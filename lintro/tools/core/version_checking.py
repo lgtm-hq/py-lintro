@@ -169,4 +169,43 @@ def get_install_hints() -> dict[str, str]:
             f"Missing install hints for tools: {', '.join(sorted(missing))}",
         )
 
+    # Other tools
+    pytest_version = versions.get("pytest", "8.0.0")
+    hints.update(
+        {
+            "pytest": (
+                f"Install via: pip install pytest>={pytest_version} "
+                f"or uv add pytest>={pytest_version}"
+            ),
+            "prettier": (
+                f"Install via: bun add -d "
+                f"prettier@>={versions.get('prettier', '3.7.0')}"
+            ),
+            "biome": (
+                f"Install via: bun add -d "
+                f"@biomejs/biome@>={versions.get('biome', '2.3.8')}"
+            ),
+            "markdownlint": (
+                f"Install via: bun add -d "
+                f"markdownlint-cli2@>={versions.get('markdownlint', '0.16.0')}"
+            ),
+            "hadolint": (
+                f"Install via: https://github.com/hadolint/hadolint/releases "
+                f"(v{versions.get('hadolint', '2.12.0')}+)"
+            ),
+            "actionlint": (
+                f"Install via: https://github.com/rhysd/actionlint/releases "
+                f"(v{versions.get('actionlint', '1.7.0')}+)"
+            ),
+            "clippy": (
+                f"Install via: rustup component add clippy "
+                f"(requires Rust {versions.get('clippy', '1.75.0')}+)"
+            ),
+            "cargo_deny": (
+                f"Install via: cargo install cargo-deny "
+                f"(v{versions.get('cargo_deny', '0.14.0')}+)"
+            ),
+        },
+    )
+
     return hints

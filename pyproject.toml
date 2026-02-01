@@ -133,6 +133,7 @@ packages = [
   "lintro.parsers.bandit",
   "lintro.parsers.black",
   "lintro.parsers.cargo_audit",
+  "lintro.parsers.cargo_deny",
   "lintro.parsers.clippy",
   "lintro.parsers.gitleaks",
   "lintro.parsers.hadolint",
