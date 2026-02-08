@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+
 import pytest
 from assertpy import assert_that
 
@@ -30,7 +32,7 @@ def test_strip_jsonc_comments_block_comment() -> None:
     """Strip /* */ block comments."""
     content = '{"key": /* comment */ "value"}'
     result = strip_jsonc_comments(content)
-    parsed = load_jsonc(result)
+    parsed = json.loads(result)
     assert_that(parsed["key"]).is_equal_to("value")
 
 
@@ -38,7 +40,7 @@ def test_strip_jsonc_comments_preserves_strings() -> None:
     """Preserve // and /* patterns inside string values."""
     content = '{"url": "https://example.com"}'
     result = strip_jsonc_comments(content)
-    parsed = load_jsonc(result)
+    parsed = json.loads(result)
     assert_that(parsed["url"]).is_equal_to("https://example.com")
 
 
@@ -128,8 +130,6 @@ def test_load_jsonc_with_comments_and_trailing_commas() -> None:
 
 def test_load_jsonc_invalid_json_raises() -> None:
     """Raise JSONDecodeError for invalid JSON after stripping."""
-    import json
-
     with pytest.raises(json.JSONDecodeError):
         load_jsonc("{invalid}")
 

@@ -8,7 +8,7 @@ JSONC text (as used in tsconfig.json, .markdownlint.jsonc, etc.).
 from __future__ import annotations
 
 import json
-import re
+from pathlib import Path
 from typing import Any
 
 from loguru import logger
@@ -115,21 +115,95 @@ def strip_trailing_commas(content: str) -> str:
 
     Removes trailing commas before closing brackets/braces that are
     invalid in strict JSON but common in JSONC (e.g., tsconfig.json).
+    Uses a character-scan to avoid modifying commas inside string literals.
 
     Args:
         content: JSON content with potential trailing commas.
 
     Returns:
         Content with trailing commas removed.
-
-    Note:
-        This is a simple regex-based approach that works for most cases.
-        It may incorrectly modify strings containing patterns like ',]'
-        but such strings are rare in configuration files.
     """
-    # Remove trailing commas before ] or } (with optional whitespace)
-    content = re.sub(r",(\s*[\]\}])", r"\1", content)
-    return content
+    result: list[str] = []
+    i = 0
+    length = len(content)
+    in_string = False
+    quote_char = ""
+    escape_next = False
+
+    while i < length:
+        char = content[i]
+
+        if escape_next:
+            escape_next = False
+            result.append(char)
+            i += 1
+            continue
+
+        if char == "\\" and in_string:
+            escape_next = True
+            result.append(char)
+            i += 1
+            continue
+
+        if not in_string and char in ('"', "'"):
+            in_string = True
+            quote_char = char
+            result.append(char)
+            i += 1
+            continue
+
+        if in_string and char == quote_char:
+            in_string = False
+            result.append(char)
+            i += 1
+            continue
+
+        if not in_string and char == ",":
+            # Look ahead past whitespace for a closing bracket/brace
+            j = i + 1
+            while j < length and content[j] in (" ", "\t", "\n", "\r"):
+                j += 1
+            if j < length and content[j] in ("]", "}"):
+                # Skip the trailing comma
+                i += 1
+                continue
+
+        result.append(char)
+        i += 1
+
+    return "".join(result)
+
+
+def extract_type_roots(base_content: Any, base_dir: Path) -> list[str] | None:
+    """Extract and resolve typeRoots from parsed tsconfig content.
+
+    Args:
+        base_content: Parsed tsconfig content (expected to be a dict).
+        base_dir: Directory of the base tsconfig for resolving relative paths.
+
+    Returns:
+        Resolved typeRoots list, empty list if explicitly set to ``[]``,
+        or ``None`` if typeRoots is not present.
+    """
+    if not isinstance(base_content, dict):
+        return None
+    comp_opts = base_content.get("compilerOptions")
+    if not isinstance(comp_opts, dict):
+        return None
+    if "typeRoots" not in comp_opts:
+        return None
+    base_roots = comp_opts["typeRoots"]
+    if not isinstance(base_roots, list):
+        return None
+    resolved: list[str] = []
+    for r in base_roots:
+        if not isinstance(r, str):
+            continue
+        try:
+            resolved.append(str((base_dir / r).resolve()))
+        except (ValueError, OSError):
+            continue
+    return resolved
 
 
 def load_jsonc(text: str) -> Any:

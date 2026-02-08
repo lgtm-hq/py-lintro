@@ -39,7 +39,7 @@ from lintro.plugins.base import BaseToolPlugin
 from lintro.plugins.protocol import ToolDefinition
 from lintro.plugins.registry import register_tool
 from lintro.tools.core.timeout_utils import create_timeout_result
-from lintro.utils.jsonc import load_jsonc
+from lintro.utils.jsonc import extract_type_roots, load_jsonc
 
 # Constants for Vue-tsc configuration
 VUE_TSC_DEFAULT_TIMEOUT: int = 120
@@ -208,23 +208,9 @@ class VueTscPlugin(BaseToolPlugin):
         # config lives in a different directory.
         try:
             base_content = load_jsonc(abs_base.read_text(encoding="utf-8"))
-            if isinstance(base_content, dict):
-                comp_opts = base_content.get("compilerOptions")
-                if isinstance(comp_opts, dict):
-                    base_roots = comp_opts.get("typeRoots")
-                    if isinstance(base_roots, list):
-                        resolved_roots: list[str] = []
-                        for r in base_roots:
-                            if not isinstance(r, str):
-                                continue
-                            try:
-                                resolved_roots.append(
-                                    str((abs_base.parent / r).resolve()),
-                                )
-                            except (ValueError, OSError):
-                                continue
-                        if resolved_roots:
-                            compiler_options["typeRoots"] = resolved_roots
+            resolved_roots = extract_type_roots(base_content, abs_base.parent)
+            if resolved_roots is not None:
+                compiler_options["typeRoots"] = resolved_roots
         except (json.JSONDecodeError, OSError) as exc:
             logger.debug(
                 "[vue-tsc] Could not read typeRoots from {}: {}",
@@ -258,28 +244,19 @@ class VueTscPlugin(BaseToolPlugin):
             # the default node_modules/@types path so TypeScript can still
             # resolve type packages from the system temp dir.
             existing_type_roots: list[str] = []
+            type_roots_present = False
             try:
                 base_content = load_jsonc(
                     base_tsconfig.read_text(encoding="utf-8"),
                 )
-                if isinstance(base_content, dict):
-                    comp_opts = base_content.get("compilerOptions")
-                    if isinstance(comp_opts, dict):
-                        base_roots = comp_opts.get("typeRoots")
-                        if isinstance(base_roots, list):
-                            for root in base_roots:
-                                if not isinstance(root, str):
-                                    continue
-                                try:
-                                    existing_type_roots.append(
-                                        str((abs_base.parent / root).resolve()),
-                                    )
-                                except (ValueError, OSError):
-                                    continue
+                extracted = extract_type_roots(base_content, abs_base.parent)
+                if extracted is not None:
+                    existing_type_roots = extracted
+                    type_roots_present = True
             except (json.JSONDecodeError, OSError):
                 pass
             default_root = str(cwd / "node_modules" / "@types")
-            if default_root not in existing_type_roots:
+            if not type_roots_present and default_root not in existing_type_roots:
                 existing_type_roots.append(default_root)
             compiler_options["typeRoots"] = existing_type_roots
 
