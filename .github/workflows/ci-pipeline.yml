@@ -862,6 +862,9 @@ jobs:
   # ============================================================================
   cleanup-ci-images:
     name: 🧹 Cleanup CI Images
+    # publish is included so cleanup waits for it on main pushes before
+    # deleting CI-tagged images; on PRs publish is skipped and always()
+    # lets cleanup proceed without blocking.
     needs: [docker-build, lint, test, smoke-test, publish]
     if: >-
       always() &&
