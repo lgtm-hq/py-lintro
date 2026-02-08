@@ -299,19 +299,25 @@ class TscPlugin(BaseToolPlugin):
             # Preserve existing typeRoots from the base tsconfig and add
             # the default node_modules/@types path so TypeScript can still
             # resolve type packages from the system temp dir.
-            compiler_options = temp_config["compilerOptions"]
-            assert isinstance(compiler_options, dict)
             existing_type_roots: list[str] = []
             try:
-                base_content = json.loads(base_tsconfig.read_text())
-                base_roots = base_content.get("compilerOptions", {}).get(
-                    "typeRoots",
-                    [],
+                base_content = load_jsonc(
+                    base_tsconfig.read_text(encoding="utf-8"),
                 )
-                for root in base_roots:
-                    existing_type_roots.append(
-                        str((abs_base.parent / root).resolve()),
-                    )
+                if isinstance(base_content, dict):
+                    comp_opts = base_content.get("compilerOptions")
+                    if isinstance(comp_opts, dict):
+                        base_roots = comp_opts.get("typeRoots")
+                        if isinstance(base_roots, list):
+                            for root in base_roots:
+                                if not isinstance(root, str):
+                                    continue
+                                try:
+                                    existing_type_roots.append(
+                                        str((abs_base.parent / root).resolve()),
+                                    )
+                                except (ValueError, OSError):
+                                    continue
             except (json.JSONDecodeError, OSError):
                 pass
             default_root = str(cwd / "node_modules" / "@types")

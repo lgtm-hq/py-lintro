@@ -128,7 +128,7 @@ def _is_result_skipped(result: object) -> tuple[bool, str]:
     return False, ""
 
 
-def _count_affected_files(tool_results: Sequence[object]) -> int:
+def count_affected_files(tool_results: Sequence[object]) -> int:
     """Count unique file paths with issues across all tool results.
 
     Args:
@@ -144,7 +144,7 @@ def _count_affected_files(tool_results: Sequence[object]) -> int:
             for issue in issues:
                 file_path = getattr(issue, "file", "")
                 if file_path:
-                    files.add(file_path)
+                    files.add(str(file_path))
     return len(files)
 
 
