@@ -45,6 +45,7 @@ from lintro.plugins.base import BaseToolPlugin
 from lintro.plugins.protocol import ToolDefinition
 from lintro.plugins.registry import register_tool
 from lintro.tools.core.timeout_utils import create_timeout_result
+from lintro.utils.jsonc import load_jsonc
 
 # Constants for Tsc configuration
 TSC_DEFAULT_TIMEOUT: int = 60
@@ -242,14 +243,34 @@ class TscPlugin(BaseToolPlugin):
         # may be in a different directory than cwd
         abs_files = [str((cwd / f).resolve()) for f in files]
 
-        temp_config: dict[str, object] = {
+        compiler_options: dict[str, Any] = {
+            # Ensure noEmit is set (type checking only)
+            "noEmit": True,
+        }
+
+        # Read typeRoots from the base tsconfig so they are preserved in the
+        # temp config.  TypeScript resolves typeRoots relative to the config
+        # file, so we resolve them to absolute paths here because the temp
+        # config lives in a different directory.
+        try:
+            base_content = load_jsonc(abs_base.read_text(encoding="utf-8"))
+            if isinstance(base_content, dict):
+                base_roots = base_content.get("compilerOptions", {}).get(
+                    "typeRoots",
+                )
+                if isinstance(base_roots, list):
+                    resolved_roots = [
+                        str((abs_base.parent / r).resolve()) for r in base_roots
+                    ]
+                    compiler_options["typeRoots"] = resolved_roots
+        except (json.JSONDecodeError, OSError) as exc:
+            logger.debug("[tsc] Could not read typeRoots from {}: {}", abs_base, exc)
+
+        temp_config = {
             "extends": str(abs_base),
             "include": abs_files,
             "exclude": [],
-            "compilerOptions": {
-                # Ensure noEmit is set (type checking only)
-                "noEmit": True,
-            },
+            "compilerOptions": compiler_options,
         }
 
         # Create temp file next to the base tsconfig so TypeScript can resolve
