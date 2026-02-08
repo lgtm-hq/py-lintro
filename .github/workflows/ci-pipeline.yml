@@ -962,11 +962,14 @@ jobs:
                 select(.metadata.container.tags[] == \"${tag}\") |
                 .id" 2>/dev/null || echo "")
             if [[ -n "$version_id" ]]; then
-              gh api --method DELETE \
-                "orgs/lgtm-hq/packages/container/py-lintro/versions/${version_id}" \
-                2>/dev/null && \
-                echo "Deleted version ${version_id} (tag: ${tag})" || \
-                echo "::warning::Failed to delete version ${version_id}"
+              while IFS= read -r vid; do
+                [[ -z "$vid" ]] && continue
+                gh api --method DELETE \
+                  "orgs/lgtm-hq/packages/container/py-lintro/versions/${vid}" \
+                  2>/dev/null && \
+                  echo "Deleted version ${vid} (tag: ${tag})" || \
+                  echo "::warning::Failed to delete version ${vid}"
+              done <<< "$version_id"
             else
               echo "No version found for tag: ${tag} (may already be cleaned)"
             fi
