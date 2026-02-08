@@ -177,9 +177,9 @@ class MypyPlugin(BaseToolPlugin):
         """
         # Convert glob to regex and escape special chars except glob wildcards
         regex = fnmatch.translate(pattern)
-        # Remove anchors added by fnmatch.translate (\\Z at end, ^ at start if present)
-        # Use explicit suffix checks instead of rstrip to avoid corrupting patterns
-        if regex.endswith("\\Z"):
+        # Remove anchors added by fnmatch.translate (\\Z or \\z at end, ^ at start)
+        # Python 3.14+ changed fnmatch.translate to use \\z instead of \\Z
+        if regex.endswith("\\Z") or regex.endswith("\\z"):
             regex = regex[:-2]
         if regex.endswith("$"):
             regex = regex[:-1]

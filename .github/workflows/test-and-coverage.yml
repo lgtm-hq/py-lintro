@@ -131,7 +131,7 @@ jobs:
       - name: Upload coverage report as artifact
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
         with:
-          name: coverage-report-python-3.13
+          name: coverage-report-python-3.14
           path: htmlcov/
           retention-days: 30
       - name: Upload coverage XML as artifact
@@ -164,7 +164,7 @@ jobs:
         uses: codecov/codecov-action@671740ac38dd9b0130fbe1cec585b89eea48d3de
         with:
           files: coverage.xml
-          flags: python-3.13
+          flags: python-3.14
           fail_ci_if_error: false
 
       - name: Generate coverage badge (no commit)

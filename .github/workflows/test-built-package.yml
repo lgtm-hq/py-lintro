@@ -92,7 +92,7 @@ jobs:
       - name: Environment setup
         uses: ./.github/actions/setup-env
         with:
-          python-version: '3.13'
+          python-version: '3.14'
         env:
           BOOTSTRAP_SKIP_SYNC: '1'
           BOOTSTRAP_SKIP_INSTALL_TOOLS: '1'

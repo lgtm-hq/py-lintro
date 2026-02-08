@@ -59,7 +59,7 @@ jobs:
           BOOTSTRAP_SKIP_SYNC: '1'
           BOOTSTRAP_SKIP_INSTALL_TOOLS: '1'
         with:
-          python-version: '3.13'
+          python-version: '3.14'
 
       - name: Prune untagged GHCR versions
         env:

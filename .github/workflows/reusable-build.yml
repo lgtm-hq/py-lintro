@@ -14,7 +14,7 @@ name: Reusable - Build & Package Validation
         description: Python version to use
         type: string
         required: false
-        default: '3.13'
+        default: '3.14'
 
 permissions:
   contents: read
