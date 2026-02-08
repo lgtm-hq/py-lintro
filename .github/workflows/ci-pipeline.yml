@@ -116,7 +116,7 @@ jobs:
       - name: Environment setup
         uses: ./.github/actions/setup-env
         with:
-          python-version: '3.13'
+          python-version: '3.14'
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           BOOTSTRAP_SKIP_INSTALL_TOOLS: '1'
@@ -364,7 +364,51 @@ jobs:
         run: scripts/ci/fail-on-lint.sh
 
   # ============================================================================
-  # Stage 3b: Security Audit (runs in parallel with test after lint)
+  # Stage 3b: Python Compatibility Matrix (runs in parallel with Docker test)
+  # ============================================================================
+  test-matrix:
+    name: "\U0001F40D Python Compatibility (${{ matrix.python-version }})"
+    needs: [lint]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ['3.11', '3.14']
+    steps:
+      - name: Harden Runner
+        uses: step-security/harden-runner@e3f713f2d8f53843e71c69a996d56f51aa9adfb9
+        with:
+          egress-policy: 'block'
+          allowed-endpoints: >
+            github.com:443
+            api.github.com:443
+            codeload.github.com:443
+            release-assets.githubusercontent.com:443
+            objects.githubusercontent.com:443
+            pypi.org:443
+            files.pythonhosted.org:443
+            astral.sh:443
+      - name: Checkout
+        uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
+      - name: Environment setup
+        uses: ./.github/actions/setup-env
+        with:
+          python-version: ${{ matrix.python-version }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          BOOTSTRAP_SKIP_INSTALL_TOOLS: '1'
+      - name: Sync dependencies
+        run: uv sync --dev --no-progress
+      - name: Run unit and component tests
+        run: >
+          uv run pytest
+          tests/unit tests/cli tests/config tests/formatters
+          tests/scripts tests/utils
+          -x
+
+  # ============================================================================
+  # Stage 3c: Security Audit (runs in parallel with test after lint)
   # ============================================================================
   security-audit:
     name: 🔐 Security Audit
@@ -402,7 +446,7 @@ jobs:
       - name: Environment setup
         uses: ./.github/actions/setup-env
         with:
-          python-version: '3.13'
+          python-version: '3.14'
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           BOOTSTRAP_SKIP_INSTALL_TOOLS: '1'
@@ -542,7 +586,7 @@ jobs:
       - name: Upload coverage report as artifact
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
         with:
-          name: coverage-report-python-3.13
+          name: coverage-report-python-3.14
           path: htmlcov/
           retention-days: 30
       - name: Upload coverage XML as artifact
@@ -572,7 +616,7 @@ jobs:
         uses: codecov/codecov-action@671740ac38dd9b0130fbe1cec585b89eea48d3de
         with:
           files: coverage.xml
-          flags: python-3.13
+          flags: python-3.14
           fail_ci_if_error: false
       - name: Generate coverage badge (no commit)
         if: success()

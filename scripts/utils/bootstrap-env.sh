@@ -18,7 +18,7 @@ Options:
   --verbose     Enable verbose output for all components
 
 Arguments:
-  PYTHON_VERSION  Python version to install (default: 3.13)
+  PYTHON_VERSION  Python version to install (default: 3.14)
 
 Environment Variables:
   BOOTSTRAP_SKIP_SYNC         Skip dependency sync (default: 0)
@@ -69,7 +69,7 @@ while [[ $# -gt 0 ]]; do
 	esac
 done
 
-PYTHON_VERSION="${PYTHON_VERSION:-3.13}"
+PYTHON_VERSION="${PYTHON_VERSION:-3.14}"
 
 log_info() {
 	echo "[bootstrap-env] $*"

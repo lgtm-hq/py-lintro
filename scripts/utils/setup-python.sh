@@ -18,7 +18,7 @@ Options:
   --verbose     Enable verbose output
 
 Arguments:
-  PYTHON_VERSION  Python version to install (default: 3.13)
+  PYTHON_VERSION  Python version to install (default: 3.14)
 
 Environment Variables:
   UV_PYTHON     Set to the installed Python version for downstream tools
@@ -59,7 +59,7 @@ while [[ $# -gt 0 ]]; do
 done
 
 # Set default Python version
-PYTHON_VERSION="${PYTHON_VERSION:-3.13}"
+PYTHON_VERSION="${PYTHON_VERSION:-3.14}"
 
 log_info() {
 	echo "[setup-python] $*"

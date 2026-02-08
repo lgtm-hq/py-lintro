@@ -51,7 +51,7 @@ jobs:
         uses: dawidd6/action-download-artifact@0bd50d53a6d7fb5cb921e607957e9cc12b4ce392 # v12
         with:
           workflow: test-and-coverage.yml
-          name: coverage-report-python-3.13
+          name: coverage-report-python-3.14
           path: coverage-report
           workflow_conclusion: success
       - name: Download coverage badge artifact

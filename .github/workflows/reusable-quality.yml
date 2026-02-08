@@ -60,7 +60,7 @@ jobs:
       - name: Environment setup
         uses: ./.github/actions/setup-env
         with:
-          python-version: '3.13'
+          python-version: '3.14'
 
       - name: Verify manifest sync
         run: python3 scripts/ci/verify-manifest-sync.py
