@@ -45,6 +45,7 @@ from lintro.plugins.base import BaseToolPlugin
 from lintro.plugins.protocol import ToolDefinition
 from lintro.plugins.registry import register_tool
 from lintro.tools.core.timeout_utils import create_timeout_result
+from lintro.utils.jsonc import extract_type_roots, load_jsonc
 
 # Constants for Tsc configuration
 TSC_DEFAULT_TIMEOUT: int = 60
@@ -242,14 +243,28 @@ class TscPlugin(BaseToolPlugin):
         # may be in a different directory than cwd
         abs_files = [str((cwd / f).resolve()) for f in files]
 
-        temp_config: dict[str, object] = {
+        compiler_options: dict[str, Any] = {
+            # Ensure noEmit is set (type checking only)
+            "noEmit": True,
+        }
+
+        # Read typeRoots from the base tsconfig so they are preserved in the
+        # temp config.  TypeScript resolves typeRoots relative to the config
+        # file, so we resolve them to absolute paths here because the temp
+        # config lives in a different directory.
+        try:
+            base_content = load_jsonc(abs_base.read_text(encoding="utf-8"))
+            resolved_roots = extract_type_roots(base_content, abs_base.parent)
+            if resolved_roots is not None:
+                compiler_options["typeRoots"] = resolved_roots
+        except (json.JSONDecodeError, OSError) as exc:
+            logger.debug("[tsc] Could not read typeRoots from {}: {}", abs_base, exc)
+
+        temp_config = {
             "extends": str(abs_base),
             "include": abs_files,
             "exclude": [],
-            "compilerOptions": {
-                # Ensure noEmit is set (type checking only)
-                "noEmit": True,
-            },
+            "compilerOptions": compiler_options,
         }
 
         # Create temp file next to the base tsconfig so TypeScript can resolve
@@ -270,23 +285,20 @@ class TscPlugin(BaseToolPlugin):
             # Preserve existing typeRoots from the base tsconfig and add
             # the default node_modules/@types path so TypeScript can still
             # resolve type packages from the system temp dir.
-            compiler_options = temp_config["compilerOptions"]
-            assert isinstance(compiler_options, dict)
             existing_type_roots: list[str] = []
+            type_roots_present = False
             try:
-                base_content = json.loads(base_tsconfig.read_text())
-                base_roots = base_content.get("compilerOptions", {}).get(
-                    "typeRoots",
-                    [],
+                base_content = load_jsonc(
+                    base_tsconfig.read_text(encoding="utf-8"),
                 )
-                for root in base_roots:
-                    existing_type_roots.append(
-                        str((abs_base.parent / root).resolve()),
-                    )
+                extracted = extract_type_roots(base_content, abs_base.parent)
+                if extracted is not None:
+                    existing_type_roots = extracted
+                    type_roots_present = True
             except (json.JSONDecodeError, OSError):
                 pass
             default_root = str(cwd / "node_modules" / "@types")
-            if default_root not in existing_type_roots:
+            if not type_roots_present and default_root not in existing_type_roots:
                 existing_type_roots.append(default_root)
             compiler_options["typeRoots"] = existing_type_roots
 

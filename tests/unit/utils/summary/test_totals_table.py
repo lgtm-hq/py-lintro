@@ -1,6 +1,6 @@
 """Unit tests for totals table generation.
 
-Tests for _count_affected_files helper and print_totals_table function
+Tests for count_affected_files helper and print_totals_table function
 in lintro.utils.summary_tables.
 """
 
@@ -11,7 +11,7 @@ from typing import TYPE_CHECKING
 from assertpy import assert_that
 
 from lintro.enums.action import Action
-from lintro.utils.summary_tables import _count_affected_files, print_totals_table
+from lintro.utils.summary_tables import count_affected_files, print_totals_table
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -20,32 +20,32 @@ if TYPE_CHECKING:
 
 
 # =============================================================================
-# _count_affected_files Tests
+# count_affected_files Tests
 # =============================================================================
 
 
 def test_count_affected_files_empty_results() -> None:
-    """Verify _count_affected_files returns 0 for empty results list."""
-    assert_that(_count_affected_files([])).is_equal_to(0)
+    """Verify count_affected_files returns 0 for empty results list."""
+    assert_that(count_affected_files([])).is_equal_to(0)
 
 
 def test_count_affected_files_no_issues(
     fake_tool_result_factory: Callable[..., FakeToolResult],
 ) -> None:
-    """Verify _count_affected_files returns 0 when results have no issues.
+    """Verify count_affected_files returns 0 when results have no issues.
 
     Args:
         fake_tool_result_factory: Factory for creating FakeToolResult instances.
     """
     results = [fake_tool_result_factory(issues=[])]
-    assert_that(_count_affected_files(results)).is_equal_to(0)
+    assert_that(count_affected_files(results)).is_equal_to(0)
 
 
 def test_count_affected_files_single_file(
     fake_tool_result_factory: Callable[..., FakeToolResult],
     fake_issue_factory: Callable[..., FakeIssue],
 ) -> None:
-    """Verify _count_affected_files counts a single affected file.
+    """Verify count_affected_files counts a single affected file.
 
     Args:
         fake_tool_result_factory: Factory for creating FakeToolResult instances.
@@ -56,14 +56,14 @@ def test_count_affected_files_single_file(
             issues=[fake_issue_factory(file="src/main.py")],
         ),
     ]
-    assert_that(_count_affected_files(results)).is_equal_to(1)
+    assert_that(count_affected_files(results)).is_equal_to(1)
 
 
 def test_count_affected_files_deduplication_within_tool(
     fake_tool_result_factory: Callable[..., FakeToolResult],
     fake_issue_factory: Callable[..., FakeIssue],
 ) -> None:
-    """Verify _count_affected_files deduplicates files within a single tool.
+    """Verify count_affected_files deduplicates files within a single tool.
 
     Args:
         fake_tool_result_factory: Factory for creating FakeToolResult instances.
@@ -78,14 +78,14 @@ def test_count_affected_files_deduplication_within_tool(
             ],
         ),
     ]
-    assert_that(_count_affected_files(results)).is_equal_to(2)
+    assert_that(count_affected_files(results)).is_equal_to(2)
 
 
 def test_count_affected_files_deduplication_across_tools(
     fake_tool_result_factory: Callable[..., FakeToolResult],
     fake_issue_factory: Callable[..., FakeIssue],
 ) -> None:
-    """Verify _count_affected_files deduplicates files across multiple tools.
+    """Verify count_affected_files deduplicates files across multiple tools.
 
     Args:
         fake_tool_result_factory: Factory for creating FakeToolResult instances.
@@ -102,14 +102,14 @@ def test_count_affected_files_deduplication_across_tools(
             ],
         ),
     ]
-    assert_that(_count_affected_files(results)).is_equal_to(2)
+    assert_that(count_affected_files(results)).is_equal_to(2)
 
 
 def test_count_affected_files_empty_file_paths_excluded(
     fake_tool_result_factory: Callable[..., FakeToolResult],
     fake_issue_factory: Callable[..., FakeIssue],
 ) -> None:
-    """Verify _count_affected_files excludes issues with empty file paths.
+    """Verify count_affected_files excludes issues with empty file paths.
 
     Args:
         fake_tool_result_factory: Factory for creating FakeToolResult instances.
@@ -123,16 +123,39 @@ def test_count_affected_files_empty_file_paths_excluded(
             ],
         ),
     ]
-    assert_that(_count_affected_files(results)).is_equal_to(1)
+    assert_that(count_affected_files(results)).is_equal_to(1)
+
+
+def test_count_affected_files_path_objects_deduplicated(
+    fake_tool_result_factory: Callable[..., FakeToolResult],
+    fake_issue_factory: Callable[..., FakeIssue],
+) -> None:
+    """Verify count_affected_files deduplicates Path objects and strings.
+
+    Args:
+        fake_tool_result_factory: Factory for creating FakeToolResult instances.
+        fake_issue_factory: Factory for creating FakeIssue instances.
+    """
+    from pathlib import Path
+
+    results = [
+        fake_tool_result_factory(
+            issues=[
+                fake_issue_factory(file=Path("src/main.py")),
+                fake_issue_factory(file="src/main.py"),
+            ],
+        ),
+    ]
+    assert_that(count_affected_files(results)).is_equal_to(1)
 
 
 def test_count_affected_files_no_issues_attribute() -> None:
-    """Verify _count_affected_files handles objects without issues attribute."""
+    """Verify count_affected_files handles objects without issues attribute."""
 
     class NoIssuesResult:
         name: str = "tool"
 
-    assert_that(_count_affected_files([NoIssuesResult()])).is_equal_to(0)
+    assert_that(count_affected_files([NoIssuesResult()])).is_equal_to(0)
 
 
 # =============================================================================

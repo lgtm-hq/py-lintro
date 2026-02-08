@@ -1,4 +1,4 @@
-"""Tests for _strip_jsonc_comments function."""
+"""Tests for strip_jsonc_comments function."""
 
 from __future__ import annotations
 
@@ -8,7 +8,7 @@ from unittest.mock import patch
 import pytest
 from assertpy import assert_that
 
-from lintro.utils.native_parsers import _strip_jsonc_comments
+from lintro.utils.jsonc import strip_jsonc_comments as _strip_jsonc_comments
 
 
 def test_strip_jsonc_comments_no_comments() -> None:
@@ -101,7 +101,7 @@ def test_strip_jsonc_comments_backslash_in_string() -> None:
 def test_strip_jsonc_comments_unclosed_block_comment_warning() -> None:
     """Warn when a block comment is not properly closed."""
     content = '{"key": "value"} /* unclosed'
-    with patch("lintro.utils.native_parsers.logger") as mock_logger:
+    with patch("lintro.utils.jsonc.logger") as mock_logger:
         _strip_jsonc_comments(content)
         mock_logger.warning.assert_called_once()
 

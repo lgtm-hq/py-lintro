@@ -4,7 +4,8 @@
 name: CI Pipeline
 
 # Gated CI: resolve-tools → docker-build → lint → test → smoke-test → publish
-# Each stage depends on the previous passing. Docker image built ONCE and cached.
+# Each stage depends on the previous passing. Docker image built ONCE and shared
+# via GHCR registry (ci-<run_id> tags), with artifact fallback for fork PRs.
 
 'on':
   push:
@@ -141,6 +142,8 @@ jobs:
     concurrency:
       group: docker-build-${{ github.ref }}
       cancel-in-progress: true
+    outputs:
+      is-fork: ${{ steps.fork-check.outputs.is-fork }}
     steps:
       - name: Harden Runner
         uses: step-security/harden-runner@e3f713f2d8f53843e71c69a996d56f51aa9adfb9
@@ -170,10 +173,22 @@ jobs:
             static.crates.io:443
             index.crates.io:443
             semgrep.dev:443
-      # The tools image is large enough that docker save runs out of disk on
-      # GitHub-hosted runners. Remove pre-installed software and pre-cached
-      # Docker images (runner-local only, does not affect GHCR) to free ~15GB.
-      - name: Free disk space
+      - name: Check if fork PR
+        id: fork-check
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          IS_FORK_PR: ${{ github.event.pull_request.head.repo.fork }}
+        run: |
+          IS_FORK="false"
+          if [[ "$EVENT_NAME" == "pull_request" && \
+                "$IS_FORK_PR" == "true" ]]; then
+            IS_FORK="true"
+          fi
+          echo "is-fork=${IS_FORK}" >> "$GITHUB_OUTPUT"
+      # Fork PRs cannot push to GHCR, so they fall back to docker save which
+      # duplicates image data on disk. Free pre-installed software to make room.
+      - name: Free disk space (fork fallback)
+        if: steps.fork-check.outputs.is-fork == 'true'
         run: |
           sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc \
             /usr/local/share/boost
@@ -188,6 +203,14 @@ jobs:
         # Action SHA pin exceeds 88 chars
         # yamllint disable-line rule:line-length
         uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+      - name: Log in to GitHub Container Registry
+        if: steps.fork-check.outputs.is-fork != 'true'
+        # yamllint disable-line rule:line-length
+        uses: docker/login-action@5e57cd118135c172c3672efd75eb46360885c0ef # v3.6.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
       - name: Build Docker image (py-lintro:latest)
         # Action SHA pin exceeds 88 chars
         # yamllint disable-line rule:line-length
@@ -211,10 +234,24 @@ jobs:
           load: true
           tags: py-lintro:base
           provenance: false
-      - name: Save Docker images to tarball
+      - name: Push CI images to GHCR
+        if: steps.fork-check.outputs.is-fork != 'true'
+        env:
+          CI_TAG: ci-${{ github.run_id }}
         run: |
-          docker save py-lintro:latest py-lintro:base -o /tmp/py-lintro-images.tar
-      - name: Upload Docker images artifact
+          docker tag py-lintro:latest \
+            "ghcr.io/lgtm-hq/py-lintro:${CI_TAG}"
+          docker tag py-lintro:base \
+            "ghcr.io/lgtm-hq/py-lintro:${CI_TAG}-base"
+          docker push "ghcr.io/lgtm-hq/py-lintro:${CI_TAG}"
+          docker push "ghcr.io/lgtm-hq/py-lintro:${CI_TAG}-base"
+      - name: Save Docker images to tarball (fork fallback)
+        if: steps.fork-check.outputs.is-fork == 'true'
+        run: |
+          docker save py-lintro:latest py-lintro:base \
+            -o /tmp/py-lintro-images.tar
+      - name: Upload Docker images artifact (fork fallback)
+        if: steps.fork-check.outputs.is-fork == 'true'
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
         with:
           name: docker-images
@@ -273,14 +310,23 @@ jobs:
         with:
           fetch-depth: 0
           token: ${{ secrets.GITHUB_TOKEN }}
-      - name: Download Docker images artifact
+      - name: Pull CI images from GHCR
+        if: needs.docker-build.outputs.is-fork != 'true'
+        env:
+          CI_TAG: ci-${{ github.run_id }}
+        run: |
+          docker pull "ghcr.io/lgtm-hq/py-lintro:${CI_TAG}"
+          docker tag "ghcr.io/lgtm-hq/py-lintro:${CI_TAG}" py-lintro:latest
+      - name: Download Docker images artifact (fork fallback)
+        if: needs.docker-build.outputs.is-fork == 'true'
         # Action SHA pin exceeds 88 chars
         # yamllint disable-line rule:line-length
         uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
         with:
           name: docker-images
           path: /tmp
-      - name: Load Docker images
+      - name: Load Docker images (fork fallback)
+        if: needs.docker-build.outputs.is-fork == 'true'
         run: docker load -i /tmp/py-lintro-images.tar
       - name: Auto-fix with Lintro (same-repo PRs only)
         if: >-
@@ -444,14 +490,25 @@ jobs:
         uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
         with:
           fetch-depth: 0
-      - name: Download Docker images artifact
+      - name: Pull CI images from GHCR
+        if: needs.docker-build.outputs.is-fork != 'true'
+        env:
+          CI_TAG: ci-${{ github.run_id }}
+        run: |
+          docker pull "ghcr.io/lgtm-hq/py-lintro:${CI_TAG}"
+          docker tag "ghcr.io/lgtm-hq/py-lintro:${CI_TAG}" py-lintro:latest
+          docker pull "ghcr.io/lgtm-hq/py-lintro:${CI_TAG}-base"
+          docker tag "ghcr.io/lgtm-hq/py-lintro:${CI_TAG}-base" py-lintro:base
+      - name: Download Docker images artifact (fork fallback)
+        if: needs.docker-build.outputs.is-fork == 'true'
         # Action SHA pin exceeds 88 chars
         # yamllint disable-line rule:line-length
         uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
         with:
           name: docker-images
           path: /tmp
-      - name: Load Docker images
+      - name: Load Docker images (fork fallback)
+        if: needs.docker-build.outputs.is-fork == 'true'
         run: docker load -i /tmp/py-lintro-images.tar
       - name: Set up Docker Buildx
         # Action SHA pin exceeds 88 chars
@@ -663,14 +720,25 @@ jobs:
           fetch-depth: 0
           fetch-tags: true
           persist-credentials: true
-      - name: Download Docker images artifact
+      - name: Pull CI images from GHCR
+        if: needs.docker-build.outputs.is-fork != 'true'
+        env:
+          CI_TAG: ci-${{ github.run_id }}
+        run: |
+          docker pull "ghcr.io/lgtm-hq/py-lintro:${CI_TAG}"
+          docker tag "ghcr.io/lgtm-hq/py-lintro:${CI_TAG}" py-lintro:latest
+          docker pull "ghcr.io/lgtm-hq/py-lintro:${CI_TAG}-base"
+          docker tag "ghcr.io/lgtm-hq/py-lintro:${CI_TAG}-base" py-lintro:base
+      - name: Download Docker images artifact (fork fallback)
+        if: needs.docker-build.outputs.is-fork == 'true'
         # Action SHA pin exceeds 88 chars
         # yamllint disable-line rule:line-length
         uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
         with:
           name: docker-images
           path: /tmp
-      - name: Load Docker images
+      - name: Load Docker images (fork fallback)
+        if: needs.docker-build.outputs.is-fork == 'true'
         run: docker load -i /tmp/py-lintro-images.tar
       - name: Test Docker Image (py-lintro:latest)
         run: ./scripts/docker/docker-build-test.sh
@@ -788,3 +856,59 @@ jobs:
           labels: ${{ steps.meta-base.outputs.labels }}
           provenance: true
           sbom: true
+
+  # ============================================================================
+  # Cleanup: Remove ephemeral CI-tagged images from GHCR
+  # ============================================================================
+  cleanup-ci-images:
+    name: 🧹 Cleanup CI Images
+    # publish is included so cleanup waits for it on main pushes before
+    # deleting CI-tagged images; on PRs publish is skipped and always()
+    # lets cleanup proceed without blocking.
+    needs: [docker-build, lint, test, smoke-test, publish]
+    if: >-
+      always() &&
+      needs.docker-build.outputs.is-fork != 'true'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      packages: write
+    timeout-minutes: 5
+    steps:
+      - name: Harden Runner
+        uses: step-security/harden-runner@e3f713f2d8f53843e71c69a996d56f51aa9adfb9
+        with:
+          egress-policy: 'block'
+          allowed-endpoints: >
+            github.com:443
+            api.github.com:443
+      - name: Delete CI-tagged images
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CI_TAG: ci-${{ github.run_id }}
+        run: |
+          for tag_suffix in "" "-base"; do
+            tag="${CI_TAG}${tag_suffix}"
+            echo "Looking up version for tag: ${tag}"
+            api_stderr=$(mktemp)
+            version_id=$(gh api \
+              "orgs/lgtm-hq/packages/container/py-lintro/versions" \
+              --paginate \
+              --jq ".[] |
+                select(.metadata.container.tags[] == \"${tag}\") |
+                .id" 2>"$api_stderr") || version_id=""
+            stderr_text=$(cat "$api_stderr")
+            rm -f "$api_stderr"
+            if [[ -n "$stderr_text" ]]; then
+              echo "::warning::gh api lookup for tag ${tag}: ${stderr_text}"
+            fi
+            if [[ -n "$version_id" ]]; then
+              gh api --method DELETE \
+                "orgs/lgtm-hq/packages/container/py-lintro/versions/${version_id}" \
+                2>/dev/null && \
+                echo "Deleted version ${version_id} (tag: ${tag})" || \
+                echo "::warning::Failed to delete version ${version_id}"
+            else
+              echo "No version found for tag: ${tag} (may already be cleaned)"
+            fi
+          done
