@@ -255,14 +255,22 @@ class TscPlugin(BaseToolPlugin):
         try:
             base_content = load_jsonc(abs_base.read_text(encoding="utf-8"))
             if isinstance(base_content, dict):
-                base_roots = base_content.get("compilerOptions", {}).get(
-                    "typeRoots",
-                )
-                if isinstance(base_roots, list):
-                    resolved_roots = [
-                        str((abs_base.parent / r).resolve()) for r in base_roots
-                    ]
-                    compiler_options["typeRoots"] = resolved_roots
+                comp_opts = base_content.get("compilerOptions")
+                if isinstance(comp_opts, dict):
+                    base_roots = comp_opts.get("typeRoots")
+                    if isinstance(base_roots, list):
+                        resolved_roots: list[str] = []
+                        for r in base_roots:
+                            if not isinstance(r, str):
+                                continue
+                            try:
+                                resolved_roots.append(
+                                    str((abs_base.parent / r).resolve()),
+                                )
+                            except (ValueError, OSError):
+                                continue
+                        if resolved_roots:
+                            compiler_options["typeRoots"] = resolved_roots
         except (json.JSONDecodeError, OSError) as exc:
             logger.debug("[tsc] Could not read typeRoots from {}: {}", abs_base, exc)
 

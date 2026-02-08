@@ -112,3 +112,59 @@ def test_create_temp_tsconfig_ignores_non_list_type_roots(
         assert_that(content["compilerOptions"]).does_not_contain_key("typeRoots")
     finally:
         temp_path.unlink(missing_ok=True)
+
+
+def test_create_temp_tsconfig_filters_non_string_type_roots(
+    vue_tsc_plugin: VueTscPlugin,
+    tmp_path: Path,
+) -> None:
+    """Verify non-string entries in typeRoots are filtered out.
+
+    Args:
+        vue_tsc_plugin: Plugin instance fixture.
+        tmp_path: Pytest temporary directory.
+    """
+    base_tsconfig = tmp_path / "tsconfig.json"
+    base_tsconfig.write_text(
+        '{"compilerOptions": {"typeRoots": ["./valid-types", 123, null, true]}}',
+    )
+
+    temp_path = vue_tsc_plugin._create_temp_tsconfig(
+        base_tsconfig=base_tsconfig,
+        files=["src/App.vue"],
+        cwd=tmp_path,
+    )
+
+    try:
+        content = json.loads(temp_path.read_text())
+        type_roots = content["compilerOptions"]["typeRoots"]
+        assert_that(type_roots).is_length(1)
+        assert_that(type_roots[0]).ends_with("valid-types")
+    finally:
+        temp_path.unlink(missing_ok=True)
+
+
+def test_create_temp_tsconfig_ignores_non_dict_compiler_options(
+    vue_tsc_plugin: VueTscPlugin,
+    tmp_path: Path,
+) -> None:
+    """Verify malformed compilerOptions (non-dict) are safely ignored.
+
+    Args:
+        vue_tsc_plugin: Plugin instance fixture.
+        tmp_path: Pytest temporary directory.
+    """
+    base_tsconfig = tmp_path / "tsconfig.json"
+    base_tsconfig.write_text('{"compilerOptions": "not-a-dict"}')
+
+    temp_path = vue_tsc_plugin._create_temp_tsconfig(
+        base_tsconfig=base_tsconfig,
+        files=["src/App.vue"],
+        cwd=tmp_path,
+    )
+
+    try:
+        content = json.loads(temp_path.read_text())
+        assert_that(content["compilerOptions"]).does_not_contain_key("typeRoots")
+    finally:
+        temp_path.unlink(missing_ok=True)
