@@ -887,12 +887,18 @@ jobs:
           for tag_suffix in "" "-base"; do
             tag="${CI_TAG}${tag_suffix}"
             echo "Looking up version for tag: ${tag}"
+            api_stderr=$(mktemp)
             version_id=$(gh api \
               "orgs/lgtm-hq/packages/container/py-lintro/versions" \
               --paginate \
               --jq ".[] |
                 select(.metadata.container.tags[] == \"${tag}\") |
-                .id" 2>/dev/null || echo "")
+                .id" 2>"$api_stderr") || version_id=""
+            stderr_text=$(cat "$api_stderr")
+            rm -f "$api_stderr"
+            if [[ -n "$stderr_text" ]]; then
+              echo "::warning::gh api lookup for tag ${tag}: ${stderr_text}"
+            fi
             if [[ -n "$version_id" ]]; then
               gh api --method DELETE \
                 "orgs/lgtm-hq/packages/container/py-lintro/versions/${version_id}" \
