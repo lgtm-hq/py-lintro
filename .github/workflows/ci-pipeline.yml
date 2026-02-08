@@ -310,6 +310,14 @@ jobs:
         with:
           fetch-depth: 0
           token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Log in to GHCR
+        if: needs.docker-build.outputs.is-fork != 'true'
+        # yamllint disable-line rule:line-length
+        uses: docker/login-action@5e57cd118135c172c3672efd75eb46360885c0ef # v3.6.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
       - name: Pull CI images from GHCR
         if: needs.docker-build.outputs.is-fork != 'true'
         env:
@@ -534,6 +542,14 @@ jobs:
         uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
         with:
           fetch-depth: 0
+      - name: Log in to GHCR
+        if: needs.docker-build.outputs.is-fork != 'true'
+        # yamllint disable-line rule:line-length
+        uses: docker/login-action@5e57cd118135c172c3672efd75eb46360885c0ef # v3.6.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
       - name: Pull CI images from GHCR
         if: needs.docker-build.outputs.is-fork != 'true'
         env:
@@ -764,6 +780,14 @@ jobs:
           fetch-depth: 0
           fetch-tags: true
           persist-credentials: true
+      - name: Log in to GHCR
+        if: needs.docker-build.outputs.is-fork != 'true'
+        # yamllint disable-line rule:line-length
+        uses: docker/login-action@5e57cd118135c172c3672efd75eb46360885c0ef # v3.6.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
       - name: Pull CI images from GHCR
         if: needs.docker-build.outputs.is-fork != 'true'
         env:

@@ -222,7 +222,7 @@ convention = "google"
 
 [tool.black]
 line-length = 88
-target-version = ["py311", "py312", "py313", "py314"]
+target-version = ["py311", "py312", "py313"]
 exclude = "/(\n    \\.git\n    | \\.venv\n    | venv\n    | build\n    | dist\n    | __pycache__\n    | test_samples\n    | node_modules\n)/\n"
 
 [tool.bandit]
