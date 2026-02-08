@@ -54,7 +54,7 @@ def test_execution_summary_check_with_issues(
     """Verify print_execution_summary aggregates issue counts from multiple tools.
 
     When multiple tools report issues, the total should be summed and
-    passed to ASCII art display.
+    passed to both the totals table and ASCII art display.
 
 
     Args:
