@@ -101,3 +101,20 @@ tools:
   # Pytest - Test runner (config in pyproject.toml [tool.pytest.ini_options])
   pytest:
     enabled: true
+
+# AI-powered issue intelligence.
+# Requires: uv pip install 'lintro[ai]'
+# `lintro chk` generates an AI summary (1 API call). Add --fix for
+# interactive AI fix suggestions.
+# `lintro fmt` generates AI fix suggestions for unfixable issues and
+# a post-fix summary.
+ai:
+  enabled: true
+  provider: anthropic
+  # model: claude-sonnet-4-20250514  # uses provider default if omitted
+  # api_key_env: ANTHROPIC_API_KEY   # uses provider default if omitted
+  # default_fix: false      # set true to always run --fix in chk
+  auto_apply: false
+  max_tokens: 4096
+  max_parallel_calls: 5 # 1-20, concurrent API calls for fix generation
+  show_cost_estimate: true

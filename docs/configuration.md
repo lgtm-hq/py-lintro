@@ -19,6 +19,7 @@ Lintro uses a clear 4-tier configuration model that separates concerns:
 | **enforce**   | Cross-cutting settings (line_length, target_python) | Always (via CLI flags)     |
 | **defaults**  | Fallback config when no native config exists        | Only when no native config |
 | **tools**     | Per-tool enable/disable and config source           | Always                     |
+| **ai**        | AI-powered summaries and fixes                      | When enabled + API key set |
 
 ### Key Principles
 
@@ -1812,6 +1813,60 @@ You do not need to specify output format or file options. Each run produces:
 
 This ensures you always have every format available for your workflow, CI, or reporting
 needs.
+
+## AI Configuration
+
+Lintro includes optional AI-powered features for actionable summaries and interactive
+fix suggestions. See the full [AI Features Guide](ai-features.md) for detailed usage.
+
+### Quick Setup
+
+```bash
+# Install AI dependencies
+uv pip install 'lintro[ai]'
+
+# Set API key
+export ANTHROPIC_API_KEY=sk-ant-...
+```
+
+```yaml
+# .lintro-config.yaml
+ai:
+  enabled: true
+  provider: anthropic
+```
+
+### AI CLI Flags
+
+| Flag    | Effect                             |
+| ------- | ---------------------------------- |
+| (none)  | AI summary only (1 API call)       |
+| `--fix` | Add interactive AI fix suggestions |
+
+### Config Defaults for Flags
+
+Set `default_fix` to avoid typing the flag every time:
+
+```yaml
+ai:
+  enabled: true
+  default_fix: false # only run --fix when explicitly requested
+```
+
+### Full AI Config Reference
+
+| Setting              | Type   | Default     | Description                           |
+| -------------------- | ------ | ----------- | ------------------------------------- |
+| `enabled`            | bool   | `false`     | Master toggle for all AI features     |
+| `provider`           | string | `anthropic` | AI provider (`anthropic` or `openai`) |
+| `model`              | string | (default)   | Model override                        |
+| `api_key_env`        | string | (default)   | Custom env var for API key            |
+| `default_fix`        | bool   | `false`     | Always run `--fix` in chk             |
+| `auto_apply`         | bool   | `false`     | Apply fixes without confirmation      |
+| `max_tokens`         | int    | `4096`      | Max tokens per request                |
+| `max_fix_issues`     | int    | `20`        | Max issues to fix per run             |
+| `max_parallel_calls` | int    | `5`         | Concurrent API calls (1-20)           |
+| `show_cost_estimate` | bool   | `true`      | Show token/cost info in output        |
 
 ## Advanced Configuration
 

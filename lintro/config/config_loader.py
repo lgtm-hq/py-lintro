@@ -18,6 +18,7 @@ from typing import Any
 
 from loguru import logger
 
+from lintro.ai.config import AIConfig
 from lintro.config.lintro_config import (
     EnforceConfig,
     ExecutionConfig,
@@ -275,6 +276,32 @@ def _parse_defaults(data: dict[str, Any]) -> dict[str, dict[str, Any]]:
     return defaults
 
 
+def _parse_ai_config(data: dict[str, Any]) -> AIConfig:
+    """Parse AI configuration section.
+
+    Args:
+        data: Raw 'ai' section from config.
+
+    Returns:
+        AIConfig: Parsed AI configuration.
+    """
+    if not data:
+        return AIConfig()
+
+    return AIConfig(
+        enabled=data.get("enabled", False),
+        provider=data.get("provider", "anthropic"),
+        model=data.get("model"),
+        api_key_env=data.get("api_key_env"),
+        default_fix=data.get("default_fix", False),
+        auto_apply=data.get("auto_apply", False),
+        max_tokens=data.get("max_tokens", 4096),
+        max_fix_issues=data.get("max_fix_issues", 20),
+        max_parallel_calls=data.get("max_parallel_calls", 5),
+        show_cost_estimate=data.get("show_cost_estimate", True),
+    )
+
+
 def _convert_pyproject_to_config(data: dict[str, Any]) -> dict[str, Any]:
     """Convert pyproject.toml [tool.lintro] format to .lintro-config.yaml format.
 
@@ -292,6 +319,7 @@ def _convert_pyproject_to_config(data: dict[str, Any]) -> dict[str, Any]:
         "execution": {},
         "defaults": {},
         "tools": {},
+        "ai": {},
     }
 
     # Known tool names to separate from enforce settings
@@ -348,6 +376,9 @@ def _convert_pyproject_to_config(data: dict[str, Any]) -> dict[str, Any]:
         elif key_lower == ConfigKey.DEFAULTS.value.lower() and isinstance(value, dict):
             # Defaults section
             result["defaults"] = value
+        elif key_lower == "ai" and isinstance(value, dict):
+            # AI configuration section
+            result["ai"] = value
 
     return result
 
@@ -412,12 +443,14 @@ def load_config(
     execution_config = _parse_execution_config(data.get("execution", {}))
     defaults = _parse_defaults(data.get("defaults", {}))
     tools_config = _parse_tools_config(data.get("tools", {}))
+    ai_config = _parse_ai_config(data.get("ai", {}))
 
     return LintroConfig(
         execution=execution_config,
         enforce=enforce_config,
         defaults=defaults,
         tools=tools_config,
+        ai=ai_config,
         config_path=resolved_path,
     )
 

@@ -56,6 +56,19 @@ def create_json_output(
                 "remaining_issues_count",
                 0,
             )
+
+        # Include AI metadata when present
+        ai_metadata = getattr(result, "ai_metadata", None)
+        if ai_metadata:
+            result_data["ai_metadata"] = ai_metadata
+
         json_data["results"].append(result_data)
+
+    # Extract AI summary from the first result that has one
+    for result in results:
+        ai_metadata = getattr(result, "ai_metadata", None)
+        if ai_metadata and "summary" in ai_metadata:
+            json_data["ai_summary"] = ai_metadata["summary"]
+            break
 
     return json_data

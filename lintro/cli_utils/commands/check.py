@@ -111,6 +111,12 @@ DEFAULT_ACTION: str = "check"
     is_flag=True,
     help="Skip confirmation prompt and proceed immediately",
 )
+@click.option(
+    "--fix",
+    "ai_fix",
+    is_flag=True,
+    help="Generate AI fix suggestions with interactive accept/reject",
+)
 def check_command(
     paths: tuple[str, ...],
     tools: str | None,
@@ -130,6 +136,7 @@ def check_command(
     debug: bool,
     auto_install: bool,
     yes: bool,
+    ai_fix: bool,
 ) -> None:
     """Check files for issues using the specified tools.
 
@@ -152,6 +159,7 @@ def check_command(
         debug: bool: Whether to enable debug output on console.
         auto_install: bool: Whether to auto-install Node.js deps if missing.
         yes: bool: Skip confirmation prompt and proceed immediately.
+        ai_fix: bool: Generate AI fix suggestions with interactive review.
 
     Raises:
         SystemExit: Process exit with the aggregated exit code from tools.
@@ -193,6 +201,7 @@ def check_command(
         no_log=no_log,
         auto_install=auto_install,
         yes=yes,
+        ai_fix=ai_fix,
     )
 
     # Exit with code only; CLI uses this as process exit code and avoids any

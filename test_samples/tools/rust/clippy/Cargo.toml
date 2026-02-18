@@ -6,4 +6,3 @@ edition = "2021"
 [lints.clippy]
 # Allow warnings for testing - clippy should still report them but not fail
 pedantic = "warn"
-

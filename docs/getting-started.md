@@ -566,15 +566,35 @@ sudo lintro check
 - **GitHub Issues:** Report bugs or request features
 - **Documentation:** Check other guides in the `docs/` directory
 
+## AI-Powered Features
+
+Lintro can optionally use AI to provide actionable summaries and interactive fix
+suggestions.
+
+```bash
+# Install AI dependencies
+uv pip install 'lintro[ai]'
+export ANTHROPIC_API_KEY=sk-ant-...
+
+# AI summary is automatic when enabled in config
+lintro check
+
+# Add interactive AI fix suggestions
+lintro check --fix
+```
+
+See the [AI Features Guide](ai-features.md) for full setup and configuration.
+
 ## Next Steps
 
 Now that you're familiar with the basics:
 
 1. **Explore advanced features** - Check out the [Configuration Guide](configuration.md)
-2. **Set up CI/CD** - See the [GitHub Integration Guide](github-integration.md)
-3. **Use Docker** - Read the [Docker Usage Guide](docker.md)
-4. **Contribute** - Check the [Contributing Guide](contributing.md)
-5. **Analyze tools** - Dive into [Tool Analysis](tool-analysis/) for detailed
+2. **Enable AI features** - See the [AI Features Guide](ai-features.md)
+3. **Set up CI/CD** - See the [GitHub Integration Guide](github-integration.md)
+4. **Use Docker** - Read the [Docker Usage Guide](docker.md)
+5. **Contribute** - Check the [Contributing Guide](contributing.md)
+6. **Analyze tools** - Dive into [Tool Analysis](tool-analysis/) for detailed
    comparisons
 
 Welcome to the Lintro community! 🚀

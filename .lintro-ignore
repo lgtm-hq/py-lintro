@@ -1,6 +1,6 @@
 # Ignore test_samples directory and build artifacts from all linting/formatting
 
-test_samples/
+# test_samples/
 build
 dist
 node_modules
