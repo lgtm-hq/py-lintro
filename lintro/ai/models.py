@@ -55,7 +55,8 @@ class AISummary:
         overview: 2-3 sentence high-level assessment.
         key_patterns: Recurring issue patterns identified across the codebase.
         priority_actions: Ordered list of recommended actions, most impactful first.
-        triage_suggestions: Issues that are likely intentional/idiomatic with suppression advice.
+        triage_suggestions: Issues that are likely intentional/idiomatic with
+        suppression advice.
         estimated_effort: Rough effort estimate to address all issues.
         input_tokens: Tokens consumed for input.
         output_tokens: Tokens generated for output.

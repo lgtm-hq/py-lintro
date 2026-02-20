@@ -8,7 +8,8 @@ from __future__ import annotations
 
 import functools
 import time
-from typing import TypeVar
+from collections.abc import Callable
+from typing import Any
 
 from loguru import logger
 
@@ -17,8 +18,6 @@ from lintro.ai.exceptions import (
     AIProviderError,
     AIRateLimitError,
 )
-
-F = TypeVar("F")
 
 # Defaults
 DEFAULT_MAX_RETRIES = 3
@@ -33,7 +32,7 @@ def with_retry(
     base_delay: float = DEFAULT_BASE_DELAY,
     max_delay: float = DEFAULT_MAX_DELAY,
     backoff_factor: float = DEFAULT_BACKOFF_FACTOR,
-):
+) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
     """Decorator for retrying AI API calls with exponential backoff.
 
     Retries on ``AIProviderError`` and ``AIRateLimitError``.
@@ -49,9 +48,11 @@ def with_retry(
         Decorated function with retry behavior.
     """
 
-    def decorator(func):
+    def decorator(
+        func: Callable[..., Any],
+    ) -> Callable[..., Any]:
         @functools.wraps(func)
-        def wrapper(*args, **kwargs):
+        def wrapper(*args: Any, **kwargs: Any) -> Any:
             last_exception: Exception | None = None
             for attempt in range(max_retries + 1):
                 try:

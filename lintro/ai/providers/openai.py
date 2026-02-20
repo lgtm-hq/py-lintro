@@ -97,6 +97,7 @@ class OpenAIProvider(BaseAIProvider):
         *,
         system: str | None = None,
         max_tokens: int = 1024,
+        timeout: float = 60.0,
     ) -> AIResponse:
         """Generate a completion using GPT.
 
@@ -104,6 +105,7 @@ class OpenAIProvider(BaseAIProvider):
             prompt: The user prompt.
             system: Optional system prompt.
             max_tokens: Maximum tokens to generate.
+            timeout: Request timeout in seconds.
 
         Returns:
             AIResponse: The model's response with usage metadata.
@@ -114,6 +116,8 @@ class OpenAIProvider(BaseAIProvider):
             AIProviderError: If the API call fails.
         """
         client = self._get_client()
+        # Per-call cap: the lower of the caller's request and the
+        # provider-level cap set at init time.
         effective_max = min(max_tokens, self._max_tokens)
 
         try:
@@ -126,6 +130,7 @@ class OpenAIProvider(BaseAIProvider):
                 model=self._model,
                 messages=messages,
                 max_tokens=effective_max,
+                timeout=timeout,
             )
 
             content = response.choices[0].message.content or ""

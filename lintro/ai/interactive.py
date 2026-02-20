@@ -12,6 +12,7 @@ from collections.abc import Sequence
 from pathlib import Path
 
 import click
+from loguru import logger
 from rich.console import Console, Group, RenderableType
 from rich.markup import escape
 from rich.panel import Panel
@@ -21,12 +22,24 @@ from lintro.ai.display import (
     _cost_str,
     _print_code_panel,
     _print_section_header,
+    render_validation,
 )
 from lintro.ai.models import AIFixSuggestion
-from lintro.ai.paths import relative_path
+from lintro.ai.paths import relative_path, resolve_workspace_file
+from lintro.ai.risk import (
+    SAFE_STYLE_RISK,
+    calculate_patch_stats,
+    classify_fix_risk,
+    is_safe_style_fix,
+)
+from lintro.ai.validation import validate_applied_fixes
 
 
-def _apply_fix(suggestion: AIFixSuggestion) -> bool:
+def _apply_fix(
+    suggestion: AIFixSuggestion,
+    *,
+    workspace_root: Path | None = None,
+) -> bool:
     """Apply a single fix suggestion to the file.
 
     Uses line-number-targeted replacement to avoid matching the wrong
@@ -35,12 +48,18 @@ def _apply_fix(suggestion: AIFixSuggestion) -> bool:
 
     Args:
         suggestion: Fix suggestion to apply.
+        workspace_root: Optional root directory limiting writable paths.
 
     Returns:
         True if the fix was applied successfully.
     """
     try:
         path = Path(suggestion.file)
+        if workspace_root is not None:
+            resolved = resolve_workspace_file(suggestion.file, workspace_root)
+            if resolved is None:
+                return False
+            path = resolved
         content = path.read_text(encoding="utf-8")
         lines = content.splitlines(keepends=True)
 
@@ -90,8 +109,15 @@ def _apply_fix(suggestion: AIFixSuggestion) -> bool:
                 path.write_text("".join(new_lines), encoding="utf-8")
                 return True
 
-        # Fallback: first-occurrence string replacement
+        # Fallback: first-occurrence string replacement.
+        # Warning: this may apply the fix to the wrong location if
+        # the original code appears earlier in the file.
         if suggestion.original_code in content:
+            logger.warning(
+                f"Line-targeted replacement failed for "
+                f"{suggestion.file}:{suggestion.line}, "
+                f"falling back to first-occurrence string replacement",
+            )
             new_content = content.replace(
                 suggestion.original_code,
                 suggestion.suggested_code,
@@ -104,6 +130,17 @@ def _apply_fix(suggestion: AIFixSuggestion) -> bool:
 
     except OSError:
         return False
+
+
+def apply_fixes(
+    suggestions: Sequence[AIFixSuggestion],
+    *,
+    workspace_root: Path | None = None,
+) -> list[AIFixSuggestion]:
+    """Apply suggestions and return only those successfully applied."""
+    return [
+        fix for fix in suggestions if _apply_fix(fix, workspace_root=workspace_root)
+    ]
 
 
 def _group_by_code(
@@ -144,6 +181,23 @@ def _print_group_header(
         total_groups: Total number of groups.
     """
     parts: list[RenderableType] = []
+    stats = calculate_patch_stats(fixes)
+    risk_labels = {classify_fix_risk(fix) for fix in fixes}
+    group_risk = (
+        SAFE_STYLE_RISK
+        if len(risk_labels) == 1 and SAFE_STYLE_RISK in risk_labels
+        else "behavioral-risk"
+    )
+    risk_color = "green" if group_risk == SAFE_STYLE_RISK else "yellow"
+
+    parts.append(
+        (
+            f"[{risk_color}]risk: {group_risk}[/{risk_color}]"
+            "  ·  "
+            f"[dim]patch: {stats.files} files, +{stats.lines_added}/"
+            f"-{stats.lines_removed}, {stats.hunks} hunks[/dim]"
+        ),
+    )
 
     explanation = fixes[0].explanation or ""
     if explanation:
@@ -208,19 +262,22 @@ def _show_group_diffs(
 def _apply_group(
     console: Console,
     fixes: list[AIFixSuggestion],
+    *,
+    workspace_root: Path | None = None,
 ) -> tuple[int, list[AIFixSuggestion]]:
     """Apply all fixes in a group, reporting results.
 
     Args:
         console: Rich Console instance.
         fixes: Suggestions to apply.
+        workspace_root: Optional root directory limiting writable paths.
 
     Returns:
         Tuple of (applied_count, list of successfully applied suggestions).
     """
     applied_fixes: list[AIFixSuggestion] = []
     for fix in fixes:
-        if _apply_fix(fix):
+        if _apply_fix(fix, workspace_root=workspace_root):
             applied_fixes.append(fix)
     applied = len(applied_fixes)
     failed = len(fixes) - applied
@@ -231,16 +288,51 @@ def _apply_group(
     return applied, applied_fixes
 
 
+def _validate_group(
+    console: Console,
+    applied_suggestions: Sequence[AIFixSuggestion],
+) -> None:
+    """Run validation immediately for a single accepted group."""
+    validation = validate_applied_fixes(applied_suggestions)
+    if not validation:
+        return
+    if validation.verified == 0 and validation.unverified == 0:
+        return
+    output = render_validation(validation)
+    if output:
+        console.print(output)
+
+
+def _render_prompt(*, validate_mode: bool, safe_default: bool) -> str:
+    """Build interactive prompt text with current mode/default."""
+    default_text = (
+        " [dim](Enter=accept group; safe-style default)[/dim]" if safe_default else ""
+    )
+    mode = "on" if validate_mode else "off"
+    return (
+        "  [y]accept group  [a]accept group + remaining  "
+        "[r]reject  [d]diffs  [s]skip  [v]validate-after-group:"
+        f" {mode} (toggle only, no apply)  [q]quit{default_text}: "
+    )
+
+
 def review_fixes_interactive(
     suggestions: Sequence[AIFixSuggestion],
+    *,
+    validate_after_group: bool = False,
+    workspace_root: Path | None = None,
 ) -> tuple[int, int, list[AIFixSuggestion]]:
     """Present fix suggestions grouped by error code for review.
 
     Groups suggestions by error code and prompts once per group:
-    ``[a]ccept all / [r]eject / [d]iffs / [s]kip / [q]uit``
+    ``[y]accept group / [a]accept group + remaining / [r]eject /
+    [d]iffs / [s]kip / [v]toggle per-group validation / [q]uit``
 
     Args:
         suggestions: Fix suggestions to review.
+        validate_after_group: Whether to validate immediately after
+            each accepted group.
+        workspace_root: Optional root directory limiting writable paths.
 
     Returns:
         Tuple of (accepted_count, rejected_count, applied_suggestions).
@@ -256,6 +348,7 @@ def review_fixes_interactive(
     accepted = 0
     rejected = 0
     accept_all = False
+    validate_mode = validate_after_group
     all_applied: list[AIFixSuggestion] = []
 
     groups = _group_by_code(suggestions)
@@ -279,41 +372,93 @@ def review_fixes_interactive(
 
     for gi, (code, fixes) in enumerate(groups.items(), 1):
         if accept_all:
-            count, group_applied = _apply_group(console, fixes)
+            count, group_applied = _apply_group(
+                console,
+                fixes,
+                workspace_root=workspace_root,
+            )
             accepted += count
             all_applied.extend(group_applied)
+            if validate_mode and group_applied:
+                _validate_group(console, group_applied)
             continue
 
         # Group header (flat text, no panels)
         _print_group_header(console, code, fixes, gi, total_groups)
 
-        # Prompt (single keypress, no Enter needed)
+        safe_default = all(is_safe_style_fix(fix) for fix in fixes)
         console.print()
-        prompt_text = click.style(
-            "  [a]ccept all  [r]eject  [d]iffs  [s]kip  [q]uit: ",
-            fg="cyan",
-        )
 
         while True:
+            prompt_text = click.style(
+                _render_prompt(
+                    validate_mode=validate_mode,
+                    safe_default=safe_default,
+                ),
+                fg="cyan",
+            )
             click.echo(prompt_text, nl=False)
             try:
-                choice = click.getchar().lower()
+                choice = click.getchar()
                 click.echo(choice)  # echo the keypress
             except (EOFError, KeyboardInterrupt):
                 click.echo()
                 return accepted, rejected, all_applied
 
+            if choice in ("\r", "\n"):
+                choice = "y" if safe_default else "s"
+            else:
+                choice = choice.lower()
+
             if choice == "d":
                 _show_group_diffs(console, fixes)
+                console.print()
+                continue
+            if choice == "v":
+                validate_mode = not validate_mode
+                state = "enabled" if validate_mode else "disabled"
+                console.print(
+                    f"  [dim]Per-group validation {state} " "(no fixes applied).[/dim]",
+                )
                 console.print()
                 continue
 
             break
 
         if choice == "a":
-            count, group_applied = _apply_group(console, fixes)
+            count, group_applied = _apply_group(
+                console,
+                fixes,
+                workspace_root=workspace_root,
+            )
             accepted += count
             all_applied.extend(group_applied)
+            if validate_mode:
+                if group_applied:
+                    _validate_group(console, group_applied)
+                else:
+                    console.print(
+                        "  [dim]Validation skipped "
+                        "(no fixes applied in this group).[/dim]",
+                    )
+            accept_all = True
+            console.print("  [dim]Will accept all remaining groups.[/dim]")
+        elif choice == "y":
+            count, group_applied = _apply_group(
+                console,
+                fixes,
+                workspace_root=workspace_root,
+            )
+            accepted += count
+            all_applied.extend(group_applied)
+            if validate_mode:
+                if group_applied:
+                    _validate_group(console, group_applied)
+                else:
+                    console.print(
+                        "  [dim]Validation skipped "
+                        "(no fixes applied in this group).[/dim]",
+                    )
         elif choice == "r":
             rejected += len(fixes)
             console.print(

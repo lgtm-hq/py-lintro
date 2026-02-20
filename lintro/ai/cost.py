@@ -6,6 +6,8 @@ and formatting costs of AI API calls.
 
 from __future__ import annotations
 
+from loguru import logger
+
 # Pricing per 1M tokens (input, output) in USD.
 # Last updated: 2025-05 — verify at provider pricing pages before relying on these.
 MODEL_PRICING: dict[str, tuple[float, float]] = {
@@ -40,7 +42,11 @@ def estimate_cost(
     Returns:
         float: Estimated cost in USD.
     """
-    input_price, output_price = MODEL_PRICING.get(model, DEFAULT_PRICING)
+    pricing = MODEL_PRICING.get(model)
+    if pricing is None:
+        logger.debug(f"Unknown model {model!r}, using default pricing")
+        pricing = DEFAULT_PRICING
+    input_price, output_price = pricing
 
     input_cost = (input_tokens / 1_000_000) * input_price
     output_cost = (output_tokens / 1_000_000) * output_price

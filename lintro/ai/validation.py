@@ -6,15 +6,19 @@ affected files to confirm that the issues were actually resolved.
 
 from __future__ import annotations
 
-from collections import defaultdict
+from collections import Counter, defaultdict
 from collections.abc import Sequence
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 from loguru import logger
 
 if TYPE_CHECKING:
     from lintro.ai.models import AIFixSuggestion
+
+
+IssueMatchKey = tuple[str, str, int | None]
 
 
 @dataclass
@@ -32,6 +36,8 @@ class ValidationResult:
     unverified: int = 0
     new_issues: int = 0
     details: list[str] = field(default_factory=list)
+    verified_by_tool: dict[str, int] = field(default_factory=dict)
+    unverified_by_tool: dict[str, int] = field(default_factory=dict)
 
 
 def validate_applied_fixes(
@@ -73,31 +79,105 @@ def validate_applied_fixes(
             logger.debug(f"Validation skipped for {tool_name}: tool check failed")
             continue
 
-        # Build a set of (file, code) pairs from remaining issues
-        remaining_set: set[tuple[str, str]] = set()
+        # Build a multiset for accurate one-to-one matching.
+        remaining_counts: Counter[IssueMatchKey] = Counter()
         for issue in remaining_issues:
             code = getattr(issue, "code", "") or ""
-            remaining_set.add((issue.file, code))
+            remaining_path = _normalize_file_path(getattr(issue, "file", ""))
+            line = _normalize_line(getattr(issue, "line", None))
+            remaining_counts[(remaining_path, code, line)] += 1
 
         # Check each applied suggestion against remaining issues
         for s in suggestions:
-            key = (s.file, s.code)
-            if key in remaining_set:
+            suggestion_path = _normalize_file_path(s.file)
+            suggestion_line = _normalize_line(s.line)
+            if _consume_matching_remaining_issue(
+                remaining_counts=remaining_counts,
+                file_path=suggestion_path,
+                code=s.code,
+                line=suggestion_line,
+            ):
                 result.unverified += 1
+                result.unverified_by_tool[tool_name] = (
+                    result.unverified_by_tool.get(tool_name, 0) + 1
+                )
                 rel = s.file.rsplit("/", 1)[-1]
                 result.details.append(
                     f"[{s.code}] {rel}:{s.line} — issue still present",
                 )
             else:
                 result.verified += 1
+                result.verified_by_tool[tool_name] = (
+                    result.verified_by_tool.get(tool_name, 0) + 1
+                )
 
     return result
+
+
+def _normalize_line(line: object) -> int | None:
+    """Normalize line values for reliable issue matching.
+
+    ``BaseIssue.line`` is typed as ``int`` (default 0), so the ``str``
+    branch is unnecessary.  The ``bool`` guard remains because ``bool``
+    is a subclass of ``int`` in Python.
+    """
+    if isinstance(line, bool):
+        return None
+    if isinstance(line, int):
+        return line if line > 0 else None
+    return None
+
+
+def _consume_matching_remaining_issue(
+    *,
+    remaining_counts: Counter[IssueMatchKey],
+    file_path: str,
+    code: str,
+    line: int | None,
+) -> bool:
+    """Consume a matching remaining issue if present.
+
+    Matching order:
+    1. Exact file/code/line.
+    2. File/code where the remaining issue has no line number.
+    3. For line-less suggestions, file/code with any line.
+    """
+    if line is not None:
+        exact_key = (file_path, code, line)
+        if remaining_counts.get(exact_key, 0) > 0:
+            remaining_counts[exact_key] -= 1
+            return True
+
+    unknown_line_key = (file_path, code, None)
+    if remaining_counts.get(unknown_line_key, 0) > 0:
+        remaining_counts[unknown_line_key] -= 1
+        return True
+
+    if line is None:
+        for key in list(remaining_counts.keys()):
+            if remaining_counts[key] <= 0:
+                continue
+            if key[0] == file_path and key[1] == code:
+                remaining_counts[key] -= 1
+                return True
+
+    return False
+
+
+def _normalize_file_path(file_path: str) -> str:
+    """Normalize file paths for reliable issue matching."""
+    if not file_path:
+        return ""
+    try:
+        return str(Path(file_path).resolve())
+    except OSError:
+        return str(Path(file_path).absolute())
 
 
 def _run_tool_check(
     tool_name: str,
     file_paths: list[str],
-) -> list | None:
+) -> list[object] | None:
     """Run a tool's check on specific files.
 
     Args:

@@ -18,13 +18,35 @@ from typing import TYPE_CHECKING
 from loguru import logger
 
 from lintro.ai.models import AIFixSuggestion
-from lintro.ai.paths import relative_path
+from lintro.ai.paths import (
+    relative_path,
+    resolve_workspace_file,
+    resolve_workspace_root,
+    to_provider_path,
+)
 from lintro.ai.prompts import FIX_PROMPT_TEMPLATE, FIX_SYSTEM
 from lintro.ai.retry import with_retry
 
 if TYPE_CHECKING:
     from lintro.ai.providers.base import BaseAIProvider
     from lintro.parsers.base_issue import BaseIssue
+
+
+def _call_provider(
+    provider: BaseAIProvider,
+    prompt: str,
+    system: str,
+    max_tokens: int,
+    timeout: float = 60.0,
+) -> object:
+    """Call the AI provider (no retry — caller wraps with retry)."""
+    return provider.complete(
+        prompt,
+        system=system,
+        max_tokens=max_tokens,
+        timeout=timeout,
+    )
+
 
 # Context window around the issue line (lines before/after)
 CONTEXT_LINES = 15
@@ -151,6 +173,10 @@ def _generate_single_fix(
     tool_name: str,
     file_cache: dict[str, str | None],
     cache_lock: threading.Lock,
+    workspace_root: Path,
+    max_tokens: int,
+    max_retries: int = 2,
+    timeout: float = 60.0,
 ) -> AIFixSuggestion | None:
     """Generate a fix suggestion for a single issue.
 
@@ -162,6 +188,10 @@ def _generate_single_fix(
         tool_name: Name of the tool.
         file_cache: Shared file content cache.
         cache_lock: Lock for thread-safe cache access.
+        workspace_root: Root directory AI is allowed to edit/read.
+        max_tokens: Maximum tokens to request from provider.
+        max_retries: Maximum retry attempts for transient failures.
+        timeout: Request timeout in seconds.
 
     Returns:
         AIFixSuggestion, or None if generation fails.
@@ -173,14 +203,23 @@ def _generate_single_fix(
         )
         return None
 
+    resolved_file = resolve_workspace_file(issue.file, workspace_root)
+    if resolved_file is None:
+        logger.debug(
+            f"Skipping issue outside workspace root: "
+            f"file={issue.file!r}, root={workspace_root}",
+        )
+        return None
+    issue_file = str(resolved_file)
+
     # Read file with thread-safe cache
     with cache_lock:
-        if issue.file not in file_cache:
-            file_cache[issue.file] = _read_file_safely(issue.file)
-        file_content = file_cache[issue.file]
+        if issue_file not in file_cache:
+            file_cache[issue_file] = _read_file_safely(issue_file)
+        file_content = file_cache[issue_file]
 
     if file_content is None:
-        logger.debug(f"Cannot read file: {issue.file!r}")
+        logger.debug(f"Cannot read file: {issue_file!r}")
         return None
 
     code = getattr(issue, "code", "") or ""
@@ -192,7 +231,7 @@ def _generate_single_fix(
     prompt = FIX_PROMPT_TEMPLATE.format(
         tool_name=tool_name,
         code=code,
-        file=issue.file,
+        file=to_provider_path(issue_file, workspace_root),
         line=issue.line,
         message=issue.message,
         context_start=context_start,
@@ -201,20 +240,12 @@ def _generate_single_fix(
     )
 
     try:
-
-        @with_retry(max_retries=2)
-        def _call():
-            return provider.complete(
-                prompt,
-                system=FIX_SYSTEM,
-                max_tokens=2048,
-            )
-
-        response = _call()
+        retrying_call = with_retry(max_retries=max_retries)(_call_provider)
+        response = retrying_call(provider, prompt, FIX_SYSTEM, max_tokens, timeout)
 
         suggestion = _parse_fix_response(
             response.content,
-            issue.file,
+            issue_file,
             issue.line,
             code,
         )
@@ -242,6 +273,10 @@ def generate_fixes(
     tool_name: str,
     max_issues: int = 20,
     max_workers: int = DEFAULT_MAX_WORKERS,
+    workspace_root: Path | None = None,
+    max_tokens: int = 2048,
+    max_retries: int = 2,
+    timeout: float = 60.0,
 ) -> list[AIFixSuggestion]:
     """Generate AI fix suggestions for unfixable issues.
 
@@ -254,6 +289,10 @@ def generate_fixes(
         tool_name: Name of the tool that produced these issues.
         max_issues: Maximum number of issues to process.
         max_workers: Maximum concurrent API calls.
+        workspace_root: Optional root directory limiting AI file access.
+        max_tokens: Maximum tokens requested per fix generation call.
+        max_retries: Maximum retry attempts for transient API failures.
+        timeout: Request timeout in seconds per API call.
 
     Returns:
         List of fix suggestions.
@@ -267,6 +306,8 @@ def generate_fixes(
         f"generate_fixes: {tool_name} received {len(issues)} issues, "
         f"processing {len(target_issues)} (max={max_issues})",
     )
+
+    root = workspace_root or resolve_workspace_root()
 
     # Shared file cache with thread safety
     file_cache: dict[str, str | None] = {}
@@ -285,6 +326,10 @@ def generate_fixes(
                 tool_name,
                 file_cache,
                 cache_lock,
+                root,
+                max_tokens,
+                max_retries,
+                timeout,
             )
             if result:
                 suggestions.append(result)
@@ -298,6 +343,10 @@ def generate_fixes(
                     tool_name,
                     file_cache,
                     cache_lock,
+                    root,
+                    max_tokens,
+                    max_retries,
+                    timeout,
                 )
                 for issue in target_issues
             ]

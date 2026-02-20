@@ -100,8 +100,37 @@ def print_pre_execution_summary(
         ]
         table.add_row("Skipped", "\n".join(skip_lines))
 
-    # AI configuration
-    if ai_config is not None and ai_config.enabled:
+    # AI configuration (always render for visibility).
+    ai_parts: list[str] = []
+    if ai_config is None:
+        ai_parts.append("[dim]disabled (no config)[/dim]")
+    elif not ai_config.enabled:
+        ai_parts.append("[dim]disabled[/dim]")
+        ai_parts.append(f"  provider: {ai_config.provider}")
+        if ai_config.model:
+            ai_parts.append(f"  model: {ai_config.model}")
+        else:
+            ai_parts.append("  model: [dim]provider default[/dim]")
+        ai_parts.append(
+            f"  parallel: {ai_config.max_parallel_calls} workers",
+        )
+        ai_parts.append(
+            "  safe-auto-apply: "
+            + (
+                "[green]on[/green]"
+                if ai_config.auto_apply_safe_fixes
+                else "[dim]off[/dim]"
+            ),
+        )
+        ai_parts.append(
+            "  validate-after-group: "
+            + (
+                "[green]on[/green]"
+                if ai_config.validate_after_group
+                else "[dim]off[/dim]"
+            ),
+        )
+    else:
         import os
 
         from lintro.ai.availability import is_provider_available
@@ -111,7 +140,6 @@ def print_pre_execution_summary(
             get_default_model,
         )
 
-        ai_parts: list[str] = []
         provider_name = ai_config.provider.lower()
         supported = set(DEFAULT_MODELS.keys())
 
@@ -176,8 +204,24 @@ def print_pre_execution_summary(
         ai_parts.append(
             f"  parallel: {ai_config.max_parallel_calls} workers",
         )
+        ai_parts.append(
+            "  safe-auto-apply: "
+            + (
+                "[green]on[/green]"
+                if ai_config.auto_apply_safe_fixes
+                else "[dim]off[/dim]"
+            ),
+        )
+        ai_parts.append(
+            "  validate-after-group: "
+            + (
+                "[green]on[/green]"
+                if ai_config.validate_after_group
+                else "[dim]off[/dim]"
+            ),
+        )
 
-        table.add_row("AI", "\n".join(ai_parts))
+    table.add_row("AI", "\n".join(ai_parts))
 
     console.print(table)
     console.print()

@@ -45,6 +45,7 @@ class BaseAIProvider(ABC):
         *,
         system: str | None = None,
         max_tokens: int = 1024,
+        timeout: float = 60.0,
     ) -> AIResponse:
         """Generate a completion from the AI model.
 
@@ -52,6 +53,7 @@ class BaseAIProvider(ABC):
             prompt: The user prompt to send to the model.
             system: Optional system prompt to set context.
             max_tokens: Maximum number of tokens to generate.
+            timeout: Request timeout in seconds.
 
         Returns:
             AIResponse: The model's response with usage metadata.

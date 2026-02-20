@@ -24,12 +24,19 @@ class AIConfig(BaseModel):
             ``--fix``. Defaults to False.
         auto_apply: Whether to automatically apply AI-generated fixes
             without user confirmation. Defaults to False for safety.
+        auto_apply_safe_fixes: Whether safe style-only AI fixes should
+            be auto-applied in non-interactive mode. Defaults to True.
         max_tokens: Maximum tokens per AI request.
         max_fix_issues: Maximum number of issues to generate AI fixes
             for per run. Set higher to analyze more issues at the cost
             of additional API calls.
         max_parallel_calls: Maximum concurrent API calls when
             generating fixes in parallel.
+        max_retries: Maximum number of retries for transient AI API
+            failures (rate limits, network errors). 0 disables retries.
+        api_timeout: Timeout in seconds for each AI API call.
+        validate_after_group: Whether to run validation immediately
+            after each accepted group in interactive review.
         show_cost_estimate: Whether to display estimated cost before
             and after AI operations.
     """
@@ -42,7 +49,11 @@ class AIConfig(BaseModel):
     api_key_env: str | None = None
     default_fix: bool = False
     auto_apply: bool = False
-    max_tokens: int = Field(default=4096, ge=1, le=128000)
+    auto_apply_safe_fixes: bool = True
+    max_tokens: int = Field(default=4096, ge=1)
     max_fix_issues: int = Field(default=20, ge=1)
     max_parallel_calls: int = Field(default=5, ge=1, le=20)
+    max_retries: int = Field(default=2, ge=0, le=10)
+    api_timeout: float = Field(default=60.0, ge=1.0)
+    validate_after_group: bool = False
     show_cost_estimate: bool = True

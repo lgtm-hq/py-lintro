@@ -27,26 +27,37 @@ Analyze these results and provide a structured summary.
 
 Respond in this exact JSON format:
 {{
-  "overview": "2-3 sentence high-level assessment of code quality. Be specific about what needs attention.",
+  "overview": "2-3 sentence assessment of code quality. \
+Be specific about what needs attention.",
   "key_patterns": [
-    "Pattern description with scope (e.g., 'Missing type annotations in 8 utility functions in src/utils/')"
+    "Pattern description with scope \
+(e.g., 'Missing type annotations in src/utils/')"
   ],
   "priority_actions": [
     "Most impactful action to take first (explain why)"
   ],
   "triage_suggestions": [
-    "Code + context where suppression is appropriate (e.g., 'B101 in test files — assert is idiomatic, add # noqa: B101')"
+    "Code + context where suppression is appropriate \
+(e.g., 'B101 in tests — add # noqa: B101')"
   ],
-  "estimated_effort": "Rough time estimate to address all issues (e.g., '20-30 minutes of focused cleanup')"
+  "estimated_effort": "Rough time estimate \
+(e.g., '20-30 minutes of focused cleanup')"
 }}
 
 Guidelines:
 - Identify systemic patterns, not individual issues
-- Priority actions should be ordered by impact (fixes that resolve the most issues first)
+- Priority actions should be ordered by impact (fixes that resolve the
+  most issues first)
 - Be specific about file areas or patterns, not generic advice
 - If issues are mostly cosmetic/style, say so
 - Limit to 3-5 key patterns and 3-5 priority actions
-- For triage_suggestions, identify issues that are likely intentional or idiomatic in their context (e.g., asserts in test files, long lines in generated code, unused imports in __init__.py). Suggest the appropriate suppression mechanism for the tool (# noqa, // eslint-disable, #[allow(...)], etc.). Only include if there are clear candidates — omit the field if all issues genuinely need fixing
+- For triage_suggestions, identify issues that are likely \
+intentional or idiomatic in their context (e.g., asserts in \
+test files, long lines in generated code, unused imports in \
+__init__.py). Suggest the appropriate suppression mechanism \
+for the tool (# noqa, // eslint-disable, #[allow(...)], etc.). \
+Only include if there are clear candidates — omit the field \
+if all issues genuinely need fixing
 """
 
 POST_FIX_SUMMARY_PROMPT_TEMPLATE = """\
@@ -62,7 +73,8 @@ Provide a brief summary of the fix session and actionable next steps.
 
 Respond in this exact JSON format:
 {{
-  "overview": "1-2 sentence summary of what was accomplished and what remains",
+  "overview": "1-2 sentence summary of what was accomplished \
+and what remains",
   "key_patterns": [
     "Pattern description of remaining issues"
   ],
@@ -87,7 +99,8 @@ File: {file}
 Line: {line}
 Issue: {message}
 
-Here is the relevant section of the file (lines {context_start}-{context_end}):
+Here is the relevant section of the file \
+(lines {context_start}-{context_end}):
 ```
 {code_context}
 ```
@@ -96,9 +109,11 @@ Provide a fix for this issue. Only change what is necessary.
 
 Respond in this exact JSON format:
 {{
-  "original_code": "the exact lines that need to change (copy from above)",
+  "original_code": "the exact lines that need to change \
+(copy from above)",
   "suggested_code": "the corrected version of those lines",
-  "explanation": "Imperative fix description (e.g. 'Add docstring for X')",
+  "explanation": "Imperative fix description \
+(e.g. 'Add docstring for X')",
   "confidence": "high|medium|low"
 }}
 """

@@ -14,6 +14,7 @@ from __future__ import annotations
 import io
 import os
 import re
+from collections import defaultdict
 from collections.abc import Sequence
 
 from rich.console import Console, Group, RenderableType
@@ -189,8 +190,6 @@ def render_fixes_terminal(
     )
 
     # Group by code for Panel rendering
-    from collections import defaultdict
-
     groups: dict[str, list[AIFixSuggestion]] = defaultdict(list)
     for s in suggestions:
         groups[s.code or "unknown"].append(s)
@@ -344,6 +343,7 @@ def render_fixes(
     *,
     tool_name: str = "",
     show_cost: bool = True,
+    output_format: str = "auto",
 ) -> str:
     """Render fixes using the appropriate format for the environment.
 
@@ -351,10 +351,19 @@ def render_fixes(
         suggestions: Fix suggestions to render.
         tool_name: Name of the tool these suggestions are for.
         show_cost: Whether to show cost estimates.
+        output_format: Output format — ``"auto"`` (default) selects
+            terminal or GitHub Actions based on environment,
+            ``"markdown"`` uses Markdown with collapsible diffs.
 
     Returns:
         Formatted fix string.
     """
+    if output_format == "markdown":
+        return render_fixes_markdown(
+            suggestions,
+            tool_name=tool_name,
+            show_cost=show_cost,
+        )
     if _is_github_actions():
         return render_fixes_github(
             suggestions,
@@ -583,16 +592,22 @@ def render_summary(
     summary: AISummary,
     *,
     show_cost: bool = True,
+    output_format: str = "auto",
 ) -> str:
     """Render summary using the appropriate format for the environment.
 
     Args:
         summary: AI summary to render.
         show_cost: Whether to show cost estimates.
+        output_format: Output format — ``"auto"`` (default) selects
+            terminal or GitHub Actions based on environment,
+            ``"markdown"`` uses Markdown with collapsible section.
 
     Returns:
         Formatted summary string.
     """
+    if output_format == "markdown":
+        return render_summary_markdown(summary, show_cost=show_cost)
     if _is_github_actions():
         return render_summary_github(summary, show_cost=show_cost)
     return render_summary_terminal(summary, show_cost=show_cost)

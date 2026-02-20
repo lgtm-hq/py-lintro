@@ -11,8 +11,7 @@ Supports parallel execution when enabled via configuration.
 
 from __future__ import annotations
 
-import os
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from lintro.enums.action import Action, normalize_action
 from lintro.models.core.tool_result import ToolResult
@@ -36,13 +35,7 @@ from lintro.utils.post_checks import execute_post_checks
 from lintro.utils.unified_config import UnifiedConfigManager
 
 if TYPE_CHECKING:
-    from lintro.ai.config import AIConfig
-    from lintro.ai.models import AIFixSuggestion
-    from lintro.ai.providers.base import BaseAIProvider
-    from lintro.config.lintro_config import LintroConfig
-    from lintro.parsers.base_issue import BaseIssue
     from lintro.plugins.base import BaseToolPlugin
-    from lintro.utils.console.logger import ThreadSafeConsoleLogger
 
 # Re-export constants for backwards compatibility
 __all__ = [
@@ -131,6 +124,22 @@ def _run_fix_with_retry(
         )
 
     return result
+
+
+def _warn_ai_fix_disabled(
+    *,
+    action: Action,
+    ai_fix: bool,
+    ai_enabled: bool,
+    logger: Any,
+) -> None:
+    """Warn when users request AI fixes but AI is disabled in config."""
+    if action != Action.CHECK or not ai_fix or ai_enabled:
+        return
+    logger.console_output(
+        "AI fixes requested with --fix, but ai.enabled is false in "
+        ".lintro-config.yaml; skipping AI enhancements.",
+    )
 
 
 def run_lint_tools_simple(
@@ -545,15 +554,29 @@ def run_lint_tools_simple(
     )
 
     # AI enhancement (CLI flags override config defaults)
+    effective_ai_fix = ai_fix or lintro_config.ai.default_fix
+    _warn_ai_fix_disabled(
+        action=action,
+        ai_fix=effective_ai_fix,
+        ai_enabled=lintro_config.ai.enabled,
+        logger=logger,
+    )
     if lintro_config.ai.enabled:
-        _run_ai_enhancement(
+        from lintro.ai.orchestrator import run_ai_enhancement
+
+        run_ai_enhancement(
             action=action,
             all_results=all_results,
             lintro_config=lintro_config,
             logger=logger,
             output_format=output_format,
-            ai_fix=ai_fix or lintro_config.ai.default_fix,
+            ai_fix=effective_ai_fix,
         )
+        if action == Action.FIX:
+            total_issues, total_fixed, total_remaining = aggregate_tool_results(
+                all_results,
+                action,
+            )
 
     # Determine final exit code once — used for both JSON output and return
     final_exit_code = int(
@@ -594,364 +617,3 @@ def run_lint_tools_simple(
             # Continue execution - report writing failures should not stop the tool
 
     return final_exit_code
-
-
-def _run_ai_enhancement(
-    *,
-    action: Action,
-    all_results: list[ToolResult],
-    lintro_config: LintroConfig,
-    logger: ThreadSafeConsoleLogger,
-    output_format: str,
-    ai_fix: bool = False,
-) -> None:
-    """Run AI-powered enhancement on tool results.
-
-    For CHECK actions:
-      - Always: generate a single-call AI summary (patterns, recommendations)
-      - ``--fix``: additionally generate fix diffs with interactive review
-    For FIX actions:
-      - Generate fix suggestions for remaining unfixable issues
-
-    Results are attached to ToolResult.ai_metadata and displayed on console.
-
-    Args:
-        action: The current action (CHECK or FIX).
-        all_results: List of tool results to enhance.
-        lintro_config: Lintro configuration object with ai config.
-        logger: Console logger for output.
-        output_format: Current output format.
-        ai_fix: Whether to generate fix suggestions interactively (check only).
-    """
-    from loguru import logger as loguru_logger
-
-    try:
-        from lintro.ai import require_ai
-        from lintro.ai.providers import get_provider
-
-        require_ai()
-
-        ai_config = lintro_config.ai
-        provider = get_provider(ai_config)
-
-        is_json = output_format.lower() == "json"
-
-        if action == Action.CHECK:
-            _run_ai_check(
-                all_results=all_results,
-                provider=provider,
-                ai_config=ai_config,
-                logger=logger,
-                is_json=is_json,
-                ai_fix=ai_fix,
-            )
-        elif action == Action.FIX:
-            _run_ai_fix(
-                all_results=all_results,
-                provider=provider,
-                ai_config=ai_config,
-                logger=logger,
-                is_json=is_json,
-            )
-
-    except Exception as e:
-        loguru_logger.debug(f"AI enhancement failed: {e}", exc_info=True)
-        # AI failures should never break the main flow
-        logger.console_output(f"AI: enhancement unavailable ({e})")
-
-
-def _run_ai_check(
-    *,
-    all_results: list[ToolResult],
-    provider: BaseAIProvider,
-    ai_config: AIConfig,
-    logger: ThreadSafeConsoleLogger,
-    is_json: bool,
-    ai_fix: bool,
-) -> None:
-    """Run AI enhancements for the CHECK action.
-
-    Always generates a summary (1 API call). Optionally generates
-    interactive fix suggestions (--fix).
-
-    Args:
-        all_results: Tool results to enhance.
-        provider: AI provider instance.
-        ai_config: AI configuration.
-        logger: Console logger for output.
-        is_json: Whether output format is JSON (suppresses terminal rendering).
-        ai_fix: Whether to generate fix suggestions with interactive review.
-    """
-    from loguru import logger as loguru_logger
-
-    from lintro.ai.display import render_summary
-    from lintro.ai.summary import generate_summary
-
-    # ── 1. Always: AI summary (single API call) ──
-    summary = generate_summary(all_results, provider)
-    if summary and not is_json:
-        output = render_summary(summary, show_cost=ai_config.show_cost_estimate)
-        if output:
-            logger.console_output(output)
-
-    # Store summary in first result's metadata for JSON output
-    if summary:
-        for result in all_results:
-            if result.issues and not result.skipped:
-                result.ai_metadata = result.ai_metadata or {}
-                result.ai_metadata["summary"] = {
-                    "overview": summary.overview,
-                    "key_patterns": summary.key_patterns,
-                    "priority_actions": summary.priority_actions,
-                    "triage_suggestions": summary.triage_suggestions,
-                    "estimated_effort": summary.estimated_effort,
-                    "input_tokens": summary.input_tokens,
-                    "output_tokens": summary.output_tokens,
-                    "cost_estimate": summary.cost_estimate,
-                }
-                break  # only attach to the first result with issues
-
-    # ── 2. Optional: interactive fix suggestions (--fix) ──
-    if ai_fix:
-        all_fix_issues: list[tuple[ToolResult, BaseIssue]] = []
-        for result in all_results:
-            loguru_logger.debug(
-                f"AI fix (chk): {result.name} "
-                f"issues={len(result.issues) if result.issues else 0}",
-            )
-            if not result.issues or result.skipped:
-                continue
-            for issue in list(result.issues):
-                all_fix_issues.append((result, issue))
-
-        if all_fix_issues:
-            _run_ai_fix_combined(
-                fix_issues=all_fix_issues,
-                provider=provider,
-                ai_config=ai_config,
-                logger=logger,
-                output_format="json" if is_json else "terminal",
-            )
-
-        # Truncation warning
-        total_fix_issues = len(all_fix_issues)
-        if not is_json and total_fix_issues > ai_config.max_fix_issues:
-            skipped = total_fix_issues - ai_config.max_fix_issues
-            logger.console_output(
-                f"\n  AI analyzed {ai_config.max_fix_issues} of "
-                f"{total_fix_issues} remaining issues "
-                f"({skipped} skipped due to limit)\n"
-                f"   Increase ai.max_fix_issues in "
-                f".lintro-config.yaml to analyze more",
-            )
-
-
-def _run_ai_fix(
-    *,
-    all_results: list[ToolResult],
-    provider: BaseAIProvider,
-    ai_config: AIConfig,
-    logger: ThreadSafeConsoleLogger,
-    is_json: bool,
-) -> None:
-    """Run AI fix suggestions for the FIX action.
-
-    Collects remaining unfixable issues across all tools and generates
-    fix suggestions with interactive review.
-
-    Args:
-        all_results: Tool results to enhance.
-        provider: AI provider instance.
-        ai_config: AI configuration.
-        logger: Console logger for output.
-        is_json: Whether output format is JSON.
-    """
-    from loguru import logger as loguru_logger
-
-    all_fix_issues: list[tuple[ToolResult, BaseIssue]] = []
-    for result in all_results:
-        loguru_logger.debug(
-            f"AI: {result.name} skipped={result.skipped} "
-            f"issues={type(result.issues).__name__} "
-            f"len={len(result.issues) if result.issues else 0} "
-            f"remaining={result.remaining_issues_count}",
-        )
-        if not result.issues or result.skipped:
-            continue
-        for issue in list(result.issues):
-            all_fix_issues.append((result, issue))
-
-    total_fix_issues = len(all_fix_issues)
-
-    if all_fix_issues:
-        _run_ai_fix_combined(
-            fix_issues=all_fix_issues,
-            provider=provider,
-            ai_config=ai_config,
-            logger=logger,
-            output_format="json" if is_json else "terminal",
-        )
-
-    # Truncation warning
-    if not is_json and total_fix_issues > ai_config.max_fix_issues:
-        skipped = total_fix_issues - ai_config.max_fix_issues
-        logger.console_output(
-            f"\n  AI analyzed {ai_config.max_fix_issues} of "
-            f"{total_fix_issues} remaining issues "
-            f"({skipped} skipped due to limit)\n"
-            f"   Increase ai.max_fix_issues in "
-            f".lintro-config.yaml to analyze more",
-        )
-
-
-def _run_ai_fix_combined(
-    *,
-    fix_issues: list[tuple[ToolResult, BaseIssue]],
-    provider: BaseAIProvider,
-    ai_config: AIConfig,
-    logger: ThreadSafeConsoleLogger,
-    output_format: str,
-) -> None:
-    """Generate AI fix suggestions for all remaining issues across tools.
-
-    Aggregates issues from all tools, generates fixes in one pass,
-    then presents them in a single interactive review session.
-
-    Args:
-        fix_issues: List of (result, issue) tuples from all tools.
-        provider: AI provider instance.
-        ai_config: AI configuration.
-        logger: Console logger.
-        output_format: Output format string.
-    """
-    from loguru import logger as loguru_logger
-
-    from lintro.ai.fix import generate_fixes
-    from lintro.ai.interactive import review_fixes_interactive
-
-    max_issues = ai_config.max_fix_issues
-
-    # Group issues by tool for generate_fixes calls
-    by_tool: dict[str, tuple[ToolResult, list[BaseIssue]]] = {}
-    for result, issue in fix_issues:
-        if result.name not in by_tool:
-            by_tool[result.name] = (result, [])
-        by_tool[result.name][1].append(issue)
-
-    # Generate fixes per tool (each tool has its own prompt context)
-    all_suggestions: list[AIFixSuggestion] = []
-    remaining_budget = max_issues
-
-    for tool_name, (result, issues) in by_tool.items():
-        if remaining_budget <= 0:
-            break
-
-        # Resolve relative issue file paths using the tool's working directory.
-        # Tools using _prepare_execution run subprocesses with cwd=ctx.cwd and
-        # report file paths relative to that directory. Without resolution,
-        # generate_fixes cannot read the source files.
-        if result.cwd:
-            for issue in issues:
-                if issue.file and not os.path.isabs(issue.file):
-                    issue.file = os.path.join(result.cwd, issue.file)
-
-        loguru_logger.debug(
-            f"AI fix: {tool_name} has {len(issues)} issues, "
-            f"budget={remaining_budget}",
-        )
-
-        suggestions = generate_fixes(
-            issues,
-            provider,
-            tool_name=tool_name,
-            max_issues=remaining_budget,
-            max_workers=ai_config.max_parallel_calls,
-        )
-        remaining_budget -= len(issues[:remaining_budget])
-        all_suggestions.extend(suggestions)
-
-        # Store per-tool metadata
-        if suggestions:
-            result.ai_metadata = {
-                "type": "fix_suggestions",
-                "suggestions": [
-                    {
-                        "file": s.file,
-                        "line": s.line,
-                        "code": s.code,
-                        "explanation": s.explanation,
-                        "confidence": s.confidence,
-                        "diff": s.diff,
-                        "input_tokens": s.input_tokens,
-                        "output_tokens": s.output_tokens,
-                        "cost_estimate": s.cost_estimate,
-                    }
-                    for s in suggestions
-                ],
-            }
-
-    if not all_suggestions:
-        return
-
-    applied = 0
-    rejected = 0
-    is_json = output_format.lower() == "json"
-
-    applied_suggestions: list[AIFixSuggestion] = []
-
-    if ai_config.auto_apply:
-        from lintro.ai.interactive import _apply_fix
-
-        for fix in all_suggestions:
-            if _apply_fix(fix):
-                applied_suggestions.append(fix)
-        applied = len(applied_suggestions)
-        rejected = len(all_suggestions) - applied
-
-        logger.console_output(
-            f"  AI: auto-applied {applied}/{len(all_suggestions)} fixes",
-        )
-    elif not is_json:
-        applied, rejected, applied_suggestions = review_fixes_interactive(
-            all_suggestions,
-        )
-
-    # Validate applied fixes by re-running tools
-    if applied_suggestions and not is_json:
-        from lintro.ai.display import render_validation
-        from lintro.ai.validation import validate_applied_fixes
-
-        validation = validate_applied_fixes(applied_suggestions)
-        if validation and (validation.verified or validation.unverified):
-            val_output = render_validation(validation)
-            if val_output:
-                logger.console_output(val_output)
-
-    # Post-fix summary: contextualize what was fixed and what remains
-    if (applied > 0 or rejected > 0) and not is_json:
-        from lintro.ai.display import render_summary
-        from lintro.ai.summary import generate_post_fix_summary
-
-        # Build remaining results from the original fix_issues
-        remaining_results = [result for result, _ in fix_issues]
-        # Deduplicate by tool name (keep first occurrence)
-        seen: set[str] = set()
-        unique_results: list[ToolResult] = []
-        for r in remaining_results:
-            if r.name not in seen:
-                seen.add(r.name)
-                unique_results.append(r)
-
-        post_summary = generate_post_fix_summary(
-            applied=applied,
-            rejected=rejected,
-            remaining_results=unique_results,
-            provider=provider,
-        )
-        if post_summary:
-            output = render_summary(
-                post_summary,
-                show_cost=ai_config.show_cost_estimate,
-            )
-            if output:
-                logger.console_output(output)

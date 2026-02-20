@@ -10,11 +10,13 @@ from __future__ import annotations
 import json
 from collections import defaultdict
 from collections.abc import Sequence
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 from loguru import logger
 
 from lintro.ai.models import AISummary
+from lintro.ai.paths import resolve_workspace_root, to_provider_path
 from lintro.ai.prompts import (
     POST_FIX_SUMMARY_PROMPT_TEMPLATE,
     SUMMARY_PROMPT_TEMPLATE,
@@ -23,11 +25,15 @@ from lintro.ai.prompts import (
 from lintro.ai.retry import with_retry
 
 if TYPE_CHECKING:
-    from lintro.ai.providers.base import BaseAIProvider
+    from lintro.ai.providers.base import AIResponse, BaseAIProvider
     from lintro.models.core.tool_result import ToolResult
 
 
-def _build_issues_digest(results: Sequence[ToolResult]) -> str:
+def _build_issues_digest(
+    results: Sequence[ToolResult],
+    *,
+    workspace_root: Path | None = None,
+) -> str:
     """Build a compact textual digest of all issues across tools.
 
     Groups by tool and error code, shows counts and sample locations.
@@ -35,10 +41,12 @@ def _build_issues_digest(results: Sequence[ToolResult]) -> str:
 
     Args:
         results: Tool results containing parsed issues.
+        workspace_root: Optional root used for provider-safe path redaction.
 
     Returns:
         Formatted digest string for inclusion in the prompt.
     """
+    root = workspace_root or resolve_workspace_root()
     lines: list[str] = []
     for result in results:
         if not result.issues or result.skipped:
@@ -48,7 +56,7 @@ def _build_issues_digest(results: Sequence[ToolResult]) -> str:
             continue
 
         # Group by code within this tool
-        by_code: dict[str, list] = defaultdict(list)
+        by_code: dict[str, list[object]] = defaultdict(list)
         for issue in issues:
             code = getattr(issue, "code", None) or "unknown"
             by_code[code].append(issue)
@@ -60,14 +68,16 @@ def _build_issues_digest(results: Sequence[ToolResult]) -> str:
         ):
             sample_locs = []
             for iss in code_issues[:3]:
-                loc = iss.file
-                if iss.line:
-                    loc += f":{iss.line}"
+                loc = to_provider_path(getattr(iss, "file", ""), root)
+                line_no = getattr(iss, "line", None)
+                if line_no:
+                    loc += f":{line_no}"
                 sample_locs.append(loc)
             more = f" (+{len(code_issues) - 3} more)" if len(code_issues) > 3 else ""
+            first_msg = getattr(code_issues[0], "message", "")
             lines.append(
                 f"  [{code}] x{len(code_issues)}: "
-                f"{code_issues[0].message}"
+                f"{first_msg}"
                 f"\n    e.g. {', '.join(sample_locs)}{more}",
             )
 
@@ -122,6 +132,7 @@ def generate_summary(
     provider: BaseAIProvider,
     *,
     max_tokens: int = 2048,
+    workspace_root: Path | None = None,
 ) -> AISummary | None:
     """Generate a high-level AI summary of all issues.
 
@@ -132,11 +143,12 @@ def generate_summary(
         results: Tool results containing parsed issues.
         provider: AI provider instance.
         max_tokens: Maximum tokens for the response.
+        workspace_root: Optional root used for provider-safe path redaction.
 
     Returns:
         AISummary, or None if generation fails or there are no issues.
     """
-    digest = _build_issues_digest(results)
+    digest = _build_issues_digest(results, workspace_root=workspace_root)
     if not digest.strip():
         return None
 
@@ -152,7 +164,7 @@ def generate_summary(
     )
 
     @with_retry(max_retries=2)
-    def _call():
+    def _call() -> AIResponse:
         return provider.complete(
             prompt,
             system=SUMMARY_SYSTEM,
@@ -179,6 +191,7 @@ def generate_post_fix_summary(
     remaining_results: Sequence[ToolResult],
     provider: BaseAIProvider,
     max_tokens: int = 1024,
+    workspace_root: Path | None = None,
 ) -> AISummary | None:
     """Generate a summary for the post-fix context.
 
@@ -191,6 +204,7 @@ def generate_post_fix_summary(
         remaining_results: Tool results with remaining issues.
         provider: AI provider instance.
         max_tokens: Maximum tokens for the response.
+        workspace_root: Optional root used for provider-safe path redaction.
 
     Returns:
         AISummary, or None if generation fails.
@@ -199,7 +213,10 @@ def generate_post_fix_summary(
         len(list(r.issues)) for r in remaining_results if r.issues and not r.skipped
     )
 
-    digest = _build_issues_digest(remaining_results)
+    digest = _build_issues_digest(
+        remaining_results,
+        workspace_root=workspace_root,
+    )
     if not digest.strip() and remaining_count == 0:
         # All issues resolved — no summary needed
         return None
@@ -212,7 +229,7 @@ def generate_post_fix_summary(
     )
 
     @with_retry(max_retries=2)
-    def _call():
+    def _call() -> AIResponse:
         return provider.complete(
             prompt,
             system=SUMMARY_SYSTEM,

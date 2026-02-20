@@ -295,9 +295,11 @@ def _parse_ai_config(data: dict[str, Any]) -> AIConfig:
         api_key_env=data.get("api_key_env"),
         default_fix=data.get("default_fix", False),
         auto_apply=data.get("auto_apply", False),
+        auto_apply_safe_fixes=data.get("auto_apply_safe_fixes", True),
         max_tokens=data.get("max_tokens", 4096),
         max_fix_issues=data.get("max_fix_issues", 20),
         max_parallel_calls=data.get("max_parallel_calls", 5),
+        validate_after_group=data.get("validate_after_group", False),
         show_cost_estimate=data.get("show_cost_estimate", True),
     )
 

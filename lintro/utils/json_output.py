@@ -5,6 +5,7 @@ This module provides functionality for creating JSON output from tool results.
 
 from typing import Any
 
+from lintro.ai.metadata import normalize_ai_metadata
 from lintro.enums.action import Action, normalize_action
 from lintro.models.core.tool_result import ToolResult
 
@@ -59,16 +60,21 @@ def create_json_output(
 
         # Include AI metadata when present
         ai_metadata = getattr(result, "ai_metadata", None)
-        if ai_metadata:
-            result_data["ai_metadata"] = ai_metadata
+        if isinstance(ai_metadata, dict):
+            normalized_ai_metadata = normalize_ai_metadata(ai_metadata)
+            if normalized_ai_metadata:
+                result_data["ai_metadata"] = normalized_ai_metadata
 
         json_data["results"].append(result_data)
 
     # Extract AI summary from the first result that has one
     for result in results:
         ai_metadata = getattr(result, "ai_metadata", None)
-        if ai_metadata and "summary" in ai_metadata:
-            json_data["ai_summary"] = ai_metadata["summary"]
+        if not isinstance(ai_metadata, dict):
+            continue
+        normalized_ai_metadata = normalize_ai_metadata(ai_metadata)
+        if "summary" in normalized_ai_metadata:
+            json_data["ai_summary"] = normalized_ai_metadata["summary"]
             break
 
     return json_data
