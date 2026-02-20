@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from unittest.mock import MagicMock, patch
 
 from assertpy import assert_that
@@ -45,6 +46,7 @@ class TestValidateAppliedFixes:
         result = validate_applied_fixes([suggestion])
 
         assert_that(result).is_not_none()
+        assert result is not None
         assert_that(result.verified).is_equal_to(1)
         assert_that(result.unverified).is_equal_to(0)
 
@@ -59,6 +61,7 @@ class TestValidateAppliedFixes:
         result = validate_applied_fixes([suggestion])
 
         assert_that(result).is_not_none()
+        assert result is not None
         assert_that(result.verified).is_equal_to(0)
         assert_that(result.unverified).is_equal_to(1)
         assert_that(result.details).is_length(1)
@@ -75,7 +78,46 @@ class TestValidateAppliedFixes:
 
         result = validate_applied_fixes([s1, s2])
 
+        assert result is not None
         assert_that(result.verified).is_equal_to(1)
+        assert_that(result.unverified).is_equal_to(1)
+        assert_that(result.verified_by_tool.get("ruff")).is_equal_to(1)
+        assert_that(result.unverified_by_tool.get("ruff")).is_equal_to(1)
+
+    @patch("lintro.ai.validation._run_tool_check")
+    def test_matches_by_line_before_file_code(self, mock_check):
+        remaining = MagicMock()
+        remaining.file = "src/main.py"
+        remaining.code = "E501"
+        remaining.line = 20
+        mock_check.return_value = [remaining]
+
+        resolved = _make_suggestion(code="E501", line=10)
+        unresolved = _make_suggestion(code="E501", line=20)
+
+        result = validate_applied_fixes([resolved, unresolved])
+
+        assert_that(result).is_not_none()
+        assert result is not None
+        assert_that(result.verified).is_equal_to(1)
+        assert_that(result.unverified).is_equal_to(1)
+        assert_that(result.details).is_length(1)
+        assert_that(result.details[0]).contains("main.py:20")
+
+    @patch("lintro.ai.validation._run_tool_check")
+    def test_unknown_remaining_line_marks_issue_unverified(self, mock_check):
+        remaining = MagicMock()
+        remaining.file = "src/main.py"
+        remaining.code = "E501"
+        remaining.line = None
+        mock_check.return_value = [remaining]
+
+        suggestion = _make_suggestion(code="E501", line=30)
+        result = validate_applied_fixes([suggestion])
+
+        assert_that(result).is_not_none()
+        assert result is not None
+        assert_that(result.verified).is_equal_to(0)
         assert_that(result.unverified).is_equal_to(1)
 
     @patch("lintro.ai.validation._run_tool_check")
@@ -84,6 +126,7 @@ class TestValidateAppliedFixes:
         result = validate_applied_fixes([suggestion])
 
         assert_that(result).is_not_none()
+        assert result is not None
         assert_that(result.verified).is_equal_to(0)
         assert_that(result.unverified).is_equal_to(0)
         mock_check.assert_not_called()
@@ -95,6 +138,7 @@ class TestValidateAppliedFixes:
 
         result = validate_applied_fixes([suggestion])
 
+        assert result is not None
         assert_that(result.verified).is_equal_to(0)
         assert_that(result.unverified).is_equal_to(0)
 
@@ -107,8 +151,34 @@ class TestValidateAppliedFixes:
 
         result = validate_applied_fixes([s1, s2])
 
+        assert result is not None
         assert_that(result.verified).is_equal_to(2)
         assert_that(mock_check.call_count).is_equal_to(2)
+
+    @patch("lintro.ai.validation._run_tool_check")
+    def test_matches_relative_remaining_paths_against_absolute_fixes(
+        self,
+        mock_check,
+        tmp_path,
+        monkeypatch,
+    ):
+        project_file = tmp_path / "src" / "main.py"
+        project_file.parent.mkdir(parents=True)
+        project_file.write_text("print('ok')\n")
+
+        monkeypatch.chdir(tmp_path)
+
+        remaining = MagicMock()
+        remaining.file = os.path.join("src", "main.py")
+        remaining.code = "B101"
+        mock_check.return_value = [remaining]
+
+        suggestion = _make_suggestion(file=str(project_file.resolve()), code="B101")
+        result = validate_applied_fixes([suggestion])
+
+        assert result is not None
+        assert_that(result.unverified).is_equal_to(1)
+        assert_that(result.verified).is_equal_to(0)
 
 
 class TestRunToolCheck:

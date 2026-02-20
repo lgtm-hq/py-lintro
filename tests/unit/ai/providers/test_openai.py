@@ -19,13 +19,13 @@ class TestOpenAIProvider:
     def test_raises_when_sdk_missing(self):
         from lintro.ai.providers import openai as mod
 
-        original = mod.openai
-        mod.openai = None
+        original = mod.openai  # type: ignore[attr-defined]
+        mod.openai = None  # type: ignore[attr-defined, assignment]
         try:
             with pytest.raises(AINotAvailableError):
                 mod.OpenAIProvider()
         finally:
-            mod.openai = original
+            mod.openai = original  # type: ignore[attr-defined]
 
     def test_default_model(self):
         from lintro.ai.providers.openai import OpenAIProvider
@@ -57,8 +57,8 @@ class TestOpenAIProvider:
 
             import lintro.ai.providers.openai as mod
 
-            original = mod.openai
-            mod.openai = MagicMock()
+            original = mod.openai  # type: ignore[attr-defined]
+            mod.openai = MagicMock()  # type: ignore[attr-defined]
             try:
                 with patch.dict(
                     "os.environ",
@@ -67,7 +67,7 @@ class TestOpenAIProvider:
                 ):
                     assert_that(provider.is_available()).is_false()
             finally:
-                mod.openai = original
+                mod.openai = original  # type: ignore[attr-defined]
 
     def test_is_available_with_key(self):
         from lintro.ai.providers.openai import OpenAIProvider
@@ -82,8 +82,8 @@ class TestOpenAIProvider:
 
             import lintro.ai.providers.openai as mod
 
-            original = mod.openai
-            mod.openai = MagicMock()
+            original = mod.openai  # type: ignore[attr-defined]
+            mod.openai = MagicMock()  # type: ignore[attr-defined]
             try:
                 with patch.dict(
                     "os.environ",
@@ -91,7 +91,7 @@ class TestOpenAIProvider:
                 ):
                     assert_that(provider.is_available()).is_true()
             finally:
-                mod.openai = original
+                mod.openai = original  # type: ignore[attr-defined]
 
     def test_get_client_no_key_raises(self):
         from lintro.ai.providers.openai import OpenAIProvider

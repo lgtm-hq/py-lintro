@@ -23,13 +23,13 @@ class TestAnthropicProvider:
             from lintro.ai.providers import anthropic as mod
 
             # Temporarily set anthropic to None to simulate missing
-            original = mod.anthropic
-            mod.anthropic = None
+            original = mod.anthropic  # type: ignore[attr-defined]
+            mod.anthropic = None  # type: ignore[attr-defined, assignment]
             try:
                 with pytest.raises(AINotAvailableError):
                     mod.AnthropicProvider()
             finally:
-                mod.anthropic = original
+                mod.anthropic = original  # type: ignore[attr-defined]
 
     def test_default_model(self):
         mock_anthropic = MagicMock()
@@ -68,8 +68,8 @@ class TestAnthropicProvider:
             # Set the module-level anthropic to a mock
             import lintro.ai.providers.anthropic as mod
 
-            original = mod.anthropic
-            mod.anthropic = MagicMock()
+            original = mod.anthropic  # type: ignore[attr-defined]
+            mod.anthropic = MagicMock()  # type: ignore[attr-defined]
             try:
                 with patch.dict(
                     "os.environ",
@@ -78,7 +78,7 @@ class TestAnthropicProvider:
                 ):
                     assert_that(provider.is_available()).is_false()
             finally:
-                mod.anthropic = original
+                mod.anthropic = original  # type: ignore[attr-defined]
 
     def test_is_available_with_key(self):
         from lintro.ai.providers.anthropic import AnthropicProvider
@@ -94,8 +94,8 @@ class TestAnthropicProvider:
 
             import lintro.ai.providers.anthropic as mod
 
-            original = mod.anthropic
-            mod.anthropic = MagicMock()
+            original = mod.anthropic  # type: ignore[attr-defined]
+            mod.anthropic = MagicMock()  # type: ignore[attr-defined]
             try:
                 with patch.dict(
                     "os.environ",
@@ -103,7 +103,7 @@ class TestAnthropicProvider:
                 ):
                     assert_that(provider.is_available()).is_true()
             finally:
-                mod.anthropic = original
+                mod.anthropic = original  # type: ignore[attr-defined]
 
     def test_get_client_no_key_raises(self):
         from lintro.ai.providers.anthropic import AnthropicProvider

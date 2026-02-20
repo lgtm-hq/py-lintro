@@ -38,24 +38,25 @@ class TestBaseAIProvider:
 
     def test_cannot_instantiate(self):
         with pytest.raises(TypeError):
-            BaseAIProvider()
+            BaseAIProvider()  # type: ignore[abstract]
 
     def test_subclass_must_implement(self):
         class IncompleteProvider(BaseAIProvider):
             pass
 
         with pytest.raises(TypeError):
-            IncompleteProvider()
+            IncompleteProvider()  # type: ignore[abstract]
 
     def test_complete_subclass(self):
         class TestProvider(BaseAIProvider):
             def complete(
                 self,
-                prompt,
+                prompt: str,
                 *,
-                system=None,
-                max_tokens=1024,
-            ):
+                system: str | None = None,
+                max_tokens: int = 1024,
+                timeout: float = 60.0,
+            ) -> AIResponse:
                 return AIResponse(
                     content="ok",
                     model="test",

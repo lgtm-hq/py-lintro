@@ -149,6 +149,8 @@ def test_fix_with_fixed_count(
     assert_that(combined).contains("black")
     assert_that(combined).contains("PASS")
     assert_that(combined).contains("Fixed")
+    assert_that(combined).contains("AI-Applied")
+    assert_that(combined).contains("AI-Verified")
     assert_that(combined).contains("Remaining")
 
 
@@ -228,6 +230,39 @@ def test_fix_parsing_remaining_from_output(
 
     combined = "".join(output)
     assert_that(combined).contains("black")
+
+
+def test_fix_shows_ai_fixed_count_from_metadata(
+    console_capture: tuple[Callable[[str], None], list[str]],
+    fake_tool_result_factory: Callable[..., FakeToolResult],
+) -> None:
+    """Display AI columns when AI metadata provides per-tool counts.
+
+    Args:
+        console_capture: Mock console output capture.
+        fake_tool_result_factory: Factory for creating fake tool results.
+    """
+    capture, output = console_capture
+    result = fake_tool_result_factory(
+        name="ruff",
+        success=False,
+        fixed_issues_count=6,
+        remaining_issues_count=5,
+    )
+    result.ai_metadata = {
+        "applied_count": 4,
+        "verified_count": 3,
+        "unverified_count": 1,
+    }
+
+    print_summary_table(capture, Action.FIX, [result])
+
+    combined = "".join(output)
+    assert_that(combined).contains("AI-Applied")
+    assert_that(combined).contains("AI-Verified")
+    assert_that(combined).contains("4")
+    assert_that(combined).contains("3")
+    assert_that(combined).contains("1 unverified")
 
 
 # =============================================================================

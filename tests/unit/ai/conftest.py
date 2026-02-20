@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Any
 
 import pytest
 
@@ -28,13 +29,13 @@ class MockAIProvider(BaseAIProvider):
         available: bool = True,
     ) -> None:
         """Initialize the mock AI provider.
-        
+
         Args:
             responses: List of responses to return from complete() calls.
             available: Whether the provider reports as available.
         """
         self.responses: list[AIResponse] = responses or []
-        self.calls: list[dict] = []
+        self.calls: list[dict[str, Any]] = []
         self._available = available
         self._call_index = 0
 
@@ -44,12 +45,14 @@ class MockAIProvider(BaseAIProvider):
         *,
         system: str | None = None,
         max_tokens: int = 1024,
+        timeout: float = 60.0,
     ) -> AIResponse:
         self.calls.append(
             {
                 "prompt": prompt,
                 "system": system,
                 "max_tokens": max_tokens,
+                "timeout": timeout,
             },
         )
         if self._call_index < len(self.responses):

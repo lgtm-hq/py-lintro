@@ -74,6 +74,29 @@ class TestBuildIssuesDigest:
         # Should show 3 samples + "(+7 more)"
         assert_that(digest).contains("+7 more")
 
+    def test_digest_redacts_absolute_paths_for_provider(self, tmp_path):
+        absolute_file = tmp_path / "src" / "hidden.py"
+        absolute_file.parent.mkdir(parents=True)
+        absolute_file.write_text("x = 1\n", encoding="utf-8")
+
+        result = ToolResult(
+            name="ruff",
+            success=True,
+            issues_count=1,
+            issues=[
+                MockIssue(
+                    file=str(absolute_file),
+                    line=1,
+                    message="Line too long",
+                    code="E501",
+                ),
+            ],
+        )
+
+        digest = _build_issues_digest([result], workspace_root=tmp_path)
+        assert_that(digest).contains("src/hidden.py:1")
+        assert_that(digest).does_not_contain(str(absolute_file))
+
 
 class TestParseSummaryResponse:
     """Tests for _parse_summary_response."""
@@ -170,6 +193,7 @@ class TestGenerateSummary:
 
         summary = generate_summary([result], provider)
         assert_that(summary).is_not_none()
+        assert summary is not None
         assert_that(summary.overview).is_equal_to("One issue found")
         assert_that(provider.calls).is_length(1)
 
@@ -241,6 +265,7 @@ class TestGeneratePostFixSummary:
             provider=provider,
         )
         assert_that(summary).is_not_none()
+        assert summary is not None
         assert_that(summary.overview).contains("Fixed 3")
 
 

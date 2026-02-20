@@ -82,3 +82,29 @@ class TestRenderFixesAutoDetect:
         with patch.dict("os.environ", {}, clear=True):
             result = render_fixes(sample_fix_suggestions)
             assert_that(result).contains("fix suggestion")
+
+    def test_markdown_format_dispatches_to_markdown_renderer(
+        self,
+        sample_fix_suggestions,
+    ):
+        result = render_fixes(
+            sample_fix_suggestions,
+            output_format="markdown",
+        )
+        assert_that(result).contains("<details>")
+        assert_that(result).contains("```diff")
+        assert_that(result).does_not_contain("::group::")
+
+
+class TestRenderSummaryAutoDetect:
+    """Tests for environment-aware summary rendering."""
+
+    def test_markdown_format_dispatches_to_markdown_renderer(self):
+        from lintro.ai.display import render_summary
+        from lintro.ai.models import AISummary
+
+        summary = AISummary(overview="Test overview", key_patterns=["pattern1"])
+        result = render_summary(summary, output_format="markdown")
+        assert_that(result).contains("<details>")
+        assert_that(result).contains("Test overview")
+        assert_that(result).contains("pattern1")

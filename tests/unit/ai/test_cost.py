@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from unittest.mock import patch
+
 import pytest
 from assertpy import assert_that
 
@@ -27,6 +29,19 @@ class TestEstimateCost:
         # Default: $3.00/M input, $15.00/M output
         expected = (1000 / 1_000_000) * 3.00 + (500 / 1_000_000) * 15.00
         assert_that(cost).is_close_to(expected, 1e-10)
+
+    @patch("lintro.ai.cost.logger")
+    def test_unknown_model_logs_debug(self, mock_logger):
+        estimate_cost("totally-unknown-model", 100, 50)
+        mock_logger.debug.assert_called_once()
+        call_args = mock_logger.debug.call_args[0][0]
+        assert_that(call_args).contains("totally-unknown-model")
+        assert_that(call_args).contains("default pricing")
+
+    @patch("lintro.ai.cost.logger")
+    def test_known_model_does_not_log(self, mock_logger):
+        estimate_cost("gpt-4o", 100, 50)
+        mock_logger.debug.assert_not_called()
 
     def test_zero_tokens(self):
         cost = estimate_cost("gpt-4o", 0, 0)

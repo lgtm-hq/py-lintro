@@ -9,9 +9,52 @@ from assertpy import assert_that
 from lintro.ai.interactive import (
     _apply_fix,
     _group_by_code,
+    _render_prompt,
+    apply_fixes,
     review_fixes_interactive,
 )
 from lintro.ai.models import AIFixSuggestion
+
+
+class TestApplyFixFallbackWarning:
+    """Tests for loguru warning on fallback str.replace path."""
+
+    @patch("lintro.ai.interactive.logger")
+    def test_fallback_logs_warning(self, mock_logger, tmp_path):
+        """Falling back to str.replace should log a warning."""
+        f = tmp_path / "test.py"
+        f.write_text("old code\nmore stuff\n")
+
+        fix = AIFixSuggestion(
+            file=str(f),
+            line=99,  # Way off — no match near this line
+            original_code="old code",
+            suggested_code="new code",
+        )
+
+        result = _apply_fix(fix)
+        assert_that(result).is_true()
+        mock_logger.warning.assert_called_once()
+        call_args = mock_logger.warning.call_args[0][0]
+        assert_that(call_args).contains("falling back")
+        assert_that(call_args).contains(str(f))
+
+    @patch("lintro.ai.interactive.logger")
+    def test_line_targeted_does_not_log_warning(self, mock_logger, tmp_path):
+        """Successful line-targeted replacement should NOT log a warning."""
+        f = tmp_path / "test.py"
+        f.write_text("x = 1\nprint('ok')\n")
+
+        fix = AIFixSuggestion(
+            file=str(f),
+            line=1,
+            original_code="x = 1",
+            suggested_code="x = 2",
+        )
+
+        result = _apply_fix(fix)
+        assert_that(result).is_true()
+        mock_logger.warning.assert_not_called()
 
 
 class TestApplyFix:
@@ -107,6 +150,43 @@ class TestApplyFix:
         result = _apply_fix(fix)
         assert_that(result).is_false()
 
+    def test_apply_fixes_returns_only_successful(self, tmp_path):
+        f = tmp_path / "test.py"
+        f.write_text("x = 1\n")
+
+        applied = apply_fixes(
+            [
+                AIFixSuggestion(
+                    file=str(f),
+                    original_code="x = 1",
+                    suggested_code="x = 2",
+                ),
+                AIFixSuggestion(
+                    file=str(f),
+                    original_code="missing",
+                    suggested_code="x = 3",
+                ),
+            ],
+        )
+        assert_that(applied).is_length(1)
+        assert_that(applied[0].suggested_code).is_equal_to("x = 2")
+
+    def test_blocks_writes_outside_workspace_root(self, tmp_path):
+        workspace_root = tmp_path / "workspace"
+        workspace_root.mkdir(parents=True)
+        outside_file = tmp_path / "outside.py"
+        outside_file.write_text("x = 1\n", encoding="utf-8")
+
+        fix = AIFixSuggestion(
+            file=str(outside_file),
+            original_code="x = 1",
+            suggested_code="x = 2",
+        )
+
+        result = _apply_fix(fix, workspace_root=workspace_root)
+        assert_that(result).is_false()
+        assert_that(outside_file.read_text(encoding="utf-8")).is_equal_to("x = 1\n")
+
 
 class TestGroupByCode:
     """Tests for _group_by_code function."""
@@ -155,3 +235,86 @@ class TestReviewFixesInteractive:
             accepted, rejected, applied = review_fixes_interactive(fixes)
             assert_that(accepted).is_equal_to(0)
             assert_that(applied).is_empty()
+
+    def test_prompt_text_clarifies_scope(self):
+        prompt = _render_prompt(validate_mode=False, safe_default=False)
+        assert_that(prompt).contains("accept group + remaining")
+        assert_that(prompt).contains("validate-after-group")
+
+    @patch("lintro.ai.interactive.sys.stdin")
+    @patch("lintro.ai.interactive.click.getchar")
+    def test_accept_via_keyboard(self, mock_getchar, mock_stdin, tmp_path):
+        """Pressing 'y' accepts a group and applies fixes."""
+        mock_stdin.isatty.return_value = True
+        mock_getchar.return_value = "y"
+
+        f = tmp_path / "test.py"
+        f.write_text("old_code\n")
+
+        fixes = [
+            AIFixSuggestion(
+                file=str(f),
+                code="E501",
+                original_code="old_code",
+                suggested_code="new_code",
+            ),
+        ]
+
+        accepted, rejected, applied = review_fixes_interactive(
+            fixes,
+            workspace_root=tmp_path,
+        )
+
+        assert_that(accepted).is_equal_to(1)
+        assert_that(rejected).is_equal_to(0)
+        assert_that(applied).is_length(1)
+
+    @patch("lintro.ai.interactive.sys.stdin")
+    @patch("lintro.ai.interactive.click.getchar")
+    def test_reject_via_keyboard(self, mock_getchar, mock_stdin, tmp_path):
+        """Pressing 'r' rejects a group."""
+        mock_stdin.isatty.return_value = True
+        mock_getchar.return_value = "r"
+
+        fixes = [
+            AIFixSuggestion(
+                file=str(tmp_path / "test.py"),
+                code="B101",
+                original_code="x",
+                suggested_code="y",
+            ),
+        ]
+
+        accepted, rejected, applied = review_fixes_interactive(fixes)
+
+        assert_that(accepted).is_equal_to(0)
+        assert_that(rejected).is_equal_to(1)
+        assert_that(applied).is_empty()
+
+    @patch("lintro.ai.interactive.sys.stdin")
+    @patch("lintro.ai.interactive.click.getchar")
+    def test_quit_via_keyboard(self, mock_getchar, mock_stdin, tmp_path):
+        """Pressing 'q' quits the review early."""
+        mock_stdin.isatty.return_value = True
+        mock_getchar.return_value = "q"
+
+        fixes = [
+            AIFixSuggestion(
+                file=str(tmp_path / "a.py"),
+                code="B101",
+                original_code="x",
+                suggested_code="y",
+            ),
+            AIFixSuggestion(
+                file=str(tmp_path / "b.py"),
+                code="E501",
+                original_code="a",
+                suggested_code="b",
+            ),
+        ]
+
+        accepted, rejected, applied = review_fixes_interactive(fixes)
+
+        assert_that(accepted).is_equal_to(0)
+        # Only the first group was seen before quit
+        assert_that(applied).is_empty()
