@@ -9,7 +9,7 @@ const message = undefinedVariable;
 
 // Wrong return type assignment
 function add(a: number, b: number): number {
-  return a + b;
+    return a + b;
 }
 const result: string = add(1, 2);
 </script>

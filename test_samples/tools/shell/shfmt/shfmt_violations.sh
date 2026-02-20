@@ -3,14 +3,14 @@
 # This file intentionally contains formatting issues
 
 # Extra whitespace around brackets
-if [ "$foo" = "bar" ]; then
-	echo "match"
+if [  "$foo" = "bar" ]; then
+    echo "match"
 fi
 
 # Inconsistent indentation (tabs vs spaces mixed)
 function example_func() {
-	echo "no indent"
-	echo "two spaces"
+echo "no indent"
+  echo "two spaces"
 	echo "tab indent"
 }
 
@@ -23,11 +23,11 @@ long_command_one && long_command_two && long_command_three
 # Switch case not indented (if switch_case_indent enabled)
 case "$1" in
 start)
-	echo "Starting"
-	;;
+echo "Starting"
+;;
 stop)
-	echo "Stopping"
-	;;
+echo "Stopping"
+;;
 esac
 
 # No space after redirect (if space_redirects enabled)
@@ -41,5 +41,6 @@ cat <input.txt
 echo "line with trailing space"
 
 # Multiple blank lines
+
 
 echo "after multiple blank lines"

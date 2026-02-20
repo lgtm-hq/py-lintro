@@ -2,18 +2,18 @@
 // vue_tsc_clean.vue - Valid Vue code without type errors
 
 interface Props {
-  title: string;
-  count?: number;
+    title: string;
+    count?: number;
 }
 
 const props = withDefaults(defineProps<Props>(), {
-  count: 0,
+    count: 0,
 });
 
 const message: string = "Welcome to Vue";
 
 function add(a: number, b: number): number {
-  return a + b;
+    return a + b;
 }
 
 const result: number = add(1, 2);

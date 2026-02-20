@@ -13,6 +13,7 @@ if (someVar == 2) {
 var oldStyle = "bad";
 
 // debugger statement
+debugger;
 
 // Empty function
 function empty() {}
