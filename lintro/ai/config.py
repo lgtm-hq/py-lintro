@@ -6,6 +6,8 @@ Defines the AIConfig Pydantic model used in the ``ai:`` section of
 
 from __future__ import annotations
 
+from typing import Literal
+
 from pydantic import BaseModel, ConfigDict, Field
 
 
@@ -39,12 +41,21 @@ class AIConfig(BaseModel):
             after each accepted group in interactive review.
         show_cost_estimate: Whether to display estimated cost before
             and after AI operations.
+        context_lines: Number of lines of code context to include
+            before and after the issue line when generating fixes.
+        fix_search_radius: Number of lines to search above and below
+            the target line when applying a fix.
+        retry_base_delay: Initial delay in seconds before the first
+            retry attempt.
+        retry_max_delay: Maximum delay in seconds between retries.
+        retry_backoff_factor: Multiplier applied to delay after each
+            retry attempt.
     """
 
     model_config = ConfigDict(frozen=False, extra="forbid")
 
     enabled: bool = False
-    provider: str = Field(default="anthropic")
+    provider: Literal["anthropic", "openai"] = "anthropic"
     model: str | None = None
     api_key_env: str | None = None
     default_fix: bool = False
@@ -57,3 +68,8 @@ class AIConfig(BaseModel):
     api_timeout: float = Field(default=60.0, ge=1.0)
     validate_after_group: bool = False
     show_cost_estimate: bool = True
+    context_lines: int = Field(default=15, ge=1, le=100)
+    fix_search_radius: int = Field(default=5, ge=1, le=50)
+    retry_base_delay: float = Field(default=1.0, ge=0.1)
+    retry_max_delay: float = Field(default=30.0, ge=1.0)
+    retry_backoff_factor: float = Field(default=2.0, ge=1.0)

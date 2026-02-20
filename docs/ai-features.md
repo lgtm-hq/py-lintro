@@ -31,7 +31,7 @@ lintro format
 
 ## Features Overview
 
-### AI Summary (default with `chk`)
+### AI Summary (default with `check`)
 
 When AI is enabled, every `lintro check` run generates a single-call AI summary that
 provides:
@@ -88,8 +88,12 @@ For each group of issues, you're prompted:
 
 Each group now includes:
 
-- **Risk label** — `safe-style` vs `behavioral-risk`
+- **Risk label** — `safe-style` vs `behavioral-risk` (classified by the AI model)
 - **Patch stats** — files touched, `+/-` lines, and hunk count
+
+Risk classification is AI-driven: the model self-reports whether each fix is purely
+cosmetic (`safe-style`) or affects behavior (`behavioral-risk`). Unknown or empty
+classifications default to `behavioral-risk` for safety.
 
 For safe-style groups, pressing `Enter` defaults to accepting the group.
 
@@ -150,11 +154,28 @@ ai:
   # Concurrent API calls for fix (1-20)
   max_parallel_calls: 5
 
+  # Max retries for transient API errors (0-10)
+  max_retries: 2
+
+  # API request timeout in seconds
+  api_timeout: 60.0
+
   # Interactive mode: validate immediately after each accepted group
   validate_after_group: false
 
   # Show token count and cost estimate in output
   show_cost_estimate: true
+
+  # Lines of surrounding context sent to AI for fix generation (1-100)
+  context_lines: 15
+
+  # Max lines above/below target for line-targeted fix search (1-50)
+  fix_search_radius: 5
+
+  # Retry backoff parameters
+  retry_base_delay: 1.0 # Initial delay in seconds (min 0.1)
+  retry_max_delay: 30.0 # Maximum delay in seconds (min 1.0)
+  retry_backoff_factor: 2.0 # Multiplier per retry (min 1.0)
 ```
 
 ### Config Defaults for CLI Flags
@@ -296,6 +317,30 @@ When AI is enabled, the pre-execution summary table includes AI configuration:
 
 This shows provider status, SDK availability, API key presence, and operational settings
 at a glance.
+
+## Docker with AI
+
+To use AI features in Docker, pass your API key as an environment variable:
+
+```bash
+# Docker with AI features (Anthropic)
+docker run --rm \
+  -e ANTHROPIC_API_KEY=$ANTHROPIC_API_KEY \
+  -v $(pwd):/code \
+  ghcr.io/lgtm-hq/py-lintro:latest check .
+
+# Docker with AI features (OpenAI)
+docker run --rm \
+  -e OPENAI_API_KEY=$OPENAI_API_KEY \
+  -v $(pwd):/code \
+  ghcr.io/lgtm-hq/py-lintro:latest check .
+```
+
+The Docker image includes the AI extras by default when built with `WITH_AI=true`:
+
+```bash
+docker build --build-arg WITH_AI=true -t lintro-ai .
+```
 
 ## Troubleshooting
 

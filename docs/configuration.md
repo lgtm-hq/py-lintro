@@ -1855,18 +1855,27 @@ ai:
 
 ### Full AI Config Reference
 
-| Setting              | Type   | Default     | Description                           |
-| -------------------- | ------ | ----------- | ------------------------------------- |
-| `enabled`            | bool   | `false`     | Master toggle for all AI features     |
-| `provider`           | string | `anthropic` | AI provider (`anthropic` or `openai`) |
-| `model`              | string | (default)   | Model override                        |
-| `api_key_env`        | string | (default)   | Custom env var for API key            |
-| `default_fix`        | bool   | `false`     | Always run `--fix` in chk             |
-| `auto_apply`         | bool   | `false`     | Apply fixes without confirmation      |
-| `max_tokens`         | int    | `4096`      | Max tokens per request                |
-| `max_fix_issues`     | int    | `20`        | Max issues to fix per run             |
-| `max_parallel_calls` | int    | `5`         | Concurrent API calls (1-20)           |
-| `show_cost_estimate` | bool   | `true`      | Show token/cost info in output        |
+| Setting                 | Type   | Default     | Description                                      |
+| ----------------------- | ------ | ----------- | ------------------------------------------------ |
+| `enabled`               | bool   | `false`     | Master toggle for all AI features                |
+| `provider`              | string | `anthropic` | AI provider (`anthropic` or `openai`)            |
+| `model`                 | string | (default)   | Model override                                   |
+| `api_key_env`           | string | (default)   | Custom env var for API key                       |
+| `default_fix`           | bool   | `false`     | Always run `--fix` in check                      |
+| `auto_apply`            | bool   | `false`     | Apply fixes without confirmation                 |
+| `auto_apply_safe_fixes` | bool   | `true`      | Auto-apply safe-style fixes in non-interactive   |
+| `max_tokens`            | int    | `4096`      | Max tokens per request                           |
+| `max_fix_issues`        | int    | `20`        | Max issues to fix per run                        |
+| `max_parallel_calls`    | int    | `5`         | Concurrent API calls (1-20)                      |
+| `max_retries`           | int    | `2`         | Max retries for transient errors (0-10)          |
+| `api_timeout`           | float  | `60.0`      | API request timeout in seconds                   |
+| `validate_after_group`  | bool   | `false`     | Validate immediately after each accepted group   |
+| `show_cost_estimate`    | bool   | `true`      | Show token/cost info in output                   |
+| `context_lines`         | int    | `15`        | Lines of context sent for fix generation (1-100) |
+| `fix_search_radius`     | int    | `5`         | Line search radius for fix application (1-50)    |
+| `retry_base_delay`      | float  | `1.0`       | Initial retry delay in seconds (min 0.1)         |
+| `retry_max_delay`       | float  | `30.0`      | Maximum retry delay in seconds (min 1.0)         |
+| `retry_backoff_factor`  | float  | `2.0`       | Retry delay multiplier (min 1.0)                 |
 
 ## Advanced Configuration
 

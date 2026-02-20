@@ -18,12 +18,8 @@ from rich.markup import escape
 from rich.panel import Panel
 from rich.syntax import Syntax
 
-from lintro.ai.display import (
-    _cost_str,
-    _print_code_panel,
-    _print_section_header,
-    render_validation,
-)
+from lintro.ai.display.shared import cost_str, print_code_panel, print_section_header
+from lintro.ai.display.validation import render_validation
 from lintro.ai.models import AIFixSuggestion
 from lintro.ai.paths import relative_path, resolve_workspace_file
 from lintro.ai.risk import (
@@ -39,16 +35,24 @@ def _apply_fix(
     suggestion: AIFixSuggestion,
     *,
     workspace_root: Path | None = None,
+    auto_apply: bool = False,
+    search_radius: int = 5,
 ) -> bool:
     """Apply a single fix suggestion to the file.
 
     Uses line-number-targeted replacement to avoid matching the wrong
     occurrence when the same code pattern appears elsewhere in the file.
-    Falls back to first-occurrence replacement if line targeting fails.
+    Falls back to first-occurrence replacement if line targeting fails,
+    unless ``auto_apply`` is True (only allows line-targeted).
 
     Args:
         suggestion: Fix suggestion to apply.
         workspace_root: Optional root directory limiting writable paths.
+        auto_apply: When True, skip the fallback first-occurrence
+            replacement (only allow line-targeted). Used by auto-apply
+            paths in the pipeline for safety.
+        search_radius: Max lines above/below the target line to search
+            for the original code pattern.
 
     Returns:
         True if the fix was applied successfully.
@@ -73,7 +77,6 @@ def _apply_fix(
 
         # Search outward from the target line (closest match wins)
         target_idx = max(0, suggestion.line - 1)  # 0-based
-        search_radius = 5
         search_order = [target_idx]
         for offset in range(1, search_radius + 1):
             if target_idx - offset >= 0:
@@ -112,7 +115,8 @@ def _apply_fix(
         # Fallback: first-occurrence string replacement.
         # Warning: this may apply the fix to the wrong location if
         # the original code appears earlier in the file.
-        if suggestion.original_code in content:
+        # Skipped when auto_apply is True for safety.
+        if not auto_apply and suggestion.original_code in content:
             logger.warning(
                 f"Line-targeted replacement failed for "
                 f"{suggestion.file}:{suggestion.line}, "
@@ -136,10 +140,13 @@ def apply_fixes(
     suggestions: Sequence[AIFixSuggestion],
     *,
     workspace_root: Path | None = None,
+    auto_apply: bool = False,
 ) -> list[AIFixSuggestion]:
     """Apply suggestions and return only those successfully applied."""
     return [
-        fix for fix in suggestions if _apply_fix(fix, workspace_root=workspace_root)
+        fix
+        for fix in suggestions
+        if _apply_fix(fix, workspace_root=workspace_root, auto_apply=auto_apply)
     ]
 
 
@@ -170,7 +177,7 @@ def _print_group_header(
 ) -> None:
     """Print a panel for one error-code group.
 
-    Delegates to the shared ``_print_code_panel`` from display.py
+    Delegates to the shared ``print_code_panel`` from display.py
     to ensure consistent Panel styling across chk and fmt.
 
     Args:
@@ -220,7 +227,7 @@ def _print_group_header(
     console.print()
     # Use tool_name from first suggestion in group
     group_tool = fixes[0].tool_name if fixes else ""
-    _print_code_panel(
+    print_code_panel(
         console,
         code=code,
         index=group_index,
@@ -361,8 +368,8 @@ def review_fixes_interactive(
     total_output = sum(s.output_tokens for s in suggestions)
     total_cost = sum(s.cost_estimate for s in suggestions)
     codes = f"{total_groups} code{'s' if total_groups != 1 else ''}"
-    cost_info = _cost_str(total_input, total_output, total_cost)
-    _print_section_header(
+    cost_info = cost_str(total_input, total_output, total_cost)
+    print_section_header(
         console,
         "🤖",
         "AI FIX SUGGESTIONS",

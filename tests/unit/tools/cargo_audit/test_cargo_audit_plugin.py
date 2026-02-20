@@ -192,16 +192,18 @@ def test_check_no_vulnerabilities(
         }
     }"""
 
-    with patch(
-        "lintro.plugins.execution_preparation.verify_tool_version",
-        return_value=None,
-    ):
-        with patch.object(
+    with (
+        patch(
+            "lintro.plugins.execution_preparation.verify_tool_version",
+            return_value=None,
+        ),
+        patch.object(
             cargo_audit_plugin,
             "_run_subprocess",
             return_value=(True, mock_output),
-        ):
-            result = cargo_audit_plugin.check([str(cargo_lock)], {})
+        ),
+    ):
+        result = cargo_audit_plugin.check([str(cargo_lock)], {})
 
     assert_that(result.success).is_true()
     assert_that(result.issues_count).is_equal_to(0)
@@ -239,16 +241,18 @@ def test_check_with_vulnerabilities(
         }
     }"""
 
-    with patch(
-        "lintro.plugins.execution_preparation.verify_tool_version",
-        return_value=None,
-    ):
-        with patch.object(
+    with (
+        patch(
+            "lintro.plugins.execution_preparation.verify_tool_version",
+            return_value=None,
+        ),
+        patch.object(
             cargo_audit_plugin,
             "_run_subprocess",
             return_value=(False, mock_output),
-        ):
-            result = cargo_audit_plugin.check([str(cargo_lock)], {})
+        ),
+    ):
+        result = cargo_audit_plugin.check([str(cargo_lock)], {})
 
     assert_that(result.success).is_false()
     assert_that(result.issues_count).is_greater_than(0)
@@ -267,19 +271,21 @@ def test_check_timeout(
     cargo_lock = tmp_path / "Cargo.lock"
     cargo_lock.write_text('[[package]]\nname = "test"\nversion = "1.0.0"')
 
-    with patch(
-        "lintro.plugins.execution_preparation.verify_tool_version",
-        return_value=None,
-    ):
-        with patch.object(
+    with (
+        patch(
+            "lintro.plugins.execution_preparation.verify_tool_version",
+            return_value=None,
+        ),
+        patch.object(
             cargo_audit_plugin,
             "_run_subprocess",
             side_effect=TimeoutExpired(
                 cmd=["cargo", "audit"],
                 timeout=120,
             ),
-        ):
-            result = cargo_audit_plugin.check([str(cargo_lock)], {})
+        ),
+    ):
+        result = cargo_audit_plugin.check([str(cargo_lock)], {})
 
     assert_that(result.success).is_false()
     assert_that(result.output).contains("timed out")

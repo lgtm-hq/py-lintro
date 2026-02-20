@@ -29,16 +29,18 @@ def test_check_with_mocked_subprocess_success(
     test_file = tmp_path / "main.ts"
     test_file.write_text("const x: number = 42;\n")
 
-    with patch(
-        "lintro.plugins.execution_preparation.verify_tool_version",
-        return_value=None,
-    ):
-        with patch.object(
+    with (
+        patch(
+            "lintro.plugins.execution_preparation.verify_tool_version",
+            return_value=None,
+        ),
+        patch.object(
             tsc_plugin,
             "_run_subprocess",
             return_value=(True, ""),
-        ):
-            result = tsc_plugin.check([str(test_file)], {})
+        ),
+    ):
+        result = tsc_plugin.check([str(test_file)], {})
 
     assert_that(result.success).is_true()
     assert_that(result.issues_count).is_equal_to(0)
@@ -59,16 +61,18 @@ def test_check_with_mocked_subprocess_issues(
 
     tsc_output = f"{test_file}(1,7): error TS2322: Type 'string' is not assignable to type 'number'."
 
-    with patch(
-        "lintro.plugins.execution_preparation.verify_tool_version",
-        return_value=None,
-    ):
-        with patch.object(
+    with (
+        patch(
+            "lintro.plugins.execution_preparation.verify_tool_version",
+            return_value=None,
+        ),
+        patch.object(
             tsc_plugin,
             "_run_subprocess",
             return_value=(False, tsc_output),
-        ):
-            result = tsc_plugin.check([str(test_file)], {})
+        ),
+    ):
+        result = tsc_plugin.check([str(test_file)], {})
 
     assert_that(result.success).is_false()
     assert_that(result.issues_count).is_greater_than(0)
@@ -87,16 +91,18 @@ def test_check_with_timeout(
     test_file = tmp_path / "main.ts"
     test_file.write_text("const x: number = 42;\n")
 
-    with patch(
-        "lintro.plugins.execution_preparation.verify_tool_version",
-        return_value=None,
-    ):
-        with patch.object(
+    with (
+        patch(
+            "lintro.plugins.execution_preparation.verify_tool_version",
+            return_value=None,
+        ),
+        patch.object(
             tsc_plugin,
             "_run_subprocess",
             side_effect=subprocess.TimeoutExpired(cmd=["tsc"], timeout=60),
-        ):
-            result = tsc_plugin.check([str(test_file)], {})
+        ),
+    ):
+        result = tsc_plugin.check([str(test_file)], {})
 
     assert_that(result.success).is_false()
     assert_that(result.issues_count).is_greater_than(0)
@@ -141,16 +147,18 @@ def test_check_parses_multiple_issues(
     tsc_output = f"""{test_file}(1,7): error TS2322: Type 'string' is not assignable to type 'number'.
 {test_file}(2,7): error TS2322: Type 'number' is not assignable to type 'string'."""
 
-    with patch(
-        "lintro.plugins.execution_preparation.verify_tool_version",
-        return_value=None,
-    ):
-        with patch.object(
+    with (
+        patch(
+            "lintro.plugins.execution_preparation.verify_tool_version",
+            return_value=None,
+        ),
+        patch.object(
             tsc_plugin,
             "_run_subprocess",
             return_value=(False, tsc_output),
-        ):
-            result = tsc_plugin.check([str(test_file)], {})
+        ),
+    ):
+        result = tsc_plugin.check([str(test_file)], {})
 
     assert_that(result.success).is_false()
     assert_that(result.issues_count).is_equal_to(2)

@@ -21,10 +21,13 @@ from lintro.ai.exceptions import (
 from lintro.ai.providers import DEFAULT_API_KEY_ENVS, DEFAULT_MODELS
 from lintro.ai.providers.base import AIResponse, BaseAIProvider
 
+_has_openai = False
 try:
     import openai
+
+    _has_openai = True
 except ImportError:
-    openai = None  # type: ignore[assignment]
+    pass
 
 DEFAULT_MODEL = DEFAULT_MODELS["openai"]
 DEFAULT_API_KEY_ENV = DEFAULT_API_KEY_ENVS["openai"]
@@ -58,7 +61,7 @@ class OpenAIProvider(BaseAIProvider):
         Raises:
             AINotAvailableError: If the openai package is not installed.
         """
-        if openai is None:
+        if not _has_openai:
             raise AINotAvailableError(
                 "OpenAI provider requires the 'openai' package. "
                 "Install with: uv pip install 'lintro[ai]'",
@@ -172,7 +175,7 @@ class OpenAIProvider(BaseAIProvider):
         Returns:
             bool: True if the SDK is installed and an API key is set.
         """
-        if openai is None:
+        if not _has_openai:
             return False
         return bool(os.environ.get(self._api_key_env))
 

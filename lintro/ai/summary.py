@@ -115,6 +115,15 @@ def _parse_summary_response(
             cost_estimate=cost_estimate,
         )
 
+    if not isinstance(data, dict):
+        logger.debug("AI summary response is not a JSON object")
+        return AISummary(
+            overview=str(data)[:500] if data else "Summary unavailable",
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
+            cost_estimate=cost_estimate,
+        )
+
     return AISummary(
         overview=data.get("overview", ""),
         key_patterns=data.get("key_patterns", []),

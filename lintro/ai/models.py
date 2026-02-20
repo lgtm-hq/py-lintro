@@ -39,6 +39,7 @@ class AIFixSuggestion:
     diff: str = ""
     explanation: str = ""
     confidence: str = "medium"
+    risk_level: str = ""
     input_tokens: int = 0
     output_tokens: int = 0
     cost_estimate: float = 0.0

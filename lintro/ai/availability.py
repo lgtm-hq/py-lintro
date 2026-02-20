@@ -23,7 +23,7 @@ def is_ai_available() -> bool:
         return _AI_AVAILABLE
 
     try:
-        import anthropic  # noqa: F401
+        import anthropic  # noqa: F401 -- import-only availability check
 
         _AI_AVAILABLE = True
         return True
@@ -31,7 +31,7 @@ def is_ai_available() -> bool:
         pass
 
     try:
-        import openai  # noqa: F401
+        import openai  # noqa: F401 -- import-only availability check
 
         _AI_AVAILABLE = True
         return True
@@ -53,11 +53,11 @@ def is_provider_available(provider: str) -> bool:
     """
     try:
         if provider == "anthropic":
-            import anthropic  # noqa: F401
+            import anthropic  # noqa: F401 -- import-only availability check
 
             return True
         elif provider == "openai":
-            import openai  # noqa: F401
+            import openai  # noqa: F401 -- import-only availability check
 
             return True
     except ImportError:

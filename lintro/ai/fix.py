@@ -164,6 +164,7 @@ def _parse_fix_response(
         diff=diff,
         explanation=data.get("explanation", ""),
         confidence=data.get("confidence", "medium"),
+        risk_level=data.get("risk_level", ""),
     )
 
 

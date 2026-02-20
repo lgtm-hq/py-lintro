@@ -72,7 +72,9 @@ def with_retry(
                         f"waiting {delay:.1f}s",
                     )
                     time.sleep(delay)
-            raise last_exception  # type: ignore[misc]  # unreachable but satisfies type checker
+            if last_exception is not None:
+                raise last_exception
+            raise AIProviderError("Retry loop exhausted without capturing an exception")
 
         return wrapper
 

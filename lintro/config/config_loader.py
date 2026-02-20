@@ -299,8 +299,15 @@ def _parse_ai_config(data: dict[str, Any]) -> AIConfig:
         max_tokens=data.get("max_tokens", 4096),
         max_fix_issues=data.get("max_fix_issues", 20),
         max_parallel_calls=data.get("max_parallel_calls", 5),
+        max_retries=data.get("max_retries", 2),
+        api_timeout=data.get("api_timeout", 60.0),
         validate_after_group=data.get("validate_after_group", False),
         show_cost_estimate=data.get("show_cost_estimate", True),
+        context_lines=data.get("context_lines", 15),
+        fix_search_radius=data.get("fix_search_radius", 5),
+        retry_base_delay=data.get("retry_base_delay", 1.0),
+        retry_max_delay=data.get("retry_max_delay", 30.0),
+        retry_backoff_factor=data.get("retry_backoff_factor", 2.0),
     )
 
 

@@ -1,14 +1,6 @@
-"""Centralized prompt templates for AI operations.
-
-All prompts used by the summary and fix services are defined here for
-maintainability and consistency.
-"""
+"""Prompt templates for AI summary generation."""
 
 from __future__ import annotations
-
-# ---------------------------------------------------------------------------
-# Summary prompts (single API call for high-level actionable insights)
-# ---------------------------------------------------------------------------
 
 SUMMARY_SYSTEM = (
     "You are a senior software engineer reviewing a codebase's quality report. "
@@ -58,62 +50,4 @@ __init__.py). Suggest the appropriate suppression mechanism \
 for the tool (# noqa, // eslint-disable, #[allow(...)], etc.). \
 Only include if there are clear candidates — omit the field \
 if all issues genuinely need fixing
-"""
-
-POST_FIX_SUMMARY_PROMPT_TEMPLATE = """\
-An auto-fix session completed with these results:
-- {applied} fixes applied successfully
-- {rejected} fixes rejected by the user
-- {remaining} issues still remaining
-
-Remaining issues digest:
-{issues_digest}
-
-Provide a brief summary of the fix session and actionable next steps.
-
-Respond in this exact JSON format:
-{{
-  "overview": "1-2 sentence summary of what was accomplished \
-and what remains",
-  "key_patterns": [
-    "Pattern description of remaining issues"
-  ],
-  "priority_actions": [
-    "Next step for remaining issues"
-  ],
-  "estimated_effort": "Rough effort to address remaining issues"
-}}
-"""
-
-FIX_SYSTEM = (
-    "You are a senior software engineer fixing code quality issues. "
-    "Provide minimal, targeted fixes that resolve the reported issue "
-    "without changing unrelated code. "
-    "Respond ONLY with the requested JSON format, no markdown fences."
-)
-
-FIX_PROMPT_TEMPLATE = """\
-Tool: {tool_name}
-Error code: {code}
-File: {file}
-Line: {line}
-Issue: {message}
-
-Here is the relevant section of the file \
-(lines {context_start}-{context_end}):
-```
-{code_context}
-```
-
-Provide a fix for this issue. Only change what is necessary.
-
-Respond in this exact JSON format:
-{{
-  "original_code": "the exact lines that need to change \
-(copy from above)",
-  "suggested_code": "the corrected version of those lines",
-  "explanation": "Imperative fix description \
-(e.g. 'Add docstring for X')",
-  "confidence": "high|medium|low"
-}}
 """

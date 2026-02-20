@@ -2,93 +2,127 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, TypedDict, cast
+from dataclasses import asdict, dataclass, field
+from typing import TYPE_CHECKING, Any, cast
 
 if TYPE_CHECKING:
     from lintro.ai.models import AIFixSuggestion, AISummary
     from lintro.models.core.tool_result import ToolResult
 
 
-class AISummaryPayload(TypedDict):
+@dataclass
+class AISummaryPayload:
     """Serialized summary payload for JSON output."""
 
-    overview: str
-    key_patterns: list[str]
-    priority_actions: list[str]
-    triage_suggestions: list[str]
-    estimated_effort: str
-    input_tokens: int
-    output_tokens: int
-    cost_estimate: float
+    overview: str = ""
+    key_patterns: list[str] = field(default_factory=list)
+    priority_actions: list[str] = field(default_factory=list)
+    triage_suggestions: list[str] = field(default_factory=list)
+    estimated_effort: str = ""
+    input_tokens: int = 0
+    output_tokens: int = 0
+    cost_estimate: float = 0.0
+
+    def to_dict(self) -> dict[str, Any]:
+        """Convert to JSON-serializable dict."""
+        return asdict(self)
 
 
-class AIFixSuggestionPayload(TypedDict):
+@dataclass
+class AIFixSuggestionPayload:
     """Serialized fix suggestion payload for JSON output."""
 
-    file: str
-    line: int
-    code: str
-    explanation: str
-    confidence: str
-    diff: str
-    input_tokens: int
-    output_tokens: int
-    cost_estimate: float
+    file: str = ""
+    line: int = 0
+    code: str = ""
+    explanation: str = ""
+    confidence: str = ""
+    diff: str = ""
+    input_tokens: int = 0
+    output_tokens: int = 0
+    cost_estimate: float = 0.0
+
+    def to_dict(self) -> dict[str, Any]:
+        """Convert to JSON-serializable dict."""
+        return asdict(self)
 
 
-class AIMetadataPayload(TypedDict, total=False):
+@dataclass
+class AIMetadataPayload:
     """Top-level AI metadata attached to ToolResult."""
 
-    summary: AISummaryPayload
-    fix_suggestions: list[AIFixSuggestionPayload]
-    applied_count: int
-    verified_count: int
-    unverified_count: int
-    fixed_count: int
+    summary: AISummaryPayload | None = None
+    fix_suggestions: list[AIFixSuggestionPayload] | None = None
+    applied_count: int | None = None
+    verified_count: int | None = None
+    unverified_count: int | None = None
+    fixed_count: int | None = None
+
+    def to_dict(self) -> dict[str, Any]:
+        """Convert to JSON-serializable dict, omitting None fields."""
+        result: dict[str, Any] = {}
+        if self.summary is not None:
+            result["summary"] = self.summary.to_dict()
+        if self.fix_suggestions is not None:
+            result["fix_suggestions"] = [s.to_dict() for s in self.fix_suggestions]
+        if self.applied_count is not None:
+            result["applied_count"] = self.applied_count
+        if self.verified_count is not None:
+            result["verified_count"] = self.verified_count
+        if self.unverified_count is not None:
+            result["unverified_count"] = self.unverified_count
+        if self.fixed_count is not None:
+            result["fixed_count"] = self.fixed_count
+        return result
 
 
 def summary_to_payload(summary: AISummary) -> AISummaryPayload:
     """Convert AISummary model to JSON-serializable metadata payload."""
-    return {
-        "overview": summary.overview,
-        "key_patterns": summary.key_patterns,
-        "priority_actions": summary.priority_actions,
-        "triage_suggestions": summary.triage_suggestions,
-        "estimated_effort": summary.estimated_effort,
-        "input_tokens": summary.input_tokens,
-        "output_tokens": summary.output_tokens,
-        "cost_estimate": summary.cost_estimate,
-    }
+    return AISummaryPayload(
+        overview=summary.overview,
+        key_patterns=summary.key_patterns,
+        priority_actions=summary.priority_actions,
+        triage_suggestions=summary.triage_suggestions,
+        estimated_effort=summary.estimated_effort,
+        input_tokens=summary.input_tokens,
+        output_tokens=summary.output_tokens,
+        cost_estimate=summary.cost_estimate,
+    )
 
 
 def suggestion_to_payload(
     suggestion: AIFixSuggestion,
 ) -> AIFixSuggestionPayload:
     """Convert AIFixSuggestion model to JSON-serializable payload."""
-    return {
-        "file": suggestion.file,
-        "line": suggestion.line,
-        "code": suggestion.code,
-        "explanation": suggestion.explanation,
-        "confidence": suggestion.confidence,
-        "diff": suggestion.diff,
-        "input_tokens": suggestion.input_tokens,
-        "output_tokens": suggestion.output_tokens,
-        "cost_estimate": suggestion.cost_estimate,
-    }
+    return AIFixSuggestionPayload(
+        file=suggestion.file,
+        line=suggestion.line,
+        code=suggestion.code,
+        explanation=suggestion.explanation,
+        confidence=suggestion.confidence,
+        diff=suggestion.diff,
+        input_tokens=suggestion.input_tokens,
+        output_tokens=suggestion.output_tokens,
+        cost_estimate=suggestion.cost_estimate,
+    )
 
 
-def ensure_ai_metadata(result: ToolResult) -> AIMetadataPayload:
-    """Ensure a ToolResult has a mutable AI metadata container."""
+def ensure_ai_metadata(result: ToolResult) -> dict[str, Any]:
+    """Ensure a ToolResult has a mutable AI metadata container.
+
+    Returns a raw dict for backward compatibility with existing consumers
+    that access metadata by string key.
+    """
     if result.ai_metadata is None:
         result.ai_metadata = {}
-    return cast(AIMetadataPayload, result.ai_metadata)
+    return cast(dict[str, Any], result.ai_metadata)
 
 
 def attach_summary_metadata(result: ToolResult, summary: AISummary) -> None:
     """Attach summary metadata without overwriting other AI metadata."""
     metadata = ensure_ai_metadata(result)
-    metadata["summary"] = summary_to_payload(summary)
+    payload = summary_to_payload(summary)
+    metadata["summary"] = payload.to_dict()
 
 
 def attach_fix_suggestions_metadata(
@@ -98,7 +132,7 @@ def attach_fix_suggestions_metadata(
     """Attach fix suggestion metadata without overwriting summary metadata."""
     metadata = ensure_ai_metadata(result)
     existing = list(metadata.get("fix_suggestions", []))
-    existing.extend(suggestion_to_payload(s) for s in suggestions)
+    existing.extend(suggestion_to_payload(s).to_dict() for s in suggestions)
     metadata["fix_suggestions"] = existing
 
 
@@ -125,23 +159,22 @@ def attach_validation_counts_metadata(
     metadata["unverified_count"] = max(0, int(unverified_count))
 
 
-def normalize_ai_metadata(raw: dict[str, Any]) -> AIMetadataPayload:
+def normalize_ai_metadata(raw: dict[str, Any]) -> dict[str, Any]:
     """Normalize legacy and current AI metadata into one stable shape."""
-    normalized: AIMetadataPayload = {}
+    normalized: dict[str, Any] = {}
 
     summary = raw.get("summary")
     if isinstance(summary, dict):
-        normalized["summary"] = cast(AISummaryPayload, summary)
+        normalized["summary"] = summary
 
     fix_suggestions = raw.get("fix_suggestions")
     if fix_suggestions is None:
         # Backward-compatible read for legacy key.
         fix_suggestions = raw.get("suggestions")
     if isinstance(fix_suggestions, list):
-        normalized["fix_suggestions"] = cast(
-            list[AIFixSuggestionPayload],
-            [item for item in fix_suggestions if isinstance(item, dict)],
-        )
+        normalized["fix_suggestions"] = [
+            item for item in fix_suggestions if isinstance(item, dict)
+        ]
 
     fixed_count = raw.get("fixed_count")
     if isinstance(fixed_count, int):

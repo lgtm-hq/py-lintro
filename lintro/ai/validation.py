@@ -111,6 +111,10 @@ def validate_applied_fixes(
                     result.verified_by_tool.get(tool_name, 0) + 1
                 )
 
+        # Count new issues: remaining issues not consumed by any suggestion
+        new_count = sum(v for v in remaining_counts.values() if v > 0)
+        result.new_issues += new_count
+
     return result
 
 

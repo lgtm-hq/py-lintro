@@ -21,10 +21,13 @@ from lintro.ai.exceptions import (
 from lintro.ai.providers import DEFAULT_API_KEY_ENVS, DEFAULT_MODELS
 from lintro.ai.providers.base import AIResponse, BaseAIProvider
 
+_has_anthropic = False
 try:
     import anthropic
+
+    _has_anthropic = True
 except ImportError:
-    anthropic = None  # type: ignore[assignment]
+    pass
 
 DEFAULT_MODEL = DEFAULT_MODELS["anthropic"]
 DEFAULT_API_KEY_ENV = DEFAULT_API_KEY_ENVS["anthropic"]
@@ -58,7 +61,7 @@ class AnthropicProvider(BaseAIProvider):
         Raises:
             AINotAvailableError: If the anthropic package is not installed.
         """
-        if anthropic is None:
+        if not _has_anthropic:
             raise AINotAvailableError(
                 "Anthropic provider requires the 'anthropic' package. "
                 "Install with: uv pip install 'lintro[ai]'",
@@ -170,7 +173,7 @@ class AnthropicProvider(BaseAIProvider):
         Returns:
             bool: True if the SDK is installed and an API key is set.
         """
-        if anthropic is None:
+        if not _has_anthropic:
             return False
         return bool(os.environ.get(self._api_key_env))
 

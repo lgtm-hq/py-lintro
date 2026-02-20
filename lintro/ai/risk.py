@@ -14,46 +14,6 @@ if TYPE_CHECKING:
 SAFE_STYLE_RISK = "safe-style"
 BEHAVIORAL_RISK = "behavioral-risk"
 
-# Conservative allowlist for deterministic style-only codes.
-# Code-only set used as fallback when tool_name is empty.
-SAFE_STYLE_CODES: frozenset[str] = frozenset(
-    {
-        "E501",
-        "W291",
-        "W292",
-        "W293",
-        "Q000",
-        "Q001",
-        "Q002",
-    },
-)
-
-# Tool-aware allowlist keyed on (tool_name, code).
-# Preferred over the flat set when tool_name is available.
-SAFE_STYLE_CODES_BY_TOOL: frozenset[tuple[str, str]] = frozenset(
-    {
-        # ruff / flake8 style codes
-        ("ruff", "E501"),
-        ("ruff", "W291"),
-        ("ruff", "W292"),
-        ("ruff", "W293"),
-        ("ruff", "Q000"),
-        ("ruff", "Q001"),
-        ("ruff", "Q002"),
-        ("flake8", "E501"),
-        ("flake8", "W291"),
-        ("flake8", "W292"),
-        ("flake8", "W293"),
-        # prettier style codes
-        ("prettier", "FORMAT"),
-        ("prettier", "PRETTIER"),
-        # eslint style codes
-        ("eslint", "INDENT"),
-        ("eslint", "SEMI"),
-        ("eslint", "QUOTES"),
-    },
-)
-
 
 @dataclass(frozen=True)
 class PatchStats:
@@ -68,15 +28,27 @@ class PatchStats:
 def classify_fix_risk(suggestion: AIFixSuggestion) -> str:
     """Classify a suggestion as safe style-only or behavioral risk.
 
-    Prefers tool-aware lookup when ``tool_name`` is set, falls back
-    to the code-only allowlist.
+    Uses the AI-reported ``risk_level`` from the fix response, combined
+    with the suggestion's ``confidence``. Defaults to behavioral-risk
+    when the risk_level is unknown or empty for safety.
+
+    Args:
+        suggestion: Fix suggestion to classify.
+
+    Returns:
+        Risk classification string: ``"safe-style"`` or ``"behavioral-risk"``.
     """
-    code = (suggestion.code or "").upper()
-    tool = (suggestion.tool_name or "").lower()
-    if tool and (tool, code) in SAFE_STYLE_CODES_BY_TOOL:
-        return SAFE_STYLE_RISK
-    if code in SAFE_STYLE_CODES:
-        return SAFE_STYLE_RISK
+    risk = (suggestion.risk_level or "").strip().lower()
+
+    if risk == SAFE_STYLE_RISK:
+        # Trust AI classification for safe-style only when confidence
+        # is high or medium — low-confidence safe claims default to risky.
+        confidence = (suggestion.confidence or "").strip().lower()
+        if confidence in ("high", "medium"):
+            return SAFE_STYLE_RISK
+        return BEHAVIORAL_RISK
+
+    # Default: anything unknown or explicitly behavioral-risk
     return BEHAVIORAL_RISK
 
 

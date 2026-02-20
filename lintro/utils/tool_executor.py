@@ -340,7 +340,7 @@ def run_lint_tools_simple(
             except (EOFError, KeyboardInterrupt):
                 _click.echo()
                 answer = "n"
-            if answer.lower() in ("n",):
+            if answer.lower() == "n":
                 logger.console_output(text="Aborted.", color="yellow")
                 return int(DEFAULT_EXIT_CODE_SUCCESS)
 
@@ -553,7 +553,7 @@ def run_lint_tools_simple(
         total_remaining=total_remaining,
     )
 
-    # AI enhancement (CLI flags override config defaults)
+    # AI enhancement via hook pattern
     effective_ai_fix = ai_fix or lintro_config.ai.default_fix
     _warn_ai_fix_disabled(
         action=action,
@@ -561,16 +561,16 @@ def run_lint_tools_simple(
         ai_enabled=lintro_config.ai.enabled,
         logger=logger,
     )
-    if lintro_config.ai.enabled:
-        from lintro.ai.orchestrator import run_ai_enhancement
 
-        run_ai_enhancement(
-            action=action,
-            all_results=all_results,
-            lintro_config=lintro_config,
-            logger=logger,
+    from lintro.ai.hook import AIPostExecutionHook
+
+    ai_hook = AIPostExecutionHook(lintro_config, ai_fix=ai_fix)
+    if ai_hook.should_run(action):
+        ai_hook.execute(
+            action,
+            all_results,
+            console_logger=logger,
             output_format=output_format,
-            ai_fix=effective_ai_fix,
         )
         if action == Action.FIX:
             total_issues, total_fixed, total_remaining = aggregate_tool_results(

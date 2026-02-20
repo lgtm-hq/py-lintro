@@ -15,6 +15,7 @@ formatting tools, Lintro provides:
 - **Beautiful output** with grid formatting
 - **Auto-fixing** capabilities where possible
 - **Multi-language support** for modern development stacks
+- **AI-powered insights** (optional) — summaries, fix suggestions, risk classification
 
 ## Installation
 

@@ -268,7 +268,7 @@ def test_delete_version_raises_on_non_204_non_404() -> None:
             client=cast(GhcrClient, DummyClient()),
             owner="owner",
             version_id=1,
-            base_path="https://api.github.com/users/owner/packages/container",
+            base_path="https://api.github.com/users/owner/packages/container",  # noqa: E501
         )
     except RuntimeError:
         return

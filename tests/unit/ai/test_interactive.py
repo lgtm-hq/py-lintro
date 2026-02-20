@@ -15,306 +15,394 @@ from lintro.ai.interactive import (
 )
 from lintro.ai.models import AIFixSuggestion
 
-
-class TestApplyFixFallbackWarning:
-    """Tests for loguru warning on fallback str.replace path."""
-
-    @patch("lintro.ai.interactive.logger")
-    def test_fallback_logs_warning(self, mock_logger, tmp_path):
-        """Falling back to str.replace should log a warning."""
-        f = tmp_path / "test.py"
-        f.write_text("old code\nmore stuff\n")
-
-        fix = AIFixSuggestion(
-            file=str(f),
-            line=99,  # Way off — no match near this line
-            original_code="old code",
-            suggested_code="new code",
-        )
-
-        result = _apply_fix(fix)
-        assert_that(result).is_true()
-        mock_logger.warning.assert_called_once()
-        call_args = mock_logger.warning.call_args[0][0]
-        assert_that(call_args).contains("falling back")
-        assert_that(call_args).contains(str(f))
-
-    @patch("lintro.ai.interactive.logger")
-    def test_line_targeted_does_not_log_warning(self, mock_logger, tmp_path):
-        """Successful line-targeted replacement should NOT log a warning."""
-        f = tmp_path / "test.py"
-        f.write_text("x = 1\nprint('ok')\n")
-
-        fix = AIFixSuggestion(
-            file=str(f),
-            line=1,
-            original_code="x = 1",
-            suggested_code="x = 2",
-        )
-
-        result = _apply_fix(fix)
-        assert_that(result).is_true()
-        mock_logger.warning.assert_not_called()
+# -- _apply_fix fallback warning ----------------------------------------------
 
 
-class TestApplyFix:
-    """Tests for _apply_fix function."""
+@patch("lintro.ai.interactive.logger")
+def test_apply_fix_fallback_logs_warning(mock_logger, tmp_path):
+    """Falling back to str.replace should log a warning."""
+    f = tmp_path / "test.py"
+    f.write_text("old code\nmore stuff\n")
 
-    def test_applies_fix(self, tmp_path):
-        f = tmp_path / "test.py"
-        f.write_text("assert x > 0\nprint('ok')\n")
+    fix = AIFixSuggestion(
+        file=str(f),
+        line=99,  # Way off -- no match near this line
+        original_code="old code",
+        suggested_code="new code",
+    )
 
-        fix = AIFixSuggestion(
-            file=str(f),
-            original_code="assert x > 0",
-            suggested_code="if x <= 0:\n    raise ValueError",
-        )
-
-        result = _apply_fix(fix)
-        assert_that(result).is_true()
-
-        content = f.read_text()
-        assert_that(content).contains("if x <= 0:")
-        assert_that(content).does_not_contain("assert x > 0")
-
-    def test_skips_when_original_not_found(self, tmp_path):
-        f = tmp_path / "test.py"
-        f.write_text("x = 1\n")
-
-        fix = AIFixSuggestion(
-            file=str(f),
-            original_code="nonexistent code",
-            suggested_code="new code",
-        )
-
-        result = _apply_fix(fix)
-        assert_that(result).is_false()
-
-    def test_handles_missing_file(self):
-        fix = AIFixSuggestion(
-            file="/nonexistent/file.py",
-            original_code="x",
-            suggested_code="y",
-        )
-        result = _apply_fix(fix)
-        assert_that(result).is_false()
-
-    def test_line_targeted_replacement(self, tmp_path):
-        """Fix applies near the target line, not an earlier occurrence."""
-        f = tmp_path / "test.py"
-        f.write_text("x = 1\nprint('a')\nx = 1\nprint('b')\n")
-
-        fix = AIFixSuggestion(
-            file=str(f),
-            line=3,
-            original_code="x = 1",
-            suggested_code="x = 2",
-        )
-
-        result = _apply_fix(fix)
-        assert_that(result).is_true()
-
-        content = f.read_text()
-        lines = content.splitlines()
-        # First occurrence should remain unchanged
-        assert_that(lines[0]).is_equal_to("x = 1")
-        # Third line (line 3) should be changed
-        assert_that(lines[2]).is_equal_to("x = 2")
-
-    def test_fallback_to_string_replace(self, tmp_path):
-        """Falls back to first-occurrence when line targeting misses."""
-        f = tmp_path / "test.py"
-        f.write_text("old code\nmore stuff\n")
-
-        fix = AIFixSuggestion(
-            file=str(f),
-            line=99,  # Way off — no match near this line
-            original_code="old code",
-            suggested_code="new code",
-        )
-
-        result = _apply_fix(fix)
-        assert_that(result).is_true()
-        assert_that(f.read_text()).contains("new code")
-
-    def test_empty_original_code(self, tmp_path):
-        f = tmp_path / "test.py"
-        f.write_text("x = 1\n")
-
-        fix = AIFixSuggestion(
-            file=str(f),
-            original_code="",
-            suggested_code="y = 2",
-        )
-
-        result = _apply_fix(fix)
-        assert_that(result).is_false()
-
-    def test_apply_fixes_returns_only_successful(self, tmp_path):
-        f = tmp_path / "test.py"
-        f.write_text("x = 1\n")
-
-        applied = apply_fixes(
-            [
-                AIFixSuggestion(
-                    file=str(f),
-                    original_code="x = 1",
-                    suggested_code="x = 2",
-                ),
-                AIFixSuggestion(
-                    file=str(f),
-                    original_code="missing",
-                    suggested_code="x = 3",
-                ),
-            ],
-        )
-        assert_that(applied).is_length(1)
-        assert_that(applied[0].suggested_code).is_equal_to("x = 2")
-
-    def test_blocks_writes_outside_workspace_root(self, tmp_path):
-        workspace_root = tmp_path / "workspace"
-        workspace_root.mkdir(parents=True)
-        outside_file = tmp_path / "outside.py"
-        outside_file.write_text("x = 1\n", encoding="utf-8")
-
-        fix = AIFixSuggestion(
-            file=str(outside_file),
-            original_code="x = 1",
-            suggested_code="x = 2",
-        )
-
-        result = _apply_fix(fix, workspace_root=workspace_root)
-        assert_that(result).is_false()
-        assert_that(outside_file.read_text(encoding="utf-8")).is_equal_to("x = 1\n")
+    result = _apply_fix(fix)
+    assert_that(result).is_true()
+    mock_logger.warning.assert_called_once()
+    call_args = mock_logger.warning.call_args[0][0]
+    assert_that(call_args).contains("falling back")
+    assert_that(call_args).contains(str(f))
 
 
-class TestGroupByCode:
-    """Tests for _group_by_code function."""
+@patch("lintro.ai.interactive.logger")
+def test_apply_fix_line_targeted_does_not_log_warning(mock_logger, tmp_path):
+    """Successful line-targeted replacement should NOT log a warning."""
+    f = tmp_path / "test.py"
+    f.write_text("x = 1\nprint('ok')\n")
 
-    def test_groups_by_code(self):
-        fixes = [
-            AIFixSuggestion(file="a.py", code="B101"),
-            AIFixSuggestion(file="b.py", code="B101"),
-            AIFixSuggestion(file="c.py", code="E501"),
-        ]
-        groups = _group_by_code(fixes)
-        assert_that(groups).contains_key("B101")
-        assert_that(groups).contains_key("E501")
-        assert_that(groups["B101"]).is_length(2)
-        assert_that(groups["E501"]).is_length(1)
+    fix = AIFixSuggestion(
+        file=str(f),
+        line=1,
+        original_code="x = 1",
+        suggested_code="x = 2",
+    )
 
-    def test_empty_code_uses_unknown(self):
-        fixes = [AIFixSuggestion(file="a.py", code="")]
-        groups = _group_by_code(fixes)
-        assert_that(groups).contains_key("unknown")
-
-    def test_empty_list(self):
-        groups = _group_by_code([])
-        assert_that(groups).is_empty()
+    result = _apply_fix(fix)
+    assert_that(result).is_true()
+    mock_logger.warning.assert_not_called()
 
 
-class TestReviewFixesInteractive:
-    """Tests for review_fixes_interactive function."""
+# -- _apply_fix ----------------------------------------------------------------
 
-    def test_empty_suggestions(self):
-        accepted, rejected, applied = review_fixes_interactive([])
-        assert_that(accepted).is_equal_to(0)
-        assert_that(rejected).is_equal_to(0)
-        assert_that(applied).is_empty()
 
-    def test_non_interactive_skips(self):
-        fixes = [
-            AIFixSuggestion(
-                file="test.py",
-                original_code="x",
-                suggested_code="y",
-            ),
-        ]
-        with patch("sys.stdin") as mock_stdin:
-            mock_stdin.isatty.return_value = False
-            accepted, rejected, applied = review_fixes_interactive(fixes)
-            assert_that(accepted).is_equal_to(0)
-            assert_that(applied).is_empty()
+def test_apply_fix_applies_fix(tmp_path):
+    f = tmp_path / "test.py"
+    f.write_text("assert x > 0\nprint('ok')\n")
 
-    def test_prompt_text_clarifies_scope(self):
-        prompt = _render_prompt(validate_mode=False, safe_default=False)
-        assert_that(prompt).contains("accept group + remaining")
-        assert_that(prompt).contains("validate-after-group")
+    fix = AIFixSuggestion(
+        file=str(f),
+        original_code="assert x > 0",
+        suggested_code="if x <= 0:\n    raise ValueError",
+    )
 
-    @patch("lintro.ai.interactive.sys.stdin")
-    @patch("lintro.ai.interactive.click.getchar")
-    def test_accept_via_keyboard(self, mock_getchar, mock_stdin, tmp_path):
-        """Pressing 'y' accepts a group and applies fixes."""
-        mock_stdin.isatty.return_value = True
-        mock_getchar.return_value = "y"
+    result = _apply_fix(fix)
+    assert_that(result).is_true()
 
-        f = tmp_path / "test.py"
-        f.write_text("old_code\n")
+    content = f.read_text()
+    assert_that(content).contains("if x <= 0:")
+    assert_that(content).does_not_contain("assert x > 0")
 
-        fixes = [
+
+def test_apply_fix_skips_when_original_not_found(tmp_path):
+    f = tmp_path / "test.py"
+    f.write_text("x = 1\n")
+
+    fix = AIFixSuggestion(
+        file=str(f),
+        original_code="nonexistent code",
+        suggested_code="new code",
+    )
+
+    result = _apply_fix(fix)
+    assert_that(result).is_false()
+
+
+def test_apply_fix_handles_missing_file():
+    fix = AIFixSuggestion(
+        file="/nonexistent/file.py",
+        original_code="x",
+        suggested_code="y",
+    )
+    result = _apply_fix(fix)
+    assert_that(result).is_false()
+
+
+def test_apply_fix_line_targeted_replacement(tmp_path):
+    """Fix applies near the target line, not an earlier occurrence."""
+    f = tmp_path / "test.py"
+    f.write_text("x = 1\nprint('a')\nx = 1\nprint('b')\n")
+
+    fix = AIFixSuggestion(
+        file=str(f),
+        line=3,
+        original_code="x = 1",
+        suggested_code="x = 2",
+    )
+
+    result = _apply_fix(fix)
+    assert_that(result).is_true()
+
+    content = f.read_text()
+    lines = content.splitlines()
+    # First occurrence should remain unchanged
+    assert_that(lines[0]).is_equal_to("x = 1")
+    # Third line (line 3) should be changed
+    assert_that(lines[2]).is_equal_to("x = 2")
+
+
+def test_apply_fix_fallback_to_string_replace(tmp_path):
+    """Falls back to first-occurrence when line targeting misses."""
+    f = tmp_path / "test.py"
+    f.write_text("old code\nmore stuff\n")
+
+    fix = AIFixSuggestion(
+        file=str(f),
+        line=99,  # Way off -- no match near this line
+        original_code="old code",
+        suggested_code="new code",
+    )
+
+    result = _apply_fix(fix)
+    assert_that(result).is_true()
+    assert_that(f.read_text()).contains("new code")
+
+
+def test_apply_fix_empty_original_code(tmp_path):
+    f = tmp_path / "test.py"
+    f.write_text("x = 1\n")
+
+    fix = AIFixSuggestion(
+        file=str(f),
+        original_code="",
+        suggested_code="y = 2",
+    )
+
+    result = _apply_fix(fix)
+    assert_that(result).is_false()
+
+
+def test_apply_fix_blocks_writes_outside_workspace_root(tmp_path):
+    workspace_root = tmp_path / "workspace"
+    workspace_root.mkdir(parents=True)
+    outside_file = tmp_path / "outside.py"
+    outside_file.write_text("x = 1\n", encoding="utf-8")
+
+    fix = AIFixSuggestion(
+        file=str(outside_file),
+        original_code="x = 1",
+        suggested_code="x = 2",
+    )
+
+    result = _apply_fix(fix, workspace_root=workspace_root)
+    assert_that(result).is_false()
+    assert_that(outside_file.read_text(encoding="utf-8")).is_equal_to("x = 1\n")
+
+
+def test_apply_fix_auto_apply_skips_fallback(tmp_path):
+    """When auto_apply=True, fallback str.replace is skipped."""
+    f = tmp_path / "test.py"
+    f.write_text("old code\nmore stuff\n")
+
+    fix = AIFixSuggestion(
+        file=str(f),
+        line=99,  # Way off -- no match near this line
+        original_code="old code",
+        suggested_code="new code",
+    )
+
+    result = _apply_fix(fix, auto_apply=True)
+    assert_that(result).is_false()
+    # File should be unchanged because fallback was skipped
+    assert_that(f.read_text()).contains("old code")
+
+
+def test_apply_fix_search_radius_limits_search(tmp_path):
+    """A narrow search_radius can miss a match outside the radius."""
+    f = tmp_path / "test.py"
+    # Place target code far from line hint
+    lines = ["filler\n"] * 20 + ["target code\n"]
+    f.write_text("".join(lines))
+
+    fix = AIFixSuggestion(
+        file=str(f),
+        line=1,  # Hint at line 1, target is at line 21
+        original_code="target code",
+        suggested_code="replaced code",
+    )
+
+    # With radius=2, line-targeted search won't reach line 21
+    result = _apply_fix(fix, auto_apply=True, search_radius=2)
+    assert_that(result).is_false()
+    assert_that(f.read_text()).contains("target code")
+
+
+# -- apply_fixes ---------------------------------------------------------------
+
+
+def test_apply_fixes_returns_only_successful(tmp_path):
+    f = tmp_path / "test.py"
+    f.write_text("x = 1\n")
+
+    applied = apply_fixes(
+        [
             AIFixSuggestion(
                 file=str(f),
-                code="E501",
-                original_code="old_code",
-                suggested_code="new_code",
+                original_code="x = 1",
+                suggested_code="x = 2",
             ),
-        ]
-
-        accepted, rejected, applied = review_fixes_interactive(
-            fixes,
-            workspace_root=tmp_path,
-        )
-
-        assert_that(accepted).is_equal_to(1)
-        assert_that(rejected).is_equal_to(0)
-        assert_that(applied).is_length(1)
-
-    @patch("lintro.ai.interactive.sys.stdin")
-    @patch("lintro.ai.interactive.click.getchar")
-    def test_reject_via_keyboard(self, mock_getchar, mock_stdin, tmp_path):
-        """Pressing 'r' rejects a group."""
-        mock_stdin.isatty.return_value = True
-        mock_getchar.return_value = "r"
-
-        fixes = [
             AIFixSuggestion(
-                file=str(tmp_path / "test.py"),
-                code="B101",
-                original_code="x",
-                suggested_code="y",
+                file=str(f),
+                original_code="missing",
+                suggested_code="x = 3",
             ),
-        ]
+        ],
+    )
+    assert_that(applied).is_length(1)
+    assert_that(applied[0].suggested_code).is_equal_to("x = 2")
 
+
+def test_apply_fixes_passes_auto_apply(tmp_path):
+    """apply_fixes forwards auto_apply to _apply_fix."""
+    f = tmp_path / "test.py"
+    f.write_text("old code\nmore stuff\n")
+
+    applied = apply_fixes(
+        [
+            AIFixSuggestion(
+                file=str(f),
+                line=99,
+                original_code="old code",
+                suggested_code="new code",
+            ),
+        ],
+        auto_apply=True,
+    )
+    # auto_apply=True prevents fallback, so nothing should be applied
+    assert_that(applied).is_empty()
+    assert_that(f.read_text()).contains("old code")
+
+
+# -- _group_by_code ------------------------------------------------------------
+
+
+def test_group_by_code_groups_by_code():
+    fixes = [
+        AIFixSuggestion(file="a.py", code="B101"),
+        AIFixSuggestion(file="b.py", code="B101"),
+        AIFixSuggestion(file="c.py", code="E501"),
+    ]
+    groups = _group_by_code(fixes)
+    assert_that(groups).contains_key("B101")
+    assert_that(groups).contains_key("E501")
+    assert_that(groups["B101"]).is_length(2)
+    assert_that(groups["E501"]).is_length(1)
+
+
+def test_group_by_code_empty_code_uses_unknown():
+    fixes = [AIFixSuggestion(file="a.py", code="")]
+    groups = _group_by_code(fixes)
+    assert_that(groups).contains_key("unknown")
+
+
+def test_group_by_code_empty_list():
+    groups = _group_by_code([])
+    assert_that(groups).is_empty()
+
+
+# -- review_fixes_interactive --------------------------------------------------
+
+
+def test_review_fixes_interactive_empty_suggestions():
+    accepted, rejected, applied = review_fixes_interactive([])
+    assert_that(accepted).is_equal_to(0)
+    assert_that(rejected).is_equal_to(0)
+    assert_that(applied).is_empty()
+
+
+def test_review_fixes_interactive_non_interactive_skips():
+    fixes = [
+        AIFixSuggestion(
+            file="test.py",
+            original_code="x",
+            suggested_code="y",
+        ),
+    ]
+    with patch("sys.stdin") as mock_stdin:
+        mock_stdin.isatty.return_value = False
         accepted, rejected, applied = review_fixes_interactive(fixes)
-
         assert_that(accepted).is_equal_to(0)
-        assert_that(rejected).is_equal_to(1)
         assert_that(applied).is_empty()
 
-    @patch("lintro.ai.interactive.sys.stdin")
-    @patch("lintro.ai.interactive.click.getchar")
-    def test_quit_via_keyboard(self, mock_getchar, mock_stdin, tmp_path):
-        """Pressing 'q' quits the review early."""
-        mock_stdin.isatty.return_value = True
-        mock_getchar.return_value = "q"
 
-        fixes = [
-            AIFixSuggestion(
-                file=str(tmp_path / "a.py"),
-                code="B101",
-                original_code="x",
-                suggested_code="y",
-            ),
-            AIFixSuggestion(
-                file=str(tmp_path / "b.py"),
-                code="E501",
-                original_code="a",
-                suggested_code="b",
-            ),
-        ]
+def test_review_fixes_interactive_prompt_text_clarifies_scope():
+    prompt = _render_prompt(validate_mode=False, safe_default=False)
+    assert_that(prompt).contains("accept group + remaining")
+    assert_that(prompt).contains("validate-after-group")
 
-        accepted, rejected, applied = review_fixes_interactive(fixes)
 
-        assert_that(accepted).is_equal_to(0)
-        # Only the first group was seen before quit
-        assert_that(applied).is_empty()
+@patch("lintro.ai.interactive.sys.stdin")
+@patch("lintro.ai.interactive.click.getchar")
+def test_review_fixes_interactive_accept_via_keyboard(
+    mock_getchar,
+    mock_stdin,
+    tmp_path,
+):
+    """Pressing 'y' accepts a group and applies fixes."""
+    mock_stdin.isatty.return_value = True
+    mock_getchar.return_value = "y"
+
+    f = tmp_path / "test.py"
+    f.write_text("old_code\n")
+
+    fixes = [
+        AIFixSuggestion(
+            file=str(f),
+            code="E501",
+            original_code="old_code",
+            suggested_code="new_code",
+        ),
+    ]
+
+    accepted, rejected, applied = review_fixes_interactive(
+        fixes,
+        workspace_root=tmp_path,
+    )
+
+    assert_that(accepted).is_equal_to(1)
+    assert_that(rejected).is_equal_to(0)
+    assert_that(applied).is_length(1)
+
+
+@patch("lintro.ai.interactive.sys.stdin")
+@patch("lintro.ai.interactive.click.getchar")
+def test_review_fixes_interactive_reject_via_keyboard(
+    mock_getchar,
+    mock_stdin,
+    tmp_path,
+):
+    """Pressing 'r' rejects a group."""
+    mock_stdin.isatty.return_value = True
+    mock_getchar.return_value = "r"
+
+    fixes = [
+        AIFixSuggestion(
+            file=str(tmp_path / "test.py"),
+            code="B101",
+            original_code="x",
+            suggested_code="y",
+        ),
+    ]
+
+    accepted, rejected, applied = review_fixes_interactive(fixes)
+
+    assert_that(accepted).is_equal_to(0)
+    assert_that(rejected).is_equal_to(1)
+    assert_that(applied).is_empty()
+
+
+@patch("lintro.ai.interactive.sys.stdin")
+@patch("lintro.ai.interactive.click.getchar")
+def test_review_fixes_interactive_quit_via_keyboard(
+    mock_getchar,
+    mock_stdin,
+    tmp_path,
+):
+    """Pressing 'q' quits the review early."""
+    mock_stdin.isatty.return_value = True
+    mock_getchar.return_value = "q"
+
+    fixes = [
+        AIFixSuggestion(
+            file=str(tmp_path / "a.py"),
+            code="B101",
+            original_code="x",
+            suggested_code="y",
+        ),
+        AIFixSuggestion(
+            file=str(tmp_path / "b.py"),
+            code="E501",
+            original_code="a",
+            suggested_code="b",
+        ),
+    ]
+
+    accepted, rejected, applied = review_fixes_interactive(fixes)
+
+    assert_that(accepted).is_equal_to(0)
+    # Only the first group was seen before quit
+    assert_that(applied).is_empty()

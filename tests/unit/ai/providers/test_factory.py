@@ -2,64 +2,58 @@
 
 from __future__ import annotations
 
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 from assertpy import assert_that
 
 from lintro.ai.config import AIConfig
+from lintro.ai.providers import anthropic as anthropic_mod
 from lintro.ai.providers import get_provider
+from lintro.ai.providers import openai as openai_mod
 
 
-class TestGetProvider:
-    """Tests for get_provider factory."""
+def test_get_provider_anthropic():
+    config = AIConfig(provider="anthropic")
+    with patch.object(anthropic_mod, "_has_anthropic", True):
+        provider = get_provider(config)
+        assert_that(provider.name).is_equal_to("anthropic")
 
-    def test_anthropic_provider(self):
-        config = AIConfig(provider="anthropic")
-        mock_anthropic = MagicMock()
-        with patch(
-            "lintro.ai.providers.anthropic.anthropic",
-            mock_anthropic,
-        ):
-            provider = get_provider(config)
-            assert_that(provider.name).is_equal_to("anthropic")
 
-    def test_openai_provider(self):
-        config = AIConfig(provider="openai")
-        mock_openai = MagicMock()
-        with patch(
-            "lintro.ai.providers.openai.openai",
-            mock_openai,
-        ):
-            provider = get_provider(config)
-            assert_that(provider.name).is_equal_to("openai")
+def test_get_provider_openai():
+    config = AIConfig(provider="openai")
+    with patch.object(openai_mod, "_has_openai", True):
+        provider = get_provider(config)
+        assert_that(provider.name).is_equal_to("openai")
 
-    def test_unknown_provider_raises(self):
-        config = AIConfig(provider="unknown")
-        with pytest.raises(ValueError, match="Unknown AI provider"):
-            get_provider(config)
 
-    def test_case_insensitive(self):
-        config = AIConfig(provider="Anthropic")
-        mock_anthropic = MagicMock()
-        with patch(
-            "lintro.ai.providers.anthropic.anthropic",
-            mock_anthropic,
-        ):
-            provider = get_provider(config)
-            assert_that(provider.name).is_equal_to("anthropic")
+def test_get_provider_unknown_raises():
+    # Bypass Pydantic validation to test the factory's own guard.
+    config = AIConfig.model_construct(provider="unknown")
+    with pytest.raises(ValueError, match="Unknown AI provider"):
+        get_provider(config)
 
-    def test_passes_model(self):
-        config = AIConfig(
-            provider="anthropic",
-            model="claude-opus-4-20250514",
+
+def test_get_provider_case_insensitive():
+    # Bypass Pydantic Literal validation to test the factory lowercases.
+    config = AIConfig.model_construct(
+        provider="Anthropic",
+        model=None,
+        api_key_env=None,
+        max_tokens=4096,
+    )
+    with patch.object(anthropic_mod, "_has_anthropic", True):
+        provider = get_provider(config)
+        assert_that(provider.name).is_equal_to("anthropic")
+
+
+def test_get_provider_passes_model():
+    config = AIConfig(
+        provider="anthropic",
+        model="claude-opus-4-20250514",
+    )
+    with patch.object(anthropic_mod, "_has_anthropic", True):
+        provider = get_provider(config)
+        assert_that(provider.model_name).is_equal_to(
+            "claude-opus-4-20250514",
         )
-        mock_anthropic = MagicMock()
-        with patch(
-            "lintro.ai.providers.anthropic.anthropic",
-            mock_anthropic,
-        ):
-            provider = get_provider(config)
-            assert_that(provider.model_name).is_equal_to(
-                "claude-opus-4-20250514",
-            )

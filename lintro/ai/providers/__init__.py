@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from lintro.ai.exceptions import AINotAvailableError  # noqa: F401
+from lintro.ai.exceptions import AINotAvailableError  # noqa: F401 -- public re-export
 
 if TYPE_CHECKING:
     from lintro.ai.config import AIConfig

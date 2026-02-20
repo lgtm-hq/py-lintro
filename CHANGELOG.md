@@ -9,6 +9,17 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+### Added
+
+- **AI-Powered Features** (BYO API key, install with `lintro[ai]`):
+  - AI-powered issue summaries with pattern analysis and prioritized actions
+  - Interactive fix suggestions with AI-generated code diffs
+  - AI-driven risk classification (`safe-style` vs `behavioral-risk`)
+  - Multi-provider support: Anthropic Claude and OpenAI GPT
+  - Post-fix summary contextualizing applied changes
+  - Configurable retry, context lines, search radius, and timeout settings
+  - Docker AI support via `WITH_AI` build arg
+
 ### Breaking Changes
 
 - **Plugin Architecture Migration**: Complete migration from tool-specific classes to

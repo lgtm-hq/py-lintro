@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from typing import Any
 from unittest.mock import MagicMock
 
 from assertpy import assert_that
@@ -65,10 +66,10 @@ class TestToolExecutorAITotals:
         fake_logger,
     ):
         class _FakeTool:
-            def set_options(self, **kwargs):  # noqa: ANN003
+            def set_options(self, **kwargs: Any) -> None:
                 return None
 
-            def fix(self, paths, options):  # noqa: ANN001
+            def fix(self, paths: Any, options: Any) -> ToolResult:
                 return ToolResult(
                     name="ruff",
                     success=False,
@@ -78,7 +79,7 @@ class TestToolExecutorAITotals:
                     issues=[],
                 )
 
-            def check(self, paths, options):  # noqa: ANN001
+            def check(self, paths: Any, options: Any) -> ToolResult:
                 return ToolResult(
                     name="ruff",
                     success=False,
@@ -99,7 +100,7 @@ class TestToolExecutorAITotals:
             "get_tools_to_run",
             lambda tools, action: ToolsToRunResult(to_run=["ruff"]),
         )
-        monkeypatch.setattr(te.tool_manager, "get_tool", lambda name: _FakeTool())  # type: ignore[attr-defined]
+        monkeypatch.setattr(te.tool_manager, "get_tool", lambda name: _FakeTool())  # type: ignore[attr-defined] -- patching module-level tool_manager singleton
         monkeypatch.setattr(
             te,
             "configure_tool_for_execution",
@@ -142,14 +143,29 @@ class TestToolExecutorAITotals:
             result = kwargs["all_results"][0]
             result.success = True
             result.issues_count = 0
+            result.fixed_issues_count = 0
             result.remaining_issues_count = 0
 
-        import lintro.ai.orchestrator as orchestrator
+        import lintro.ai.hook as hook_module
+
+        class _FakeHook:
+            def should_run(self, action: Any) -> bool:
+                return True
+
+            def execute(
+                self,
+                action: Any,
+                all_results: Any,
+                *,
+                console_logger: Any,
+                output_format: Any,
+            ) -> None:
+                _fake_ai_enhancement(all_results=all_results)
 
         monkeypatch.setattr(
-            orchestrator,
-            "run_ai_enhancement",
-            _fake_ai_enhancement,
+            hook_module,
+            "AIPostExecutionHook",
+            lambda lintro_config, ai_fix=False: _FakeHook(),
         )
 
         captured: dict[str, int] = {}

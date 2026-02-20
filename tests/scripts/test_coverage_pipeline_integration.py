@@ -57,7 +57,8 @@ TOTAL                       235     25    89%
 """
 
     coverage_xml = """<?xml version="1.0" ?>
-<coverage version="7.0.0" timestamp="1706472000" lines-covered="210" lines-valid="235" line-rate="0.8936" branch-rate="0" complexity="0">
+<coverage version="7.0.0" timestamp="1706472000" lines-covered="210" \
+lines-valid="235" line-rate="0.8936" branch-rate="0" complexity="0">
     <packages>
         <package name="lintro" line-rate="0.8936" branch-rate="0" complexity="0">
             <classes>
