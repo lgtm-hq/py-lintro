@@ -74,14 +74,24 @@ lintro check --fix
 For each group of issues, you're prompted:
 
 ```text
-[a]ccept all / [r]eject / [d]iffs / [s]kip / [q]uit
+[y]accept group / [a]accept group + remaining / [r]reject / [d]iffs / [s]kip / [v]validate-after-group / [q]quit
 ```
 
-- **Accept** — applies the suggested fix to your files
+- **Accept group** — applies only the current group
+- **Accept group + remaining** — applies current group, then auto-accepts the rest
 - **Reject** — skips this group
 - **Diffs** — shows the unified diff before deciding
 - **Skip** — moves to the next group
+- **Validate-after-group** — toggles immediate tool validation after each accepted group
+  (does not accept/apply fixes by itself)
 - **Quit** — stops the review
+
+Each group now includes:
+
+- **Risk label** — `safe-style` vs `behavioral-risk`
+- **Patch stats** — files touched, `+/-` lines, and hunk count
+
+For safe-style groups, pressing `Enter` defaults to accepting the group.
 
 After the review session, a post-fix AI summary contextualizes what was fixed and what
 remains.
@@ -128,6 +138,9 @@ ai:
   # Auto-apply fixes without interactive review (use with caution)
   auto_apply: false
 
+  # Auto-apply deterministic style fixes (e.g. E501) in non-interactive/json runs
+  auto_apply_safe_fixes: true
+
   # Max tokens per API request
   max_tokens: 4096
 
@@ -136,6 +149,9 @@ ai:
 
   # Concurrent API calls for fix (1-20)
   max_parallel_calls: 5
+
+  # Interactive mode: validate immediately after each accepted group
+  validate_after_group: false
 
   # Show token count and cost estimate in output
   show_cost_estimate: true
@@ -273,6 +289,8 @@ When AI is enabled, the pre-execution summary table includes AI configuration:
 │               │   provider: anthropic            │
 │               │   model: claude-sonnet-4-...     │
 │               │   parallel: 5 workers            │
+│               │   safe-auto-apply: on            │
+│               │   validate-after-group: off      │
 └───────────────┴──────────────────────────────────┘
 ```
 

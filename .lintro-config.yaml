@@ -115,6 +115,8 @@ ai:
   # api_key_env: ANTHROPIC_API_KEY   # uses provider default if omitted
   # default_fix: false      # set true to always run --fix in chk
   auto_apply: false
+  auto_apply_safe_fixes: true # auto-apply deterministic style fixes (e.g. E501)
   max_tokens: 4096
   max_parallel_calls: 5 # 1-20, concurrent API calls for fix generation
+  validate_after_group: false # interactive mode: re-check right after each group
   show_cost_estimate: true

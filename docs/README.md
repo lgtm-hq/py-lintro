@@ -93,7 +93,7 @@ lintro test
 **🧠 AI-Powered Analysis:**
 
 ```bash
-lintro check --explain --fix
+lintro check --fix
 ```
 
 > [AI Features Guide](ai-features.md)
@@ -227,8 +227,7 @@ docker run --rm -v "$(pwd):/code" lintro:latest check
 
 ## 🆕 Recent Updates
 
-- **AI-powered intelligence** - AI summaries, per-code explanations (`--explain`), and
-  interactive fix suggestions (`--fix`)
+- **AI-powered intelligence** - AI summaries and interactive fix suggestions (`--fix`)
 - **Security audit framework** - Comprehensive security verification for workflows and
   scripts
 - **DRY consolidation** - Reduced duplicate patterns across workflows and actions
