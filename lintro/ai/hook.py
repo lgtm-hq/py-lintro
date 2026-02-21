@@ -20,12 +20,7 @@ if TYPE_CHECKING:
 
 
 class AIPostExecutionHook:
-    """Hook that runs AI enhancement after tool execution.
-
-    Attributes:
-        _lintro_config: Full Lintro config with AI section.
-        _ai_fix: Whether AI fix was requested (CLI flag or config).
-    """
+    """Hook that runs AI enhancement after tool execution."""
 
     def __init__(
         self,

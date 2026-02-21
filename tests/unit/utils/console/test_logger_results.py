@@ -55,8 +55,7 @@ def test_print_tool_result_includes_metadata_for_check_action(
     """
     with (
         patch.object(logger, "console_output"),
-        patch.object(logger, "_print_metadata_messages")
-        as mock_meta,
+        patch.object(logger, "_print_metadata_messages") as mock_meta,
     ):
         logger.print_tool_result(
             "ruff",
@@ -81,8 +80,7 @@ def test_print_tool_result_skips_metadata_for_fix_action(
     """
     with (
         patch.object(logger, "console_output"),
-        patch.object(logger, "_print_metadata_messages")
-        as mock_meta,
+        patch.object(logger, "_print_metadata_messages") as mock_meta,
     ):
         logger.print_tool_result(
             "ruff",
@@ -107,8 +105,7 @@ def test_print_tool_result_handles_pytest_for_test_action(
     """
     with (
         patch.object(logger, "console_output"),
-        patch.object(logger, "_print_pytest_results")
-        as mock_pytest,
+        patch.object(logger, "_print_pytest_results") as mock_pytest,
     ):
         logger.print_tool_result(
             "pytest",

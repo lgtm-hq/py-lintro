@@ -314,7 +314,7 @@ def test_execution_summary_fix_parses_cannot_autofix_from_output(
 def test_execution_summary_fix_handles_string_sentinel_remaining(
     fake_tool_result_factory: Callable[..., FakeToolResult],
 ) -> None:
-    """Verify print_execution_summary handles string sentinel for remaining_issues_count.
+    """Verify print_execution_summary handles string sentinels.
 
     String sentinel values (like 'N/A') should not be added to numeric
     totals to prevent type errors in calculations.

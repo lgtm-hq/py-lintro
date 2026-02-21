@@ -38,7 +38,6 @@ def get_provider(config: AIConfig) -> BaseAIProvider:
         BaseAIProvider: Configured provider instance.
 
     Raises:
-        AINotAvailableError: If the provider's package is not installed.
         ValueError: If the provider name is not recognized.
     """
     provider_name = config.provider.lower()

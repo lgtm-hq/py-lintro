@@ -30,6 +30,8 @@ class ValidationResult:
         unverified: Number of fixes whose issues still appear.
         new_issues: Number of pre-existing issues not targeted by fixes.
         details: Per-file validation details.
+        verified_by_tool: Verified fix counts grouped by tool name.
+        unverified_by_tool: Unverified fix counts grouped by tool name.
     """
 
     verified: int = 0

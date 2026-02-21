@@ -15,6 +15,8 @@ class AIConfig(BaseModel):
     """Configuration for AI-powered features.
 
     Attributes:
+        model_config: Pydantic model configuration for mutability and
+            extra-field handling.
         enabled: Whether AI features are enabled globally.
         provider: AI provider to use ("anthropic" or "openai").
         model: Model identifier. None uses the provider's default.

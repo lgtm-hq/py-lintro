@@ -140,7 +140,8 @@ def test_load_lintro_ignore_handles_file_read_error(tmp_path: Path) -> None:
     with (
         patch("lintro.utils.path_utils.find_lintro_ignore", return_value=ignore_file),
         patch(
-            "builtins.open", side_effect=PermissionError("Access denied")
+            "builtins.open",
+            side_effect=PermissionError("Access denied"),
         ),
     ):
         result = load_lintro_ignore()

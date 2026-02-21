@@ -14,13 +14,7 @@ from lintro.parsers.base_issue import BaseIssue
 
 
 class MockAIProvider(BaseAIProvider):
-    """Mock AI provider for testing.
-
-    Attributes:
-        responses: Queue of responses to return from complete().
-        calls: Recorded calls to complete().
-        _available: Whether the provider reports as available.
-    """
+    """Mock AI provider for testing."""
 
     def __init__(
         self,

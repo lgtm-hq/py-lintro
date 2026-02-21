@@ -34,14 +34,7 @@ DEFAULT_API_KEY_ENV = DEFAULT_API_KEY_ENVS["anthropic"]
 
 
 class AnthropicProvider(BaseAIProvider):
-    """Anthropic Claude provider.
-
-    Attributes:
-        _model: Model identifier to use.
-        _api_key_env: Environment variable name for the API key.
-        _max_tokens: Default max tokens for completions.
-        _client: Lazy-initialized Anthropic client.
-    """
+    """Anthropic Claude provider."""
 
     def __init__(
         self,

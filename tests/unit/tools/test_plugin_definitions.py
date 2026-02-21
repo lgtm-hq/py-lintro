@@ -21,10 +21,9 @@ from lintro.plugins.base import BaseToolPlugin
 # =============================================================================
 
 # Each tuple contains:
-# (ToolName, plugin_class_path, can_fix, tool_type, description_keywords, native_configs)
-PLUGIN_DEFINITIONS: list[
-    tuple[ToolName, str, bool, ToolType, list[str], list[str]]
-] = [
+# (ToolName, plugin_class_path, can_fix, tool_type,
+#  description_keywords, native_configs)
+PLUGIN_DEFINITIONS: list[tuple[ToolName, str, bool, ToolType, list[str], list[str]]] = [
     (
         ToolName.RUFF,
         "lintro.tools.definitions.ruff.RuffPlugin",

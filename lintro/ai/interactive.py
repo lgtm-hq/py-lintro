@@ -195,9 +195,7 @@ def _validate_group(
 
 def _render_prompt(*, validate_mode: bool, safe_default: bool) -> str:
     """Build interactive prompt text with current mode/default."""
-    default_text = (
-        " (Enter=accept group; safe-style default)" if safe_default else ""
-    )
+    default_text = " (Enter=accept group; safe-style default)" if safe_default else ""
     mode = "on" if validate_mode else "off"
     return (
         "  [y]accept group  [a]accept group + remaining  "

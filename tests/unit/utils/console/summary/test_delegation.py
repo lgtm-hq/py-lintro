@@ -400,12 +400,14 @@ def test_execution_summary_calls_all_components(
     logger = ThreadSafeConsoleLogger()
     results = [fake_tool_result_factory(success=True, issues_count=3)]
 
-    with patch.object(logger, "console_output"):
-        with patch.object(logger, "_print_summary_table") as mock_table:
-            with patch.object(logger, "_print_ascii_art") as mock_art:
-                logger.print_execution_summary(Action.CHECK, results)
-                mock_table.assert_called_once()
-                mock_art.assert_called_once()
+    with (
+        patch.object(logger, "console_output"),
+        patch.object(logger, "_print_summary_table") as mock_table,
+        patch.object(logger, "_print_ascii_art") as mock_art,
+    ):
+        logger.print_execution_summary(Action.CHECK, results)
+        mock_table.assert_called_once()
+        mock_art.assert_called_once()
 
 
 def test_execution_summary_empty_results_handled(

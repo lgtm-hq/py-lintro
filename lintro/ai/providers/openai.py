@@ -34,14 +34,7 @@ DEFAULT_API_KEY_ENV = DEFAULT_API_KEY_ENVS["openai"]
 
 
 class OpenAIProvider(BaseAIProvider):
-    """OpenAI GPT provider.
-
-    Attributes:
-        _model: Model identifier to use.
-        _api_key_env: Environment variable name for the API key.
-        _max_tokens: Default max tokens for completions.
-        _client: Lazy-initialized OpenAI client.
-    """
+    """OpenAI GPT provider."""
 
     def __init__(
         self,
