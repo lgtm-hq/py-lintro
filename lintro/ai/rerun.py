@@ -84,7 +84,7 @@ def paths_for_context(
 
 def rerun_tools(
     by_tool: dict[str, tuple[ToolResult, list[BaseIssue]]],
-) -> list[ToolResult]:
+) -> list[ToolResult] | None:
     """Re-run tools on analyzed files to get fresh remaining issue counts.
 
     Reuses the original tool execution cwd for path/config consistency.
@@ -98,7 +98,7 @@ def rerun_tools(
     try:
         from lintro.tools import tool_manager
     except ImportError:
-        return []
+        return None
 
     rerun_results: list[ToolResult] = []
     for tool_name, (result, issues) in by_tool.items():

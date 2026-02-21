@@ -15,7 +15,10 @@ from lintro.parsers.tsc.tsc_parser import (
 
 def test_parse_tsc_output_single_error() -> None:
     """Parse a single tsc error from text output."""
-    output = "src/main.ts(10,5): error TS2322: Type 'string' is not assignable to type 'number'."
+    output = (
+        "src/main.ts(10,5): error TS2322:"
+        " Type 'string' is not assignable to type 'number'."
+    )
     issues = parse_tsc_output(output)
 
     assert_that(issues).is_length(1)
@@ -29,7 +32,10 @@ def test_parse_tsc_output_single_error() -> None:
 
 def test_parse_tsc_output_single_warning() -> None:
     """Parse a single tsc warning from text output."""
-    output = "src/utils.ts(15,1): warning TS6133: 'x' is declared but its value is never read."
+    output = (
+        "src/utils.ts(15,1): warning TS6133:"
+        " 'x' is declared but its value is never read."
+    )
     issues = parse_tsc_output(output)
 
     assert_that(issues).is_length(1)
@@ -39,9 +45,14 @@ def test_parse_tsc_output_single_warning() -> None:
 
 def test_parse_tsc_output_multiple_errors() -> None:
     """Parse multiple errors from tsc output."""
-    output = """src/main.ts(10,5): error TS2322: Type 'string' is not assignable to type 'number'.
-src/main.ts(15,10): error TS2339: Property 'foo' does not exist on type 'Bar'.
-src/utils.ts(3,1): warning TS6133: 'x' is declared but its value is never read."""
+    output = (
+        "src/main.ts(10,5): error TS2322:"
+        " Type 'string' is not assignable to type 'number'.\n"
+        "src/main.ts(15,10): error TS2339:"
+        " Property 'foo' does not exist on type 'Bar'.\n"
+        "src/utils.ts(3,1): warning TS6133:"
+        " 'x' is declared but its value is never read."
+    )
     issues = parse_tsc_output(output)
 
     assert_that(issues).is_length(3)
@@ -104,7 +115,10 @@ src/common.cts(10,1): error TS2322: Type error."""
 
 def test_parse_tsc_output_deep_nested_path() -> None:
     """Parse errors with deeply nested file paths."""
-    output = "packages/app/src/features/auth/hooks/useAuth.ts(42,15): error TS2345: Argument type mismatch."
+    output = (
+        "packages/app/src/features/auth/hooks/useAuth.ts(42,15):"
+        " error TS2345: Argument type mismatch."
+    )
     issues = parse_tsc_output(output)
 
     assert_that(issues).is_length(1)
@@ -159,7 +173,11 @@ def test_tsc_issue_to_display_row_minimal() -> None:
 def test_parse_tsc_output_ansi_codes_stripped() -> None:
     """Strip ANSI escape codes from output for consistent CI/local parsing."""
     # Output with ANSI color codes (common in CI environments)
-    output = "\x1b[31msrc/main.ts(10,5): error TS2322: Type 'string' is not assignable to type 'number'.\x1b[0m"
+    output = (
+        "\x1b[31msrc/main.ts(10,5): error TS2322:"
+        " Type 'string' is not assignable to type 'number'."
+        "\x1b[0m"
+    )
     issues = parse_tsc_output(output)
 
     assert_that(issues).is_length(1)
@@ -185,7 +203,7 @@ def test_categorize_tsc_issues_separates_type_and_dep_errors() -> None:
             line=10,
             column=5,
             code="TS2322",
-            message="Type 'string' is not assignable to type 'number'.",
+            message=("Type 'string' is not assignable" " to type 'number'."),
             severity="error",
         ),
         TscIssue(
@@ -193,7 +211,9 @@ def test_categorize_tsc_issues_separates_type_and_dep_errors() -> None:
             line=1,
             column=1,
             code="TS2307",
-            message="Cannot find module 'react' or its corresponding type declarations.",
+            message=(
+                "Cannot find module 'react'" " or its corresponding type declarations."
+            ),
             severity="error",
         ),
         TscIssue(
@@ -306,7 +326,9 @@ def test_extract_missing_modules_from_ts2307() -> None:
             line=1,
             column=1,
             code="TS2307",
-            message="Cannot find module 'react' or its corresponding type declarations.",
+            message=(
+                "Cannot find module 'react'" " or its corresponding type declarations."
+            ),
             severity="error",
         ),
         TscIssue(
@@ -314,7 +336,10 @@ def test_extract_missing_modules_from_ts2307() -> None:
             line=2,
             column=1,
             code="TS2307",
-            message="Cannot find module '@types/node' or its corresponding type declarations.",
+            message=(
+                "Cannot find module '@types/node'"
+                " or its corresponding type declarations."
+            ),
             severity="error",
         ),
     ]

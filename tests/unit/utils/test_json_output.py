@@ -13,6 +13,7 @@ class TestCreateJsonOutput:
     """Tests for create_json_output."""
 
     def test_includes_summary_and_fix_suggestions_together(self):
+        """Verify JSON output includes both AI summary and fix suggestions."""
         result = ToolResult(name="ruff", success=False, issues_count=1)
         result.ai_metadata = {
             "summary": {
@@ -57,6 +58,7 @@ class TestCreateJsonOutput:
         )
 
     def test_normalizes_legacy_suggestions_key(self):
+        """Test that legacy suggestions key is normalized correctly."""
         result = ToolResult(name="ruff", success=False, issues_count=1)
         result.ai_metadata = {
             "summary": {"overview": "Legacy"},

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import html
 import io
 from collections import defaultdict
 from collections.abc import Sequence
@@ -148,15 +149,16 @@ def render_fixes_github(
         lines.append(f"::group::{loc}{code_label}{tool_label} \u2014 {fix.explanation}")
 
         if fix.diff:
+            sanitized_diff = fix.diff.replace("```", "``\u200b`")
             lines.append("```diff")
-            lines.append(fix.diff)
+            lines.append(sanitized_diff)
             lines.append("```")
 
         lines.append(f"Confidence: {fix.confidence}")
         lines.append("::endgroup::")
 
     if show_cost and total_cost > 0:
-        lines.append(f"AI fix cost estimate: {format_cost(total_cost)}")
+        lines.append(f"AI cost: {format_cost(total_cost)}")
 
     return "\n".join(lines)
 
@@ -196,17 +198,19 @@ def render_fixes_markdown(
             loc += f":{fix.line}"
         loc += "`"
 
-        code_label = f" **[{fix.code}]**" if fix.code else ""
-        tool_label = f" ({fix.tool_name})" if fix.tool_name else ""
+        code_label = f" **[{html.escape(fix.code)}]**" if fix.code else ""
+        tool_label = f" ({html.escape(fix.tool_name)})" if fix.tool_name else ""
 
         lines.append("<details>")
-        summary_text = f"{loc}{code_label}{tool_label}" f" \u2014 {fix.explanation}"
+        escaped_explanation = html.escape(fix.explanation) if fix.explanation else ""
+        summary_text = f"{loc}{code_label}{tool_label} \u2014 {escaped_explanation}"
         lines.append(f"<summary>{summary_text}</summary>")
         lines.append("")
 
         if fix.diff:
+            sanitized_diff = fix.diff.replace("```", "``\u200b`")
             lines.append("```diff")
-            lines.append(fix.diff)
+            lines.append(sanitized_diff)
             lines.append("```")
             lines.append("")
 
@@ -216,7 +220,7 @@ def render_fixes_markdown(
         lines.append("")
 
     if show_cost and total_cost > 0:
-        lines.append(f"*AI fix cost estimate: {format_cost(total_cost)}*")
+        lines.append(f"*AI cost: {format_cost(total_cost)}*")
 
     return "\n".join(lines)
 

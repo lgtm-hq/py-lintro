@@ -8,6 +8,7 @@ from lintro.ai.prompts import FIX_PROMPT_TEMPLATE, FIX_SYSTEM
 
 
 def test_prompts_template_renders():
+    """Verify the fix prompt template renders with all required placeholders."""
     assert_that(FIX_SYSTEM).is_not_empty()
     result = FIX_PROMPT_TEMPLATE.format(
         tool_name="ruff",
@@ -24,4 +25,5 @@ def test_prompts_template_renders():
 
 
 def test_prompts_template_includes_risk_level():
+    """Verify the fix prompt template contains a risk_level placeholder."""
     assert_that(FIX_PROMPT_TEMPLATE).contains("risk_level")

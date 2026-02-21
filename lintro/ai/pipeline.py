@@ -8,9 +8,10 @@ from typing import TYPE_CHECKING
 
 from loguru import logger as loguru_logger
 
+from lintro.ai.apply import apply_fixes
 from lintro.ai.display import render_summary, render_validation
 from lintro.ai.fix import generate_fixes
-from lintro.ai.interactive import apply_fixes, review_fixes_interactive
+from lintro.ai.interactive import review_fixes_interactive
 from lintro.ai.metadata import (
     attach_fix_suggestions_metadata,
     attach_fixed_count_metadata,
@@ -125,17 +126,19 @@ def run_fix_pipeline(
         applied_suggestions.extend(applied_safe)
         applied += len(applied_safe)
         safe_failed = len(safe_suggestions) - len(applied_safe)
-        if safe_failed and not is_json:
-            logger.console_output(
-                f"  AI: safe-style auto-apply failed for {safe_failed} " "suggestions",
-            )
         if not is_json:
-            logger.console_output(
-                f"  AI: auto-applied safe style fixes "
-                f"{len(applied_safe)}/{len(safe_suggestions)}",
+            msg = (
+                f"  AI: auto-applied {len(applied_safe)}/{len(safe_suggestions)}"
+                f" safe-style fixes"
             )
+            if safe_failed:
+                msg += f" ({safe_failed} failed)"
+            logger.console_output(msg)
 
     if ai_config.auto_apply:
+        # When safe_fast_path_applied is True, safe fixes are already counted
+        # in `applied` and failures in `safe_failed`, so only risky fixes
+        # remain as candidates. Otherwise all suggestions are candidates.
         auto_apply_candidates = (
             risky_suggestions if safe_fast_path_applied else all_suggestions
         )
@@ -145,7 +148,9 @@ def run_fix_pipeline(
             auto_apply=True,
         )
         applied_suggestions.extend(auto_applied)
+        # `applied` is cumulative (includes earlier safe fast-path increments)
         applied += len(auto_applied)
+        # `rejected` = failed candidates + failed safe fixes from fast path
         rejected = len(auto_apply_candidates) - len(auto_applied) + safe_failed
         logger.console_output(
             f"  AI: auto-applied {applied}/{len(all_suggestions)} fixes",
@@ -163,14 +168,12 @@ def run_fix_pipeline(
         rejected += rejected_count + safe_failed
         applied_suggestions.extend(interactive_applied)
 
-    fresh_remaining_results: list[ToolResult] = []
-    if applied_suggestions:
-        fresh_remaining_results = rerun_tools(by_tool)
-        if fresh_remaining_results:
-            apply_rerun_results(
-                by_tool=by_tool,
-                rerun_results=fresh_remaining_results,
-            )
+    fresh_remaining_results = rerun_tools(by_tool) if applied_suggestions else None
+    if applied_suggestions and fresh_remaining_results:
+        apply_rerun_results(
+            by_tool=by_tool,
+            rerun_results=fresh_remaining_results,
+        )
 
     validation = None
     if applied_suggestions:
@@ -213,11 +216,8 @@ def run_fix_pipeline(
 
         if applied_suggestions:
             unique_results = fresh_remaining_results
-            if not unique_results:
-                logger.console_output(
-                    "  AI: post-fix summary skipped "
-                    "(fresh rerun unavailable for verification)",
-                )
+            if unique_results is None:
+                logger.console_output("  AI: post-fix summary unavailable")
         else:
             unique_results = _unique_results_from_fix_issues(fix_issues)
 

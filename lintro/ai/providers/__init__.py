@@ -18,7 +18,7 @@ if TYPE_CHECKING:
 # Used by provider implementations and by the pre-execution summary
 # (which needs these values without importing heavy SDKs).
 DEFAULT_MODELS: dict[str, str] = {
-    "anthropic": "claude-sonnet-4-20250514",
+    "anthropic": "claude-sonnet-4-6",
     "openai": "gpt-4o",
 }
 

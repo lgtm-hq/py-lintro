@@ -28,6 +28,21 @@ if TYPE_CHECKING:
     from lintro.ai.providers.base import AIResponse, BaseAIProvider
     from lintro.models.core.tool_result import ToolResult
 
+# -- Type helpers --------------------------------------------------------------
+
+
+def _ensure_str_list(value: object) -> list[str]:
+    """Coerce an AI response value to a list of strings.
+
+    Handles the case where the AI returns a plain string instead of
+    a list, or a list containing non-string items.
+    """
+    if isinstance(value, list):
+        return [str(item) for item in value if isinstance(item, str)]
+    if isinstance(value, str):
+        return [value]
+    return []
+
 
 def _build_issues_digest(
     results: Sequence[ToolResult],
@@ -126,9 +141,9 @@ def _parse_summary_response(
 
     return AISummary(
         overview=data.get("overview", ""),
-        key_patterns=data.get("key_patterns", []),
-        priority_actions=data.get("priority_actions", []),
-        triage_suggestions=data.get("triage_suggestions", []),
+        key_patterns=_ensure_str_list(data.get("key_patterns", [])),
+        priority_actions=_ensure_str_list(data.get("priority_actions", [])),
+        triage_suggestions=_ensure_str_list(data.get("triage_suggestions", [])),
         estimated_effort=data.get("estimated_effort", ""),
         input_tokens=input_tokens,
         output_tokens=output_tokens,

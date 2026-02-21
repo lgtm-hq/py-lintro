@@ -21,6 +21,7 @@ class TestWarnAIFixDisabled:
     """Tests for warning behavior when AI fix is requested but disabled."""
 
     def test_warns_only_for_check_when_fix_requested_and_ai_disabled(self):
+        """Warn when action is CHECK, ai_fix=True, and AI disabled."""
         logger = MagicMock()
 
         _warn_ai_fix_disabled(
@@ -33,6 +34,7 @@ class TestWarnAIFixDisabled:
         assert_that(logger.console_output.call_count).is_equal_to(1)
 
     def test_no_warning_for_other_states(self):
+        """Test that no warning is issued for non-qualifying state combinations."""
         logger = MagicMock()
 
         _warn_ai_fix_disabled(
@@ -65,6 +67,8 @@ class TestToolExecutorAITotals:
         monkeypatch,
         fake_logger,
     ):
+        """Test that fix recomputes totals after AI changes."""
+
         class _FakeTool:
             def set_options(self, **kwargs: Any) -> None:
                 return None
@@ -100,7 +104,11 @@ class TestToolExecutorAITotals:
             "get_tools_to_run",
             lambda tools, action: ToolsToRunResult(to_run=["ruff"]),
         )
-        monkeypatch.setattr(te.tool_manager, "get_tool", lambda name: _FakeTool())  # type: ignore[attr-defined] -- patching module-level tool_manager singleton
+        monkeypatch.setattr(
+            te.tool_manager,  # type: ignore[attr-defined]  # singleton
+            "get_tool",
+            lambda name: _FakeTool(),
+        )
         monkeypatch.setattr(
             te,
             "configure_tool_for_execution",

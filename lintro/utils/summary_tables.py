@@ -327,7 +327,7 @@ def print_summary_table(
                             f"{_YELLOW}⏭️  SKIP{_RESET}",
                             "-",  # Fixed
                             "-",  # AI-Applied
-                            "-",  # AI-Verified
+                            "-",  # AI-Resolved
                             "-",  # Remaining
                             f"{_YELLOW}{skip_reason}{_RESET}" if skip_reason else "",
                         ],
@@ -393,7 +393,7 @@ def print_summary_table(
                 ai_verified_display: str = f"{_GREEN}{ai_verified_value}{_RESET}"
                 ai_unverified_value = _get_ai_unverified_count(result)
                 notes_display = (
-                    f"{_YELLOW}{ai_unverified_value} unverified{_RESET}"
+                    f"{_YELLOW}{ai_unverified_value} unresolved{_RESET}"
                     if ai_unverified_value > 0
                     else ""
                 )
@@ -496,7 +496,7 @@ def print_summary_table(
                 "Status",
                 "Fixed",
                 "AI-Applied",
-                "AI-Verified",
+                "AI-Resolved",
                 "Remaining",
                 "Notes",
             ]
@@ -559,7 +559,7 @@ def print_totals_table(
             rows: list[list[str | int]] = [
                 ["Fixed Issues (Native)", total_fixed],
                 ["AI Applied Fixes", total_ai_applied],
-                ["AI Verified Fixes", total_ai_verified],
+                ["AI Resolved Fixes", total_ai_verified],
                 ["Total Resolved", total_resolved],
                 ["Remaining Issues", total_remaining],
                 ["Affected Files", affected_files],

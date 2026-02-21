@@ -28,7 +28,7 @@ from lintro.ai.prompts import FIX_PROMPT_TEMPLATE, FIX_SYSTEM
 from lintro.ai.retry import with_retry
 
 if TYPE_CHECKING:
-    from lintro.ai.providers.base import BaseAIProvider
+    from lintro.ai.providers.base import AIResponse, BaseAIProvider
     from lintro.parsers.base_issue import BaseIssue
 
 
@@ -38,7 +38,7 @@ def _call_provider(
     system: str,
     max_tokens: int,
     timeout: float = 60.0,
-) -> object:
+) -> AIResponse:
     """Call the AI provider (no retry — caller wraps with retry)."""
     return provider.complete(
         prompt,

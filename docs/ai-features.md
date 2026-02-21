@@ -6,7 +6,7 @@ interactive fix suggestions on top of standard linting results.
 > **Requirements:** Python package extra + an API key.
 >
 > ```bash
-> uv pip install 'lintro[ai]'
+> pip install -e '.[ai]'
 > export ANTHROPIC_API_KEY=sk-ant-...   # or OPENAI_API_KEY for OpenAI
 > ```
 
@@ -100,11 +100,12 @@ For safe-style groups, pressing `Enter` defaults to accepting the group.
 After the review session, a post-fix AI summary contextualizes what was fixed and what
 remains.
 
-### AI Fixes in `fmt`
+### AI Fixes in `format`
 
 When running `lintro format`, tools auto-fix what they can. For remaining unfixable
 issues, the AI generates fix suggestions and presents them interactively (same UX as
-`--fix` in `chk`). After the session, a post-fix summary wraps up what was accomplished.
+`--fix` in `check`). After the session, a post-fix summary wraps up what was
+accomplished.
 
 ## Configuration
 
@@ -116,7 +117,7 @@ Add the `ai` section to `.lintro-config.yaml`:
 ai:
   enabled: true
   provider: anthropic # or "openai"
-  # model: claude-sonnet-4-20250514  # uses provider default if omitted
+  # model: claude-sonnet-4-6  # uses provider default if omitted
   # api_key_env: ANTHROPIC_API_KEY   # uses provider default if omitted
 ```
 
@@ -131,7 +132,7 @@ ai:
   provider: anthropic
 
   # Model override (uses provider default if omitted)
-  # model: claude-sonnet-4-20250514
+  # model: claude-sonnet-4-6
 
   # Custom env var for API key (uses provider default if omitted)
   # api_key_env: MY_CUSTOM_KEY
@@ -193,7 +194,7 @@ CLI flags always override config: passing `--fix` on the CLI turns it on even if
 
 ### Providers
 
-#### Anthropic (default)
+#### [Anthropic](https://docs.anthropic.com/) (default)
 
 ```bash
 export ANTHROPIC_API_KEY=sk-ant-...
@@ -202,10 +203,13 @@ export ANTHROPIC_API_KEY=sk-ant-...
 ```yaml
 ai:
   provider: anthropic
-  # model: claude-sonnet-4-20250514  # default
+  # model: claude-sonnet-4-6  # default
 ```
 
-#### OpenAI
+See the [Anthropic API docs](https://docs.anthropic.com/en/api/) for model options and
+pricing.
+
+#### [OpenAI](https://platform.openai.com/docs/)
 
 ```bash
 export OPENAI_API_KEY=sk-...
@@ -216,6 +220,9 @@ ai:
   provider: openai
   # model: gpt-4o  # default
 ```
+
+See the [OpenAI API docs](https://platform.openai.com/docs/api-reference/) for model
+options and pricing.
 
 ## Environment Support
 
@@ -295,7 +302,7 @@ AI failures never break the main linting flow. If the provider is unavailable, y
 your normal linting results with a one-line notice:
 
 ```text
-AI: enhancement unavailable (API key not set)
+AI: enhancement unavailable
 ```
 
 ## Pre-Execution Summary
@@ -311,7 +318,7 @@ When AI is enabled, the pre-execution summary table includes AI configuration:
 │               │   model: claude-sonnet-4-...     │
 │               │   parallel: 5 workers            │
 │               │   safe-auto-apply: on            │
-│               │   validate-after-group: off      │
+│               │   verify-fixes: off               │
 └───────────────┴──────────────────────────────────┘
 ```
 
@@ -344,7 +351,7 @@ docker build --build-arg WITH_AI=true -t lintro-ai .
 
 ## Troubleshooting
 
-### "AI: enhancement unavailable"
+### AI: enhancement unavailable
 
 **SDK not installed:**
 

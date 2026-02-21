@@ -51,7 +51,7 @@ def _make_ai_response(
     risk_level: str | None = None,
 ) -> AIResponse:
     """Helper to build a successful AIResponse with a valid JSON payload."""
-    payload: dict = {
+    payload: dict[str, str | None] = {
         "original_code": original,
         "suggested_code": suggested,
         "explanation": explanation,
@@ -103,12 +103,14 @@ def test_extract_context_extracts_context():
 
 
 def test_extract_context_clamps_to_start():
+    """Verify context window clamps to the first line when target is near the start."""
     content = "\n".join(f"line {i}" for i in range(1, 11))
     context, start, end = _extract_context(content, 1, 5)
     assert_that(start).is_equal_to(1)
 
 
 def test_extract_context_clamps_to_end():
+    """Verify context window clamps to the last line when target is near the end."""
     content = "\n".join(f"line {i}" for i in range(1, 11))
     context, start, end = _extract_context(content, 10, 5)
     assert_that(end).is_equal_to(10)
@@ -120,6 +122,7 @@ def test_extract_context_clamps_to_end():
 
 
 def test_generate_diff_generates_unified_diff():
+    """Verify unified diff output contains expected file headers and change markers."""
     diff = _generate_diff("test.py", "old code\n", "new code\n")
     assert_that(diff).contains("a/test.py")
     assert_that(diff).contains("b/test.py")
@@ -128,6 +131,7 @@ def test_generate_diff_generates_unified_diff():
 
 
 def test_generate_diff_no_diff_for_identical():
+    """Verify that identical content produces an empty diff string."""
     diff = _generate_diff("test.py", "same\n", "same\n")
     assert_that(diff).is_equal_to("")
 
@@ -138,6 +142,7 @@ def test_generate_diff_no_diff_for_identical():
 
 
 def test_parse_fix_response_valid_response():
+    """Valid JSON is parsed into a fix suggestion with correct fields."""
     content = json.dumps(
         {
             "original_code": "assert x > 0",
@@ -155,11 +160,13 @@ def test_parse_fix_response_valid_response():
 
 
 def test_parse_fix_response_invalid_json():
+    """Verify that invalid JSON content returns None."""
     result = _parse_fix_response("not json", "main.py", 10, "B101")
     assert_that(result).is_none()
 
 
 def test_parse_fix_response_identical_code():
+    """Verify that identical original and suggested code returns None."""
     content = json.dumps(
         {
             "original_code": "x = 1",
@@ -173,6 +180,7 @@ def test_parse_fix_response_identical_code():
 
 
 def test_parse_fix_response_empty_original():
+    """Verify that an empty original_code field returns None."""
     content = json.dumps(
         {
             "original_code": "",
@@ -224,6 +232,7 @@ def test_parse_fix_response_risk_level_defaults_to_empty():
 
 
 def test_generate_fixes_empty_issues(mock_provider):
+    """Verify that an empty issue list returns an empty result."""
     result = generate_fixes(
         [],
         mock_provider,
@@ -233,6 +242,7 @@ def test_generate_fixes_empty_issues(mock_provider):
 
 
 def test_generate_fixes_generates_fixes_for_unfixable(tmp_path):
+    """Unfixable issues are sent to the AI and produce suggestions."""
     source = tmp_path / "test.py"
     source.write_text("assert x > 0\nprint('hello')\n")
 
@@ -298,6 +308,7 @@ def test_generate_fixes_processes_fixable_issues(tmp_path):
 
 
 def test_generate_fixes_skips_issues_without_file(mock_provider):
+    """Verify that issues without a file path are skipped."""
     issue = MockIssue(line=1, code="B101", message="test")
     result = generate_fixes(
         [issue],
@@ -308,6 +319,7 @@ def test_generate_fixes_skips_issues_without_file(mock_provider):
 
 
 def test_generate_fixes_respects_max_issues(tmp_path):
+    """Verify that the max_issues parameter limits the number of provider calls."""
     source = tmp_path / "test.py"
     source.write_text("x = 1\n" * 50)
 
@@ -334,6 +346,7 @@ def test_generate_fixes_respects_max_issues(tmp_path):
 
 
 def test_generate_fixes_handles_provider_error(tmp_path):
+    """Verify that a provider exception results in an empty fix list."""
     source = tmp_path / "test.py"
     source.write_text("x = 1\n")
 
@@ -384,6 +397,7 @@ def test_generate_fixes_skips_issues_with_unreadable_relative_paths(tmp_path):
 
 
 def test_generate_fixes_provider_prompt_uses_workspace_relative_path(tmp_path):
+    """Provider prompt contains workspace-relative paths, not absolute."""
     source = tmp_path / "src" / "service.py"
     source.parent.mkdir(parents=True)
     source.write_text("assert ready\n", encoding="utf-8")
@@ -428,6 +442,7 @@ def test_generate_fixes_provider_prompt_uses_workspace_relative_path(tmp_path):
 
 
 def test_generate_fixes_skips_issue_outside_workspace_root(tmp_path):
+    """Verify that issues with files outside the workspace root are skipped."""
     outside = tmp_path.parent / "outside.py"
     outside.write_text("assert x\n", encoding="utf-8")
 
@@ -717,11 +732,13 @@ def test_max_retries_zero_means_no_retry(tmp_path):
 
 
 def test_tool_result_cwd_defaults_to_none():
+    """Verify that ToolResult.cwd defaults to None when not specified."""
     result = ToolResult(name="test", success=True)
     assert_that(result.cwd).is_none()
 
 
 def test_tool_result_cwd_preserves_value():
+    """Verify that ToolResult.cwd preserves the value passed at construction."""
     result = ToolResult(name="test", success=True, cwd="/some/path")
     assert_that(result.cwd).is_equal_to("/some/path")
 

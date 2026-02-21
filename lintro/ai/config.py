@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 class AIConfig(BaseModel):
@@ -73,3 +73,13 @@ class AIConfig(BaseModel):
     retry_base_delay: float = Field(default=1.0, ge=0.1)
     retry_max_delay: float = Field(default=30.0, ge=1.0)
     retry_backoff_factor: float = Field(default=2.0, ge=1.0)
+
+    @model_validator(mode="after")
+    def _check_retry_delays(self) -> AIConfig:
+        if self.retry_max_delay < self.retry_base_delay:
+            msg = (
+                f"retry_max_delay ({self.retry_max_delay}) must be >= "
+                f"retry_base_delay ({self.retry_base_delay})"
+            )
+            raise ValueError(msg)
+        return self

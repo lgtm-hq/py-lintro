@@ -127,10 +127,12 @@ def test_extract_with_coverage_xml() -> None:
     <packages>
         <package name="lintro" line-rate="0.8" branch-rate="0.0" complexity="0">
             <classes>
-                <class name="foo.py" filename="lintro/foo.py" line-rate="0.9" branch-rate="0.0" complexity="0">
+                <class name="foo.py" filename="lintro/foo.py"
+                      line-rate="0.9" branch-rate="0.0" complexity="0">
                     <lines/>
                 </class>
-                <class name="bar.py" filename="lintro/bar.py" line-rate="0.7" branch-rate="0.0" complexity="0">
+                <class name="bar.py" filename="lintro/bar.py"
+                      line-rate="0.7" branch-rate="0.0" complexity="0">
                     <lines/>
                 </class>
             </classes>

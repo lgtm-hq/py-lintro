@@ -161,7 +161,7 @@ def test_patch_stats_is_frozen() -> None:
     """PatchStats is a frozen dataclass."""
     stats = PatchStats(files=1, hunks=2, lines_added=3, lines_removed=4)
     with pytest.raises(AttributeError):
-        stats.files = 99  # type: ignore[misc] -- intentionally mutating frozen dataclass to test immutability
+        stats.files = 99  # type: ignore[misc]  # intentionally mutating frozen dataclass
 
 
 # -- calculate_patch_stats -------------------------------------------------

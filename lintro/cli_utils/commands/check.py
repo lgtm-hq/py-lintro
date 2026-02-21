@@ -223,6 +223,7 @@ def check(
     no_log: bool,
     auto_install: bool = False,
     yes: bool = False,
+    ai_fix: bool = False,
 ) -> None:
     """Programmatic check function for backward compatibility.
 
@@ -240,6 +241,7 @@ def check(
         no_log: bool: Whether to disable logging to file.
         auto_install: bool: Whether to auto-install Node.js deps if missing.
         yes: bool: Skip confirmation prompt and proceed immediately.
+        ai_fix: bool: Generate AI fix suggestions with interactive review.
 
     Returns:
         None: This function does not return a value.
@@ -272,6 +274,8 @@ def check(
         args.append("--auto-install")
     if yes:
         args.append("--yes")
+    if ai_fix:
+        args.append("--fix")
 
     runner = CliRunner()
     result = runner.invoke(check_command, args)

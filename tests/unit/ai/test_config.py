@@ -63,7 +63,7 @@ def test_provider_openai() -> None:
 def test_provider_invalid_rejected() -> None:
     """An invalid provider string is rejected by validation."""
     with pytest.raises(ValidationError):
-        AIConfig(provider="gemini")  # type: ignore[arg-type] -- intentionally invalid for validation test
+        AIConfig(provider="gemini")  # type: ignore[arg-type]  # intentionally invalid
 
 
 # -- Boolean overrides -----------------------------------------------------
@@ -275,4 +275,4 @@ def test_retry_backoff_factor_rejects_below_minimum() -> None:
 def test_extra_fields_forbidden() -> None:
     """Unknown fields are rejected by the model."""
     with pytest.raises(ValidationError):
-        AIConfig(unknown_field="value")  # type: ignore[call-arg] -- intentionally invalid for validation test
+        AIConfig(unknown_field="value")  # type: ignore[call-arg]  # intentionally invalid

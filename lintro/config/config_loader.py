@@ -279,6 +279,9 @@ def _parse_defaults(data: dict[str, Any]) -> dict[str, dict[str, Any]]:
 def _parse_ai_config(data: dict[str, Any]) -> AIConfig:
     """Parse AI configuration section.
 
+    Passes only recognized keys through to AIConfig so the model's
+    own defaults apply for any omitted fields.
+
     Args:
         data: Raw 'ai' section from config.
 
@@ -288,27 +291,9 @@ def _parse_ai_config(data: dict[str, Any]) -> AIConfig:
     if not data:
         return AIConfig()
 
-    return AIConfig(
-        enabled=data.get("enabled", False),
-        provider=data.get("provider", "anthropic"),
-        model=data.get("model"),
-        api_key_env=data.get("api_key_env"),
-        default_fix=data.get("default_fix", False),
-        auto_apply=data.get("auto_apply", False),
-        auto_apply_safe_fixes=data.get("auto_apply_safe_fixes", True),
-        max_tokens=data.get("max_tokens", 4096),
-        max_fix_issues=data.get("max_fix_issues", 20),
-        max_parallel_calls=data.get("max_parallel_calls", 5),
-        max_retries=data.get("max_retries", 2),
-        api_timeout=data.get("api_timeout", 60.0),
-        validate_after_group=data.get("validate_after_group", False),
-        show_cost_estimate=data.get("show_cost_estimate", True),
-        context_lines=data.get("context_lines", 15),
-        fix_search_radius=data.get("fix_search_radius", 5),
-        retry_base_delay=data.get("retry_base_delay", 1.0),
-        retry_max_delay=data.get("retry_max_delay", 30.0),
-        retry_backoff_factor=data.get("retry_backoff_factor", 2.0),
-    )
+    known_fields = set(AIConfig.model_fields)
+    filtered = {k: v for k, v in data.items() if k in known_fields}
+    return AIConfig(**filtered)
 
 
 def _convert_pyproject_to_config(data: dict[str, Any]) -> dict[str, Any]:

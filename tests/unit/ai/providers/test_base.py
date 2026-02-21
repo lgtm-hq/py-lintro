@@ -8,6 +8,7 @@ from lintro.ai.providers.base import AIResponse, BaseAIProvider
 
 
 def test_ai_response_defaults():
+    """Verify that AIResponse fields default to zero or empty when not provided."""
     resp = AIResponse(content="hello", model="test")
     assert_that(resp.content).is_equal_to("hello")
     assert_that(resp.model).is_equal_to("test")
@@ -18,6 +19,7 @@ def test_ai_response_defaults():
 
 
 def test_ai_response_with_all_fields():
+    """Verify that AIResponse stores all explicitly provided field values."""
     resp = AIResponse(
         content="test",
         model="gpt-4o",
@@ -31,6 +33,8 @@ def test_ai_response_with_all_fields():
 
 
 def test_base_ai_provider_complete_subclass():
+    """A complete BaseAIProvider subclass can be instantiated."""
+
     class TestProvider(BaseAIProvider):
         def complete(
             self,
@@ -63,3 +67,23 @@ def test_base_ai_provider_complete_subclass():
 
     result = provider.complete("hello")
     assert_that(result.content).is_equal_to("ok")
+
+
+def test_base_ai_provider_cannot_instantiate_directly():
+    """BaseAIProvider is abstract and cannot be instantiated."""
+    import pytest
+
+    with pytest.raises(TypeError):
+        BaseAIProvider()  # type: ignore[abstract]  # intentionally testing abstract
+
+
+def test_incomplete_subclass_fails():
+    """A subclass missing abstract methods cannot be instantiated."""
+    import pytest
+
+    class IncompleteProvider(BaseAIProvider):
+        def is_available(self):
+            return True
+
+    with pytest.raises(TypeError):
+        IncompleteProvider()  # type: ignore[abstract]  # intentionally testing abstract

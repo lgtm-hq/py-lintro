@@ -76,6 +76,7 @@ def test_run_ai_enhancement_check_fix_preserves_summary_and_fix_metadata(
     _check_config,
     _mock_logger,
 ):
+    """Verify check+fix action attaches both summary and fix metadata to the result."""
     result = _single_issue_result
     config = _check_config
     logger = _mock_logger
@@ -124,6 +125,7 @@ def test_run_ai_enhancement_fix_action_generates_fix_metadata(
     mock_get_provider,
     _mock_require_ai,
 ):
+    """Verify fix action populates applied/verified counts."""
     result = ToolResult(
         name="ruff",
         success=False,
@@ -196,6 +198,7 @@ def test_run_ai_enhancement_fix_action_noninteractive_applies_safe_then_reviews_
     mock_get_provider,
     _mock_require_ai,
 ):
+    """Non-interactive mode auto-applies safe fixes, reviews risky."""
     result = ToolResult(
         name="ruff",
         success=False,
@@ -279,6 +282,7 @@ def test_run_ai_enhancement_fix_action_json_auto_applies_safe_style_suggestions(
     mock_get_provider,
     _mock_require_ai,
 ):
+    """JSON mode auto-applies only safe-style suggestions and reruns."""
     result = ToolResult(
         name="ruff",
         success=False,
@@ -368,6 +372,7 @@ def test_run_ai_enhancement_fix_action_json_uses_fresh_rerun_results(
     mock_get_provider,
     _mock_require_ai,
 ):
+    """Verify JSON fix action updates result counts from fresh rerun tool output."""
     result = ToolResult(
         name="ruff",
         success=False,
@@ -441,6 +446,7 @@ def test_run_ai_enhancement_fix_action_passes_validate_mode_to_interactive_revie
     mock_get_provider,
     _mock_require_ai,
 ):
+    """Verify validate_after_group config flag is forwarded to interactive review."""
     result = ToolResult(
         name="ruff",
         success=False,
@@ -495,6 +501,7 @@ def test_run_ai_enhancement_fix_action_uses_only_remaining_issue_tail(
     mock_get_provider,
     _mock_require_ai,
 ):
+    """Fix generation receives only remaining issues, not fixed."""
     fixed_issue = MockIssue(
         file="src/main.py",
         line=1,
@@ -545,6 +552,7 @@ def test_run_ai_enhancement_fix_action_skips_tools_with_zero_remaining_issues(
     mock_get_provider,
     _mock_require_ai,
 ):
+    """Verify fix generation is skipped for tools with zero remaining issues."""
     result = ToolResult(
         name="prettier",
         success=True,
@@ -591,6 +599,7 @@ def test_run_ai_enhancement_fix_action_uses_fresh_rerun_results_for_post_summary
     mock_get_provider,
     _mock_require_ai,
 ):
+    """Post-fix summary receives fresh rerun results, not stale."""
     result = ToolResult(
         name="ruff",
         success=False,
@@ -656,6 +665,7 @@ def test_run_ai_enhancement_fix_action_uses_fresh_rerun_results_for_post_summary
 
 
 def test_rerun_context_paths_for_context_relativizes_to_tool_cwd(tmp_path):
+    """Paths inside tool cwd become relative; outside stay absolute."""
     tool_cwd = tmp_path / "tool"
     tool_cwd.mkdir(parents=True)
     inside = tool_cwd / "src" / "main.py"
@@ -675,6 +685,7 @@ def test_rerun_context_paths_for_context_relativizes_to_tool_cwd(tmp_path):
 
 @patch("lintro.tools.tool_manager.get_tool")
 def test_rerun_context_rerun_uses_original_tool_cwd(mock_get_tool, tmp_path):
+    """Verify rerun_tools changes cwd to the original tool working directory."""
     tool_cwd = tmp_path / "tool"
     tool_cwd.mkdir(parents=True)
     source = tool_cwd / "src" / "main.py"
@@ -713,7 +724,7 @@ def test_rerun_context_rerun_uses_original_tool_cwd(mock_get_tool, tmp_path):
             )
 
     mock_get_tool.return_value = _FakeTool()
-    rerun_results = rerun_tools(by_tool)  # type: ignore[arg-type] -- test uses simplified mock data
+    rerun_results = rerun_tools(by_tool)  # type: ignore[arg-type]  # test uses simplified mock data
 
     assert_that(rerun_results).is_length(1)
     assert_that(captured.get("cwd")).is_equal_to(str(tool_cwd))
@@ -775,10 +786,11 @@ def test_rerun_context_rerun_continues_on_tool_failure(mock_get_tool, tmp_path):
         "failing-tool": (result_a, [issue_a]),
         "passing-tool": (result_b, [issue_b]),
     }
-    rerun_results = rerun_tools(by_tool)  # type: ignore[arg-type] -- test uses simplified mock data
+    rerun_results = rerun_tools(by_tool)  # type: ignore[arg-type]  # test uses simplified mock data
 
     assert_that(call_count["failing"]).is_equal_to(1)
     assert_that(call_count["passing"]).is_equal_to(1)
+    assert rerun_results is not None
     assert_that(rerun_results).is_length(1)
     assert_that(rerun_results[0].name).is_equal_to("passing-tool")
 
@@ -796,6 +808,7 @@ def test_summary_attachment_summary_attached_to_all_results_with_issues(
     mock_get_provider,
     _mock_require_ai,
 ):
+    """Verify the AI summary is attached to every result that has issues."""
     result_a = ToolResult(
         name="ruff",
         success=False,

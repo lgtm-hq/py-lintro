@@ -17,6 +17,7 @@ from lintro.ai.availability import (
 
 
 def test_availability_available_when_anthropic_installed():
+    """Verify AI is available when the anthropic module is installed."""
     reset_availability_cache()
     with patch.dict("sys.modules", {"anthropic": object()}):
         reset_availability_cache()
@@ -25,18 +26,29 @@ def test_availability_available_when_anthropic_installed():
 
 
 def test_availability_caching():
+    """Subsequent calls use cached result without re-importing."""
+    import sys
+
     reset_availability_cache()
-    result1 = is_ai_available()
-    result2 = is_ai_available()
+    sys.modules.pop("anthropic", None)
+    sys.modules.pop("openai", None)
+    with patch(
+        "importlib.import_module",
+        side_effect=ImportError,
+    ):
+        result1 = is_ai_available()
+        result2 = is_ai_available()
     assert_that(result1).is_equal_to(result2)
 
 
 def test_availability_unknown_provider():
+    """Verify that an unknown provider is reported as unavailable."""
     result = is_provider_available("unknown")
     assert_that(result).is_false()
 
 
 def test_availability_require_raises_when_unavailable():
+    """Verify require_ai raises UsageError when AI is not available."""
     with (
         patch(
             "lintro.ai.availability.is_ai_available",
@@ -48,6 +60,7 @@ def test_availability_require_raises_when_unavailable():
 
 
 def test_availability_require_passes_when_available():
+    """Verify require_ai succeeds without error when AI is available."""
     with patch(
         "lintro.ai.availability.is_ai_available",
         return_value=True,

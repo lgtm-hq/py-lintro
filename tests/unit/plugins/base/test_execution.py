@@ -121,9 +121,11 @@ def test_validate_paths_inaccessible_raises(
     test_file = tmp_path / "test.py"
     test_file.write_text("print('hello')")
 
-    with patch("os.access", return_value=False):
-        with pytest.raises(PermissionError, match="not accessible"):
-            fake_tool_plugin._validate_paths([str(test_file)])
+    with (
+        patch("os.access", return_value=False),
+        pytest.raises(PermissionError, match="not accessible"),
+    ):
+        fake_tool_plugin._validate_paths([str(test_file)])
 
 
 # =============================================================================

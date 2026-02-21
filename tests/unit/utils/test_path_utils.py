@@ -137,9 +137,13 @@ def test_load_lintro_ignore_handles_file_read_error(tmp_path: Path) -> None:
     ignore_file = tmp_path / ".lintro-ignore"
     ignore_file.write_text("*.pyc\n")
 
-    with patch("lintro.utils.path_utils.find_lintro_ignore", return_value=ignore_file):
-        with patch("builtins.open", side_effect=PermissionError("Access denied")):
-            result = load_lintro_ignore()
+    with (
+        patch("lintro.utils.path_utils.find_lintro_ignore", return_value=ignore_file),
+        patch(
+            "builtins.open", side_effect=PermissionError("Access denied")
+        ),
+    ):
+        result = load_lintro_ignore()
 
     assert_that(result).is_empty()
 

@@ -68,7 +68,7 @@ def run_ai_enhancement(
             )
     except Exception as e:
         loguru_logger.debug(f"AI enhancement failed: {e}", exc_info=True)
-        logger.console_output(f"AI: enhancement unavailable ({e})")
+        logger.console_output("  AI: enhancement unavailable")
 
 
 def _run_ai_check(
@@ -249,8 +249,8 @@ def _log_fix_limit_message(
         return
     skipped = total_issues - max_fix_issues
     logger.console_output(
-        f"\n  AI analyzed {max_fix_issues} of "
-        f"{total_issues} remaining issues "
+        f"\n  AI: analyzed {max_fix_issues} of "
+        f"{total_issues} issues "
         f"({skipped} skipped due to limit)\n"
         f"   Increase ai.max_fix_issues in .lintro-config.yaml "
         f"to analyze more",

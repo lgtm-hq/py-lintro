@@ -19,6 +19,7 @@ from lintro.models.core.tool_result import ToolResult
 
 
 def test_metadata_summary_and_fixes_coexist():
+    """Summary and fix_suggestions metadata coexist on a ToolResult."""
     result = ToolResult(name="ruff", success=True)
     summary = AISummary(overview="Overview")
     suggestion = AIFixSuggestion(
@@ -39,6 +40,7 @@ def test_metadata_summary_and_fixes_coexist():
 
 
 def test_metadata_normalize_supports_legacy_suggestions_key():
+    """Verify that the legacy 'suggestions' key is normalized to 'fix_suggestions'."""
     raw = {
         "summary": {"overview": "Legacy summary"},
         "type": "fix_suggestions",
@@ -53,6 +55,7 @@ def test_metadata_normalize_supports_legacy_suggestions_key():
 
 
 def test_metadata_fixed_count_is_attached_and_normalized():
+    """Fixed and validation counts are attached and normalized."""
     result = ToolResult(name="ruff", success=True)
     attach_fixed_count_metadata(result, 3)
     attach_validation_counts_metadata(
@@ -79,6 +82,7 @@ def test_metadata_fixed_count_is_attached_and_normalized():
 
 
 def test_metadata_payload_to_dict_serialization():
+    """Verify that AIMetadataPayload.to_dict serializes all fields correctly."""
     payload = AIMetadataPayload(
         summary=AISummaryPayload(overview="Test overview", estimated_effort="1h"),
         fix_suggestions=[

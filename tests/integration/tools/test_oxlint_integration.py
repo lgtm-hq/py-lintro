@@ -195,7 +195,8 @@ def test_definition_file_patterns(
 ) -> None:
     """Verify OxlintPlugin definition includes JS/TS file patterns.
 
-    Tests that the plugin is configured to handle JS/TS files (*.js, *.ts, *.jsx, *.tsx).
+    Tests that the plugin is configured to handle JS/TS files
+    (*.js, *.ts, *.jsx, *.tsx).
 
     Args:
         get_plugin: Fixture factory to get plugin instances.

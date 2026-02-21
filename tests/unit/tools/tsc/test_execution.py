@@ -59,7 +59,10 @@ def test_check_with_mocked_subprocess_issues(
     test_file = tmp_path / "main.ts"
     test_file.write_text("const x: number = 'string';\n")
 
-    tsc_output = f"{test_file}(1,7): error TS2322: Type 'string' is not assignable to type 'number'."
+    tsc_output = (
+        f"{test_file}(1,7): error TS2322:"
+        " Type 'string' is not assignable to type 'number'."
+    )
 
     with (
         patch(
@@ -144,8 +147,12 @@ def test_check_parses_multiple_issues(
     test_file = tmp_path / "main.ts"
     test_file.write_text("const x: number = 'a';\nconst y: string = 42;\n")
 
-    tsc_output = f"""{test_file}(1,7): error TS2322: Type 'string' is not assignable to type 'number'.
-{test_file}(2,7): error TS2322: Type 'number' is not assignable to type 'string'."""
+    tsc_output = (
+        f"{test_file}(1,7): error TS2322:"
+        " Type 'string' is not assignable to type 'number'.\n"
+        f"{test_file}(2,7): error TS2322:"
+        " Type 'number' is not assignable to type 'string'."
+    )
 
     with (
         patch(

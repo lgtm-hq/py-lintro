@@ -1,6 +1,7 @@
 """Unit tests for ThreadSafeConsoleLogger summary delegation methods.
 
-This module tests the delegation functionality of ThreadSafeConsoleLogger summary methods,
+This module tests the delegation functionality of ThreadSafeConsoleLogger summary
+methods,
 including summary table, final status, and ASCII art delegation.
 """
 
@@ -374,12 +375,14 @@ def test_execution_summary_outputs_header_and_border(
     logger = ThreadSafeConsoleLogger()
     results = [fake_tool_result_factory(success=True, issues_count=0)]
 
-    with patch.object(logger, "console_output") as mock_output:
-        with patch.object(logger, "_print_summary_table"):
-            with patch.object(logger, "_print_ascii_art"):
-                logger.print_execution_summary(Action.CHECK, results)
-                # Should have multiple output calls including header
-                assert_that(mock_output.call_count).is_greater_than(0)
+    with (
+        patch.object(logger, "console_output") as mock_output,
+        patch.object(logger, "_print_summary_table"),
+        patch.object(logger, "_print_ascii_art"),
+    ):
+        logger.print_execution_summary(Action.CHECK, results)
+        # Should have multiple output calls including header
+        assert_that(mock_output.call_count).is_greater_than(0)
 
 
 def test_execution_summary_calls_all_components(
@@ -419,11 +422,13 @@ def test_execution_summary_empty_results_handled(
     """
     logger = ThreadSafeConsoleLogger()
 
-    with patch.object(logger, "console_output"):
-        with patch.object(logger, "_print_summary_table"):
-            with patch.object(logger, "_print_ascii_art") as mock_art:
-                logger.print_execution_summary(Action.CHECK, [])
-                mock_art.assert_called_once_with(total_issues=0)
+    with (
+        patch.object(logger, "console_output"),
+        patch.object(logger, "_print_summary_table"),
+        patch.object(logger, "_print_ascii_art") as mock_art,
+    ):
+        logger.print_execution_summary(Action.CHECK, [])
+        mock_art.assert_called_once_with(total_issues=0)
 
 
 @pytest.mark.parametrize(
@@ -447,8 +452,10 @@ def test_execution_summary_all_action_types(
     logger = ThreadSafeConsoleLogger()
     results = [fake_tool_result_factory(success=True, issues_count=0)]
 
-    with patch.object(logger, "console_output"):
-        with patch.object(logger, "_print_summary_table"):
-            with patch.object(logger, "_print_ascii_art"):
-                # Should not raise for any action type
-                logger.print_execution_summary(action, results)
+    with (
+        patch.object(logger, "console_output"),
+        patch.object(logger, "_print_summary_table"),
+        patch.object(logger, "_print_ascii_art"),
+    ):
+        # Should not raise for any action type
+        logger.print_execution_summary(action, results)

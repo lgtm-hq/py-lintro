@@ -32,11 +32,19 @@ from lintro.utils.display_helpers import (
 
 
 def _get_ai_count(result: object, key: str) -> int:
-    """Get an integer AI metadata count from a result object."""
+    """Get an integer AI metadata count from a result object.
+
+    Falls back from ``applied_count`` to ``fixed_count`` for
+    backward compatibility with older metadata.
+    """
     ai_metadata = getattr(result, "ai_metadata", None)
     if not isinstance(ai_metadata, dict):
         return 0
-    value = ai_metadata.get(key, 0)
+    value = ai_metadata.get(key)
+    if value is None and key == "applied_count":
+        value = ai_metadata.get("fixed_count", 0)
+    if value is None:
+        return 0
     try:
         return max(0, int(value))
     except (TypeError, ValueError):
@@ -332,7 +340,7 @@ class ThreadSafeConsoleLogger:
             severity_warnings: Number of issues at WARNING severity.
             severity_info: Number of issues at INFO severity.
             total_ai_applied: Total number of AI-applied fixes (FIX mode).
-            total_ai_verified: Total number of AI-verified fixes (FIX mode).
+            total_ai_verified: Total number of AI-resolved fixes (FIX mode).
         """
         from lintro.utils.summary_tables import print_totals_table
 

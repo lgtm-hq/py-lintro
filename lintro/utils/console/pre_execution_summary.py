@@ -123,7 +123,7 @@ def print_pre_execution_summary(
             ),
         )
         ai_parts.append(
-            "  validate-after-group: "
+            "  verify-fixes: "
             + (
                 "[green]on[/green]"
                 if ai_config.validate_after_group
@@ -213,7 +213,7 @@ def print_pre_execution_summary(
             ),
         )
         ai_parts.append(
-            "  validate-after-group: "
+            "  verify-fixes: "
             + (
                 "[green]on[/green]"
                 if ai_config.validate_after_group

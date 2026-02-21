@@ -142,7 +142,10 @@ def test_parse_markdownlint_multiline_with_empty_lines() -> None:
 def test_parse_markdownlint_ansi_codes_stripped() -> None:
     """Strip ANSI escape codes from output for consistent CI/local parsing."""
     # Output with ANSI color codes (common in CI environments)
-    output = "\x1b[31mdir/about.md:1:1 MD021/no-multiple-space-closed-atx Multiple spaces\x1b[0m"
+    output = (
+        "\x1b[31mdir/about.md:1:1 MD021/no-multiple-space-closed-atx"
+        " Multiple spaces\x1b[0m"
+    )
     issues = parse_markdownlint_output(output)
     assert_that(len(issues)).is_equal_to(1)
     assert_that(issues[0].file).is_equal_to("dir/about.md")

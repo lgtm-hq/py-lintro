@@ -34,10 +34,9 @@ def render_validation_terminal(result: ValidationResult) -> str:
 
     parts: list[str] = []
     if result.verified:
-        parts.append(f"[green]{result.verified} verified[/green]")
+        parts.append(f"[green]{result.verified} resolved[/green]")
     if result.unverified:
-        parts.append(f"[yellow]{result.unverified} unverified[/yellow]")
-
+        parts.append(f"[yellow]{result.unverified} still present[/yellow]")
     sep = " \u00b7 "
     console.print(f"  [bold]Fix validation:[/bold] {sep.join(parts)}")
 
@@ -48,12 +47,12 @@ def render_validation_terminal(result: ValidationResult) -> str:
 
 
 def render_validation(result: ValidationResult) -> str:
-    """Render validation using the appropriate format for the environment.
+    """Render validation as terminal-formatted output.
 
     Args:
         result: Validation result to render.
 
     Returns:
-        Formatted validation string.
+        Formatted validation string for terminal display.
     """
     return render_validation_terminal(result)

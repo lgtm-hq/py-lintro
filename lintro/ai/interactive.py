@@ -12,16 +12,16 @@ from collections.abc import Sequence
 from pathlib import Path
 
 import click
-from loguru import logger
 from rich.console import Console, Group, RenderableType
 from rich.markup import escape
 from rich.panel import Panel
 from rich.syntax import Syntax
 
+from lintro.ai.apply import _apply_fix, apply_fixes
 from lintro.ai.display.shared import cost_str, print_code_panel, print_section_header
 from lintro.ai.display.validation import render_validation
 from lintro.ai.models import AIFixSuggestion
-from lintro.ai.paths import relative_path, resolve_workspace_file
+from lintro.ai.paths import relative_path
 from lintro.ai.risk import (
     SAFE_STYLE_RISK,
     calculate_patch_stats,
@@ -30,124 +30,7 @@ from lintro.ai.risk import (
 )
 from lintro.ai.validation import validate_applied_fixes
 
-
-def _apply_fix(
-    suggestion: AIFixSuggestion,
-    *,
-    workspace_root: Path | None = None,
-    auto_apply: bool = False,
-    search_radius: int = 5,
-) -> bool:
-    """Apply a single fix suggestion to the file.
-
-    Uses line-number-targeted replacement to avoid matching the wrong
-    occurrence when the same code pattern appears elsewhere in the file.
-    Falls back to first-occurrence replacement if line targeting fails,
-    unless ``auto_apply`` is True (only allows line-targeted).
-
-    Args:
-        suggestion: Fix suggestion to apply.
-        workspace_root: Optional root directory limiting writable paths.
-        auto_apply: When True, skip the fallback first-occurrence
-            replacement (only allow line-targeted). Used by auto-apply
-            paths in the pipeline for safety.
-        search_radius: Max lines above/below the target line to search
-            for the original code pattern.
-
-    Returns:
-        True if the fix was applied successfully.
-    """
-    try:
-        path = Path(suggestion.file)
-        if workspace_root is not None:
-            resolved = resolve_workspace_file(suggestion.file, workspace_root)
-            if resolved is None:
-                return False
-            path = resolved
-        content = path.read_text(encoding="utf-8")
-        lines = content.splitlines(keepends=True)
-
-        original_lines = suggestion.original_code.splitlines(keepends=True)
-        if not original_lines:
-            return False
-
-        # Ensure last line has consistent newline for comparison
-        if original_lines and not original_lines[-1].endswith("\n"):
-            original_lines[-1] += "\n"
-
-        # Search outward from the target line (closest match wins)
-        target_idx = max(0, suggestion.line - 1)  # 0-based
-        search_order = [target_idx]
-        for offset in range(1, search_radius + 1):
-            if target_idx - offset >= 0:
-                search_order.append(target_idx - offset)
-            if target_idx + offset < len(lines):
-                search_order.append(target_idx + offset)
-
-        for start in search_order:
-            end = start + len(original_lines)
-            if end > len(lines):
-                continue
-
-            window = lines[start:end]
-            # Normalize trailing newline on last window line for comparison
-            normalized_window = list(window)
-            if normalized_window and not normalized_window[-1].endswith("\n"):
-                normalized_window[-1] += "\n"
-
-            if normalized_window == original_lines:
-                suggested_lines = suggestion.suggested_code.splitlines(
-                    keepends=True,
-                )
-                # Preserve trailing newline consistency
-                if (
-                    suggested_lines
-                    and window
-                    and window[-1].endswith("\n")
-                    and not suggested_lines[-1].endswith("\n")
-                ):
-                    suggested_lines[-1] += "\n"
-
-                new_lines = lines[:start] + suggested_lines + lines[end:]
-                path.write_text("".join(new_lines), encoding="utf-8")
-                return True
-
-        # Fallback: first-occurrence string replacement.
-        # Warning: this may apply the fix to the wrong location if
-        # the original code appears earlier in the file.
-        # Skipped when auto_apply is True for safety.
-        if not auto_apply and suggestion.original_code in content:
-            logger.warning(
-                f"Line-targeted replacement failed for "
-                f"{suggestion.file}:{suggestion.line}, "
-                f"falling back to first-occurrence string replacement",
-            )
-            new_content = content.replace(
-                suggestion.original_code,
-                suggestion.suggested_code,
-                1,
-            )
-            path.write_text(new_content, encoding="utf-8")
-            return True
-
-        return False
-
-    except OSError:
-        return False
-
-
-def apply_fixes(
-    suggestions: Sequence[AIFixSuggestion],
-    *,
-    workspace_root: Path | None = None,
-    auto_apply: bool = False,
-) -> list[AIFixSuggestion]:
-    """Apply suggestions and return only those successfully applied."""
-    return [
-        fix
-        for fix in suggestions
-        if _apply_fix(fix, workspace_root=workspace_root, auto_apply=auto_apply)
-    ]
+__all__ = ["apply_fixes", "review_fixes_interactive"]
 
 
 def _group_by_code(
@@ -313,12 +196,12 @@ def _validate_group(
 def _render_prompt(*, validate_mode: bool, safe_default: bool) -> str:
     """Build interactive prompt text with current mode/default."""
     default_text = (
-        " [dim](Enter=accept group; safe-style default)[/dim]" if safe_default else ""
+        " (Enter=accept group; safe-style default)" if safe_default else ""
     )
     mode = "on" if validate_mode else "off"
     return (
         "  [y]accept group  [a]accept group + remaining  "
-        "[r]reject  [d]diffs  [s]skip  [v]validate-after-group:"
+        "[r]reject  [d]diffs  [s]skip  [v]verify fixes:"
         f" {mode} (toggle only, no apply)  [q]quit{default_text}: "
     )
 
@@ -377,17 +260,25 @@ def review_fixes_interactive(
         cost_info=cost_info,
     )
 
+    auto_accepted = 0
+    auto_failed = 0
+    auto_groups = 0
+
     for gi, (code, fixes) in enumerate(groups.items(), 1):
         if accept_all:
-            count, group_applied = _apply_group(
-                console,
-                fixes,
-                workspace_root=workspace_root,
-            )
+            applied_fixes: list[AIFixSuggestion] = []
+            for fix in fixes:
+                if _apply_fix(fix, workspace_root=workspace_root):
+                    applied_fixes.append(fix)
+            count = len(applied_fixes)
+            failed = len(fixes) - count
             accepted += count
-            all_applied.extend(group_applied)
-            if validate_mode and group_applied:
-                _validate_group(console, group_applied)
+            auto_accepted += count
+            auto_failed += failed
+            auto_groups += 1
+            all_applied.extend(applied_fixes)
+            if validate_mode and applied_fixes:
+                _validate_group(console, applied_fixes)
             continue
 
         # Group header (flat text, no panels)
@@ -477,6 +368,17 @@ def review_fixes_interactive(
         elif choice == "q":
             console.print("  [dim]Quit review.[/dim]")
             break
+
+    # Consolidated line for auto-accepted groups
+    if auto_groups > 0:
+        total_auto = auto_accepted + auto_failed
+        msg = (
+            f"  [green]✓ Applied {auto_accepted}/{total_auto} "
+            f"across {auto_groups} group{'s' if auto_groups != 1 else ''}[/green]"
+        )
+        if auto_failed:
+            msg += f"  [yellow]({auto_failed} failed)[/yellow]"
+        console.print(msg)
 
     # Summary
     console.print()

@@ -14,6 +14,7 @@ from lintro.ai.providers import openai as openai_mod
 
 
 def test_get_provider_anthropic():
+    """Verify that get_provider returns an Anthropic provider when configured."""
     config = AIConfig(provider="anthropic")
     with patch.object(anthropic_mod, "_has_anthropic", True):
         provider = get_provider(config)
@@ -21,6 +22,7 @@ def test_get_provider_anthropic():
 
 
 def test_get_provider_openai():
+    """Verify that get_provider returns an OpenAI provider when configured."""
     config = AIConfig(provider="openai")
     with patch.object(openai_mod, "_has_openai", True):
         provider = get_provider(config)
@@ -28,6 +30,7 @@ def test_get_provider_openai():
 
 
 def test_get_provider_unknown_raises():
+    """Verify that get_provider raises ValueError for an unknown provider name."""
     # Bypass Pydantic validation to test the factory's own guard.
     config = AIConfig.model_construct(provider="unknown")
     with pytest.raises(ValueError, match="Unknown AI provider"):
@@ -35,6 +38,7 @@ def test_get_provider_unknown_raises():
 
 
 def test_get_provider_case_insensitive():
+    """Verify that get_provider handles provider names case-insensitively."""
     # Bypass Pydantic Literal validation to test the factory lowercases.
     config = AIConfig.model_construct(
         provider="Anthropic",
@@ -48,6 +52,7 @@ def test_get_provider_case_insensitive():
 
 
 def test_get_provider_passes_model():
+    """Verify that get_provider forwards the configured model to the provider."""
     config = AIConfig(
         provider="anthropic",
         model="claude-opus-4-20250514",

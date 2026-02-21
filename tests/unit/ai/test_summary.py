@@ -26,6 +26,7 @@ from tests.unit.ai.conftest import MockAIProvider, MockIssue
 
 
 def test_build_issues_digest_builds_digest_from_results():
+    """Verify digest includes tool names, issue codes, and occurrence counts."""
     issues = [
         MockIssue(file="src/a.py", line=10, message="Use of assert", code="B101"),
         MockIssue(file="src/b.py", line=20, message="Use of assert", code="B101"),
@@ -45,11 +46,13 @@ def test_build_issues_digest_builds_digest_from_results():
 
 
 def test_build_issues_digest_empty_results():
+    """Verify empty results list produces an empty digest string."""
     digest = _build_issues_digest([])
     assert_that(digest).is_empty()
 
 
 def test_build_issues_digest_skipped_results_excluded():
+    """Verify skipped tool results are excluded from the digest."""
     result = ToolResult(
         name="ruff",
         success=True,
@@ -62,6 +65,7 @@ def test_build_issues_digest_skipped_results_excluded():
 
 
 def test_build_issues_digest_sample_locations_capped():
+    """Verify sample locations are capped at 3 with a count of remaining shown."""
     issues = [
         MockIssue(file=f"src/f{i}.py", line=i, message="test", code="E501")
         for i in range(10)
@@ -78,6 +82,7 @@ def test_build_issues_digest_sample_locations_capped():
 
 
 def test_build_issues_digest_redacts_absolute_paths_for_provider(tmp_path):
+    """Verify absolute file paths are converted to workspace-relative in the digest."""
     absolute_file = tmp_path / "src" / "hidden.py"
     absolute_file.parent.mkdir(parents=True)
     absolute_file.write_text("x = 1\n", encoding="utf-8")
@@ -105,6 +110,7 @@ def test_build_issues_digest_redacts_absolute_paths_for_provider(tmp_path):
 
 
 def test_parse_summary_response_valid_json():
+    """Verify valid JSON response is parsed into an AISummary with all fields."""
     content = json.dumps(
         {
             "overview": "Code needs work",
@@ -128,6 +134,7 @@ def test_parse_summary_response_valid_json():
 
 
 def test_parse_summary_response_parses_triage_suggestions():
+    """Verify triage_suggestions field is parsed from the JSON response."""
     content = json.dumps(
         {
             "overview": "Some issues",
@@ -145,18 +152,21 @@ def test_parse_summary_response_parses_triage_suggestions():
 
 
 def test_parse_summary_response_missing_triage_defaults_to_empty():
+    """Verify missing triage_suggestions key defaults to an empty list."""
     content = json.dumps({"overview": "Clean", "key_patterns": []})
     result = _parse_summary_response(content)
     assert_that(result.triage_suggestions).is_empty()
 
 
 def test_parse_summary_response_invalid_json_fallback():
+    """Verify invalid JSON falls back to using raw content as the overview."""
     result = _parse_summary_response("not json at all")
     assert_that(result.overview).contains("not json")
     assert_that(result.key_patterns).is_empty()
 
 
 def test_parse_summary_response_empty_content():
+    """Verify empty content returns a summary with 'Summary unavailable' overview."""
     result = _parse_summary_response("")
     assert_that(result.overview).is_equal_to("Summary unavailable")
 
@@ -177,7 +187,7 @@ def test_parse_summary_response_non_dict_json_list():
 
 
 def test_parse_summary_response_non_dict_json_string():
-    """When json.loads returns a plain string, the isinstance(data, dict) check triggers."""
+    """Non-dict JSON triggers the isinstance(data, dict) fallback."""
     content = json.dumps("just a string")
     result = _parse_summary_response(
         content,
@@ -202,6 +212,7 @@ def test_parse_summary_response_non_dict_json_int():
 
 
 def test_generate_summary_returns_none_for_no_issues():
+    """Returns None and skips provider when no issues exist."""
     provider = MockAIProvider()
     result = ToolResult(name="ruff", success=True, issues_count=0)
     summary = generate_summary([result], provider)
@@ -210,6 +221,7 @@ def test_generate_summary_returns_none_for_no_issues():
 
 
 def test_generate_summary_generates_summary():
+    """Verify generate_summary calls the provider and returns a parsed AISummary."""
     issues = [
         MockIssue(file="a.py", line=1, message="bad code", code="E501"),
     ]
@@ -244,6 +256,7 @@ def test_generate_summary_generates_summary():
 
 
 def test_generate_summary_handles_provider_error():
+    """Verify generate_summary returns None when the provider raises an error."""
     issues = [
         MockIssue(file="a.py", line=1, message="bad", code="E501"),
     ]
@@ -266,6 +279,7 @@ def test_generate_summary_handles_provider_error():
 
 
 def test_generate_post_fix_summary_returns_none_when_all_resolved():
+    """Verify post-fix summary returns None when all issues are resolved."""
     provider = MockAIProvider()
     result = ToolResult(name="ruff", success=True, issues_count=0)
 
@@ -279,6 +293,7 @@ def test_generate_post_fix_summary_returns_none_when_all_resolved():
 
 
 def test_generate_post_fix_summary_generates_post_fix_summary():
+    """Verify post-fix summary is generated when remaining issues exist."""
     issues = [
         MockIssue(file="a.py", line=1, message="remaining", code="B101"),
     ]
@@ -320,6 +335,7 @@ def test_generate_post_fix_summary_generates_post_fix_summary():
 
 
 def test_render_summary_terminal_renders_overview():
+    """Verify terminal rendering includes overview, patterns, actions, and effort."""
     summary = AISummary(
         overview="Code quality is good overall.",
         key_patterns=["Missing docstrings"],
@@ -334,12 +350,14 @@ def test_render_summary_terminal_renders_overview():
 
 
 def test_render_summary_terminal_empty_summary():
+    """Verify an empty AISummary produces empty terminal output."""
     summary = AISummary()
     output = render_summary_terminal(summary)
     assert_that(output).is_empty()
 
 
 def test_render_summary_terminal_cost_display():
+    """Verify token cost is shown or hidden based on the show_cost flag."""
     summary = AISummary(
         overview="Test",
         input_tokens=100,
@@ -354,6 +372,7 @@ def test_render_summary_terminal_cost_display():
 
 
 def test_render_summary_terminal_strips_leading_numbers_from_priority_actions():
+    """Leading number prefixes are stripped from priority actions."""
     summary = AISummary(
         overview="Test",
         priority_actions=[
@@ -373,6 +392,7 @@ def test_render_summary_terminal_strips_leading_numbers_from_priority_actions():
 
 
 def test_render_summary_terminal_renders_triage_suggestions():
+    """Terminal rendering includes triage with stripped prefixes."""
     summary = AISummary(
         overview="Issues found",
         triage_suggestions=[
@@ -388,6 +408,7 @@ def test_render_summary_terminal_renders_triage_suggestions():
 
 
 def test_render_summary_terminal_omits_triage_when_empty():
+    """Triage section is omitted when suggestions are empty."""
     summary = AISummary(overview="Clean code", triage_suggestions=[])
     output = render_summary_terminal(summary)
     assert_that(output).does_not_contain("Triage")
@@ -397,6 +418,7 @@ def test_render_summary_terminal_omits_triage_when_empty():
 
 
 def test_render_summary_github_renders_with_groups():
+    """Verify GitHub rendering wraps content in ::group::/::endgroup:: markers."""
     summary = AISummary(
         overview="Issues found",
         key_patterns=["Pattern A"],
@@ -410,6 +432,7 @@ def test_render_summary_github_renders_with_groups():
 
 
 def test_render_summary_github_strips_leading_numbers_from_priority_actions():
+    """Verify GitHub rendering strips leading number prefixes from priority actions."""
     summary = AISummary(
         overview="Test",
         priority_actions=["1. Fix imports", "2. Add tests"],
@@ -420,6 +443,7 @@ def test_render_summary_github_strips_leading_numbers_from_priority_actions():
 
 
 def test_render_summary_github_renders_triage_suggestions():
+    """Verify GitHub rendering includes triage suggestions section."""
     summary = AISummary(
         overview="Issues found",
         triage_suggestions=[
@@ -434,6 +458,7 @@ def test_render_summary_github_renders_triage_suggestions():
 
 
 def test_render_summary_github_omits_triage_when_empty():
+    """Triage section omitted from GitHub output when empty."""
     summary = AISummary(overview="Clean code", triage_suggestions=[])
     output = render_summary_github(summary)
     assert_that(output).does_not_contain("Triage")
@@ -443,6 +468,7 @@ def test_render_summary_github_omits_triage_when_empty():
 
 
 def test_render_summary_markdown_renders_with_details():
+    """Verify markdown rendering wraps content in HTML details/summary tags."""
     summary = AISummary(
         overview="Some issues",
         key_patterns=["Pattern X"],
@@ -458,6 +484,7 @@ def test_render_summary_markdown_renders_with_details():
 
 
 def test_render_summary_markdown_renders_triage_suggestions():
+    """Verify markdown rendering includes triage suggestions section."""
     summary = AISummary(
         overview="Issues found",
         triage_suggestions=[

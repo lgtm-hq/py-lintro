@@ -570,12 +570,17 @@ sudo lintro check
 ## AI-Powered Features
 
 Lintro can optionally use AI to provide actionable summaries and interactive fix
-suggestions.
+suggestions. Supports [Anthropic](https://docs.anthropic.com/) and
+[OpenAI](https://platform.openai.com/docs/) as providers.
 
 ```bash
-# Install AI dependencies
-uv pip install 'lintro[ai]'
-export ANTHROPIC_API_KEY=sk-ant-...
+# Install AI dependencies (from local repo)
+pip install -e '.[ai]'
+
+# Set your provider's API key
+export ANTHROPIC_API_KEY=sk-ant-...   # for Anthropic
+# or
+export OPENAI_API_KEY=sk-...          # for OpenAI
 
 # AI summary is automatic when enabled in config
 lintro check

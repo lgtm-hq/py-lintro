@@ -25,6 +25,8 @@ class AIFixSuggestion:
         diff: Unified diff string showing the change.
         explanation: Brief explanation of what was changed and why.
         confidence: Confidence level ("high", "medium", "low").
+        risk_level: AI-reported risk classification ("safe-style" or
+            "behavioral-risk"). Empty string if not classified.
         input_tokens: Tokens consumed for input in the API call.
         output_tokens: Tokens generated for output in the API call.
         cost_estimate: Estimated cost in USD for the API call.

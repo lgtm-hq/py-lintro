@@ -47,6 +47,7 @@ class MockAIProvider(BaseAIProvider):
         max_tokens: int = 1024,
         timeout: float = 60.0,
     ) -> AIResponse:
+        """Return the next queued response or a default."""
         self.calls.append(
             {
                 "prompt": prompt,
@@ -69,14 +70,17 @@ class MockAIProvider(BaseAIProvider):
         )
 
     def is_available(self) -> bool:
+        """Check if the mock AI provider is available."""
         return self._available
 
     @property
     def name(self) -> str:
+        """Return the provider name."""
         return "mock"
 
     @property
     def model_name(self) -> str:
+        """Return the model name."""
         return "mock-model"
 
 

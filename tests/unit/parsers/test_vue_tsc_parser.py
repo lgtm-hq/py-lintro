@@ -20,7 +20,10 @@ def test_parse_vue_tsc_output_empty() -> None:
 
 def test_parse_vue_tsc_output_single_error() -> None:
     """Parse a single vue-tsc error from text output."""
-    output = "src/App.vue(10,5): error TS2322: Type 'string' is not assignable to type 'number'."
+    output = (
+        "src/App.vue(10,5): error TS2322: "
+        "Type 'string' is not assignable to type 'number'."
+    )
     issues = parse_vue_tsc_output(output)
 
     assert_that(issues).is_length(1)
@@ -34,9 +37,17 @@ def test_parse_vue_tsc_output_single_error() -> None:
 
 def test_parse_vue_tsc_output_multiple_errors() -> None:
     """Parse multiple errors from vue-tsc output."""
-    output = """src/App.vue(10,5): error TS2322: Type 'string' is not assignable to type 'number'.
-src/components/Card.vue(15,10): error TS2339: Property 'foo' does not exist on type 'Props'.
-src/views/Home.vue(3,1): warning TS6133: 'x' is declared but its value is never read."""
+    output = (
+        "src/App.vue(10,5): error TS2322:"
+        " Type 'string' is not assignable"
+        " to type 'number'.\n"
+        "src/components/Card.vue(15,10): error TS2339:"
+        " Property 'foo' does not exist"
+        " on type 'Props'.\n"
+        "src/views/Home.vue(3,1): warning TS6133:"
+        " 'x' is declared but its value"
+        " is never read."
+    )
     issues = parse_vue_tsc_output(output)
 
     assert_that(issues).is_length(3)
@@ -148,7 +159,11 @@ def test_extract_missing_modules() -> None:
             column=1,
             code="TS2307",
             severity="error",
-            message="Cannot find module '@vueuse/core' or its corresponding type declarations.",
+            message=(
+                "Cannot find module '@vueuse/core'"
+                " or its corresponding"
+                " type declarations."
+            ),
         ),
     ]
 

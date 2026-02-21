@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass, field
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from lintro.ai.models import AIFixSuggestion, AISummary
@@ -35,8 +35,10 @@ class AIFixSuggestionPayload:
     file: str = ""
     line: int = 0
     code: str = ""
+    tool_name: str = ""
     explanation: str = ""
     confidence: str = ""
+    risk_level: str = ""
     diff: str = ""
     input_tokens: int = 0
     output_tokens: int = 0
@@ -98,8 +100,10 @@ def suggestion_to_payload(
         file=suggestion.file,
         line=suggestion.line,
         code=suggestion.code,
+        tool_name=suggestion.tool_name,
         explanation=suggestion.explanation,
         confidence=suggestion.confidence,
+        risk_level=suggestion.risk_level,
         diff=suggestion.diff,
         input_tokens=suggestion.input_tokens,
         output_tokens=suggestion.output_tokens,
@@ -115,7 +119,7 @@ def ensure_ai_metadata(result: ToolResult) -> dict[str, Any]:
     """
     if result.ai_metadata is None:
         result.ai_metadata = {}
-    return cast(dict[str, Any], result.ai_metadata)
+    return result.ai_metadata
 
 
 def attach_summary_metadata(result: ToolResult, summary: AISummary) -> None:

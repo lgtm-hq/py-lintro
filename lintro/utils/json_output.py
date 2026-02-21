@@ -64,17 +64,13 @@ def create_json_output(
             normalized_ai_metadata = normalize_ai_metadata(ai_metadata)
             if normalized_ai_metadata:
                 result_data["ai_metadata"] = normalized_ai_metadata
+                # Extract AI summary from the first result that has one
+                if (
+                    "summary" in normalized_ai_metadata
+                    and "ai_summary" not in json_data
+                ):
+                    json_data["ai_summary"] = normalized_ai_metadata["summary"]
 
         json_data["results"].append(result_data)
-
-    # Extract AI summary from the first result that has one
-    for result in results:
-        ai_metadata = getattr(result, "ai_metadata", None)
-        if not isinstance(ai_metadata, dict):
-            continue
-        normalized_ai_metadata = normalize_ai_metadata(ai_metadata)
-        if "summary" in normalized_ai_metadata:
-            json_data["ai_summary"] = normalized_ai_metadata["summary"]
-            break
 
     return json_data

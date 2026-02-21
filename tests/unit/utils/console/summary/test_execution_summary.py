@@ -41,11 +41,13 @@ def test_execution_summary_check_no_issues(
     logger = ThreadSafeConsoleLogger()
     results = [fake_tool_result_factory(success=True, issues_count=0)]
 
-    with patch.object(logger, "console_output"):
-        with patch.object(logger, "_print_summary_table"):
-            with patch.object(logger, "_print_ascii_art") as mock_art:
-                logger.print_execution_summary(Action.CHECK, results)
-                mock_art.assert_called_once_with(total_issues=0)
+    with (
+        patch.object(logger, "console_output"),
+        patch.object(logger, "_print_summary_table"),
+        patch.object(logger, "_print_ascii_art") as mock_art,
+    ):
+        logger.print_execution_summary(Action.CHECK, results)
+        mock_art.assert_called_once_with(total_issues=0)
 
 
 def test_execution_summary_check_with_issues(
@@ -66,17 +68,19 @@ def test_execution_summary_check_with_issues(
         fake_tool_result_factory(success=True, issues_count=3),
     ]
 
-    with patch.object(logger, "console_output"):
-        with patch.object(logger, "_print_summary_table"):
-            with patch.object(logger, "_print_totals_table") as mock_totals:
-                with patch.object(logger, "_print_ascii_art") as mock_art:
-                    logger.print_execution_summary(Action.CHECK, results)
-                    # Should show total of 8 issues
-                    mock_art.assert_called_once_with(total_issues=8)
-                    # Verify totals table was called with correct total
-                    mock_totals.assert_called_once()
-                    call_kwargs = mock_totals.call_args.kwargs
-                    assert_that(call_kwargs["total_issues"]).is_equal_to(8)
+    with (
+        patch.object(logger, "console_output"),
+        patch.object(logger, "_print_summary_table"),
+        patch.object(logger, "_print_totals_table") as mock_totals,
+        patch.object(logger, "_print_ascii_art") as mock_art,
+    ):
+        logger.print_execution_summary(Action.CHECK, results)
+        # Should show total of 8 issues
+        mock_art.assert_called_once_with(total_issues=8)
+        # Verify totals table was called with correct total
+        mock_totals.assert_called_once()
+        call_kwargs = mock_totals.call_args.kwargs
+        assert_that(call_kwargs["total_issues"]).is_equal_to(8)
 
 
 def test_execution_summary_check_failed_tool_shows_minimum_issues(
@@ -94,12 +98,16 @@ def test_execution_summary_check_failed_tool_shows_minimum_issues(
     logger = ThreadSafeConsoleLogger()
     results = [fake_tool_result_factory(success=False, issues_count=0)]
 
-    with patch.object(logger, "console_output"):
-        with patch.object(logger, "_print_summary_table"):
-            with patch.object(logger, "_print_ascii_art") as mock_art:
-                logger.print_execution_summary(Action.CHECK, results)
-                # Should show at least 1 for art when tool failed
-                mock_art.assert_called_once_with(total_issues=1)
+    with (
+        patch.object(logger, "console_output"),
+        patch.object(logger, "_print_summary_table"),
+        patch.object(logger, "_print_ascii_art") as mock_art,
+    ):
+        logger.print_execution_summary(Action.CHECK, results)
+        # Should show at least 1 for art when tool failed
+        mock_art.assert_called_once_with(  # noqa: E501
+            total_issues=1,
+        )
 
 
 @pytest.mark.parametrize(
@@ -134,11 +142,15 @@ def test_execution_summary_check_issue_aggregation(
         for count in issue_counts
     ]
 
-    with patch.object(logger, "console_output"):
-        with patch.object(logger, "_print_summary_table"):
-            with patch.object(logger, "_print_ascii_art") as mock_art:
-                logger.print_execution_summary(Action.CHECK, results)
-                mock_art.assert_called_once_with(total_issues=expected_total)
+    with (
+        patch.object(logger, "console_output"),
+        patch.object(logger, "_print_summary_table"),
+        patch.object(logger, "_print_ascii_art") as mock_art,
+    ):
+        logger.print_execution_summary(Action.CHECK, results)
+        mock_art.assert_called_once_with(
+            total_issues=expected_total,
+        )
 
 
 # =============================================================================
@@ -167,11 +179,13 @@ def test_execution_summary_fix_with_standardized_counts(
         ),
     ]
 
-    with patch.object(logger, "console_output"):
-        with patch.object(logger, "_print_summary_table"):
-            with patch.object(logger, "_print_ascii_art") as mock_art:
-                logger.print_execution_summary(Action.FIX, results)
-                mock_art.assert_called_once_with(total_issues=2)
+    with (
+        patch.object(logger, "console_output"),
+        patch.object(logger, "_print_summary_table"),
+        patch.object(logger, "_print_ascii_art") as mock_art,
+    ):
+        logger.print_execution_summary(Action.FIX, results)
+        mock_art.assert_called_once_with(total_issues=2)
 
 
 def test_execution_summary_fix_fallback_to_issues_count(
@@ -195,11 +209,13 @@ def test_execution_summary_fix_fallback_to_issues_count(
         ),
     ]
 
-    with patch.object(logger, "console_output"):
-        with patch.object(logger, "_print_summary_table"):
-            with patch.object(logger, "_print_ascii_art"):
-                # Should not raise any exception
-                logger.print_execution_summary(Action.FIX, results)
+    with (
+        patch.object(logger, "console_output"),
+        patch.object(logger, "_print_summary_table"),
+        patch.object(logger, "_print_ascii_art"),
+    ):
+        # Should not raise any exception
+        logger.print_execution_summary(Action.FIX, results)
 
 
 def test_execution_summary_fix_failed_tool_handled(
@@ -207,8 +223,8 @@ def test_execution_summary_fix_failed_tool_handled(
 ) -> None:
     """Verify print_execution_summary handles failed tools in fix action gracefully.
 
-    Failed tools should not contribute to numeric totals to avoid
-    misleading success metrics.
+    Failed tools should not contribute to numeric totals to avoid misleading
+    success metrics.
 
 
     Args:
@@ -223,11 +239,13 @@ def test_execution_summary_fix_failed_tool_handled(
         ),
     ]
 
-    with patch.object(logger, "console_output"):
-        with patch.object(logger, "_print_summary_table"):
-            with patch.object(logger, "_print_ascii_art"):
-                # Should not raise and should handle sentinel values
-                logger.print_execution_summary(Action.FIX, results)
+    with (
+        patch.object(logger, "console_output"),
+        patch.object(logger, "_print_summary_table"),
+        patch.object(logger, "_print_ascii_art"),
+    ):
+        # Should not raise and should handle sentinel values
+        logger.print_execution_summary(Action.FIX, results)
 
 
 def test_execution_summary_fix_parses_remaining_from_output(
@@ -251,11 +269,13 @@ def test_execution_summary_fix_parses_remaining_from_output(
         ),
     ]
 
-    with patch.object(logger, "console_output"):
-        with patch.object(logger, "_print_summary_table"):
-            with patch.object(logger, "_print_ascii_art") as mock_art:
-                logger.print_execution_summary(Action.FIX, results)
-                mock_art.assert_called_once_with(total_issues=5)
+    with (
+        patch.object(logger, "console_output"),
+        patch.object(logger, "_print_summary_table"),
+        patch.object(logger, "_print_ascii_art") as mock_art,
+    ):
+        logger.print_execution_summary(Action.FIX, results)
+        mock_art.assert_called_once_with(total_issues=5)
 
 
 def test_execution_summary_fix_parses_cannot_autofix_from_output(
@@ -280,11 +300,15 @@ def test_execution_summary_fix_parses_cannot_autofix_from_output(
         ),
     ]
 
-    with patch.object(logger, "console_output"):
-        with patch.object(logger, "_print_summary_table"):
-            with patch.object(logger, "_print_ascii_art") as mock_art:
-                logger.print_execution_summary(Action.FIX, results)
-                mock_art.assert_called_once_with(total_issues=3)
+    with (
+        patch.object(logger, "console_output"),
+        patch.object(logger, "_print_summary_table"),
+        patch.object(logger, "_print_ascii_art") as mock_art,
+    ):
+        logger.print_execution_summary(Action.FIX, results)
+        mock_art.assert_called_once_with(
+            total_issues=3,
+        )
 
 
 def test_execution_summary_fix_handles_string_sentinel_remaining(
@@ -292,8 +316,8 @@ def test_execution_summary_fix_handles_string_sentinel_remaining(
 ) -> None:
     """Verify print_execution_summary handles string sentinel for remaining_issues_count.
 
-    String sentinel values (like 'N/A') should not be added to numeric totals
-    to prevent type errors in calculations.
+    String sentinel values (like 'N/A') should not be added to numeric
+    totals to prevent type errors in calculations.
 
 
     Args:
@@ -305,11 +329,13 @@ def test_execution_summary_fix_handles_string_sentinel_remaining(
     result.remaining_issues_count = "N/A"  # type: ignore[assignment]
     results = [result]
 
-    with patch.object(logger, "console_output"):
-        with patch.object(logger, "_print_summary_table"):
-            with patch.object(logger, "_print_ascii_art"):
-                # Should not raise or add string sentinel to numeric total
-                logger.print_execution_summary(Action.FIX, results)
+    with (
+        patch.object(logger, "console_output"),
+        patch.object(logger, "_print_summary_table"),
+        patch.object(logger, "_print_ascii_art"),
+    ):
+        # Should not raise or add string sentinel to numeric total
+        logger.print_execution_summary(Action.FIX, results)
 
 
 @pytest.mark.parametrize(
@@ -348,8 +374,10 @@ def test_execution_summary_fix_various_counts(
         ),
     ]
 
-    with patch.object(logger, "console_output"):
-        with patch.object(logger, "_print_summary_table"):
-            with patch.object(logger, "_print_ascii_art") as mock_art:
-                logger.print_execution_summary(Action.FIX, results)
-                mock_art.assert_called_once_with(total_issues=expected_remaining)
+    with (
+        patch.object(logger, "console_output"),
+        patch.object(logger, "_print_summary_table"),
+        patch.object(logger, "_print_ascii_art") as mock_art,
+    ):
+        logger.print_execution_summary(Action.FIX, results)
+        mock_art.assert_called_once_with(total_issues=expected_remaining)

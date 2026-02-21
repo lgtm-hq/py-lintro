@@ -11,9 +11,10 @@ from typing import TYPE_CHECKING
 
 from loguru import logger
 
+from lintro.enums.action import Action
+
 if TYPE_CHECKING:
     from lintro.config.lintro_config import LintroConfig
-    from lintro.enums.action import Action
     from lintro.models.core.tool_result import ToolResult
     from lintro.utils.console.logger import ThreadSafeConsoleLogger
 
@@ -45,12 +46,15 @@ class AIPostExecutionHook:
         """Check whether AI enhancement should run for this action.
 
         Args:
-            action: The action being performed (CHECK, FIX).
+            action: The action being performed (CHECK, FIX, TEST).
 
         Returns:
-            True if AI is enabled in config.
+            True if AI is enabled and action is CHECK or FIX.
         """
-        return self._lintro_config.ai.enabled
+        return self._lintro_config.ai.enabled and action in {
+            Action.CHECK,
+            Action.FIX,
+        }
 
     def execute(
         self,

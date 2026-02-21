@@ -155,7 +155,9 @@ def test_get_min_version_returns_version_for_registered_tools(
 def test_get_min_version_raises_keyerror_for_unknown_tool() -> None:
     """Test that get_min_version raises KeyError for unknown tools."""
     with pytest.raises(KeyError, match="not found"):
-        get_min_version("nonexistent_tool")  # type: ignore[arg-type]
+        get_min_version(
+            "nonexistent_tool",  # type: ignore[arg-type]
+        )
 
 
 def test_get_tool_version_supports_companion_packages() -> None:
@@ -209,11 +211,16 @@ def test_all_external_tools_registered_in_tool_versions() -> None:
             for tool in manifest.get("tools", [])
             if isinstance(tool, dict) and tool.get("name")
         }
-        assert_that(set(TOOL_VERSIONS.keys())).is_subset_of(manifest_tools)
+        assert_that(set(TOOL_VERSIONS.keys())).is_subset_of(
+            manifest_tools,
+        )
     else:
-        assert_that(set(TOOL_VERSIONS.keys())).is_equal_to(expected_non_npm_tools)
+        assert_that(set(TOOL_VERSIONS.keys())).is_equal_to(
+            expected_non_npm_tools,
+        )
 
-    # All tools (including npm-managed) should be available via get_all_expected_versions
+    # All tools (including npm-managed) should be available
+    # via get_all_expected_versions
     all_versions = get_all_expected_versions()
     if manifest_path.exists():
         assert_that(set(all_versions.keys())).is_equal_to(manifest_tools)
@@ -358,7 +365,7 @@ def test_check_tool_version_failure(mock_run: MagicMock) -> None:
         (),
         {
             "returncode": 0,
-            "stdout": "Haskell Dockerfile Linter 0.0.0",  # Always below any real minimum
+            "stdout": "Haskell Dockerfile Linter 0.0.0",  # Below any real minimum
             "stderr": "",
         },
     )()

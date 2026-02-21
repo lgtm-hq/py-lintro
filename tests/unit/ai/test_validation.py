@@ -35,12 +35,14 @@ def _make_suggestion(
 
 
 def test_validate_applied_fixes_returns_none_for_empty():
+    """Verify validation returns None when given an empty suggestions list."""
     result = validate_applied_fixes([])
     assert_that(result).is_none()
 
 
 @patch("lintro.ai.validation._run_tool_check")
 def test_validate_applied_fixes_verified_when_issue_gone(mock_check):
+    """Verify a fix is marked as verified when the tool reports no remaining issues."""
     mock_check.return_value = []  # No issues remain
     suggestion = _make_suggestion()
 
@@ -54,6 +56,7 @@ def test_validate_applied_fixes_verified_when_issue_gone(mock_check):
 
 @patch("lintro.ai.validation._run_tool_check")
 def test_validate_applied_fixes_unverified_when_issue_remains(mock_check):
+    """Fix is marked unverified when issue still appears in output."""
     remaining = MagicMock()
     remaining.file = "src/main.py"
     remaining.code = "B101"
@@ -71,6 +74,7 @@ def test_validate_applied_fixes_unverified_when_issue_remains(mock_check):
 
 @patch("lintro.ai.validation._run_tool_check")
 def test_validate_applied_fixes_mixed_verified_and_unverified(mock_check):
+    """Verify correct counts when some fixes are verified and others are not."""
     remaining = MagicMock()
     remaining.file = "src/main.py"
     remaining.code = "B101"
@@ -90,6 +94,7 @@ def test_validate_applied_fixes_mixed_verified_and_unverified(mock_check):
 
 @patch("lintro.ai.validation._run_tool_check")
 def test_validate_applied_fixes_matches_by_line_before_file_code(mock_check):
+    """Validation matches remaining issues by line, not just file."""
     remaining = MagicMock()
     remaining.file = "src/main.py"
     remaining.code = "E501"
@@ -113,6 +118,7 @@ def test_validate_applied_fixes_matches_by_line_before_file_code(mock_check):
 def test_validate_applied_fixes_unknown_remaining_line_marks_issue_unverified(
     mock_check,
 ):
+    """Verify a remaining issue with unknown line number marks the fix as unverified."""
     remaining = MagicMock()
     remaining.file = "src/main.py"
     remaining.code = "E501"
@@ -130,6 +136,7 @@ def test_validate_applied_fixes_unknown_remaining_line_marks_issue_unverified(
 
 @patch("lintro.ai.validation._run_tool_check")
 def test_validate_applied_fixes_skips_unknown_tool(mock_check):
+    """Suggestions with unknown tool names are skipped silently."""
     suggestion = _make_suggestion(tool_name="unknown")
     result = validate_applied_fixes([suggestion])
 
@@ -142,6 +149,7 @@ def test_validate_applied_fixes_skips_unknown_tool(mock_check):
 
 @patch("lintro.ai.validation._run_tool_check")
 def test_validate_applied_fixes_skips_when_check_returns_none(mock_check):
+    """Verify suggestions are skipped when the tool check returns None."""
     mock_check.return_value = None  # Tool not available
     suggestion = _make_suggestion()
 
@@ -154,6 +162,7 @@ def test_validate_applied_fixes_skips_when_check_returns_none(mock_check):
 
 @patch("lintro.ai.validation._run_tool_check")
 def test_validate_applied_fixes_groups_by_tool(mock_check):
+    """Verify validation groups suggestions by tool and checks each tool separately."""
     mock_check.return_value = []
 
     s1 = _make_suggestion(tool_name="ruff")
@@ -172,6 +181,7 @@ def test_validate_applied_fixes_matches_relative_remaining_paths_against_absolut
     tmp_path,
     monkeypatch,
 ):
+    """Relative remaining paths match against absolute fix paths."""
     project_file = tmp_path / "src" / "main.py"
     project_file.parent.mkdir(parents=True)
     project_file.write_text("print('ok')\n")
@@ -218,6 +228,7 @@ def test_validate_applied_fixes_tracks_new_issues(mock_check):
 
 @patch("lintro.tools.tool_manager.get_tool")
 def test_run_tool_check_returns_issues(mock_get_tool):
+    """Verify _run_tool_check returns the list of issues from a successful tool run."""
     from lintro.ai.validation import _run_tool_check
 
     mock_issue = MagicMock()
@@ -237,6 +248,7 @@ def test_run_tool_check_returns_issues(mock_get_tool):
 
 @patch("lintro.tools.tool_manager.get_tool")
 def test_run_tool_check_returns_none_on_error(mock_get_tool):
+    """Verify _run_tool_check returns None when the tool raises an exception."""
     from lintro.ai.validation import _run_tool_check
 
     mock_tool = MagicMock()
@@ -249,6 +261,7 @@ def test_run_tool_check_returns_none_on_error(mock_get_tool):
 
 @patch("lintro.tools.tool_manager.get_tool")
 def test_run_tool_check_returns_none_for_missing_tool(mock_get_tool):
+    """Verify _run_tool_check returns None when the requested tool does not exist."""
     from lintro.ai.validation import _run_tool_check
 
     mock_get_tool.side_effect = KeyError("no such tool")
@@ -261,12 +274,14 @@ def test_run_tool_check_returns_none_for_missing_tool(mock_get_tool):
 
 
 def test_render_validation_terminal_renders_verified():
+    """Verify terminal rendering displays the verified fix count."""
     result = ValidationResult(verified=3, unverified=0)
     output = render_validation_terminal(result)
-    assert_that(output).contains("3 verified")
+    assert_that(output).contains("3 resolved")
 
 
 def test_render_validation_terminal_renders_unverified_with_details():
+    """Verify terminal rendering shows unverified count and detail lines."""
     result = ValidationResult(
         verified=1,
         unverified=2,
@@ -276,13 +291,14 @@ def test_render_validation_terminal_renders_unverified_with_details():
         ],
     )
     output = render_validation_terminal(result)
-    assert_that(output).contains("1 verified")
-    assert_that(output).contains("2 unverified")
+    assert_that(output).contains("1 resolved")
+    assert_that(output).contains("2 still present")
     assert_that(output).contains("B101")
     assert_that(output).contains("E501")
 
 
 def test_render_validation_terminal_empty_result_returns_empty():
+    """Verify an empty ValidationResult produces empty terminal output."""
     result = ValidationResult()
     output = render_validation_terminal(result)
     assert_that(output).is_empty()

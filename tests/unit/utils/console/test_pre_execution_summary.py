@@ -46,7 +46,7 @@ def test_pre_execution_summary_shows_ai_when_disabled() -> None:
     assert_that(output).contains("provider: openai")
     assert_that(output).contains("parallel: 7 workers")
     assert_that(output).contains("safe-auto-apply: on")
-    assert_that(output).contains("validate-after-group: off")
+    assert_that(output).contains("verify-fixes: off")
 
 
 def test_pre_execution_summary_shows_ai_when_enabled(
@@ -72,7 +72,7 @@ def test_pre_execution_summary_shows_ai_when_enabled(
     assert_that(output).contains("provider: anthropic")
     assert_that(output).contains("parallel: 3 workers")
     assert_that(output).contains("safe-auto-apply: on")
-    assert_that(output).contains("validate-after-group: off")
+    assert_that(output).contains("verify-fixes: off")
 
 
 def test_pre_execution_summary_shows_ai_when_config_missing() -> None:

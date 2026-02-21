@@ -16,6 +16,7 @@ from lintro.ai.retry import with_retry
 
 
 def test_retry_succeeds_on_first_attempt():
+    """Verify decorated function returns immediately on success without retrying."""
     call_count = 0
 
     @with_retry(max_retries=3)
@@ -31,6 +32,7 @@ def test_retry_succeeds_on_first_attempt():
 
 @patch("lintro.ai.retry.time.sleep")
 def test_retry_retries_on_provider_error(mock_sleep):
+    """Verify AIProviderError triggers retries until success."""
     call_count = 0
 
     @with_retry(max_retries=3, base_delay=1.0)
@@ -49,6 +51,7 @@ def test_retry_retries_on_provider_error(mock_sleep):
 
 @patch("lintro.ai.retry.time.sleep")
 def test_retry_retries_on_rate_limit_error(mock_sleep):
+    """Verify AIRateLimitError triggers retries until success."""
     call_count = 0
 
     @with_retry(max_retries=2, base_delay=1.0)
@@ -65,6 +68,7 @@ def test_retry_retries_on_rate_limit_error(mock_sleep):
 
 
 def test_retry_does_not_retry_on_authentication_error():
+    """Verify AIAuthenticationError is raised immediately without retrying."""
     call_count = 0
 
     @with_retry(max_retries=3)
@@ -80,6 +84,8 @@ def test_retry_does_not_retry_on_authentication_error():
 
 @patch("lintro.ai.retry.time.sleep")
 def test_retry_raises_after_max_retries_exhausted(mock_sleep):
+    """Verify the original error is raised after all retry attempts are exhausted."""
+
     @with_retry(max_retries=2, base_delay=0.1)
     def fn():
         raise AIProviderError("always fails")
@@ -91,6 +97,7 @@ def test_retry_raises_after_max_retries_exhausted(mock_sleep):
 
 @patch("lintro.ai.retry.time.sleep")
 def test_retry_exponential_backoff_delays(mock_sleep):
+    """Verify retry delays follow exponential backoff progression."""
     call_count = 0
 
     @with_retry(max_retries=3, base_delay=1.0, backoff_factor=2.0)
@@ -110,6 +117,7 @@ def test_retry_exponential_backoff_delays(mock_sleep):
 
 @patch("lintro.ai.retry.time.sleep")
 def test_retry_max_delay_cap(mock_sleep):
+    """Verify retry delays are capped at the configured max_delay value."""
     call_count = 0
 
     @with_retry(
@@ -132,6 +140,7 @@ def test_retry_max_delay_cap(mock_sleep):
 
 
 def test_retry_does_not_retry_non_ai_exceptions():
+    """Verify non-AI exceptions propagate immediately without retrying."""
     call_count = 0
 
     @with_retry(max_retries=3)
@@ -146,6 +155,8 @@ def test_retry_does_not_retry_non_ai_exceptions():
 
 
 def test_retry_preserves_function_metadata():
+    """Verify the retry decorator preserves the wrapped function name and docstring."""
+
     @with_retry(max_retries=1)
     def my_function():
         """My docstring."""

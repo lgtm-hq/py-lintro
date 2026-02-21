@@ -43,11 +43,13 @@ Guidelines:
 - Be specific about file areas or patterns, not generic advice
 - If issues are mostly cosmetic/style, say so
 - Limit to 3-5 key patterns and 3-5 priority actions
+- When recommending actions, use `lintro chk` for checking and \
+`lintro fmt` for formatting — never suggest running linting tools \
+directly (e.g., don't say 'run black' or 'run ruff --fix')
 - For triage_suggestions, identify issues that are likely \
 intentional or idiomatic in their context (e.g., asserts in \
 test files, long lines in generated code, unused imports in \
 __init__.py). Suggest the appropriate suppression mechanism \
 for the tool (# noqa, // eslint-disable, #[allow(...)], etc.). \
-Only include if there are clear candidates — omit the field \
-if all issues genuinely need fixing
+Use an empty array if all issues genuinely need fixing
 """

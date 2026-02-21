@@ -6,11 +6,10 @@ from unittest.mock import patch
 
 from assertpy import assert_that
 
+from lintro.ai.apply import _apply_fix, apply_fixes
 from lintro.ai.interactive import (
-    _apply_fix,
     _group_by_code,
     _render_prompt,
-    apply_fixes,
     review_fixes_interactive,
 )
 from lintro.ai.models import AIFixSuggestion
@@ -18,9 +17,9 @@ from lintro.ai.models import AIFixSuggestion
 # -- _apply_fix fallback warning ----------------------------------------------
 
 
-@patch("lintro.ai.interactive.logger")
-def test_apply_fix_fallback_logs_warning(mock_logger, tmp_path):
-    """Falling back to str.replace should log a warning."""
+@patch("lintro.ai.apply.logger")
+def test_apply_fix_fallback_logs_debug(mock_logger, tmp_path):
+    """Falling back to str.replace should log at debug level."""
     f = tmp_path / "test.py"
     f.write_text("old code\nmore stuff\n")
 
@@ -33,13 +32,13 @@ def test_apply_fix_fallback_logs_warning(mock_logger, tmp_path):
 
     result = _apply_fix(fix)
     assert_that(result).is_true()
-    mock_logger.warning.assert_called_once()
-    call_args = mock_logger.warning.call_args[0][0]
+    mock_logger.debug.assert_called_once()
+    call_args = mock_logger.debug.call_args[0][0]
     assert_that(call_args).contains("falling back")
     assert_that(call_args).contains(str(f))
 
 
-@patch("lintro.ai.interactive.logger")
+@patch("lintro.ai.apply.logger")
 def test_apply_fix_line_targeted_does_not_log_warning(mock_logger, tmp_path):
     """Successful line-targeted replacement should NOT log a warning."""
     f = tmp_path / "test.py"
@@ -61,6 +60,7 @@ def test_apply_fix_line_targeted_does_not_log_warning(mock_logger, tmp_path):
 
 
 def test_apply_fix_applies_fix(tmp_path):
+    """Verify that a valid fix replaces the original code in the file."""
     f = tmp_path / "test.py"
     f.write_text("assert x > 0\nprint('ok')\n")
 
@@ -79,6 +79,7 @@ def test_apply_fix_applies_fix(tmp_path):
 
 
 def test_apply_fix_skips_when_original_not_found(tmp_path):
+    """_apply_fix returns False when original code is not found."""
     f = tmp_path / "test.py"
     f.write_text("x = 1\n")
 
@@ -93,6 +94,7 @@ def test_apply_fix_skips_when_original_not_found(tmp_path):
 
 
 def test_apply_fix_handles_missing_file():
+    """Verify that _apply_fix returns False for a nonexistent file path."""
     fix = AIFixSuggestion(
         file="/nonexistent/file.py",
         original_code="x",
@@ -143,6 +145,7 @@ def test_apply_fix_fallback_to_string_replace(tmp_path):
 
 
 def test_apply_fix_empty_original_code(tmp_path):
+    """Verify that an empty original_code string causes _apply_fix to return False."""
     f = tmp_path / "test.py"
     f.write_text("x = 1\n")
 
@@ -157,6 +160,7 @@ def test_apply_fix_empty_original_code(tmp_path):
 
 
 def test_apply_fix_blocks_writes_outside_workspace_root(tmp_path):
+    """Verify that fixes targeting files outside workspace_root are rejected."""
     workspace_root = tmp_path / "workspace"
     workspace_root.mkdir(parents=True)
     outside_file = tmp_path / "outside.py"
@@ -215,6 +219,7 @@ def test_apply_fix_search_radius_limits_search(tmp_path):
 
 
 def test_apply_fixes_returns_only_successful(tmp_path):
+    """Verify that apply_fixes returns only successfully applied suggestions."""
     f = tmp_path / "test.py"
     f.write_text("x = 1\n")
 
@@ -261,6 +266,7 @@ def test_apply_fixes_passes_auto_apply(tmp_path):
 
 
 def test_group_by_code_groups_by_code():
+    """Verify that fixes are grouped into separate lists by their rule code."""
     fixes = [
         AIFixSuggestion(file="a.py", code="B101"),
         AIFixSuggestion(file="b.py", code="B101"),
@@ -274,12 +280,14 @@ def test_group_by_code_groups_by_code():
 
 
 def test_group_by_code_empty_code_uses_unknown():
+    """Verify that an empty code string is grouped under the 'unknown' key."""
     fixes = [AIFixSuggestion(file="a.py", code="")]
     groups = _group_by_code(fixes)
     assert_that(groups).contains_key("unknown")
 
 
 def test_group_by_code_empty_list():
+    """Verify that an empty fix list produces an empty grouping."""
     groups = _group_by_code([])
     assert_that(groups).is_empty()
 
@@ -288,6 +296,7 @@ def test_group_by_code_empty_list():
 
 
 def test_review_fixes_interactive_empty_suggestions():
+    """Verify that empty suggestions result in zero accepted, rejected, and applied."""
     accepted, rejected, applied = review_fixes_interactive([])
     assert_that(accepted).is_equal_to(0)
     assert_that(rejected).is_equal_to(0)
@@ -295,6 +304,7 @@ def test_review_fixes_interactive_empty_suggestions():
 
 
 def test_review_fixes_interactive_non_interactive_skips():
+    """Verify that non-interactive stdin causes the review to be skipped."""
     fixes = [
         AIFixSuggestion(
             file="test.py",
@@ -310,9 +320,10 @@ def test_review_fixes_interactive_non_interactive_skips():
 
 
 def test_review_fixes_interactive_prompt_text_clarifies_scope():
+    """Verify that the rendered prompt includes scope clarification text."""
     prompt = _render_prompt(validate_mode=False, safe_default=False)
     assert_that(prompt).contains("accept group + remaining")
-    assert_that(prompt).contains("validate-after-group")
+    assert_that(prompt).contains("verify fixes")
 
 
 @patch("lintro.ai.interactive.sys.stdin")

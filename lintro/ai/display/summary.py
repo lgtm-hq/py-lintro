@@ -156,7 +156,7 @@ def render_summary_github(
 
     if show_cost and summary.cost_estimate > 0:
         lines.append("")
-        lines.append(f"AI cost estimate: {format_cost(summary.cost_estimate)}")
+        lines.append(f"AI cost: {format_cost(summary.cost_estimate)}")
 
     lines.append("::endgroup::")
 
@@ -220,7 +220,7 @@ def render_summary_markdown(
 
     if show_cost and summary.cost_estimate > 0:
         lines.append("")
-        lines.append(f"*AI cost estimate: {format_cost(summary.cost_estimate)}*")
+        lines.append(f"*AI cost: {format_cost(summary.cost_estimate)}*")
 
     return "\n".join(lines)
 

@@ -150,7 +150,7 @@ def test_fix_with_fixed_count(
     assert_that(combined).contains("PASS")
     assert_that(combined).contains("Fixed")
     assert_that(combined).contains("AI-Applied")
-    assert_that(combined).contains("AI-Verified")
+    assert_that(combined).contains("AI-Resolved")
     assert_that(combined).contains("Remaining")
 
 
@@ -259,10 +259,10 @@ def test_fix_shows_ai_fixed_count_from_metadata(
 
     combined = "".join(output)
     assert_that(combined).contains("AI-Applied")
-    assert_that(combined).contains("AI-Verified")
+    assert_that(combined).contains("AI-Resolved")
     assert_that(combined).contains("4")
     assert_that(combined).contains("3")
-    assert_that(combined).contains("1 unverified")
+    assert_that(combined).contains("1 unresolved")
 
 
 # =============================================================================

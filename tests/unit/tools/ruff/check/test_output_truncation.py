@@ -48,7 +48,7 @@ def test_check_failure_logs_output_to_debug_only(
             f"Expected full output in debug calls: {debug_calls}",
         ).is_true()
 
-        # Verify no truncation warning was logged (raw JSON should not appear in console)
+        # Verify no truncation warning was logged (raw JSON should not appear)
         warning_calls = [str(call) for call in mock_logger.warning.call_args_list]
         truncation_warning = any(
             "check failed with output" in call for call in warning_calls
@@ -116,7 +116,8 @@ def test_format_check_failure_logs_output_to_debug_only(
             "format check failed with output" in call for call in warning_calls
         )
         assert_that(truncation_warning).described_as(
-            f"Did not expect 'format check failed with output' warning: {warning_calls}",
+            "Did not expect 'format check failed with output' warning:"
+            f" {warning_calls}",
         ).is_false()
 
 
