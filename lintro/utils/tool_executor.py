@@ -341,6 +341,15 @@ def run_lint_tools_simple(
                     else tool.check(paths, {})
                 )
 
+                # Populate doc_url on each issue from the plugin
+                if hasattr(tool, "doc_url") and result.issues:
+                    for issue in result.issues:
+                        code = getattr(issue, "code", None) or ""
+                        if code and not getattr(issue, "doc_url", ""):
+                            url = tool.doc_url(str(code))
+                            if url:
+                                issue.doc_url = url
+
                 all_results.append(result)
 
                 # Update totals

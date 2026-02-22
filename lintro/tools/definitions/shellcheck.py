@@ -148,6 +148,19 @@ class ShellcheckPlugin(BaseToolPlugin):
         )
         super().set_options(**options, **kwargs)
 
+    def doc_url(self, code: str) -> str | None:
+        """Return ShellCheck wiki URL for the given code.
+
+        Args:
+            code: ShellCheck code (e.g., "SC2086").
+
+        Returns:
+            URL to the ShellCheck wiki page.
+        """
+        if code:
+            return f"https://www.shellcheck.net/wiki/{code}"
+        return None
+
     def _build_command(self) -> list[str]:
         """Build the shellcheck command.
 

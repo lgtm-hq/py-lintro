@@ -89,6 +89,11 @@ def write_output_file(
                         "line": getattr(issue, "line", None) or 0,
                         "code": getattr(issue, "code", "") or "",
                         "message": getattr(issue, "message", "") or "",
+                        **(
+                            {"doc_url": issue.doc_url}
+                            if getattr(issue, "doc_url", "")
+                            else {}
+                        ),
                     }
                     for issue in result.issues
                 ]
