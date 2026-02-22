@@ -37,6 +37,8 @@ def render_validation_terminal(result: ValidationResult) -> str:
         parts.append(f"[green]{result.verified} resolved[/green]")
     if result.unverified:
         parts.append(f"[yellow]{result.unverified} still present[/yellow]")
+    if result.new_issues:
+        parts.append(f"[red]{result.new_issues} new issues introduced[/red]")
     sep = " \u00b7 "
     console.print(f"  [bold]Fix validation:[/bold] {sep.join(parts)}")
 

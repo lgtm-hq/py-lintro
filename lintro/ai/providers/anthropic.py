@@ -154,7 +154,7 @@ class AnthropicProvider(BaseAIProvider):
             raise AIRateLimitError(
                 f"Anthropic rate limit exceeded: {e}",
             ) from e
-        except anthropic.APIError as e:
+        except anthropic.AnthropicError as e:
             logger.debug(f"Anthropic API error: {e}")
             raise AIProviderError(
                 f"Anthropic API error: {e}",

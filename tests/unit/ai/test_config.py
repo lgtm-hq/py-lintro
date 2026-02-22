@@ -269,6 +269,15 @@ def test_retry_backoff_factor_rejects_below_minimum() -> None:
         AIConfig(retry_backoff_factor=0.5)
 
 
+# -- Cross-field validators ------------------------------------------------
+
+
+def test_retry_max_delay_less_than_base_raises() -> None:
+    """retry_max_delay < retry_base_delay raises ValidationError."""
+    with pytest.raises(ValidationError, match="retry_max_delay"):
+        AIConfig(retry_base_delay=5.0, retry_max_delay=1.0)
+
+
 # -- Extra fields forbidden ------------------------------------------------
 
 

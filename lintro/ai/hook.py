@@ -35,7 +35,7 @@ class AIPostExecutionHook:
             ai_fix: Whether AI fix suggestions were requested.
         """
         self._lintro_config = lintro_config
-        self._ai_fix = ai_fix or lintro_config.ai.default_fix
+        self._ai_fix = ai_fix
 
     def should_run(self, action: Action) -> bool:
         """Check whether AI enhancement should run for this action.

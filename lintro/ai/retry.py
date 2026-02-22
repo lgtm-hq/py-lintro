@@ -72,9 +72,10 @@ def with_retry(
                         f"waiting {delay:.1f}s",
                     )
                     time.sleep(delay)
-            if last_exception is not None:
-                raise last_exception
-            raise AIProviderError("Retry loop exhausted without capturing an exception")
+            assert (
+                last_exception is not None
+            ), "Retry loop exhausted without capturing an exception"
+            raise last_exception
 
         return wrapper
 

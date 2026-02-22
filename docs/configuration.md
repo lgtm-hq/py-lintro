@@ -1825,7 +1825,10 @@ fix suggestions. See the full [AI Features Guide](ai-features.md) for detailed u
 # Install AI dependencies
 uv pip install 'lintro[ai]'
 
-# Set API key
+# Set API key for your configured provider
+# Anthropic (default): ANTHROPIC_API_KEY
+# OpenAI:              OPENAI_API_KEY
+# Custom:              set ai.api_key_env in config to use any env var name
 export ANTHROPIC_API_KEY=sk-ant-...
 ```
 

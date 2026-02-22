@@ -105,7 +105,7 @@ def test_execution_summary_check_failed_tool_shows_minimum_issues(
     ):
         logger.print_execution_summary(Action.CHECK, results)
         # Should show at least 1 for art when tool failed
-        mock_art.assert_called_once_with(  # noqa: E501
+        mock_art.assert_called_once_with(
             total_issues=1,
         )
 

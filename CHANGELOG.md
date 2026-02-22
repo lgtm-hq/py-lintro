@@ -90,9 +90,6 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 - CI script path references for coverage comments
 - Package metadata and classifiers
 - Logo display in README for PyPI compatibility
-
-### Added
-
 - Initial release preparation
 - PyPI package configuration
 - MANIFEST.in file for asset inclusion

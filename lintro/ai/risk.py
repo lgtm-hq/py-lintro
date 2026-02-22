@@ -79,14 +79,27 @@ def calculate_patch_stats(suggestions: Sequence[AIFixSuggestion]) -> PatchStats:
                     lines_removed += 1
             continue
 
-        # Fallback estimate when diff is unavailable.
+        # Fallback estimate when diff is unavailable: compute actual churn.
+        import difflib
+
         original_lines = suggestion.original_code.splitlines()
         suggested_lines = suggestion.suggested_code.splitlines()
-        hunks += 1
-        if len(suggested_lines) > len(original_lines):
-            lines_added += len(suggested_lines) - len(original_lines)
-        elif len(original_lines) > len(suggested_lines):
-            lines_removed += len(original_lines) - len(suggested_lines)
+        matcher = difflib.SequenceMatcher(
+            None,
+            original_lines,
+            suggested_lines,
+        )
+        for tag, i1, i2, j1, j2 in matcher.get_opcodes():
+            if tag == "replace":
+                lines_removed += i2 - i1
+                lines_added += j2 - j1
+                hunks += 1
+            elif tag == "delete":
+                lines_removed += i2 - i1
+                hunks += 1
+            elif tag == "insert":
+                lines_added += j2 - j1
+                hunks += 1
 
     return PatchStats(
         files=len(files),
