@@ -298,6 +298,19 @@ class MypyPlugin(BaseToolPlugin):
 
         return effective_excludes
 
+    def doc_url(self, code: str) -> str | None:
+        """Return mypy documentation URL for the given error code.
+
+        Args:
+            code: mypy error code (e.g., "import-untyped").
+
+        Returns:
+            URL to the mypy error code documentation.
+        """
+        if code:
+            return f"https://mypy.readthedocs.io/en/stable/error_code_list.html#{code}"
+        return None
+
     def check(self, paths: list[str], options: dict[str, object]) -> ToolResult:
         """Check files with Mypy.
 

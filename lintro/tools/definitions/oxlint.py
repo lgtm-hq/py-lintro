@@ -230,6 +230,20 @@ class OxlintPlugin(BaseToolPlugin):
 
         return args
 
+    def doc_url(self, code: str) -> str | None:
+        """Return oxlint documentation URL for the given rule.
+
+        Args:
+            code: Oxlint rule in "category/rule" format
+                (e.g., "deepscan/bad-comparison-sequence").
+
+        Returns:
+            URL to the oxlint rule documentation.
+        """
+        if code and "/" in code:
+            return f"https://oxc.rs/docs/guide/usage/linter/rules/{code}.html"
+        return None
+
     def check(self, paths: list[str], options: dict[str, object]) -> ToolResult:
         """Check files with Oxlint without making changes.
 
