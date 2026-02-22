@@ -45,6 +45,9 @@ class ToolResult:
     fixed_issues_count: int | None = field(default=None)
     remaining_issues_count: int | None = field(default=None)
 
+    # Issues detected before fixes were applied (for two-table fix output)
+    detected_issues: Sequence[BaseIssue] | None = field(default=None)
+
     # Optional pytest-specific summary data for display
     pytest_summary: dict[str, Any] | None = field(default=None)
 

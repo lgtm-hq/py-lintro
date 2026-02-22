@@ -357,6 +357,21 @@ def run_lint_tools_simple(
                 display_output = None
                 if result.formatted_output:
                     display_output = result.formatted_output
+                elif (
+                    action == Action.FIX
+                    and result.detected_issues
+                ):
+                    # Fix mode with detected issues: render two-table output
+                    from lintro.formatters.formatter import format_fix_results
+
+                    display_output = format_fix_results(
+                        detected_issues=result.detected_issues,
+                        remaining_issues=(
+                            list(result.issues) if result.issues else None
+                        ),
+                        output_format=output_format,
+                        tool_name=tool_name,
+                    )
                 elif result.issues or result.output:
                     # Format issues using the tool formatter
                     # Also format when there's output (e.g., coverage) even with no
