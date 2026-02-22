@@ -55,6 +55,7 @@ class BaseIssue:
     line: int = field(default=0)
     column: int = field(default=0)
     message: str = field(default="")
+    doc_url: str = field(default="", repr=False)
 
     def get_severity(self) -> SeverityLevel:
         """Return the normalized severity for this issue.
@@ -91,7 +92,8 @@ class BaseIssue:
         to customize field mapping without overriding this method.
 
         Returns:
-            Dictionary with keys: file, line, column, code, message, severity, fixable.
+            Dictionary with keys: file, line, column, code, message, severity,
+            fixable, doc_url.
         """
         # Get the field mapping (supports inheritance)
         field_map = self.DISPLAY_FIELD_MAP
@@ -113,4 +115,5 @@ class BaseIssue:
             "message": message_val,
             "severity": str(self.get_severity()),
             "fixable": "Yes" if fixable_val else "",
+            "doc_url": getattr(self, "doc_url", "") or "",
         }

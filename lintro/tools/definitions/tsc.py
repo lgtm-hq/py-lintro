@@ -367,6 +367,21 @@ class TscPlugin(BaseToolPlugin):
 
         return cmd
 
+    def doc_url(self, code: str) -> str | None:
+        """Return TypeScript error documentation URL.
+
+        Args:
+            code: TypeScript error code (e.g., "TS2307" or "2307").
+
+        Returns:
+            URL to the TypeScript error documentation.
+        """
+        if code:
+            # Strip "TS" prefix if present
+            num = code.lstrip("TSts")
+            return f"https://typescript.tv/errors/#ts{num}"
+        return None
+
     def check(self, paths: list[str], options: dict[str, object]) -> ToolResult:
         """Check files with tsc.
 

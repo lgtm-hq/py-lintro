@@ -180,6 +180,19 @@ class ClippyPlugin(BaseToolPlugin):
         options = filter_none_options(timeout=timeout)
         super().set_options(**options, **kwargs)
 
+    def doc_url(self, code: str) -> str | None:
+        """Return Clippy documentation URL for the given lint name.
+
+        Args:
+            code: Clippy lint name (e.g., "needless_return").
+
+        Returns:
+            URL to the Clippy lint documentation.
+        """
+        if code:
+            return f"https://rust-lang.github.io/rust-clippy/master/index.html#{code}"
+        return None
+
     def check(self, paths: list[str], options: dict[str, object]) -> ToolResult:
         """Run `cargo clippy` and parse linting issues.
 

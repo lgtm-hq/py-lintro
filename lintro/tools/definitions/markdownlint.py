@@ -203,6 +203,19 @@ class MarkdownlintPlugin(BaseToolPlugin):
             )
             return None
 
+    def doc_url(self, code: str) -> str | None:
+        """Return markdownlint documentation URL for the given code.
+
+        Args:
+            code: Markdownlint code (e.g., "MD013").
+
+        Returns:
+            URL to the markdownlint rule documentation.
+        """
+        if code:
+            return f"https://github.com/DavidAnson/markdownlint/blob/main/doc/{code.lower()}.md"
+        return None
+
     def check(self, paths: list[str], options: dict[str, object]) -> ToolResult:
         """Check files with Markdownlint.
 

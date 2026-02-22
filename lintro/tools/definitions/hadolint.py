@@ -234,6 +234,19 @@ class HadolintPlugin(BaseToolPlugin):
                 error=str(e),
             )
 
+    def doc_url(self, code: str) -> str | None:
+        """Return Hadolint wiki URL for the given code.
+
+        Args:
+            code: Hadolint code (e.g., "DL3008").
+
+        Returns:
+            URL to the Hadolint wiki page.
+        """
+        if code:
+            return f"https://github.com/hadolint/hadolint/wiki/{code}"
+        return None
+
     def check(self, paths: list[str], options: dict[str, object]) -> ToolResult:
         """Check files with Hadolint.
 

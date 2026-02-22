@@ -175,6 +175,19 @@ class RuffPlugin(BaseToolPlugin):
         )
         super().set_options(**options, **kwargs)
 
+    def doc_url(self, code: str) -> str | None:
+        """Return Ruff documentation URL for the given rule code.
+
+        Args:
+            code: Ruff rule code (e.g., "E501", "F401").
+
+        Returns:
+            URL to the Ruff rules documentation.
+        """
+        if code:
+            return f"https://docs.astral.sh/ruff/rules/{code}"
+        return None
+
     def check(self, paths: list[str], options: dict[str, object]) -> ToolResult:
         """Check files with Ruff.
 

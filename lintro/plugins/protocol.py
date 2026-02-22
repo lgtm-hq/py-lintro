@@ -148,3 +148,14 @@ class LintroPlugin(Protocol):
             **kwargs: Tool-specific options to set.
         """
         ...
+
+    def doc_url(self, code: str) -> str | None:
+        """Return a documentation URL for the given rule code.
+
+        Args:
+            code: The rule/error code (e.g., "E501", "SC2086").
+
+        Returns:
+            Documentation URL string, or None if no docs available.
+        """
+        ...
