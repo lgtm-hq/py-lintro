@@ -33,16 +33,18 @@ def test_check_with_timeout(
     test_file.parent.mkdir(parents=True, exist_ok=True)
     test_file.write_text("fn main() {}")
 
-    with patch(
-        "lintro.plugins.execution_preparation.verify_tool_version",
-        return_value=None,
-    ):
-        with patch.object(
+    with (
+        patch(
+            "lintro.plugins.execution_preparation.verify_tool_version",
+            return_value=None,
+        ),
+        patch.object(
             rustfmt_plugin,
             "_run_subprocess",
             side_effect=subprocess.TimeoutExpired(cmd=["cargo", "fmt"], timeout=60),
-        ):
-            result = rustfmt_plugin.check([str(test_file)], {})
+        ),
+    ):
+        result = rustfmt_plugin.check([str(test_file)], {})
 
     assert_that(result.success).is_false()
     assert_that(result.output).contains("timed out")
@@ -66,16 +68,18 @@ def test_fix_with_timeout_on_initial_check(
     test_file.parent.mkdir(parents=True, exist_ok=True)
     test_file.write_text("fn main() {}")
 
-    with patch(
-        "lintro.plugins.execution_preparation.verify_tool_version",
-        return_value=None,
-    ):
-        with patch.object(
+    with (
+        patch(
+            "lintro.plugins.execution_preparation.verify_tool_version",
+            return_value=None,
+        ),
+        patch.object(
             rustfmt_plugin,
             "_run_subprocess",
             side_effect=subprocess.TimeoutExpired(cmd=["cargo", "fmt"], timeout=60),
-        ):
-            result = rustfmt_plugin.fix([str(test_file)], {})
+        ),
+    ):
+        result = rustfmt_plugin.fix([str(test_file)], {})
 
     assert_that(result.success).is_false()
     assert_that(result.output).contains("timed out")
@@ -128,12 +132,14 @@ def test_fix_with_timeout_on_fix_command(
         # Fix command times out
         raise subprocess.TimeoutExpired(cmd=cmd, timeout=timeout)
 
-    with patch(
-        "lintro.plugins.execution_preparation.verify_tool_version",
-        return_value=None,
+    with (
+        patch(
+            "lintro.plugins.execution_preparation.verify_tool_version",
+            return_value=None,
+        ),
+        patch.object(rustfmt_plugin, "_run_subprocess", side_effect=mock_run),
     ):
-        with patch.object(rustfmt_plugin, "_run_subprocess", side_effect=mock_run):
-            result = rustfmt_plugin.fix([str(test_file)], {})
+        result = rustfmt_plugin.fix([str(test_file)], {})
 
     assert_that(result.success).is_false()
     assert_that(result.output).contains("timed out")
@@ -189,12 +195,14 @@ def test_fix_with_timeout_on_verification(
         # Verification times out
         raise subprocess.TimeoutExpired(cmd=cmd, timeout=timeout)
 
-    with patch(
-        "lintro.plugins.execution_preparation.verify_tool_version",
-        return_value=None,
+    with (
+        patch(
+            "lintro.plugins.execution_preparation.verify_tool_version",
+            return_value=None,
+        ),
+        patch.object(rustfmt_plugin, "_run_subprocess", side_effect=mock_run),
     ):
-        with patch.object(rustfmt_plugin, "_run_subprocess", side_effect=mock_run):
-            result = rustfmt_plugin.fix([str(test_file)], {})
+        result = rustfmt_plugin.fix([str(test_file)], {})
 
     assert_that(result.success).is_false()
     assert_that(result.output).contains("timed out")

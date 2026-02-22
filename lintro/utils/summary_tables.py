@@ -97,6 +97,47 @@ def _format_tool_display_name(tool_name: str) -> str:
     return tool_name.replace("_", "-")
 
 
+def _get_ai_applied_count(result: object) -> int:
+    """Get AI-applied fix count from tool result metadata."""
+    ai_metadata = getattr(result, "ai_metadata", None)
+    if not isinstance(ai_metadata, dict):
+        return 0
+    applied_count = ai_metadata.get(
+        "applied_count",
+        ai_metadata.get("fixed_count", 0),
+    )
+    if applied_count is None:
+        return 0
+    try:
+        return max(0, int(applied_count))
+    except (TypeError, ValueError):
+        return 0
+
+
+def _get_ai_verified_count(result: object) -> int:
+    """Get count of AI-applied fixes verified as resolved."""
+    ai_metadata = getattr(result, "ai_metadata", None)
+    if not isinstance(ai_metadata, dict):
+        return 0
+    verified_count = ai_metadata.get("verified_count", 0)
+    try:
+        return max(0, int(verified_count))
+    except (TypeError, ValueError):
+        return 0
+
+
+def _get_ai_unverified_count(result: object) -> int:
+    """Get count of AI-applied fixes that remain unresolved."""
+    ai_metadata = getattr(result, "ai_metadata", None)
+    if not isinstance(ai_metadata, dict):
+        return 0
+    unverified_count = ai_metadata.get("unverified_count", 0)
+    try:
+        return max(0, int(unverified_count))
+    except (TypeError, ValueError):
+        return 0
+
+
 def _is_result_skipped(result: object) -> tuple[bool, str]:
     """Check if a tool result represents a skipped tool.
 
@@ -285,6 +326,8 @@ def print_summary_table(
                             tool_display,
                             f"{_YELLOW}⏭️  SKIP{_RESET}",
                             "-",  # Fixed
+                            "-",  # AI-Applied
+                            "-",  # AI-Resolved
                             "-",  # Remaining
                             f"{_YELLOW}{skip_reason}{_RESET}" if skip_reason else "",
                         ],
@@ -344,6 +387,16 @@ def print_summary_table(
 
                 # Fixed issues display
                 fixed_display: str = f"{_GREEN}{fixed_display_value}{_RESET}"
+                ai_applied_value = _get_ai_applied_count(result)
+                ai_applied_display: str = f"{_GREEN}{ai_applied_value}{_RESET}"
+                ai_verified_value = _get_ai_verified_count(result)
+                ai_verified_display: str = f"{_GREEN}{ai_verified_value}{_RESET}"
+                ai_unverified_value = _get_ai_unverified_count(result)
+                notes_display = (
+                    f"{_YELLOW}{ai_unverified_value} unresolved{_RESET}"
+                    if ai_unverified_value > 0
+                    else ""
+                )
 
                 # Remaining issues display
                 if isinstance(remaining_count, str):
@@ -360,8 +413,10 @@ def print_summary_table(
                         tool_display,
                         status_display,
                         fixed_display,
+                        ai_applied_display,
+                        ai_verified_display,
                         remaining_display,
-                        "",  # Notes
+                        notes_display,
                     ],
                 )
             else:  # check
@@ -436,7 +491,15 @@ def print_summary_table(
                 "Notes",
             ]
         elif action == Action.FIX:
-            headers = ["Tool", "Status", "Fixed", "Remaining", "Notes"]
+            headers = [
+                "Tool",
+                "Status",
+                "Fixed",
+                "AI-Applied",
+                "AI-Resolved",
+                "Remaining",
+                "Notes",
+            ]
         else:
             headers = ["Tool", "Status", "Issues", "Notes"]
 
@@ -466,6 +529,8 @@ def print_totals_table(
     severity_errors: int = 0,
     severity_warnings: int = 0,
     severity_info: int = 0,
+    total_ai_applied: int = 0,
+    total_ai_verified: int = 0,
 ) -> None:
     """Print a totals summary table for the run.
 
@@ -473,12 +538,14 @@ def print_totals_table(
         console_output_func: Function to output text to console.
         action: The action being performed.
         total_issues: Total number of issues found (CHECK/TEST mode).
-        total_fixed: Total number of issues fixed (FIX mode).
+        total_fixed: Total number of native-tool issues fixed (FIX mode).
         total_remaining: Total number of remaining issues (FIX mode).
         affected_files: Number of unique files with issues.
         severity_errors: Number of issues at ERROR severity.
         severity_warnings: Number of issues at WARNING severity.
         severity_info: Number of issues at INFO severity.
+        total_ai_applied: Total number of AI-applied fixes (FIX mode).
+        total_ai_verified: Total number of AI-verified fixes (FIX mode).
     """
     try:
         import click
@@ -488,8 +555,12 @@ def print_totals_table(
         console_output_func(text=header)
 
         if action == Action.FIX:
+            total_resolved = total_fixed + total_ai_verified
             rows: list[list[str | int]] = [
-                ["Fixed Issues", total_fixed],
+                ["Fixed Issues (Native)", total_fixed],
+                ["AI Applied Fixes", total_ai_applied],
+                ["AI Resolved Fixes", total_ai_verified],
+                ["Total Resolved", total_resolved],
                 ["Remaining Issues", total_remaining],
                 ["Affected Files", affected_files],
             ]

@@ -35,15 +35,17 @@ def test_find_prettier_config_found_prettierrc(prettier_plugin: PrettierPlugin) 
     def mock_exists(path: str) -> bool:
         return path.endswith(".prettierrc")
 
-    with patch("os.path.exists", side_effect=mock_exists):
-        with patch("os.getcwd", return_value="/project"):
-            with patch(
-                "os.path.abspath",
-                side_effect=lambda p: p if p.startswith("/") else f"/project/{p}",
-            ):
-                result = prettier_plugin._find_prettier_config(search_dir="/project")
-                assert_that(result).is_not_none()
-                assert_that(result).contains(".prettierrc")
+    with (
+        patch("os.path.exists", side_effect=mock_exists),
+        patch("os.getcwd", return_value="/project"),
+        patch(
+            "os.path.abspath",
+            side_effect=lambda p: p if p.startswith("/") else f"/project/{p}",
+        ),
+    ):
+        result = prettier_plugin._find_prettier_config(search_dir="/project")
+        assert_that(result).is_not_none()
+        assert_that(result).contains(".prettierrc")
 
 
 # Tests for _find_prettierignore method
@@ -70,12 +72,14 @@ def test_find_prettierignore_found(prettier_plugin: PrettierPlugin) -> None:
     def mock_exists(path: str) -> bool:
         return path.endswith(".prettierignore")
 
-    with patch("os.path.exists", side_effect=mock_exists):
-        with patch("os.getcwd", return_value="/project"):
-            with patch(
-                "os.path.abspath",
-                side_effect=lambda p: p if p.startswith("/") else f"/project/{p}",
-            ):
-                result = prettier_plugin._find_prettierignore(search_dir="/project")
-                assert_that(result).is_not_none()
-                assert_that(result).contains(".prettierignore")
+    with (
+        patch("os.path.exists", side_effect=mock_exists),
+        patch("os.getcwd", return_value="/project"),
+        patch(
+            "os.path.abspath",
+            side_effect=lambda p: p if p.startswith("/") else f"/project/{p}",
+        ),
+    ):
+        result = prettier_plugin._find_prettierignore(search_dir="/project")
+        assert_that(result).is_not_none()
+        assert_that(result).contains(".prettierignore")

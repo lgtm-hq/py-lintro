@@ -275,7 +275,8 @@ def mock_execution_context_for_tool(
     This provides backward compatibility for tests using the old fixture name.
 
     Args:
-        mock_execution_context_factory: Factory function for creating mock execution contexts.
+        mock_execution_context_factory: Factory function for creating mock
+            execution contexts.
 
     Returns:
         The same factory function as mock_execution_context_factory.

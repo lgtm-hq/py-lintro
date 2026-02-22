@@ -1,7 +1,8 @@
 """Integration tests for Ruff tool definition.
 
 These tests require ruff to be installed and available in PATH.
-They verify the RuffPlugin definition, check command, fix command, and set_options method.
+They verify the RuffPlugin definition, check command, fix command, and
+set_options method.
 """
 
 from __future__ import annotations

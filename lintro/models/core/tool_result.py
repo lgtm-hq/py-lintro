@@ -48,6 +48,13 @@ class ToolResult:
     # Optional pytest-specific summary data for display
     pytest_summary: dict[str, Any] | None = field(default=None)
 
+    # Optional AI-generated metadata (explanations, fix suggestions)
+    ai_metadata: dict[str, Any] | None = field(default=None)
+
+    # Working directory used during tool execution (for resolving relative
+    # issue file paths in AI fix generation)
+    cwd: str | None = field(default=None)
+
     # Skip tracking for tools that didn't execute
     skipped: bool = field(default=False)
     skip_reason: str | None = field(default=None)

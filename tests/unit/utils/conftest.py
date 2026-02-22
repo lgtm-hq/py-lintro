@@ -30,6 +30,8 @@ class FakeToolResult:
     fixed_issues_count: int | None = None
     remaining_issues_count: int | None = None
     pytest_summary: dict[str, Any] | None = None
+    ai_metadata: dict[str, Any] | None = None
+    cwd: str | None = None
 
 
 @dataclass
@@ -59,7 +61,7 @@ def fake_tool_result_factory() -> Callable[..., FakeToolResult]:
     """Factory fixture to create FakeToolResult with custom attributes.
 
     Returns:
-        Callable[..., FakeToolResult]: Description of returned Callable[..., FakeToolResult].
+        A factory callable that creates FakeToolResult instances.
     """
 
     def _create(**kwargs: Any) -> FakeToolResult:

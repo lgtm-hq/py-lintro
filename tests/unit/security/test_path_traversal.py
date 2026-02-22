@@ -274,7 +274,7 @@ def test_normalize_file_path_for_display_absolute_path_inside_project(
         os.chdir(old_cwd)
 
 
-def test_normalize_file_path_for_display_path_outside_project_returns_relative_with_dotdot(
+def test_normalize_file_path_for_display_path_outside_project_returns_relative_with_dotdot(  # noqa: E501
     tmp_path: Path,
 ) -> None:
     """Verify path outside project returns path with .. prefix.

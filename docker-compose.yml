@@ -8,6 +8,7 @@ services:
       dockerfile: Dockerfile
       args:
         TOOLS_IMAGE: ${TOOLS_IMAGE:-ghcr.io/lgtm-hq/lintro-tools:latest@sha256:19c1cd7e4ba40f5101282de5049058ca6bc9b929ecc6dc73fa1ae05f63f584ff}
+        WITH_AI: ${WITH_AI:-false}
     logging:
       driver: local
       options:
@@ -17,6 +18,10 @@ services:
       # Mount current directory to /code (not /app to avoid overwriting the app)
       - ${PWD:-./}:/code
     working_dir: /code
+    environment:
+      # Pass AI provider API keys through to the container (optional)
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
 
   # Integration test runner - mounts source for development testing
   # Usage: docker compose run --rm test-integration
@@ -48,6 +53,8 @@ services:
       - RUNNING_IN_DOCKER=1
       - DOCKER_BUILDKIT=0
       - COVERAGE_OUTPUT_DIR=/app
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
     user: root
     shm_size: 256m
     # Run as root to avoid permission issues with mounted volumes

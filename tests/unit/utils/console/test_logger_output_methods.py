@@ -42,11 +42,13 @@ def test_console_output_with_color(logger: ThreadSafeConsoleLogger) -> None:
     Args:
         logger: ThreadSafeConsoleLogger instance fixture.
     """
-    with patch("click.echo") as mock_echo:
-        with patch("click.style", return_value="styled text") as mock_style:
-            logger.console_output("test message", color="red")
-            mock_style.assert_called_once_with("test message", fg="red")
-            mock_echo.assert_called_once_with("styled text")
+    with (
+        patch("click.echo") as mock_echo,
+        patch("click.style", return_value="styled text") as mock_style,
+    ):
+        logger.console_output("test message", color="red")
+        mock_style.assert_called_once_with("test message", fg="red")
+        mock_echo.assert_called_once_with("styled text")
 
 
 @pytest.mark.parametrize(
@@ -124,12 +126,16 @@ def test_save_console_log_handles_os_error(tmp_path: Path) -> None:
     """
     logger = ThreadSafeConsoleLogger(run_dir=tmp_path)
     logger._messages = ["Test message"]
-    with patch("builtins.open", side_effect=OSError("Permission denied")):
-        with patch("lintro.utils.console.logger.logger.error") as mock_error:
-            logger.save_console_log()
-            mock_error.assert_called_once()
-            error_message = str(mock_error.call_args)
-            assert_that(error_message).contains("Failed to save console log")
+    with (
+        patch("builtins.open", side_effect=OSError("Permission denied")),
+        patch("lintro.utils.console.logger.logger.error") as mock_error,
+    ):
+        logger.save_console_log()
+        mock_error.assert_called_once()
+        error_message = str(mock_error.call_args)
+        assert_that(error_message).contains(
+            "Failed to save console log",
+        )
 
 
 def test_save_console_log_handles_permission_error(tmp_path: Path) -> None:
@@ -143,7 +149,12 @@ def test_save_console_log_handles_permission_error(tmp_path: Path) -> None:
     """
     logger = ThreadSafeConsoleLogger(run_dir=tmp_path)
     logger._messages = ["Test message"]
-    with patch("builtins.open", side_effect=PermissionError("Access denied")):
-        with patch("lintro.utils.console.logger.logger.error") as mock_error:
-            logger.save_console_log()
-            mock_error.assert_called_once()
+    with (
+        patch(
+            "builtins.open",
+            side_effect=PermissionError("Access denied"),
+        ),
+        patch("lintro.utils.console.logger.logger.error") as mock_error,
+    ):
+        logger.save_console_log()
+        mock_error.assert_called_once()

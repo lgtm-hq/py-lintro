@@ -34,16 +34,18 @@ def test_check_with_timeout(
     test_file = tmp_path / "test_script.sh"
     test_file.write_text('#!/bin/bash\necho "hello"\n')
 
-    with patch(
-        "lintro.plugins.execution_preparation.verify_tool_version",
-        return_value=None,
-    ):
-        with patch.object(
+    with (
+        patch(
+            "lintro.plugins.execution_preparation.verify_tool_version",
+            return_value=None,
+        ),
+        patch.object(
             shfmt_plugin,
             "_run_subprocess",
             side_effect=subprocess.TimeoutExpired(cmd=["shfmt"], timeout=30),
-        ):
-            result = shfmt_plugin.check([str(test_file)], {})
+        ),
+    ):
+        result = shfmt_plugin.check([str(test_file)], {})
 
     assert_that(result.success).is_false()
 
@@ -61,16 +63,18 @@ def test_fix_with_timeout(
     test_file = tmp_path / "test_script.sh"
     test_file.write_text('#!/bin/bash\necho "hello"\n')
 
-    with patch(
-        "lintro.plugins.execution_preparation.verify_tool_version",
-        return_value=None,
-    ):
-        with patch.object(
+    with (
+        patch(
+            "lintro.plugins.execution_preparation.verify_tool_version",
+            return_value=None,
+        ),
+        patch.object(
             shfmt_plugin,
             "_run_subprocess",
             side_effect=subprocess.TimeoutExpired(cmd=["shfmt"], timeout=30),
-        ):
-            result = shfmt_plugin.fix([str(test_file)], {})
+        ),
+    ):
+        result = shfmt_plugin.fix([str(test_file)], {})
 
     assert_that(result.success).is_false()
 

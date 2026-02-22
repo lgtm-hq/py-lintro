@@ -273,7 +273,10 @@ def test_parse_taplo_output_fmt_check_format() -> None:
     Taplo fmt --check outputs:
     ERROR taplo:format_files: the file is not properly formatted path="file.toml"
     """
-    output = 'ERROR taplo:format_files: the file is not properly formatted path="/tmp/test.toml"'
+    output = (
+        "ERROR taplo:format_files: the file is not properly formatted"
+        ' path="/tmp/test.toml"'
+    )
     result = parse_taplo_output(output)
 
     assert_that(result).is_length(1)
@@ -285,9 +288,16 @@ def test_parse_taplo_output_fmt_check_format() -> None:
 
 def test_parse_taplo_output_fmt_check_multiple_files() -> None:
     """Parse taplo fmt --check output with multiple files."""
-    output = """ERROR taplo:format_files: the file is not properly formatted path="config.toml"
-ERROR taplo:format_files: the file is not properly formatted path="pyproject.toml"
-ERROR operation failed error=some files were not properly formatted"""
+    output = (
+        "ERROR taplo:format_files:"
+        " the file is not properly formatted"
+        ' path="config.toml"\n'
+        "ERROR taplo:format_files:"
+        " the file is not properly formatted"
+        ' path="pyproject.toml"\n'
+        "ERROR operation failed"
+        " error=some files were not properly formatted"
+    )
     result = parse_taplo_output(output)
 
     assert_that(result).is_length(2)

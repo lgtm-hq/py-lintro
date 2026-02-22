@@ -54,7 +54,8 @@ def test_load_ruff_config_flattens_lint_section(mock_load_tool_config: Any) -> N
     should be flattened to top-level keys with underscores.
 
     Args:
-        mock_load_tool_config: Factory fixture for mocking load_tool_config_from_pyproject.
+        mock_load_tool_config: Factory fixture for mocking
+            load_tool_config_from_pyproject.
     """
     mock_config = {
         "line-length": 100,
@@ -83,7 +84,8 @@ def test_load_ruff_config_handles_non_dict_lint_section(
     When lint is not a dict, select and other lint keys should not be present.
 
     Args:
-        mock_load_tool_config: Factory fixture for mocking load_tool_config_from_pyproject.
+        mock_load_tool_config: Factory fixture for mocking
+            load_tool_config_from_pyproject.
     """
     with mock_load_tool_config({"lint": "invalid", "line-length": 88}):
         result = load_ruff_config()
@@ -96,7 +98,8 @@ def test_load_ruff_config_handles_empty_config(mock_load_tool_config: Any) -> No
     """Verify load_ruff_config handles empty configuration.
 
     Args:
-        mock_load_tool_config: Factory fixture for mocking load_tool_config_from_pyproject.
+        mock_load_tool_config: Factory fixture for mocking
+            load_tool_config_from_pyproject.
     """
     with mock_load_tool_config({}):
         result = load_ruff_config()

@@ -60,7 +60,7 @@ def test_validate_line_length_consistency_delegates_to_unified_config() -> None:
 
 
 def test_validate_line_length_consistency_returns_empty_list_when_valid() -> None:
-    """Verify validate_line_length_consistency returns empty list when config is valid."""
+    """Verify validate_line_length_consistency returns empty list when valid."""
     with patch(
         "lintro.utils.unified_config.validate_config_consistency",
         return_value=[],

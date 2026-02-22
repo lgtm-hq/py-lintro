@@ -87,7 +87,8 @@ def test_dispatch_junit_format(mock_test_junit_xml_failure: str) -> None:
     """Dispatch to JUnit parser when format is junit.
 
     Args:
-        mock_test_junit_xml_failure: Mock pytest JUnit XML output string with test failures.
+        mock_test_junit_xml_failure: Mock pytest JUnit XML output string with test
+            failures.
     """
     issues = parse_pytest_output(mock_test_junit_xml_failure, format="junit")
     assert_that(issues).is_length(1)

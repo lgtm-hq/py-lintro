@@ -293,7 +293,8 @@ def test_merge_history_limit_enforced() -> None:
     # Create previous body with MAX_HISTORY_RUNS history blocks
     # Use "Run #N" format to match the history pattern
     history_blocks = "\n\n".join(
-        f"<details>\n<summary>Run #{i} (2026-01-25 0{i}:00:00 UTC)</summary>\nContent {i}\n</details>"
+        f"<details>\n<summary>Run #{i} (2026-01-25 0{i}:00:00 UTC)</summary>\n"
+        f"Content {i}\n</details>"
         for i in range(MAX_HISTORY_RUNS)
     )
     previous = f"<!-- test -->\n\nCurrent content\n\n{history_blocks}"

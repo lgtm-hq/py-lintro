@@ -57,17 +57,21 @@ TOTAL                       235     25    89%
 """
 
     coverage_xml = """<?xml version="1.0" ?>
-<coverage version="7.0.0" timestamp="1706472000" lines-covered="210" lines-valid="235" line-rate="0.8936" branch-rate="0" complexity="0">
+<coverage version="7.0.0" timestamp="1706472000" lines-covered="210" \
+lines-valid="235" line-rate="0.8936" branch-rate="0" complexity="0">
     <packages>
         <package name="lintro" line-rate="0.8936" branch-rate="0" complexity="0">
             <classes>
-                <class name="__init__.py" filename="lintro/__init__.py" line-rate="1.0" branch-rate="0" complexity="0">
+                <class name="__init__.py" filename="lintro/__init__.py"
+                      line-rate="1.0" branch-rate="0" complexity="0">
                     <lines/>
                 </class>
-                <class name="core.py" filename="lintro/core.py" line-rate="0.9" branch-rate="0" complexity="0">
+                <class name="core.py" filename="lintro/core.py"
+                      line-rate="0.9" branch-rate="0" complexity="0">
                     <lines/>
                 </class>
-                <class name="utils.py" filename="lintro/utils.py" line-rate="0.875" branch-rate="0" complexity="0">
+                <class name="utils.py" filename="lintro/utils.py"
+                      line-rate="0.875" branch-rate="0" complexity="0">
                     <lines/>
                 </class>
             </classes>

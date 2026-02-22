@@ -167,9 +167,9 @@ def test_manager_apply_config_raises_value_error_from_tool(
             "lintro.utils.unified_config_manager.load_lintro_tool_config",
             return_value={},
         ),
+        pytest.raises(ValueError, match="Invalid value"),
     ):
-        with pytest.raises(ValueError, match="Invalid value"):
-            manager.apply_config_to_tool(mock_tool)
+        manager.apply_config_to_tool(mock_tool)
 
 
 def test_manager_apply_config_raises_type_error_from_tool(
@@ -201,9 +201,9 @@ def test_manager_apply_config_raises_type_error_from_tool(
             "lintro.utils.unified_config_manager.load_lintro_tool_config",
             return_value={},
         ),
+        pytest.raises(TypeError, match="Type mismatch"),
     ):
-        with pytest.raises(TypeError, match="Type mismatch"):
-            manager.apply_config_to_tool(mock_tool)
+        manager.apply_config_to_tool(mock_tool)
 
 
 def test_manager_apply_config_handles_other_errors_gracefully(

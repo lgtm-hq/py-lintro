@@ -1,7 +1,8 @@
 """Integration tests for Black tool definition.
 
 These tests require black to be installed and available in PATH.
-They verify the BlackPlugin definition, check command, fix command, and set_options method.
+They verify the BlackPlugin definition, check command, fix command, and
+set_options method.
 """
 
 from __future__ import annotations

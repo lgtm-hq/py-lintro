@@ -25,16 +25,18 @@ def test_check_with_mocked_subprocess_success(
     test_file = tmp_path / "test.toml"
     test_file.write_text('[project]\nname = "test"\n')
 
-    with patch(
-        "lintro.plugins.execution_preparation.verify_tool_version",
-        return_value=None,
-    ):
-        with patch.object(
+    with (
+        patch(
+            "lintro.plugins.execution_preparation.verify_tool_version",
+            return_value=None,
+        ),
+        patch.object(
             taplo_plugin,
             "_run_subprocess",
             return_value=(True, ""),
-        ):
-            result = taplo_plugin.check([str(test_file)], {})
+        ),
+    ):
+        result = taplo_plugin.check([str(test_file)], {})
 
     assert_that(result.success).is_true()
     assert_that(result.issues_count).is_equal_to(0)
@@ -60,16 +62,18 @@ def test_check_with_mocked_subprocess_lint_errors(
    |          ^ expected a value
 """
 
-    with patch(
-        "lintro.plugins.execution_preparation.verify_tool_version",
-        return_value=None,
-    ):
-        with patch.object(
+    with (
+        patch(
+            "lintro.plugins.execution_preparation.verify_tool_version",
+            return_value=None,
+        ),
+        patch.object(
             taplo_plugin,
             "_run_subprocess",
             side_effect=[(False, taplo_output), (True, "")],
-        ):
-            result = taplo_plugin.check([str(test_file)], {})
+        ),
+    ):
+        result = taplo_plugin.check([str(test_file)], {})
 
     assert_that(result.success).is_false()
     assert_that(result.issues_count).is_greater_than(0)
@@ -95,16 +99,18 @@ def test_check_with_mocked_subprocess_format_issues(
    | ^ formatting issue
 """
 
-    with patch(
-        "lintro.plugins.execution_preparation.verify_tool_version",
-        return_value=None,
-    ):
-        with patch.object(
+    with (
+        patch(
+            "lintro.plugins.execution_preparation.verify_tool_version",
+            return_value=None,
+        ),
+        patch.object(
             taplo_plugin,
             "_run_subprocess",
             side_effect=[(True, ""), (False, format_output)],
-        ):
-            result = taplo_plugin.check([str(test_file)], {})
+        ),
+    ):
+        result = taplo_plugin.check([str(test_file)], {})
 
     assert_that(result.success).is_false()
     assert_that(result.issues_count).is_greater_than(0)
@@ -156,11 +162,12 @@ def test_fix_with_mocked_subprocess_success(
    | ^ formatting issue
 """
 
-    with patch(
-        "lintro.plugins.execution_preparation.verify_tool_version",
-        return_value=None,
-    ):
-        with patch.object(
+    with (
+        patch(
+            "lintro.plugins.execution_preparation.verify_tool_version",
+            return_value=None,
+        ),
+        patch.object(
             taplo_plugin,
             "_run_subprocess",
             side_effect=[
@@ -170,8 +177,9 @@ def test_fix_with_mocked_subprocess_success(
                 (True, ""),  # final format check
                 (True, ""),  # final lint check
             ],
-        ):
-            result = taplo_plugin.fix([str(test_file)], {})
+        ),
+    ):
+        result = taplo_plugin.fix([str(test_file)], {})
 
     assert_that(result.success).is_true()
     assert_that(result.fixed_issues_count).is_equal_to(1)
@@ -204,11 +212,12 @@ def test_fix_with_mocked_subprocess_partial_fix(
    |          ^ expected a value
 """
 
-    with patch(
-        "lintro.plugins.execution_preparation.verify_tool_version",
-        return_value=None,
-    ):
-        with patch.object(
+    with (
+        patch(
+            "lintro.plugins.execution_preparation.verify_tool_version",
+            return_value=None,
+        ),
+        patch.object(
             taplo_plugin,
             "_run_subprocess",
             side_effect=[
@@ -218,8 +227,9 @@ def test_fix_with_mocked_subprocess_partial_fix(
                 (True, ""),  # final format check - format is fixed
                 (False, lint_issue),  # final lint check - syntax error remains
             ],
-        ):
-            result = taplo_plugin.fix([str(test_file)], {})
+        ),
+    ):
+        result = taplo_plugin.fix([str(test_file)], {})
 
     assert_that(result.success).is_false()
     assert_that(result.initial_issues_count).is_equal_to(2)
@@ -240,11 +250,12 @@ def test_fix_with_no_changes_needed(
     test_file = tmp_path / "test.toml"
     test_file.write_text('[project]\nname = "test"\n')
 
-    with patch(
-        "lintro.plugins.execution_preparation.verify_tool_version",
-        return_value=None,
-    ):
-        with patch.object(
+    with (
+        patch(
+            "lintro.plugins.execution_preparation.verify_tool_version",
+            return_value=None,
+        ),
+        patch.object(
             taplo_plugin,
             "_run_subprocess",
             side_effect=[
@@ -254,8 +265,9 @@ def test_fix_with_no_changes_needed(
                 (True, ""),  # final format check
                 (True, ""),  # final lint check
             ],
-        ):
-            result = taplo_plugin.fix([str(test_file)], {})
+        ),
+    ):
+        result = taplo_plugin.fix([str(test_file)], {})
 
     assert_that(result.success).is_true()
     assert_that(result.initial_issues_count).is_equal_to(0)

@@ -35,16 +35,18 @@ def test_check_with_timeout(
     test_file = tmp_path / "large_file.py"
     test_file.write_text('"""Large file that takes too long."""\n')
 
-    with patch(
-        "lintro.plugins.execution_preparation.verify_tool_version",
-        return_value=None,
-    ):
-        with patch.object(
+    with (
+        patch(
+            "lintro.plugins.execution_preparation.verify_tool_version",
+            return_value=None,
+        ),
+        patch.object(
             semgrep_plugin,
             "_run_subprocess",
             side_effect=subprocess.TimeoutExpired(cmd=["semgrep"], timeout=120),
-        ):
-            result = semgrep_plugin.check([str(test_file)], {})
+        ),
+    ):
+        result = semgrep_plugin.check([str(test_file)], {})
 
     assert_that(result.success).is_false()
     assert_that(result.output).contains("timed out")
@@ -66,16 +68,18 @@ def test_check_with_json_parse_error(
     # Invalid JSON output
     invalid_output = "Error: Something went wrong\n{invalid json"
 
-    with patch(
-        "lintro.plugins.execution_preparation.verify_tool_version",
-        return_value=None,
-    ):
-        with patch.object(
+    with (
+        patch(
+            "lintro.plugins.execution_preparation.verify_tool_version",
+            return_value=None,
+        ),
+        patch.object(
             semgrep_plugin,
             "_run_subprocess",
             return_value=(False, invalid_output),
-        ):
-            result = semgrep_plugin.check([str(test_file)], {})
+        ),
+    ):
+        result = semgrep_plugin.check([str(test_file)], {})
 
     assert_that(result.success).is_false()
     assert_that(result.issues_count).is_equal_to(0)
@@ -104,16 +108,18 @@ def test_check_with_semgrep_errors(
         },
     )
 
-    with patch(
-        "lintro.plugins.execution_preparation.verify_tool_version",
-        return_value=None,
-    ):
-        with patch.object(
+    with (
+        patch(
+            "lintro.plugins.execution_preparation.verify_tool_version",
+            return_value=None,
+        ),
+        patch.object(
             semgrep_plugin,
             "_run_subprocess",
             return_value=(False, semgrep_output),
-        ):
-            result = semgrep_plugin.check([str(test_file)], {})
+        ),
+    ):
+        result = semgrep_plugin.check([str(test_file)], {})
 
     assert_that(result.success).is_false()
 

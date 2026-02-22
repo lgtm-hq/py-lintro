@@ -11,7 +11,7 @@ Supports parallel execution when enabled via configuration.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import Any
 
 from lintro.enums.action import Action, normalize_action
 from lintro.models.core.tool_result import ToolResult
@@ -34,9 +34,6 @@ from lintro.utils.output import OutputManager
 from lintro.utils.post_checks import execute_post_checks
 from lintro.utils.unified_config import UnifiedConfigManager
 
-if TYPE_CHECKING:
-    pass
-
 # Re-export constants for backwards compatibility
 __all__ = [
     "DEFAULT_EXIT_CODE_FAILURE",
@@ -44,6 +41,22 @@ __all__ = [
     "DEFAULT_REMAINING_COUNT",
     "run_lint_tools_simple",
 ]
+
+
+def _warn_ai_fix_disabled(
+    *,
+    action: Action,
+    ai_fix: bool,
+    ai_enabled: bool,
+    logger: Any,
+) -> None:
+    """Warn when users request AI fixes but AI is disabled in config."""
+    if action != Action.CHECK or not ai_fix or ai_enabled:
+        return
+    logger.console_output(
+        "AI fixes requested with --fix, but ai.enabled is false in "
+        ".lintro-config.yaml; skipping AI enhancements.",
+    )
 
 
 def run_lint_tools_simple(
@@ -65,6 +78,7 @@ def run_lint_tools_simple(
     no_log: bool = False,
     auto_install: bool = False,
     yes: bool = False,
+    ai_fix: bool = False,
 ) -> int:
     """Simplified runner using Loguru-based logging with rich formatting.
 
@@ -92,6 +106,7 @@ def run_lint_tools_simple(
         no_log: Whether to disable file logging (not yet implemented).
         auto_install: Whether to auto-install Node.js deps if node_modules missing.
         yes: Skip confirmation prompt and proceed immediately.
+        ai_fix: Enable AI fix suggestions with interactive review (check only).
 
     Returns:
         Exit code (0 for success, 1 for failures).
@@ -225,6 +240,7 @@ def run_lint_tools_simple(
             is_container=is_container,
             is_ci=is_ci,
             per_tool_auto_install=per_tool_auto if per_tool_auto else None,
+            ai_config=lintro_config.ai,
         )
 
         # Confirmation prompt — skip when non-interactive
@@ -232,11 +248,16 @@ def run_lint_tools_simple(
 
         auto_continue = yes or is_ci or not sys.stdin.isatty()
         if not auto_continue:
+            import click as _click
+
+            _click.echo("Proceed? [Y/n] ", nl=False)
             try:
-                answer = input("Proceed? [Y/n] ").strip().lower()
+                answer = _click.getchar()
+                _click.echo(answer)  # echo the keypress
             except (EOFError, KeyboardInterrupt):
+                _click.echo()
                 answer = "n"
-            if answer in ("n", "no"):
+            if answer.lower() == "n":
                 logger.console_output(text="Aborted.", color="yellow")
                 return int(DEFAULT_EXIT_CODE_SUCCESS)
 
@@ -443,6 +464,31 @@ def run_lint_tools_simple(
         total_fixed=total_fixed,
         total_remaining=total_remaining,
     )
+
+    # AI enhancement via hook pattern
+    effective_ai_fix = ai_fix or lintro_config.ai.default_fix
+    _warn_ai_fix_disabled(
+        action=action,
+        ai_fix=effective_ai_fix,
+        ai_enabled=lintro_config.ai.enabled,
+        logger=logger,
+    )
+
+    from lintro.ai.hook import AIPostExecutionHook
+
+    ai_hook = AIPostExecutionHook(lintro_config, ai_fix=effective_ai_fix)
+    if ai_hook.should_run(action):
+        ai_hook.execute(
+            action,
+            all_results,
+            console_logger=logger,
+            output_format=output_format,
+        )
+        if action == Action.FIX:
+            total_issues, total_fixed, total_remaining = aggregate_tool_results(
+                all_results,
+                action,
+            )
 
     # Determine final exit code once — used for both JSON output and return
     final_exit_code = int(

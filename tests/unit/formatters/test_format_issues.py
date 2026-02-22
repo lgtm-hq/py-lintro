@@ -26,7 +26,7 @@ from lintro.parsers.ruff.ruff_issue import RuffIssue
 
 
 def test_standard_columns_has_expected_fields() -> None:
-    """Verify STANDARD_COLUMNS contains all expected fields including Severity and Fixable."""
+    """Verify STANDARD_COLUMNS contains expected fields."""
     assert_that(STANDARD_COLUMNS).is_equal_to(
         [
             DisplayColumn.FILE,
@@ -427,7 +427,10 @@ def test_format_issues_with_empty_list_returns_no_issues_message() -> None:
 
 
 def test_format_issues_with_sections_empty_list_returns_no_issues_message() -> None:
-    """Verify format_issues_with_sections with empty list returns 'No issues found' message."""
+    """Verify format_issues_with_sections with empty list.
+
+    Returns 'No issues found' message.
+    """
     result = format_issues_with_sections([], group_by_fixable=True)
 
     assert_that(result).is_equal_to("No issues found.")

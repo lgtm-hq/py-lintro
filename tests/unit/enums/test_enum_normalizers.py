@@ -30,7 +30,8 @@ from lintro.enums.tool_type import ToolType, normalize_tool_type
 from lintro.enums.tools_value import ToolsValue, normalize_tools_value
 
 # Test cases for all normalizer functions
-# Format: (normalize_func, enum_class, enum_member, lowercase_str, uppercase_str, error_pattern)
+# Format:
+# (normalize_func, enum_class, enum_member, lowercase_str, uppercase_str, error_pattern)
 NORMALIZER_TEST_CASES = [
     pytest.param(
         normalize_bandit_severity_level,

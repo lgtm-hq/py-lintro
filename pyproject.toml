@@ -81,6 +81,7 @@ test = [
 ]
 typing = ["types-setuptools>=80.9.0.20251223", "types-tabulate>=0.9.0.20241207"]
 tools = ["semgrep>=1.151.0", "sqlfluff>=4.0.0"]
+ai = ["anthropic>=0.39.0", "openai>=1.50.0"]
 
 [project.scripts]
 lintro = "lintro.cli:main"
@@ -168,6 +169,10 @@ packages = [
   "lintro.utils.environment",
   "lintro.utils.execution",
   "lintro.utils.output",
+  "lintro.ai",
+  "lintro.ai.display",
+  "lintro.ai.prompts",
+  "lintro.ai.providers",
 ]
 
 [tool.setuptools.package-data]
@@ -212,7 +217,7 @@ preview = true
 explicit-preview-rules = true
 
 [tool.ruff.lint.per-file-ignores]
-"tests/**/*.py" = ["E501", "SIM117", "SIM105"]
+"tests/**/*.py" = []
 ".lintro/**/*.py" = ["E501"]
 "**/__init__.py" = ["D104"]
 "test_samples/**/*.py" = ["ALL"]

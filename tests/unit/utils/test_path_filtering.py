@@ -80,7 +80,8 @@ def test_should_exclude_path_normalization_error() -> None:
     """Handle path normalization errors gracefully."""
     with patch("os.path.abspath", side_effect=ValueError("Invalid path")):
         result = should_exclude_path("some/path", ["*.py"])
-        # Should still work with original path and not match since path doesn't end in .py
+        # Should still work with original path and not match since path
+        # doesn't end in .py
         assert_that(result).is_false()
 
 

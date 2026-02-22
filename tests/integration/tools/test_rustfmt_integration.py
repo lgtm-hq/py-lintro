@@ -1,7 +1,8 @@
 """Integration tests for rustfmt tool definition.
 
 These tests require rustfmt and cargo to be installed and available in PATH.
-They verify the RustfmtPlugin definition, check command, fix command, and set_options method.
+They verify the RustfmtPlugin definition, check command, fix command, and
+set_options method.
 """
 
 from __future__ import annotations

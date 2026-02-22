@@ -122,14 +122,17 @@ def test_extract_with_coverage_xml() -> None:
     """Extract both test summary and coverage data when coverage.xml exists."""
     pytest_output = "10 passed in 5.00s\n"
     coverage_xml = """<?xml version="1.0" ?>
-<coverage version="7.0.0" timestamp="1234567890" lines-covered="800" lines-valid="1000" line-rate="0.8" branch-rate="0.0" complexity="0">
+<coverage version="7.0.0" timestamp="1234567890" lines-covered="800" \
+           lines-valid="1000" line-rate="0.8" branch-rate="0.0" complexity="0">
     <packages>
         <package name="lintro" line-rate="0.8" branch-rate="0.0" complexity="0">
             <classes>
-                <class name="foo.py" filename="lintro/foo.py" line-rate="0.9" branch-rate="0.0" complexity="0">
+                <class name="foo.py" filename="lintro/foo.py"
+                      line-rate="0.9" branch-rate="0.0" complexity="0">
                     <lines/>
                 </class>
-                <class name="bar.py" filename="lintro/bar.py" line-rate="0.7" branch-rate="0.0" complexity="0">
+                <class name="bar.py" filename="lintro/bar.py"
+                      line-rate="0.7" branch-rate="0.0" complexity="0">
                     <lines/>
                 </class>
             </classes>

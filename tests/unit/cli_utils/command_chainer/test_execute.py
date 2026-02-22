@@ -152,13 +152,15 @@ def test_execute_single_command_reraises_keyboard_interrupt(
     chainer = CommandChainer(mock_group)
     parent_ctx = click.Context(mock_group, info_name="lintro")
 
-    with patch.object(
-        mock_group,
-        "invoke",
-        side_effect=KeyboardInterrupt(),
+    with (
+        patch.object(
+            mock_group,
+            "invoke",
+            side_effect=KeyboardInterrupt(),
+        ),
+        pytest.raises(KeyboardInterrupt),
     ):
-        with pytest.raises(KeyboardInterrupt):
-            chainer._execute_single_command(parent_ctx, ["fmt"])
+        chainer._execute_single_command(parent_ctx, ["fmt"])
 
 
 def test_execute_single_command_handles_exception(mock_group: click.Group) -> None:

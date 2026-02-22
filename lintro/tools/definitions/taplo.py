@@ -411,4 +411,5 @@ class TaploPlugin(BaseToolPlugin):
             initial_issues_count=initial_count,
             fixed_issues_count=fixed_count,
             remaining_issues_count=remaining_count,
+            cwd=ctx.cwd,
         )

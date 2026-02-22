@@ -1,7 +1,8 @@
 """Integration tests for shfmt tool definition.
 
 These tests require shfmt to be installed and available in PATH.
-They verify the ShfmtPlugin definition, check command, fix command, and set_options method.
+They verify the ShfmtPlugin definition, check command, fix command, and
+set_options method.
 """
 
 from __future__ import annotations

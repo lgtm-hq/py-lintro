@@ -166,7 +166,8 @@ src/config.json
 src/readme.md
 src/component.tsx"""
     result = parse_oxfmt_output(output)
-    # Only .js and .tsx in the test data are valid oxfmt extensions (.css, .json, .md are not)
+    # Only .js and .tsx in the test data are valid oxfmt extensions
+    # (.css, .json, .md are not)
     assert_that(result).is_length(2)
     assert_that(result[0].file).is_equal_to("src/file.js")
     assert_that(result[1].file).is_equal_to("src/component.tsx")
