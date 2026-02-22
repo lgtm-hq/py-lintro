@@ -156,7 +156,7 @@ class OpenAIProvider(BaseAIProvider):
             raise AIRateLimitError(
                 f"OpenAI rate limit exceeded: {e}",
             ) from e
-        except openai.APIError as e:
+        except openai.OpenAIError as e:
             logger.debug(f"OpenAI API error: {e}")
             raise AIProviderError(
                 f"OpenAI API error: {e}",

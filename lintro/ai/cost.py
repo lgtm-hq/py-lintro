@@ -12,6 +12,7 @@ from loguru import logger
 # Last updated: 2025-05 — verify at provider pricing pages before relying on these.
 MODEL_PRICING: dict[str, tuple[float, float]] = {
     # Anthropic models
+    "claude-sonnet-4-6": (3.00, 15.00),
     "claude-sonnet-4-20250514": (3.00, 15.00),
     "claude-haiku-3-5-20241022": (0.80, 4.00),
     "claude-opus-4-20250514": (15.00, 75.00),

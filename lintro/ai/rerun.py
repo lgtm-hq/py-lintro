@@ -112,8 +112,13 @@ def rerun_tools(
             tool = tool_manager.get_tool(tool_name)
             with _tool_cwd(result.cwd):
                 rerun_results.append(tool.check(rerun_paths, {}))
-        except Exception:
+        except (KeyError, ImportError):
             logger.debug(
+                f"AI post-fix rerun skipped for {tool_name}: tool not available",
+            )
+            continue
+        except Exception:
+            logger.warning(
                 f"AI post-fix rerun failed for {tool_name}",
                 exc_info=True,
             )

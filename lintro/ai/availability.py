@@ -51,19 +51,26 @@ def is_provider_available(provider: str) -> bool:
     Returns:
         bool: True if the provider's package is importable.
     """
+    if provider not in ("anthropic", "openai"):
+        import logging
+
+        logging.getLogger(__name__).warning(
+            "Unknown AI provider %r; supported providers: anthropic, openai",
+            provider,
+        )
+        return False
+
     try:
         if provider == "anthropic":
             import anthropic  # noqa: F401 -- import-only availability check
 
             return True
-        elif provider == "openai":
+        else:
             import openai  # noqa: F401 -- import-only availability check
 
             return True
     except ImportError:
-        pass
-
-    return False
+        return False
 
 
 def require_ai() -> None:

@@ -476,7 +476,7 @@ def run_lint_tools_simple(
 
     from lintro.ai.hook import AIPostExecutionHook
 
-    ai_hook = AIPostExecutionHook(lintro_config, ai_fix=ai_fix)
+    ai_hook = AIPostExecutionHook(lintro_config, ai_fix=effective_ai_fix)
     if ai_hook.should_run(action):
         ai_hook.execute(
             action,

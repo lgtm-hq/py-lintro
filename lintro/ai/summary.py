@@ -38,7 +38,7 @@ def _ensure_str_list(value: object) -> list[str]:
     a list, or a list containing non-string items.
     """
     if isinstance(value, list):
-        return [str(item) for item in value if isinstance(item, str)]
+        return [item for item in value if isinstance(item, str)]
     if isinstance(value, str):
         return [value]
     return []

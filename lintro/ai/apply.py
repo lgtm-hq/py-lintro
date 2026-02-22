@@ -124,10 +124,17 @@ def apply_fixes(
     *,
     workspace_root: Path | None = None,
     auto_apply: bool = False,
+    search_radius: int | None = None,
 ) -> list[AIFixSuggestion]:
     """Apply suggestions and return only those successfully applied."""
+    kwargs: dict[str, object] = {
+        "workspace_root": workspace_root,
+        "auto_apply": auto_apply,
+    }
+    if search_radius is not None:
+        kwargs["search_radius"] = search_radius
     return [
         fix
         for fix in suggestions
-        if _apply_fix(fix, workspace_root=workspace_root, auto_apply=auto_apply)
+        if _apply_fix(fix, **kwargs)  # type: ignore[arg-type]
     ]
