@@ -351,6 +351,19 @@ class YamllintPlugin(BaseToolPlugin):
             results["all_success"] = False
             results["execution_failures"] += 1
 
+    def doc_url(self, code: str) -> str | None:
+        """Return yamllint documentation URL for the given rule.
+
+        Args:
+            code: Yamllint rule name (e.g., "line-length").
+
+        Returns:
+            URL to the yamllint rule documentation.
+        """
+        if code:
+            return f"https://yamllint.readthedocs.io/en/stable/rules.html#{code}"
+        return None
+
     def check(self, paths: list[str], options: dict[str, object]) -> ToolResult:
         """Check files with Yamllint.
 
