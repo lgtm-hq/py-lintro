@@ -108,6 +108,8 @@ def execute_ruff_fix(
         file_patterns=tool.definition.file_patterns,
         exclude_patterns=tool.exclude_patterns,
         include_venv=tool.include_venv,
+        incremental=tool.options.get("incremental", False),
+        tool_name="ruff",
     )
 
     if not python_files:
