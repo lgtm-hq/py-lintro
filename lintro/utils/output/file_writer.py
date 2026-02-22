@@ -92,6 +92,18 @@ def write_output_file(
                     }
                     for issue in result.issues
                 ]
+            # Include detected (pre-fix) issues when available
+            detected = getattr(result, "detected_issues", None)
+            if detected:
+                result_data["detected_issues"] = [
+                    {
+                        "file": getattr(issue, "file", "") or "",
+                        "line": getattr(issue, "line", None) or 0,
+                        "code": getattr(issue, "code", "") or "",
+                        "message": getattr(issue, "message", "") or "",
+                    }
+                    for issue in detected
+                ]
             json_data["results"].append(result_data)
         output_file.write_text(
             json.dumps(json_data, indent=2, ensure_ascii=False),
