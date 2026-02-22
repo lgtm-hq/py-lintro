@@ -164,7 +164,9 @@ if [ -f "test-summary.json" ]; then
 	DURATION_STR="${TEST_DURATION}s"
 
 	# Determine test status emoji
-	if [ "${TEST_FAILED:-0}" -gt 0 ] || [ "${TEST_ERRORS:-0}" -gt 0 ]; then
+	if [ "${TEST_TOTAL:-0}" -eq 0 ]; then
+		TEST_STATUS_EMOJI="⚠️ NO DATA"
+	elif [ "${TEST_FAILED:-0}" -gt 0 ] || [ "${TEST_ERRORS:-0}" -gt 0 ]; then
 		TEST_STATUS_EMOJI="❌ FAIL"
 	else
 		TEST_STATUS_EMOJI="✅ PASS"
