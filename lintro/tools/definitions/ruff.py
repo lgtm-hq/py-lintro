@@ -210,7 +210,7 @@ class RuffPlugin(BaseToolPlugin):
             )
             if result.returncode == 0 and result.stdout:
                 data = json.loads(result.stdout)
-                name = data.get("name")
+                name: str | None = data.get("name")
                 self._rule_name_cache[code] = name
                 return name
         except (
