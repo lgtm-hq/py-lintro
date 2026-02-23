@@ -31,7 +31,7 @@ lintro format
 
 ## Features Overview
 
-### AI Summary (default with `check`)
+### AI Summary (default with `check` / `chk`)
 
 When AI is enabled, every `lintro check` run generates a single-call AI summary that
 provides:

@@ -109,7 +109,7 @@ tools:
 # `lintro fmt` generates AI fix suggestions for unfixable issues and
 # a post-fix summary.
 ai:
-  enabled: true
+  enabled: false
   provider: anthropic
   # model: claude-sonnet-4-20250514  # uses provider default if omitted
   # api_key_env: ANTHROPIC_API_KEY   # uses provider default if omitted
