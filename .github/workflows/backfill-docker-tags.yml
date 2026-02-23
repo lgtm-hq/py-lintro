@@ -1,0 +1,197 @@
+# SPDX-License-Identifier: MIT
+# For license details, see the repository root LICENSE file.
+---
+name: Backfill - Docker Semver Tags
+# One-time workflow to build and push semver-tagged Docker images for all
+# historical releases that were never published to GHCR.
+# Delete this workflow after successful backfill.
+
+'on':
+  workflow_dispatch:
+    inputs:
+      batch:
+        description: 'Batch number (1-6). Each batch covers ~25 releases.'
+        required: true
+        type: choice
+        options:
+          - '1'
+          - '2'
+          - '3'
+          - '4'
+          - '5'
+          - '6'
+      dry-run:
+        description: 'Dry run — build but do not push'
+        required: false
+        default: 'false'
+
+permissions: {}
+
+jobs:
+  generate-matrix:
+    name: Generate tag matrix for batch ${{ inputs.batch }}
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    outputs:
+      matrix: ${{ steps.matrix.outputs.tags }}
+      count: ${{ steps.matrix.outputs.count }}
+    steps:
+      - name: Harden Runner
+        uses: step-security/harden-runner@e3f713f2d8f53843e71c69a996d56f51aa9adfb9
+        with:
+          egress-policy: 'block'
+          allowed-endpoints: >
+            github.com:443
+            api.github.com:443
+      - name: Checkout
+        uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+      - name: Generate matrix from batch
+        id: matrix
+        env:
+          BATCH: ${{ inputs.batch }}
+        shell: bash
+        run: |
+          # List all version tags, sorted chronologically, excluding action tags
+          mapfile -t all_tags < <(
+            git tag --sort=creatordate --format='%(refname:short)' \
+              | grep -v 'actions-v'
+          )
+          total=${#all_tags[@]}
+          batch_size=$(( (total + 5) / 6 ))  # ceil(total/6)
+          start=$(( (BATCH - 1) * batch_size ))
+          end=$(( start + batch_size ))
+          if (( end > total )); then end=$total; fi
+
+          # Build JSON array of tags for this batch
+          json="["
+          count=0
+          for (( i=start; i<end; i++ )); do
+            tag="${all_tags[$i]}"
+            sha=$(git rev-parse --short "$tag")
+            if (( count > 0 )); then json+=","; fi
+            json+="{\"tag\":\"${tag}\",\"sha\":\"${sha}\"}"
+            ((count++))
+          done
+          json+="]"
+
+          echo "tags=${json}" >> "$GITHUB_OUTPUT"
+          echo "count=${count}" >> "$GITHUB_OUTPUT"
+          echo "Batch ${BATCH}: ${count} tags (indices ${start}–$((end-1)))"
+
+  backfill:
+    name: 'Build ${{ matrix.tag }}'
+    needs: generate-matrix
+    if: needs.generate-matrix.outputs.count != '0'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      packages: write
+    timeout-minutes: 30
+    strategy:
+      matrix:
+        include: ${{ fromJson(needs.generate-matrix.outputs.matrix) }}
+      fail-fast: false
+      max-parallel: 2
+    steps:
+      - name: Harden Runner
+        uses: step-security/harden-runner@e3f713f2d8f53843e71c69a996d56f51aa9adfb9
+        with:
+          egress-policy: 'block'
+          allowed-endpoints: >
+            github.com:443
+            api.github.com:443
+            codeload.github.com:443
+            release-assets.githubusercontent.com:443
+            objects.githubusercontent.com:443
+            ghcr.io:443
+            pkg-containers.githubusercontent.com:443
+            docker.io:443
+            registry-1.docker.io:443
+            auth.docker.io:443
+            production.cloudflare.docker.com:443
+            pypi.org:443
+            files.pythonhosted.org:443
+            static.rust-lang.org:443
+            bun.sh:443
+            astral.sh:443
+            sh.rustup.rs:443
+            deb.debian.org:80
+            registry.npmjs.org:443
+            crates.io:443
+            static.crates.io:443
+            index.crates.io:443
+            semgrep.dev:443
+      - name: Checkout at release tag
+        uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6
+        with:
+          ref: ${{ matrix.tag }}
+          fetch-depth: 1
+      - name: Set up Docker Buildx
+        # yamllint disable-line rule:line-length
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+      - name: Login to GHCR
+        # yamllint disable-line rule:line-length
+        uses: docker/login-action@553b6f090f15b58451081ce157ff1929a266131d # v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Compute version and tags
+        id: tags
+        env:
+          TAG: ${{ matrix.tag }}
+          SHA: ${{ matrix.sha }}
+        shell: bash
+        run: |
+          version="${TAG#v}"
+          major="${version%%.*}"
+          minor="${version#*.}"
+          minor="${minor%%.*}"
+
+          # Main image tags
+          tags="ghcr.io/lgtm-hq/py-lintro:${version}"
+          tags+=",ghcr.io/lgtm-hq/py-lintro:${major}.${minor}"
+          tags+=",ghcr.io/lgtm-hq/py-lintro:${major}"
+          tags+=",ghcr.io/lgtm-hq/py-lintro:sha-${SHA}"
+          echo "main-tags=${tags}" >> "$GITHUB_OUTPUT"
+
+          # Base image tags (Dockerfile.base exists from v0.42.7+)
+          if [[ -f Dockerfile.base ]]; then
+            base_tags="ghcr.io/lgtm-hq/py-lintro:${version}-base"
+            base_tags+=",ghcr.io/lgtm-hq/py-lintro:${major}.${minor}-base"
+            base_tags+=",ghcr.io/lgtm-hq/py-lintro:${major}-base"
+            base_tags+=",ghcr.io/lgtm-hq/py-lintro:sha-${SHA}-base"
+            echo "base-tags=${base_tags}" >> "$GITHUB_OUTPUT"
+            echo "has-base=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "has-base=false" >> "$GITHUB_OUTPUT"
+          fi
+
+          echo "Building ${TAG} (${version}) at sha-${SHA}"
+
+      - name: Build and push main image
+        # yamllint disable-line rule:line-length
+        uses: docker/build-push-action@263435318d21b8e681c14492fe198d362a7d2c83 # v6
+        with:
+          context: .
+          push: ${{ inputs.dry-run != 'true' }}
+          tags: ${{ steps.tags.outputs.main-tags }}
+          provenance: true
+          sbom: true
+
+      - name: Build and push base image
+        if: steps.tags.outputs.has-base == 'true'
+        # yamllint disable-line rule:line-length
+        uses: docker/build-push-action@263435318d21b8e681c14492fe198d362a7d2c83 # v6
+        with:
+          context: .
+          file: Dockerfile.base
+          push: ${{ inputs.dry-run != 'true' }}
+          tags: ${{ steps.tags.outputs.base-tags }}
+          provenance: true
+          sbom: true

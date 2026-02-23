@@ -121,6 +121,18 @@ jobs:
           files: |
             dist/*
 
+  docker-publish:
+    name: Publish Docker Images to GHCR
+    needs: publish
+    # Skip for pre-release tags and internal action version tags
+    # yamllint disable-line rule:line-length
+    if: ${{ !startsWith(github.ref_name, 'actions-v') && !contains(github.ref_name, 'a') && !contains(github.ref_name, 'b') && !contains(github.ref_name, 'rc') }}
+    uses: ./.github/workflows/docker-build-publish.yml
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+
   update-homebrew:
     name: Update Homebrew Formula
     needs: publish

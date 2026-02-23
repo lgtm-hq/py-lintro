@@ -2,7 +2,8 @@
 # For license details, see the repository root LICENSE file.
 ---
 name: Build - Docker Image & Registry
-# Builds and tests Docker image. Called by build-test-pipeline.yml for push/PR events.
+# Builds and tests Docker image. Called by ci-pipeline.yml for push/PR events
+# and by publish-pypi-on-tag.yml for release tag pushes (semver-tagged images).
 # Can also be triggered directly for releases or manual dispatch.
 
 'on':
@@ -10,9 +11,11 @@ name: Build - Docker Image & Registry
   workflow_call:
     inputs:
       tools-image:
-        description: 'Tools image reference to use for the build'
-        required: true
+        # yamllint disable-line rule:line-length
+        description: 'Tools image reference to use for the build (auto-resolved if empty)'
+        required: false
         type: string
+        default: ''
   # Direct triggers (not handled by orchestrator)
   release:
     types: [published, edited]
@@ -142,7 +145,8 @@ jobs:
     defaults:
       run:
         shell: bash
-    if: github.event_name == 'release' || (github.ref == 'refs/heads/main' && github.event_name == 'push') || (github.event_name == 'workflow_dispatch' && inputs.force_publish == 'true') # yamllint disable-line rule:line-length
+    # yamllint disable-line rule:line-length
+    if: github.event_name == 'release' || github.event_name == 'workflow_call' || (github.ref == 'refs/heads/main' && github.event_name == 'push') || (github.event_name == 'workflow_dispatch' && inputs.force_publish == 'true')
     concurrency:
       group: docker-publish-${{ github.ref }}
       cancel-in-progress: true
