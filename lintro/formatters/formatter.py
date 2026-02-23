@@ -235,15 +235,27 @@ def format_fix_results(
 
     normalized_format = normalize_output_format(output_format)
 
-    # JSON/GitHub: merge detected + remaining, deduplicating by identity
+    # JSON/GitHub: merge detected + remaining, deduplicating by attributes
     if normalized_format in {OutputFormat.JSON, OutputFormat.GITHUB}:
-        seen_ids: set[int] = {id(i) for i in detected_issues}
+
+        def _issue_key(issue: BaseIssue) -> tuple[str, int, str, str]:
+            return (
+                issue.file,
+                issue.line,
+                getattr(issue, "code", "") or "",
+                issue.message,
+            )
+
+        seen_keys: set[tuple[str, int, str, str]] = {
+            _issue_key(i) for i in detected_issues
+        }
         merged: list[BaseIssue] = list(detected_issues)
         if remaining_issues:
             for issue in remaining_issues:
-                if id(issue) not in seen_ids:
+                key = _issue_key(issue)
+                if key not in seen_keys:
                     merged.append(issue)
-                    seen_ids.add(id(issue))
+                    seen_keys.add(key)
         return format_issues(
             merged,
             output_format=normalized_format,
