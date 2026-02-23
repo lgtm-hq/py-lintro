@@ -34,55 +34,6 @@ BANDIT_DEFAULT_PRIORITY: int = 90  # High priority for security tool
 BANDIT_FILE_PATTERNS: list[str] = ["*.py", "*.pyi"]
 BANDIT_OUTPUT_FORMAT: str = "json"
 
-# Mapping of Bandit test IDs to their documentation page slugs.
-# Bandit doc URLs use the format: plugins/<slug>.html
-BANDIT_PLUGIN_SLUGS: dict[str, str] = {
-    "B101": "b101_assert_used",
-    "B102": "b102_exec_used",
-    "B103": "b103_set_bad_file_permissions",
-    "B104": "b104_hardcoded_bind_all_interfaces",
-    "B105": "b105_hardcoded_password_string",
-    "B106": "b106_hardcoded_password_funcarg",
-    "B107": "b107_hardcoded_password_default",
-    "B108": "b108_hardcoded_tmp_directory",
-    "B109": "b109_password_config_option_not_marked_secret",
-    "B110": "b110_try_except_pass",
-    "B111": "b111_execute_with_run_as_root_equals_true",
-    "B112": "b112_try_except_continue",
-    "B113": "b113_request_without_timeout",
-    "B201": "b201_flask_debug_true",
-    "B202": "b202_tarfile_unsafe_members",
-    "B324": "b324_hashlib",
-    "B501": "b501_request_with_no_cert_validation",
-    "B502": "b502_ssl_with_bad_version",
-    "B503": "b503_ssl_with_bad_defaults",
-    "B504": "b504_ssl_with_no_version",
-    "B505": "b505_weak_cryptographic_key",
-    "B506": "b506_yaml_load",
-    "B507": "b507_ssh_no_host_key_verification",
-    "B508": "b508_snmp_insecure_version",
-    "B509": "b509_snmp_weak_cryptography",
-    "B601": "b601_paramiko_calls",
-    "B602": "b602_subprocess_popen_with_shell_equals_true",
-    "B603": "b603_subprocess_without_shell_equals_true",
-    "B604": "b604_any_other_function_with_shell_equals_true",
-    "B605": "b605_start_process_with_a_shell",
-    "B606": "b606_start_process_with_no_shell",
-    "B607": "b607_start_process_with_partial_path",
-    "B608": "b608_hardcoded_sql_expressions",
-    "B609": "b609_linux_commands_wildcard_injection",
-    "B610": "b610_django_extra_used",
-    "B611": "b611_django_rawsql_used",
-    "B612": "b612_logging_config_insecure_listen",
-    "B613": "b613_trojansource",
-    "B614": "b614_pytorch_load",
-    "B615": "b615_huggingface_unsafe_download",
-    "B701": "b701_jinja2_autoescape_false",
-    "B702": "b702_use_of_mako_templates",
-    "B703": "b703_django_mark_safe",
-    "B704": "b704_markupsafe_markup_xss",
-}
-
 
 def _extract_bandit_json(raw_text: str) -> dict[str, Any]:
     """Extract Bandit's JSON object from mixed stdout/stderr text.
@@ -350,17 +301,17 @@ class BanditPlugin(BaseToolPlugin):
     def doc_url(self, code: str) -> str | None:
         """Return Bandit documentation URL for the given code.
 
+        Returns the plugins index page. Individual plugin page slugs do not
+        follow a deterministic pattern so we link to the index instead.
+
         Args:
             code: Bandit code (e.g., "B101").
 
         Returns:
-            URL to the Bandit plugin documentation, or None if unknown.
+            URL to the Bandit plugins index page, or None if code is empty.
         """
-        if not code:
-            return None
-        slug = BANDIT_PLUGIN_SLUGS.get(code.upper())
-        if slug:
-            return f"https://bandit.readthedocs.io/en/latest/plugins/{slug}.html"
+        if code:
+            return "https://bandit.readthedocs.io/en/latest/plugins/index.html"
         return None
 
     def check(self, paths: list[str], options: dict[str, object]) -> ToolResult:

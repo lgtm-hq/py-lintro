@@ -370,15 +370,21 @@ class TscPlugin(BaseToolPlugin):
     def doc_url(self, code: str) -> str | None:
         """Return TypeScript error documentation URL.
 
+        Uses typescript.tv, a third-party error reference, since the
+        official TypeScript handbook does not provide per-error pages.
+
         Args:
             code: TypeScript error code (e.g., "TS2307" or "2307").
 
         Returns:
-            URL to the TypeScript error documentation.
+            URL to the TypeScript error documentation, or None if invalid.
         """
-        if code:
-            # Strip "TS" prefix if present
-            num = code.lstrip("TSts")
+        if not code:
+            return None
+        # Strip "TS"/"ts" prefix if present to get the numeric portion
+        upper = code.upper()
+        num = code[2:] if upper.startswith("TS") else code
+        if num.isdigit():
             return f"https://typescript.tv/errors/#ts{num}"
         return None
 

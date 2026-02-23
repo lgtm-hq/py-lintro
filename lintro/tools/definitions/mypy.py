@@ -301,14 +301,17 @@ class MypyPlugin(BaseToolPlugin):
     def doc_url(self, code: str) -> str | None:
         """Return mypy documentation URL for the given error code.
 
+        Returns the error code list page. Individual anchor mapping is not
+        reliable because mypy docs don't use the raw code as fragment IDs.
+
         Args:
             code: mypy error code (e.g., "import-untyped").
 
         Returns:
-            URL to the mypy error code documentation.
+            URL to the mypy error codes page, or None if code is empty.
         """
         if code:
-            return f"https://mypy.readthedocs.io/en/stable/error_code_list.html#{code}"
+            return "https://mypy.readthedocs.io/en/stable/error_code_list.html"
         return None
 
     def check(self, paths: list[str], options: dict[str, object]) -> ToolResult:
