@@ -46,6 +46,8 @@ def format_cost(cost: float) -> str:
     Returns:
         str: Formatted cost string (e.g., "$0.003", "<$0.001").
     """
+    if cost < 0:
+        cost = 0
     if cost < 0.001:
         return "<$0.001"
     return f"${cost:.3f}"

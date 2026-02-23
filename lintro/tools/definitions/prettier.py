@@ -369,6 +369,7 @@ class PrettierPlugin(BaseToolPlugin):
                 success=False,
                 output=f"Prettier execution failed: {e}",
                 issues_count=0,
+                cwd=ctx.cwd,
             )
 
         output: str = result[1]
@@ -472,6 +473,7 @@ class PrettierPlugin(BaseToolPlugin):
                 success=False,
                 output=f"Prettier execution failed: {e}",
                 issues_count=0,
+                cwd=ctx.cwd,
             )
 
         check_output: str = check_result[1]
@@ -513,6 +515,7 @@ class PrettierPlugin(BaseToolPlugin):
                 success=False,
                 output=f"Prettier execution failed: {e}",
                 issues_count=0,
+                cwd=ctx.cwd,
             )
 
         fix_output: str = fix_result[1]
@@ -540,6 +543,7 @@ class PrettierPlugin(BaseToolPlugin):
                 success=False,
                 output=f"Prettier execution failed: {e}",
                 issues_count=0,
+                cwd=ctx.cwd,
             )
 
         final_check_output: str = final_check_result[1]

@@ -274,8 +274,14 @@ def review_fixes_interactive(
             auto_failed += len(fixes) - count
             auto_groups += 1
             all_applied.extend(group_applied)
-            if validate_mode and group_applied:
-                _validate_group(console, group_applied)
+            if validate_mode:
+                if group_applied:
+                    _validate_group(console, group_applied)
+                else:
+                    console.print(
+                        "  [dim]Validation skipped "
+                        "(no fixes applied in this group).[/dim]",
+                    )
             continue
 
         # Group header (flat text, no panels)

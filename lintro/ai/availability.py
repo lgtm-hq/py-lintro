@@ -66,7 +66,7 @@ def is_provider_available(provider: str) -> bool:
         return False
 
     try:
-        if provider == AIProvider.ANTHROPIC:
+        if provider == AIProvider.ANTHROPIC.value:
             import anthropic  # noqa: F401 -- import-only availability check
 
             return True

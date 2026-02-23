@@ -67,8 +67,13 @@ def run_ai_enhancement(
                 workspace_root=workspace_root,
             )
     except Exception as e:
-        loguru_logger.debug(f"AI enhancement failed: {e}", exc_info=True)
-        logger.console_output("  AI: enhancement unavailable")
+        loguru_logger.debug(
+            f"AI enhancement failed ({type(e).__name__}): {e}",
+            exc_info=True,
+        )
+        logger.console_output(
+            f"  AI: enhancement unavailable ({type(e).__name__})",
+        )
 
 
 def _run_ai_check(
@@ -201,6 +206,12 @@ def _remaining_issues_for_fix_result(result: ToolResult) -> list[BaseIssue]:
         return issues
     if remaining_count <= 0:
         return []
+    if remaining_count > len(issues):
+        loguru_logger.warning(
+            f"remaining_issues_count ({remaining_count}) exceeds "
+            f"issues length ({len(issues)}); clamping to {len(issues)}",
+        )
+        remaining_count = len(issues)
     if remaining_count >= len(issues):
         return issues
 

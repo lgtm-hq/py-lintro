@@ -177,9 +177,9 @@ def generate_summary(
         return None
 
     total_issues = sum(
-        len(list(r.issues)) for r in results if r.issues and not r.skipped
+        r.issues_count for r in results if r.issues_count and not r.skipped
     )
-    tool_count = sum(1 for r in results if r.issues and not r.skipped)
+    tool_count = sum(1 for r in results if r.issues_count and not r.skipped)
 
     prompt = SUMMARY_PROMPT_TEMPLATE.format(
         total_issues=total_issues,

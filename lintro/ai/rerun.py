@@ -145,6 +145,8 @@ def apply_rerun_results(
             continue
 
         refreshed_issues = list(rerun.issues) if rerun.issues is not None else []
+        result.initial_issues_count = 0
+        result.fixed_issues_count = 0
         result.issues = refreshed_issues
         result.issues_count = len(refreshed_issues)
         result.remaining_issues_count = len(refreshed_issues)

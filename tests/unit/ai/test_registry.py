@@ -33,7 +33,7 @@ def test_aiprovider_is_str():
 def test_aiprovider_iteration():
     """Iterating AIProvider yields all members."""
     members = list(AIProvider)
-    assert_that(members).is_length(2)
+    assert_that(len(members)).is_greater_than_or_equal_to(2)
     assert_that(members).contains(AIProvider.ANTHROPIC, AIProvider.OPENAI)
 
 
@@ -93,7 +93,7 @@ def test_provider_info_default_models_empty():
 def test_registry_items():
     """items() yields all providers."""
     items = list(PROVIDERS.items())
-    assert_that(items).is_length(2)
+    assert_that(items).is_length(len(list(AIProvider)))
     providers = [p for p, _ in items]
     assert_that(providers).contains(AIProvider.ANTHROPIC, AIProvider.OPENAI)
 

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from dataclasses import FrozenInstanceError
+
 import pytest
 from assertpy import assert_that
 
@@ -160,7 +162,7 @@ def test_patch_stats_defaults() -> None:
 def test_patch_stats_is_frozen() -> None:
     """PatchStats is a frozen dataclass."""
     stats = PatchStats(files=1, hunks=2, lines_added=3, lines_removed=4)
-    with pytest.raises(AttributeError):
+    with pytest.raises(FrozenInstanceError):
         stats.files = 99  # type: ignore[misc]  # intentionally mutating frozen dataclass
 
 
