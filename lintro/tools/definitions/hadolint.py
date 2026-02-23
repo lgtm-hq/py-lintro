@@ -250,9 +250,9 @@ class HadolintPlugin(BaseToolPlugin):
             return None
         upper = code.upper()
         if upper.startswith("SC"):
-            return f"https://www.shellcheck.net/wiki/{code}"
+            return f"https://www.shellcheck.net/wiki/{upper}"
         if upper.startswith("DL"):
-            return f"https://github.com/hadolint/hadolint/wiki/{code}"
+            return f"https://github.com/hadolint/hadolint/wiki/{upper}"
         return None
 
     def check(self, paths: list[str], options: dict[str, object]) -> ToolResult:
