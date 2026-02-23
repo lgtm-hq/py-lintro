@@ -57,6 +57,7 @@ def sample_results() -> list[ToolResult]:
     mock_issue.line = 10
     mock_issue.code = "E001"
     mock_issue.message = "Test error message"
+    mock_issue.doc_url = ""
 
     result_with_issues = ToolResult(
         name="ruff",
@@ -270,6 +271,7 @@ def test_json_with_issues_details(tmp_path: Path) -> None:
     mock_issue.line = 42
     mock_issue.code = "W999"
     mock_issue.message = "Warning message"
+    mock_issue.doc_url = ""
 
     result = ToolResult(
         name="pylint",
@@ -308,6 +310,7 @@ def test_html_escapes_special_characters(tmp_path: Path) -> None:
     mock_issue.line = 1
     mock_issue.code = "E001"
     mock_issue.message = "<script>alert('xss')</script>"
+    mock_issue.doc_url = ""
 
     result = ToolResult(
         name="<tool>",
@@ -344,6 +347,7 @@ def test_markdown_escapes_pipe_characters(tmp_path: Path) -> None:
     mock_issue.line = 1
     mock_issue.code = "E|001"
     mock_issue.message = "Message with | pipe"
+    mock_issue.doc_url = ""
 
     result = ToolResult(
         name="ruff",

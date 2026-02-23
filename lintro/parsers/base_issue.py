@@ -39,6 +39,7 @@ class BaseIssue:
         line: Line number where the issue was found (1-based, 0 means unknown).
         column: Column number where the issue was found (1-based, 0 means unknown).
         message: Human-readable description of the issue.
+        doc_url: URL to the rule's documentation page (empty when unavailable).
     """
 
     # Default field mapping - subclasses can override specific keys
