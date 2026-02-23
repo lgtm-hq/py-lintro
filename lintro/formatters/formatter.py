@@ -235,11 +235,17 @@ def format_fix_results(
 
     normalized_format = normalize_output_format(output_format)
 
-    # JSON/GitHub: combine both lists into a single output (no structural change)
+    # JSON/GitHub: merge detected + remaining, deduplicating by identity
     if normalized_format in {OutputFormat.JSON, OutputFormat.GITHUB}:
-        all_issues = list(detected_issues)
+        seen_ids: set[int] = {id(i) for i in detected_issues}
+        merged: list[BaseIssue] = list(detected_issues)
+        if remaining_issues:
+            for issue in remaining_issues:
+                if id(issue) not in seen_ids:
+                    merged.append(issue)
+                    seen_ids.add(id(issue))
         return format_issues(
-            all_issues,
+            merged,
             output_format=normalized_format,
             tool_name=tool_name,
         )
