@@ -193,7 +193,8 @@ def render_fixes_markdown(
 
     for fix in suggestions:
         total_cost += fix.cost_estimate
-        loc = f"`{relative_path(fix.file)}"
+        rel = html.escape(relative_path(fix.file))
+        loc = f"`{rel}"
         if fix.line:
             loc += f":{fix.line}"
         loc += "`"

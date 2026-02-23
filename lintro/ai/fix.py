@@ -10,7 +10,7 @@ from __future__ import annotations
 import difflib
 import json
 import threading
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -176,7 +176,7 @@ def _generate_single_fix(
     cache_lock: threading.Lock,
     workspace_root: Path,
     max_tokens: int,
-    max_retries: int = 2,
+    retrying_call: Callable[..., AIResponse],
     timeout: float = 60.0,
 ) -> AIFixSuggestion | None:
     """Generate a fix suggestion for a single issue.
@@ -191,7 +191,7 @@ def _generate_single_fix(
         cache_lock: Lock for thread-safe cache access.
         workspace_root: Root directory AI is allowed to edit/read.
         max_tokens: Maximum tokens to request from provider.
-        max_retries: Maximum retry attempts for transient failures.
+        retrying_call: Pre-built retry wrapper around ``_call_provider``.
         timeout: Request timeout in seconds.
 
     Returns:
@@ -241,7 +241,6 @@ def _generate_single_fix(
     )
 
     try:
-        retrying_call = with_retry(max_retries=max_retries)(_call_provider)
         response = retrying_call(provider, prompt, FIX_SYSTEM, max_tokens, timeout)
 
         suggestion = _parse_fix_response(
@@ -314,6 +313,9 @@ def generate_fixes(
     file_cache: dict[str, str | None] = {}
     cache_lock = threading.Lock()
 
+    # Build the retry wrapper once and share across all calls.
+    retrying_call = with_retry(max_retries=max_retries)(_call_provider)
+
     suggestions: list[AIFixSuggestion] = []
 
     workers = min(len(target_issues), max_workers)
@@ -329,7 +331,7 @@ def generate_fixes(
                 cache_lock,
                 root,
                 max_tokens,
-                max_retries,
+                retrying_call,
                 timeout,
             )
             if result:
@@ -346,7 +348,7 @@ def generate_fixes(
                     cache_lock,
                     root,
                     max_tokens,
-                    max_retries,
+                    retrying_call,
                     timeout,
                 )
                 for issue in target_issues

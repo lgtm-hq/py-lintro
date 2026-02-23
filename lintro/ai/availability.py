@@ -53,6 +53,7 @@ def is_provider_available(provider: str) -> bool:
     """
     from lintro.ai.registry import AIProvider
 
+    provider = provider.lower()
     if provider not in set(AIProvider):
         from loguru import logger
 

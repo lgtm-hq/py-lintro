@@ -104,7 +104,7 @@ PROVIDERS = AIProviderRegistry(
         models={
             "claude-sonnet-4-6": ModelPricing(3.00, 15.00),
             "claude-sonnet-4-20250514": ModelPricing(3.00, 15.00),
-            "claude-haiku-3-5-20241022": ModelPricing(0.80, 4.00),
+            "claude-haiku-4-5-20251001": ModelPricing(0.80, 4.00),
             "claude-opus-4-20250514": ModelPricing(15.00, 75.00),
         },
     ),

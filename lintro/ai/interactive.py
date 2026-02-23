@@ -264,19 +264,18 @@ def review_fixes_interactive(
 
     for gi, (code, fixes) in enumerate(groups.items(), 1):
         if accept_all:
-            applied_fixes: list[AIFixSuggestion] = []
-            for fix in fixes:
-                if _apply_fix(fix, workspace_root=workspace_root):
-                    applied_fixes.append(fix)
-            count = len(applied_fixes)
-            failed = len(fixes) - count
+            count, group_applied = _apply_group(
+                console,
+                fixes,
+                workspace_root=workspace_root,
+            )
             accepted += count
             auto_accepted += count
-            auto_failed += failed
+            auto_failed += len(fixes) - count
             auto_groups += 1
-            all_applied.extend(applied_fixes)
-            if validate_mode and applied_fixes:
-                _validate_group(console, applied_fixes)
+            all_applied.extend(group_applied)
+            if validate_mode and group_applied:
+                _validate_group(console, group_applied)
             continue
 
         # Group header (flat text, no panels)
@@ -321,7 +320,7 @@ def review_fixes_interactive(
 
             break
 
-        if choice == "a":
+        if choice in ("a", "y"):
             count, group_applied = _apply_group(
                 console,
                 fixes,
@@ -337,24 +336,9 @@ def review_fixes_interactive(
                         "  [dim]Validation skipped "
                         "(no fixes applied in this group).[/dim]",
                     )
-            accept_all = True
-            console.print("  [dim]Will accept all remaining groups.[/dim]")
-        elif choice == "y":
-            count, group_applied = _apply_group(
-                console,
-                fixes,
-                workspace_root=workspace_root,
-            )
-            accepted += count
-            all_applied.extend(group_applied)
-            if validate_mode:
-                if group_applied:
-                    _validate_group(console, group_applied)
-                else:
-                    console.print(
-                        "  [dim]Validation skipped "
-                        "(no fixes applied in this group).[/dim]",
-                    )
+            if choice == "a":
+                accept_all = True
+                console.print("  [dim]Will accept all remaining groups.[/dim]")
         elif choice == "r":
             rejected += len(fixes)
             console.print(

@@ -28,7 +28,7 @@ class ValidationResult:
     Attributes:
         verified: Number of fixes whose issues no longer appear.
         unverified: Number of fixes whose issues still appear.
-        new_issues: Number of pre-existing issues not targeted by fixes.
+        new_issues: Number of remaining issues not matched to any applied fix.
         details: Per-file validation details.
         verified_by_tool: Verified fix counts grouped by tool name.
         unverified_by_tool: Unverified fix counts grouped by tool name.
