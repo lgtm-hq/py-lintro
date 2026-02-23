@@ -353,6 +353,30 @@ def _write_artifacts(
             _emit(f"Warning: Failed to write {artifact} artifact: {e}")
 
 
+def _enrich_issues_with_doc_urls(
+    tool: BaseToolPlugin,
+    result: ToolResult,
+) -> None:
+    """Populate doc_url on each issue using the plugin's doc_url method.
+
+    Skips issues that already have a doc_url set.
+
+    Args:
+        tool: Plugin instance that may provide a doc_url method.
+        result: ToolResult whose issues will be enriched in-place.
+    """
+    if not hasattr(tool, "doc_url") or not result.issues:
+        return
+    for issue in result.issues:
+        if getattr(issue, "doc_url", ""):
+            continue
+        code = str(getattr(issue, "code", "") or "")
+        if code:
+            url = tool.doc_url(code)
+            if url:
+                issue.doc_url = url
+
+
 def run_lint_tools_simple(
     *,
     action: str | Action,
@@ -589,6 +613,14 @@ def run_lint_tools_simple(
             max_fix_retries=lintro_config.execution.max_fix_retries,
         )
 
+        # Enrich parallel results with doc_url from each plugin
+        for result in all_results:
+            try:
+                tool = tool_manager.get_tool(result.name)
+                _enrich_issues_with_doc_urls(tool, result)
+            except (KeyError, ValueError):
+                pass  # Tool not found — skip enrichment
+
         # Calculate totals from parallel results using helper
         total_issues, total_fixed, total_remaining = aggregate_tool_results(
             all_results,
@@ -646,13 +678,7 @@ def run_lint_tools_simple(
                     result = tool.check(paths, {})
 
                 # Populate doc_url on each issue from the plugin
-                if hasattr(tool, "doc_url") and result.issues:
-                    for issue in result.issues:
-                        code = getattr(issue, "code", None) or ""
-                        if code and not getattr(issue, "doc_url", ""):
-                            url = tool.doc_url(str(code))
-                            if url:
-                                issue.doc_url = url
+                _enrich_issues_with_doc_urls(tool, result)
 
                 all_results.append(result)
 
