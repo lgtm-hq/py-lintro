@@ -238,15 +238,16 @@ def format_fix_results(
     # JSON/GitHub: merge detected + remaining, deduplicating by attributes
     if normalized_format in {OutputFormat.JSON, OutputFormat.GITHUB}:
 
-        def _issue_key(issue: BaseIssue) -> tuple[str, int, str, str]:
+        def _issue_key(issue: BaseIssue) -> tuple[str, int, int, str, str]:
             return (
                 issue.file,
                 issue.line,
+                issue.column,
                 getattr(issue, "code", "") or "",
                 issue.message,
             )
 
-        seen_keys: set[tuple[str, int, str, str]] = {
+        seen_keys: set[tuple[str, int, int, str, str]] = {
             _issue_key(i) for i in detected_issues
         }
         merged: list[BaseIssue] = list(detected_issues)
