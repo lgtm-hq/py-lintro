@@ -142,7 +142,7 @@ jobs:
         env:
           TAG: ${{ matrix.tag }}
           SHA: ${{ matrix.sha }}
-        run: ../_ci/scripts/ci/backfill-compute-tags.sh
+        run: _ci/scripts/ci/backfill-compute-tags.sh
 
       - name: Build and push main image
         # yamllint disable-line rule:line-length

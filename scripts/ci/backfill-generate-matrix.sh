@@ -27,6 +27,10 @@ if [[ -z "${BATCH:-}" ]]; then
 	echo "::error::BATCH environment variable is required"
 	exit 1
 fi
+if ! [[ "$BATCH" =~ ^[0-9]+$ ]] || ((BATCH < 1 || BATCH > 6)); then
+	echo "::error::BATCH must be a number between 1 and 6 (got: ${BATCH})"
+	exit 1
+fi
 
 # List all version tags, sorted chronologically, excluding action tags
 mapfile -t all_tags < <(
@@ -39,17 +43,15 @@ start=$(((BATCH - 1) * batch_size))
 end=$((start + batch_size))
 if ((end > total)); then end=$total; fi
 
-# Build JSON array of tags for this batch
-json="["
-count=0
+# Build JSON array of tags for this batch using jq for safe encoding
+objects=()
 for ((i = start; i < end; i++)); do
 	tag="${all_tags[$i]}"
 	sha=$(git rev-parse --short "$tag")
-	if ((count > 0)); then json+=","; fi
-	json+="{\"tag\":\"${tag}\",\"sha\":\"${sha}\"}"
-	((count++))
+	objects+=("$(jq -n --arg tag "$tag" --arg sha "$sha" '{tag:$tag,sha:$sha}')")
 done
-json+="]"
+json=$(printf '%s\n' "${objects[@]}" | jq -s '.')
+count=${#objects[@]}
 
 echo "tags=${json}" >>"$GITHUB_OUTPUT"
 echo "count=${count}" >>"$GITHUB_OUTPUT"
