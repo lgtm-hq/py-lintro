@@ -38,6 +38,7 @@ jobs:
       count: ${{ steps.matrix.outputs.count }}
     steps:
       - name: Harden Runner
+        # yamllint disable-line rule:line-length
         uses: step-security/harden-runner@e3f713f2d8f53843e71c69a996d56f51aa9adfb9
         with:
           egress-policy: 'block'
@@ -53,34 +54,7 @@ jobs:
         id: matrix
         env:
           BATCH: ${{ inputs.batch }}
-        shell: bash
-        run: |
-          # List all version tags, sorted chronologically, excluding action tags
-          mapfile -t all_tags < <(
-            git tag --sort=creatordate --format='%(refname:short)' \
-              | grep -v 'actions-v'
-          )
-          total=${#all_tags[@]}
-          batch_size=$(( (total + 5) / 6 ))  # ceil(total/6)
-          start=$(( (BATCH - 1) * batch_size ))
-          end=$(( start + batch_size ))
-          if (( end > total )); then end=$total; fi
-
-          # Build JSON array of tags for this batch
-          json="["
-          count=0
-          for (( i=start; i<end; i++ )); do
-            tag="${all_tags[$i]}"
-            sha=$(git rev-parse --short "$tag")
-            if (( count > 0 )); then json+=","; fi
-            json+="{\"tag\":\"${tag}\",\"sha\":\"${sha}\"}"
-            ((count++))
-          done
-          json+="]"
-
-          echo "tags=${json}" >> "$GITHUB_OUTPUT"
-          echo "count=${count}" >> "$GITHUB_OUTPUT"
-          echo "Batch ${BATCH}: ${count} tags (indices ${start}–$((end-1)))"
+        run: scripts/ci/backfill-generate-matrix.sh
 
   backfill:
     name: 'Build ${{ matrix.tag }}'
@@ -91,13 +65,21 @@ jobs:
       contents: read
       packages: write
     timeout-minutes: 30
+    defaults:
+      run:
+        shell: bash
     strategy:
       matrix:
         include: ${{ fromJson(needs.generate-matrix.outputs.matrix) }}
       fail-fast: false
       max-parallel: 2
     steps:
+      # Harden runner — cannot use composite action here because the
+      # workspace will be checked out at a historical release tag where
+      # .github/actions/ does not exist. Uses the same endpoint list as
+      # docker-build-publish.yml.
       - name: Harden Runner
+        # yamllint disable-line rule:line-length
         uses: step-security/harden-runner@e3f713f2d8f53843e71c69a996d56f51aa9adfb9
         with:
           egress-policy: 'block'
@@ -125,11 +107,25 @@ jobs:
             static.crates.io:443
             index.crates.io:443
             semgrep.dev:443
+
+      # Sparse-checkout main for CI scripts (not available on old tags)
+      - name: Checkout CI scripts from main
+        uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6
+        with:
+          ref: main
+          sparse-checkout: scripts/ci
+          path: _ci
+
+      # Checkout the release tag as the build context
       - name: Checkout at release tag
         uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6
         with:
           ref: ${{ matrix.tag }}
           fetch-depth: 1
+
+      # Cannot use ./.github/actions/setup-docker here — it does not
+      # exist on old release tags.  Uses same raw actions as the
+      # build-and-test job in docker-build-publish.yml.
       - name: Set up Docker Buildx
         # yamllint disable-line rule:line-length
         uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
@@ -146,33 +142,7 @@ jobs:
         env:
           TAG: ${{ matrix.tag }}
           SHA: ${{ matrix.sha }}
-        shell: bash
-        run: |
-          version="${TAG#v}"
-          major="${version%%.*}"
-          minor="${version#*.}"
-          minor="${minor%%.*}"
-
-          # Main image tags
-          tags="ghcr.io/lgtm-hq/py-lintro:${version}"
-          tags+=",ghcr.io/lgtm-hq/py-lintro:${major}.${minor}"
-          tags+=",ghcr.io/lgtm-hq/py-lintro:${major}"
-          tags+=",ghcr.io/lgtm-hq/py-lintro:sha-${SHA}"
-          echo "main-tags=${tags}" >> "$GITHUB_OUTPUT"
-
-          # Base image tags (Dockerfile.base exists from v0.42.7+)
-          if [[ -f Dockerfile.base ]]; then
-            base_tags="ghcr.io/lgtm-hq/py-lintro:${version}-base"
-            base_tags+=",ghcr.io/lgtm-hq/py-lintro:${major}.${minor}-base"
-            base_tags+=",ghcr.io/lgtm-hq/py-lintro:${major}-base"
-            base_tags+=",ghcr.io/lgtm-hq/py-lintro:sha-${SHA}-base"
-            echo "base-tags=${base_tags}" >> "$GITHUB_OUTPUT"
-            echo "has-base=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "has-base=false" >> "$GITHUB_OUTPUT"
-          fi
-
-          echo "Building ${TAG} (${version}) at sha-${SHA}"
+        run: ../_ci/scripts/ci/backfill-compute-tags.sh
 
       - name: Build and push main image
         # yamllint disable-line rule:line-length
