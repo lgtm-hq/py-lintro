@@ -196,6 +196,10 @@ def _generate_single_fix(
 
     Returns:
         AIFixSuggestion, or None if generation fails.
+
+    Raises:
+        KeyboardInterrupt: Re-raised on user interrupt.
+        SystemExit: Re-raised on system exit.
     """
     if not issue.file or not issue.line:
         logger.debug(
@@ -257,9 +261,12 @@ def _generate_single_fix(
             suggestion.cost_estimate = response.cost_estimate
             return suggestion
 
-    except Exception:
+    except (KeyboardInterrupt, SystemExit):
+        raise
+    except Exception as exc:
         logger.debug(
-            f"AI fix generation failed for {issue.file}:{issue.line}",
+            f"AI fix generation failed for {issue.file}:{issue.line} "
+            f"({type(exc).__name__}: {exc})",
             exc_info=True,
         )
 
@@ -296,6 +303,10 @@ def generate_fixes(
 
     Returns:
         List of fix suggestions.
+
+    Raises:
+        KeyboardInterrupt: Re-raised on user interrupt.
+        SystemExit: Re-raised on system exit.
     """
     if not issues:
         return []
@@ -354,7 +365,16 @@ def generate_fixes(
                 for issue in target_issues
             ]
             for future in as_completed(futures):
-                result = future.result()
+                try:
+                    result = future.result()
+                except (KeyboardInterrupt, SystemExit):
+                    raise
+                except Exception as exc:
+                    logger.debug(
+                        f"AI fix worker failed ({type(exc).__name__}: {exc})",
+                        exc_info=True,
+                    )
+                    continue
                 if result:
                     suggestions.append(result)
 

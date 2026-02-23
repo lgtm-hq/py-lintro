@@ -103,7 +103,7 @@ def validate_applied_fixes(
                 result.unverified_by_tool[tool_name] = (
                     result.unverified_by_tool.get(tool_name, 0) + 1
                 )
-                rel = s.file.rsplit("/", 1)[-1]
+                rel = Path(s.file).name
                 result.details.append(
                     f"[{s.code}] {rel}:{s.line} — issue still present",
                 )

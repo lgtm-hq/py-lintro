@@ -136,6 +136,11 @@ def render_fixes_github(
         return ""
 
     lines: list[str] = []
+
+    if tool_name:
+        lines.append(f"### AI Fix Suggestions ({tool_name})")
+        lines.append("")
+
     total_cost = 0.0
 
     for fix in suggestions:
