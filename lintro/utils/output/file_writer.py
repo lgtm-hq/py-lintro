@@ -178,7 +178,9 @@ def write_output_file(
                         r"\|",
                     )
                     doc_url = str(getattr(issue, "doc_url", "") or "")
-                    doc_val = f"[docs]({doc_url})" if doc_url else ""
+                    doc_val = (
+                        f"[docs]({doc_url})".replace("|", r"\|") if doc_url else ""
+                    )
                     lines.append(
                         f"| {file_val} | {line_val} | {code_val}"
                         f" | {msg_val} | {doc_val} |",
@@ -220,7 +222,9 @@ def write_output_file(
                     m_val = html.escape(str(getattr(issue, "message", "") or ""))
                     doc_url = str(getattr(issue, "doc_url", "") or "")
                     d_val = (
-                        f"<a href='{html.escape(doc_url)}'>docs</a>" if doc_url else ""
+                        f'<a href="{html.escape(doc_url, quote=True)}">docs</a>'
+                        if doc_url
+                        else ""
                     )
                     html_lines.append(
                         f"<tr><td>{f_val}</td><td>{l_val}</td>"

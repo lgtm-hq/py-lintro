@@ -116,5 +116,5 @@ class BaseIssue:
             "message": message_val,
             "severity": str(self.get_severity()),
             "fixable": "Yes" if fixable_val else "",
-            "doc_url": getattr(self, "doc_url", "") or "",
+            "doc_url": self.doc_url,
         }

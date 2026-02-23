@@ -299,6 +299,69 @@ def test_json_with_issues_details(tmp_path: Path) -> None:
     assert_that(issues[0]["code"]).is_equal_to("W999")
 
 
+def test_doc_url_rendered_in_json_markdown_html(tmp_path: Path) -> None:
+    """Test doc_url is rendered correctly in JSON, Markdown, and HTML output.
+
+    Args:
+        tmp_path: Temporary directory path for testing.
+    """
+    doc_link = "https://example.com/rule/E501"
+
+    mock_issue = MagicMock()
+    mock_issue.file = "foo.py"
+    mock_issue.line = 7
+    mock_issue.code = "E501"
+    mock_issue.message = "Line too long"
+    mock_issue.doc_url = doc_link
+
+    result = ToolResult(
+        name="ruff",
+        success=False,
+        output="Issues found",
+        issues_count=1,
+        issues=[mock_issue],
+    )
+
+    # JSON: doc_url key present with correct value
+    json_path = tmp_path / "report.json"
+    write_output_file(
+        output_path=str(json_path),
+        output_format=OutputFormat.JSON,
+        all_results=[result],
+        action=Action.CHECK,
+        total_issues=1,
+        total_fixed=0,
+    )
+    content = json.loads(json_path.read_text())
+    assert_that(content["results"][0]["issues"][0]["doc_url"]).is_equal_to(doc_link)
+
+    # Markdown: rendered as clickable link
+    md_path = tmp_path / "report.md"
+    write_output_file(
+        output_path=str(md_path),
+        output_format=OutputFormat.MARKDOWN,
+        all_results=[result],
+        action=Action.CHECK,
+        total_issues=1,
+        total_fixed=0,
+    )
+    md_content = md_path.read_text()
+    assert_that(md_content).contains(f"[docs]({doc_link})")
+
+    # HTML: rendered as <a> tag
+    html_path = tmp_path / "report.html"
+    write_output_file(
+        output_path=str(html_path),
+        output_format=OutputFormat.HTML,
+        all_results=[result],
+        action=Action.CHECK,
+        total_issues=1,
+        total_fixed=0,
+    )
+    html_content = html_path.read_text()
+    assert_that(html_content).contains(f'<a href="{doc_link}">docs</a>')
+
+
 def test_html_escapes_special_characters(tmp_path: Path) -> None:
     """Test HTML output escapes special characters.
 
