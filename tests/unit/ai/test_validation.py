@@ -59,6 +59,7 @@ def test_validate_applied_fixes_unverified_when_issue_remains(mock_check):
     remaining = MagicMock()
     remaining.file = "src/main.py"
     remaining.code = "B101"
+    remaining.line = 10
     mock_check.return_value = [remaining]
 
     suggestion = _make_suggestion()
@@ -76,6 +77,7 @@ def test_validate_applied_fixes_mixed_verified_and_unverified(mock_check):
     remaining = MagicMock()
     remaining.file = "src/main.py"
     remaining.code = "B101"
+    remaining.line = 10
     mock_check.return_value = [remaining]
 
     s1 = _make_suggestion(code="B101")
