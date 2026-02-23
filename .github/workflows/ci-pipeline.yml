@@ -886,6 +886,7 @@ jobs:
           tags: |
             type=ref,event=branch
             type=ref,event=pr
+            type=sha,prefix=sha-
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
             type=semver,pattern={{major}}
@@ -896,6 +897,7 @@ jobs:
         with:
           images: ghcr.io/lgtm-hq/py-lintro
           tags: |
+            type=sha,prefix=sha-,suffix=-base
             type=semver,pattern={{version}},suffix=-base
             type=semver,pattern={{major}}.{{minor}},suffix=-base
             type=semver,pattern={{major}},suffix=-base
