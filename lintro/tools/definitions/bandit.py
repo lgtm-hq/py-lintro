@@ -308,7 +308,9 @@ class BanditPlugin(BaseToolPlugin):
             URL to the Bandit plugin documentation.
         """
         if code:
-            return f"https://bandit.readthedocs.io/en/latest/plugins/{code.lower()}.html"
+            return (
+                f"https://bandit.readthedocs.io/en/latest/plugins/{code.lower()}.html"
+            )
         return None
 
     def check(self, paths: list[str], options: dict[str, object]) -> ToolResult:
