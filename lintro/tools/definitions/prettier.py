@@ -237,6 +237,7 @@ class PrettierPlugin(BaseToolPlugin):
         timeout_val: int,
         initial_issues: list[PrettierIssue] | None = None,
         initial_count: int = 0,
+        cwd: str | None = None,
     ) -> ToolResult:
         """Create a ToolResult for timeout scenarios.
 
@@ -244,6 +245,7 @@ class PrettierPlugin(BaseToolPlugin):
             timeout_val: The timeout value that was exceeded.
             initial_issues: Optional list of issues found before timeout.
             initial_count: Optional count of initial issues.
+            cwd: Working directory for the tool result.
 
         Returns:
             ToolResult: ToolResult instance representing timeout failure.
@@ -271,6 +273,7 @@ class PrettierPlugin(BaseToolPlugin):
             initial_issues_count=initial_count,
             fixed_issues_count=0,
             remaining_issues_count=len(combined_issues),
+            cwd=cwd,
         )
 
     def check(self, paths: list[str], options: dict[str, object]) -> ToolResult:
@@ -356,7 +359,7 @@ class PrettierPlugin(BaseToolPlugin):
                 cwd=ctx.cwd,
             )
         except subprocess.TimeoutExpired:
-            return self._create_timeout_result(timeout_val=ctx.timeout)
+            return self._create_timeout_result(timeout_val=ctx.timeout, cwd=ctx.cwd)
         except (OSError, ValueError, RuntimeError, FileNotFoundError) as e:
             if isinstance(e, FileNotFoundError):
                 return self._create_not_found_result()
@@ -459,7 +462,7 @@ class PrettierPlugin(BaseToolPlugin):
                 cwd=ctx.cwd,
             )
         except subprocess.TimeoutExpired:
-            return self._create_timeout_result(timeout_val=ctx.timeout)
+            return self._create_timeout_result(timeout_val=ctx.timeout, cwd=ctx.cwd)
         except (OSError, ValueError, RuntimeError, FileNotFoundError) as e:
             if isinstance(e, FileNotFoundError):
                 return self._create_not_found_result()
@@ -499,6 +502,7 @@ class PrettierPlugin(BaseToolPlugin):
                 timeout_val=ctx.timeout,
                 initial_issues=initial_issues,
                 initial_count=initial_count,
+                cwd=ctx.cwd,
             )
         except (OSError, ValueError, RuntimeError, FileNotFoundError) as e:
             if isinstance(e, FileNotFoundError):
@@ -525,6 +529,7 @@ class PrettierPlugin(BaseToolPlugin):
                 timeout_val=ctx.timeout,
                 initial_issues=initial_issues,
                 initial_count=initial_count,
+                cwd=ctx.cwd,
             )
         except (OSError, ValueError, RuntimeError, FileNotFoundError) as e:
             if isinstance(e, FileNotFoundError):
