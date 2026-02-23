@@ -49,14 +49,14 @@ def test_default_config_numeric_fields() -> None:
 
 
 def test_provider_anthropic() -> None:
-    """Provider 'anthropic' is accepted."""
-    config = AIConfig(provider="anthropic")
+    """Provider 'anthropic' is accepted (Pydantic coerces str to AIProvider)."""
+    config = AIConfig(provider="anthropic")  # type: ignore[arg-type]  # tests YAML-style str coercion
     assert_that(config.provider).is_equal_to("anthropic")
 
 
 def test_provider_openai() -> None:
-    """Provider 'openai' is accepted."""
-    config = AIConfig(provider="openai")
+    """Provider 'openai' is accepted (Pydantic coerces str to AIProvider)."""
+    config = AIConfig(provider="openai")  # type: ignore[arg-type]  # tests YAML-style str coercion
     assert_that(config.provider).is_equal_to("openai")
 
 

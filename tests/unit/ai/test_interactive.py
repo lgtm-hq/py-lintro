@@ -21,7 +21,10 @@ from lintro.ai.models import AIFixSuggestion
 def test_apply_fix_fallback_logs_debug(mock_logger, tmp_path):
     """Falling back to str.replace should log at debug level."""
     f = tmp_path / "test.py"
-    f.write_text("old code\nmore stuff\n")
+    # File must be long enough that clamped target_idx (last line)
+    # plus search_radius (default 5) cannot reach line 0.
+    filler = "".join(f"line {i}\n" for i in range(2, 22))
+    f.write_text(f"old code\n{filler}")
 
     fix = AIFixSuggestion(
         file=str(f),
@@ -130,7 +133,10 @@ def test_apply_fix_line_targeted_replacement(tmp_path):
 def test_apply_fix_fallback_to_string_replace(tmp_path):
     """Falls back to first-occurrence when line targeting misses."""
     f = tmp_path / "test.py"
-    f.write_text("old code\nmore stuff\n")
+    # File must be long enough that clamped target_idx (last line)
+    # plus default search_radius (5) cannot reach line 0.
+    filler = "".join(f"line {i}\n" for i in range(2, 22))
+    f.write_text(f"old code\n{filler}")
 
     fix = AIFixSuggestion(
         file=str(f),
@@ -180,7 +186,10 @@ def test_apply_fix_blocks_writes_outside_workspace_root(tmp_path):
 def test_apply_fix_auto_apply_skips_fallback(tmp_path):
     """When auto_apply=True, fallback str.replace is skipped."""
     f = tmp_path / "test.py"
-    f.write_text("old code\nmore stuff\n")
+    # File must be long enough that clamped target_idx (last line)
+    # plus default search_radius (5) cannot reach line 0.
+    filler = "".join(f"line {i}\n" for i in range(2, 22))
+    f.write_text(f"old code\n{filler}")
 
     fix = AIFixSuggestion(
         file=str(f),
@@ -244,7 +253,10 @@ def test_apply_fixes_returns_only_successful(tmp_path):
 def test_apply_fixes_passes_auto_apply(tmp_path):
     """apply_fixes forwards auto_apply to _apply_fix."""
     f = tmp_path / "test.py"
-    f.write_text("old code\nmore stuff\n")
+    # File must be long enough that clamped target_idx (last line)
+    # plus default search_radius (5) cannot reach line 0.
+    filler = "".join(f"line {i}\n" for i in range(2, 22))
+    f.write_text(f"old code\n{filler}")
 
     applied = apply_fixes(
         [

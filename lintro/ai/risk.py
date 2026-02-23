@@ -59,6 +59,8 @@ def is_safe_style_fix(suggestion: AIFixSuggestion) -> bool:
 
 def calculate_patch_stats(suggestions: Sequence[AIFixSuggestion]) -> PatchStats:
     """Calculate patch stats for a group of fix suggestions."""
+    import difflib
+
     if not suggestions:
         return PatchStats()
 
@@ -80,8 +82,6 @@ def calculate_patch_stats(suggestions: Sequence[AIFixSuggestion]) -> PatchStats:
             continue
 
         # Fallback estimate when diff is unavailable: compute actual churn.
-        import difflib
-
         original_lines = suggestion.original_code.splitlines()
         suggested_lines = suggestion.suggested_code.splitlines()
         matcher = difflib.SequenceMatcher(

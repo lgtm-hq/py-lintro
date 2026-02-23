@@ -32,6 +32,7 @@ services:
       dockerfile: Dockerfile
       args:
         TOOLS_IMAGE: ${TOOLS_IMAGE:-ghcr.io/lgtm-hq/lintro-tools:latest@sha256:479e01c64ffbbb820554deb77792d9f05bb710c3445975040ff2136261904b59}
+        WITH_AI: ${WITH_AI:-false}
     image: py-lintro-test:latest
     logging:
       driver: local

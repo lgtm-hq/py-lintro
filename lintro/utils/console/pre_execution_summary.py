@@ -134,14 +134,11 @@ def print_pre_execution_summary(
         import os
 
         from lintro.ai.availability import is_provider_available
-        from lintro.ai.providers import (
-            DEFAULT_API_KEY_ENVS,
-            DEFAULT_MODELS,
-            get_default_model,
-        )
+        from lintro.ai.providers import get_default_model
+        from lintro.ai.registry import PROVIDERS, AIProvider
 
         provider_name = ai_config.provider.lower()
-        supported = set(DEFAULT_MODELS.keys())
+        supported = set(AIProvider)
 
         # Check: unknown provider
         if provider_name not in supported:
@@ -156,8 +153,8 @@ def print_pre_execution_summary(
             sdk_ok = is_provider_available(provider_name)
 
             # Check API key
-            key_env = ai_config.api_key_env or DEFAULT_API_KEY_ENVS.get(
-                provider_name,
+            key_env = ai_config.api_key_env or PROVIDERS.default_api_key_envs.get(
+                AIProvider(provider_name),
                 "",
             )
             key_set = bool(os.environ.get(key_env)) if key_env else False

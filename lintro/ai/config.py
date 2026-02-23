@@ -6,9 +6,9 @@ Defines the AIConfig Pydantic model used in the ``ai:`` section of
 
 from __future__ import annotations
 
-from typing import Literal
-
 from pydantic import BaseModel, ConfigDict, Field, model_validator
+
+from lintro.ai.registry import AIProvider
 
 
 class AIConfig(BaseModel):
@@ -57,7 +57,7 @@ class AIConfig(BaseModel):
     model_config = ConfigDict(frozen=False, extra="forbid")
 
     enabled: bool = False
-    provider: Literal["anthropic", "openai"] = "anthropic"
+    provider: AIProvider = AIProvider.ANTHROPIC
     model: str | None = None
     api_key_env: str | None = None
     default_fix: bool = False

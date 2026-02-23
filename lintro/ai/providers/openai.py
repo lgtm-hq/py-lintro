@@ -18,8 +18,8 @@ from lintro.ai.exceptions import (
     AIProviderError,
     AIRateLimitError,
 )
-from lintro.ai.providers import DEFAULT_API_KEY_ENVS, DEFAULT_MODELS
 from lintro.ai.providers.base import AIResponse, BaseAIProvider
+from lintro.ai.registry import PROVIDERS
 
 _has_openai = False
 try:
@@ -29,8 +29,8 @@ try:
 except ImportError:
     pass
 
-DEFAULT_MODEL = DEFAULT_MODELS["openai"]
-DEFAULT_API_KEY_ENV = DEFAULT_API_KEY_ENVS["openai"]
+DEFAULT_MODEL = PROVIDERS.openai.default_model
+DEFAULT_API_KEY_ENV = PROVIDERS.openai.default_api_key_env
 
 
 class OpenAIProvider(BaseAIProvider):

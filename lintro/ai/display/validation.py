@@ -28,8 +28,8 @@ def render_validation_terminal(result: ValidationResult) -> str:
         width=BORDER_LENGTH,
     )
 
-    total = result.verified + result.unverified
-    if total == 0:
+    total = result.verified + result.unverified + result.new_issues
+    if total == 0 and not result.details:
         return ""
 
     parts: list[str] = []

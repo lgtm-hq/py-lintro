@@ -51,17 +51,21 @@ def is_provider_available(provider: str) -> bool:
     Returns:
         bool: True if the provider's package is importable.
     """
-    if provider not in ("anthropic", "openai"):
-        import logging
+    from lintro.ai.registry import AIProvider
 
-        logging.getLogger(__name__).warning(
-            "Unknown AI provider %r; supported providers: anthropic, openai",
+    if provider not in set(AIProvider):
+        from loguru import logger
+
+        supported = ", ".join(p.value for p in AIProvider)
+        logger.warning(
+            "Unknown AI provider {!r}; supported providers: {}",
             provider,
+            supported,
         )
         return False
 
     try:
-        if provider == "anthropic":
+        if provider == AIProvider.ANTHROPIC:
             import anthropic  # noqa: F401 -- import-only availability check
 
             return True

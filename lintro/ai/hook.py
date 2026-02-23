@@ -80,3 +80,4 @@ class AIPostExecutionHook:
             )
         except Exception as e:
             logger.debug(f"AI post-execution hook failed: {e}", exc_info=True)
+            console_logger.warning(f"AI enhancement unavailable: {e}")

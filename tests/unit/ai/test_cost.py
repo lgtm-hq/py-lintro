@@ -8,11 +8,11 @@ import pytest
 from assertpy import assert_that
 
 from lintro.ai.cost import (
-    MODEL_PRICING,
     estimate_cost,
     format_cost,
     format_token_count,
 )
+from lintro.ai.registry import PROVIDERS
 
 
 def test_cost_known_model():
@@ -58,9 +58,9 @@ def test_cost_large_token_count():
     assert_that(cost).is_greater_than(0)
 
 
-@pytest.mark.parametrize("model", list(MODEL_PRICING.keys()))
+@pytest.mark.parametrize("model", list(PROVIDERS.model_pricing.keys()))
 def test_cost_all_known_models_have_pricing(model):
-    """Verify every model in MODEL_PRICING produces a positive cost estimate."""
+    """Verify every registered model produces a positive cost estimate."""
     cost = estimate_cost(model, 1000, 1000)
     assert_that(cost).is_greater_than(0)
 

@@ -9,22 +9,18 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from lintro.ai.exceptions import AINotAvailableError  # noqa: F401 -- public re-export
+from lintro.ai.registry import PROVIDERS, AIProvider
 
 if TYPE_CHECKING:
     from lintro.ai.config import AIConfig
     from lintro.ai.providers.base import BaseAIProvider
 
-# Single source of truth for provider defaults.
-# Used by provider implementations and by the pre-execution summary
-# (which needs these values without importing heavy SDKs).
+# Re-export for backward compatibility with string-keyed access.
 DEFAULT_MODELS: dict[str, str] = {
-    "anthropic": "claude-sonnet-4-6",
-    "openai": "gpt-4o",
+    p.value: m for p, m in PROVIDERS.default_models.items()
 }
-
 DEFAULT_API_KEY_ENVS: dict[str, str] = {
-    "anthropic": "ANTHROPIC_API_KEY",
-    "openai": "OPENAI_API_KEY",
+    p.value: e for p, e in PROVIDERS.default_api_key_envs.items()
 }
 
 
@@ -42,7 +38,7 @@ def get_provider(config: AIConfig) -> BaseAIProvider:
     """
     provider_name = config.provider.lower()
 
-    if provider_name == "anthropic":
+    if provider_name == AIProvider.ANTHROPIC:
         from lintro.ai.providers.anthropic import AnthropicProvider
 
         return AnthropicProvider(
@@ -50,7 +46,7 @@ def get_provider(config: AIConfig) -> BaseAIProvider:
             api_key_env=config.api_key_env,
             max_tokens=config.max_tokens,
         )
-    elif provider_name == "openai":
+    elif provider_name == AIProvider.OPENAI:
         from lintro.ai.providers.openai import OpenAIProvider
 
         return OpenAIProvider(
@@ -59,7 +55,7 @@ def get_provider(config: AIConfig) -> BaseAIProvider:
             max_tokens=config.max_tokens,
         )
     else:
-        supported = "anthropic, openai"
+        supported = ", ".join(p.value for p in AIProvider)
         raise ValueError(
             f"Unknown AI provider: '{provider_name}'. "
             f"Supported providers: {supported}",

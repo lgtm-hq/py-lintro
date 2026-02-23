@@ -36,7 +36,7 @@ def test_pre_execution_summary_shows_ai_when_disabled() -> None:
     output = _render_summary(
         AIConfig(
             enabled=False,
-            provider="openai",
+            provider="openai",  # type: ignore[arg-type]  # Pydantic coerces str
             max_parallel_calls=7,
         ),
     )
@@ -62,7 +62,7 @@ def test_pre_execution_summary_shows_ai_when_enabled(
     output = _render_summary(
         AIConfig(
             enabled=True,
-            provider="anthropic",
+            provider="anthropic",  # type: ignore[arg-type]  # Pydantic coerces str
             max_parallel_calls=3,
         ),
     )
