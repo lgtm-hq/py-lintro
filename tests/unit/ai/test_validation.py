@@ -48,7 +48,6 @@ def test_validate_applied_fixes_verified_when_issue_gone(mock_check):
 
     result = validate_applied_fixes([suggestion])
 
-    assert_that(result).is_not_none()
     assert result is not None
     assert_that(result.verified).is_equal_to(1)
     assert_that(result.unverified).is_equal_to(0)
@@ -65,7 +64,6 @@ def test_validate_applied_fixes_unverified_when_issue_remains(mock_check):
     suggestion = _make_suggestion()
     result = validate_applied_fixes([suggestion])
 
-    assert_that(result).is_not_none()
     assert result is not None
     assert_that(result.verified).is_equal_to(0)
     assert_that(result.unverified).is_equal_to(1)
@@ -106,7 +104,6 @@ def test_validate_applied_fixes_matches_by_line_before_file_code(mock_check):
 
     result = validate_applied_fixes([resolved, unresolved])
 
-    assert_that(result).is_not_none()
     assert result is not None
     assert_that(result.verified).is_equal_to(1)
     assert_that(result.unverified).is_equal_to(1)
@@ -128,7 +125,6 @@ def test_validate_applied_fixes_unknown_remaining_line_marks_issue_unverified(
     suggestion = _make_suggestion(code="E501", line=30)
     result = validate_applied_fixes([suggestion])
 
-    assert_that(result).is_not_none()
     assert result is not None
     assert_that(result.verified).is_equal_to(0)
     assert_that(result.unverified).is_equal_to(1)
@@ -140,7 +136,6 @@ def test_validate_applied_fixes_skips_unknown_tool(mock_check):
     suggestion = _make_suggestion(tool_name="unknown")
     result = validate_applied_fixes([suggestion])
 
-    assert_that(result).is_not_none()
     assert result is not None
     assert_that(result.verified).is_equal_to(0)
     assert_that(result.unverified).is_equal_to(0)

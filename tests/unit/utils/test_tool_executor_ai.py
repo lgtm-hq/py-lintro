@@ -150,9 +150,9 @@ class TestToolExecutorAITotals:
         def _fake_ai_enhancement(**kwargs):
             result = kwargs["all_results"][0]
             result.success = True
-            result.issues_count = 0
-            result.fixed_issues_count = 0
+            result.fixed_issues_count = result.issues_count
             result.remaining_issues_count = 0
+            result.issues_count = 0
 
         import lintro.ai.hook as hook_module
 

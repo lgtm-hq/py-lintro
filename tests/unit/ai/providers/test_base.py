@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import pytest
 from assertpy import assert_that
 
 from lintro.ai.providers.base import AIResponse, BaseAIProvider
@@ -71,15 +72,12 @@ def test_base_ai_provider_complete_subclass():
 
 def test_base_ai_provider_cannot_instantiate_directly():
     """BaseAIProvider is abstract and cannot be instantiated."""
-    import pytest
-
     with pytest.raises(TypeError):
         BaseAIProvider()  # type: ignore[abstract]  # intentionally testing abstract
 
 
 def test_incomplete_subclass_fails():
     """A subclass missing abstract methods cannot be instantiated."""
-    import pytest
 
     class IncompleteProvider(BaseAIProvider):
         def is_available(self):

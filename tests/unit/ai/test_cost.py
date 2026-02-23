@@ -12,20 +12,25 @@ from lintro.ai.cost import (
     format_cost,
     format_token_count,
 )
-from lintro.ai.registry import PROVIDERS
+from lintro.ai.registry import DEFAULT_PRICING, PROVIDERS
 
 
 def test_cost_known_model():
     """Verify cost estimation uses correct pricing for a known model."""
+    pricing = PROVIDERS.model_pricing["gpt-4o"]
     cost = estimate_cost("gpt-4o", 1000, 500)
-    expected = (1000 / 1_000_000) * 2.50 + (500 / 1_000_000) * 10.00
+    expected = (1000 / 1_000_000) * pricing.input_per_million + (
+        500 / 1_000_000
+    ) * pricing.output_per_million
     assert_that(cost).is_close_to(expected, 1e-10)
 
 
 def test_cost_unknown_model_uses_default():
     """Verify cost estimation falls back to default pricing for unknown models."""
     cost = estimate_cost("unknown-model", 1000, 500)
-    expected = (1000 / 1_000_000) * 3.00 + (500 / 1_000_000) * 15.00
+    expected = (1000 / 1_000_000) * DEFAULT_PRICING.input_per_million + (
+        500 / 1_000_000
+    ) * DEFAULT_PRICING.output_per_million
     assert_that(cost).is_close_to(expected, 1e-10)
 
 

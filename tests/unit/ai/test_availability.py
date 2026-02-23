@@ -18,7 +18,6 @@ from lintro.ai.availability import (
 
 def test_availability_available_when_anthropic_installed():
     """Verify AI is available when the anthropic module is installed."""
-    reset_availability_cache()
     with patch.dict("sys.modules", {"anthropic": object()}):
         reset_availability_cache()
         result = is_ai_available()
@@ -27,17 +26,13 @@ def test_availability_available_when_anthropic_installed():
 
 def test_availability_caching():
     """Subsequent calls use cached result without re-importing."""
-    import sys
-
     reset_availability_cache()
-    sys.modules.pop("anthropic", None)
-    sys.modules.pop("openai", None)
-    with patch(
-        "importlib.import_module",
-        side_effect=ImportError,
-    ):
+    with patch.dict("sys.modules", {"anthropic": object()}):
         result1 = is_ai_available()
-        result2 = is_ai_available()
+    # Second call should return cached True even without the mock
+    result2 = is_ai_available()
+    assert_that(result1).is_true()
+    assert_that(result2).is_true()
     assert_that(result1).is_equal_to(result2)
 
 
