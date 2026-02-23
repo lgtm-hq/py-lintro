@@ -149,6 +149,7 @@ class OxlintPlugin(BaseToolPlugin):
         timeout_val: int,
         initial_issues: list[OxlintIssue] | None = None,
         initial_count: int = 0,
+        cwd: str | None = None,
     ) -> ToolResult:
         """Create a ToolResult for timeout scenarios.
 
@@ -156,6 +157,7 @@ class OxlintPlugin(BaseToolPlugin):
             timeout_val: The timeout value that was exceeded.
             initial_issues: Optional list of issues found before timeout.
             initial_count: Optional count of initial issues.
+            cwd: Working directory for the tool result.
 
         Returns:
             ToolResult: ToolResult instance representing timeout failure.
@@ -189,6 +191,7 @@ class OxlintPlugin(BaseToolPlugin):
             initial_issues_count=effective_initial,
             fixed_issues_count=0,
             remaining_issues_count=remaining_count,
+            cwd=cwd,
         )
 
     def _build_oxlint_args(self, options: dict[str, object]) -> list[str]:
@@ -298,7 +301,7 @@ class OxlintPlugin(BaseToolPlugin):
                 cwd=ctx.cwd,
             )
         except subprocess.TimeoutExpired:
-            return self._create_timeout_result(timeout_val=ctx.timeout)
+            return self._create_timeout_result(timeout_val=ctx.timeout, cwd=ctx.cwd)
 
         output: str = result[1]
         issues: list[OxlintIssue] = parse_oxlint_output(output=output)
@@ -316,6 +319,7 @@ class OxlintPlugin(BaseToolPlugin):
             output=final_output,
             issues_count=issues_count,
             issues=issues,
+            cwd=ctx.cwd,
         )
 
     def fix(self, paths: list[str], options: dict[str, object]) -> ToolResult:
@@ -376,7 +380,7 @@ class OxlintPlugin(BaseToolPlugin):
                 cwd=ctx.cwd,
             )
         except subprocess.TimeoutExpired:
-            return self._create_timeout_result(timeout_val=ctx.timeout)
+            return self._create_timeout_result(timeout_val=ctx.timeout, cwd=ctx.cwd)
 
         check_output: str = check_result[1]
         initial_issues: list[OxlintIssue] = parse_oxlint_output(output=check_output)
@@ -404,6 +408,7 @@ class OxlintPlugin(BaseToolPlugin):
                 timeout_val=ctx.timeout,
                 initial_issues=initial_issues,
                 initial_count=initial_count,
+                cwd=ctx.cwd,
             )
         fix_output: str = fix_result[1]
 
@@ -419,6 +424,7 @@ class OxlintPlugin(BaseToolPlugin):
                 timeout_val=ctx.timeout,
                 initial_issues=initial_issues,
                 initial_count=initial_count,
+                cwd=ctx.cwd,
             )
 
         final_check_output: str = final_check_result[1]

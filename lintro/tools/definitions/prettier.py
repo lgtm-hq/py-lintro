@@ -384,6 +384,7 @@ class PrettierPlugin(BaseToolPlugin):
             output=final_output,
             issues_count=issues_count,
             issues=issues,
+            cwd=ctx.cwd,
         )
 
     def fix(self, paths: list[str], options: dict[str, object]) -> ToolResult:
