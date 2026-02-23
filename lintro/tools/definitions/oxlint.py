@@ -241,7 +241,7 @@ class OxlintPlugin(BaseToolPlugin):
             URL to the oxlint rule documentation.
         """
         if code and "/" in code:
-            return f"https://oxc.rs/docs/guide/usage/linter/rules/{code}.html"
+            return f"https://oxc.rs/docs/guide/usage/linter/rules/{code}"
         return None
 
     def check(self, paths: list[str], options: dict[str, object]) -> ToolResult:

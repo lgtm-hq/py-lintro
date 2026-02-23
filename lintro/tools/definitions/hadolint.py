@@ -235,15 +235,23 @@ class HadolintPlugin(BaseToolPlugin):
             )
 
     def doc_url(self, code: str) -> str | None:
-        """Return Hadolint wiki URL for the given code.
+        """Return documentation URL for the given code.
+
+        Hadolint emits both native DL rules and ShellCheck SC rules.
+        Routes each prefix to the appropriate documentation site.
 
         Args:
-            code: Hadolint code (e.g., "DL3008").
+            code: Rule code (e.g., "DL3008", "SC2046").
 
         Returns:
-            URL to the Hadolint wiki page.
+            URL to the rule documentation, or None if code is empty.
         """
-        if code:
+        if not code:
+            return None
+        upper = code.upper()
+        if upper.startswith("SC"):
+            return f"https://www.shellcheck.net/wiki/{code}"
+        if upper.startswith("DL"):
             return f"https://github.com/hadolint/hadolint/wiki/{code}"
         return None
 

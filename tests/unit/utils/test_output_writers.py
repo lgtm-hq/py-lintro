@@ -362,6 +362,41 @@ def test_doc_url_rendered_in_json_markdown_html(tmp_path: Path) -> None:
     assert_that(html_content).contains(f'<a href="{doc_link}">docs</a>')
 
 
+def test_empty_doc_url_omitted_from_json(tmp_path: Path) -> None:
+    """Test that an empty doc_url is not included in JSON output.
+
+    Args:
+        tmp_path: Temporary directory path for testing.
+    """
+    mock_issue = MagicMock()
+    mock_issue.file = "bar.py"
+    mock_issue.line = 10
+    mock_issue.code = "W001"
+    mock_issue.message = "Some warning"
+    mock_issue.doc_url = ""
+
+    result = ToolResult(
+        name="test-tool",
+        success=False,
+        output="Issues found",
+        issues_count=1,
+        issues=[mock_issue],
+    )
+
+    json_path = tmp_path / "no_doc_url.json"
+    write_output_file(
+        output_path=str(json_path),
+        output_format=OutputFormat.JSON,
+        all_results=[result],
+        action=Action.CHECK,
+        total_issues=1,
+        total_fixed=0,
+    )
+    content = json.loads(json_path.read_text())
+    issue_data = content["results"][0]["issues"][0]
+    assert_that(issue_data).does_not_contain_key("doc_url")
+
+
 def test_html_escapes_special_characters(tmp_path: Path) -> None:
     """Test HTML output escapes special characters.
 
