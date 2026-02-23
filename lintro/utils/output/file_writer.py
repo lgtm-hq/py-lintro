@@ -64,6 +64,27 @@ def build_doc_url_map(all_results: Sequence[Any]) -> dict[str, str]:
     return doc_url_map
 
 
+def _serialize_issue(issue: BaseIssue) -> dict[str, Any]:
+    """Serialize a BaseIssue to a JSON-safe dictionary.
+
+    Args:
+        issue: BaseIssue: The issue to serialize.
+
+    Returns:
+        dict[str, Any]: Serialized issue data.
+    """
+    data: dict[str, Any] = {
+        "file": getattr(issue, "file", "") or "",
+        "line": getattr(issue, "line", None) or 0,
+        "code": getattr(issue, "code", "") or "",
+        "message": getattr(issue, "message", "") or "",
+    }
+    doc_url = getattr(issue, "doc_url", "") or ""
+    if doc_url:
+        data["doc_url"] = doc_url
+    return data
+
+
 def write_output_file(
     *,
     output_path: str,
@@ -114,30 +135,13 @@ def write_output_file(
                     result_data["ai_metadata"] = normalized
             if hasattr(result, "issues") and result.issues:
                 result_data["issues"] = [
-                    {
-                        "file": getattr(issue, "file", "") or "",
-                        "line": getattr(issue, "line", None) or 0,
-                        "code": getattr(issue, "code", "") or "",
-                        "message": getattr(issue, "message", "") or "",
-                        **(
-                            {"doc_url": issue.doc_url}
-                            if getattr(issue, "doc_url", "")
-                            else {}
-                        ),
-                    }
-                    for issue in result.issues
+                    _serialize_issue(issue) for issue in result.issues
                 ]
             # Include detected (pre-fix) issues when available
             detected = getattr(result, "detected_issues", None)
             if detected:
                 result_data["detected_issues"] = [
-                    {
-                        "file": getattr(issue, "file", "") or "",
-                        "line": getattr(issue, "line", None) or 0,
-                        "code": getattr(issue, "code", "") or "",
-                        "message": getattr(issue, "message", "") or "",
-                    }
-                    for issue in detected
+                    _serialize_issue(issue) for issue in detected
                 ]
             json_data["results"].append(result_data)
         output_file.write_text(
