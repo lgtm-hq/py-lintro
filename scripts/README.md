@@ -74,7 +74,7 @@ Scripts for GitHub Actions workflows and continuous integration.
 
 | Script                              | Purpose                                                            | Usage                                                                    |
 | ----------------------------------- | ------------------------------------------------------------------ | ------------------------------------------------------------------------ |
-| `backfill-compute-tags.sh`          | Compute Docker image tags for a backfill release                   | `TAG=v0.52.2 SHA=876464d ./scripts/ci/backfill-compute-tags.sh`          |
+| `backfill-compute-tags.sh`          | Compute Docker image tags for a backfill release                   | `TAG=v0.52.2 SHA=876464d... ./scripts/ci/backfill-compute-tags.sh`       |
 | `backfill-generate-matrix.sh`       | Generate JSON tag matrix for backfill batch                        | `BATCH=1 ./scripts/ci/backfill-generate-matrix.sh`                       |
 | `coverage-manager.sh`               | Unified coverage ops (extract/badge/comment/threshold)             | `./scripts/utils/coverage-manager.sh --help`                             |
 | `ci-extract-coverage.sh`            | Extract coverage percentage                                        | `./scripts/ci/ci-extract-coverage.sh`                                    |
