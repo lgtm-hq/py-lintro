@@ -129,6 +129,10 @@ jobs:
       - name: Smoke Test Base Image
         run: docker run --rm py-lintro:base lintro --version
 
+      - name: Pull tools image
+        env:
+          TOOLS_IMAGE: ${{ steps.tools.outputs.image }}
+        run: docker pull "$TOOLS_IMAGE"
       - name: Run pytest suite inside Docker (compose)
         env:
           TOOLS_IMAGE: ${{ steps.tools.outputs.image }}
