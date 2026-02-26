@@ -51,7 +51,7 @@ jobs:
   build-macos:
     name: Build macOS Binary
     needs: get-release-info
-    runs-on: macos-latest
+    runs-on: ${{ matrix.arch == 'x86_64' && 'macos-15-intel' || 'macos-latest' }}
     permissions:
       contents: write
     strategy:
