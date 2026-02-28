@@ -111,6 +111,19 @@ class PydoclintPlugin(BaseToolPlugin):
                 error=str(e),
             )
 
+    def doc_url(self, code: str) -> str | None:
+        """Return pydoclint documentation URL.
+
+        Pydoclint uses a single configuration page for all rules.
+
+        Args:
+            code: Pydoclint code (e.g., "DOC301").
+
+        Returns:
+            URL to the pydoclint documentation.
+        """
+        return "https://jsh9.github.io/pydoclint/how_to_config.html"
+
     def check(self, paths: list[str], options: dict[str, object]) -> ToolResult:
         """Check files with pydoclint.
 

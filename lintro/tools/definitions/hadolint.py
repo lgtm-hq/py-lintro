@@ -234,6 +234,27 @@ class HadolintPlugin(BaseToolPlugin):
                 error=str(e),
             )
 
+    def doc_url(self, code: str) -> str | None:
+        """Return documentation URL for the given code.
+
+        Hadolint emits both native DL rules and ShellCheck SC rules.
+        Routes each prefix to the appropriate documentation site.
+
+        Args:
+            code: Rule code (e.g., "DL3008", "SC2046").
+
+        Returns:
+            URL to the rule documentation, or None if code is empty.
+        """
+        if not code:
+            return None
+        upper = code.upper()
+        if upper.startswith("SC"):
+            return f"https://www.shellcheck.net/wiki/{upper}"
+        if upper.startswith("DL"):
+            return f"https://github.com/hadolint/hadolint/wiki/{upper}"
+        return None
+
     def check(self, paths: list[str], options: dict[str, object]) -> ToolResult:
         """Check files with Hadolint.
 

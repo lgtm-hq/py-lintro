@@ -89,6 +89,11 @@ def write_output_file(
                         "line": getattr(issue, "line", None) or 0,
                         "code": getattr(issue, "code", "") or "",
                         "message": getattr(issue, "message", "") or "",
+                        **(
+                            {"doc_url": issue.doc_url}
+                            if getattr(issue, "doc_url", "")
+                            else {}
+                        ),
                     }
                     for issue in result.issues
                 ]
@@ -101,7 +106,15 @@ def write_output_file(
     elif output_format == OutputFormat.CSV:
         # Write CSV format
         rows: list[list[str]] = []
-        header: list[str] = ["tool", "issues_count", "file", "line", "code", "message"]
+        header: list[str] = [
+            "tool",
+            "issues_count",
+            "file",
+            "line",
+            "code",
+            "message",
+            "doc_url",
+        ]
         for result in all_results:
             if hasattr(result, "issues") and result.issues:
                 for issue in result.issues:
@@ -119,6 +132,9 @@ def write_output_file(
                             sanitize_csv_value(
                                 str(getattr(issue, "message", "") or ""),
                             ),
+                            sanitize_csv_value(
+                                str(getattr(issue, "doc_url", "") or ""),
+                            ),
                         ],
                     )
             else:
@@ -126,6 +142,7 @@ def write_output_file(
                     [
                         sanitize_csv_value(result.name),
                         sanitize_csv_value(str(getattr(result, "issues_count", 0))),
+                        "",
                         "",
                         "",
                         "",
@@ -150,8 +167,8 @@ def write_output_file(
             issues_count = getattr(result, "issues_count", 0)
             lines.append(f"### {result.name} ({issues_count} issues)")
             if hasattr(result, "issues") and result.issues:
-                lines.append("| File | Line | Code | Message |")
-                lines.append("|------|------|------|---------|")
+                lines.append("| File | Line | Code | Message | Docs |")
+                lines.append("|------|------|------|---------|------|")
                 for issue in result.issues:
                     file_val = str(getattr(issue, "file", "") or "").replace("|", r"\|")
                     line_val = getattr(issue, "line", None) or 0
@@ -160,8 +177,13 @@ def write_output_file(
                         "|",
                         r"\|",
                     )
+                    doc_url = str(getattr(issue, "doc_url", "") or "")
+                    doc_val = (
+                        f"[docs]({doc_url})".replace("|", r"\|") if doc_url else ""
+                    )
                     lines.append(
-                        f"| {file_val} | {line_val} | {code_val} | {msg_val} |",
+                        f"| {file_val} | {line_val} | {code_val}"
+                        f" | {msg_val} | {doc_val} |",
                     )
                 lines.append("")
             else:
@@ -191,16 +213,22 @@ def write_output_file(
             if hasattr(result, "issues") and result.issues:
                 html_lines.append(
                     "<table border='1'><tr><th>File</th><th>Line</th>"
-                    "<th>Code</th><th>Message</th></tr>",
+                    "<th>Code</th><th>Message</th><th>Docs</th></tr>",
                 )
                 for issue in result.issues:
                     f_val = html.escape(str(getattr(issue, "file", "") or ""))
                     l_val = html.escape(str(getattr(issue, "line", None) or 0))
                     c_val = html.escape(str(getattr(issue, "code", "") or ""))
                     m_val = html.escape(str(getattr(issue, "message", "") or ""))
+                    doc_url = str(getattr(issue, "doc_url", "") or "")
+                    d_val = (
+                        f'<a href="{html.escape(doc_url, quote=True)}">docs</a>'
+                        if doc_url
+                        else ""
+                    )
                     html_lines.append(
                         f"<tr><td>{f_val}</td><td>{l_val}</td>"
-                        f"<td>{c_val}</td><td>{m_val}</td></tr>",
+                        f"<td>{c_val}</td><td>{m_val}</td><td>{d_val}</td></tr>",
                     )
                 html_lines.append("</table>")
             else:

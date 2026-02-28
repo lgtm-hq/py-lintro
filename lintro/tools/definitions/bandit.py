@@ -298,6 +298,22 @@ class BanditPlugin(BaseToolPlugin):
 
         return cmd
 
+    def doc_url(self, code: str) -> str | None:
+        """Return Bandit documentation URL for the given code.
+
+        Returns the plugins index page. Individual plugin page slugs do not
+        follow a deterministic pattern so we link to the index instead.
+
+        Args:
+            code: Bandit code (e.g., "B101").
+
+        Returns:
+            URL to the Bandit plugins index page, or None if code is empty.
+        """
+        if code:
+            return "https://bandit.readthedocs.io/en/latest/plugins/index.html"
+        return None
+
     def check(self, paths: list[str], options: dict[str, object]) -> ToolResult:
         """Check files with Bandit for security issues.
 

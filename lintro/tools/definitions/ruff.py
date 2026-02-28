@@ -6,9 +6,13 @@ It can replace multiple Python tools like flake8, black, isort, and more.
 
 from __future__ import annotations
 
+import json
 import os
-from dataclasses import dataclass
+import subprocess  # nosec B404 - subprocess used safely to resolve ruff rule names
+from dataclasses import dataclass, field
 from typing import Any
+
+from loguru import logger
 
 from lintro.enums.tool_type import ToolType
 from lintro.models.core.tool_result import ToolResult
@@ -42,6 +46,11 @@ class RuffPlugin(BaseToolPlugin):
     This plugin integrates Ruff with Lintro for linting and formatting
     Python files.
     """
+
+    _rule_name_cache: dict[str, str | None] = field(
+        default_factory=dict,
+        repr=False,
+    )
 
     @property
     def definition(self) -> ToolDefinition:
@@ -174,6 +183,65 @@ class RuffPlugin(BaseToolPlugin):
             format_check=format_check,
         )
         super().set_options(**options, **kwargs)
+
+    def _resolve_rule_name(self, code: str) -> str | None:
+        """Resolve a rule code to its slug via ``ruff rule``.
+
+        Results are cached per-session so the CLI is invoked at most once
+        per unique code.
+
+        Args:
+            code: Ruff rule code (e.g., "E501").
+
+        Returns:
+            Rule name slug (e.g., "line-too-long"), or None on failure.
+        """
+        if code in self._rule_name_cache:
+            return self._rule_name_cache[code]
+
+        try:
+            cmd = self._get_executable_command(tool_name="ruff")
+            cmd.extend(["rule", "--output-format", "json", code])
+            result = subprocess.run(  # nosec B603
+                cmd,
+                capture_output=True,
+                text=True,
+                timeout=5,
+            )
+            if result.returncode == 0 and result.stdout:
+                data = json.loads(result.stdout)
+                name: str | None = data.get("name")
+                self._rule_name_cache[code] = name
+                return name
+        except (
+            subprocess.TimeoutExpired,
+            json.JSONDecodeError,
+            OSError,
+        ):
+            logger.debug("Failed to resolve ruff rule name for {}", code)
+
+        self._rule_name_cache[code] = None
+        return None
+
+    def doc_url(self, code: str) -> str | None:
+        """Return Ruff documentation URL for the given rule code.
+
+        Resolves the rule name slug via ``ruff rule`` so the URL points
+        to the correct page (e.g., ``line-too-long`` instead of ``E501``).
+
+        Args:
+            code: Ruff rule code (e.g., "E501", "F401").
+
+        Returns:
+            URL to the Ruff rule documentation, or None if code is empty
+            or the rule name cannot be resolved.
+        """
+        if not code:
+            return None
+        name = self._resolve_rule_name(code)
+        if name:
+            return f"https://docs.astral.sh/ruff/rules/{name}/"
+        return None
 
     def check(self, paths: list[str], options: dict[str, object]) -> ToolResult:
         """Check files with Ruff.

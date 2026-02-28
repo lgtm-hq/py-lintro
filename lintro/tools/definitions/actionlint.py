@@ -119,6 +119,19 @@ class ActionlintPlugin(BaseToolPlugin):
             results["all_outputs"].append(f"Error checking {file_path}: {e}")
             results["execution_failures"] += 1
 
+    def doc_url(self, code: str) -> str | None:
+        """Return actionlint documentation URL.
+
+        Actionlint uses a single documentation page for all checks.
+
+        Args:
+            code: Actionlint check identifier (unused, single doc page).
+
+        Returns:
+            URL to the actionlint checks documentation.
+        """
+        return "https://github.com/rhysd/actionlint/blob/main/docs/checks.md"
+
     def check(self, paths: list[str], options: dict[str, object]) -> ToolResult:
         """Check GitHub Actions workflow files with actionlint.
 
