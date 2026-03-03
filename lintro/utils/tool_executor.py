@@ -96,7 +96,7 @@ def _run_fix_with_retry(
             name=result.name,
             success=result.success,
             output=result.output,
-            issues_count=result.issues_count,
+            issues_count=remaining,
             issues=result.issues,
             initial_issues_count=initial_issues_count,
             fixed_issues_count=fixed,

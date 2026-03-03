@@ -110,4 +110,11 @@ def test_build_config_args_returns_args_when_builtin_defaults_exist(
             args = prettier_plugin._build_config_args()
 
     # Should have generated args since builtin defaults exist for prettier
-    assert_that(args).is_not_empty()
+    assert_that(args).contains("--no-config")
+    assert_that(args).contains("--config")
+    # Verify correct ordering: --no-config before --config <path>
+    no_config_idx = args.index("--no-config")
+    config_idx = args.index("--config")
+    assert_that(no_config_idx).is_less_than(config_idx)
+    # The path should follow --config
+    assert_that(args[config_idx + 1]).is_equal_to("/tmp/test.json")

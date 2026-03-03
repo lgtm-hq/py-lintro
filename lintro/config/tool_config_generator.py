@@ -142,6 +142,7 @@ NATIVE_CONFIG_PATTERNS: dict[str, list[str]] = {
         "prettier.config.ts",
         "prettier.config.cts",
         "prettier.config.mts",
+        "package.json",
     ],
 }
 

@@ -288,6 +288,7 @@ def _convert_pyproject_to_config(data: dict[str, Any]) -> dict[str, Any]:
         "fail_fast",
         "parallel",
         "auto_install_deps",
+        "max_fix_retries",
     }
 
     # Known enforce settings (formerly global)
