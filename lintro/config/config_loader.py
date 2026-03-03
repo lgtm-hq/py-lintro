@@ -172,18 +172,19 @@ def _parse_execution_config(data: dict[str, Any]) -> ExecutionConfig:
         raise ValueError(
             "execution.max_fix_retries must be an integer, got bool",
         )
+    elif isinstance(raw_retries, int):
+        max_fix_retries = raw_retries
+    elif isinstance(raw_retries, str) and raw_retries.strip().lstrip("-+").isdigit():
+        max_fix_retries = int(raw_retries)
     else:
-        try:
-            max_fix_retries = int(raw_retries)
-        except (TypeError, ValueError) as e:
-            raise ValueError(
-                f"execution.max_fix_retries must be an integer, "
-                f"got {type(raw_retries).__name__}",
-            ) from e
-        if max_fix_retries < 1:
-            raise ValueError(
-                f"execution.max_fix_retries must be >= 1, got {max_fix_retries}",
-            )
+        raise ValueError(
+            f"execution.max_fix_retries must be an integer, "
+            f"got {type(raw_retries).__name__}: {raw_retries!r}",
+        )
+    if max_fix_retries < 1:
+        raise ValueError(
+            f"execution.max_fix_retries must be >= 1, got {max_fix_retries}",
+        )
 
     return ExecutionConfig(
         enabled_tools=enabled_tools,
