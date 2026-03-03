@@ -181,9 +181,10 @@ def _parse_execution_config(data: dict[str, Any]) -> ExecutionConfig:
             f"execution.max_fix_retries must be an integer, "
             f"got {type(raw_retries).__name__}: {raw_retries!r}",
         )
-    if max_fix_retries < 1:
+    if not 1 <= max_fix_retries <= 10:
         raise ValueError(
-            f"execution.max_fix_retries must be >= 1, got {max_fix_retries}",
+            f"execution.max_fix_retries must be between 1 and 10, "
+            f"got {max_fix_retries}",
         )
 
     return ExecutionConfig(

@@ -83,6 +83,19 @@ def test_prettier_fmt_converges_on_changelog(
     """
     changelog = str(changelog_project / "CHANGELOG.md")
 
+    # Run single pass first to establish baseline — may or may not converge
+    # depending on prettier version and content specifics
+    single_pass_result = _run_fix_with_retry(
+        tool=prettier_plugin,
+        paths=[changelog],
+        options={},
+        max_retries=1,
+    )
+    single_remaining = single_pass_result.remaining_issues_count or 0
+
+    # Reset file to original content for the multi-pass test
+    (changelog_project / "CHANGELOG.md").write_text(PROBLEMATIC_CHANGELOG)
+
     retry_result = _run_fix_with_retry(
         tool=prettier_plugin,
         paths=[changelog],
@@ -91,8 +104,12 @@ def test_prettier_fmt_converges_on_changelog(
     )
 
     # With retry, the result should converge (0 remaining issues)
-    assert_that(retry_result.remaining_issues_count).is_equal_to(0)
+    retry_remaining = retry_result.remaining_issues_count or 0
+    assert_that(retry_remaining).is_equal_to(0)
     assert_that(retry_result.success).is_true()
+
+    # Retry should do at least as well as single pass
+    assert_that(retry_remaining).is_less_than_or_equal_to(single_remaining)
 
     # Verify the file is stable: running check again should find no issues
     final_check = prettier_plugin.check([changelog], {})
