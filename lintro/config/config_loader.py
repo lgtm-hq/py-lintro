@@ -167,6 +167,7 @@ def _parse_execution_config(data: dict[str, Any]) -> ExecutionConfig:
         fail_fast=data.get("fail_fast", False),
         parallel=data.get("parallel", True),
         auto_install_deps=data.get("auto_install_deps"),
+        max_fix_retries=data.get("max_fix_retries", 3),
     )
 
 
