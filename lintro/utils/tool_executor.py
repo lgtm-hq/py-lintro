@@ -46,6 +46,25 @@ __all__ = [
 ]
 
 
+def _get_remaining_count(result: ToolResult) -> int:
+    """Get remaining issue count from a ToolResult.
+
+    Falls back to issues_count when remaining_issues_count is not set,
+    then to 0 if neither is available.
+
+    Args:
+        result: The tool result to inspect.
+
+    Returns:
+        int: Number of remaining issues.
+    """
+    if result.remaining_issues_count is not None:
+        return result.remaining_issues_count
+    if result.issues_count is not None:
+        return result.issues_count
+    return 0
+
+
 def _run_fix_with_retry(
     tool: BaseToolPlugin,
     paths: list[str],
@@ -76,7 +95,7 @@ def _run_fix_with_retry(
         return result
 
     initial_issues_count = getattr(result, "initial_issues_count", None)
-    remaining = getattr(result, "remaining_issues_count", None) or 0
+    remaining = _get_remaining_count(result)
 
     for attempt in range(2, max_retries + 1):
         if remaining == 0:
@@ -87,7 +106,7 @@ def _run_fix_with_retry(
             f"({remaining} remaining issues)",
         )
         result = tool.fix(paths, options)
-        remaining = getattr(result, "remaining_issues_count", None) or 0
+        remaining = _get_remaining_count(result)
 
     # Merge: keep initial_issues_count from first pass, rest from last pass
     if initial_issues_count is not None:

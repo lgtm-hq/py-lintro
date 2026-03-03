@@ -238,6 +238,19 @@ def has_native_config(tool_name: str) -> bool:
         for pattern in patterns:
             config_path = current / pattern
             if config_path.exists():
+                # package.json only counts if it contains a "prettier" key
+                if tool_lower == "prettier" and pattern == "package.json":
+                    try:
+                        pkg_data = json.loads(
+                            config_path.read_text(encoding="utf-8"),
+                        )
+                        if "prettier" not in pkg_data:
+                            continue
+                    except (json.JSONDecodeError, OSError):
+                        logger.debug(
+                            f"Skipping unreadable package.json: {config_path}",
+                        )
+                        continue
                 logger.debug(
                     f"Found native config for {tool_name}: {config_path}",
                 )

@@ -154,6 +154,9 @@ def _parse_execution_config(data: dict[str, Any]) -> ExecutionConfig:
 
     Returns:
         ExecutionConfig: Parsed execution configuration.
+
+    Raises:
+        ValueError: If max_fix_retries is not a valid positive integer.
     """
     enabled_tools = data.get("enabled_tools", [])
     if isinstance(enabled_tools, str):
@@ -161,13 +164,34 @@ def _parse_execution_config(data: dict[str, Any]) -> ExecutionConfig:
 
     tool_order = data.get("tool_order", "priority")
 
+    # Validate max_fix_retries
+    raw_retries = data.get("max_fix_retries")
+    if raw_retries is None:
+        max_fix_retries = 3
+    elif isinstance(raw_retries, bool):
+        raise ValueError(
+            "execution.max_fix_retries must be an integer, got bool",
+        )
+    else:
+        try:
+            max_fix_retries = int(raw_retries)
+        except (TypeError, ValueError) as e:
+            raise ValueError(
+                f"execution.max_fix_retries must be an integer, "
+                f"got {type(raw_retries).__name__}",
+            ) from e
+        if max_fix_retries < 1:
+            raise ValueError(
+                f"execution.max_fix_retries must be >= 1, got {max_fix_retries}",
+            )
+
     return ExecutionConfig(
         enabled_tools=enabled_tools,
         tool_order=tool_order,
         fail_fast=data.get("fail_fast", False),
         parallel=data.get("parallel", True),
         auto_install_deps=data.get("auto_install_deps"),
-        max_fix_retries=data.get("max_fix_retries", 3),
+        max_fix_retries=max_fix_retries,
     )
 
 
