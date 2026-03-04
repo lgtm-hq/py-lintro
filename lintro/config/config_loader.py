@@ -174,8 +174,14 @@ def _parse_execution_config(data: dict[str, Any]) -> ExecutionConfig:
         )
     elif isinstance(raw_retries, int):
         max_fix_retries = raw_retries
-    elif isinstance(raw_retries, str) and raw_retries.strip().lstrip("-+").isdigit():
-        max_fix_retries = int(raw_retries)
+    elif isinstance(raw_retries, str):
+        try:
+            max_fix_retries = int(raw_retries.strip())
+        except ValueError:
+            raise ValueError(
+                f"execution.max_fix_retries must be an integer, "
+                f"got {type(raw_retries).__name__}: {raw_retries!r}",
+            ) from None
     else:
         raise ValueError(
             f"execution.max_fix_retries must be an integer, "
