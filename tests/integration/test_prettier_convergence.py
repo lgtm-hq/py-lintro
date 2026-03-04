@@ -133,12 +133,13 @@ def test_prettier_fmt_stable_after_convergence(
     changelog = str(changelog_project / "CHANGELOG.md")
 
     # Converge first
-    _run_fix_with_retry(
+    converge_result = _run_fix_with_retry(
         tool=prettier_plugin,
         paths=[changelog],
         options={},
         max_retries=3,
     )
+    assert_that(converge_result.success).is_true()
 
     # Capture content after convergence
     converged_content = (changelog_project / "CHANGELOG.md").read_text()
