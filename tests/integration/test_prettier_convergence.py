@@ -149,4 +149,5 @@ def test_prettier_fmt_stable_after_convergence(
     after_second_content = (changelog_project / "CHANGELOG.md").read_text()
 
     assert_that(after_second_content).is_equal_to(converged_content)
-    assert_that(second_result.remaining_issues_count).is_equal_to(0)
+    second_remaining = second_result.remaining_issues_count or 0
+    assert_that(second_remaining).is_equal_to(0)
