@@ -39,6 +39,7 @@ def run_tools_parallel(
     max_workers: int,
     incremental: bool = False,
     auto_install: bool = False,
+    max_fix_retries: int = 3,
 ) -> list[ToolResult]:
     """Run tools in parallel using async executor.
 
@@ -54,6 +55,7 @@ def run_tools_parallel(
         max_workers: Maximum parallel workers.
         incremental: Whether to only check changed files.
         auto_install: Whether to auto-install Node.js deps if missing.
+        max_fix_retries: Maximum fix→verify convergence cycles.
 
     Returns:
         List of ToolResult objects.
@@ -149,6 +151,7 @@ def run_tools_parallel(
                         paths=paths,
                         action=action,
                         on_result=on_tool_complete,
+                        max_fix_retries=max_fix_retries,
                     ),
                 )
 

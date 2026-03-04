@@ -31,6 +31,8 @@ class ExecutionConfig(BaseModel):
         auto_install_deps: Auto-install Node.js dependencies if node_modules
             is missing. None means unset (falls back to container detection),
             True/False explicitly enables/disables.
+        max_fix_retries: Maximum number of fix→verify cycles for converging
+            formatters (default: 3). Some formatters need multiple passes.
     """
 
     model_config = ConfigDict(frozen=False, extra="forbid")
@@ -41,3 +43,4 @@ class ExecutionConfig(BaseModel):
     parallel: bool = True
     max_workers: int = Field(default_factory=_get_default_max_workers, ge=1, le=32)
     auto_install_deps: bool | None = None
+    max_fix_retries: int = Field(default=3, ge=1, le=10)

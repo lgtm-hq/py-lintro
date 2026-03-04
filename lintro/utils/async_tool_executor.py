@@ -78,6 +78,7 @@ class AsyncToolExecutor:
         paths: list[str],
         action: Action,
         options: dict[str, Any] | None = None,
+        max_fix_retries: int = 3,
     ) -> ToolResult:
         """Run a single tool asynchronously.
 
@@ -86,6 +87,7 @@ class AsyncToolExecutor:
             paths: List of file paths to process.
             action: The action to perform (check or fix).
             options: Additional options to pass to the tool.
+            max_fix_retries: Maximum fix→verify convergence cycles.
 
         Returns:
             ToolResult: The result of tool execution.
@@ -101,10 +103,26 @@ class AsyncToolExecutor:
         loop = asyncio.get_running_loop()
         opts = options or {}
 
-        func = tool.fix if action == Action.FIX else tool.check
+        if action == Action.FIX:
+            from lintro.utils.tool_executor import _run_fix_with_retry
 
-        logger.debug(f"Starting async execution of {tool.definition.name}")
-        result = await loop.run_in_executor(self._executor, func, paths, opts)
+            logger.debug(f"Starting async execution of {tool.definition.name}")
+            result = await loop.run_in_executor(
+                self._executor,
+                _run_fix_with_retry,
+                tool,
+                paths,
+                opts,
+                max_fix_retries,
+            )
+        else:
+            logger.debug(f"Starting async execution of {tool.definition.name}")
+            result = await loop.run_in_executor(
+                self._executor,
+                tool.check,
+                paths,
+                opts,
+            )
         logger.debug(f"Completed async execution of {tool.definition.name}")
 
         return result
@@ -116,6 +134,7 @@ class AsyncToolExecutor:
         action: Action,
         options_per_tool: dict[str, dict[str, Any]] | None = None,
         on_result: Callable[[str, ToolResult], None] | None = None,
+        max_fix_retries: int = 3,
     ) -> list[tuple[str, ToolResult]]:
         """Run multiple tools in parallel.
 
@@ -125,6 +144,7 @@ class AsyncToolExecutor:
             action: The action to perform.
             options_per_tool: Optional dict mapping tool names to their options.
             on_result: Optional callback called when each tool completes.
+            max_fix_retries: Maximum fix→verify convergence cycles.
 
         Returns:
             List of (tool_name, ToolResult) tuples in completion order.
@@ -145,7 +165,13 @@ class AsyncToolExecutor:
                 Tuple of (tool_name, ToolResult).
             """
             tool_opts = options.get(name, {})
-            result = await self.run_tool_async(tool, paths, action, tool_opts)
+            result = await self.run_tool_async(
+                tool,
+                paths,
+                action,
+                tool_opts,
+                max_fix_retries=max_fix_retries,
+            )
             if on_result:
                 on_result(name, result)
             return (name, result)

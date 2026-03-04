@@ -69,6 +69,7 @@ TOOL_CONFIG_FORMATS: dict[str, ConfigFormat] = {
     "oxfmt": ConfigFormat.JSON,
     "oxlint": ConfigFormat.JSON,
     "yamllint": ConfigFormat.YAML,
+    "prettier": ConfigFormat.JSON,
 }
 
 # Key mappings for tools that use different naming conventions in their native configs.
@@ -79,6 +80,14 @@ NATIVE_KEY_MAPPINGS: dict[str, dict[str, str]] = {
         "require_labels": "requireLabels",
         "strict_labels": "strictLabels",
         # "ignored" stays as "ignored" (same in both formats)
+    },
+}
+
+# Built-in defaults that Lintro provides for tools even without user config.
+# User defaults always take precedence (merged on top of builtins).
+TOOL_BUILTIN_DEFAULTS: dict[str, dict[str, Any]] = {
+    "prettier": {
+        "proseWrap": "always",
     },
 }
 
@@ -116,6 +125,24 @@ NATIVE_CONFIG_PATTERNS: dict[str, list[str]] = {
     "oxfmt": [
         ".oxfmtrc.json",
         ".oxfmtrc.jsonc",
+    ],
+    "prettier": [
+        ".prettierrc",
+        ".prettierrc.json",
+        ".prettierrc.json5",
+        ".prettierrc.yaml",
+        ".prettierrc.yml",
+        ".prettierrc.js",
+        ".prettierrc.cjs",
+        ".prettierrc.mjs",
+        ".prettierrc.toml",
+        "prettier.config.js",
+        "prettier.config.cjs",
+        "prettier.config.mjs",
+        "prettier.config.ts",
+        "prettier.config.cts",
+        "prettier.config.mts",
+        "package.json",
     ],
 }
 
@@ -211,6 +238,19 @@ def has_native_config(tool_name: str) -> bool:
         for pattern in patterns:
             config_path = current / pattern
             if config_path.exists():
+                # package.json only counts if it contains a "prettier" key
+                if tool_lower == "prettier" and pattern == "package.json":
+                    try:
+                        pkg_data = json.loads(
+                            config_path.read_text(encoding="utf-8"),
+                        )
+                        if "prettier" not in pkg_data:
+                            continue
+                    except (json.JSONDecodeError, OSError):
+                        logger.debug(
+                            f"Skipping unreadable package.json: {config_path}",
+                        )
+                        continue
                 logger.debug(
                     f"Found native config for {tool_name}: {config_path}",
                 )
@@ -251,10 +291,12 @@ def generate_defaults_config(
         )
         return None
 
-    # Get defaults for this tool
-    defaults = lintro_config.get_tool_defaults(tool_lower)
-    if not defaults:
+    # Get defaults for this tool (user defaults override builtin defaults)
+    user_defaults = lintro_config.get_tool_defaults(tool_lower)
+    builtin_defaults = TOOL_BUILTIN_DEFAULTS.get(tool_lower, {})
+    if not user_defaults and not builtin_defaults:
         return None
+    defaults = {**builtin_defaults, **user_defaults}
 
     # Get config format for this tool
     config_format = TOOL_CONFIG_FORMATS.get(tool_lower, ConfigFormat.JSON)
@@ -390,6 +432,7 @@ def get_defaults_injection_args(
         "bandit": ["-c", config_str],
         "oxlint": ["--config", config_str],
         "oxfmt": ["--config", config_str],
+        "prettier": ["--no-config", "--config", config_str],
     }
 
     return config_flags.get(tool_lower, [])

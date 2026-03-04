@@ -154,6 +154,9 @@ def _parse_execution_config(data: dict[str, Any]) -> ExecutionConfig:
 
     Returns:
         ExecutionConfig: Parsed execution configuration.
+
+    Raises:
+        ValueError: If max_fix_retries is not a valid positive integer.
     """
     enabled_tools = data.get("enabled_tools", [])
     if isinstance(enabled_tools, str):
@@ -161,12 +164,42 @@ def _parse_execution_config(data: dict[str, Any]) -> ExecutionConfig:
 
     tool_order = data.get("tool_order", "priority")
 
+    # Validate max_fix_retries
+    raw_retries = data.get("max_fix_retries")
+    if raw_retries is None:
+        max_fix_retries = 3
+    elif isinstance(raw_retries, bool):
+        raise ValueError(
+            "execution.max_fix_retries must be an integer, got bool",
+        )
+    elif isinstance(raw_retries, int):
+        max_fix_retries = raw_retries
+    elif isinstance(raw_retries, str):
+        try:
+            max_fix_retries = int(raw_retries.strip())
+        except ValueError:
+            raise ValueError(
+                f"execution.max_fix_retries must be an integer, "
+                f"got {type(raw_retries).__name__}: {raw_retries!r}",
+            ) from None
+    else:
+        raise ValueError(
+            f"execution.max_fix_retries must be an integer, "
+            f"got {type(raw_retries).__name__}: {raw_retries!r}",
+        )
+    if not 1 <= max_fix_retries <= 10:
+        raise ValueError(
+            f"execution.max_fix_retries must be between 1 and 10, "
+            f"got {max_fix_retries}",
+        )
+
     return ExecutionConfig(
         enabled_tools=enabled_tools,
         tool_order=tool_order,
         fail_fast=data.get("fail_fast", False),
         parallel=data.get("parallel", True),
         auto_install_deps=data.get("auto_install_deps"),
+        max_fix_retries=max_fix_retries,
     )
 
 
@@ -287,6 +320,7 @@ def _convert_pyproject_to_config(data: dict[str, Any]) -> dict[str, Any]:
         "fail_fast",
         "parallel",
         "auto_install_deps",
+        "max_fix_retries",
     }
 
     # Known enforce settings (formerly global)

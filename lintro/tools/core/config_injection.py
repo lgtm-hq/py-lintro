@@ -125,7 +125,13 @@ def _should_use_lintro_config(
 
     # Check if defaults are configured for this tool
     defaults = lintro_config.get_tool_defaults(tool_name.lower())
-    return bool(defaults)
+    if defaults:
+        return True
+
+    # Check if builtin defaults exist for this tool
+    from lintro.config.tool_config_generator import TOOL_BUILTIN_DEFAULTS
+
+    return tool_name.lower() in TOOL_BUILTIN_DEFAULTS
 
 
 def _build_config_args(

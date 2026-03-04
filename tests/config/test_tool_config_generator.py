@@ -12,6 +12,7 @@ from lintro.config.tool_config_generator import (
     _convert_python_version_for_mypy,
     _transform_keys_for_native_config,
     _write_defaults_config,
+    generate_defaults_config,
     get_defaults_injection_args,
     get_enforce_cli_args,
     has_native_config,
@@ -334,3 +335,136 @@ def test_has_native_config_oxfmt_not_found(
     monkeypatch.chdir(tmp_path)
 
     assert_that(has_native_config("oxfmt")).is_false()
+
+
+# =============================================================================
+# Prettier builtin defaults tests
+# =============================================================================
+
+
+def test_prettier_builtin_defaults_applied_when_no_user_defaults(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Should generate config with builtin defaults when user sets none.
+
+    Args:
+        tmp_path: Pytest temporary directory fixture.
+        monkeypatch: Pytest monkeypatch fixture.
+    """
+    monkeypatch.chdir(tmp_path)
+    lintro_config = LintroConfig()
+
+    config_path = generate_defaults_config("prettier", lintro_config)
+
+    assert_that(config_path).is_not_none()
+    assert config_path is not None
+    import json
+
+    content = json.loads(config_path.read_text())
+    assert_that(content).contains_key("proseWrap")
+    assert_that(content["proseWrap"]).is_equal_to("always")
+    config_path.unlink(missing_ok=True)
+
+
+def test_prettier_user_defaults_override_builtin_defaults(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Should let user defaults override builtin defaults.
+
+    Args:
+        tmp_path: Pytest temporary directory fixture.
+        monkeypatch: Pytest monkeypatch fixture.
+    """
+    monkeypatch.chdir(tmp_path)
+    lintro_config = LintroConfig(
+        defaults={"prettier": {"proseWrap": "never"}},
+    )
+
+    config_path = generate_defaults_config("prettier", lintro_config)
+
+    assert_that(config_path).is_not_none()
+    assert config_path is not None
+    import json
+
+    content = json.loads(config_path.read_text())
+    assert_that(content["proseWrap"]).is_equal_to("never")
+    config_path.unlink(missing_ok=True)
+
+
+def test_prettier_user_defaults_merged_with_builtin_defaults(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Should merge user defaults on top of builtin defaults.
+
+    Args:
+        tmp_path: Pytest temporary directory fixture.
+        monkeypatch: Pytest monkeypatch fixture.
+    """
+    monkeypatch.chdir(tmp_path)
+    lintro_config = LintroConfig(
+        defaults={"prettier": {"tabWidth": 4}},
+    )
+
+    config_path = generate_defaults_config("prettier", lintro_config)
+
+    assert_that(config_path).is_not_none()
+    assert config_path is not None
+    import json
+
+    content = json.loads(config_path.read_text())
+    # Builtin default should be present
+    assert_that(content["proseWrap"]).is_equal_to("always")
+    # User default should also be present
+    assert_that(content["tabWidth"]).is_equal_to(4)
+    config_path.unlink(missing_ok=True)
+
+
+def test_prettier_native_config_skips_defaults_generation(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Should skip defaults generation when native config exists.
+
+    Args:
+        tmp_path: Pytest temporary directory fixture.
+        monkeypatch: Pytest monkeypatch fixture.
+    """
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / ".prettierrc").write_text("{}")
+    lintro_config = LintroConfig()
+
+    config_path = generate_defaults_config("prettier", lintro_config)
+
+    assert_that(config_path).is_none()
+
+
+def test_has_native_config_prettier_detects_prettierrc(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Should detect .prettierrc as native config.
+
+    Args:
+        tmp_path: Pytest temporary directory fixture.
+        monkeypatch: Pytest monkeypatch fixture.
+    """
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / ".prettierrc").write_text("{}")
+
+    assert_that(has_native_config("prettier")).is_true()
+
+
+def test_get_defaults_injection_args_prettier(tmp_path: Path) -> None:
+    """Should return --no-config --config args for prettier.
+
+    Args:
+        tmp_path: Pytest temporary directory fixture.
+    """
+    config_path = tmp_path / "test.json"
+    config_path.write_text("{}")
+    args = get_defaults_injection_args("prettier", config_path)
+
+    assert_that(args).is_equal_to(["--no-config", "--config", str(config_path)])

@@ -36,6 +36,23 @@ PRETTIER_DEFAULT_TIMEOUT: int = 30
 PRETTIER_DEFAULT_PRIORITY: int = 80
 # Note: JS/TS/Vue files are handled by oxfmt (faster).
 # Prettier handles file types that oxfmt doesn't support.
+PRETTIER_CONFIG_FILENAMES: tuple[str, ...] = (
+    ".prettierrc",
+    ".prettierrc.json",
+    ".prettierrc.json5",
+    ".prettierrc.yaml",
+    ".prettierrc.yml",
+    ".prettierrc.js",
+    ".prettierrc.cjs",
+    ".prettierrc.mjs",
+    ".prettierrc.toml",
+    "prettier.config.js",
+    "prettier.config.cjs",
+    "prettier.config.mjs",
+    "prettier.config.ts",
+    "prettier.config.cts",
+    "prettier.config.mts",
+)
 PRETTIER_FILE_PATTERNS: list[str] = [
     "*.css",
     "*.scss",
@@ -77,14 +94,7 @@ class PrettierPlugin(BaseToolPlugin):
             file_patterns=PRETTIER_FILE_PATTERNS,
             priority=PRETTIER_DEFAULT_PRIORITY,
             conflicts_with=[],
-            native_configs=[
-                ".prettierrc",
-                ".prettierrc.json",
-                ".prettierrc.js",
-                ".prettierrc.yaml",
-                ".prettierrc.yml",
-                "prettier.config.js",
-            ],
+            native_configs=list(PRETTIER_CONFIG_FILENAMES),
             version_command=["prettier", "--version"],
             min_version=get_min_version(ToolName.PRETTIER),
             default_options={
@@ -131,15 +141,7 @@ class PrettierPlugin(BaseToolPlugin):
         Returns:
             str | None: Path to config file if found, None otherwise.
         """
-        config_paths = [
-            ".prettierrc",
-            ".prettierrc.json",
-            ".prettierrc.js",
-            ".prettierrc.yaml",
-            ".prettierrc.yml",
-            "prettier.config.js",
-            "package.json",
-        ]
+        config_paths = [*PRETTIER_CONFIG_FILENAMES, "package.json"]
         # Search upward from search_dir (or cwd) to find config, just like prettier
         start_dir = os.path.abspath(search_dir) if search_dir else os.getcwd()
         current_dir = start_dir

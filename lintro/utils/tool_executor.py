@@ -35,7 +35,7 @@ from lintro.utils.post_checks import execute_post_checks
 from lintro.utils.unified_config import UnifiedConfigManager
 
 if TYPE_CHECKING:
-    pass
+    from lintro.plugins.base import BaseToolPlugin
 
 # Re-export constants for backwards compatibility
 __all__ = [
@@ -44,6 +44,86 @@ __all__ = [
     "DEFAULT_REMAINING_COUNT",
     "run_lint_tools_simple",
 ]
+
+
+def _get_remaining_count(result: ToolResult) -> int:
+    """Get remaining issue count from a ToolResult.
+
+    Falls back to issues_count when remaining_issues_count is not set,
+    then to 0 if neither is available.
+
+    Args:
+        result: The tool result to inspect.
+
+    Returns:
+        int: Number of remaining issues.
+    """
+    if result.remaining_issues_count is not None:
+        return result.remaining_issues_count
+    if result.issues_count is not None:
+        return result.issues_count
+    return 0
+
+
+def _run_fix_with_retry(
+    tool: BaseToolPlugin,
+    paths: list[str],
+    options: dict[str, object],
+    max_retries: int,
+) -> ToolResult:
+    """Run tool.fix() with convergence retries.
+
+    Some formatters (e.g. prettier with proseWrap) are non-idempotent and
+    need multiple write→verify cycles to stabilize. This function retries
+    fix() up to ``max_retries`` times, keeping the initial issue count from
+    the first pass and the remaining count from the last pass.
+
+    Args:
+        tool: The tool plugin to execute.
+        paths: List of file paths to process.
+        options: Runtime options for the tool.
+        max_retries: Maximum number of fix→verify cycles.
+
+    Returns:
+        ToolResult: Merged result across all passes.
+    """
+    from loguru import logger
+
+    result = tool.fix(paths, options)
+
+    if max_retries <= 1:
+        return result
+
+    initial_issues_count = getattr(result, "initial_issues_count", None)
+    remaining = _get_remaining_count(result)
+
+    for attempt in range(2, max_retries + 1):
+        if remaining == 0:
+            break
+
+        logger.debug(
+            f"Fix retry {attempt}/{max_retries} for {tool.definition.name} "
+            f"({remaining} remaining issues)",
+        )
+        result = tool.fix(paths, options)
+        remaining = _get_remaining_count(result)
+
+    # Merge: keep initial_issues_count from first pass, rest from last pass
+    if initial_issues_count is not None:
+        fixed = max(0, initial_issues_count - remaining)
+        result = ToolResult(
+            name=result.name,
+            success=result.success,
+            output=result.output,
+            issues_count=remaining,
+            issues=result.issues,
+            initial_issues_count=initial_issues_count,
+            fixed_issues_count=fixed,
+            remaining_issues_count=remaining,
+            formatted_output=result.formatted_output,
+        )
+
+    return result
 
 
 def run_lint_tools_simple(
@@ -262,6 +342,7 @@ def run_lint_tools_simple(
             max_workers=lintro_config.execution.max_workers,
             incremental=incremental,
             auto_install=effective_auto_install,
+            max_fix_retries=lintro_config.execution.max_fix_retries,
         )
 
         # Calculate totals from parallel results using helper
@@ -335,11 +416,15 @@ def run_lint_tools_simple(
                 )
 
                 # Execute the tool
-                result = (
-                    tool.fix(paths, {})
-                    if action == Action.FIX
-                    else tool.check(paths, {})
-                )
+                if action == Action.FIX:
+                    result = _run_fix_with_retry(
+                        tool=tool,
+                        paths=paths,
+                        options={},
+                        max_retries=lintro_config.execution.max_fix_retries,
+                    )
+                else:
+                    result = tool.check(paths, {})
 
                 all_results.append(result)
 
