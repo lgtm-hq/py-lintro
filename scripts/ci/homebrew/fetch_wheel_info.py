@@ -10,6 +10,9 @@ Usage:
 
     # Platform-specific wheels (macos arm64/x86_64)
     python3 fetch_wheel_info.py pydantic_core --type platform
+
+    # Specific version
+    python3 fetch_wheel_info.py pydantic_core --type platform --version 2.41.5
 """
 
 import argparse
@@ -86,13 +89,18 @@ def main() -> None:
         help="Wheel type to fetch",
     )
     parser.add_argument(
+        "--version",
+        default=None,
+        help="Specific version to fetch (default: latest)",
+    )
+    parser.add_argument(
         "--comment",
         default="",
         help="Comment to add above resource stanza",
     )
     args = parser.parse_args()
 
-    data = fetch_pypi_json(args.package)
+    data = fetch_pypi_json(args.package, version=args.version)
 
     if args.type == "universal":
         wheel = find_universal_wheel(data)

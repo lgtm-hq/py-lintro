@@ -119,8 +119,15 @@ python3 "$SCRIPT_DIR/fetch_wheel_info.py" pydoclint \
 	exit 1
 }
 
+# Query the installed pydantic-core version from the analysis venv
+# (must match the version required by pydantic, not the latest on PyPI)
+PYDANTIC_CORE_VERSION=$("$ANALYSIS_VENV/bin/python" -c \
+	"from importlib.metadata import version; print(version('pydantic-core'))")
+log_info "Installed pydantic-core version: ${PYDANTIC_CORE_VERSION}"
+
 python3 "$SCRIPT_DIR/fetch_wheel_info.py" pydantic_core \
 	--type platform \
+	--version "$PYDANTIC_CORE_VERSION" \
 	--comment "pydantic_core requires Rust to build - use platform-specific wheels" \
 	>"$TMPDIR/pydantic.txt" || {
 	log_error "Failed to fetch pydantic_core wheel info"
