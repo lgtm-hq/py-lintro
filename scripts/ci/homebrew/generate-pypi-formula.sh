@@ -122,7 +122,18 @@ python3 "$SCRIPT_DIR/fetch_wheel_info.py" pydoclint \
 # Query the installed pydantic-core version from the analysis venv
 # (must match the version required by pydantic, not the latest on PyPI)
 PYDANTIC_CORE_VERSION=$("$ANALYSIS_VENV/bin/python" -c \
-	"from importlib.metadata import version; print(version('pydantic-core'))")
+	"
+try:
+    from importlib.metadata import version
+    print(version('pydantic-core'))
+except Exception as e:
+    import sys
+    print(f'Failed to resolve pydantic-core version: {e}', file=sys.stderr)
+    sys.exit(1)
+") || {
+	log_error "Could not determine installed pydantic-core version"
+	exit 1
+}
 log_info "Installed pydantic-core version: ${PYDANTIC_CORE_VERSION}"
 
 python3 "$SCRIPT_DIR/fetch_wheel_info.py" pydantic_core \
