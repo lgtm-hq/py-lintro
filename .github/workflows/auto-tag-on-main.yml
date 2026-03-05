@@ -45,12 +45,14 @@ jobs:
             static.rust-lang.org:443
             bun.sh:443
             astral.sh:443
+            releases.astral.sh:443
             sh.rustup.rs:443
             registry.npmjs.org:443
             crates.io:443
             static.crates.io:443
             index.crates.io:443
             semgrep.dev:443
+            metrics.semgrep.dev:443
       - name: Checkout
         uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6
         with:
