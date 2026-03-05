@@ -51,11 +51,11 @@ class LintroBin < Formula
 
   on_macos do
     on_arm do
-      url "\#{RELEASE_BASE}/download/v\#{version}/lintro-macos-arm64"
+      url "#{RELEASE_BASE}/download/v#{version}/lintro-macos-arm64"
       sha256 "${ARM64_SHA}"
     end
     on_intel do
-      url "\#{RELEASE_BASE}/download/v\#{version}/lintro-macos-x86_64"
+      url "#{RELEASE_BASE}/download/v#{version}/lintro-macos-x86_64"
       sha256 "${X86_SHA}"
     end
   end
@@ -82,7 +82,7 @@ class LintroBin < Formula
   end
 
   test do
-    assert_match version.to_s, shell_output("\#{bin}/lintro --version")
+    assert_match version.to_s, shell_output("#{bin}/lintro --version")
   end
 end
 EOF
