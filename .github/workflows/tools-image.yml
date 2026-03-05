@@ -151,6 +151,7 @@ jobs:
             static.rust-lang.org:443
             bun.sh:443
             astral.sh:443
+            releases.astral.sh:443
             sh.rustup.rs:443
             deb.debian.org:80
             registry.npmjs.org:443
@@ -158,6 +159,7 @@ jobs:
             static.crates.io:443
             index.crates.io:443
             semgrep.dev:443
+            metrics.semgrep.dev:443
             fulcio.sigstore.dev:443
             rekor.sigstore.dev:443
             tuf-repo-cdn.sigstore.dev:443

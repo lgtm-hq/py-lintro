@@ -33,6 +33,7 @@ jobs:
             auth.docker.io:443
             registry.npmjs.org:443
             semgrep.dev:443
+            metrics.semgrep.dev:443
 
       - name: Pull tools image
         run: docker pull ghcr.io/lgtm-hq/lintro-tools:latest

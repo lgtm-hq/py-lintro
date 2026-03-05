@@ -164,7 +164,11 @@
         "type": "npm",
         "package": "vue-tsc",
         "bin": "vue-tsc",
-        "version_command": ["bun", "-e", "console.log(require('vue-tsc/package.json').version)"]
+        "version_command": [
+          "sh",
+          "-c",
+          "NODE_PATH=${BUN_INSTALL:-$HOME/.bun}/install/global/node_modules bun -e \"console.log(require('vue-tsc/package.json').version)\""
+        ]
       },
       "tier": "tools"
     },
