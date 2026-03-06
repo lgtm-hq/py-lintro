@@ -13,7 +13,7 @@
 
 # TOOLS_IMAGE can be overridden at build time (e.g., for PR testing with new tools)
 # yamllint disable-line rule:line-length
-ARG TOOLS_IMAGE=ghcr.io/lgtm-hq/lintro-tools:latest@sha256:19c1cd7e4ba40f5101282de5049058ca6bc9b929ecc6dc73fa1ae05f63f584ff
+ARG TOOLS_IMAGE=ghcr.io/lgtm-hq/lintro-tools:latest@sha256:479e01c64ffbbb820554deb77792d9f05bb710c3445975040ff2136261904b59
 # checkov:skip=CKV_DOCKER_7: Tools image is pinned by digest; tag is for readability.
 # hadolint ignore=DL3006
 FROM ${TOOLS_IMAGE}

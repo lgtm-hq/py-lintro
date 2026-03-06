@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "lintro"
-version = "0.52.11"
+version = "0.52.12"
 description = "A unified CLI tool for code formatting, linting, and quality assurance"
 keywords = [
   "linting",
