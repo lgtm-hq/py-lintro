@@ -2,19 +2,18 @@
 set -euo pipefail
 
 # sbom-rename-artifacts.sh
-# Rename SBOM artifacts to include tag and short SHA for traceability.
+# Rename SBOM artifacts to include tag and full SHA for traceability.
 
 if [ "${1:-}" = "--help" ] || [ "${1:-}" = "-h" ]; then
 	echo "Usage: $0 [OUTPUT_DIR]"
 	echo ""
-	echo "Rename SBOM files to include tag and short SHA prefix."
+	echo "Rename SBOM files to include tag and full SHA prefix."
 	echo "Defaults: OUTPUT_DIR=dist/sbom"
 	exit 0
 fi
 
 TAG="${GITHUB_REF_NAME:-${TAG:-unknown}}"
-SHA_SHORT="${GITHUB_SHA:-${SHA:-unknown}}"
-SHA_SHORT="${SHA_SHORT:0:12}"
+FULL_SHA="${GITHUB_SHA:-${SHA:-unknown}}"
 
 OUTPUT_DIR=${1:-dist/sbom}
 
@@ -26,7 +25,7 @@ fi
 shopt -s nullglob
 for f in "${OUTPUT_DIR}/py-lintro-sbom."*; do
 	base=$(basename "$f")
-	mv "$f" "${OUTPUT_DIR}/${TAG}-${SHA_SHORT}-${base}"
+	mv "$f" "${OUTPUT_DIR}/${TAG}-${FULL_SHA}-${base}"
 done
 
-echo "Renamed SBOM artifacts in ${OUTPUT_DIR} with ${TAG}-${SHA_SHORT}- prefix"
+echo "Renamed SBOM artifacts in ${OUTPUT_DIR} with ${TAG}-${FULL_SHA}- prefix"
