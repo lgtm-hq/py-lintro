@@ -15,6 +15,11 @@ fi
 TAG="${GITHUB_REF_NAME:-${TAG:-unknown}}"
 FULL_SHA="${GITHUB_SHA:-${SHA:-unknown}}"
 
+if ! [[ "$FULL_SHA" =~ ^[0-9a-fA-F]{40}$ ]]; then
+	echo "::error::FULL_SHA must be a 40-character hex commit hash (got: ${FULL_SHA})" >&2
+	exit 1
+fi
+
 OUTPUT_DIR=${1:-dist/sbom}
 
 if [ ! -d "${OUTPUT_DIR}" ]; then

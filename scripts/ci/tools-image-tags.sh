@@ -48,6 +48,10 @@ if [[ -n "${GITHUB_SHA:-}" ]]; then
 else
 	FULL_SHA=$(git rev-parse HEAD)
 fi
+if ! [[ "$FULL_SHA" =~ ^[0-9a-fA-F]{40}$ ]]; then
+	echo "::error::FULL_SHA must be a 40-character hex commit hash (got: ${FULL_SHA})"
+	exit 1
+fi
 IS_PR=$([[ "$EVENT_NAME" == "pull_request" ]] && echo true || echo false)
 
 # Start with SHA tag (always included)
