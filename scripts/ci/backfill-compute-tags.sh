@@ -15,7 +15,7 @@ set -euo pipefail
 
 if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
 	cat <<'EOF'
-Usage: TAG=v0.52.2 SHA=876464d1a2b3c4d5e6f7... ./scripts/ci/backfill-compute-tags.sh
+Usage: TAG=v0.52.2 SHA=876464d9f1a2b3c4d5e6f7081920a1b2c3d4e5f6 ./scripts/ci/backfill-compute-tags.sh
 
 Computes Docker image tags for a release. Outputs semver tags (X.Y.Z, X.Y, X)
 and sha-prefixed tags for both main and base images.
@@ -34,6 +34,10 @@ if [[ -z "${TAG:-}" ]]; then
 fi
 if [[ -z "${SHA:-}" ]]; then
 	echo "::error::SHA environment variable is required"
+	exit 1
+fi
+if ! [[ "$SHA" =~ ^[0-9a-f]{40}$ ]]; then
+	echo "::error::SHA must be a full 40-character lowercase hex commit SHA (got: ${SHA})"
 	exit 1
 fi
 

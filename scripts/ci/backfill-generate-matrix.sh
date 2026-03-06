@@ -47,7 +47,7 @@ if ((end > total)); then end=$total; fi
 objects=()
 for ((i = start; i < end; i++)); do
 	tag="${all_tags[$i]}"
-	sha=$(git rev-parse "$tag")
+	sha=$(git rev-parse "$tag^{}")
 	objects+=("$(jq -n --arg tag "$tag" --arg sha "$sha" '{tag:$tag,sha:$sha}')")
 done
 json=$(printf '%s\n' "${objects[@]}" | jq -s '.')

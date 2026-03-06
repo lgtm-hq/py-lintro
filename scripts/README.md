@@ -72,70 +72,70 @@ Homebrew formula templates for binary distribution.
 
 Scripts for GitHub Actions workflows and continuous integration.
 
-| Script                              | Purpose                                                            | Usage                                                                    |
-| ----------------------------------- | ------------------------------------------------------------------ | ------------------------------------------------------------------------ |
-| `backfill-compute-tags.sh`          | Compute Docker image tags for a backfill release                   | `TAG=v0.52.2 SHA=876464d... ./scripts/ci/backfill-compute-tags.sh`       |
-| `backfill-generate-matrix.sh`       | Generate JSON tag matrix for backfill batch                        | `BATCH=1 ./scripts/ci/backfill-generate-matrix.sh`                       |
-| `coverage-manager.sh`               | Unified coverage ops (extract/badge/comment/threshold)             | `./scripts/utils/coverage-manager.sh --help`                             |
-| `ci-extract-coverage.sh`            | Extract coverage percentage                                        | `./scripts/ci/ci-extract-coverage.sh`                                    |
-| `ci-lintro.sh`                      | Run Lintro analysis in Docker for CI                               | `./scripts/ci/ci-lintro.sh`                                              |
-| `ci-log.sh`                         | Generic CI logging utility for workflow status messages            | `./scripts/ci/ci-log.sh <message>`                                       |
-| `ci-post-pr-comment.sh`             | Post comments to PRs using GitHub API                              | `./scripts/ci/ci-post-pr-comment.sh [file]`                              |
-| `ci-pr-comment.sh`                  | Generate PR comments with Lintro results                           | `./scripts/ci/ci-pr-comment.sh`                                          |
-| `fail-on-lint.sh`                   | Fail CI job when lint checks fail                                  | `CHK_EXIT_CODE=1 ./scripts/ci/fail-on-lint.sh`                           |
-| `post-pr-delete-previous.sh`        | Delete previous PR comments by marker                              | `./scripts/ci/post-pr-delete-previous.sh --help`                         |
-| `lintro-report-generate.sh`         | Generate comprehensive Lintro reports                              | `./scripts/ci/lintro-report-generate.sh`                                 |
-| `pull-lintro-image.sh`              | Pull lintro Docker image from GHCR and log digest                  | `./scripts/ci/testing/pull-lintro-image.sh`                              |
-| `pages-deploy.sh`                   | Deploy coverage reports to GitHub Pages                            | `./scripts/ci/pages-deploy.sh`                                           |
-| `ghcr_prune_untagged.py`            | Prune untagged GHCR package versions                               | `uv run python scripts/ci/ghcr_prune_untagged.py`                        |
-| `deployments-prune.sh`              | Prune GitHub deployments via gh (keep-n/ref)                       | `./scripts/ci/deployments-prune.sh --help`                               |
-| `coverage-badge-update.sh`          | Generate and update coverage badge                                 | `./scripts/ci/testing/coverage-badge-update.sh --help`                   |
-| `coverage-pr-comment.sh`            | Generate PR comments with coverage info                            | `./scripts/ci/github/coverage-pr-comment.sh --help`                      |
-| `enforce-coverage-threshold.sh`     | Enforce minimum coverage threshold                                 | `./scripts/ci/testing/enforce-coverage-threshold.sh --help`              |
-| `auto-tag-unified.sh`               | Unified auto-tagging functions (check/read/create)                 | `./scripts/ci/auto-tag-unified.sh --help`                                |
-| `ci-auto-fix.sh`                    | Auto-format via Docker and push changes                            | `./scripts/ci/ci-auto-fix.sh`                                            |
-| `pypi-version-exists.sh`            | Check if version exists on PyPI                                    | `./scripts/ci/pypi-version-exists.sh <project> <version>`                |
-| `ensure-tag-on-main.sh`             | Ensure tag ref points to commit on main                            | `./scripts/ci/ensure-tag-on-main.sh --help`                              |
-| `guard-release-commit.sh`           | Check last commit is release bump                                  | `./scripts/ci/guard-release-commit.sh --help`                            |
-| `pre-release-quality.sh`            | Run Lintro format and check                                        | `./scripts/ci/pre-release-quality.sh --help`                             |
-| `semantic_release_compute_next.py`  | Compute next version (tag-only baseline)                           | `uv run python scripts/ci/semantic_release_compute_next.py --print-only` |
-| `validate-action-pinning.sh`        | Scan for unpinned GitHub Actions                                   | `./scripts/ci/validate-action-pinning.sh --help`                         |
-| `semantic-pr-title-check.sh`        | Validate PR title against Conventional Commits                     | `./scripts/ci/semantic-pr-title-check.sh --help`                         |
-| `verify-tag-matches-pyproject.sh`   | Verify tag matches `pyproject.toml` version                        | `./scripts/ci/verify-tag-matches-pyproject.sh --help`                    |
-| `sbom-generate.sh`                  | Generate and export SBOMs via bomctl                               | `./scripts/ci/sbom-generate.sh --help`                                   |
-| `sbom-rename-artifacts.sh`          | Prefix SBOMs with tag and SHA for traceability                     | `./scripts/ci/sbom-rename-artifacts.sh dist/sbom`                        |
-| `sbom-attest-artifacts.sh`          | Create cosign attestations for SBOM artifacts                      | `./scripts/ci/sbom-attest-artifacts.sh dist/sbom`                        |
-| `sbom-fetch-github-api.sh`          | Fetch repo SBOM via GitHub API; export via script                  | `./scripts/ci/sbom-fetch-github-api.sh --help`                           |
-| `semantic-release-helpers.sh`       | Helpers for semantic-release workflow steps                        | `./scripts/ci/semantic-release-helpers.sh --help`                        |
-| `reusable-quality-entry.sh`         | Quality gate wrapper for reusable workflow                         | `./scripts/ci/reusable-quality-entry.sh --help`                          |
-| `configure-git-user.sh`             | Configure git user/email and safe.directory                        | `./scripts/ci/configure-git-user.sh --help`                              |
-| `egress-audit-lite.sh`              | Audit reachability of allowed endpoints                            | `./scripts/ci/egress-audit-lite.sh --help`                               |
-| `sbom-install-binary-gh.sh`         | Install bomctl from GitHub Releases via gh                         | `./scripts/ci/sbom-install-binary-gh.sh --help`                          |
-| `fail-if-semantic-invalid.sh`       | Fail step if semantic title validation failed                      | `OK=true ./scripts/ci/fail-if-semantic-invalid.sh`                       |
-| `detect-changes.sh`                 | Detect repo diffs and set has_changes output                       | `./scripts/ci/detect-changes.sh --help`                                  |
-| `security-audit.sh`                 | Comprehensive security audit for workflows/scripts                 | `./scripts/ci/security-audit.sh --help`                                  |
-| `bomctl-help-test.sh`               | Test bomctl binary installation                                    | `./scripts/ci/bomctl-help-test.sh`                                       |
-| `sbom-generate-safe.sh`             | Generate SBOMs with consolidated error handling                    | `./scripts/ci/sbom-generate-safe.sh`                                     |
-| `test-install-package.sh`           | Install and verify built package in isolated venv                  | `./scripts/ci/test-install-package.sh wheel`                             |
-| `test-built-package-integration.sh` | Run integration tests for built package in isolated venv           | `./scripts/ci/test-built-package-integration.sh`                         |
-| `test-venv-setup.sh`                | Create isolated Python 3.13 virtual environment                    | `./scripts/ci/test-venv-setup.sh`                                        |
-| `test-verify-cli.sh`                | Verify lintro CLI entry points in installed package                | `./scripts/ci/test-verify-cli.sh`                                        |
-| `test-verify-imports.sh`            | Verify critical package imports in installed lintro                | `./scripts/ci/test-verify-imports.sh wheel`                              |
-| `extract-test-summary.sh`           | Extract pytest test summary to JSON for PR comments                | `./scripts/ci/testing/extract-test-summary.sh <log> <out.json>`          |
-| `extract-version-from-tag.sh`       | Extract version from git tag (strips v prefix)                     | `./scripts/ci/extract-version-from-tag.sh`                               |
-| `git-commit-push.sh`                | Stage, commit, and push with github-actions[bot]                   | `./scripts/ci/git-commit-push.sh <pattern> <message>`                    |
-| `tools-image-push.sh`               | Push tools image tags with per-tag error handling                  | `./scripts/ci/tools-image-push.sh --help`                                |
-| `tools-image-summary.sh`            | Generate GitHub step summary for tools image build                 | `./scripts/ci/tools-image-summary.sh --help`                             |
-| `tools-image-tags.sh`               | Generate Docker image tags for tools image build                   | `./scripts/ci/tools-image-tags.sh --help`                                |
-| `tools-image-resolve-tag.sh`        | Resolve tools image tag for reusable workflow callers              | `./scripts/ci/tools-image-resolve-tag.sh --help`                         |
-| `tools-image-verify.sh`             | Verify required tools are installed in tools image                 | `./scripts/ci/tools-image-verify.sh --help`                              |
-| `tools-image-update-digest.sh`      | Update pinned tools image digest in repo files                     | `./scripts/ci/tools-image-update-digest.sh --help`                       |
-| `tools-image-detect-changes.sh`     | Detect tool file changes requiring fresh image build               | `./scripts/ci/tools-image-detect-changes.sh --help`                      |
-| `tools-image-wait.sh`               | Wait for tools-image workflow to complete                          | `./scripts/ci/tools-image-wait.sh --help`                                |
-| `tools-image-resolve.sh`            | Resolve tools image tag based on event context                     | `./scripts/ci/tools-image-resolve.sh --help`                             |
-| `verify-manifest-tools.py`          | Verify tools in image match manifest versions                      | `python scripts/ci/verify-manifest-tools.py --help`                      |
-| `verify-manifest-sync.py`           | Verify manifest versions match pyproject and package.json          | `python scripts/ci/verify-manifest-sync.py --help`                       |
-| `verify-tool-version-sync.py`       | Verify tool versions match between package.json and pyproject.toml | `python scripts/ci/verify-tool-version-sync.py`                          |
+| Script                              | Purpose                                                            | Usage                                                                                            |
+| ----------------------------------- | ------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------ |
+| `backfill-compute-tags.sh`          | Compute Docker image tags for a backfill release                   | `TAG=v0.52.2 SHA=876464d9f1a2b3c4d5e6f7081920a1b2c3d4e5f6 ./scripts/ci/backfill-compute-tags.sh` |
+| `backfill-generate-matrix.sh`       | Generate JSON tag matrix for backfill batch                        | `BATCH=1 ./scripts/ci/backfill-generate-matrix.sh`                                               |
+| `coverage-manager.sh`               | Unified coverage ops (extract/badge/comment/threshold)             | `./scripts/utils/coverage-manager.sh --help`                                                     |
+| `ci-extract-coverage.sh`            | Extract coverage percentage                                        | `./scripts/ci/ci-extract-coverage.sh`                                                            |
+| `ci-lintro.sh`                      | Run Lintro analysis in Docker for CI                               | `./scripts/ci/ci-lintro.sh`                                                                      |
+| `ci-log.sh`                         | Generic CI logging utility for workflow status messages            | `./scripts/ci/ci-log.sh <message>`                                                               |
+| `ci-post-pr-comment.sh`             | Post comments to PRs using GitHub API                              | `./scripts/ci/ci-post-pr-comment.sh [file]`                                                      |
+| `ci-pr-comment.sh`                  | Generate PR comments with Lintro results                           | `./scripts/ci/ci-pr-comment.sh`                                                                  |
+| `fail-on-lint.sh`                   | Fail CI job when lint checks fail                                  | `CHK_EXIT_CODE=1 ./scripts/ci/fail-on-lint.sh`                                                   |
+| `post-pr-delete-previous.sh`        | Delete previous PR comments by marker                              | `./scripts/ci/post-pr-delete-previous.sh --help`                                                 |
+| `lintro-report-generate.sh`         | Generate comprehensive Lintro reports                              | `./scripts/ci/lintro-report-generate.sh`                                                         |
+| `pull-lintro-image.sh`              | Pull lintro Docker image from GHCR and log digest                  | `./scripts/ci/testing/pull-lintro-image.sh`                                                      |
+| `pages-deploy.sh`                   | Deploy coverage reports to GitHub Pages                            | `./scripts/ci/pages-deploy.sh`                                                                   |
+| `ghcr_prune_untagged.py`            | Prune untagged GHCR package versions                               | `uv run python scripts/ci/ghcr_prune_untagged.py`                                                |
+| `deployments-prune.sh`              | Prune GitHub deployments via gh (keep-n/ref)                       | `./scripts/ci/deployments-prune.sh --help`                                                       |
+| `coverage-badge-update.sh`          | Generate and update coverage badge                                 | `./scripts/ci/testing/coverage-badge-update.sh --help`                                           |
+| `coverage-pr-comment.sh`            | Generate PR comments with coverage info                            | `./scripts/ci/github/coverage-pr-comment.sh --help`                                              |
+| `enforce-coverage-threshold.sh`     | Enforce minimum coverage threshold                                 | `./scripts/ci/testing/enforce-coverage-threshold.sh --help`                                      |
+| `auto-tag-unified.sh`               | Unified auto-tagging functions (check/read/create)                 | `./scripts/ci/auto-tag-unified.sh --help`                                                        |
+| `ci-auto-fix.sh`                    | Auto-format via Docker and push changes                            | `./scripts/ci/ci-auto-fix.sh`                                                                    |
+| `pypi-version-exists.sh`            | Check if version exists on PyPI                                    | `./scripts/ci/pypi-version-exists.sh <project> <version>`                                        |
+| `ensure-tag-on-main.sh`             | Ensure tag ref points to commit on main                            | `./scripts/ci/ensure-tag-on-main.sh --help`                                                      |
+| `guard-release-commit.sh`           | Check last commit is release bump                                  | `./scripts/ci/guard-release-commit.sh --help`                                                    |
+| `pre-release-quality.sh`            | Run Lintro format and check                                        | `./scripts/ci/pre-release-quality.sh --help`                                                     |
+| `semantic_release_compute_next.py`  | Compute next version (tag-only baseline)                           | `uv run python scripts/ci/semantic_release_compute_next.py --print-only`                         |
+| `validate-action-pinning.sh`        | Scan for unpinned GitHub Actions                                   | `./scripts/ci/validate-action-pinning.sh --help`                                                 |
+| `semantic-pr-title-check.sh`        | Validate PR title against Conventional Commits                     | `./scripts/ci/semantic-pr-title-check.sh --help`                                                 |
+| `verify-tag-matches-pyproject.sh`   | Verify tag matches `pyproject.toml` version                        | `./scripts/ci/verify-tag-matches-pyproject.sh --help`                                            |
+| `sbom-generate.sh`                  | Generate and export SBOMs via bomctl                               | `./scripts/ci/sbom-generate.sh --help`                                                           |
+| `sbom-rename-artifacts.sh`          | Prefix SBOMs with tag and SHA for traceability                     | `./scripts/ci/sbom-rename-artifacts.sh dist/sbom`                                                |
+| `sbom-attest-artifacts.sh`          | Create cosign attestations for SBOM artifacts                      | `./scripts/ci/sbom-attest-artifacts.sh dist/sbom`                                                |
+| `sbom-fetch-github-api.sh`          | Fetch repo SBOM via GitHub API; export via script                  | `./scripts/ci/sbom-fetch-github-api.sh --help`                                                   |
+| `semantic-release-helpers.sh`       | Helpers for semantic-release workflow steps                        | `./scripts/ci/semantic-release-helpers.sh --help`                                                |
+| `reusable-quality-entry.sh`         | Quality gate wrapper for reusable workflow                         | `./scripts/ci/reusable-quality-entry.sh --help`                                                  |
+| `configure-git-user.sh`             | Configure git user/email and safe.directory                        | `./scripts/ci/configure-git-user.sh --help`                                                      |
+| `egress-audit-lite.sh`              | Audit reachability of allowed endpoints                            | `./scripts/ci/egress-audit-lite.sh --help`                                                       |
+| `sbom-install-binary-gh.sh`         | Install bomctl from GitHub Releases via gh                         | `./scripts/ci/sbom-install-binary-gh.sh --help`                                                  |
+| `fail-if-semantic-invalid.sh`       | Fail step if semantic title validation failed                      | `OK=true ./scripts/ci/fail-if-semantic-invalid.sh`                                               |
+| `detect-changes.sh`                 | Detect repo diffs and set has_changes output                       | `./scripts/ci/detect-changes.sh --help`                                                          |
+| `security-audit.sh`                 | Comprehensive security audit for workflows/scripts                 | `./scripts/ci/security-audit.sh --help`                                                          |
+| `bomctl-help-test.sh`               | Test bomctl binary installation                                    | `./scripts/ci/bomctl-help-test.sh`                                                               |
+| `sbom-generate-safe.sh`             | Generate SBOMs with consolidated error handling                    | `./scripts/ci/sbom-generate-safe.sh`                                                             |
+| `test-install-package.sh`           | Install and verify built package in isolated venv                  | `./scripts/ci/test-install-package.sh wheel`                                                     |
+| `test-built-package-integration.sh` | Run integration tests for built package in isolated venv           | `./scripts/ci/test-built-package-integration.sh`                                                 |
+| `test-venv-setup.sh`                | Create isolated Python 3.13 virtual environment                    | `./scripts/ci/test-venv-setup.sh`                                                                |
+| `test-verify-cli.sh`                | Verify lintro CLI entry points in installed package                | `./scripts/ci/test-verify-cli.sh`                                                                |
+| `test-verify-imports.sh`            | Verify critical package imports in installed lintro                | `./scripts/ci/test-verify-imports.sh wheel`                                                      |
+| `extract-test-summary.sh`           | Extract pytest test summary to JSON for PR comments                | `./scripts/ci/testing/extract-test-summary.sh <log> <out.json>`                                  |
+| `extract-version-from-tag.sh`       | Extract version from git tag (strips v prefix)                     | `./scripts/ci/extract-version-from-tag.sh`                                                       |
+| `git-commit-push.sh`                | Stage, commit, and push with github-actions[bot]                   | `./scripts/ci/git-commit-push.sh <pattern> <message>`                                            |
+| `tools-image-push.sh`               | Push tools image tags with per-tag error handling                  | `./scripts/ci/tools-image-push.sh --help`                                                        |
+| `tools-image-summary.sh`            | Generate GitHub step summary for tools image build                 | `./scripts/ci/tools-image-summary.sh --help`                                                     |
+| `tools-image-tags.sh`               | Generate Docker image tags for tools image build                   | `./scripts/ci/tools-image-tags.sh --help`                                                        |
+| `tools-image-resolve-tag.sh`        | Resolve tools image tag for reusable workflow callers              | `./scripts/ci/tools-image-resolve-tag.sh --help`                                                 |
+| `tools-image-verify.sh`             | Verify required tools are installed in tools image                 | `./scripts/ci/tools-image-verify.sh --help`                                                      |
+| `tools-image-update-digest.sh`      | Update pinned tools image digest in repo files                     | `./scripts/ci/tools-image-update-digest.sh --help`                                               |
+| `tools-image-detect-changes.sh`     | Detect tool file changes requiring fresh image build               | `./scripts/ci/tools-image-detect-changes.sh --help`                                              |
+| `tools-image-wait.sh`               | Wait for tools-image workflow to complete                          | `./scripts/ci/tools-image-wait.sh --help`                                                        |
+| `tools-image-resolve.sh`            | Resolve tools image tag based on event context                     | `./scripts/ci/tools-image-resolve.sh --help`                                                     |
+| `verify-manifest-tools.py`          | Verify tools in image match manifest versions                      | `python scripts/ci/verify-manifest-tools.py --help`                                              |
+| `verify-manifest-sync.py`           | Verify manifest versions match pyproject and package.json          | `python scripts/ci/verify-manifest-sync.py --help`                                               |
+| `verify-tool-version-sync.py`       | Verify tool versions match between package.json and pyproject.toml | `python scripts/ci/verify-tool-version-sync.py`                                                  |
 
 #### Homebrew Scripts (`ci/homebrew/`)
 
