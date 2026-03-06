@@ -44,14 +44,18 @@ FORCE_LATEST="${FORCE_LATEST:-false}"
 PR_NUMBER="${PR_NUMBER:-}"
 
 if [[ -n "${GITHUB_SHA:-}" ]]; then
-	SHORT_SHA="${GITHUB_SHA:0:7}"
+	FULL_SHA="${GITHUB_SHA}"
 else
-	SHORT_SHA=$(git rev-parse --short HEAD)
+	FULL_SHA=$(git rev-parse HEAD)
+fi
+if ! [[ "$FULL_SHA" =~ ^[0-9a-fA-F]{40}$ ]]; then
+	echo "::error::FULL_SHA must be a 40-character hex commit hash (got: ${FULL_SHA})"
+	exit 1
 fi
 IS_PR=$([[ "$EVENT_NAME" == "pull_request" ]] && echo true || echo false)
 
 # Start with SHA tag (always included)
-TAGS="${IMAGE_BASE}:sha-${SHORT_SHA}"
+TAGS="${IMAGE_BASE}:sha-${FULL_SHA}"
 
 # Add date tag only for non-PR events
 if [[ "$IS_PR" != "true" ]]; then
@@ -84,7 +88,7 @@ echo "tags=${TAGS}" >>"$GITHUB_OUTPUT"
 if [[ "$IS_PR" == "true" && -n "$PR_NUMBER" ]]; then
 	PRIMARY_TAG="${IMAGE_BASE}:pr-${PR_NUMBER}"
 else
-	PRIMARY_TAG="${IMAGE_BASE}:sha-${SHORT_SHA}"
+	PRIMARY_TAG="${IMAGE_BASE}:sha-${FULL_SHA}"
 fi
 echo "primary_tag=${PRIMARY_TAG}" >>"$GITHUB_OUTPUT"
 
