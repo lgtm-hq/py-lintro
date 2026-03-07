@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -25,28 +26,50 @@ class PatchStats:
     lines_removed: int = 0
 
 
-def _diff_is_style_only(suggestion: AIFixSuggestion) -> bool:
-    """Heuristic check: does the diff only change whitespace/style?
+def _ast_equivalent(original: str, suggested: str) -> bool | None:
+    """Compare ASTs of original and suggested Python code.
 
-    Compares original and suggested code character-by-character after
-    stripping whitespace and normalizing quotes. If the non-whitespace,
-    non-quote content differs, the change is behavioral.
+    Returns True if both snippets parse to the same AST (style-only change),
+    False if they differ (behavioral change), or None if either snippet
+    is not valid Python (fall back to heuristic).
+    """
+    import ast
+
+    try:
+        orig_ast = ast.dump(ast.parse(original))
+        sugg_ast = ast.dump(ast.parse(suggested))
+        return orig_ast == sugg_ast
+    except SyntaxError:
+        return None  # Not parseable, fall back to heuristic
+
+
+def _diff_is_style_only(suggestion: AIFixSuggestion) -> bool:
+    """Check whether the diff only changes whitespace/style.
+
+    First attempts an AST comparison for Python code. If both snippets
+    parse successfully, the AST result is authoritative. Otherwise falls
+    back to comparing original and suggested code after stripping
+    whitespace and normalizing quotes.
     """
     original = suggestion.original_code or ""
     suggested = suggestion.suggested_code or ""
 
+    # Try AST comparison first (authoritative for valid Python)
+    ast_result = _ast_equivalent(original, suggested)
+    if ast_result is not None:
+        return ast_result
+
     def _normalize(text: str) -> str:
         """Strip whitespace, trailing commas, and normalize quotes."""
-        import re
-
         # Remove all whitespace
         text = re.sub(r"\s+", "", text)
-        # Normalize quote characters (single ↔ double)
+        # Normalize quote characters (single -> double)
         text = text.replace("'", '"')
         # Remove trailing commas before closing brackets
-        text = re.sub(r',([}\])])', r"\1", text)
+        text = re.sub(r",([}\])])", r"\1", text)
         return text
 
+    # Fall back to whitespace/quote normalization heuristic
     return _normalize(original) == _normalize(suggested)
 
 

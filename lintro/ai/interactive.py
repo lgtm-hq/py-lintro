@@ -32,6 +32,15 @@ from lintro.ai.validation import validate_applied_fixes
 
 __all__ = ["apply_fixes", "review_fixes_interactive"]
 
+# Named constants for interactive review key bindings
+KEY_ACCEPT = "y"
+KEY_ACCEPT_ALL = "a"
+KEY_REJECT = "r"
+KEY_SHOW_DIFF = "d"
+KEY_SKIP = "s"
+KEY_TOGGLE_VALIDATE = "v"
+KEY_QUIT = "q"
+
 
 def _group_by_code(
     suggestions: Sequence[AIFixSuggestion],
@@ -312,15 +321,15 @@ def review_fixes_interactive(
                 return accepted, rejected, all_applied
 
             if choice in ("\r", "\n"):
-                choice = "y" if safe_default else "s"
+                choice = KEY_ACCEPT if safe_default else KEY_SKIP
             else:
                 choice = choice.lower()
 
-            if choice == "d":
+            if choice == KEY_SHOW_DIFF:
                 _show_group_diffs(console, fixes)
                 console.print()
                 continue
-            if choice == "v":
+            if choice == KEY_TOGGLE_VALIDATE:
                 validate_mode = not validate_mode
                 state = "enabled" if validate_mode else "disabled"
                 console.print(
@@ -331,7 +340,7 @@ def review_fixes_interactive(
 
             break
 
-        if choice in ("a", "y"):
+        if choice in (KEY_ACCEPT_ALL, KEY_ACCEPT):
             count, group_applied = _apply_group(
                 console,
                 fixes,
@@ -348,18 +357,18 @@ def review_fixes_interactive(
                         "  [dim]Validation skipped "
                         "(no fixes applied in this group).[/dim]",
                     )
-            if choice == "a":
+            if choice == KEY_ACCEPT_ALL:
                 accept_all = True
                 console.print("  [dim]Will accept all remaining groups.[/dim]")
-        elif choice == "r":
+        elif choice == KEY_REJECT:
             rejected += len(fixes)
             console.print(
                 f"  [yellow]✗ Rejected {len(fixes)} "
                 f"fix{'es' if len(fixes) != 1 else ''}[/yellow]",
             )
-        elif choice == "s":
+        elif choice == KEY_SKIP:
             console.print("  [dim]⏭  Skipped[/dim]")
-        elif choice == "q":
+        elif choice == KEY_QUIT:
             console.print("  [dim]Quit review.[/dim]")
             break
 

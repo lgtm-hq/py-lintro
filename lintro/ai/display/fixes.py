@@ -231,6 +231,27 @@ def render_fixes_markdown(
     return "\n".join(lines)
 
 
+def render_fixes_annotations(suggestions: Sequence[AIFixSuggestion]) -> str:
+    """Emit GitHub Actions annotation commands for fix suggestions.
+
+    Each suggestion produces a ``::warning`` annotation that surfaces
+    directly in the GitHub Actions UI next to the affected file/line.
+
+    Args:
+        suggestions: Fix suggestions to annotate.
+
+    Returns:
+        Newline-joined ``::warning`` commands, or empty string if no
+        suggestions are provided.
+    """
+    lines: list[str] = []
+    for s in suggestions:
+        level = "warning"
+        msg = f"AI fix available ({s.code}): {s.explanation}"
+        lines.append(f"::{level} file={s.file},line={s.line}::{msg}")
+    return "\n".join(lines)
+
+
 def render_fixes(
     suggestions: Sequence[AIFixSuggestion],
     *,
@@ -239,6 +260,10 @@ def render_fixes(
     output_format: str = "auto",
 ) -> str:
     """Render fixes using the appropriate format for the environment.
+
+    When running inside GitHub Actions (auto-detected), annotations are
+    appended to the rendered output so they appear as inline warnings in
+    the Actions UI.
 
     Args:
         suggestions: Fix suggestions to render.
@@ -258,11 +283,15 @@ def render_fixes(
             show_cost=show_cost,
         )
     if is_github_actions():
-        return render_fixes_github(
+        rendered = render_fixes_github(
             suggestions,
             tool_name=tool_name,
             show_cost=show_cost,
         )
+        annotations = render_fixes_annotations(suggestions)
+        if annotations:
+            rendered = rendered + "\n" + annotations if rendered else annotations
+        return rendered
     return render_fixes_terminal(
         suggestions,
         tool_name=tool_name,

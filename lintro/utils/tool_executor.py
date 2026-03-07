@@ -102,7 +102,8 @@ def _run_fix_with_retry(
             break
 
         logger.debug(
-            f"Fix retry {attempt}/{max_retries} for {tool.definition.name} "
+            f"Fix retry {attempt}/{max_retries} for "
+            f"{getattr(getattr(tool, 'definition', None), 'name', 'unknown')} "
             f"({remaining} remaining issues)",
         )
         result = tool.fix(paths, options)

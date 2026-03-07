@@ -23,6 +23,8 @@ from lintro.ai.prompts import (
     SUMMARY_SYSTEM,
 )
 from lintro.ai.retry import with_retry
+from lintro.ai.secrets import redact_secrets
+from lintro.ai.token_budget import estimate_tokens
 
 if TYPE_CHECKING:
     from lintro.ai.providers.base import AIResponse, BaseAIProvider
@@ -48,35 +50,59 @@ def _build_issues_digest(
     results: Sequence[ToolResult],
     *,
     workspace_root: Path | None = None,
+    max_tokens: int = 8000,
 ) -> str:
     """Build a compact textual digest of all issues across tools.
 
     Groups by tool and error code, shows counts and sample locations.
-    Designed to fit within a single prompt without being too verbose.
+    Tracks token budget so the digest stays within *max_tokens*; when
+    the budget is nearly exhausted the remaining tools/codes are
+    summarised in a single truncation note.
 
     Args:
         results: Tool results containing parsed issues.
         workspace_root: Optional root used for provider-safe path redaction.
+        max_tokens: Soft token budget for the entire digest (default 8000).
 
     Returns:
         Formatted digest string for inclusion in the prompt.
     """
     root = workspace_root or resolve_workspace_root()
     lines: list[str] = []
+    used_tokens = 0
+    truncated = False
+
+    # Pre-compute per-tool issue lists so we can report omitted counts.
+    tool_entries: list[tuple[str, list[object]]] = []
     for result in results:
         if not result.issues or result.skipped:
             continue
-        issues = list(result.issues)
-        if not issues:
-            continue
+        issues: list[object] = list(result.issues)
+        if issues:
+            tool_entries.append((result.name, issues))
 
+    omitted_issues = 0
+    omitted_tools = 0
+
+    for idx, (tool_name, issues) in enumerate(tool_entries):
         # Group by code within this tool
         by_code: dict[str, list[object]] = defaultdict(list)
         for issue in issues:
             code = getattr(issue, "code", None) or "unknown"
             by_code[code].append(issue)
 
-        lines.append(f"\n## {result.name} ({len(issues)} issues)")
+        header = f"\n## {tool_name} ({len(issues)} issues)"
+        header_tokens = estimate_tokens(header)
+        if used_tokens + header_tokens > max_tokens:
+            # Budget exhausted — count this tool and all remaining.
+            omitted_issues += sum(len(iss) for _, iss in tool_entries[idx:])
+            omitted_tools += len(tool_entries) - idx
+            truncated = True
+            break
+
+        lines.append(header)
+        used_tokens += header_tokens
+
         for code, code_issues in sorted(
             by_code.items(),
             key=lambda x: -len(x[1]),
@@ -89,12 +115,39 @@ def _build_issues_digest(
                     loc += f":{line_no}"
                 sample_locs.append(loc)
             more = f" (+{len(code_issues) - 3} more)" if len(code_issues) > 3 else ""
-            first_msg = getattr(code_issues[0], "message", "")
-            lines.append(
+            first_msg = redact_secrets(getattr(code_issues[0], "message", ""))
+            entry = (
                 f"  [{code}] x{len(code_issues)}: "
                 f"{first_msg}"
-                f"\n    e.g. {', '.join(sample_locs)}{more}",
+                f"\n    e.g. {', '.join(sample_locs)}{more}"
             )
+            entry_tokens = estimate_tokens(entry)
+            if used_tokens + entry_tokens > max_tokens:
+                # Count remaining codes in this tool + remaining tools.
+                remaining_in_tool = sum(
+                    len(ci)
+                    for c, ci in by_code.items()
+                    if c >= code  # rough: current + later sorted codes
+                )
+                omitted_issues += remaining_in_tool + sum(
+                    len(iss) for _, iss in tool_entries[idx + 1 :]
+                )
+                omitted_tools += len(tool_entries) - idx - 1
+                truncated = True
+                break
+
+            lines.append(entry)
+            used_tokens += entry_tokens
+
+        if truncated:
+            break
+
+    if truncated:
+        note = f"\n(truncated — {omitted_issues} more issues"
+        if omitted_tools:
+            note += f" across {omitted_tools} tool{'s' if omitted_tools != 1 else ''}"
+        note += ")"
+        lines.append(note)
 
     return "\n".join(lines)
 
@@ -182,7 +235,11 @@ def generate_summary(
     Returns:
         AISummary, or None if generation fails or there are no issues.
     """
-    digest = _build_issues_digest(results, workspace_root=workspace_root)
+    digest = _build_issues_digest(
+        results,
+        workspace_root=workspace_root,
+        max_tokens=8000,
+    )
     if not digest.strip():
         return None
 
@@ -266,6 +323,7 @@ def generate_post_fix_summary(
     digest = _build_issues_digest(
         remaining_results,
         workspace_root=workspace_root,
+        max_tokens=6000,
     )
     if not digest.strip() and remaining_count == 0:
         # All issues resolved — no summary needed

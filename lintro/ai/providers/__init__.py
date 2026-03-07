@@ -36,28 +36,38 @@ def get_provider(config: AIConfig) -> BaseAIProvider:
     Raises:
         ValueError: If the provider name is not recognized.
     """
-    provider_name = config.provider.lower()
+    try:
+        provider_enum = AIProvider(config.provider.lower())
+    except ValueError as exc:
+        supported = ", ".join(p.value for p in AIProvider)
+        raise ValueError(
+            f"Unknown AI provider: '{config.provider}'. "
+            f"Supported providers: {supported}",
+        ) from exc
 
-    if provider_name == AIProvider.ANTHROPIC:
+    if provider_enum is AIProvider.ANTHROPIC:
         from lintro.ai.providers.anthropic import AnthropicProvider
 
         return AnthropicProvider(
             model=config.model,
             api_key_env=config.api_key_env,
             max_tokens=config.max_tokens,
+            base_url=config.api_base_url,
         )
-    elif provider_name == AIProvider.OPENAI:
+    elif provider_enum is AIProvider.OPENAI:
         from lintro.ai.providers.openai import OpenAIProvider
 
         return OpenAIProvider(
             model=config.model,
             api_key_env=config.api_key_env,
             max_tokens=config.max_tokens,
+            base_url=config.api_base_url,
         )
     else:
+        # Unreachable with current AIProvider members, but kept as a safety net.
         supported = ", ".join(p.value for p in AIProvider)
         raise ValueError(
-            f"Unknown AI provider: '{provider_name}'. "
+            f"Unknown AI provider: '{provider_enum}'. "
             f"Supported providers: {supported}",
         )
 

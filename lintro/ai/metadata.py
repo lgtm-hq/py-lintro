@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from lintro.ai.models import AIFixSuggestion, AISummary
+    from lintro.ai.telemetry import AITelemetry
     from lintro.models.core.tool_result import ToolResult
 
 
@@ -161,6 +162,26 @@ def attach_validation_counts_metadata(
     metadata = ensure_ai_metadata(result)
     metadata["verified_count"] = max(0, int(verified_count))
     metadata["unverified_count"] = max(0, int(unverified_count))
+
+
+def attach_telemetry_metadata(
+    results: list[ToolResult],
+    telemetry: AITelemetry,
+) -> None:
+    """Attach telemetry metrics to the first result's AI metadata.
+
+    Places the telemetry dictionary under the ``ai_metrics`` key so
+    downstream consumers (JSON output, CI reporters) can access
+    session-level AI usage information.
+
+    Args:
+        results: List of tool results; metrics are attached to the first.
+        telemetry: Accumulated session telemetry to serialize.
+    """
+    if not results:
+        return
+    metadata = ensure_ai_metadata(results[0])
+    metadata["ai_metrics"] = telemetry.to_dict()
 
 
 def normalize_ai_metadata(raw: dict[str, Any]) -> dict[str, Any]:

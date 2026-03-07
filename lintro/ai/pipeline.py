@@ -9,17 +9,23 @@ from typing import TYPE_CHECKING
 from loguru import logger as loguru_logger
 
 from lintro.ai.apply import apply_fixes
+from lintro.ai.audit import write_audit_log
+from lintro.ai.budget import CostBudget
 from lintro.ai.display import render_summary, render_validation
 from lintro.ai.fix import generate_fixes
 from lintro.ai.interactive import review_fixes_interactive
 from lintro.ai.metadata import (
     attach_fix_suggestions_metadata,
     attach_fixed_count_metadata,
+    attach_telemetry_metadata,
     attach_validation_counts_metadata,
 )
+from lintro.ai.refinement import refine_unverified_fixes
 from lintro.ai.rerun import apply_rerun_results, rerun_tools
 from lintro.ai.risk import is_safe_style_fix
 from lintro.ai.summary import generate_post_fix_summary
+from lintro.ai.telemetry import AITelemetry
+from lintro.ai.undo import save_undo_patch
 from lintro.ai.validation import validate_applied_fixes
 
 if TYPE_CHECKING:
@@ -30,6 +36,8 @@ if TYPE_CHECKING:
     from lintro.parsers.base_issue import BaseIssue
     from lintro.utils.console.logger import ThreadSafeConsoleLogger
 
+CONFIDENCE_ORDER = {"high": 3, "medium": 2, "low": 1}
+
 
 def run_fix_pipeline(
     *,
@@ -39,6 +47,7 @@ def run_fix_pipeline(
     logger: ThreadSafeConsoleLogger,
     output_format: str,
     workspace_root: Path,
+    budget: CostBudget | None = None,
 ) -> None:
     """Generate and optionally apply AI fix suggestions across all tools.
 
@@ -57,7 +66,10 @@ def run_fix_pipeline(
         logger: Console logger for output.
         output_format: Output format string.
         workspace_root: Workspace root path.
+        budget: Optional cost budget tracker.
     """
+    telemetry = AITelemetry()
+
     by_tool: dict[str, tuple[ToolResult, list[BaseIssue]]] = {}
     for result, issue in fix_issues:
         if result.name not in by_tool:
@@ -66,6 +78,20 @@ def run_fix_pipeline(
 
     all_suggestions: list[AIFixSuggestion] = []
     remaining_budget = ai_config.max_fix_issues
+    is_json = output_format.lower() == "json"
+
+    # P5-1: Progress indicator for fix generation
+    total_fix_issues = sum(len(issues) for _, issues in by_tool.values())
+    if not is_json and total_fix_issues > 0:
+        logger.console_output(
+            f"  AI: generating fixes for {total_fix_issues} issues...",
+        )
+
+    def _progress_callback(completed: int, total: int) -> None:
+        if not is_json:
+            logger.console_output(
+                f"  AI: generating fixes... {completed}/{total}",
+            )
 
     for tool_name, (result, issues) in by_tool.items():
         if remaining_budget <= 0:
@@ -73,6 +99,9 @@ def run_fix_pipeline(
 
         if not issues:
             continue
+
+        if budget is not None:
+            budget.check()
 
         loguru_logger.debug(
             f"AI fix: {tool_name} has {len(issues)} issues, "
@@ -93,22 +122,80 @@ def run_fix_pipeline(
             base_delay=ai_config.retry_base_delay,
             max_delay=ai_config.retry_max_delay,
             backoff_factor=ai_config.retry_backoff_factor,
+            enable_cache=ai_config.enable_cache,
+            cache_ttl=ai_config.cache_ttl,
+            progress_callback=_progress_callback,
         )
         for suggestion in suggestions:
             if not suggestion.tool_name:
                 suggestion.tool_name = tool_name
         remaining_budget -= len(issues[:remaining_budget])
+
+        # P5-4: Verbose diagnostic output — suggestions per tool
+        if ai_config.verbose:
+            loguru_logger.info(
+                f"AI fix: {tool_name} generated " f"{len(suggestions)} suggestions",
+            )
+
+        telemetry.total_api_calls += len(suggestions)
+        for s in suggestions:
+            telemetry.total_input_tokens += s.input_tokens
+            telemetry.total_output_tokens += s.output_tokens
+            telemetry.total_cost_usd += s.cost_estimate
+
+        if budget is not None:
+            budget.record(sum(s.cost_estimate for s in suggestions))
+
+        # P5-4: Verbose — cost accumulation
+        if ai_config.verbose:
+            tool_cost = sum(s.cost_estimate for s in suggestions)
+            loguru_logger.info(
+                f"AI fix: {tool_name} cost=${tool_cost:.6f}, "
+                f"cumulative=${telemetry.total_cost_usd:.6f}",
+            )
+
         all_suggestions.extend(suggestions)
 
         if suggestions:
             attach_fix_suggestions_metadata(result, suggestions)
 
+    # Apply confidence threshold filter
+    threshold = CONFIDENCE_ORDER.get(ai_config.min_confidence, 1)
+    all_suggestions = [
+        s for s in all_suggestions if CONFIDENCE_ORDER.get(s.confidence, 1) >= threshold
+    ]
+
+    # P5-4: Verbose — confidence/risk breakdown
+    if ai_config.verbose and all_suggestions:
+        confidence_counts: dict[str, int] = {}
+        risk_counts: dict[str, int] = {}
+        for s in all_suggestions:
+            confidence_counts[s.confidence] = confidence_counts.get(s.confidence, 0) + 1
+            risk_label = s.risk_level or "unclassified"
+            risk_counts[risk_label] = risk_counts.get(risk_label, 0) + 1
+        loguru_logger.info(
+            f"AI fix: confidence breakdown: {confidence_counts}",
+        )
+        loguru_logger.info(
+            f"AI fix: risk breakdown: {risk_counts}",
+        )
+
     if not all_suggestions:
+        return
+
+    # Dry-run mode: display fixes but do not apply them
+    if ai_config.dry_run:
+        if not is_json:
+            loguru_logger.info(
+                "AI: dry-run mode — fixes displayed but not applied",
+            )
+            logger.console_output(
+                "  AI: dry-run mode — fixes displayed but not applied",
+            )
         return
 
     applied = 0
     rejected = 0
-    is_json = output_format.lower() == "json"
     applied_suggestions: list[AIFixSuggestion] = []
     safe_suggestions = [s for s in all_suggestions if is_safe_style_fix(s)]
     risky_suggestions = [s for s in all_suggestions if not is_safe_style_fix(s)]
@@ -122,6 +209,7 @@ def run_fix_pipeline(
         and (is_json or not sys.stdin.isatty())
     ):
         safe_fast_path_applied = True
+        save_undo_patch(safe_suggestions, workspace_root)
         applied_safe = apply_fixes(
             safe_suggestions,
             workspace_root=workspace_root,
@@ -147,6 +235,7 @@ def run_fix_pipeline(
         auto_apply_candidates = (
             risky_suggestions if safe_fast_path_applied else all_suggestions
         )
+        save_undo_patch(auto_apply_candidates, workspace_root)
         auto_applied = apply_fixes(
             auto_apply_candidates,
             workspace_root=workspace_root,
@@ -165,6 +254,7 @@ def run_fix_pipeline(
         review_candidates = (
             risky_suggestions if safe_fast_path_applied else all_suggestions
         )
+        save_undo_patch(review_candidates, workspace_root)
         accepted_count, rejected_count, interactive_applied = review_fixes_interactive(
             review_candidates,
             validate_after_group=ai_config.validate_after_group,
@@ -174,6 +264,9 @@ def run_fix_pipeline(
         applied += accepted_count
         rejected += rejected_count + safe_failed
         applied_suggestions.extend(interactive_applied)
+
+    telemetry.successful_fixes = applied
+    telemetry.failed_fixes = len(all_suggestions) - applied
 
     fresh_remaining_results = rerun_tools(by_tool) if applied_suggestions else None
     if applied_suggestions and fresh_remaining_results:
@@ -193,6 +286,45 @@ def run_fix_pipeline(
             val_output = render_validation(validation)
             if val_output:
                 logger.console_output(val_output)
+
+        # P3-4: Multi-turn fix refinement — if validation found unverified
+        # fixes and refinement is enabled, attempt one refinement round.
+        if (
+            validation
+            and validation.unverified > 0
+            and ai_config.max_refinement_attempts >= 1
+        ):
+            refined, refinement_cost = refine_unverified_fixes(
+                applied_suggestions=applied_suggestions,
+                validation=validation,
+                provider=provider,
+                ai_config=ai_config,
+                workspace_root=workspace_root,
+            )
+            if refined:
+                # Track refinement cost in telemetry
+                telemetry.total_api_calls += len(refined)
+                for s in refined:
+                    telemetry.total_input_tokens += s.input_tokens
+                    telemetry.total_output_tokens += s.output_tokens
+                    telemetry.total_cost_usd += s.cost_estimate
+                if budget is not None:
+                    budget.record(refinement_cost)
+
+                # Re-validate after refinement
+                re_validation = validate_applied_fixes(refined)
+                if re_validation:
+                    validation.verified += re_validation.verified
+                    validation.unverified -= re_validation.verified
+                    if not is_json and re_validation.verified:
+                        logger.console_output(
+                            f"  AI: refinement verified "
+                            f"{re_validation.verified} additional fix(es)",
+                        )
+                if ai_config.verbose:
+                    loguru_logger.info(
+                        f"AI fix: refinement cost=${refinement_cost:.6f}",
+                    )
 
     applied_by_tool: dict[str, int] = {}
     for suggestion in applied_suggestions:
@@ -249,6 +381,13 @@ def run_fix_pipeline(
                 )
                 if output:
                     logger.console_output(output)
+
+    total_cost = sum(s.cost_estimate for s in all_suggestions)
+    write_audit_log(workspace_root, applied_suggestions, rejected, total_cost)
+    attach_telemetry_metadata(
+        [r for r, _ in by_tool.values()],
+        telemetry,
+    )
 
 
 def _unique_results_from_fix_issues(

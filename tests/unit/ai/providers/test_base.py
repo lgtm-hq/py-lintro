@@ -37,6 +37,18 @@ def test_base_ai_provider_complete_subclass():
     """A complete BaseAIProvider subclass can be instantiated."""
 
     class TestProvider(BaseAIProvider):
+        def __init__(self) -> None:
+            super().__init__(
+                provider_name="test",
+                has_sdk=True,
+                sdk_package="test",
+                default_model="test-model",
+                default_api_key_env="TEST_KEY",
+            )
+
+        def _create_client(self, *, api_key: str) -> object:
+            return None
+
         def complete(
             self,
             prompt: str,
@@ -50,21 +62,9 @@ def test_base_ai_provider_complete_subclass():
                 model="test",
             )
 
-        def is_available(self):
-            return True
-
-        @property
-        def name(self):
-            return "test"
-
-        @property
-        def model_name(self):
-            return "test-model"
-
     provider = TestProvider()
     assert_that(provider.name).is_equal_to("test")
     assert_that(provider.model_name).is_equal_to("test-model")
-    assert_that(provider.is_available()).is_true()
 
     result = provider.complete("hello")
     assert_that(result.content).is_equal_to("ok")
@@ -73,15 +73,26 @@ def test_base_ai_provider_complete_subclass():
 def test_base_ai_provider_cannot_instantiate_directly():
     """BaseAIProvider is abstract and cannot be instantiated."""
     with pytest.raises(TypeError):
-        BaseAIProvider()  # type: ignore[abstract]  # intentionally testing abstract
+        BaseAIProvider(  # type: ignore[abstract]
+            provider_name="test",
+            has_sdk=True,
+            sdk_package="test",
+            default_model="m",
+            default_api_key_env="K",
+        )
 
 
 def test_incomplete_subclass_fails():
     """A subclass missing abstract methods cannot be instantiated."""
 
     class IncompleteProvider(BaseAIProvider):
-        def is_available(self):
-            return True
+        pass
 
     with pytest.raises(TypeError):
-        IncompleteProvider()  # type: ignore[abstract]  # intentionally testing abstract
+        IncompleteProvider(  # type: ignore[abstract]
+            provider_name="test",
+            has_sdk=True,
+            sdk_package="test",
+            default_model="m",
+            default_api_key_env="K",
+        )

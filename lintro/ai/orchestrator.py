@@ -12,7 +12,9 @@ from typing import TYPE_CHECKING
 from loguru import logger as loguru_logger
 
 from lintro.ai import require_ai
+from lintro.ai.budget import CostBudget
 from lintro.ai.display import render_summary
+from lintro.ai.filters import filter_issues
 from lintro.ai.metadata import attach_summary_metadata
 from lintro.ai.paths import resolve_workspace_file, resolve_workspace_root
 from lintro.ai.pipeline import run_fix_pipeline
@@ -47,6 +49,14 @@ def run_ai_enhancement(
         provider = get_provider(ai_config)
         is_json = output_format.lower() == "json"
 
+        # P5-4: Verbose — log provider, model, and workspace at info level
+        if ai_config.verbose:
+            loguru_logger.info(
+                f"AI: provider={ai_config.provider.value}, "
+                f"model={ai_config.model or 'default'}, "
+                f"workspace_root={workspace_root}",
+            )
+
         if action == Action.CHECK:
             _run_ai_check(
                 all_results=all_results,
@@ -66,7 +76,11 @@ def run_ai_enhancement(
                 is_json=is_json,
                 workspace_root=workspace_root,
             )
+    except (KeyboardInterrupt, SystemExit):
+        raise
     except Exception as e:
+        if getattr(lintro_config.ai, "fail_on_ai_error", False):
+            raise
         loguru_logger.debug(
             f"AI enhancement failed ({type(e).__name__}): {e}",
             exc_info=True,
@@ -87,6 +101,8 @@ def _run_ai_check(
     workspace_root: Path,
 ) -> None:
     """Run AI summary and optional AI fix suggestions for check action."""
+    budget = CostBudget(max_cost_usd=ai_config.max_cost_usd)
+
     summary = generate_summary(
         all_results,
         provider,
@@ -104,6 +120,7 @@ def _run_ai_check(
             logger.console_output(output)
 
     if summary:
+        budget.record(summary.cost_estimate)
         for result in all_results:
             if result.issues and not result.skipped:
                 attach_summary_metadata(result, summary)
@@ -119,7 +136,8 @@ def _run_ai_check(
         )
         if not result.issues or result.skipped:
             continue
-        for issue in list(result.issues):
+        filtered = filter_issues(list(result.issues), ai_config)
+        for issue in filtered:
             if _normalize_issue_path_for_workspace(
                 issue=issue,
                 workspace_root=workspace_root,
@@ -135,6 +153,7 @@ def _run_ai_check(
             logger=logger,
             output_format="json" if is_json else "terminal",
             workspace_root=workspace_root,
+            budget=budget,
         )
 
     if not is_json:
@@ -155,6 +174,8 @@ def _run_ai_fix(
     workspace_root: Path,
 ) -> None:
     """Run AI fix suggestions for format action."""
+    budget = CostBudget(max_cost_usd=ai_config.max_cost_usd)
+
     all_fix_issues: list[tuple[ToolResult, BaseIssue]] = []
     for result in all_results:
         loguru_logger.debug(
@@ -168,6 +189,7 @@ def _run_ai_fix(
         remaining_issues = _remaining_issues_for_fix_result(result)
         if not remaining_issues:
             continue
+        remaining_issues = filter_issues(remaining_issues, ai_config)
         for issue in remaining_issues:
             if _normalize_issue_path_for_workspace(
                 issue=issue,
@@ -184,6 +206,7 @@ def _run_ai_fix(
             logger=logger,
             output_format="json" if is_json else "terminal",
             workspace_root=workspace_root,
+            budget=budget,
         )
 
     if not is_json:

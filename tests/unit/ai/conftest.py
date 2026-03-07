@@ -28,10 +28,21 @@ class MockAIProvider(BaseAIProvider):
             responses: List of responses to return from complete() calls.
             available: Whether the provider reports as available.
         """
+        super().__init__(
+            provider_name="mock",
+            has_sdk=True,
+            sdk_package="mock",
+            default_model="mock-model",
+            default_api_key_env="MOCK_API_KEY",
+        )
         self.responses: list[AIResponse] = responses or []
         self.calls: list[dict[str, Any]] = []
         self._available = available
         self._call_index = 0
+
+    def _create_client(self, *, api_key: str) -> Any:
+        """Return a mock client."""
+        return None
 
     def complete(
         self,
@@ -66,16 +77,6 @@ class MockAIProvider(BaseAIProvider):
     def is_available(self) -> bool:
         """Check if the mock AI provider is available."""
         return self._available
-
-    @property
-    def name(self) -> str:
-        """Return the provider name."""
-        return "mock"
-
-    @property
-    def model_name(self) -> str:
-        """Return the model name."""
-        return "mock-model"
 
 
 @dataclass

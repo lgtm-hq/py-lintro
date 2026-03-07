@@ -6,7 +6,6 @@ Requires the ``anthropic`` package (installed via ``lintro[ai]``).
 
 from __future__ import annotations
 
-import os
 from typing import Any
 
 from loguru import logger
@@ -14,7 +13,6 @@ from loguru import logger
 from lintro.ai.cost import estimate_cost
 from lintro.ai.exceptions import (
     AIAuthenticationError,
-    AINotAvailableError,
     AIProviderError,
     AIRateLimitError,
 )
@@ -42,50 +40,43 @@ class AnthropicProvider(BaseAIProvider):
         model: str | None = None,
         api_key_env: str | None = None,
         max_tokens: int = 4096,
+        base_url: str | None = None,
     ) -> None:
         """Initialize the Anthropic provider.
 
         Args:
-            model: Model identifier. Defaults to claude-sonnet-4-20250514.
+            model: Model identifier. Defaults to claude-sonnet-4-6.
             api_key_env: Environment variable for API key.
                 Defaults to ANTHROPIC_API_KEY.
             max_tokens: Default max tokens for completions.
-
-        Raises:
-            AINotAvailableError: If the anthropic package is not installed.
+            base_url: Custom API base URL for Anthropic-compatible
+                endpoints (proxies, self-hosted, etc.).
         """
-        if not _has_anthropic:
-            raise AINotAvailableError(
-                "Anthropic provider requires the 'anthropic' package. "
-                "Install with: uv pip install 'lintro[ai]'",
-            )
+        super().__init__(
+            provider_name="anthropic",
+            has_sdk=_has_anthropic,
+            sdk_package="anthropic",
+            default_model=DEFAULT_MODEL,
+            default_api_key_env=DEFAULT_API_KEY_ENV,
+            model=model,
+            api_key_env=api_key_env,
+            max_tokens=max_tokens,
+            base_url=base_url,
+        )
 
-        self._model = model or DEFAULT_MODEL
-        self._api_key_env = api_key_env or DEFAULT_API_KEY_ENV
-        self._max_tokens = max_tokens
-        self._client: Any = None
+    def _create_client(self, *, api_key: str) -> Any:
+        """Create the Anthropic SDK client.
 
-    def _get_client(self) -> Any:
-        """Get or create the Anthropic client.
+        Args:
+            api_key: The resolved API key.
 
         Returns:
             anthropic.Anthropic: The API client.
-
-        Raises:
-            AIAuthenticationError: If no API key is found.
         """
-        if self._client is not None:
-            return self._client
-
-        api_key = os.environ.get(self._api_key_env)
-        if not api_key:
-            raise AIAuthenticationError(
-                f"No API key found. Set the {self._api_key_env} "
-                f"environment variable.",
-            )
-
-        self._client = anthropic.Anthropic(api_key=api_key)
-        return self._client
+        kwargs: dict[str, Any] = {"api_key": api_key}
+        if self._base_url:
+            kwargs["base_url"] = self._base_url
+        return anthropic.Anthropic(**kwargs)
 
     def complete(
         self,
@@ -159,31 +150,3 @@ class AnthropicProvider(BaseAIProvider):
             raise AIProviderError(
                 f"Anthropic API error: {e}",
             ) from e
-
-    def is_available(self) -> bool:
-        """Check if Anthropic is ready to use.
-
-        Returns:
-            bool: True if the SDK is installed and an API key is set.
-        """
-        if not _has_anthropic:
-            return False
-        return bool(os.environ.get(self._api_key_env))
-
-    @property
-    def name(self) -> str:
-        """Return the provider name.
-
-        Returns:
-            str: "anthropic".
-        """
-        return "anthropic"
-
-    @property
-    def model_name(self) -> str:
-        """Return the configured model name.
-
-        Returns:
-            str: The model identifier.
-        """
-        return self._model

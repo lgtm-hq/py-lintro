@@ -23,6 +23,13 @@ class AIConfig(BaseModel):
         api_key_env: Custom environment variable name for the API key.
             Defaults to provider-specific env var (ANTHROPIC_API_KEY,
             OPENAI_API_KEY).
+        api_base_url: Custom API base URL. Enables Ollama, vLLM,
+            Azure OpenAI, or any OpenAI-compatible endpoint.
+        api_region: Provider region hint for data residency. Used
+            with api_base_url for region-specific endpoints.
+        fallback_models: Ordered list of fallback model identifiers.
+            On rate-limit errors, the orchestrator retries with each
+            model in sequence before giving up.
         default_fix: Whether to enable interactive AI fix suggestions
             by default in ``chk``. Equivalent to always passing
             ``--fix``. Defaults to False.
@@ -52,6 +59,27 @@ class AIConfig(BaseModel):
         retry_max_delay: Maximum delay in seconds between retries.
         retry_backoff_factor: Multiplier applied to delay after each
             retry attempt.
+        enable_cache: Whether to enable on-disk suggestion caching for
+            deduplication across runs. Defaults to False.
+        cache_ttl: Time-to-live in seconds for cached suggestions.
+            Defaults to 3600 (1 hour). Minimum 60.
+        max_refinement_attempts: Maximum number of refinement rounds
+            for unverified fixes. 0 disables refinement.
+        fail_on_ai_error: Whether to re-raise AI exceptions instead of
+            logging and continuing gracefully.
+        verbose: Whether to emit detailed progress and diagnostic
+            messages for AI operations.
+        include_paths: Glob patterns for paths to include in AI processing.
+        exclude_paths: Glob patterns for paths to exclude from AI processing.
+        include_rules: Glob patterns for rules to include in AI processing.
+        exclude_rules: Glob patterns for rules to exclude from AI processing.
+        min_confidence: Minimum confidence level for AI fix suggestions.
+            One of 'low', 'medium', 'high'.
+        dry_run: Display AI fix suggestions without applying them.
+        max_cost_usd: Maximum total cost in USD per AI session.
+            None disables the limit.
+        max_prompt_tokens: Token budget for fix prompts before context
+            trimming.
     """
 
     model_config = ConfigDict(frozen=False, extra="forbid")
@@ -60,6 +88,21 @@ class AIConfig(BaseModel):
     provider: AIProvider = AIProvider.ANTHROPIC
     model: str | None = None
     api_key_env: str | None = None
+    api_base_url: str | None = Field(
+        default=None,
+        description=(
+            "Custom API base URL. Enables Ollama, vLLM, Azure OpenAI, "
+            "or any OpenAI-compatible endpoint."
+        ),
+    )
+    api_region: str | None = Field(
+        default=None,
+        description=(
+            "Provider region hint for data residency. "
+            "Used with api_base_url for region-specific endpoints."
+        ),
+    )
+    fallback_models: list[str] = Field(default_factory=list)
     default_fix: bool = False
     auto_apply: bool = False
     auto_apply_safe_fixes: bool = True
@@ -75,6 +118,53 @@ class AIConfig(BaseModel):
     retry_base_delay: float = Field(default=1.0, ge=0.1)
     retry_max_delay: float = Field(default=30.0, ge=1.0)
     retry_backoff_factor: float = Field(default=2.0, ge=1.0)
+    enable_cache: bool = Field(default=False)
+    cache_ttl: int = Field(default=3600, ge=60)
+    max_refinement_attempts: int = Field(default=1, ge=0, le=3)
+    fail_on_ai_error: bool = Field(default=False)
+    verbose: bool = Field(default=False)
+    include_paths: list[str] = Field(
+        default_factory=list,
+        description="Glob patterns for paths to include in AI processing.",
+    )
+    exclude_paths: list[str] = Field(
+        default_factory=list,
+        description="Glob patterns for paths to exclude from AI processing.",
+    )
+    include_rules: list[str] = Field(
+        default_factory=list,
+        description="Glob patterns for rules to include in AI processing.",
+    )
+    exclude_rules: list[str] = Field(
+        default_factory=list,
+        description="Glob patterns for rules to exclude from AI processing.",
+    )
+    min_confidence: str = Field(
+        default="low",
+        description=(
+            "Minimum confidence level for AI fix suggestions. "
+            "Suggestions below this threshold are discarded. "
+            "One of 'low', 'medium', 'high'."
+        ),
+    )
+    dry_run: bool = Field(
+        default=False,
+        description=(
+            "Display AI fix suggestions without applying them. "
+            "Useful for previewing what changes the AI would make."
+        ),
+    )
+    max_cost_usd: float | None = Field(
+        default=None,
+        description=(
+            "Maximum total cost in USD per AI session. " "None disables the limit."
+        ),
+    )
+    max_prompt_tokens: int = Field(
+        default=12000,
+        ge=1000,
+        description="Token budget for fix prompts before context trimming.",
+    )
 
     @model_validator(mode="after")
     def _check_retry_delays(self) -> AIConfig:

@@ -1,6 +1,6 @@
 """Apply AI-generated fix suggestions to source files.
 
-Handles line-targeted replacement with search-radius fallback.
+Handles line-targeted replacement within a configurable search radius.
 """
 
 from __future__ import annotations
@@ -25,15 +25,13 @@ def _apply_fix(
 
     Uses line-number-targeted replacement to avoid matching the wrong
     occurrence when the same code pattern appears elsewhere in the file.
-    Falls back to first-occurrence replacement if line targeting fails,
-    unless ``auto_apply`` is True (only allows line-targeted).
+    If the original code is not found within the search radius of the
+    target line, the fix fails (returns False).
 
     Args:
         suggestion: Fix suggestion to apply.
         workspace_root: Root directory limiting writable paths.
-        auto_apply: When True, skip the fallback first-occurrence
-            replacement (only allow line-targeted). Used by auto-apply
-            paths in the pipeline for safety.
+        auto_apply: Reserved for future use; kept for API compatibility.
         search_radius: Max lines above/below the target line to search
             for the original code pattern.
 
@@ -64,8 +62,7 @@ def _apply_fix(
             )
             return False
 
-        # line == 0 means "unspecified" — skip line-targeted search and
-        # fall through to the first-occurrence fallback below.
+        # line == 0 means "unspecified" — no line-targeted search possible.
         if suggestion.line >= 1:
             # Search outward from the target line (closest match wins).
             # Clamp to last line when the AI reports a stale/out-of-range
@@ -108,24 +105,6 @@ def _apply_fix(
                 new_lines = lines[:start] + suggested_lines + lines[end:]
                 path.write_text("".join(new_lines), encoding="utf-8")
                 return True
-
-        # Fallback: first-occurrence string replacement.
-        # Warning: this may apply the fix to the wrong location if
-        # the original code appears earlier in the file.
-        # Skipped when auto_apply is True for safety.
-        if not auto_apply and suggestion.original_code in content:
-            logger.debug(
-                f"Line-targeted replacement failed for "
-                f"{suggestion.file}:{suggestion.line}, "
-                f"falling back to first-occurrence string replacement",
-            )
-            new_content = content.replace(
-                suggestion.original_code,
-                suggestion.suggested_code,
-                1,
-            )
-            path.write_text(new_content, encoding="utf-8")
-            return True
 
         return False
 

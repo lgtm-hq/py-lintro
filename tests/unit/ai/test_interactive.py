@@ -14,12 +14,11 @@ from lintro.ai.interactive import (
 )
 from lintro.ai.models import AIFixSuggestion
 
-# -- _apply_fix fallback warning ----------------------------------------------
+# -- _apply_fix no fallback ----------------------------------------------------
 
 
-@patch("lintro.ai.apply.logger")
-def test_apply_fix_fallback_logs_debug(mock_logger, tmp_path):
-    """Falling back to str.replace should log at debug level."""
+def test_apply_fix_no_fallback_when_line_targeting_misses(tmp_path):
+    """When line-targeted replacement misses, fix fails (no fallback)."""
     f = tmp_path / "test.py"
     # File must be long enough that clamped target_idx (last line)
     # plus search_radius (default 5) cannot reach line 0.
@@ -34,11 +33,9 @@ def test_apply_fix_fallback_logs_debug(mock_logger, tmp_path):
     )
 
     result = _apply_fix(fix, workspace_root=tmp_path)
-    assert_that(result).is_true()
-    mock_logger.debug.assert_called_once()
-    call_args = mock_logger.debug.call_args[0][0]
-    assert_that(call_args).contains("falling back")
-    assert_that(call_args).contains(str(f))
+    assert_that(result).is_false()
+    # File should be unchanged -- no fallback replacement
+    assert_that(f.read_text()).contains("old code")
 
 
 @patch("lintro.ai.apply.logger")
@@ -69,6 +66,7 @@ def test_apply_fix_applies_fix(tmp_path):
 
     fix = AIFixSuggestion(
         file=str(f),
+        line=1,
         original_code="assert x > 0",
         suggested_code="if x <= 0:\n    raise ValueError",
     )
@@ -88,6 +86,7 @@ def test_apply_fix_skips_when_original_not_found(tmp_path):
 
     fix = AIFixSuggestion(
         file=str(f),
+        line=1,
         original_code="nonexistent code",
         suggested_code="new code",
     )
@@ -130,8 +129,8 @@ def test_apply_fix_line_targeted_replacement(tmp_path):
     assert_that(lines[2]).is_equal_to("x = 2")
 
 
-def test_apply_fix_fallback_to_string_replace(tmp_path):
-    """Falls back to first-occurrence when line targeting misses."""
+def test_apply_fix_fails_when_line_targeting_misses(tmp_path):
+    """Returns False when line targeting misses (no fallback)."""
     f = tmp_path / "test.py"
     # File must be long enough that clamped target_idx (last line)
     # plus default search_radius (5) cannot reach line 0.
@@ -146,8 +145,9 @@ def test_apply_fix_fallback_to_string_replace(tmp_path):
     )
 
     result = _apply_fix(fix, workspace_root=tmp_path)
-    assert_that(result).is_true()
-    assert_that(f.read_text()).contains("new code")
+    assert_that(result).is_false()
+    # File should remain unchanged
+    assert_that(f.read_text()).contains("old code")
 
 
 def test_apply_fix_empty_original_code(tmp_path):
@@ -183,8 +183,8 @@ def test_apply_fix_blocks_writes_outside_workspace_root(tmp_path):
     assert_that(outside_file.read_text(encoding="utf-8")).is_equal_to("x = 1\n")
 
 
-def test_apply_fix_auto_apply_skips_fallback(tmp_path):
-    """When auto_apply=True, fallback str.replace is skipped."""
+def test_apply_fix_auto_apply_fails_when_line_misses(tmp_path):
+    """With auto_apply=True, fix fails when line targeting misses."""
     f = tmp_path / "test.py"
     # File must be long enough that clamped target_idx (last line)
     # plus default search_radius (5) cannot reach line 0.
@@ -200,7 +200,7 @@ def test_apply_fix_auto_apply_skips_fallback(tmp_path):
 
     result = _apply_fix(fix, auto_apply=True, workspace_root=tmp_path)
     assert_that(result).is_false()
-    # File should be unchanged because fallback was skipped
+    # File should be unchanged
     assert_that(f.read_text()).contains("old code")
 
 
@@ -236,11 +236,13 @@ def test_apply_fixes_returns_only_successful(tmp_path):
         [
             AIFixSuggestion(
                 file=str(f),
+                line=1,
                 original_code="x = 1",
                 suggested_code="x = 2",
             ),
             AIFixSuggestion(
                 file=str(f),
+                line=1,
                 original_code="missing",
                 suggested_code="x = 3",
             ),
@@ -363,6 +365,7 @@ def test_review_fixes_interactive_accept_via_keyboard(
     fixes = [
         AIFixSuggestion(
             file=str(f),
+            line=1,
             code="E501",
             original_code="old_code",
             suggested_code="new_code",

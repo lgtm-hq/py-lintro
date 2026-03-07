@@ -11,6 +11,7 @@ Used by both ``chk`` (summaries, explanations) and ``fmt`` (fix suggestions).
 
 from lintro.ai.display.fixes import (
     render_fixes,
+    render_fixes_annotations,
     render_fixes_github,
     render_fixes_markdown,
     render_fixes_terminal,
@@ -46,6 +47,7 @@ __all__ = [
     "print_section_header",
     # Fix rendering
     "render_fixes",
+    "render_fixes_annotations",
     "render_fixes_github",
     "render_fixes_markdown",
     "render_fixes_terminal",

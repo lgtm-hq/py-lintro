@@ -320,13 +320,17 @@ def test_generate_fixes_skips_issues_without_file(mock_provider):
 
 def test_generate_fixes_respects_max_issues(tmp_path):
     """Verify that the max_issues parameter limits the number of provider calls."""
-    source = tmp_path / "test.py"
-    source.write_text("x = 1\n" * 50)
+    # Use separate files so batching does not group them
+    sources = []
+    for i in range(1, 6):
+        f = tmp_path / f"test{i}.py"
+        f.write_text("x = 1\n" * 50)
+        sources.append(f)
 
     issues = [
         MockIssue(
-            file=str(source),
-            line=i,
+            file=str(sources[i - 1]),
+            line=1,
             code="B101",
             message="test",
         )
@@ -472,13 +476,18 @@ def test_generate_fixes_skips_issue_outside_workspace_root(tmp_path):
 
 def test_concurrent_generation_with_multiple_workers(tmp_path):
     """generate_fixes with max_workers=3 exercises the ThreadPoolExecutor path."""
-    source = tmp_path / "test.py"
-    source.write_text("line1\nline2\nline3\n")
+    # Use separate files so batching does not group them,
+    # exercising the ThreadPoolExecutor path for single-issue calls.
+    sources = []
+    for i in range(1, 4):
+        f = tmp_path / f"test{i}.py"
+        f.write_text(f"line{i}\n")
+        sources.append(f)
 
     issues = [
         MockIssue(
-            file=str(source),
-            line=i,
+            file=str(sources[i - 1]),
+            line=1,
             code="B101",
             message=f"Issue {i}",
         )
@@ -519,17 +528,25 @@ def test_concurrent_generation_with_multiple_workers(tmp_path):
 
 def test_concurrent_mixed_success_and_failure(tmp_path):
     """Concurrent mode: one success, one failure -> 1 suggestion returned."""
-    source = tmp_path / "test.py"
-    source.write_text("line1\nline2\n")
+    # Use separate files so batching does not group them
+    source1 = tmp_path / "test1.py"
+    source1.write_text("line1\n")
+    source2 = tmp_path / "test2.py"
+    source2.write_text("line2\n")
 
     issues = [
         MockIssue(
-            file=str(source),
-            line=i,
+            file=str(source1),
+            line=1,
             code="B101",
-            message=f"Issue {i}",
-        )
-        for i in range(1, 3)
+            message="Issue 1",
+        ),
+        MockIssue(
+            file=str(source2),
+            line=1,
+            code="B101",
+            message="Issue 2",
+        ),
     ]
 
     responses = [
@@ -808,3 +825,356 @@ def test_no_resolution_when_cwd_is_none():
         issue.file = os.path.join(cwd, issue.file)
 
     assert_that(issue.file).is_equal_to("relative/path/file.js")
+
+
+# ---------------------------------------------------------------------------
+# P3-3: Full file context for small files
+# ---------------------------------------------------------------------------
+
+
+def test_full_file_context_for_small_file(tmp_path):
+    """Small files should send full content as context (lines 1-N)."""
+    source = tmp_path / "small.py"
+    source.write_text("x = 1\ny = 2\nz = 3\n")
+
+    issue = MockIssue(
+        file=str(source),
+        line=2,
+        code="E501",
+        message="Line too long",
+    )
+
+    provider = MockAIProvider()
+    generate_fixes(
+        [issue],
+        provider,
+        tool_name="ruff",
+        workspace_root=tmp_path,
+    )
+
+    assert_that(provider.calls).is_length(1)
+    prompt = provider.calls[0]["prompt"]
+    # Full file sent: context window should span the entire file
+    assert_that(prompt).contains("lines 1-3")
+    assert_that(prompt).contains("x = 1")
+    assert_that(prompt).contains("z = 3")
+
+
+def test_full_file_skipped_when_file_exceeds_threshold(tmp_path):
+    """Files over full_file_threshold should use windowed context."""
+    import threading
+
+    from lintro.ai.fix import _call_provider, _generate_single_fix
+    from lintro.ai.retry import with_retry
+
+    # Create a file with 50 lines but set threshold to 5
+    source = tmp_path / "big.py"
+    source.write_text("\n".join(f"line_{i}" for i in range(1, 51)) + "\n")
+
+    issue = MockIssue(
+        file=str(source),
+        line=25,
+        code="E501",
+        message="Line too long",
+    )
+
+    provider = MockAIProvider()
+    retrying_call = with_retry(max_retries=0)(_call_provider)
+
+    _generate_single_fix(
+        issue,
+        provider,
+        "ruff",
+        {},
+        threading.Lock(),
+        tmp_path,
+        2048,
+        retrying_call,
+        full_file_threshold=5,  # File has 50 lines, above threshold
+    )
+
+    assert_that(provider.calls).is_length(1)
+    prompt = provider.calls[0]["prompt"]
+    # Should NOT contain "lines 1-50" (full file); uses windowed context
+    assert_that(prompt).does_not_contain("lines 1-50")
+    # Should contain a windowed range around line 25
+    assert_that(prompt).contains("line_25")
+
+
+def test_full_file_skipped_when_over_token_budget(tmp_path):
+    """Full file that exceeds token budget should fall back to windowed context."""
+    import threading
+
+    from lintro.ai.fix import _call_provider, _generate_single_fix
+    from lintro.ai.retry import with_retry
+
+    # Create a small file but set a very tight token budget
+    source = tmp_path / "medium.py"
+    source.write_text("x = 1\ny = 2\nz = 3\n")
+
+    issue = MockIssue(
+        file=str(source),
+        line=2,
+        code="E501",
+        message="Line too long",
+    )
+
+    provider = MockAIProvider()
+    retrying_call = with_retry(max_retries=0)(_call_provider)
+
+    _generate_single_fix(
+        issue,
+        provider,
+        "ruff",
+        {},
+        threading.Lock(),
+        tmp_path,
+        2048,
+        retrying_call,
+        max_prompt_tokens=10,  # Very tight budget, full file won't fit
+    )
+
+    assert_that(provider.calls).is_length(1)
+
+
+# ---------------------------------------------------------------------------
+# P3-1: Multi-issue batching per file
+# ---------------------------------------------------------------------------
+
+
+def test_batch_prompt_for_multi_issue_file(tmp_path):
+    """Multiple issues in one file should trigger a batch prompt."""
+    source = tmp_path / "multi.py"
+    source.write_text("x = 1\ny = 2\nz = 3\n")
+
+    issues = [
+        MockIssue(
+            file=str(source),
+            line=1,
+            code="B101",
+            message="Issue one",
+        ),
+        MockIssue(
+            file=str(source),
+            line=3,
+            code="E501",
+            message="Issue two",
+        ),
+    ]
+
+    batch_response = AIResponse(
+        content=json.dumps(
+            [
+                {
+                    "line": 1,
+                    "code": "B101",
+                    "original_code": "x = 1",
+                    "suggested_code": "x = 2",
+                    "explanation": "Fix one",
+                    "confidence": "high",
+                    "risk_level": "behavioral-risk",
+                },
+                {
+                    "line": 3,
+                    "code": "E501",
+                    "original_code": "z = 3",
+                    "suggested_code": "z = 4",
+                    "explanation": "Fix two",
+                    "confidence": "medium",
+                    "risk_level": "safe-style",
+                },
+            ],
+        ),
+        model="mock",
+        input_tokens=50,
+        output_tokens=50,
+        cost_estimate=0.002,
+        provider="mock",
+    )
+    provider = MockAIProvider(responses=[batch_response])
+
+    result = generate_fixes(
+        issues,
+        provider,
+        tool_name="ruff",
+        workspace_root=tmp_path,
+    )
+
+    # Only 1 provider call (the batch), not 2 single calls
+    assert_that(provider.calls).is_length(1)
+    prompt = provider.calls[0]["prompt"]
+    assert_that(prompt).contains("Issue one")
+    assert_that(prompt).contains("Issue two")
+    assert_that(prompt).contains("JSON array")
+
+    assert_that(result).is_length(2)
+    assert_that(result[0].line).is_equal_to(1)
+    assert_that(result[1].line).is_equal_to(3)
+    assert_that(result[0].tool_name).is_equal_to("ruff")
+
+
+def test_batch_fallback_to_single_on_parse_failure(tmp_path):
+    """Failed batch parse falls back to single-issue mode."""
+    source = tmp_path / "multi.py"
+    source.write_text("x = 1\ny = 2\n")
+
+    issues = [
+        MockIssue(
+            file=str(source),
+            line=1,
+            code="B101",
+            message="Issue one",
+        ),
+        MockIssue(
+            file=str(source),
+            line=2,
+            code="E501",
+            message="Issue two",
+        ),
+    ]
+
+    # First response (batch) is invalid, subsequent ones are valid single fixes
+    responses = [
+        AIResponse(
+            content="not-a-json-array",
+            model="mock",
+            input_tokens=10,
+            output_tokens=10,
+            cost_estimate=0.001,
+            provider="mock",
+        ),
+        AIResponse(
+            content=json.dumps(
+                {
+                    "original_code": "x = 1",
+                    "suggested_code": "x = 2",
+                    "explanation": "Fix one",
+                    "confidence": "high",
+                },
+            ),
+            model="mock",
+            input_tokens=10,
+            output_tokens=10,
+            cost_estimate=0.001,
+            provider="mock",
+        ),
+        AIResponse(
+            content=json.dumps(
+                {
+                    "original_code": "y = 2",
+                    "suggested_code": "y = 3",
+                    "explanation": "Fix two",
+                    "confidence": "high",
+                },
+            ),
+            model="mock",
+            input_tokens=10,
+            output_tokens=10,
+            cost_estimate=0.001,
+            provider="mock",
+        ),
+    ]
+    provider = MockAIProvider(responses=responses)
+
+    result = generate_fixes(
+        issues,
+        provider,
+        tool_name="ruff",
+        workspace_root=tmp_path,
+    )
+
+    # 1 batch call + 2 single fallback calls = 3
+    assert_that(provider.calls).is_length(3)
+    assert_that(result).is_length(2)
+
+
+def test_single_issue_file_not_batched(tmp_path):
+    """A file with only 1 issue should use the single-issue path."""
+    source = tmp_path / "single.py"
+    source.write_text("x = 1\n")
+
+    issue = MockIssue(
+        file=str(source),
+        line=1,
+        code="B101",
+        message="test",
+    )
+
+    provider = MockAIProvider()
+    generate_fixes(
+        [issue],
+        provider,
+        tool_name="ruff",
+        workspace_root=tmp_path,
+    )
+
+    assert_that(provider.calls).is_length(1)
+    prompt = provider.calls[0]["prompt"]
+    # Single-issue prompt, not batch
+    assert_that(prompt).does_not_contain("JSON array")
+    assert_that(prompt).contains("Error code: B101")
+
+
+# ---------------------------------------------------------------------------
+# _parse_batch_response
+# ---------------------------------------------------------------------------
+
+
+def test_parse_batch_response_valid():
+    """Valid batch JSON array is parsed into suggestions."""
+    from lintro.ai.fix import _parse_batch_response
+
+    content = json.dumps(
+        [
+            {
+                "line": 5,
+                "code": "E501",
+                "original_code": "old",
+                "suggested_code": "new",
+                "explanation": "Fix",
+                "confidence": "high",
+                "risk_level": "safe-style",
+            },
+        ],
+    )
+    result = _parse_batch_response(content, "test.py")
+    assert_that(result).is_length(1)
+    assert_that(result[0].line).is_equal_to(5)
+    assert_that(result[0].code).is_equal_to("E501")
+    assert_that(result[0].risk_level).is_equal_to("safe-style")
+
+
+def test_parse_batch_response_invalid_json():
+    """Invalid JSON returns empty list."""
+    from lintro.ai.fix import _parse_batch_response
+
+    result = _parse_batch_response("not json", "test.py")
+    assert_that(result).is_empty()
+
+
+def test_parse_batch_response_not_array():
+    """Non-array JSON returns empty list."""
+    from lintro.ai.fix import _parse_batch_response
+
+    result = _parse_batch_response('{"key": "value"}', "test.py")
+    assert_that(result).is_empty()
+
+
+def test_parse_batch_response_skips_identical_code():
+    """Items with identical original and suggested code are skipped."""
+    from lintro.ai.fix import _parse_batch_response
+
+    content = json.dumps(
+        [
+            {
+                "line": 1,
+                "code": "E501",
+                "original_code": "same",
+                "suggested_code": "same",
+                "explanation": "No change",
+                "confidence": "high",
+            },
+        ],
+    )
+    result = _parse_batch_response(content, "test.py")
+    assert_that(result).is_empty()
