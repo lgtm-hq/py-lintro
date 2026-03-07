@@ -150,7 +150,10 @@ def test_install_node_deps_returns_success_when_deps_already_installed(
 def test_install_node_deps_returns_failure_when_cwd_not_writable(
     tmp_path: Path,
 ) -> None:
-    """Return failure when directory is not writable (PermissionError from should_install_deps)."""
+    """Return failure when directory is not writable.
+
+    PermissionError from should_install_deps.
+    """
     (tmp_path / "package.json").write_text("{}")
 
     with patch("lintro.utils.node_deps.os.access", return_value=False):

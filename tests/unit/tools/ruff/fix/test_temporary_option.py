@@ -55,10 +55,14 @@ def test_temporary_option_restores_on_exception(
     """
     mock_ruff_tool.options = {"key": "original"}
 
-    with pytest.raises(ValueError):
-        with _temporary_option(mock_ruff_tool, "key", "temporary"):
-            assert_that(mock_ruff_tool.options["key"]).is_equal_to("temporary")
-            raise ValueError("Test exception")
+    with (
+        pytest.raises(ValueError),
+        _temporary_option(mock_ruff_tool, "key", "temporary"),
+    ):
+        assert_that(mock_ruff_tool.options["key"]).is_equal_to(
+            "temporary",
+        )
+        raise ValueError("Test exception")
 
     assert_that(mock_ruff_tool.options["key"]).is_equal_to("original")
 

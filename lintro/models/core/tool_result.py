@@ -31,6 +31,10 @@ class ToolResult:
 
     The ``issues`` field can contain parsed issue objects (tool-specific) to
     support unified table formatting.
+
+    Convention: for FIX action, remaining issues occupy the tail of the
+    ``issues`` list. Tools append all detected issues in order, so the
+    last ``remaining_issues_count`` entries are the ones still unfixed.
     """
 
     name: str = field(default="")
@@ -47,6 +51,13 @@ class ToolResult:
 
     # Optional pytest-specific summary data for display
     pytest_summary: dict[str, Any] | None = field(default=None)
+
+    # Optional AI-generated metadata (explanations, fix suggestions)
+    ai_metadata: dict[str, Any] | None = field(default=None)
+
+    # Working directory used during tool execution (for resolving relative
+    # issue file paths in AI fix generation)
+    cwd: str | None = field(default=None)
 
     # Skip tracking for tools that didn't execute
     skipped: bool = field(default=False)

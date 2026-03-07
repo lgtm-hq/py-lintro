@@ -32,14 +32,16 @@ def mock_run_lint_tools_simple() -> Generator[MagicMock, None, None]:
     Yields:
         MagicMock: A MagicMock instance for the mocked function.
     """
-    with patch("lintro.cli_utils.commands.check.run_lint_tools_simple") as mock_check:
-        with patch(
+    with (
+        patch("lintro.cli_utils.commands.check.run_lint_tools_simple") as mock_check,
+        patch(
             "lintro.cli_utils.commands.format.run_lint_tools_simple",
-        ) as mock_format:
-            # Configure both mocks to return 0 by default
-            mock_check.return_value = EXIT_SUCCESS
-            mock_format.return_value = EXIT_SUCCESS
-            yield mock_check
+        ) as mock_format,
+    ):
+        # Configure both mocks to return 0 by default
+        mock_check.return_value = EXIT_SUCCESS
+        mock_format.return_value = EXIT_SUCCESS
+        yield mock_check
 
 
 @pytest.fixture

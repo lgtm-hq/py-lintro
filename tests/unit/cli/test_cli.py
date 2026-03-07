@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 from unittest.mock import patch
 
 import pytest
@@ -68,10 +69,8 @@ def test_main_entry_point() -> None:
     with patch("lintro.cli.cli") as mock_cli:
         mock_cli.return_value = None
         # main() calls cli() which is a Click command
-        try:
+        with contextlib.suppress(SystemExit):
             main()
-        except SystemExit:
-            pass  # Click may raise SystemExit
         mock_cli.assert_called_once()
 
 
@@ -246,17 +245,19 @@ def test_lintro_group_invoke_normalizes_comma_separated_commands() -> None:
     """Verify comma-separated commands are normalized."""
     runner = CliRunner()
     # This tests the parsing logic - actual execution would require mocking
-    with patch("lintro.cli_utils.commands.check.run_lint_tools_simple") as mock_check:
-        with patch(
+    with (
+        patch("lintro.cli_utils.commands.check.run_lint_tools_simple") as mock_check,
+        patch(
             "lintro.cli_utils.commands.format.run_lint_tools_simple",
-        ) as mock_fmt:
-            mock_check.return_value = 0
-            mock_fmt.return_value = 0
-            # Test comma-separated command detection
-            runner.invoke(cli, ["fmt", ",", "chk"])
-            # Both commands should have been invoked for chained execution
-            assert_that(mock_fmt.called).is_true()
-            assert_that(mock_check.called).is_true()
+        ) as mock_fmt,
+    ):
+        mock_check.return_value = 0
+        mock_fmt.return_value = 0
+        # Test comma-separated command detection
+        runner.invoke(cli, ["fmt", ",", "chk"])
+        # Both commands should have been invoked for chained execution
+        assert_that(mock_fmt.called).is_true()
+        assert_that(mock_check.called).is_true()
 
 
 def test_lintro_group_invoke_single_command() -> None:
@@ -281,11 +282,13 @@ def test_lintro_group_invoke_handles_keyboard_interrupt() -> None:
 def test_lintro_group_invoke_aggregates_exit_codes() -> None:
     """Verify chained commands aggregate exit codes (max)."""
     runner = CliRunner()
-    with patch("lintro.cli_utils.commands.format.run_lint_tools_simple") as mock_fmt:
-        with patch("lintro.cli_utils.commands.check.run_lint_tools_simple") as mock_chk:
-            # First command succeeds, second fails
-            mock_fmt.return_value = 0
-            mock_chk.return_value = 1
-            result = runner.invoke(cli, ["fmt", ",", "chk"])
-            # Result should be max of exit codes
-            assert_that(result.exit_code).is_equal_to(1)
+    with (
+        patch("lintro.cli_utils.commands.format.run_lint_tools_simple") as mock_fmt,
+        patch("lintro.cli_utils.commands.check.run_lint_tools_simple") as mock_chk,
+    ):
+        # First command succeeds, second fails
+        mock_fmt.return_value = 0
+        mock_chk.return_value = 1
+        result = runner.invoke(cli, ["fmt", ",", "chk"])
+        # Result should be max of exit codes
+        assert_that(result.exit_code).is_equal_to(1)

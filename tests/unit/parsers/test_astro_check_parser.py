@@ -16,7 +16,10 @@ def test_parse_astro_check_output_empty() -> None:
 
 def test_parse_astro_check_output_single_error() -> None:
     """Parse a single astro check error from text output."""
-    output = "src/pages/index.astro:10:5 - error ts2322: Type 'string' is not assignable to type 'number'."
+    output = (
+        "src/pages/index.astro:10:5 - error ts2322: "
+        "Type 'string' is not assignable to type 'number'."
+    )
     issues = parse_astro_check_output(output)
 
     assert_that(issues).is_length(1)
@@ -30,9 +33,14 @@ def test_parse_astro_check_output_single_error() -> None:
 
 def test_parse_astro_check_output_multiple_errors() -> None:
     """Parse multiple errors from astro check output."""
-    output = """src/pages/index.astro:10:5 - error ts2322: Type 'string' is not assignable to type 'number'.
-src/pages/about.astro:15:10 - error ts2339: Property 'foo' does not exist on type 'Bar'.
-src/components/Card.astro:3:1 - warning ts6133: 'x' is declared but its value is never read."""
+    output = (
+        "src/pages/index.astro:10:5 - error ts2322:"
+        " Type 'string' is not assignable to type 'number'.\n"
+        "src/pages/about.astro:15:10 - error ts2339:"
+        " Property 'foo' does not exist on type 'Bar'.\n"
+        "src/components/Card.astro:3:1 - warning ts6133:"
+        " 'x' is declared but its value is never read."
+    )
     issues = parse_astro_check_output(output)
 
     assert_that(issues).is_length(3)
@@ -44,7 +52,10 @@ src/components/Card.astro:3:1 - warning ts6133: 'x' is declared but its value is
 
 def test_parse_astro_check_output_tsc_style() -> None:
     """Parse tsc-style output format (parentheses)."""
-    output = "src/pages/index.astro(10,5): error TS2322: Type 'string' is not assignable to type 'number'."
+    output = (
+        "src/pages/index.astro(10,5): error TS2322:"
+        " Type 'string' is not assignable to type 'number'."
+    )
     issues = parse_astro_check_output(output)
 
     assert_that(issues).is_length(1)
@@ -146,7 +157,8 @@ def test_parse_astro_check_output_skips_timestamps_keeps_real_errors() -> None:
         "16:25:27 [content] Synced content\n"
         "16:25:27 [types] Generated 836ms\n"
         "16:25:27 [check] Getting diagnostics for Astro files in /code...\n"
-        "src/pages/index.astro:10:5 - error ts2322: Type 'string' is not assignable to type 'number'.\n"
+        "src/pages/index.astro:10:5 - error ts2322: "
+        "Type 'string' is not assignable to type 'number'.\n"
         "Result (52 files):\n"
         "- 1 error\n"
         "- 0 warnings\n"

@@ -40,8 +40,15 @@ COPY pyproject.toml uv.lock package.json /app/
 # Copy full source
 COPY lintro/ /app/lintro/
 
-# Install Python dependencies
-RUN uv sync --dev --extra tools --no-progress && (uv cache clean || true)
+# Build argument: set WITH_AI=true to include AI provider dependencies
+ARG WITH_AI=false
+
+# Install Python dependencies (conditionally include AI extras)
+RUN if [ "$WITH_AI" = "true" ]; then \
+      uv sync --dev --extra tools --extra ai --no-progress; \
+    else \
+      uv sync --dev --extra tools --no-progress; \
+    fi && (uv cache clean || true)
 
 # Install gosu for secure privilege dropping in the entrypoint
 # hadolint ignore=DL3008

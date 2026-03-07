@@ -1,7 +1,8 @@
 """Integration tests for Prettier tool definition.
 
 These tests require prettier to be installed (npm install -g prettier).
-They verify the PrettierPlugin definition, check command, fix command, and set_options method.
+They verify the PrettierPlugin definition, check command, fix command, and
+set_options method.
 """
 
 from __future__ import annotations

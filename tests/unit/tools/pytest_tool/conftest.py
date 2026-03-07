@@ -272,12 +272,23 @@ def mock_test_junit_xml_success() -> str:
     Returns:
         A JUnit XML string representing successful pytest results.
     """
-    return """<?xml version="1.0" encoding="utf-8"?>
-<testsuite name="pytest" tests="2" errors="0" failures="0" skipped="0" time="0.08">
-    <testcase classname="tests.test_example" name="test_success" file="tests/test_example.py" line="10" time="0.05"/>
-    <testcase classname="tests.test_example" name="test_another" file="tests/test_example.py" line="20" time="0.03"/>
-</testsuite>
-"""
+    return (
+        '<?xml version="1.0" encoding="utf-8"?>\n'
+        "<testsuite"
+        ' name="pytest" tests="2" errors="0"'
+        ' failures="0" skipped="0" time="0.08">\n'
+        "    <testcase"
+        ' classname="tests.test_example"'
+        ' name="test_success"'
+        ' file="tests/test_example.py"'
+        ' line="10" time="0.05"/>\n'
+        "    <testcase"
+        ' classname="tests.test_example"'
+        ' name="test_another"'
+        ' file="tests/test_example.py"'
+        ' line="20" time="0.03"/>\n'
+        "</testsuite>\n"
+    )
 
 
 @pytest.fixture
@@ -287,14 +298,28 @@ def mock_test_junit_xml_failure() -> str:
     Returns:
         A JUnit XML string representing failed pytest results.
     """
-    return """<?xml version="1.0" encoding="utf-8"?>
-<testsuite name="pytest" tests="2" errors="0" failures="1" skipped="0" time="0.08">
-    <testcase classname="tests.test_example" name="test_failure" file="tests/test_example.py" line="10" time="0.05">
-        <failure message="AssertionError: assert 1 == 2">AssertionError: assert 1 == 2</failure>
-    </testcase>
-    <testcase classname="tests.test_example" name="test_success" file="tests/test_example.py" line="20" time="0.03"/>
-</testsuite>
-"""
+    return (
+        '<?xml version="1.0" encoding="utf-8"?>\n'
+        "<testsuite"
+        ' name="pytest" tests="2" errors="0"'
+        ' failures="1" skipped="0" time="0.08">\n'
+        "    <testcase"
+        ' classname="tests.test_example"'
+        ' name="test_failure"'
+        ' file="tests/test_example.py"'
+        ' line="10" time="0.05">\n'
+        "        <failure"
+        ' message="AssertionError: assert 1 == 2">'
+        "AssertionError: assert 1 == 2"
+        "</failure>\n"
+        "    </testcase>\n"
+        "    <testcase"
+        ' classname="tests.test_example"'
+        ' name="test_success"'
+        ' file="tests/test_example.py"'
+        ' line="20" time="0.03"/>\n'
+        "</testsuite>\n"
+    )
 
 
 @pytest.fixture
@@ -304,20 +329,48 @@ def mock_test_junit_xml_mixed() -> str:
     Returns:
         A JUnit XML string representing mixed pytest results.
     """
-    return """<?xml version="1.0" encoding="utf-8"?>
-<testsuite name="pytest" tests="4" errors="1" failures="1" skipped="1" time="0.10">
-    <testcase classname="tests.test_example" name="test_failure" file="tests/test_example.py" line="10" time="0.05">
-        <failure message="AssertionError: assert 1 == 2">AssertionError: assert 1 == 2</failure>
-    </testcase>
-    <testcase classname="tests.test_example" name="test_error" file="tests/test_example.py" line="20" time="0.02">
-        <error message="RuntimeError: Something went wrong">RuntimeError: Something went wrong</error>
-    </testcase>
-    <testcase classname="tests.test_example" name="test_skipped" file="tests/test_example.py" line="30" time="0.0">
-        <skipped message="Not implemented yet">Not implemented yet</skipped>
-    </testcase>
-    <testcase classname="tests.test_example" name="test_success" file="tests/test_example.py" line="40" time="0.03"/>
-</testsuite>
-"""
+    return (
+        '<?xml version="1.0" encoding="utf-8"?>\n'
+        "<testsuite"
+        ' name="pytest" tests="4" errors="1"'
+        ' failures="1" skipped="1" time="0.10">\n'
+        "    <testcase"
+        ' classname="tests.test_example"'
+        ' name="test_failure"'
+        ' file="tests/test_example.py"'
+        ' line="10" time="0.05">\n'
+        "        <failure"
+        ' message="AssertionError: assert 1 == 2">'
+        "AssertionError: assert 1 == 2"
+        "</failure>\n"
+        "    </testcase>\n"
+        "    <testcase"
+        ' classname="tests.test_example"'
+        ' name="test_error"'
+        ' file="tests/test_example.py"'
+        ' line="20" time="0.02">\n'
+        "        <error"
+        ' message="RuntimeError: Something went wrong">'
+        "RuntimeError: Something went wrong"
+        "</error>\n"
+        "    </testcase>\n"
+        "    <testcase"
+        ' classname="tests.test_example"'
+        ' name="test_skipped"'
+        ' file="tests/test_example.py"'
+        ' line="30" time="0.0">\n'
+        "        <skipped"
+        ' message="Not implemented yet">'
+        "Not implemented yet"
+        "</skipped>\n"
+        "    </testcase>\n"
+        "    <testcase"
+        ' classname="tests.test_example"'
+        ' name="test_success"'
+        ' file="tests/test_example.py"'
+        ' line="40" time="0.03"/>\n'
+        "</testsuite>\n"
+    )
 
 
 @pytest.fixture
