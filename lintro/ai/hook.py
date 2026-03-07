@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING
 
 from loguru import logger
 
+from lintro.ai.models import AIResult
 from lintro.enums.action import Action
 
 if TYPE_CHECKING:
@@ -58,7 +59,7 @@ class AIPostExecutionHook:
         *,
         console_logger: ThreadSafeConsoleLogger,
         output_format: str,
-    ) -> None:
+    ) -> AIResult:
         """Run AI enhancement on tool results.
 
         Args:
@@ -66,11 +67,14 @@ class AIPostExecutionHook:
             all_results: Results from all tools.
             console_logger: Logger for console output.
             output_format: Output format string.
+
+        Returns:
+            AIResult with structured outcome data.
         """
         try:
             from lintro.ai.orchestrator import run_ai_enhancement
 
-            run_ai_enhancement(
+            return run_ai_enhancement(
                 action=action,
                 all_results=all_results,
                 lintro_config=self._lintro_config,
@@ -81,3 +85,4 @@ class AIPostExecutionHook:
         except Exception as e:
             logger.debug(f"AI post-execution hook failed: {e}", exc_info=True)
             console_logger.warning(f"AI enhancement unavailable: {e}")
+            return AIResult(error=True)

@@ -566,8 +566,9 @@ def run_lint_tools_simple(
     from lintro.ai.hook import AIPostExecutionHook
 
     ai_hook = AIPostExecutionHook(lintro_config, ai_fix=effective_ai_fix)
+    ai_result = None
     if ai_hook.should_run(action):
-        ai_hook.execute(
+        ai_result = ai_hook.execute(
             action,
             all_results,
             console_logger=logger,
@@ -589,6 +590,14 @@ def run_lint_tools_simple(
             main_phase_empty_due_to_filter=main_phase_empty_due_to_filter,
         ),
     )
+
+    # AI-driven exit code adjustments
+    if ai_result is not None:
+        ai_config = lintro_config.ai
+        if ai_config.fail_on_unfixed and ai_result.unfixed_issues > 0:
+            final_exit_code = 1
+        if ai_config.fail_on_ai_error and ai_result.error:
+            final_exit_code = 1
 
     # Display results
     if all_results:

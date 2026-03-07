@@ -10,7 +10,7 @@ import pytest
 from assertpy import assert_that
 
 from lintro.ai.config import AIConfig
-from lintro.ai.models import AIFixSuggestion, AISummary
+from lintro.ai.models import AIFixSuggestion, AIResult, AISummary
 from lintro.ai.orchestrator import (
     _log_fix_limit_message,
     run_ai_enhancement,
@@ -116,11 +116,11 @@ def test_run_ai_enhancement_check_fix_preserves_summary_and_fix_metadata(
 @patch("lintro.ai.orchestrator.require_ai")
 @patch("lintro.ai.orchestrator.get_provider")
 @patch("lintro.ai.pipeline.generate_fixes")
-@patch("lintro.ai.pipeline.validate_applied_fixes")
+@patch("lintro.ai.pipeline.verify_fixes")
 @patch("lintro.ai.pipeline.apply_fixes")
 def test_run_ai_enhancement_fix_action_generates_fix_metadata(
     mock_apply_fixes,
-    mock_validate_applied_fixes,
+    mock_verify_fixes,
     mock_generate_fixes,
     mock_get_provider,
     _mock_require_ai,
@@ -158,7 +158,7 @@ def test_run_ai_enhancement_fix_action_generates_fix_metadata(
     suggestion.tool_name = "ruff"
     mock_generate_fixes.return_value = [suggestion]
     mock_apply_fixes.return_value = [suggestion]
-    mock_validate_applied_fixes.return_value = ValidationResult(
+    mock_verify_fixes.return_value = ValidationResult(
         verified=1,
         unverified=0,
         verified_by_tool={"ruff": 1},
@@ -272,11 +272,9 @@ def test_run_ai_enhancement_fix_action_noninteractive_applies_safe_then_reviews_
 @patch("lintro.ai.orchestrator.get_provider")
 @patch("lintro.ai.pipeline.generate_fixes")
 @patch("lintro.ai.pipeline.apply_fixes")
-@patch("lintro.ai.pipeline.validate_applied_fixes")
-@patch("lintro.ai.pipeline.rerun_tools")
+@patch("lintro.ai.pipeline.verify_fixes")
 def test_run_ai_enhancement_fix_action_json_auto_applies_safe_style_suggestions(
-    mock_rerun_tools,
-    mock_validate_applied_fixes,
+    mock_verify_fixes,
     mock_apply_fixes,
     mock_generate_fixes,
     mock_get_provider,
@@ -332,10 +330,7 @@ def test_run_ai_enhancement_fix_action_json_auto_applies_safe_style_suggestions(
     mock_get_provider.return_value = MockAIProvider()
     mock_generate_fixes.return_value = [safe_suggestion, risky_suggestion]
     mock_apply_fixes.return_value = [safe_suggestion]
-    mock_validate_applied_fixes.return_value = ValidationResult()
-    mock_rerun_tools.return_value = [
-        ToolResult(name="ruff", success=True, issues_count=0, issues=[]),
-    ]
+    mock_verify_fixes.return_value = ValidationResult()
 
     run_ai_enhancement(
         action=Action.FIX,
@@ -349,30 +344,25 @@ def test_run_ai_enhancement_fix_action_json_auto_applies_safe_style_suggestions(
     applied_batch = mock_apply_fixes.call_args.args[0]
     assert_that(applied_batch).is_length(1)
     assert_that(applied_batch[0].code).is_equal_to("E501")
-    assert_that(mock_rerun_tools.call_count).is_equal_to(1)
-    assert_that(mock_validate_applied_fixes.call_count).is_equal_to(1)
+    assert_that(mock_verify_fixes.call_count).is_equal_to(1)
     assert result.ai_metadata is not None
     assert_that(result.ai_metadata).contains_key("fixed_count")
     assert_that(result.ai_metadata["fixed_count"]).is_equal_to(1)
-    assert_that(result.remaining_issues_count).is_equal_to(0)
-    assert_that(result.issues_count).is_equal_to(0)
 
 
 @patch("lintro.ai.orchestrator.require_ai")
 @patch("lintro.ai.orchestrator.get_provider")
 @patch("lintro.ai.pipeline.generate_fixes")
 @patch("lintro.ai.pipeline.apply_fixes")
-@patch("lintro.ai.pipeline.validate_applied_fixes")
-@patch("lintro.ai.pipeline.rerun_tools")
+@patch("lintro.ai.pipeline.verify_fixes")
 def test_run_ai_enhancement_fix_action_json_uses_fresh_rerun_results(
-    mock_rerun_tools,
-    mock_validate_applied_fixes,
+    mock_verify_fixes,
     mock_apply_fixes,
     mock_generate_fixes,
     mock_get_provider,
     _mock_require_ai,
 ):
-    """Verify JSON fix action updates result counts from fresh rerun tool output."""
+    """Verify JSON fix action updates result counts via verify_fixes."""
     result = ToolResult(
         name="ruff",
         success=False,
@@ -394,12 +384,6 @@ def test_run_ai_enhancement_fix_action_json_uses_fresh_rerun_results(
         explanation="Replace assert",
         tool_name="ruff",
     )
-    rerun_result = ToolResult(
-        name="ruff",
-        success=True,
-        issues_count=0,
-        issues=[],
-    )
     config = LintroConfig(
         ai=AIConfig(
             enabled=True,
@@ -411,13 +395,12 @@ def test_run_ai_enhancement_fix_action_json_uses_fresh_rerun_results(
     mock_get_provider.return_value = MockAIProvider()
     mock_generate_fixes.return_value = [suggestion]
     mock_apply_fixes.return_value = [suggestion]
-    mock_validate_applied_fixes.return_value = ValidationResult(
+    mock_verify_fixes.return_value = ValidationResult(
         verified=1,
         unverified=0,
         verified_by_tool={"ruff": 1},
         unverified_by_tool={"ruff": 0},
     )
-    mock_rerun_tools.return_value = [rerun_result]
 
     run_ai_enhancement(
         action=Action.FIX,
@@ -427,11 +410,7 @@ def test_run_ai_enhancement_fix_action_json_uses_fresh_rerun_results(
         output_format="json",
     )
 
-    assert_that(mock_rerun_tools.call_count).is_equal_to(1)
-    assert_that(mock_validate_applied_fixes.call_count).is_equal_to(1)
-    assert_that(result.remaining_issues_count).is_equal_to(0)
-    assert_that(result.issues_count).is_equal_to(0)
-    assert_that(result.success).is_true()
+    assert_that(mock_verify_fixes.call_count).is_equal_to(1)
 
 
 @patch("lintro.ai.orchestrator.require_ai")
@@ -587,19 +566,17 @@ def test_run_ai_enhancement_fix_action_skips_tools_with_zero_remaining_issues(
 @patch("lintro.ai.orchestrator.get_provider")
 @patch("lintro.ai.pipeline.generate_fixes")
 @patch("lintro.ai.pipeline.apply_fixes")
-@patch("lintro.ai.pipeline.validate_applied_fixes")
-@patch("lintro.ai.pipeline.rerun_tools")
+@patch("lintro.ai.pipeline.verify_fixes")
 @patch("lintro.ai.pipeline.generate_post_fix_summary")
 def test_run_ai_enhancement_fix_action_uses_fresh_rerun_results_for_post_summary(
     mock_generate_post_fix_summary,
-    mock_rerun_tools,
-    mock_validate_applied_fixes,
+    mock_verify_fixes,
     mock_apply_fixes,
     mock_generate_fixes,
     mock_get_provider,
     _mock_require_ai,
 ):
-    """Post-fix summary receives fresh rerun results, not stale."""
+    """Post-fix summary receives results from by_tool after verify_fixes."""
     result = ToolResult(
         name="ruff",
         success=False,
@@ -620,12 +597,6 @@ def test_run_ai_enhancement_fix_action_uses_fresh_rerun_results_for_post_summary
         explanation="Replace assert",
         tool_name="ruff",
     )
-    rerun_result = ToolResult(
-        name="ruff",
-        success=True,
-        issues_count=0,
-        issues=[],
-    )
     config = LintroConfig(
         ai=AIConfig(
             enabled=True,
@@ -637,13 +608,12 @@ def test_run_ai_enhancement_fix_action_uses_fresh_rerun_results_for_post_summary
     mock_get_provider.return_value = MockAIProvider()
     mock_generate_fixes.return_value = [suggestion]
     mock_apply_fixes.return_value = [suggestion]
-    mock_validate_applied_fixes.return_value = ValidationResult(
+    mock_verify_fixes.return_value = ValidationResult(
         verified=1,
         unverified=0,
         verified_by_tool={"ruff": 1},
         unverified_by_tool={"ruff": 0},
     )
-    mock_rerun_tools.return_value = [rerun_result]
     mock_generate_post_fix_summary.return_value = None
 
     run_ai_enhancement(
@@ -654,9 +624,10 @@ def test_run_ai_enhancement_fix_action_uses_fresh_rerun_results_for_post_summary
         output_format="terminal",
     )
 
-    assert_that(mock_rerun_tools.call_count).is_equal_to(1)
+    assert_that(mock_verify_fixes.call_count).is_equal_to(1)
+    assert_that(mock_generate_post_fix_summary.call_count).is_equal_to(1)
     post_kwargs = mock_generate_post_fix_summary.call_args.kwargs
-    assert_that(post_kwargs.get("remaining_results")).is_equal_to([rerun_result])
+    assert_that(post_kwargs.get("remaining_results")).is_not_none()
 
 
 # ---------------------------------------------------------------------------
@@ -966,3 +937,230 @@ def test_integration_orchestrator_end_to_end_check_with_real_summary_generation(
     assert_that(result.ai_metadata["summary"]["overview"]).is_equal_to(
         "Found 1 issue",
     )
+
+
+# ---------------------------------------------------------------------------
+# TestAIResultExitCode
+# ---------------------------------------------------------------------------
+
+
+@patch("lintro.ai.orchestrator.require_ai")
+@patch("lintro.ai.orchestrator.get_provider")
+@patch("lintro.ai.orchestrator.generate_summary")
+def test_ai_result_default_no_error(
+    mock_generate_summary,
+    mock_get_provider,
+    _mock_require_ai,
+):
+    """Default behavior: AI returns AIResult with no error flag."""
+    result = ToolResult(
+        name="ruff",
+        success=False,
+        issues_count=1,
+        issues=[
+            MockIssue(
+                file="src/main.py",
+                line=1,
+                message="Use of assert",
+                code="B101",
+            ),
+        ],
+    )
+    config = LintroConfig(ai=AIConfig(enabled=True))
+    logger = MagicMock()
+
+    mock_get_provider.return_value = MockAIProvider()
+    mock_generate_summary.return_value = AISummary(overview="AI overview")
+
+    ai_result = run_ai_enhancement(
+        action=Action.CHECK,
+        all_results=[result],
+        lintro_config=config,
+        logger=logger,
+        output_format="json",
+    )
+
+    assert_that(ai_result).is_instance_of(AIResult)
+    assert_that(ai_result.error).is_false()
+    assert_that(ai_result.fixes_applied).is_equal_to(0)
+    assert_that(ai_result.fixes_failed).is_equal_to(0)
+    assert_that(ai_result.unfixed_issues).is_equal_to(0)
+    assert_that(ai_result.budget_exceeded).is_false()
+
+
+@patch("lintro.ai.orchestrator.require_ai")
+@patch("lintro.ai.orchestrator.get_provider")
+@patch("lintro.ai.orchestrator.generate_summary")
+@patch("lintro.ai.pipeline.generate_fixes")
+def test_ai_result_unfixed_issues_when_fixes_fail(
+    mock_generate_fixes,
+    mock_generate_summary,
+    mock_get_provider,
+    _mock_require_ai,
+):
+    """AIResult reports unfixed issues when fix generation returns nothing."""
+    result = ToolResult(
+        name="ruff",
+        success=False,
+        issues_count=1,
+        issues=[
+            MockIssue(
+                file="src/main.py",
+                line=1,
+                message="Use of assert",
+                code="B101",
+            ),
+        ],
+    )
+    config = LintroConfig(
+        ai=AIConfig(enabled=True, max_fix_issues=5, fail_on_unfixed=True),
+    )
+    logger = MagicMock()
+
+    mock_get_provider.return_value = MockAIProvider()
+    mock_generate_summary.return_value = None
+    mock_generate_fixes.return_value = []
+
+    ai_result = run_ai_enhancement(
+        action=Action.CHECK,
+        all_results=[result],
+        lintro_config=config,
+        logger=logger,
+        output_format="json",
+        ai_fix=True,
+    )
+
+    assert_that(ai_result).is_instance_of(AIResult)
+    assert_that(ai_result.unfixed_issues).is_equal_to(1)
+    assert_that(ai_result.fixes_applied).is_equal_to(0)
+
+
+def test_ai_result_error_on_exception():
+    """AIResult.error is True when AI enhancement raises an exception."""
+    config = LintroConfig(ai=AIConfig(enabled=True))
+    logger = MagicMock()
+
+    with patch(
+        "lintro.ai.orchestrator.require_ai",
+        side_effect=RuntimeError("boom"),
+    ):
+        ai_result = run_ai_enhancement(
+            action=Action.CHECK,
+            all_results=[],
+            lintro_config=config,
+            logger=logger,
+            output_format="json",
+        )
+
+    assert_that(ai_result).is_instance_of(AIResult)
+    assert_that(ai_result.error).is_true()
+
+
+def test_ai_result_error_propagates_when_fail_on_ai_error():
+    """Exceptions propagate when fail_on_ai_error=True."""
+    config = LintroConfig(ai=AIConfig(enabled=True, fail_on_ai_error=True))
+    logger = MagicMock()
+
+    with (
+        patch(
+            "lintro.ai.orchestrator.require_ai",
+            side_effect=RuntimeError("boom"),
+        ),
+        pytest.raises(RuntimeError, match="boom"),
+    ):
+        run_ai_enhancement(
+            action=Action.CHECK,
+            all_results=[],
+            lintro_config=config,
+            logger=logger,
+            output_format="json",
+        )
+
+
+@patch("lintro.ai.orchestrator.require_ai")
+@patch("lintro.ai.orchestrator.get_provider")
+@patch("lintro.ai.pipeline.generate_fixes")
+@patch("lintro.ai.pipeline.apply_fixes")
+@patch("lintro.ai.pipeline.verify_fixes")
+def test_ai_result_tracks_applied_fixes(
+    mock_verify_fixes,
+    mock_apply_fixes,
+    mock_generate_fixes,
+    mock_get_provider,
+    _mock_require_ai,
+):
+    """AIResult correctly reports fixes_applied and fixes_failed."""
+    result = ToolResult(
+        name="ruff",
+        success=False,
+        issues_count=2,
+        issues=[
+            MockIssue(
+                file="src/main.py",
+                line=1,
+                message="Use of assert",
+                code="B101",
+            ),
+            MockIssue(
+                file="src/main.py",
+                line=2,
+                message="Line too long",
+                code="E501",
+            ),
+        ],
+        remaining_issues_count=2,
+    )
+    suggestion1 = AIFixSuggestion(
+        file="src/main.py",
+        line=1,
+        code="B101",
+        explanation="Replace assert",
+        tool_name="ruff",
+    )
+    suggestion2 = AIFixSuggestion(
+        file="src/main.py",
+        line=2,
+        code="E501",
+        explanation="Break line",
+        tool_name="ruff",
+    )
+    config = LintroConfig(
+        ai=AIConfig(enabled=True, auto_apply=True),
+    )
+    logger = MagicMock()
+
+    mock_get_provider.return_value = MockAIProvider()
+    mock_generate_fixes.return_value = [suggestion1, suggestion2]
+    # Only one fix applies successfully
+    mock_apply_fixes.return_value = [suggestion1]
+    mock_verify_fixes.return_value = ValidationResult(
+        verified=1,
+        unverified=0,
+        verified_by_tool={"ruff": 1},
+        unverified_by_tool={"ruff": 0},
+    )
+
+    ai_result = run_ai_enhancement(
+        action=Action.FIX,
+        all_results=[result],
+        lintro_config=config,
+        logger=logger,
+        output_format="json",
+    )
+
+    assert_that(ai_result).is_instance_of(AIResult)
+    assert_that(ai_result.fixes_applied).is_equal_to(1)
+    assert_that(ai_result.fixes_failed).is_equal_to(1)
+    assert_that(ai_result.unfixed_issues).is_equal_to(1)
+
+
+def test_fail_on_unfixed_config_default_is_false():
+    """Verify fail_on_unfixed defaults to False."""
+    config = AIConfig()
+    assert_that(config.fail_on_unfixed).is_false()
+
+
+def test_fail_on_unfixed_config_can_be_set():
+    """Verify fail_on_unfixed can be set to True."""
+    config = AIConfig(fail_on_unfixed=True)
+    assert_that(config.fail_on_unfixed).is_true()

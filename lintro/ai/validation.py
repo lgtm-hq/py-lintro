@@ -2,6 +2,10 @@
 
 After AI fixes are applied, re-runs the relevant linting tools on the
 affected files to confirm that the issues were actually resolved.
+
+The unified ``verify_fixes`` function combines tool re-execution (previously
+in ``rerun.py``) with per-fix verification so that each tool is invoked only
+once rather than twice.
 """
 
 from __future__ import annotations
@@ -16,6 +20,8 @@ from loguru import logger
 
 if TYPE_CHECKING:
     from lintro.ai.models import AIFixSuggestion
+    from lintro.models.core.tool_result import ToolResult
+    from lintro.parsers.base_issue import BaseIssue
 
 
 IssueMatchKey = tuple[str, str, int | None]
@@ -42,6 +48,55 @@ class ValidationResult:
     unverified_by_tool: dict[str, int] = field(default_factory=dict)
 
 
+def verify_fixes(
+    *,
+    applied_suggestions: Sequence[AIFixSuggestion],
+    by_tool: dict[str, tuple[ToolResult, list[BaseIssue]]],
+) -> ValidationResult | None:
+    """Unified post-fix verification: re-run tools and validate fixes.
+
+    Runs each tool once and uses the results for two purposes:
+    1. Update the original ``ToolResult`` objects with fresh remaining-issue
+       counts (what ``rerun.apply_rerun_results`` previously did).
+    2. Check each applied suggestion against the fresh results to determine
+       whether the fix was verified (what ``validate_applied_fixes`` does).
+
+    This replaces the previous pattern of calling ``rerun_tools`` +
+    ``apply_rerun_results`` followed by ``validate_applied_fixes``, which
+    caused each tool to be invoked twice.
+
+    Args:
+        applied_suggestions: Suggestions that were successfully applied.
+        by_tool: Dict mapping tool name to (ToolResult, issues) pairs,
+            used for cwd-aware tool re-execution and ToolResult updates.
+
+    Returns:
+        ValidationResult summarizing what was verified, or None if
+        validation could not run.
+    """
+    if not applied_suggestions:
+        return None
+
+    from lintro.ai.rerun import apply_rerun_results, rerun_tools
+
+    # Step 1: Re-run tools (cwd-aware) to get fresh ToolResults.
+    fresh_results = rerun_tools(by_tool)
+    if fresh_results:
+        apply_rerun_results(by_tool=by_tool, rerun_results=fresh_results)
+
+    # Build a lookup from tool name -> fresh remaining issues for validation.
+    fresh_issues_by_tool: dict[str, list[object]] = {}
+    if fresh_results:
+        for result in fresh_results:
+            issues: list[object] = (
+                list(result.issues) if result.issues is not None else []
+            )
+            fresh_issues_by_tool[result.name] = issues
+
+    # Step 2: Validate each applied suggestion using the fresh results.
+    return _validate_suggestions(applied_suggestions, fresh_issues_by_tool)
+
+
 def validate_applied_fixes(
     applied_suggestions: Sequence[AIFixSuggestion],
 ) -> ValidationResult | None:
@@ -50,6 +105,10 @@ def validate_applied_fixes(
     Groups applied suggestions by tool, runs each tool's check on the
     affected files, and checks whether the originally reported issues
     are still present.
+
+    This standalone version is used when ``by_tool`` context is not
+    available (e.g. interactive per-group validation and post-refinement
+    re-validation).
 
     Args:
         applied_suggestions: Suggestions that were successfully applied.
@@ -61,15 +120,15 @@ def validate_applied_fixes(
     if not applied_suggestions:
         return None
 
-    # Group suggestions by tool_name → set of files
-    by_tool: dict[str, list[AIFixSuggestion]] = defaultdict(list)
+    # Group suggestions by tool_name -> set of files
+    by_tool_suggestions: dict[str, list[AIFixSuggestion]] = defaultdict(list)
     for s in applied_suggestions:
         tool = s.tool_name or "unknown"
-        by_tool[tool].append(s)
+        by_tool_suggestions[tool].append(s)
 
-    result = ValidationResult()
-
-    for tool_name, suggestions in by_tool.items():
+    # Run each tool and collect fresh issues
+    fresh_issues_by_tool: dict[str, list[object]] = {}
+    for tool_name, suggestions in by_tool_suggestions.items():
         if tool_name == "unknown":
             continue
 
@@ -77,8 +136,43 @@ def validate_applied_fixes(
         remaining_issues = _run_tool_check(tool_name, file_paths)
 
         if remaining_issues is None:
-            # Tool not available or check failed — skip validation
             logger.debug(f"Validation skipped for {tool_name}: tool check failed")
+            continue
+
+        fresh_issues_by_tool[tool_name] = remaining_issues
+
+    return _validate_suggestions(applied_suggestions, fresh_issues_by_tool)
+
+
+def _validate_suggestions(
+    applied_suggestions: Sequence[AIFixSuggestion],
+    fresh_issues_by_tool: dict[str, list[object]],
+) -> ValidationResult:
+    """Core validation logic: compare applied suggestions against fresh issues.
+
+    Args:
+        applied_suggestions: Suggestions that were applied.
+        fresh_issues_by_tool: Mapping of tool name to remaining issues
+            from a fresh tool run.
+
+    Returns:
+        ValidationResult with per-fix verification status.
+    """
+    # Group suggestions by tool
+    by_tool_suggestions: dict[str, list[AIFixSuggestion]] = defaultdict(list)
+    for s in applied_suggestions:
+        tool = s.tool_name or "unknown"
+        by_tool_suggestions[tool].append(s)
+
+    result = ValidationResult()
+
+    for tool_name, suggestions in by_tool_suggestions.items():
+        if tool_name == "unknown":
+            continue
+
+        remaining_issues = fresh_issues_by_tool.get(tool_name)
+        if remaining_issues is None:
+            # Tool was not run or check failed -- skip validation
             continue
 
         # Build a multiset for accurate one-to-one matching.

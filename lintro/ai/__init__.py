@@ -14,11 +14,13 @@ Features:
 
 from lintro.ai.availability import is_ai_available, require_ai
 from lintro.ai.config import AIConfig
+from lintro.ai.models import AIResult
 from lintro.ai.registry import AIProvider
 
 __all__ = [
     "AIConfig",
     "AIProvider",
+    "AIResult",
     "is_ai_available",
     "require_ai",
 ]

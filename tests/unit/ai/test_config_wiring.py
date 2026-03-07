@@ -53,9 +53,7 @@ def _make_fix_issues() -> tuple[
 
 @patch(f"{_PIPELINE}.render_validation")
 @patch(f"{_PIPELINE}.render_summary")
-@patch(f"{_PIPELINE}.validate_applied_fixes")
-@patch(f"{_PIPELINE}.apply_rerun_results")
-@patch(f"{_PIPELINE}.rerun_tools")
+@patch(f"{_PIPELINE}.verify_fixes")
 @patch(f"{_PIPELINE}.generate_post_fix_summary")
 @patch(f"{_PIPELINE}.review_fixes_interactive")
 @patch(f"{_PIPELINE}.apply_fixes")
@@ -65,9 +63,7 @@ def test_context_lines_flows_to_generate_fixes(
     mock_apply_fixes,
     _mock_review,
     _mock_post_summary,
-    _mock_rerun,
-    _mock_apply_rerun,
-    _mock_validate,
+    _mock_verify,
     _mock_render_summary,
     _mock_render_validation,
 ):
@@ -95,9 +91,7 @@ def test_context_lines_flows_to_generate_fixes(
 
 @patch(f"{_PIPELINE}.render_validation")
 @patch(f"{_PIPELINE}.render_summary")
-@patch(f"{_PIPELINE}.validate_applied_fixes")
-@patch(f"{_PIPELINE}.apply_rerun_results")
-@patch(f"{_PIPELINE}.rerun_tools")
+@patch(f"{_PIPELINE}.verify_fixes")
 @patch(f"{_PIPELINE}.generate_post_fix_summary")
 @patch(f"{_PIPELINE}.review_fixes_interactive")
 @patch(f"{_PIPELINE}.apply_fixes")
@@ -107,9 +101,7 @@ def test_fix_search_radius_flows_to_apply_fixes(
     mock_apply_fixes,
     _mock_review,
     _mock_post_summary,
-    _mock_rerun,
-    _mock_apply_rerun,
-    _mock_validate,
+    _mock_verify,
     _mock_render_summary,
     _mock_render_validation,
 ):
@@ -118,8 +110,7 @@ def test_fix_search_radius_flows_to_apply_fixes(
     suggestion = _make_suggestion()
     mock_generate_fixes.return_value = [suggestion]
     mock_apply_fixes.return_value = [suggestion]
-    _mock_rerun.return_value = None
-    _mock_validate.return_value = ValidationResult()
+    _mock_verify.return_value = ValidationResult()
 
     ai_config = AIConfig(
         enabled=True,
@@ -145,9 +136,7 @@ def test_fix_search_radius_flows_to_apply_fixes(
 
 @patch(f"{_PIPELINE}.render_validation")
 @patch(f"{_PIPELINE}.render_summary")
-@patch(f"{_PIPELINE}.validate_applied_fixes")
-@patch(f"{_PIPELINE}.apply_rerun_results")
-@patch(f"{_PIPELINE}.rerun_tools")
+@patch(f"{_PIPELINE}.verify_fixes")
 @patch(f"{_PIPELINE}.generate_post_fix_summary")
 @patch(f"{_PIPELINE}.review_fixes_interactive")
 @patch(f"{_PIPELINE}.apply_fixes")
@@ -157,9 +146,7 @@ def test_retry_delays_flow_to_generate_fixes(
     mock_apply_fixes,
     _mock_review,
     _mock_post_summary,
-    _mock_rerun,
-    _mock_apply_rerun,
-    _mock_validate,
+    _mock_verify,
     _mock_render_summary,
     _mock_render_validation,
 ):
@@ -194,9 +181,7 @@ def test_retry_delays_flow_to_generate_fixes(
 
 @patch(f"{_PIPELINE}.render_validation")
 @patch(f"{_PIPELINE}.render_summary")
-@patch(f"{_PIPELINE}.validate_applied_fixes")
-@patch(f"{_PIPELINE}.apply_rerun_results")
-@patch(f"{_PIPELINE}.rerun_tools")
+@patch(f"{_PIPELINE}.verify_fixes")
 @patch(f"{_PIPELINE}.generate_post_fix_summary")
 @patch(f"{_PIPELINE}.review_fixes_interactive")
 @patch(f"{_PIPELINE}.apply_fixes")
@@ -206,9 +191,7 @@ def test_timeout_and_retries_flow_to_post_fix_summary(
     mock_apply_fixes,
     _mock_review,
     mock_post_summary,
-    mock_rerun,
-    _mock_apply_rerun,
-    mock_validate,
+    mock_verify,
     _mock_render_summary,
     _mock_render_validation,
 ):
@@ -217,10 +200,7 @@ def test_timeout_and_retries_flow_to_post_fix_summary(
     suggestion = _make_suggestion()
     mock_generate_fixes.return_value = [suggestion]
     mock_apply_fixes.return_value = [suggestion]
-    mock_rerun.return_value = [
-        ToolResult(name="ruff", success=True, issues_count=0, issues=[]),
-    ]
-    mock_validate.return_value = ValidationResult(
+    mock_verify.return_value = ValidationResult(
         verified=1,
         unverified=0,
         verified_by_tool={"ruff": 1},

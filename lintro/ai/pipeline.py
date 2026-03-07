@@ -21,12 +21,11 @@ from lintro.ai.metadata import (
     attach_validation_counts_metadata,
 )
 from lintro.ai.refinement import refine_unverified_fixes
-from lintro.ai.rerun import apply_rerun_results, rerun_tools
 from lintro.ai.risk import is_safe_style_fix
 from lintro.ai.summary import generate_post_fix_summary
 from lintro.ai.telemetry import AITelemetry
 from lintro.ai.undo import save_undo_patch
-from lintro.ai.validation import validate_applied_fixes
+from lintro.ai.validation import validate_applied_fixes, verify_fixes
 
 if TYPE_CHECKING:
     from lintro.ai.config import AIConfig
@@ -48,7 +47,7 @@ def run_fix_pipeline(
     output_format: str,
     workspace_root: Path,
     budget: CostBudget | None = None,
-) -> None:
+) -> tuple[int, int]:
     """Generate and optionally apply AI fix suggestions across all tools.
 
     This is the main fix pipeline that:
@@ -67,6 +66,9 @@ def run_fix_pipeline(
         output_format: Output format string.
         workspace_root: Workspace root path.
         budget: Optional cost budget tracker.
+
+    Returns:
+        Tuple of (fixes_applied, fixes_failed).
     """
     telemetry = AITelemetry()
 
@@ -125,6 +127,7 @@ def run_fix_pipeline(
             enable_cache=ai_config.enable_cache,
             cache_ttl=ai_config.cache_ttl,
             progress_callback=_progress_callback,
+            fallback_models=ai_config.fallback_models,
         )
         for suggestion in suggestions:
             if not suggestion.tool_name:
@@ -181,7 +184,7 @@ def run_fix_pipeline(
         )
 
     if not all_suggestions:
-        return
+        return (0, 0)
 
     # Dry-run mode: display fixes but do not apply them
     if ai_config.dry_run:
@@ -192,7 +195,7 @@ def run_fix_pipeline(
             logger.console_output(
                 "  AI: dry-run mode — fixes displayed but not applied",
             )
-        return
+        return (0, 0)
 
     applied = 0
     rejected = 0
@@ -268,16 +271,14 @@ def run_fix_pipeline(
     telemetry.successful_fixes = applied
     telemetry.failed_fixes = len(all_suggestions) - applied
 
-    fresh_remaining_results = rerun_tools(by_tool) if applied_suggestions else None
-    if applied_suggestions and fresh_remaining_results:
-        apply_rerun_results(
-            by_tool=by_tool,
-            rerun_results=fresh_remaining_results,
-        )
-
+    # Unified verification: re-run tools once for both ToolResult updates
+    # and per-fix validation (consolidates rerun + validate into one pass).
     validation = None
     if applied_suggestions:
-        validation = validate_applied_fixes(applied_suggestions)
+        validation = verify_fixes(
+            applied_suggestions=applied_suggestions,
+            by_tool=by_tool,
+        )
         if (
             not is_json
             and validation
@@ -354,9 +355,11 @@ def run_fix_pipeline(
             applied_for_summary = validation.verified
 
         if applied_suggestions:
-            unique_results = fresh_remaining_results
-            if unique_results is None:
-                logger.console_output("  AI: post-fix summary unavailable")
+            # verify_fixes already updated by_tool ToolResults in-place,
+            # so extract the refreshed results for the post-fix summary.
+            unique_results: list[ToolResult] | None = [
+                result for result, _ in by_tool.values()
+            ]
         else:
             unique_results = _unique_results_from_fix_issues(fix_issues)
 
@@ -373,6 +376,7 @@ def run_fix_pipeline(
                 base_delay=ai_config.retry_base_delay,
                 max_delay=ai_config.retry_max_delay,
                 backoff_factor=ai_config.retry_backoff_factor,
+                fallback_models=ai_config.fallback_models,
             )
             if post_summary:
                 output = render_summary(
@@ -388,6 +392,8 @@ def run_fix_pipeline(
         [r for r, _ in by_tool.values()],
         telemetry,
     )
+
+    return (applied, len(all_suggestions) - applied)
 
 
 def _unique_results_from_fix_issues(

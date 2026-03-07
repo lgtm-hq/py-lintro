@@ -76,9 +76,7 @@ def _make_fix_issues(
 
 @patch(f"{_PIPELINE}.render_validation")
 @patch(f"{_PIPELINE}.render_summary")
-@patch(f"{_PIPELINE}.validate_applied_fixes")
-@patch(f"{_PIPELINE}.apply_rerun_results")
-@patch(f"{_PIPELINE}.rerun_tools")
+@patch(f"{_PIPELINE}.verify_fixes")
 @patch(f"{_PIPELINE}.generate_post_fix_summary")
 @patch(f"{_PIPELINE}.review_fixes_interactive")
 @patch(f"{_PIPELINE}.apply_fixes")
@@ -88,9 +86,7 @@ def test_budget_tracking_across_multiple_tools(
     mock_apply_fixes,
     mock_review_fixes_interactive,
     mock_generate_post_fix_summary,
-    mock_rerun_tools,
-    mock_apply_rerun_results,
-    mock_validate_applied_fixes,
+    mock_verify_fixes,
     mock_render_summary,
     mock_render_validation,
 ):
@@ -117,8 +113,7 @@ def test_budget_tracking_across_multiple_tools(
     ]
     mock_apply_fixes.return_value = []
     mock_review_fixes_interactive.return_value = (0, 0, [])
-    mock_rerun_tools.return_value = None
-    mock_validate_applied_fixes.return_value = ValidationResult()
+    mock_verify_fixes.return_value = ValidationResult()
 
     ai_config = _default_ai_config(max_fix_issues=3)
 
@@ -145,9 +140,7 @@ def test_budget_tracking_across_multiple_tools(
 @patch(f"{_PIPELINE}.is_safe_style_fix")
 @patch(f"{_PIPELINE}.render_validation")
 @patch(f"{_PIPELINE}.render_summary")
-@patch(f"{_PIPELINE}.validate_applied_fixes")
-@patch(f"{_PIPELINE}.apply_rerun_results")
-@patch(f"{_PIPELINE}.rerun_tools")
+@patch(f"{_PIPELINE}.verify_fixes")
 @patch(f"{_PIPELINE}.generate_post_fix_summary")
 @patch(f"{_PIPELINE}.review_fixes_interactive")
 @patch(f"{_PIPELINE}.apply_fixes")
@@ -157,9 +150,7 @@ def test_safe_vs_risky_suggestion_splitting(
     mock_apply_fixes,
     mock_review_fixes_interactive,
     mock_generate_post_fix_summary,
-    mock_rerun_tools,
-    mock_apply_rerun_results,
-    mock_validate_applied_fixes,
+    mock_verify_fixes,
     mock_render_summary,
     mock_render_validation,
     mock_is_safe,
@@ -176,8 +167,7 @@ def test_safe_vs_risky_suggestion_splitting(
     mock_is_safe.side_effect = lambda s: s.risk_level == "safe-style"
     mock_apply_fixes.return_value = [safe]
     mock_review_fixes_interactive.return_value = (0, 0, [])
-    mock_rerun_tools.return_value = None
-    mock_validate_applied_fixes.return_value = ValidationResult()
+    mock_verify_fixes.return_value = ValidationResult()
 
     ai_config = _default_ai_config(auto_apply_safe_fixes=True)
 
@@ -198,9 +188,7 @@ def test_safe_vs_risky_suggestion_splitting(
 
 @patch(f"{_PIPELINE}.render_validation")
 @patch(f"{_PIPELINE}.render_summary")
-@patch(f"{_PIPELINE}.validate_applied_fixes")
-@patch(f"{_PIPELINE}.apply_rerun_results")
-@patch(f"{_PIPELINE}.rerun_tools")
+@patch(f"{_PIPELINE}.verify_fixes")
 @patch(f"{_PIPELINE}.generate_post_fix_summary")
 @patch(f"{_PIPELINE}.review_fixes_interactive")
 @patch(f"{_PIPELINE}.apply_fixes")
@@ -210,9 +198,7 @@ def test_auto_apply_fast_path_json_mode(
     mock_apply_fixes,
     mock_review_fixes_interactive,
     mock_generate_post_fix_summary,
-    mock_rerun_tools,
-    mock_apply_rerun_results,
-    mock_validate_applied_fixes,
+    mock_verify_fixes,
     mock_render_summary,
     mock_render_validation,
 ):
@@ -225,8 +211,7 @@ def test_auto_apply_fast_path_json_mode(
 
     mock_generate_fixes.return_value = [safe]
     mock_apply_fixes.return_value = [safe]
-    mock_rerun_tools.return_value = None
-    mock_validate_applied_fixes.return_value = ValidationResult()
+    mock_verify_fixes.return_value = ValidationResult()
 
     ai_config = _default_ai_config(auto_apply_safe_fixes=True, auto_apply=False)
 
@@ -249,9 +234,7 @@ def test_auto_apply_fast_path_json_mode(
 
 @patch(f"{_PIPELINE}.render_validation")
 @patch(f"{_PIPELINE}.render_summary")
-@patch(f"{_PIPELINE}.validate_applied_fixes")
-@patch(f"{_PIPELINE}.apply_rerun_results")
-@patch(f"{_PIPELINE}.rerun_tools")
+@patch(f"{_PIPELINE}.verify_fixes")
 @patch(f"{_PIPELINE}.generate_post_fix_summary")
 @patch(f"{_PIPELINE}.review_fixes_interactive")
 @patch(f"{_PIPELINE}.apply_fixes")
@@ -263,9 +246,7 @@ def test_interactive_review_path(
     mock_apply_fixes,
     mock_review_fixes_interactive,
     mock_generate_post_fix_summary,
-    mock_rerun_tools,
-    mock_apply_rerun_results,
-    mock_validate_applied_fixes,
+    mock_verify_fixes,
     mock_render_summary,
     mock_render_validation,
 ):
@@ -278,8 +259,7 @@ def test_interactive_review_path(
 
     mock_generate_fixes.return_value = [suggestion]
     mock_review_fixes_interactive.return_value = (1, 0, [suggestion])
-    mock_rerun_tools.return_value = None
-    mock_validate_applied_fixes.return_value = ValidationResult()
+    mock_verify_fixes.return_value = ValidationResult()
 
     ai_config = _default_ai_config(auto_apply=False, auto_apply_safe_fixes=False)
 
@@ -300,9 +280,7 @@ def test_interactive_review_path(
 
 @patch(f"{_PIPELINE}.render_validation")
 @patch(f"{_PIPELINE}.render_summary")
-@patch(f"{_PIPELINE}.validate_applied_fixes")
-@patch(f"{_PIPELINE}.apply_rerun_results")
-@patch(f"{_PIPELINE}.rerun_tools")
+@patch(f"{_PIPELINE}.verify_fixes")
 @patch(f"{_PIPELINE}.generate_post_fix_summary")
 @patch(f"{_PIPELINE}.review_fixes_interactive")
 @patch(f"{_PIPELINE}.apply_fixes")
@@ -312,9 +290,7 @@ def test_no_suggestions_returns_early(
     mock_apply_fixes,
     mock_review_fixes_interactive,
     mock_generate_post_fix_summary,
-    mock_rerun_tools,
-    mock_apply_rerun_results,
-    mock_validate_applied_fixes,
+    mock_verify_fixes,
     mock_render_summary,
     mock_render_validation,
 ):
@@ -339,16 +315,13 @@ def test_no_suggestions_returns_early(
     assert_that(mock_generate_fixes.call_count).is_equal_to(1)
     mock_apply_fixes.assert_not_called()
     mock_review_fixes_interactive.assert_not_called()
-    mock_rerun_tools.assert_not_called()
-    mock_validate_applied_fixes.assert_not_called()
+    mock_verify_fixes.assert_not_called()
     mock_generate_post_fix_summary.assert_not_called()
 
 
 @patch(f"{_PIPELINE}.render_validation")
 @patch(f"{_PIPELINE}.render_summary")
-@patch(f"{_PIPELINE}.validate_applied_fixes")
-@patch(f"{_PIPELINE}.apply_rerun_results")
-@patch(f"{_PIPELINE}.rerun_tools")
+@patch(f"{_PIPELINE}.verify_fixes")
 @patch(f"{_PIPELINE}.generate_post_fix_summary")
 @patch(f"{_PIPELINE}.review_fixes_interactive")
 @patch(f"{_PIPELINE}.apply_fixes")
@@ -358,13 +331,11 @@ def test_post_fix_summary_generation(
     mock_apply_fixes,
     mock_review_fixes_interactive,
     mock_generate_post_fix_summary,
-    mock_rerun_tools,
-    mock_apply_rerun_results,
-    mock_validate_applied_fixes,
+    mock_verify_fixes,
     mock_render_summary,
     mock_render_validation,
 ):
-    """Applied fixes + non-json → post_fix_summary is called."""
+    """Applied fixes + non-json -> post_fix_summary is called."""
     issue = MockIssue(file="a.py", line=1, code="B101", message="err")
     result = _make_result("ruff", [issue])
     fix_issues = _make_fix_issues(result, [issue])
@@ -373,10 +344,7 @@ def test_post_fix_summary_generation(
 
     mock_generate_fixes.return_value = [suggestion]
     mock_apply_fixes.return_value = [suggestion]
-    mock_rerun_tools.return_value = [
-        ToolResult(name="ruff", success=True, issues_count=0, issues=[]),
-    ]
-    mock_validate_applied_fixes.return_value = ValidationResult(
+    mock_verify_fixes.return_value = ValidationResult(
         verified=1,
         unverified=0,
         verified_by_tool={"ruff": 1},
@@ -404,25 +372,21 @@ def test_post_fix_summary_generation(
 
 @patch(f"{_PIPELINE}.render_validation")
 @patch(f"{_PIPELINE}.render_summary")
-@patch(f"{_PIPELINE}.validate_applied_fixes")
-@patch(f"{_PIPELINE}.apply_rerun_results")
-@patch(f"{_PIPELINE}.rerun_tools")
+@patch(f"{_PIPELINE}.verify_fixes")
 @patch(f"{_PIPELINE}.generate_post_fix_summary")
 @patch(f"{_PIPELINE}.review_fixes_interactive")
 @patch(f"{_PIPELINE}.apply_fixes")
 @patch(f"{_PIPELINE}.generate_fixes")
-def test_rerun_and_validation_flow(
+def test_verify_fixes_flow(
     mock_generate_fixes,
     mock_apply_fixes,
     mock_review_fixes_interactive,
     mock_generate_post_fix_summary,
-    mock_rerun_tools,
-    mock_apply_rerun_results,
-    mock_validate_applied_fixes,
+    mock_verify_fixes,
     mock_render_summary,
     mock_render_validation,
 ):
-    """When fixes are applied, rerun_tools and validate_applied_fixes are called."""
+    """When fixes are applied, verify_fixes is called with suggestions and by_tool."""
     issue = MockIssue(file="a.py", line=1, code="B101", message="err")
     result = _make_result("ruff", [issue])
     fix_issues = _make_fix_issues(result, [issue])
@@ -431,14 +395,7 @@ def test_rerun_and_validation_flow(
 
     mock_generate_fixes.return_value = [suggestion]
     mock_apply_fixes.return_value = [suggestion]
-    rerun_result = ToolResult(
-        name="ruff",
-        success=True,
-        issues_count=0,
-        issues=[],
-    )
-    mock_rerun_tools.return_value = [rerun_result]
-    mock_validate_applied_fixes.return_value = ValidationResult(
+    mock_verify_fixes.return_value = ValidationResult(
         verified=1,
         unverified=0,
         verified_by_tool={"ruff": 1},
@@ -457,13 +414,8 @@ def test_rerun_and_validation_flow(
         workspace_root=Path("/tmp"),
     )
 
-    assert_that(mock_rerun_tools.call_count).is_equal_to(1)
-    assert_that(mock_validate_applied_fixes.call_count).is_equal_to(1)
-    validate_args = mock_validate_applied_fixes.call_args.args
-    assert_that(validate_args[0]).is_equal_to([suggestion])
-
-    assert_that(mock_apply_rerun_results.call_count).is_equal_to(1)
-    rerun_kwargs = mock_apply_rerun_results.call_args.kwargs
-    assert_that(rerun_kwargs).contains_key("by_tool")
-    assert_that(rerun_kwargs).contains_key("rerun_results")
-    assert_that(rerun_kwargs["rerun_results"]).is_equal_to([rerun_result])
+    assert_that(mock_verify_fixes.call_count).is_equal_to(1)
+    verify_kwargs = mock_verify_fixes.call_args.kwargs
+    assert_that(verify_kwargs).contains_key("applied_suggestions")
+    assert_that(verify_kwargs).contains_key("by_tool")
+    assert_that(verify_kwargs["applied_suggestions"]).is_equal_to([suggestion])

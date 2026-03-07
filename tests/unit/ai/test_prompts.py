@@ -50,6 +50,7 @@ _FIX_DEFAULTS = {
     "context_start": 37,
     "context_end": 47,
     "code_context": "x = 1",
+    "boundary": "CODE_BLOCK_test1234",
 }
 
 
@@ -114,6 +115,7 @@ def test_fix_prompt_renders_various_issue_types(tool_name, code, message):
         context_start=5,
         context_end=15,
         code_context="pass",
+        boundary="CODE_BLOCK_test1234",
     )
     assert_that(result).contains(tool_name)
     assert_that(result).contains(code)
@@ -242,6 +244,7 @@ def test_refinement_prompt_renders():
         context_start=5,
         context_end=15,
         code_context="x = 1",
+        boundary="CODE_BLOCK_test1234",
     )
     assert_that(result).contains("old fix")
     assert_that(result).contains("still too long")
@@ -260,6 +263,7 @@ def test_batch_prompt_renders():
         file="app.py",
         issues_list="1. E501 line 10\n2. E302 line 20",
         file_content="import os\n",
+        boundary="CODE_BLOCK_test1234",
     )
     assert_that(result).contains("ruff")
     assert_that(result).contains("app.py")

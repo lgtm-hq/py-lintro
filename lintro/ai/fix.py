@@ -19,6 +19,7 @@ from typing import TYPE_CHECKING
 from loguru import logger
 
 from lintro.ai.cache import cache_suggestion, get_cached_suggestion
+from lintro.ai.fallback import complete_with_fallback
 from lintro.ai.models import AIFixSuggestion
 from lintro.ai.paths import (
     relative_path,
@@ -28,11 +29,20 @@ from lintro.ai.paths import (
 )
 from lintro.ai.prompts import FIX_BATCH_PROMPT_TEMPLATE, FIX_PROMPT_TEMPLATE, FIX_SYSTEM
 from lintro.ai.retry import with_retry
+from lintro.ai.sanitize import (
+    detect_injection_patterns,
+    make_boundary_marker,
+    sanitize_code_content,
+)
 from lintro.ai.token_budget import estimate_tokens
 
 if TYPE_CHECKING:
     from lintro.ai.providers.base import AIResponse, BaseAIProvider
     from lintro.parsers.base_issue import BaseIssue
+
+# Module-level fallback models list, set by generate_fixes() so the
+# retry-wrapped _call_provider can access it without signature changes.
+_fallback_models: list[str] = []
 
 
 def _call_provider(
@@ -42,9 +52,11 @@ def _call_provider(
     max_tokens: int,
     timeout: float = 60.0,
 ) -> AIResponse:
-    """Call the AI provider (no retry — caller wraps with retry)."""
-    return provider.complete(
+    """Call the AI provider with model fallback (no retry — caller wraps with retry)."""
+    return complete_with_fallback(
+        provider,
         prompt,
+        fallback_models=_fallback_models,
         system=system,
         max_tokens=max_tokens,
         timeout=timeout,
@@ -286,10 +298,20 @@ def _generate_single_fix(
             cached_suggestion.tool_name = tool_name
             return cached_suggestion
 
+    # Sanitize code content and detect injection attempts for logging
+    sanitized_content = sanitize_code_content(file_content)
+    injections = detect_injection_patterns(file_content)
+    if injections:
+        logger.warning(
+            f"Potential prompt injection patterns detected in "
+            f"{issue.file}: {', '.join(injections)}",
+        )
+
     # Try full-file context for small files that fit within the budget
     total_lines = len(file_content.splitlines())
     use_full_file = False
     if total_lines <= full_file_threshold:
+        boundary = make_boundary_marker()
         full_prompt = FIX_PROMPT_TEMPLATE.format(
             tool_name=tool_name,
             code=code,
@@ -298,7 +320,8 @@ def _generate_single_fix(
             message=issue.message,
             context_start=1,
             context_end=total_lines,
-            code_context=file_content,
+            code_context=sanitized_content,
+            boundary=boundary,
         )
         if estimate_tokens(full_prompt) <= max_prompt_tokens:
             prompt = full_prompt
@@ -318,6 +341,8 @@ def _generate_single_fix(
                 issue.line,
                 context_lines=effective_context_lines,
             )
+            boundary = make_boundary_marker()
+            sanitized_context = sanitize_code_content(context)
             prompt = FIX_PROMPT_TEMPLATE.format(
                 tool_name=tool_name,
                 code=code,
@@ -326,7 +351,8 @@ def _generate_single_fix(
                 message=issue.message,
                 context_start=context_start,
                 context_end=context_end,
-                code_context=context,
+                code_context=sanitized_context,
+                boundary=boundary,
             )
             if (
                 estimate_tokens(prompt) <= max_prompt_tokens
@@ -488,11 +514,21 @@ def _generate_batch_fixes(
         )
     issues_list = "\n".join(issues_list_parts)
 
+    sanitized_content = sanitize_code_content(file_content)
+    injections = detect_injection_patterns(file_content)
+    if injections:
+        logger.warning(
+            f"Potential prompt injection patterns detected in "
+            f"{file_path}: {', '.join(injections)}",
+        )
+
+    boundary = make_boundary_marker()
     prompt = FIX_BATCH_PROMPT_TEMPLATE.format(
         tool_name=tool_name,
         file=to_provider_path(file_path, workspace_root),
         issues_list=issues_list,
-        file_content=file_content,
+        file_content=sanitized_content,
+        boundary=boundary,
     )
 
     if estimate_tokens(prompt) > max_prompt_tokens:
@@ -554,6 +590,7 @@ def generate_fixes(
     enable_cache: bool = False,
     cache_ttl: int = 3600,
     progress_callback: Callable[[int, int], None] | None = None,
+    fallback_models: list[str] | None = None,
 ) -> list[AIFixSuggestion]:
     """Generate AI fix suggestions for unfixable issues.
 
@@ -579,6 +616,8 @@ def generate_fixes(
         cache_ttl: Time-to-live in seconds for cached suggestions.
         progress_callback: Optional callback invoked after each fix
             completes with (completed_count, total_count).
+        fallback_models: Ordered list of fallback model identifiers
+            to try when the primary model fails with a retryable error.
 
     Returns:
         List of fix suggestions.
@@ -587,6 +626,9 @@ def generate_fixes(
         KeyboardInterrupt: Re-raised on user interrupt.
         SystemExit: Re-raised on system exit.
     """
+    global _fallback_models  # noqa: PLW0603
+    _fallback_models = fallback_models or []
+
     if not issues:
         return []
 

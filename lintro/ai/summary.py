@@ -15,6 +15,7 @@ from typing import TYPE_CHECKING
 
 from loguru import logger
 
+from lintro.ai.fallback import complete_with_fallback
 from lintro.ai.models import AISummary
 from lintro.ai.paths import resolve_workspace_root, to_provider_path
 from lintro.ai.prompts import (
@@ -215,6 +216,7 @@ def generate_summary(
     base_delay: float | None = None,
     max_delay: float | None = None,
     backoff_factor: float | None = None,
+    fallback_models: list[str] | None = None,
 ) -> AISummary | None:
     """Generate a high-level AI summary of all issues.
 
@@ -231,6 +233,8 @@ def generate_summary(
         base_delay: Initial retry delay in seconds (None = use default).
         max_delay: Maximum retry delay in seconds (None = use default).
         backoff_factor: Retry backoff multiplier (None = use default).
+        fallback_models: Ordered list of fallback model identifiers
+            to try when the primary model fails with a retryable error.
 
     Returns:
         AISummary, or None if generation fails or there are no issues.
@@ -261,8 +265,10 @@ def generate_summary(
         backoff_factor=backoff_factor if backoff_factor is not None else 2.0,
     )
     def _call() -> AIResponse:
-        return provider.complete(
+        return complete_with_fallback(
+            provider,
             prompt,
+            fallback_models=fallback_models,
             system=SUMMARY_SYSTEM,
             max_tokens=max_tokens,
             timeout=timeout,
@@ -294,6 +300,7 @@ def generate_post_fix_summary(
     base_delay: float | None = None,
     max_delay: float | None = None,
     backoff_factor: float | None = None,
+    fallback_models: list[str] | None = None,
 ) -> AISummary | None:
     """Generate a summary for the post-fix context.
 
@@ -312,6 +319,8 @@ def generate_post_fix_summary(
         base_delay: Initial retry delay in seconds (None = use default).
         max_delay: Maximum retry delay in seconds (None = use default).
         backoff_factor: Retry backoff multiplier (None = use default).
+        fallback_models: Ordered list of fallback model identifiers
+            to try when the primary model fails with a retryable error.
 
     Returns:
         AISummary, or None if generation fails.
@@ -343,8 +352,10 @@ def generate_post_fix_summary(
         backoff_factor=backoff_factor if backoff_factor is not None else 2.0,
     )
     def _call() -> AIResponse:
-        return provider.complete(
+        return complete_with_fallback(
+            provider,
             prompt,
+            fallback_models=fallback_models,
             system=SUMMARY_SYSTEM,
             max_tokens=max_tokens,
             timeout=timeout,

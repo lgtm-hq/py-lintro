@@ -63,10 +63,15 @@ class AIConfig(BaseModel):
             deduplication across runs. Defaults to False.
         cache_ttl: Time-to-live in seconds for cached suggestions.
             Defaults to 3600 (1 hour). Minimum 60.
+        cache_max_entries: Maximum number of cache entries to keep.
+            When exceeded, least recently used entries are evicted.
+            Defaults to 1000.
         max_refinement_attempts: Maximum number of refinement rounds
             for unverified fixes. 0 disables refinement.
         fail_on_ai_error: Whether to re-raise AI exceptions instead of
             logging and continuing gracefully.
+        fail_on_unfixed: When True, unfixable or failed AI fixes
+            contribute to a non-zero exit code.
         verbose: Whether to emit detailed progress and diagnostic
             messages for AI operations.
         include_paths: Glob patterns for paths to include in AI processing.
@@ -120,8 +125,16 @@ class AIConfig(BaseModel):
     retry_backoff_factor: float = Field(default=2.0, ge=1.0)
     enable_cache: bool = Field(default=False)
     cache_ttl: int = Field(default=3600, ge=60)
+    cache_max_entries: int = Field(default=1000, ge=1)
     max_refinement_attempts: int = Field(default=1, ge=0, le=3)
     fail_on_ai_error: bool = Field(default=False)
+    fail_on_unfixed: bool = Field(
+        default=False,
+        description=(
+            "When True, unfixable or failed AI fixes contribute to a "
+            "non-zero exit code."
+        ),
+    )
     verbose: bool = Field(default=False)
     include_paths: list[str] = Field(
         default_factory=list,

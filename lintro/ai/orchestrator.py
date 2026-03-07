@@ -16,6 +16,7 @@ from lintro.ai.budget import CostBudget
 from lintro.ai.display import render_summary
 from lintro.ai.filters import filter_issues
 from lintro.ai.metadata import attach_summary_metadata
+from lintro.ai.models import AIResult
 from lintro.ai.paths import resolve_workspace_file, resolve_workspace_root
 from lintro.ai.pipeline import run_fix_pipeline
 from lintro.ai.providers import get_provider
@@ -39,8 +40,25 @@ def run_ai_enhancement(
     logger: ThreadSafeConsoleLogger,
     output_format: str,
     ai_fix: bool = False,
-) -> None:
-    """Run AI-powered enhancement for check/fix actions."""
+) -> AIResult:
+    """Run AI-powered enhancement for check/fix actions.
+
+    Args:
+        action: The action being performed (CHECK or FIX).
+        all_results: Tool results from the linting run.
+        lintro_config: Full lintro configuration.
+        logger: Thread-safe console logger.
+        output_format: Output format (e.g. "terminal", "json").
+        ai_fix: Whether to generate AI fix suggestions.
+
+    Returns:
+        AIResult with structured outcome data for exit code decisions.
+
+    Raises:
+        KeyboardInterrupt: Re-raised immediately.
+        SystemExit: Re-raised immediately.
+        Exception: Re-raised when ``fail_on_ai_error`` is True.
+    """
     try:
         require_ai()
 
@@ -58,7 +76,7 @@ def run_ai_enhancement(
             )
 
         if action == Action.CHECK:
-            _run_ai_check(
+            return _run_ai_check(
                 all_results=all_results,
                 provider=provider,
                 ai_config=ai_config,
@@ -68,7 +86,7 @@ def run_ai_enhancement(
                 workspace_root=workspace_root,
             )
         elif action == Action.FIX:
-            _run_ai_fix(
+            return _run_ai_fix(
                 all_results=all_results,
                 provider=provider,
                 ai_config=ai_config,
@@ -76,6 +94,7 @@ def run_ai_enhancement(
                 is_json=is_json,
                 workspace_root=workspace_root,
             )
+        return AIResult()
     except (KeyboardInterrupt, SystemExit):
         raise
     except Exception as e:
@@ -88,6 +107,7 @@ def run_ai_enhancement(
         logger.console_output(
             f"  AI: enhancement unavailable ({type(e).__name__})",
         )
+        return AIResult(error=True)
 
 
 def _run_ai_check(
@@ -99,7 +119,7 @@ def _run_ai_check(
     is_json: bool,
     ai_fix: bool,
     workspace_root: Path,
-) -> None:
+) -> AIResult:
     """Run AI summary and optional AI fix suggestions for check action."""
     budget = CostBudget(max_cost_usd=ai_config.max_cost_usd)
 
@@ -113,6 +133,7 @@ def _run_ai_check(
         base_delay=ai_config.retry_base_delay,
         max_delay=ai_config.retry_max_delay,
         backoff_factor=ai_config.retry_backoff_factor,
+        fallback_models=ai_config.fallback_models,
     )
     if summary and not is_json:
         output = render_summary(summary, show_cost=ai_config.show_cost_estimate)
@@ -126,7 +147,7 @@ def _run_ai_check(
                 attach_summary_metadata(result, summary)
 
     if not ai_fix:
-        return
+        return AIResult()
 
     all_fix_issues: list[tuple[ToolResult, BaseIssue]] = []
     for result in all_results:
@@ -145,8 +166,10 @@ def _run_ai_check(
             ):
                 all_fix_issues.append((result, issue))
 
+    fixes_applied = 0
+    fixes_failed = 0
     if all_fix_issues:
-        run_fix_pipeline(
+        fixes_applied, fixes_failed = run_fix_pipeline(
             fix_issues=all_fix_issues,
             provider=provider,
             ai_config=ai_config,
@@ -163,6 +186,16 @@ def _run_ai_check(
             max_fix_issues=ai_config.max_fix_issues,
         )
 
+    unfixed = len(all_fix_issues) - fixes_applied
+    return AIResult(
+        fixes_applied=fixes_applied,
+        fixes_failed=fixes_failed,
+        unfixed_issues=max(0, unfixed),
+        budget_exceeded=(
+            budget.remaining == 0.0 if budget.remaining is not None else False
+        ),
+    )
+
 
 def _run_ai_fix(
     *,
@@ -172,7 +205,7 @@ def _run_ai_fix(
     logger: ThreadSafeConsoleLogger,
     is_json: bool,
     workspace_root: Path,
-) -> None:
+) -> AIResult:
     """Run AI fix suggestions for format action."""
     budget = CostBudget(max_cost_usd=ai_config.max_cost_usd)
 
@@ -198,8 +231,10 @@ def _run_ai_fix(
             ):
                 all_fix_issues.append((result, issue))
 
+    fixes_applied = 0
+    fixes_failed = 0
     if all_fix_issues:
-        run_fix_pipeline(
+        fixes_applied, fixes_failed = run_fix_pipeline(
             fix_issues=all_fix_issues,
             provider=provider,
             ai_config=ai_config,
@@ -215,6 +250,16 @@ def _run_ai_fix(
             total_issues=len(all_fix_issues),
             max_fix_issues=ai_config.max_fix_issues,
         )
+
+    unfixed = len(all_fix_issues) - fixes_applied
+    return AIResult(
+        fixes_applied=fixes_applied,
+        fixes_failed=fixes_failed,
+        unfixed_issues=max(0, unfixed),
+        budget_exceeded=(
+            budget.remaining == 0.0 if budget.remaining is not None else False
+        ),
+    )
 
 
 def _remaining_issues_for_fix_result(result: ToolResult) -> list[BaseIssue]:
