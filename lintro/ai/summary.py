@@ -157,6 +157,11 @@ def generate_summary(
     *,
     max_tokens: int = 2048,
     workspace_root: Path | None = None,
+    timeout: float = 60.0,
+    max_retries: int = 2,
+    base_delay: float | None = None,
+    max_delay: float | None = None,
+    backoff_factor: float | None = None,
 ) -> AISummary | None:
     """Generate a high-level AI summary of all issues.
 
@@ -168,6 +173,11 @@ def generate_summary(
         provider: AI provider instance.
         max_tokens: Maximum tokens for the response.
         workspace_root: Optional root used for provider-safe path redaction.
+        timeout: Request timeout in seconds per API call.
+        max_retries: Maximum retry attempts for transient API failures.
+        base_delay: Initial retry delay in seconds (None = use default).
+        max_delay: Maximum retry delay in seconds (None = use default).
+        backoff_factor: Retry backoff multiplier (None = use default).
 
     Returns:
         AISummary, or None if generation fails or there are no issues.
@@ -187,12 +197,18 @@ def generate_summary(
         issues_digest=digest,
     )
 
-    @with_retry(max_retries=2)
+    @with_retry(
+        max_retries=max_retries,
+        base_delay=base_delay if base_delay is not None else 1.0,
+        max_delay=max_delay if max_delay is not None else 30.0,
+        backoff_factor=backoff_factor if backoff_factor is not None else 2.0,
+    )
     def _call() -> AIResponse:
         return provider.complete(
             prompt,
             system=SUMMARY_SYSTEM,
             max_tokens=max_tokens,
+            timeout=timeout,
         )
 
     try:
@@ -216,6 +232,11 @@ def generate_post_fix_summary(
     provider: BaseAIProvider,
     max_tokens: int = 1024,
     workspace_root: Path | None = None,
+    timeout: float = 60.0,
+    max_retries: int = 2,
+    base_delay: float | None = None,
+    max_delay: float | None = None,
+    backoff_factor: float | None = None,
 ) -> AISummary | None:
     """Generate a summary for the post-fix context.
 
@@ -229,6 +250,11 @@ def generate_post_fix_summary(
         provider: AI provider instance.
         max_tokens: Maximum tokens for the response.
         workspace_root: Optional root used for provider-safe path redaction.
+        timeout: Request timeout in seconds per API call.
+        max_retries: Maximum retry attempts for transient API failures.
+        base_delay: Initial retry delay in seconds (None = use default).
+        max_delay: Maximum retry delay in seconds (None = use default).
+        backoff_factor: Retry backoff multiplier (None = use default).
 
     Returns:
         AISummary, or None if generation fails.
@@ -252,12 +278,18 @@ def generate_post_fix_summary(
         issues_digest=digest or "No remaining issues.",
     )
 
-    @with_retry(max_retries=2)
+    @with_retry(
+        max_retries=max_retries,
+        base_delay=base_delay if base_delay is not None else 1.0,
+        max_delay=max_delay if max_delay is not None else 30.0,
+        backoff_factor=backoff_factor if backoff_factor is not None else 2.0,
+    )
     def _call() -> AIResponse:
         return provider.complete(
             prompt,
             system=SUMMARY_SYSTEM,
             max_tokens=max_tokens,
+            timeout=timeout,
         )
 
     try:

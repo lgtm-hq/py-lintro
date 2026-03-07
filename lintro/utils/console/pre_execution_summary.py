@@ -106,30 +106,6 @@ def print_pre_execution_summary(
         ai_parts.append("[dim]disabled (no config)[/dim]")
     elif not ai_config.enabled:
         ai_parts.append("[dim]disabled[/dim]")
-        ai_parts.append(f"  provider: {ai_config.provider}")
-        if ai_config.model:
-            ai_parts.append(f"  model: {ai_config.model}")
-        else:
-            ai_parts.append("  model: [dim]provider default[/dim]")
-        ai_parts.append(
-            f"  parallel: {ai_config.max_parallel_calls} workers",
-        )
-        ai_parts.append(
-            "  safe-auto-apply: "
-            + (
-                "[green]on[/green]"
-                if ai_config.auto_apply_safe_fixes
-                else "[dim]off[/dim]"
-            ),
-        )
-        ai_parts.append(
-            "  verify-fixes: "
-            + (
-                "[green]on[/green]"
-                if ai_config.validate_after_group
-                else "[dim]off[/dim]"
-            ),
-        )
     else:
         import os
 

@@ -89,6 +89,10 @@ def run_fix_pipeline(
             max_tokens=ai_config.max_tokens,
             max_retries=ai_config.max_retries,
             timeout=ai_config.api_timeout,
+            context_lines=ai_config.context_lines,
+            base_delay=ai_config.retry_base_delay,
+            max_delay=ai_config.retry_max_delay,
+            backoff_factor=ai_config.retry_backoff_factor,
         )
         for suggestion in suggestions:
             if not suggestion.tool_name:
@@ -122,6 +126,7 @@ def run_fix_pipeline(
             safe_suggestions,
             workspace_root=workspace_root,
             auto_apply=True,
+            search_radius=ai_config.fix_search_radius,
         )
         applied_suggestions.extend(applied_safe)
         applied += len(applied_safe)
@@ -146,6 +151,7 @@ def run_fix_pipeline(
             auto_apply_candidates,
             workspace_root=workspace_root,
             auto_apply=True,
+            search_radius=ai_config.fix_search_radius,
         )
         applied_suggestions.extend(auto_applied)
         # `applied` is cumulative (includes earlier safe fast-path increments)
@@ -163,6 +169,7 @@ def run_fix_pipeline(
             review_candidates,
             validate_after_group=ai_config.validate_after_group,
             workspace_root=workspace_root,
+            search_radius=ai_config.fix_search_radius,
         )
         applied += accepted_count
         rejected += rejected_count + safe_failed
@@ -229,6 +236,11 @@ def run_fix_pipeline(
                 provider=provider,
                 max_tokens=ai_config.max_tokens,
                 workspace_root=workspace_root,
+                timeout=ai_config.api_timeout,
+                max_retries=ai_config.max_retries,
+                base_delay=ai_config.retry_base_delay,
+                max_delay=ai_config.retry_max_delay,
+                backoff_factor=ai_config.retry_backoff_factor,
             )
             if post_summary:
                 output = render_summary(

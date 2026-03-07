@@ -54,6 +54,9 @@ CONTEXT_LINES = 15
 # Maximum concurrent API calls for fix generation
 DEFAULT_MAX_WORKERS = 5
 
+# Maximum file cache entries to limit memory usage
+_MAX_CACHE_ENTRIES = 100
+
 
 def _read_file_safely(file_path: str) -> str | None:
     """Read a file's contents, returning None on failure.
@@ -178,6 +181,7 @@ def _generate_single_fix(
     max_tokens: int,
     retrying_call: Callable[..., AIResponse],
     timeout: float = 60.0,
+    context_lines: int = CONTEXT_LINES,
 ) -> AIFixSuggestion | None:
     """Generate a fix suggestion for a single issue.
 
@@ -193,6 +197,7 @@ def _generate_single_fix(
         max_tokens: Maximum tokens to request from provider.
         retrying_call: Pre-built retry wrapper around ``_call_provider``.
         timeout: Request timeout in seconds.
+        context_lines: Lines of context before/after the issue line.
 
     Returns:
         AIFixSuggestion, or None if generation fails.
@@ -217,9 +222,12 @@ def _generate_single_fix(
         return None
     issue_file = str(resolved_file)
 
-    # Read file with thread-safe cache
+    # Read file with thread-safe cache (evict oldest when at capacity)
     with cache_lock:
         if issue_file not in file_cache:
+            if len(file_cache) >= _MAX_CACHE_ENTRIES:
+                oldest_key = next(iter(file_cache))
+                del file_cache[oldest_key]
             file_cache[issue_file] = _read_file_safely(issue_file)
         file_content = file_cache[issue_file]
 
@@ -231,6 +239,7 @@ def _generate_single_fix(
     context, context_start, context_end = _extract_context(
         file_content,
         issue.line,
+        context_lines=context_lines,
     )
 
     prompt = FIX_PROMPT_TEMPLATE.format(
@@ -284,6 +293,10 @@ def generate_fixes(
     max_tokens: int = 2048,
     max_retries: int = 2,
     timeout: float = 60.0,
+    context_lines: int = CONTEXT_LINES,
+    base_delay: float | None = None,
+    max_delay: float | None = None,
+    backoff_factor: float | None = None,
 ) -> list[AIFixSuggestion]:
     """Generate AI fix suggestions for unfixable issues.
 
@@ -300,6 +313,10 @@ def generate_fixes(
         max_tokens: Maximum tokens requested per fix generation call.
         max_retries: Maximum retry attempts for transient API failures.
         timeout: Request timeout in seconds per API call.
+        context_lines: Lines of context before/after the issue line.
+        base_delay: Initial retry delay in seconds (None = use default).
+        max_delay: Maximum retry delay in seconds (None = use default).
+        backoff_factor: Retry backoff multiplier (None = use default).
 
     Returns:
         List of fix suggestions.
@@ -320,12 +337,17 @@ def generate_fixes(
 
     root = workspace_root or resolve_workspace_root()
 
-    # Shared file cache with thread safety
+    # Shared file cache with thread safety (capped to limit memory usage)
     file_cache: dict[str, str | None] = {}
     cache_lock = threading.Lock()
 
     # Build the retry wrapper once and share across all calls.
-    retrying_call = with_retry(max_retries=max_retries)(_call_provider)
+    retrying_call = with_retry(
+        max_retries=max_retries,
+        base_delay=base_delay if base_delay is not None else 1.0,
+        max_delay=max_delay if max_delay is not None else 30.0,
+        backoff_factor=backoff_factor if backoff_factor is not None else 2.0,
+    )(_call_provider)
 
     suggestions: list[AIFixSuggestion] = []
 
@@ -344,6 +366,7 @@ def generate_fixes(
                 max_tokens,
                 retrying_call,
                 timeout,
+                context_lines,
             )
             if result:
                 suggestions.append(result)
@@ -361,6 +384,7 @@ def generate_fixes(
                     max_tokens,
                     retrying_call,
                     timeout,
+                    context_lines,
                 )
                 for issue in target_issues
             ]
@@ -377,6 +401,10 @@ def generate_fixes(
                     continue
                 if result:
                     suggestions.append(result)
+
+    # Sort by (file, line) for deterministic ordering regardless of
+    # thread completion order from as_completed().
+    suggestions.sort(key=lambda s: (s.file, s.line))
 
     logger.debug(
         f"generate_fixes: {tool_name} produced "

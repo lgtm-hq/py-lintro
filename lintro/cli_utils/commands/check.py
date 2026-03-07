@@ -115,7 +115,7 @@ DEFAULT_ACTION: str = "check"
     "--fix",
     "ai_fix",
     is_flag=True,
-    help="Generate AI fix suggestions with interactive accept/reject",
+    help="Generate AI fix suggestions (safe-style fixes auto-apply in non-interactive mode)",
 )
 def check_command(
     paths: tuple[str, ...],

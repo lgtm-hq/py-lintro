@@ -9,7 +9,9 @@ An auto-fix session completed with these results:
 - {remaining} issues still remaining
 
 Remaining issues digest:
+<issues_digest>
 {issues_digest}
+</issues_digest>
 
 Provide a brief summary of the fix session and actionable next steps.
 

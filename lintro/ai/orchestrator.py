@@ -92,6 +92,11 @@ def _run_ai_check(
         provider,
         max_tokens=ai_config.max_tokens,
         workspace_root=workspace_root,
+        timeout=ai_config.api_timeout,
+        max_retries=ai_config.max_retries,
+        base_delay=ai_config.retry_base_delay,
+        max_delay=ai_config.retry_max_delay,
+        backoff_factor=ai_config.retry_backoff_factor,
     )
     if summary and not is_json:
         output = render_summary(summary, show_cost=ai_config.show_cost_estimate)

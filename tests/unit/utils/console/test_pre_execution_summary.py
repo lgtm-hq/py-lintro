@@ -43,10 +43,9 @@ def test_pre_execution_summary_shows_ai_when_disabled() -> None:
 
     assert_that(output).contains("AI")
     assert_that(output).contains("disabled")
-    assert_that(output).contains("provider: openai")
-    assert_that(output).contains("parallel: 7 workers")
-    assert_that(output).contains("safe-auto-apply: on")
-    assert_that(output).contains("verify-fixes: off")
+    # When disabled, config details should not be shown
+    assert_that(output).does_not_contain("provider: openai")
+    assert_that(output).does_not_contain("parallel: 7 workers")
 
 
 def test_pre_execution_summary_shows_ai_when_enabled(

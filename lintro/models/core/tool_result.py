@@ -31,6 +31,10 @@ class ToolResult:
 
     The ``issues`` field can contain parsed issue objects (tool-specific) to
     support unified table formatting.
+
+    Convention: for FIX action, remaining issues occupy the tail of the
+    ``issues`` list. Tools append all detected issues in order, so the
+    last ``remaining_issues_count`` entries are the ones still unfixed.
     """
 
     name: str = field(default="")

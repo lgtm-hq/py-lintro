@@ -13,7 +13,9 @@ SUMMARY_PROMPT_TEMPLATE = """\
 A linting analysis found {total_issues} issues across {tool_count} tool(s).
 
 Here is a digest of all issues grouped by tool and error code:
+<issues_digest>
 {issues_digest}
+</issues_digest>
 
 Analyze these results and provide a structured summary.
 

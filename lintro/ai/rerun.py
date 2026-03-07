@@ -30,6 +30,11 @@ def _tool_cwd(cwd: str | None) -> Iterator[None]:
     Uses a process-global lock because ``os.chdir`` is process-wide
     and tools call ``subprocess.run`` internally without a ``cwd`` param.
 
+    Known V1 limitation: ``os.chdir()`` is process-global, so other
+    concurrent code sees the changed cwd even though the lock serializes
+    reruns. Long-term fix: pass ``cwd`` to ``subprocess.run`` in the
+    tool abstraction layer.
+
     Args:
         cwd: Directory to chdir into, or None to skip.
     """
@@ -145,8 +150,9 @@ def apply_rerun_results(
             continue
 
         refreshed_issues = list(rerun.issues) if rerun.issues is not None else []
-        result.initial_issues_count = 0
-        result.fixed_issues_count = 0
+        # Preserve native fix counters — only update remaining issues
+        # and issue list. The initial/fixed counts reflect what the native
+        # tool originally reported and should not be zeroed.
         result.issues = refreshed_issues
         result.issues_count = len(refreshed_issues)
         result.remaining_issues_count = len(refreshed_issues)

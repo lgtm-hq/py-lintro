@@ -153,21 +153,23 @@ def _apply_group(
     console: Console,
     fixes: list[AIFixSuggestion],
     *,
-    workspace_root: Path | None = None,
+    workspace_root: Path,
+    search_radius: int = 5,
 ) -> tuple[int, list[AIFixSuggestion]]:
     """Apply all fixes in a group, reporting results.
 
     Args:
         console: Rich Console instance.
         fixes: Suggestions to apply.
-        workspace_root: Optional root directory limiting writable paths.
+        workspace_root: Root directory limiting writable paths.
+        search_radius: Max lines above/below the target line to search.
 
     Returns:
         Tuple of (applied_count, list of successfully applied suggestions).
     """
     applied_fixes: list[AIFixSuggestion] = []
     for fix in fixes:
-        if _apply_fix(fix, workspace_root=workspace_root):
+        if _apply_fix(fix, workspace_root=workspace_root, search_radius=search_radius):
             applied_fixes.append(fix)
     applied = len(applied_fixes)
     failed = len(fixes) - applied
@@ -208,7 +210,8 @@ def review_fixes_interactive(
     suggestions: Sequence[AIFixSuggestion],
     *,
     validate_after_group: bool = False,
-    workspace_root: Path | None = None,
+    workspace_root: Path,
+    search_radius: int = 5,
 ) -> tuple[int, int, list[AIFixSuggestion]]:
     """Present fix suggestions grouped by error code for review.
 
@@ -220,7 +223,8 @@ def review_fixes_interactive(
         suggestions: Fix suggestions to review.
         validate_after_group: Whether to validate immediately after
             each accepted group.
-        workspace_root: Optional root directory limiting writable paths.
+        workspace_root: Root directory limiting writable paths.
+        search_radius: Max lines above/below the target line to search.
 
     Returns:
         Tuple of (accepted_count, rejected_count, applied_suggestions).
@@ -268,6 +272,7 @@ def review_fixes_interactive(
                 console,
                 fixes,
                 workspace_root=workspace_root,
+                search_radius=search_radius,
             )
             accepted += count
             auto_accepted += count
@@ -331,6 +336,7 @@ def review_fixes_interactive(
                 console,
                 fixes,
                 workspace_root=workspace_root,
+                search_radius=search_radius,
             )
             accepted += count
             all_applied.extend(group_applied)

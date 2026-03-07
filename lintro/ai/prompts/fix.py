@@ -14,13 +14,16 @@ Tool: {tool_name}
 Error code: {code}
 File: {file}
 Line: {line}
-Issue: {message}
+
+<issue_message>
+{message}
+</issue_message>
 
 Here is the relevant section of the file \
 (lines {context_start}-{context_end}):
-```
+<code_context>
 {code_context}
-```
+</code_context>
 
 Provide a fix for this issue. Only change what is necessary.
 

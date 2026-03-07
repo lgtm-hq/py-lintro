@@ -44,11 +44,3 @@ class AIRateLimitError(AIProviderError):
     Raised when the provider returns a rate limit error. Users should
     wait and retry, or switch to a different provider/model.
     """
-
-
-class AITokenLimitError(AIError):
-    """Request exceeds the model's token limit.
-
-    Raised when the input (source context + prompt) is too large for
-    the configured model's context window.
-    """

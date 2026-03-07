@@ -25,12 +25,38 @@ class PatchStats:
     lines_removed: int = 0
 
 
+def _diff_is_style_only(suggestion: AIFixSuggestion) -> bool:
+    """Heuristic check: does the diff only change whitespace/style?
+
+    Compares original and suggested code character-by-character after
+    stripping whitespace and normalizing quotes. If the non-whitespace,
+    non-quote content differs, the change is behavioral.
+    """
+    original = suggestion.original_code or ""
+    suggested = suggestion.suggested_code or ""
+
+    def _normalize(text: str) -> str:
+        """Strip whitespace, trailing commas, and normalize quotes."""
+        import re
+
+        # Remove all whitespace
+        text = re.sub(r"\s+", "", text)
+        # Normalize quote characters (single ↔ double)
+        text = text.replace("'", '"')
+        # Remove trailing commas before closing brackets
+        text = re.sub(r',([}\])])', r"\1", text)
+        return text
+
+    return _normalize(original) == _normalize(suggested)
+
+
 def classify_fix_risk(suggestion: AIFixSuggestion) -> str:
     """Classify a suggestion as safe style-only or behavioral risk.
 
     Uses the AI-reported ``risk_level`` from the fix response, combined
-    with the suggestion's ``confidence``. Defaults to behavioral-risk
-    when the risk_level is unknown or empty for safety.
+    with the suggestion's ``confidence``. Applies a heuristic cross-check:
+    if the diff changes non-whitespace content beyond quotes and trailing
+    commas, the fix is downgraded to behavioral-risk regardless of AI claim.
 
     Args:
         suggestion: Fix suggestion to classify.
@@ -45,6 +71,10 @@ def classify_fix_risk(suggestion: AIFixSuggestion) -> str:
         # is high or medium — low-confidence safe claims default to risky.
         confidence = (suggestion.confidence or "").strip().lower()
         if confidence in ("high", "medium"):
+            # Heuristic cross-check: downgrade if the diff changes
+            # non-whitespace/non-quote content.
+            if not _diff_is_style_only(suggestion):
+                return BEHAVIORAL_RISK
             return SAFE_STYLE_RISK
         return BEHAVIORAL_RISK
 

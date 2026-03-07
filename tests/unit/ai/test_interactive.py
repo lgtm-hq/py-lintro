@@ -33,7 +33,7 @@ def test_apply_fix_fallback_logs_debug(mock_logger, tmp_path):
         suggested_code="new code",
     )
 
-    result = _apply_fix(fix)
+    result = _apply_fix(fix, workspace_root=tmp_path)
     assert_that(result).is_true()
     mock_logger.debug.assert_called_once()
     call_args = mock_logger.debug.call_args[0][0]
@@ -54,7 +54,7 @@ def test_apply_fix_line_targeted_does_not_log_warning(mock_logger, tmp_path):
         suggested_code="x = 2",
     )
 
-    result = _apply_fix(fix)
+    result = _apply_fix(fix, workspace_root=tmp_path)
     assert_that(result).is_true()
     mock_logger.warning.assert_not_called()
 
@@ -73,7 +73,7 @@ def test_apply_fix_applies_fix(tmp_path):
         suggested_code="if x <= 0:\n    raise ValueError",
     )
 
-    result = _apply_fix(fix)
+    result = _apply_fix(fix, workspace_root=tmp_path)
     assert_that(result).is_true()
 
     content = f.read_text()
@@ -92,18 +92,18 @@ def test_apply_fix_skips_when_original_not_found(tmp_path):
         suggested_code="new code",
     )
 
-    result = _apply_fix(fix)
+    result = _apply_fix(fix, workspace_root=tmp_path)
     assert_that(result).is_false()
 
 
-def test_apply_fix_handles_missing_file():
+def test_apply_fix_handles_missing_file(tmp_path):
     """Verify that _apply_fix returns False for a nonexistent file path."""
     fix = AIFixSuggestion(
-        file="/nonexistent/file.py",
+        file=str(tmp_path / "nonexistent" / "file.py"),
         original_code="x",
         suggested_code="y",
     )
-    result = _apply_fix(fix)
+    result = _apply_fix(fix, workspace_root=tmp_path)
     assert_that(result).is_false()
 
 
@@ -119,7 +119,7 @@ def test_apply_fix_line_targeted_replacement(tmp_path):
         suggested_code="x = 2",
     )
 
-    result = _apply_fix(fix)
+    result = _apply_fix(fix, workspace_root=tmp_path)
     assert_that(result).is_true()
 
     content = f.read_text()
@@ -145,7 +145,7 @@ def test_apply_fix_fallback_to_string_replace(tmp_path):
         suggested_code="new code",
     )
 
-    result = _apply_fix(fix)
+    result = _apply_fix(fix, workspace_root=tmp_path)
     assert_that(result).is_true()
     assert_that(f.read_text()).contains("new code")
 
@@ -161,7 +161,7 @@ def test_apply_fix_empty_original_code(tmp_path):
         suggested_code="y = 2",
     )
 
-    result = _apply_fix(fix)
+    result = _apply_fix(fix, workspace_root=tmp_path)
     assert_that(result).is_false()
 
 
@@ -198,7 +198,7 @@ def test_apply_fix_auto_apply_skips_fallback(tmp_path):
         suggested_code="new code",
     )
 
-    result = _apply_fix(fix, auto_apply=True)
+    result = _apply_fix(fix, auto_apply=True, workspace_root=tmp_path)
     assert_that(result).is_false()
     # File should be unchanged because fallback was skipped
     assert_that(f.read_text()).contains("old code")
@@ -219,7 +219,7 @@ def test_apply_fix_search_radius_limits_search(tmp_path):
     )
 
     # With radius=2, line-targeted search won't reach line 21
-    result = _apply_fix(fix, auto_apply=True, search_radius=2)
+    result = _apply_fix(fix, auto_apply=True, search_radius=2, workspace_root=tmp_path)
     assert_that(result).is_false()
     assert_that(f.read_text()).contains("target code")
 
@@ -245,6 +245,7 @@ def test_apply_fixes_returns_only_successful(tmp_path):
                 suggested_code="x = 3",
             ),
         ],
+        workspace_root=tmp_path,
     )
     assert_that(applied).is_length(1)
     assert_that(applied[0].suggested_code).is_equal_to("x = 2")
@@ -268,6 +269,7 @@ def test_apply_fixes_passes_auto_apply(tmp_path):
             ),
         ],
         auto_apply=True,
+        workspace_root=tmp_path,
     )
     # auto_apply=True prevents fallback, so nothing should be applied
     assert_that(applied).is_empty()
@@ -307,15 +309,18 @@ def test_group_by_code_empty_list():
 # -- review_fixes_interactive --------------------------------------------------
 
 
-def test_review_fixes_interactive_empty_suggestions():
+def test_review_fixes_interactive_empty_suggestions(tmp_path):
     """Verify that empty suggestions result in zero accepted, rejected, and applied."""
-    accepted, rejected, applied = review_fixes_interactive([])
+    accepted, rejected, applied = review_fixes_interactive(
+        [],
+        workspace_root=tmp_path,
+    )
     assert_that(accepted).is_equal_to(0)
     assert_that(rejected).is_equal_to(0)
     assert_that(applied).is_empty()
 
 
-def test_review_fixes_interactive_non_interactive_skips():
+def test_review_fixes_interactive_non_interactive_skips(tmp_path):
     """Verify that non-interactive stdin causes the review to be skipped."""
     fixes = [
         AIFixSuggestion(
@@ -326,7 +331,10 @@ def test_review_fixes_interactive_non_interactive_skips():
     ]
     with patch("sys.stdin") as mock_stdin:
         mock_stdin.isatty.return_value = False
-        accepted, rejected, applied = review_fixes_interactive(fixes)
+        accepted, rejected, applied = review_fixes_interactive(
+            fixes,
+            workspace_root=tmp_path,
+        )
         assert_that(accepted).is_equal_to(0)
         assert_that(applied).is_empty()
 
@@ -391,7 +399,10 @@ def test_review_fixes_interactive_reject_via_keyboard(
         ),
     ]
 
-    accepted, rejected, applied = review_fixes_interactive(fixes)
+    accepted, rejected, applied = review_fixes_interactive(
+        fixes,
+        workspace_root=tmp_path,
+    )
 
     assert_that(accepted).is_equal_to(0)
     assert_that(rejected).is_equal_to(1)
@@ -424,7 +435,10 @@ def test_review_fixes_interactive_quit_via_keyboard(
         ),
     ]
 
-    accepted, rejected, applied = review_fixes_interactive(fixes)
+    accepted, rejected, applied = review_fixes_interactive(
+        fixes,
+        workspace_root=tmp_path,
+    )
 
     assert_that(accepted).is_equal_to(0)
     # Only the first group was seen before quit

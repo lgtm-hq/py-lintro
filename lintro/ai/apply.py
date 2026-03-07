@@ -17,7 +17,7 @@ from lintro.ai.paths import resolve_workspace_file
 def _apply_fix(
     suggestion: AIFixSuggestion,
     *,
-    workspace_root: Path | None = None,
+    workspace_root: Path,
     auto_apply: bool = False,
     search_radius: int = 5,
 ) -> bool:
@@ -30,7 +30,7 @@ def _apply_fix(
 
     Args:
         suggestion: Fix suggestion to apply.
-        workspace_root: Optional root directory limiting writable paths.
+        workspace_root: Root directory limiting writable paths.
         auto_apply: When True, skip the fallback first-occurrence
             replacement (only allow line-targeted). Used by auto-apply
             paths in the pipeline for safety.
@@ -41,12 +41,10 @@ def _apply_fix(
         True if the fix was applied successfully.
     """
     try:
-        path = Path(suggestion.file)
-        if workspace_root is not None:
-            resolved = resolve_workspace_file(suggestion.file, workspace_root)
-            if resolved is None:
-                return False
-            path = resolved
+        resolved = resolve_workspace_file(suggestion.file, workspace_root)
+        if resolved is None:
+            return False
+        path = resolved
         content = path.read_text(encoding="utf-8")
         lines = content.splitlines(keepends=True)
 
@@ -138,7 +136,7 @@ def _apply_fix(
 def apply_fixes(
     suggestions: Sequence[AIFixSuggestion],
     *,
-    workspace_root: Path | None = None,
+    workspace_root: Path,
     auto_apply: bool = False,
     search_radius: int | None = None,
 ) -> list[AIFixSuggestion]:

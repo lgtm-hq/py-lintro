@@ -147,6 +147,53 @@ def test_is_safe_style_fix_returns_false_for_low_confidence_safe() -> None:
     assert_that(is_safe_style_fix(suggestion)).is_false()
 
 
+# -- Heuristic cross-check ------------------------------------------------
+
+
+def test_heuristic_downgrades_safe_claim_with_behavioral_diff() -> None:
+    """AI claims safe-style but diff changes logic → downgraded to behavioral."""
+    suggestion = AIFixSuggestion(
+        risk_level="safe-style",
+        confidence="high",
+        original_code="x = 1",
+        suggested_code="x = 2",
+    )
+    assert_that(classify_fix_risk(suggestion)).is_equal_to(BEHAVIORAL_RISK)
+
+
+def test_heuristic_allows_whitespace_only_diff() -> None:
+    """AI claims safe-style and diff is whitespace-only → stays safe-style."""
+    suggestion = AIFixSuggestion(
+        risk_level="safe-style",
+        confidence="high",
+        original_code="x  =  1",
+        suggested_code="x = 1",
+    )
+    assert_that(classify_fix_risk(suggestion)).is_equal_to(SAFE_STYLE_RISK)
+
+
+def test_heuristic_allows_quote_normalization() -> None:
+    """Quote style changes are considered style-only."""
+    suggestion = AIFixSuggestion(
+        risk_level="safe-style",
+        confidence="high",
+        original_code="x = 'hello'",
+        suggested_code='x = "hello"',
+    )
+    assert_that(classify_fix_risk(suggestion)).is_equal_to(SAFE_STYLE_RISK)
+
+
+def test_heuristic_allows_trailing_comma_changes() -> None:
+    """Trailing comma additions are considered style-only."""
+    suggestion = AIFixSuggestion(
+        risk_level="safe-style",
+        confidence="high",
+        original_code="f(a, b)",
+        suggested_code="f(a, b,)",
+    )
+    assert_that(classify_fix_risk(suggestion)).is_equal_to(SAFE_STYLE_RISK)
+
+
 # -- PatchStats dataclass --------------------------------------------------
 
 

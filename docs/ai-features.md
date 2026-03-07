@@ -392,3 +392,30 @@ persistent rate limiting:
 - Lower `max_fix_issues` (default 20) if fix generation is too expensive
 - Avoid `default_fix: true` in config unless you want fixes every run
 - Use `--fix` only when needed
+
+## Data & Privacy
+
+### What is sent to the AI provider
+
+- **Summary mode** (`lintro check`): An issue digest containing error codes, counts, issue
+  messages, and workspace-relative file paths. No source code is sent.
+- **Fix mode** (`--fix` or `lintro format`): A ~30-line code context window around each
+  issue line, plus the issue message and error code. One API call per issue.
+
+### What is NOT sent
+
+- **Full files** — only a small context window around the issue line
+- **Absolute paths** — all paths are made relative to the workspace root before sending
+- **Other project files** — only files with reported issues are read
+
+### Workspace boundary enforcement
+
+AI fix suggestions are validated against the workspace root. Fixes targeting files outside
+the workspace are rejected and never applied.
+
+### Important notes
+
+- AI suggestions can hallucinate incorrect fixes — always review before accepting
+- See your provider's privacy policy for data retention:
+  [Anthropic](https://www.anthropic.com/privacy),
+  [OpenAI](https://openai.com/policies/privacy-policy)

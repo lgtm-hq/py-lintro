@@ -10,7 +10,6 @@ from lintro.ai.exceptions import (
     AINotAvailableError,
     AIProviderError,
     AIRateLimitError,
-    AITokenLimitError,
 )
 from lintro.exceptions.errors import LintroError
 
@@ -22,4 +21,3 @@ def test_exceptions_hierarchy():
     assert_that(AIProviderError("x")).is_instance_of(AIError)
     assert_that(AIAuthenticationError("x")).is_instance_of(AIProviderError)
     assert_that(AIRateLimitError("x")).is_instance_of(AIProviderError)
-    assert_that(AITokenLimitError("x")).is_instance_of(AIError)
