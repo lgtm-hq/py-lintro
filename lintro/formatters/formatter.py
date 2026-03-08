@@ -204,6 +204,91 @@ def format_issues_with_sections(
     return "\n\n".join(sections)
 
 
+def format_fix_results(
+    detected_issues: Sequence[BaseIssue],
+    remaining_issues: Sequence[BaseIssue] | None,
+    output_format: OutputFormat | str = OutputFormat.GRID,
+    *,
+    tool_name: str | None = None,
+) -> str:
+    """Format fix-mode results as two separate tables.
+
+    Renders a "Detected issues" table and a "Remaining issues" table
+    so users can clearly see what was auto-fixed vs what still needs
+    attention. When all issues are fixed, the "Remaining" table is omitted.
+
+    For JSON/GitHub formats, returns a single combined table for
+    backward compatibility.
+
+    Args:
+        detected_issues: Issues found before fixes were applied.
+        remaining_issues: Issues still present after fixes, or None/empty
+            if all were fixed.
+        output_format: Output format (grid, json, plain, etc.).
+        tool_name: Tool name for JSON output.
+
+    Returns:
+        Formatted string with one or two labeled tables.
+    """
+    if not detected_issues:
+        return "No issues found."
+
+    normalized_format = normalize_output_format(output_format)
+
+    # JSON/GitHub: merge detected + remaining, deduplicating by attributes
+    if normalized_format in {OutputFormat.JSON, OutputFormat.GITHUB}:
+
+        def _issue_key(issue: BaseIssue) -> tuple[str, int, int, str, str]:
+            return (
+                issue.file,
+                issue.line,
+                issue.column,
+                getattr(issue, "code", "") or "",
+                issue.message,
+            )
+
+        seen_keys: set[tuple[str, int, int, str, str]] = {
+            _issue_key(i) for i in detected_issues
+        }
+        merged: list[BaseIssue] = list(detected_issues)
+        if remaining_issues:
+            for issue in remaining_issues:
+                key = _issue_key(issue)
+                if key not in seen_keys:
+                    merged.append(issue)
+                    seen_keys.add(key)
+        return format_issues(
+            merged,
+            output_format=normalized_format,
+            tool_name=tool_name,
+        )
+
+    sections: list[str] = []
+
+    # Always show detected issues
+    detected_output = format_issues(
+        detected_issues,
+        output_format=normalized_format,
+        tool_name=tool_name,
+    )
+    sections.append(f"Detected issues ({len(detected_issues)})\n{detected_output}")
+
+    # Only show remaining if there are any
+    if remaining_issues:
+        remaining_output = format_issues(
+            remaining_issues,
+            output_format=normalized_format,
+            tool_name=tool_name,
+        )
+        sections.append(
+            f"Remaining issues ({len(remaining_issues)})\n{remaining_output}",
+        )
+    else:
+        sections.append("All issues were auto-fixed.")
+
+    return "\n\n".join(sections)
+
+
 def format_tool_result(
     tool_name: str,
     issues: Sequence[BaseIssue],

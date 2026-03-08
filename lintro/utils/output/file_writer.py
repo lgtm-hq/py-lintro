@@ -41,6 +41,23 @@ if TYPE_CHECKING:
     from lintro.models.core.tool_result import ToolResult
 
 
+def _serialize_issue(issue: BaseIssue) -> dict[str, Any]:
+    """Serialize a BaseIssue to a JSON-safe dictionary.
+
+    Args:
+        issue: BaseIssue: The issue to serialize.
+
+    Returns:
+        dict[str, Any]: Serialized issue data.
+    """
+    return {
+        "file": getattr(issue, "file", "") or "",
+        "line": getattr(issue, "line", None) or 0,
+        "code": getattr(issue, "code", "") or "",
+        "message": getattr(issue, "message", "") or "",
+    }
+
+
 def write_output_file(
     *,
     output_path: str,
@@ -84,13 +101,13 @@ def write_output_file(
             }
             if hasattr(result, "issues") and result.issues:
                 result_data["issues"] = [
-                    {
-                        "file": getattr(issue, "file", "") or "",
-                        "line": getattr(issue, "line", None) or 0,
-                        "code": getattr(issue, "code", "") or "",
-                        "message": getattr(issue, "message", "") or "",
-                    }
-                    for issue in result.issues
+                    _serialize_issue(issue) for issue in result.issues
+                ]
+            # Include detected (pre-fix) issues when available
+            detected = getattr(result, "detected_issues", None)
+            if detected:
+                result_data["detected_issues"] = [
+                    _serialize_issue(issue) for issue in detected
                 ]
             json_data["results"].append(result_data)
         output_file.write_text(
