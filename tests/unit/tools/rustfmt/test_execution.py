@@ -60,9 +60,8 @@ def test_check_with_mocked_subprocess_success(
             "lintro.plugins.execution_preparation.verify_tool_version",
             return_value=None,
         ),
-        patch.object(
-            rustfmt_plugin,
-            "_run_subprocess",
+        patch(
+            "lintro.tools.definitions.rustfmt.run_subprocess_with_timeout",
             return_value=(True, ""),
         ),
     ):
@@ -102,9 +101,8 @@ def test_check_with_mocked_subprocess_issues(
             "lintro.plugins.execution_preparation.verify_tool_version",
             return_value=None,
         ),
-        patch.object(
-            rustfmt_plugin,
-            "_run_subprocess",
+        patch(
+            "lintro.tools.definitions.rustfmt.run_subprocess_with_timeout",
             return_value=(False, mock_output),
         ),
     ):
@@ -189,6 +187,7 @@ def test_fix_with_mocked_subprocess_success(
         cmd: list[str],
         timeout: int,
         cwd: str | None = None,
+        **_kwargs: object,
     ) -> tuple[bool, str]:
         """Mock subprocess that returns diff on check, success on fix.
 
@@ -196,6 +195,7 @@ def test_fix_with_mocked_subprocess_success(
             cmd: Command list.
             timeout: Timeout in seconds.
             cwd: Working directory.
+            **_kwargs: Absorb extra keyword arguments (e.g. tool).
 
         Returns:
             Tuple of (success, output).
@@ -217,7 +217,10 @@ def test_fix_with_mocked_subprocess_success(
             "lintro.plugins.execution_preparation.verify_tool_version",
             return_value=None,
         ),
-        patch.object(rustfmt_plugin, "_run_subprocess", side_effect=mock_run),
+        patch(
+            "lintro.tools.definitions.rustfmt.run_subprocess_with_timeout",
+            side_effect=mock_run,
+        ),
     ):
         result = rustfmt_plugin.fix([str(test_file)], {})
 
@@ -249,9 +252,8 @@ def test_fix_with_nothing_to_fix(
             "lintro.plugins.execution_preparation.verify_tool_version",
             return_value=None,
         ),
-        patch.object(
-            rustfmt_plugin,
-            "_run_subprocess",
+        patch(
+            "lintro.tools.definitions.rustfmt.run_subprocess_with_timeout",
             return_value=(True, ""),
         ),
     ):

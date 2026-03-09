@@ -29,7 +29,7 @@ from tests.unit.ai.conftest import MockAIProvider, MockIssue
 
 
 @pytest.fixture
-def _single_issue_result():
+def single_issue_result():
     """ToolResult with one ruff issue."""
     return ToolResult(
         name="ruff",
@@ -47,13 +47,13 @@ def _single_issue_result():
 
 
 @pytest.fixture
-def _check_config():
+def check_config():
     """LintroConfig with AI enabled and max_fix_issues=5."""
     return LintroConfig(ai=AIConfig(enabled=True, max_fix_issues=5))
 
 
 @pytest.fixture
-def _mock_logger():
+def mock_logger():
     """MagicMock logger."""
     return MagicMock()
 
@@ -72,14 +72,14 @@ def test_run_ai_enhancement_check_fix_preserves_summary_and_fix_metadata(
     mock_generate_summary,
     mock_get_provider,
     _mock_require_ai,
-    _single_issue_result,
-    _check_config,
-    _mock_logger,
+    single_issue_result,
+    check_config,
+    mock_logger,
 ):
     """Verify check+fix action attaches both summary and fix metadata to the result."""
-    result = _single_issue_result
-    config = _check_config
-    logger = _mock_logger
+    result = single_issue_result
+    config = check_config
+    logger = mock_logger
 
     mock_get_provider.return_value = MockAIProvider()
     mock_generate_summary.return_value = AISummary(overview="AI overview")

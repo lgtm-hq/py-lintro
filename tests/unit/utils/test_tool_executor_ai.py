@@ -32,6 +32,9 @@ class TestWarnAIFixDisabled:
         )
 
         assert_that(logger.console_output.call_count).is_equal_to(1)
+        warning_text = logger.console_output.call_args[0][0]
+        assert_that(warning_text).contains("AI fixes requested")
+        assert_that(warning_text).contains("ai.enabled is false")
 
     def test_no_warning_for_other_states(self):
         """Test that no warning is issued for non-qualifying state combinations."""
@@ -102,7 +105,7 @@ class TestToolExecutorAITotals:
         monkeypatch.setattr(
             te,
             "get_tools_to_run",
-            lambda tools, action: ToolsToRunResult(to_run=["ruff"]),
+            lambda tools, action, **_kw: ToolsToRunResult(to_run=["ruff"]),
         )
         monkeypatch.setattr(
             te.tool_manager,  # type: ignore[attr-defined]  # singleton

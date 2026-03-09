@@ -119,6 +119,7 @@ def _setup_tool_manager(
     def fake_get_tools(
         tools: str | None,
         action: str,
+        **_kwargs: object,
     ) -> ToolsToRunResult:
         return ToolsToRunResult(to_run=list(tools_dict.keys()))
 
@@ -383,7 +384,7 @@ def test_executor_unknown_tool(
     """
     _stub_logger(monkeypatch, fake_logger)
 
-    def raise_value_error(tools: str | None, action: str) -> Never:
+    def raise_value_error(tools: str | None, action: str, **_kwargs: object) -> Never:
         raise ValueError("unknown tool")
 
     monkeypatch.setattr(te, "get_tools_to_run", raise_value_error, raising=True)

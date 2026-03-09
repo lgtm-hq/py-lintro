@@ -1,7 +1,5 @@
 """Tests for the runtime model fallback chain."""
 
-# ruff: noqa: D102
-
 from __future__ import annotations
 
 from unittest.mock import MagicMock
@@ -25,6 +23,7 @@ def _make_provider(model: str = "primary-model") -> MagicMock:
 
 
 def _ok_response(model: str = "primary-model") -> AIResponse:
+    """Create a successful mock AI response."""
     return AIResponse(
         content="ok",
         model=model,
@@ -39,6 +38,7 @@ class TestCompleteWithFallbackPrimarySuccess:
     """Primary model succeeds on first try."""
 
     def test_returns_response_without_fallback(self) -> None:
+        """Return response when primary succeeds without fallback."""
         provider = _make_provider()
         provider.complete.return_value = _ok_response()
 
@@ -48,6 +48,7 @@ class TestCompleteWithFallbackPrimarySuccess:
         provider.complete.assert_called_once()
 
     def test_returns_response_with_empty_fallback_list(self) -> None:
+        """Return response when fallback list is empty."""
         provider = _make_provider()
         provider.complete.return_value = _ok_response()
 
@@ -57,6 +58,7 @@ class TestCompleteWithFallbackPrimarySuccess:
         provider.complete.assert_called_once()
 
     def test_does_not_try_fallbacks_on_success(self) -> None:
+        """Skip fallback models when primary succeeds."""
         provider = _make_provider()
         provider.complete.return_value = _ok_response()
 
@@ -76,6 +78,7 @@ class TestCompleteWithFallbackChain:
     """Primary fails, fallback models are tried in order."""
 
     def test_falls_back_on_provider_error(self) -> None:
+        """Fall back to next model on provider error."""
         provider = _make_provider()
         provider.complete.side_effect = [
             AIProviderError("primary down"),
@@ -93,6 +96,7 @@ class TestCompleteWithFallbackChain:
         assert provider._model == "primary-model"  # restored
 
     def test_falls_back_on_rate_limit_error(self) -> None:
+        """Fall back to next model on rate limit error."""
         provider = _make_provider()
         provider.complete.side_effect = [
             AIRateLimitError("rate limited"),
@@ -109,6 +113,7 @@ class TestCompleteWithFallbackChain:
         assert provider.complete.call_count == 2
 
     def test_tries_multiple_fallbacks_in_order(self) -> None:
+        """Try fallback models sequentially until one succeeds."""
         provider = _make_provider()
         provider.complete.side_effect = [
             AIProviderError("primary down"),
@@ -132,6 +137,7 @@ class TestCompleteWithFallbackChain:
         models_seen: list[str] = []
 
         def capture_model(*args, **kwargs):
+            """Record the current model and fail until the third call."""
             models_seen.append(provider._model)
             if len(models_seen) < 3:
                 raise AIProviderError("fail")
@@ -153,6 +159,7 @@ class TestCompleteWithFallbackAllFail:
     """All models fail -- last error is raised."""
 
     def test_raises_last_error_when_all_fail(self) -> None:
+        """Raise the last error when all models fail."""
         provider = _make_provider()
         provider.complete.side_effect = [
             AIProviderError("primary down"),
@@ -170,6 +177,7 @@ class TestCompleteWithFallbackAllFail:
         assert provider._model == "primary-model"  # restored
 
     def test_raises_primary_error_when_no_fallbacks(self) -> None:
+        """Raise the primary error when no fallbacks are configured."""
         provider = _make_provider()
         provider.complete.side_effect = AIProviderError("primary down")
 
@@ -181,6 +189,7 @@ class TestCompleteWithFallbackAuthError:
     """AIAuthenticationError is never retried."""
 
     def test_auth_error_propagates_immediately(self) -> None:
+        """Propagate authentication error without trying fallbacks."""
         provider = _make_provider()
         provider.complete.side_effect = AIAuthenticationError("bad key")
 
@@ -196,6 +205,7 @@ class TestCompleteWithFallbackAuthError:
         assert provider._model == "primary-model"  # restored
 
     def test_auth_error_on_fallback_propagates(self) -> None:
+        """Propagate authentication error raised by a fallback model."""
         provider = _make_provider()
         provider.complete.side_effect = [
             AIProviderError("primary down"),
@@ -217,6 +227,7 @@ class TestCompleteWithFallbackModelRestoration:
     """_model is always restored, even on error."""
 
     def test_model_restored_on_auth_error(self) -> None:
+        """Restore original model after authentication error."""
         provider = _make_provider("orig")
         provider.complete.side_effect = AIAuthenticationError("err")
 
@@ -230,6 +241,7 @@ class TestCompleteWithFallbackModelRestoration:
         assert provider._model == "orig"
 
     def test_model_restored_on_provider_error(self) -> None:
+        """Restore original model after provider error."""
         provider = _make_provider("orig")
         provider.complete.side_effect = AIProviderError("err")
 
@@ -239,6 +251,7 @@ class TestCompleteWithFallbackModelRestoration:
         assert provider._model == "orig"
 
     def test_model_restored_on_success(self) -> None:
+        """Restore original model after successful fallback."""
         provider = _make_provider("orig")
         provider.complete.side_effect = [
             AIProviderError("fail"),
@@ -254,6 +267,7 @@ class TestCompleteWithFallbackKwargsPassthrough:
     """Keyword arguments are forwarded to provider.complete()."""
 
     def test_forwards_all_kwargs(self) -> None:
+        """Forward all keyword arguments to provider.complete."""
         provider = _make_provider()
         provider.complete.return_value = _ok_response()
 

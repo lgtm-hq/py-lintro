@@ -158,3 +158,6 @@ def test_save_console_log_handles_permission_error(tmp_path: Path) -> None:
     ):
         logger.save_console_log()
         mock_error.assert_called_once()
+        assert_that(str(mock_error.call_args)).contains(
+            "Failed to save console log",
+        )

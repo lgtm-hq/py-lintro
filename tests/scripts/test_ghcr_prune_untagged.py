@@ -130,7 +130,8 @@ def make_mock_client(
         def get(
             self,
             url: str,
-            headers: dict[str, str],
+            *,
+            headers: Mapping[str, str] | None = None,
         ) -> (
             MockOwnerResponse | Any
         ):  # noqa: ARG002 -- mock matches real Client.get signature
@@ -146,7 +147,8 @@ def make_mock_client(
         def delete(
             self,
             url: str,
-            headers: dict[str, str],
+            *,
+            headers: Mapping[str, str] | None = None,
         ) -> (
             MockDeleteResponse
         ):  # noqa: ARG002 -- mock matches real Client.delete signature
@@ -253,11 +255,7 @@ def test_delete_version_calls_delete(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_delete_version_raises_on_non_204_non_404() -> None:
-    """Raise when the delete operation returns an unexpected status code.
-
-    Raises:
-        AssertionError: If the expected RuntimeError is not raised.
-    """
+    """Raise when the delete operation returns an unexpected status code."""
 
     class DummyClient:
         def delete(
@@ -270,20 +268,17 @@ def test_delete_version_raises_on_non_204_non_404() -> None:
         ):  # noqa: ARG002 -- mock matches real Client.delete signature
             return MockDeleteResponse(status_code=500)
 
-    try:
-        # DummyClient is a test mock that only implements delete().
-        # Pass base_path to avoid owner type lookup
-        # (DummyClient doesn't implement get()).
-        # Cast: mock only implements delete(), sufficient here
+    # DummyClient is a test mock that only implements delete().
+    # Pass base_path to avoid owner type lookup
+    # (DummyClient doesn't implement get()).
+    # Cast: mock only implements delete(), sufficient here
+    with pytest.raises(RuntimeError):
         delete_version(
             client=cast(GhcrClient, DummyClient()),
             owner="owner",
             version_id=1,
             base_path="https://api.github.com/users/owner/packages/container",  # noqa: E501 -- test URL intentionally long
         )
-    except RuntimeError:
-        return
-    raise AssertionError("Expected RuntimeError on non-204/404 response")
 
 
 def test_main_deletes_only_untagged(monkeypatch: pytest.MonkeyPatch) -> None:

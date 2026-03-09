@@ -133,7 +133,11 @@ def _setup_main_tool(monkeypatch: pytest.MonkeyPatch) -> FakeTool:
     ok = ToolResult(name="ruff", success=True, output="", issues_count=0)
     ruff = FakeTool("ruff", can_fix=True, result=ok)
 
-    def fake_get_tools(tools: str | None, action: str) -> ToolsToRunResult:
+    def fake_get_tools(
+        tools: str | None,
+        action: str,
+        **_kwargs: object,
+    ) -> ToolsToRunResult:
         return ToolsToRunResult(to_run=["ruff"])
 
     monkeypatch.setattr(te, "get_tools_to_run", fake_get_tools, raising=True)

@@ -151,6 +151,8 @@ def test_print_totals_table_delegates_fix_mode() -> None:
             total_fixed=10,
             total_remaining=3,
             affected_files=5,
+            total_ai_applied=2,
+            total_ai_verified=1,
         )
         mock_print.assert_called_once_with(
             console_output_func=logger.console_output,
@@ -162,8 +164,8 @@ def test_print_totals_table_delegates_fix_mode() -> None:
             severity_errors=0,
             severity_warnings=0,
             severity_info=0,
-            total_ai_applied=0,
-            total_ai_verified=0,
+            total_ai_applied=2,
+            total_ai_verified=1,
         )
 
 

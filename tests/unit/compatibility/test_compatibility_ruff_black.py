@@ -137,12 +137,17 @@ def _setup_tools(monkeypatch: pytest.MonkeyPatch) -> tuple[FakeTool, FakeTool]:
     black = FakeTool(ToolName.BLACK, can_fix=True)
     tool_map = {ToolName.RUFF: ruff, ToolName.BLACK: black}
 
-    def fake_get_tools(tools: str | None, action: str) -> ToolsToRunResult:
+    def fake_get_tools(
+        tools: str | None,
+        action: str,
+        **_kwargs: object,
+    ) -> ToolsToRunResult:
         """Return tool names for ruff and black in order.
 
         Args:
             tools: Optional tool selection string (ignored in tests).
             action: Runner action being executed (e.g., "fmt" or "check").
+            **_kwargs: Absorb extra keyword arguments (e.g. ignore_conflicts).
 
         Returns:
             ToolsToRunResult with ruff and black tools.
