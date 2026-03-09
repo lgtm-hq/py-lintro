@@ -25,6 +25,7 @@ from lintro.ai.display.shared import (
 )
 from lintro.ai.display.summary import (
     render_summary,
+    render_summary_annotations,
     render_summary_github,
     render_summary_markdown,
     render_summary_terminal,
@@ -53,6 +54,7 @@ __all__ = [
     "render_fixes_terminal",
     # Summary rendering
     "render_summary",
+    "render_summary_annotations",
     "render_summary_github",
     "render_summary_markdown",
     "render_summary_terminal",

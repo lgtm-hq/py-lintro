@@ -149,9 +149,16 @@ def render_fixes_github(
         if fix.line:
             loc += f":{fix.line}"
 
-        code_label = f" [{fix.code}]" if fix.code else ""
-        tool_label = f" ({fix.tool_name})" if fix.tool_name else ""
-        lines.append(f"::group::{loc}{code_label}{tool_label} \u2014 {fix.explanation}")
+        code_label = f" [{_escape_annotation(fix.code)}]" if fix.code else ""
+        tool_label = (
+            f" ({_escape_annotation(fix.tool_name)})" if fix.tool_name else ""
+        )
+        escaped_loc = _escape_annotation(loc)
+        escaped_explanation = _escape_annotation(fix.explanation or "")
+        lines.append(
+            f"::group::{escaped_loc}{code_label}{tool_label}"
+            f" \u2014 {escaped_explanation}",
+        )
 
         if fix.diff:
             sanitized_diff = fix.diff.replace("```", "``\u200b`")
@@ -231,24 +238,112 @@ def render_fixes_markdown(
     return "\n".join(lines)
 
 
+def _risk_to_annotation_level(risk_level: str) -> str:
+    """Map AI risk level to a GitHub Actions annotation level.
+
+    Args:
+        risk_level: Risk classification from the AI fix suggestion
+            (e.g. ``"high"``, ``"critical"``, ``"medium"``, ``"low"``).
+
+    Returns:
+        One of ``"error"``, ``"warning"``, or ``"notice"``.
+    """
+    normalized = risk_level.lower().strip() if risk_level else ""
+    if normalized in {"high", "critical"}:
+        return "error"
+    if normalized in {"medium", "behavioral-risk"}:
+        return "warning"
+    if normalized in {"low", "safe-style"}:
+        return "notice"
+    return "warning"
+
+
+def _escape_annotation(value: str) -> str:
+    """Escape special characters for GitHub Actions annotation messages.
+
+    Args:
+        value: Raw string to escape.
+
+    Returns:
+        Escaped string safe for workflow command messages.
+    """
+    return value.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
+
+
+def _escape_property(value: str) -> str:
+    """Escape a value for use inside a GitHub Actions annotation property.
+
+    Property values are delimited by ``,`` and terminated by ``::`` so
+    both characters must be percent-encoded in addition to the standard
+    message escapes.
+
+    Args:
+        value: Raw property value.
+
+    Returns:
+        Escaped string safe for annotation property positions.
+    """
+    return (
+        _escape_annotation(value)
+        .replace(",", "%2C")
+        .replace(":", "%3A")
+    )
+
+
 def render_fixes_annotations(suggestions: Sequence[AIFixSuggestion]) -> str:
     """Emit GitHub Actions annotation commands for fix suggestions.
 
-    Each suggestion produces a ``::warning`` annotation that surfaces
-    directly in the GitHub Actions UI next to the affected file/line.
+    Each suggestion maps its ``risk_level`` to the appropriate annotation
+    level (``::error``, ``::warning``, or ``::notice``) and includes file,
+    line, and title properties so annotations appear inline on PR diffs.
+
+    Mapping:
+        - ``high`` / ``critical`` -> ``::error``
+        - ``medium`` / ``behavioral-risk`` -> ``::warning``
+        - ``low`` / ``safe-style`` -> ``::notice``
+        - (unset) -> ``::warning`` (default)
 
     Args:
         suggestions: Fix suggestions to annotate.
 
     Returns:
-        Newline-joined ``::warning`` commands, or empty string if no
+        Newline-joined annotation commands, or empty string if no
         suggestions are provided.
     """
     lines: list[str] = []
     for s in suggestions:
-        level = "warning"
-        msg = f"AI fix available ({s.code}): {s.explanation}"
-        lines.append(f"::{level} file={s.file},line={s.line}::{msg}")
+        level = _risk_to_annotation_level(s.risk_level)
+
+        props: list[str] = []
+        if s.file:
+            props.append(f"file={_escape_property(s.file)}")
+        if s.line:
+            props.append(f"line={s.line}")
+
+        title_parts: list[str] = []
+        if s.tool_name:
+            title_parts.append(s.tool_name)
+        if s.code:
+            if title_parts:
+                title_parts[-1] += f"({s.code})"
+            else:
+                title_parts.append(s.code)
+        if title_parts:
+            props.append(f"title={_escape_property(title_parts[0])}")
+
+        props_str = ",".join(props)
+
+        explanation = s.explanation or "AI fix available"
+        code_label = f" [{s.code}]" if s.code else ""
+        confidence_label = f" (confidence: {s.confidence})" if s.confidence else ""
+        msg = _escape_annotation(
+            f"AI fix available{code_label}: {explanation}{confidence_label}",
+        )
+
+        if props_str:
+            lines.append(f"::{level} {props_str}::{msg}")
+        else:
+            lines.append(f"::{level}::{msg}")
     return "\n".join(lines)
 
 

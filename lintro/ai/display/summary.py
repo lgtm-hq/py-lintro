@@ -225,6 +225,36 @@ def render_summary_markdown(
     return "\n".join(lines)
 
 
+def render_summary_annotations(summary: AISummary) -> str:
+    """Emit GitHub Actions annotation commands for AI summary insights.
+
+    Key patterns are emitted as ``::warning`` and priority actions as
+    ``::notice`` annotations so they surface in the Actions UI.
+
+    Args:
+        summary: AI summary to annotate.
+
+    Returns:
+        Newline-joined annotation commands, or empty string if the
+        summary has no actionable insights.
+    """
+    if not summary.overview:
+        return ""
+
+    lines: list[str] = []
+
+    for pattern in summary.key_patterns:
+        escaped = pattern.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
+        lines.append(f"::warning title=AI Pattern::{escaped}")
+
+    for action in summary.priority_actions:
+        clean = LEADING_NUMBER_RE.sub("", action)
+        escaped = clean.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
+        lines.append(f"::notice title=AI Priority::{escaped}")
+
+    return "\n".join(lines)
+
+
 def render_summary(
     summary: AISummary,
     *,
