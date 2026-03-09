@@ -397,8 +397,8 @@ persistent rate limiting:
 
 ### What is sent to the AI provider
 
-- **Summary mode** (`lintro check`): An issue digest containing error codes, counts, issue
-  messages, and workspace-relative file paths. No source code is sent.
+- **Summary mode** (`lintro check`): An issue digest containing error codes, counts,
+  issue messages, and workspace-relative file paths. No source code is sent.
 - **Fix mode** (`--fix` or `lintro format`): A ~30-line code context window around each
   issue line, plus the issue message and error code. One API call per issue.
 
@@ -410,8 +410,8 @@ persistent rate limiting:
 
 ### Workspace boundary enforcement
 
-AI fix suggestions are validated against the workspace root. Fixes targeting files outside
-the workspace are rejected and never applied.
+AI fix suggestions are validated against the workspace root. Fixes targeting files
+outside the workspace are rejected and never applied.
 
 ### Important notes
 
