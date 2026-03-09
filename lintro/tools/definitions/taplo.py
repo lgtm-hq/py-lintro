@@ -276,6 +276,7 @@ class TaploPlugin(BaseToolPlugin):
             output=output if count > 0 else None,
             issues_count=count,
             issues=all_issues,
+            cwd=ctx.cwd,
         )
 
     def fix(self, paths: list[str], options: dict[str, object]) -> ToolResult:

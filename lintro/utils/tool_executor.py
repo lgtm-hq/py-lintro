@@ -163,6 +163,7 @@ def run_lint_tools_simple(
     auto_install: bool = False,
     yes: bool = False,
     ai_fix: bool = False,
+    ignore_conflicts: bool = False,
 ) -> int:
     """Simplified runner using Loguru-based logging with rich formatting.
 
@@ -191,6 +192,7 @@ def run_lint_tools_simple(
         auto_install: Whether to auto-install Node.js deps if node_modules missing.
         yes: Skip confirmation prompt and proceed immediately.
         ai_fix: Enable AI fix suggestions with interactive review (check only).
+        ignore_conflicts: Whether to ignore tool configuration conflicts.
 
     Returns:
         Exit code (0 for success, 1 for failures).
@@ -217,7 +219,11 @@ def run_lint_tools_simple(
 
     # Get tools to run (now returns ToolsToRunResult with skip info)
     try:
-        tools_result = get_tools_to_run(tools, action)
+        tools_result = get_tools_to_run(
+            tools,
+            action,
+            ignore_conflicts=ignore_conflicts,
+        )
     except ValueError as e:
         logger.console_output(f"Error: {e}")
         return 1

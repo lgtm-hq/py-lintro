@@ -173,12 +173,15 @@ def get_tool_lookup_keys(tool_name: str) -> set[str]:
 def get_tools_to_run(
     tools: str | ToolsValue | None,
     action: str | Action,
+    *,
+    ignore_conflicts: bool = False,
 ) -> ToolsToRunResult:
     """Get the list of tools to run based on the tools string and action.
 
     Args:
         tools: Comma-separated tool names, "all", or None.
         action: "check", "fmt", or "test".
+        ignore_conflicts: If True, skip conflict checking between tools.
 
     Returns:
         ToolsToRunResult with tools to run and skipped tools with reasons.

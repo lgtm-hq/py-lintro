@@ -115,7 +115,7 @@ DEFAULT_ACTION: str = "check"
     "--fix",
     "ai_fix",
     is_flag=True,
-    help="Generate AI fix suggestions (safe-style fixes auto-apply in non-interactive mode)",
+    help="Generate AI fix suggestions (safe fixes auto-apply in CI)",
 )
 def check_command(
     paths: tuple[str, ...],
@@ -202,6 +202,7 @@ def check_command(
         auto_install=auto_install,
         yes=yes,
         ai_fix=ai_fix,
+        ignore_conflicts=ignore_conflicts,
     )
 
     # Exit with code only; CLI uses this as process exit code and avoids any
