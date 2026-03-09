@@ -81,7 +81,7 @@ def verify_fixes(
 
     # Step 1: Re-run tools (cwd-aware) to get fresh ToolResults.
     fresh_results = rerun_tools(by_tool)
-    if fresh_results:
+    if fresh_results is not None:
         apply_rerun_results(by_tool=by_tool, rerun_results=fresh_results)
 
     # Build a lookup from tool name -> fresh remaining issues for validation.
@@ -128,6 +128,7 @@ def validate_applied_fixes(
 
     # Run each tool and collect fresh issues
     fresh_issues_by_tool: dict[str, list[object]] = {}
+    any_tool_ran = False
     for tool_name, suggestions in by_tool_suggestions.items():
         if tool_name == "unknown":
             continue
@@ -139,7 +140,11 @@ def validate_applied_fixes(
             logger.debug(f"Validation skipped for {tool_name}: tool check failed")
             continue
 
+        any_tool_ran = True
         fresh_issues_by_tool[tool_name] = remaining_issues
+
+    if not any_tool_ran:
+        return None
 
     return _validate_suggestions(applied_suggestions, fresh_issues_by_tool)
 

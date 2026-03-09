@@ -45,31 +45,39 @@ def get_provider(config: AIConfig) -> BaseAIProvider:
             f"Supported providers: {supported}",
         ) from exc
 
-    if provider_enum is AIProvider.ANTHROPIC:
-        from lintro.ai.providers.anthropic import AnthropicProvider
+    provider_classes: dict[AIProvider, tuple[str, str]] = {
+        AIProvider.ANTHROPIC: (
+            "lintro.ai.providers.anthropic",
+            "AnthropicProvider",
+        ),
+        AIProvider.OPENAI: (
+            "lintro.ai.providers.openai",
+            "OpenAIProvider",
+        ),
+    }
 
-        return AnthropicProvider(
-            model=config.model,
-            api_key_env=config.api_key_env,
-            max_tokens=config.max_tokens,
-            base_url=config.api_base_url,
-        )
-    elif provider_enum is AIProvider.OPENAI:
-        from lintro.ai.providers.openai import OpenAIProvider
-
-        return OpenAIProvider(
-            model=config.model,
-            api_key_env=config.api_key_env,
-            max_tokens=config.max_tokens,
-            base_url=config.api_base_url,
-        )
-    else:
-        # Unreachable with current AIProvider members, but kept as a safety net.
-        supported = ", ".join(p.value for p in AIProvider)
+    entry = provider_classes.get(provider_enum)
+    if entry is None:
+        implemented = ", ".join(p.value for p in provider_classes)
         raise ValueError(
-            f"Unknown AI provider: '{provider_enum}'. "
-            f"Supported providers: {supported}",
+            f"AI provider '{provider_enum}' is recognized but not "
+            f"implemented. Implemented providers: {implemented}",
         )
+
+    import importlib
+
+    module_path, class_name = entry
+    module = importlib.import_module(
+        module_path,
+    )  # nosec B403 -- module paths are hard-coded above
+    provider_cls = getattr(module, class_name)
+    result: BaseAIProvider = provider_cls(
+        model=config.model,
+        api_key_env=config.api_key_env,
+        max_tokens=config.max_tokens,
+        base_url=config.api_base_url,
+    )
+    return result
 
 
 def get_default_model(provider_name: str) -> str | None:

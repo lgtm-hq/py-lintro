@@ -60,13 +60,21 @@ def _diff_is_style_only(suggestion: AIFixSuggestion) -> bool:
         return ast_result
 
     def _normalize(text: str) -> str:
-        """Strip whitespace, trailing commas, and normalize quotes."""
-        # Remove all whitespace
-        text = re.sub(r"\s+", "", text)
-        # Normalize quote characters (single -> double)
-        text = text.replace("'", '"')
+        """Normalize for style-only comparison without altering semantics.
+
+        Only performs safe normalizations: trim edges, normalize line
+        endings and consecutive blank lines, and remove trailing commas
+        before closing brackets. Does NOT remove internal whitespace or
+        rewrite quote characters, which could mask behavioral changes.
+        """
+        # Trim leading/trailing whitespace
+        text = text.strip()
+        # Normalize line endings
+        text = text.replace("\r\n", "\n").replace("\r", "\n")
+        # Collapse consecutive blank lines
+        text = re.sub(r"\n{3,}", "\n\n", text)
         # Remove trailing commas before closing brackets
-        text = re.sub(r",([}\])])", r"\1", text)
+        text = re.sub(r",(\s*[}\])])", r"\1", text)
         return text
 
     # Fall back to whitespace/quote normalization heuristic

@@ -13,10 +13,12 @@ from loguru import logger as loguru_logger
 
 from lintro.ai import require_ai
 from lintro.ai.budget import CostBudget
-from lintro.ai.display import render_summary
+from lintro.ai.display import render_summary, render_summary_annotations
+from lintro.ai.display.shared import is_github_actions
 from lintro.ai.filters import filter_issues
+from lintro.ai.integrations.github_pr import GitHubPRReporter
 from lintro.ai.metadata import attach_summary_metadata
-from lintro.ai.models import AIResult
+from lintro.ai.models import AIFixSuggestion, AIResult, AISummary
 from lintro.ai.paths import resolve_workspace_file, resolve_workspace_root
 from lintro.ai.pipeline import run_fix_pipeline
 from lintro.ai.providers import get_provider
@@ -139,12 +141,21 @@ def _run_ai_check(
         output = render_summary(summary, show_cost=ai_config.show_cost_estimate)
         if output:
             logger.console_output(output)
+        # Emit GitHub Actions annotations for summary insights
+        if is_github_actions():
+            annotations = render_summary_annotations(summary)
+            if annotations:
+                logger.console_output(annotations)
 
     if summary:
         budget.record(summary.cost_estimate)
         for result in all_results:
             if result.issues and not result.skipped:
                 attach_summary_metadata(result, summary)
+
+    # Post summary as PR comment when enabled
+    if summary and ai_config.github_pr_comments:
+        _post_pr_comments(summary=summary, logger=logger)
 
     if not ai_fix:
         return AIResult()
@@ -320,6 +331,37 @@ def _normalize_issue_path_for_workspace(
 
     issue.file = str(resolved)
     return True
+
+
+def _post_pr_comments(
+    *,
+    summary: AISummary | None = None,
+    suggestions: list[AIFixSuggestion] | None = None,
+    logger: ThreadSafeConsoleLogger,
+) -> None:
+    """Post AI findings as GitHub PR review comments.
+
+    Logs a warning and continues gracefully on failure.
+
+    Args:
+        summary: Optional AI summary.
+        suggestions: Optional fix suggestions.
+        logger: Console logger.
+    """
+    reporter = GitHubPRReporter()
+    if not reporter.is_available():
+        loguru_logger.debug(
+            "GitHub PR reporter not available — missing token, repo, or PR number",
+        )
+        return
+    success = reporter.post_review_comments(
+        suggestions=suggestions or [],
+        summary=summary,
+    )
+    if success:
+        loguru_logger.debug("GitHub PR review comments posted successfully")
+    else:
+        logger.console_output("  AI: failed to post some PR review comments")
 
 
 def _log_fix_limit_message(

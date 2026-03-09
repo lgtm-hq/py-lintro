@@ -37,6 +37,8 @@ class AIFixSuggestionPayload:
     line: int = 0
     code: str = ""
     tool_name: str = ""
+    original_code: str = ""
+    suggested_code: str = ""
     explanation: str = ""
     confidence: str = ""
     risk_level: str = ""
@@ -102,6 +104,8 @@ def suggestion_to_payload(
         line=suggestion.line,
         code=suggestion.code,
         tool_name=suggestion.tool_name,
+        original_code=suggestion.original_code,
+        suggested_code=suggestion.suggested_code,
         explanation=suggestion.explanation,
         confidence=suggestion.confidence,
         risk_level=suggestion.risk_level,

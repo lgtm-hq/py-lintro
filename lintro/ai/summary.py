@@ -326,7 +326,7 @@ def generate_post_fix_summary(
         AISummary, or None if generation fails.
     """
     remaining_count = sum(
-        len(list(r.issues)) for r in remaining_results if r.issues and not r.skipped
+        r.issues_count for r in remaining_results if r.issues and not r.skipped
     )
 
     digest = _build_issues_digest(

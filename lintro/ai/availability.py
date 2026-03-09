@@ -70,10 +70,12 @@ def is_provider_available(provider: str) -> bool:
             import anthropic  # noqa: F401 -- import-only availability check
 
             return True
-        else:
+        elif provider == AIProvider.OPENAI.value:
             import openai  # noqa: F401 -- import-only availability check
 
             return True
+        else:
+            return False
     except ImportError:
         return False
 

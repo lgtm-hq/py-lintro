@@ -46,7 +46,26 @@ def with_retry(
 
     Returns:
         Decorated function with retry behavior.
+
+    Raises:
+        ValueError: If any retry parameter is invalid (negative or
+            max_delay < base_delay).
     """
+    if max_retries < 0:
+        msg = f"max_retries must be >= 0, got {max_retries}"
+        raise ValueError(msg)
+    if base_delay < 0:
+        msg = f"base_delay must be >= 0, got {base_delay}"
+        raise ValueError(msg)
+    if max_delay < 0:
+        msg = f"max_delay must be >= 0, got {max_delay}"
+        raise ValueError(msg)
+    if backoff_factor < 0:
+        msg = f"backoff_factor must be >= 0, got {backoff_factor}"
+        raise ValueError(msg)
+    if max_delay < base_delay:
+        msg = f"max_delay ({max_delay}) must be >= base_delay ({base_delay})"
+        raise ValueError(msg)
 
     def decorator(
         func: Callable[..., Any],

@@ -160,6 +160,13 @@ class AIConfig(BaseModel):
             "One of 'low', 'medium', 'high'."
         ),
     )
+    github_pr_comments: bool = Field(
+        default=False,
+        description=(
+            "Post AI summaries and fix suggestions as inline PR review "
+            "comments when running in GitHub Actions."
+        ),
+    )
     dry_run: bool = Field(
         default=False,
         description=(
