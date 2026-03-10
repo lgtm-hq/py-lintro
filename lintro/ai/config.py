@@ -81,6 +81,8 @@ class AIConfig(BaseModel):
         exclude_rules: Glob patterns for rules to exclude from AI processing.
         min_confidence: Minimum confidence level for AI fix suggestions.
             One of 'low', 'medium', 'high'.
+        github_pr_comments: Post AI summaries and fix suggestions as
+            inline PR review comments when running in GitHub Actions.
         dry_run: Display AI fix suggestions without applying them.
         max_cost_usd: Maximum total cost in USD per AI session.
             None disables the limit.

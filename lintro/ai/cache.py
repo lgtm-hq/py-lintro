@@ -7,8 +7,6 @@ import hashlib
 import json
 import time
 from pathlib import Path
-from typing import Any
-
 from lintro.ai.models import AIFixSuggestion
 
 CACHE_DIR = ".lintro-cache/ai"
@@ -127,7 +125,8 @@ def cache_suggestion(
     cache_dir.mkdir(parents=True, exist_ok=True)
     cache_file = cache_dir / f"{key}.json"
     suggestion_data = dataclasses.asdict(suggestion)
-    cache_file.write_text(
-        json.dumps({"timestamp": time.time(), "suggestion": suggestion_data}),
-    )
+    payload = json.dumps({"timestamp": time.time(), "suggestion": suggestion_data})
+    tmp = cache_file.with_suffix(".tmp")
+    tmp.write_text(payload, encoding="utf-8")
+    tmp.replace(cache_file)
     _evict_lru(cache_dir, max_entries)

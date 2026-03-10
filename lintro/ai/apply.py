@@ -39,6 +39,9 @@ def _apply_fix(
 
     Returns:
         True if the fix was applied successfully.
+
+    Raises:
+        BaseException: Re-raised after cleanup when the atomic write fails.
     """
     try:
         resolved = resolve_workspace_file(suggestion.file, workspace_root)

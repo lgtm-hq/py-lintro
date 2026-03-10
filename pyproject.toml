@@ -219,7 +219,6 @@ preview = true
 explicit-preview-rules = true
 
 [tool.ruff.lint.per-file-ignores]
-"tests/**/*.py" = []
 ".lintro/**/*.py" = ["E501"]
 "**/__init__.py" = ["D104"]
 "test_samples/**/*.py" = ["ALL"]

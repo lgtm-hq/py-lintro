@@ -29,12 +29,6 @@ class GitHubPRReporter:
 
     The PR number is detected from ``GITHUB_REF`` (``refs/pull/<n>/merge``)
     or can be provided directly.
-
-    Attributes:
-        token: GitHub API token.
-        repo: GitHub repository in ``owner/repo`` format.
-        pr_number: Pull request number.
-        api_base: GitHub API base URL.
     """
 
     def __init__(
@@ -114,12 +108,14 @@ class GitHubPRReporter:
         comments: list[dict[str, Any]] = []
         for s in suggestions:
             rel = relative_path(s.file)
+            if not rel:
+                continue
             body = _format_inline_comment(s)
             comment: dict[str, Any] = {
                 "path": rel,
                 "body": body,
             }
-            if s.line:
+            if isinstance(s.line, int) and s.line > 0:
                 comment["line"] = s.line
             comments.append(comment)
 

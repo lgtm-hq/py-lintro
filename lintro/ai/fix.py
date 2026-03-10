@@ -252,6 +252,9 @@ def _check_cache(
             f"Cache hit for {issue.file}:{issue.line} ({code})",
         )
         cached.tool_name = tool_name
+        cached.input_tokens = 0
+        cached.output_tokens = 0
+        cached.cost_estimate = 0.0
         return cached
     return None
 
@@ -432,10 +435,6 @@ def _generate_single_fix(
 
     Returns:
         AIFixSuggestion, or None if generation fails.
-
-    Raises:
-        KeyboardInterrupt: Re-raised on user interrupt.
-        SystemExit: Re-raised on system exit.
     """
     validated = _validate_and_read_file(
         issue,
