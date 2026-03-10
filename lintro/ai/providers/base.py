@@ -13,6 +13,11 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from lintro.ai.exceptions import AIAuthenticationError, AINotAvailableError
+from lintro.ai.providers.constants import (
+    DEFAULT_MAX_TOKENS,
+    DEFAULT_PER_CALL_MAX_TOKENS,
+    DEFAULT_TIMEOUT,
+)
 from lintro.ai.registry import AIProvider
 
 
@@ -59,7 +64,7 @@ class BaseAIProvider(ABC):
         default_api_key_env: str,
         model: str | None = None,
         api_key_env: str | None = None,
-        max_tokens: int = 4096,
+        max_tokens: int = DEFAULT_MAX_TOKENS,
         base_url: str | None = None,
     ) -> None:
         """Initialise the provider with shared parameters.
@@ -73,6 +78,8 @@ class BaseAIProvider(ABC):
                 is ``None``.
             model: Model identifier override.
             api_key_env: Environment variable for the API key override.
+                The key is required at runtime; its absence raises
+                ``AIAuthenticationError`` on first API call.
             max_tokens: Provider-level cap on generated tokens.
             base_url: Custom API base URL.
 
@@ -138,8 +145,8 @@ class BaseAIProvider(ABC):
         prompt: str,
         *,
         system: str | None = None,
-        max_tokens: int = 1024,
-        timeout: float = 60.0,
+        max_tokens: int = DEFAULT_PER_CALL_MAX_TOKENS,
+        timeout: float = DEFAULT_TIMEOUT,
     ) -> AIResponse:
         """Generate a completion from the AI model.
 
@@ -189,3 +196,12 @@ class BaseAIProvider(ABC):
             str: Model identifier being used.
         """
         return self._model
+
+    @model_name.setter
+    def model_name(self, value: str) -> None:
+        """Set the model name.
+
+        Args:
+            value: New model identifier.
+        """
+        self._model = value

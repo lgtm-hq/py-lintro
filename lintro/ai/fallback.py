@@ -33,8 +33,8 @@ def complete_with_fallback(
     model in order and retries. ``AIAuthenticationError`` is never
     retried — it propagates immediately.
 
-    After all attempts (successful or not), the provider's ``_model``
-    attribute is restored to the original value.
+    After all attempts (successful or not), the provider's ``model_name``
+    is restored to the original value.
 
     Args:
         provider: AI provider instance.
@@ -59,15 +59,15 @@ def complete_with_fallback(
     if fallback_models:
         models_to_try.extend(fallback_models)
 
-    original_model = provider._model
+    original_model = provider.model_name
     last_error: Exception | None = None
 
     try:
         for idx, model in enumerate(models_to_try):
             if model is not None:
-                provider._model = model
+                provider.model_name = model
 
-            label = provider._model
+            label = provider.model_name
             try:
                 logger.debug(
                     "Fallback chain: trying model '{}' (attempt {}/{})",
@@ -102,7 +102,7 @@ def complete_with_fallback(
                         exc,
                     )
     finally:
-        provider._model = original_model
+        provider.model_name = original_model
 
     # All models exhausted — raise the last error.
     # last_error is always an AIProviderError or AIRateLimitError here

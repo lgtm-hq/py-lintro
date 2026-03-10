@@ -95,7 +95,9 @@ def to_sarif(
     results: list[dict[str, Any]] = []
 
     for s in suggestions:
-        rule_id = s.code or "unknown"
+        rule_id = (
+            f"{s.tool_name}/{s.code}" if s.tool_name and s.code else s.code or "unknown"
+        )
 
         if rule_id not in rules_map:
             rule: dict[str, Any] = {"id": rule_id}

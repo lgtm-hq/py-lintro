@@ -41,6 +41,12 @@ def _ensure_str_list(value: object) -> list[str]:
     a list, or a list containing non-string items.
     """
     if isinstance(value, list):
+        non_str = [item for item in value if not isinstance(item, str)]
+        if non_str:
+            logger.warning(
+                "Dropped {} non-string items from AI response list",
+                len(non_str),
+            )
         return [item for item in value if isinstance(item, str)]
     if isinstance(value, str):
         return [value]

@@ -11,7 +11,7 @@ from loguru import logger as loguru_logger
 from lintro.ai.apply import apply_fixes
 from lintro.ai.audit import write_audit_log
 from lintro.ai.budget import CostBudget
-from lintro.ai.display import render_summary, render_validation
+from lintro.ai.display import render_fixes, render_summary, render_validation
 from lintro.ai.enums import ConfidenceLevel
 from lintro.ai.fix import generate_fixes
 from lintro.ai.interactive import review_fixes_interactive
@@ -38,7 +38,7 @@ if TYPE_CHECKING:
     from lintro.utils.console.logger import ThreadSafeConsoleLogger
 
 
-def _confidence_order(value: ConfidenceLevel | str) -> int:
+def _confidence_numeric(value: ConfidenceLevel | str) -> int:
     """Return numeric ordering for a confidence value (3=high, 2=medium, 1=low)."""
     try:
         return ConfidenceLevel(value).numeric_order
@@ -99,6 +99,7 @@ def _generate_all_suggestions(
             base_delay=ai_config.retry_base_delay,
             max_delay=ai_config.retry_max_delay,
             backoff_factor=ai_config.retry_backoff_factor,
+            max_prompt_tokens=ai_config.max_prompt_tokens,
             enable_cache=ai_config.enable_cache,
             cache_ttl=ai_config.cache_ttl,
             progress_callback=_progress_callback,
@@ -143,9 +144,9 @@ def _filter_by_confidence(
     ai_config: AIConfig,
 ) -> list[AIFixSuggestion]:
     """Apply confidence threshold filter and log diagnostics."""
-    threshold = _confidence_order(ai_config.min_confidence)
+    threshold = _confidence_numeric(ai_config.min_confidence)
     filtered = [
-        s for s in all_suggestions if _confidence_order(s.confidence) >= threshold
+        s for s in all_suggestions if _confidence_numeric(s.confidence) >= threshold
     ]
 
     if ai_config.verbose and filtered:
@@ -370,9 +371,12 @@ def run_fix_pipeline(
     # Dry-run mode: display fixes but do not apply them
     if ai_config.dry_run:
         if not is_json:
-            loguru_logger.info(
-                "AI: dry-run mode — fixes displayed but not applied",
+            rendered = render_fixes(
+                all_suggestions,
+                show_cost=ai_config.show_cost_estimate,
             )
+            if rendered:
+                logger.console_output(rendered)
             logger.console_output(
                 "  AI: dry-run mode — fixes displayed but not applied",
             )
