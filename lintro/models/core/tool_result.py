@@ -52,7 +52,14 @@ class ToolResult:
     # Optional pytest-specific summary data for display
     pytest_summary: dict[str, Any] | None = field(default=None)
 
-    # Optional AI-generated metadata (explanations, fix suggestions)
+    # Optional AI-generated metadata (explanations, fix suggestions).
+    # Expected keys (all optional):
+    #   "fix_suggestions": list[AIFixSuggestionPayload]  (serialized)
+    #   "fixed_count": int
+    #   "verified_count": int
+    #   "unverified_count": int
+    #   "telemetry": dict with api_calls, tokens, cost, latency
+    # Built incrementally via helpers in lintro.ai.metadata.
     ai_metadata: dict[str, Any] | None = field(default=None)
 
     # Working directory used during tool execution (for resolving relative

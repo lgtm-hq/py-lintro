@@ -86,7 +86,7 @@ def verify_fixes(
 
     # Build a lookup from tool name -> fresh remaining issues for validation.
     fresh_issues_by_tool: dict[str, list[object]] = {}
-    if fresh_results:
+    if fresh_results is not None:
         for result in fresh_results:
             issues: list[object] = (
                 list(result.issues) if result.issues is not None else []
