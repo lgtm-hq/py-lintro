@@ -205,6 +205,64 @@ def _parse_summary_response(
     )
 
 
+def _call_summary_provider(
+    prompt: str,
+    *,
+    provider: BaseAIProvider,
+    max_tokens: int,
+    timeout: float,
+    max_retries: int,
+    base_delay: float | None,
+    max_delay: float | None,
+    backoff_factor: float | None,
+    fallback_models: list[str] | None,
+) -> AISummary | None:
+    """Shared retry/call/parse helper for summary generation.
+
+    Args:
+        prompt: The formatted prompt to send to the provider.
+        provider: AI provider instance.
+        max_tokens: Maximum tokens for the response.
+        timeout: Request timeout in seconds per API call.
+        max_retries: Maximum retry attempts for transient API failures.
+        base_delay: Initial retry delay in seconds (None = use default).
+        max_delay: Maximum retry delay in seconds (None = use default).
+        backoff_factor: Retry backoff multiplier (None = use default).
+        fallback_models: Ordered list of fallback model identifiers.
+
+    Returns:
+        AISummary, or None if generation fails.
+    """
+
+    @with_retry(
+        max_retries=max_retries,
+        base_delay=base_delay if base_delay is not None else 1.0,
+        max_delay=max_delay if max_delay is not None else 30.0,
+        backoff_factor=backoff_factor if backoff_factor is not None else 2.0,
+    )
+    def _call() -> AIResponse:
+        return complete_with_fallback(
+            provider,
+            prompt,
+            fallback_models=fallback_models,
+            system=SUMMARY_SYSTEM,
+            max_tokens=max_tokens,
+            timeout=timeout,
+        )
+
+    try:
+        response = _call()
+        return _parse_summary_response(
+            response.content,
+            input_tokens=response.input_tokens,
+            output_tokens=response.output_tokens,
+            cost_estimate=response.cost_estimate,
+        )
+    except Exception:
+        logger.debug("AI summary generation failed", exc_info=True)
+        return None
+
+
 def generate_summary(
     results: Sequence[ToolResult],
     provider: BaseAIProvider,
@@ -258,33 +316,17 @@ def generate_summary(
         issues_digest=digest,
     )
 
-    @with_retry(
+    return _call_summary_provider(
+        prompt,
+        provider=provider,
+        max_tokens=max_tokens,
+        timeout=timeout,
         max_retries=max_retries,
-        base_delay=base_delay if base_delay is not None else 1.0,
-        max_delay=max_delay if max_delay is not None else 30.0,
-        backoff_factor=backoff_factor if backoff_factor is not None else 2.0,
+        base_delay=base_delay,
+        max_delay=max_delay,
+        backoff_factor=backoff_factor,
+        fallback_models=fallback_models,
     )
-    def _call() -> AIResponse:
-        return complete_with_fallback(
-            provider,
-            prompt,
-            fallback_models=fallback_models,
-            system=SUMMARY_SYSTEM,
-            max_tokens=max_tokens,
-            timeout=timeout,
-        )
-
-    try:
-        response = _call()
-        return _parse_summary_response(
-            response.content,
-            input_tokens=response.input_tokens,
-            output_tokens=response.output_tokens,
-            cost_estimate=response.cost_estimate,
-        )
-    except Exception:
-        logger.debug("AI summary generation failed", exc_info=True)
-        return None
 
 
 def generate_post_fix_summary(
@@ -345,30 +387,14 @@ def generate_post_fix_summary(
         issues_digest=digest or "No remaining issues.",
     )
 
-    @with_retry(
+    return _call_summary_provider(
+        prompt,
+        provider=provider,
+        max_tokens=max_tokens,
+        timeout=timeout,
         max_retries=max_retries,
-        base_delay=base_delay if base_delay is not None else 1.0,
-        max_delay=max_delay if max_delay is not None else 30.0,
-        backoff_factor=backoff_factor if backoff_factor is not None else 2.0,
+        base_delay=base_delay,
+        max_delay=max_delay,
+        backoff_factor=backoff_factor,
+        fallback_models=fallback_models,
     )
-    def _call() -> AIResponse:
-        return complete_with_fallback(
-            provider,
-            prompt,
-            fallback_models=fallback_models,
-            system=SUMMARY_SYSTEM,
-            max_tokens=max_tokens,
-            timeout=timeout,
-        )
-
-    try:
-        response = _call()
-        return _parse_summary_response(
-            response.content,
-            input_tokens=response.input_tokens,
-            output_tokens=response.output_tokens,
-            cost_estimate=response.cost_estimate,
-        )
-    except Exception:
-        logger.debug("AI post-fix summary generation failed", exc_info=True)
-        return None

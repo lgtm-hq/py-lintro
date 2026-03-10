@@ -8,6 +8,7 @@ unified diffs. Supports parallel API calls for improved performance.
 from __future__ import annotations
 
 import difflib
+import functools
 import json
 import threading
 from collections import defaultdict
@@ -34,15 +35,12 @@ from lintro.ai.sanitize import (
     make_boundary_marker,
     sanitize_code_content,
 )
+from lintro.ai.secrets import redact_secrets
 from lintro.ai.token_budget import estimate_tokens
 
 if TYPE_CHECKING:
     from lintro.ai.providers.base import AIResponse, BaseAIProvider
     from lintro.parsers.base_issue import BaseIssue
-
-# Module-level fallback models list, set by generate_fixes() so the
-# retry-wrapped _call_provider can access it without signature changes.
-_fallback_models: list[str] = []
 
 
 def _call_provider(
@@ -51,12 +49,13 @@ def _call_provider(
     system: str,
     max_tokens: int,
     timeout: float = 60.0,
+    fallback_models: list[str] | None = None,
 ) -> AIResponse:
     """Call the AI provider with model fallback (no retry — caller wraps with retry)."""
     return complete_with_fallback(
         provider,
         prompt,
-        fallback_models=_fallback_models,
+        fallback_models=fallback_models,
         system=system,
         max_tokens=max_tokens,
         timeout=timeout,
@@ -189,6 +188,211 @@ def _parse_fix_response(
     )
 
 
+def _validate_and_read_file(
+    issue: BaseIssue,
+    file_cache: dict[str, str | None],
+    cache_lock: threading.Lock,
+    workspace_root: Path,
+) -> tuple[str, str] | None:
+    """Validate the issue and read its file content.
+
+    Returns (issue_file, file_content) or None if validation fails.
+    Thread-safe — uses a lock for the shared file cache.
+    """
+    if not issue.file or not issue.line:
+        logger.debug(
+            f"Skipping issue without file/line: "
+            f"file={issue.file!r} line={issue.line}",
+        )
+        return None
+
+    resolved_file = resolve_workspace_file(issue.file, workspace_root)
+    if resolved_file is None:
+        logger.debug(
+            f"Skipping issue outside workspace root: "
+            f"file={issue.file!r}, root={workspace_root}",
+        )
+        return None
+    issue_file = str(resolved_file)
+
+    with cache_lock:
+        if issue_file not in file_cache:
+            if len(file_cache) >= _MAX_CACHE_ENTRIES:
+                oldest_key = next(iter(file_cache))
+                del file_cache[oldest_key]
+            file_cache[issue_file] = _read_file_safely(issue_file)
+        file_content = file_cache[issue_file]
+
+    if file_content is None:
+        logger.debug(f"Cannot read file: {issue_file!r}")
+        return None
+
+    return issue_file, file_content
+
+
+def _check_cache(
+    workspace_root: Path,
+    file_content: str,
+    code: str,
+    issue: BaseIssue,
+    tool_name: str,
+    cache_ttl: int,
+) -> AIFixSuggestion | None:
+    """Check the suggestion dedup cache and return a hit if found."""
+    cached = get_cached_suggestion(
+        workspace_root,
+        file_content,
+        code,
+        issue.line,
+        issue.message,
+        ttl=cache_ttl,
+    )
+    if cached is not None:
+        logger.debug(
+            f"Cache hit for {issue.file}:{issue.line} ({code})",
+        )
+        cached.tool_name = tool_name
+        return cached
+    return None
+
+
+def _build_fix_context(
+    issue: BaseIssue,
+    issue_file: str,
+    file_content: str,
+    tool_name: str,
+    code: str,
+    workspace_root: Path,
+    context_lines: int,
+    max_prompt_tokens: int,
+    full_file_threshold: int,
+) -> str:
+    """Sanitize content and build the fix prompt with appropriate context.
+
+    Tries full-file context for small files, falls back to windowed
+    context that progressively shrinks to fit the token budget.
+    """
+    sanitized_content = redact_secrets(sanitize_code_content(file_content))
+    injections = detect_injection_patterns(file_content)
+    if injections:
+        logger.warning(
+            f"Potential prompt injection patterns detected in "
+            f"{issue.file}: {', '.join(injections)}",
+        )
+
+    total_lines = len(file_content.splitlines())
+    if total_lines <= full_file_threshold:
+        boundary = make_boundary_marker()
+        full_prompt = FIX_PROMPT_TEMPLATE.format(
+            tool_name=tool_name,
+            code=code,
+            file=to_provider_path(issue_file, workspace_root),
+            line=issue.line,
+            message=issue.message,
+            context_start=1,
+            context_end=total_lines,
+            code_context=sanitized_content,
+            boundary=boundary,
+        )
+        if estimate_tokens(full_prompt) <= max_prompt_tokens:
+            logger.debug(
+                f"Using full file context ({total_lines} lines) for "
+                f"{issue.file}:{issue.line}",
+            )
+            return full_prompt
+
+    effective_context_lines = context_lines
+    _min_context = 3
+    while True:
+        context, context_start, context_end = _extract_context(
+            file_content,
+            issue.line,
+            context_lines=effective_context_lines,
+        )
+        boundary = make_boundary_marker()
+        sanitized_context = sanitize_code_content(context)
+        prompt = FIX_PROMPT_TEMPLATE.format(
+            tool_name=tool_name,
+            code=code,
+            file=to_provider_path(issue_file, workspace_root),
+            line=issue.line,
+            message=issue.message,
+            context_start=context_start,
+            context_end=context_end,
+            code_context=sanitized_context,
+            boundary=boundary,
+        )
+        if (
+            estimate_tokens(prompt) <= max_prompt_tokens
+            or effective_context_lines <= _min_context
+        ):
+            return prompt
+        old_ctx = effective_context_lines
+        effective_context_lines = max(
+            _min_context,
+            effective_context_lines // 2,
+        )
+        logger.debug(
+            f"Fix prompt over budget for {issue.file}:{issue.line} "
+            f"reducing context_lines {old_ctx} -> {effective_context_lines}",
+        )
+
+
+def _call_and_cache_fix(
+    prompt: str,
+    issue_file: str,
+    issue: BaseIssue,
+    code: str,
+    tool_name: str,
+    retrying_call: Callable[..., AIResponse],
+    provider: BaseAIProvider,
+    max_tokens: int,
+    timeout: float,
+    workspace_root: Path,
+    file_content: str,
+    enable_cache: bool,
+) -> AIFixSuggestion | None:
+    """Call the provider, parse the response, and optionally cache the result."""
+    try:
+        response = retrying_call(provider, prompt, FIX_SYSTEM, max_tokens, timeout)
+
+        suggestion = _parse_fix_response(
+            response.content,
+            issue_file,
+            issue.line,
+            code,
+        )
+
+        if suggestion:
+            suggestion.tool_name = tool_name
+            suggestion.input_tokens = response.input_tokens
+            suggestion.output_tokens = response.output_tokens
+            suggestion.cost_estimate = response.cost_estimate
+
+            if enable_cache:
+                cache_suggestion(
+                    workspace_root,
+                    file_content,
+                    code,
+                    issue.line,
+                    issue.message,
+                    suggestion,
+                )
+
+            return suggestion
+
+    except (KeyboardInterrupt, SystemExit):
+        raise
+    except Exception as exc:
+        logger.debug(
+            f"AI fix generation failed for {issue.file}:{issue.line} "
+            f"({type(exc).__name__}: {exc})",
+            exc_info=True,
+        )
+
+    return None
+
+
 def _generate_single_fix(
     issue: BaseIssue,
     provider: BaseAIProvider,
@@ -208,12 +412,6 @@ def _generate_single_fix(
     """Generate a fix suggestion for a single issue.
 
     Thread-safe — uses a lock for the shared file cache.
-
-    For small files (under *full_file_threshold* lines) whose content
-    fits within *max_prompt_tokens*, the entire file is sent as context.
-    Otherwise the builder progressively reduces ``context_lines``
-    (halving each iteration, minimum 3) and rebuilds the prompt until
-    it fits.
 
     Args:
         issue: The issue to fix.
@@ -239,184 +437,56 @@ def _generate_single_fix(
         KeyboardInterrupt: Re-raised on user interrupt.
         SystemExit: Re-raised on system exit.
     """
-    if not issue.file or not issue.line:
-        logger.debug(
-            f"Skipping issue without file/line: "
-            f"file={issue.file!r} line={issue.line}",
-        )
+    validated = _validate_and_read_file(
+        issue,
+        file_cache,
+        cache_lock,
+        workspace_root,
+    )
+    if validated is None:
         return None
-
-    resolved_file = resolve_workspace_file(issue.file, workspace_root)
-    if resolved_file is None:
-        logger.debug(
-            f"Skipping issue outside workspace root: "
-            f"file={issue.file!r}, root={workspace_root}",
-        )
-        return None
-    issue_file = str(resolved_file)
-
-    # Read file with thread-safe cache (evict oldest when at capacity)
-    with cache_lock:
-        if issue_file not in file_cache:
-            if len(file_cache) >= _MAX_CACHE_ENTRIES:
-                oldest_key = next(iter(file_cache))
-                del file_cache[oldest_key]
-            file_cache[issue_file] = _read_file_safely(issue_file)
-        file_content = file_cache[issue_file]
-
-    if file_content is None:
-        logger.debug(f"Cannot read file: {issue_file!r}")
-        return None
+    issue_file, file_content = validated
 
     code = getattr(issue, "code", "") or ""
 
-    # Check suggestion cache before calling the AI provider
     if enable_cache:
-        cached = get_cached_suggestion(
+        cached = _check_cache(
             workspace_root,
             file_content,
             code,
-            issue.line,
-            issue.message,
-            ttl=cache_ttl,
+            issue,
+            tool_name,
+            cache_ttl,
         )
         if cached is not None:
-            logger.debug(
-                f"Cache hit for {issue.file}:{issue.line} ({code})",
-            )
-            cached_suggestion = AIFixSuggestion(
-                file=cached.get("file", issue_file),
-                line=cached.get("line", issue.line),
-                code=cached.get("code", code),
-                original_code=cached.get("original_code", ""),
-                suggested_code=cached.get("suggested_code", ""),
-                diff=cached.get("diff", ""),
-                explanation=cached.get("explanation", ""),
-                confidence=cached.get("confidence", "medium"),
-                risk_level=cached.get("risk_level", ""),
-            )
-            cached_suggestion.tool_name = tool_name
-            return cached_suggestion
+            return cached
 
-    # Sanitize code content and detect injection attempts for logging
-    sanitized_content = sanitize_code_content(file_content)
-    injections = detect_injection_patterns(file_content)
-    if injections:
-        logger.warning(
-            f"Potential prompt injection patterns detected in "
-            f"{issue.file}: {', '.join(injections)}",
-        )
+    prompt = _build_fix_context(
+        issue,
+        issue_file,
+        file_content,
+        tool_name,
+        code,
+        workspace_root,
+        context_lines,
+        max_prompt_tokens,
+        full_file_threshold,
+    )
 
-    # Try full-file context for small files that fit within the budget
-    total_lines = len(file_content.splitlines())
-    use_full_file = False
-    if total_lines <= full_file_threshold:
-        boundary = make_boundary_marker()
-        full_prompt = FIX_PROMPT_TEMPLATE.format(
-            tool_name=tool_name,
-            code=code,
-            file=to_provider_path(issue_file, workspace_root),
-            line=issue.line,
-            message=issue.message,
-            context_start=1,
-            context_end=total_lines,
-            code_context=sanitized_content,
-            boundary=boundary,
-        )
-        if estimate_tokens(full_prompt) <= max_prompt_tokens:
-            prompt = full_prompt
-            use_full_file = True
-            logger.debug(
-                f"Using full file context ({total_lines} lines) for "
-                f"{issue.file}:{issue.line}",
-            )
-
-    # Fall back to windowed context, progressively reducing if over budget
-    if not use_full_file:
-        effective_context_lines = context_lines
-        _min_context = 3
-        while True:
-            context, context_start, context_end = _extract_context(
-                file_content,
-                issue.line,
-                context_lines=effective_context_lines,
-            )
-            boundary = make_boundary_marker()
-            sanitized_context = sanitize_code_content(context)
-            prompt = FIX_PROMPT_TEMPLATE.format(
-                tool_name=tool_name,
-                code=code,
-                file=to_provider_path(issue_file, workspace_root),
-                line=issue.line,
-                message=issue.message,
-                context_start=context_start,
-                context_end=context_end,
-                code_context=sanitized_context,
-                boundary=boundary,
-            )
-            if (
-                estimate_tokens(prompt) <= max_prompt_tokens
-                or effective_context_lines <= _min_context
-            ):
-                break
-            old_ctx = effective_context_lines
-            effective_context_lines = max(
-                _min_context,
-                effective_context_lines // 2,
-            )
-            logger.debug(
-                f"Fix prompt over budget for {issue.file}:{issue.line} "
-                f"reducing context_lines {old_ctx} -> {effective_context_lines}",
-            )
-
-    try:
-        response = retrying_call(provider, prompt, FIX_SYSTEM, max_tokens, timeout)
-
-        suggestion = _parse_fix_response(
-            response.content,
-            issue_file,
-            issue.line,
-            code,
-        )
-
-        if suggestion:
-            suggestion.tool_name = tool_name
-            suggestion.input_tokens = response.input_tokens
-            suggestion.output_tokens = response.output_tokens
-            suggestion.cost_estimate = response.cost_estimate
-
-            if enable_cache:
-                cache_suggestion(
-                    workspace_root,
-                    file_content,
-                    code,
-                    issue.line,
-                    issue.message,
-                    {
-                        "file": suggestion.file,
-                        "line": suggestion.line,
-                        "code": suggestion.code,
-                        "original_code": suggestion.original_code,
-                        "suggested_code": suggestion.suggested_code,
-                        "diff": suggestion.diff,
-                        "explanation": suggestion.explanation,
-                        "confidence": suggestion.confidence,
-                        "risk_level": suggestion.risk_level,
-                    },
-                )
-
-            return suggestion
-
-    except (KeyboardInterrupt, SystemExit):
-        raise
-    except Exception as exc:
-        logger.debug(
-            f"AI fix generation failed for {issue.file}:{issue.line} "
-            f"({type(exc).__name__}: {exc})",
-            exc_info=True,
-        )
-
-    return None
+    return _call_and_cache_fix(
+        prompt,
+        issue_file,
+        issue,
+        code,
+        tool_name,
+        retrying_call,
+        provider,
+        max_tokens,
+        timeout,
+        workspace_root,
+        file_content,
+        enable_cache,
+    )
 
 
 def _parse_batch_response(
@@ -514,7 +584,7 @@ def _generate_batch_fixes(
         )
     issues_list = "\n".join(issues_list_parts)
 
-    sanitized_content = sanitize_code_content(file_content)
+    sanitized_content = redact_secrets(sanitize_code_content(file_content))
     injections = detect_injection_patterns(file_content)
     if injections:
         logger.warning(
@@ -626,9 +696,6 @@ def generate_fixes(
         KeyboardInterrupt: Re-raised on user interrupt.
         SystemExit: Re-raised on system exit.
     """
-    global _fallback_models  # noqa: PLW0603
-    _fallback_models = fallback_models or []
-
     if not issues:
         return []
 
@@ -646,12 +713,17 @@ def generate_fixes(
     cache_lock = threading.Lock()
 
     # Build the retry wrapper once and share across all calls.
+    # Bind fallback_models via partial to avoid global mutable state.
+    bound_call = functools.partial(
+        _call_provider,
+        fallback_models=fallback_models or [],
+    )
     retrying_call = with_retry(
         max_retries=max_retries,
         base_delay=base_delay if base_delay is not None else 1.0,
         max_delay=max_delay if max_delay is not None else 30.0,
         backoff_factor=backoff_factor if backoff_factor is not None else 2.0,
-    )(_call_provider)
+    )(bound_call)
 
     suggestions: list[AIFixSuggestion] = []
     completed_count = 0

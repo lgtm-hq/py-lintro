@@ -20,6 +20,7 @@ from rich.syntax import Syntax
 from lintro.ai.apply import _apply_fix, apply_fixes
 from lintro.ai.display.shared import cost_str, print_code_panel, print_section_header
 from lintro.ai.display.validation import render_validation
+from lintro.ai.enums import RiskLevel
 from lintro.ai.models import AIFixSuggestion
 from lintro.ai.paths import relative_path
 from lintro.ai.risk import (
@@ -85,7 +86,7 @@ def _print_group_header(
     group_risk = (
         SAFE_STYLE_RISK
         if len(risk_labels) == 1 and SAFE_STYLE_RISK in risk_labels
-        else "behavioral-risk"
+        else RiskLevel.BEHAVIORAL_RISK
     )
     risk_color = "green" if group_risk == SAFE_STYLE_RISK else "yellow"
 

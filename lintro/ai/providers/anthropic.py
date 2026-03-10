@@ -17,7 +17,7 @@ from lintro.ai.exceptions import (
     AIRateLimitError,
 )
 from lintro.ai.providers.base import AIResponse, BaseAIProvider
-from lintro.ai.registry import PROVIDERS
+from lintro.ai.registry import PROVIDERS, AIProvider
 
 _has_anthropic = False
 try:
@@ -53,7 +53,7 @@ class AnthropicProvider(BaseAIProvider):
                 endpoints (proxies, self-hosted, etc.).
         """
         super().__init__(
-            provider_name="anthropic",
+            provider_name=AIProvider.ANTHROPIC,
             has_sdk=_has_anthropic,
             sdk_package="anthropic",
             default_model=DEFAULT_MODEL,
@@ -134,7 +134,7 @@ class AnthropicProvider(BaseAIProvider):
                 input_tokens=input_tokens,
                 output_tokens=output_tokens,
                 cost_estimate=cost,
-                provider="anthropic",
+                provider=AIProvider.ANTHROPIC,
             )
 
         except anthropic.AuthenticationError as e:

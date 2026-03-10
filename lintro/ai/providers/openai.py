@@ -17,7 +17,7 @@ from lintro.ai.exceptions import (
     AIRateLimitError,
 )
 from lintro.ai.providers.base import AIResponse, BaseAIProvider
-from lintro.ai.registry import PROVIDERS
+from lintro.ai.registry import PROVIDERS, AIProvider
 
 _has_openai = False
 try:
@@ -53,7 +53,7 @@ class OpenAIProvider(BaseAIProvider):
                 endpoints (Ollama, vLLM, Azure OpenAI, etc.).
         """
         super().__init__(
-            provider_name="openai",
+            provider_name=AIProvider.OPENAI,
             has_sdk=_has_openai,
             sdk_package="openai",
             default_model=DEFAULT_MODEL,
@@ -136,7 +136,7 @@ class OpenAIProvider(BaseAIProvider):
                 input_tokens=input_tokens,
                 output_tokens=output_tokens,
                 cost_estimate=cost,
-                provider="openai",
+                provider=AIProvider.OPENAI,
             )
 
         except openai.AuthenticationError as e:

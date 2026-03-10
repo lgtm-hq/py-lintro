@@ -7,17 +7,17 @@ using the GitHub REST API via ``urllib.request``.
 from __future__ import annotations
 
 import json
-import logging
 import os
 import urllib.error
 import urllib.request
 from collections.abc import Sequence
 from typing import Any
 
+from loguru import logger
+
+from lintro.ai.enums import ConfidenceLevel
 from lintro.ai.models import AIFixSuggestion, AISummary
 from lintro.ai.paths import relative_path
-
-logger = logging.getLogger(__name__)
 
 
 class GitHubPRReporter:
@@ -183,14 +183,14 @@ class GitHubPRReporter:
                 return 200 <= status < 300
         except urllib.error.HTTPError as e:
             logger.warning(
-                "GitHub API request failed: %s %s -> %d",
+                "GitHub API request failed: {} {} -> {}",
                 method,
                 url,
                 e.code,
             )
             return False
         except urllib.error.URLError as e:
-            logger.warning("GitHub API request error: %s", e.reason)
+            logger.warning("GitHub API request error: {}", e.reason)
             return False
 
 
@@ -280,12 +280,13 @@ def _format_inline_comment(suggestion: AIFixSuggestion) -> str:
         lines.append("")
 
     if suggestion.suggested_code:
+        sanitized_code = suggestion.suggested_code.replace("```", "``\u200b`")
         lines.append("```suggestion")
-        lines.append(suggestion.suggested_code)
+        lines.append(sanitized_code)
         lines.append("```")
         lines.append("")
 
-    confidence = suggestion.confidence or "medium"
+    confidence = suggestion.confidence or ConfidenceLevel.MEDIUM
     risk = suggestion.risk_level or "unknown"
     lines.append(f"Confidence: {confidence} | Risk: {risk}")
 

@@ -4,6 +4,10 @@ Generates SARIF (Static Analysis Results Interchange Format) output
 from AI fix suggestions and summaries. Compatible with GitHub Code
 Scanning, VS Code SARIF Viewer, and other SARIF-consuming tools.
 
+This module is infrastructure for upcoming SARIF output support —
+the core ``to_sarif`` / ``write_sarif`` functions are fully implemented
+but not yet wired into the main CLI output pipeline.
+
 Spec: https://docs.oasis-open.org/sarif/sarif/v2.1.0/
 """
 
@@ -14,6 +18,7 @@ from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
 
+from lintro.ai.enums import ConfidenceLevel, RiskLevel
 from lintro.ai.models import AIFixSuggestion, AISummary
 
 SARIF_SCHEMA = (
@@ -22,22 +27,32 @@ SARIF_SCHEMA = (
 )
 SARIF_VERSION = "2.1.0"
 
+_CONFIDENCE_SCORE = {
+    ConfidenceLevel.HIGH: 0.9,
+    ConfidenceLevel.MEDIUM: 0.6,
+    ConfidenceLevel.LOW: 0.3,
+}
+
 
 def _risk_to_sarif_level(risk_level: str) -> str:
     """Map AI risk level to SARIF result level.
 
     Args:
-        risk_level: Risk classification (e.g. ``"high"``, ``"low"``).
+        risk_level: Risk classification (e.g. ``"behavioral-risk"``).
 
     Returns:
         One of ``"error"``, ``"warning"``, or ``"note"``.
     """
     normalized = risk_level.lower().strip() if risk_level else ""
+    try:
+        return RiskLevel(normalized).to_severity_label(sarif=True)
+    except ValueError:
+        pass
     if normalized in {"high", "critical"}:
         return "error"
-    if normalized in {"medium", "behavioral-risk"}:
+    if normalized in {"medium"}:
         return "warning"
-    if normalized in {"low", "safe-style"}:
+    if normalized in {"low"}:
         return "note"
     return "warning"
 
@@ -51,8 +66,11 @@ def _confidence_to_score(confidence: str) -> float:
     Returns:
         Score between 0.0 and 1.0.
     """
-    mapping = {"high": 0.9, "medium": 0.6, "low": 0.3}
-    return mapping.get(confidence.lower().strip() if confidence else "", 0.5)
+    normalized = confidence.lower().strip() if confidence else ""
+    try:
+        return _CONFIDENCE_SCORE[ConfidenceLevel(normalized)]
+    except (ValueError, KeyError):
+        return 0.5
 
 
 def to_sarif(

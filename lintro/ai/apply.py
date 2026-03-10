@@ -5,6 +5,8 @@ Handles line-targeted replacement within a configurable search radius.
 
 from __future__ import annotations
 
+import os
+import tempfile
 from collections.abc import Sequence
 from pathlib import Path
 
@@ -103,7 +105,19 @@ def _apply_fix(
                     suggested_lines[-1] += "\n"
 
                 new_lines = lines[:start] + suggested_lines + lines[end:]
-                path.write_text("".join(new_lines), encoding="utf-8")
+                # Atomic write: write to temp file then rename
+                fd, tmp = tempfile.mkstemp(
+                    dir=path.parent,
+                    suffix=".tmp",
+                )
+                try:
+                    os.write(fd, "".join(new_lines).encode("utf-8"))
+                    os.close(fd)
+                    Path(tmp).replace(path)
+                except BaseException:
+                    os.close(fd)
+                    Path(tmp).unlink(missing_ok=True)
+                    raise
                 return True
 
         return False

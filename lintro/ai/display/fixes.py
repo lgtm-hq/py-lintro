@@ -18,6 +18,7 @@ from lintro.ai.display.shared import (
     print_code_panel,
     print_section_header,
 )
+from lintro.ai.enums import RiskLevel
 from lintro.ai.models import AIFixSuggestion
 from lintro.ai.paths import relative_path
 from lintro.utils.console.constants import BORDER_LENGTH
@@ -150,9 +151,7 @@ def render_fixes_github(
             loc += f":{fix.line}"
 
         code_label = f" [{_escape_annotation(fix.code)}]" if fix.code else ""
-        tool_label = (
-            f" ({_escape_annotation(fix.tool_name)})" if fix.tool_name else ""
-        )
+        tool_label = f" ({_escape_annotation(fix.tool_name)})" if fix.tool_name else ""
         escaped_loc = _escape_annotation(loc)
         escaped_explanation = _escape_annotation(fix.explanation or "")
         lines.append(
@@ -243,17 +242,21 @@ def _risk_to_annotation_level(risk_level: str) -> str:
 
     Args:
         risk_level: Risk classification from the AI fix suggestion
-            (e.g. ``"high"``, ``"critical"``, ``"medium"``, ``"low"``).
+            (e.g. ``"behavioral-risk"``, ``"safe-style"``).
 
     Returns:
         One of ``"error"``, ``"warning"``, or ``"notice"``.
     """
     normalized = risk_level.lower().strip() if risk_level else ""
+    try:
+        return RiskLevel(normalized).to_severity_label(sarif=False)
+    except ValueError:
+        pass
     if normalized in {"high", "critical"}:
         return "error"
-    if normalized in {"medium", "behavioral-risk"}:
+    if normalized in {"medium"}:
         return "warning"
-    if normalized in {"low", "safe-style"}:
+    if normalized in {"low"}:
         return "notice"
     return "warning"
 
@@ -283,11 +286,7 @@ def _escape_property(value: str) -> str:
     Returns:
         Escaped string safe for annotation property positions.
     """
-    return (
-        _escape_annotation(value)
-        .replace(",", "%2C")
-        .replace(":", "%3A")
-    )
+    return _escape_annotation(value).replace(",", "%2C").replace(":", "%3A")
 
 
 def render_fixes_annotations(suggestions: Sequence[AIFixSuggestion]) -> str:
@@ -355,6 +354,10 @@ def render_fixes(
     output_format: str = "auto",
 ) -> str:
     """Render fixes using the appropriate format for the environment.
+
+    This is the public dispatcher for fix rendering, available for use
+    by future pipeline integrations. Currently used by the interactive
+    review loop and display modules.
 
     When running inside GitHub Actions (auto-detected), annotations are
     appended to the rendered output so they appear as inline warnings in

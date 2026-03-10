@@ -7,13 +7,15 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from lintro.ai.enums import ConfidenceLevel, RiskLevel
+
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
     from lintro.ai.models import AIFixSuggestion
 
-SAFE_STYLE_RISK = "safe-style"
-BEHAVIORAL_RISK = "behavioral-risk"
+SAFE_STYLE_RISK = RiskLevel.SAFE_STYLE
+BEHAVIORAL_RISK = RiskLevel.BEHAVIORAL_RISK
 
 
 @dataclass(frozen=True)
@@ -101,7 +103,7 @@ def classify_fix_risk(suggestion: AIFixSuggestion) -> str:
         # Trust AI classification for safe-style only when confidence
         # is high or medium — low-confidence safe claims default to risky.
         confidence = (suggestion.confidence or "").strip().lower()
-        if confidence in ("high", "medium"):
+        if confidence in (ConfidenceLevel.HIGH, ConfidenceLevel.MEDIUM):
             # Heuristic cross-check: downgrade if the diff changes
             # non-whitespace/non-quote content.
             if not _diff_is_style_only(suggestion):

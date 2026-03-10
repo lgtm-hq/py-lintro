@@ -24,6 +24,7 @@ from lintro.ai.pipeline import run_fix_pipeline
 from lintro.ai.providers import get_provider
 from lintro.ai.summary import generate_summary
 from lintro.enums.action import Action
+from lintro.enums.output_format import OutputFormat
 
 if TYPE_CHECKING:
     from lintro.ai.config import AIConfig
@@ -67,7 +68,7 @@ def run_ai_enhancement(
         ai_config = lintro_config.ai
         workspace_root = resolve_workspace_root(lintro_config.config_path)
         provider = get_provider(ai_config)
-        is_json = output_format.lower() == "json"
+        is_json = output_format.lower() == OutputFormat.JSON
 
         # P5-4: Verbose — log provider, model, and workspace at info level
         if ai_config.verbose:
@@ -177,34 +178,14 @@ def _run_ai_check(
             ):
                 all_fix_issues.append((result, issue))
 
-    fixes_applied = 0
-    fixes_failed = 0
-    if all_fix_issues:
-        fixes_applied, fixes_failed = run_fix_pipeline(
-            fix_issues=all_fix_issues,
-            provider=provider,
-            ai_config=ai_config,
-            logger=logger,
-            output_format="json" if is_json else "terminal",
-            workspace_root=workspace_root,
-            budget=budget,
-        )
-
-    if not is_json:
-        _log_fix_limit_message(
-            logger=logger,
-            total_issues=len(all_fix_issues),
-            max_fix_issues=ai_config.max_fix_issues,
-        )
-
-    unfixed = len(all_fix_issues) - fixes_applied
-    return AIResult(
-        fixes_applied=fixes_applied,
-        fixes_failed=fixes_failed,
-        unfixed_issues=max(0, unfixed),
-        budget_exceeded=(
-            budget.remaining == 0.0 if budget.remaining is not None else False
-        ),
+    return _collect_and_fix(
+        fix_issues=all_fix_issues,
+        provider=provider,
+        ai_config=ai_config,
+        logger=logger,
+        is_json=is_json,
+        workspace_root=workspace_root,
+        budget=budget,
     )
 
 
@@ -242,15 +223,40 @@ def _run_ai_fix(
             ):
                 all_fix_issues.append((result, issue))
 
+    return _collect_and_fix(
+        fix_issues=all_fix_issues,
+        provider=provider,
+        ai_config=ai_config,
+        logger=logger,
+        is_json=is_json,
+        workspace_root=workspace_root,
+        budget=budget,
+    )
+
+
+def _collect_and_fix(
+    *,
+    fix_issues: list[tuple[ToolResult, BaseIssue]],
+    provider: BaseAIProvider,
+    ai_config: AIConfig,
+    logger: ThreadSafeConsoleLogger,
+    is_json: bool,
+    workspace_root: Path,
+    budget: CostBudget,
+) -> AIResult:
+    """Run the fix pipeline and build an AIResult.
+
+    Shared by ``_run_ai_check`` and ``_run_ai_fix``.
+    """
     fixes_applied = 0
     fixes_failed = 0
-    if all_fix_issues:
+    if fix_issues:
         fixes_applied, fixes_failed = run_fix_pipeline(
-            fix_issues=all_fix_issues,
+            fix_issues=fix_issues,
             provider=provider,
             ai_config=ai_config,
             logger=logger,
-            output_format="json" if is_json else "terminal",
+            output_format=OutputFormat.JSON if is_json else OutputFormat.PLAIN,
             workspace_root=workspace_root,
             budget=budget,
         )
@@ -258,11 +264,11 @@ def _run_ai_fix(
     if not is_json:
         _log_fix_limit_message(
             logger=logger,
-            total_issues=len(all_fix_issues),
+            total_issues=len(fix_issues),
             max_fix_issues=ai_config.max_fix_issues,
         )
 
-    unfixed = len(all_fix_issues) - fixes_applied
+    unfixed = len(fix_issues) - fixes_applied
     return AIResult(
         fixes_applied=fixes_applied,
         fixes_failed=fixes_failed,

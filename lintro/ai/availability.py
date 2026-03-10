@@ -6,7 +6,12 @@ provides clear error messages when they are not.
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 import click
+
+if TYPE_CHECKING:
+    from lintro.ai.registry import AIProvider
 
 _AI_AVAILABLE: bool | None = None
 
@@ -42,7 +47,7 @@ def is_ai_available() -> bool:
     return False
 
 
-def is_provider_available(provider: str) -> bool:
+def is_provider_available(provider: AIProvider | str) -> bool:
     """Check if a specific provider package is installed.
 
     Args:

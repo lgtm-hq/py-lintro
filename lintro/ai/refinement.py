@@ -9,6 +9,7 @@ re-validation.
 
 from __future__ import annotations
 
+import functools
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -114,12 +115,16 @@ def refine_unverified_fixes(
     if not unverified_keys:
         return [], 0.0
 
+    bound_call = functools.partial(
+        _call_provider,
+        fallback_models=ai_config.fallback_models or [],
+    )
     retrying_call = with_retry(
         max_retries=ai_config.max_retries,
         base_delay=ai_config.retry_base_delay,
         max_delay=ai_config.retry_max_delay,
         backoff_factor=ai_config.retry_backoff_factor,
-    )(_call_provider)
+    )(bound_call)
 
     refined: list[AIFixSuggestion] = []
     total_cost = 0.0
