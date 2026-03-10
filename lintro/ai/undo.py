@@ -33,10 +33,17 @@ def save_undo_patch(
         return None
     patch_lines: list[str] = []
     for s in suggestions:
+        # Ensure trailing newlines for valid unified diff output
+        suggested = s.suggested_code or ""
+        if suggested and not suggested.endswith("\n"):
+            suggested += "\n"
+        original = s.original_code or ""
+        if original and not original.endswith("\n"):
+            original += "\n"
         # Reverse diff: suggested -> original (for undo)
         diff = difflib.unified_diff(
-            s.suggested_code.splitlines(keepends=True),
-            s.original_code.splitlines(keepends=True),
+            suggested.splitlines(keepends=True),
+            original.splitlines(keepends=True),
             fromfile=f"a/{s.file}",
             tofile=f"b/{s.file}",
         )

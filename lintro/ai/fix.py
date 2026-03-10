@@ -310,7 +310,7 @@ def _build_fix_context(
             context_lines=effective_context_lines,
         )
         boundary = make_boundary_marker()
-        sanitized_context = sanitize_code_content(context)
+        sanitized_context = redact_secrets(sanitize_code_content(context))
         prompt = FIX_PROMPT_TEMPLATE.format(
             tool_name=tool_name,
             code=code,
@@ -618,11 +618,15 @@ def _generate_batch_fixes(
             )
             return None
 
+        count = len(suggestions)
+        per_input = response.input_tokens // count
+        per_output = response.output_tokens // count
+        per_cost = response.cost_estimate / count
         for suggestion in suggestions:
             suggestion.tool_name = tool_name
-            suggestion.input_tokens = response.input_tokens
-            suggestion.output_tokens = response.output_tokens
-            suggestion.cost_estimate = response.cost_estimate
+            suggestion.input_tokens = per_input
+            suggestion.output_tokens = per_output
+            suggestion.cost_estimate = per_cost
 
         logger.debug(
             f"Batch fix generated {len(suggestions)} suggestions "

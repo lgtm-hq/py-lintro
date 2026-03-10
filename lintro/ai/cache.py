@@ -54,7 +54,11 @@ def get_cached_suggestion(
     cache_file = workspace_root / CACHE_DIR / f"{key}.json"
     if not cache_file.exists():
         return None
-    data = json.loads(cache_file.read_text())
+    try:
+        data = json.loads(cache_file.read_text())
+    except (json.JSONDecodeError, OSError):
+        cache_file.unlink(missing_ok=True)
+        return None
     if time.time() - data.get("timestamp", 0) > ttl:
         cache_file.unlink(missing_ok=True)
         return None
@@ -80,11 +84,18 @@ def _evict_lru(cache_dir: Path, max_entries: int) -> None:
         cache_dir: Directory containing cache JSON files.
         max_entries: Maximum number of entries to retain.
     """
-    entries = sorted(cache_dir.glob("*.json"), key=lambda p: p.stat().st_mtime)
+    # Build sorted list, skipping entries removed by concurrent processes.
+    entries: list[tuple[float, Path]] = []
+    for p in cache_dir.glob("*.json"):
+        try:
+            entries.append((p.stat().st_mtime, p))
+        except OSError:
+            continue
+    entries.sort()
     to_remove = len(entries) - max_entries
     if to_remove <= 0:
         return
-    for entry in entries[:to_remove]:
+    for _, entry in entries[:to_remove]:
         entry.unlink(missing_ok=True)
 
 

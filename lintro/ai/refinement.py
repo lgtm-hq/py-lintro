@@ -165,8 +165,10 @@ def refine_unverified_fixes(
 
         # Find the matching validation detail for the error message
         error_detail = ""
+        code_tag = f"[{suggestion.code}]"
+        line_tag = f":{suggestion.line} "
         for detail in validation.details:
-            if f"[{suggestion.code}]" in detail and f":{suggestion.line}" in detail:
+            if code_tag in detail and line_tag in detail:
                 error_detail = detail
                 break
 

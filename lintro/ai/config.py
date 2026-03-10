@@ -177,6 +177,7 @@ class AIConfig(BaseModel):
     )
     max_cost_usd: float | None = Field(
         default=None,
+        ge=0,
         description=(
             "Maximum total cost in USD per AI session. " "None disables the limit."
         ),

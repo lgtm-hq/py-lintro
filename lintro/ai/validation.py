@@ -81,17 +81,16 @@ def verify_fixes(
 
     # Step 1: Re-run tools (cwd-aware) to get fresh ToolResults.
     fresh_results = rerun_tools(by_tool)
-    if fresh_results is not None:
-        apply_rerun_results(by_tool=by_tool, rerun_results=fresh_results)
+    if fresh_results is None:
+        return None
+
+    apply_rerun_results(by_tool=by_tool, rerun_results=fresh_results)
 
     # Build a lookup from tool name -> fresh remaining issues for validation.
     fresh_issues_by_tool: dict[str, list[object]] = {}
-    if fresh_results is not None:
-        for result in fresh_results:
-            issues: list[object] = (
-                list(result.issues) if result.issues is not None else []
-            )
-            fresh_issues_by_tool[result.name] = issues
+    for result in fresh_results:
+        issues: list[object] = list(result.issues) if result.issues is not None else []
+        fresh_issues_by_tool[result.name] = issues
 
     # Step 2: Validate each applied suggestion using the fresh results.
     return _validate_suggestions(applied_suggestions, fresh_issues_by_tool)

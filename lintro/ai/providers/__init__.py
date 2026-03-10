@@ -60,7 +60,7 @@ def get_provider(config: AIConfig) -> BaseAIProvider:
     if entry is None:
         implemented = ", ".join(p.value for p in provider_classes)
         raise ValueError(
-            f"AI provider '{provider_enum}' is recognized but not "
+            f"AI provider '{provider_enum.value}' is recognized but not "
             f"implemented. Implemented providers: {implemented}",
         )
 

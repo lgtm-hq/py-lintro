@@ -111,11 +111,10 @@ def _apply_fix(
                     suffix=".tmp",
                 )
                 try:
-                    os.write(fd, "".join(new_lines).encode("utf-8"))
-                    os.close(fd)
+                    with os.fdopen(fd, "wb") as f:
+                        f.write("".join(new_lines).encode("utf-8"))
                     Path(tmp).replace(path)
                 except BaseException:
-                    os.close(fd)
                     Path(tmp).unlink(missing_ok=True)
                     raise
                 return True

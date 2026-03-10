@@ -315,7 +315,7 @@ def render_fixes_annotations(suggestions: Sequence[AIFixSuggestion]) -> str:
 
         props: list[str] = []
         if s.file:
-            props.append(f"file={_escape_property(s.file)}")
+            props.append(f"file={_escape_property(relative_path(s.file))}")
         if s.line:
             props.append(f"line={s.line}")
 

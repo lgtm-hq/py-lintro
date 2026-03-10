@@ -125,11 +125,16 @@ def _build_issues_digest(
             entry_tokens = estimate_tokens(entry)
             if used_tokens + entry_tokens > max_tokens:
                 # Count remaining codes in this tool + remaining tools.
-                remaining_in_tool = sum(
-                    len(ci)
-                    for c, ci in by_code.items()
-                    if c >= code  # rough: current + later sorted codes
-                )
+                seen_current = False
+                remaining_in_tool = 0
+                for c, ci in sorted(
+                    by_code.items(),
+                    key=lambda x: -len(x[1]),
+                ):
+                    if c == code:
+                        seen_current = True
+                    if seen_current:
+                        remaining_in_tool += len(ci)
                 omitted_issues += remaining_in_tool + sum(
                     len(iss) for _, iss in tool_entries[idx + 1 :]
                 )

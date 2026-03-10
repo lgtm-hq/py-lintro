@@ -42,7 +42,7 @@ class RiskLevel(HyphenatedStrEnum):
                 (GitHub Actions annotation format).
 
         Returns:
-            One of ``"error"``, ``"warning"``, ``"note"``, or ``"notice"``.
+            One of ``"warning"``, ``"note"``, or ``"notice"``.
         """
         if self == RiskLevel.SAFE_STYLE:
             return "note" if sarif else "notice"

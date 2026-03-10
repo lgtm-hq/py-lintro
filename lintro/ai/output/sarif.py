@@ -246,4 +246,7 @@ def write_sarif(
         tool_version=tool_version,
     )
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    output_path.write_text(json.dumps(sarif, indent=2) + "\n")
+    output_path.write_text(
+        json.dumps(sarif, indent=2) + "\n",
+        encoding="utf-8",
+    )

@@ -908,13 +908,15 @@ def test_full_file_skipped_when_over_token_budget(tmp_path):
     from lintro.ai.fix import _call_provider, _generate_single_fix
     from lintro.ai.retry import with_retry
 
-    # Create a small file but set a very tight token budget
+    # Create a file with 20 lines, set a tight token budget so full-file
+    # context is rejected and windowed context is used instead.
     source = tmp_path / "medium.py"
-    source.write_text("x = 1\ny = 2\nz = 3\n")
+    lines = [f"line_{i} = {i}" for i in range(1, 21)]
+    source.write_text("\n".join(lines) + "\n")
 
     issue = MockIssue(
         file=str(source),
-        line=2,
+        line=10,
         code="E501",
         message="Line too long",
     )
@@ -935,6 +937,11 @@ def test_full_file_skipped_when_over_token_budget(tmp_path):
     )
 
     assert_that(provider.calls).is_length(1)
+    prompt = provider.calls[0]["prompt"]
+    # Should use windowed context, not full file (1-20)
+    assert_that(prompt).does_not_contain("lines 1-20")
+    # Should contain the target line
+    assert_that(prompt).contains("line_10")
 
 
 # ---------------------------------------------------------------------------

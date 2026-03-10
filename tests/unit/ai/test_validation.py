@@ -461,7 +461,5 @@ def test_verify_fixes_handles_no_rerun_results(mock_rerun_tools):
         by_tool=by_tool,
     )
 
-    # With no rerun results, no tools have fresh issues, so validation skips
-    assert result is not None
-    assert_that(result.verified).is_equal_to(0)
-    assert_that(result.unverified).is_equal_to(0)
+    # With no rerun results, verify_fixes returns None
+    assert result is None
