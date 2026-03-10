@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from lintro.ai.enums import ConfidenceLevel
 from lintro.ai.registry import AIProvider
 
 
@@ -152,8 +153,8 @@ class AIConfig(BaseModel):
         default_factory=list,
         description="Glob patterns for rules to exclude from AI processing.",
     )
-    min_confidence: str = Field(
-        default="low",
+    min_confidence: ConfidenceLevel = Field(
+        default=ConfidenceLevel.LOW,
         description=(
             "Minimum confidence level for AI fix suggestions. "
             "Suggestions below this threshold are discarded. "

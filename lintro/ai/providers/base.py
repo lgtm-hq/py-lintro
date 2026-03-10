@@ -13,6 +13,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from lintro.ai.exceptions import AIAuthenticationError, AINotAvailableError
+from lintro.ai.registry import AIProvider
 
 
 @dataclass
@@ -33,7 +34,7 @@ class AIResponse:
     input_tokens: int = field(default=0)
     output_tokens: int = field(default=0)
     cost_estimate: float = field(default=0.0)
-    provider: str = field(default="")
+    provider: AIProvider | str = field(default="")
 
 
 class BaseAIProvider(ABC):

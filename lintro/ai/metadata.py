@@ -5,6 +5,8 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass, field
 from typing import TYPE_CHECKING, Any
 
+from lintro.ai.enums import ConfidenceLevel, RiskLevel
+
 if TYPE_CHECKING:
     from lintro.ai.models import AIFixSuggestion, AISummary
     from lintro.ai.telemetry import AITelemetry
@@ -40,8 +42,8 @@ class AIFixSuggestionPayload:
     original_code: str = ""
     suggested_code: str = ""
     explanation: str = ""
-    confidence: str = ""
-    risk_level: str = ""
+    confidence: ConfidenceLevel | str = ""
+    risk_level: RiskLevel | str = ""
     diff: str = ""
     input_tokens: int = 0
     output_tokens: int = 0
@@ -50,35 +52,6 @@ class AIFixSuggestionPayload:
     def to_dict(self) -> dict[str, Any]:
         """Convert to JSON-serializable dict."""
         return asdict(self)
-
-
-@dataclass
-class AIMetadataPayload:
-    """Top-level AI metadata attached to ToolResult."""
-
-    summary: AISummaryPayload | None = None
-    fix_suggestions: list[AIFixSuggestionPayload] | None = None
-    applied_count: int | None = None
-    verified_count: int | None = None
-    unverified_count: int | None = None
-    fixed_count: int | None = None
-
-    def to_dict(self) -> dict[str, Any]:
-        """Convert to JSON-serializable dict, omitting None fields."""
-        result: dict[str, Any] = {}
-        if self.summary is not None:
-            result["summary"] = self.summary.to_dict()
-        if self.fix_suggestions is not None:
-            result["fix_suggestions"] = [s.to_dict() for s in self.fix_suggestions]
-        if self.applied_count is not None:
-            result["applied_count"] = self.applied_count
-        if self.verified_count is not None:
-            result["verified_count"] = self.verified_count
-        if self.unverified_count is not None:
-            result["unverified_count"] = self.unverified_count
-        if self.fixed_count is not None:
-            result["fixed_count"] = self.fixed_count
-        return result
 
 
 def summary_to_payload(summary: AISummary) -> AISummaryPayload:
