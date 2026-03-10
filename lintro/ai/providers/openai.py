@@ -17,6 +17,11 @@ from lintro.ai.exceptions import (
     AIRateLimitError,
 )
 from lintro.ai.providers.base import AIResponse, BaseAIProvider
+from lintro.ai.providers.constants import (
+    DEFAULT_MAX_TOKENS,
+    DEFAULT_PER_CALL_MAX_TOKENS,
+    DEFAULT_TIMEOUT,
+)
 from lintro.ai.registry import PROVIDERS, AIProvider
 
 _has_openai = False
@@ -39,7 +44,7 @@ class OpenAIProvider(BaseAIProvider):
         *,
         model: str | None = None,
         api_key_env: str | None = None,
-        max_tokens: int = 4096,
+        max_tokens: int = DEFAULT_MAX_TOKENS,
         base_url: str | None = None,
     ) -> None:
         """Initialize the OpenAI provider.
@@ -83,8 +88,8 @@ class OpenAIProvider(BaseAIProvider):
         prompt: str,
         *,
         system: str | None = None,
-        max_tokens: int = 1024,
-        timeout: float = 60.0,
+        max_tokens: int = DEFAULT_PER_CALL_MAX_TOKENS,
+        timeout: float = DEFAULT_TIMEOUT,
     ) -> AIResponse:
         """Generate a completion using GPT.
 

@@ -8,7 +8,7 @@ modules import what they need rather than maintaining parallel dicts.
 
 from __future__ import annotations
 
-from collections.abc import Iterator, Mapping
+from collections.abc import Iterator
 from dataclasses import dataclass, field
 from enum import StrEnum, auto
 
@@ -20,57 +20,6 @@ class AIProvider(StrEnum):
 
     ANTHROPIC = auto()
     OPENAI = auto()
-
-
-# -- Immutable dict --------------------------------------------------------
-
-
-class _FrozenDict(dict[str, "ModelPricing"]):
-    """Dict subclass that blocks mutation after construction.
-
-    Inherits from ``dict`` so ``dataclasses.asdict()`` can recursively
-    convert nested dataclasses, while preventing accidental mutation of
-    the provider registry's model pricing data.
-    """
-
-    def __setitem__(self, key: str, value: object) -> None:  # noqa: ARG002
-        """Block item assignment."""
-        raise TypeError("_FrozenDict does not support item assignment")
-
-    def __delitem__(self, key: str) -> None:  # noqa: ARG002
-        """Block item deletion."""
-        raise TypeError("_FrozenDict does not support item deletion")
-
-    def update(self, *args: object, **kwargs: object) -> None:
-        """Block update."""
-        raise TypeError("_FrozenDict does not support update")
-
-    def pop(self, *args: object) -> ModelPricing:
-        """Block pop."""
-        raise TypeError("_FrozenDict does not support pop")
-
-    def clear(self) -> None:
-        """Block clear."""
-        raise TypeError("_FrozenDict does not support clear")
-
-    def setdefault(
-        self,
-        key: str,
-        default: ModelPricing | None = None,
-    ) -> ModelPricing:
-        """Block setdefault."""
-        raise TypeError("_FrozenDict does not support setdefault")
-
-    def popitem(self) -> tuple[str, ModelPricing]:
-        """Block popitem."""
-        raise TypeError("_FrozenDict does not support popitem")
-
-    def __ior__(  # type: ignore[override, misc]
-        self,
-        other: object,  # noqa: ARG002
-    ) -> _FrozenDict:
-        """Block in-place union (``|=``)."""
-        raise TypeError("_FrozenDict does not support |=")
 
 
 # -- Data structures -------------------------------------------------------
@@ -96,22 +45,7 @@ class ProviderInfo:
 
     default_model: str
     default_api_key_env: str
-    models: Mapping[str, ModelPricing] = field(default_factory=_FrozenDict)
-
-    def __post_init__(self) -> None:
-        """Wrap models in an immutable ``_FrozenDict``.
-
-        The frozen dataclass prevents attribute reassignment, but a plain
-        dict passed at construction time would still be mutable.  Wrapping
-        in ``_FrozenDict`` blocks mutation while remaining compatible with
-        ``dataclasses.asdict()`` (which requires a real ``dict`` subclass).
-        """
-        if not isinstance(self.models, _FrozenDict):
-            object.__setattr__(
-                self,
-                "models",
-                _FrozenDict(self.models),
-            )
+    models: dict[str, ModelPricing] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
