@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import pytest
 from assertpy import assert_that
 
 from lintro.ai.secrets import redact_secrets, scan_for_secrets
@@ -26,154 +27,150 @@ def test_normal_variable_assignments() -> None:
     assert_that(scan_for_secrets(text)).is_empty()
 
 
-# -- scan_for_secrets: API keys -----------------------------------------------
+# -- scan_for_secrets: pattern detection (parametrized) -----------------------
 
 
-def test_detects_api_key_assignment() -> None:
-    """Detects api_key = 'some_long_value' pattern."""
-    text = "api_key = 'ABCDEFGHIJKLMNOPQRST1234567890'\n"
+@pytest.mark.parametrize(
+    ("description", "text", "expected_pattern"),
+    [
+        (
+            "api_key assignment",
+            "api_key = 'ABCDEFGHIJKLMNOPQRST1234567890'\n",
+            "api",
+        ),
+        (
+            "apikey no separator",
+            "apikey = 'ABCDEFGHIJKLMNOPQRST1234567890'\n",
+            "api",
+        ),
+        (
+            "api-key header",
+            "api-key: ABCDEFGHIJKLMNOPQRST1234567890\n",
+            "api",
+        ),
+        (
+            "API_KEY uppercase",
+            "API_KEY = 'ABCDEFGHIJKLMNOPQRST1234567890'\n",
+            "api",
+        ),
+        (
+            "password assignment",
+            "password = 'super_secret_password_123'\n",
+            "secret",
+        ),
+        (
+            "PASSWORD uppercase",
+            "PASSWORD = 'super_secret_password_123'\n",
+            "secret",
+        ),
+        (
+            "passwd assignment",
+            "passwd = 'my_password_here'\n",
+            "secret",
+        ),
+        (
+            "secret assignment",
+            "secret = 'a_very_secret_value'\n",
+            "secret",
+        ),
+        (
+            "token assignment",
+            "token = 'abcdefghijklmnopqrst1234567890'\n",
+            "secret",
+        ),
+        (
+            "AWS access key ID",
+            "aws_access_key_id = 'AKIAIOSFODNN7EXAMPLE'\n",
+            "AWS",
+        ),
+        (
+            "AWS secret access key",
+            "aws_secret_access_key = 'wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY'\n",
+            "AWS",
+        ),
+        (
+            "GitHub PAT",
+            "ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghij\n",
+            "ghp_",
+        ),
+        (
+            "OpenAI key",
+            "sk-abcdefghijklmnopqrstuvwxyz\n",
+            "sk-",
+        ),
+        (
+            "RSA private key",
+            (
+                "-----BEGIN RSA PRIVATE KEY-----\n"
+                "MIIEpAIBAAKCAQEA...\n"
+                "-----END RSA PRIVATE KEY-----\n"
+            ),
+            "private key",
+        ),
+        (
+            "EC private key",
+            (
+                "-----BEGIN EC PRIVATE KEY-----\n"
+                "MIIEpAIBAAKCAQEA...\n"
+                "-----END EC PRIVATE KEY-----\n"
+            ),
+            "private key",
+        ),
+        (
+            "generic private key",
+            (
+                "-----BEGIN PRIVATE KEY-----\n"
+                "MIIEpAIBAAKCAQEA...\n"
+                "-----END PRIVATE KEY-----\n"
+            ),
+            "private key",
+        ),
+    ],
+    ids=[
+        "api_key",
+        "apikey",
+        "api-key",
+        "API_KEY",
+        "password",
+        "PASSWORD",
+        "passwd",
+        "secret",
+        "token",
+        "aws-access-key",
+        "aws-secret-key",
+        "github-pat",
+        "openai-key",
+        "rsa-private-key",
+        "ec-private-key",
+        "generic-private-key",
+    ],
+)
+def test_detects_secret_pattern(
+    description: str,
+    text: str,
+    expected_pattern: str,
+) -> None:
+    """Detects {description} and description mentions pattern type."""
     result = scan_for_secrets(text)
     assert_that(result).is_not_empty()
-    assert_that(result[0]).contains("Potential secret detected")
+    assert_that(result[0].lower()).contains(expected_pattern.lower())
 
 
-def test_detects_apikey_no_separator() -> None:
-    """Detects apikey= pattern without separator."""
-    text = "apikey = 'ABCDEFGHIJKLMNOPQRST1234567890'\n"
-    result = scan_for_secrets(text)
-    assert_that(result).is_not_empty()
+# -- scan_for_secrets: negative cases -----------------------------------------
 
 
-def test_detects_api_dash_key() -> None:
-    """Detects api-key pattern."""
-    text = "api-key: ABCDEFGHIJKLMNOPQRST1234567890\n"
-    result = scan_for_secrets(text)
-    assert_that(result).is_not_empty()
-
-
-# -- scan_for_secrets: passwords -----------------------------------------------
-
-
-def test_detects_password() -> None:
-    """Detects password assignment."""
-    text = "password = 'super_secret_password_123'\n"
-    result = scan_for_secrets(text)
-    assert_that(result).is_not_empty()
-
-
-def test_detects_passwd() -> None:
-    """Detects passwd assignment."""
-    text = "passwd = 'my_password_here'\n"
-    result = scan_for_secrets(text)
-    assert_that(result).is_not_empty()
-
-
-def test_detects_secret() -> None:
-    """Detects secret assignment."""
-    text = "secret = 'a_very_secret_value'\n"
-    result = scan_for_secrets(text)
-    assert_that(result).is_not_empty()
-
-
-def test_short_password_not_detected() -> None:
-    """Password shorter than 8 chars is not detected."""
-    text = "password = 'short'\n"
+@pytest.mark.parametrize(
+    ("description", "text"),
+    [
+        ("short password", "password = 'short'\n"),
+        ("short ghp_ prefix", "ghp_short\n"),
+        ("short sk- prefix", "sk-short\n"),
+    ],
+    ids=["short-password", "short-ghp", "short-sk"],
+)
+def test_does_not_detect_short_values(description: str, text: str) -> None:
+    """Short values ({description}) are not flagged as secrets."""
     assert_that(scan_for_secrets(text)).is_empty()
-
-
-# -- scan_for_secrets: tokens --------------------------------------------------
-
-
-def test_detects_token_assignment() -> None:
-    """Detects token = 'long_token_value...' pattern."""
-    text = "token = 'abcdefghijklmnopqrst1234567890'\n"
-    result = scan_for_secrets(text)
-    assert_that(result).is_not_empty()
-
-
-# -- scan_for_secrets: AWS keys ------------------------------------------------
-
-
-def test_detects_aws_access_key() -> None:
-    """Detects AWS access key ID pattern."""
-    text = "aws_access_key_id = 'AKIAIOSFODNN7EXAMPLE'\n"
-    result = scan_for_secrets(text)
-    assert_that(result).is_not_empty()
-
-
-def test_detects_aws_secret_key() -> None:
-    """Detects AWS secret access key pattern."""
-    text = "aws_secret_access_key = 'wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY'\n"
-    result = scan_for_secrets(text)
-    assert_that(result).is_not_empty()
-
-
-# -- scan_for_secrets: GitHub PAT ----------------------------------------------
-
-
-def test_detects_github_pat() -> None:
-    """Detects GitHub personal access token."""
-    text = "ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghij\n"
-    result = scan_for_secrets(text)
-    assert_that(result).is_not_empty()
-
-
-def test_ghp_short_not_detected() -> None:
-    """Short ghp_ prefix without enough chars is not detected."""
-    text = "ghp_short\n"
-    assert_that(scan_for_secrets(text)).is_empty()
-
-
-# -- scan_for_secrets: OpenAI/Anthropic keys -----------------------------------
-
-
-def test_detects_openai_key() -> None:
-    """Detects OpenAI API key pattern."""
-    text = "sk-abcdefghijklmnopqrstuvwxyz\n"
-    result = scan_for_secrets(text)
-    assert_that(result).is_not_empty()
-
-
-def test_sk_short_not_detected() -> None:
-    """Short sk- prefix without enough chars is not detected."""
-    text = "sk-short\n"
-    assert_that(scan_for_secrets(text)).is_empty()
-
-
-# -- scan_for_secrets: private keys --------------------------------------------
-
-
-def test_detects_rsa_private_key() -> None:
-    """Detect full RSA private key PEM block."""
-    text = (
-        "-----BEGIN RSA PRIVATE KEY-----\n"
-        "MIIEpAIBAAKCAQEA...\n"
-        "-----END RSA PRIVATE KEY-----\n"
-    )
-    result = scan_for_secrets(text)
-    assert_that(result).is_not_empty()
-
-
-def test_detects_ec_private_key() -> None:
-    """Detect full EC private key PEM block."""
-    text = (
-        "-----BEGIN EC PRIVATE KEY-----\n"
-        "MIIEpAIBAAKCAQEA...\n"
-        "-----END EC PRIVATE KEY-----\n"
-    )
-    result = scan_for_secrets(text)
-    assert_that(result).is_not_empty()
-
-
-def test_detects_generic_private_key() -> None:
-    """Detect full generic private key PEM block."""
-    text = (
-        "-----BEGIN PRIVATE KEY-----\n"
-        "MIIEpAIBAAKCAQEA...\n"
-        "-----END PRIVATE KEY-----\n"
-    )
-    result = scan_for_secrets(text)
-    assert_that(result).is_not_empty()
 
 
 # -- scan_for_secrets: multiple detections -------------------------------------
@@ -190,23 +187,6 @@ def test_detects_multiple_secrets() -> None:
     assert_that(result).is_length(3)
 
 
-# -- scan_for_secrets: case insensitivity --------------------------------------
-
-
-def test_api_key_case_insensitive() -> None:
-    """API_KEY (uppercase) is also detected."""
-    text = "API_KEY = 'ABCDEFGHIJKLMNOPQRST1234567890'\n"
-    result = scan_for_secrets(text)
-    assert_that(result).is_not_empty()
-
-
-def test_password_case_insensitive() -> None:
-    """PASSWORD (uppercase) is also detected."""
-    text = "PASSWORD = 'super_secret_password_123'\n"
-    result = scan_for_secrets(text)
-    assert_that(result).is_not_empty()
-
-
 # -- redact_secrets ------------------------------------------------------------
 
 
@@ -216,50 +196,57 @@ def test_redact_clean_text_unchanged() -> None:
     assert_that(redact_secrets(text)).is_equal_to(text)
 
 
-def test_redact_api_key() -> None:
-    """API key is replaced with [REDACTED]."""
-    text = "api_key = 'ABCDEFGHIJKLMNOPQRST1234567890'\n"
+@pytest.mark.parametrize(
+    ("description", "text", "forbidden_substring"),
+    [
+        (
+            "API key",
+            "api_key = 'ABCDEFGHIJKLMNOPQRST1234567890'\n",
+            "ABCDEFGHIJKLMNOPQRST",
+        ),
+        (
+            "password",
+            "password = 'super_secret_password_123'\n",
+            "super_secret_password_123",
+        ),
+        (
+            "GitHub PAT",
+            # nosemgrep: detected-github-token
+            "token = " "ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghij\n",
+            "ghp_ABCDEFGHIJ",
+        ),
+        (
+            "OpenAI key",
+            "key = sk-abcdefghijklmnopqrstuvwxyz\n",
+            "sk-abcdefghij",
+        ),
+        (
+            "RSA private key",
+            (
+                "-----BEGIN RSA PRIVATE KEY-----\n"
+                "MIIEpAIBAAKCAQEA...\n"
+                "-----END RSA PRIVATE KEY-----\n"
+            ),
+            "BEGIN RSA PRIVATE KEY",
+        ),
+    ],
+    ids=[
+        "api-key",
+        "password",
+        "github-pat",
+        "openai-key",
+        "private-key",
+    ],
+)
+def test_redact_replaces_secret(
+    description: str,
+    text: str,
+    forbidden_substring: str,
+) -> None:
+    """Redaction of {description} replaces value with [REDACTED]."""
     result = redact_secrets(text)
     assert_that(result).contains("[REDACTED]")
-    assert_that(result).does_not_contain("ABCDEFGHIJKLMNOPQRST")
-
-
-def test_redact_password() -> None:
-    """Password is replaced with [REDACTED]."""
-    text = "password = 'super_secret_password_123'\n"
-    result = redact_secrets(text)
-    assert_that(result).contains("[REDACTED]")
-    assert_that(result).does_not_contain("super_secret_password_123")
-
-
-def test_redact_github_pat() -> None:
-    """GitHub PAT is replaced with [REDACTED]."""
-    # nosemgrep: detected-github-token
-    text = "token = ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghij\n"
-    result = redact_secrets(text)
-    assert_that(result).contains("[REDACTED]")
-    assert_that(result).does_not_contain("ghp_ABCDEFGHIJ")
-
-
-def test_redact_openai_key() -> None:
-    """OpenAI key is replaced with [REDACTED]."""
-    text = "key = sk-abcdefghijklmnopqrstuvwxyz\n"
-    result = redact_secrets(text)
-    assert_that(result).contains("[REDACTED]")
-    assert_that(result).does_not_contain("sk-abcdefghij")
-
-
-def test_redact_private_key() -> None:
-    """Full PEM private key block is replaced with [REDACTED]."""
-    text = (
-        "-----BEGIN RSA PRIVATE KEY-----\n"
-        "MIIEpAIBAAKCAQEA...\n"
-        "-----END RSA PRIVATE KEY-----\n"
-    )
-    result = redact_secrets(text)
-    assert_that(result).contains("[REDACTED]")
-    assert_that(result).does_not_contain("BEGIN RSA PRIVATE KEY")
-    assert_that(result).does_not_contain("MIIEpAIBAAKCAQEA")
+    assert_that(result).does_not_contain(forbidden_substring)
 
 
 def test_redact_multiple_secrets() -> None:

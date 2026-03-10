@@ -6,7 +6,6 @@ from assertpy import assert_that
 
 from lintro.ai.metadata import (
     AIFixSuggestionPayload,
-    AIMetadataPayload,
     AISummaryPayload,
     attach_fix_suggestions_metadata,
     attach_fixed_count_metadata,
@@ -81,26 +80,16 @@ def test_metadata_fixed_count_is_attached_and_normalized():
     assert_that(normalized["unverified_count"]).is_equal_to(1)
 
 
-def test_metadata_payload_to_dict_serialization():
-    """Verify that AIMetadataPayload.to_dict serializes all fields correctly."""
-    payload = AIMetadataPayload(
-        summary=AISummaryPayload(overview="Test overview", estimated_effort="1h"),
-        fix_suggestions=[
-            AIFixSuggestionPayload(file="a.py", line=10, code="E501"),
-        ],
-        applied_count=1,
-        verified_count=1,
-        unverified_count=0,
-        fixed_count=1,
-    )
-    d = payload.to_dict()
+def test_payload_to_dict_serialization():
+    """Verify that payload to_dict methods serialize fields correctly."""
+    summary = AISummaryPayload(overview="Test overview", estimated_effort="1h")
+    suggestion = AIFixSuggestionPayload(file="a.py", line=10, code="E501")
 
-    assert_that(d).contains_key("summary")
-    assert_that(d).contains_key("fix_suggestions")
-    assert_that(d["summary"]["overview"]).is_equal_to("Test overview")
-    assert_that(d["fix_suggestions"]).is_length(1)
-    assert_that(d["fix_suggestions"][0]["file"]).is_equal_to("a.py")
-    assert_that(d["applied_count"]).is_equal_to(1)
-    assert_that(d["fixed_count"]).is_equal_to(1)
-    assert_that(d["verified_count"]).is_equal_to(1)
-    assert_that(d["unverified_count"]).is_equal_to(0)
+    sd = summary.to_dict()
+    assert_that(sd["overview"]).is_equal_to("Test overview")
+    assert_that(sd["estimated_effort"]).is_equal_to("1h")
+
+    fd = suggestion.to_dict()
+    assert_that(fd["file"]).is_equal_to("a.py")
+    assert_that(fd["line"]).is_equal_to(10)
+    assert_that(fd["code"]).is_equal_to("E501")

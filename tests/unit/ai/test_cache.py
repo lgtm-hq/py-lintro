@@ -14,6 +14,20 @@ from lintro.ai.cache import (
     cache_suggestion,
     get_cached_suggestion,
 )
+from lintro.ai.models import AIFixSuggestion
+
+
+def _make_suggestion(**kwargs: object) -> AIFixSuggestion:
+    """Create a minimal AIFixSuggestion for tests."""
+    defaults = {
+        "file": "test.py",
+        "line": 1,
+        "code": "E001",
+        "original_code": "x",
+        "suggested_code": "y",
+    }
+    defaults.update(kwargs)
+    return AIFixSuggestion(**defaults)  # type: ignore[arg-type]
 
 
 # -- _cache_key --------------------------------------------------------------
@@ -49,15 +63,19 @@ def test_cache_miss_returns_none(tmp_path: object) -> None:
 
 
 def test_cache_hit_returns_data(tmp_path: object) -> None:
-    """A cache hit returns the stored suggestion dict."""
+    """A cache hit returns the stored suggestion as AIFixSuggestion."""
     from pathlib import Path
 
     root = Path(str(tmp_path))
-    suggestion = {"fix": "use x instead of y"}
+    suggestion = _make_suggestion()
     cache_suggestion(root, "content", "E001", 10, "msg", suggestion)
 
     result = get_cached_suggestion(root, "content", "E001", 10, "msg")
-    assert_that(result).is_equal_to(suggestion)
+    assert_that(result).is_not_none()
+    assert_that(result).is_instance_of(AIFixSuggestion)
+    assert_that(result.file).is_equal_to("test.py")
+    assert_that(result.original_code).is_equal_to("x")
+    assert_that(result.suggested_code).is_equal_to("y")
 
 
 def test_expired_cache_returns_none_and_deletes_file(tmp_path: object) -> None:
@@ -65,7 +83,7 @@ def test_expired_cache_returns_none_and_deletes_file(tmp_path: object) -> None:
     from pathlib import Path
 
     root = Path(str(tmp_path))
-    suggestion = {"fix": "use x instead of y"}
+    suggestion = {"file": "test.py", "line": 1, "code": "E001"}
 
     # Write a cache entry with a timestamp far in the past
     key = _cache_key("content", "E001", 10, "msg")
@@ -89,7 +107,8 @@ def test_cache_stores_to_correct_path(tmp_path: object) -> None:
     from pathlib import Path
 
     root = Path(str(tmp_path))
-    cache_suggestion(root, "content", "E001", 10, "msg", {"fix": "done"})
+    suggestion = _make_suggestion()
+    cache_suggestion(root, "content", "E001", 10, "msg", suggestion)
 
     key = _cache_key("content", "E001", 10, "msg")
     cache_file = root / CACHE_DIR / f"{key}.json"
@@ -97,7 +116,7 @@ def test_cache_stores_to_correct_path(tmp_path: object) -> None:
 
     data = json.loads(cache_file.read_text())
     assert_that(data).contains_key("timestamp", "suggestion")
-    assert_that(data["suggestion"]).is_equal_to({"fix": "done"})
+    assert_that(data["suggestion"]["file"]).is_equal_to("test.py")
 
 
 # -- LRU eviction -------------------------------------------------------------
@@ -151,16 +170,15 @@ def test_cache_suggestion_evicts_when_over_max(tmp_path: object) -> None:
     # Pre-populate cache with entries that have known mtime ordering
     cache_dir = root / CACHE_DIR
     cache_dir.mkdir(parents=True, exist_ok=True)
-    old_files = []
     for i in range(3):
         f = cache_dir / f"old_entry_{i}.json"
         f.write_text(json.dumps({"timestamp": time.time(), "suggestion": {"i": i}}))
         # Make entries progressively older
         os.utime(f, (1000 + i, 1000 + i))
-        old_files.append(f)
 
     # Adding one more entry should evict the oldest (old_entry_0)
-    cache_suggestion(root, "new", "E999", 1, "new msg", {"fix": "new"}, max_entries=max_entries)
+    suggestion = _make_suggestion(code="E999")
+    cache_suggestion(root, "new", "E999", 1, "new msg", suggestion, max_entries=max_entries)
 
     remaining = sorted(p.name for p in cache_dir.glob("*.json"))
     # old_entry_0 (mtime=1000) should have been evicted
@@ -175,7 +193,7 @@ def test_get_cached_suggestion_updates_mtime(tmp_path: object) -> None:
     from pathlib import Path
 
     root = Path(str(tmp_path))
-    suggestion = {"fix": "keep me"}
+    suggestion = _make_suggestion()
     cache_suggestion(root, "content", "E001", 10, "msg", suggestion)
 
     key = _cache_key("content", "E001", 10, "msg")
@@ -187,7 +205,7 @@ def test_get_cached_suggestion_updates_mtime(tmp_path: object) -> None:
 
     # Access the entry
     result = get_cached_suggestion(root, "content", "E001", 10, "msg")
-    assert_that(result).is_equal_to(suggestion)
+    assert_that(result).is_not_none()
 
     new_mtime = cache_file.stat().st_mtime
     assert_that(new_mtime).is_greater_than(old_mtime)

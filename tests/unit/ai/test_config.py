@@ -114,159 +114,96 @@ def test_custom_api_key_env() -> None:
     assert_that(config.api_key_env).is_equal_to("MY_API_KEY")
 
 
-# -- max_tokens ------------------------------------------------------------
+# -- Numeric field boundary values (parametrized) --------------------------
 
 
-def test_max_tokens_accepts_minimum() -> None:
-    """max_tokens accepts the minimum value of 1."""
-    config = AIConfig(max_tokens=1)
-    assert_that(config.max_tokens).is_equal_to(1)
+@pytest.mark.parametrize(
+    ("field_name", "valid_value", "expected"),
+    [
+        ("max_tokens", 1, 1),
+        ("max_tokens", 512000, 512000),
+        ("max_parallel_calls", 1, 1),
+        ("max_parallel_calls", 20, 20),
+        ("max_retries", 0, 0),
+        ("max_retries", 10, 10),
+        ("api_timeout", 1.0, 1.0),
+        ("api_timeout", 300.0, 300.0),
+        ("context_lines", 1, 1),
+        ("context_lines", 100, 100),
+        ("fix_search_radius", 1, 1),
+        ("fix_search_radius", 50, 50),
+        ("retry_base_delay", 0.1, 0.1),
+        ("retry_max_delay", 1.0, 1.0),
+        ("retry_backoff_factor", 1.0, 1.0),
+    ],
+    ids=[
+        "max_tokens=1",
+        "max_tokens=512000",
+        "max_parallel_calls=1",
+        "max_parallel_calls=20",
+        "max_retries=0",
+        "max_retries=10",
+        "api_timeout=1.0",
+        "api_timeout=300.0",
+        "context_lines=1",
+        "context_lines=100",
+        "fix_search_radius=1",
+        "fix_search_radius=50",
+        "retry_base_delay=0.1",
+        "retry_max_delay=1.0",
+        "retry_backoff_factor=1.0",
+    ],
+)
+def test_numeric_field_accepts_valid_value(
+    field_name: str,
+    valid_value: int | float,
+    expected: int | float,
+) -> None:
+    """Numeric field {field_name} accepts value {valid_value}."""
+    config = AIConfig(**{field_name: valid_value})  # type: ignore[arg-type]  # dynamic field name
+    assert_that(getattr(config, field_name)).is_equal_to(expected)
 
 
-def test_max_tokens_accepts_large_value() -> None:
-    """max_tokens accepts large values (no upper bound)."""
-    config = AIConfig(max_tokens=512000)
-    assert_that(config.max_tokens).is_equal_to(512000)
-
-
-def test_max_tokens_rejects_zero() -> None:
-    """max_tokens=0 violates ge=1 constraint."""
+@pytest.mark.parametrize(
+    ("field_name", "invalid_value"),
+    [
+        ("max_tokens", 0),
+        ("max_parallel_calls", 0),
+        ("max_parallel_calls", 21),
+        ("max_retries", -1),
+        ("max_retries", 11),
+        ("api_timeout", 0.5),
+        ("context_lines", 0),
+        ("context_lines", 101),
+        ("fix_search_radius", 0),
+        ("fix_search_radius", 51),
+        ("retry_base_delay", 0.05),
+        ("retry_max_delay", 0.5),
+        ("retry_backoff_factor", 0.5),
+    ],
+    ids=[
+        "max_tokens=0",
+        "max_parallel_calls=0",
+        "max_parallel_calls=21",
+        "max_retries=-1",
+        "max_retries=11",
+        "api_timeout=0.5",
+        "context_lines=0",
+        "context_lines=101",
+        "fix_search_radius=0",
+        "fix_search_radius=51",
+        "retry_base_delay=0.05",
+        "retry_max_delay=0.5",
+        "retry_backoff_factor=0.5",
+    ],
+)
+def test_numeric_field_rejects_invalid_value(
+    field_name: str,
+    invalid_value: int | float,
+) -> None:
+    """Numeric field {field_name} rejects invalid value {invalid_value}."""
     with pytest.raises(ValidationError):
-        AIConfig(max_tokens=0)
-
-
-# -- max_parallel_calls ----------------------------------------------------
-
-
-def test_max_parallel_calls_accepts_bounds() -> None:
-    """max_parallel_calls accepts boundary values 1 and 20."""
-    assert_that(AIConfig(max_parallel_calls=1).max_parallel_calls).is_equal_to(1)
-    assert_that(AIConfig(max_parallel_calls=20).max_parallel_calls).is_equal_to(20)
-
-
-def test_max_parallel_calls_rejects_out_of_range() -> None:
-    """max_parallel_calls rejects 0 and 21."""
-    with pytest.raises(ValidationError):
-        AIConfig(max_parallel_calls=0)
-    with pytest.raises(ValidationError):
-        AIConfig(max_parallel_calls=21)
-
-
-# -- max_retries -----------------------------------------------------------
-
-
-def test_max_retries_accepts_bounds() -> None:
-    """max_retries accepts 0 (disabled) and 10 (max)."""
-    assert_that(AIConfig(max_retries=0).max_retries).is_equal_to(0)
-    assert_that(AIConfig(max_retries=10).max_retries).is_equal_to(10)
-
-
-def test_max_retries_rejects_out_of_range() -> None:
-    """max_retries rejects -1 and 11."""
-    with pytest.raises(ValidationError):
-        AIConfig(max_retries=-1)
-    with pytest.raises(ValidationError):
-        AIConfig(max_retries=11)
-
-
-# -- api_timeout -----------------------------------------------------------
-
-
-def test_api_timeout_accepts_minimum() -> None:
-    """api_timeout accepts the minimum of 1.0."""
-    config = AIConfig(api_timeout=1.0)
-    assert_that(config.api_timeout).is_equal_to(1.0)
-
-
-def test_api_timeout_accepts_large_value() -> None:
-    """api_timeout accepts large values."""
-    config = AIConfig(api_timeout=300.0)
-    assert_that(config.api_timeout).is_equal_to(300.0)
-
-
-def test_api_timeout_rejects_below_minimum() -> None:
-    """api_timeout rejects values below 1.0."""
-    with pytest.raises(ValidationError):
-        AIConfig(api_timeout=0.5)
-
-
-# -- context_lines ---------------------------------------------------------
-
-
-def test_context_lines_accepts_bounds() -> None:
-    """context_lines accepts boundary values 1 and 100."""
-    assert_that(AIConfig(context_lines=1).context_lines).is_equal_to(1)
-    assert_that(AIConfig(context_lines=100).context_lines).is_equal_to(100)
-
-
-def test_context_lines_rejects_out_of_range() -> None:
-    """context_lines rejects 0 and 101."""
-    with pytest.raises(ValidationError):
-        AIConfig(context_lines=0)
-    with pytest.raises(ValidationError):
-        AIConfig(context_lines=101)
-
-
-# -- fix_search_radius -----------------------------------------------------
-
-
-def test_fix_search_radius_accepts_bounds() -> None:
-    """fix_search_radius accepts boundary values 1 and 50."""
-    assert_that(AIConfig(fix_search_radius=1).fix_search_radius).is_equal_to(1)
-    assert_that(AIConfig(fix_search_radius=50).fix_search_radius).is_equal_to(50)
-
-
-def test_fix_search_radius_rejects_out_of_range() -> None:
-    """fix_search_radius rejects 0 and 51."""
-    with pytest.raises(ValidationError):
-        AIConfig(fix_search_radius=0)
-    with pytest.raises(ValidationError):
-        AIConfig(fix_search_radius=51)
-
-
-# -- retry_base_delay ------------------------------------------------------
-
-
-def test_retry_base_delay_accepts_minimum() -> None:
-    """retry_base_delay accepts the minimum of 0.1."""
-    config = AIConfig(retry_base_delay=0.1)
-    assert_that(config.retry_base_delay).is_equal_to(0.1)
-
-
-def test_retry_base_delay_rejects_below_minimum() -> None:
-    """retry_base_delay rejects values below 0.1."""
-    with pytest.raises(ValidationError):
-        AIConfig(retry_base_delay=0.05)
-
-
-# -- retry_max_delay -------------------------------------------------------
-
-
-def test_retry_max_delay_accepts_minimum() -> None:
-    """retry_max_delay accepts the minimum of 1.0."""
-    config = AIConfig(retry_max_delay=1.0)
-    assert_that(config.retry_max_delay).is_equal_to(1.0)
-
-
-def test_retry_max_delay_rejects_below_minimum() -> None:
-    """retry_max_delay rejects values below 1.0."""
-    with pytest.raises(ValidationError):
-        AIConfig(retry_max_delay=0.5)
-
-
-# -- retry_backoff_factor --------------------------------------------------
-
-
-def test_retry_backoff_factor_accepts_minimum() -> None:
-    """retry_backoff_factor accepts the minimum of 1.0."""
-    config = AIConfig(retry_backoff_factor=1.0)
-    assert_that(config.retry_backoff_factor).is_equal_to(1.0)
-
-
-def test_retry_backoff_factor_rejects_below_minimum() -> None:
-    """retry_backoff_factor rejects values below 1.0."""
-    with pytest.raises(ValidationError):
-        AIConfig(retry_backoff_factor=0.5)
+        AIConfig(**{field_name: invalid_value})  # type: ignore[arg-type]  # dynamic field name
 
 
 # -- Cross-field validators ------------------------------------------------
