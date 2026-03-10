@@ -49,7 +49,7 @@ def test_reverse_diff_suggested_to_original(tmp_path: Path) -> None:
     """The patch is a reverse diff (suggested -> original) for undo."""
     s = _make_suggestion(original="old_line\n", suggested="new_line\n")
     result = save_undo_patch([s], workspace_root=tmp_path)
-    assert result is not None
+    assert_that(result).is_not_none()
 
     content = result.read_text()
     # In a reverse diff, the "from" shows the suggested (new) code
@@ -68,7 +68,7 @@ def test_patch_content_is_valid_unified_diff(tmp_path: Path) -> None:
     """The patch content contains standard unified diff markers."""
     s = _make_suggestion(original="alpha\n", suggested="beta\n")
     result = save_undo_patch([s], workspace_root=tmp_path)
-    assert result is not None
+    assert_that(result).is_not_none()
 
     content = result.read_text()
     assert_that(content).contains("---")

@@ -31,7 +31,7 @@ def test_metadata_summary_and_fixes_coexist():
     attach_summary_metadata(result, summary)
     attach_fix_suggestions_metadata(result, [suggestion])
 
-    assert result.ai_metadata is not None
+    assert_that(result.ai_metadata).is_not_none()
     assert_that(result.ai_metadata).contains_key("summary")
     assert_that(result.ai_metadata).contains_key("fix_suggestions")
     assert_that(result.ai_metadata["summary"]["overview"]).is_equal_to("Overview")
@@ -63,7 +63,7 @@ def test_metadata_fixed_count_is_attached_and_normalized():
         unverified_count=1,
     )
 
-    assert result.ai_metadata is not None
+    assert_that(result.ai_metadata).is_not_none()
     assert_that(result.ai_metadata).contains_key("fixed_count")
     assert_that(result.ai_metadata).contains_key("applied_count")
     assert_that(result.ai_metadata).contains_key("verified_count")

@@ -56,7 +56,7 @@ def test_validate_applied_fixes_verified_when_issue_gone(mock_check):
 
     result = validate_applied_fixes([suggestion])
 
-    assert result is not None
+    assert_that(result).is_not_none()
     assert_that(result.verified).is_equal_to(1)
     assert_that(result.unverified).is_equal_to(0)
 
@@ -73,7 +73,7 @@ def test_validate_applied_fixes_unverified_when_issue_remains(mock_check):
     suggestion = _make_suggestion()
     result = validate_applied_fixes([suggestion])
 
-    assert result is not None
+    assert_that(result).is_not_none()
     assert_that(result.verified).is_equal_to(0)
     assert_that(result.unverified).is_equal_to(1)
     assert_that(result.details).is_length(1)
@@ -93,7 +93,7 @@ def test_validate_applied_fixes_mixed_verified_and_unverified(mock_check):
 
     result = validate_applied_fixes([s1, s2])
 
-    assert result is not None
+    assert_that(result).is_not_none()
     assert_that(result.verified).is_equal_to(1)
     assert_that(result.unverified).is_equal_to(1)
     assert_that(result.verified_by_tool.get("ruff")).is_equal_to(1)
@@ -114,7 +114,7 @@ def test_validate_applied_fixes_matches_by_line_before_file_code(mock_check):
 
     result = validate_applied_fixes([resolved, unresolved])
 
-    assert result is not None
+    assert_that(result).is_not_none()
     assert_that(result.verified).is_equal_to(1)
     assert_that(result.unverified).is_equal_to(1)
     assert_that(result.details).is_length(1)
@@ -135,7 +135,7 @@ def test_validate_applied_fixes_unknown_remaining_line_marks_issue_unverified(
     suggestion = _make_suggestion(code="E501", line=30)
     result = validate_applied_fixes([suggestion])
 
-    assert result is not None
+    assert_that(result).is_not_none()
     assert_that(result.verified).is_equal_to(0)
     assert_that(result.unverified).is_equal_to(1)
 
@@ -147,7 +147,7 @@ def test_validate_applied_fixes_skips_unknown_tool(mock_check):
     result = validate_applied_fixes([suggestion])
 
     # No tool actually ran, so validate_applied_fixes returns None.
-    assert result is None
+    assert_that(result).is_none()
     mock_check.assert_not_called()
 
 
@@ -160,7 +160,7 @@ def test_validate_applied_fixes_skips_when_check_returns_none(mock_check):
     result = validate_applied_fixes([suggestion])
 
     # No tool successfully ran, so validate_applied_fixes returns None.
-    assert result is None
+    assert_that(result).is_none()
 
 
 @patch("lintro.ai.validation._run_tool_check")
@@ -173,7 +173,7 @@ def test_validate_applied_fixes_groups_by_tool(mock_check):
 
     result = validate_applied_fixes([s1, s2])
 
-    assert result is not None
+    assert_that(result).is_not_none()
     assert_that(result.verified).is_equal_to(2)
     assert_that(mock_check.call_count).is_equal_to(2)
 
@@ -199,7 +199,7 @@ def test_validate_applied_fixes_matches_relative_remaining_paths_against_absolut
     suggestion = _make_suggestion(file=str(project_file.resolve()), code="B101")
     result = validate_applied_fixes([suggestion])
 
-    assert result is not None
+    assert_that(result).is_not_none()
     assert_that(result.unverified).is_equal_to(1)
     assert_that(result.verified).is_equal_to(0)
 
@@ -221,7 +221,7 @@ def test_validate_applied_fixes_tracks_new_issues(mock_check):
     suggestion = _make_suggestion(code="B101", line=10)
     result = validate_applied_fixes([suggestion])
 
-    assert result is not None
+    assert_that(result).is_not_none()
     assert_that(result.unverified).is_equal_to(1)
     assert_that(result.new_issues).is_equal_to(1)
 
@@ -385,7 +385,7 @@ def test_verify_fixes_runs_tools_once_and_validates(
         by_tool=by_tool,
     )
 
-    assert result is not None
+    assert_that(result).is_not_none()
     assert_that(result.verified).is_equal_to(1)
     assert_that(result.unverified).is_equal_to(0)
     # rerun_tools should be called exactly once (not twice as before)
@@ -431,7 +431,7 @@ def test_verify_fixes_updates_tool_results_and_validates(
         by_tool=by_tool,
     )
 
-    assert result is not None
+    assert_that(result).is_not_none()
     assert_that(result.unverified).is_equal_to(1)
     assert_that(result.verified).is_equal_to(0)
     # Confirms apply_rerun_results was called to update ToolResult objects
@@ -462,4 +462,4 @@ def test_verify_fixes_handles_no_rerun_results(mock_rerun_tools):
     )
 
     # With no rerun results, verify_fixes returns None
-    assert result is None
+    assert_that(result).is_none()
