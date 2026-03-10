@@ -53,5 +53,5 @@ def save_undo_patch(
     undo_dir = workspace_root / UNDO_DIR
     undo_dir.mkdir(parents=True, exist_ok=True)
     patch_path = undo_dir / UNDO_FILE
-    patch_path.write_text("".join(patch_lines))
+    patch_path.write_text("".join(patch_lines), encoding="utf-8")
     return patch_path

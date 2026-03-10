@@ -35,6 +35,8 @@ def truncate_to_budget(text: str, max_tokens: int) -> tuple[str, bool]:
     Returns:
         Tuple of (possibly truncated text, was_truncated).
     """
+    if max_tokens <= 0:
+        return "", True
     if estimate_tokens(text) <= max_tokens:
         return text, False
 

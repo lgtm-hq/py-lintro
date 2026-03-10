@@ -110,6 +110,7 @@ def refine_unverified_fixes(
                 line = int(rest[colon_idx + 1 : space_idx])
                 unverified_keys.add((code, line))
             except (ValueError, IndexError):
+                logger.debug("Skipping unparseable validation detail: {}", detail)
                 continue
 
     if not unverified_keys:

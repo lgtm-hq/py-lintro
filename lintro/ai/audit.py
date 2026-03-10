@@ -51,4 +51,7 @@ def write_audit_log(
     }
     audit_dir = workspace_root / AUDIT_DIR
     audit_dir.mkdir(parents=True, exist_ok=True)
-    (audit_dir / AUDIT_FILE).write_text(json.dumps(audit, indent=2))
+    (audit_dir / AUDIT_FILE).write_text(
+        json.dumps(audit, indent=2),
+        encoding="utf-8",
+    )

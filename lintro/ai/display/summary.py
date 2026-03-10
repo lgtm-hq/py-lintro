@@ -244,12 +244,22 @@ def render_summary_annotations(summary: AISummary) -> str:
     lines: list[str] = []
 
     for pattern in summary.key_patterns:
-        escaped = pattern.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
+        escaped = (
+            pattern.replace("%", "%25")
+            .replace("\r", "%0D")
+            .replace("\n", "%0A")
+            .replace("::", ":\u200b:")
+        )
         lines.append(f"::warning title=AI Pattern::{escaped}")
 
     for action in summary.priority_actions:
         clean = LEADING_NUMBER_RE.sub("", action)
-        escaped = clean.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
+        escaped = (
+            clean.replace("%", "%25")
+            .replace("\r", "%0D")
+            .replace("\n", "%0A")
+            .replace("::", ":\u200b:")
+        )
         lines.append(f"::notice title=AI Priority::{escaped}")
 
     return "\n".join(lines)
