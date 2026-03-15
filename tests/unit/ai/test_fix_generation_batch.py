@@ -160,6 +160,7 @@ def test_batch_fallback_to_single_on_parse_failure(tmp_path):
         provider,
         tool_name="ruff",
         workspace_root=tmp_path,
+        max_workers=1,
     )
 
     # 1 batch call + 2 single fallback calls = 3

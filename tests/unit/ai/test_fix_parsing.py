@@ -1,4 +1,4 @@
-"""Tests for _parse_fix_response, _parse_batch_response, and _generate_diff."""
+"""Tests for parse_fix_response, parse_batch_response, and generate_diff."""
 
 from __future__ import annotations
 
@@ -6,10 +6,14 @@ import json
 
 from assertpy import assert_that
 
-from lintro.ai.fix import (
-    _generate_diff,
-    _parse_batch_response,
-    _parse_fix_response,
+from lintro.ai.fix_parsing import (
+    generate_diff as _generate_diff,
+)
+from lintro.ai.fix_parsing import (
+    parse_batch_response as _parse_batch_response,
+)
+from lintro.ai.fix_parsing import (
+    parse_fix_response as _parse_fix_response,
 )
 
 # ---------------------------------------------------------------------------

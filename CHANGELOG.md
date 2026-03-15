@@ -128,7 +128,7 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Technical Details
 
-- Python 3.13+ compatibility
+- Python 3.13+ compatibility (historical; minimum later lowered to 3.11)
 - MIT License
 - Comprehensive type hints
 - Google-style docstrings
