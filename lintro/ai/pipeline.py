@@ -14,6 +14,7 @@ from lintro.ai.budget import CostBudget
 from lintro.ai.display import render_fixes, render_summary, render_validation
 from lintro.ai.enums import ConfidenceLevel
 from lintro.ai.fix import generate_fixes
+from lintro.ai.fix_params import FixGenParams
 from lintro.ai.interactive import review_fixes_interactive
 from lintro.ai.metadata import (
     attach_fix_suggestions_metadata,
@@ -85,13 +86,11 @@ def _generate_all_suggestions(
             f"budget={remaining_budget}",
         )
 
-        suggestions = generate_fixes(
-            issues,
-            provider,
+        fix_params = FixGenParams(
             tool_name=tool_name,
+            workspace_root=workspace_root,
             max_issues=remaining_budget,
             max_workers=ai_config.max_parallel_calls,
-            workspace_root=workspace_root,
             max_tokens=ai_config.max_tokens,
             max_retries=ai_config.max_retries,
             timeout=ai_config.api_timeout,
@@ -105,6 +104,27 @@ def _generate_all_suggestions(
             progress_callback=_progress_callback,
             fallback_models=ai_config.fallback_models,
             sanitize_mode=ai_config.sanitize_mode,
+        )
+        suggestions = generate_fixes(
+            issues,
+            provider,
+            tool_name=fix_params.tool_name,
+            max_issues=fix_params.max_issues,
+            max_workers=fix_params.max_workers,
+            workspace_root=fix_params.workspace_root,
+            max_tokens=fix_params.max_tokens,
+            max_retries=fix_params.max_retries,
+            timeout=fix_params.timeout,
+            context_lines=fix_params.context_lines,
+            base_delay=fix_params.base_delay,
+            max_delay=fix_params.max_delay,
+            backoff_factor=fix_params.backoff_factor,
+            max_prompt_tokens=fix_params.max_prompt_tokens,
+            enable_cache=fix_params.enable_cache,
+            cache_ttl=fix_params.cache_ttl,
+            progress_callback=fix_params.progress_callback,
+            fallback_models=fix_params.fallback_models,
+            sanitize_mode=fix_params.sanitize_mode,
         )
         for suggestion in suggestions:
             if not suggestion.tool_name:
@@ -297,6 +317,17 @@ def _verify_and_refine(
             if re_validation:
                 validation.verified += re_validation.verified
                 validation.unverified -= re_validation.verified
+                # Merge per-tool counters from refinement re-validation
+                for tool, count in re_validation.verified_by_tool.items():
+                    validation.verified_by_tool[tool] = (
+                        validation.verified_by_tool.get(tool, 0) + count
+                    )
+                    # Decrease unverified for the same tool accordingly
+                    if tool in validation.unverified_by_tool:
+                        validation.unverified_by_tool[tool] = max(
+                            0,
+                            validation.unverified_by_tool[tool] - count,
+                        )
                 if not is_json and re_validation.verified:
                     logger.console_output(
                         f"  AI: refinement verified "

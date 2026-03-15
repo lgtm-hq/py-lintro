@@ -28,6 +28,7 @@ from lintro.ai.fix_context import (
     read_file_safely,
     validate_and_read_file,
 )
+from lintro.ai.fix_params import FixGenParams
 from lintro.ai.fix_parsing import (
     generate_diff,
     parse_batch_response,
@@ -261,6 +262,7 @@ def _generate_batch_fixes(
     retrying_call: Callable[..., AIResponse],
     timeout: float,
     max_prompt_tokens: int,
+    sanitize_mode: SanitizeMode = SanitizeMode.WARN,
 ) -> list[AIFixSuggestion] | None:
     """Generate fixes for multiple issues in one file via a batch prompt.
 
@@ -279,6 +281,7 @@ def _generate_batch_fixes(
         retrying_call: Pre-built retry wrapper around ``_call_provider``.
         timeout: Request timeout in seconds.
         max_prompt_tokens: Token budget for the prompt.
+        sanitize_mode: How to handle detected prompt injection patterns.
 
     Returns:
         List of AIFixSuggestions, or None on failure (fall back to single).
@@ -298,6 +301,12 @@ def _generate_batch_fixes(
     sanitized_content = redact_secrets(sanitize_code_content(file_content))
     injections = detect_injection_patterns(file_content)
     if injections:
+        if sanitize_mode == SanitizeMode.BLOCK:
+            logger.warning(
+                f"Blocking batch fix for {file_path}: prompt injection "
+                f"patterns detected: {', '.join(injections)}",
+            )
+            return None
         logger.warning(
             f"Potential prompt injection patterns detected in "
             f"{file_path}: {', '.join(injections)}",
@@ -425,7 +434,9 @@ def generate_fixes(
 
     root = workspace_root or resolve_workspace_root()
 
-    # Shared file cache with thread safety (capped to limit memory usage)
+    # Shared file cache with thread safety (capped to limit memory usage).
+    # Note: cache_max_entries uses the module default from
+    # fix_context._MAX_CACHE_ENTRIES.
     file_cache: dict[str, str | None] = {}
     cache_lock = threading.Lock()
 
@@ -486,6 +497,7 @@ def generate_fixes(
             retrying_call,
             timeout,
             max_prompt_tokens,
+            sanitize_mode=sanitize_mode,
         )
         if batch_result is not None:
             suggestions.extend(batch_result)
@@ -576,3 +588,44 @@ def generate_fixes(
         f"{len(suggestions)}/{len(target_issues)} suggestions",
     )
     return suggestions
+
+
+def generate_fixes_from_params(
+    issues: Sequence[BaseIssue],
+    provider: BaseAIProvider,
+    params: FixGenParams,
+) -> list[AIFixSuggestion]:
+    """Generate fixes using a ``FixGenParams`` parameter object.
+
+    Thin wrapper around ``generate_fixes`` that unpacks the params
+    object into keyword arguments.
+
+    Args:
+        issues: Sequence of issues to fix.
+        provider: AI provider instance.
+        params: Grouped generation parameters.
+
+    Returns:
+        List of fix suggestions.
+    """
+    return generate_fixes(
+        issues,
+        provider,
+        tool_name=params.tool_name,
+        max_issues=params.max_issues,
+        max_workers=params.max_workers,
+        workspace_root=params.workspace_root,
+        max_tokens=params.max_tokens,
+        max_retries=params.max_retries,
+        timeout=params.timeout,
+        context_lines=params.context_lines,
+        max_prompt_tokens=params.max_prompt_tokens,
+        base_delay=params.base_delay,
+        max_delay=params.max_delay,
+        backoff_factor=params.backoff_factor,
+        enable_cache=params.enable_cache,
+        cache_ttl=params.cache_ttl,
+        progress_callback=params.progress_callback,
+        fallback_models=params.fallback_models,
+        sanitize_mode=params.sanitize_mode,
+    )

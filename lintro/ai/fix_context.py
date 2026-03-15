@@ -32,7 +32,11 @@ if TYPE_CHECKING:
 # Context window around the issue line (lines before/after)
 CONTEXT_LINES = 15
 
-# Maximum file cache entries to limit memory usage
+# Maximum file cache entries to limit memory usage.
+# Eviction is FIFO (oldest insertion order, via dict ordering) rather
+# than true LRU. FIFO is simpler and sufficient here because fix
+# generation processes issues file-by-file, so recently inserted
+# entries are overwhelmingly the ones accessed next.
 _MAX_CACHE_ENTRIES = 100
 
 # Only attempt full-file context for files under this many lines
