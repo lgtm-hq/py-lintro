@@ -225,4 +225,4 @@ def test_normalize_tool_type_with_combined_enum() -> None:
 def test_normalize_tool_type_with_invalid_type() -> None:
     """Raise ValueError for invalid type."""
     with pytest.raises(ValueError, match="Invalid tool type"):
-        normalize_tool_type(123)  # type: ignore
+        normalize_tool_type(123)  # type: ignore[arg-type]  # intentional wrong type to test error path

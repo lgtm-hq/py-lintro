@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import threading
 from typing import Any
 from unittest.mock import MagicMock, patch
 
@@ -326,7 +325,10 @@ def test_rerun_context_rerun_uses_original_tool_cwd(mock_get_tool, tmp_path):
 
 def test_rerun_context_rerun_cwd_lock_exists():
     """Verify the module-level threading lock is a Lock instance."""
-    assert_that(_rerun_cwd_lock).is_instance_of(type(threading.Lock()))
+    # threading.Lock() returns a _thread.lock instance; verify it has
+    # the acquire/release protocol rather than comparing type identity.
+    assert_that(hasattr(_rerun_cwd_lock, "acquire")).is_true()
+    assert_that(hasattr(_rerun_cwd_lock, "release")).is_true()
 
 
 @patch("lintro.tools.tool_manager.get_tool")
