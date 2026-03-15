@@ -396,9 +396,13 @@ def run_fix_pipeline(
     )
 
     # Step 2: Apply confidence threshold filter
+    total_generated = len(all_suggestions)
     all_suggestions = _filter_by_confidence(all_suggestions, ai_config)
+    filtered_out = total_generated - len(all_suggestions)
 
     if not all_suggestions:
+        telemetry.successful_fixes = 0
+        telemetry.failed_fixes = total_generated
         return (0, 0)
 
     # Dry-run mode: display fixes but do not apply them
@@ -425,7 +429,7 @@ def run_fix_pipeline(
     )
 
     telemetry.successful_fixes = applied
-    telemetry.failed_fixes = len(all_suggestions) - applied
+    telemetry.failed_fixes = (len(all_suggestions) - applied) + filtered_out
 
     # Step 4: Verify and refine applied fixes
     validation = None
