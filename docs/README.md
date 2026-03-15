@@ -92,6 +92,8 @@ lintro test
 
 **🧠 AI-Powered Analysis:**
 
+Requires `lintro[ai]` extra, an API key, and `ai.enabled: true`.
+
 ```bash
 lintro check --fix
 ```

@@ -9,9 +9,9 @@ Lintro for your project.
 > Use `enforce.line_length` to ensure consistent settings across all tools via CLI
 > injection.
 
-## Configuration Model: 4-Tier System
+## Configuration Model: 5-Tier System
 
-Lintro uses a clear 4-tier configuration model that separates concerns:
+Lintro uses a clear 5-tier configuration model that separates concerns:
 
 | Tier          | Purpose                                             | When Applied               |
 | ------------- | --------------------------------------------------- | -------------------------- |
@@ -58,6 +58,11 @@ The configuration system works in a specific order:
    - `config_source`: Optional explicit path to native config file
    - `auto_install`: Per-tool auto-install override (`true`/`false`/omit to inherit
      global)
+
+5. **AI Tier** - AI-powered summaries and fix suggestions (opt-in)
+   - `enabled`: Whether AI features are active (default: `false`)
+   - `provider`: AI provider to use (`anthropic` or `openai`)
+   - Applied only when enabled and a valid API key is set
 
 ### Configuration Resolution Example
 
@@ -1822,8 +1827,10 @@ fix suggestions. See the full [AI Features Guide](ai-features.md) for detailed u
 ### Quick Setup
 
 ```bash
-# Install AI dependencies
+# Install AI dependencies (published package)
 uv pip install 'lintro[ai]'
+# Or from source checkout:
+uv sync --extra ai
 
 # Set API key for your configured provider
 # Anthropic (default): ANTHROPIC_API_KEY
