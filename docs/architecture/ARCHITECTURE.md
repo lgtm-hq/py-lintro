@@ -208,9 +208,10 @@ Hierarchical configuration with clear precedence.
 
 1. CLI flags
 2. Environment variables
-3. `pyproject.toml` `[tool.lintro]` section
-4. Tool native configs (`.ruff.toml`, etc.)
-5. Hardcoded defaults
+3. `.lintro-config.yaml` / `.lintro-config.yml`
+4. `pyproject.toml` `[tool.lintro]` section (fallback)
+5. Tool native configs (`.ruff.toml`, etc.)
+6. Hardcoded defaults
 
 **Key Classes:**
 
