@@ -19,7 +19,7 @@ from lintro.ai.apply import apply_fixes
 from lintro.ai.fix import _call_provider
 from lintro.ai.fix_context import extract_context, read_file_safely
 from lintro.ai.fix_parsing import parse_fix_response
-from lintro.ai.paths import to_provider_path
+from lintro.ai.paths import resolve_workspace_file, to_provider_path
 from lintro.ai.prompts import FIX_SYSTEM, REFINEMENT_PROMPT_TEMPLATE
 from lintro.ai.retry import with_retry
 from lintro.ai.sanitize import make_boundary_marker, sanitize_code_content
@@ -92,7 +92,7 @@ def refine_unverified_fixes(
         SystemExit: Re-raised immediately.
     """
     # Identify unverified suggestions from validation details
-    unverified_keys: set[tuple[str, int]] = set()
+    unverified_keys: set[tuple[str, str, int]] = set()
     for detail in validation.details:
         if "issue still present" in detail:
             # Detail format: "[code] file:line - issue still present"
@@ -104,8 +104,9 @@ def refine_unverified_fixes(
                 colon_idx = rest.index(":")
                 # Find the space/dash separator after line number
                 space_idx = rest.index(" ", colon_idx)
+                file_path = rest[:colon_idx]
                 line = int(rest[colon_idx + 1 : space_idx])
-                unverified_keys.add((code, line))
+                unverified_keys.add((file_path, code, line))
             except (ValueError, IndexError):
                 logger.debug("Skipping unparseable validation detail: {}", detail)
                 continue
@@ -128,7 +129,7 @@ def refine_unverified_fixes(
     total_cost = 0.0
 
     for suggestion in applied_suggestions:
-        if (suggestion.code, suggestion.line) not in unverified_keys:
+        if (suggestion.file, suggestion.code, suggestion.line) not in unverified_keys:
             continue
 
         logger.debug(
@@ -141,6 +142,14 @@ def refine_unverified_fixes(
             logger.debug(
                 f"Refinement: revert failed for "
                 f"{suggestion.file}:{suggestion.line}",
+            )
+            continue
+
+        # Validate the file path is within the workspace root
+        if resolve_workspace_file(suggestion.file, workspace_root) is None:
+            logger.debug(
+                f"Refinement: file {suggestion.file} is outside "
+                f"workspace root {workspace_root}, skipping",
             )
             continue
 

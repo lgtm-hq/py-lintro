@@ -100,7 +100,7 @@ def test_refine_parses_detail_strings_correctly(tmp_path: Path) -> None:
     validation = ValidationResult(
         verified=0,
         unverified=1,
-        details=["[W123] main.py:42 — issue still present"],
+        details=["[W123] src/main.py:42 — issue still present"],
     )
 
     provider = MagicMock()
