@@ -1,9 +1,9 @@
-"""Provider metadata dataclasses.
+"""Provider metadata dataclass.
 
-Houses the frozen :class:`ModelPricing` and :class:`ProviderInfo`
-dataclasses used by the provider registry.  Separated from
-:mod:`lintro.ai.registry` so that consumers needing only the data
-shapes can import them without depending on the singleton instance.
+Houses the frozen :class:`ProviderInfo` dataclass used by the provider
+registry.  Separated from :mod:`lintro.ai.registry` so that consumers
+needing only the data shapes can import them without depending on the
+singleton instance.
 """
 
 from __future__ import annotations
@@ -11,13 +11,10 @@ from __future__ import annotations
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 
+from lintro.ai.model_pricing import ModelPricing
 
-@dataclass(frozen=True)
-class ModelPricing:
-    """Per-model pricing in USD per 1 million tokens."""
-
-    input_per_million: float
-    output_per_million: float
+# Re-export for backward compatibility
+__all__ = ["ModelPricing", "ProviderInfo"]
 
 
 @dataclass(frozen=True)
