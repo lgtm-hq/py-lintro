@@ -177,18 +177,16 @@ class OxlintPlugin(BaseToolPlugin):
             severity="error",
             fixable=False,
         )
-        combined_issues = (initial_issues or []) + [timeout_issue]
-        remaining_count = len(combined_issues)
-        # Maintain invariant: initial = fixed + remaining
+        pre_fix_count = len(initial_issues) if initial_issues else 0
         return ToolResult(
             name=self.definition.name,
             success=False,
             output=timeout_msg,
-            issues_count=remaining_count,
-            issues=combined_issues,
-            initial_issues_count=remaining_count,
+            issues_count=1,
+            issues=[timeout_issue],
+            initial_issues_count=pre_fix_count,
             fixed_issues_count=0,
-            remaining_issues_count=remaining_count,
+            remaining_issues_count=pre_fix_count,
             cwd=cwd,
         )
 

@@ -338,7 +338,8 @@ class BlackPlugin(BaseToolPlugin):
                 files=ctx.rel_files,
                 cwd=ctx.cwd,
             )
-            initial_count = len(initial_issues) + len(initial_line_length_issues)
+            initial_issues = initial_issues + initial_line_length_issues
+            initial_count = len(initial_issues)
 
         # Apply formatting
         fix_cmd_base: list[str] = self._get_executable_command(tool_name="black")
