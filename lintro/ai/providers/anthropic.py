@@ -59,6 +59,7 @@ def _map_errors() -> Iterator[None]:
             f"Anthropic API error: {e}",
         ) from e
 
+
 DEFAULT_MODEL = PROVIDERS.anthropic.default_model
 DEFAULT_API_KEY_ENV = PROVIDERS.anthropic.default_api_key_env
 
@@ -128,11 +129,6 @@ class AnthropicProvider(BaseAIProvider):
 
         Returns:
             AIResponse: The model's response with usage metadata.
-
-        Raises:
-            AIAuthenticationError: If authentication fails.
-            AIRateLimitError: If rate limited.
-            AIProviderError: If the API call fails.
         """
         client = self._get_client()
         # Per-call cap: the lower of the caller's request and the

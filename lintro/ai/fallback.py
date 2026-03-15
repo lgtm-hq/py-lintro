@@ -154,12 +154,6 @@ def complete_with_fallback(
 
     Returns:
         The first successful ``AIResponse``.
-
-    Raises:
-        AIAuthenticationError: Immediately on authentication failure.
-        AIProviderError: If the primary model and all fallbacks fail.
-        AIRateLimitError: If the primary model and all fallbacks fail
-            with rate-limit errors (last error is re-raised).
     """
 
     def _attempt(
@@ -212,11 +206,6 @@ def stream_complete_with_fallback(
 
     Returns:
         The first successful ``AIStreamResult``.
-
-    Raises:
-        AIAuthenticationError: Immediately on authentication failure.
-        AIProviderError: If the primary model and all fallbacks fail.
-        AIRateLimitError: If all attempts fail with rate-limit errors.
     """
 
     def _attempt(

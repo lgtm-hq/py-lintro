@@ -59,6 +59,7 @@ def _map_errors() -> Iterator[None]:
             f"OpenAI API error: {e}",
         ) from e
 
+
 DEFAULT_MODEL = PROVIDERS.openai.default_model
 DEFAULT_API_KEY_ENV = PROVIDERS.openai.default_api_key_env
 
@@ -128,11 +129,6 @@ class OpenAIProvider(BaseAIProvider):
 
         Returns:
             AIResponse: The model's response with usage metadata.
-
-        Raises:
-            AIAuthenticationError: If authentication fails.
-            AIRateLimitError: If rate limited.
-            AIProviderError: If the API call fails.
         """
         client = self._get_client()
         # Per-call cap: the lower of the caller's request and the

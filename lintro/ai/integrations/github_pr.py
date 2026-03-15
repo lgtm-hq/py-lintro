@@ -59,6 +59,7 @@ class GitHubPRReporter:
         self.pr_number = pr_number or _detect_pr_number()
         self.api_base = api_base.rstrip("/")
 
+        self.workspace_root: Path | None
         if workspace_root is not None:
             self.workspace_root = workspace_root
         else:
