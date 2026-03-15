@@ -10,7 +10,7 @@ from assertpy import assert_that
 
 from lintro.config.config_loader import _load_pyproject_fallback
 from lintro.utils.config import (
-    _find_pyproject,
+    clear_pyproject_cache,
     load_lintro_tool_config,
     load_pyproject,
 )
@@ -27,8 +27,7 @@ def test_load_lintro_tool_config(
         monkeypatch: Pytest monkeypatch to chdir into temp dir.
     """
     # Clear both LRU caches to ensure we load from the test directory
-    load_pyproject.cache_clear()
-    _find_pyproject.cache_clear()
+    clear_pyproject_cache()
 
     pyproject = tmp_path / "pyproject.toml"
     pyproject.write_text(
@@ -62,8 +61,7 @@ def test_config_loader_handles_missing_and_malformed_pyproject(
         monkeypatch: Pytest monkeypatch fixture for chdir and environment.
     """
     # Clear both LRU caches to ensure we load from the test directory
-    load_pyproject.cache_clear()
-    _find_pyproject.cache_clear()
+    clear_pyproject_cache()
 
     from lintro.utils import config as cfg
 
@@ -93,8 +91,7 @@ def test_load_pyproject_toml_parse_error_logs_warning(
         tmp_path: Pytest temporary directory fixture.
         monkeypatch: Pytest monkeypatch fixture for chdir.
     """
-    load_pyproject.cache_clear()
-    _find_pyproject.cache_clear()
+    clear_pyproject_cache()
 
     pyproject = tmp_path / "pyproject.toml"
     pyproject.write_text("invalid: [toml content")
@@ -121,8 +118,7 @@ def test_load_pyproject_os_error_logs_debug(
         tmp_path: Pytest temporary directory fixture.
         monkeypatch: Pytest monkeypatch fixture for chdir.
     """
-    load_pyproject.cache_clear()
-    _find_pyproject.cache_clear()
+    clear_pyproject_cache()
 
     pyproject = tmp_path / "pyproject.toml"
     pyproject.write_text("[tool.lintro]")
