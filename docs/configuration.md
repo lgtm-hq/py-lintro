@@ -1986,7 +1986,7 @@ repos:
 
 ### Makefile Integration
 
-<!-- markdownlint-disable MD010 -->
+<!-- markdownlint-disable MD010 -- Makefile code block requires literal hard tabs -->
 
 ```makefile
 .PHONY: lint fix check quality install-tools

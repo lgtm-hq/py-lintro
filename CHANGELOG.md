@@ -1,4 +1,4 @@
-<!-- markdownlint-disable MD024 -->
+<!-- markdownlint-disable MD024 -- duplicate headings are standard in changelogs -->
 
 # Changelog
 

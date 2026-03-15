@@ -1,6 +1,6 @@
 # Script Organization Guide
 
-<!-- markdownlint-disable MD036 -->
+<!-- markdownlint-disable MD036 -- bold text used as descriptive subtitle, not as a heading -->
 
 **For Contributors & Maintainers**
 

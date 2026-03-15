@@ -7,7 +7,7 @@ implementations with the core tools themselves.
 
 ### [Ruff Analysis](./ruff-analysis.md)
 
-<!-- markdownlint-disable MD036 -->
+<!-- markdownlint-disable MD036 -- bold text used as descriptive subtitle, not as a heading -->
 
 **Comprehensive Python Static Code Analyzer**
 
@@ -158,7 +158,7 @@ Each analysis follows a consistent structure:
 
 ## Use Case Recommendations
 
-<!-- markdownlint-disable MD026 -->
+<!-- markdownlint-disable MD026 -- trailing colon in headings is intentional for readability -->
 
 ### Use Core Tools When:
 

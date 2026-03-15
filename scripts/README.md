@@ -20,7 +20,7 @@ scripts/
 
 ### For New Contributors
 
-<!-- markdownlint-disable MD029 -->
+<!-- markdownlint-disable MD029 -- sequential numbering restarts after nested code blocks -->
 
 1. **Install dependencies:**
 
@@ -572,7 +572,7 @@ source "$SCRIPT_DIR/../utils/utils.sh"
 
 ### Common Issues
 
-<!-- markdownlint-disable MD029 -->
+<!-- markdownlint-disable MD029 -- sequential numbering restarts after nested code blocks -->
 
 1. **Permission Denied**
 

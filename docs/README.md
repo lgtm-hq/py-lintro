@@ -112,7 +112,7 @@ lintro check --fix
 
 ### End Users
 
-<!-- markdownlint-disable MD036 -->
+<!-- markdownlint-disable MD036 -- bold text used as descriptive subtitle, not as a heading -->
 
 **Goal: Use Lintro effectively in projects**
 

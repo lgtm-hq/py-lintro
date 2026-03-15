@@ -1,4 +1,4 @@
-<!-- markdownlint-disable MD041 -->
+<!-- markdownlint-disable MD041 -- PR template does not start with a top-level heading -->
 
 ## Commit Summary (Conventional Commits)
 
