@@ -104,9 +104,8 @@ def run_ai_enhancement(
     except Exception as e:
         if getattr(lintro_config.ai, "fail_on_ai_error", False):
             raise
-        loguru_logger.debug(
+        loguru_logger.opt(exception=e).debug(
             f"AI enhancement failed ({type(e).__name__}): {e}",
-            exc_info=True,
         )
         is_json = output_format.lower() == OutputFormat.JSON
         if not is_json:
@@ -263,8 +262,9 @@ def _collect_and_fix(
     """
     fixes_applied = 0
     fixes_failed = 0
+    fix_suggestions: list[AIFixSuggestion] = []
     if fix_issues:
-        fixes_applied, fixes_failed = run_fix_pipeline(
+        fixes_applied, fixes_failed, fix_suggestions = run_fix_pipeline(
             fix_issues=fix_issues,
             provider=provider,
             ai_config=ai_config,
@@ -279,6 +279,14 @@ def _collect_and_fix(
             logger=logger,
             total_issues=len(fix_issues),
             max_fix_issues=ai_config.max_fix_issues,
+        )
+
+    if fix_suggestions and ai_config.github_pr_comments:
+        _post_pr_comments(
+            suggestions=fix_suggestions,
+            logger=logger,
+            workspace_root=workspace_root,
+            is_json=is_json,
         )
 
     unfixed = len(fix_issues) - fixes_applied
@@ -345,6 +353,12 @@ def _normalize_issue_path_for_workspace(
         loguru_logger.debug(
             f"Skipping issue outside workspace root: "
             f"file={candidate!r} root={workspace_root}",
+        )
+        return False
+
+    if not resolved.is_file():
+        loguru_logger.debug(
+            f"Skipping non-existent file: {resolved}",
         )
         return False
 

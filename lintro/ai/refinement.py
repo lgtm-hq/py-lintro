@@ -165,10 +165,10 @@ def refine_unverified_fixes(
             context_lines=ai_config.context_lines,
         )
 
-        previous_suggestion = (
+        previous_suggestion = sanitize_code_content(
             f"original_code: {suggestion.original_code}\n"
             f"suggested_code: {suggestion.suggested_code}\n"
-            f"explanation: {suggestion.explanation}"
+            f"explanation: {suggestion.explanation}",
         )
 
         # Find the matching validation detail for the error message
@@ -182,13 +182,19 @@ def refine_unverified_fixes(
                 break
 
         boundary = make_boundary_marker()
+        safe_file = sanitize_code_content(
+            to_provider_path(suggestion.file, workspace_root),
+        )
+        safe_error = sanitize_code_content(
+            error_detail or "Issue still present after fix",
+        )
         prompt = REFINEMENT_PROMPT_TEMPLATE.format(
-            tool_name=suggestion.tool_name or "unknown",
+            tool_name=sanitize_code_content(suggestion.tool_name or "unknown"),
             code=suggestion.code,
-            file=to_provider_path(suggestion.file, workspace_root),
+            file=safe_file,
             line=suggestion.line,
             previous_suggestion=previous_suggestion,
-            new_error=error_detail or "Issue still present after fix",
+            new_error=safe_error,
             context_start=context_start,
             context_end=context_end,
             code_context=sanitize_code_content(context),

@@ -11,7 +11,7 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Added
 
-- **AI-Powered Features** (BYO API key, install with `lintro[ai]`):
+- **AI-Powered Features** (BYO API key, install with `'lintro[ai]'`):
   - AI-powered issue summaries with pattern analysis and prioritized actions
   - Interactive fix suggestions with AI-generated code diffs
   - AI-driven risk classification (`safe-style` vs `behavioral-risk`)

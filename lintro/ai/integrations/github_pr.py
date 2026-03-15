@@ -132,12 +132,15 @@ class GitHubPRReporter:
             if not rel:
                 continue
             body = _format_inline_comment(s)
+            # GitHub review comments require a valid position; skip if missing
+            if not (isinstance(s.line, int) and s.line > 0):
+                continue
             comment: dict[str, Any] = {
                 "path": rel,
                 "body": body,
+                "line": s.line,
+                "side": "RIGHT",
             }
-            if isinstance(s.line, int) and s.line > 0:
-                comment["line"] = s.line
             comments.append(comment)
 
         if not comments:
@@ -204,11 +207,16 @@ class GitHubPRReporter:
                 status: int = resp.status
                 return 200 <= status < 300
         except urllib.error.HTTPError as e:
+            try:
+                body = e.read().decode("utf-8", "replace")[:500]
+            except Exception:
+                body = "<unreadable>"
             logger.warning(
-                "GitHub API request failed: {} {} -> {}",
+                "GitHub API request failed: {} {} -> {}: {}",
                 method,
                 url,
                 e.code,
+                body,
             )
             return False
         except urllib.error.URLError as e:

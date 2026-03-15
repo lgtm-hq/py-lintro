@@ -350,7 +350,7 @@ def run_fix_pipeline(
     output_format: str,
     workspace_root: Path,
     budget: CostBudget | None = None,
-) -> tuple[int, int]:
+) -> tuple[int, int, list[AIFixSuggestion]]:
     """Generate and optionally apply AI fix suggestions across all tools.
 
     This is the main fix pipeline that:
@@ -403,7 +403,12 @@ def run_fix_pipeline(
     if not all_suggestions:
         telemetry.successful_fixes = 0
         telemetry.failed_fixes = total_generated
-        return (0, 0)
+        write_audit_log(workspace_root, [], 0, telemetry.total_cost_usd)
+        attach_telemetry_metadata(
+            [r for r, _ in by_tool.values()],
+            telemetry,
+        )
+        return (0, 0, [])
 
     # Dry-run mode: display fixes but do not apply them
     if ai_config.dry_run:
@@ -417,7 +422,7 @@ def run_fix_pipeline(
             logger.console_output(
                 "  AI: dry-run mode — fixes displayed but not applied",
             )
-        return (0, 0)
+        return (0, 0, all_suggestions)
 
     # Step 3: Apply or review fixes
     applied, rejected, applied_suggestions = _apply_or_review(
@@ -469,10 +474,10 @@ def run_fix_pipeline(
             ),
         )
 
-    # Generate post-fix summary
-    if (applied > 0 or rejected > 0) and not is_json:
+    # Generate post-fix summary — only when validation confirms outcomes
+    if (applied > 0 or rejected > 0) and not is_json and validation is not None:
         applied_for_summary = applied
-        if validation and (validation.verified or validation.unverified):
+        if validation.verified or validation.unverified:
             applied_for_summary = validation.verified
 
         # When fixes were applied, by_tool already holds de-duplicated
@@ -520,7 +525,7 @@ def run_fix_pipeline(
         telemetry,
     )
 
-    return (applied, len(all_suggestions) - applied)
+    return (applied, len(all_suggestions) - applied, applied_suggestions)
 
 
 def _unique_results_from_fix_issues(

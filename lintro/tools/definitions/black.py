@@ -211,17 +211,13 @@ class BlackPlugin(BaseToolPlugin):
             "  - Need to increase timeout via --tool-options black:timeout=N"
         )
         if initial_count is not None:
-            # Maintain invariant: initial = fixed + remaining
-            remaining = max(initial_count, 1)
             return ToolResult(
                 name=self.definition.name,
                 success=False,
                 output=timeout_msg,
-                issues_count=remaining,
+                issues_count=0,
                 issues=[],
-                initial_issues_count=remaining,
-                fixed_issues_count=0,
-                remaining_issues_count=remaining,
+                initial_issues_count=initial_count,
                 cwd=cwd,
             )
         return ToolResult(

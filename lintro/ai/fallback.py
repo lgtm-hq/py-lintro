@@ -80,16 +80,16 @@ def _with_fallback(
 
     last_error: Exception | None = None
 
+    # Lock serializes model_name access across concurrent threads
+    # sharing the same provider instance.
     with _model_lock:
         original_model = provider.model_name
 
     try:
         for idx, model in enumerate(models_to_try):
-            if model is not None:
-                with _model_lock:
-                    provider.model_name = model
-
             with _model_lock:
+                if model is not None:
+                    provider.model_name = model
                 label = provider.model_name
             try:
                 logger.debug(
@@ -99,7 +99,10 @@ def _with_fallback(
                     idx + 1,
                     len(models_to_try),
                 )
-                return attempt_fn(prompt, system, max_tokens, timeout)
+                # Hold lock during the call to prevent another thread
+                # from swapping model_name mid-request.
+                with _model_lock:
+                    return attempt_fn(prompt, system, max_tokens, timeout)
             except AIAuthenticationError:
                 # Never retry auth errors — restore and propagate.
                 raise
@@ -125,7 +128,8 @@ def _with_fallback(
         with _model_lock:
             provider.model_name = original_model
 
-    # All models exhausted — re-raise preserving original traceback.
+    # All models exhausted — wrap the last error so pydoclint can
+    # statically verify the Raises section.
     if isinstance(last_error, AIRateLimitError):
         raise AIRateLimitError(str(last_error)) from last_error
     if isinstance(last_error, AIProviderError):

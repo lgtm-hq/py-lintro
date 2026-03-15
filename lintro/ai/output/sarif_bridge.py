@@ -94,11 +94,19 @@ def summary_from_results(
             cost = float(raw_summary.get("cost_estimate", 0.0))
         except (TypeError, ValueError):
             cost = 0.0
+
+        def _str_list(val: object) -> list[str]:
+            if isinstance(val, list):
+                return [str(x) for x in val]
+            if val is None:
+                return []
+            return [str(val)]
+
         return AISummary(
             overview=str(raw_summary.get("overview", "")),
-            key_patterns=raw_summary.get("key_patterns", []),
-            priority_actions=raw_summary.get("priority_actions", []),
-            triage_suggestions=raw_summary.get("triage_suggestions", []),
+            key_patterns=_str_list(raw_summary.get("key_patterns")),
+            priority_actions=_str_list(raw_summary.get("priority_actions")),
+            triage_suggestions=_str_list(raw_summary.get("triage_suggestions")),
             estimated_effort=str(raw_summary.get("estimated_effort", "")),
             input_tokens=in_tok,
             output_tokens=out_tok,
