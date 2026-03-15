@@ -34,38 +34,37 @@ try:
 except ImportError:
     pass
 
-
-@contextmanager
-def _map_errors() -> Iterator[None]:
-    """Map OpenAI SDK exceptions to AI exceptions.
-
-    Catches ``openai.AuthenticationError``, ``openai.RateLimitError``,
-    and ``openai.OpenAIError`` and re-raises them as the corresponding
-    AI exception types.
-    """
-    try:
-        yield
-    except openai.AuthenticationError as e:
-        raise AIAuthenticationError(
-            f"OpenAI authentication failed: {e}",
-        ) from e
-    except openai.RateLimitError as e:
-        raise AIRateLimitError(
-            f"OpenAI rate limit exceeded: {e}",
-        ) from e
-    except openai.OpenAIError as e:
-        logger.debug(f"OpenAI API error: {e}")
-        raise AIProviderError(
-            f"OpenAI API error: {e}",
-        ) from e
-
-
 DEFAULT_MODEL = PROVIDERS.openai.default_model
 DEFAULT_API_KEY_ENV = PROVIDERS.openai.default_api_key_env
 
 
 class OpenAIProvider(BaseAIProvider):
     """OpenAI GPT provider."""
+
+    @staticmethod
+    @contextmanager
+    def _map_errors() -> Iterator[None]:
+        """Map OpenAI SDK exceptions to AI exceptions.
+
+        Safe to call only when the ``openai`` SDK is installed —
+        the base class ``__init__`` raises ``AINotAvailableError``
+        before any method can be called if the SDK is missing.
+        """
+        try:
+            yield
+        except openai.AuthenticationError as e:
+            raise AIAuthenticationError(
+                f"OpenAI authentication failed: {e}",
+            ) from e
+        except openai.RateLimitError as e:
+            raise AIRateLimitError(
+                f"OpenAI rate limit exceeded: {e}",
+            ) from e
+        except openai.OpenAIError as e:
+            logger.debug(f"OpenAI API error: {e}")
+            raise AIProviderError(
+                f"OpenAI API error: {e}",
+            ) from e
 
     def __init__(
         self,
@@ -135,7 +134,7 @@ class OpenAIProvider(BaseAIProvider):
         # provider-level cap set at init time.
         effective_max = min(max_tokens, self._max_tokens)
 
-        with _map_errors():
+        with self._map_errors():
             messages: list[dict[str, str]] = []
             if system:
                 messages.append({"role": "system", "content": system})
@@ -202,7 +201,7 @@ class OpenAIProvider(BaseAIProvider):
         final_response: list[AIResponse] = []
 
         def _generate() -> Iterator[str]:
-            with _map_errors():
+            with self._map_errors():
                 stream = client.chat.completions.create(
                     model=self._model,
                     messages=messages,

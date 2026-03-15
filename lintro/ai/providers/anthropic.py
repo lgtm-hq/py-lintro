@@ -34,38 +34,37 @@ try:
 except ImportError:
     pass
 
-
-@contextmanager
-def _map_errors() -> Iterator[None]:
-    """Map Anthropic SDK exceptions to AI exceptions.
-
-    Catches ``anthropic.AuthenticationError``, ``anthropic.RateLimitError``,
-    and ``anthropic.AnthropicError`` and re-raises them as the corresponding
-    AI exception types.
-    """
-    try:
-        yield
-    except anthropic.AuthenticationError as e:
-        raise AIAuthenticationError(
-            f"Anthropic authentication failed: {e}",
-        ) from e
-    except anthropic.RateLimitError as e:
-        raise AIRateLimitError(
-            f"Anthropic rate limit exceeded: {e}",
-        ) from e
-    except anthropic.AnthropicError as e:
-        logger.debug(f"Anthropic API error: {e}")
-        raise AIProviderError(
-            f"Anthropic API error: {e}",
-        ) from e
-
-
 DEFAULT_MODEL = PROVIDERS.anthropic.default_model
 DEFAULT_API_KEY_ENV = PROVIDERS.anthropic.default_api_key_env
 
 
 class AnthropicProvider(BaseAIProvider):
     """Anthropic Claude provider."""
+
+    @staticmethod
+    @contextmanager
+    def _map_errors() -> Iterator[None]:
+        """Map Anthropic SDK exceptions to AI exceptions.
+
+        Safe to call only when the ``anthropic`` SDK is installed —
+        the base class ``__init__`` raises ``AINotAvailableError``
+        before any method can be called if the SDK is missing.
+        """
+        try:
+            yield
+        except anthropic.AuthenticationError as e:
+            raise AIAuthenticationError(
+                f"Anthropic authentication failed: {e}",
+            ) from e
+        except anthropic.RateLimitError as e:
+            raise AIRateLimitError(
+                f"Anthropic rate limit exceeded: {e}",
+            ) from e
+        except anthropic.AnthropicError as e:
+            logger.debug(f"Anthropic API error: {e}")
+            raise AIProviderError(
+                f"Anthropic API error: {e}",
+            ) from e
 
     def __init__(
         self,
@@ -135,7 +134,7 @@ class AnthropicProvider(BaseAIProvider):
         # provider-level cap set at init time.
         effective_max = min(max_tokens, self._max_tokens)
 
-        with _map_errors():
+        with self._map_errors():
             kwargs: dict[str, Any] = {
                 "model": self._model,
                 "max_tokens": effective_max,
@@ -204,7 +203,7 @@ class AnthropicProvider(BaseAIProvider):
         final_response: list[AIResponse] = []
 
         def _generate() -> Iterator[str]:
-            with _map_errors():
+            with self._map_errors():
                 with client.messages.stream(**kwargs) as stream:
                     yield from stream.text_stream
                     final_message = stream.get_final_message()
