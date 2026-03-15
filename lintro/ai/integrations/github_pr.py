@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 import os
 import urllib.error
+import urllib.parse
 import urllib.request
 from collections.abc import Sequence
 from typing import Any
@@ -170,11 +171,16 @@ class GitHubPRReporter:
                 "X-GitHub-Api-Version": "2022-11-28",
             },
         )
+        parsed = urllib.parse.urlparse(url)
+        if parsed.scheme != "https":
+            logger.warning("Refusing non-HTTPS URL: {}", url)
+            return False
+
         try:
-            with urllib.request.urlopen(
+            with urllib.request.urlopen(  # noqa: S310 — HTTPS-only validated above  # nosemgrep: dynamic-urllib-use-detected  # nosec B310
                 req,
                 timeout=30,
-            ) as resp:  # noqa: S310 — URL is constructed from trusted config, not user input
+            ) as resp:
                 status: int = resp.status
                 return 200 <= status < 300
         except urllib.error.HTTPError as e:

@@ -117,9 +117,9 @@ def test_refine_parses_detail_strings_correctly(tmp_path: Path) -> None:
 
     with (
         patch("lintro.ai.refinement._revert_fix") as mock_revert,
-        patch("lintro.ai.refinement._read_file_safely") as mock_read,
-        patch("lintro.ai.refinement._extract_context") as mock_ctx,
-        patch("lintro.ai.refinement._parse_fix_response") as mock_parse,
+        patch("lintro.ai.refinement.read_file_safely") as mock_read,
+        patch("lintro.ai.refinement.extract_context") as mock_ctx,
+        patch("lintro.ai.refinement.parse_fix_response") as mock_parse,
         patch("lintro.ai.refinement.apply_fixes") as mock_apply,
     ):
         mock_revert.return_value = True
@@ -206,9 +206,9 @@ def test_refine_skips_when_parse_returns_none(tmp_path: Path) -> None:
 
     with (
         patch("lintro.ai.refinement._revert_fix") as mock_revert,
-        patch("lintro.ai.refinement._read_file_safely") as mock_read,
-        patch("lintro.ai.refinement._extract_context") as mock_ctx,
-        patch("lintro.ai.refinement._parse_fix_response") as mock_parse,
+        patch("lintro.ai.refinement.read_file_safely") as mock_read,
+        patch("lintro.ai.refinement.extract_context") as mock_ctx,
+        patch("lintro.ai.refinement.parse_fix_response") as mock_parse,
     ):
         mock_revert.return_value = True
         mock_read.return_value = "file content\n"

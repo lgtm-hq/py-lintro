@@ -171,6 +171,7 @@ packages = [
   "lintro.utils.output",
   "lintro.ai",
   "lintro.ai.display",
+  "lintro.ai.enums",
   "lintro.ai.integrations",
   "lintro.ai.output",
   "lintro.ai.prompts",

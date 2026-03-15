@@ -186,7 +186,7 @@ def test_run_ai_enhancement_fix_action_json_auto_applies_safe_style_suggestions(
     assert_that(mock_verify_fixes.call_count).is_equal_to(1)
     assert_that(result.ai_metadata).is_not_none()
     assert_that(result.ai_metadata).contains_key("fixed_count")
-    assert_that(result.ai_metadata["fixed_count"]).is_equal_to(1)
+    assert_that(result.ai_metadata["fixed_count"]).is_equal_to(1)  # type: ignore[index]  # assertpy is_not_none narrows this
 
 
 @patch("lintro.ai.orchestrator.require_ai")
@@ -385,4 +385,4 @@ def test_rerun_context_rerun_continues_on_tool_failure(mock_get_tool, tmp_path):
     assert_that(call_count["passing"]).is_equal_to(1)
     assert_that(rerun_results).is_not_none()
     assert_that(rerun_results).is_length(1)
-    assert_that(rerun_results[0].name).is_equal_to("passing-tool")
+    assert_that(rerun_results[0].name).is_equal_to("passing-tool")  # type: ignore[index]  # assertpy is_not_none narrows this

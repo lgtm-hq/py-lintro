@@ -316,20 +316,12 @@ def _convert_pyproject_to_config(data: dict[str, Any]) -> dict[str, Any]:
         "ai": {},
     }
 
-    # Known tool names to separate from enforce settings
-    # Hardcoded list of supported tools for reliable config parsing
-    # (ToolRegistry may not be populated yet during config loading)
-    known_tools = {
-        "actionlint",
-        "bandit",
-        "black",
-        "clippy",
-        "hadolint",
-        "markdownlint",
-        "mypy",
-        "pytest",
-        "ruff",
-        "yamllint",
+    # Derive known tool names from the ToolName enum (a static StrEnum,
+    # always available without triggering the plugin registry).
+    from lintro.enums.tool_name import ToolName
+
+    known_tools = {t.value for t in ToolName} | {
+        t.value.replace("_", "-") for t in ToolName
     }
     # Add common aliases for tools
     tool_aliases = {"markdownlint-cli2": "markdownlint"}

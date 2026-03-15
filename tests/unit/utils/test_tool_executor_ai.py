@@ -76,6 +76,9 @@ class TestToolExecutorAITotals:
             def set_options(self, **kwargs: Any) -> None:
                 return None
 
+            def reset_options(self) -> None:
+                return None
+
             def fix(self, paths: Any, options: Any) -> ToolResult:
                 return ToolResult(
                     name="ruff",

@@ -63,6 +63,10 @@ class FakeTool:
         """
         return self._definition.can_fix
 
+    def reset_options(self) -> None:
+        """Reset options to defaults (stub for testing)."""
+        self.options = {}
+
     def set_options(self, **kwargs: Any) -> None:
         """Record provided options for later assertions.
 

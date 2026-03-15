@@ -121,7 +121,7 @@ def test_custom_api_key_env() -> None:
     ("field_name", "valid_value", "expected"),
     [
         ("max_tokens", 1, 1),
-        ("max_tokens", 512000, 512000),
+        ("max_tokens", 128000, 128000),
         ("max_parallel_calls", 1, 1),
         ("max_parallel_calls", 20, 20),
         ("max_retries", 0, 0),
@@ -138,7 +138,7 @@ def test_custom_api_key_env() -> None:
     ],
     ids=[
         "max_tokens=1",
-        "max_tokens=512000",
+        "max_tokens=128000",
         "max_parallel_calls=1",
         "max_parallel_calls=20",
         "max_retries=0",

@@ -64,20 +64,24 @@ def get_provider(config: AIConfig) -> BaseAIProvider:
             f"implemented. Implemented providers: {implemented}",
         )
 
-    import importlib
+    provider_cls: type[BaseAIProvider]
+    if provider_enum is AIProvider.ANTHROPIC:
+        from lintro.ai.providers.anthropic import AnthropicProvider
 
-    module_path, class_name = entry
-    module = importlib.import_module(
-        module_path,
-    )  # nosec B403 -- module paths are hard-coded above
-    provider_cls = getattr(module, class_name)
-    result: BaseAIProvider = provider_cls(
+        provider_cls = AnthropicProvider
+    elif provider_enum is AIProvider.OPENAI:
+        from lintro.ai.providers.openai import OpenAIProvider
+
+        provider_cls = OpenAIProvider
+    else:
+        msg = f"No import path for provider: {provider_enum.value}"
+        raise ValueError(msg)
+    return provider_cls(
         model=config.model,
         api_key_env=config.api_key_env,
         max_tokens=config.max_tokens,
         base_url=config.api_base_url,
     )
-    return result
 
 
 def get_default_model(provider_name: str) -> str | None:

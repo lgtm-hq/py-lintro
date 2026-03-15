@@ -104,6 +104,7 @@ def _generate_all_suggestions(
             cache_ttl=ai_config.cache_ttl,
             progress_callback=_progress_callback,
             fallback_models=ai_config.fallback_models,
+            sanitize_mode=ai_config.sanitize_mode,
         )
         for suggestion in suggestions:
             if not suggestion.tool_name:

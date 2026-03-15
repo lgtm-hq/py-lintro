@@ -632,4 +632,27 @@ def run_lint_tools_simple(
             logger.console_output(f"Warning: Failed to write reports: {e}")
             # Continue execution - report writing failures should not stop the tool
 
+        # Write user-specified output file (--output flag)
+        if output_file is not None:
+            try:
+                from lintro.enums.output_format import normalize_output_format
+                from lintro.utils.output.file_writer import write_output_file
+
+                write_output_file(
+                    output_path=output_file,
+                    output_format=normalize_output_format(output_format),
+                    all_results=all_results,
+                    action=action,
+                    total_issues=total_issues,
+                    total_fixed=total_fixed,
+                )
+            except (OSError, ValueError, TypeError) as e:
+                logger.console_output(f"Warning: Failed to write output file: {e}")
+
+        # Clean up old run directories to prevent unbounded growth
+        try:
+            output_manager.cleanup_old_runs()
+        except OSError as e:
+            logger.console_output(f"Warning: Failed to clean up old runs: {e}")
+
     return final_exit_code

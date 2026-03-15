@@ -111,6 +111,9 @@ def test_get_tools_to_run_fmt_with_cannot_fix_raises(
         def can_fix(self) -> bool:
             return self._definition.can_fix
 
+        def reset_options(self) -> None:  # noqa: D401
+            return None
+
         def set_options(self, **kwargs: Any) -> None:  # noqa: D401
             return None
 
@@ -162,6 +165,7 @@ def test_main_loop_get_tool_raises_appends_failure(
                 "definition": FakeToolDefinition(name="black", can_fix=True),
                 "can_fix": True,
                 "set_options": lambda self, **k: None,
+                "reset_options": lambda self: None,
                 "check": lambda self, paths, options=None: ok,
                 "fix": lambda self, paths, options=None: ok,
                 "options": {},
@@ -222,6 +226,7 @@ def test_write_reports_errors_are_swallowed(monkeypatch: pytest.MonkeyPatch) -> 
             "definition": FakeToolDefinition(name="ruff", can_fix=True),
             "can_fix": True,
             "set_options": lambda self, **k: None,
+            "reset_options": lambda self: None,
             "check": lambda self, paths, options=None: ok,
             "fix": lambda self, paths, options=None: ok,
             "options": {},
@@ -275,6 +280,7 @@ def test_unknown_post_check_tool_is_skipped(monkeypatch: pytest.MonkeyPatch) -> 
             "definition": FakeToolDefinition(name="ruff", can_fix=True),
             "can_fix": True,
             "set_options": lambda self, **k: None,
+            "reset_options": lambda self: None,
             "check": lambda self, paths, options=None: ok,
             "fix": lambda self, paths, options=None: ok,
             "options": {},
@@ -380,6 +386,7 @@ def test_post_checks_early_filter_removes_black_from_main(
             "definition": FakeToolDefinition(name="ruff", can_fix=True),
             "can_fix": True,
             "set_options": lambda self, **k: None,
+            "reset_options": lambda self: None,
             "check": lambda self, paths, options=None: ok,
             "fix": lambda self, paths, options=None: ok,
             "options": {},

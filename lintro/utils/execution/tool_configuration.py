@@ -94,6 +94,9 @@ def configure_tool_for_execution(
         auto_install: Whether to auto-install Node.js deps if missing (global default).
         lintro_config: Optional LintroConfig to reuse; fetched via get_config() if None.
     """
+    # Reset accumulated state from prior runs (singleton instances)
+    tool.reset_options()
+
     # Build CLI overrides from --tool-options
     cli_overrides: dict[str, object] = {}
     for option_key in get_tool_lookup_keys(tool_name):
@@ -236,6 +239,20 @@ def get_tools_to_run(
                 skipped.append(SkippedTool(name=name, reason=reason))
             else:
                 to_run.append(name)
+
+        # Apply execution ordering and conflict resolution
+        if to_run:
+            ordered = tool_manager.get_tool_execution_order(
+                to_run,
+                ignore_conflicts=ignore_conflicts,
+            )
+            removed = set(to_run) - set(ordered)
+            for name in removed:
+                skipped.append(
+                    SkippedTool(name=name, reason="removed by conflict resolution"),
+                )
+            to_run = ordered
+
         return ToolsToRunResult(to_run=to_run, skipped=skipped)
 
     # Parse specific tools
@@ -271,5 +288,18 @@ def get_tools_to_run(
                     f"Tool '{name}' does not support formatting",
                 )
         to_run.append(name)
+
+    # Apply execution ordering and conflict resolution
+    if to_run:
+        ordered = tool_manager.get_tool_execution_order(
+            to_run,
+            ignore_conflicts=ignore_conflicts,
+        )
+        removed = set(to_run) - set(ordered)
+        for name in removed:
+            skipped.append(
+                SkippedTool(name=name, reason="removed by conflict resolution"),
+            )
+        to_run = ordered
 
     return ToolsToRunResult(to_run=to_run, skipped=skipped)

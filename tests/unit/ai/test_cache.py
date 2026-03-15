@@ -178,7 +178,9 @@ def test_cache_suggestion_evicts_when_over_max(tmp_path: object) -> None:
 
     # Adding one more entry should evict the oldest (old_entry_0)
     suggestion = _make_suggestion(code="E999")
-    cache_suggestion(root, "new", "E999", 1, "new msg", suggestion, max_entries=max_entries)
+    cache_suggestion(
+        root, "new", "E999", 1, "new msg", suggestion, max_entries=max_entries,
+    )
 
     remaining = sorted(p.name for p in cache_dir.glob("*.json"))
     # old_entry_0 (mtime=1000) should have been evicted

@@ -251,7 +251,7 @@ def test_generate_summary_generates_summary():
     summary = generate_summary([result], provider)
     assert_that(summary).is_not_none()
     assert_that(summary).is_not_none()
-    assert_that(summary.overview).is_equal_to("One issue found")
+    assert_that(summary.overview).is_equal_to("One issue found")  # type: ignore[union-attr]  # assertpy is_not_none narrows this
     assert_that(provider.calls).is_length(1)
 
 
@@ -328,7 +328,7 @@ def test_generate_post_fix_summary_generates_post_fix_summary():
     )
     assert_that(summary).is_not_none()
     assert_that(summary).is_not_none()
-    assert_that(summary.overview).contains("Fixed 3")
+    assert_that(summary.overview).contains("Fixed 3")  # type: ignore[union-attr]  # assertpy is_not_none narrows this
 
 
 # -- render_summary_terminal --------------------------------------------------

@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from lintro.ai.enums import ConfidenceLevel
+from lintro.ai.enums import ConfidenceLevel, SanitizeMode
 from lintro.ai.registry import AIProvider
 
 
@@ -88,6 +88,9 @@ class AIConfig(BaseModel):
             None disables the limit.
         max_prompt_tokens: Token budget for fix prompts before context
             trimming.
+        sanitize_mode: Controls prompt injection detection behavior.
+            'warn' logs detections, 'block' skips affected files,
+            'off' disables detection.
     """
 
     model_config = ConfigDict(frozen=False, extra="forbid")
@@ -114,7 +117,7 @@ class AIConfig(BaseModel):
     default_fix: bool = False
     auto_apply: bool = False
     auto_apply_safe_fixes: bool = True
-    max_tokens: int = Field(default=4096, ge=1)
+    max_tokens: int = Field(default=4096, ge=1, le=128_000)
     max_fix_issues: int = Field(default=20, ge=1)
     max_parallel_calls: int = Field(default=5, ge=1, le=20)
     max_retries: int = Field(default=2, ge=0, le=10)
@@ -188,6 +191,14 @@ class AIConfig(BaseModel):
         default=12000,
         ge=1000,
         description="Token budget for fix prompts before context trimming.",
+    )
+    sanitize_mode: SanitizeMode = Field(
+        default=SanitizeMode.WARN,
+        description=(
+            "How to handle detected prompt injection patterns in source "
+            "files: 'warn' logs and continues, 'block' skips the file, "
+            "'off' disables detection."
+        ),
     )
 
     @model_validator(mode="after")

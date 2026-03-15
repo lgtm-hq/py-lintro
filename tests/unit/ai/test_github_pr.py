@@ -16,7 +16,10 @@ from lintro.ai.integrations.github_pr import (
 )
 from lintro.ai.models import AIFixSuggestion, AISummary
 
-_TEST_TOKEN = "ghp_test_fixture_token"  # noqa: S105 — not a real token
+_TEST_TOKEN = (
+    "ghp_test_fixture_token"  # noqa: S105  # nosec B105 — fake test fixture token
+)
+_EMPTY_TOKEN = ""  # noqa: S105  # nosec B105
 
 
 @pytest.fixture
@@ -74,7 +77,7 @@ def test_is_available_with_all_context(test_token: str) -> None:
 def test_is_not_available_without_token() -> None:
     """Report unavailable when token is empty."""
     reporter = GitHubPRReporter(
-        token="",
+        token=_EMPTY_TOKEN,
         repo="owner/repo",
         pr_number=1,
     )
@@ -117,7 +120,7 @@ def test_reads_env_vars() -> None:
 
 def test_post_review_comments_returns_false_when_unavailable() -> None:
     """Return False when reporter is unavailable."""
-    reporter = GitHubPRReporter(token="", repo="", pr_number=None)
+    reporter = GitHubPRReporter(token=_EMPTY_TOKEN, repo="", pr_number=None)
     result = reporter.post_review_comments([], summary=None)
     assert_that(result).is_false()
 

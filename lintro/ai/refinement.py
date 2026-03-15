@@ -16,12 +16,9 @@ from typing import TYPE_CHECKING
 from loguru import logger
 
 from lintro.ai.apply import apply_fixes
-from lintro.ai.fix import (
-    _call_provider,
-    _extract_context,
-    _parse_fix_response,
-    _read_file_safely,
-)
+from lintro.ai.fix import _call_provider
+from lintro.ai.fix_context import extract_context, read_file_safely
+from lintro.ai.fix_parsing import parse_fix_response
 from lintro.ai.paths import to_provider_path
 from lintro.ai.prompts import FIX_SYSTEM, REFINEMENT_PROMPT_TEMPLATE
 from lintro.ai.retry import with_retry
@@ -148,11 +145,11 @@ def refine_unverified_fixes(
             continue
 
         # Step 2: Read current file content and build refinement prompt
-        file_content = _read_file_safely(suggestion.file)
+        file_content = read_file_safely(suggestion.file)
         if file_content is None:
             continue
 
-        context, context_start, context_end = _extract_context(
+        context, context_start, context_end = extract_context(
             file_content,
             suggestion.line,
             context_lines=ai_config.context_lines,
@@ -197,7 +194,7 @@ def refine_unverified_fixes(
                 ai_config.api_timeout,
             )
 
-            refined_suggestion = _parse_fix_response(
+            refined_suggestion = parse_fix_response(
                 response.content,
                 suggestion.file,
                 suggestion.line,

@@ -192,5 +192,5 @@ def test_apply_rerun_results_updates_remaining_issues() -> None:
     assert_that(original_result.issues_count).is_equal_to(1)
     assert_that(original_result.issues).is_length(1)
     assert_that(original_result.issues).is_not_none()
-    assert_that(original_result.issues[0].message).is_equal_to("remaining issue")
+    assert_that(original_result.issues[0].message).is_equal_to("remaining issue")  # type: ignore[index]  # assertpy is_not_none narrows this
     assert_that(original_result.success).is_true()

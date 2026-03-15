@@ -51,7 +51,7 @@ def test_reverse_diff_suggested_to_original(tmp_path: Path) -> None:
     result = save_undo_patch([s], workspace_root=tmp_path)
     assert_that(result).is_not_none()
 
-    content = result.read_text()
+    content = result.read_text()  # type: ignore[union-attr]  # assertpy is_not_none narrows this
     # In a reverse diff, the "from" shows the suggested (new) code
     # and the "to" shows the original (old) code
     assert_that(content).contains("-new_line")
@@ -70,7 +70,7 @@ def test_patch_content_is_valid_unified_diff(tmp_path: Path) -> None:
     result = save_undo_patch([s], workspace_root=tmp_path)
     assert_that(result).is_not_none()
 
-    content = result.read_text()
+    content = result.read_text()  # type: ignore[union-attr]  # assertpy is_not_none narrows this
     assert_that(content).contains("---")
     assert_that(content).contains("+++")
     assert_that(content).contains("@@")

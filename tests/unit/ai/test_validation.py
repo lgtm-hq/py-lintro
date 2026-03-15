@@ -57,8 +57,8 @@ def test_validate_applied_fixes_verified_when_issue_gone(mock_check):
     result = validate_applied_fixes([suggestion])
 
     assert_that(result).is_not_none()
-    assert_that(result.verified).is_equal_to(1)
-    assert_that(result.unverified).is_equal_to(0)
+    assert_that(result.verified).is_equal_to(1)  # type: ignore[union-attr]  # assertpy is_not_none narrows this
+    assert_that(result.unverified).is_equal_to(0)  # type: ignore[union-attr]  # assertpy is_not_none narrows this
 
 
 @patch("lintro.ai.validation._run_tool_check")
@@ -74,9 +74,9 @@ def test_validate_applied_fixes_unverified_when_issue_remains(mock_check):
     result = validate_applied_fixes([suggestion])
 
     assert_that(result).is_not_none()
-    assert_that(result.verified).is_equal_to(0)
-    assert_that(result.unverified).is_equal_to(1)
-    assert_that(result.details).is_length(1)
+    assert_that(result.verified).is_equal_to(0)  # type: ignore[union-attr]  # assertpy is_not_none narrows this
+    assert_that(result.unverified).is_equal_to(1)  # type: ignore[union-attr]  # assertpy is_not_none narrows this
+    assert_that(result.details).is_length(1)  # type: ignore[union-attr]  # assertpy is_not_none narrows this
 
 
 @patch("lintro.ai.validation._run_tool_check")
@@ -94,10 +94,10 @@ def test_validate_applied_fixes_mixed_verified_and_unverified(mock_check):
     result = validate_applied_fixes([s1, s2])
 
     assert_that(result).is_not_none()
-    assert_that(result.verified).is_equal_to(1)
-    assert_that(result.unverified).is_equal_to(1)
-    assert_that(result.verified_by_tool.get("ruff")).is_equal_to(1)
-    assert_that(result.unverified_by_tool.get("ruff")).is_equal_to(1)
+    assert_that(result.verified).is_equal_to(1)  # type: ignore[union-attr]  # assertpy is_not_none narrows this
+    assert_that(result.unverified).is_equal_to(1)  # type: ignore[union-attr]  # assertpy is_not_none narrows this
+    assert_that(result.verified_by_tool.get("ruff")).is_equal_to(1)  # type: ignore[union-attr]  # assertpy is_not_none narrows this
+    assert_that(result.unverified_by_tool.get("ruff")).is_equal_to(1)  # type: ignore[union-attr]  # assertpy is_not_none narrows this
 
 
 @patch("lintro.ai.validation._run_tool_check")
@@ -115,10 +115,10 @@ def test_validate_applied_fixes_matches_by_line_before_file_code(mock_check):
     result = validate_applied_fixes([resolved, unresolved])
 
     assert_that(result).is_not_none()
-    assert_that(result.verified).is_equal_to(1)
-    assert_that(result.unverified).is_equal_to(1)
-    assert_that(result.details).is_length(1)
-    assert_that(result.details[0]).contains("main.py:20")
+    assert_that(result.verified).is_equal_to(1)  # type: ignore[union-attr]  # assertpy is_not_none narrows this
+    assert_that(result.unverified).is_equal_to(1)  # type: ignore[union-attr]  # assertpy is_not_none narrows this
+    assert_that(result.details).is_length(1)  # type: ignore[union-attr]  # assertpy is_not_none narrows this
+    assert_that(result.details[0]).contains("main.py:20")  # type: ignore[union-attr]  # assertpy is_not_none narrows this
 
 
 @patch("lintro.ai.validation._run_tool_check")
@@ -136,8 +136,8 @@ def test_validate_applied_fixes_unknown_remaining_line_marks_issue_unverified(
     result = validate_applied_fixes([suggestion])
 
     assert_that(result).is_not_none()
-    assert_that(result.verified).is_equal_to(0)
-    assert_that(result.unverified).is_equal_to(1)
+    assert_that(result.verified).is_equal_to(0)  # type: ignore[union-attr]  # assertpy is_not_none narrows this
+    assert_that(result.unverified).is_equal_to(1)  # type: ignore[union-attr]  # assertpy is_not_none narrows this
 
 
 @patch("lintro.ai.validation._run_tool_check")
@@ -174,7 +174,7 @@ def test_validate_applied_fixes_groups_by_tool(mock_check):
     result = validate_applied_fixes([s1, s2])
 
     assert_that(result).is_not_none()
-    assert_that(result.verified).is_equal_to(2)
+    assert_that(result.verified).is_equal_to(2)  # type: ignore[union-attr]  # assertpy is_not_none narrows this
     assert_that(mock_check.call_count).is_equal_to(2)
 
 
@@ -200,8 +200,8 @@ def test_validate_applied_fixes_matches_relative_remaining_paths_against_absolut
     result = validate_applied_fixes([suggestion])
 
     assert_that(result).is_not_none()
-    assert_that(result.unverified).is_equal_to(1)
-    assert_that(result.verified).is_equal_to(0)
+    assert_that(result.unverified).is_equal_to(1)  # type: ignore[union-attr]  # assertpy is_not_none narrows this
+    assert_that(result.verified).is_equal_to(0)  # type: ignore[union-attr]  # assertpy is_not_none narrows this
 
 
 @patch("lintro.ai.validation._run_tool_check")
@@ -222,8 +222,8 @@ def test_validate_applied_fixes_tracks_new_issues(mock_check):
     result = validate_applied_fixes([suggestion])
 
     assert_that(result).is_not_none()
-    assert_that(result.unverified).is_equal_to(1)
-    assert_that(result.new_issues).is_equal_to(1)
+    assert_that(result.unverified).is_equal_to(1)  # type: ignore[union-attr]  # assertpy is_not_none narrows this
+    assert_that(result.new_issues).is_equal_to(1)  # type: ignore[union-attr]  # assertpy is_not_none narrows this
 
 
 # -- _run_tool_check ----------------------------------------------------------
@@ -386,8 +386,8 @@ def test_verify_fixes_runs_tools_once_and_validates(
     )
 
     assert_that(result).is_not_none()
-    assert_that(result.verified).is_equal_to(1)
-    assert_that(result.unverified).is_equal_to(0)
+    assert_that(result.verified).is_equal_to(1)  # type: ignore[union-attr]  # assertpy is_not_none narrows this
+    assert_that(result.unverified).is_equal_to(0)  # type: ignore[union-attr]  # assertpy is_not_none narrows this
     # rerun_tools should be called exactly once (not twice as before)
     mock_rerun_tools.assert_called_once_with(by_tool)
     mock_apply_rerun.assert_called_once()
@@ -432,8 +432,8 @@ def test_verify_fixes_updates_tool_results_and_validates(
     )
 
     assert_that(result).is_not_none()
-    assert_that(result.unverified).is_equal_to(1)
-    assert_that(result.verified).is_equal_to(0)
+    assert_that(result.unverified).is_equal_to(1)  # type: ignore[union-attr]  # assertpy is_not_none narrows this
+    assert_that(result.verified).is_equal_to(0)  # type: ignore[union-attr]  # assertpy is_not_none narrows this
     # Confirms apply_rerun_results was called to update ToolResult objects
     mock_apply_rerun.assert_called_once()
 

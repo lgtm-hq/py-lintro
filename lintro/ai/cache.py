@@ -7,6 +7,7 @@ import hashlib
 import json
 import time
 from pathlib import Path
+
 from lintro.ai.models import AIFixSuggestion
 
 CACHE_DIR = ".lintro-cache/ai"

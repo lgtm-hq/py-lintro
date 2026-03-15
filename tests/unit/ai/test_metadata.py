@@ -34,8 +34,8 @@ def test_metadata_summary_and_fixes_coexist():
     assert_that(result.ai_metadata).is_not_none()
     assert_that(result.ai_metadata).contains_key("summary")
     assert_that(result.ai_metadata).contains_key("fix_suggestions")
-    assert_that(result.ai_metadata["summary"]["overview"]).is_equal_to("Overview")
-    assert_that(result.ai_metadata["fix_suggestions"]).is_length(1)
+    assert_that(result.ai_metadata["summary"]["overview"]).is_equal_to("Overview")  # type: ignore[index]  # assertpy is_not_none narrows this
+    assert_that(result.ai_metadata["fix_suggestions"]).is_length(1)  # type: ignore[index]  # assertpy is_not_none narrows this
 
 
 def test_metadata_normalize_supports_legacy_suggestions_key():
@@ -68,10 +68,10 @@ def test_metadata_fixed_count_is_attached_and_normalized():
     assert_that(result.ai_metadata).contains_key("applied_count")
     assert_that(result.ai_metadata).contains_key("verified_count")
     assert_that(result.ai_metadata).contains_key("unverified_count")
-    assert_that(result.ai_metadata["fixed_count"]).is_equal_to(3)
-    assert_that(result.ai_metadata["applied_count"]).is_equal_to(3)
-    assert_that(result.ai_metadata["verified_count"]).is_equal_to(2)
-    assert_that(result.ai_metadata["unverified_count"]).is_equal_to(1)
+    assert_that(result.ai_metadata["fixed_count"]).is_equal_to(3)  # type: ignore[index]  # assertpy is_not_none narrows this
+    assert_that(result.ai_metadata["applied_count"]).is_equal_to(3)  # type: ignore[index]  # assertpy is_not_none narrows this
+    assert_that(result.ai_metadata["verified_count"]).is_equal_to(2)  # type: ignore[index]  # assertpy is_not_none narrows this
+    assert_that(result.ai_metadata["unverified_count"]).is_equal_to(1)  # type: ignore[index]  # assertpy is_not_none narrows this
 
     normalized = normalize_ai_metadata(result.ai_metadata or {})
     assert_that(normalized["fixed_count"]).is_equal_to(3)

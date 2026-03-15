@@ -175,10 +175,10 @@ def test_run_ai_enhancement_fix_action_generates_fix_metadata(
     assert_that(result.ai_metadata).contains_key("applied_count")
     assert_that(result.ai_metadata).contains_key("verified_count")
     assert_that(result.ai_metadata).contains_key("unverified_count")
-    assert_that(result.ai_metadata["fix_suggestions"]).is_length(1)
-    assert_that(result.ai_metadata["applied_count"]).is_equal_to(1)
-    assert_that(result.ai_metadata["verified_count"]).is_equal_to(1)
-    assert_that(result.ai_metadata["unverified_count"]).is_equal_to(0)
+    assert_that(result.ai_metadata["fix_suggestions"]).is_length(1)  # type: ignore[index]  # assertpy is_not_none narrows this
+    assert_that(result.ai_metadata["applied_count"]).is_equal_to(1)  # type: ignore[index]  # assertpy is_not_none narrows this
+    assert_that(result.ai_metadata["verified_count"]).is_equal_to(1)  # type: ignore[index]  # assertpy is_not_none narrows this
+    assert_that(result.ai_metadata["unverified_count"]).is_equal_to(0)  # type: ignore[index]  # assertpy is_not_none narrows this
 
 
 @patch("lintro.ai.orchestrator.require_ai")
@@ -456,10 +456,10 @@ def test_summary_attachment_summary_attached_to_all_results_with_issues(
     assert_that(result_b.ai_metadata).is_not_none()
     assert_that(result_a.ai_metadata).contains_key("summary")
     assert_that(result_b.ai_metadata).contains_key("summary")
-    assert_that(result_a.ai_metadata["summary"]["overview"]).is_equal_to(
+    assert_that(result_a.ai_metadata["summary"]["overview"]).is_equal_to(  # type: ignore[index]  # assertpy is_not_none narrows this
         "overview",
     )
-    assert_that(result_b.ai_metadata["summary"]["overview"]).is_equal_to(
+    assert_that(result_b.ai_metadata["summary"]["overview"]).is_equal_to(  # type: ignore[index]  # assertpy is_not_none narrows this
         "overview",
     )
 
@@ -566,6 +566,6 @@ def test_integration_orchestrator_end_to_end_check_with_real_summary_generation(
 
     assert_that(result.ai_metadata).is_not_none()
     assert_that(result.ai_metadata).contains_key("summary")
-    assert_that(result.ai_metadata["summary"]["overview"]).is_equal_to(
+    assert_that(result.ai_metadata["summary"]["overview"]).is_equal_to(  # type: ignore[index]  # assertpy is_not_none narrows this
         "Found 1 issue",
     )

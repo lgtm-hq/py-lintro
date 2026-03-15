@@ -50,9 +50,9 @@ def test_parse_fix_response_valid_response():
     result = _parse_fix_response(content, "main.py", 10, "B101")
     assert_that(result).is_not_none()
     assert_that(result).is_not_none()
-    assert_that(result.file).is_equal_to("main.py")
-    assert_that(result.confidence).is_equal_to("high")
-    assert_that(result.diff).is_not_empty()
+    assert_that(result.file).is_equal_to("main.py")  # type: ignore[union-attr]  # assertpy is_not_none narrows this
+    assert_that(result.confidence).is_equal_to("high")  # type: ignore[union-attr]  # assertpy is_not_none narrows this
+    assert_that(result.diff).is_not_empty()  # type: ignore[union-attr]  # assertpy is_not_none narrows this
 
 
 def test_parse_fix_response_invalid_json():
@@ -103,7 +103,7 @@ def test_parse_fix_response_extracts_risk_level():
     result = _parse_fix_response(content, "main.py", 10, "B101")
     assert_that(result).is_not_none()
     assert_that(result).is_not_none()
-    assert_that(result.risk_level).is_equal_to("low")
+    assert_that(result.risk_level).is_equal_to("low")  # type: ignore[union-attr]  # assertpy is_not_none narrows this
 
 
 def test_parse_fix_response_risk_level_defaults_to_empty():
@@ -119,7 +119,7 @@ def test_parse_fix_response_risk_level_defaults_to_empty():
     result = _parse_fix_response(content, "main.py", 10, "B101")
     assert_that(result).is_not_none()
     assert_that(result).is_not_none()
-    assert_that(result.risk_level).is_equal_to("")
+    assert_that(result.risk_level).is_equal_to("")  # type: ignore[union-attr]  # assertpy is_not_none narrows this
 
 
 # ---------------------------------------------------------------------------

@@ -73,7 +73,8 @@ DEFAULT_ACTION: str = "check"
 @click.option(
     "--no-log",
     is_flag=True,
-    help="Disable logging to file",
+    hidden=True,
+    help="Disable logging to file (not yet implemented)",
 )
 @click.option(
     "--raw-output",
@@ -93,7 +94,8 @@ DEFAULT_ACTION: str = "check"
 @click.option(
     "--stream/--no-stream",
     default=False,
-    help="Stream tool output in real-time (useful for long operations)",
+    hidden=True,
+    help="Stream tool output in real-time (not yet implemented)",
 )
 @click.option(
     "--debug",
