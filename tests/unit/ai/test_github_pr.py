@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -313,3 +314,34 @@ def test_sanitizes_backticks_in_diff() -> None:
     )
     result = _format_inline_comment(s)
     assert_that(result).does_not_contain("``````")
+
+
+# -- TestWorkspaceRelativePaths: workspace_root produces repo-relative paths. -
+
+
+def test_post_review_uses_workspace_relative_paths(test_token: str) -> None:
+    """Use workspace-relative paths when workspace_root is set."""
+    workspace = Path("/home/runner/work/repo")
+    reporter = GitHubPRReporter(
+        token=test_token,
+        repo="owner/repo",
+        pr_number=5,
+        workspace_root=workspace,
+    )
+    suggestions = [
+        AIFixSuggestion(
+            file=str(workspace / "src" / "main.py"),
+            line=10,
+            code="B101",
+            tool_name="bandit",
+            explanation="Replace assert",
+            confidence="high",
+        ),
+    ]
+
+    with patch.object(reporter, "_api_request", return_value=True) as mock_api:
+        reporter._post_review(suggestions)
+        payload = mock_api.call_args[0][2]
+        comment_path = payload["comments"][0]["path"]
+        # Should be relative to workspace_root, not an absolute path
+        assert_that(comment_path).is_equal_to("src/main.py")

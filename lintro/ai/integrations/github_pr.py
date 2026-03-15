@@ -12,13 +12,14 @@ import urllib.error
 import urllib.parse
 import urllib.request
 from collections.abc import Sequence
+from pathlib import Path
 from typing import Any
 
 from loguru import logger
 
 from lintro.ai.enums import ConfidenceLevel
 from lintro.ai.models import AIFixSuggestion, AISummary
-from lintro.ai.paths import relative_path
+from lintro.ai.paths import relative_path, to_provider_path
 
 
 class GitHubPRReporter:
@@ -39,6 +40,7 @@ class GitHubPRReporter:
         repo: str | None = None,
         pr_number: int | None = None,
         api_base: str = "https://api.github.com",
+        workspace_root: Path | None = None,
     ) -> None:
         """Initialize the GitHub PR reporter.
 
@@ -48,11 +50,20 @@ class GitHubPRReporter:
                 ``GITHUB_REPOSITORY`` env var.
             pr_number: PR number. Falls back to parsing ``GITHUB_REF``.
             api_base: GitHub API base URL.
+            workspace_root: Workspace root for deriving repo-relative paths.
+                Falls back to ``GITHUB_WORKSPACE`` env var, then ``None``
+                (which uses ``relative_path()`` as fallback).
         """
         self.token = token or os.environ.get("GITHUB_TOKEN", "")
         self.repo = repo or os.environ.get("GITHUB_REPOSITORY", "")
         self.pr_number = pr_number or _detect_pr_number()
         self.api_base = api_base.rstrip("/")
+
+        if workspace_root is not None:
+            self.workspace_root = workspace_root
+        else:
+            gh_ws = os.environ.get("GITHUB_WORKSPACE", "")
+            self.workspace_root = Path(gh_ws) if gh_ws else None
 
     def is_available(self) -> bool:
         """Check whether all required context is present.
@@ -108,7 +119,11 @@ class GitHubPRReporter:
         """
         comments: list[dict[str, Any]] = []
         for s in suggestions:
-            rel = relative_path(s.file)
+            rel = (
+                to_provider_path(s.file, self.workspace_root)
+                if self.workspace_root is not None
+                else relative_path(s.file)
+            )
             if not rel:
                 continue
             body = _format_inline_comment(s)

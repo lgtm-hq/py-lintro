@@ -156,7 +156,11 @@ def _run_ai_check(
 
     # Post summary as PR comment when enabled
     if summary and ai_config.github_pr_comments:
-        _post_pr_comments(summary=summary, logger=logger)
+        _post_pr_comments(
+            summary=summary,
+            logger=logger,
+            workspace_root=workspace_root,
+        )
 
     if not ai_fix:
         return AIResult()
@@ -344,6 +348,7 @@ def _post_pr_comments(
     summary: AISummary | None = None,
     suggestions: list[AIFixSuggestion] | None = None,
     logger: ThreadSafeConsoleLogger,
+    workspace_root: Path | None = None,
 ) -> None:
     """Post AI findings as GitHub PR review comments.
 
@@ -353,8 +358,9 @@ def _post_pr_comments(
         summary: Optional AI summary.
         suggestions: Optional fix suggestions.
         logger: Console logger.
+        workspace_root: Workspace root for repo-relative paths.
     """
-    reporter = GitHubPRReporter()
+    reporter = GitHubPRReporter(workspace_root=workspace_root)
     if not reporter.is_available():
         loguru_logger.debug(
             "GitHub PR reporter not available — missing token, repo, or PR number",
