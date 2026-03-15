@@ -58,6 +58,27 @@ def test_parse_fix_response_valid_response():
     assert_that(result.diff).is_not_empty()  # type: ignore[union-attr]  # assertpy is_not_none narrows this
 
 
+def test_parse_fix_response_non_object_json():
+    """Non-object JSON (array, string, number) returns None."""
+    for payload in ["[1, 2]", '"just a string"', "42"]:
+        result = _parse_fix_response(payload, "main.py", 10, "B101")
+        assert_that(result).is_none()
+
+
+def test_parse_fix_response_non_string_code_fields():
+    """Non-string original_code or suggested_code returns None."""
+    content = json.dumps(
+        {
+            "original_code": 123,
+            "suggested_code": ["not", "a", "string"],
+            "explanation": "Fix",
+            "confidence": "medium",
+        },
+    )
+    result = _parse_fix_response(content, "main.py", 10, "B101")
+    assert_that(result).is_none()
+
+
 def test_parse_fix_response_invalid_json():
     """Verify that invalid JSON content returns None."""
     result = _parse_fix_response("not json", "main.py", 10, "B101")
@@ -160,6 +181,53 @@ def test_parse_batch_response_not_array():
     """Non-array JSON returns empty list."""
     result = _parse_batch_response('{"key": "value"}', "test.py")
     assert_that(result).is_empty()
+
+
+def test_parse_batch_response_mixed_valid_and_invalid():
+    """Only valid items are returned; invalid items are skipped."""
+    content = json.dumps(
+        [
+            # Valid item
+            {
+                "line": 10,
+                "code": "E501",
+                "original_code": "old line",
+                "suggested_code": "new line",
+                "explanation": "Fix",
+                "confidence": "high",
+                "risk_level": "safe-style",
+            },
+            # Non-dict item (string)
+            "not a dict",
+            # Null item
+            None,
+            # Missing suggested_code
+            {
+                "line": 20,
+                "code": "E502",
+                "original_code": "code",
+            },
+            # Identical original and suggested
+            {
+                "line": 30,
+                "code": "E503",
+                "original_code": "same",
+                "suggested_code": "same",
+            },
+            # Non-string code fields
+            {
+                "line": 40,
+                "code": "E504",
+                "original_code": 123,
+                "suggested_code": ["list"],
+            },
+        ],
+    )
+    result = _parse_batch_response(content, "test.py")
+    assert_that(result).is_length(1)
+    assert_that(result[0].line).is_equal_to(10)
+    assert_that(result[0].code).is_equal_to("E501")
+    assert_that(result[0].risk_level).is_equal_to("safe-style")
 
 
 def test_parse_batch_response_skips_identical_code():

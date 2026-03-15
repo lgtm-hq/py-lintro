@@ -64,7 +64,12 @@ def mock_logger():
 @patch("lintro.ai.orchestrator.get_provider")
 @patch("lintro.ai.orchestrator.generate_summary")
 @patch("lintro.ai.pipeline.generate_fixes")
+@patch(
+    "lintro.ai.orchestrator._normalize_issue_path_for_workspace",
+    return_value=True,
+)
 def test_run_ai_enhancement_check_fix_preserves_summary_and_fix_metadata(
+    _mock_normalize,
     mock_generate_fixes,
     mock_generate_summary,
     mock_get_provider,

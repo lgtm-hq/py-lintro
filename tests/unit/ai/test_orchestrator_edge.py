@@ -69,7 +69,12 @@ def test_ai_result_default_no_error(
 @patch("lintro.ai.orchestrator.get_provider")
 @patch("lintro.ai.orchestrator.generate_summary")
 @patch("lintro.ai.pipeline.generate_fixes")
+@patch(
+    "lintro.ai.orchestrator._normalize_issue_path_for_workspace",
+    return_value=True,
+)
 def test_ai_result_unfixed_issues_when_fixes_fail(
+    _mock_normalize,
     mock_generate_fixes,
     mock_generate_summary,
     mock_get_provider,
@@ -159,7 +164,12 @@ def test_ai_result_error_propagates_when_fail_on_ai_error():
 @patch("lintro.ai.pipeline.generate_fixes")
 @patch("lintro.ai.pipeline.apply_fixes")
 @patch("lintro.ai.pipeline.verify_fixes")
+@patch(
+    "lintro.ai.orchestrator._normalize_issue_path_for_workspace",
+    return_value=True,
+)
 def test_ai_result_tracks_applied_fixes(
+    _mock_normalize,
     mock_verify_fixes,
     mock_apply_fixes,
     mock_generate_fixes,

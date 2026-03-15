@@ -25,7 +25,12 @@ from tests.unit.ai.conftest import MockAIProvider, MockIssue
 @patch("lintro.ai.pipeline.generate_fixes")
 @patch("lintro.ai.pipeline.verify_fixes")
 @patch("lintro.ai.pipeline.apply_fixes")
+@patch(
+    "lintro.ai.orchestrator._normalize_issue_path_for_workspace",
+    return_value=True,
+)
 def test_run_ai_enhancement_fix_action_generates_fix_metadata(
+    _mock_normalize,
     mock_apply_fixes,
     mock_verify_fixes,
     mock_generate_fixes,
@@ -96,7 +101,12 @@ def test_run_ai_enhancement_fix_action_generates_fix_metadata(
 @patch("lintro.ai.pipeline.generate_fixes")
 @patch("lintro.ai.pipeline.review_fixes_interactive")
 @patch("lintro.ai.pipeline.sys.stdin.isatty", return_value=True)
+@patch(
+    "lintro.ai.orchestrator._normalize_issue_path_for_workspace",
+    return_value=True,
+)
 def test_run_ai_enhancement_fix_action_passes_validate_mode_to_interactive_review(
+    _mock_normalize,
     _mock_isatty,
     mock_review_fixes_interactive,
     mock_generate_fixes,
@@ -153,7 +163,12 @@ def test_run_ai_enhancement_fix_action_passes_validate_mode_to_interactive_revie
 @patch("lintro.ai.orchestrator.require_ai")
 @patch("lintro.ai.orchestrator.get_provider")
 @patch("lintro.ai.pipeline.generate_fixes")
+@patch(
+    "lintro.ai.orchestrator._normalize_issue_path_for_workspace",
+    return_value=True,
+)
 def test_run_ai_enhancement_fix_action_uses_only_remaining_issue_tail(
+    _mock_normalize,
     mock_generate_fixes,
     mock_get_provider,
     _mock_require_ai,
@@ -246,7 +261,12 @@ def test_run_ai_enhancement_fix_action_skips_tools_with_zero_remaining_issues(
 @patch("lintro.ai.pipeline.apply_fixes")
 @patch("lintro.ai.pipeline.verify_fixes")
 @patch("lintro.ai.pipeline.generate_post_fix_summary")
+@patch(
+    "lintro.ai.orchestrator._normalize_issue_path_for_workspace",
+    return_value=True,
+)
 def test_run_ai_enhancement_fix_action_uses_fresh_rerun_results_for_post_summary(
+    _mock_normalize,
     mock_generate_post_fix_summary,
     mock_verify_fixes,
     mock_apply_fixes,

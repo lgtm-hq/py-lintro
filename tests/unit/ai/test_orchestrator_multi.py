@@ -28,7 +28,12 @@ from tests.unit.ai.conftest import MockAIProvider, MockIssue
 @patch("lintro.ai.pipeline.apply_fixes")
 @patch("lintro.ai.pipeline.review_fixes_interactive")
 @patch("lintro.ai.pipeline.sys.stdin.isatty", return_value=False)
+@patch(
+    "lintro.ai.orchestrator._normalize_issue_path_for_workspace",
+    return_value=True,
+)
 def test_run_ai_enhancement_fix_action_noninteractive_applies_safe_then_reviews_risky(
+    _mock_normalize,
     _mock_isatty,
     mock_review_fixes_interactive,
     mock_apply_fixes,
@@ -111,7 +116,12 @@ def test_run_ai_enhancement_fix_action_noninteractive_applies_safe_then_reviews_
 @patch("lintro.ai.pipeline.generate_fixes")
 @patch("lintro.ai.pipeline.apply_fixes")
 @patch("lintro.ai.pipeline.verify_fixes")
+@patch(
+    "lintro.ai.orchestrator._normalize_issue_path_for_workspace",
+    return_value=True,
+)
 def test_run_ai_enhancement_fix_action_json_auto_applies_safe_style_suggestions(
+    _mock_normalize,
     mock_verify_fixes,
     mock_apply_fixes,
     mock_generate_fixes,
@@ -193,7 +203,12 @@ def test_run_ai_enhancement_fix_action_json_auto_applies_safe_style_suggestions(
 @patch("lintro.ai.pipeline.generate_fixes")
 @patch("lintro.ai.pipeline.apply_fixes")
 @patch("lintro.ai.pipeline.verify_fixes")
+@patch(
+    "lintro.ai.orchestrator._normalize_issue_path_for_workspace",
+    return_value=True,
+)
 def test_run_ai_enhancement_fix_action_json_uses_fresh_rerun_results(
+    _mock_normalize,
     mock_verify_fixes,
     mock_apply_fixes,
     mock_generate_fixes,
