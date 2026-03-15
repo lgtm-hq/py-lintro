@@ -63,7 +63,7 @@ def _apply_conflict_resolution(
         ignore_conflicts=ignore_conflicts,
     )
     removed = set(to_run) - set(ordered)
-    for name in removed:
+    for name in sorted(removed):
         skipped.append(
             SkippedTool(name=name, reason="removed by conflict resolution"),
         )

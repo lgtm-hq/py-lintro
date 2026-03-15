@@ -214,8 +214,14 @@ class PrettierPlugin(BaseToolPlugin):
 
         return None
 
-    def _create_not_found_result(self) -> ToolResult:
+    def _create_not_found_result(
+        self,
+        cwd: str | None = None,
+    ) -> ToolResult:
         """Create a ToolResult for when Prettier is not found.
+
+        Args:
+            cwd: Working directory for the tool result.
 
         Returns:
             ToolResult: ToolResult instance representing Prettier not found.
@@ -230,6 +236,7 @@ class PrettierPlugin(BaseToolPlugin):
                 "  - Or install locally: 'npm install prettier'"
             ),
             issues_count=0,
+            cwd=cwd,
         )
 
     def _create_timeout_result(
@@ -364,7 +371,7 @@ class PrettierPlugin(BaseToolPlugin):
             return self._create_timeout_result(timeout_val=ctx.timeout, cwd=ctx.cwd)
         except (OSError, ValueError, RuntimeError, FileNotFoundError) as e:
             if isinstance(e, FileNotFoundError):
-                return self._create_not_found_result()
+                return self._create_not_found_result(cwd=ctx.cwd)
             logger.error(f"Failed to run prettier: {e}")
             return ToolResult(
                 name=self.definition.name,
@@ -468,7 +475,7 @@ class PrettierPlugin(BaseToolPlugin):
             return self._create_timeout_result(timeout_val=ctx.timeout, cwd=ctx.cwd)
         except (OSError, ValueError, RuntimeError, FileNotFoundError) as e:
             if isinstance(e, FileNotFoundError):
-                return self._create_not_found_result()
+                return self._create_not_found_result(cwd=ctx.cwd)
             logger.error(f"Failed to run prettier: {e}")
             return ToolResult(
                 name=self.definition.name,
@@ -510,7 +517,7 @@ class PrettierPlugin(BaseToolPlugin):
             )
         except (OSError, ValueError, RuntimeError, FileNotFoundError) as e:
             if isinstance(e, FileNotFoundError):
-                return self._create_not_found_result()
+                return self._create_not_found_result(cwd=ctx.cwd)
             logger.error(f"Failed to run prettier: {e}")
             return ToolResult(
                 name=self.definition.name,
@@ -538,7 +545,7 @@ class PrettierPlugin(BaseToolPlugin):
             )
         except (OSError, ValueError, RuntimeError, FileNotFoundError) as e:
             if isinstance(e, FileNotFoundError):
-                return self._create_not_found_result()
+                return self._create_not_found_result(cwd=ctx.cwd)
             logger.error(f"Failed to run prettier: {e}")
             return ToolResult(
                 name=self.definition.name,
