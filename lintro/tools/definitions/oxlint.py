@@ -179,16 +179,14 @@ class OxlintPlugin(BaseToolPlugin):
         )
         combined_issues = (initial_issues or []) + [timeout_issue]
         remaining_count = len(combined_issues)
-        # Ensure consistency: if initial was 0, set it to remaining_count
-        # so that initial = fixed + remaining holds (0 + remaining = remaining)
-        effective_initial = initial_count if initial_count > 0 else remaining_count
+        # Maintain invariant: initial = fixed + remaining
         return ToolResult(
             name=self.definition.name,
             success=False,
             output=timeout_msg,
             issues_count=remaining_count,
             issues=combined_issues,
-            initial_issues_count=effective_initial,
+            initial_issues_count=remaining_count,
             fixed_issues_count=0,
             remaining_issues_count=remaining_count,
             cwd=cwd,

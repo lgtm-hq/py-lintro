@@ -264,15 +264,17 @@ class PrettierPlugin(BaseToolPlugin):
             column=0,
         )
         combined_issues = (initial_issues or []) + [timeout_issue]
+        remaining_count = len(combined_issues)
+        # Maintain invariant: initial = fixed + remaining
         return ToolResult(
             name=self.definition.name,
             success=False,
             output=timeout_msg,
-            issues_count=len(combined_issues),
+            issues_count=remaining_count,
             issues=combined_issues,
-            initial_issues_count=initial_count,
+            initial_issues_count=remaining_count,
             fixed_issues_count=0,
-            remaining_issues_count=len(combined_issues),
+            remaining_issues_count=remaining_count,
             cwd=cwd,
         )
 

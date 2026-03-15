@@ -37,6 +37,39 @@ class ToolsToRunResult:
     skipped: list[SkippedTool] = field(default_factory=list)
 
 
+def _apply_conflict_resolution(
+    to_run: list[str],
+    skipped: list[SkippedTool],
+    *,
+    ignore_conflicts: bool,
+) -> list[str]:
+    """Apply execution ordering and conflict resolution to a tool list.
+
+    Mutates *skipped* in place by appending tools removed during
+    conflict resolution.
+
+    Args:
+        to_run: Candidate tool names.
+        skipped: Accumulator for skipped tools (mutated in place).
+        ignore_conflicts: Whether to ignore tool conflicts.
+
+    Returns:
+        The ordered list of tools to run.
+    """
+    if not to_run:
+        return to_run
+    ordered = tool_manager.get_tool_execution_order(
+        to_run,
+        ignore_conflicts=ignore_conflicts,
+    )
+    removed = set(to_run) - set(ordered)
+    for name in removed:
+        skipped.append(
+            SkippedTool(name=name, reason="removed by conflict resolution"),
+        )
+    return ordered
+
+
 def _get_disabled_reason(config: LintroConfig, tool_name: str) -> str:
     """Determine why a tool is disabled.
 
@@ -240,18 +273,11 @@ def get_tools_to_run(
             else:
                 to_run.append(name)
 
-        # Apply execution ordering and conflict resolution
-        if to_run:
-            ordered = tool_manager.get_tool_execution_order(
-                to_run,
-                ignore_conflicts=ignore_conflicts,
-            )
-            removed = set(to_run) - set(ordered)
-            for name in removed:
-                skipped.append(
-                    SkippedTool(name=name, reason="removed by conflict resolution"),
-                )
-            to_run = ordered
+        to_run = _apply_conflict_resolution(
+            to_run,
+            skipped,
+            ignore_conflicts=ignore_conflicts,
+        )
 
         return ToolsToRunResult(to_run=to_run, skipped=skipped)
 
@@ -289,17 +315,10 @@ def get_tools_to_run(
                 )
         to_run.append(name)
 
-    # Apply execution ordering and conflict resolution
-    if to_run:
-        ordered = tool_manager.get_tool_execution_order(
-            to_run,
-            ignore_conflicts=ignore_conflicts,
-        )
-        removed = set(to_run) - set(ordered)
-        for name in removed:
-            skipped.append(
-                SkippedTool(name=name, reason="removed by conflict resolution"),
-            )
-        to_run = ordered
+    to_run = _apply_conflict_resolution(
+        to_run,
+        skipped,
+        ignore_conflicts=ignore_conflicts,
+    )
 
     return ToolsToRunResult(to_run=to_run, skipped=skipped)

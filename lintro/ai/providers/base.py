@@ -165,8 +165,8 @@ class BaseAIProvider(ABC):
         if self._client is not None:
             return self._client
 
-        api_key = os.environ.get(self._api_key_env)
-        if not api_key:
+        api_key = os.environ.get(self._api_key_env) or ""
+        if not api_key and not self._base_url:
             raise AIAuthenticationError(
                 f"No API key found. Set the {self._api_key_env} "
                 f"environment variable.",

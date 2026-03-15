@@ -120,11 +120,13 @@ class GitHubPRReporter:
         """
         comments: list[dict[str, Any]] = []
         for s in suggestions:
-            rel = (
+            # Normalize path: strip leading "./" and ensure forward slashes
+            raw_path = (
                 to_provider_path(s.file, self.workspace_root)
                 if self.workspace_root is not None
                 else relative_path(s.file)
             )
+            rel = raw_path.lstrip("./").replace("\\", "/") if raw_path else ""
             if not rel:
                 continue
             body = _format_inline_comment(s)

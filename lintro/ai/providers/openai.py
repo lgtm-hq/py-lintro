@@ -199,6 +199,7 @@ class OpenAIProvider(BaseAIProvider):
         )
 
         final_response: list[AIResponse] = []
+        accumulated_text: list[str] = []
 
         def _generate() -> Iterator[str]:
             with self._map_errors():
@@ -216,7 +217,9 @@ class OpenAIProvider(BaseAIProvider):
 
                 for chunk in stream:
                     if chunk.choices and chunk.choices[0].delta.content:
-                        yield chunk.choices[0].delta.content
+                        text = chunk.choices[0].delta.content
+                        accumulated_text.append(text)
+                        yield text
                     if chunk.usage:
                         input_tokens = chunk.usage.prompt_tokens
                         output_tokens = chunk.usage.completion_tokens
@@ -224,7 +227,7 @@ class OpenAIProvider(BaseAIProvider):
                 cost = estimate_cost(self._model, input_tokens, output_tokens)
                 final_response.append(
                     AIResponse(
-                        content="",
+                        content="".join(accumulated_text),
                         model=self._model,
                         input_tokens=input_tokens,
                         output_tokens=output_tokens,
