@@ -7,5 +7,7 @@ node_modules
 .venv
 venv
 env
+.claude
+
 __pycache__
 .lintro/*
