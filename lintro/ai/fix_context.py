@@ -73,8 +73,11 @@ def extract_context(
     lines = content.splitlines()
     total = len(lines)
 
-    start = max(0, line - 1 - context_lines)
-    end = min(total, line + context_lines)
+    # Clamp line to valid range [1, total] so out-of-range values
+    # still produce a useful context window.
+    clamped_line = max(1, min(line, total)) if total > 0 else 1
+    start = max(0, clamped_line - 1 - context_lines)
+    end = min(total, clamped_line + context_lines)
 
     context = "\n".join(lines[start:end])
     return context, start + 1, end
@@ -226,10 +229,15 @@ def build_fix_context(
             code_context=sanitized_context,
             boundary=boundary,
         )
-        if (
-            estimate_tokens(prompt) <= max_prompt_tokens
-            or effective_context_lines <= _min_context
-        ):
+        prompt_tokens = estimate_tokens(prompt)
+        if prompt_tokens <= max_prompt_tokens:
+            return prompt
+        if effective_context_lines <= _min_context:
+            logger.debug(
+                f"Fix prompt still over budget at minimum context "
+                f"({prompt_tokens} > {max_prompt_tokens}) for "
+                f"{issue.file}:{issue.line}; sending anyway",
+            )
             return prompt
         old_ctx = effective_context_lines
         effective_context_lines = max(

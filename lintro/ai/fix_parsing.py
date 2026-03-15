@@ -71,8 +71,16 @@ def parse_fix_response(
         logger.debug(f"Failed to parse AI fix response for {file_path}:{line}")
         return None
 
+    if not isinstance(data, dict):
+        logger.debug(f"AI fix response is not a JSON object for {file_path}:{line}")
+        return None
+
     original = data.get("original_code", "")
     suggested = data.get("suggested_code", "")
+
+    if not isinstance(original, str) or not isinstance(suggested, str):
+        logger.debug(f"AI fix code fields are not strings for {file_path}:{line}")
+        return None
 
     if not original or not suggested or original == suggested:
         return None

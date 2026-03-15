@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import difflib
+import os
+import tempfile
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -53,5 +55,13 @@ def save_undo_patch(
     undo_dir = workspace_root / UNDO_DIR
     undo_dir.mkdir(parents=True, exist_ok=True)
     patch_path = undo_dir / UNDO_FILE
-    patch_path.write_text("".join(patch_lines), encoding="utf-8")
+    # Atomic write: temp file + os.replace to avoid partial writes
+    fd, tmp = tempfile.mkstemp(dir=undo_dir, suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write("".join(patch_lines))
+        Path(tmp).replace(patch_path)
+    except BaseException:
+        Path(tmp).unlink(missing_ok=True)
+        raise
     return patch_path

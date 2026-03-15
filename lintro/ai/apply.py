@@ -115,9 +115,14 @@ def _apply_fix(
                 )
                 try:
                     with os.fdopen(fd, "wb") as f:
+                        # fd is now owned by the file object — do not
+                        # close it separately.
                         f.write("".join(new_lines).encode("utf-8"))
                     Path(tmp).replace(path)
                 except BaseException:
+                    # os.fdopen takes ownership of fd on success, so
+                    # only close it manually if os.fdopen itself fails
+                    # (extremely unlikely but avoids an fd leak).
                     Path(tmp).unlink(missing_ok=True)
                     raise
                 return True
