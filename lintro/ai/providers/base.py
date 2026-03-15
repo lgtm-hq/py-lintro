@@ -49,10 +49,12 @@ class AIStreamResult:
 
     _chunks: Iterator[str]
     _on_done: Callable[[], AIResponse]
+    _consumed: bool = field(default=False, init=False)
 
     def __iter__(self) -> Iterator[str]:
         """Yield text chunks from the underlying iterator."""
         yield from self._chunks
+        self._consumed = True
 
     def response(self) -> AIResponse:
         """Return the finalized AIResponse.
@@ -67,9 +69,17 @@ class AIStreamResult:
     def collect(self) -> AIResponse:
         """Consume all tokens and return the complete AIResponse.
 
+        May only be called once — a second call raises ``RuntimeError``
+        because the underlying iterator has already been exhausted.
+
         Returns:
             AIResponse with concatenated content and usage metadata.
+
+        Raises:
+            RuntimeError: If the stream has already been consumed.
         """
+        if self._consumed:
+            raise RuntimeError("AIStreamResult already consumed")
         content = "".join(self)
         resp = self.response()
         return AIResponse(
@@ -244,6 +254,12 @@ class BaseAIProvider(ABC):
 
     def is_available(self) -> bool:
         """Check if this provider is ready to use.
+
+        Note: this reads the API key from the environment on every call,
+        while ``_get_client()`` caches the client (and its key) after
+        the first successful creation. If the env var is removed after
+        client creation, ``is_available()`` will return ``False`` even
+        though the cached client would still work.
 
         Returns:
             bool: True if the provider's SDK is installed and an API

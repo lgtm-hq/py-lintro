@@ -172,3 +172,20 @@ def test_base_provider_stream_complete_single_chunk_iteration() -> None:
     chunks = list(stream)
 
     assert_that(chunks).is_equal_to(["one shot"])
+
+
+def test_collect_raises_on_double_call() -> None:
+    """collect() raises RuntimeError when called a second time."""
+    resp = _make_response("")
+    result = AIStreamResult(
+        _chunks=iter(["alpha", " ", "beta"]),
+        _on_done=lambda: resp,
+    )
+
+    # First call succeeds
+    collected = result.collect()
+    assert_that(collected.content).is_equal_to("alpha beta")
+
+    # Second call raises
+    with pytest.raises(RuntimeError, match="already consumed"):
+        result.collect()
