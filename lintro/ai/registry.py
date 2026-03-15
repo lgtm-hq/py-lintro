@@ -4,48 +4,33 @@ Consolidates model pricing, default models, and API key environment
 variables into a frozen dataclass hierarchy keyed by an ``AIProvider``
 StrEnum.  Every piece of provider metadata lives here; downstream
 modules import what they need rather than maintaining parallel dicts.
+
+The ``AIProvider`` enum, ``ModelPricing``, and ``ProviderInfo`` dataclasses
+are defined in :mod:`lintro.ai.provider_enum` and
+:mod:`lintro.ai.provider_info` respectively, and re-exported here for
+backward compatibility.
 """
 
 from __future__ import annotations
 
 from collections.abc import Iterator
-from dataclasses import dataclass, field
-from enum import StrEnum, auto
+from dataclasses import dataclass
 
-# -- Enums -----------------------------------------------------------------
+from lintro.ai.provider_enum import AIProvider
+from lintro.ai.provider_info import ModelPricing, ProviderInfo
 
+# Re-export for backward compatibility — callers that do
+# ``from lintro.ai.registry import AIProvider`` continue to work.
+__all__ = [
+    "AIProvider",
+    "AIProviderRegistry",
+    "DEFAULT_PRICING",
+    "ModelPricing",
+    "PROVIDERS",
+    "ProviderInfo",
+]
 
-class AIProvider(StrEnum):
-    """Supported AI providers."""
-
-    ANTHROPIC = auto()
-    OPENAI = auto()
-
-
-# -- Data structures -------------------------------------------------------
-
-
-@dataclass(frozen=True)
-class ModelPricing:
-    """Per-model pricing in USD per 1 million tokens."""
-
-    input_per_million: float
-    output_per_million: float
-
-
-@dataclass(frozen=True)
-class ProviderInfo:
-    """Metadata for a single AI provider.
-
-    Attributes:
-        default_model: Model identifier used when the user omits one.
-        default_api_key_env: Environment variable checked for the API key.
-        models: Known models and their pricing.
-    """
-
-    default_model: str
-    default_api_key_env: str
-    models: dict[str, ModelPricing] = field(default_factory=dict)
+# -- Registry class --------------------------------------------------------
 
 
 @dataclass(frozen=True)
