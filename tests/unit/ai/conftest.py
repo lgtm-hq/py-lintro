@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import threading
 from dataclasses import dataclass
 from typing import Any
 
@@ -14,7 +15,7 @@ from lintro.parsers.base_issue import BaseIssue
 
 
 class MockAIProvider(BaseAIProvider):
-    """Mock AI provider for testing."""
+    """Thread-safe mock AI provider for testing."""
 
     def __init__(
         self,
@@ -39,6 +40,7 @@ class MockAIProvider(BaseAIProvider):
         self.calls: list[dict[str, Any]] = []
         self._available = available
         self._call_index = 0
+        self._lock = threading.Lock()
 
     def _create_client(self, *, api_key: str) -> Any:
         """Return a mock client."""
@@ -53,18 +55,19 @@ class MockAIProvider(BaseAIProvider):
         timeout: float = 60.0,
     ) -> AIResponse:
         """Return the next queued response or a default."""
-        self.calls.append(
-            {
-                "prompt": prompt,
-                "system": system,
-                "max_tokens": max_tokens,
-                "timeout": timeout,
-            },
-        )
-        if self._call_index < len(self.responses):
-            response = self.responses[self._call_index]
-            self._call_index += 1
-            return response
+        with self._lock:
+            self.calls.append(
+                {
+                    "prompt": prompt,
+                    "system": system,
+                    "max_tokens": max_tokens,
+                    "timeout": timeout,
+                },
+            )
+            if self._call_index < len(self.responses):
+                response = self.responses[self._call_index]
+                self._call_index += 1
+                return response
         return AIResponse(
             content="{}",
             model="mock-model",

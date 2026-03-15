@@ -271,7 +271,9 @@ def test_no_retry_on_auth_error(tmp_path):
 
 
 def test_max_retries_zero_means_no_retry(tmp_path):
-    """max_retries=0 means the provider is called exactly once."""
+    """max_retries=0 means no retry on transient error — only one call."""
+    from lintro.ai.exceptions import AIProviderError
+
     source = tmp_path / "test.py"
     source.write_text("x = 1\n")
 
@@ -282,8 +284,15 @@ def test_max_retries_zero_means_no_retry(tmp_path):
         message="test",
     )
 
-    provider = MockAIProvider()
-    generate_fixes(
+    call_count = {"n": 0}
+
+    class FailOnceProvider(MockAIProvider):
+        def complete(self, prompt, **kwargs):
+            call_count["n"] += 1
+            raise AIProviderError("transient failure")
+
+    provider = FailOnceProvider()
+    result = generate_fixes(
         [issue],
         provider,
         tool_name="ruff",
@@ -291,4 +300,5 @@ def test_max_retries_zero_means_no_retry(tmp_path):
         max_retries=0,
     )
 
-    assert_that(provider.calls).is_length(1)
+    assert_that(call_count["n"]).is_equal_to(1)
+    assert_that(result).is_empty()
