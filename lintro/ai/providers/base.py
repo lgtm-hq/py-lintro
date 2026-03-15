@@ -9,8 +9,6 @@ from __future__ import annotations
 
 import os
 from abc import ABC, abstractmethod
-from collections.abc import Callable, Iterator
-from dataclasses import dataclass, field
 from typing import Any
 
 from lintro.ai.exceptions import AIAuthenticationError, AINotAvailableError
@@ -19,77 +17,10 @@ from lintro.ai.providers.constants import (
     DEFAULT_PER_CALL_MAX_TOKENS,
     DEFAULT_TIMEOUT,
 )
-from lintro.ai.registry import AIProvider
+from lintro.ai.providers.response import AIResponse  # noqa: F401
+from lintro.ai.providers.stream_result import AIStreamResult  # noqa: F401
 
-
-@dataclass
-class AIResponse:
-    """Response from an AI provider API call.
-
-    Attributes:
-        content: The generated text content.
-        model: Model identifier that produced this response.
-        input_tokens: Number of input tokens consumed.
-        output_tokens: Number of output tokens generated.
-        cost_estimate: Estimated cost in USD for this call.
-        provider: Name of the provider (e.g., "anthropic", "openai").
-    """
-
-    content: str
-    model: str
-    input_tokens: int = field(default=0)
-    output_tokens: int = field(default=0)
-    cost_estimate: float = field(default=0.0)
-    provider: AIProvider | str = field(default="")
-
-
-@dataclass
-class AIStreamResult:
-    """Wraps a token iterator and provides finalized metadata after exhaustion."""
-
-    _chunks: Iterator[str]
-    _on_done: Callable[[], AIResponse]
-    _consumed: bool = field(default=False, init=False)
-
-    def __iter__(self) -> Iterator[str]:
-        """Yield text chunks from the underlying iterator."""
-        yield from self._chunks
-        self._consumed = True
-
-    def response(self) -> AIResponse:
-        """Return the finalized AIResponse.
-
-        Only valid after iteration completes.
-
-        Returns:
-            The finalized AIResponse with usage metadata.
-        """
-        return self._on_done()
-
-    def collect(self) -> AIResponse:
-        """Consume all tokens and return the complete AIResponse.
-
-        May only be called once — a second call raises ``RuntimeError``
-        because the underlying iterator has already been exhausted.
-
-        Returns:
-            AIResponse with concatenated content and usage metadata.
-
-        Raises:
-            RuntimeError: If the stream has already been consumed.
-        """
-        if self._consumed:
-            raise RuntimeError("AIStreamResult already consumed")
-        content = "".join(self)
-        resp = self.response()
-        return AIResponse(
-            content=content,
-            model=resp.model,
-            input_tokens=resp.input_tokens,
-            output_tokens=resp.output_tokens,
-            cost_estimate=resp.cost_estimate,
-            provider=resp.provider,
-        )
+__all__ = ["AIResponse", "AIStreamResult", "BaseAIProvider"]
 
 
 class BaseAIProvider(ABC):
