@@ -7,6 +7,7 @@ Authentication errors are never retried.
 
 from __future__ import annotations
 
+import threading
 from collections.abc import Callable
 from typing import TypeVar
 
@@ -18,6 +19,10 @@ from lintro.ai.exceptions import (
     AIRateLimitError,
 )
 from lintro.ai.providers.base import AIResponse, AIStreamResult, BaseAIProvider
+
+# Serializes model_name mutations across concurrent fallback calls
+# sharing the same provider instance.
+_model_lock = threading.Lock()
 
 _T = TypeVar("_T")
 
@@ -67,21 +72,25 @@ def _with_fallback(
         AIAuthenticationError: Immediately on authentication failure.
         AIProviderError: If the primary model and all fallbacks fail.
         AIRateLimitError: If the primary model and all fallbacks fail
-            with rate-limit errors (last error is re-raised).
+            with rate-limit errors.
     """
     models_to_try: list[str | None] = [None]  # None = keep current model
     if fallback_models:
         models_to_try.extend(fallback_models)
 
-    original_model = provider.model_name
     last_error: Exception | None = None
+
+    with _model_lock:
+        original_model = provider.model_name
 
     try:
         for idx, model in enumerate(models_to_try):
             if model is not None:
-                provider.model_name = model
+                with _model_lock:
+                    provider.model_name = model
 
-            label = provider.model_name
+            with _model_lock:
+                label = provider.model_name
             try:
                 logger.debug(
                     "{}: trying model '{}' (attempt {}/{})",
@@ -113,14 +122,15 @@ def _with_fallback(
                         exc,
                     )
     finally:
-        provider.model_name = original_model
+        with _model_lock:
+            provider.model_name = original_model
 
-    # All models exhausted — raise the last error.
+    # All models exhausted — re-raise preserving original traceback.
     if isinstance(last_error, AIRateLimitError):
         raise AIRateLimitError(str(last_error)) from last_error
-    raise AIProviderError(
-        str(last_error) if last_error else f"{label_prefix} exhausted",
-    ) from last_error
+    if isinstance(last_error, AIProviderError):
+        raise AIProviderError(str(last_error)) from last_error
+    raise AIProviderError(f"{label_prefix} exhausted")
 
 
 def complete_with_fallback(

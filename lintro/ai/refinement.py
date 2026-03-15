@@ -146,7 +146,8 @@ def refine_unverified_fixes(
             continue
 
         # Validate the file path is within the workspace root
-        if resolve_workspace_file(suggestion.file, workspace_root) is None:
+        resolved_path = resolve_workspace_file(suggestion.file, workspace_root)
+        if resolved_path is None:
             logger.debug(
                 f"Refinement: file {suggestion.file} is outside "
                 f"workspace root {workspace_root}, skipping",
@@ -154,7 +155,7 @@ def refine_unverified_fixes(
             continue
 
         # Step 2: Read current file content and build refinement prompt
-        file_content = read_file_safely(suggestion.file)
+        file_content = read_file_safely(str(resolved_path))
         if file_content is None:
             continue
 
@@ -174,8 +175,9 @@ def refine_unverified_fixes(
         error_detail = ""
         code_tag = f"[{suggestion.code}]"
         line_tag = f":{suggestion.line} "
+        file_tag = suggestion.file
         for detail in validation.details:
-            if code_tag in detail and line_tag in detail:
+            if code_tag in detail and line_tag in detail and file_tag in detail:
                 error_detail = detail
                 break
 

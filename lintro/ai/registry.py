@@ -76,7 +76,7 @@ class AIProviderRegistry:
     @property
     def model_pricing(self) -> dict[str, ModelPricing]:
         """Flat mapping of every known model to its pricing."""
-        return self._cached_model_pricing
+        return dict(self._cached_model_pricing)
 
     @property
     def default_models(self) -> dict[AIProvider, str]:

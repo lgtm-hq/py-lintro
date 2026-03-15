@@ -87,6 +87,7 @@ def run_ai_enhancement(
                 is_json=is_json,
                 ai_fix=ai_fix,
                 workspace_root=workspace_root,
+                output_format=output_format,
             )
         elif action == Action.FIX:
             return _run_ai_fix(
@@ -124,6 +125,7 @@ def _run_ai_check(
     is_json: bool,
     ai_fix: bool,
     workspace_root: Path,
+    output_format: str = "auto",
 ) -> AIResult:
     """Run AI summary and optional AI fix suggestions for check action."""
     budget = CostBudget(max_cost_usd=ai_config.max_cost_usd)
@@ -141,7 +143,11 @@ def _run_ai_check(
         fallback_models=ai_config.fallback_models,
     )
     if summary and not is_json:
-        output = render_summary(summary, show_cost=ai_config.show_cost_estimate)
+        output = render_summary(
+            summary,
+            show_cost=ai_config.show_cost_estimate,
+            output_format=output_format,
+        )
         if output:
             logger.console_output(output)
         # Emit GitHub Actions annotations for summary insights
@@ -162,6 +168,7 @@ def _run_ai_check(
             summary=summary,
             logger=logger,
             workspace_root=workspace_root,
+            is_json=is_json,
         )
 
     if not ai_fix:
@@ -351,6 +358,7 @@ def _post_pr_comments(
     suggestions: list[AIFixSuggestion] | None = None,
     logger: ThreadSafeConsoleLogger,
     workspace_root: Path | None = None,
+    is_json: bool = False,
 ) -> None:
     """Post AI findings as GitHub PR review comments.
 
@@ -361,6 +369,7 @@ def _post_pr_comments(
         suggestions: Optional fix suggestions.
         logger: Console logger.
         workspace_root: Workspace root for repo-relative paths.
+        is_json: Whether output is JSON/SARIF (suppresses plain text).
     """
     reporter = GitHubPRReporter(workspace_root=workspace_root)
     if not reporter.is_available():
@@ -374,8 +383,10 @@ def _post_pr_comments(
     )
     if success:
         loguru_logger.debug("GitHub PR review comments posted successfully")
-    else:
+    elif not is_json:
         logger.console_output("  AI: failed to post some PR review comments")
+    else:
+        loguru_logger.debug("GitHub PR review comments partially failed")
 
 
 def _log_fix_limit_message(

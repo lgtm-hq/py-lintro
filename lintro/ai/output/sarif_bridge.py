@@ -82,14 +82,26 @@ def summary_from_results(
         raw_summary: dict[str, Any] | None = result.ai_metadata.get("summary")
         if not isinstance(raw_summary, dict):
             continue
+        try:
+            in_tok = int(raw_summary.get("input_tokens", 0))
+        except (TypeError, ValueError):
+            in_tok = 0
+        try:
+            out_tok = int(raw_summary.get("output_tokens", 0))
+        except (TypeError, ValueError):
+            out_tok = 0
+        try:
+            cost = float(raw_summary.get("cost_estimate", 0.0))
+        except (TypeError, ValueError):
+            cost = 0.0
         return AISummary(
-            overview=raw_summary.get("overview", ""),
+            overview=str(raw_summary.get("overview", "")),
             key_patterns=raw_summary.get("key_patterns", []),
             priority_actions=raw_summary.get("priority_actions", []),
             triage_suggestions=raw_summary.get("triage_suggestions", []),
-            estimated_effort=raw_summary.get("estimated_effort", ""),
-            input_tokens=raw_summary.get("input_tokens", 0),
-            output_tokens=raw_summary.get("output_tokens", 0),
-            cost_estimate=raw_summary.get("cost_estimate", 0.0),
+            estimated_effort=str(raw_summary.get("estimated_effort", "")),
+            input_tokens=in_tok,
+            output_tokens=out_tok,
+            cost_estimate=cost,
         )
     return None

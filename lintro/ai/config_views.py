@@ -23,7 +23,7 @@ class AIProviderConfig:
     api_key_env: str | None
     api_base_url: str | None
     api_region: str | None
-    fallback_models: list[str]
+    fallback_models: tuple[str, ...]
     max_tokens: int
     max_retries: int
     api_timeout: float
@@ -65,7 +65,7 @@ class AIOutputConfig:
     fail_on_unfixed: bool
     min_confidence: ConfidenceLevel
     sanitize_mode: SanitizeMode
-    include_paths: list[str]
-    exclude_paths: list[str]
-    include_rules: list[str]
-    exclude_rules: list[str]
+    include_paths: tuple[str, ...]
+    exclude_paths: tuple[str, ...]
+    include_rules: tuple[str, ...]
+    exclude_rules: tuple[str, ...]

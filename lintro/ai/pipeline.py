@@ -475,6 +475,10 @@ def run_fix_pipeline(
         if validation and (validation.verified or validation.unverified):
             applied_for_summary = validation.verified
 
+        # When fixes were applied, by_tool already holds de-duplicated
+        # per-tool results (one ToolResult per tool).  When no fixes were
+        # applied, we derive unique results from the original fix_issues
+        # because by_tool may be empty or stale.
         if applied_suggestions:
             unique_results: list[ToolResult] | None = [
                 result for result, _ in by_tool.values()

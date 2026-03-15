@@ -61,8 +61,13 @@ def save_undo_patch(
     # Atomic write: temp file + os.replace to avoid partial writes
     fd, tmp = tempfile.mkstemp(dir=undo_dir, suffix=".tmp")
     try:
-        with os.fdopen(fd, "w", encoding="utf-8") as f:
-            f.write("".join(patch_lines))
+        try:
+            fobj = os.fdopen(fd, "w", encoding="utf-8")
+        except BaseException:
+            os.close(fd)
+            raise
+        with fobj:
+            fobj.write("".join(patch_lines))
         Path(tmp).replace(patch_path)
     except BaseException:
         Path(tmp).unlink(missing_ok=True)
