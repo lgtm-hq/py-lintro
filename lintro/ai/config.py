@@ -2,96 +2,95 @@
 
 Defines the AIConfig Pydantic model used in the ``ai:`` section of
 .lintro-config.yaml. All AI features are opt-in and disabled by default.
+
+Fields are logically grouped into three areas:
+
+* **Provider** — model selection, API endpoints, authentication, retry
+* **Budget** — cost caps, issue limits, parallelism, caching
+* **Output** — display, verbosity, PR integration, apply behaviour
+
+The flat attribute API (``config.provider``, ``config.max_tokens``, …)
+is the primary interface; the grouping is for documentation only.
 """
 
 from __future__ import annotations
+
+from dataclasses import dataclass
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from lintro.ai.enums import ConfidenceLevel, SanitizeMode
 from lintro.ai.registry import AIProvider
 
+# ---------------------------------------------------------------------------
+# Grouped views (read-only snapshots for callers that want structured access)
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class AIProviderConfig:
+    """Read-only view of provider-related AI settings."""
+
+    provider: AIProvider
+    model: str | None
+    api_key_env: str | None
+    api_base_url: str | None
+    api_region: str | None
+    fallback_models: list[str]
+    max_tokens: int
+    max_retries: int
+    api_timeout: float
+    retry_base_delay: float
+    retry_max_delay: float
+    retry_backoff_factor: float
+
+
+@dataclass(frozen=True)
+class AIBudgetConfig:
+    """Read-only view of budget and limit settings."""
+
+    max_fix_issues: int
+    max_parallel_calls: int
+    max_cost_usd: float | None
+    max_prompt_tokens: int
+    max_refinement_attempts: int
+    enable_cache: bool
+    cache_ttl: int
+    cache_max_entries: int
+    context_lines: int
+    fix_search_radius: int
+
+
+@dataclass(frozen=True)
+class AIOutputConfig:
+    """Read-only view of output and display settings."""
+
+    show_cost_estimate: bool
+    verbose: bool
+    stream: bool
+    dry_run: bool
+    github_pr_comments: bool
+    validate_after_group: bool
+    auto_apply: bool
+    auto_apply_safe_fixes: bool
+    default_fix: bool
+    fail_on_ai_error: bool
+    fail_on_unfixed: bool
+    min_confidence: ConfidenceLevel
+    sanitize_mode: SanitizeMode
+    include_paths: list[str]
+    exclude_paths: list[str]
+    include_rules: list[str]
+    exclude_rules: list[str]
+
 
 class AIConfig(BaseModel):
     """Configuration for AI-powered features.
 
-    Attributes:
-        model_config: Pydantic model configuration for mutability and
-            extra-field handling.
-        enabled: Whether AI features are enabled globally.
-        provider: AI provider to use ("anthropic" or "openai").
-        model: Model identifier. None uses the provider's default.
-        api_key_env: Custom environment variable name for the API key.
-            Defaults to provider-specific env var (ANTHROPIC_API_KEY,
-            OPENAI_API_KEY).
-        api_base_url: Custom API base URL. Enables Ollama, vLLM,
-            Azure OpenAI, or any OpenAI-compatible endpoint.
-        api_region: Provider region hint for data residency. Used
-            with api_base_url for region-specific endpoints.
-        fallback_models: Ordered list of fallback model identifiers.
-            On rate-limit errors, the orchestrator retries with each
-            model in sequence before giving up.
-        default_fix: Whether to enable interactive AI fix suggestions
-            by default in ``chk``. Equivalent to always passing
-            ``--fix``. Defaults to False.
-        auto_apply: Whether to automatically apply AI-generated fixes
-            without user confirmation. Defaults to False for safety.
-        auto_apply_safe_fixes: Whether safe style-only AI fixes should
-            be auto-applied in non-interactive mode. Defaults to True.
-        max_tokens: Maximum tokens per AI request.
-        max_fix_issues: Maximum number of issues to generate AI fixes
-            for per run. Set higher to analyze more issues at the cost
-            of additional API calls.
-        max_parallel_calls: Maximum concurrent API calls when
-            generating fixes in parallel.
-        max_retries: Maximum number of retries for transient AI API
-            failures (rate limits, network errors). 0 disables retries.
-        api_timeout: Timeout in seconds for each AI API call.
-        validate_after_group: Whether to run validation immediately
-            after each accepted group in interactive review.
-        show_cost_estimate: Whether to display estimated cost before
-            and after AI operations.
-        context_lines: Number of lines of code context to include
-            before and after the issue line when generating fixes.
-        fix_search_radius: Number of lines to search above and below
-            the target line when applying a fix.
-        retry_base_delay: Initial delay in seconds before the first
-            retry attempt.
-        retry_max_delay: Maximum delay in seconds between retries.
-        retry_backoff_factor: Multiplier applied to delay after each
-            retry attempt.
-        enable_cache: Whether to enable on-disk suggestion caching for
-            deduplication across runs. Defaults to False.
-        cache_ttl: Time-to-live in seconds for cached suggestions.
-            Defaults to 3600 (1 hour). Minimum 60.
-        cache_max_entries: Maximum number of cache entries to keep.
-            When exceeded, least recently used entries are evicted.
-            Defaults to 1000.
-        max_refinement_attempts: Maximum number of refinement rounds
-            for unverified fixes. 0 disables refinement.
-        fail_on_ai_error: Whether to re-raise AI exceptions instead of
-            logging and continuing gracefully.
-        fail_on_unfixed: When True, unfixable or failed AI fixes
-            contribute to a non-zero exit code.
-        verbose: Whether to emit detailed progress and diagnostic
-            messages for AI operations.
-        include_paths: Glob patterns for paths to include in AI processing.
-        exclude_paths: Glob patterns for paths to exclude from AI processing.
-        include_rules: Glob patterns for rules to include in AI processing.
-        exclude_rules: Glob patterns for rules to exclude from AI processing.
-        min_confidence: Minimum confidence level for AI fix suggestions.
-            One of 'low', 'medium', 'high'.
-        github_pr_comments: Post AI summaries and fix suggestions as
-            inline PR review comments when running in GitHub Actions.
-        dry_run: Display AI fix suggestions without applying them.
-        max_cost_usd: Maximum total cost in USD per AI session.
-            None disables the limit.
-        max_prompt_tokens: Token budget for fix prompts before context
-            trimming.
-        stream: Stream AI responses token-by-token in interactive mode.
-        sanitize_mode: Controls prompt injection detection behavior.
-            'warn' logs detections, 'block' skips affected files,
-            'off' disables detection.
+    All fields are accessible directly on the model instance
+    (e.g. ``config.provider``).  For structured access, use the
+    ``provider_config``, ``budget_config``, and ``output_config``
+    properties which return frozen dataclass snapshots.
     """
 
     model_config = ConfigDict(frozen=False, extra="forbid")
@@ -215,3 +214,62 @@ class AIConfig(BaseModel):
             )
             raise ValueError(msg)
         return self
+
+    # -- Grouped views -----------------------------------------------------
+
+    @property
+    def provider_config(self) -> AIProviderConfig:
+        """Return a frozen snapshot of provider-related settings."""
+        return AIProviderConfig(
+            provider=self.provider,
+            model=self.model,
+            api_key_env=self.api_key_env,
+            api_base_url=self.api_base_url,
+            api_region=self.api_region,
+            fallback_models=list(self.fallback_models),
+            max_tokens=self.max_tokens,
+            max_retries=self.max_retries,
+            api_timeout=self.api_timeout,
+            retry_base_delay=self.retry_base_delay,
+            retry_max_delay=self.retry_max_delay,
+            retry_backoff_factor=self.retry_backoff_factor,
+        )
+
+    @property
+    def budget_config(self) -> AIBudgetConfig:
+        """Return a frozen snapshot of budget and limit settings."""
+        return AIBudgetConfig(
+            max_fix_issues=self.max_fix_issues,
+            max_parallel_calls=self.max_parallel_calls,
+            max_cost_usd=self.max_cost_usd,
+            max_prompt_tokens=self.max_prompt_tokens,
+            max_refinement_attempts=self.max_refinement_attempts,
+            enable_cache=self.enable_cache,
+            cache_ttl=self.cache_ttl,
+            cache_max_entries=self.cache_max_entries,
+            context_lines=self.context_lines,
+            fix_search_radius=self.fix_search_radius,
+        )
+
+    @property
+    def output_config(self) -> AIOutputConfig:
+        """Return a frozen snapshot of output and display settings."""
+        return AIOutputConfig(
+            show_cost_estimate=self.show_cost_estimate,
+            verbose=self.verbose,
+            stream=self.stream,
+            dry_run=self.dry_run,
+            github_pr_comments=self.github_pr_comments,
+            validate_after_group=self.validate_after_group,
+            auto_apply=self.auto_apply,
+            auto_apply_safe_fixes=self.auto_apply_safe_fixes,
+            default_fix=self.default_fix,
+            fail_on_ai_error=self.fail_on_ai_error,
+            fail_on_unfixed=self.fail_on_unfixed,
+            min_confidence=self.min_confidence,
+            sanitize_mode=self.sanitize_mode,
+            include_paths=list(self.include_paths),
+            exclude_paths=list(self.exclude_paths),
+            include_rules=list(self.include_rules),
+            exclude_rules=list(self.exclude_rules),
+        )
