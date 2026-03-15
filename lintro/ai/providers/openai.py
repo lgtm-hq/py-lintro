@@ -7,6 +7,7 @@ Requires the ``openai`` package (installed via ``lintro[ai]``).
 from __future__ import annotations
 
 from collections.abc import Iterator
+from contextlib import contextmanager
 from typing import Any
 
 from loguru import logger
@@ -32,6 +33,31 @@ try:
     _has_openai = True
 except ImportError:
     pass
+
+
+@contextmanager
+def _map_errors() -> Iterator[None]:
+    """Map OpenAI SDK exceptions to AI exceptions.
+
+    Catches ``openai.AuthenticationError``, ``openai.RateLimitError``,
+    and ``openai.OpenAIError`` and re-raises them as the corresponding
+    AI exception types.
+    """
+    try:
+        yield
+    except openai.AuthenticationError as e:
+        raise AIAuthenticationError(
+            f"OpenAI authentication failed: {e}",
+        ) from e
+    except openai.RateLimitError as e:
+        raise AIRateLimitError(
+            f"OpenAI rate limit exceeded: {e}",
+        ) from e
+    except openai.OpenAIError as e:
+        logger.debug(f"OpenAI API error: {e}")
+        raise AIProviderError(
+            f"OpenAI API error: {e}",
+        ) from e
 
 DEFAULT_MODEL = PROVIDERS.openai.default_model
 DEFAULT_API_KEY_ENV = PROVIDERS.openai.default_api_key_env
@@ -113,7 +139,7 @@ class OpenAIProvider(BaseAIProvider):
         # provider-level cap set at init time.
         effective_max = min(max_tokens, self._max_tokens)
 
-        try:
+        with _map_errors():
             messages: list[dict[str, str]] = []
             if system:
                 messages.append({"role": "system", "content": system})
@@ -144,20 +170,6 @@ class OpenAIProvider(BaseAIProvider):
                 cost_estimate=cost,
                 provider=AIProvider.OPENAI,
             )
-
-        except openai.AuthenticationError as e:
-            raise AIAuthenticationError(
-                f"OpenAI authentication failed: {e}",
-            ) from e
-        except openai.RateLimitError as e:
-            raise AIRateLimitError(
-                f"OpenAI rate limit exceeded: {e}",
-            ) from e
-        except openai.OpenAIError as e:
-            logger.debug(f"OpenAI API error: {e}")
-            raise AIProviderError(
-                f"OpenAI API error: {e}",
-            ) from e
 
     def stream_complete(
         self,
@@ -194,7 +206,7 @@ class OpenAIProvider(BaseAIProvider):
         final_response: list[AIResponse] = []
 
         def _generate() -> Iterator[str]:
-            try:
+            with _map_errors():
                 stream = client.chat.completions.create(
                     model=self._model,
                     messages=messages,
@@ -225,19 +237,6 @@ class OpenAIProvider(BaseAIProvider):
                         provider=AIProvider.OPENAI,
                     ),
                 )
-            except openai.AuthenticationError as e:
-                raise AIAuthenticationError(
-                    f"OpenAI authentication failed: {e}",
-                ) from e
-            except openai.RateLimitError as e:
-                raise AIRateLimitError(
-                    f"OpenAI rate limit exceeded: {e}",
-                ) from e
-            except openai.OpenAIError as e:
-                logger.debug(f"OpenAI stream API error: {e}")
-                raise AIProviderError(
-                    f"OpenAI API error: {e}",
-                ) from e
 
         def _on_done() -> AIResponse:
             if not final_response:

@@ -7,6 +7,7 @@ Requires the ``anthropic`` package (installed via ``lintro[ai]``).
 from __future__ import annotations
 
 from collections.abc import Iterator
+from contextlib import contextmanager
 from typing import Any
 
 from loguru import logger
@@ -32,6 +33,31 @@ try:
     _has_anthropic = True
 except ImportError:
     pass
+
+
+@contextmanager
+def _map_errors() -> Iterator[None]:
+    """Map Anthropic SDK exceptions to AI exceptions.
+
+    Catches ``anthropic.AuthenticationError``, ``anthropic.RateLimitError``,
+    and ``anthropic.AnthropicError`` and re-raises them as the corresponding
+    AI exception types.
+    """
+    try:
+        yield
+    except anthropic.AuthenticationError as e:
+        raise AIAuthenticationError(
+            f"Anthropic authentication failed: {e}",
+        ) from e
+    except anthropic.RateLimitError as e:
+        raise AIRateLimitError(
+            f"Anthropic rate limit exceeded: {e}",
+        ) from e
+    except anthropic.AnthropicError as e:
+        logger.debug(f"Anthropic API error: {e}")
+        raise AIProviderError(
+            f"Anthropic API error: {e}",
+        ) from e
 
 DEFAULT_MODEL = PROVIDERS.anthropic.default_model
 DEFAULT_API_KEY_ENV = PROVIDERS.anthropic.default_api_key_env
@@ -113,7 +139,7 @@ class AnthropicProvider(BaseAIProvider):
         # provider-level cap set at init time.
         effective_max = min(max_tokens, self._max_tokens)
 
-        try:
+        with _map_errors():
             kwargs: dict[str, Any] = {
                 "model": self._model,
                 "max_tokens": effective_max,
@@ -142,20 +168,6 @@ class AnthropicProvider(BaseAIProvider):
                 cost_estimate=cost,
                 provider=AIProvider.ANTHROPIC,
             )
-
-        except anthropic.AuthenticationError as e:
-            raise AIAuthenticationError(
-                f"Anthropic authentication failed: {e}",
-            ) from e
-        except anthropic.RateLimitError as e:
-            raise AIRateLimitError(
-                f"Anthropic rate limit exceeded: {e}",
-            ) from e
-        except anthropic.AnthropicError as e:
-            logger.debug(f"Anthropic API error: {e}")
-            raise AIProviderError(
-                f"Anthropic API error: {e}",
-            ) from e
 
     def stream_complete(
         self,
@@ -196,7 +208,7 @@ class AnthropicProvider(BaseAIProvider):
         final_response: list[AIResponse] = []
 
         def _generate() -> Iterator[str]:
-            try:
+            with _map_errors():
                 with client.messages.stream(**kwargs) as stream:
                     yield from stream.text_stream
                     final_message = stream.get_final_message()
@@ -214,19 +226,6 @@ class AnthropicProvider(BaseAIProvider):
                         provider=AIProvider.ANTHROPIC,
                     ),
                 )
-            except anthropic.AuthenticationError as e:
-                raise AIAuthenticationError(
-                    f"Anthropic authentication failed: {e}",
-                ) from e
-            except anthropic.RateLimitError as e:
-                raise AIRateLimitError(
-                    f"Anthropic rate limit exceeded: {e}",
-                ) from e
-            except anthropic.AnthropicError as e:
-                logger.debug(f"Anthropic stream API error: {e}")
-                raise AIProviderError(
-                    f"Anthropic API error: {e}",
-                ) from e
 
         def _on_done() -> AIResponse:
             if not final_response:
