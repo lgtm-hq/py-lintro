@@ -186,20 +186,20 @@ class OpenAIProvider(BaseAIProvider):
         client = self._get_client()
         effective_max = min(max_tokens, self._max_tokens)
 
-        try:
-            messages: list[dict[str, str]] = []
-            if system:
-                messages.append({"role": "system", "content": system})
-            messages.append({"role": "user", "content": prompt})
+        messages: list[dict[str, str]] = []
+        if system:
+            messages.append({"role": "system", "content": system})
+        messages.append({"role": "user", "content": prompt})
 
-            logger.debug(
-                f"OpenAI stream request: model={self._model}, "
-                f"max_tokens={effective_max}",
-            )
+        logger.debug(
+            f"OpenAI stream request: model={self._model}, "
+            f"max_tokens={effective_max}",
+        )
 
-            final_response: list[AIResponse] = []
+        final_response: list[AIResponse] = []
 
-            def _generate() -> Iterator[str]:
+        def _generate() -> Iterator[str]:
+            try:
                 stream = client.chat.completions.create(
                     model=self._model,
                     messages=messages,
@@ -230,22 +230,21 @@ class OpenAIProvider(BaseAIProvider):
                         provider=AIProvider.OPENAI,
                     ),
                 )
+            except openai.AuthenticationError as e:
+                raise AIAuthenticationError(
+                    f"OpenAI authentication failed: {e}",
+                ) from e
+            except openai.RateLimitError as e:
+                raise AIRateLimitError(
+                    f"OpenAI rate limit exceeded: {e}",
+                ) from e
+            except openai.OpenAIError as e:
+                logger.debug(f"OpenAI stream API error: {e}")
+                raise AIProviderError(
+                    f"OpenAI API error: {e}",
+                ) from e
 
-            return AIStreamResult(
-                _chunks=_generate(),
-                _on_done=lambda: final_response[0],
-            )
-
-        except openai.AuthenticationError as e:
-            raise AIAuthenticationError(
-                f"OpenAI authentication failed: {e}",
-            ) from e
-        except openai.RateLimitError as e:
-            raise AIRateLimitError(
-                f"OpenAI rate limit exceeded: {e}",
-            ) from e
-        except openai.OpenAIError as e:
-            logger.debug(f"OpenAI stream API error: {e}")
-            raise AIProviderError(
-                f"OpenAI API error: {e}",
-            ) from e
+        return AIStreamResult(
+            _chunks=_generate(),
+            _on_done=lambda: final_response[0],
+        )

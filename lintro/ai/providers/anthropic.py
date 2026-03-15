@@ -184,24 +184,24 @@ class AnthropicProvider(BaseAIProvider):
         client = self._get_client()
         effective_max = min(max_tokens, self._max_tokens)
 
-        try:
-            kwargs: dict[str, Any] = {
-                "model": self._model,
-                "max_tokens": effective_max,
-                "messages": [{"role": "user", "content": prompt}],
-                "timeout": timeout,
-            }
-            if system:
-                kwargs["system"] = system
+        kwargs: dict[str, Any] = {
+            "model": self._model,
+            "max_tokens": effective_max,
+            "messages": [{"role": "user", "content": prompt}],
+            "timeout": timeout,
+        }
+        if system:
+            kwargs["system"] = system
 
-            logger.debug(
-                f"Anthropic stream request: model={self._model}, "
-                f"max_tokens={effective_max}",
-            )
+        logger.debug(
+            f"Anthropic stream request: model={self._model}, "
+            f"max_tokens={effective_max}",
+        )
 
-            final_response: list[AIResponse] = []
+        final_response: list[AIResponse] = []
 
-            def _generate() -> Iterator[str]:
+        def _generate() -> Iterator[str]:
+            try:
                 with client.messages.stream(**kwargs) as stream:
                     yield from stream.text_stream
                     final_message = stream.get_final_message()
@@ -219,22 +219,21 @@ class AnthropicProvider(BaseAIProvider):
                         provider=AIProvider.ANTHROPIC,
                     ),
                 )
+            except anthropic.AuthenticationError as e:
+                raise AIAuthenticationError(
+                    f"Anthropic authentication failed: {e}",
+                ) from e
+            except anthropic.RateLimitError as e:
+                raise AIRateLimitError(
+                    f"Anthropic rate limit exceeded: {e}",
+                ) from e
+            except anthropic.AnthropicError as e:
+                logger.debug(f"Anthropic stream API error: {e}")
+                raise AIProviderError(
+                    f"Anthropic API error: {e}",
+                ) from e
 
-            return AIStreamResult(
-                _chunks=_generate(),
-                _on_done=lambda: final_response[0],
-            )
-
-        except anthropic.AuthenticationError as e:
-            raise AIAuthenticationError(
-                f"Anthropic authentication failed: {e}",
-            ) from e
-        except anthropic.RateLimitError as e:
-            raise AIRateLimitError(
-                f"Anthropic rate limit exceeded: {e}",
-            ) from e
-        except anthropic.AnthropicError as e:
-            logger.debug(f"Anthropic stream API error: {e}")
-            raise AIProviderError(
-                f"Anthropic API error: {e}",
-            ) from e
+        return AIStreamResult(
+            _chunks=_generate(),
+            _on_done=lambda: final_response[0],
+        )

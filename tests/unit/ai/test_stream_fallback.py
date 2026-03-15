@@ -156,10 +156,11 @@ def test_stream_fallback_restores_model_name() -> None:
     provider = _SuccessProvider("p1")
     original_model = provider.model_name
 
-    stream_complete_with_fallback(
+    result = stream_complete_with_fallback(
         provider,
         "prompt",
         fallback_models=["other-model"],
     )
+    list(result)  # consume stream so fallback logic completes
 
     assert_that(provider.model_name).is_equal_to(original_model)

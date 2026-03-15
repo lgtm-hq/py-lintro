@@ -30,10 +30,9 @@ def suggestions_from_results(
     for result in all_results:
         if result.ai_metadata is None:
             continue
-        raw_suggestions: list[dict[str, Any]] = result.ai_metadata.get(
-            "fix_suggestions",
-            [],
-        )
+        raw_suggestions = result.ai_metadata.get("fix_suggestions", [])
+        if not isinstance(raw_suggestions, list):
+            continue
         for raw in raw_suggestions:
             if not isinstance(raw, dict):
                 continue
