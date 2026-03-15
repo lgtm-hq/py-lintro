@@ -41,9 +41,10 @@ dependencies = [
   "tabulate>=0.9.0",
   "yamllint>=1.37.1",
   "httpx>=0.28.1",
+  "PyYAML>=6.0.2",
   "defusedxml>=0.7.1",
   "ruff>=0.14.10",
-  "black>=26.1.0",
+  "black>=26.3.1",
   "bandit>=1.9.2",
   "mypy>=1.19.1",
   "pydoclint>=0.8.3",
@@ -81,6 +82,7 @@ test = [
 ]
 typing = ["types-setuptools>=80.9.0.20251223", "types-tabulate>=0.9.0.20241207"]
 tools = ["semgrep>=1.151.0", "sqlfluff>=4.0.0"]
+ai = ["anthropic>=0.39.0", "openai>=1.50.0"]
 
 [project.scripts]
 lintro = "lintro.cli:main"
@@ -102,7 +104,7 @@ dev = [
   "assertpy>=1.1",
   "pytest-mock>=3.15.1",
   "bandit>=1.9.2",
-  "black>=26.1.0",
+  "black>=26.3.1",
   "ruff>=0.14.10",
   "yamllint>=1.37.1",
   "pytest-timeout>=2.4.0",
@@ -168,6 +170,13 @@ packages = [
   "lintro.utils.environment",
   "lintro.utils.execution",
   "lintro.utils.output",
+  "lintro.ai",
+  "lintro.ai.display",
+  "lintro.ai.enums",
+  "lintro.ai.integrations",
+  "lintro.ai.output",
+  "lintro.ai.prompts",
+  "lintro.ai.providers",
 ]
 
 [tool.setuptools.package-data]
@@ -212,7 +221,6 @@ preview = true
 explicit-preview-rules = true
 
 [tool.ruff.lint.per-file-ignores]
-"tests/**/*.py" = ["E501", "SIM117", "SIM105"]
 ".lintro/**/*.py" = ["E501"]
 "**/__init__.py" = ["D104"]
 "test_samples/**/*.py" = ["ALL"]
@@ -222,7 +230,7 @@ convention = "google"
 
 [tool.black]
 line-length = 88
-target-version = ["py311", "py312", "py313"]
+target-version = ["py311", "py312", "py313", "py314"]
 exclude = "/(\n    \\.git\n    | \\.venv\n    | venv\n    | build\n    | dist\n    | __pycache__\n    | test_samples\n    | node_modules\n)/\n"
 
 [tool.bandit]

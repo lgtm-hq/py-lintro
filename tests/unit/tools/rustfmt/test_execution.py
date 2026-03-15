@@ -55,16 +55,17 @@ def test_check_with_mocked_subprocess_success(
     test_file.parent.mkdir(parents=True, exist_ok=True)
     test_file.write_text("fn main() {}\n")
 
-    with patch(
-        "lintro.plugins.execution_preparation.verify_tool_version",
-        return_value=None,
-    ):
-        with patch.object(
-            rustfmt_plugin,
-            "_run_subprocess",
+    with (
+        patch(
+            "lintro.plugins.execution_preparation.verify_tool_version",
+            return_value=None,
+        ),
+        patch(
+            "lintro.tools.definitions.rustfmt.run_subprocess_with_timeout",
             return_value=(True, ""),
-        ):
-            result = rustfmt_plugin.check([str(test_file)], {})
+        ),
+    ):
+        result = rustfmt_plugin.check([str(test_file)], {})
 
     assert_that(result.success).is_true()
     assert_that(result.issues_count).is_equal_to(0)
@@ -95,16 +96,17 @@ def test_check_with_mocked_subprocess_issues(
         "+}"
     )
 
-    with patch(
-        "lintro.plugins.execution_preparation.verify_tool_version",
-        return_value=None,
-    ):
-        with patch.object(
-            rustfmt_plugin,
-            "_run_subprocess",
+    with (
+        patch(
+            "lintro.plugins.execution_preparation.verify_tool_version",
+            return_value=None,
+        ),
+        patch(
+            "lintro.tools.definitions.rustfmt.run_subprocess_with_timeout",
             return_value=(False, mock_output),
-        ):
-            result = rustfmt_plugin.check([str(test_file)], {})
+        ),
+    ):
+        result = rustfmt_plugin.check([str(test_file)], {})
 
     assert_that(result.success).is_false()
     assert_that(result.issues_count).is_greater_than(0)
@@ -185,6 +187,7 @@ def test_fix_with_mocked_subprocess_success(
         cmd: list[str],
         timeout: int,
         cwd: str | None = None,
+        **_kwargs: object,
     ) -> tuple[bool, str]:
         """Mock subprocess that returns diff on check, success on fix.
 
@@ -192,6 +195,7 @@ def test_fix_with_mocked_subprocess_success(
             cmd: Command list.
             timeout: Timeout in seconds.
             cwd: Working directory.
+            **_kwargs: Absorb extra keyword arguments (e.g. tool).
 
         Returns:
             Tuple of (success, output).
@@ -208,12 +212,17 @@ def test_fix_with_mocked_subprocess_success(
             # Verification - no issues
             return (True, "")
 
-    with patch(
-        "lintro.plugins.execution_preparation.verify_tool_version",
-        return_value=None,
+    with (
+        patch(
+            "lintro.plugins.execution_preparation.verify_tool_version",
+            return_value=None,
+        ),
+        patch(
+            "lintro.tools.definitions.rustfmt.run_subprocess_with_timeout",
+            side_effect=mock_run,
+        ),
     ):
-        with patch.object(rustfmt_plugin, "_run_subprocess", side_effect=mock_run):
-            result = rustfmt_plugin.fix([str(test_file)], {})
+        result = rustfmt_plugin.fix([str(test_file)], {})
 
     assert_that(result.success).is_true()
     assert_that(result.fixed_issues_count).is_equal_to(1)
@@ -238,16 +247,17 @@ def test_fix_with_nothing_to_fix(
     test_file.parent.mkdir(parents=True, exist_ok=True)
     test_file.write_text("fn main() {}\n")
 
-    with patch(
-        "lintro.plugins.execution_preparation.verify_tool_version",
-        return_value=None,
-    ):
-        with patch.object(
-            rustfmt_plugin,
-            "_run_subprocess",
+    with (
+        patch(
+            "lintro.plugins.execution_preparation.verify_tool_version",
+            return_value=None,
+        ),
+        patch(
+            "lintro.tools.definitions.rustfmt.run_subprocess_with_timeout",
             return_value=(True, ""),
-        ):
-            result = rustfmt_plugin.fix([str(test_file)], {})
+        ),
+    ):
+        result = rustfmt_plugin.fix([str(test_file)], {})
 
     assert_that(result.success).is_true()
     assert_that(result.issues_count).is_equal_to(0)

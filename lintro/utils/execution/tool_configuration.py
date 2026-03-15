@@ -37,6 +37,39 @@ class ToolsToRunResult:
     skipped: list[SkippedTool] = field(default_factory=list)
 
 
+def _apply_conflict_resolution(
+    to_run: list[str],
+    skipped: list[SkippedTool],
+    *,
+    ignore_conflicts: bool,
+) -> list[str]:
+    """Apply execution ordering and conflict resolution to a tool list.
+
+    Mutates *skipped* in place by appending tools removed during
+    conflict resolution.
+
+    Args:
+        to_run: Candidate tool names.
+        skipped: Accumulator for skipped tools (mutated in place).
+        ignore_conflicts: Whether to ignore tool conflicts.
+
+    Returns:
+        The ordered list of tools to run.
+    """
+    if not to_run:
+        return to_run
+    ordered = tool_manager.get_tool_execution_order(
+        to_run,
+        ignore_conflicts=ignore_conflicts,
+    )
+    removed = set(to_run) - set(ordered)
+    for name in sorted(removed):
+        skipped.append(
+            SkippedTool(name=name, reason="removed by conflict resolution"),
+        )
+    return ordered
+
+
 def _get_disabled_reason(config: LintroConfig, tool_name: str) -> str:
     """Determine why a tool is disabled.
 
@@ -94,6 +127,9 @@ def configure_tool_for_execution(
         auto_install: Whether to auto-install Node.js deps if missing (global default).
         lintro_config: Optional LintroConfig to reuse; fetched via get_config() if None.
     """
+    # Reset accumulated state from prior runs (singleton instances)
+    tool.reset_options()
+
     # Build CLI overrides from --tool-options
     cli_overrides: dict[str, object] = {}
     for option_key in get_tool_lookup_keys(tool_name):
@@ -173,12 +209,15 @@ def get_tool_lookup_keys(tool_name: str) -> set[str]:
 def get_tools_to_run(
     tools: str | ToolsValue | None,
     action: str | Action,
+    *,
+    ignore_conflicts: bool = False,
 ) -> ToolsToRunResult:
     """Get the list of tools to run based on the tools string and action.
 
     Args:
         tools: Comma-separated tool names, "all", or None.
         action: "check", "fmt", or "test".
+        ignore_conflicts: If True, skip conflict checking between tools.
 
     Returns:
         ToolsToRunResult with tools to run and skipped tools with reasons.
@@ -233,6 +272,13 @@ def get_tools_to_run(
                 skipped.append(SkippedTool(name=name, reason=reason))
             else:
                 to_run.append(name)
+
+        to_run = _apply_conflict_resolution(
+            to_run,
+            skipped,
+            ignore_conflicts=ignore_conflicts,
+        )
+
         return ToolsToRunResult(to_run=to_run, skipped=skipped)
 
     # Parse specific tools
@@ -268,5 +314,11 @@ def get_tools_to_run(
                     f"Tool '{name}' does not support formatting",
                 )
         to_run.append(name)
+
+    to_run = _apply_conflict_resolution(
+        to_run,
+        skipped,
+        ignore_conflicts=ignore_conflicts,
+    )
 
     return ToolsToRunResult(to_run=to_run, skipped=skipped)

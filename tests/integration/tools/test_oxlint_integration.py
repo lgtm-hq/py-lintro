@@ -1,7 +1,8 @@
 """Integration tests for Oxlint tool definition.
 
 These tests require oxlint to be installed and available in PATH.
-They verify the OxlintPlugin definition, check command, fix command, and set_options method.
+They verify the OxlintPlugin definition, check command, fix command, and
+set_options method.
 """
 
 from __future__ import annotations
@@ -192,9 +193,10 @@ def test_definition_attributes(
 def test_definition_file_patterns(
     get_plugin: Callable[[str], BaseToolPlugin],
 ) -> None:
-    """Verify OxlintPlugin definition includes JavaScript/TypeScript file patterns.
+    """Verify OxlintPlugin definition includes JS/TS file patterns.
 
-    Tests that the plugin is configured to handle JS/TS files (*.js, *.ts, *.jsx, *.tsx).
+    Tests that the plugin is configured to handle JS/TS files
+    (*.js, *.ts, *.jsx, *.tsx).
 
     Args:
         get_plugin: Fixture factory to get plugin instances.

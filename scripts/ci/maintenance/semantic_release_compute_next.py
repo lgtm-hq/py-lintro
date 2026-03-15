@@ -158,11 +158,13 @@ def run_git(*args: str) -> str:
         raise RuntimeError("git executable not found in PATH")
     # Validate arguments against allowlist before executing
     _validate_git_args([*args])
-    result = subprocess.run(  # nosec
-        [git_path, *args],
-        capture_output=True,
-        text=True,
-        check=False,
+    result = (
+        subprocess.run(  # nosec B603 — args validated by _validate_git_args allowlist
+            [git_path, *args],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
     )
     return (result.stdout or "").strip()
 

@@ -348,4 +348,6 @@ def execute_ruff_fix(
         initial_issues_count=total_initial_count,
         fixed_issues_count=fixed_count,
         remaining_issues_count=remaining_count,
+        # Store pre-fix issues so the display layer can show what was fixed
+        initial_issues=initial_issues if initial_issues else None,
     )

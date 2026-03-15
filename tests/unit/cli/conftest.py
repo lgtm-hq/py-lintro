@@ -26,20 +26,22 @@ def isolated_cli_runner() -> CliRunner:
 
 
 @pytest.fixture
-def mock_run_lint_tools_simple() -> Generator[MagicMock, None, None]:
+def mock_run_lint_tools_simple() -> Generator[tuple[MagicMock, MagicMock], None, None]:
     """Mock the run_lint_tools_simple function used by check/format commands.
 
     Yields:
-        MagicMock: A MagicMock instance for the mocked function.
+        tuple[MagicMock, MagicMock]: Check and format mock instances.
     """
-    with patch("lintro.cli_utils.commands.check.run_lint_tools_simple") as mock_check:
-        with patch(
+    with (
+        patch("lintro.cli_utils.commands.check.run_lint_tools_simple") as mock_check,
+        patch(
             "lintro.cli_utils.commands.format.run_lint_tools_simple",
-        ) as mock_format:
-            # Configure both mocks to return 0 by default
-            mock_check.return_value = EXIT_SUCCESS
-            mock_format.return_value = EXIT_SUCCESS
-            yield mock_check
+        ) as mock_format,
+    ):
+        # Configure both mocks to return 0 by default
+        mock_check.return_value = EXIT_SUCCESS
+        mock_format.return_value = EXIT_SUCCESS
+        yield mock_check, mock_format
 
 
 @pytest.fixture

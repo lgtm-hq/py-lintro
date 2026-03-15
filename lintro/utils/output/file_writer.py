@@ -208,6 +208,17 @@ def write_output_file(
         html_lines.append("</body></html>")
         output_file.write_text("\n".join(html_lines), encoding="utf-8")
 
+    elif output_format == OutputFormat.SARIF:
+        from lintro.ai.output.sarif import write_sarif
+        from lintro.ai.output.sarif_bridge import (
+            suggestions_from_results,
+            summary_from_results,
+        )
+
+        suggestions = suggestions_from_results(all_results)
+        summary = summary_from_results(all_results)
+        write_sarif(suggestions, summary, output_path=output_file)
+
     else:
         # Plain or Grid format - write formatted text output
         lines = [f"Lintro {action.value.capitalize()} Report", "=" * 40, ""]

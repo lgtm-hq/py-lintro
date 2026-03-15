@@ -2,7 +2,8 @@
 
 This test ensures that:
 1. All modules listed in pyproject.toml are actually included in the package build
-2. All packages in the source tree are listed in pyproject.toml (catches forgotten packages)
+2. All packages in the source tree are listed in pyproject.toml (catches forgotten
+   packages)
 
 This prevents packaging errors where a module exists in the source tree but is
 missing from the packages list (like the 0.43.0 bug with lintro.utils.environment).

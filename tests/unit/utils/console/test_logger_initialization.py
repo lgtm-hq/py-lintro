@@ -27,7 +27,7 @@ def test_init_with_run_dir(tmp_path: Path) -> None:
 
 
 def test_init_without_run_dir() -> None:
-    """Verify ThreadSafeConsoleLogger initializes with None when no run directory provided.
+    """Verify ThreadSafeConsoleLogger initializes with None when no run directory.
 
     When no run_dir is given, the attribute should be None, which disables
     file-based console logging features.

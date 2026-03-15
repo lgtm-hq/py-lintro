@@ -23,6 +23,7 @@ class OutputFormat(StrEnum):
     JSON = auto()
     CSV = auto()
     GITHUB = auto()
+    SARIF = auto()
 
 
 def normalize_output_format(value: str | OutputFormat) -> OutputFormat:

@@ -121,11 +121,25 @@ class BanditPlugin(BaseToolPlugin):
     def __post_init__(self) -> None:
         """Initialize the tool with configuration from pyproject.toml."""
         super().__post_init__()
+        self._apply_native_config()
 
-        # Load bandit configuration from pyproject.toml
+    def reset_options(self) -> None:
+        """Reset options and re-apply native [tool.bandit] config.
+
+        Overrides the base ``reset_options()`` so that native bandit
+        configuration from pyproject.toml (skips, tests, severity, etc.)
+        is preserved after the reset.  Without this, the base reset
+        restores ``definition.default_options`` which has ``skips: None``,
+        silently dropping the user's configured skip list.
+        """
+        super().reset_options()
+        self._apply_native_config()
+
+    def _apply_native_config(self) -> None:
+        """Load and apply native [tool.bandit] config from pyproject.toml."""
         bandit_config = load_bandit_config()
 
-        # Apply configuration overrides
+        # Apply exclude_dirs
         if "exclude_dirs" in bandit_config:
             exclude_dirs = bandit_config["exclude_dirs"]
             if isinstance(exclude_dirs, list):
@@ -137,7 +151,7 @@ class BanditPlugin(BaseToolPlugin):
                     if recursive_pattern not in self.exclude_patterns:
                         self.exclude_patterns.append(recursive_pattern)
 
-        # Set other options from configuration
+        # Apply other options from configuration
         config_mapping = {
             "tests": "tests",
             "skips": "skips",

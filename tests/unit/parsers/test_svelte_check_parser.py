@@ -254,7 +254,10 @@ def test_parse_ndjson_invalid_json_skipped() -> None:
 
 def test_parse_svelte_check_output_machine_verbose_single_error() -> None:
     """Parse a single legacy machine-verbose error."""
-    output = "src/lib/Button.svelte:15:5:15:10 Error Type 'string' is not assignable to type 'number'."
+    output = (
+        "src/lib/Button.svelte:15:5:15:10 Error "
+        "Type 'string' is not assignable to type 'number'."
+    )
     issues = parse_svelte_check_output(output)
 
     assert_that(issues).is_length(1)
@@ -267,9 +270,14 @@ def test_parse_svelte_check_output_machine_verbose_single_error() -> None:
 
 def test_parse_svelte_check_output_multiple_errors() -> None:
     """Parse multiple errors from svelte-check output."""
-    output = """src/lib/Button.svelte:15:5:15:10 Error Type 'string' is not assignable to type 'number'.
-src/routes/+page.svelte:20:3:20:15 Error Property 'foo' does not exist on type 'Bar'.
-src/lib/Card.svelte:8:1:8:20 Warning Unused CSS selector '.unused'."""
+    output = (
+        "src/lib/Button.svelte:15:5:15:10 Error"
+        " Type 'string' is not assignable to type 'number'.\n"
+        "src/routes/+page.svelte:20:3:20:15 Error"
+        " Property 'foo' does not exist on type 'Bar'.\n"
+        "src/lib/Card.svelte:8:1:8:20 Warning"
+        " Unused CSS selector '.unused'."
+    )
     issues = parse_svelte_check_output(output)
 
     assert_that(issues).is_length(3)
@@ -280,7 +288,10 @@ src/lib/Card.svelte:8:1:8:20 Warning Unused CSS selector '.unused'."""
 
 def test_parse_svelte_check_output_machine_format() -> None:
     """Parse machine format (non-verbose)."""
-    output = "ERROR src/lib/Button.svelte:15:5 Type 'string' is not assignable to type 'number'."
+    output = (
+        "ERROR src/lib/Button.svelte:15:5"
+        " Type 'string' is not assignable to type 'number'."
+    )
     issues = parse_svelte_check_output(output)
 
     assert_that(issues).is_length(1)

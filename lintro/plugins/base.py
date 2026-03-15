@@ -156,6 +156,18 @@ class BaseToolPlugin(ABC):
     # Public API
     # -------------------------------------------------------------------------
 
+    def reset_options(self) -> None:
+        """Reset options back to definition defaults.
+
+        Clears accumulated state from prior ``set_options()`` calls so
+        the same plugin instance can be reused across runs without
+        leaking mutated configuration.
+        """
+        self.options = dict(self.definition.default_options)
+        self.exclude_patterns = []
+        self.include_venv = False
+        self._setup_defaults()
+
     def set_options(self, **kwargs: object) -> None:
         """Set tool-specific options.
 
