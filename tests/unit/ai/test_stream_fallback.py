@@ -153,7 +153,26 @@ def test_stream_fallback_raises_when_all_fail() -> None:
 
 def test_stream_fallback_restores_model_name() -> None:
     """Provider model name is restored after fallback completes."""
-    provider = _SuccessProvider("p1")
+
+    class _FailThenSuccessProvider(_SuccessProvider):
+        def stream_complete(
+            self,
+            prompt: str,
+            *,
+            system: str | None = None,
+            max_tokens: int = DEFAULT_PER_CALL_MAX_TOKENS,
+            timeout: float = DEFAULT_TIMEOUT,
+        ) -> AIStreamResult:
+            if self._model == "test-model":
+                raise AIProviderError("primary failed")
+            return super().stream_complete(
+                prompt,
+                system=system,
+                max_tokens=max_tokens,
+                timeout=timeout,
+            )
+
+    provider = _FailThenSuccessProvider("p1")
     original_model = provider.model_name
 
     result = stream_complete_with_fallback(

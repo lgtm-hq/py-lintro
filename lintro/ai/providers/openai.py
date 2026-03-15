@@ -177,11 +177,6 @@ class OpenAIProvider(BaseAIProvider):
 
         Returns:
             An AIStreamResult wrapping the token stream.
-
-        Raises:
-            AIAuthenticationError: If authentication fails.
-            AIRateLimitError: If rate limited.
-            AIProviderError: If the API call fails.
         """
         client = self._get_client()
         effective_max = min(max_tokens, self._max_tokens)
@@ -244,7 +239,14 @@ class OpenAIProvider(BaseAIProvider):
                     f"OpenAI API error: {e}",
                 ) from e
 
+        def _on_done() -> AIResponse:
+            if not final_response:
+                raise AIProviderError(
+                    "OpenAI stream was not fully consumed",
+                )
+            return final_response[0]
+
         return AIStreamResult(
             _chunks=_generate(),
-            _on_done=lambda: final_response[0],
+            _on_done=_on_done,
         )

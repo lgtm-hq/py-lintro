@@ -148,12 +148,13 @@ def test_base_provider_stream_complete_passes_kwargs() -> None:
             return _make_response()
 
     provider = _CapturingProvider(response=_make_response())
-    provider.stream_complete(
+    stream = provider.stream_complete(
         "my prompt",
         system="sys",
         max_tokens=512,
         timeout=30,
     )
+    list(stream)  # consume stream to trigger complete()
 
     assert_that(calls).is_length(1)
     assert_that(calls[0]["prompt"]).is_equal_to("my prompt")
