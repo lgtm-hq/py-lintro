@@ -107,9 +107,11 @@ def run_ai_enhancement(
             f"AI enhancement failed ({type(e).__name__}): {e}",
             exc_info=True,
         )
-        logger.console_output(
-            f"  AI: enhancement unavailable ({type(e).__name__})",
-        )
+        is_json = output_format.lower() == OutputFormat.JSON
+        if not is_json:
+            logger.console_output(
+                f"  AI: enhancement unavailable ({type(e).__name__})",
+            )
         return AIResult(error=True)
 
 

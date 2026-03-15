@@ -226,9 +226,10 @@ def _apply_or_review(
         applied_suggestions.extend(auto_applied)
         applied += len(auto_applied)
         rejected = len(auto_apply_candidates) - len(auto_applied) + safe_failed
-        logger.console_output(
-            f"  AI: auto-applied {applied}/{len(all_suggestions)} fixes",
-        )
+        if not is_json:
+            logger.console_output(
+                f"  AI: auto-applied {applied}/{len(all_suggestions)} fixes",
+            )
     elif not is_json:
         review_candidates = (
             risky_suggestions if safe_fast_path_applied else all_suggestions
@@ -469,8 +470,12 @@ def run_fix_pipeline(
                 if output:
                     logger.console_output(output)
 
-    total_cost = sum(s.cost_estimate for s in all_suggestions)
-    write_audit_log(workspace_root, applied_suggestions, rejected, total_cost)
+    write_audit_log(
+        workspace_root,
+        applied_suggestions,
+        rejected,
+        telemetry.total_cost_usd,
+    )
     attach_telemetry_metadata(
         [r for r, _ in by_tool.values()],
         telemetry,
