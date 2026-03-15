@@ -54,8 +54,10 @@ class GitHubPRReporter:
                 Falls back to ``GITHUB_WORKSPACE`` env var, then ``None``
                 (which uses ``relative_path()`` as fallback).
         """
-        self.token = token or os.environ.get("GITHUB_TOKEN", "")
-        self.repo = repo or os.environ.get("GITHUB_REPOSITORY", "")
+        self.token = token if token is not None else os.environ.get("GITHUB_TOKEN", "")
+        self.repo = (
+            repo if repo is not None else os.environ.get("GITHUB_REPOSITORY", "")
+        )
         self.pr_number = pr_number or _detect_pr_number()
         self.api_base = api_base.rstrip("/")
 
