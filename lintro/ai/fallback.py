@@ -193,8 +193,9 @@ def stream_complete_with_fallback(
     """Call ``provider.stream_complete()`` with automatic model fallback.
 
     Same fallback logic as ``complete_with_fallback`` but returns a
-    streaming result. Only retries on setup failures — once a provider
-    begins yielding tokens, its stream is returned directly.
+    streaming result. Fallback applies at stream *creation* time only —
+    once a provider begins yielding tokens, mid-stream failures are
+    not retried because partial content has already been consumed.
 
     Args:
         provider: AI provider instance.

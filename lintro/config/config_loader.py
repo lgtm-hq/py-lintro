@@ -316,8 +316,9 @@ def _convert_pyproject_to_config(data: dict[str, Any]) -> dict[str, Any]:
         "ai": {},
     }
 
-    # Derive known tool names from the ToolName enum (a static StrEnum,
-    # always available without triggering the plugin registry).
+    # Inline import: ToolName is a static StrEnum that does not trigger
+    # the plugin registry. Imported here to avoid a circular dependency
+    # between config_loader and the tool subsystem.
     from lintro.enums.tool_name import ToolName
 
     known_tools = {t.value for t in ToolName} | {

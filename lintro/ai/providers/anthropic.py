@@ -203,6 +203,10 @@ class AnthropicProvider(BaseAIProvider):
         final_response: list[AIResponse] = []
 
         def _generate() -> Iterator[str]:
+            # Note: mid-stream errors surface as exceptions during
+            # iteration and are NOT retried because partial content has
+            # already been yielded to the caller. Only setup failures
+            # (before the first token) are caught by the fallback chain.
             with self._map_errors():
                 with client.messages.stream(**kwargs) as stream:
                     yield from stream.text_stream

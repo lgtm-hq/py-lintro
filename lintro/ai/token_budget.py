@@ -19,7 +19,7 @@ def estimate_tokens(text: str) -> int:
     """
     if not text:
         return 0
-    return max(1, len(text) // 4)
+    return max(1, (len(text) + 3) // 4)
 
 
 def truncate_to_budget(text: str, max_tokens: int) -> tuple[str, bool]:
@@ -36,7 +36,7 @@ def truncate_to_budget(text: str, max_tokens: int) -> tuple[str, bool]:
         Tuple of (possibly truncated text, was_truncated).
     """
     if max_tokens <= 0:
-        return "", True
+        raise ValueError(f"max_tokens must be positive, got {max_tokens}")
     if estimate_tokens(text) <= max_tokens:
         return text, False
 

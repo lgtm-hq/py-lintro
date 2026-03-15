@@ -174,8 +174,17 @@ def _display_fix_result(
     from lintro.utils.output import format_tool_output
     from lintro.utils.result_formatters import print_tool_result
 
-    # When in fix mode and initial_issues is populated, show what was fixed
-    if action == Action.FIX and result.initial_issues and not raw_output:
+    # When in fix mode and initial_issues is populated and ALL issues
+    # were fixed (remaining == 0), show what was fixed. When some issues
+    # remain, the initial_issues list is misleading because not all of
+    # them were actually resolved.
+    remaining = getattr(result, "remaining_issues_count", None)
+    if (
+        action == Action.FIX
+        and result.initial_issues
+        and not raw_output
+        and remaining == 0
+    ):
         # Format the initial issues as a table
         issues_display = format_tool_output(
             tool_name=result.name,

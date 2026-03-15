@@ -28,7 +28,7 @@ def stream_to_console(
     """
     parts: list[str] = []
     for chunk in stream_result:
-        console.print(chunk, end="", style=style or None, highlight=False)
+        console.print(chunk, end="", style=style or None, highlight=False, markup=False)
         parts.append(chunk)
     console.print()
     return "".join(parts)

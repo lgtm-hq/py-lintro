@@ -204,12 +204,16 @@ def _parse_summary_response(
             cost_estimate=cost_estimate,
         )
 
+    overview_raw = data.get("overview", "")
+    effort_raw = data.get("estimated_effort", "")
+    overview = overview_raw if isinstance(overview_raw, str) else str(overview_raw)
+    effort = effort_raw if isinstance(effort_raw, str) else str(effort_raw)
     return AISummary(
-        overview=data.get("overview", ""),
+        overview=overview,
         key_patterns=_ensure_str_list(data.get("key_patterns", [])),
         priority_actions=_ensure_str_list(data.get("priority_actions", [])),
         triage_suggestions=_ensure_str_list(data.get("triage_suggestions", [])),
-        estimated_effort=data.get("estimated_effort", ""),
+        estimated_effort=effort,
         input_tokens=input_tokens,
         output_tokens=output_tokens,
         cost_estimate=cost_estimate,
@@ -379,7 +383,7 @@ def generate_post_fix_summary(
         AISummary, or None if generation fails.
     """
     remaining_count = sum(
-        r.issues_count for r in remaining_results if r.issues and not r.skipped
+        r.issues_count for r in remaining_results if r.issues_count and not r.skipped
     )
 
     digest = _build_issues_digest(

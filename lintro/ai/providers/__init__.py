@@ -73,9 +73,6 @@ def get_provider(config: AIConfig) -> BaseAIProvider:
         from lintro.ai.providers.openai import OpenAIProvider
 
         provider_cls = OpenAIProvider
-    else:
-        msg = f"No import path for provider: {provider_enum.value}"
-        raise ValueError(msg)
     return provider_cls(
         model=config.model,
         api_key_env=config.api_key_env,

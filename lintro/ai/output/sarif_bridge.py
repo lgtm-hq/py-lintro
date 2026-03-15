@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
+from lintro.ai.enums import ConfidenceLevel
 from lintro.ai.models import AIFixSuggestion, AISummary
 
 if TYPE_CHECKING:
@@ -39,18 +40,21 @@ def suggestions_from_results(
             suggestions.append(
                 AIFixSuggestion(
                     file=raw.get("file", ""),
-                    line=raw.get("line", 0),
+                    line=int(raw.get("line", 0)),
                     code=raw.get("code", ""),
                     tool_name=raw.get("tool_name", ""),
                     original_code=raw.get("original_code", ""),
                     suggested_code=raw.get("suggested_code", ""),
                     diff=raw.get("diff", ""),
                     explanation=raw.get("explanation", ""),
-                    confidence=raw.get("confidence", "medium"),
+                    confidence=raw.get(
+                        "confidence",
+                        ConfidenceLevel.MEDIUM,
+                    ),
                     risk_level=raw.get("risk_level", ""),
-                    input_tokens=raw.get("input_tokens", 0),
-                    output_tokens=raw.get("output_tokens", 0),
-                    cost_estimate=raw.get("cost_estimate", 0.0),
+                    input_tokens=int(raw.get("input_tokens", 0)),
+                    output_tokens=int(raw.get("output_tokens", 0)),
+                    cost_estimate=float(raw.get("cost_estimate", 0.0)),
                 ),
             )
     return suggestions
