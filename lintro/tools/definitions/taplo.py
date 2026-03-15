@@ -409,6 +409,7 @@ class TaploPlugin(BaseToolPlugin):
             output=final_summary,
             issues_count=remaining_count,
             issues=all_remaining_issues,
+            initial_issues=initial_issues if initial_issues else None,
             initial_issues_count=initial_count,
             fixed_issues_count=fixed_count,
             remaining_issues_count=remaining_count,

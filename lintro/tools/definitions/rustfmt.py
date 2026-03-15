@@ -368,6 +368,7 @@ class RustfmtPlugin(BaseToolPlugin):
             output=output_after if not overall_success else None,
             issues_count=remaining_count,
             issues=remaining_issues,
+            initial_issues=initial_issues if initial_issues else None,
             initial_issues_count=initial_count,
             fixed_issues_count=fixed_count,
             remaining_issues_count=remaining_count,

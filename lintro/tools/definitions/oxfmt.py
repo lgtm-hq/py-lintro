@@ -425,6 +425,7 @@ class OxfmtPlugin(BaseToolPlugin):
             output=final_output,
             issues_count=remaining_count,
             issues=remaining_issues or [],
+            initial_issues=initial_issues if initial_issues else None,
             initial_issues_count=initial_count,
             fixed_issues_count=fixed_count,
             remaining_issues_count=remaining_count,

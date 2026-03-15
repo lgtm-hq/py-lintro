@@ -35,6 +35,8 @@ from lintro.utils.post_checks import execute_post_checks
 from lintro.utils.unified_config import UnifiedConfigManager
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from lintro.plugins.base import BaseToolPlugin
 
 # Re-export constants for backwards compatibility
@@ -95,6 +97,7 @@ def _run_fix_with_retry(
         return result
 
     initial_issues_count = getattr(result, "initial_issues_count", None)
+    first_pass_initial_issues = getattr(result, "initial_issues", None)
     remaining = _get_remaining_count(result)
 
     for attempt in range(2, max_retries + 1):
@@ -109,7 +112,8 @@ def _run_fix_with_retry(
         result = tool.fix(paths, options)
         remaining = _get_remaining_count(result)
 
-    # Merge: keep initial_issues_count from first pass, rest from last pass
+    # Merge: keep initial_issues_count and initial_issues from first pass,
+    # rest from last pass
     if initial_issues_count is not None:
         fixed = max(0, initial_issues_count - remaining)
         result = ToolResult(
@@ -122,6 +126,7 @@ def _run_fix_with_retry(
             fixed_issues_count=fixed,
             remaining_issues_count=remaining,
             formatted_output=result.formatted_output,
+            initial_issues=first_pass_initial_issues,
         )
 
     return result
@@ -141,6 +146,89 @@ def _warn_ai_fix_disabled(
         "AI fixes requested with --fix, but ai.enabled is false in "
         ".lintro-config.yaml; skipping AI enhancements.",
     )
+
+
+def _display_fix_result(
+    result: ToolResult,
+    *,
+    output_format: str,
+    raw_output: bool,
+    console_output_func: Callable[..., None],
+    success_func: Callable[..., None],
+    action: Action,
+) -> None:
+    """Display fix result with initial issue details when available.
+
+    When a tool fixes issues, this shows WHAT was fixed (via initial_issues)
+    before showing the count summary. Falls back to the standard display
+    when initial_issues is not populated.
+
+    Args:
+        result: The tool result to display.
+        output_format: Output format for formatting issues.
+        raw_output: Whether to show raw tool output.
+        console_output_func: Function to output text to console.
+        success_func: Function to display success message.
+        action: The action being performed.
+    """
+    from lintro.utils.output import format_tool_output
+    from lintro.utils.result_formatters import print_tool_result
+
+    # When in fix mode and initial_issues is populated, show what was fixed
+    if action == Action.FIX and result.initial_issues and not raw_output:
+        # Format the initial issues as a table
+        issues_display = format_tool_output(
+            tool_name=result.name,
+            output="",
+            output_format=output_format,
+            issues=list(result.initial_issues),
+        )
+        if issues_display and issues_display.strip():
+            console_output_func(text=issues_display)
+
+        # Show the count summary below the table
+        print_tool_result(
+            console_output_func=console_output_func,
+            success_func=success_func,
+            tool_name=result.name,
+            output=result.output or "",
+            issues_count=result.issues_count,
+            raw_output_for_meta=result.output,
+            action=action,
+            success=result.success,
+        )
+        return
+
+    # Standard display path (no initial_issues available)
+    display_output: str | None = None
+    if result.formatted_output:
+        display_output = result.formatted_output
+    elif result.issues or result.output:
+        display_output = format_tool_output(
+            tool_name=result.name,
+            output=result.output or "",
+            output_format=output_format,
+            issues=list(result.issues) if result.issues else None,
+        )
+    if result.output and raw_output:
+        display_output = result.output
+
+    if display_output and display_output.strip():
+        print_tool_result(
+            console_output_func=console_output_func,
+            success_func=success_func,
+            tool_name=result.name,
+            output=display_output,
+            issues_count=result.issues_count,
+            raw_output_for_meta=result.output,
+            action=action,
+            success=result.success,
+        )
+    elif result.issues_count == 0 and result.success:
+        console_output_func(
+            text="✓ No issues found.",
+            color="green",
+        )
 
 
 def run_lint_tools_simple(
@@ -389,39 +477,14 @@ def run_lint_tools_simple(
             display_name = get_tool_display_name(result.name)
             logger.print_tool_header(tool_name=display_name, action=action)
 
-            display_output: str | None = None
-            if result.formatted_output:
-                display_output = result.formatted_output
-            elif result.issues or result.output:
-                from lintro.utils.output import format_tool_output
-
-                display_output = format_tool_output(
-                    tool_name=result.name,
-                    output=result.output or "",
-                    output_format=output_format,
-                    issues=list(result.issues) if result.issues else None,
-                )
-            if result.output and raw_output:
-                display_output = result.output
-
-            if display_output and display_output.strip():
-                from lintro.utils.result_formatters import print_tool_result
-
-                print_tool_result(
-                    console_output_func=logger.console_output,
-                    success_func=success_func,
-                    tool_name=result.name,
-                    output=display_output,
-                    issues_count=result.issues_count,
-                    raw_output_for_meta=result.output,
-                    action=action,
-                    success=result.success,
-                )
-            elif result.issues_count == 0 and result.success:
-                logger.console_output(
-                    text="✓ No issues found.",
-                    color="green",
-                )
+            _display_fix_result(
+                result,
+                output_format=output_format,
+                raw_output=raw_output,
+                console_output_func=logger.console_output,
+                success_func=success_func,
+                action=action,
+            )
 
     else:
         # Sequential execution (original behavior)
@@ -471,45 +534,15 @@ def run_lint_tools_simple(
                         remaining_count if remaining_count is not None else 0
                     )
 
-                # Use formatted_output if available, otherwise format from issues
-                display_output = None
-                if result.formatted_output:
-                    display_output = result.formatted_output
-                elif result.issues or result.output:
-                    # Format issues using the tool formatter
-                    # Also format when there's output (e.g., coverage) even with no
-                    # issues
-                    from lintro.utils.output import format_tool_output
-
-                    display_output = format_tool_output(
-                        tool_name=tool_name,
-                        output=result.output or "",
-                        output_format=output_format,
-                        issues=list(result.issues) if result.issues else None,
-                    )
-                if result.output and raw_output:
-                    # Use raw output when raw_output flag is True (overrides formatted)
-                    display_output = result.output
-
-                # Display the formatted output if available
-                if display_output and display_output.strip():
-                    from lintro.utils.result_formatters import print_tool_result
-
-                    print_tool_result(
-                        console_output_func=logger.console_output,
-                        success_func=success_func,
-                        tool_name=tool_name,
-                        output=display_output,
-                        issues_count=result.issues_count,
-                        raw_output_for_meta=result.output,
-                        action=action,
-                        success=result.success,
-                    )
-                elif result.issues_count == 0 and result.success:
-                    # Show success message when no issues found and no output
-                    logger.console_output(text="Processing files")
-                    logger.console_output(text="✓ No issues found.", color="green")
-                    logger.console_output(text="")
+                # Display the result (with initial issue details in fix mode)
+                _display_fix_result(
+                    result,
+                    output_format=output_format,
+                    raw_output=raw_output,
+                    console_output_func=logger.console_output,
+                    success_func=success_func,
+                    action=action,
+                )
 
             except (TypeError, AttributeError):
                 # Programming errors should be re-raised for debugging
