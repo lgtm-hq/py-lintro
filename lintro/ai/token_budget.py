@@ -34,6 +34,9 @@ def truncate_to_budget(text: str, max_tokens: int) -> tuple[str, bool]:
 
     Returns:
         Tuple of (possibly truncated text, was_truncated).
+
+    Raises:
+        ValueError: If max_tokens is not positive.
     """
     if max_tokens <= 0:
         raise ValueError(f"max_tokens must be positive, got {max_tokens}")

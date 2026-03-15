@@ -4,7 +4,7 @@
 
 Currently supporting the latest stable version:
 
-<!-- markdownlint-disable MD060 -- table uses emoji characters that trigger false positive link/image detection -->
+<!-- markdownlint-disable MD060 -- emoji triggers false positive -->
 
 | Version | Supported |
 | ------- | --------- |

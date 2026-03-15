@@ -30,6 +30,9 @@ def save_undo_patch(
 
     Returns:
         Path to the saved patch file, or None if nothing to save.
+
+    Raises:
+        BaseException: Re-raised after cleaning up the temporary file on write failure.
     """
     if not suggestions:
         return None
