@@ -6,6 +6,7 @@ Requires the ``anthropic`` package (installed via ``lintro[ai]``).
 
 from __future__ import annotations
 
+from collections.abc import Iterator
 from typing import Any
 
 from loguru import logger
@@ -16,7 +17,7 @@ from lintro.ai.exceptions import (
     AIProviderError,
     AIRateLimitError,
 )
-from lintro.ai.providers.base import AIResponse, BaseAIProvider
+from lintro.ai.providers.base import AIResponse, AIStreamResult, BaseAIProvider
 from lintro.ai.providers.constants import (
     DEFAULT_MAX_TOKENS,
     DEFAULT_PER_CALL_MAX_TOKENS,
@@ -152,6 +153,88 @@ class AnthropicProvider(BaseAIProvider):
             ) from e
         except anthropic.AnthropicError as e:
             logger.debug(f"Anthropic API error: {e}")
+            raise AIProviderError(
+                f"Anthropic API error: {e}",
+            ) from e
+
+    def stream_complete(
+        self,
+        prompt: str,
+        *,
+        system: str | None = None,
+        max_tokens: int = DEFAULT_PER_CALL_MAX_TOKENS,
+        timeout: float = DEFAULT_TIMEOUT,
+    ) -> AIStreamResult:
+        """Stream a completion from the Anthropic API token-by-token.
+
+        Args:
+            prompt: The user prompt.
+            system: Optional system prompt.
+            max_tokens: Maximum tokens to generate.
+            timeout: Request timeout in seconds.
+
+        Returns:
+            An AIStreamResult wrapping the token stream.
+
+        Raises:
+            AIAuthenticationError: If authentication fails.
+            AIRateLimitError: If rate limited.
+            AIProviderError: If the API call fails.
+        """
+        client = self._get_client()
+        effective_max = min(max_tokens, self._max_tokens)
+
+        try:
+            kwargs: dict[str, Any] = {
+                "model": self._model,
+                "max_tokens": effective_max,
+                "messages": [{"role": "user", "content": prompt}],
+                "timeout": timeout,
+            }
+            if system:
+                kwargs["system"] = system
+
+            logger.debug(
+                f"Anthropic stream request: model={self._model}, "
+                f"max_tokens={effective_max}",
+            )
+
+            final_response: list[AIResponse] = []
+
+            def _generate() -> Iterator[str]:
+                with client.messages.stream(**kwargs) as stream:
+                    yield from stream.text_stream
+                    final_message = stream.get_final_message()
+
+                input_tokens = final_message.usage.input_tokens
+                output_tokens = final_message.usage.output_tokens
+                cost = estimate_cost(self._model, input_tokens, output_tokens)
+                final_response.append(
+                    AIResponse(
+                        content="",
+                        model=self._model,
+                        input_tokens=input_tokens,
+                        output_tokens=output_tokens,
+                        cost_estimate=cost,
+                        provider=AIProvider.ANTHROPIC,
+                    ),
+                )
+
+            return AIStreamResult(
+                _chunks=_generate(),
+                _on_done=lambda: final_response[0],
+            )
+
+        except anthropic.AuthenticationError as e:
+            raise AIAuthenticationError(
+                f"Anthropic authentication failed: {e}",
+            ) from e
+        except anthropic.RateLimitError as e:
+            raise AIRateLimitError(
+                f"Anthropic rate limit exceeded: {e}",
+            ) from e
+        except anthropic.AnthropicError as e:
+            logger.debug(f"Anthropic stream API error: {e}")
             raise AIProviderError(
                 f"Anthropic API error: {e}",
             ) from e

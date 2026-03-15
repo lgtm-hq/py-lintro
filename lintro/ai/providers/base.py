@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import os
 from abc import ABC, abstractmethod
+from collections.abc import Callable, Iterator
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -40,6 +41,45 @@ class AIResponse:
     output_tokens: int = field(default=0)
     cost_estimate: float = field(default=0.0)
     provider: AIProvider | str = field(default="")
+
+
+@dataclass
+class AIStreamResult:
+    """Wraps a token iterator and provides finalized metadata after exhaustion."""
+
+    _chunks: Iterator[str]
+    _on_done: Callable[[], AIResponse]
+
+    def __iter__(self) -> Iterator[str]:
+        """Yield text chunks from the underlying iterator."""
+        yield from self._chunks
+
+    def response(self) -> AIResponse:
+        """Return the finalized AIResponse.
+
+        Only valid after iteration completes.
+
+        Returns:
+            The finalized AIResponse with usage metadata.
+        """
+        return self._on_done()
+
+    def collect(self) -> AIResponse:
+        """Consume all tokens and return the complete AIResponse.
+
+        Returns:
+            AIResponse with concatenated content and usage metadata.
+        """
+        content = "".join(self)
+        resp = self.response()
+        return AIResponse(
+            content=content,
+            model=resp.model,
+            input_tokens=resp.input_tokens,
+            output_tokens=resp.output_tokens,
+            cost_estimate=resp.cost_estimate,
+            provider=resp.provider,
+        )
 
 
 class BaseAIProvider(ABC):
@@ -165,6 +205,40 @@ class BaseAIProvider(ABC):
             AIRateLimitError: If rate limited.
         """
         ...
+
+    # -- Streaming (default delegates to complete) --------------------------
+
+    def stream_complete(
+        self,
+        prompt: str,
+        *,
+        system: str | None = None,
+        max_tokens: int = DEFAULT_PER_CALL_MAX_TOKENS,
+        timeout: float = DEFAULT_TIMEOUT,
+    ) -> AIStreamResult:
+        """Stream a completion. Default: delegates to complete().
+
+        Providers with native streaming support should override this.
+
+        Args:
+            prompt: The user prompt text.
+            system: Optional system prompt.
+            max_tokens: Maximum tokens to generate.
+            timeout: Request timeout in seconds.
+
+        Returns:
+            An AIStreamResult wrapping the token stream.
+        """
+        response = self.complete(
+            prompt,
+            system=system,
+            max_tokens=max_tokens,
+            timeout=timeout,
+        )
+        return AIStreamResult(
+            _chunks=iter([response.content]),
+            _on_done=lambda: response,
+        )
 
     # -- Concrete shared helpers -------------------------------------------
 

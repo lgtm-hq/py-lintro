@@ -6,6 +6,7 @@ Requires the ``openai`` package (installed via ``lintro[ai]``).
 
 from __future__ import annotations
 
+from collections.abc import Iterator
 from typing import Any
 
 from loguru import logger
@@ -16,7 +17,7 @@ from lintro.ai.exceptions import (
     AIProviderError,
     AIRateLimitError,
 )
-from lintro.ai.providers.base import AIResponse, BaseAIProvider
+from lintro.ai.providers.base import AIResponse, AIStreamResult, BaseAIProvider
 from lintro.ai.providers.constants import (
     DEFAULT_MAX_TOKENS,
     DEFAULT_PER_CALL_MAX_TOKENS,
@@ -154,6 +155,97 @@ class OpenAIProvider(BaseAIProvider):
             ) from e
         except openai.OpenAIError as e:
             logger.debug(f"OpenAI API error: {e}")
+            raise AIProviderError(
+                f"OpenAI API error: {e}",
+            ) from e
+
+    def stream_complete(
+        self,
+        prompt: str,
+        *,
+        system: str | None = None,
+        max_tokens: int = DEFAULT_PER_CALL_MAX_TOKENS,
+        timeout: float = DEFAULT_TIMEOUT,
+    ) -> AIStreamResult:
+        """Stream a completion from the OpenAI API token-by-token.
+
+        Args:
+            prompt: The user prompt.
+            system: Optional system prompt.
+            max_tokens: Maximum tokens to generate.
+            timeout: Request timeout in seconds.
+
+        Returns:
+            An AIStreamResult wrapping the token stream.
+
+        Raises:
+            AIAuthenticationError: If authentication fails.
+            AIRateLimitError: If rate limited.
+            AIProviderError: If the API call fails.
+        """
+        client = self._get_client()
+        effective_max = min(max_tokens, self._max_tokens)
+
+        try:
+            messages: list[dict[str, str]] = []
+            if system:
+                messages.append({"role": "system", "content": system})
+            messages.append({"role": "user", "content": prompt})
+
+            logger.debug(
+                f"OpenAI stream request: model={self._model}, "
+                f"max_tokens={effective_max}",
+            )
+
+            final_response: list[AIResponse] = []
+
+            def _generate() -> Iterator[str]:
+                stream = client.chat.completions.create(
+                    model=self._model,
+                    messages=messages,
+                    max_tokens=effective_max,
+                    timeout=timeout,
+                    stream=True,
+                    stream_options={"include_usage": True},
+                )
+
+                input_tokens = 0
+                output_tokens = 0
+
+                for chunk in stream:
+                    if chunk.choices and chunk.choices[0].delta.content:
+                        yield chunk.choices[0].delta.content
+                    if chunk.usage:
+                        input_tokens = chunk.usage.prompt_tokens
+                        output_tokens = chunk.usage.completion_tokens
+
+                cost = estimate_cost(self._model, input_tokens, output_tokens)
+                final_response.append(
+                    AIResponse(
+                        content="",
+                        model=self._model,
+                        input_tokens=input_tokens,
+                        output_tokens=output_tokens,
+                        cost_estimate=cost,
+                        provider=AIProvider.OPENAI,
+                    ),
+                )
+
+            return AIStreamResult(
+                _chunks=_generate(),
+                _on_done=lambda: final_response[0],
+            )
+
+        except openai.AuthenticationError as e:
+            raise AIAuthenticationError(
+                f"OpenAI authentication failed: {e}",
+            ) from e
+        except openai.RateLimitError as e:
+            raise AIRateLimitError(
+                f"OpenAI rate limit exceeded: {e}",
+            ) from e
+        except openai.OpenAIError as e:
+            logger.debug(f"OpenAI stream API error: {e}")
             raise AIProviderError(
                 f"OpenAI API error: {e}",
             ) from e

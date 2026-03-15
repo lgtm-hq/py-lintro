@@ -14,7 +14,7 @@ from lintro.ai.exceptions import (
     AIProviderError,
     AIRateLimitError,
 )
-from lintro.ai.providers.base import AIResponse, BaseAIProvider
+from lintro.ai.providers.base import AIResponse, AIStreamResult, BaseAIProvider
 
 
 def complete_with_fallback(
@@ -111,4 +111,90 @@ def complete_with_fallback(
         raise AIRateLimitError(str(last_error)) from last_error
     raise AIProviderError(
         str(last_error) if last_error else "Fallback chain exhausted",
+    ) from last_error
+
+
+def stream_complete_with_fallback(
+    provider: BaseAIProvider,
+    prompt: str,
+    *,
+    fallback_models: list[str] | None = None,
+    system: str | None = None,
+    max_tokens: int = 1024,
+    timeout: float = 60.0,
+) -> AIStreamResult:
+    """Call ``provider.stream_complete()`` with automatic model fallback.
+
+    Same fallback logic as ``complete_with_fallback`` but returns a
+    streaming result. Only retries on setup failures — once a provider
+    begins yielding tokens, its stream is returned directly.
+
+    Args:
+        provider: AI provider instance.
+        prompt: The user prompt.
+        fallback_models: Ordered list of fallback model identifiers.
+        system: Optional system prompt.
+        max_tokens: Maximum tokens to generate.
+        timeout: Request timeout in seconds.
+
+    Returns:
+        The first successful ``AIStreamResult``.
+
+    Raises:
+        AIAuthenticationError: Immediately on authentication failure.
+        AIProviderError: If the primary model and all fallbacks fail.
+        AIRateLimitError: If all attempts fail with rate-limit errors.
+    """
+    models_to_try: list[str | None] = [None]
+    if fallback_models:
+        models_to_try.extend(fallback_models)
+
+    original_model = provider.model_name
+    last_error: Exception | None = None
+
+    try:
+        for idx, model in enumerate(models_to_try):
+            if model is not None:
+                provider.model_name = model
+
+            label = provider.model_name
+            try:
+                logger.debug(
+                    "Stream fallback: trying model '{}' (attempt {}/{})",
+                    label,
+                    idx + 1,
+                    len(models_to_try),
+                )
+                return provider.stream_complete(
+                    prompt,
+                    system=system,
+                    max_tokens=max_tokens,
+                    timeout=timeout,
+                )
+            except AIAuthenticationError:
+                raise
+            except (AIProviderError, AIRateLimitError) as exc:
+                last_error = exc
+                if idx < len(models_to_try) - 1:
+                    next_model = models_to_try[idx + 1]
+                    logger.debug(
+                        "Stream fallback: model '{}' failed ({}), "
+                        "falling back to '{}'",
+                        label,
+                        exc,
+                        next_model,
+                    )
+                else:
+                    logger.debug(
+                        "Stream fallback: model '{}' failed ({}), " "no more fallbacks",
+                        label,
+                        exc,
+                    )
+    finally:
+        provider.model_name = original_model
+
+    if isinstance(last_error, AIRateLimitError):
+        raise AIRateLimitError(str(last_error)) from last_error
+    raise AIProviderError(
+        str(last_error) if last_error else "Stream fallback chain exhausted",
     ) from last_error

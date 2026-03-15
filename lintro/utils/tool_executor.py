@@ -308,7 +308,9 @@ def run_lint_tools_simple(
         effective_auto_install = is_container
 
     # Pre-execution config summary (suppress in JSON mode)
-    if output_format.lower() != "json" and (tools_to_run or skipped_tools):
+    if output_format.lower() not in {"json", "sarif"} and (
+        tools_to_run or skipped_tools
+    ):
         from lintro.utils.console.pre_execution_summary import (
             print_pre_execution_summary,
         )
@@ -622,6 +624,17 @@ def run_lint_tools_simple(
                 exit_code=final_exit_code,
             )
             print(json.dumps(json_data, indent=2))
+        elif output_format.lower() == "sarif":
+            from lintro.ai.output.sarif import render_fixes_sarif
+            from lintro.ai.output.sarif_bridge import (
+                suggestions_from_results,
+                summary_from_results,
+            )
+
+            suggestions = suggestions_from_results(all_results)
+            summary = summary_from_results(all_results)
+            sarif_json = render_fixes_sarif(suggestions, summary)
+            print(sarif_json)
         else:
             logger.print_execution_summary(action, all_results)
 

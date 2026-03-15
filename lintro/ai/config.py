@@ -88,6 +88,7 @@ class AIConfig(BaseModel):
             None disables the limit.
         max_prompt_tokens: Token budget for fix prompts before context
             trimming.
+        stream: Stream AI responses token-by-token in interactive mode.
         sanitize_mode: Controls prompt injection detection behavior.
             'warn' logs detections, 'block' skips affected files,
             'off' disables detection.
@@ -191,6 +192,10 @@ class AIConfig(BaseModel):
         default=12000,
         ge=1000,
         description="Token budget for fix prompts before context trimming.",
+    )
+    stream: bool = Field(
+        default=False,
+        description="Stream AI responses token-by-token in interactive mode.",
     )
     sanitize_mode: SanitizeMode = Field(
         default=SanitizeMode.WARN,

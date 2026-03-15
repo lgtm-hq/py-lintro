@@ -49,7 +49,9 @@ DEFAULT_ACTION: str = "check"
 )
 @click.option(
     "--output-format",
-    type=click.Choice(["plain", "grid", "markdown", "html", "json", "csv", "github"]),
+    type=click.Choice(
+        ["plain", "grid", "markdown", "html", "json", "csv", "github", "sarif"],
+    ),
     default="grid",
     help="Output format for displaying results",
 )
