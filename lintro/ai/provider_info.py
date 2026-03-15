@@ -8,6 +8,7 @@ shapes can import them without depending on the singleton instance.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 
 
@@ -27,8 +28,10 @@ class ProviderInfo:
         default_model: Model identifier used when the user omits one.
         default_api_key_env: Environment variable checked for the API key.
         models: Known models and their pricing.
+            Typed as ``Mapping`` to signal read-only intent; the frozen
+            dataclass prevents reassignment of the attribute itself.
     """
 
     default_model: str
     default_api_key_env: str
-    models: dict[str, ModelPricing] = field(default_factory=dict)
+    models: Mapping[str, ModelPricing] = field(default_factory=dict)

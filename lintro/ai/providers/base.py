@@ -186,19 +186,20 @@ class BaseAIProvider(ABC):
     def is_available(self) -> bool:
         """Check if this provider is ready to use.
 
-        Note: this reads the API key from the environment on every call,
-        while ``_get_client()`` caches the client (and its key) after
-        the first successful creation. If the env var is removed after
-        client creation, ``is_available()`` will return ``False`` even
-        though the cached client would still work.
+        A provider is available when its SDK is installed and at least
+        one of these is true: an API key env var is set, a custom
+        base URL is configured, or a client has already been created.
 
         Returns:
-            bool: True if the provider's SDK is installed and an API
-                key is configured.
+            bool: True if the provider can serve requests.
         """
         if not self._has_sdk:
             return False
-        return bool(os.environ.get(self._api_key_env))
+        return bool(
+            os.environ.get(self._api_key_env)
+            or self._base_url
+            or self._client is not None,
+        )
 
     @property
     def name(self) -> str:

@@ -130,6 +130,10 @@ def to_sarif(
 
         # Fix suggestion — only emit when there is a real replacement target
         if s.suggested_code and s.file and s.line:
+            deleted_region: dict[str, int] = {"startLine": s.line}
+            if s.original_code:
+                end_line = s.line + s.original_code.count("\n")
+                deleted_region["endLine"] = end_line
             fix: dict[str, Any] = {
                 "description": {"text": s.explanation or "AI suggestion"},
                 "artifactChanges": [
@@ -137,9 +141,7 @@ def to_sarif(
                         "artifactLocation": {"uri": s.file},
                         "replacements": [
                             {
-                                "deletedRegion": {
-                                    "startLine": s.line,
-                                },
+                                "deletedRegion": deleted_region,
                                 "insertedContent": {
                                     "text": s.suggested_code,
                                 },

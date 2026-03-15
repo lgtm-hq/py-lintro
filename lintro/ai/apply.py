@@ -114,15 +114,18 @@ def _apply_fix(
                     suffix=".tmp",
                 )
                 try:
-                    with os.fdopen(fd, "wb") as f:
-                        # fd is now owned by the file object — do not
-                        # close it separately.
-                        f.write("".join(new_lines).encode("utf-8"))
+                    # os.fdopen transfers fd ownership to the file object.
+                    # If os.fdopen itself raises, fd is still raw and must
+                    # be closed manually to avoid a leak.
+                    try:
+                        fobj = os.fdopen(fd, "wb")
+                    except BaseException:
+                        os.close(fd)
+                        raise
+                    with fobj:
+                        fobj.write("".join(new_lines).encode("utf-8"))
                     Path(tmp).replace(path)
                 except BaseException:
-                    # os.fdopen takes ownership of fd on success, so
-                    # only close it manually if os.fdopen itself fails
-                    # (extremely unlikely but avoids an fd leak).
                     Path(tmp).unlink(missing_ok=True)
                     raise
                 return True

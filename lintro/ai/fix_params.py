@@ -24,8 +24,8 @@ class FixGenParams:
     one change site instead of threading it through every function.
 
     Attributes:
-        tool_name: Name of the tool that produced these issues.
         workspace_root: Root directory limiting AI file access.
+        tool_name: Name of the tool that produced these issues.
         max_tokens: Maximum tokens requested per fix generation call.
         max_retries: Maximum retry attempts for transient API failures.
         timeout: Request timeout in seconds per API call.
@@ -43,8 +43,8 @@ class FixGenParams:
         progress_callback: Optional callback after each fix completes.
     """
 
+    workspace_root: Path
     tool_name: str = ""
-    workspace_root: Path = field(default_factory=Path)
     max_tokens: int = 2048
     max_retries: int = 2
     timeout: float = 60.0

@@ -131,7 +131,13 @@ def parse_batch_response(
             continue
         original = item.get("original_code", "")
         suggested = item.get("suggested_code", "")
-        if not original or not suggested or original == suggested:
+        if (
+            not isinstance(original, str)
+            or not isinstance(suggested, str)
+            or not original
+            or not suggested
+            or original == suggested
+        ):
             continue
         line = item.get("line", 0)
         code = item.get("code", "")

@@ -14,7 +14,7 @@ backward compatibility.
 from __future__ import annotations
 
 from collections.abc import Iterator
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from lintro.ai.provider_enum import AIProvider
 from lintro.ai.provider_info import ModelPricing, ProviderInfo
@@ -43,6 +43,18 @@ class AIProviderRegistry:
 
     anthropic: ProviderInfo
     openai: ProviderInfo
+    _cached_model_pricing: dict[str, ModelPricing] = field(
+        default_factory=dict,
+        init=False,
+        repr=False,
+    )
+
+    def __post_init__(self) -> None:
+        """Pre-compute cached derived mappings."""
+        pricing: dict[str, ModelPricing] = {}
+        for _provider, info in self.items():
+            pricing.update(info.models)
+        object.__setattr__(self, "_cached_model_pricing", pricing)
 
     def items(self) -> Iterator[tuple[AIProvider, ProviderInfo]]:
         """Yield ``(AIProvider, ProviderInfo)`` pairs."""
@@ -64,10 +76,7 @@ class AIProviderRegistry:
     @property
     def model_pricing(self) -> dict[str, ModelPricing]:
         """Flat mapping of every known model to its pricing."""
-        result: dict[str, ModelPricing] = {}
-        for _provider, info in self.items():
-            result.update(info.models)
-        return result
+        return self._cached_model_pricing
 
     @property
     def default_models(self) -> dict[AIProvider, str]:

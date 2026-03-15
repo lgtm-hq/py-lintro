@@ -293,8 +293,9 @@ def _generate_batch_fixes(
     issues_list_parts: list[str] = []
     for idx, issue in enumerate(file_issues, 1):
         code = getattr(issue, "code", "") or ""
+        msg = redact_secrets(sanitize_code_content(issue.message))
         issues_list_parts.append(
-            f"{idx}. Line {issue.line} [{code}]: {issue.message}",
+            f"{idx}. Line {issue.line} [{code}]: {msg}",
         )
     issues_list = "\n".join(issues_list_parts)
 

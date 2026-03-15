@@ -126,7 +126,7 @@ class GitHubPRReporter:
                 if self.workspace_root is not None
                 else relative_path(s.file)
             )
-            rel = raw_path.lstrip("./").replace("\\", "/") if raw_path else ""
+            rel = raw_path.removeprefix("./").replace("\\", "/") if raw_path else ""
             if not rel:
                 continue
             body = _format_inline_comment(s)

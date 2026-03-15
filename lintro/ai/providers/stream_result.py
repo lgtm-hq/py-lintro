@@ -22,8 +22,10 @@ class AIStreamResult:
 
     def __iter__(self) -> Iterator[str]:
         """Yield text chunks from the underlying iterator."""
-        yield from self._chunks
-        self._consumed = True
+        try:
+            yield from self._chunks
+        finally:
+            self._consumed = True
 
     def response(self) -> AIResponse:
         """Return the finalized AIResponse.
