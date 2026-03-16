@@ -16,7 +16,8 @@ execution:
   parallel: true
   max_workers: 10 # 1-32, defaults to CPU count if omitted
   auto_install_deps: true # Auto-install Node.js deps if node_modules missing
-  # artifacts: ['sarif']  # Side-channel outputs written alongside primary display
+  # artifacts: ['sarif', 'json']  # Side-channel outputs alongside primary display
+  # Supported: json, csv, markdown, html, sarif, plain
   # SARIF auto-emits in GitHub Actions even without this
 
 # Fallback configurations for tools without native config files.

@@ -240,47 +240,91 @@ def _display_fix_result(
         )
 
 
-def _write_sarif_artifact(
+_ARTIFACT_EXTENSIONS: dict[str, str] = {
+    "json": "results.json",
+    "csv": "results.csv",
+    "markdown": "results.md",
+    "html": "results.html",
+    "sarif": "results.sarif.json",
+    "plain": "results.txt",
+}
+
+
+def _write_artifacts(
     all_results: list[ToolResult],
     lintro_config: Any,
     logger: Any,
+    action: Action,
+    total_issues: int,
+    total_fixed: int,
 ) -> None:
-    """Write a SARIF artifact as a side-channel file.
+    """Write side-channel artifact files alongside primary output.
 
-    Emits a SARIF file alongside the primary output when explicitly
-    configured via ``execution.artifacts: ["sarif"]`` or when running
-    inside GitHub Actions (auto-detected via ``GITHUB_ACTIONS=true``).
+    Emits artifact files into ``.lintro/artifacts/<format>/`` for each
+    format listed in ``execution.artifacts``.  SARIF is also auto-emitted
+    when ``GITHUB_ACTIONS=true`` is detected (for Code Scanning).
 
-    The file is written to ``.lintro/sarif/results.sarif.json``.
+    Supported formats match ``OutputFormat``: json, csv, markdown,
+    html, sarif, plain.
 
     Args:
         all_results: Completed tool results.
         lintro_config: Loaded LintroConfig instance.
         logger: Console logger for warning output.
+        action: The action performed (check, fmt, test).
+        total_issues: Total number of issues found.
+        total_fixed: Total number of issues fixed.
     """
     import os
+    from pathlib import Path
 
-    artifacts = lintro_config.execution.artifacts
+    from lintro.enums.output_format import OutputFormat, normalize_output_format
+    from lintro.utils.output.file_writer import write_output_file
+
+    artifacts: list[str] = [a.lower() for a in lintro_config.execution.artifacts]
     is_gha = os.environ.get("GITHUB_ACTIONS") == "true"
 
-    if "sarif" not in artifacts and not is_gha:
+    # Auto-emit SARIF in GitHub Actions for Code Scanning integration.
+    if is_gha and "sarif" not in artifacts:
+        artifacts.append("sarif")
+
+    if not artifacts:
         return
 
-    try:
-        from pathlib import Path
+    for artifact in artifacts:
+        filename = _ARTIFACT_EXTENSIONS.get(artifact)
+        if filename is None:
+            logger.console_output(
+                f"Warning: Unknown artifact format '{artifact}', skipping",
+            )
+            continue
 
-        from lintro.ai.output.sarif import write_sarif
-        from lintro.ai.output.sarif_bridge import (
-            suggestions_from_results,
-            summary_from_results,
-        )
+        artifact_path = Path(".lintro") / "artifacts" / artifact / filename
+        try:
+            fmt = normalize_output_format(artifact)
+            if fmt == OutputFormat.SARIF:
+                from lintro.ai.output.sarif import write_sarif
+                from lintro.ai.output.sarif_bridge import (
+                    suggestions_from_results,
+                    summary_from_results,
+                )
 
-        suggestions = suggestions_from_results(all_results)
-        summary = summary_from_results(all_results)
-        sarif_path = Path(".lintro") / "sarif" / "results.sarif.json"
-        write_sarif(suggestions, summary, output_path=sarif_path)
-    except (OSError, ValueError, TypeError) as e:
-        logger.console_output(f"Warning: Failed to write SARIF artifact: {e}")
+                suggestions = suggestions_from_results(all_results)
+                summary = summary_from_results(all_results)
+                write_sarif(suggestions, summary, output_path=artifact_path)
+            else:
+                write_output_file(
+                    output_path=str(artifact_path),
+                    output_format=fmt,
+                    all_results=all_results,
+                    action=action,
+                    total_issues=total_issues,
+                    total_fixed=total_fixed,
+                )
+        except (OSError, ValueError, TypeError) as e:
+            logger.console_output(
+                f"Warning: Failed to write {artifact} artifact: {e}",
+            )
 
 
 def run_lint_tools_simple(
@@ -747,9 +791,16 @@ def run_lint_tools_simple(
             except (OSError, ValueError, TypeError) as e:
                 logger.console_output(f"Warning: Failed to write output file: {e}")
 
-        # Write SARIF artifact as a side-channel file when configured or
-        # when running inside GitHub Actions (auto-emit for Code Scanning).
-        _write_sarif_artifact(all_results, lintro_config, logger)
+        # Write side-channel artifact files when configured or when
+        # running inside GitHub Actions (SARIF auto-emit for Code Scanning).
+        _write_artifacts(
+            all_results,
+            lintro_config,
+            logger,
+            action=action,
+            total_issues=total_issues,
+            total_fixed=total_fixed,
+        )
 
         # Clean up old run directories to prevent unbounded growth
         try:

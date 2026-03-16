@@ -34,9 +34,10 @@ class ExecutionConfig(BaseModel):
         max_fix_retries: Maximum number of fix→verify cycles for converging
             formatters (default: 3). Some formatters need multiple passes.
         artifacts: Side-channel artifact formats to write alongside the
-            primary output. Currently supports ``["sarif"]``. When
-            ``GITHUB_ACTIONS=true`` is detected, SARIF is emitted
-            automatically even if this list is empty.
+            primary output. Supports all output formats: json, csv,
+            markdown, html, sarif, plain. When ``GITHUB_ACTIONS=true``
+            is detected, SARIF is emitted automatically even if this
+            list is empty.
     """
 
     model_config = ConfigDict(frozen=False, extra="forbid")
