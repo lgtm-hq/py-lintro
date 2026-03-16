@@ -4,9 +4,11 @@ from __future__ import annotations
 
 from assertpy import assert_that
 
-from lintro.ai.fix import (
-    _extract_context,
-    _read_file_safely,
+from lintro.ai.fix_context import (
+    extract_context as _extract_context,
+)
+from lintro.ai.fix_context import (
+    read_file_safely as _read_file_safely,
 )
 
 # ---------------------------------------------------------------------------

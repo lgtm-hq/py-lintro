@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -45,8 +46,8 @@ def single_issue_result():
 
 @pytest.fixture
 def check_config():
-    """LintroConfig with AI enabled and max_fix_issues=5."""
-    return LintroConfig(ai=AIConfig(enabled=True, max_fix_issues=5))
+    """LintroConfig with AI enabled and max_fix_attempts=5."""
+    return LintroConfig(ai=AIConfig(enabled=True, max_fix_attempts=5))
 
 
 @pytest.fixture
@@ -63,10 +64,10 @@ def mock_logger():
 @patch("lintro.ai.orchestrator.require_ai")
 @patch("lintro.ai.orchestrator.get_provider")
 @patch("lintro.ai.orchestrator.generate_summary")
-@patch("lintro.ai.pipeline.generate_fixes")
+@patch("lintro.ai.pipeline.generate_fixes_from_params")
 @patch(
-    "lintro.ai.orchestrator._normalize_issue_path_for_workspace",
-    return_value=True,
+    "lintro.ai.orchestrator._resolve_issue_path",
+    side_effect=lambda *, file, workspace_root, cwd: Path(file),
 )
 def test_run_ai_enhancement_check_fix_preserves_summary_and_fix_metadata(
     _mock_normalize,
@@ -187,34 +188,34 @@ def test_summary_attachment_summary_attached_to_all_results_with_issues(
 
 
 def test_log_fix_limit_message_no_log_when_within_limit():
-    """No console output when total_issues <= max_fix_issues."""
+    """No console output when total_issues <= max_fix_attempts."""
     logger = MagicMock()
     _log_fix_limit_message(
         logger=logger,
         total_issues=3,
-        max_fix_issues=5,
+        max_fix_attempts=5,
     )
     logger.console_output.assert_not_called()
 
 
 def test_log_fix_limit_message_no_log_when_exactly_at_limit():
-    """No console output when total_issues == max_fix_issues."""
+    """No console output when total_issues == max_fix_attempts."""
     logger = MagicMock()
     _log_fix_limit_message(
         logger=logger,
         total_issues=5,
-        max_fix_issues=5,
+        max_fix_attempts=5,
     )
     logger.console_output.assert_not_called()
 
 
 def test_log_fix_limit_message_logs_when_over_limit():
-    """Logs skipped count when total_issues > max_fix_issues."""
+    """Logs skipped count when total_issues > max_fix_attempts."""
     logger = MagicMock()
     _log_fix_limit_message(
         logger=logger,
         total_issues=10,
-        max_fix_issues=5,
+        max_fix_attempts=5,
     )
     logger.console_output.assert_called_once()
     msg = logger.console_output.call_args[0][0]

@@ -95,8 +95,9 @@ def test_retry_raises_after_max_retries_exhausted(mock_sleep):
     assert_that(mock_sleep.call_count).is_equal_to(2)
 
 
+@patch("lintro.ai.retry.random.uniform", return_value=1.0)
 @patch("lintro.ai.retry.time.sleep")
-def test_retry_exponential_backoff_delays(mock_sleep):
+def test_retry_exponential_backoff_delays(mock_sleep, _mock_uniform):
     """Verify retry delays follow exponential backoff progression."""
     call_count = 0
 
@@ -115,8 +116,9 @@ def test_retry_exponential_backoff_delays(mock_sleep):
     assert_that(delays).is_equal_to([1.0, 2.0, 4.0])
 
 
+@patch("lintro.ai.retry.random.uniform", return_value=1.0)
 @patch("lintro.ai.retry.time.sleep")
-def test_retry_max_delay_cap(mock_sleep):
+def test_retry_max_delay_cap(mock_sleep, _mock_uniform):
     """Verify retry delays are capped at the configured max_delay value."""
     call_count = 0
 

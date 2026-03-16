@@ -7,6 +7,7 @@ immediately propagating permanent failures (authentication errors).
 from __future__ import annotations
 
 import functools
+import random
 import time
 from collections.abc import Callable
 from typing import Any
@@ -33,10 +34,14 @@ def with_retry(
     max_delay: float = DEFAULT_MAX_DELAY,
     backoff_factor: float = DEFAULT_BACKOFF_FACTOR,
 ) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
-    """Decorator for retrying AI API calls with exponential backoff.
+    """Decorator for retrying AI API calls with exponential backoff and jitter.
 
     Retries on ``AIProviderError`` and ``AIRateLimitError``.
     Does NOT retry on ``AIAuthenticationError`` (permanent failure).
+
+    Each retry delay is computed as ``min(base_delay * factor^attempt,
+    max_delay)`` then jittered by ±20 % to avoid thundering-herd
+    alignment when multiple processes retry concurrently.
 
     Args:
         max_retries: Maximum number of retry attempts.
@@ -86,6 +91,10 @@ def with_retry(
                         base_delay * (backoff_factor**attempt),
                         max_delay,
                     )
+                    # Jitter ±20% to prevent thundering-herd alignment
+                    # across concurrent lintro processes. Not used for
+                    # security/cryptographic purposes.
+                    delay *= random.uniform(0.8, 1.2)  # nosec B311  # noqa: S311
                     logger.debug(
                         f"AI retry {attempt + 1}/{max_retries}: {e}, "
                         f"waiting {delay:.1f}s",

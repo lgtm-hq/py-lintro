@@ -47,7 +47,7 @@ def _make_suggestion(
 def _default_ai_config(**overrides: object) -> AIConfig:
     defaults: dict[str, object] = {
         "enabled": True,
-        "max_fix_issues": 20,
+        "max_fix_attempts": 20,
     }
     defaults.update(overrides)
     return AIConfig(**defaults)  # type: ignore[arg-type]
@@ -80,9 +80,9 @@ def _make_fix_issues(
 @patch(f"{_PIPELINE}.generate_post_fix_summary")
 @patch(f"{_PIPELINE}.review_fixes_interactive")
 @patch(f"{_PIPELINE}.apply_fixes")
-@patch(f"{_PIPELINE}.generate_fixes")
+@patch(f"{_PIPELINE}.generate_fixes_from_params")
 def test_budget_tracking_across_multiple_tools(
-    mock_generate_fixes,
+    mock_generate_fixes_from_params,
     mock_apply_fixes,
     mock_review_fixes_interactive,
     mock_generate_post_fix_summary,
@@ -90,7 +90,7 @@ def test_budget_tracking_across_multiple_tools(
     mock_render_summary,
     mock_render_validation,
 ):
-    """When two tools have issues, budget (max_fix_issues) is consumed correctly."""
+    """When two tools have issues, budget (max_fix_attempts) is consumed correctly."""
     issue_a = MockIssue(file="a.py", line=1, code="E501", message="err")
     issue_b = MockIssue(file="b.py", line=1, code="E501", message="err")
     issue_c = MockIssue(file="c.py", line=1, code="W001", message="err")
@@ -107,7 +107,7 @@ def test_budget_tracking_across_multiple_tools(
     suggestion_b = _make_suggestion(file="b.py", tool_name="ruff")
     suggestion_c = _make_suggestion(file="c.py", tool_name="mypy", code="W001")
 
-    mock_generate_fixes.side_effect = [
+    mock_generate_fixes_from_params.side_effect = [
         [suggestion_a, suggestion_b],
         [suggestion_c],
     ]
@@ -115,7 +115,7 @@ def test_budget_tracking_across_multiple_tools(
     mock_review_fixes_interactive.return_value = (0, 0, [])
     mock_verify_fixes.return_value = ValidationResult()
 
-    ai_config = _default_ai_config(max_fix_issues=3)
+    ai_config = _default_ai_config(max_fix_attempts=3)
 
     run_fix_pipeline(
         fix_issues=fix_issues,
@@ -126,15 +126,15 @@ def test_budget_tracking_across_multiple_tools(
         workspace_root=Path("/tmp"),
     )
 
-    assert_that(mock_generate_fixes.call_count).is_equal_to(2)
+    assert_that(mock_generate_fixes_from_params.call_count).is_equal_to(2)
 
     # First call gets full budget of 3
-    first_call_kwargs = mock_generate_fixes.call_args_list[0].kwargs
-    assert_that(first_call_kwargs["max_issues"]).is_equal_to(3)
+    first_call_params = mock_generate_fixes_from_params.call_args_list[0].args[2]
+    assert_that(first_call_params.max_issues).is_equal_to(3)
 
     # Second call gets reduced budget: 3 - 2 (issues consumed from ruff) = 1
-    second_call_kwargs = mock_generate_fixes.call_args_list[1].kwargs
-    assert_that(second_call_kwargs["max_issues"]).is_equal_to(1)
+    second_call_params = mock_generate_fixes_from_params.call_args_list[1].args[2]
+    assert_that(second_call_params.max_issues).is_equal_to(1)
 
 
 @patch(f"{_PIPELINE}.is_safe_style_fix")
@@ -144,9 +144,9 @@ def test_budget_tracking_across_multiple_tools(
 @patch(f"{_PIPELINE}.generate_post_fix_summary")
 @patch(f"{_PIPELINE}.review_fixes_interactive")
 @patch(f"{_PIPELINE}.apply_fixes")
-@patch(f"{_PIPELINE}.generate_fixes")
+@patch(f"{_PIPELINE}.generate_fixes_from_params")
 def test_safe_vs_risky_suggestion_splitting(
-    mock_generate_fixes,
+    mock_generate_fixes_from_params,
     mock_apply_fixes,
     mock_review_fixes_interactive,
     mock_generate_post_fix_summary,
@@ -163,7 +163,7 @@ def test_safe_vs_risky_suggestion_splitting(
     safe = _make_suggestion(code="E501", risk_level="safe-style")
     risky = _make_suggestion(code="B101", risk_level="behavioral-risk")
 
-    mock_generate_fixes.return_value = [safe, risky]
+    mock_generate_fixes_from_params.return_value = [safe, risky]
     mock_is_safe.side_effect = lambda s: s.risk_level == "safe-style"
     mock_apply_fixes.return_value = [safe]
     mock_review_fixes_interactive.return_value = (0, 0, [])
@@ -192,9 +192,9 @@ def test_safe_vs_risky_suggestion_splitting(
 @patch(f"{_PIPELINE}.generate_post_fix_summary")
 @patch(f"{_PIPELINE}.review_fixes_interactive")
 @patch(f"{_PIPELINE}.apply_fixes")
-@patch(f"{_PIPELINE}.generate_fixes")
+@patch(f"{_PIPELINE}.generate_fixes_from_params")
 def test_auto_apply_fast_path_json_mode(
-    mock_generate_fixes,
+    mock_generate_fixes_from_params,
     mock_apply_fixes,
     mock_review_fixes_interactive,
     mock_generate_post_fix_summary,
@@ -209,7 +209,7 @@ def test_auto_apply_fast_path_json_mode(
 
     safe = _make_suggestion(code="E501", risk_level="safe-style", confidence="high")
 
-    mock_generate_fixes.return_value = [safe]
+    mock_generate_fixes_from_params.return_value = [safe]
     mock_apply_fixes.return_value = [safe]
     mock_verify_fixes.return_value = ValidationResult()
 
@@ -238,11 +238,11 @@ def test_auto_apply_fast_path_json_mode(
 @patch(f"{_PIPELINE}.generate_post_fix_summary")
 @patch(f"{_PIPELINE}.review_fixes_interactive")
 @patch(f"{_PIPELINE}.apply_fixes")
-@patch(f"{_PIPELINE}.generate_fixes")
+@patch(f"{_PIPELINE}.generate_fixes_from_params")
 @patch(f"{_PIPELINE}.sys.stdin.isatty", return_value=True)
 def test_interactive_review_path(
     _mock_isatty,
-    mock_generate_fixes,
+    mock_generate_fixes_from_params,
     mock_apply_fixes,
     mock_review_fixes_interactive,
     mock_generate_post_fix_summary,
@@ -257,7 +257,7 @@ def test_interactive_review_path(
 
     suggestion = _make_suggestion(code="B101", risk_level="behavioral-risk")
 
-    mock_generate_fixes.return_value = [suggestion]
+    mock_generate_fixes_from_params.return_value = [suggestion]
     mock_review_fixes_interactive.return_value = (1, 0, [suggestion])
     mock_verify_fixes.return_value = ValidationResult()
 
@@ -284,9 +284,9 @@ def test_interactive_review_path(
 @patch(f"{_PIPELINE}.generate_post_fix_summary")
 @patch(f"{_PIPELINE}.review_fixes_interactive")
 @patch(f"{_PIPELINE}.apply_fixes")
-@patch(f"{_PIPELINE}.generate_fixes")
+@patch(f"{_PIPELINE}.generate_fixes_from_params")
 def test_no_suggestions_returns_early(
-    mock_generate_fixes,
+    mock_generate_fixes_from_params,
     mock_apply_fixes,
     mock_review_fixes_interactive,
     mock_generate_post_fix_summary,
@@ -294,12 +294,12 @@ def test_no_suggestions_returns_early(
     mock_render_summary,
     mock_render_validation,
 ):
-    """Empty generate_fixes exits without calling apply/review."""
+    """Empty generate_fixes_from_params exits without calling apply/review."""
     issue = MockIssue(file="a.py", line=1, code="E501", message="err")
     result = _make_result("ruff", [issue])
     fix_issues = _make_fix_issues(result, [issue])
 
-    mock_generate_fixes.return_value = []
+    mock_generate_fixes_from_params.return_value = []
 
     ai_config = _default_ai_config()
 
@@ -312,7 +312,7 @@ def test_no_suggestions_returns_early(
         workspace_root=Path("/tmp"),
     )
 
-    assert_that(mock_generate_fixes.call_count).is_equal_to(1)
+    assert_that(mock_generate_fixes_from_params.call_count).is_equal_to(1)
     mock_apply_fixes.assert_not_called()
     mock_review_fixes_interactive.assert_not_called()
     mock_verify_fixes.assert_not_called()
@@ -325,9 +325,9 @@ def test_no_suggestions_returns_early(
 @patch(f"{_PIPELINE}.generate_post_fix_summary")
 @patch(f"{_PIPELINE}.review_fixes_interactive")
 @patch(f"{_PIPELINE}.apply_fixes")
-@patch(f"{_PIPELINE}.generate_fixes")
+@patch(f"{_PIPELINE}.generate_fixes_from_params")
 def test_post_fix_summary_generation(
-    mock_generate_fixes,
+    mock_generate_fixes_from_params,
     mock_apply_fixes,
     mock_review_fixes_interactive,
     mock_generate_post_fix_summary,
@@ -342,7 +342,7 @@ def test_post_fix_summary_generation(
 
     suggestion = _make_suggestion(code="B101", tool_name="ruff")
 
-    mock_generate_fixes.return_value = [suggestion]
+    mock_generate_fixes_from_params.return_value = [suggestion]
     mock_apply_fixes.return_value = [suggestion]
     mock_verify_fixes.return_value = ValidationResult(
         verified=1,
@@ -376,9 +376,9 @@ def test_post_fix_summary_generation(
 @patch(f"{_PIPELINE}.generate_post_fix_summary")
 @patch(f"{_PIPELINE}.review_fixes_interactive")
 @patch(f"{_PIPELINE}.apply_fixes")
-@patch(f"{_PIPELINE}.generate_fixes")
+@patch(f"{_PIPELINE}.generate_fixes_from_params")
 def test_verify_fixes_flow(
-    mock_generate_fixes,
+    mock_generate_fixes_from_params,
     mock_apply_fixes,
     mock_review_fixes_interactive,
     mock_generate_post_fix_summary,
@@ -393,7 +393,7 @@ def test_verify_fixes_flow(
 
     suggestion = _make_suggestion(code="B101", tool_name="ruff")
 
-    mock_generate_fixes.return_value = [suggestion]
+    mock_generate_fixes_from_params.return_value = [suggestion]
     mock_apply_fixes.return_value = [suggestion]
     mock_verify_fixes.return_value = ValidationResult(
         verified=1,

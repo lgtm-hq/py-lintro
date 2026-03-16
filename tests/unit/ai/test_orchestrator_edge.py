@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -68,10 +69,10 @@ def test_ai_result_default_no_error(
 @patch("lintro.ai.orchestrator.require_ai")
 @patch("lintro.ai.orchestrator.get_provider")
 @patch("lintro.ai.orchestrator.generate_summary")
-@patch("lintro.ai.pipeline.generate_fixes")
+@patch("lintro.ai.pipeline.generate_fixes_from_params")
 @patch(
-    "lintro.ai.orchestrator._normalize_issue_path_for_workspace",
-    return_value=True,
+    "lintro.ai.orchestrator._resolve_issue_path",
+    side_effect=lambda *, file, workspace_root, cwd: Path(file),
 )
 def test_ai_result_unfixed_issues_when_fixes_fail(
     _mock_normalize,
@@ -95,7 +96,7 @@ def test_ai_result_unfixed_issues_when_fixes_fail(
         ],
     )
     config = LintroConfig(
-        ai=AIConfig(enabled=True, max_fix_issues=5, fail_on_unfixed=True),
+        ai=AIConfig(enabled=True, max_fix_attempts=5, fail_on_unfixed=True),
     )
     logger = MagicMock()
 
@@ -161,12 +162,12 @@ def test_ai_result_error_propagates_when_fail_on_ai_error():
 
 @patch("lintro.ai.orchestrator.require_ai")
 @patch("lintro.ai.orchestrator.get_provider")
-@patch("lintro.ai.pipeline.generate_fixes")
+@patch("lintro.ai.pipeline.generate_fixes_from_params")
 @patch("lintro.ai.pipeline.apply_fixes")
 @patch("lintro.ai.pipeline.verify_fixes")
 @patch(
-    "lintro.ai.orchestrator._normalize_issue_path_for_workspace",
-    return_value=True,
+    "lintro.ai.orchestrator._resolve_issue_path",
+    side_effect=lambda *, file, workspace_root, cwd: Path(file),
 )
 def test_ai_result_tracks_applied_fixes(
     _mock_normalize,

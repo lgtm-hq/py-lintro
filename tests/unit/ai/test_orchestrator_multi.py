@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 from unittest.mock import MagicMock, patch
 
@@ -24,13 +25,13 @@ from tests.unit.ai.conftest import MockAIProvider, MockIssue
 
 @patch("lintro.ai.orchestrator.require_ai")
 @patch("lintro.ai.orchestrator.get_provider")
-@patch("lintro.ai.pipeline.generate_fixes")
+@patch("lintro.ai.pipeline.generate_fixes_from_params")
 @patch("lintro.ai.pipeline.apply_fixes")
 @patch("lintro.ai.pipeline.review_fixes_interactive")
 @patch("lintro.ai.pipeline.sys.stdin.isatty", return_value=False)
 @patch(
-    "lintro.ai.orchestrator._normalize_issue_path_for_workspace",
-    return_value=True,
+    "lintro.ai.orchestrator._resolve_issue_path",
+    side_effect=lambda *, file, workspace_root, cwd: Path(file),
 )
 def test_run_ai_enhancement_fix_action_noninteractive_applies_safe_then_reviews_risky(
     _mock_normalize,
@@ -113,12 +114,12 @@ def test_run_ai_enhancement_fix_action_noninteractive_applies_safe_then_reviews_
 
 @patch("lintro.ai.orchestrator.require_ai")
 @patch("lintro.ai.orchestrator.get_provider")
-@patch("lintro.ai.pipeline.generate_fixes")
+@patch("lintro.ai.pipeline.generate_fixes_from_params")
 @patch("lintro.ai.pipeline.apply_fixes")
 @patch("lintro.ai.pipeline.verify_fixes")
 @patch(
-    "lintro.ai.orchestrator._normalize_issue_path_for_workspace",
-    return_value=True,
+    "lintro.ai.orchestrator._resolve_issue_path",
+    side_effect=lambda *, file, workspace_root, cwd: Path(file),
 )
 def test_run_ai_enhancement_fix_action_json_auto_applies_safe_style_suggestions(
     _mock_normalize,
@@ -151,7 +152,7 @@ def test_run_ai_enhancement_fix_action_json_auto_applies_safe_style_suggestions(
     config = LintroConfig(
         ai=AIConfig(
             enabled=True,
-            max_fix_issues=5,
+            max_fix_attempts=5,
             auto_apply=False,
             auto_apply_safe_fixes=True,
         ),
@@ -200,12 +201,12 @@ def test_run_ai_enhancement_fix_action_json_auto_applies_safe_style_suggestions(
 
 @patch("lintro.ai.orchestrator.require_ai")
 @patch("lintro.ai.orchestrator.get_provider")
-@patch("lintro.ai.pipeline.generate_fixes")
+@patch("lintro.ai.pipeline.generate_fixes_from_params")
 @patch("lintro.ai.pipeline.apply_fixes")
 @patch("lintro.ai.pipeline.verify_fixes")
 @patch(
-    "lintro.ai.orchestrator._normalize_issue_path_for_workspace",
-    return_value=True,
+    "lintro.ai.orchestrator._resolve_issue_path",
+    side_effect=lambda *, file, workspace_root, cwd: Path(file),
 )
 def test_run_ai_enhancement_fix_action_json_uses_fresh_rerun_results(
     _mock_normalize,

@@ -42,6 +42,9 @@ _MAX_CACHE_ENTRIES = 100
 # Only attempt full-file context for files under this many lines
 FULL_FILE_THRESHOLD = 500
 
+# Minimum context lines to keep when trimming for token budget
+MIN_CONTEXT_LINES = 3
+
 
 def read_file_safely(file_path: str) -> str | None:
     """Read a file's contents, returning None on failure.
@@ -214,7 +217,6 @@ def build_fix_context(
             return full_prompt
 
     effective_context_lines = context_lines
-    _min_context = 3
     while True:
         context, context_start, context_end = extract_context(
             file_content,
@@ -237,7 +239,7 @@ def build_fix_context(
         prompt_tokens = estimate_tokens(prompt)
         if prompt_tokens <= max_prompt_tokens:
             return prompt
-        if effective_context_lines <= _min_context:
+        if effective_context_lines <= MIN_CONTEXT_LINES:
             logger.debug(
                 f"Fix prompt still over budget at minimum context "
                 f"({prompt_tokens} > {max_prompt_tokens}) for "
@@ -246,7 +248,7 @@ def build_fix_context(
             return prompt
         old_ctx = effective_context_lines
         effective_context_lines = max(
-            _min_context,
+            MIN_CONTEXT_LINES,
             effective_context_lines // 2,
         )
         logger.debug(

@@ -64,7 +64,12 @@ class AIConfig(BaseModel):
     auto_apply: bool = False
     auto_apply_safe_fixes: bool = True
     max_tokens: int = Field(default=4096, ge=1, le=128_000)
-    max_fix_issues: int = Field(default=20, ge=1)
+    max_fix_attempts: int = Field(
+        default=20,
+        ge=1,
+        description="Maximum number of issues to attempt fixing per run. "
+        "Counts API calls made, not suggestions returned.",
+    )
     max_parallel_calls: int = Field(default=5, ge=1, le=20)
     max_retries: int = Field(default=2, ge=0, le=10)
     api_timeout: float = Field(default=60.0, ge=1.0)
@@ -185,7 +190,7 @@ class AIConfig(BaseModel):
     def budget_config(self) -> AIBudgetConfig:
         """Return a frozen snapshot of budget and limit settings."""
         return AIBudgetConfig(
-            max_fix_issues=self.max_fix_issues,
+            max_fix_attempts=self.max_fix_attempts,
             max_parallel_calls=self.max_parallel_calls,
             max_cost_usd=self.max_cost_usd,
             max_prompt_tokens=self.max_prompt_tokens,

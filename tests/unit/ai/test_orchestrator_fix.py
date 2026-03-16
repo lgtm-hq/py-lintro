@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 from assertpy import assert_that
@@ -22,12 +23,12 @@ from tests.unit.ai.conftest import MockAIProvider, MockIssue
 
 @patch("lintro.ai.orchestrator.require_ai")
 @patch("lintro.ai.orchestrator.get_provider")
-@patch("lintro.ai.pipeline.generate_fixes")
+@patch("lintro.ai.pipeline.generate_fixes_from_params")
 @patch("lintro.ai.pipeline.verify_fixes")
 @patch("lintro.ai.pipeline.apply_fixes")
 @patch(
-    "lintro.ai.orchestrator._normalize_issue_path_for_workspace",
-    return_value=True,
+    "lintro.ai.orchestrator._resolve_issue_path",
+    side_effect=lambda *, file, workspace_root, cwd: Path(file),
 )
 def test_run_ai_enhancement_fix_action_generates_fix_metadata(
     _mock_normalize,
@@ -54,7 +55,7 @@ def test_run_ai_enhancement_fix_action_generates_fix_metadata(
     config = LintroConfig(
         ai=AIConfig(
             enabled=True,
-            max_fix_issues=5,
+            max_fix_attempts=5,
             auto_apply=True,
         ),
     )
@@ -98,12 +99,12 @@ def test_run_ai_enhancement_fix_action_generates_fix_metadata(
 
 @patch("lintro.ai.orchestrator.require_ai")
 @patch("lintro.ai.orchestrator.get_provider")
-@patch("lintro.ai.pipeline.generate_fixes")
+@patch("lintro.ai.pipeline.generate_fixes_from_params")
 @patch("lintro.ai.pipeline.review_fixes_interactive")
 @patch("lintro.ai.pipeline.sys.stdin.isatty", return_value=True)
 @patch(
-    "lintro.ai.orchestrator._normalize_issue_path_for_workspace",
-    return_value=True,
+    "lintro.ai.orchestrator._resolve_issue_path",
+    side_effect=lambda *, file, workspace_root, cwd: Path(file),
 )
 def test_run_ai_enhancement_fix_action_passes_validate_mode_to_interactive_review(
     _mock_normalize,
@@ -130,7 +131,7 @@ def test_run_ai_enhancement_fix_action_passes_validate_mode_to_interactive_revie
     config = LintroConfig(
         ai=AIConfig(
             enabled=True,
-            max_fix_issues=5,
+            max_fix_attempts=5,
             validate_after_group=True,
         ),
     )
@@ -162,10 +163,10 @@ def test_run_ai_enhancement_fix_action_passes_validate_mode_to_interactive_revie
 
 @patch("lintro.ai.orchestrator.require_ai")
 @patch("lintro.ai.orchestrator.get_provider")
-@patch("lintro.ai.pipeline.generate_fixes")
+@patch("lintro.ai.pipeline.generate_fixes_from_params")
 @patch(
-    "lintro.ai.orchestrator._normalize_issue_path_for_workspace",
-    return_value=True,
+    "lintro.ai.orchestrator._resolve_issue_path",
+    side_effect=lambda *, file, workspace_root, cwd: Path(file),
 )
 def test_run_ai_enhancement_fix_action_uses_only_remaining_issue_tail(
     _mock_normalize,
@@ -193,7 +194,7 @@ def test_run_ai_enhancement_fix_action_uses_only_remaining_issue_tail(
         issues=[fixed_issue, remaining_issue],
         remaining_issues_count=1,
     )
-    config = LintroConfig(ai=AIConfig(enabled=True, max_fix_issues=5))
+    config = LintroConfig(ai=AIConfig(enabled=True, max_fix_attempts=5))
     logger = MagicMock()
 
     mock_get_provider.return_value = MockAIProvider()
@@ -211,14 +212,14 @@ def test_run_ai_enhancement_fix_action_uses_only_remaining_issue_tail(
     issues_arg = mock_generate_fixes.call_args.args[0]
     assert_that(issues_arg).is_length(1)
     assert_that(issues_arg[0].code).is_equal_to("E501")
-    fix_kwargs = mock_generate_fixes.call_args.kwargs
-    assert_that(fix_kwargs.get("max_tokens")).is_equal_to(4096)
-    assert_that(fix_kwargs).contains_key("workspace_root")
+    params = mock_generate_fixes.call_args.args[2]
+    assert_that(params.max_tokens).is_equal_to(4096)
+    assert_that(params.workspace_root).is_not_none()
 
 
 @patch("lintro.ai.orchestrator.require_ai")
 @patch("lintro.ai.orchestrator.get_provider")
-@patch("lintro.ai.pipeline.generate_fixes")
+@patch("lintro.ai.pipeline.generate_fixes_from_params")
 def test_run_ai_enhancement_fix_action_skips_tools_with_zero_remaining_issues(
     mock_generate_fixes,
     mock_get_provider,
@@ -239,7 +240,7 @@ def test_run_ai_enhancement_fix_action_skips_tools_with_zero_remaining_issues(
         ],
         remaining_issues_count=0,
     )
-    config = LintroConfig(ai=AIConfig(enabled=True, max_fix_issues=5))
+    config = LintroConfig(ai=AIConfig(enabled=True, max_fix_attempts=5))
     logger = MagicMock()
 
     mock_get_provider.return_value = MockAIProvider()
@@ -257,13 +258,13 @@ def test_run_ai_enhancement_fix_action_skips_tools_with_zero_remaining_issues(
 
 @patch("lintro.ai.orchestrator.require_ai")
 @patch("lintro.ai.orchestrator.get_provider")
-@patch("lintro.ai.pipeline.generate_fixes")
+@patch("lintro.ai.pipeline.generate_fixes_from_params")
 @patch("lintro.ai.pipeline.apply_fixes")
 @patch("lintro.ai.pipeline.verify_fixes")
 @patch("lintro.ai.pipeline.generate_post_fix_summary")
 @patch(
-    "lintro.ai.orchestrator._normalize_issue_path_for_workspace",
-    return_value=True,
+    "lintro.ai.orchestrator._resolve_issue_path",
+    side_effect=lambda *, file, workspace_root, cwd: Path(file),
 )
 def test_run_ai_enhancement_fix_action_uses_fresh_rerun_results_for_post_summary(
     _mock_normalize,

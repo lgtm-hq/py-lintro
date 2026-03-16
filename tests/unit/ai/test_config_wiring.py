@@ -57,7 +57,7 @@ def _make_fix_issues() -> tuple[
 @patch(f"{_PIPELINE}.generate_post_fix_summary")
 @patch(f"{_PIPELINE}.review_fixes_interactive")
 @patch(f"{_PIPELINE}.apply_fixes")
-@patch(f"{_PIPELINE}.generate_fixes")
+@patch(f"{_PIPELINE}.generate_fixes_from_params")
 def test_context_lines_flows_to_generate_fixes(
     mock_generate_fixes,
     mock_apply_fixes,
@@ -82,8 +82,8 @@ def test_context_lines_flows_to_generate_fixes(
         workspace_root=Path("/tmp"),
     )
 
-    kwargs = mock_generate_fixes.call_args.kwargs
-    assert_that(kwargs["context_lines"]).is_equal_to(42)
+    params = mock_generate_fixes.call_args.args[2]
+    assert_that(params.context_lines).is_equal_to(42)
 
 
 # -- fix_search_radius wiring -----------------------------------------------
@@ -95,7 +95,7 @@ def test_context_lines_flows_to_generate_fixes(
 @patch(f"{_PIPELINE}.generate_post_fix_summary")
 @patch(f"{_PIPELINE}.review_fixes_interactive")
 @patch(f"{_PIPELINE}.apply_fixes")
-@patch(f"{_PIPELINE}.generate_fixes")
+@patch(f"{_PIPELINE}.generate_fixes_from_params")
 def test_fix_search_radius_flows_to_apply_fixes(
     mock_generate_fixes,
     mock_apply_fixes,
@@ -140,7 +140,7 @@ def test_fix_search_radius_flows_to_apply_fixes(
 @patch(f"{_PIPELINE}.generate_post_fix_summary")
 @patch(f"{_PIPELINE}.review_fixes_interactive")
 @patch(f"{_PIPELINE}.apply_fixes")
-@patch(f"{_PIPELINE}.generate_fixes")
+@patch(f"{_PIPELINE}.generate_fixes_from_params")
 def test_retry_delays_flow_to_generate_fixes(
     mock_generate_fixes,
     mock_apply_fixes,
@@ -170,10 +170,10 @@ def test_retry_delays_flow_to_generate_fixes(
         workspace_root=Path("/tmp"),
     )
 
-    kwargs = mock_generate_fixes.call_args.kwargs
-    assert_that(kwargs["base_delay"]).is_equal_to(0.5)
-    assert_that(kwargs["max_delay"]).is_equal_to(10.0)
-    assert_that(kwargs["backoff_factor"]).is_equal_to(3.0)
+    params = mock_generate_fixes.call_args.args[2]
+    assert_that(params.base_delay).is_equal_to(0.5)
+    assert_that(params.max_delay).is_equal_to(10.0)
+    assert_that(params.backoff_factor).is_equal_to(3.0)
 
 
 # -- timeout wiring to post-fix summary ------------------------------------
@@ -185,7 +185,7 @@ def test_retry_delays_flow_to_generate_fixes(
 @patch(f"{_PIPELINE}.generate_post_fix_summary")
 @patch(f"{_PIPELINE}.review_fixes_interactive")
 @patch(f"{_PIPELINE}.apply_fixes")
-@patch(f"{_PIPELINE}.generate_fixes")
+@patch(f"{_PIPELINE}.generate_fixes_from_params")
 def test_timeout_and_retries_flow_to_post_fix_summary(
     mock_generate_fixes,
     mock_apply_fixes,

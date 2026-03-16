@@ -23,7 +23,12 @@ from lintro.ai.prompts import (
     SUMMARY_PROMPT_TEMPLATE,
     SUMMARY_SYSTEM,
 )
-from lintro.ai.retry import with_retry
+from lintro.ai.retry import (
+    DEFAULT_BACKOFF_FACTOR,
+    DEFAULT_BASE_DELAY,
+    DEFAULT_MAX_DELAY,
+    with_retry,
+)
 from lintro.ai.secrets import redact_secrets
 from lintro.ai.summary_params import SummaryGenParams
 from lintro.ai.token_budget import estimate_tokens
@@ -256,9 +261,11 @@ def _call_summary_provider(
 
     @with_retry(
         max_retries=max_retries,
-        base_delay=base_delay if base_delay is not None else 1.0,
-        max_delay=max_delay if max_delay is not None else 30.0,
-        backoff_factor=backoff_factor if backoff_factor is not None else 2.0,
+        base_delay=base_delay if base_delay is not None else DEFAULT_BASE_DELAY,
+        max_delay=max_delay if max_delay is not None else DEFAULT_MAX_DELAY,
+        backoff_factor=(
+            backoff_factor if backoff_factor is not None else DEFAULT_BACKOFF_FACTOR
+        ),
     )
     def _call() -> AIResponse:
         return complete_with_fallback(

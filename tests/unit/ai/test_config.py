@@ -34,7 +34,7 @@ def test_default_config_numeric_fields() -> None:
     """All numeric fields have correct defaults."""
     config = AIConfig()
     assert_that(config.max_tokens).is_equal_to(4096)
-    assert_that(config.max_fix_issues).is_equal_to(20)
+    assert_that(config.max_fix_attempts).is_equal_to(20)
     assert_that(config.max_parallel_calls).is_equal_to(5)
     assert_that(config.max_retries).is_equal_to(2)
     assert_that(config.api_timeout).is_equal_to(60.0)

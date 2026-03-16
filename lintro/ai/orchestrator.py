@@ -183,11 +183,15 @@ def _run_ai_check(
             continue
         filtered = filter_issues(list(result.issues), ai_config)
         for issue in filtered:
-            if _normalize_issue_path_for_workspace(
-                issue=issue,
+            if not issue.file:
+                continue
+            resolved = _resolve_issue_path(
+                file=issue.file,
                 workspace_root=workspace_root,
                 cwd=result.cwd,
-            ):
+            )
+            if resolved is not None:
+                issue.file = str(resolved)
                 all_fix_issues.append((result, issue))
 
     return _collect_and_fix(
@@ -228,11 +232,15 @@ def _run_ai_fix(
             continue
         remaining_issues = filter_issues(remaining_issues, ai_config)
         for issue in remaining_issues:
-            if _normalize_issue_path_for_workspace(
-                issue=issue,
+            if not issue.file:
+                continue
+            resolved = _resolve_issue_path(
+                file=issue.file,
                 workspace_root=workspace_root,
                 cwd=result.cwd,
-            ):
+            )
+            if resolved is not None:
+                issue.file = str(resolved)
                 all_fix_issues.append((result, issue))
 
     return _collect_and_fix(
@@ -278,7 +286,7 @@ def _collect_and_fix(
         _log_fix_limit_message(
             logger=logger,
             total_issues=len(fix_issues),
-            max_fix_issues=ai_config.max_fix_issues,
+            max_fix_attempts=ai_config.max_fix_attempts,
         )
 
     if fix_suggestions and ai_config.github_pr_comments:
@@ -334,17 +342,18 @@ def _remaining_issues_for_fix_result(result: ToolResult) -> list[BaseIssue]:
     return issues[-remaining_count:]
 
 
-def _normalize_issue_path_for_workspace(
+def _resolve_issue_path(
     *,
-    issue: BaseIssue,
+    file: str,
     workspace_root: Path,
     cwd: str | None,
-) -> bool:
-    """Normalize issue path to an absolute workspace-local path."""
-    if not issue.file:
-        return False
+) -> Path | None:
+    """Resolve an issue file path to an absolute workspace-local path.
 
-    candidate = issue.file
+    Returns the resolved path if valid, or ``None`` if the path is
+    outside the workspace root or does not exist on disk.
+    """
+    candidate = file
     if cwd and not os.path.isabs(candidate):
         candidate = os.path.join(cwd, candidate)
 
@@ -354,16 +363,15 @@ def _normalize_issue_path_for_workspace(
             f"Skipping issue outside workspace root: "
             f"file={candidate!r} root={workspace_root}",
         )
-        return False
+        return None
 
     if not resolved.is_file():
         loguru_logger.debug(
             f"Skipping non-existent file: {resolved}",
         )
-        return False
+        return None
 
-    issue.file = str(resolved)
-    return True
+    return resolved
 
 
 def _post_pr_comments(
@@ -407,16 +415,16 @@ def _log_fix_limit_message(
     *,
     logger: ThreadSafeConsoleLogger,
     total_issues: int,
-    max_fix_issues: int,
+    max_fix_attempts: int,
 ) -> None:
     """Log a message when some issues were skipped due to the fix limit."""
-    if total_issues <= max_fix_issues:
+    if total_issues <= max_fix_attempts:
         return
-    skipped = total_issues - max_fix_issues
+    skipped = total_issues - max_fix_attempts
     logger.console_output(
-        f"\n  AI: analyzed {max_fix_issues} of "
+        f"\n  AI: analyzed {max_fix_attempts} of "
         f"{total_issues} issues "
         f"({skipped} skipped due to limit)\n"
-        f"   Increase ai.max_fix_issues in .lintro-config.yaml "
+        f"   Increase ai.max_fix_attempts in .lintro-config.yaml "
         f"to analyze more",
     )

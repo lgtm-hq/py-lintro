@@ -10,6 +10,7 @@ once rather than twice.
 
 from __future__ import annotations
 
+import subprocess
 from collections import Counter, defaultdict
 from collections.abc import Sequence
 from dataclasses import dataclass, field
@@ -305,7 +306,7 @@ def _run_tool_check(
         if tool_result.issues is not None:
             return list(tool_result.issues)
         return []
-    except Exception:
+    except (OSError, subprocess.SubprocessError, ValueError, RuntimeError):
         logger.debug(
             f"Validation: {tool_name} check failed",
             exc_info=True,

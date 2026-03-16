@@ -13,7 +13,7 @@ from lintro.ai.audit import write_audit_log
 from lintro.ai.budget import CostBudget
 from lintro.ai.display import render_fixes, render_summary, render_validation
 from lintro.ai.enums import ConfidenceLevel
-from lintro.ai.fix import generate_fixes
+from lintro.ai.fix import generate_fixes_from_params
 from lintro.ai.fix_params import FixGenParams
 from lintro.ai.interactive import review_fixes_interactive
 from lintro.ai.metadata import (
@@ -59,7 +59,7 @@ def _generate_all_suggestions(
 ) -> list[AIFixSuggestion]:
     """Iterate tools, generate fix suggestions, and collect telemetry."""
     all_suggestions: list[AIFixSuggestion] = []
-    remaining_budget = ai_config.max_fix_issues
+    remaining_budget = ai_config.max_fix_attempts
 
     total_fix_issues = sum(len(issues) for _, issues in by_tool.values())
     if not is_json and total_fix_issues > 0:
@@ -106,28 +106,7 @@ def _generate_all_suggestions(
             fallback_models=ai_config.fallback_models,
             sanitize_mode=ai_config.sanitize_mode,
         )
-        suggestions = generate_fixes(
-            issues,
-            provider,
-            tool_name=fix_params.tool_name,
-            max_issues=fix_params.max_issues,
-            max_workers=fix_params.max_workers,
-            workspace_root=fix_params.workspace_root,
-            max_tokens=fix_params.max_tokens,
-            max_retries=fix_params.max_retries,
-            timeout=fix_params.timeout,
-            context_lines=fix_params.context_lines,
-            base_delay=fix_params.base_delay,
-            max_delay=fix_params.max_delay,
-            backoff_factor=fix_params.backoff_factor,
-            max_prompt_tokens=fix_params.max_prompt_tokens,
-            enable_cache=fix_params.enable_cache,
-            cache_ttl=fix_params.cache_ttl,
-            progress_callback=fix_params.progress_callback,
-            fallback_models=fix_params.fallback_models,
-            sanitize_mode=fix_params.sanitize_mode,
-            cache_max_entries=fix_params.cache_max_entries,
-        )
+        suggestions = generate_fixes_from_params(issues, provider, fix_params)
         for suggestion in suggestions:
             if not suggestion.tool_name:
                 suggestion.tool_name = tool_name

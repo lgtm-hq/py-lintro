@@ -30,7 +30,6 @@ from lintro.ai.fix_context import (
 )
 from lintro.ai.fix_params import FixGenParams
 from lintro.ai.fix_parsing import (
-    generate_diff,
     parse_batch_response,
     parse_fix_response,
 )
@@ -41,7 +40,12 @@ from lintro.ai.paths import (
     to_provider_path,
 )
 from lintro.ai.prompts import FIX_BATCH_PROMPT_TEMPLATE, FIX_SYSTEM
-from lintro.ai.retry import with_retry
+from lintro.ai.retry import (
+    DEFAULT_BACKOFF_FACTOR,
+    DEFAULT_BASE_DELAY,
+    DEFAULT_MAX_DELAY,
+    with_retry,
+)
 from lintro.ai.sanitize import (
     detect_injection_patterns,
     make_boundary_marker,
@@ -53,27 +57,6 @@ from lintro.ai.token_budget import estimate_tokens
 if TYPE_CHECKING:
     from lintro.ai.providers.base import AIResponse, BaseAIProvider
     from lintro.parsers.base_issue import BaseIssue
-
-# Re-export public API from split modules for backward compatibility
-from lintro.ai.fix_context import (  # noqa: E402, F811
-    extract_context,
-    read_file_safely,
-)
-from lintro.ai.fix_parsing import (  # noqa: E402, F811
-    generate_diff,
-    parse_batch_response,
-    parse_fix_response,
-)
-
-# Backward-compatible private aliases used by refinement.py and tests
-_read_file_safely = read_file_safely
-_extract_context = extract_context
-_generate_diff = generate_diff
-_parse_fix_response = parse_fix_response
-_parse_batch_response = parse_batch_response
-_validate_and_read_file = validate_and_read_file
-_check_cache = check_cache
-_build_fix_context = build_fix_context
 
 
 def _call_provider(
@@ -452,9 +435,11 @@ def generate_fixes(
     )
     retrying_call = with_retry(
         max_retries=max_retries,
-        base_delay=base_delay if base_delay is not None else 1.0,
-        max_delay=max_delay if max_delay is not None else 30.0,
-        backoff_factor=backoff_factor if backoff_factor is not None else 2.0,
+        base_delay=base_delay if base_delay is not None else DEFAULT_BASE_DELAY,
+        max_delay=max_delay if max_delay is not None else DEFAULT_MAX_DELAY,
+        backoff_factor=(
+            backoff_factor if backoff_factor is not None else DEFAULT_BACKOFF_FACTOR
+        ),
     )(bound_call)
 
     suggestions: list[AIFixSuggestion] = []

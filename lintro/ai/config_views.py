@@ -36,7 +36,7 @@ class AIProviderConfig:
 class AIBudgetConfig:
     """Read-only view of budget and limit settings."""
 
-    max_fix_issues: int
+    max_fix_attempts: int
     max_parallel_calls: int
     max_cost_usd: float | None
     max_prompt_tokens: int
