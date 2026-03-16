@@ -471,8 +471,12 @@ def generate_fixes(
             single_issues.extend(group)
             continue
 
-        # Populate file_cache so single-fix fallback doesn't re-read
+        # Populate file_cache so single-fix fallback doesn't re-read.
+        # Respect cache_max_entries to avoid unbounded growth.
         with cache_lock:
+            if resolved_path not in file_cache and len(file_cache) >= cache_max_entries:
+                oldest_key = next(iter(file_cache))
+                del file_cache[oldest_key]
             file_cache[resolved_path] = content
 
         batch_result = _generate_batch_fixes(
@@ -518,6 +522,7 @@ def generate_fixes(
                 retrying_call,
                 timeout,
                 context_lines,
+                max_prompt_tokens=max_prompt_tokens,
                 enable_cache=enable_cache,
                 cache_ttl=cache_ttl,
                 sanitize_mode=sanitize_mode,
@@ -543,6 +548,7 @@ def generate_fixes(
                     retrying_call,
                     timeout,
                     context_lines,
+                    max_prompt_tokens=max_prompt_tokens,
                     enable_cache=enable_cache,
                     cache_ttl=cache_ttl,
                     sanitize_mode=sanitize_mode,

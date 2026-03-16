@@ -362,7 +362,7 @@ def run_fix_pipeline(
             by_tool[result.name] = (result, [])
         by_tool[result.name][1].append(issue)
 
-    is_json = output_format.lower() == OutputFormat.JSON
+    is_json = output_format.lower() in (OutputFormat.JSON, OutputFormat.SARIF)
 
     # Step 1: Generate suggestions across all tools
     all_suggestions = _generate_all_suggestions(

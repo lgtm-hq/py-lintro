@@ -24,6 +24,7 @@ from lintro.ai.paths import resolve_workspace_file, to_provider_path
 from lintro.ai.prompts import FIX_SYSTEM, REFINEMENT_PROMPT_TEMPLATE
 from lintro.ai.retry import with_retry
 from lintro.ai.sanitize import make_boundary_marker, sanitize_code_content
+from lintro.ai.secrets import redact_secrets
 
 if TYPE_CHECKING:
     from lintro.ai.config import AIConfig
@@ -162,10 +163,12 @@ def refine_unverified_fixes(
             context_lines=ai_config.context_lines,
         )
 
-        previous_suggestion = sanitize_code_content(
-            f"original_code: {suggestion.original_code}\n"
-            f"suggested_code: {suggestion.suggested_code}\n"
-            f"explanation: {suggestion.explanation}",
+        previous_suggestion = redact_secrets(
+            sanitize_code_content(
+                f"original_code: {suggestion.original_code}\n"
+                f"suggested_code: {suggestion.suggested_code}\n"
+                f"explanation: {suggestion.explanation}",
+            ),
         )
 
         # Find the matching validation detail for the error message
@@ -182,8 +185,10 @@ def refine_unverified_fixes(
         safe_file = sanitize_code_content(
             to_provider_path(suggestion.file, workspace_root),
         )
-        safe_error = sanitize_code_content(
-            error_detail or "Issue still present after fix",
+        safe_error = redact_secrets(
+            sanitize_code_content(
+                error_detail or "Issue still present after fix",
+            ),
         )
         prompt = REFINEMENT_PROMPT_TEMPLATE.format(
             tool_name=sanitize_code_content(suggestion.tool_name or "unknown"),
@@ -194,7 +199,7 @@ def refine_unverified_fixes(
             new_error=safe_error,
             context_start=context_start,
             context_end=context_end,
-            code_context=sanitize_code_content(context),
+            code_context=redact_secrets(sanitize_code_content(context)),
             boundary=boundary,
         )
 

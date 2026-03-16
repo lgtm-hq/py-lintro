@@ -195,6 +195,8 @@ def build_fix_context(
                 f"{issue.file}: {', '.join(injections)}",
             )
 
+    safe_message = redact_secrets(sanitize_code_content(issue.message))
+
     total_lines = len(file_content.splitlines())
     if total_lines <= full_file_threshold:
         boundary = make_boundary_marker()
@@ -203,7 +205,7 @@ def build_fix_context(
             code=code,
             file=to_provider_path(issue_file, workspace_root),
             line=issue.line,
-            message=issue.message,
+            message=safe_message,
             context_start=1,
             context_end=total_lines,
             code_context=sanitized_content,
@@ -230,7 +232,7 @@ def build_fix_context(
             code=code,
             file=to_provider_path(issue_file, workspace_root),
             line=issue.line,
-            message=issue.message,
+            message=safe_message,
             context_start=context_start,
             context_end=context_end,
             code_context=sanitized_context,

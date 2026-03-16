@@ -1,8 +1,12 @@
 """Execution configuration model."""
 
 import os
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
+
+# Supported artifact formats for side-channel output
+ArtifactFormat = Literal["json", "csv", "markdown", "html", "sarif", "plain"]
 
 
 def _get_default_max_workers() -> int:
@@ -49,4 +53,4 @@ class ExecutionConfig(BaseModel):
     max_workers: int = Field(default_factory=_get_default_max_workers, ge=1, le=32)
     auto_install_deps: bool | None = None
     max_fix_retries: int = Field(default=3, ge=1, le=10)
-    artifacts: list[str] = Field(default_factory=list)
+    artifacts: list[ArtifactFormat] = Field(default_factory=list)
