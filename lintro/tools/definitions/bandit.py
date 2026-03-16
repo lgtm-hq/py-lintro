@@ -175,7 +175,7 @@ class BanditPlugin(BaseToolPlugin):
                     value = ",".join(value)
                 self.options[option_key] = value
 
-    def set_options(  # type: ignore[override]
+    def set_options(
         self,
         severity: str | None = None,
         confidence: str | None = None,

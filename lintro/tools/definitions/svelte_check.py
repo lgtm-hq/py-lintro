@@ -79,7 +79,7 @@ class SvelteCheckPlugin(BaseToolPlugin):
             default_timeout=SVELTE_CHECK_DEFAULT_TIMEOUT,
         )
 
-    def set_options(  # type: ignore[override]
+    def set_options(
         self,
         threshold: str | None = None,
         tsconfig: str | None = None,

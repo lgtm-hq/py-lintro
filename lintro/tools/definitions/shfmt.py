@@ -76,7 +76,7 @@ class ShfmtPlugin(BaseToolPlugin):
             default_timeout=SHFMT_DEFAULT_TIMEOUT,
         )
 
-    def set_options(  # type: ignore[override]
+    def set_options(
         self,
         indent: int | None = None,
         binary_next_line: bool | None = None,

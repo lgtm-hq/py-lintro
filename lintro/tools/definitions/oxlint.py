@@ -87,7 +87,7 @@ class OxlintPlugin(BaseToolPlugin):
         super().__post_init__()
         self.options.setdefault("quiet", False)
 
-    def set_options(  # type: ignore[override]
+    def set_options(
         self,
         exclude_patterns: list[str] | None = None,
         include_venv: bool = False,

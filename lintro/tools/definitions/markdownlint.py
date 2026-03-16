@@ -108,7 +108,7 @@ class MarkdownlintPlugin(BaseToolPlugin):
             issues_count=0,
         )
 
-    def set_options(  # type: ignore[override]
+    def set_options(
         self,
         timeout: int | None = None,
         line_length: int | None = None,

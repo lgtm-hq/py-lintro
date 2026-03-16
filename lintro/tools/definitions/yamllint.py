@@ -89,7 +89,7 @@ class YamllintPlugin(BaseToolPlugin):
             default_timeout=YAMLLINT_DEFAULT_TIMEOUT,
         )
 
-    def set_options(  # type: ignore[override]
+    def set_options(
         self,
         format: str | YamllintFormat | None = None,
         config_file: str | None = None,

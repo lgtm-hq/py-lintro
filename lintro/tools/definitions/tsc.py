@@ -108,7 +108,7 @@ class TscPlugin(BaseToolPlugin):
             default_timeout=TSC_DEFAULT_TIMEOUT,
         )
 
-    def set_options(  # type: ignore[override]
+    def set_options(
         self,
         project: str | None = None,
         strict: bool | None = None,

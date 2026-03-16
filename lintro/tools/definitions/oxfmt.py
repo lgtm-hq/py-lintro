@@ -82,7 +82,7 @@ class OxfmtPlugin(BaseToolPlugin):
             default_timeout=OXFMT_DEFAULT_TIMEOUT,
         )
 
-    def set_options(  # type: ignore[override]
+    def set_options(
         self,
         exclude_patterns: list[str] | None = None,
         include_venv: bool = False,

@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import subprocess  # nosec B404 - used safely with shell disabled
 from dataclasses import dataclass
+from typing import Any
 
 from loguru import logger
 
@@ -71,7 +72,7 @@ class TaploPlugin(BaseToolPlugin):
             default_timeout=TAPLO_DEFAULT_TIMEOUT,
         )
 
-    def set_options(  # type: ignore[override]
+    def set_options(
         self,
         schema: str | None = None,
         aligned_arrays: bool | None = None,
@@ -79,7 +80,7 @@ class TaploPlugin(BaseToolPlugin):
         array_trailing_comma: bool | None = None,
         indent_string: str | None = None,
         reorder_keys: bool | None = None,
-        **kwargs: object,
+        **kwargs: Any,
     ) -> None:
         """Set Taplo-specific options with validation.
 
