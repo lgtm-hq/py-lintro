@@ -33,6 +33,10 @@ class ExecutionConfig(BaseModel):
             True/False explicitly enables/disables.
         max_fix_retries: Maximum number of fix→verify cycles for converging
             formatters (default: 3). Some formatters need multiple passes.
+        artifacts: Side-channel artifact formats to write alongside the
+            primary output. Currently supports ``["sarif"]``. When
+            ``GITHUB_ACTIONS=true`` is detected, SARIF is emitted
+            automatically even if this list is empty.
     """
 
     model_config = ConfigDict(frozen=False, extra="forbid")
@@ -44,3 +48,4 @@ class ExecutionConfig(BaseModel):
     max_workers: int = Field(default_factory=_get_default_max_workers, ge=1, le=32)
     auto_install_deps: bool | None = None
     max_fix_retries: int = Field(default=3, ge=1, le=10)
+    artifacts: list[str] = Field(default_factory=list)

@@ -240,6 +240,49 @@ def _display_fix_result(
         )
 
 
+def _write_sarif_artifact(
+    all_results: list[ToolResult],
+    lintro_config: Any,
+    logger: Any,
+) -> None:
+    """Write a SARIF artifact as a side-channel file.
+
+    Emits a SARIF file alongside the primary output when explicitly
+    configured via ``execution.artifacts: ["sarif"]`` or when running
+    inside GitHub Actions (auto-detected via ``GITHUB_ACTIONS=true``).
+
+    The file is written to ``.lintro/sarif/results.sarif.json``.
+
+    Args:
+        all_results: Completed tool results.
+        lintro_config: Loaded LintroConfig instance.
+        logger: Console logger for warning output.
+    """
+    import os
+
+    artifacts = lintro_config.execution.artifacts
+    is_gha = os.environ.get("GITHUB_ACTIONS") == "true"
+
+    if "sarif" not in artifacts and not is_gha:
+        return
+
+    try:
+        from pathlib import Path
+
+        from lintro.ai.output.sarif import write_sarif
+        from lintro.ai.output.sarif_bridge import (
+            suggestions_from_results,
+            summary_from_results,
+        )
+
+        suggestions = suggestions_from_results(all_results)
+        summary = summary_from_results(all_results)
+        sarif_path = Path(".lintro") / "sarif" / "results.sarif.json"
+        write_sarif(suggestions, summary, output_path=sarif_path)
+    except (OSError, ValueError, TypeError) as e:
+        logger.console_output(f"Warning: Failed to write SARIF artifact: {e}")
+
+
 def run_lint_tools_simple(
     *,
     action: str | Action,
@@ -703,6 +746,10 @@ def run_lint_tools_simple(
                 )
             except (OSError, ValueError, TypeError) as e:
                 logger.console_output(f"Warning: Failed to write output file: {e}")
+
+        # Write SARIF artifact as a side-channel file when configured or
+        # when running inside GitHub Actions (auto-emit for Code Scanning).
+        _write_sarif_artifact(all_results, lintro_config, logger)
 
         # Clean up old run directories to prevent unbounded growth
         try:
