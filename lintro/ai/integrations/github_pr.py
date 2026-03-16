@@ -58,7 +58,7 @@ class GitHubPRReporter:
         self.repo = (
             repo if repo is not None else os.environ.get("GITHUB_REPOSITORY", "")
         )
-        self.pr_number = pr_number or _detect_pr_number()
+        self.pr_number = pr_number if pr_number is not None else _detect_pr_number()
         self.api_base = api_base.rstrip("/")
 
         self.workspace_root: Path | None
