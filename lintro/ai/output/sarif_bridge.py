@@ -16,6 +16,22 @@ if TYPE_CHECKING:
     from lintro.models.core.tool_result import ToolResult
 
 
+def _coerce_confidence(value: object) -> ConfidenceLevel:
+    """Coerce a raw confidence value to the ``ConfidenceLevel`` enum.
+
+    Accepts enum members, their string names (case-insensitive), or
+    falls back to ``MEDIUM`` for unrecognised values.
+    """
+    if isinstance(value, ConfidenceLevel):
+        return value
+    if isinstance(value, str):
+        try:
+            return ConfidenceLevel(value.lower())
+        except ValueError:
+            return ConfidenceLevel.MEDIUM
+    return ConfidenceLevel.MEDIUM
+
+
 def suggestions_from_results(
     all_results: list[ToolResult],
 ) -> list[AIFixSuggestion]:
@@ -48,9 +64,8 @@ def suggestions_from_results(
                         suggested_code=str(raw.get("suggested_code", "")),
                         diff=str(raw.get("diff", "")),
                         explanation=str(raw.get("explanation", "")),
-                        confidence=raw.get(
-                            "confidence",
-                            ConfidenceLevel.MEDIUM,
+                        confidence=_coerce_confidence(
+                            raw.get("confidence", ConfidenceLevel.MEDIUM),
                         ),
                         risk_level=str(raw.get("risk_level", "")),
                         input_tokens=int(raw.get("input_tokens", 0)),

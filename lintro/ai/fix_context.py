@@ -92,6 +92,7 @@ def validate_and_read_file(
     file_cache: dict[str, str | None],
     cache_lock: threading.Lock,
     workspace_root: Path,
+    cache_max_entries: int = _MAX_CACHE_ENTRIES,
 ) -> tuple[str, str] | None:
     """Validate the issue and read its file content.
 
@@ -116,7 +117,7 @@ def validate_and_read_file(
 
     with cache_lock:
         if issue_file not in file_cache:
-            if len(file_cache) >= _MAX_CACHE_ENTRIES:
+            if len(file_cache) >= cache_max_entries:
                 oldest_key = next(iter(file_cache))
                 del file_cache[oldest_key]
             file_cache[issue_file] = read_file_safely(issue_file)

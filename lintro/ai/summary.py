@@ -349,6 +349,38 @@ def generate_summary(
     )
 
 
+def generate_summary_from_params(
+    results: Sequence[ToolResult],
+    provider: BaseAIProvider,
+    params: SummaryGenParams,
+) -> AISummary | None:
+    """Generate a summary using a ``SummaryGenParams`` parameter object.
+
+    Thin wrapper around ``generate_summary`` that unpacks the params
+    object into keyword arguments.
+
+    Args:
+        results: Tool results containing parsed issues.
+        provider: AI provider instance.
+        params: Grouped generation parameters.
+
+    Returns:
+        AISummary, or None if generation fails or there are no issues.
+    """
+    return generate_summary(
+        results,
+        provider,
+        max_tokens=params.max_tokens,
+        workspace_root=params.workspace_root,
+        timeout=params.timeout,
+        max_retries=params.max_retries,
+        base_delay=params.base_delay,
+        max_delay=params.max_delay,
+        backoff_factor=params.backoff_factor,
+        fallback_models=params.fallback_models,
+    )
+
+
 def generate_post_fix_summary(
     *,
     applied: int,
@@ -417,4 +449,43 @@ def generate_post_fix_summary(
         max_delay=max_delay,
         backoff_factor=backoff_factor,
         fallback_models=fallback_models,
+    )
+
+
+def generate_post_fix_summary_from_params(
+    *,
+    applied: int,
+    rejected: int,
+    remaining_results: Sequence[ToolResult],
+    provider: BaseAIProvider,
+    params: SummaryGenParams,
+) -> AISummary | None:
+    """Generate a post-fix summary using a ``SummaryGenParams`` parameter object.
+
+    Thin wrapper around ``generate_post_fix_summary`` that unpacks the
+    params object into keyword arguments.
+
+    Args:
+        applied: Number of fixes applied.
+        rejected: Number of fixes rejected.
+        remaining_results: Tool results with remaining issues.
+        provider: AI provider instance.
+        params: Grouped generation parameters.
+
+    Returns:
+        AISummary, or None if generation fails.
+    """
+    return generate_post_fix_summary(
+        applied=applied,
+        rejected=rejected,
+        remaining_results=remaining_results,
+        provider=provider,
+        max_tokens=params.max_tokens,
+        workspace_root=params.workspace_root,
+        timeout=params.timeout,
+        max_retries=params.max_retries,
+        base_delay=params.base_delay,
+        max_delay=params.max_delay,
+        backoff_factor=params.backoff_factor,
+        fallback_models=params.fallback_models,
     )

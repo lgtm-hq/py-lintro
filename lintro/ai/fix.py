@@ -170,6 +170,7 @@ def _generate_single_fix(
     cache_ttl: int = 3600,
     full_file_threshold: int = FULL_FILE_THRESHOLD,
     sanitize_mode: SanitizeMode = SanitizeMode.WARN,
+    cache_max_entries: int = 100,
 ) -> AIFixSuggestion | None:
     """Generate a fix suggestion for a single issue.
 
@@ -192,6 +193,7 @@ def _generate_single_fix(
         full_file_threshold: Max lines to attempt full-file context
             (default 500).
         sanitize_mode: How to handle detected prompt injection patterns.
+        cache_max_entries: Maximum file cache entries to limit memory.
 
     Returns:
         AIFixSuggestion, or None if generation fails.
@@ -201,6 +203,7 @@ def _generate_single_fix(
         file_cache,
         cache_lock,
         workspace_root,
+        cache_max_entries=cache_max_entries,
     )
     if validated is None:
         return None
@@ -387,6 +390,7 @@ def generate_fixes(
     progress_callback: Callable[[int, int], None] | None = None,
     fallback_models: list[str] | None = None,
     sanitize_mode: SanitizeMode = SanitizeMode.WARN,
+    cache_max_entries: int = 1000,
 ) -> list[AIFixSuggestion]:
     """Generate AI fix suggestions for unfixable issues.
 
@@ -415,6 +419,7 @@ def generate_fixes(
         fallback_models: Ordered list of fallback model identifiers
             to try when the primary model fails with a retryable error.
         sanitize_mode: How to handle prompt injection patterns.
+        cache_max_entries: Maximum file cache entries to limit memory.
 
     Returns:
         List of fix suggestions.
@@ -436,8 +441,6 @@ def generate_fixes(
     root = workspace_root or resolve_workspace_root()
 
     # Shared file cache with thread safety (capped to limit memory usage).
-    # Note: cache_max_entries uses the module default from
-    # fix_context._MAX_CACHE_ENTRIES.
     file_cache: dict[str, str | None] = {}
     cache_lock = threading.Lock()
 
@@ -533,6 +536,7 @@ def generate_fixes(
                 enable_cache=enable_cache,
                 cache_ttl=cache_ttl,
                 sanitize_mode=sanitize_mode,
+                cache_max_entries=cache_max_entries,
             )
             if result:
                 suggestions.append(result)
@@ -557,6 +561,7 @@ def generate_fixes(
                     enable_cache=enable_cache,
                     cache_ttl=cache_ttl,
                     sanitize_mode=sanitize_mode,
+                    cache_max_entries=cache_max_entries,
                 )
                 for issue in single_issues
             ]
@@ -629,4 +634,5 @@ def generate_fixes_from_params(
         progress_callback=params.progress_callback,
         fallback_models=params.fallback_models,
         sanitize_mode=params.sanitize_mode,
+        cache_max_entries=params.cache_max_entries,
     )

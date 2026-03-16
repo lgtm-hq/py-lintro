@@ -101,6 +101,7 @@ def _generate_all_suggestions(
             max_prompt_tokens=ai_config.max_prompt_tokens,
             enable_cache=ai_config.enable_cache,
             cache_ttl=ai_config.cache_ttl,
+            cache_max_entries=ai_config.cache_max_entries,
             progress_callback=_progress_callback,
             fallback_models=ai_config.fallback_models,
             sanitize_mode=ai_config.sanitize_mode,
@@ -125,6 +126,7 @@ def _generate_all_suggestions(
             progress_callback=fix_params.progress_callback,
             fallback_models=fix_params.fallback_models,
             sanitize_mode=fix_params.sanitize_mode,
+            cache_max_entries=fix_params.cache_max_entries,
         )
         for suggestion in suggestions:
             if not suggestion.tool_name:

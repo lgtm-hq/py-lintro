@@ -36,6 +36,7 @@ class FixGenParams:
         backoff_factor: Retry backoff multiplier.
         enable_cache: Whether to use suggestion deduplication cache.
         cache_ttl: Time-to-live in seconds for cached suggestions.
+        cache_max_entries: Maximum file cache entries to limit memory.
         max_issues: Maximum number of issues to process.
         max_workers: Maximum concurrent API calls.
         fallback_models: Ordered fallback model identifiers.
@@ -55,6 +56,7 @@ class FixGenParams:
     backoff_factor: float = 2.0
     enable_cache: bool = False
     cache_ttl: int = 3600
+    cache_max_entries: int = 1000
     max_issues: int = 20
     max_workers: int = 5
     fallback_models: list[str] = field(default_factory=list)
