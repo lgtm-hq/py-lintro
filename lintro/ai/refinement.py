@@ -10,6 +10,7 @@ re-validation.
 from __future__ import annotations
 
 import functools
+import re
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -91,25 +92,21 @@ def refine_unverified_fixes(
         KeyboardInterrupt: Re-raised immediately.
         SystemExit: Re-raised immediately.
     """
-    # Identify unverified suggestions from validation details
+    # Identify unverified suggestions from validation details.
+    # Detail format: "[code] file:line - issue still present"
+    detail_re = re.compile(r"^\[([^\]]+)\]\s+(.+?):(\d+)\s+[-\u2014]\s+")
     unverified_keys: set[tuple[str, str, int]] = set()
     for detail in validation.details:
-        if "issue still present" in detail:
-            # Detail format: "[code] file:line - issue still present"
-            # Parse code and file:line from the detail string
-            try:
-                bracket_end = detail.index("]")
-                code = detail[1:bracket_end]
-                rest = detail[bracket_end + 2 :]
-                colon_idx = rest.index(":")
-                # Find the space/dash separator after line number
-                space_idx = rest.index(" ", colon_idx)
-                file_path = rest[:colon_idx]
-                line = int(rest[colon_idx + 1 : space_idx])
-                unverified_keys.add((file_path, code, line))
-            except (ValueError, IndexError):
-                logger.debug("Skipping unparseable validation detail: {}", detail)
-                continue
+        if "issue still present" not in detail:
+            continue
+        m = detail_re.match(detail)
+        if m:
+            unverified_keys.add((m.group(2), m.group(1), int(m.group(3))))
+        else:
+            logger.debug(
+                "Skipping unparseable validation detail: {} (no regex match)",
+                detail,
+            )
 
     if not unverified_keys:
         return [], 0.0

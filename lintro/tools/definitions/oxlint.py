@@ -178,14 +178,12 @@ class OxlintPlugin(BaseToolPlugin):
             fixable=False,
         )
         pre_fix_count = len(initial_issues) if initial_issues else 0
-        all_issues = list(initial_issues) if initial_issues else []
-        all_issues.append(timeout_issue)
         return ToolResult(
             name=self.definition.name,
             success=False,
             output=timeout_msg,
-            issues_count=len(all_issues),
-            issues=all_issues,
+            issues_count=1,
+            issues=[timeout_issue],
             initial_issues_count=pre_fix_count,
             cwd=cwd,
         )

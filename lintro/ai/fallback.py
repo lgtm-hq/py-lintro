@@ -87,21 +87,21 @@ def _with_fallback(
 
     try:
         for idx, model in enumerate(models_to_try):
-            with _model_lock:
-                if model is not None:
-                    provider.model_name = model
-                label = provider.model_name
             try:
-                logger.debug(
-                    "{}: trying model '{}' (attempt {}/{})",
-                    label_prefix,
-                    label,
-                    idx + 1,
-                    len(models_to_try),
-                )
-                # Hold lock during the call to prevent another thread
-                # from swapping model_name mid-request.
+                # Hold lock from model assignment through logging and
+                # the provider call to prevent TOCTOU races where
+                # another thread swaps model_name between set and use.
                 with _model_lock:
+                    if model is not None:
+                        provider.model_name = model
+                    label = provider.model_name
+                    logger.debug(
+                        "{}: trying model '{}' (attempt {}/{})",
+                        label_prefix,
+                        label,
+                        idx + 1,
+                        len(models_to_try),
+                    )
                     return attempt_fn(prompt, system, max_tokens, timeout)
             except AIAuthenticationError:
                 # Never retry auth errors — restore and propagate.

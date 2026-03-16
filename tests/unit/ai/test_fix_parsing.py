@@ -113,6 +113,20 @@ def test_parse_fix_response_empty_original():
     assert_that(result).is_none()
 
 
+def test_parse_fix_response_empty_suggested():
+    """Verify that an empty suggested_code field returns None."""
+    content = json.dumps(
+        {
+            "original_code": "old code",
+            "suggested_code": "",
+            "explanation": "Fix",
+            "confidence": "medium",
+        },
+    )
+    result = _parse_fix_response(content, "main.py", 10, "B101")
+    assert_that(result).is_none()
+
+
 def test_parse_fix_response_extracts_risk_level():
     """_parse_fix_response should populate risk_level from the JSON payload."""
     content = json.dumps(
