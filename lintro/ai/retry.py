@@ -65,8 +65,8 @@ def with_retry(
     if max_delay < 0:
         msg = f"max_delay must be >= 0, got {max_delay}"
         raise ValueError(msg)
-    if backoff_factor < 0:
-        msg = f"backoff_factor must be >= 0, got {backoff_factor}"
+    if backoff_factor <= 0:
+        msg = f"backoff_factor must be > 0, got {backoff_factor}"
         raise ValueError(msg)
     if max_delay < base_delay:
         msg = f"max_delay ({max_delay}) must be >= base_delay ({base_delay})"

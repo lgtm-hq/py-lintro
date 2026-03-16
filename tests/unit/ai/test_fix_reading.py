@@ -30,6 +30,14 @@ def test_read_file_safely_returns_none_for_missing():
     assert_that(result).is_none()
 
 
+def test_read_file_safely_returns_empty_string_for_empty_file(tmp_path):
+    """Empty file returns an empty string, not None."""
+    f = tmp_path / "empty.py"
+    f.write_text("")
+    result = _read_file_safely(str(f))
+    assert_that(result).is_equal_to("")
+
+
 # ---------------------------------------------------------------------------
 # _extract_context
 # ---------------------------------------------------------------------------
@@ -56,3 +64,11 @@ def test_extract_context_clamps_to_end():
     content = "\n".join(f"line {i}" for i in range(1, 11))
     context, start, end = _extract_context(content, 10, 5)
     assert_that(end).is_equal_to(10)
+
+
+def test_extract_context_clamps_out_of_bounds_line():
+    """Line beyond file length is clamped to file bounds."""
+    content = "\n".join(f"line {i}" for i in range(1, 11))
+    context, start, end = _extract_context(content, 999, 3)
+    assert_that(end).is_equal_to(10)
+    assert_that(context).contains("line 10")

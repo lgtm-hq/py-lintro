@@ -338,7 +338,8 @@ class TaploPlugin(BaseToolPlugin):
             )
 
         lint_issues = parse_taplo_output(output=lint_output)
-        initial_count += len(lint_issues)
+        initial_issues.extend(lint_issues)
+        initial_count = len(initial_issues)
 
         # Apply formatting with taplo fmt
         fix_cmd: list[str] = self._get_executable_command(tool_name="taplo") + ["fmt"]

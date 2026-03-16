@@ -5,6 +5,7 @@ Thin coordinator that delegates to pipeline and rerun services.
 
 from __future__ import annotations
 
+import dataclasses
 import os
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -191,8 +192,10 @@ def _run_ai_check(
                 cwd=result.cwd,
             )
             if resolved is not None:
-                issue.file = str(resolved)
-                all_fix_issues.append((result, issue))
+                # Shallow-copy to avoid mutating the shared issue on
+                # ToolResult.issues (which downstream renderers read).
+                fix_issue = dataclasses.replace(issue, file=str(resolved))
+                all_fix_issues.append((result, fix_issue))
 
     return _collect_and_fix(
         fix_issues=all_fix_issues,
@@ -240,8 +243,8 @@ def _run_ai_fix(
                 cwd=result.cwd,
             )
             if resolved is not None:
-                issue.file = str(resolved)
-                all_fix_issues.append((result, issue))
+                fix_issue = dataclasses.replace(issue, file=str(resolved))
+                all_fix_issues.append((result, fix_issue))
 
     return _collect_and_fix(
         fix_issues=all_fix_issues,

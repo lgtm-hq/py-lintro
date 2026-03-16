@@ -346,3 +346,29 @@ def test_post_review_uses_workspace_relative_paths(test_token: str) -> None:
         comment_path = payload["comments"][0]["path"]
         # Should be relative to workspace_root, not an absolute path
         assert_that(comment_path).is_equal_to("src/main.py")
+
+
+def test_post_review_skips_out_of_workspace_suggestions(test_token: str) -> None:
+    """Suggestions with files outside workspace_root are silently skipped."""
+    workspace = Path("/home/runner/work/repo")
+    reporter = GitHubPRReporter(
+        token=test_token,
+        repo="owner/repo",
+        pr_number=5,
+        workspace_root=workspace,
+    )
+    suggestions = [
+        AIFixSuggestion(
+            file="/tmp/outside/secret.py",
+            line=5,
+            code="B101",
+            tool_name="bandit",
+            explanation="Fix",
+            confidence="high",
+        ),
+    ]
+
+    with patch.object(reporter, "_api_request", return_value=True) as mock_api:
+        reporter._post_review(suggestions)
+        # Out-of-workspace suggestion should be filtered; no API call made
+        mock_api.assert_not_called()
