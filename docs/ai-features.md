@@ -150,7 +150,7 @@ ai:
   max_tokens: 4096
 
   # Max issues to generate AI fixes for per run
-  max_fix_issues: 20
+  max_fix_attempts: 20
 
   # Concurrent API calls for fix (1-20)
   max_parallel_calls: 5
@@ -271,7 +271,7 @@ AI features use minimal API calls:
 
 ### Reducing Costs
 
-1. **Limits** — `max_fix_issues` (default 20) caps API calls
+1. **Limits** — `max_fix_attempts` (default 20) caps API calls
 2. **Opt-in flags** — `--fix` is opt-in; only the summary runs by default (1 call)
 3. **Cost display** — `show_cost_estimate: true` shows token usage and estimated cost
    after each AI operation
@@ -384,12 +384,12 @@ If you hit rate limits, the retry logic handles transient 429 errors automatical
 persistent rate limiting:
 
 - Reduce `max_parallel_calls` (e.g., from 5 to 2)
-- Reduce `max_fix_issues`
+- Reduce `max_fix_attempts`
 
 ### High Costs
 
 - Check `show_cost_estimate: true` is set to monitor usage
-- Lower `max_fix_issues` (default 20) if fix generation is too expensive
+- Lower `max_fix_attempts` (default 20) if fix generation is too expensive
 - Avoid `default_fix: true` in config unless you want fixes every run
 - Use `--fix` only when needed
 
