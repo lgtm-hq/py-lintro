@@ -70,7 +70,7 @@ class BlackPlugin(BaseToolPlugin):
             default_timeout=BLACK_DEFAULT_TIMEOUT,
         )
 
-    def set_options(  # type: ignore[override]
+    def set_options(
         self,
         line_length: int | None = None,
         target_version: str | None = None,

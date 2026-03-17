@@ -105,7 +105,7 @@ class PrettierPlugin(BaseToolPlugin):
             default_timeout=PRETTIER_DEFAULT_TIMEOUT,
         )
 
-    def set_options(  # type: ignore[override]
+    def set_options(
         self,
         verbose_fix_output: bool | None = None,
         line_length: int | None = None,

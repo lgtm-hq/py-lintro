@@ -124,7 +124,7 @@ class CargoDenyPlugin(BaseToolPlugin):
             default_timeout=CARGO_DENY_DEFAULT_TIMEOUT,
         )
 
-    def set_options(  # type: ignore[override]
+    def set_options(
         self,
         timeout: int | None = None,
         **kwargs: Any,

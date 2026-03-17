@@ -120,7 +120,7 @@ class MypyPlugin(BaseToolPlugin):
             default_timeout=MYPY_DEFAULT_TIMEOUT,
         )
 
-    def set_options(  # type: ignore[override]
+    def set_options(
         self,
         strict: bool | None = None,
         ignore_missing_imports: bool | None = None,

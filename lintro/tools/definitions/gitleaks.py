@@ -80,7 +80,7 @@ class GitleaksPlugin(BaseToolPlugin):
             default_timeout=GITLEAKS_DEFAULT_TIMEOUT,
         )
 
-    def set_options(  # type: ignore[override]
+    def set_options(
         self,
         no_git: bool | None = None,
         config: str | None = None,

@@ -121,9 +121,11 @@ def test_validate_paths_inaccessible_raises(
     test_file = tmp_path / "test.py"
     test_file.write_text("print('hello')")
 
-    with patch("os.access", return_value=False):
-        with pytest.raises(PermissionError, match="not accessible"):
-            fake_tool_plugin._validate_paths([str(test_file)])
+    with (
+        patch("os.access", return_value=False),
+        pytest.raises(PermissionError, match="not accessible"),
+    ):
+        fake_tool_plugin._validate_paths([str(test_file)])
 
 
 # =============================================================================
@@ -259,17 +261,19 @@ def test_prepare_execution_no_files_found_returns_early_result(
         fake_tool_plugin: Fixture providing a FakeToolPlugin instance.
         tmp_path: Pytest temporary directory fixture.
     """
-    with patch(
-        "lintro.plugins.execution_preparation.verify_tool_version",
-        return_value=None,
-    ):
-        with patch(
+    with (
+        patch(
+            "lintro.plugins.execution_preparation.verify_tool_version",
+            return_value=None,
+        ),
+        patch(
             "lintro.plugins.execution_preparation.discover_files",
             return_value=[],
-        ):
-            ctx = fake_tool_plugin._prepare_execution([str(tmp_path)], {})
+        ),
+    ):
+        ctx = fake_tool_plugin._prepare_execution([str(tmp_path)], {})
 
-            assert_that(ctx.should_skip).is_true()
+        assert_that(ctx.should_skip).is_true()
 
 
 def test_prepare_execution_successful_returns_context_with_files(
@@ -285,19 +289,21 @@ def test_prepare_execution_successful_returns_context_with_files(
     test_file = tmp_path / "test.py"
     test_file.write_text("print('hello')")
 
-    with patch(
-        "lintro.plugins.execution_preparation.verify_tool_version",
-        return_value=None,
-    ):
-        with patch(
+    with (
+        patch(
+            "lintro.plugins.execution_preparation.verify_tool_version",
+            return_value=None,
+        ),
+        patch(
             "lintro.plugins.execution_preparation.discover_files",
             return_value=[str(test_file)],
-        ):
-            ctx = fake_tool_plugin._prepare_execution([str(tmp_path)], {})
+        ),
+    ):
+        ctx = fake_tool_plugin._prepare_execution([str(tmp_path)], {})
 
-            assert_that(ctx.should_skip).is_false()
-            assert_that(ctx.files).is_length(1)
-            assert_that(ctx.files).is_equal_to([str(test_file)])
+        assert_that(ctx.should_skip).is_false()
+        assert_that(ctx.files).is_length(1)
+        assert_that(ctx.files).is_equal_to([str(test_file)])
 
 
 # =============================================================================

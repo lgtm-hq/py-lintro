@@ -131,7 +131,7 @@ class SemgrepPlugin(BaseToolPlugin):
             default_timeout=SEMGREP_DEFAULT_TIMEOUT,
         )
 
-    def set_options(  # type: ignore[override]
+    def set_options(
         self,
         config: str | None = None,
         exclude: list[str] | None = None,

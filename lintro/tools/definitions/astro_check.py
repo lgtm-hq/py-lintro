@@ -79,7 +79,7 @@ class AstroCheckPlugin(BaseToolPlugin):
             default_timeout=ASTRO_CHECK_DEFAULT_TIMEOUT,
         )
 
-    def set_options(  # type: ignore[override]
+    def set_options(
         self,
         root: str | None = None,
         **kwargs: Any,
