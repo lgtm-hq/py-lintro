@@ -18,6 +18,7 @@ from typing import Any
 
 from loguru import logger
 
+from lintro.ai.config import AIConfig
 from lintro.config.lintro_config import (
     EnforceConfig,
     ExecutionConfig,
@@ -275,6 +276,34 @@ def _parse_defaults(data: dict[str, Any]) -> dict[str, dict[str, Any]]:
     return defaults
 
 
+def _parse_ai_config(data: dict[str, Any]) -> AIConfig:
+    """Parse AI configuration section.
+
+    Passes only recognized keys through to AIConfig so the model's
+    own defaults apply for any omitted fields.
+
+    Args:
+        data: Raw 'ai' section from config.
+
+    Returns:
+        AIConfig: Parsed AI configuration.
+    """
+    if not data:
+        return AIConfig()
+
+    known_fields = set(AIConfig.model_fields)
+    unknown = set(data) - known_fields
+    if unknown:
+        from loguru import logger
+
+        logger.warning(
+            "Unknown AI config keys ignored: {}",
+            ", ".join(sorted(unknown)),
+        )
+    filtered = {k: v for k, v in data.items() if k in known_fields}
+    return AIConfig(**filtered)
+
+
 def _convert_pyproject_to_config(data: dict[str, Any]) -> dict[str, Any]:
     """Convert pyproject.toml [tool.lintro] format to .lintro-config.yaml format.
 
@@ -292,22 +321,16 @@ def _convert_pyproject_to_config(data: dict[str, Any]) -> dict[str, Any]:
         "execution": {},
         "defaults": {},
         "tools": {},
+        "ai": {},
     }
 
-    # Known tool names to separate from enforce settings
-    # Hardcoded list of supported tools for reliable config parsing
-    # (ToolRegistry may not be populated yet during config loading)
-    known_tools = {
-        "actionlint",
-        "bandit",
-        "black",
-        "clippy",
-        "hadolint",
-        "markdownlint",
-        "mypy",
-        "pytest",
-        "ruff",
-        "yamllint",
+    # Inline import: ToolName is a static StrEnum that does not trigger
+    # the plugin registry. Imported here to avoid a circular dependency
+    # between config_loader and the tool subsystem.
+    from lintro.enums.tool_name import ToolName
+
+    known_tools = {t.value for t in ToolName} | {
+        t.value.replace("_", "-") for t in ToolName
     }
     # Add common aliases for tools
     tool_aliases = {"markdownlint-cli2": "markdownlint"}
@@ -348,6 +371,9 @@ def _convert_pyproject_to_config(data: dict[str, Any]) -> dict[str, Any]:
         elif key_lower == ConfigKey.DEFAULTS.value.lower() and isinstance(value, dict):
             # Defaults section
             result["defaults"] = value
+        elif key_lower == "ai" and isinstance(value, dict):
+            # AI configuration section
+            result["ai"] = value
 
     return result
 
@@ -412,12 +438,14 @@ def load_config(
     execution_config = _parse_execution_config(data.get("execution", {}))
     defaults = _parse_defaults(data.get("defaults", {}))
     tools_config = _parse_tools_config(data.get("tools", {}))
+    ai_config = _parse_ai_config(data.get("ai", {}))
 
     return LintroConfig(
         execution=execution_config,
         enforce=enforce_config,
         defaults=defaults,
         tools=tools_config,
+        ai=ai_config,
         config_path=resolved_path,
     )
 
