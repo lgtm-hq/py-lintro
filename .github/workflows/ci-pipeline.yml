@@ -839,7 +839,6 @@ jobs:
     permissions:
       contents: read
       packages: write
-      id-token: write
     timeout-minutes: 30
     defaults:
       run:
