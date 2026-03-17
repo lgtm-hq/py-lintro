@@ -53,16 +53,18 @@ def test_print_tool_result_includes_metadata_for_check_action(
     Args:
         logger: ThreadSafeConsoleLogger instance fixture.
     """
-    with patch.object(logger, "console_output"):
-        with patch.object(logger, "_print_metadata_messages") as mock_meta:
-            logger.print_tool_result(
-                "ruff",
-                "output",
-                5,
-                raw_output_for_meta="3 fixable issues",
-                action=Action.CHECK,
-            )
-            mock_meta.assert_called_once_with("3 fixable issues")
+    with (
+        patch.object(logger, "console_output"),
+        patch.object(logger, "_print_metadata_messages") as mock_meta,
+    ):
+        logger.print_tool_result(
+            "ruff",
+            "output",
+            5,
+            raw_output_for_meta="3 fixable issues",
+            action=Action.CHECK,
+        )
+        mock_meta.assert_called_once_with("3 fixable issues")
 
 
 def test_print_tool_result_skips_metadata_for_fix_action(
@@ -76,16 +78,18 @@ def test_print_tool_result_skips_metadata_for_fix_action(
     Args:
         logger: ThreadSafeConsoleLogger instance fixture.
     """
-    with patch.object(logger, "console_output"):
-        with patch.object(logger, "_print_metadata_messages") as mock_meta:
-            logger.print_tool_result(
-                "ruff",
-                "output",
-                5,
-                raw_output_for_meta="3 fixable issues",
-                action=Action.FIX,
-            )
-            mock_meta.assert_not_called()
+    with (
+        patch.object(logger, "console_output"),
+        patch.object(logger, "_print_metadata_messages") as mock_meta,
+    ):
+        logger.print_tool_result(
+            "ruff",
+            "output",
+            5,
+            raw_output_for_meta="3 fixable issues",
+            action=Action.FIX,
+        )
+        mock_meta.assert_not_called()
 
 
 def test_print_tool_result_handles_pytest_for_test_action(
@@ -99,13 +103,15 @@ def test_print_tool_result_handles_pytest_for_test_action(
     Args:
         logger: ThreadSafeConsoleLogger instance fixture.
     """
-    with patch.object(logger, "console_output"):
-        with patch.object(logger, "_print_pytest_results") as mock_pytest:
-            logger.print_tool_result(
-                "pytest",
-                "test output",
-                0,
-                action=Action.TEST,
-                success=True,
-            )
-            mock_pytest.assert_called_once_with("test output", True)
+    with (
+        patch.object(logger, "console_output"),
+        patch.object(logger, "_print_pytest_results") as mock_pytest,
+    ):
+        logger.print_tool_result(
+            "pytest",
+            "test output",
+            0,
+            action=Action.TEST,
+            success=True,
+        )
+        mock_pytest.assert_called_once_with("test output", True)
