@@ -192,12 +192,14 @@ class BlackPlugin(BaseToolPlugin):
         self,
         timeout_val: int,
         initial_count: int | None = None,
+        cwd: str | None = None,
     ) -> ToolResult:
         """Handle timeout errors consistently.
 
         Args:
             timeout_val: The timeout value that was exceeded.
             initial_count: Optional initial issues count for fix operations.
+            cwd: Working directory for the tool result.
 
         Returns:
             Standardized timeout error result.
@@ -213,13 +215,10 @@ class BlackPlugin(BaseToolPlugin):
                 name=self.definition.name,
                 success=False,
                 output=timeout_msg,
-                issues_count=max(initial_count, 1),
+                issues_count=0,
                 issues=[],
-                initial_issues_count=(
-                    initial_count if not self.options.get("diff") else 0
-                ),
-                fixed_issues_count=0,
-                remaining_issues_count=max(initial_count, 1),
+                initial_issues_count=initial_count,
+                cwd=cwd,
             )
         return ToolResult(
             name=self.definition.name,
@@ -227,6 +226,7 @@ class BlackPlugin(BaseToolPlugin):
             output=timeout_msg,
             issues_count=1,
             issues=[],
+            cwd=cwd,
         )
 
     def check(self, paths: list[str], options: dict[str, object]) -> ToolResult:
@@ -260,7 +260,7 @@ class BlackPlugin(BaseToolPlugin):
                 cwd=ctx.cwd,
             )
         except subprocess.TimeoutExpired:
-            return self._handle_timeout_error(ctx.timeout)
+            return self._handle_timeout_error(ctx.timeout, cwd=ctx.cwd)
 
         black_issues = parse_black_output(output=output)
 
@@ -279,6 +279,7 @@ class BlackPlugin(BaseToolPlugin):
             output=None if count == 0 else output,
             issues_count=count,
             issues=all_issues,
+            cwd=ctx.cwd,
         )
 
     def fix(self, paths: list[str], options: dict[str, object]) -> ToolResult:
@@ -323,13 +324,18 @@ class BlackPlugin(BaseToolPlugin):
                     cwd=ctx.cwd,
                 )
             except subprocess.TimeoutExpired:
-                return self._handle_timeout_error(ctx.timeout, initial_count=0)
+                return self._handle_timeout_error(
+                    ctx.timeout,
+                    initial_count=0,
+                    cwd=ctx.cwd,
+                )
             initial_issues = parse_black_output(output=check_output)
             initial_line_length_issues = self._check_line_length_violations(
                 files=ctx.rel_files,
                 cwd=ctx.cwd,
             )
-            initial_count = len(initial_issues) + len(initial_line_length_issues)
+            initial_issues = initial_issues + initial_line_length_issues
+            initial_count = len(initial_issues)
 
         # Apply formatting
         fix_cmd_base: list[str] = self._get_executable_command(tool_name="black")
@@ -347,7 +353,11 @@ class BlackPlugin(BaseToolPlugin):
                 cwd=ctx.cwd,
             )
         except subprocess.TimeoutExpired:
-            return self._handle_timeout_error(ctx.timeout, initial_count=initial_count)
+            return self._handle_timeout_error(
+                ctx.timeout,
+                initial_count=initial_count,
+                cwd=ctx.cwd,
+            )
 
         # Final check for remaining differences
         try:
@@ -357,7 +367,11 @@ class BlackPlugin(BaseToolPlugin):
                 cwd=ctx.cwd,
             )
         except subprocess.TimeoutExpired:
-            return self._handle_timeout_error(ctx.timeout, initial_count=initial_count)
+            return self._handle_timeout_error(
+                ctx.timeout,
+                initial_count=initial_count,
+                cwd=ctx.cwd,
+            )
         remaining_issues = parse_black_output(output=final_output)
 
         # Check for line length violations that Black cannot wrap
@@ -393,4 +407,6 @@ class BlackPlugin(BaseToolPlugin):
             initial_issues_count=initial_count,
             fixed_issues_count=fixed_count,
             remaining_issues_count=remaining_count,
+            initial_issues=initial_issues if initial_issues else None,
+            cwd=ctx.cwd,
         )

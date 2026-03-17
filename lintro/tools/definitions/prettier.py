@@ -214,8 +214,14 @@ class PrettierPlugin(BaseToolPlugin):
 
         return None
 
-    def _create_not_found_result(self) -> ToolResult:
+    def _create_not_found_result(
+        self,
+        cwd: str | None = None,
+    ) -> ToolResult:
         """Create a ToolResult for when Prettier is not found.
+
+        Args:
+            cwd: Working directory for the tool result.
 
         Returns:
             ToolResult: ToolResult instance representing Prettier not found.
@@ -230,6 +236,7 @@ class PrettierPlugin(BaseToolPlugin):
                 "  - Or install locally: 'npm install prettier'"
             ),
             issues_count=0,
+            cwd=cwd,
         )
 
     def _create_timeout_result(
@@ -237,6 +244,7 @@ class PrettierPlugin(BaseToolPlugin):
         timeout_val: int,
         initial_issues: list[PrettierIssue] | None = None,
         initial_count: int = 0,
+        cwd: str | None = None,
     ) -> ToolResult:
         """Create a ToolResult for timeout scenarios.
 
@@ -244,6 +252,7 @@ class PrettierPlugin(BaseToolPlugin):
             timeout_val: The timeout value that was exceeded.
             initial_issues: Optional list of issues found before timeout.
             initial_count: Optional count of initial issues.
+            cwd: Working directory for the tool result.
 
         Returns:
             ToolResult: ToolResult instance representing timeout failure.
@@ -262,15 +271,18 @@ class PrettierPlugin(BaseToolPlugin):
             column=0,
         )
         combined_issues = (initial_issues or []) + [timeout_issue]
+        remaining_count = len(combined_issues)
+        # Maintain invariant: initial = fixed + remaining
         return ToolResult(
             name=self.definition.name,
             success=False,
             output=timeout_msg,
-            issues_count=len(combined_issues),
+            issues_count=remaining_count,
             issues=combined_issues,
-            initial_issues_count=initial_count,
+            initial_issues_count=remaining_count,
             fixed_issues_count=0,
-            remaining_issues_count=len(combined_issues),
+            remaining_issues_count=remaining_count,
+            cwd=cwd,
         )
 
     def check(self, paths: list[str], options: dict[str, object]) -> ToolResult:
@@ -356,16 +368,17 @@ class PrettierPlugin(BaseToolPlugin):
                 cwd=ctx.cwd,
             )
         except subprocess.TimeoutExpired:
-            return self._create_timeout_result(timeout_val=ctx.timeout)
+            return self._create_timeout_result(timeout_val=ctx.timeout, cwd=ctx.cwd)
         except (OSError, ValueError, RuntimeError, FileNotFoundError) as e:
             if isinstance(e, FileNotFoundError):
-                return self._create_not_found_result()
+                return self._create_not_found_result(cwd=ctx.cwd)
             logger.error(f"Failed to run prettier: {e}")
             return ToolResult(
                 name=self.definition.name,
                 success=False,
                 output=f"Prettier execution failed: {e}",
                 issues_count=0,
+                cwd=ctx.cwd,
             )
 
         output: str = result[1]
@@ -384,6 +397,7 @@ class PrettierPlugin(BaseToolPlugin):
             output=final_output,
             issues_count=issues_count,
             issues=issues,
+            cwd=ctx.cwd,
         )
 
     def fix(self, paths: list[str], options: dict[str, object]) -> ToolResult:
@@ -458,16 +472,17 @@ class PrettierPlugin(BaseToolPlugin):
                 cwd=ctx.cwd,
             )
         except subprocess.TimeoutExpired:
-            return self._create_timeout_result(timeout_val=ctx.timeout)
+            return self._create_timeout_result(timeout_val=ctx.timeout, cwd=ctx.cwd)
         except (OSError, ValueError, RuntimeError, FileNotFoundError) as e:
             if isinstance(e, FileNotFoundError):
-                return self._create_not_found_result()
+                return self._create_not_found_result(cwd=ctx.cwd)
             logger.error(f"Failed to run prettier: {e}")
             return ToolResult(
                 name=self.definition.name,
                 success=False,
                 output=f"Prettier execution failed: {e}",
                 issues_count=0,
+                cwd=ctx.cwd,
             )
 
         check_output: str = check_result[1]
@@ -498,16 +513,18 @@ class PrettierPlugin(BaseToolPlugin):
                 timeout_val=ctx.timeout,
                 initial_issues=initial_issues,
                 initial_count=initial_count,
+                cwd=ctx.cwd,
             )
         except (OSError, ValueError, RuntimeError, FileNotFoundError) as e:
             if isinstance(e, FileNotFoundError):
-                return self._create_not_found_result()
+                return self._create_not_found_result(cwd=ctx.cwd)
             logger.error(f"Failed to run prettier: {e}")
             return ToolResult(
                 name=self.definition.name,
                 success=False,
                 output=f"Prettier execution failed: {e}",
                 issues_count=0,
+                cwd=ctx.cwd,
             )
 
         fix_output: str = fix_result[1]
@@ -524,16 +541,18 @@ class PrettierPlugin(BaseToolPlugin):
                 timeout_val=ctx.timeout,
                 initial_issues=initial_issues,
                 initial_count=initial_count,
+                cwd=ctx.cwd,
             )
         except (OSError, ValueError, RuntimeError, FileNotFoundError) as e:
             if isinstance(e, FileNotFoundError):
-                return self._create_not_found_result()
+                return self._create_not_found_result(cwd=ctx.cwd)
             logger.error(f"Failed to run prettier: {e}")
             return ToolResult(
                 name=self.definition.name,
                 success=False,
                 output=f"Prettier execution failed: {e}",
                 issues_count=0,
+                cwd=ctx.cwd,
             )
 
         final_check_output: str = final_check_result[1]
@@ -587,4 +606,6 @@ class PrettierPlugin(BaseToolPlugin):
             initial_issues_count=initial_count,
             fixed_issues_count=fixed_count,
             remaining_issues_count=remaining_count,
+            initial_issues=initial_issues if initial_issues else None,
+            cwd=ctx.cwd,
         )

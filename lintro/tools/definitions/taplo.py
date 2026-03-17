@@ -277,6 +277,7 @@ class TaploPlugin(BaseToolPlugin):
             output=output if count > 0 else None,
             issues_count=count,
             issues=all_issues,
+            cwd=ctx.cwd,
         )
 
     def fix(self, paths: list[str], options: dict[str, object]) -> ToolResult:
@@ -337,7 +338,8 @@ class TaploPlugin(BaseToolPlugin):
             )
 
         lint_issues = parse_taplo_output(output=lint_output)
-        initial_count += len(lint_issues)
+        initial_issues.extend(lint_issues)
+        initial_count = len(initial_issues)
 
         # Apply formatting with taplo fmt
         fix_cmd: list[str] = self._get_executable_command(tool_name="taplo") + ["fmt"]
@@ -409,7 +411,9 @@ class TaploPlugin(BaseToolPlugin):
             output=final_summary,
             issues_count=remaining_count,
             issues=all_remaining_issues,
+            initial_issues=initial_issues if initial_issues else None,
             initial_issues_count=initial_count,
             fixed_issues_count=fixed_count,
             remaining_issues_count=remaining_count,
+            cwd=ctx.cwd,
         )

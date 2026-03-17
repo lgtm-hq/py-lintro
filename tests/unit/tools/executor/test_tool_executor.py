@@ -71,6 +71,10 @@ class FakeTool:
         """
         self.options.update(kwargs)
 
+    def reset_options(self) -> None:
+        """Reset options to defaults (no-op for stub)."""
+        self.options.clear()
+
     def check(
         self,
         paths: list[str],
