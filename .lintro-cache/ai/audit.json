@@ -1,0 +1,18 @@
+{
+  "timestamp": 1773759454.857374,
+  "applied_count": 1,
+  "rejected_count": 0,
+  "total_cost_usd": 0.0,
+  "entries": [
+    {
+      "file": "src/main.py",
+      "line": 1,
+      "code": "B101",
+      "tool": "ruff",
+      "action": "applied",
+      "confidence": "medium",
+      "risk_level": "",
+      "cost": 0.0
+    }
+  ]
+}
