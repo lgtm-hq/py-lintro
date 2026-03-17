@@ -1,4 +1,4 @@
-<!-- markdownlint-disable MD024 -->
+<!-- markdownlint-disable MD024 -- duplicate headings are standard in changelogs -->
 
 # Changelog
 
@@ -8,6 +8,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
+
+### Added
+
+- **AI-Powered Features** (BYO API key, install with `'lintro[ai]'`):
+  - AI-powered issue summaries with pattern analysis and prioritized actions
+  - Interactive fix suggestions with AI-generated code diffs
+  - AI-driven risk classification (`safe-style` vs `behavioral-risk`)
+  - Multi-provider support: Anthropic Claude and OpenAI GPT
+  - Post-fix summary contextualizing applied changes
+  - Configurable retry, context lines, search radius, and timeout settings
+  - Docker AI support via `WITH_AI` build arg
 
 ### Breaking Changes
 
@@ -79,9 +90,6 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 - CI script path references for coverage comments
 - Package metadata and classifiers
 - Logo display in README for PyPI compatibility
-
-### Added
-
 - Initial release preparation
 - PyPI package configuration
 - MANIFEST.in file for asset inclusion
@@ -120,7 +128,7 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Technical Details
 
-- Python 3.13+ compatibility
+- Python 3.13+ compatibility (historical; minimum later lowered to 3.11)
 - MIT License
 - Comprehensive type hints
 - Google-style docstrings

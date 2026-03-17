@@ -249,6 +249,31 @@ system.
 
 <!-- markdownlint-enable MD013 MD033 MD060 -->
 
+## 🤖 AI-Powered Features (Optional)
+
+Lintro includes optional AI-powered features that provide actionable summaries and
+interactive fix suggestions. AI features are **BYO (Bring Your Own) API key** — not
+enabled by default.
+
+- **Providers:** Anthropic Claude, OpenAI GPT
+- **AI Summary** — high-level assessment with pattern analysis (1 API call per run)
+- **Interactive Fix Suggestions** — AI-generated code diffs with risk classification
+- **Post-fix Summary** — contextualizes what was fixed and what remains
+
+```bash
+# Install with AI support
+uv pip install 'lintro[ai]'
+export ANTHROPIC_API_KEY=sk-ant-...   # or OPENAI_API_KEY
+
+# Enable in config
+# .lintro-config.yaml
+# ai:
+#   enabled: true
+#   provider: anthropic
+```
+
+See the [AI Features Guide](docs/ai-features.md) for full documentation.
+
 ## 📦 Installation
 
 **Python 3.11+** is required. Check tool versions with `lintro list-tools`.
@@ -313,6 +338,7 @@ docker run --rm -v $(pwd):/code ghcr.io/lgtm-hq/py-lintro:base check
 | ------------------------------------------------ | --------------------------------------- |
 | [Getting Started](docs/getting-started.md)       | Installation, first steps, requirements |
 | [Configuration](docs/configuration.md)           | Tool configuration, options, presets    |
+| [AI Features](docs/ai-features.md)               | AI summaries, fix suggestions, config   |
 | [Docker Usage](docs/docker.md)                   | Containerized development               |
 | [GitHub Integration](docs/github-integration.md) | CI/CD setup, workflows                  |
 | [Contributing](docs/contributing.md)             | Development guide, adding tools         |

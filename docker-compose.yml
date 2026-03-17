@@ -7,7 +7,9 @@ services:
       context: .
       dockerfile: Dockerfile
       args:
+        # yamllint disable-line rule:line-length
         TOOLS_IMAGE: ${TOOLS_IMAGE:-ghcr.io/lgtm-hq/lintro-tools:latest@sha256:f000b0f1440f963e1e56978826bb0e52082bd99c26b410cd65206e3fd3935d98}
+        WITH_AI: ${WITH_AI:-false}
     logging:
       driver: local
       options:
@@ -17,6 +19,10 @@ services:
       # Mount current directory to /code (not /app to avoid overwriting the app)
       - ${PWD:-./}:/code
     working_dir: /code
+    environment:
+      # Pass AI provider API keys through to the container (optional)
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
 
   # Integration test runner - mounts source for development testing
   # Usage: docker compose run --rm test-integration
@@ -26,7 +32,9 @@ services:
       context: .
       dockerfile: Dockerfile
       args:
+        # yamllint disable-line rule:line-length
         TOOLS_IMAGE: ${TOOLS_IMAGE:-ghcr.io/lgtm-hq/lintro-tools:latest@sha256:f000b0f1440f963e1e56978826bb0e52082bd99c26b410cd65206e3fd3935d98}
+        WITH_AI: ${WITH_AI:-false}
     image: py-lintro-test:latest
     logging:
       driver: local
@@ -48,6 +56,8 @@ services:
       - RUNNING_IN_DOCKER=1
       - DOCKER_BUILDKIT=0
       - COVERAGE_OUTPUT_DIR=/app
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
     user: root
     shm_size: 256m
     # Run as root to avoid permission issues with mounted volumes

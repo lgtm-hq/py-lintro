@@ -14,6 +14,8 @@ configuring, and contributing to Lintro.
 
 - **[Getting Started](getting-started.md)** - Installation, first steps, and basic usage
 - **[Configuration Guide](configuration.md)** - Tool configuration and customization
+- **[AI Features](ai-features.md)** - AI-powered summaries, explanations, and fix
+  suggestions
 - **[Docker Usage](docker.md)** - Using Lintro with Docker
 
 **Integration Guides:**
@@ -55,6 +57,7 @@ configuring, and contributing to Lintro.
 | **First time usage**    | [Main README → Quick Start](../README.md#quick-start)                     |
 | **Docker setup**        | [Docker Usage → Quick Start](docker.md#quick-start)                       |
 | **GitHub Actions**      | [GitHub Integration → Quick Setup](github-integration.md#quick-setup)     |
+| **AI features**         | [AI Features → Quick Start](ai-features.md#quick-start)                   |
 | **Configure tools**     | [Configuration → Tool Configuration](configuration.md#tool-configuration) |
 | **Add new tool**        | [Contributing → How to Add a Tool](contributing.md#how-to-add-a-new-tool) |
 | **Project vision**      | [Architecture → Vision](architecture/VISION.md)                           |
@@ -87,6 +90,16 @@ lintro test
 
 → [Pytest Analysis](tool-analysis/pytest-analysis.md)
 
+**🧠 AI-Powered Analysis:**
+
+Requires `lintro[ai]` extra, an API key, and `ai.enabled: true`.
+
+```bash
+lintro check --fix
+```
+
+> [AI Features Guide](ai-features.md)
+
 **🐳 Containerized Development:**
 
 ```bash
@@ -101,7 +114,7 @@ lintro test
 
 ### End Users
 
-<!-- markdownlint-disable MD036 -->
+<!-- markdownlint-disable MD036 -- bold subtitle, not a heading -->
 
 **Goal: Use Lintro effectively in projects**
 
@@ -197,6 +210,7 @@ docker run --rm -v "$(pwd):/code" lintro:latest check
 ### Search by Topic
 
 - **Installation:** [Getting Started](getting-started.md#installation)
+- **AI Features:** [AI Features Guide](ai-features.md)
 - **Configuration:** [Configuration Guide](configuration.md)
 - **Docker:** [Docker Usage](docker.md)
 - **CI/CD:** [GitHub Integration](github-integration.md)
@@ -215,6 +229,7 @@ docker run --rm -v "$(pwd):/code" lintro:latest check
 
 ## 🆕 Recent Updates
 
+- **AI-powered intelligence** - AI summaries and interactive fix suggestions (`--fix`)
 - **Security audit framework** - Comprehensive security verification for workflows and
   scripts
 - **DRY consolidation** - Reduced duplicate patterns across workflows and actions
