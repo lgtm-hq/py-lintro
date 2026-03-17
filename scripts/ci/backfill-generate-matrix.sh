@@ -50,7 +50,7 @@ for ((i = start; i < end; i++)); do
 	sha=$(git rev-parse "$tag^{}")
 	objects+=("$(jq -n --arg tag "$tag" --arg sha "$sha" '{tag:$tag,sha:$sha}')")
 done
-json=$(printf '%s\n' "${objects[@]}" | jq -s '.')
+json=$(printf '%s\n' "${objects[@]}" | jq -sc '.')
 count=${#objects[@]}
 
 echo "tags=${json}" >>"$GITHUB_OUTPUT"
