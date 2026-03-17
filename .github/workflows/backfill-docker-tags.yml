@@ -153,8 +153,10 @@ jobs:
           context: .
           push: ${{ inputs.dry-run != 'true' }}
           tags: ${{ steps.tags.outputs.main-tags }}
-          provenance: true
-          sbom: true
+          # Provenance/SBOM disabled: creates untagged OCI child manifests that
+          # ghcr_prune_untagged.py deletes, breaking tagged image indexes.
+          provenance: false
+          sbom: false
 
       - name: Build and push base image
         if: steps.tags.outputs.has-base == 'true'
@@ -165,5 +167,6 @@ jobs:
           file: Dockerfile.base
           push: ${{ inputs.dry-run != 'true' }}
           tags: ${{ steps.tags.outputs.base-tags }}
-          provenance: true
-          sbom: true
+          # Provenance/SBOM disabled: same reason as above.
+          provenance: false
+          sbom: false

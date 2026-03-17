@@ -839,7 +839,6 @@ jobs:
     permissions:
       contents: read
       packages: write
-      id-token: write
     timeout-minutes: 30
     defaults:
       run:
@@ -919,7 +918,7 @@ jobs:
             type=semver,pattern={{major}}.{{minor}},suffix=-base
             type=semver,pattern={{major}},suffix=-base
             type=raw,value=base,enable={{is_default_branch}}
-      - name: Build and push Docker image (with provenance + SBOM)
+      - name: Build and push Docker image
         # Action SHA pin exceeds 88 chars
         # yamllint disable-line rule:line-length
         uses: docker/build-push-action@263435318d21b8e681c14492fe198d362a7d2c83 # v6
@@ -930,9 +929,12 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           build-args: |
             TOOLS_IMAGE=${{ needs.resolve-tools.outputs.image }}
-          provenance: true
-          sbom: true
-      - name: Build and push Base Docker image (with provenance + SBOM)
+          # Provenance/SBOM disabled: creates untagged OCI child manifests that
+          # ghcr_prune_untagged.py deletes, breaking tagged image indexes.
+          # Produces simple Docker v2 manifests (like ci-* tags).
+          provenance: false
+          sbom: false
+      - name: Build and push Base Docker image
         # Action SHA pin exceeds 88 chars
         # yamllint disable-line rule:line-length
         uses: docker/build-push-action@263435318d21b8e681c14492fe198d362a7d2c83 # v6
@@ -942,8 +944,9 @@ jobs:
           push: true
           tags: ${{ steps.meta-base.outputs.tags }}
           labels: ${{ steps.meta-base.outputs.labels }}
-          provenance: true
-          sbom: true
+          # Provenance/SBOM disabled: same reason as above.
+          provenance: false
+          sbom: false
 
   # ============================================================================
   # Cleanup: Remove ephemeral CI-tagged images from GHCR

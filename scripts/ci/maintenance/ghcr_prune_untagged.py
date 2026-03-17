@@ -5,10 +5,10 @@ Google-style docstring.
 This script lists container package versions for the current repo on GHCR and
 deletes those that have no tags AND are older than a retention period.
 
-IMPORTANT: Multi-arch images have architecture-specific manifests that are
-untagged but referenced by the main manifest index. We protect these by:
-1. Only deleting versions older than GHCR_PRUNE_MIN_AGE_DAYS (default: 7)
-2. This gives time for tagged images to be pulled and cached
+NOTE: All publish jobs now use ``provenance: false`` and ``sbom: false``,
+producing simple Docker v2 manifests with no untagged OCI child manifests.
+The min-age guard is retained as defense-in-depth but is no longer the
+primary protection mechanism.
 
 Requires GITHUB_TOKEN with packages:write scope in Actions.
 """
