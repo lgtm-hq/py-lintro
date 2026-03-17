@@ -3,6 +3,8 @@
 .classpath
 .project
 .coverage
+.claude/
+.lintro-cache/
 
 ### dirs
 Reports/
