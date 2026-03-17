@@ -1,0 +1,95 @@
+"""Tests for AI metadata helpers."""
+
+from __future__ import annotations
+
+from assertpy import assert_that
+
+from lintro.ai.metadata import (
+    AIFixSuggestionPayload,
+    AISummaryPayload,
+    attach_fix_suggestions_metadata,
+    attach_fixed_count_metadata,
+    attach_summary_metadata,
+    attach_validation_counts_metadata,
+    normalize_ai_metadata,
+)
+from lintro.ai.models import AIFixSuggestion, AISummary
+from lintro.models.core.tool_result import ToolResult
+
+
+def test_metadata_summary_and_fixes_coexist():
+    """Summary and fix_suggestions metadata coexist on a ToolResult."""
+    result = ToolResult(name="ruff", success=True)
+    summary = AISummary(overview="Overview")
+    suggestion = AIFixSuggestion(
+        file="src/main.py",
+        line=1,
+        code="B101",
+        explanation="Replace assert",
+    )
+
+    attach_summary_metadata(result, summary)
+    attach_fix_suggestions_metadata(result, [suggestion])
+
+    assert_that(result.ai_metadata).is_not_none()
+    assert_that(result.ai_metadata).contains_key("summary")
+    assert_that(result.ai_metadata).contains_key("fix_suggestions")
+    assert_that(result.ai_metadata["summary"]["overview"]).is_equal_to("Overview")  # type: ignore[index]  # assertpy is_not_none narrows this
+    assert_that(result.ai_metadata["fix_suggestions"]).is_length(1)  # type: ignore[index]  # assertpy is_not_none narrows this
+
+
+def test_metadata_normalize_supports_legacy_suggestions_key():
+    """Verify that the legacy 'suggestions' key is normalized to 'fix_suggestions'."""
+    raw = {
+        "summary": {"overview": "Legacy summary"},
+        "type": "fix_suggestions",
+        "suggestions": [{"file": "a.py", "line": 1, "code": "E501"}],
+    }
+
+    normalized = normalize_ai_metadata(raw)
+
+    assert_that(normalized).contains_key("summary")
+    assert_that(normalized).contains_key("fix_suggestions")
+    assert_that(normalized["fix_suggestions"]).is_length(1)
+
+
+def test_metadata_fixed_count_is_attached_and_normalized():
+    """Fixed and validation counts are attached and normalized."""
+    result = ToolResult(name="ruff", success=True)
+    attach_fixed_count_metadata(result, 3)
+    attach_validation_counts_metadata(
+        result,
+        verified_count=2,
+        unverified_count=1,
+    )
+
+    assert_that(result.ai_metadata).is_not_none()
+    assert_that(result.ai_metadata).contains_key("fixed_count")
+    assert_that(result.ai_metadata).contains_key("applied_count")
+    assert_that(result.ai_metadata).contains_key("verified_count")
+    assert_that(result.ai_metadata).contains_key("unverified_count")
+    assert_that(result.ai_metadata["fixed_count"]).is_equal_to(3)  # type: ignore[index]  # assertpy is_not_none narrows this
+    assert_that(result.ai_metadata["applied_count"]).is_equal_to(3)  # type: ignore[index]  # assertpy is_not_none narrows this
+    assert_that(result.ai_metadata["verified_count"]).is_equal_to(2)  # type: ignore[index]  # assertpy is_not_none narrows this
+    assert_that(result.ai_metadata["unverified_count"]).is_equal_to(1)  # type: ignore[index]  # assertpy is_not_none narrows this
+
+    normalized = normalize_ai_metadata(result.ai_metadata or {})
+    assert_that(normalized["fixed_count"]).is_equal_to(3)
+    assert_that(normalized["applied_count"]).is_equal_to(3)
+    assert_that(normalized["verified_count"]).is_equal_to(2)
+    assert_that(normalized["unverified_count"]).is_equal_to(1)
+
+
+def test_payload_to_dict_serialization():
+    """Verify that payload to_dict methods serialize fields correctly."""
+    summary = AISummaryPayload(overview="Test overview", estimated_effort="1h")
+    suggestion = AIFixSuggestionPayload(file="a.py", line=10, code="E501")
+
+    sd = summary.to_dict()
+    assert_that(sd["overview"]).is_equal_to("Test overview")
+    assert_that(sd["estimated_effort"]).is_equal_to("1h")
+
+    fd = suggestion.to_dict()
+    assert_that(fd["file"]).is_equal_to("a.py")
+    assert_that(fd["line"]).is_equal_to(10)
+    assert_that(fd["code"]).is_equal_to("E501")
