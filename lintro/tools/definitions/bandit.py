@@ -168,15 +168,31 @@ class BanditPlugin(BaseToolPlugin):
             "confidence": "confidence",
         }
 
+        valid_aggregates = {"vuln", "file"}
+
         for config_key, option_key in config_mapping.items():
             if config_key in bandit_config:
                 value = bandit_config[config_key]
-                if config_key == "severity" and value is not None:
-                    value = normalize_bandit_severity_level(value).value
-                elif config_key == "confidence" and value is not None:
-                    value = normalize_bandit_confidence_level(value).value
-                elif config_key in ("skips", "tests") and isinstance(value, list):
-                    value = ",".join(value)
+                try:
+                    if config_key == "severity" and value is not None:
+                        value = normalize_bandit_severity_level(value).value
+                    elif config_key == "confidence" and value is not None:
+                        value = normalize_bandit_confidence_level(value).value
+                    elif config_key in ("skips", "tests") and isinstance(
+                        value,
+                        list,
+                    ):
+                        value = ",".join(value)
+                    elif config_key == "aggregate" and value not in valid_aggregates:
+                        logger.warning(
+                            f"[bandit] Invalid native aggregate value: {value!r}",
+                        )
+                        continue
+                except (ValueError, TypeError) as e:
+                    logger.warning(
+                        f"[bandit] Invalid native config for {config_key}: {e}",
+                    )
+                    continue
                 self.options[option_key] = value
 
     def set_options(

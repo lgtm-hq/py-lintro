@@ -77,6 +77,7 @@ def test_bandit_reset_options_preserves_native_config() -> None:
     # Native config should be applied from __post_init__
     assert_that(plugin.options["skips"]).is_equal_to("B101,B601")
     assert_that(plugin.options["tests"]).is_equal_to("B201")
+    assert_that(plugin.options["severity"]).is_equal_to("HIGH")
 
     # Override with user options
     plugin.set_options(skips="B102")
@@ -91,3 +92,4 @@ def test_bandit_reset_options_preserves_native_config() -> None:
 
     assert_that(plugin.options["skips"]).is_equal_to("B101,B601")
     assert_that(plugin.options["tests"]).is_equal_to("B201")
+    assert_that(plugin.options["severity"]).is_equal_to("HIGH")
