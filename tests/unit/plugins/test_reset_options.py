@@ -13,23 +13,24 @@ if TYPE_CHECKING:
 
 def test_reset_options_restores_defaults(fake_tool_plugin: FakeToolPlugin) -> None:
     """Verify reset_options clears accumulated state from set_options."""
+    default_timeout = fake_tool_plugin.definition.default_timeout
+
     # Mutate state via set_options
     fake_tool_plugin.set_options(exclude_patterns=["*.pyc", "*.pyo"])
     fake_tool_plugin.set_options(include_venv=True)
     fake_tool_plugin.set_options(custom_flag="on")
+    fake_tool_plugin.set_options(timeout=default_timeout + 60)
 
     assert_that(fake_tool_plugin.include_venv).is_true()
     assert_that(fake_tool_plugin.options).contains_key("custom_flag")
+    assert_that(fake_tool_plugin.options["timeout"]).is_equal_to(default_timeout + 60)
 
     # Reset
     fake_tool_plugin.reset_options()
 
     assert_that(fake_tool_plugin.include_venv).is_false()
     assert_that(fake_tool_plugin.options).does_not_contain_key("custom_flag")
-    # Default timeout should be restored
-    assert_that(fake_tool_plugin.options.get("timeout")).is_equal_to(
-        fake_tool_plugin.definition.default_timeout,
-    )
+    assert_that(fake_tool_plugin.options.get("timeout")).is_equal_to(default_timeout)
 
 
 def test_reset_options_clears_exclude_patterns(
@@ -79,9 +80,11 @@ def test_bandit_reset_options_preserves_native_config() -> None:
     assert_that(plugin.options["tests"]).is_equal_to("B201")
     assert_that(plugin.options["severity"]).is_equal_to("HIGH")
 
-    # Override with user options
-    plugin.set_options(skips="B102")
+    # Override all native options with user values
+    plugin.set_options(skips="B102", tests="B999", severity="LOW")
     assert_that(plugin.options["skips"]).is_equal_to("B102")
+    assert_that(plugin.options["tests"]).is_equal_to("B999")
+    assert_that(plugin.options["severity"]).is_equal_to("LOW")
 
     # Reset should restore native config, not defaults (which have skips=None)
     with patch(
