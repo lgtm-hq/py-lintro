@@ -137,7 +137,11 @@ class BanditPlugin(BaseToolPlugin):
 
     def _apply_native_config(self) -> None:
         """Load and apply native [tool.bandit] config from pyproject.toml."""
-        bandit_config = load_bandit_config()
+        try:
+            bandit_config = load_bandit_config()
+        except Exception as e:
+            logger.warning(f"[bandit] Failed to load native config: {e}")
+            return
 
         # Apply exclude_dirs
         if "exclude_dirs" in bandit_config:

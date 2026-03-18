@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
+from unittest.mock import patch
 
 from assertpy import assert_that
 
@@ -35,7 +36,6 @@ def test_reset_options_clears_exclude_patterns(
     fake_tool_plugin: FakeToolPlugin,
 ) -> None:
     """Verify reset_options resets exclude_patterns to defaults."""
-    list(fake_tool_plugin.exclude_patterns)
     fake_tool_plugin.set_options(exclude_patterns=["custom_pattern_*"])
 
     assert_that(fake_tool_plugin.exclude_patterns).contains("custom_pattern_*")
@@ -56,3 +56,38 @@ def test_reset_options_allows_clean_reconfiguration(
 
     assert_that(fake_tool_plugin.exclude_patterns).contains("second_*")
     assert_that(fake_tool_plugin.exclude_patterns).does_not_contain("first_*")
+
+
+def test_bandit_reset_options_preserves_native_config() -> None:
+    """Verify BanditPlugin.reset_options() re-applies native pyproject.toml config."""
+    native_config = {
+        "skips": ["B101", "B601"],
+        "tests": ["B201"],
+        "severity": "HIGH",
+    }
+
+    with patch(
+        "lintro.tools.definitions.bandit.load_bandit_config",
+        return_value=native_config,
+    ):
+        from lintro.tools.definitions.bandit import BanditPlugin
+
+        plugin = BanditPlugin()
+
+    # Native config should be applied from __post_init__
+    assert_that(plugin.options["skips"]).is_equal_to("B101,B601")
+    assert_that(plugin.options["tests"]).is_equal_to("B201")
+
+    # Override with user options
+    plugin.set_options(skips="B102")
+    assert_that(plugin.options["skips"]).is_equal_to("B102")
+
+    # Reset should restore native config, not defaults (which have skips=None)
+    with patch(
+        "lintro.tools.definitions.bandit.load_bandit_config",
+        return_value=native_config,
+    ):
+        plugin.reset_options()
+
+    assert_that(plugin.options["skips"]).is_equal_to("B101,B601")
+    assert_that(plugin.options["tests"]).is_equal_to("B201")

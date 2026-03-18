@@ -135,7 +135,7 @@ class MarkdownlintPlugin(BaseToolPlugin):
 
         validate_positive_int(line_length, "line_length")
         if line_length is not None:
-            self.options["line_length"] = line_length
+            set_kwargs["line_length"] = line_length
 
         super().set_options(**set_kwargs)
 
