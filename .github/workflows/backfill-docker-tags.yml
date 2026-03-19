@@ -119,14 +119,15 @@ jobs:
           fetch-depth: 1
 
       # Sparse-checkout main for CI scripts (not available on old tags).
-      # Placed outside the workspace ($GITHUB_WORKSPACE/../_ci) so the tag
-      # checkout above cannot overwrite it.
+      # Must come AFTER the tag checkout — checking out the tag into the
+      # default workspace wipes any prior content, but this step only
+      # writes into _ci/ and does not touch the parent workspace.
       - name: Checkout CI scripts from main
         uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6
         with:
           ref: main
           sparse-checkout: scripts/ci
-          path: ../_ci
+          path: _ci
 
       # Cannot use ./.github/actions/setup-docker here — it does not
       # exist on old release tags.  Uses same raw actions as the
@@ -147,7 +148,7 @@ jobs:
         env:
           TAG: ${{ matrix.tag }}
           SHA: ${{ matrix.sha }}
-        run: ../_ci/scripts/ci/backfill-compute-tags.sh
+        run: _ci/scripts/ci/backfill-compute-tags.sh
 
       - name: Build and push main image
         # yamllint disable-line rule:line-length
