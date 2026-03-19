@@ -69,7 +69,7 @@ class SqlfluffPlugin(BaseToolPlugin):
             default_timeout=SQLFLUFF_DEFAULT_TIMEOUT,
         )
 
-    def set_options(  # type: ignore[override]
+    def set_options(
         self,
         dialect: str | None = None,
         exclude_rules: list[str] | None = None,

@@ -110,7 +110,7 @@ class RuffPlugin(BaseToolPlugin):
         if env_unsafe_fixes in ("true", "1", "yes", "on"):
             self.options["unsafe_fixes"] = True
 
-    def set_options(  # type: ignore[override]
+    def set_options(
         self,
         select: list[str] | None = None,
         ignore: list[str] | None = None,

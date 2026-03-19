@@ -140,7 +140,7 @@ class RustfmtPlugin(BaseToolPlugin):
             default_timeout=RUSTFMT_DEFAULT_TIMEOUT,
         )
 
-    def set_options(  # type: ignore[override]
+    def set_options(
         self,
         timeout: int | None = None,
         **kwargs: Any,

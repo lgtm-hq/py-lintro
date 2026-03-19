@@ -108,7 +108,7 @@ class MarkdownlintPlugin(BaseToolPlugin):
             issues_count=0,
         )
 
-    def set_options(  # type: ignore[override]
+    def set_options(
         self,
         timeout: int | None = None,
         line_length: int | None = None,
@@ -135,7 +135,7 @@ class MarkdownlintPlugin(BaseToolPlugin):
 
         validate_positive_int(line_length, "line_length")
         if line_length is not None:
-            self.options["line_length"] = line_length
+            set_kwargs["line_length"] = line_length
 
         super().set_options(**set_kwargs)
 

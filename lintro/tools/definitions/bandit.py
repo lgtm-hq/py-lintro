@@ -121,11 +121,29 @@ class BanditPlugin(BaseToolPlugin):
     def __post_init__(self) -> None:
         """Initialize the tool with configuration from pyproject.toml."""
         super().__post_init__()
+        self._apply_native_config()
 
-        # Load bandit configuration from pyproject.toml
-        bandit_config = load_bandit_config()
+    def reset_options(self) -> None:
+        """Reset options and re-apply native [tool.bandit] config.
 
-        # Apply configuration overrides
+        Overrides the base ``reset_options()`` so that native bandit
+        configuration from pyproject.toml (skips, tests, severity, etc.)
+        is preserved after the reset.  Without this, the base reset
+        restores ``definition.default_options`` which has ``skips: None``,
+        silently dropping the user's configured skip list.
+        """
+        super().reset_options()
+        self._apply_native_config()
+
+    def _apply_native_config(self) -> None:
+        """Load and apply native [tool.bandit] config from pyproject.toml."""
+        try:
+            bandit_config = load_bandit_config()
+        except Exception as e:
+            logger.warning(f"[bandit] Failed to load native config: {e}")
+            return
+
+        # Apply exclude_dirs
         if "exclude_dirs" in bandit_config:
             exclude_dirs = bandit_config["exclude_dirs"]
             if isinstance(exclude_dirs, list):
@@ -137,7 +155,7 @@ class BanditPlugin(BaseToolPlugin):
                     if recursive_pattern not in self.exclude_patterns:
                         self.exclude_patterns.append(recursive_pattern)
 
-        # Set other options from configuration
+        # Apply other options from configuration
         config_mapping = {
             "tests": "tests",
             "skips": "skips",
@@ -150,18 +168,34 @@ class BanditPlugin(BaseToolPlugin):
             "confidence": "confidence",
         }
 
+        valid_aggregates = {"vuln", "file"}
+
         for config_key, option_key in config_mapping.items():
             if config_key in bandit_config:
                 value = bandit_config[config_key]
-                if config_key == "severity" and value is not None:
-                    value = normalize_bandit_severity_level(value).value
-                elif config_key == "confidence" and value is not None:
-                    value = normalize_bandit_confidence_level(value).value
-                elif config_key in ("skips", "tests") and isinstance(value, list):
-                    value = ",".join(value)
+                try:
+                    if config_key == "severity" and value is not None:
+                        value = normalize_bandit_severity_level(value).value
+                    elif config_key == "confidence" and value is not None:
+                        value = normalize_bandit_confidence_level(value).value
+                    elif config_key in ("skips", "tests") and isinstance(
+                        value,
+                        list,
+                    ):
+                        value = ",".join(value)
+                    elif config_key == "aggregate" and value not in valid_aggregates:
+                        logger.warning(
+                            f"[bandit] Invalid native aggregate value: {value!r}",
+                        )
+                        continue
+                except (ValueError, TypeError) as e:
+                    logger.warning(
+                        f"[bandit] Invalid native config for {config_key}: {e}",
+                    )
+                    continue
                 self.options[option_key] = value
 
-    def set_options(  # type: ignore[override]
+    def set_options(
         self,
         severity: str | None = None,
         confidence: str | None = None,

@@ -84,7 +84,7 @@ class HadolintPlugin(BaseToolPlugin):
             default_timeout=HADOLINT_DEFAULT_TIMEOUT,
         )
 
-    def set_options(  # type: ignore[override]
+    def set_options(
         self,
         format: str | HadolintFormat | None = None,
         failure_threshold: str | HadolintFailureThreshold | None = None,

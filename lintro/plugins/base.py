@@ -23,7 +23,7 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import click
 from loguru import logger
@@ -156,7 +156,19 @@ class BaseToolPlugin(ABC):
     # Public API
     # -------------------------------------------------------------------------
 
-    def set_options(self, **kwargs: object) -> None:
+    def reset_options(self) -> None:
+        """Reset options back to definition defaults.
+
+        Clears accumulated state from prior ``set_options()`` calls so
+        the same plugin instance can be reused across runs without
+        leaking mutated configuration.
+        """
+        self.options = dict(self.definition.default_options)
+        self.exclude_patterns = []
+        self.include_venv = False
+        self._setup_defaults()
+
+    def set_options(self, **kwargs: Any) -> None:
         """Set tool-specific options.
 
         Args:
