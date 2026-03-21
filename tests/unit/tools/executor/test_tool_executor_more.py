@@ -158,6 +158,7 @@ def test_main_loop_get_tool_raises_appends_failure(
                 "definition": FakeToolDefinition(name="black", can_fix=True),
                 "can_fix": True,
                 "set_options": lambda self, **k: None,
+                "reset_options": lambda self: None,
                 "check": lambda self, paths, options=None: ok,
                 "fix": lambda self, paths, options=None: ok,
                 "options": {},

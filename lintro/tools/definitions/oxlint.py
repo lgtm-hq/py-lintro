@@ -185,6 +185,7 @@ class OxlintPlugin(BaseToolPlugin):
             issues_count=1,
             issues=[timeout_issue],
             initial_issues_count=pre_fix_count,
+            initial_issues=initial_issues if initial_issues else None,
             cwd=cwd,
         )
 
