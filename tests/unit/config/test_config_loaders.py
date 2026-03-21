@@ -19,7 +19,6 @@ from lintro.utils.config import (
     load_lintro_global_config,
     load_lintro_tool_config,
     load_post_checks_config,
-    load_pyproject,
     load_pyproject_config,
     load_tool_config_from_pyproject,
 )

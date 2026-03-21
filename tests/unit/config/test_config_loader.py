@@ -12,7 +12,6 @@ from lintro.config.config_loader import _load_pyproject_fallback
 from lintro.utils.config import (
     clear_pyproject_cache,
     load_lintro_tool_config,
-    load_pyproject,
 )
 
 
