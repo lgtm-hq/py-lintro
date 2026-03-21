@@ -11,7 +11,6 @@ Allows tool-specific defaults via `[tool.lintro.<tool>]` (e.g., `[tool.lintro.ru
 from __future__ import annotations
 
 import configparser
-import functools
 import tomllib
 from pathlib import Path
 from typing import Any
@@ -23,6 +22,7 @@ __all__ = [
     "load_pyproject",
     "load_pyproject_config",
     "load_tool_config_from_pyproject",
+    "clear_pyproject_cache",
     # Lintro config loading
     "load_lintro_global_config",
     "load_lintro_tool_config",
@@ -44,10 +44,28 @@ __all__ = [
 # Core pyproject.toml Loading
 # =============================================================================
 
+# Module-level caches keyed on resolved paths so that different working
+# directories get independent cache entries (unlike functools.lru_cache
+# which has no awareness of cwd).
+_pyproject_path_cache: dict[Path, Path | None] = {}
+_pyproject_data_cache: dict[Path, dict[str, Any]] = {}
 
-@functools.lru_cache(maxsize=32)
+
+def clear_pyproject_cache() -> None:
+    """Clear both pyproject path and data caches.
+
+    Call this when the working directory may have changed or when
+    pyproject.toml contents should be re-read from disk.
+    """
+    _pyproject_path_cache.clear()
+    _pyproject_data_cache.clear()
+
+
 def _find_pyproject(start_path: Path | None = None) -> Path | None:
     """Search for pyproject.toml up the directory tree.
+
+    Results are cached by resolved start path so that different working
+    directories return the correct pyproject.toml.
 
     Args:
         start_path: Optional starting path for search.
@@ -58,18 +76,23 @@ def _find_pyproject(start_path: Path | None = None) -> Path | None:
     """
     if start_path is None:
         start_path = Path.cwd()
+    key = start_path.resolve()
+    if key in _pyproject_path_cache:
+        return _pyproject_path_cache[key]
     for parent in [start_path, *start_path.parents]:
         candidate = parent / "pyproject.toml"
         if candidate.exists():
+            _pyproject_path_cache[key] = candidate
             return candidate
+    _pyproject_path_cache[key] = None
     return None
 
 
-@functools.lru_cache(maxsize=1)
 def load_pyproject() -> dict[str, Any]:
     """Load the full pyproject.toml with caching.
 
-    Uses LRU caching to avoid repeated file I/O operations.
+    Results are cached by resolved pyproject path so that different
+    working directories correctly load their own pyproject.toml.
 
     Returns:
         Full pyproject.toml contents as dict
@@ -78,9 +101,14 @@ def load_pyproject() -> dict[str, Any]:
     if not pyproject_path:
         logger.debug("No pyproject.toml found in current directory or parents")
         return {}
+    key = pyproject_path.resolve()
+    if key in _pyproject_data_cache:
+        return _pyproject_data_cache[key]
     try:
         with pyproject_path.open("rb") as f:
-            return tomllib.load(f)
+            data = tomllib.load(f)
+        _pyproject_data_cache[key] = data
+        return data
     except OSError as e:
         logger.warning(f"Failed to read pyproject.toml at {pyproject_path}: {e}")
         return {}

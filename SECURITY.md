@@ -4,7 +4,7 @@
 
 Currently supporting the latest stable version:
 
-<!-- markdownlint-disable MD060 -->
+<!-- markdownlint-disable MD060 -- emoji triggers false positive -->
 
 | Version | Supported |
 | ------- | --------- |

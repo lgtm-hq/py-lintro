@@ -2,7 +2,7 @@
 
 By making a contribution to this project, I certify that:
 
-<!-- markdownlint-disable MD013 -->
+<!-- markdownlint-disable MD013 -- legal text has long lines that must not be reformatted -->
 
 1. The contribution was created in whole or in part by me and I have the right to submit
    it under the open source license indicated in the file; or

@@ -1,6 +1,6 @@
 # Lintro
 
-<!-- markdownlint-disable MD033 MD013 -->
+<!-- markdownlint-disable MD033 MD013 -- inline HTML and long lines needed for centered badge/logo layout -->
 <p align="center">
 <img src="https://raw.githubusercontent.com/lgtm-hq/py-lintro/main/assets/images/lintro.png" alt="Lintro Logo" style="width:100%;max-width:800px;height:auto;">
 </p>
@@ -73,7 +73,7 @@ system.
 
 ## 🛠️ Supported Tools
 
-<!-- markdownlint-disable MD013 MD033 MD060 -->
+<!-- markdownlint-disable MD013 MD033 MD060 -- HTML table with long lines and inline links for supported tools matrix -->
 
 <table>
 <thead>

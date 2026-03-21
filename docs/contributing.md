@@ -125,7 +125,7 @@ consistent UX and maintainable implementation.
 
 ### Implementation Steps
 
-<!-- markdownlint-disable MD029 -->
+<!-- markdownlint-disable MD029 -- numbering restarts after nested blocks -->
 
 1. Core code
 
