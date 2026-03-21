@@ -270,7 +270,7 @@ jobs:
     needs: [resolve-tools, docker-build, manifest-sync]
     runs-on: ubuntu-24.04
     permissions:
-      contents: read
+      contents: write
       pull-requests: write
       packages: write
     timeout-minutes: 30
