@@ -270,7 +270,7 @@ jobs:
     needs: [resolve-tools, docker-build, manifest-sync]
     runs-on: ubuntu-24.04
     permissions:
-      contents: write
+      contents: read
       pull-requests: write
       packages: write
     timeout-minutes: 30
@@ -342,21 +342,8 @@ jobs:
       - name: Load Docker images (fork fallback)
         if: needs.docker-build.outputs.is-fork == 'true'
         run: docker load -i /tmp/py-lintro-images.tar
-      - name: Auto-fix with Lintro (same-repo PRs only)
-        if: >-
-          github.event_name == 'pull_request' &&
-          github.event.pull_request.draft == false &&
-          github.event.pull_request.head.repo.fork == false
-        env:
-          HEAD_REF: ${{ github.head_ref }}
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          PR_HEAD_REPO_FULL_NAME: ${{ github.event.pull_request.head.repo.full_name }}
-          RUFF_UNSAFE_FIXES: 'true'
-        run: scripts/ci/ci-auto-fix.sh
       - name: Run Lintro Analysis in Docker
         id: lintro
-        env:
-          RUFF_UNSAFE_FIXES: 'true'
         run: ./scripts/ci/testing/ci-lintro.sh
         continue-on-error: true
       - name: Generate PR Comment

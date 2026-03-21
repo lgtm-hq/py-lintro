@@ -93,7 +93,6 @@ Scripts for GitHub Actions workflows and continuous integration.
 | `coverage-pr-comment.sh`            | Generate PR comments with coverage info                            | `./scripts/ci/github/coverage-pr-comment.sh --help`                                              |
 | `enforce-coverage-threshold.sh`     | Enforce minimum coverage threshold                                 | `./scripts/ci/testing/enforce-coverage-threshold.sh --help`                                      |
 | `auto-tag-unified.sh`               | Unified auto-tagging functions (check/read/create)                 | `./scripts/ci/auto-tag-unified.sh --help`                                                        |
-| `ci-auto-fix.sh`                    | Auto-format via Docker and push changes                            | `./scripts/ci/ci-auto-fix.sh`                                                                    |
 | `pypi-version-exists.sh`            | Check if version exists on PyPI                                    | `./scripts/ci/pypi-version-exists.sh <project> <version>`                                        |
 | `ensure-tag-on-main.sh`             | Ensure tag ref points to commit on main                            | `./scripts/ci/ensure-tag-on-main.sh --help`                                                      |
 | `guard-release-commit.sh`           | Check last commit is release bump                                  | `./scripts/ci/guard-release-commit.sh --help`                                                    |
