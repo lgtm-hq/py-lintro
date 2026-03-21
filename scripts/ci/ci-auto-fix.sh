@@ -66,11 +66,11 @@ if [ -n "$CHANGED" ]; then
 		echo '```'
 	} >>"$GITHUB_STEP_SUMMARY" || true
 
-	# Stage only allowed file types
-	git add -A '*.py' '*.md' '*.yml' '*.yaml' '*.json' '*.toml' '*.js' '*.ts' '*.tsx' || true
+	# Stage all formatting changes — lintro only touches files it's configured to handle
+	git add -A
 
 	if git diff --cached --quiet; then
-		echo "No allowed changes to commit after filtering."
+		echo "No changes to commit after staging."
 		exit 0
 	fi
 
