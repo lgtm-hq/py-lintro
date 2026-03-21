@@ -13,8 +13,8 @@ import pytest
 from assertpy import assert_that
 
 from lintro.utils.config import (
-    _find_pyproject,
     _get_lintro_section,
+    clear_pyproject_cache,
     get_tool_order_config,
     load_lintro_global_config,
     load_lintro_tool_config,
@@ -30,10 +30,9 @@ from lintro.utils.config import (
 
 
 @pytest.fixture
-def clear_pyproject_cache() -> None:
+def reset_pyproject_cache() -> None:
     """Clear pyproject-related caches before each test."""
-    load_pyproject.cache_clear()
-    _find_pyproject.cache_clear()
+    clear_pyproject_cache()
 
 
 @pytest.fixture
@@ -69,7 +68,7 @@ def mock_lintro_section() -> Any:
 
 
 def test_load_pyproject_config_is_alias_for_load_pyproject(
-    clear_pyproject_cache: None,
+    reset_pyproject_cache: None,
     mock_empty_pyproject: Any,
 ) -> None:
     """Verify load_pyproject_config is an alias for load_pyproject.
@@ -78,7 +77,7 @@ def test_load_pyproject_config_is_alias_for_load_pyproject(
     load_pyproject when no pyproject.toml file is found.
 
     Args:
-        clear_pyproject_cache: Fixture to clear caches.
+        reset_pyproject_cache: Fixture to clear caches.
         mock_empty_pyproject: Mock for patching _find_pyproject to return None.
     """
     with mock_empty_pyproject:
@@ -129,7 +128,7 @@ def test_load_pyproject_config_is_alias_for_load_pyproject(
     ],
 )
 def test_get_lintro_section_handles_various_inputs(
-    clear_pyproject_cache: None,
+    reset_pyproject_cache: None,
     pyproject_data: dict[str, Any],
     expected_result: dict[str, Any],
     description: str,
@@ -137,7 +136,7 @@ def test_get_lintro_section_handles_various_inputs(
     """Test _get_lintro_section handles various pyproject.toml structures.
 
     Args:
-        clear_pyproject_cache: Fixture to clear caches.
+        reset_pyproject_cache: Fixture to clear caches.
         pyproject_data: The mock pyproject.toml data to test.
         expected_result: The expected return value.
         description: Human-readable description of the test case.
