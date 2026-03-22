@@ -16,6 +16,9 @@ execution:
   parallel: true
   max_workers: 10 # 1-32, defaults to CPU count if omitted
   auto_install_deps: true # Auto-install Node.js deps if node_modules missing
+  # artifacts: ['sarif', 'json']  # Side-channel outputs alongside primary display
+  # Supported: json, csv, markdown, html, sarif, plain
+  # SARIF auto-emits in GitHub Actions even without this
 
 # Fallback configurations for tools without native config files.
 # These are used when no native config (e.g., .prettierrc, .yamllint) is found.
@@ -101,3 +104,22 @@ tools:
   # Pytest - Test runner (config in pyproject.toml [tool.pytest.ini_options])
   pytest:
     enabled: true
+
+# AI-powered issue intelligence.
+# Requires: uv pip install 'lintro[ai]'
+# `lintro chk` generates an AI summary (1 API call). Add --fix for
+# interactive AI fix suggestions.
+# `lintro fmt` generates AI fix suggestions for unfixable issues and
+# a post-fix summary.
+ai:
+  enabled: false
+  provider: anthropic
+  # model: claude-sonnet-4-20250514  # uses provider default if omitted
+  # api_key_env: ANTHROPIC_API_KEY   # uses provider default if omitted
+  # default_fix: false      # set true to always run --fix in chk
+  auto_apply: false
+  auto_apply_safe_fixes: true # auto-apply deterministic style fixes (e.g. E501)
+  max_tokens: 4096
+  max_parallel_calls: 5 # 1-20, concurrent API calls for fix generation
+  validate_after_group: false # interactive mode: re-check right after each group
+  show_cost_estimate: true
