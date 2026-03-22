@@ -134,7 +134,7 @@ class AIConfig(BaseModel):
         default=None,
         ge=0,
         description=(
-            "Maximum total cost in USD per AI session. " "None disables the limit."
+            "Maximum total cost in USD per AI session." " None disables the limit."
         ),
     )
     max_prompt_tokens: int = Field(

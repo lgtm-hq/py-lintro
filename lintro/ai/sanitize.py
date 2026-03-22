@@ -126,9 +126,7 @@ def sanitize_code_content(content: str) -> str:
     if not content:
         return content
 
-    result = _neutralize_role_markers(content)
-    result = _neutralize_xml_tags(result)
-    return result
+    return _neutralize_xml_tags(_neutralize_role_markers(content))
 
 
 def detect_injection_patterns(content: str) -> list[str]:

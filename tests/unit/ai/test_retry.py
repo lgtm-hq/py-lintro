@@ -152,7 +152,7 @@ def test_retry_does_not_retry_non_ai_exceptions():
         call_count += 1
         raise ValueError("not an AI error")
 
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="not an AI error"):
         fn()
     assert_that(call_count).is_equal_to(1)
 
