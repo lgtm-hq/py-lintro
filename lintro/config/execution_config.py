@@ -1,8 +1,12 @@
 """Execution configuration model."""
 
 import os
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
+
+# Supported artifact formats for side-channel output
+ArtifactFormat = Literal["json", "csv", "markdown", "html", "sarif", "plain"]
 
 
 def _get_default_max_workers() -> int:
@@ -33,6 +37,11 @@ class ExecutionConfig(BaseModel):
             True/False explicitly enables/disables.
         max_fix_retries: Maximum number of fix→verify cycles for converging
             formatters (default: 3). Some formatters need multiple passes.
+        artifacts: Side-channel artifact formats to write alongside the
+            primary output. Supports all output formats: json, csv,
+            markdown, html, sarif, plain. When ``GITHUB_ACTIONS=true``
+            is detected, SARIF is emitted automatically even if this
+            list is empty.
     """
 
     model_config = ConfigDict(frozen=False, extra="forbid")
@@ -44,3 +53,4 @@ class ExecutionConfig(BaseModel):
     max_workers: int = Field(default_factory=_get_default_max_workers, ge=1, le=32)
     auto_install_deps: bool | None = None
     max_fix_retries: int = Field(default=3, ge=1, le=10)
+    artifacts: list[ArtifactFormat] = Field(default_factory=list)

@@ -27,6 +27,7 @@ class _FakeToolDefinition:
         self.description = ""
         self.file_patterns: list[str] = []
         self.native_configs: list[str] = []
+        self.conflicts_with: list[str] = []
 
 
 class _FakeTool:
