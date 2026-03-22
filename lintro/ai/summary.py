@@ -33,7 +33,6 @@ if TYPE_CHECKING:
     from lintro.ai.providers.base import AIResponse, BaseAIProvider
     from lintro.models.core.tool_result import ToolResult
 
-# Re-export for backward compatibility
 __all__ = ["SummaryGenParams"]
 
 
