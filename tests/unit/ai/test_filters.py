@@ -51,10 +51,31 @@ def test_include_paths_multiple_patterns() -> None:
 
 
 def test_include_paths_glob_star_star() -> None:
-    """Recursive glob pattern matches nested paths."""
+    """Recursive glob pattern matches at all nesting depths."""
     config = AIConfig(include_paths=["src/**/*.py"])
-    issue = MockIssue(file="src/deep/nested/module.py", code="E501")
-    assert_that(should_process_issue(issue, config)).is_true()
+    # Zero segments: src/foo.py
+    assert_that(
+        should_process_issue(MockIssue(file="src/foo.py", code="E501"), config),
+    ).is_true()
+    # One segment: src/a/foo.py
+    assert_that(
+        should_process_issue(MockIssue(file="src/a/foo.py", code="E501"), config),
+    ).is_true()
+    # Deep nesting: src/a/b/c/foo.py
+    assert_that(
+        should_process_issue(
+            MockIssue(file="src/deep/nested/module.py", code="E501"),
+            config,
+        ),
+    ).is_true()
+    # Non-matching prefix
+    assert_that(
+        should_process_issue(MockIssue(file="other/foo.py", code="E501"), config),
+    ).is_false()
+    # Non-matching extension
+    assert_that(
+        should_process_issue(MockIssue(file="src/foo.txt", code="E501"), config),
+    ).is_false()
 
 
 # -- exclude_paths -------------------------------------------------------------
