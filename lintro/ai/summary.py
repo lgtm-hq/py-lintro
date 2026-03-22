@@ -189,8 +189,19 @@ def _parse_summary_response(
     Returns:
         Parsed AISummary.
     """
+    # Strip markdown code fences that AI models commonly wrap JSON in
+    cleaned = content.strip()
+    if cleaned.startswith("```"):
+        # Remove opening fence (with optional language tag)
+        first_newline = cleaned.find("\n")
+        if first_newline != -1:
+            cleaned = cleaned[first_newline + 1 :]
+        # Remove closing fence
+        if cleaned.rstrip().endswith("```"):
+            cleaned = cleaned.rstrip()[:-3].rstrip()
+
     try:
-        data = json.loads(content)
+        data = json.loads(cleaned)
     except json.JSONDecodeError:
         logger.debug("Failed to parse AI summary response as JSON")
         return AISummary(
