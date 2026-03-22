@@ -114,7 +114,7 @@ def test_include_and_exclude_paths_include_wins_when_not_excluded() -> None:
 
 def test_include_and_exclude_paths_exclude_overrides() -> None:
     """Include passes but exclude also matches: issue is rejected."""
-    config = AIConfig(include_paths=["src/*"], exclude_paths=["src/vendor/*"])
+    config = AIConfig(include_paths=["src/**"], exclude_paths=["src/vendor/*"])
     issue = MockIssue(file="src/vendor/lib.py", code="E501")
     assert_that(should_process_issue(issue, config)).is_false()
 
