@@ -4,10 +4,6 @@ Generates SARIF (Static Analysis Results Interchange Format) output
 from AI fix suggestions and summaries. Compatible with GitHub Code
 Scanning, VS Code SARIF Viewer, and other SARIF-consuming tools.
 
-This module is infrastructure for upcoming SARIF output support —
-the core ``to_sarif`` / ``write_sarif`` functions are fully implemented
-but not yet wired into the main CLI output pipeline.
-
 Spec: https://docs.oasis-open.org/sarif/sarif/v2.1.0/
 """
 
@@ -95,9 +91,10 @@ def to_sarif(
     results: list[dict[str, Any]] = []
 
     for s in suggestions:
-        rule_id = (
-            f"{s.tool_name}/{s.code}" if s.tool_name and s.code else s.code or "unknown"
-        )
+        if s.tool_name and s.code:
+            rule_id = f"{s.tool_name}/{s.code}"
+        else:
+            rule_id = s.tool_name or s.code or "unknown"
 
         if rule_id not in rules_map:
             rule: dict[str, Any] = {"id": rule_id}
@@ -181,8 +178,14 @@ def to_sarif(
         "results": results,
     }
 
-    # Attach summary as run properties
-    if summary and summary.overview:
+    # Attach summary as run properties when any field is populated
+    if summary and (
+        summary.overview
+        or summary.key_patterns
+        or summary.priority_actions
+        or summary.triage_suggestions
+        or summary.estimated_effort
+    ):
         run["properties"] = {
             "aiSummary": {
                 "overview": summary.overview,
