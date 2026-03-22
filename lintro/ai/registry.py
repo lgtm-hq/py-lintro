@@ -8,7 +8,7 @@ modules import what they need rather than maintaining parallel dicts.
 The ``AIProvider`` enum, ``ModelPricing``, and ``ProviderInfo`` dataclasses
 are defined in :mod:`lintro.ai.provider_enum` and
 :mod:`lintro.ai.provider_info` respectively, and re-exported here for
-backward compatibility.
+convenience.
 """
 
 from __future__ import annotations
@@ -19,8 +19,6 @@ from dataclasses import dataclass, field
 from lintro.ai.provider_enum import AIProvider
 from lintro.ai.provider_info import ModelPricing, ProviderInfo
 
-# Re-export for backward compatibility — callers that do
-# ``from lintro.ai.registry import AIProvider`` continue to work.
 __all__ = [
     "AIProvider",
     "AIProviderRegistry",

@@ -21,7 +21,6 @@ from lintro.ai.config_views import AIBudgetConfig, AIOutputConfig, AIProviderCon
 from lintro.ai.enums import ConfidenceLevel, SanitizeMode
 from lintro.ai.registry import AIProvider
 
-# Re-export for backward compatibility
 __all__ = [
     "AIBudgetConfig",
     "AIConfig",

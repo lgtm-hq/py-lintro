@@ -65,6 +65,7 @@ def test_retry_retries_on_rate_limit_error(mock_sleep):
     result = fn()
     assert_that(result).is_equal_to("ok")
     assert_that(call_count).is_equal_to(2)
+    mock_sleep.assert_called()
 
 
 def test_retry_does_not_retry_on_authentication_error():

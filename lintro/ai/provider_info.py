@@ -13,7 +13,6 @@ from dataclasses import dataclass, field
 
 from lintro.ai.model_pricing import ModelPricing
 
-# Re-export for backward compatibility
 __all__ = ["ModelPricing", "ProviderInfo"]
 
 

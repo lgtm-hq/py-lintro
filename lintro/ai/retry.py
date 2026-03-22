@@ -95,6 +95,7 @@ def with_retry(
                     # across concurrent lintro processes. Not used for
                     # security/cryptographic purposes.
                     delay *= random.uniform(0.8, 1.2)  # nosec B311  # noqa: S311
+                    delay = min(delay, max_delay)
                     logger.debug(
                         f"AI retry {attempt + 1}/{max_retries}: {e}, "
                         f"waiting {delay:.1f}s",

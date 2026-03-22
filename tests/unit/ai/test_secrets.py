@@ -212,7 +212,7 @@ def test_redact_clean_text_unchanged() -> None:
         (
             "GitHub PAT",
             # nosemgrep: detected-github-token
-            "token = " "ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghij\n",
+            "token = ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghij\n",
             "ghp_ABCDEFGHIJ",
         ),
         (

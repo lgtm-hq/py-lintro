@@ -84,7 +84,7 @@ def _neutralize_role_markers(text: str) -> str:
 def _neutralize_xml_tags(text: str) -> str:
     """Escape XML-like tags that could confuse the model's parsing.
 
-    Replaces the opening ``<`` with ``<`` only for tags whose names
+    Replaces the opening ``<`` with ``&lt;`` only for tags whose names
     match known prompt-structural elements (system, instruction, etc.).
 
     Args:

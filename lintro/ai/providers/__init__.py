@@ -15,7 +15,7 @@ if TYPE_CHECKING:
     from lintro.ai.config import AIConfig
     from lintro.ai.providers.base import BaseAIProvider
 
-# Re-export for backward compatibility with string-keyed access.
+# String-keyed lookup for convenience.
 DEFAULT_MODELS: dict[str, str] = {
     p.value: m for p, m in PROVIDERS.default_models.items()
 }
@@ -93,4 +93,4 @@ def get_default_model(provider_name: str) -> str | None:
     return DEFAULT_MODELS.get(provider_name.lower())
 
 
-__all__ = ["get_default_model", "get_provider", "AINotAvailableError"]
+__all__ = ["AINotAvailableError", "get_default_model", "get_provider"]

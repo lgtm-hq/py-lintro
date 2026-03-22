@@ -33,6 +33,12 @@ def test_max_tokens_zero_rejected():
         AIConfig(max_tokens=0)
 
 
+def test_max_tokens_negative_rejected():
+    """max_tokens=-1 raises ValidationError."""
+    with pytest.raises(ValidationError, match="max_tokens"):
+        AIConfig(max_tokens=-1)
+
+
 def test_sanitize_mode_default():
     """Default sanitize_mode is 'warn'."""
     config = AIConfig()

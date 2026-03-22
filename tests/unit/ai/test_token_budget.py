@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import pytest
 from assertpy import assert_that
 
 from lintro.ai.token_budget import estimate_tokens, truncate_to_budget
@@ -65,3 +66,10 @@ def test_empty_string_no_truncation() -> None:
     result, truncated = truncate_to_budget("", max_tokens=10)
     assert_that(result).is_equal_to("")
     assert_that(truncated).is_false()
+
+
+@pytest.mark.parametrize("max_tokens", [0, -1, -5])
+def test_truncate_raises_on_non_positive_max_tokens(max_tokens: int) -> None:
+    """truncate_to_budget raises ValueError for non-positive max_tokens."""
+    with pytest.raises(ValueError, match="max_tokens must be positive"):
+        truncate_to_budget("some text", max_tokens=max_tokens)

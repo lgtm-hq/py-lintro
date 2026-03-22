@@ -294,8 +294,6 @@ def _parse_ai_config(data: dict[str, Any]) -> AIConfig:
     known_fields = set(AIConfig.model_fields)
     unknown = set(data) - known_fields
     if unknown:
-        from loguru import logger
-
         logger.warning(
             "Unknown AI config keys ignored: {}",
             ", ".join(sorted(unknown)),

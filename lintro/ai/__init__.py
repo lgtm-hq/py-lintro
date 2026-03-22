@@ -14,7 +14,7 @@ Features:
 
 from lintro.ai.config import AIConfig
 from lintro.ai.enums import ConfidenceLevel, RiskLevel
-from lintro.ai.registry import AIProvider
+from lintro.ai.provider_enum import AIProvider
 
 __all__ = [
     "AIConfig",

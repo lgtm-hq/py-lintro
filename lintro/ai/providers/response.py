@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from lintro.ai.registry import AIProvider
+from lintro.ai.provider_enum import AIProvider
 
 
 @dataclass
