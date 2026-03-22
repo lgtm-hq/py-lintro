@@ -82,15 +82,13 @@ def should_process_issue(issue: BaseIssue, config: AIConfig) -> bool:
     file_path = getattr(issue, "file", "") or ""
     code = getattr(issue, "code", "") or ""
 
-    # Path filtering — use _glob_match for ** patterns, fnmatch otherwise
+    # Path filtering — _glob_match handles both * and ** correctly
     if config.include_paths and not any(
-        _glob_match(file_path, p) if "**" in p else fnmatch.fnmatch(file_path, p)
-        for p in config.include_paths
+        _glob_match(file_path, p) for p in config.include_paths
     ):
         return False
     if config.exclude_paths and any(
-        _glob_match(file_path, p) if "**" in p else fnmatch.fnmatch(file_path, p)
-        for p in config.exclude_paths
+        _glob_match(file_path, p) for p in config.exclude_paths
     ):
         return False
 

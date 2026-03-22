@@ -251,7 +251,7 @@ def test_filter_issues_no_filters() -> None:
 
 def test_filter_issues_all_excluded() -> None:
     """filter_issues can exclude all issues."""
-    config = AIConfig(exclude_paths=["*"])
+    config = AIConfig(exclude_paths=["**"])
     issues: list[BaseIssue] = [
         MockIssue(file="src/main.py", code="E501"),
         MockIssue(file="tests/test.py", code="B101"),
