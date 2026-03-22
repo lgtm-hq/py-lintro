@@ -138,8 +138,8 @@ def test_retry_max_delay_cap(mock_sleep, _mock_uniform):
 
     fn()
     delays = [call.args[0] for call in mock_sleep.call_args_list]
-    for delay in delays:
-        assert_that(delay).is_less_than_or_equal_to(25.0)
+    assert_that(delays).is_length(5)
+    assert_that(delays).is_equal_to([10.0, 25.0, 25.0, 25.0, 25.0])
 
 
 def test_retry_does_not_retry_non_ai_exceptions():
