@@ -121,6 +121,8 @@ packages = [
   "lintro",
   "lintro.ai",
   "lintro.ai.enums",
+  "lintro.ai.models",
+  "lintro.ai.output",
   "lintro.ai.providers",
   "lintro.cli_utils",
   "lintro.cli_utils.commands",
