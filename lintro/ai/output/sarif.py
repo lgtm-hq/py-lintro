@@ -30,7 +30,7 @@ _CONFIDENCE_SCORE = {
 }
 
 
-def _risk_to_sarif_level(risk_level: str) -> str:
+def _risk_to_sarif_level(risk_level: RiskLevel | str) -> str:
     """Map AI risk level to SARIF result level.
 
     Args:
@@ -39,7 +39,7 @@ def _risk_to_sarif_level(risk_level: str) -> str:
     Returns:
         One of ``"error"``, ``"warning"``, or ``"note"``.
     """
-    normalized = risk_level.lower().strip() if risk_level else ""
+    normalized = str(risk_level).lower().strip() if risk_level else ""
     try:
         return RiskLevel(normalized).to_severity_label(sarif=True)
     except ValueError:
@@ -53,16 +53,16 @@ def _risk_to_sarif_level(risk_level: str) -> str:
     return "warning"
 
 
-def _confidence_to_score(confidence: str) -> float:
+def _confidence_to_score(confidence: ConfidenceLevel | str) -> float:
     """Map confidence label to a numeric score.
 
     Args:
-        confidence: Confidence level string.
+        confidence: Confidence level string or enum.
 
     Returns:
         Score between 0.0 and 1.0.
     """
-    normalized = confidence.lower().strip() if confidence else ""
+    normalized = str(confidence).lower().strip() if confidence else ""
     try:
         return _CONFIDENCE_SCORE[ConfidenceLevel(normalized)]
     except (ValueError, KeyError):
