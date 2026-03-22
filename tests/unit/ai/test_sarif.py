@@ -23,7 +23,7 @@ from lintro.ai.output.sarif import (
 
 
 @pytest.mark.parametrize(
-    "input_val, expected",
+    ("input_val", "expected"),
     [
         ("high", "error"),
         ("critical", "error"),
@@ -44,7 +44,7 @@ def test_risk_to_sarif_level(input_val: str, expected: str) -> None:
 
 
 @pytest.mark.parametrize(
-    "input_val, expected",
+    ("input_val", "expected"),
     [
         ("high", 0.9),
         ("medium", 0.6),

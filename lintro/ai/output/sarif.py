@@ -132,8 +132,9 @@ def to_sarif(
         if s.suggested_code and s.file and s.line:
             deleted_region: dict[str, int] = {"startLine": s.line}
             if s.original_code:
-                end_line = s.line + s.original_code.count("\n")
-                deleted_region["endLine"] = end_line
+                trimmed = s.original_code.rstrip("\n")
+                line_count = max(1, trimmed.count("\n") + 1)
+                deleted_region["endLine"] = s.line + line_count - 1
             fix: dict[str, Any] = {
                 "description": {"text": s.explanation or "AI suggestion"},
                 "artifactChanges": [
