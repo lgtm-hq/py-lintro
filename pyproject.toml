@@ -120,9 +120,12 @@ build = ["nuitka>=2.8.9", "ordered-set>=4.1.0", "zstandard>=0.25.0"]
 packages = [
   "lintro",
   "lintro.ai",
+  "lintro.ai.display",
   "lintro.ai.enums",
+  "lintro.ai.metadata",
   "lintro.ai.models",
   "lintro.ai.output",
+  "lintro.ai.prompts",
   "lintro.ai.providers",
   "lintro.cli_utils",
   "lintro.cli_utils.commands",

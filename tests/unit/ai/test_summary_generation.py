@@ -247,7 +247,6 @@ def test_generate_summary_generates_summary():
 
     summary = generate_summary([result], provider)
     assert_that(summary).is_not_none()
-    assert_that(summary).is_not_none()
     assert_that(summary.overview).is_equal_to("One issue found")  # type: ignore[union-attr]  # assertpy is_not_none narrows this
     assert_that(provider.calls).is_length(1)
 
@@ -270,5 +269,3 @@ def test_generate_summary_handles_provider_error():
 
     summary = generate_summary([result], ErrorProvider())
     assert_that(summary).is_none()
-
-

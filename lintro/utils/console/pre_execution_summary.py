@@ -142,7 +142,7 @@ def print_pre_execution_summary(
                     "[red]enabled (SDK not installed)[/red]",
                 )
                 ai_parts.append(
-                    "  [yellow]run: uv pip install" " 'lintro\\[ai]'[/yellow]",
+                    "  [yellow]run: uv pip install 'lintro\\[ai]'[/yellow]",
                 )
             elif not key_set:
                 ai_parts.append(

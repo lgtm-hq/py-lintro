@@ -1,57 +1,16 @@
-"""Typed helpers for AI metadata attached to tool results."""
+"""Helper functions for attaching and normalizing AI metadata."""
 
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass, field
 from typing import TYPE_CHECKING, Any
 
-from lintro.ai.enums import ConfidenceLevel, RiskLevel
+from lintro.ai.metadata.fix_suggestion_payload import AIFixSuggestionPayload
+from lintro.ai.metadata.summary_payload import AISummaryPayload
 
 if TYPE_CHECKING:
     from lintro.ai.models import AIFixSuggestion, AISummary
     from lintro.ai.telemetry import AITelemetry
     from lintro.models.core.tool_result import ToolResult
-
-
-@dataclass
-class AISummaryPayload:
-    """Serialized summary payload for JSON output."""
-
-    overview: str = ""
-    key_patterns: list[str] = field(default_factory=list)
-    priority_actions: list[str] = field(default_factory=list)
-    triage_suggestions: list[str] = field(default_factory=list)
-    estimated_effort: str = ""
-    input_tokens: int = 0
-    output_tokens: int = 0
-    cost_estimate: float = 0.0
-
-    def to_dict(self) -> dict[str, Any]:
-        """Convert to JSON-serializable dict."""
-        return asdict(self)
-
-
-@dataclass
-class AIFixSuggestionPayload:
-    """Serialized fix suggestion payload for JSON output."""
-
-    file: str = ""
-    line: int = 0
-    code: str = ""
-    tool_name: str = ""
-    original_code: str = ""
-    suggested_code: str = ""
-    explanation: str = ""
-    confidence: ConfidenceLevel | str = ""
-    risk_level: RiskLevel | str = ""
-    diff: str = ""
-    input_tokens: int = 0
-    output_tokens: int = 0
-    cost_estimate: float = 0.0
-
-    def to_dict(self) -> dict[str, Any]:
-        """Convert to JSON-serializable dict."""
-        return asdict(self)
 
 
 def summary_to_payload(summary: AISummary) -> AISummaryPayload:
@@ -90,17 +49,16 @@ def suggestion_to_payload(
 
 
 def ensure_ai_metadata(result: ToolResult) -> dict[str, Any]:
-    """Ensure a ToolResult has a mutable AI metadata container.
-
-    Returns a raw dict for backward compatibility with existing consumers
-    that access metadata by string key.
-    """
+    """Ensure a ToolResult has a mutable AI metadata container."""
     if result.ai_metadata is None:
         result.ai_metadata = {}
     return result.ai_metadata
 
 
-def attach_summary_metadata(result: ToolResult, summary: AISummary) -> None:
+def attach_summary_metadata(
+    result: ToolResult,
+    summary: AISummary,
+) -> None:
     """Attach summary metadata without overwriting other AI metadata."""
     metadata = ensure_ai_metadata(result)
     payload = summary_to_payload(summary)
@@ -111,18 +69,18 @@ def attach_fix_suggestions_metadata(
     result: ToolResult,
     suggestions: list[AIFixSuggestion],
 ) -> None:
-    """Attach fix suggestion metadata without overwriting summary metadata."""
+    """Attach fix suggestion metadata without overwriting summary."""
     metadata = ensure_ai_metadata(result)
     existing = list(metadata.get("fix_suggestions", []))
     existing.extend(suggestion_to_payload(s).to_dict() for s in suggestions)
     metadata["fix_suggestions"] = existing
 
 
-def attach_fixed_count_metadata(result: ToolResult, fixed_count: int) -> None:
-    """Attach per-tool AI-applied fix count for summary rendering.
-
-    Keeps legacy ``fixed_count`` for backward compatibility.
-    """
+def attach_fixed_count_metadata(
+    result: ToolResult,
+    fixed_count: int,
+) -> None:
+    """Attach per-tool AI-applied fix count for summary rendering."""
     metadata = ensure_ai_metadata(result)
     applied_count = max(0, int(fixed_count))
     metadata["fixed_count"] = applied_count
@@ -145,16 +103,7 @@ def attach_telemetry_metadata(
     results: list[ToolResult],
     telemetry: AITelemetry,
 ) -> None:
-    """Attach telemetry metrics to the first result's AI metadata.
-
-    Places the telemetry dictionary under the ``ai_metrics`` key so
-    downstream consumers (JSON output, CI reporters) can access
-    session-level AI usage information.
-
-    Args:
-        results: List of tool results; metrics are attached to the first.
-        telemetry: Accumulated session telemetry to serialize.
-    """
+    """Attach telemetry metrics to the first result's AI metadata."""
     if not results:
         return
     metadata = ensure_ai_metadata(results[0])
@@ -171,7 +120,6 @@ def normalize_ai_metadata(raw: dict[str, Any]) -> dict[str, Any]:
 
     fix_suggestions = raw.get("fix_suggestions")
     if fix_suggestions is None:
-        # Backward-compatible read for legacy key.
         fix_suggestions = raw.get("suggestions")
     if isinstance(fix_suggestions, list):
         normalized["fix_suggestions"] = [

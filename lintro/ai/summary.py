@@ -382,5 +382,3 @@ def generate_summary_from_params(
         backoff_factor=params.backoff_factor,
         fallback_models=params.fallback_models,
     )
-
-

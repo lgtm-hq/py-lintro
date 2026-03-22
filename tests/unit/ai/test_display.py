@@ -9,7 +9,6 @@ from lintro.ai.display import (
 )
 from lintro.ai.models import AISummary
 
-
 # -- render_summary (auto-detect) ---------------------------------------------
 
 

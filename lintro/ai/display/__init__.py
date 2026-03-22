@@ -1,6 +1,6 @@
 """AI output rendering package.
 
-Supports three environments:
+Supports the following environments:
 - Terminal: Rich Panels with section headers
 - GitHub Actions: ``::group::`` / ``::endgroup::`` collapsible sections
 - Markdown: ``<details><summary>`` collapsible sections

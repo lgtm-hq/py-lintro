@@ -58,31 +58,34 @@ def is_provider_available(provider: AIProvider | str) -> bool:
     """
     from lintro.ai.registry import AIProvider
 
-    provider = provider.lower()
-    if provider not in set(AIProvider):
+    if isinstance(provider, AIProvider):
+        provider_value = provider.value
+    else:
+        provider_value = str(provider).lower()
+
+    if provider_value not in {p.value for p in AIProvider}:
         from loguru import logger
 
         supported = ", ".join(p.value for p in AIProvider)
         logger.warning(
             "Unknown AI provider {!r}; supported providers: {}",
-            provider,
+            provider_value,
             supported,
         )
         return False
 
     try:
-        if provider == AIProvider.ANTHROPIC.value:
+        if provider_value == AIProvider.ANTHROPIC.value:
             import anthropic  # noqa: F401 -- import-only availability check
 
             return True
-        elif provider == AIProvider.OPENAI.value:
+        if provider_value == AIProvider.OPENAI.value:
             import openai  # noqa: F401 -- import-only availability check
 
             return True
-        else:
-            return False
     except ImportError:
-        return False
+        pass
+    return False
 
 
 def require_ai() -> None:
