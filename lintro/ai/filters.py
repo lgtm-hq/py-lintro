@@ -49,8 +49,7 @@ def _glob_match(path: str, pattern: str) -> bool:
                 else:
                     regex += ".*"
                 continue
-            else:
-                regex += "[^/]*"
+            regex += "[^/]*"
         elif c == "?":
             regex += "[^/]"
         else:
