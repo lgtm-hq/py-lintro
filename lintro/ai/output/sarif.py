@@ -119,14 +119,14 @@ def to_sarif(
                     "artifactLocation": {"uri": s.file},
                 },
             }
-            if s.line:
+            if s.line > 0:
                 location["physicalLocation"]["region"] = {
                     "startLine": s.line,
                 }
             result["locations"] = [location]
 
         # Fix suggestion — only emit when there is a real replacement target
-        if s.suggested_code and s.file and s.line:
+        if s.suggested_code and s.file and s.line > 0:
             deleted_region: dict[str, int] = {"startLine": s.line}
             if s.original_code:
                 trimmed = s.original_code.rstrip("\n")
