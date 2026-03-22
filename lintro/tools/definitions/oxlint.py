@@ -177,7 +177,10 @@ class OxlintPlugin(BaseToolPlugin):
             severity="error",
             fixable=False,
         )
-        pre_fix_count = len(initial_issues) if initial_issues is not None else initial_count
+        if initial_issues is not None:
+            pre_fix_count = len(initial_issues)
+        else:
+            pre_fix_count = initial_count
         return ToolResult(
             name=self.definition.name,
             success=False,
@@ -469,6 +472,6 @@ class OxlintPlugin(BaseToolPlugin):
             initial_issues_count=initial_count,
             fixed_issues_count=fixed_count,
             remaining_issues_count=remaining_count,
-            initial_issues=initial_issues if initial_issues else None,
+            initial_issues=initial_issues if initial_issues is not None else None,
             cwd=ctx.cwd,
         )
