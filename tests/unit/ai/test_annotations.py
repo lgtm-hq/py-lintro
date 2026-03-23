@@ -19,7 +19,7 @@ from lintro.ai.models import AIFixSuggestion, AISummary
 
 
 @pytest.mark.parametrize(
-    "input_val, expected",
+    ("input_val", "expected"),
     [
         ("high", "error"),
         ("critical", "error"),

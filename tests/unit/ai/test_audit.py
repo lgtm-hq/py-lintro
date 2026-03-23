@@ -12,7 +12,7 @@ from lintro.ai.audit import AUDIT_DIR, AUDIT_FILE, write_audit_log
 from lintro.ai.models import AIFixSuggestion
 
 
-@pytest.fixture()
+@pytest.fixture
 def suggestion() -> AIFixSuggestion:
     """A sample AIFixSuggestion for testing."""
     return AIFixSuggestion(

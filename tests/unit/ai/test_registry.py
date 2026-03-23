@@ -116,7 +116,7 @@ def test_registry_model_pricing_contains_all_models():
 
 def test_registry_model_pricing_values_are_model_pricing():
     """Every value in model_pricing is a ModelPricing instance."""
-    for _model, p in PROVIDERS.model_pricing.items():
+    for p in PROVIDERS.model_pricing.values():
         assert_that(p).is_instance_of(ModelPricing)
 
 

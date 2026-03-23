@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import time
+from pathlib import Path
 
 from assertpy import assert_that
 
@@ -56,17 +57,15 @@ def test_cache_key_is_16_hex_chars() -> None:
 # -- get_cached_suggestion ---------------------------------------------------
 
 
-def test_cache_miss_returns_none(tmp_path: object) -> None:
+def test_cache_miss_returns_none(tmp_path: Path) -> None:
     """A cache miss returns None."""
-    result = get_cached_suggestion(tmp_path, "content", "E001", 10, "msg")  # type: ignore[arg-type]
+    result = get_cached_suggestion(tmp_path, "content", "E001", 10, "msg")
     assert_that(result).is_none()
 
 
-def test_cache_hit_returns_data(tmp_path: object) -> None:
+def test_cache_hit_returns_data(tmp_path: Path) -> None:
     """A cache hit returns the stored suggestion as AIFixSuggestion."""
-    from pathlib import Path
-
-    root = Path(str(tmp_path))
+    root = tmp_path
     suggestion = _make_suggestion()
     cache_suggestion(root, "content", "E001", 10, "msg", suggestion)
 
@@ -78,11 +77,9 @@ def test_cache_hit_returns_data(tmp_path: object) -> None:
     assert_that(result.suggested_code).is_equal_to("y")
 
 
-def test_expired_cache_returns_none_and_deletes_file(tmp_path: object) -> None:
+def test_expired_cache_returns_none_and_deletes_file(tmp_path: Path) -> None:
     """An expired cache entry returns None and removes the file."""
-    from pathlib import Path
-
-    root = Path(str(tmp_path))
+    root = tmp_path
     suggestion = {"file": "test.py", "line": 1, "code": "E001"}
 
     # Write a cache entry with a timestamp far in the past
@@ -102,11 +99,9 @@ def test_expired_cache_returns_none_and_deletes_file(tmp_path: object) -> None:
 # -- cache_suggestion --------------------------------------------------------
 
 
-def test_cache_stores_to_correct_path(tmp_path: object) -> None:
+def test_cache_stores_to_correct_path(tmp_path: Path) -> None:
     """cache_suggestion writes a JSON file under CACHE_DIR."""
-    from pathlib import Path
-
-    root = Path(str(tmp_path))
+    root = tmp_path
     suggestion = _make_suggestion()
     cache_suggestion(root, "content", "E001", 10, "msg", suggestion)
 
@@ -122,12 +117,11 @@ def test_cache_stores_to_correct_path(tmp_path: object) -> None:
 # -- LRU eviction -------------------------------------------------------------
 
 
-def test_evict_lru_removes_oldest_entries(tmp_path: object) -> None:
+def test_evict_lru_removes_oldest_entries(tmp_path: Path) -> None:
     """_evict_lru removes the least recently modified entries."""
     import os
-    from pathlib import Path
 
-    cache_dir = Path(str(tmp_path)) / "cache"
+    cache_dir = tmp_path / "cache"
     cache_dir.mkdir()
 
     # Create 5 files with staggered mtime values
@@ -143,11 +137,9 @@ def test_evict_lru_removes_oldest_entries(tmp_path: object) -> None:
     assert_that(remaining).is_equal_to(["entry_2.json", "entry_3.json", "entry_4.json"])
 
 
-def test_evict_lru_no_op_when_under_limit(tmp_path: object) -> None:
+def test_evict_lru_no_op_when_under_limit(tmp_path: Path) -> None:
     """_evict_lru does nothing when entry count is within the limit."""
-    from pathlib import Path
-
-    cache_dir = Path(str(tmp_path)) / "cache"
+    cache_dir = tmp_path / "cache"
     cache_dir.mkdir()
 
     for i in range(3):
@@ -159,12 +151,11 @@ def test_evict_lru_no_op_when_under_limit(tmp_path: object) -> None:
     assert_that(remaining).is_length(3)
 
 
-def test_cache_suggestion_evicts_when_over_max(tmp_path: object) -> None:
+def test_cache_suggestion_evicts_when_over_max(tmp_path: Path) -> None:
     """cache_suggestion triggers LRU eviction when max_entries is exceeded."""
     import os
-    from pathlib import Path
 
-    root = Path(str(tmp_path))
+    root = tmp_path
     max_entries = 3
 
     # Pre-populate cache with entries that have known mtime ordering
@@ -189,12 +180,11 @@ def test_cache_suggestion_evicts_when_over_max(tmp_path: object) -> None:
     assert_that(remaining).is_length(max_entries)
 
 
-def test_get_cached_suggestion_updates_mtime(tmp_path: object) -> None:
+def test_get_cached_suggestion_updates_mtime(tmp_path: Path) -> None:
     """Accessing a cached entry touches the file so it becomes most recent."""
     import os
-    from pathlib import Path
 
-    root = Path(str(tmp_path))
+    root = tmp_path
     suggestion = _make_suggestion()
     cache_suggestion(root, "content", "E001", 10, "msg", suggestion)
 

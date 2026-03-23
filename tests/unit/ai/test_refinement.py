@@ -223,7 +223,7 @@ def test_refine_skips_when_parse_returns_none(tmp_path: Path) -> None:
 
         mock_parse.return_value = None
 
-        refined, cost = refine_unverified_fixes(
+        refined, _cost = refine_unverified_fixes(
             applied_suggestions=[suggestion],
             validation=validation,
             provider=provider,

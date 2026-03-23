@@ -24,7 +24,7 @@ from tests.unit.ai.conftest import MockAIProvider, MockIssue
 # ---------------------------------------------------------------------------
 
 
-@pytest.fixture()
+@pytest.fixture
 def source_file(tmp_path):
     """Create a minimal Python source file and return its path."""
     f = tmp_path / "test.py"
@@ -32,7 +32,7 @@ def source_file(tmp_path):
     return f
 
 
-@pytest.fixture()
+@pytest.fixture
 def single_issue(source_file):
     """Return a single MockIssue pointing at the source file."""
     return MockIssue(

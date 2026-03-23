@@ -183,8 +183,8 @@ def test_apply_fix_blocks_writes_outside_workspace_root(tmp_path):
     assert_that(outside_file.read_text(encoding="utf-8")).is_equal_to("x = 1\n")
 
 
-def test_apply_fix_auto_apply_fails_when_line_misses(tmp_path):
-    """With auto_apply=True, fix fails when line targeting misses."""
+def test_apply_fix_fails_when_line_misses_with_flag(tmp_path):
+    """Fix fails when line targeting misses (auto_apply flag passed but unused)."""
     f = tmp_path / "test.py"
     # File must be long enough that clamped target_idx (last line)
     # plus default search_radius (5) cannot reach line 0.

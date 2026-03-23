@@ -55,15 +55,15 @@ def test_extract_context_extracts_context():
 def test_extract_context_clamps_to_start():
     """Verify context window clamps to the first line when target is near the start."""
     content = "\n".join(f"line {i}" for i in range(1, 11))
-    context, start, end = _extract_context(content, 1, 5)
-    assert_that(start).is_equal_to(1)
+    _context, _start, _end = _extract_context(content, 1, 5)
+    assert_that(_start).is_equal_to(1)
 
 
 def test_extract_context_clamps_to_end():
     """Verify context window clamps to the last line when target is near the end."""
     content = "\n".join(f"line {i}" for i in range(1, 11))
-    context, start, end = _extract_context(content, 10, 5)
-    assert_that(end).is_equal_to(10)
+    _context, _start, _end = _extract_context(content, 10, 5)
+    assert_that(_end).is_equal_to(10)
 
 
 def test_extract_context_clamps_out_of_bounds_line():

@@ -95,7 +95,7 @@ def test_fix_prompt_contains_all_values():
 
 
 @pytest.mark.parametrize(
-    "tool_name,code,message",
+    ("tool_name", "code", "message"),
     [
         ("ruff", "E501", "Line too long (120 > 79 characters)"),
         ("mypy", "attr-defined", "Module has no attribute 'foo'"),

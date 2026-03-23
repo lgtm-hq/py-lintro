@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+from pathlib import PurePosixPath
 
 from assertpy import assert_that
 
@@ -14,18 +15,23 @@ from lintro.ai.paths import (
 )
 
 
+def _normalize(path: str) -> str:
+    """Normalize a path to POSIX form for cross-platform comparison."""
+    return str(PurePosixPath(path.replace("\\", "/")))
+
+
 def test_paths_relative_for_cwd_child():
     """Verify absolute path under cwd is converted to a relative path."""
     cwd = os.getcwd()
     abs_path = os.path.join(cwd, "src", "main.py")
     result = relative_path(abs_path)
-    assert_that(result).is_equal_to(os.path.join("src", "main.py"))
+    assert_that(_normalize(result)).is_equal_to("src/main.py")
 
 
 def test_paths_already_relative():
     """Verify an already-relative path is returned unchanged."""
     result = relative_path("src/main.py")
-    assert_that(result).is_equal_to("src/main.py")
+    assert_that(_normalize(result)).is_equal_to("src/main.py")
 
 
 def test_paths_relative_on_empty():
@@ -67,7 +73,7 @@ def test_paths_to_provider_path_is_workspace_relative(tmp_path):
     file_path.write_text("x = 1\n", encoding="utf-8")
 
     provider_path = to_provider_path(str(file_path), tmp_path)
-    assert_that(provider_path).is_equal_to(os.path.join("pkg", "module.py"))
+    assert_that(_normalize(provider_path)).is_equal_to("pkg/module.py")
 
 
 def test_paths_to_provider_path_falls_back_without_leaking_absolute(tmp_path):
