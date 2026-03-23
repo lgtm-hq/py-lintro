@@ -5,6 +5,8 @@ from __future__ import annotations
 import dataclasses
 import hashlib
 import json
+import os
+import tempfile
 import time
 from pathlib import Path
 
@@ -58,7 +60,14 @@ def get_cached_suggestion(
     except (json.JSONDecodeError, OSError):
         cache_file.unlink(missing_ok=True)
         return None
-    if time.time() - data.get("timestamp", 0) > ttl:
+    if not isinstance(data, dict):
+        cache_file.unlink(missing_ok=True)
+        return None
+    timestamp = data.get("timestamp")
+    if not isinstance(timestamp, (int, float)):
+        cache_file.unlink(missing_ok=True)
+        return None
+    if time.time() - timestamp > ttl:
         cache_file.unlink(missing_ok=True)
         return None
     suggestion = data.get("suggestion")
@@ -127,7 +136,16 @@ def cache_suggestion(
     cache_file = cache_dir / f"{key}.json"
     suggestion_data = dataclasses.asdict(suggestion)
     payload = json.dumps({"timestamp": time.time(), "suggestion": suggestion_data})
-    tmp = cache_file.with_suffix(".tmp")
-    tmp.write_text(payload, encoding="utf-8")
-    tmp.replace(cache_file)
+    fd, tmp_path = tempfile.mkstemp(
+        dir=cache_file.parent,
+        prefix=cache_file.name + ".",
+        suffix=".tmp",
+    )
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write(payload)
+        os.replace(tmp_path, cache_file)
+    except BaseException:
+        Path(tmp_path).unlink(missing_ok=True)
+        raise
     _evict_lru(cache_dir, max_entries)

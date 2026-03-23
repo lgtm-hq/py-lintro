@@ -82,6 +82,10 @@ class AIPostExecutionHook:
                 output_format=output_format,
                 ai_fix=self._ai_fix,
             )
+        except (ImportError, ModuleNotFoundError, RuntimeError) as e:
+            logger.debug(f"AI post-execution hook failed: {e}", exc_info=True)
+            console_logger.warning(f"AI enhancement unavailable: {e}")
+            return AIResult(error=True)
         except Exception as e:
             logger.debug(f"AI post-execution hook failed: {e}", exc_info=True)
             console_logger.warning(f"AI enhancement unavailable: {e}")

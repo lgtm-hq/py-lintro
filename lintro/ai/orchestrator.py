@@ -18,7 +18,7 @@ from lintro.ai.display import render_summary, render_summary_annotations
 from lintro.ai.display.shared import is_github_actions
 from lintro.ai.filters import filter_issues
 from lintro.ai.metadata import attach_summary_metadata
-from lintro.ai.models import AIFixSuggestion, AIResult, AISummary
+from lintro.ai.models import AIFixSuggestion, AIResult
 from lintro.ai.paths import resolve_workspace_file, resolve_workspace_root
 from lintro.ai.pipeline import run_fix_pipeline
 from lintro.ai.providers import get_provider

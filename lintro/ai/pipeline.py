@@ -117,11 +117,16 @@ def _generate_all_suggestions(
                 f"AI fix: {tool_name} generated {len(suggestions)} suggestions",
             )
 
-        telemetry.total_api_calls += len(suggestions)
+        # Count API calls by unique token sets (batch = 1 call, not N).
+        # Cache hits (0 tokens) are not counted as API calls.
+        api_calls = 0
         for s in suggestions:
             telemetry.total_input_tokens += s.input_tokens
             telemetry.total_output_tokens += s.output_tokens
             telemetry.total_cost_usd += s.cost_estimate
+            if s.input_tokens > 0 or s.output_tokens > 0:
+                api_calls += 1
+        telemetry.total_api_calls += api_calls
 
         if budget is not None:
             budget.record(sum(s.cost_estimate for s in suggestions))

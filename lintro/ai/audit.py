@@ -28,20 +28,19 @@ def write_audit_log(
         rejected_count: Number of rejected suggestions.
         total_cost: Cumulative cost in USD.
     """
-    entries = []
-    for s in applied:
-        entries.append(
-            {
-                "file": s.file,
-                "line": s.line,
-                "code": s.code,
-                "tool": s.tool_name,
-                "action": "applied",
-                "confidence": s.confidence,
-                "risk_level": s.risk_level,
-                "cost": s.cost_estimate,
-            },
-        )
+    entries = [
+        {
+            "file": s.file,
+            "line": s.line,
+            "code": s.code,
+            "tool": s.tool_name,
+            "action": "applied",
+            "confidence": s.confidence,
+            "risk_level": s.risk_level,
+            "cost": s.cost_estimate,
+        }
+        for s in applied
+    ]
     audit = {
         "timestamp": time.time(),
         "applied_count": len(applied),

@@ -303,12 +303,13 @@ def _run_tool_check(
 
     try:
         tool_result = tool.check(file_paths, {})
-        if tool_result.issues is not None:
-            return list(tool_result.issues)
-        return []
     except (OSError, subprocess.SubprocessError, ValueError, RuntimeError):
         logger.debug(
             f"Validation: {tool_name} check failed",
             exc_info=True,
         )
         return None
+    else:
+        if tool_result.issues is not None:
+            return list(tool_result.issues)
+        return []

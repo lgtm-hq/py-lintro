@@ -180,22 +180,24 @@ def build_fix_context(
     context that progressively shrinks to fit the token budget.
     """
     sanitized_content = redact_secrets(sanitize_code_content(file_content))
+    safe_message = redact_secrets(sanitize_code_content(issue.message))
     if sanitize_mode != SanitizeMode.OFF:
-        injections = detect_injection_patterns(file_content)
+        file_injections = detect_injection_patterns(file_content)
+        msg_injections = detect_injection_patterns(issue.message)
+        injections = file_injections + msg_injections
         if injections:
             if sanitize_mode == SanitizeMode.BLOCK:
                 logger.warning(
                     f"Blocking fix for {issue.file}: prompt injection "
-                    f"patterns detected: {', '.join(injections)}",
+                    f"patterns detected in file/diagnostic: "
+                    f"{', '.join(injections)}",
                 )
                 return None
             # SanitizeMode.WARN (default)
             logger.warning(
                 f"Potential prompt injection patterns detected in "
-                f"{issue.file}: {', '.join(injections)}",
+                f"{issue.file} (file/diagnostic): {', '.join(injections)}",
             )
-
-    safe_message = redact_secrets(sanitize_code_content(issue.message))
 
     total_lines = len(file_content.splitlines())
     if total_lines <= full_file_threshold:

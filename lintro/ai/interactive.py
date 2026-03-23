@@ -177,8 +177,11 @@ def _apply_group(
     Returns:
         Tuple of (applied_count, list of successfully applied suggestions).
     """
+    # Sort fixes by (file, line descending) so same-file edits apply
+    # bottom-to-top, preventing earlier edits from shifting later targets.
+    sorted_fixes = sorted(fixes, key=lambda f: (f.file, -(f.line or 0)))
     applied_fixes: list[AIFixSuggestion] = []
-    for fix in fixes:
+    for fix in sorted_fixes:
         if _apply_fix(fix, workspace_root=workspace_root, search_radius=search_radius):
             applied_fixes.append(fix)
     applied = len(applied_fixes)

@@ -60,6 +60,7 @@ def _revert_fix(
         [reverse],
         workspace_root=workspace_root,
         auto_apply=True,
+        search_radius=5,
     )
     return len(applied) > 0
 

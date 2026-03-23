@@ -139,8 +139,13 @@ def parse_batch_response(
             or original == suggested
         ):
             continue
-        line = item.get("line", 0)
-        code = item.get("code", "")
+        raw_line = item.get("line", 0)
+        try:
+            line = int(raw_line) if not isinstance(raw_line, int) else raw_line
+        except (TypeError, ValueError):
+            line = 0
+        raw_code = item.get("code", "")
+        code = str(raw_code) if not isinstance(raw_code, str) else raw_code
         diff = generate_diff(file_path, original, suggested)
         results.append(
             AIFixSuggestion(

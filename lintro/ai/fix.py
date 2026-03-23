@@ -286,18 +286,22 @@ def _generate_batch_fixes(
     issues_list = "\n".join(issues_list_parts)
 
     sanitized_content = redact_secrets(sanitize_code_content(file_content))
-    injections = detect_injection_patterns(file_content)
-    if injections:
-        if sanitize_mode == SanitizeMode.BLOCK:
+    if sanitize_mode != SanitizeMode.OFF:
+        file_injections = detect_injection_patterns(file_content)
+        msg_injections = detect_injection_patterns(issues_list)
+        injections = file_injections + msg_injections
+        if injections:
+            if sanitize_mode == SanitizeMode.BLOCK:
+                logger.warning(
+                    f"Blocking batch fix for {file_path}: prompt injection "
+                    f"patterns detected in file/diagnostics: "
+                    f"{', '.join(injections)}",
+                )
+                return None
             logger.warning(
-                f"Blocking batch fix for {file_path}: prompt injection "
-                f"patterns detected: {', '.join(injections)}",
+                f"Potential prompt injection patterns detected in "
+                f"{file_path} (file/diagnostics): {', '.join(injections)}",
             )
-            return None
-        logger.warning(
-            f"Potential prompt injection patterns detected in "
-            f"{file_path}: {', '.join(injections)}",
-        )
 
     boundary = make_boundary_marker()
     prompt = FIX_BATCH_PROMPT_TEMPLATE.format(
@@ -321,6 +325,14 @@ def _generate_batch_fixes(
         if not suggestions:
             logger.debug(
                 f"Batch response parse returned no suggestions for {file_path}, "
+                f"falling back to single-issue mode",
+            )
+            return None
+
+        if len(suggestions) != len(file_issues):
+            logger.debug(
+                f"Batch response count mismatch for {file_path}: "
+                f"got {len(suggestions)} suggestions for {len(file_issues)} issues, "
                 f"falling back to single-issue mode",
             )
             return None
