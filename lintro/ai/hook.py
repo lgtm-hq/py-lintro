@@ -86,7 +86,7 @@ class AIPostExecutionHook:
                 ai_fix=self._ai_fix,
             )
         except Exception as e:
-            logger.debug(f"AI post-execution hook failed: {e}", exc_info=True)
+            logger.opt(exception=True).debug(f"AI post-execution hook failed: {e}")
             if getattr(self._lintro_config.ai, "fail_on_ai_error", False):
                 raise
             console_logger.warning(f"AI enhancement unavailable: {e}")

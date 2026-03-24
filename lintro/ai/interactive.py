@@ -99,7 +99,8 @@ def _print_group_header(
         ),
     )
 
-    explanation = fixes[0].explanation or ""
+    first = fixes[0] if fixes else None
+    explanation = (first.explanation or "") if first else ""
     if explanation:
         parts.append(f"[cyan]{escape(explanation)}[/cyan]")
 
@@ -118,8 +119,7 @@ def _print_group_header(
         Group(*parts) if len(parts) > 1 else (parts[0] if parts else "")
     )
     console.print()
-    # Use tool_name from first suggestion in group
-    group_tool = fixes[0].tool_name if fixes else ""
+    group_tool = first.tool_name if first else ""
     print_code_panel(
         console,
         code=code,
