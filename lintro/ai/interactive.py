@@ -202,7 +202,12 @@ def _validate_group(
     validation = validate_applied_fixes(applied_suggestions)
     if not validation:
         return
-    if validation.verified == 0 and validation.unverified == 0:
+    if (
+        validation.verified == 0
+        and validation.unverified == 0
+        and not validation.new_issues
+        and not validation.details
+    ):
         return
     output = render_validation(validation)
     if output:

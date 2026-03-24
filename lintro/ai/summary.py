@@ -451,10 +451,9 @@ def generate_post_fix_summary(
 
     if digest.strip():
         issues_digest = digest
-    elif remaining_count > 0:
-        issues_digest = f"Remaining issues: {remaining_count} (details unavailable)"
     else:
-        issues_digest = "No remaining issues."
+        # remaining_count must be > 0 here (remaining_count == 0 returned above)
+        issues_digest = f"Remaining issues: {remaining_count} (details unavailable)"
 
     prompt = POST_FIX_SUMMARY_PROMPT_TEMPLATE.format(
         applied=applied,

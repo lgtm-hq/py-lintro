@@ -70,6 +70,9 @@ class AIPostExecutionHook:
 
         Returns:
             AIResult with structured outcome data.
+
+        Raises:
+            Exception: Re-raised when ``fail_on_ai_error`` is enabled.
         """
         try:
             from lintro.ai.orchestrator import run_ai_enhancement
@@ -84,5 +87,7 @@ class AIPostExecutionHook:
             )
         except Exception as e:
             logger.debug(f"AI post-execution hook failed: {e}", exc_info=True)
+            if getattr(self._lintro_config.ai, "fail_on_ai_error", False):
+                raise
             console_logger.warning(f"AI enhancement unavailable: {e}")
             return AIResult(error=True)
