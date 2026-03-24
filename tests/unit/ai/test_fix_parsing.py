@@ -17,7 +17,7 @@ from lintro.ai.fix_parsing import (
 # ---------------------------------------------------------------------------
 
 
-def testgenerate_diff_generates_unified_diff():
+def test_generate_diff_generates_unified_diff():
     """Verify unified diff output contains expected file headers and change markers."""
     diff = generate_diff("test.py", "old code\n", "new code\n")
     assert_that(diff).contains("a/test.py")
@@ -26,7 +26,7 @@ def testgenerate_diff_generates_unified_diff():
     assert_that(diff).contains("+new code")
 
 
-def testgenerate_diff_no_diff_for_identical():
+def test_generate_diff_no_diff_for_identical():
     """Verify that identical content produces an empty diff string."""
     diff = generate_diff("test.py", "same\n", "same\n")
     assert_that(diff).is_equal_to("")

@@ -253,8 +253,8 @@ def test_apply_fixes_returns_only_successful(tmp_path):
     assert_that(applied[0].suggested_code).is_equal_to("x = 2")
 
 
-def test_apply_fixes_passes_auto_apply(tmp_path):
-    """apply_fixes forwards auto_apply to _apply_fix."""
+def test_apply_fixes_with_auto_apply_flag_fails_when_line_misses(tmp_path):
+    """apply_fixes with auto_apply=True fails when line targeting misses."""
     f = tmp_path / "test.py"
     # File must be long enough that clamped target_idx (last line)
     # plus default search_radius (5) cannot reach line 0.
@@ -333,7 +333,7 @@ def test_review_fixes_interactive_non_interactive_skips(tmp_path):
     ]
     with patch("sys.stdin") as mock_stdin:
         mock_stdin.isatty.return_value = False
-        accepted, rejected, applied = review_fixes_interactive(
+        accepted, _rejected, applied = review_fixes_interactive(
             fixes,
             workspace_root=tmp_path,
         )
@@ -438,7 +438,7 @@ def test_review_fixes_interactive_quit_via_keyboard(
         ),
     ]
 
-    accepted, rejected, applied = review_fixes_interactive(
+    accepted, _rejected, applied = review_fixes_interactive(
         fixes,
         workspace_root=tmp_path,
     )

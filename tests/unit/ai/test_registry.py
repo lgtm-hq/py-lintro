@@ -125,7 +125,7 @@ def test_registry_default_models():
     defaults = PROVIDERS.default_models
     assert_that(defaults).contains_key(AIProvider.ANTHROPIC)
     assert_that(defaults).contains_key(AIProvider.OPENAI)
-    for _provider, model in defaults.items():
+    for model in defaults.values():
         assert_that(model).is_instance_of(str)
 
 
@@ -158,7 +158,7 @@ def test_asdict_produces_nested_dict():
         "models",
     )
     # Models are nested dicts with pricing fields.
-    for _model_name, pricing in anthropic_info["models"].items():
+    for pricing in anthropic_info["models"].values():
         assert_that(pricing).contains_key(
             "input_per_million",
             "output_per_million",

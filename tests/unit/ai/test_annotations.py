@@ -254,5 +254,6 @@ def test_github_actions_includes_annotations(
     with patch.dict("os.environ", {"GITHUB_ACTIONS": "true"}):
         result = render_fixes(sample_fix_suggestions)
         assert_that(result).contains("::group::")
+        # Fixture omits risk_level, so render_fixes defaults to "warning" level
         assert_that(result).contains("::warning")
         assert_that(result).contains("AI fix available")

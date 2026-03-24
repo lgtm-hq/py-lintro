@@ -69,6 +69,6 @@ def test_extract_context_clamps_to_end():
 def test_extract_context_clamps_out_of_bounds_line():
     """Line beyond file length is clamped to file bounds."""
     content = "\n".join(f"line {i}" for i in range(1, 11))
-    context, start, end = _extract_context(content, 999, 3)
+    context, _start, end = _extract_context(content, 999, 3)
     assert_that(end).is_equal_to(10)
     assert_that(context).contains("line 10")
