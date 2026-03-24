@@ -127,6 +127,7 @@ def _run_fix_with_retry(
             remaining_issues_count=remaining,
             formatted_output=result.formatted_output,
             initial_issues=first_pass_initial_issues,
+            cwd=result.cwd,
         )
 
     return result
@@ -261,6 +262,8 @@ def _write_artifacts(
     action: Action,
     total_issues: int,
     total_fixed: int,
+    *,
+    warn_func: Any = None,
 ) -> None:
     """Write side-channel artifact files alongside primary output.
 
@@ -278,6 +281,8 @@ def _write_artifacts(
         action: The action performed (check, fmt, test).
         total_issues: Total number of issues found.
         total_fixed: Total number of issues fixed.
+        warn_func: Optional callback for emitting warnings.  When ``None``,
+            falls back to ``logger.console_output``.
     """
     import os
     from pathlib import Path
@@ -295,12 +300,12 @@ def _write_artifacts(
     if not artifacts:
         return
 
+    _emit = warn_func if warn_func is not None else logger.console_output
+
     for artifact in artifacts:
         filename = _ARTIFACT_EXTENSIONS.get(artifact)
         if filename is None:
-            logger.console_output(
-                f"Warning: Unknown artifact format '{artifact}', skipping",
-            )
+            _emit(f"Warning: Unknown artifact format '{artifact}', skipping")
             continue
 
         artifact_path = Path(".lintro") / "artifacts" / artifact / filename
@@ -326,9 +331,7 @@ def _write_artifacts(
                     total_fixed=total_fixed,
                 )
         except (OSError, ValueError, TypeError) as e:
-            logger.console_output(
-                f"Warning: Failed to write {artifact} artifact: {e}",
-            )
+            _emit(f"Warning: Failed to write {artifact} artifact: {e}")
 
 
 def run_lint_tools_simple(
@@ -772,11 +775,23 @@ def run_lint_tools_simple(
         else:
             logger.print_execution_summary(action, all_results)
 
+        # Route warnings to stderr (loguru) for machine-readable formats so
+        # plain-text messages don't corrupt JSON/SARIF output on stdout.
+        _is_machine = output_format.lower() in ("json", "sarif")
+
+        def _warn(msg: str) -> None:
+            if _is_machine:
+                from loguru import logger as loguru_logger
+
+                loguru_logger.warning(msg)
+            else:
+                logger.console_output(msg)
+
         # Write report files (markdown, html, csv)
         try:
             output_manager.write_reports_from_results(all_results)
         except (OSError, ValueError, TypeError) as e:
-            logger.console_output(f"Warning: Failed to write reports: {e}")
+            _warn(f"Warning: Failed to write reports: {e}")
             # Continue execution - report writing failures should not stop the tool
 
         # Write user-specified output file (--output flag)
@@ -811,7 +826,7 @@ def run_lint_tools_simple(
                         total_fixed=total_fixed,
                     )
             except (OSError, ValueError, TypeError) as e:
-                logger.console_output(f"Warning: Failed to write output file: {e}")
+                _warn(f"Warning: Failed to write output file: {e}")
 
         # Write side-channel artifact files when configured or when
         # running inside GitHub Actions (SARIF auto-emit for Code Scanning).
@@ -822,12 +837,13 @@ def run_lint_tools_simple(
             action=action,
             total_issues=total_issues,
             total_fixed=total_fixed,
+            warn_func=_warn,
         )
 
         # Clean up old run directories to prevent unbounded growth
         try:
             output_manager.cleanup_old_runs()
         except OSError as e:
-            logger.console_output(f"Warning: Failed to clean up old runs: {e}")
+            _warn(f"Warning: Failed to clean up old runs: {e}")
 
     return final_exit_code

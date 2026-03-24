@@ -64,6 +64,36 @@ def test_warn_ai_fix_disabled_no_warning_for_other_states():
     assert_that(logger.console_output.call_count).is_equal_to(0)
 
 
+def test_warn_ai_fix_disabled_suppressed_for_json_output():
+    """Warning is suppressed when output format is JSON."""
+    logger = MagicMock()
+
+    _warn_ai_fix_disabled(
+        action=Action.CHECK,
+        ai_fix=True,
+        ai_enabled=False,
+        logger=logger,
+        output_format="json",
+    )
+
+    assert_that(logger.console_output.call_count).is_equal_to(0)
+
+
+def test_warn_ai_fix_disabled_suppressed_for_sarif_output():
+    """Warning is suppressed when output format is SARIF."""
+    logger = MagicMock()
+
+    _warn_ai_fix_disabled(
+        action=Action.CHECK,
+        ai_fix=True,
+        ai_enabled=False,
+        logger=logger,
+        output_format="sarif",
+    )
+
+    assert_that(logger.console_output.call_count).is_equal_to(0)
+
+
 # ---------------------------------------------------------------------------
 # Post-AI total recalculation
 # ---------------------------------------------------------------------------

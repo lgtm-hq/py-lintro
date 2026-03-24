@@ -143,13 +143,15 @@ class GitHubPRReporter:
             if not rel or rel == OUTSIDE_WORKSPACE_SENTINEL or rel.startswith(".."):
                 continue
             body = _format_inline_comment(s)
-            # GitHub review comments require a valid line; skip if missing
-            if not (isinstance(s.line, int) and s.line > 0):
-                continue
+            has_line = isinstance(s.line, int) and s.line > 0
 
-            # Only include in the review batch if we have diff data and the
-            # line is in the PR diff; otherwise fall back to an issue comment.
-            if diff_lines is None or s.line not in diff_lines.get(rel, set()):
+            # Suggestions without a valid line or not in the PR diff fall back
+            # to standalone issue comments instead of inline review comments.
+            if (
+                not has_line
+                or diff_lines is None
+                or s.line not in diff_lines.get(rel, set())
+            ):
                 fallback_suggestions.append(s)
                 continue
 
@@ -185,35 +187,52 @@ class GitHubPRReporter:
     def _fetch_pr_diff_lines(self) -> dict[str, set[int]] | None:
         """Fetch changed lines per file from the PR diff.
 
+        Paginates through all pages of the ``GET /pulls/{pr}/files``
+        endpoint (up to 100 files per page) so large PRs are fully covered.
+
         Returns:
             Mapping of ``{file_path: {line_numbers...}}`` for right-side
             (added/modified) lines, or ``None`` if the diff cannot be fetched.
         """
-        url = f"{self.api_base}/repos/{self.repo}/pulls/{self.pr_number}/files"
-        req = urllib.request.Request(
-            url,
-            method="GET",
-            headers={
-                "Authorization": f"Bearer {self.token}",
-                "Accept": "application/vnd.github+json",
-                "X-GitHub-Api-Version": "2022-11-28",
-            },
-        )
-        parsed = urllib.parse.urlparse(url)
+        base_url = f"{self.api_base}/repos/{self.repo}/pulls/{self.pr_number}/files"
+        parsed = urllib.parse.urlparse(base_url)
         if parsed.scheme != "https":
             return None
-        try:
-            with urllib.request.urlopen(  # noqa: S310 — HTTPS-only validated above  # nosemgrep: dynamic-urllib-use-detected  # nosec B310
-                req,
-                timeout=30,
-            ) as resp:
-                files = json.loads(resp.read().decode())
-        except (urllib.error.URLError, json.JSONDecodeError, OSError):
-            logger.debug("Failed to fetch PR diff; skipping diff-position filtering")
-            return None
+
+        all_files: list[dict[str, Any]] = []
+        page = 1
+        while True:
+            url = f"{base_url}?per_page=100&page={page}"
+            req = urllib.request.Request(
+                url,
+                method="GET",
+                headers={
+                    "Authorization": f"Bearer {self.token}",
+                    "Accept": "application/vnd.github+json",
+                    "X-GitHub-Api-Version": "2022-11-28",
+                },
+            )
+            try:
+                with urllib.request.urlopen(  # noqa: S310 — HTTPS-only validated above  # nosemgrep: dynamic-urllib-use-detected  # nosec B310
+                    req,
+                    timeout=30,
+                ) as resp:
+                    files_page = json.loads(resp.read().decode())
+            except (urllib.error.URLError, json.JSONDecodeError, OSError):
+                logger.debug(
+                    "Failed to fetch PR diff; skipping diff-position filtering",
+                )
+                return None
+
+            if not files_page:
+                break
+            all_files.extend(files_page)
+            if len(files_page) < 100:
+                break
+            page += 1
 
         result: dict[str, set[int]] = {}
-        for f in files:
+        for f in all_files:
             filename = f.get("filename", "")
             patch = f.get("patch", "")
             if not filename or not patch:
@@ -342,13 +361,28 @@ def _parse_patch_lines(patch: str) -> set[int]:
 
 
 def _detect_pr_number() -> int | None:
-    """Detect PR number from ``GITHUB_REF`` environment variable.
+    """Detect PR number from the GitHub event payload or ``GITHUB_REF``.
 
-    Expected format: ``refs/pull/<number>/merge``.
+    Tries ``GITHUB_EVENT_PATH`` first (works for ``pull_request_target``
+    workflows), then falls back to parsing ``GITHUB_REF``
+    (``refs/pull/<number>/merge``).
 
     Returns:
         PR number if detected, else None.
     """
+    # Try event payload first (covers pull_request_target workflows)
+    event_path = os.environ.get("GITHUB_EVENT_PATH", "")
+    if event_path:
+        try:
+            with open(event_path) as f:
+                event = json.load(f)
+            number = event.get("number")
+            if isinstance(number, int) and number > 0:
+                return number
+        except (OSError, json.JSONDecodeError, TypeError, AttributeError):
+            pass
+
+    # Fall back to GITHUB_REF parsing
     ref = os.environ.get("GITHUB_REF", "")
     if ref.startswith("refs/pull/") and ref.endswith("/merge"):
         try:
