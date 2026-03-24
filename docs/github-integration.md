@@ -35,25 +35,15 @@ The repository includes pre-configured GitHub Actions workflows. To activate the
 - Pushes to main branch
 - Manual workflow dispatch
 
-### 2. Test Suite & Coverage
+### 2. Test Suite, Coverage & Pages Deployment
 
-**File:** `.github/workflows/test-and-coverage.yml`
+**File:** `.github/workflows/ci-pipeline.yml` (jobs: `test`, `deploy-pages`)
 
 **Features:**
 
 - 🧪 **Test coverage reporting** with badges
-- 📈 **GitHub Pages deployment** for coverage badges
+- 🌐 **GitHub Pages deployment** for coverage reports (main branch only)
 - 🔄 **Auto-updating** on each push to main
-
-### 3. Coverage Pages Deployment
-
-**File:** `.github/workflows/pages-deploy-coverage.yml`
-
-**Features:**
-
-- 🌐 Deploys the `htmlcov/` coverage report to GitHub Pages
-- 🔗 Links the artifact produced by the test-and-coverage workflow
-- 🧷 Uses a dedicated workflow_run trigger for reliable handoff
 
 > Tip: Ensure Pages is enabled (Settings → Pages → Source: GitHub Actions)
 
@@ -69,8 +59,9 @@ The repository includes pre-configured GitHub Actions workflows. To activate the
 - 📦 **Artifact upload** for report retention
 - 🌐 **Optional GitHub Pages deployment** for report hosting
 
-If you want to publish the weekly report to Pages, prefer using the dedicated
-`pages-deploy-coverage.yml` pattern as shown above.
+If you want to publish the weekly report to Pages, prefer using a dedicated
+`deploy-pages` job gated on the report workflow, following the pattern in
+`ci-pipeline.yml`.
 
 ### 5. Complete CI Pipeline
 

@@ -100,7 +100,7 @@ permissions:
 
 | Workflow                   | Permissions                        | Justification         |
 | -------------------------- | ---------------------------------- | --------------------- |
-| `test-and-coverage.yml`    | `contents: read`                   | Read-only testing     |
+| `ci-pipeline.yml`          | `contents: read` (+ per-job)       | CI pipeline           |
 | `publish-pypi-on-tag.yml`  | `contents: write, id-token: write` | Release + OIDC        |
 | `build-binary.yml`         | `contents: write`                  | Upload release assets |
 | `docker-build-publish.yml` | `contents: read, packages: write`  | Push to GHCR          |
