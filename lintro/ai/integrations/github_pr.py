@@ -166,7 +166,7 @@ class GitHubPRReporter:
         Returns:
             True if posted successfully.
         """
-        url = f"{self.api_base}/repos/{self.repo}" f"/issues/{self.pr_number}/comments"
+        url = f"{self.api_base}/repos/{self.repo}/issues/{self.pr_number}/comments"
         return self._api_request("POST", url, {"body": body})
 
     def _api_request(
@@ -262,20 +262,19 @@ def _format_summary_comment(summary: AISummary) -> str:
     if summary.key_patterns:
         lines.append("")
         lines.append("### Key Patterns")
-        for pattern in summary.key_patterns:
-            lines.append(f"- {pattern}")
+        lines.extend(f"- {pattern}" for pattern in summary.key_patterns)
 
     if summary.priority_actions:
         lines.append("")
         lines.append("### Priority Actions")
-        for i, action in enumerate(summary.priority_actions, 1):
-            lines.append(f"{i}. {action}")
+        lines.extend(
+            f"{i}. {action}" for i, action in enumerate(summary.priority_actions, 1)
+        )
 
     if summary.triage_suggestions:
         lines.append("")
         lines.append("### Triage — Consider Suppressing")
-        for suggestion in summary.triage_suggestions:
-            lines.append(f"- {suggestion}")
+        lines.extend(f"- {suggestion}" for suggestion in summary.triage_suggestions)
 
     if summary.estimated_effort:
         lines.append("")

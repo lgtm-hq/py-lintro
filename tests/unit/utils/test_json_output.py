@@ -76,3 +76,6 @@ def test_create_json_output_normalizes_legacy_suggestions_key() -> None:
     assert_that(data["results"][0]["ai_metadata"]).contains_key(
         "fix_suggestions",
     )
+    assert_that(data["results"][0]["ai_metadata"]).does_not_contain_key(
+        "suggestions",
+    )

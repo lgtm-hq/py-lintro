@@ -79,7 +79,8 @@ def to_provider_path(file_path: str, workspace_root: Path) -> str:
         workspace_root: Absolute workspace root.
 
     Returns:
-        Workspace-relative path, or file name fallback when outside root.
+        Workspace-relative POSIX path when under workspace_root,
+        or the ``"<outside-workspace>"`` sentinel for any path outside it.
     """
     resolved = resolve_workspace_file(file_path, workspace_root)
     if resolved is None:
