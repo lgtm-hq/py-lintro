@@ -65,6 +65,10 @@ class FakeTool:
         """
         return self._definition.can_fix
 
+    def reset_options(self) -> None:
+        """Reset options to defaults (stub for testing)."""
+        self.options = {}
+
     def set_options(self, **kwargs: Any) -> None:
         """Record option values provided to the tool stub.
 
@@ -72,10 +76,6 @@ class FakeTool:
             **kwargs: Arbitrary options to store for assertions.
         """
         self.options.update(kwargs)
-
-    def reset_options(self) -> None:
-        """Reset options to defaults (no-op for stub)."""
-        self.options.clear()
 
     def check(
         self,
@@ -137,7 +137,11 @@ def _setup_main_tool(monkeypatch: pytest.MonkeyPatch) -> FakeTool:
     ok = ToolResult(name="ruff", success=True, output="", issues_count=0)
     ruff = FakeTool("ruff", can_fix=True, result=ok)
 
-    def fake_get_tools(tools: str | None, action: str) -> ToolsToRunResult:
+    def fake_get_tools(
+        tools: str | None,
+        action: str,
+        **_kwargs: object,
+    ) -> ToolsToRunResult:
         return ToolsToRunResult(to_run=["ruff"])
 
     monkeypatch.setattr(te, "get_tools_to_run", fake_get_tools, raising=True)

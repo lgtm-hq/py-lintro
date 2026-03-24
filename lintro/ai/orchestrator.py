@@ -17,6 +17,7 @@ from lintro.ai.budget import CostBudget
 from lintro.ai.display import render_summary, render_summary_annotations
 from lintro.ai.display.shared import is_github_actions
 from lintro.ai.filters import filter_issues
+from lintro.ai.integrations.github_pr import GitHubPRReporter
 from lintro.ai.metadata import attach_summary_metadata
 from lintro.ai.models import AIResult
 from lintro.ai.paths import resolve_workspace_file, resolve_workspace_root
@@ -28,6 +29,8 @@ from lintro.enums.output_format import OutputFormat
 
 if TYPE_CHECKING:
     from lintro.ai.config import AIConfig
+    from lintro.ai.models.fix_suggestion import AIFixSuggestion
+    from lintro.ai.models.summary import AISummary
     from lintro.ai.providers.base import BaseAIProvider
     from lintro.config.lintro_config import LintroConfig
     from lintro.models.core.tool_result import ToolResult
@@ -161,6 +164,15 @@ def _run_ai_check(
             if result.issues and not result.skipped:
                 attach_summary_metadata(result, summary)
 
+    # Post summary as PR comment when enabled
+    if summary and ai_config.github_pr_comments:
+        _post_pr_comments(
+            summary=summary,
+            logger=logger,
+            workspace_root=workspace_root,
+            is_json=is_json,
+        )
+
     if not ai_fix:
         return AIResult()
 
@@ -263,8 +275,9 @@ def _collect_and_fix(
     """
     fixes_applied = 0
     fixes_failed = 0
+    fix_suggestions: list[AIFixSuggestion] = []
     if fix_issues:
-        fixes_applied, fixes_failed, _fix_suggestions = run_fix_pipeline(
+        fixes_applied, fixes_failed, fix_suggestions = run_fix_pipeline(
             fix_issues=fix_issues,
             provider=provider,
             ai_config=ai_config,
@@ -279,6 +292,14 @@ def _collect_and_fix(
             logger=logger,
             total_issues=len(fix_issues),
             max_fix_attempts=ai_config.max_fix_attempts,
+        )
+
+    if fix_suggestions and ai_config.github_pr_comments:
+        _post_pr_comments(
+            suggestions=fix_suggestions,
+            logger=logger,
+            workspace_root=workspace_root,
+            is_json=is_json,
         )
 
     unfixed = len(fix_issues) - fixes_applied
@@ -356,6 +377,43 @@ def _resolve_issue_path(
         return None
 
     return resolved
+
+
+def _post_pr_comments(
+    *,
+    summary: AISummary | None = None,
+    suggestions: list[AIFixSuggestion] | None = None,
+    logger: ThreadSafeConsoleLogger,
+    workspace_root: Path | None = None,
+    is_json: bool = False,
+) -> None:
+    """Post AI findings as GitHub PR review comments.
+
+    Logs a warning and continues gracefully on failure.
+
+    Args:
+        summary: Optional AI summary.
+        suggestions: Optional fix suggestions.
+        logger: Console logger.
+        workspace_root: Workspace root for repo-relative paths.
+        is_json: Whether output is JSON/SARIF (suppresses plain text).
+    """
+    reporter = GitHubPRReporter(workspace_root=workspace_root)
+    if not reporter.is_available():
+        loguru_logger.debug(
+            "GitHub PR reporter not available — missing token, repo, or PR number",
+        )
+        return
+    success = reporter.post_review_comments(
+        suggestions=suggestions or [],
+        summary=summary,
+    )
+    if success:
+        loguru_logger.debug("GitHub PR review comments posted successfully")
+    elif not is_json:
+        logger.console_output("  AI: failed to post some PR review comments")
+    else:
+        loguru_logger.debug("GitHub PR review comments partially failed")
 
 
 def _log_fix_limit_message(

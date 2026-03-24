@@ -18,6 +18,7 @@ from loguru import logger
 from lintro.enums.action import Action, normalize_action
 from lintro.enums.severity_level import SeverityLevel
 from lintro.enums.tool_name import ToolName
+from lintro.utils.ai_metadata import get_ai_count as _get_ai_count
 from lintro.utils.console.constants import (
     BORDER_LENGTH,
     RE_CANNOT_AUTOFIX,
@@ -185,10 +186,14 @@ class ThreadSafeConsoleLogger:
             # For format commands, track both fixed and remaining issues
             total_fixed: int = 0
             total_remaining: int = 0
+            total_ai_applied: int = 0
+            total_ai_verified: int = 0
             for result in tool_results:
                 fixed_std = getattr(result, "fixed_issues_count", None)
                 remaining_std = getattr(result, "remaining_issues_count", None)
                 success = getattr(result, "success", True)
+                total_ai_applied += _get_ai_count(result, "applied_count")
+                total_ai_verified += _get_ai_count(result, "verified_count")
 
                 if fixed_std is not None:
                     total_fixed += fixed_std
@@ -219,10 +224,13 @@ class ThreadSafeConsoleLogger:
                 total_fixed=total_fixed,
                 total_remaining=total_remaining,
                 affected_files=affected_files,
+                total_ai_applied=total_ai_applied,
+                total_ai_verified=total_ai_verified,
             )
             self._print_ascii_art(total_issues=total_remaining)
             logger.debug(
-                f"{action} completed with {total_fixed} fixed, "
+                f"{action} completed with native={total_fixed}, "
+                f"ai_verified={total_ai_verified}, "
                 f"{total_remaining} remaining",
             )
         else:
@@ -298,6 +306,8 @@ class ThreadSafeConsoleLogger:
         severity_errors: int = 0,
         severity_warnings: int = 0,
         severity_info: int = 0,
+        total_ai_applied: int = 0,
+        total_ai_verified: int = 0,
     ) -> None:
         """Print the totals summary table for the run.
 
@@ -310,6 +320,8 @@ class ThreadSafeConsoleLogger:
             severity_errors: Number of issues at ERROR severity.
             severity_warnings: Number of issues at WARNING severity.
             severity_info: Number of issues at INFO severity.
+            total_ai_applied: Total number of AI-applied fixes (FIX mode).
+            total_ai_verified: Total number of AI-resolved fixes (FIX mode).
         """
         from lintro.utils.summary_tables import print_totals_table
 
@@ -323,6 +335,8 @@ class ThreadSafeConsoleLogger:
             severity_errors=severity_errors,
             severity_warnings=severity_warnings,
             severity_info=severity_info,
+            total_ai_applied=total_ai_applied,
+            total_ai_verified=total_ai_verified,
         )
 
     def _print_final_status(

@@ -28,6 +28,7 @@ from lintro.cli_utils.commands.list_tools import list_tools_command  # noqa: E40
 from lintro.cli_utils.commands.test import test_command  # noqa: E402
 from lintro.cli_utils.commands.versions import versions_command  # noqa: E402
 from lintro.tools.core.runtime_discovery import clear_discovery_cache  # noqa: E402
+from lintro.utils.config import clear_pyproject_cache  # noqa: E402
 
 
 class LintroGroup(click.Group):
@@ -147,9 +148,10 @@ class LintroGroup(click.Group):
         Raises:
             SystemExit: If a command exits with a non-zero exit code.
         """
-        # Clear tool discovery cache at start of each invocation to ensure
-        # fresh tool detection (tools may have been installed/uninstalled)
+        # Clear caches at start of each invocation to ensure fresh tool
+        # detection and pyproject.toml loading across working directories
         clear_discovery_cache()
+        clear_pyproject_cache()
 
         all_args = ctx.protected_args + ctx.args
 

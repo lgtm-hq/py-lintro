@@ -18,6 +18,7 @@ class AIResult:
         unfixed_issues: Number of issues that remain unfixed after AI.
         budget_exceeded: Whether the cost budget was exceeded.
         error: Whether an AI error occurred during the run.
+        message: Human-readable error or status message.
     """
 
     fixes_applied: int = 0
@@ -25,3 +26,4 @@ class AIResult:
     unfixed_issues: int = 0
     budget_exceeded: bool = False
     error: bool = False
+    message: str = ""

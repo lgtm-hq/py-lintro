@@ -122,6 +122,7 @@ packages = [
   "lintro.ai",
   "lintro.ai.display",
   "lintro.ai.enums",
+  "lintro.ai.integrations",
   "lintro.ai.metadata",
   "lintro.ai.models",
   "lintro.ai.output",

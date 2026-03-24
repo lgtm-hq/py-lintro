@@ -11,7 +11,7 @@ Supports parallel execution when enabled via configuration.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from lintro.enums.action import Action, normalize_action
 from lintro.models.core.tool_result import ToolResult
@@ -35,6 +35,8 @@ from lintro.utils.post_checks import execute_post_checks
 from lintro.utils.unified_config import UnifiedConfigManager
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from lintro.plugins.base import BaseToolPlugin
 
 # Re-export constants for backwards compatibility
@@ -95,6 +97,7 @@ def _run_fix_with_retry(
         return result
 
     initial_issues_count = getattr(result, "initial_issues_count", None)
+    first_pass_initial_issues = getattr(result, "initial_issues", None)
     remaining = _get_remaining_count(result)
 
     for attempt in range(2, max_retries + 1):
@@ -102,13 +105,15 @@ def _run_fix_with_retry(
             break
 
         logger.debug(
-            f"Fix retry {attempt}/{max_retries} for {tool.definition.name} "
+            f"Fix retry {attempt}/{max_retries} for "
+            f"{getattr(getattr(tool, 'definition', None), 'name', 'unknown')} "
             f"({remaining} remaining issues)",
         )
         result = tool.fix(paths, options)
         remaining = _get_remaining_count(result)
 
-    # Merge: keep initial_issues_count from first pass, rest from last pass
+    # Merge: keep initial_issues_count and initial_issues from first pass,
+    # rest from last pass
     if initial_issues_count is not None:
         fixed = max(0, initial_issues_count - remaining)
         result = ToolResult(
@@ -121,9 +126,223 @@ def _run_fix_with_retry(
             fixed_issues_count=fixed,
             remaining_issues_count=remaining,
             formatted_output=result.formatted_output,
+            initial_issues=first_pass_initial_issues,
+            cwd=result.cwd,
+        )
+    elif first_pass_initial_issues is not None:
+        # Preserve initial_issues even when initial_issues_count is absent
+        fixed = max(0, len(first_pass_initial_issues) - remaining)
+        result = ToolResult(
+            name=result.name,
+            success=result.success,
+            output=result.output,
+            issues_count=remaining,
+            issues=result.issues,
+            initial_issues_count=len(first_pass_initial_issues),
+            fixed_issues_count=fixed,
+            remaining_issues_count=remaining,
+            formatted_output=result.formatted_output,
+            initial_issues=first_pass_initial_issues,
+            cwd=result.cwd,
         )
 
     return result
+
+
+def _warn_ai_fix_disabled(
+    *,
+    action: Action,
+    ai_fix: bool,
+    ai_enabled: bool,
+    logger: Any,
+    output_format: str = "",
+) -> None:
+    """Warn when users request AI fixes but AI is disabled in config."""
+    if action != Action.CHECK or not ai_fix or ai_enabled:
+        return
+    # Suppress plain-text warnings for machine-readable output formats
+    if output_format.lower() in ("json", "sarif"):
+        return
+    logger.console_output(
+        "AI fixes requested with --fix, but ai.enabled is false in "
+        ".lintro-config.yaml; skipping AI enhancements.",
+    )
+
+
+def _display_fix_result(
+    result: ToolResult,
+    *,
+    output_format: str,
+    raw_output: bool,
+    console_output_func: Callable[..., None],
+    success_func: Callable[..., None],
+    action: Action,
+) -> None:
+    """Display fix result with initial issue details when available.
+
+    When a tool fixes issues, this shows WHAT was fixed (via initial_issues)
+    before showing the count summary. Falls back to the standard display
+    when initial_issues is not populated.
+
+    Args:
+        result: The tool result to display.
+        output_format: Output format for formatting issues.
+        raw_output: Whether to show raw tool output.
+        console_output_func: Function to output text to console.
+        success_func: Function to display success message.
+        action: The action being performed.
+    """
+    from lintro.utils.output import format_tool_output
+    from lintro.utils.result_formatters import print_tool_result
+
+    # When in fix mode and initial_issues is populated and ALL issues
+    # were fixed (remaining == 0), show what was fixed. When some issues
+    # remain, the initial_issues list is misleading because not all of
+    # them were actually resolved.
+    remaining = getattr(result, "remaining_issues_count", None)
+    if remaining is None:
+        remaining = getattr(result, "issues_count", None)
+    if (
+        action == Action.FIX
+        and result.initial_issues
+        and not raw_output
+        and remaining == 0
+    ):
+        # Format the initial issues as a table
+        issues_display = format_tool_output(
+            tool_name=result.name,
+            output="",
+            output_format=output_format,
+            issues=list(result.initial_issues),
+        )
+        if issues_display and issues_display.strip():
+            console_output_func(text=issues_display)
+
+        # Show the count summary below the table
+        print_tool_result(
+            console_output_func=console_output_func,
+            success_func=success_func,
+            tool_name=result.name,
+            output=result.output or "",
+            issues_count=result.issues_count,
+            raw_output_for_meta=result.output,
+            action=action,
+            success=result.success,
+        )
+        return
+
+    # Standard display path (no initial_issues available)
+    display_output: str | None = None
+    if result.formatted_output:
+        display_output = result.formatted_output
+    elif result.issues or result.output:
+        display_output = format_tool_output(
+            tool_name=result.name,
+            output=result.output or "",
+            output_format=output_format,
+            issues=list(result.issues) if result.issues else None,
+        )
+    if result.output and raw_output:
+        display_output = result.output
+
+    if display_output and display_output.strip():
+        print_tool_result(
+            console_output_func=console_output_func,
+            success_func=success_func,
+            tool_name=result.name,
+            output=display_output,
+            issues_count=result.issues_count,
+            raw_output_for_meta=result.output,
+            action=action,
+            success=result.success,
+        )
+    elif (
+        result.issues_count == 0
+        and result.success
+        and not getattr(result, "fixed_issues_count", 0)
+    ):
+        console_output_func(
+            text="✓ No issues found.",
+            color="green",
+        )
+
+
+_ARTIFACT_EXTENSIONS: dict[str, str] = {
+    "json": "results.json",
+    "csv": "results.csv",
+    "markdown": "results.md",
+    "html": "results.html",
+    "sarif": "results.sarif.json",
+    "plain": "results.txt",
+}
+
+
+def _write_artifacts(
+    all_results: list[ToolResult],
+    lintro_config: Any,
+    logger: Any,
+    action: Action,
+    total_issues: int,
+    total_fixed: int,
+    *,
+    warn_func: Any = None,
+) -> None:
+    """Write side-channel artifact files alongside primary output.
+
+    Emits artifact files into ``.lintro/artifacts/<format>/`` for each
+    format listed in ``execution.artifacts``.  SARIF is also auto-emitted
+    when ``GITHUB_ACTIONS=true`` is detected (for Code Scanning).
+
+    Supported formats match ``OutputFormat``: json, csv, markdown,
+    html, sarif, plain.
+
+    Args:
+        all_results: Completed tool results.
+        lintro_config: Loaded LintroConfig instance.
+        logger: Console logger for warning output.
+        action: The action performed (check, fmt, test).
+        total_issues: Total number of issues found.
+        total_fixed: Total number of issues fixed.
+        warn_func: Optional callback for emitting warnings.  When ``None``,
+            falls back to ``logger.console_output``.
+    """
+    import os
+    from pathlib import Path
+
+    from lintro.enums.output_format import normalize_output_format
+    from lintro.utils.output.file_writer import write_output_file
+
+    artifacts: list[str] = [a.lower() for a in lintro_config.execution.artifacts]
+    is_gha = os.environ.get("GITHUB_ACTIONS") == "true"
+
+    # Auto-emit SARIF in GitHub Actions for Code Scanning integration.
+    if is_gha and "sarif" not in artifacts:
+        artifacts.append("sarif")
+
+    if not artifacts:
+        return
+
+    _emit = warn_func if warn_func is not None else logger.console_output
+
+    for artifact in artifacts:
+        filename = _ARTIFACT_EXTENSIONS.get(artifact)
+        if filename is None:
+            _emit(f"Warning: Unknown artifact format '{artifact}', skipping")
+            continue
+
+        artifact_path = Path(".lintro") / "artifacts" / artifact / filename
+        try:
+            fmt = normalize_output_format(artifact)
+            write_output_file(
+                output_path=str(artifact_path),
+                output_format=fmt,
+                all_results=all_results,
+                action=action,
+                total_issues=total_issues,
+                total_fixed=total_fixed,
+            )
+        except (OSError, ValueError, TypeError) as e:
+            _emit(f"Warning: Failed to write {artifact} artifact: {e}")
 
 
 def run_lint_tools_simple(
@@ -145,6 +364,8 @@ def run_lint_tools_simple(
     no_log: bool = False,
     auto_install: bool = False,
     yes: bool = False,
+    ai_fix: bool = False,
+    ignore_conflicts: bool = False,
 ) -> int:
     """Simplified runner using Loguru-based logging with rich formatting.
 
@@ -172,6 +393,8 @@ def run_lint_tools_simple(
         no_log: Whether to disable file logging (not yet implemented).
         auto_install: Whether to auto-install Node.js deps if node_modules missing.
         yes: Skip confirmation prompt and proceed immediately.
+        ai_fix: Enable AI fix suggestions with interactive review (check only).
+        ignore_conflicts: Whether to ignore tool configuration conflicts.
 
     Returns:
         Exit code (0 for success, 1 for failures).
@@ -179,6 +402,7 @@ def run_lint_tools_simple(
     Raises:
         TypeError: If a programming error occurs during tool execution.
         AttributeError: If a programming error occurs during tool execution.
+        Exception: Re-raised from AI hook when ``ai.fail_on_ai_error`` is enabled.
     """
     # Normalize action to enum
     action = normalize_action(action)
@@ -198,7 +422,11 @@ def run_lint_tools_simple(
 
     # Get tools to run (now returns ToolsToRunResult with skip info)
     try:
-        tools_result = get_tools_to_run(tools, action)
+        tools_result = get_tools_to_run(
+            tools,
+            action,
+            ignore_conflicts=ignore_conflicts,
+        )
     except ValueError as e:
         logger.console_output(f"Error: {e}")
         return 1
@@ -283,7 +511,9 @@ def run_lint_tools_simple(
         effective_auto_install = is_container
 
     # Pre-execution config summary (suppress in JSON mode)
-    if output_format.lower() != "json" and (tools_to_run or skipped_tools):
+    if output_format.lower() not in {"json", "sarif"} and (
+        tools_to_run or skipped_tools
+    ):
         from lintro.utils.console.pre_execution_summary import (
             print_pre_execution_summary,
         )
@@ -305,6 +535,7 @@ def run_lint_tools_simple(
             is_container=is_container,
             is_ci=is_ci,
             per_tool_auto_install=per_tool_auto if per_tool_auto else None,
+            ai_config=lintro_config.ai,
         )
 
         # Confirmation prompt — skip when non-interactive
@@ -312,11 +543,16 @@ def run_lint_tools_simple(
 
         auto_continue = yes or is_ci or not sys.stdin.isatty()
         if not auto_continue:
+            import click as _click
+
+            _click.echo("Proceed? [Y/n] ", nl=False)
             try:
-                answer = input("Proceed? [Y/n] ").strip().lower()
+                answer = _click.getchar()
+                _click.echo(answer)  # echo the keypress
             except (EOFError, KeyboardInterrupt):
+                _click.echo()
                 answer = "n"
-            if answer in ("n", "no"):
+            if answer.lower() == "n":
                 logger.console_output(text="Aborted.", color="yellow")
                 return int(DEFAULT_EXIT_CODE_SUCCESS)
 
@@ -356,39 +592,14 @@ def run_lint_tools_simple(
             display_name = get_tool_display_name(result.name)
             logger.print_tool_header(tool_name=display_name, action=action)
 
-            display_output: str | None = None
-            if result.formatted_output:
-                display_output = result.formatted_output
-            elif result.issues or result.output:
-                from lintro.utils.output import format_tool_output
-
-                display_output = format_tool_output(
-                    tool_name=result.name,
-                    output=result.output or "",
-                    output_format=output_format,
-                    issues=list(result.issues) if result.issues else None,
-                )
-            if result.output and raw_output:
-                display_output = result.output
-
-            if display_output and display_output.strip():
-                from lintro.utils.result_formatters import print_tool_result
-
-                print_tool_result(
-                    console_output_func=logger.console_output,
-                    success_func=success_func,
-                    tool_name=result.name,
-                    output=display_output,
-                    issues_count=result.issues_count,
-                    raw_output_for_meta=result.output,
-                    action=action,
-                    success=result.success,
-                )
-            elif result.issues_count == 0 and result.success:
-                logger.console_output(
-                    text="✓ No issues found.",
-                    color="green",
-                )
+            _display_fix_result(
+                result,
+                output_format=output_format,
+                raw_output=raw_output,
+                console_output_func=logger.console_output,
+                success_func=success_func,
+                action=action,
+            )
 
     else:
         # Sequential execution (original behavior)
@@ -438,45 +649,15 @@ def run_lint_tools_simple(
                         remaining_count if remaining_count is not None else 0
                     )
 
-                # Use formatted_output if available, otherwise format from issues
-                display_output = None
-                if result.formatted_output:
-                    display_output = result.formatted_output
-                elif result.issues or result.output:
-                    # Format issues using the tool formatter
-                    # Also format when there's output (e.g., coverage) even with no
-                    # issues
-                    from lintro.utils.output import format_tool_output
-
-                    display_output = format_tool_output(
-                        tool_name=tool_name,
-                        output=result.output or "",
-                        output_format=output_format,
-                        issues=list(result.issues) if result.issues else None,
-                    )
-                if result.output and raw_output:
-                    # Use raw output when raw_output flag is True (overrides formatted)
-                    display_output = result.output
-
-                # Display the formatted output if available
-                if display_output and display_output.strip():
-                    from lintro.utils.result_formatters import print_tool_result
-
-                    print_tool_result(
-                        console_output_func=logger.console_output,
-                        success_func=success_func,
-                        tool_name=tool_name,
-                        output=display_output,
-                        issues_count=result.issues_count,
-                        raw_output_for_meta=result.output,
-                        action=action,
-                        success=result.success,
-                    )
-                elif result.issues_count == 0 and result.success:
-                    # Show success message when no issues found and no output
-                    logger.console_output(text="Processing files")
-                    logger.console_output(text="✓ No issues found.", color="green")
-                    logger.console_output(text="")
+                # Display the result (with initial issue details in fix mode)
+                _display_fix_result(
+                    result,
+                    output_format=output_format,
+                    raw_output=raw_output,
+                    console_output_func=logger.console_output,
+                    success_func=success_func,
+                    action=action,
+                )
 
             except (TypeError, AttributeError):
                 # Programming errors should be re-raised for debugging
@@ -529,6 +710,45 @@ def run_lint_tools_simple(
         total_remaining=total_remaining,
     )
 
+    # AI enhancement via hook pattern
+    effective_ai_fix = ai_fix or lintro_config.ai.default_fix
+    _warn_ai_fix_disabled(
+        action=action,
+        ai_fix=effective_ai_fix,
+        ai_enabled=lintro_config.ai.enabled,
+        logger=logger,
+        output_format=output_format,
+    )
+
+    from lintro.ai.hook import AIPostExecutionHook
+
+    ai_hook = AIPostExecutionHook(lintro_config, ai_fix=effective_ai_fix)
+    ai_result = None
+    if ai_hook.should_run(action):
+        try:
+            ai_result = ai_hook.execute(
+                action,
+                all_results,
+                console_logger=logger,
+                output_format=output_format,
+            )
+        except Exception as exc:
+            from loguru import logger as loguru_logger
+
+            loguru_logger.opt(exception=True).debug(f"AI hook failed: {exc}")
+            if getattr(lintro_config.ai, "fail_on_ai_error", False):
+                raise
+            if output_format.lower() not in ("json", "sarif"):
+                logger.console_output(f"Warning: AI enhancement failed: {exc}")
+            from lintro.ai.models import AIResult
+
+            ai_result = AIResult(error=True, message=str(exc))
+        if ai_result is not None:
+            total_issues, total_fixed, total_remaining = aggregate_tool_results(
+                all_results,
+                action,
+            )
+
     # Determine final exit code once — used for both JSON output and return
     final_exit_code = int(
         determine_exit_code(
@@ -539,6 +759,14 @@ def run_lint_tools_simple(
             main_phase_empty_due_to_filter=main_phase_empty_due_to_filter,
         ),
     )
+
+    # AI-driven exit code adjustments
+    if ai_result is not None:
+        ai_config = lintro_config.ai
+        if ai_config.fail_on_unfixed and ai_result.unfixed_issues > 0:
+            final_exit_code = 1
+        if ai_config.fail_on_ai_error and ai_result.error:
+            final_exit_code = 1
 
     # Display results
     if all_results:
@@ -557,14 +785,89 @@ def run_lint_tools_simple(
                 exit_code=final_exit_code,
             )
             print(json.dumps(json_data, indent=2))
+        elif output_format.lower() == "sarif":
+            from lintro.ai.output.sarif import render_fixes_sarif
+            from lintro.ai.output.sarif_bridge import (
+                suggestions_from_results,
+                summary_from_results,
+            )
+
+            suggestions = suggestions_from_results(all_results)
+            summary = summary_from_results(all_results)
+            sarif_json = render_fixes_sarif(suggestions, summary)
+            print(sarif_json)
         else:
             logger.print_execution_summary(action, all_results)
+
+        # Route warnings to stderr (loguru) for machine-readable formats so
+        # plain-text messages don't corrupt JSON/SARIF output on stdout.
+        _is_machine = output_format.lower() in ("json", "sarif")
+
+        def _warn(msg: str) -> None:
+            if _is_machine:
+                from loguru import logger as loguru_logger
+
+                loguru_logger.warning(msg)
+            else:
+                logger.console_output(msg)
 
         # Write report files (markdown, html, csv)
         try:
             output_manager.write_reports_from_results(all_results)
         except (OSError, ValueError, TypeError) as e:
-            logger.console_output(f"Warning: Failed to write reports: {e}")
+            _warn(f"Warning: Failed to write reports: {e}")
             # Continue execution - report writing failures should not stop the tool
+
+        # Write user-specified output file (--output flag)
+        if output_file is not None:
+            try:
+                from lintro.enums.output_format import (
+                    OutputFormat,
+                    normalize_output_format,
+                )
+                from lintro.utils.output.file_writer import write_output_file
+
+                fmt = normalize_output_format(output_format)
+                if fmt == OutputFormat.SARIF:
+                    from pathlib import Path
+
+                    from lintro.ai.output.sarif import write_sarif
+                    from lintro.ai.output.sarif_bridge import (
+                        suggestions_from_results,
+                        summary_from_results,
+                    )
+
+                    suggestions = suggestions_from_results(all_results)
+                    summary = summary_from_results(all_results)
+                    write_sarif(suggestions, summary, output_path=Path(output_file))
+                else:
+                    write_output_file(
+                        output_path=output_file,
+                        output_format=fmt,
+                        all_results=all_results,
+                        action=action,
+                        total_issues=total_issues,
+                        total_fixed=total_fixed,
+                    )
+            except (OSError, ValueError, TypeError) as e:
+                _warn(f"Warning: Failed to write output file: {e}")
+
+        # Write side-channel artifact files when configured or when
+        # running inside GitHub Actions (SARIF auto-emit for Code Scanning).
+        _write_artifacts(
+            all_results,
+            lintro_config,
+            logger,
+            action=action,
+            total_issues=total_issues,
+            total_fixed=total_fixed,
+            warn_func=_warn,
+        )
+
+        # Clean up old run directories to prevent unbounded growth
+        try:
+            output_manager.cleanup_old_runs()
+        except OSError as e:
+            _warn(f"Warning: Failed to clean up old runs: {e}")
 
     return final_exit_code
