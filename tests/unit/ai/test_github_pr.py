@@ -120,7 +120,7 @@ def test_is_not_available_without_repo(test_token: str) -> None:
 
 def test_is_not_available_without_pr_number(test_token: str) -> None:
     """Report unavailable when PR number is None."""
-    with patch.dict("os.environ", {"GITHUB_REF": ""}):
+    with patch.dict("os.environ", {"GITHUB_REF": "", "GITHUB_EVENT_PATH": ""}):
         reporter = GitHubPRReporter(
             token=test_token,
             repo="owner/repo",
