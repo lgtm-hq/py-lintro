@@ -78,7 +78,10 @@ def test_returns_none_for_missing_ref() -> None:
 
 def test_returns_none_for_malformed_ref() -> None:
     """Return None for malformed pull ref."""
-    with patch.dict("os.environ", {"GITHUB_REF": "refs/pull//merge"}):
+    with patch.dict(
+        "os.environ",
+        {"GITHUB_REF": "refs/pull//merge", "GITHUB_EVENT_PATH": ""},
+    ):
         assert_that(_detect_pr_number()).is_none()
 
 
