@@ -144,4 +144,8 @@ def normalize_ai_metadata(raw: dict[str, Any]) -> dict[str, Any]:
     if isinstance(unverified_count, int):
         normalized["unverified_count"] = unverified_count
 
+    ai_metrics = raw.get("ai_metrics")
+    if isinstance(ai_metrics, dict):
+        normalized["ai_metrics"] = ai_metrics
+
     return normalized

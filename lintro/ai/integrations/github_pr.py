@@ -19,7 +19,7 @@ from loguru import logger
 
 from lintro.ai.enums import ConfidenceLevel
 from lintro.ai.models import AIFixSuggestion, AISummary
-from lintro.ai.paths import relative_path, to_provider_path
+from lintro.ai.paths import to_provider_path
 
 
 class GitHubPRReporter:
@@ -51,8 +51,8 @@ class GitHubPRReporter:
             pr_number: PR number. Falls back to parsing ``GITHUB_REF``.
             api_base: GitHub API base URL.
             workspace_root: Workspace root for deriving repo-relative paths.
-                Falls back to ``GITHUB_WORKSPACE`` env var, then ``None``
-                (which uses ``relative_path()`` as fallback).
+                Falls back to ``GITHUB_WORKSPACE`` env var, then the
+                git repository root via ``git rev-parse``.
         """
         self.token = token if token is not None else os.environ.get("GITHUB_TOKEN", "")
         self.repo = (
@@ -66,7 +66,7 @@ class GitHubPRReporter:
             self.workspace_root = workspace_root
         else:
             gh_ws = os.environ.get("GITHUB_WORKSPACE", "")
-            self.workspace_root = Path(gh_ws) if gh_ws else None
+            self.workspace_root = Path(gh_ws) if gh_ws else _detect_repo_root()
 
     def is_available(self) -> bool:
         """Check whether all required context is present.
@@ -114,20 +114,28 @@ class GitHubPRReporter:
     def _post_review(self, suggestions: Sequence[AIFixSuggestion]) -> bool:
         """Post inline review comments for fix suggestions.
 
+        Suggestions whose file/line can be mapped to the PR diff are posted
+        as inline review comments.  Any suggestion that cannot be mapped
+        (file not in diff, or line outside changed hunks) is posted as a
+        standalone issue comment so one unmappable entry cannot cause a 422
+        that rejects the entire review batch.
+
         Args:
             suggestions: Fix suggestions to post.
 
         Returns:
-            True if the review was posted successfully.
+            True if all comments were posted successfully.
         """
+        diff_lines = self._fetch_pr_diff_lines()
         comments: list[dict[str, Any]] = []
+        fallback_suggestions: list[AIFixSuggestion] = []
+
         for s in suggestions:
-            # Normalize path: strip leading "./" and ensure forward slashes
-            raw_path = (
-                to_provider_path(s.file, self.workspace_root)
-                if self.workspace_root is not None
-                else relative_path(s.file)
-            )
+            # Resolve repo-relative path
+            if self.workspace_root is not None:
+                raw_path = to_provider_path(s.file, self.workspace_root)
+            else:
+                raw_path = s.file
             rel = raw_path.removeprefix("./").replace("\\", "/") if raw_path else ""
             # Skip empty, outside-workspace sentinel, and parent-relative paths.
             # Note: absence of "/" does not imply out-of-workspace — repo-root
@@ -135,9 +143,16 @@ class GitHubPRReporter:
             if not rel or rel == "<outside-workspace>" or rel.startswith(".."):
                 continue
             body = _format_inline_comment(s)
-            # GitHub review comments require a valid position; skip if missing
+            # GitHub review comments require a valid line; skip if missing
             if not (isinstance(s.line, int) and s.line > 0):
                 continue
+
+            # Only include in the review batch if the line is in the PR diff;
+            # otherwise fall back to an issue comment.
+            if diff_lines is not None and s.line not in diff_lines.get(rel, set()):
+                fallback_suggestions.append(s)
+                continue
+
             comment: dict[str, Any] = {
                 "path": rel,
                 "body": body,
@@ -146,16 +161,65 @@ class GitHubPRReporter:
             }
             comments.append(comment)
 
-        if not comments:
-            return True
+        success = True
 
-        payload = {
-            "event": "COMMENT",
-            "body": "Lintro AI review",
-            "comments": comments,
-        }
-        url = f"{self.api_base}/repos/{self.repo}/pulls/{self.pr_number}/reviews"
-        return self._api_request("POST", url, payload)
+        if comments:
+            payload = {
+                "event": "COMMENT",
+                "body": "Lintro AI review",
+                "comments": comments,
+            }
+            url = f"{self.api_base}/repos/{self.repo}/pulls/{self.pr_number}/reviews"
+            if not self._api_request("POST", url, payload):
+                success = False
+
+        # Post unmappable suggestions as standalone issue comments
+        for s in fallback_suggestions:
+            body = _format_inline_comment(s)
+            location = f"`{s.file}:{s.line}`" if s.line else f"`{s.file}`"
+            if not self._post_issue_comment(f"{location}\n\n{body}"):
+                success = False
+
+        return success
+
+    def _fetch_pr_diff_lines(self) -> dict[str, set[int]] | None:
+        """Fetch changed lines per file from the PR diff.
+
+        Returns:
+            Mapping of ``{file_path: {line_numbers...}}`` for right-side
+            (added/modified) lines, or ``None`` if the diff cannot be fetched.
+        """
+        url = f"{self.api_base}/repos/{self.repo}/pulls/{self.pr_number}/files"
+        req = urllib.request.Request(
+            url,
+            method="GET",
+            headers={
+                "Authorization": f"Bearer {self.token}",
+                "Accept": "application/vnd.github+json",
+                "X-GitHub-Api-Version": "2022-11-28",
+            },
+        )
+        parsed = urllib.parse.urlparse(url)
+        if parsed.scheme != "https":
+            return None
+        try:
+            with urllib.request.urlopen(  # noqa: S310 — HTTPS-only validated above  # nosemgrep: dynamic-urllib-use-detected  # nosec B310
+                req,
+                timeout=30,
+            ) as resp:
+                files = json.loads(resp.read().decode())
+        except (urllib.error.URLError, json.JSONDecodeError, OSError):
+            logger.debug("Failed to fetch PR diff; skipping diff-position filtering")
+            return None
+
+        result: dict[str, set[int]] = {}
+        for f in files:
+            filename = f.get("filename", "")
+            patch = f.get("patch", "")
+            if not filename or not patch:
+                continue
+            result[filename] = _parse_patch_lines(patch)
+        return result
 
     def _post_issue_comment(self, body: str) -> bool:
         """Post a top-level issue comment on the PR.
@@ -225,6 +289,56 @@ class GitHubPRReporter:
         except urllib.error.URLError as e:
             logger.warning("GitHub API request error: {}", e.reason)
             return False
+
+
+def _detect_repo_root() -> Path | None:
+    """Detect the git repository root via ``git rev-parse``.
+
+    Returns:
+        Repository root path, or ``None`` if detection fails.
+    """
+    import subprocess
+
+    try:
+        result = subprocess.run(
+            ["git", "rev-parse", "--show-toplevel"],
+            capture_output=True,
+            text=True,
+            check=True,
+            timeout=5,
+        )
+        toplevel = result.stdout.strip()
+        return Path(toplevel) if toplevel else None
+    except (subprocess.SubprocessError, FileNotFoundError, OSError):
+        return None
+
+
+def _parse_patch_lines(patch: str) -> set[int]:
+    """Extract right-side (new) line numbers from a unified diff patch.
+
+    Args:
+        patch: The ``patch`` field from the GitHub files API.
+
+    Returns:
+        Set of line numbers on the right side of the diff.
+    """
+    import re
+
+    lines: set[int] = set()
+    current_line = 0
+    for raw_line in patch.split("\n"):
+        hunk_match = re.match(r"^@@ -\d+(?:,\d+)? \+(\d+)", raw_line)
+        if hunk_match:
+            current_line = int(hunk_match.group(1))
+            continue
+        if raw_line.startswith("-"):
+            # Deleted line — doesn't advance right-side counter
+            continue
+        if raw_line.startswith("+"):
+            lines.add(current_line)
+        # Both context lines and additions advance the right-side counter
+        current_line += 1
+    return lines
 
 
 def _detect_pr_number() -> int | None:

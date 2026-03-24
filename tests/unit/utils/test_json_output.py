@@ -79,3 +79,90 @@ def test_create_json_output_normalizes_legacy_suggestions_key() -> None:
     assert_that(data["results"][0]["ai_metadata"]).does_not_contain_key(
         "suggestions",
     )
+
+
+def test_create_json_output_includes_ai_count_fields() -> None:
+    """Verify AI count fields are serialized into JSON output."""
+    result = ToolResult(name="ruff", success=False, issues_count=3)
+    result.ai_metadata = {
+        "fixed_count": 2,
+        "verified_count": 1,
+        "unverified_count": 1,
+    }
+
+    data = create_json_output(
+        action=Action.CHECK,
+        results=[result],
+        total_issues=3,
+        total_fixed=0,
+        total_remaining=0,
+        exit_code=1,
+    )
+
+    ai_meta = data["results"][0]["ai_metadata"]
+    assert_that(ai_meta["fixed_count"]).is_equal_to(2)
+    assert_that(ai_meta["applied_count"]).is_equal_to(2)
+    assert_that(ai_meta["verified_count"]).is_equal_to(1)
+    assert_that(ai_meta["unverified_count"]).is_equal_to(1)
+
+
+def test_create_json_output_includes_ai_metrics() -> None:
+    """Verify AI telemetry metrics are preserved through normalization."""
+    result = ToolResult(name="ruff", success=False, issues_count=1)
+    result.ai_metadata = {
+        "ai_metrics": {
+            "total_api_calls": 5,
+            "total_input_tokens": 1000,
+            "total_output_tokens": 500,
+            "total_cost_usd": 0.01,
+        },
+    }
+
+    data = create_json_output(
+        action=Action.CHECK,
+        results=[result],
+        total_issues=1,
+        total_fixed=0,
+        total_remaining=0,
+        exit_code=1,
+    )
+
+    ai_meta = data["results"][0]["ai_metadata"]
+    assert_that(ai_meta).contains_key("ai_metrics")
+    assert_that(ai_meta["ai_metrics"]["total_api_calls"]).is_equal_to(5)
+    assert_that(ai_meta["ai_metrics"]["total_cost_usd"]).is_equal_to(0.01)
+
+
+def test_create_json_output_counts_survive_legacy_normalization() -> None:
+    """Verify counts and metrics survive alongside legacy key normalization."""
+    result = ToolResult(name="ruff", success=False, issues_count=1)
+    result.ai_metadata = {
+        "summary": {"overview": "Legacy with counts"},
+        "suggestions": [{"file": "a.py", "line": 1}],
+        "type": "fix_suggestions",
+        "fixed_count": 1,
+        "verified_count": 1,
+        "unverified_count": 0,
+        "ai_metrics": {
+            "total_api_calls": 2,
+            "total_cost_usd": 0.005,
+        },
+    }
+
+    data = create_json_output(
+        action=Action.CHECK,
+        results=[result],
+        total_issues=1,
+        total_fixed=0,
+        total_remaining=0,
+        exit_code=1,
+    )
+
+    ai_meta = data["results"][0]["ai_metadata"]
+    assert_that(ai_meta).contains_key("fix_suggestions")
+    assert_that(ai_meta).does_not_contain_key("suggestions")
+    assert_that(ai_meta["fixed_count"]).is_equal_to(1)
+    assert_that(ai_meta["verified_count"]).is_equal_to(1)
+    assert_that(ai_meta["unverified_count"]).is_equal_to(0)
+    assert_that(ai_meta).contains_key("ai_metrics")
+    assert_that(ai_meta["ai_metrics"]["total_api_calls"]).is_equal_to(2)
