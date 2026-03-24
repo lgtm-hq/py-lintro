@@ -1,13 +1,12 @@
 {
   "name": "py-lintro",
-  "version": "1.0.0",
   "description": "A comprehensive CLI tool that unifies various code formatting, linting, and quality assurance tools under a single command-line interface.",
   "keywords": [],
   "homepage": "https://github.com/lgtm-hq/py-lintro#readme",
   "bugs": {
     "url": "https://github.com/lgtm-hq/py-lintro/issues"
   },
-  "license": "ISC",
+  "license": "MIT",
   "author": "",
   "repository": {
     "type": "git",
