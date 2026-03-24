@@ -257,3 +257,4 @@ def test_github_actions_includes_annotations(
         # Fixture omits risk_level, so render_fixes defaults to "warning" level
         assert_that(result).contains("::warning")
         assert_that(result).contains("AI fix available")
+        assert_that(result).contains("::endgroup::")

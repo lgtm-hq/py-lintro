@@ -19,21 +19,22 @@ from lintro.ai.fix_context import (
 def test_read_file_safely_reads_existing_file(tmp_path):
     """Existing file contents are returned as a string."""
     f = tmp_path / "test.py"
-    f.write_text("hello world")
+    f.write_text("hello world", encoding="utf-8")
     result = _read_file_safely(str(f))
     assert_that(result).is_equal_to("hello world")
 
 
-def test_read_file_safely_returns_none_for_missing():
+def test_read_file_safely_returns_none_for_missing(tmp_path):
     """Missing file returns None instead of raising."""
-    result = _read_file_safely("/nonexistent/file.py")
+    missing = tmp_path / "no_such_file.py"
+    result = _read_file_safely(str(missing))
     assert_that(result).is_none()
 
 
 def test_read_file_safely_returns_empty_string_for_empty_file(tmp_path):
     """Empty file returns an empty string, not None."""
     f = tmp_path / "empty.py"
-    f.write_text("")
+    f.write_text("", encoding="utf-8")
     result = _read_file_safely(str(f))
     assert_that(result).is_equal_to("")
 

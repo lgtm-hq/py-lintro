@@ -37,7 +37,7 @@ def test_generate_diff_no_diff_for_identical():
 # ---------------------------------------------------------------------------
 
 
-def testparse_fix_response_valid_response():
+def test_parse_fix_response_valid_response():
     """Valid JSON is parsed into a fix suggestion with correct fields."""
     content = json.dumps(
         {
@@ -54,14 +54,14 @@ def testparse_fix_response_valid_response():
     assert_that(result.diff).is_not_empty()  # type: ignore[union-attr]  # assertpy is_not_none narrows this
 
 
-def testparse_fix_response_non_object_json():
+def test_parse_fix_response_non_object_json():
     """Non-object JSON (array, string, number) returns None."""
     for payload in ["[1, 2]", '"just a string"', "42"]:
         result = parse_fix_response(payload, "main.py", 10, "B101")
         assert_that(result).is_none()
 
 
-def testparse_fix_response_non_string_code_fields():
+def test_parse_fix_response_non_string_code_fields():
     """Non-string original_code or suggested_code returns None."""
     content = json.dumps(
         {
@@ -75,13 +75,13 @@ def testparse_fix_response_non_string_code_fields():
     assert_that(result).is_none()
 
 
-def testparse_fix_response_invalid_json():
+def test_parse_fix_response_invalid_json():
     """Verify that invalid JSON content returns None."""
     result = parse_fix_response("not json", "main.py", 10, "B101")
     assert_that(result).is_none()
 
 
-def testparse_fix_response_identical_code():
+def test_parse_fix_response_identical_code():
     """Verify that identical original and suggested code returns None."""
     content = json.dumps(
         {
@@ -95,7 +95,7 @@ def testparse_fix_response_identical_code():
     assert_that(result).is_none()
 
 
-def testparse_fix_response_empty_original():
+def test_parse_fix_response_empty_original():
     """Verify that an empty original_code field returns None."""
     content = json.dumps(
         {
@@ -109,7 +109,7 @@ def testparse_fix_response_empty_original():
     assert_that(result).is_none()
 
 
-def testparse_fix_response_empty_suggested():
+def test_parse_fix_response_empty_suggested():
     """Verify that an empty suggested_code field returns None."""
     content = json.dumps(
         {
@@ -123,7 +123,7 @@ def testparse_fix_response_empty_suggested():
     assert_that(result).is_none()
 
 
-def testparse_fix_response_extracts_risk_level():
+def test_parse_fix_response_extracts_risk_level():
     """parse_fix_response should populate risk_level from the JSON payload."""
     content = json.dumps(
         {
@@ -139,7 +139,7 @@ def testparse_fix_response_extracts_risk_level():
     assert_that(result.risk_level).is_equal_to("low")  # type: ignore[union-attr]  # assertpy is_not_none narrows this
 
 
-def testparse_fix_response_risk_level_defaults_to_empty():
+def test_parse_fix_response_risk_level_defaults_to_empty():
     """When risk_level is absent from the JSON, the field should default to ''."""
     content = json.dumps(
         {
@@ -159,7 +159,7 @@ def testparse_fix_response_risk_level_defaults_to_empty():
 # ---------------------------------------------------------------------------
 
 
-def testparse_batch_response_valid():
+def test_parse_batch_response_valid():
     """Valid batch JSON array is parsed into suggestions."""
     content = json.dumps(
         [
@@ -181,19 +181,19 @@ def testparse_batch_response_valid():
     assert_that(result[0].risk_level).is_equal_to("safe-style")
 
 
-def testparse_batch_response_invalid_json():
+def test_parse_batch_response_invalid_json():
     """Invalid JSON returns empty list."""
     result = parse_batch_response("not json", "test.py")
     assert_that(result).is_empty()
 
 
-def testparse_batch_response_not_array():
+def test_parse_batch_response_not_array():
     """Non-array JSON returns empty list."""
     result = parse_batch_response('{"key": "value"}', "test.py")
     assert_that(result).is_empty()
 
 
-def testparse_batch_response_mixed_valid_and_invalid():
+def test_parse_batch_response_mixed_valid_and_invalid():
     """Only valid items are returned; invalid items are skipped."""
     content = json.dumps(
         [
@@ -240,7 +240,7 @@ def testparse_batch_response_mixed_valid_and_invalid():
     assert_that(result[0].risk_level).is_equal_to("safe-style")
 
 
-def testparse_batch_response_skips_identical_code():
+def test_parse_batch_response_skips_identical_code():
     """Items with identical original and suggested code are skipped."""
     content = json.dumps(
         [
