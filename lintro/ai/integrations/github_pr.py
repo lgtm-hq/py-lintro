@@ -147,9 +147,9 @@ class GitHubPRReporter:
             if not (isinstance(s.line, int) and s.line > 0):
                 continue
 
-            # Only include in the review batch if the line is in the PR diff;
-            # otherwise fall back to an issue comment.
-            if diff_lines is not None and s.line not in diff_lines.get(rel, set()):
+            # Only include in the review batch if we have diff data and the
+            # line is in the PR diff; otherwise fall back to an issue comment.
+            if diff_lines is None or s.line not in diff_lines.get(rel, set()):
                 fallback_suggestions.append(s)
                 continue
 

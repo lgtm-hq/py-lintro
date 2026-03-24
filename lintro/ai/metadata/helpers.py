@@ -146,6 +146,8 @@ def normalize_ai_metadata(raw: dict[str, Any]) -> dict[str, Any]:
 
     ai_metrics = raw.get("ai_metrics")
     if isinstance(ai_metrics, dict):
-        normalized["ai_metrics"] = ai_metrics
+        import copy
+
+        normalized["ai_metrics"] = copy.deepcopy(ai_metrics)
 
     return normalized

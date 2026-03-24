@@ -340,7 +340,11 @@ def test_post_review_uses_workspace_relative_paths(test_token: str) -> None:
         ),
     ]
 
-    with patch.object(reporter, "_api_request", return_value=True) as mock_api:
+    diff = {"src/main.py": {10}}
+    with (
+        patch.object(reporter, "_fetch_pr_diff_lines", return_value=diff),
+        patch.object(reporter, "_api_request", return_value=True) as mock_api,
+    ):
         reporter._post_review(suggestions)
         payload = mock_api.call_args[0][2]
         comment_path = payload["comments"][0]["path"]
@@ -368,7 +372,11 @@ def test_post_review_skips_out_of_workspace_suggestions(test_token: str) -> None
         ),
     ]
 
-    with patch.object(reporter, "_api_request", return_value=True) as mock_api:
+    diff = {"some/other/file.py": {1, 2, 3}}
+    with (
+        patch.object(reporter, "_fetch_pr_diff_lines", return_value=diff),
+        patch.object(reporter, "_api_request", return_value=True) as mock_api,
+    ):
         reporter._post_review(suggestions)
         # Out-of-workspace suggestion should be filtered; no API call made
         mock_api.assert_not_called()

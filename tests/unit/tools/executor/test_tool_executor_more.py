@@ -145,10 +145,10 @@ def test_main_loop_get_tool_raises_appends_failure(
     ok = ToolResult(name="black", success=True, output="", issues_count=0)
 
     def fake_get_tools(
-        tools: str | None,
-        action: str,
+        _tools: str | None,
+        _action: str,
         *,
-        ignore_conflicts: bool = False,
+        ignore_conflicts: bool = False,  # noqa: ARG001 — must match caller kwarg name
     ) -> ToolsToRunResult:
         return ToolsToRunResult(to_run=["ruff", "black"])
 
@@ -210,10 +210,10 @@ def test_write_reports_errors_are_swallowed(monkeypatch: pytest.MonkeyPatch) -> 
     ok = ToolResult(name="ruff", success=True, output="", issues_count=0)
 
     def fake_get_tools(
-        tools: str | None,
-        action: str,
+        _tools: str | None,
+        _action: str,
         *,
-        ignore_conflicts: bool = False,
+        ignore_conflicts: bool = False,  # noqa: ARG001 — must match caller kwarg name
     ) -> ToolsToRunResult:
         return ToolsToRunResult(to_run=["ruff"])
 

@@ -73,13 +73,13 @@ def test_fix_recomputes_totals_after_ai_changes(monkeypatch, fake_logger):
     """Test that fix recomputes totals after AI changes."""
 
     class _FakeTool:
-        def set_options(self, **kwargs: Any) -> None:
+        def set_options(self, **_kwargs: Any) -> None:
             return None
 
         def reset_options(self) -> None:
             return None
 
-        def fix(self, paths: Any, options: Any) -> ToolResult:
+        def fix(self, _paths: Any, _options: Any) -> ToolResult:
             return ToolResult(
                 name="ruff",
                 success=False,
@@ -89,7 +89,7 @@ def test_fix_recomputes_totals_after_ai_changes(monkeypatch, fake_logger):
                 issues=[],
             )
 
-        def check(self, paths: Any, options: Any) -> ToolResult:
+        def check(self, _paths: Any, _options: Any) -> ToolResult:
             return ToolResult(
                 name="ruff",
                 success=False,
