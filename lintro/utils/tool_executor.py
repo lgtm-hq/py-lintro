@@ -184,6 +184,8 @@ def _display_fix_result(
     # remain, the initial_issues list is misleading because not all of
     # them were actually resolved.
     remaining = getattr(result, "remaining_issues_count", None)
+    if remaining is None:
+        remaining = getattr(result, "issues_count", None)
     if (
         action == Action.FIX
         and result.initial_issues
@@ -238,7 +240,11 @@ def _display_fix_result(
             action=action,
             success=result.success,
         )
-    elif result.issues_count == 0 and result.success:
+    elif (
+        result.issues_count == 0
+        and result.success
+        and not getattr(result, "fixed_issues_count", 0)
+    ):
         console_output_func(
             text="✓ No issues found.",
             color="green",

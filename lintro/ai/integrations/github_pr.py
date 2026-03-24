@@ -316,7 +316,11 @@ def _detect_repo_root() -> Path | None:
     Returns:
         Repository root path, or ``None`` if detection fails.
     """
+    import shutil
     import subprocess
+
+    if not shutil.which("git"):
+        return None
 
     try:
         result = subprocess.run(
