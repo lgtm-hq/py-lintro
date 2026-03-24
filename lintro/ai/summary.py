@@ -18,7 +18,11 @@ from loguru import logger
 from lintro.ai.fallback import complete_with_fallback
 from lintro.ai.models import AISummary
 from lintro.ai.paths import resolve_workspace_root, to_provider_path
-from lintro.ai.prompts.summary import SUMMARY_PROMPT_TEMPLATE, SUMMARY_SYSTEM
+from lintro.ai.prompts import (
+    POST_FIX_SUMMARY_PROMPT_TEMPLATE,
+    SUMMARY_PROMPT_TEMPLATE,
+    SUMMARY_SYSTEM,
+)
 from lintro.ai.retry import (
     DEFAULT_BACKOFF_FACTOR,
     DEFAULT_BASE_DELAY,
@@ -383,6 +387,122 @@ def generate_summary_from_params(
     return generate_summary(
         results,
         provider,
+        max_tokens=params.max_tokens,
+        workspace_root=params.workspace_root,
+        timeout=params.timeout,
+        max_retries=params.max_retries,
+        base_delay=params.base_delay,
+        max_delay=params.max_delay,
+        backoff_factor=params.backoff_factor,
+        fallback_models=params.fallback_models,
+    )
+
+
+def generate_post_fix_summary(
+    *,
+    applied: int,
+    rejected: int,
+    remaining_results: Sequence[ToolResult],
+    provider: BaseAIProvider,
+    max_tokens: int = 1024,
+    workspace_root: Path | None = None,
+    timeout: float = 60.0,
+    max_retries: int = 2,
+    base_delay: float | None = None,
+    max_delay: float | None = None,
+    backoff_factor: float | None = None,
+    fallback_models: list[str] | None = None,
+) -> AISummary | None:
+    """Generate a summary for the post-fix context.
+
+    Contextualizes what was fixed and what remains, providing
+    actionable next steps for remaining issues.
+
+    Args:
+        applied: Number of fixes applied.
+        rejected: Number of fixes rejected.
+        remaining_results: Tool results with remaining issues.
+        provider: AI provider instance.
+        max_tokens: Maximum tokens for the response.
+        workspace_root: Optional root used for provider-safe path redaction.
+        timeout: Request timeout in seconds per API call.
+        max_retries: Maximum retry attempts for transient API failures.
+        base_delay: Initial retry delay in seconds (None = use default).
+        max_delay: Maximum retry delay in seconds (None = use default).
+        backoff_factor: Retry backoff multiplier (None = use default).
+        fallback_models: Ordered list of fallback model identifiers
+            to try when the primary model fails with a retryable error.
+
+    Returns:
+        AISummary, or None if generation fails.
+    """
+    remaining_count = sum(
+        r.issues_count for r in remaining_results if r.issues_count and not r.skipped
+    )
+
+    digest = _build_issues_digest(
+        remaining_results,
+        workspace_root=workspace_root,
+        max_tokens=6000,
+    )
+    if not digest.strip() and remaining_count == 0:
+        # All issues resolved — no summary needed
+        return None
+
+    if digest.strip():
+        issues_digest = digest
+    else:
+        # remaining_count must be > 0 here (remaining_count == 0 returned above)
+        issues_digest = f"Remaining issues: {remaining_count} (details unavailable)"
+
+    prompt = POST_FIX_SUMMARY_PROMPT_TEMPLATE.format(
+        applied=applied,
+        rejected=rejected,
+        remaining=remaining_count,
+        issues_digest=issues_digest,
+    )
+
+    return _call_summary_provider(
+        prompt,
+        provider=provider,
+        max_tokens=max_tokens,
+        timeout=timeout,
+        max_retries=max_retries,
+        base_delay=base_delay,
+        max_delay=max_delay,
+        backoff_factor=backoff_factor,
+        fallback_models=fallback_models,
+    )
+
+
+def generate_post_fix_summary_from_params(
+    *,
+    applied: int,
+    rejected: int,
+    remaining_results: Sequence[ToolResult],
+    provider: BaseAIProvider,
+    params: SummaryGenParams,
+) -> AISummary | None:
+    """Generate a post-fix summary using a ``SummaryGenParams`` parameter object.
+
+    Thin wrapper around ``generate_post_fix_summary`` that unpacks the
+    params object into keyword arguments.
+
+    Args:
+        applied: Number of fixes applied.
+        rejected: Number of fixes rejected.
+        remaining_results: Tool results with remaining issues.
+        provider: AI provider instance.
+        params: Grouped generation parameters.
+
+    Returns:
+        AISummary, or None if generation fails.
+    """
+    return generate_post_fix_summary(
+        applied=applied,
+        rejected=rejected,
+        remaining_results=remaining_results,
+        provider=provider,
         max_tokens=params.max_tokens,
         workspace_root=params.workspace_root,
         timeout=params.timeout,

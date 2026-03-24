@@ -49,3 +49,4 @@ jobs:
           # yamllint disable-line rule:line-length
           comment-summary-in-pr: ${{ github.event.pull_request.head.repo.fork == false }}
           allow-ghsas: true
+          retry-on-snapshot-warnings: true

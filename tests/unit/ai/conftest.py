@@ -9,6 +9,7 @@ from typing import Any
 import pytest
 
 from lintro.ai.config import AIConfig
+from lintro.ai.models import AIFixSuggestion
 from lintro.ai.providers.base import AIResponse, BaseAIProvider
 from lintro.parsers.base_issue import BaseIssue
 
@@ -135,5 +136,29 @@ def sample_issues() -> list[MockIssue]:
             message="Line too long",
             code="E501",
             severity="warning",
+        ),
+    ]
+
+
+@pytest.fixture
+def sample_fix_suggestions() -> list[AIFixSuggestion]:
+    """Create sample fix suggestions for testing."""
+    return [
+        AIFixSuggestion(
+            file="src/main.py",
+            line=10,
+            code="B101",
+            tool_name="bandit",
+            original_code="assert x > 0",
+            suggested_code="if not x > 0:\n    raise ValueError",
+            diff="--- a/src/main.py\n+++ b/src/main.py\n"
+            "-assert x > 0\n"
+            "+if not x > 0:\n"
+            "+    raise ValueError",
+            explanation="Replace assert with if/raise",
+            confidence="high",
+            input_tokens=150,
+            output_tokens=80,
+            cost_estimate=0.002,
         ),
     ]

@@ -1,0 +1,91 @@
+"""Tests for _read_file_safely and _extract_context."""
+
+from __future__ import annotations
+
+from assertpy import assert_that
+
+from lintro.ai.fix_context import extract_context as _extract_context
+from lintro.ai.fix_context import read_file_safely as _read_file_safely
+
+# ---------------------------------------------------------------------------
+# _read_file_safely
+# ---------------------------------------------------------------------------
+
+
+def test_read_file_safely_reads_existing_file(tmp_path):
+    """Existing file contents are returned as a string."""
+    f = tmp_path / "test.py"
+    f.write_text("hello world", encoding="utf-8")
+    result = _read_file_safely(str(f))
+    assert_that(result).is_equal_to("hello world")
+
+
+def test_read_file_safely_returns_none_for_missing(tmp_path):
+    """Missing file returns None instead of raising."""
+    missing = tmp_path / "no_such_file.py"
+    result = _read_file_safely(str(missing))
+    assert_that(result).is_none()
+
+
+def test_read_file_safely_returns_empty_string_for_empty_file(tmp_path):
+    """Empty file returns an empty string, not None."""
+    f = tmp_path / "empty.py"
+    f.write_text("", encoding="utf-8")
+    result = _read_file_safely(str(f))
+    assert_that(result).is_equal_to("")
+
+
+# ---------------------------------------------------------------------------
+# _extract_context
+# ---------------------------------------------------------------------------
+
+
+def test_extract_context_extracts_context():
+    """Context window is centred on the target line."""
+    content = "\n".join(f"line {i}" for i in range(1, 31))
+    context, start, end = _extract_context(content, 15, 5)
+    assert_that(start).is_equal_to(10)
+    assert_that(end).is_equal_to(20)
+    assert_that(context).contains("line 15")
+
+
+def test_extract_context_clamps_to_start():
+    """Verify context window clamps to the first line when target is near the start."""
+    content = "\n".join(f"line {i}" for i in range(1, 11))
+    _context, start, _end = _extract_context(content, 1, 5)
+    assert_that(start).is_equal_to(1)
+
+
+def test_extract_context_clamps_to_end():
+    """Verify context window clamps to the last line when target is near the end."""
+    content = "\n".join(f"line {i}" for i in range(1, 11))
+    _context, _start, end = _extract_context(content, 10, 5)
+    assert_that(end).is_equal_to(10)
+
+
+def test_extract_context_empty_content():
+    """Empty content returns empty context with start=1, end=0."""
+    context, start, end = _extract_context("", 1, 5)
+    assert_that(context).is_equal_to("")
+    assert_that(start).is_equal_to(1)
+    assert_that(end).is_equal_to(0)
+
+
+def test_extract_context_non_positive_line():
+    """Line 0 or negative is clamped to the first line."""
+    content = "\n".join(f"line {i}" for i in range(1, 11))
+    context, start, _end = _extract_context(content, 0, 3)
+    assert_that(start).is_equal_to(1)
+    assert_that(context).contains("line 1")
+
+    context_neg, start_neg, _end_neg = _extract_context(content, -5, 3)
+    assert_that(start_neg).is_equal_to(1)
+    assert_that(context_neg).contains("line 1")
+
+
+def test_extract_context_clamps_out_of_bounds_line():
+    """Line beyond file length is clamped to file bounds."""
+    content = "\n".join(f"line {i}" for i in range(1, 11))
+    context, _start, end = _extract_context(content, 999, 3)
+    assert_that(end).is_equal_to(10)
+    assert_that(context).contains("line 10")
