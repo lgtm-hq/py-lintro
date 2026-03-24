@@ -10,6 +10,7 @@ from typing import Any
 
 from lintro.enums.action import Action
 from lintro.enums.tool_name import ToolName, normalize_tool_name
+from lintro.utils.ai_metadata import get_ai_count
 from lintro.utils.console import (
     RE_CANNOT_AUTOFIX,
     RE_REMAINING_OR_CANNOT,
@@ -99,43 +100,17 @@ def _format_tool_display_name(tool_name: str) -> str:
 
 def _get_ai_applied_count(result: object) -> int:
     """Get AI-applied fix count from tool result metadata."""
-    ai_metadata = getattr(result, "ai_metadata", None)
-    if not isinstance(ai_metadata, dict):
-        return 0
-    applied_count = ai_metadata.get(
-        "applied_count",
-        ai_metadata.get("fixed_count", 0),
-    )
-    if applied_count is None:
-        return 0
-    try:
-        return max(0, int(applied_count))
-    except (TypeError, ValueError):
-        return 0
+    return get_ai_count(result, "applied_count")
 
 
 def _get_ai_verified_count(result: object) -> int:
     """Get count of AI-applied fixes verified as resolved."""
-    ai_metadata = getattr(result, "ai_metadata", None)
-    if not isinstance(ai_metadata, dict):
-        return 0
-    verified_count = ai_metadata.get("verified_count", 0)
-    try:
-        return max(0, int(verified_count))
-    except (TypeError, ValueError):
-        return 0
+    return get_ai_count(result, "verified_count")
 
 
 def _get_ai_unverified_count(result: object) -> int:
     """Get count of AI-applied fixes that remain unresolved."""
-    ai_metadata = getattr(result, "ai_metadata", None)
-    if not isinstance(ai_metadata, dict):
-        return 0
-    unverified_count = ai_metadata.get("unverified_count", 0)
-    try:
-        return max(0, int(unverified_count))
-    except (TypeError, ValueError):
-        return 0
+    return get_ai_count(result, "unverified_count")
 
 
 def _is_result_skipped(result: object) -> tuple[bool, str]:

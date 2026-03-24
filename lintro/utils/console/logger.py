@@ -18,6 +18,7 @@ from loguru import logger
 from lintro.enums.action import Action, normalize_action
 from lintro.enums.severity_level import SeverityLevel
 from lintro.enums.tool_name import ToolName
+from lintro.utils.ai_metadata import get_ai_count as _get_ai_count
 from lintro.utils.console.constants import (
     BORDER_LENGTH,
     RE_CANNOT_AUTOFIX,
@@ -29,26 +30,6 @@ from lintro.utils.display_helpers import (
     print_final_status,
     print_final_status_format,
 )
-
-
-def _get_ai_count(result: object, key: str) -> int:
-    """Get an integer AI metadata count from a result object.
-
-    Falls back from ``applied_count`` to ``fixed_count`` for
-    backward compatibility with older metadata.
-    """
-    ai_metadata = getattr(result, "ai_metadata", None)
-    if not isinstance(ai_metadata, dict):
-        return 0
-    value = ai_metadata.get(key)
-    if value is None and key == "applied_count":
-        value = ai_metadata.get("fixed_count", 0)
-    if value is None:
-        return 0
-    try:
-        return max(0, int(value))
-    except (TypeError, ValueError):
-        return 0
 
 
 class ThreadSafeConsoleLogger:

@@ -19,7 +19,7 @@ from loguru import logger
 
 from lintro.ai.enums import ConfidenceLevel
 from lintro.ai.models import AIFixSuggestion, AISummary
-from lintro.ai.paths import to_provider_path
+from lintro.ai.paths import OUTSIDE_WORKSPACE_SENTINEL, to_provider_path
 
 
 class GitHubPRReporter:
@@ -140,7 +140,7 @@ class GitHubPRReporter:
             # Skip empty, outside-workspace sentinel, and parent-relative paths.
             # Note: absence of "/" does not imply out-of-workspace — repo-root
             # files like "README.md" or "pyproject.toml" are valid.
-            if not rel or rel == "<outside-workspace>" or rel.startswith(".."):
+            if not rel or rel == OUTSIDE_WORKSPACE_SENTINEL or rel.startswith(".."):
                 continue
             body = _format_inline_comment(s)
             # GitHub review comments require a valid line; skip if missing

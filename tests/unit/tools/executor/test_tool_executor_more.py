@@ -289,7 +289,7 @@ def test_unknown_post_check_tool_is_skipped(monkeypatch: pytest.MonkeyPatch) -> 
     monkeypatch.setattr(
         te,
         "get_tools_to_run",
-        lambda tools, action, *, ignore_conflicts=False: ToolsToRunResult(
+        lambda _tools, _action, *, ignore_conflicts=False: ToolsToRunResult(
             to_run=["ruff"],
         ),
         raising=True,
@@ -364,7 +364,7 @@ def test_post_checks_early_filter_removes_black_from_main(
     monkeypatch.setattr(
         te,
         "get_tools_to_run",
-        lambda tools, action, *, ignore_conflicts=False: ToolsToRunResult(
+        lambda _tools, _action, *, ignore_conflicts=False: ToolsToRunResult(
             to_run=["ruff", "black"],
         ),
         raising=True,
@@ -464,7 +464,7 @@ def test_all_filtered_results_in_no_tools_warning(
     monkeypatch.setattr(
         te,
         "get_tools_to_run",
-        lambda tools, action, *, ignore_conflicts=False: ToolsToRunResult(
+        lambda _tools, _action, *, ignore_conflicts=False: ToolsToRunResult(
             to_run=["black"],
         ),
         raising=True,

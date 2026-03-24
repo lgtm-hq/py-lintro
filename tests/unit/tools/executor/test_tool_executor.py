@@ -388,7 +388,7 @@ def test_executor_unknown_tool(
     """
     _stub_logger(monkeypatch, fake_logger)
 
-    def raise_value_error(tools: str | None, action: str, **_kwargs: object) -> Never:
+    def raise_value_error(_tools: str | None, _action: str, **_kwargs: object) -> Never:
         raise ValueError("unknown tool")
 
     monkeypatch.setattr(te, "get_tools_to_run", raise_value_error, raising=True)

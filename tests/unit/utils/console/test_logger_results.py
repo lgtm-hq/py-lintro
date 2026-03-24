@@ -114,4 +114,5 @@ def test_print_tool_result_handles_pytest_for_test_action(
             action=Action.TEST,
             success=True,
         )
-        mock_pytest.assert_called_once_with("test output", True)
+        expected_success = True
+        mock_pytest.assert_called_once_with("test output", expected_success)

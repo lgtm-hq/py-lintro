@@ -5,6 +5,9 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
+OUTSIDE_WORKSPACE_SENTINEL = "<outside-workspace>"
+"""Sentinel returned by :func:`to_provider_path` for paths outside the workspace."""
+
 
 def relative_path(file_path: str) -> str:
     """Convert a path to be relative to cwd for display.
@@ -80,9 +83,9 @@ def to_provider_path(file_path: str, workspace_root: Path) -> str:
 
     Returns:
         Workspace-relative POSIX path when under workspace_root,
-        or the ``"<outside-workspace>"`` sentinel for any path outside it.
+        or :data:`OUTSIDE_WORKSPACE_SENTINEL` for any path outside it.
     """
     resolved = resolve_workspace_file(file_path, workspace_root)
     if resolved is None:
-        return "<outside-workspace>"
+        return OUTSIDE_WORKSPACE_SENTINEL
     return resolved.relative_to(workspace_root.resolve()).as_posix()
