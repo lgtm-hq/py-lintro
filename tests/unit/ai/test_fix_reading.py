@@ -63,6 +63,26 @@ def test_extract_context_clamps_to_end():
     assert_that(end).is_equal_to(10)
 
 
+def test_extract_context_empty_content():
+    """Empty content returns empty context with start=1, end=0."""
+    context, start, end = _extract_context("", 1, 5)
+    assert_that(context).is_equal_to("")
+    assert_that(start).is_equal_to(1)
+    assert_that(end).is_equal_to(0)
+
+
+def test_extract_context_non_positive_line():
+    """Line 0 or negative is clamped to the first line."""
+    content = "\n".join(f"line {i}" for i in range(1, 11))
+    context, start, _end = _extract_context(content, 0, 3)
+    assert_that(start).is_equal_to(1)
+    assert_that(context).contains("line 1")
+
+    context_neg, start_neg, _end_neg = _extract_context(content, -5, 3)
+    assert_that(start_neg).is_equal_to(1)
+    assert_that(context_neg).contains("line 1")
+
+
 def test_extract_context_clamps_out_of_bounds_line():
     """Line beyond file length is clamped to file bounds."""
     content = "\n".join(f"line {i}" for i in range(1, 11))

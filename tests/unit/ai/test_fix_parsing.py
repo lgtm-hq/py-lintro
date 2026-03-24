@@ -154,6 +154,20 @@ def test_parse_fix_response_risk_level_defaults_to_empty():
     assert_that(result.risk_level).is_equal_to("")  # type: ignore[union-attr]  # assertpy is_not_none narrows this
 
 
+def test_parse_fix_response_confidence_defaults_to_medium():
+    """When confidence is absent from the JSON, the field should default to 'medium'."""
+    content = json.dumps(
+        {
+            "original_code": "assert x > 0",
+            "suggested_code": "if not x > 0:\n    raise ValueError",
+            "explanation": "Replace assert",
+        },
+    )
+    result = parse_fix_response(content, "main.py", 10, "B101")
+    assert_that(result).is_not_none()
+    assert_that(result.confidence).is_equal_to("medium")  # type: ignore[union-attr]  # assertpy is_not_none narrows this
+
+
 # ---------------------------------------------------------------------------
 # parse_batch_response
 # ---------------------------------------------------------------------------
