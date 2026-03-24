@@ -256,3 +256,31 @@ def test_parse_batch_response_skips_identical_code():
     )
     result = parse_batch_response(content, "test.py")
     assert_that(result).is_empty()
+
+
+def test_parse_batch_response_coerces_line_and_code():
+    """Verify line is coerced to int and code to str from non-standard types."""
+    content = json.dumps(
+        [
+            {
+                "line": "7",
+                "code": 123,
+                "original_code": "old",
+                "suggested_code": "new",
+            },
+            {
+                "line": "notanint",
+                "code": None,
+                "original_code": "old2",
+                "suggested_code": "new2",
+            },
+        ],
+    )
+    result = parse_batch_response(content, "test.py")
+    assert_that(result).is_length(2)
+    # Numeric string coerced to int
+    assert_that(result[0].line).is_equal_to(7)
+    assert_that(result[0].code).is_equal_to("123")
+    # Non-numeric string falls back to 0
+    assert_that(result[1].line).is_equal_to(0)
+    assert_that(result[1].code).is_equal_to("None")
