@@ -129,6 +129,22 @@ def _run_fix_with_retry(
             initial_issues=first_pass_initial_issues,
             cwd=result.cwd,
         )
+    elif first_pass_initial_issues is not None:
+        # Preserve initial_issues even when initial_issues_count is absent
+        fixed = max(0, len(first_pass_initial_issues) - remaining)
+        result = ToolResult(
+            name=result.name,
+            success=result.success,
+            output=result.output,
+            issues_count=remaining,
+            issues=result.issues,
+            initial_issues_count=len(first_pass_initial_issues),
+            fixed_issues_count=fixed,
+            remaining_issues_count=remaining,
+            formatted_output=result.formatted_output,
+            initial_issues=first_pass_initial_issues,
+            cwd=result.cwd,
+        )
 
     return result
 
@@ -386,6 +402,7 @@ def run_lint_tools_simple(
     Raises:
         TypeError: If a programming error occurs during tool execution.
         AttributeError: If a programming error occurs during tool execution.
+        Exception: Re-raised from AI hook when ``ai.fail_on_ai_error`` is enabled.
     """
     # Normalize action to enum
     action = normalize_action(action)
@@ -719,9 +736,13 @@ def run_lint_tools_simple(
             from loguru import logger as loguru_logger
 
             loguru_logger.opt(exception=True).debug(f"AI hook failed: {exc}")
+            if getattr(lintro_config.ai, "fail_on_ai_error", False):
+                raise
+            if output_format.lower() not in ("json", "sarif"):
+                logger.console_output(f"Warning: AI enhancement failed: {exc}")
             from lintro.ai.models import AIResult
 
-            ai_result = AIResult(error=True)
+            ai_result = AIResult(error=True, message=str(exc))
         if ai_result is not None:
             total_issues, total_fixed, total_remaining = aggregate_tool_results(
                 all_results,
