@@ -32,21 +32,41 @@ def test_token() -> str:
 # -- TestDetectPRNumber: Tests for PR number detection from GITHUB_REF. ------
 
 
+def test_detects_pr_number_from_event_payload(tmp_path: Path) -> None:
+    """Detect PR number from GITHUB_EVENT_PATH payload."""
+    event_file = tmp_path / "event.json"
+    event_file.write_text('{"number": 99}')
+    with patch.dict(
+        "os.environ",
+        {"GITHUB_EVENT_PATH": str(event_file), "GITHUB_REF": "refs/pull/42/merge"},
+    ):
+        assert_that(_detect_pr_number()).is_equal_to(99)
+
+
 def test_detects_pr_number_from_ref() -> None:
     """Detect PR number from GITHUB_REF."""
-    with patch.dict("os.environ", {"GITHUB_REF": "refs/pull/42/merge"}):
+    with patch.dict(
+        "os.environ",
+        {"GITHUB_REF": "refs/pull/42/merge", "GITHUB_EVENT_PATH": ""},
+    ):
         assert_that(_detect_pr_number()).is_equal_to(42)
 
 
 def test_returns_none_for_branch_ref() -> None:
     """Return None for branch refs."""
-    with patch.dict("os.environ", {"GITHUB_REF": "refs/heads/main"}):
+    with patch.dict(
+        "os.environ",
+        {"GITHUB_REF": "refs/heads/main", "GITHUB_EVENT_PATH": ""},
+    ):
         assert_that(_detect_pr_number()).is_none()
 
 
 def test_returns_none_for_empty_ref() -> None:
     """Return None for empty GITHUB_REF."""
-    with patch.dict("os.environ", {"GITHUB_REF": ""}):
+    with patch.dict(
+        "os.environ",
+        {"GITHUB_REF": "", "GITHUB_EVENT_PATH": ""},
+    ):
         assert_that(_detect_pr_number()).is_none()
 
 
