@@ -48,11 +48,9 @@ For workflows that should be unique per commit (e.g., manual TestPyPI publish), 
 
 ## Quick Reference by File Name
 
+- ci-pipeline.yml: Gated CI pipeline — resolve-tools, docker-build, lint, test (with
+  coverage), smoke-test, publish, and deploy-pages (coverage to GitHub Pages on main).
 - ci-lintro-analysis.yml: Run Lintro on PRs/pushes; Docker build; PR comment.
-- test-and-coverage.yml: Full test suite in Docker, upload coverage artifacts, comment
-  coverage on PRs.
-- pages-deploy-coverage.yml: Deploy coverage HTML to GitHub Pages after a successful
-  test-and-coverage run.
 - lintro-report-scheduled.yml: Scheduled/manual Lintro run that uploads a markdown
   report.
 - docker-build-publish.yml: Build/test Docker image; publish to GHCR on main/release.

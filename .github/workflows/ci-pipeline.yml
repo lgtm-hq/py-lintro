@@ -4,6 +4,7 @@
 name: CI Pipeline
 
 # Gated CI: resolve-tools → docker-build → lint → test → smoke-test → publish
+#                                                test → deploy-pages (main only)
 # Each stage depends on the previous passing. Docker image built ONCE and shared
 # via GHCR registry (ci-<run_id> tags), with artifact fallback for fork PRs.
 
@@ -730,6 +731,61 @@ jobs:
           marker: '<!-- coverage-report -->'
 
   # ============================================================================
+  # Stage 4c: Deploy Coverage to GitHub Pages (main only)
+  # ============================================================================
+  deploy-pages:
+    name: 🌐 Deploy Coverage to Pages
+    needs: [test]
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    defaults:
+      run:
+        shell: bash
+    concurrency:
+      group: pages-deploy-${{ github.ref }}
+      cancel-in-progress: true
+    steps:
+      - name: Harden Runner
+        uses: step-security/harden-runner@e3f713f2d8f53843e71c69a996d56f51aa9adfb9
+        with:
+          egress-policy: 'block'
+          allowed-endpoints: >
+            github.com:443
+            api.github.com:443
+            codeload.github.com:443
+            release-assets.githubusercontent.com:443
+            objects.githubusercontent.com:443
+      - name: Checkout
+        uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
+      - name: Download coverage report artifact
+        # yamllint disable-line rule:line-length
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
+        with:
+          name: coverage-report-python-3.14
+          path: coverage-report
+      - name: Download coverage badge artifact
+        # yamllint disable-line rule:line-length
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
+        with:
+          name: coverage-badge
+          path: coverage-badge
+      - name: Prepare coverage report directory
+        run: ./scripts/ci/pages-deploy.sh --badge-path coverage-badge/coverage-badge.svg
+      - name: Deploy coverage to Pages
+        id: deployment
+        uses: ./.github/actions/pages-deploy
+        with:
+          path: _site
+
+  # ============================================================================
   # Stage 5: Smoke Test (GATED on test)
   # ============================================================================
   smoke-test:
@@ -943,7 +999,7 @@ jobs:
     # publish is included so cleanup waits for it on main pushes before
     # deleting CI-tagged images; on PRs publish is skipped and always()
     # lets cleanup proceed without blocking.
-    needs: [docker-build, lint, test, smoke-test, publish]
+    needs: [docker-build, lint, test, smoke-test, publish, deploy-pages]
     if: >-
       always() &&
       needs.docker-build.outputs.is-fork != 'true'
