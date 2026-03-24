@@ -83,6 +83,5 @@ def to_provider_path(file_path: str, workspace_root: Path) -> str:
     """
     resolved = resolve_workspace_file(file_path, workspace_root)
     if resolved is None:
-        name = Path(file_path).name
-        return name if name else "<outside-workspace>"
+        return "<outside-workspace>"
     return resolved.relative_to(workspace_root.resolve()).as_posix()

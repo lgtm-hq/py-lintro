@@ -29,6 +29,8 @@ from lintro.enums.output_format import OutputFormat
 
 if TYPE_CHECKING:
     from lintro.ai.config import AIConfig
+    from lintro.ai.models.fix_suggestion import AIFixSuggestion
+    from lintro.ai.models.summary import AISummary
     from lintro.ai.providers.base import BaseAIProvider
     from lintro.config.lintro_config import LintroConfig
     from lintro.models.core.tool_result import ToolResult
@@ -273,8 +275,9 @@ def _collect_and_fix(
     """
     fixes_applied = 0
     fixes_failed = 0
+    fix_suggestions: list[AIFixSuggestion] = []
     if fix_issues:
-        fixes_applied, fixes_failed, _fix_suggestions = run_fix_pipeline(
+        fixes_applied, fixes_failed, fix_suggestions = run_fix_pipeline(
             fix_issues=fix_issues,
             provider=provider,
             ai_config=ai_config,

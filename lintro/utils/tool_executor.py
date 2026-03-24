@@ -711,7 +711,7 @@ def run_lint_tools_simple(
             console_logger=logger,
             output_format=output_format,
         )
-        if action == Action.FIX:
+        if ai_result is not None:
             total_issues, total_fixed, total_remaining = aggregate_tool_results(
                 all_results,
                 action,
@@ -777,17 +777,34 @@ def run_lint_tools_simple(
         # Write user-specified output file (--output flag)
         if output_file is not None:
             try:
-                from lintro.enums.output_format import normalize_output_format
+                from lintro.enums.output_format import (
+                    OutputFormat,
+                    normalize_output_format,
+                )
                 from lintro.utils.output.file_writer import write_output_file
 
-                write_output_file(
-                    output_path=output_file,
-                    output_format=normalize_output_format(output_format),
-                    all_results=all_results,
-                    action=action,
-                    total_issues=total_issues,
-                    total_fixed=total_fixed,
-                )
+                fmt = normalize_output_format(output_format)
+                if fmt == OutputFormat.SARIF:
+                    from pathlib import Path
+
+                    from lintro.ai.output.sarif import write_sarif
+                    from lintro.ai.output.sarif_bridge import (
+                        suggestions_from_results,
+                        summary_from_results,
+                    )
+
+                    suggestions = suggestions_from_results(all_results)
+                    summary = summary_from_results(all_results)
+                    write_sarif(suggestions, summary, output_path=Path(output_file))
+                else:
+                    write_output_file(
+                        output_path=output_file,
+                        output_format=fmt,
+                        all_results=all_results,
+                        action=action,
+                        total_issues=total_issues,
+                        total_fixed=total_fixed,
+                    )
             except (OSError, ValueError, TypeError) as e:
                 logger.console_output(f"Warning: Failed to write output file: {e}")
 

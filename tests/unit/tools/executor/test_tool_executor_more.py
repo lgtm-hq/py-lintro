@@ -144,7 +144,12 @@ def test_main_loop_get_tool_raises_appends_failure(
 
     ok = ToolResult(name="black", success=True, output="", issues_count=0)
 
-    def fake_get_tools(tools: str | None, action: str) -> ToolsToRunResult:
+    def fake_get_tools(
+        tools: str | None,
+        action: str,
+        *,
+        ignore_conflicts: bool = False,
+    ) -> ToolsToRunResult:
         return ToolsToRunResult(to_run=["ruff", "black"])
 
     def fake_get_tool(name: str) -> object:
@@ -204,7 +209,12 @@ def test_write_reports_errors_are_swallowed(monkeypatch: pytest.MonkeyPatch) -> 
 
     ok = ToolResult(name="ruff", success=True, output="", issues_count=0)
 
-    def fake_get_tools(tools: str | None, action: str) -> ToolsToRunResult:
+    def fake_get_tools(
+        tools: str | None,
+        action: str,
+        *,
+        ignore_conflicts: bool = False,
+    ) -> ToolsToRunResult:
         return ToolsToRunResult(to_run=["ruff"])
 
     ruff_tool = type(
@@ -279,7 +289,9 @@ def test_unknown_post_check_tool_is_skipped(monkeypatch: pytest.MonkeyPatch) -> 
     monkeypatch.setattr(
         te,
         "get_tools_to_run",
-        lambda tools, action: ToolsToRunResult(to_run=["ruff"]),
+        lambda tools, action, *, ignore_conflicts=False: ToolsToRunResult(
+            to_run=["ruff"],
+        ),
         raising=True,
     )
     monkeypatch.setattr(tool_manager, "get_tool", lambda name: ruff_tool)
@@ -352,7 +364,9 @@ def test_post_checks_early_filter_removes_black_from_main(
     monkeypatch.setattr(
         te,
         "get_tools_to_run",
-        lambda tools, action: ToolsToRunResult(to_run=["ruff", "black"]),
+        lambda tools, action, *, ignore_conflicts=False: ToolsToRunResult(
+            to_run=["ruff", "black"],
+        ),
         raising=True,
     )
 
@@ -450,7 +464,9 @@ def test_all_filtered_results_in_no_tools_warning(
     monkeypatch.setattr(
         te,
         "get_tools_to_run",
-        lambda tools, action: ToolsToRunResult(to_run=["black"]),
+        lambda tools, action, *, ignore_conflicts=False: ToolsToRunResult(
+            to_run=["black"],
+        ),
         raising=True,
     )
     # Early config filters out black

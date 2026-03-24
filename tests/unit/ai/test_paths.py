@@ -77,7 +77,7 @@ def test_paths_to_provider_path_is_workspace_relative(tmp_path):
 
 
 def test_paths_to_provider_path_falls_back_without_leaking_absolute(tmp_path):
-    """Absolute paths outside workspace fall back to filename only."""
+    """Absolute paths outside workspace return the sentinel marker."""
     outside_path = str(tmp_path.parent / "secret" / "main.py")
     provider_path = to_provider_path(outside_path, tmp_path)
-    assert_that(provider_path).is_equal_to("main.py")
+    assert_that(provider_path).is_equal_to("<outside-workspace>")

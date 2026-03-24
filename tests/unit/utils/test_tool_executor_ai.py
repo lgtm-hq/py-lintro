@@ -173,8 +173,9 @@ def test_fix_recomputes_totals_after_ai_changes(monkeypatch, fake_logger):
             *,
             console_logger: Any,
             output_format: Any,
-        ) -> None:
+        ) -> object:
             _fake_ai_enhancement(all_results=all_results)
+            return object()  # non-None sentinel to signal hook ran
 
     monkeypatch.setattr(
         hook_module,

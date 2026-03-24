@@ -30,6 +30,7 @@ class FakeToolResult:
     fixed_issues_count: int | None = None
     remaining_issues_count: int | None = None
     pytest_summary: dict[str, Any] | None = None
+    ai_metadata: dict[str, Any] | None = None
 
 
 @dataclass

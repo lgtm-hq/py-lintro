@@ -129,15 +129,10 @@ class GitHubPRReporter:
                 else relative_path(s.file)
             )
             rel = raw_path.removeprefix("./").replace("\\", "/") if raw_path else ""
-            # Skip empty, outside-workspace sentinel, parent-relative, and
-            # basename-only paths (to_provider_path falls back to basename
-            # when the file is outside the workspace root).
-            if (
-                not rel
-                or rel == "<outside-workspace>"
-                or rel.startswith("..")
-                or "/" not in rel
-            ):
+            # Skip empty, outside-workspace sentinel, and parent-relative paths.
+            # Note: absence of "/" does not imply out-of-workspace — repo-root
+            # files like "README.md" or "pyproject.toml" are valid.
+            if not rel or rel == "<outside-workspace>" or rel.startswith(".."):
                 continue
             body = _format_inline_comment(s)
             # GitHub review comments require a valid position; skip if missing
