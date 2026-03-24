@@ -9,6 +9,7 @@ from __future__ import annotations
 import sys
 from collections import defaultdict
 from collections.abc import Sequence
+from enum import StrEnum
 from pathlib import Path
 
 import click
@@ -33,14 +34,17 @@ from lintro.ai.validation import validate_applied_fixes
 
 __all__ = ["apply_fixes", "review_fixes_interactive"]
 
-# Named constants for interactive review key bindings
-KEY_ACCEPT = "y"
-KEY_ACCEPT_ALL = "a"
-KEY_REJECT = "r"
-KEY_SHOW_DIFF = "d"
-KEY_SKIP = "s"
-KEY_TOGGLE_VALIDATE = "v"
-KEY_QUIT = "q"
+
+class ReviewKey(StrEnum):
+    """Key bindings for interactive fix review."""
+
+    ACCEPT = "y"
+    ACCEPT_ALL = "a"
+    REJECT = "r"
+    SHOW_DIFF = "d"
+    SKIP = "s"
+    TOGGLE_VALIDATE = "v"
+    QUIT = "q"
 
 
 def _group_by_code(
@@ -120,12 +124,13 @@ def _print_group_header(
     )
     console.print()
     group_tool = first.tool_name if first else ""
+    unique_files = len({fix.file for fix in fixes})
     print_code_panel(
         console,
         code=code,
         index=group_index,
         total=total_groups,
-        count=len(fixes),
+        count=unique_files,
         count_label="file",
         content=content,
         tool_name=group_tool,
@@ -331,15 +336,15 @@ def review_fixes_interactive(
                 return accepted, rejected, all_applied
 
             if choice in ("\r", "\n"):
-                choice = KEY_ACCEPT if safe_default else KEY_SKIP
+                choice = ReviewKey.ACCEPT if safe_default else ReviewKey.SKIP
             else:
                 choice = choice.lower()
 
-            if choice == KEY_SHOW_DIFF:
+            if choice == ReviewKey.SHOW_DIFF:
                 _show_group_diffs(console, fixes)
                 console.print()
                 continue
-            if choice == KEY_TOGGLE_VALIDATE:
+            if choice == ReviewKey.TOGGLE_VALIDATE:
                 validate_mode = not validate_mode
                 state = "enabled" if validate_mode else "disabled"
                 console.print(
@@ -348,9 +353,15 @@ def review_fixes_interactive(
                 console.print()
                 continue
 
+            _valid_actions = {v.value for v in ReviewKey}
+            if choice not in _valid_actions:
+                console.print("  [dim]Unrecognized key. Use y/a/r/d/s/v/q.[/dim]")
+                console.print()
+                continue
+
             break
 
-        if choice in (KEY_ACCEPT_ALL, KEY_ACCEPT):
+        if choice in (ReviewKey.ACCEPT_ALL, ReviewKey.ACCEPT):
             count, group_applied = _apply_group(
                 console,
                 fixes,
@@ -367,18 +378,18 @@ def review_fixes_interactive(
                         "  [dim]Validation skipped "
                         "(no fixes applied in this group).[/dim]",
                     )
-            if choice == KEY_ACCEPT_ALL:
+            if choice == ReviewKey.ACCEPT_ALL:
                 accept_all = True
                 console.print("  [dim]Will accept all remaining groups.[/dim]")
-        elif choice == KEY_REJECT:
+        elif choice == ReviewKey.REJECT:
             rejected += len(fixes)
             console.print(
                 f"  [yellow]✗ Rejected {len(fixes)} "
                 f"fix{'es' if len(fixes) != 1 else ''}[/yellow]",
             )
-        elif choice == KEY_SKIP:
+        elif choice == ReviewKey.SKIP:
             console.print("  [dim]⏭  Skipped[/dim]")
-        elif choice == KEY_QUIT:
+        elif choice == ReviewKey.QUIT:
             console.print("  [dim]Quit review.[/dim]")
             break
 

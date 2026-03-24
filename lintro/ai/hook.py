@@ -1,7 +1,7 @@
 """Post-execution hook for AI enhancement.
 
 Replaces inline ``if lintro_config.ai.enabled:`` checks in tool_executor
-with a structured hook pattern. AI stays auto-invoked after check/format
+with a structured hook pattern. AI stays auto-invoked after check/fix
 -- no standalone command.
 """
 
@@ -89,5 +89,6 @@ class AIPostExecutionHook:
             logger.opt(exception=True).debug(f"AI post-execution hook failed: {e}")
             if getattr(self._lintro_config.ai, "fail_on_ai_error", False):
                 raise
-            console_logger.warning(f"AI enhancement unavailable: {e}")
+            if output_format.lower() != "json":
+                console_logger.warning(f"AI enhancement unavailable: {e}")
             return AIResult(error=True)
