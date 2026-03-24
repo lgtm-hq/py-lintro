@@ -276,7 +276,7 @@ class GitHubPRReporter:
         except urllib.error.HTTPError as e:
             try:
                 body = e.read().decode("utf-8", "replace")[:500]
-            except Exception:
+            except (AttributeError, UnicodeDecodeError, ValueError, OSError):
                 body = "<unreadable>"
             logger.warning(
                 "GitHub API request failed: {} {} -> {}: {}",
