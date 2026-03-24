@@ -36,12 +36,15 @@ if TYPE_CHECKING:
 def _revert_fix(
     suggestion: AIFixSuggestion,
     workspace_root: Path,
+    *,
+    search_radius: int = 5,
 ) -> bool:
     """Revert an applied fix by replacing suggested_code back with original_code.
 
     Args:
         suggestion: The applied suggestion to revert.
         workspace_root: Workspace root for path resolution.
+        search_radius: Max lines above/below the target line to search.
 
     Returns:
         True if the revert succeeded.
@@ -60,7 +63,7 @@ def _revert_fix(
         [reverse],
         workspace_root=workspace_root,
         auto_apply=True,
-        search_radius=5,
+        search_radius=search_radius,
     )
     return len(applied) > 0
 
@@ -137,7 +140,11 @@ def refine_unverified_fixes(
         )
 
         # Step 1: Revert the fix
-        if not _revert_fix(suggestion, workspace_root):
+        if not _revert_fix(
+            suggestion,
+            workspace_root,
+            search_radius=ai_config.fix_search_radius,
+        ):
             logger.debug(
                 f"Refinement: revert failed for "
                 f"{suggestion.file}:{suggestion.line}",

@@ -82,7 +82,10 @@ def parse_fix_response(
         logger.debug(f"AI fix code fields are not strings for {file_path}:{line}")
         return None
 
-    if not original or not suggested or original == suggested:
+    if not original or not suggested:
+        return None
+    if original == suggested:
+        logger.debug(f"AI suggested no-op fix for {file_path}:{line}")
         return None
 
     diff = generate_diff(file_path, original, suggested)

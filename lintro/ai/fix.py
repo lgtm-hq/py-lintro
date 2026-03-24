@@ -277,8 +277,10 @@ def _generate_batch_fixes(
         SystemExit: Re-raised immediately.
     """
     issues_list_parts: list[str] = []
+    raw_messages: list[str] = []
     for idx, issue in enumerate(file_issues, 1):
         code = getattr(issue, "code", "") or ""
+        raw_messages.append(issue.message)
         msg = redact_secrets(sanitize_code_content(issue.message))
         issues_list_parts.append(
             f"{idx}. Line {issue.line} [{code}]: {msg}",
@@ -288,7 +290,8 @@ def _generate_batch_fixes(
     sanitized_content = redact_secrets(sanitize_code_content(file_content))
     if sanitize_mode != SanitizeMode.OFF:
         file_injections = detect_injection_patterns(file_content)
-        msg_injections = detect_injection_patterns(issues_list)
+        # Scan raw messages before sanitization to catch original injection markers
+        msg_injections = detect_injection_patterns("\n".join(raw_messages))
         injections = file_injections + msg_injections
         if injections:
             if sanitize_mode == SanitizeMode.BLOCK:

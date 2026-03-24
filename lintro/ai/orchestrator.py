@@ -18,7 +18,7 @@ from lintro.ai.display import render_summary, render_summary_annotations
 from lintro.ai.display.shared import is_github_actions
 from lintro.ai.filters import filter_issues
 from lintro.ai.metadata import attach_summary_metadata
-from lintro.ai.models import AIFixSuggestion, AIResult
+from lintro.ai.models import AIResult
 from lintro.ai.paths import resolve_workspace_file, resolve_workspace_root
 from lintro.ai.pipeline import run_fix_pipeline
 from lintro.ai.providers import get_provider
@@ -263,9 +263,8 @@ def _collect_and_fix(
     """
     fixes_applied = 0
     fixes_failed = 0
-    fix_suggestions: list[AIFixSuggestion] = []
     if fix_issues:
-        fixes_applied, fixes_failed, fix_suggestions = run_fix_pipeline(
+        fixes_applied, fixes_failed, _fix_suggestions = run_fix_pipeline(
             fix_issues=fix_issues,
             provider=provider,
             ai_config=ai_config,

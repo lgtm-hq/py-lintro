@@ -259,12 +259,17 @@ def _consume_matching_remaining_issue(
         return True
 
     if line is None:
-        for key in list(remaining_counts.keys()):
-            if remaining_counts[key] <= 0:
-                continue
-            if key[0] == file_path and key[1] == code:
-                remaining_counts[key] -= 1
-                return True
+        match_key = next(
+            (
+                k
+                for k, v in remaining_counts.items()
+                if v > 0 and k[0] == file_path and k[1] == code
+            ),
+            None,
+        )
+        if match_key is not None:
+            remaining_counts[match_key] -= 1
+            return True
 
     return False
 

@@ -17,7 +17,7 @@ from rich.markup import escape
 from rich.panel import Panel
 from rich.syntax import Syntax
 
-from lintro.ai.apply import _apply_fix, apply_fixes
+from lintro.ai.apply import apply_fixes
 from lintro.ai.display.shared import cost_str, print_code_panel, print_section_header
 from lintro.ai.display.validation import render_validation
 from lintro.ai.enums import RiskLevel
@@ -180,10 +180,11 @@ def _apply_group(
     # Sort fixes by (file, line descending) so same-file edits apply
     # bottom-to-top, preventing earlier edits from shifting later targets.
     sorted_fixes = sorted(fixes, key=lambda f: (f.file, -(f.line or 0)))
-    applied_fixes: list[AIFixSuggestion] = []
-    for fix in sorted_fixes:
-        if _apply_fix(fix, workspace_root=workspace_root, search_radius=search_radius):
-            applied_fixes.append(fix)
+    applied_fixes = apply_fixes(
+        sorted_fixes,
+        workspace_root=workspace_root,
+        search_radius=search_radius,
+    )
     applied = len(applied_fixes)
     failed = len(fixes) - applied
     msg = f"  [green]✓ Applied {applied}/{len(fixes)}[/green]"
