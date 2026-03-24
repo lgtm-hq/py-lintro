@@ -241,7 +241,21 @@ When using `--output-format json`, AI data is included in the output:
 
 ```json
 {
-  "results": [...],
+  "results": [
+    {
+      "tool": "ruff",
+      "issues": [...],
+      "ai_metadata": {
+        "summary": {
+          "overview": "Code quality assessment...",
+          "key_patterns": ["Pattern 1", "Pattern 2"],
+          "priority_actions": ["Action 1", "Action 2"],
+          "estimated_effort": "20-30 minutes"
+        },
+        "fix_suggestions": [...]
+      }
+    }
+  ],
   "summary": {...},
   "ai_summary": {
     "overview": "Code quality assessment...",
@@ -294,7 +308,7 @@ uv pip install lintro  # no AI support
 AI API calls use exponential backoff retry:
 
 - **Max retries:** 2 (3 total attempts)
-- **Backoff:** 1s, 2s, 4s (capped at 30s)
+- **Backoff:** 1s, 2s (capped at 30s)
 - **Retried errors:** rate limits, transient provider errors
 - **Not retried:** authentication errors (fail immediately)
 
@@ -343,7 +357,7 @@ docker run --rm \
   ghcr.io/lgtm-hq/py-lintro:latest check .
 ```
 
-The Docker image includes the AI extras by default when built with `WITH_AI=true`:
+The Docker image includes the AI extras when built with `WITH_AI=true`:
 
 ```bash
 docker build --build-arg WITH_AI=true -t lintro-ai .

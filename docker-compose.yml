@@ -56,8 +56,10 @@ services:
       - RUNNING_IN_DOCKER=1
       - DOCKER_BUILDKIT=0
       - COVERAGE_OUTPUT_DIR=/app
-      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
-      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      # AI provider keys: only injected when PROVIDE_AI_KEYS is set
+      # e.g., PROVIDE_AI_KEYS=1 docker compose run test-integration
+      - ANTHROPIC_API_KEY=${PROVIDE_AI_KEYS:+${ANTHROPIC_API_KEY:-}}
+      - OPENAI_API_KEY=${PROVIDE_AI_KEYS:+${OPENAI_API_KEY:-}}
     user: root
     shm_size: 256m
     # Run as root to avoid permission issues with mounted volumes
