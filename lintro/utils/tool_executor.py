@@ -293,7 +293,7 @@ def _write_artifacts(
     import os
     from pathlib import Path
 
-    from lintro.enums.output_format import OutputFormat, normalize_output_format
+    from lintro.enums.output_format import normalize_output_format
     from lintro.utils.output.file_writer import write_output_file
 
     artifacts: list[str] = [a.lower() for a in lintro_config.execution.artifacts]
@@ -317,25 +317,14 @@ def _write_artifacts(
         artifact_path = Path(".lintro") / "artifacts" / artifact / filename
         try:
             fmt = normalize_output_format(artifact)
-            if fmt == OutputFormat.SARIF:
-                from lintro.ai.output.sarif import write_sarif
-                from lintro.ai.output.sarif_bridge import (
-                    suggestions_from_results,
-                    summary_from_results,
-                )
-
-                suggestions = suggestions_from_results(all_results)
-                summary = summary_from_results(all_results)
-                write_sarif(suggestions, summary, output_path=artifact_path)
-            else:
-                write_output_file(
-                    output_path=str(artifact_path),
-                    output_format=fmt,
-                    all_results=all_results,
-                    action=action,
-                    total_issues=total_issues,
-                    total_fixed=total_fixed,
-                )
+            write_output_file(
+                output_path=str(artifact_path),
+                output_format=fmt,
+                all_results=all_results,
+                action=action,
+                total_issues=total_issues,
+                total_fixed=total_fixed,
+            )
         except (OSError, ValueError, TypeError) as e:
             _emit(f"Warning: Failed to write {artifact} artifact: {e}")
 
@@ -719,12 +708,20 @@ def run_lint_tools_simple(
     ai_hook = AIPostExecutionHook(lintro_config, ai_fix=effective_ai_fix)
     ai_result = None
     if ai_hook.should_run(action):
-        ai_result = ai_hook.execute(
-            action,
-            all_results,
-            console_logger=logger,
-            output_format=output_format,
-        )
+        try:
+            ai_result = ai_hook.execute(
+                action,
+                all_results,
+                console_logger=logger,
+                output_format=output_format,
+            )
+        except Exception as exc:
+            from loguru import logger as loguru_logger
+
+            loguru_logger.opt(exception=True).debug(f"AI hook failed: {exc}")
+            from lintro.ai.models import AIResult
+
+            ai_result = AIResult(error=True)
         if ai_result is not None:
             total_issues, total_fixed, total_remaining = aggregate_tool_results(
                 all_results,

@@ -89,6 +89,6 @@ class AIPostExecutionHook:
             logger.opt(exception=True).debug(f"AI post-execution hook failed: {e}")
             if getattr(self._lintro_config.ai, "fail_on_ai_error", False):
                 raise
-            if output_format.lower() != "json":
+            if output_format.lower() not in ("json", "sarif"):
                 console_logger.warning(f"AI enhancement unavailable: {e}")
             return AIResult(error=True)
