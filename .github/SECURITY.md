@@ -32,12 +32,12 @@ responsibly through one of the following channels.
 
 - **Acknowledgment**: Within 48 hours of receiving your report
 - **Investigation & Fix**: Within 30 days, we will assess severity and develop a fix
-- **Release**: Critical vulnerabilities are patched as soon as possible; other
-  fixes are released within 90 days
+- **Release**: Critical vulnerabilities are patched as soon as possible; other fixes are
+  released within 90 days
 - **Public Disclosure**: Coordinated with the reporter after a fix is available
 
-We appreciate responsible disclosure and will credit reporters (unless anonymity
-is requested) in our security advisories and release notes.
+We appreciate responsible disclosure and will credit reporters (unless anonymity is
+requested) in our security advisories and release notes.
 
 ## Repository Secrets
 

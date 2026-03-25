@@ -27,8 +27,8 @@ vulnerabilities before a fix is available puts all users at risk.
 
 1. **GitHub Security Advisories**: Use
    [GitHub Security Advisories](https://github.com/lgtm-hq/py-lintro/security/advisories/new)
-   to privately disclose a vulnerability. This is the preferred reporting channel
-   as it allows structured coordination and tracking.
+   to privately disclose a vulnerability. This is the preferred reporting channel as it
+   allows structured coordination and tracking.
 2. **Email**: Send details to `turbocoder13@gmail.com`
 3. **Subject**: Include "SECURITY: Lintro" in the subject line
 4. **Details**: Provide a clear description of the vulnerability
@@ -44,19 +44,19 @@ vulnerabilities before a fix is available puts all users at risk.
 
 We follow a coordinated vulnerability disclosure process:
 
-- **Acknowledgment**: Within 48 hours of receiving your report, we will
-  acknowledge receipt and begin our initial assessment.
-- **Investigation**: Within 30 days, we will investigate the vulnerability,
-  determine its severity, and develop a fix.
-- **Fix & Release**: We aim to release a patch within 90 days of the initial
-  report. Critical vulnerabilities may receive expedited fixes.
-- **Public Disclosure**: After the fix is released, we will coordinate public
-  disclosure with the reporter. We request that reporters refrain from public
-  disclosure until a fix is available to protect users.
+- **Acknowledgment**: Within 48 hours of receiving your report, we will acknowledge
+  receipt and begin our initial assessment.
+- **Investigation**: Within 30 days, we will investigate the vulnerability, determine
+  its severity, and develop a fix.
+- **Fix & Release**: We aim to release a patch within 90 days of the initial report.
+  Critical vulnerabilities may receive expedited fixes.
+- **Public Disclosure**: After the fix is released, we will coordinate public disclosure
+  with the reporter. We request that reporters refrain from public disclosure until a
+  fix is available to protect users.
 - **Updates**: You will be kept informed of progress throughout the process.
 
-We appreciate responsible disclosure and will credit reporters (unless anonymity
-is requested) in our security advisories and release notes.
+We appreciate responsible disclosure and will credit reporters (unless anonymity is
+requested) in our security advisories and release notes.
 
 ## For Contributors
 
@@ -69,12 +69,13 @@ is requested) in our security advisories and release notes.
 ## Security Updates
 
 Security fixes will be released as patch versions and documented in
-[CHANGELOG.md](CHANGELOG.md). Users are encouraged to subscribe to GitHub
-release notifications to stay informed about security updates.
+[CHANGELOG.md](CHANGELOG.md). Users are encouraged to subscribe to GitHub release
+notifications to stay informed about security updates.
 
 ## Contact
 
-- **Primary**: [GitHub Security Advisories](https://github.com/lgtm-hq/py-lintro/security/advisories/new)
+- **Primary**:
+  [GitHub Security Advisories](https://github.com/lgtm-hq/py-lintro/security/advisories/new)
 - **Email**: `turbocoder13@gmail.com`
 
 Thanks for helping keep Lintro secure!
