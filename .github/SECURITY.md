@@ -4,18 +4,40 @@
 
 | Version | Supported          |
 | ------- | ------------------ |
-| 0.22.x  | :white_check_mark: |
-| < 0.22  | :x:                |
+| 0.64.x  | :white_check_mark: |
+| < 0.64  | :x:                |
 
 ## Reporting a Vulnerability
 
-If you discover a security vulnerability in lintro, please report it by:
+If you discover a security vulnerability in lintro, please report it
+responsibly through one of the following channels.
 
-1. **Do NOT open a public GitHub issue**
-2. Report via
-   [GitHub's private vulnerability reporting](https://github.com/lgtm-hq/py-lintro/security/advisories/new)
-3. Include detailed steps to reproduce the vulnerability
-4. Allow reasonable time for the issue to be addressed before public disclosure
+**Do NOT open a public GitHub issue** for security vulnerabilities.
+
+### How to Report
+
+1. **Preferred**: Use
+   [GitHub Security Advisories](https://github.com/lgtm-hq/py-lintro/security/advisories/new)
+   to privately disclose a vulnerability
+2. **Email**: Contact `turbocoder13@gmail.com` with "SECURITY: Lintro" in the subject
+
+### What to Include
+
+- Description of the vulnerability and its potential impact
+- Steps to reproduce (if possible)
+- Affected versions and configurations
+- Any suggested fixes or mitigations you might have
+
+### Vulnerability Disclosure Timeline
+
+- **Acknowledgment**: Within 48 hours of receiving your report
+- **Investigation & Fix**: Within 30 days, we will assess severity and develop a fix
+- **Release**: Critical vulnerabilities are patched as soon as possible; other
+  fixes are released within 90 days
+- **Public Disclosure**: Coordinated with the reporter after a fix is available
+
+We appreciate responsible disclosure and will credit reporters (unless anonymity
+is requested) in our security advisories and release notes.
 
 ## Repository Secrets
 
