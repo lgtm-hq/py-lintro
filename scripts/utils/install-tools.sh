@@ -8,6 +8,7 @@ set -euo pipefail
 #
 # Usage:
 #   ./scripts/install-tools.sh [--help] [--dry-run] [--verbose] [--local|--docker]
+#                              [--tools tool1,tool2,...]
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
@@ -46,6 +47,7 @@ else:
 if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
 	cat <<'EOF'
 Usage: install-tools.sh [--help] [--dry-run] [--verbose] [--local|--docker]
+                       [--tools tool1,tool2,...]
 
 Tool Installation Script
 Installs all required linting and formatting tools.
@@ -56,6 +58,7 @@ Options:
   --verbose      Enable verbose output
   --local        Install tools locally (default)
   --docker       Install tools system-wide for Docker
+  --tools LIST   Only install the specified tools (comma-separated)
 
 This script installs:
   - Ruff (Python linter and formatter)
@@ -72,6 +75,7 @@ This script installs:
   - Rustfmt (Rust formatter; requires Rust toolchain)
   - Cargo-audit (Rust dependency vulnerability scanner; requires Rust toolchain)
   - Cargo-deny (Rust dependency license/advisory checker; requires Rust toolchain)
+  - OSV-Scanner (Multi-ecosystem vulnerability scanner)
   - Oxlint (JavaScript/TypeScript linter)
   - Oxfmt (JavaScript/TypeScript formatter)
   - Semgrep (Security scanner)
@@ -95,6 +99,7 @@ fi
 DRY_RUN=0
 # Note: VERBOSE may already be set by utils.sh, so use default
 VERBOSE="${VERBOSE:-0}"
+TOOL_FILTER=""
 
 # Parse flags and collect positional args
 POSITIONAL=()
@@ -108,6 +113,22 @@ while [[ $# -gt 0 ]]; do
 		VERBOSE=1
 		shift
 		;;
+	--tools)
+		if [[ -z "${2:-}" || "$2" == --* ]]; then
+			echo "Error: --tools requires a non-empty comma-separated list of tool names" >&2
+			exit 1
+		fi
+		TOOL_FILTER="$2"
+		shift 2
+		;;
+	--tools=*)
+		TOOL_FILTER="${1#*=}"
+		if [[ -z "$TOOL_FILTER" ]]; then
+			echo "Error: --tools requires a non-empty comma-separated list of tool names" >&2
+			exit 1
+		fi
+		shift
+		;;
 	--help | -h)
 		# Already handled above
 		shift
@@ -119,6 +140,61 @@ while [[ $# -gt 0 ]]; do
 	esac
 done
 set -- "${POSITIONAL[@]:-}"
+
+# Tool filter: when --tools is set, only install the listed tools.
+# Accepts comma-separated names matching the install block identifiers
+# (e.g., osv-scanner, hadolint, ruff). Normalizes underscores to hyphens.
+should_install() {
+	local tool_name="$1"
+	# No filter = install everything
+	[[ -z "$TOOL_FILTER" ]] && return 0
+	# Normalize: replace underscores with hyphens for matching
+	local normalized_filter="${TOOL_FILTER//_/-}"
+	local normalized_name="${tool_name//_/-}"
+	# Check if tool is in the comma-separated list
+	IFS=',' read -ra filter_list <<<"$normalized_filter"
+	for item in "${filter_list[@]}"; do
+		# Trim whitespace
+		item="${item## }"
+		item="${item%% }"
+		[[ "$item" == "$normalized_name" ]] && return 0
+	done
+	return 1
+}
+
+# Supported tool names for --tools validation.
+# Kept in sync with the should_install blocks and tools_to_verify array.
+SUPPORTED_TOOLS=(
+	"actionlint" "astro" "bandit" "black" "cargo-audit" "cargo-deny"
+	"clippy" "gitleaks" "hadolint" "markdownlint" "markdownlint-cli2" "mypy" "osv-scanner"
+	"oxfmt" "oxlint" "prettier" "pydoclint" "ruff" "rustfmt" "semgrep"
+	"shellcheck" "shfmt" "sqlfluff" "svelte-check" "taplo" "tsc"
+	"vue-tsc" "yamllint"
+)
+
+# Validate --tools filter against known tool names (fail-fast on typos).
+if [[ -n "$TOOL_FILTER" ]]; then
+	IFS=',' read -ra _filter_entries <<<"${TOOL_FILTER//_/-}"
+	_invalid=()
+	for _entry in "${_filter_entries[@]}"; do
+		_entry="${_entry## }"
+		_entry="${_entry%% }"
+		_found=false
+		for _supported in "${SUPPORTED_TOOLS[@]}"; do
+			[[ "$_entry" == "$_supported" ]] && {
+				_found=true
+				break
+			}
+		done
+		[[ "$_found" == false ]] && _invalid+=("$_entry")
+	done
+	if [[ ${#_invalid[@]} -gt 0 ]]; then
+		echo "Error: unknown tool(s) in --tools: ${_invalid[*]}" >&2
+		echo "Supported tools: ${SUPPORTED_TOOLS[*]}" >&2
+		exit 1
+	fi
+	unset _filter_entries _invalid _entry _found _supported
+fi
 
 # Script-specific logging (prefixed)
 install_log() { echo "[install-tools] $*"; }
@@ -237,6 +313,11 @@ install_python_package() {
 	local version="${2:-}"
 	local full_package="$package"
 
+	if ! should_install "$package"; then
+		log_verbose "Skipping $package (not in --tools filter)"
+		return 0
+	fi
+
 	if [ -n "$version" ]; then
 		full_package="$package==$version"
 	fi
@@ -278,6 +359,11 @@ install_tool_curl() {
 	local tool_name="$1"
 	local base_url="$2"
 	local target_path="$BIN_DIR/$tool_name"
+
+	if ! should_install "$tool_name"; then
+		log_verbose "Skipping $tool_name (not in --tools filter)"
+		return 0
+	fi
 
 	echo -e "${BLUE}Installing $tool_name...${NC}"
 
@@ -442,26 +528,31 @@ main() {
 		"https://github.com/hadolint/hadolint/releases/download/v${HADOLINT_VERSION}/hadolint"
 
 	# Install gitleaks (secret detection)
-	echo -e "${BLUE}Installing gitleaks...${NC}"
-	GITLEAKS_VERSION=$(get_tool_version "gitleaks") || exit 1
-	if [ $DRY_RUN -eq 1 ]; then
-		log_info "[DRY-RUN] Would install gitleaks v${GITLEAKS_VERSION}"
-	elif command -v gitleaks &>/dev/null; then
-		echo -e "${GREEN}✓ gitleaks already installed${NC}"
-	else
-		tmpdir=$(mktemp -d)
-		os=$(uname -s | tr '[:upper:]' '[:lower:]')
-		arch=$(uname -m)
-		case "$arch" in
-		x86_64 | amd64) arch_name="x64" ;;
-		aarch64 | arm64) arch_name="arm64" ;;
-		*) arch_name="x64" ;;
-		esac
-		tgz_url="https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_${os}_${arch_name}.tar.gz"
-		checksum_url="https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_checksums.txt"
-		if download_with_retries "$tgz_url" "$tmpdir/gitleaks.tar.gz" 3; then
-			# Verify checksum if available
-			if download_with_retries "$checksum_url" "$tmpdir/checksums.txt" 3; then
+	if should_install "gitleaks"; then
+		echo -e "${BLUE}Installing gitleaks...${NC}"
+		GITLEAKS_VERSION=$(get_tool_version "gitleaks") || exit 1
+		if [ $DRY_RUN -eq 1 ]; then
+			log_info "[DRY-RUN] Would install gitleaks v${GITLEAKS_VERSION}"
+		elif command -v gitleaks &>/dev/null; then
+			echo -e "${GREEN}✓ gitleaks already installed${NC}"
+		else
+			tmpdir=$(mktemp -d)
+			os=$(uname -s | tr '[:upper:]' '[:lower:]')
+			arch=$(uname -m)
+			case "$arch" in
+			x86_64 | amd64) arch_name="x64" ;;
+			aarch64 | arm64) arch_name="arm64" ;;
+			*) arch_name="x64" ;;
+			esac
+			tgz_url="https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_${os}_${arch_name}.tar.gz"
+			checksum_url="https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_checksums.txt"
+			if download_with_retries "$tgz_url" "$tmpdir/gitleaks.tar.gz" 3; then
+				# Require checksum verification before installing
+				if ! download_with_retries "$checksum_url" "$tmpdir/checksums.txt" 3; then
+					echo -e "${RED}✗ Failed to download checksum file for gitleaks${NC}"
+					rm -rf "$tmpdir"
+					exit 1
+				fi
 				echo -e "${BLUE}Verifying checksum for gitleaks...${NC}"
 				expected=$(grep "gitleaks_${GITLEAKS_VERSION}_${os}_${arch_name}.tar.gz" "$tmpdir/checksums.txt" | awk '{print $1}')
 				if [ -z "$expected" ]; then
@@ -484,432 +575,561 @@ main() {
 					exit 1
 				fi
 				echo -e "${GREEN}✓ Checksum verified${NC}"
+				tar -xzf "$tmpdir/gitleaks.tar.gz" -C "$tmpdir"
+				cp "$tmpdir/gitleaks" "$BIN_DIR/gitleaks"
+				chmod +x "$BIN_DIR/gitleaks"
+				echo -e "${GREEN}✓ gitleaks installed successfully${NC}"
+			else
+				echo -e "${RED}✗ Failed to download gitleaks${NC}"
+				rm -rf "$tmpdir"
+				exit 1
 			fi
-			tar -xzf "$tmpdir/gitleaks.tar.gz" -C "$tmpdir"
-			cp "$tmpdir/gitleaks" "$BIN_DIR/gitleaks"
-			chmod +x "$BIN_DIR/gitleaks"
-			echo -e "${GREEN}✓ gitleaks installed successfully${NC}"
-		else
-			echo -e "${RED}✗ Failed to download gitleaks${NC}"
 			rm -rf "$tmpdir"
-			exit 1
 		fi
-		rm -rf "$tmpdir"
-	fi
+	fi # gitleaks
 
-	# Install actionlint (GitHub Actions workflow linter)
-	# Prebuilt binaries: https://github.com/rhysd/actionlint/releases
-	echo -e "${BLUE}Installing actionlint...${NC}"
-	ACTIONLINT_VERSION="v$(get_tool_version "actionlint")" || exit 1
-	# actionlint release assets are named actionlint_${version}_${os}_${arch}.tar.gz
-	# We'll try to download and extract the binary
-	tmpdir=$(mktemp -d)
-	os=$(uname -s)
-	arch=$(uname -m)
-	case "$os" in
-	Darwin) os_name="darwin" ;;
-	Linux) os_name="linux" ;;
-	*) os_name="linux" ;;
-	esac
-	case "$arch" in
-	x86_64 | amd64) arch_name="amd64" ;;
-	aarch64 | arm64) arch_name="arm64" ;;
-	*) arch_name="amd64" ;;
-	esac
-	tgz_url="https://github.com/rhysd/actionlint/releases/download/${ACTIONLINT_VERSION}/actionlint_${ACTIONLINT_VERSION#v}_${os_name}_${arch_name}.tar.gz"
-	if download_with_retries "$tgz_url" "$tmpdir/actionlint.tgz" 3; then
-		# Verify SHA256 if checksum is available
-		checksum_url="${tgz_url}.sha256"
-		if download_with_retries "$checksum_url" "$tmpdir/actionlint.tgz.sha256" 3; then
-			echo -e "${BLUE}Verifying checksum for actionlint...${NC}"
-			if command -v sha256sum >/dev/null 2>&1; then
-				if ! (cd "$tmpdir" && sha256sum -c actionlint.tgz.sha256 >/dev/null 2>&1); then
-					echo -e "${RED}✗ Checksum mismatch for actionlint${NC}"
+	# Install osv-scanner (multi-ecosystem vulnerability scanner)
+	if should_install "osv-scanner"; then
+		echo -e "${BLUE}Installing osv-scanner...${NC}"
+		OSV_SCANNER_VERSION=$(get_tool_version "osv_scanner") || exit 1
+		if [ $DRY_RUN -eq 1 ]; then
+			log_info "[DRY-RUN] Would install osv-scanner v${OSV_SCANNER_VERSION}"
+		elif command -v osv-scanner &>/dev/null; then
+			echo -e "${GREEN}✓ osv-scanner already installed${NC}"
+		else
+			os=$(uname -s | tr '[:upper:]' '[:lower:]')
+			arch=$(uname -m)
+			case "$arch" in
+			x86_64 | amd64) arch_name="amd64" ;;
+			aarch64 | arm64) arch_name="arm64" ;;
+			*) arch_name="amd64" ;;
+			esac
+			binary_url="https://github.com/google/osv-scanner/releases/download/v${OSV_SCANNER_VERSION}/osv-scanner_${os}_${arch_name}"
+			checksum_url="https://github.com/google/osv-scanner/releases/download/v${OSV_SCANNER_VERSION}/osv-scanner_SHA256SUMS"
+			tmpdir=$(mktemp -d)
+			if download_with_retries "$binary_url" "$tmpdir/osv-scanner" 3; then
+				chmod +x "$tmpdir/osv-scanner"
+				# Require checksum verification before installing
+				if ! download_with_retries "$checksum_url" "$tmpdir/checksums.txt" 3; then
+					echo -e "${RED}✗ Failed to download checksum file for osv-scanner${NC}"
+					rm -rf "$tmpdir"
 					exit 1
 				fi
-			elif command -v shasum >/dev/null 2>&1; then
-				expected=$(cut -d' ' -f1 <"$tmpdir/actionlint.tgz.sha256")
-				actual=$(shasum -a 256 "$tmpdir/actionlint.tgz" | awk '{print $1}')
-				if [[ "$expected" != "$actual" ]]; then
-					echo -e "${RED}✗ Checksum mismatch for actionlint${NC}"
+				echo -e "${BLUE}Verifying checksum for osv-scanner...${NC}"
+				expected=$(grep "osv-scanner_${os}_${arch_name}$" "$tmpdir/checksums.txt" | awk '{print $1}')
+				if [ -z "$expected" ]; then
+					echo -e "${RED}✗ No checksum entry for osv-scanner_${os}_${arch_name}${NC}"
+					rm -rf "$tmpdir"
 					exit 1
 				fi
-			fi
-		fi
-		tar -xzf "$tmpdir/actionlint.tgz" -C "$tmpdir" >/dev/null 2>&1 || true
-		if [ -f "$tmpdir/actionlint" ]; then
-			cp "$tmpdir/actionlint" "$BIN_DIR/actionlint"
-			chmod +x "$BIN_DIR/actionlint"
-			echo -e "${GREEN}✓ actionlint installed successfully${NC}"
-		else
-			echo -e "${YELLOW}⚠ Could not find extracted actionlint binary${NC}"
-		fi
-	else
-		echo -e "${YELLOW}⚠ Failed to download actionlint prebuilt binary${NC}"
-	fi
-	rm -rf "$tmpdir" || true
-
-	# Install shfmt (shell script formatter)
-	echo -e "${BLUE}Installing shfmt...${NC}"
-	SHFMT_VERSION=$(get_tool_version "shfmt") || exit 1
-	if [ $DRY_RUN -eq 1 ]; then
-		log_info "[DRY-RUN] Would install shfmt v${SHFMT_VERSION}"
-	elif command -v shfmt &>/dev/null; then
-		echo -e "${GREEN}✓ shfmt already installed${NC}"
-	else
-		os=$(uname -s | tr '[:upper:]' '[:lower:]')
-		arch=$(uname -m)
-		case "$arch" in
-		x86_64 | amd64) arch="amd64" ;;
-		aarch64 | arm64) arch="arm64" ;;
-		esac
-		binary_url="https://github.com/mvdan/sh/releases/download/v${SHFMT_VERSION}/shfmt_v${SHFMT_VERSION}_${os}_${arch}"
-		if download_with_retries "$binary_url" "$BIN_DIR/shfmt" 3; then
-			chmod +x "$BIN_DIR/shfmt"
-			echo -e "${GREEN}✓ shfmt installed successfully${NC}"
-		else
-			echo -e "${RED}✗ Failed to download shfmt${NC}"
-			exit 1
-		fi
-	fi
-
-	# Install Rust toolchain, clippy, and rustfmt
-	echo -e "${BLUE}Installing Rust toolchain, clippy, and rustfmt...${NC}"
-	if RUST_TOOLCHAIN_VERSION=$(get_tool_version "rustc" 2>/dev/null); then
-		log_verbose "Pinned Rust toolchain version: ${RUST_TOOLCHAIN_VERSION}"
-	else
-		RUST_TOOLCHAIN_VERSION="stable"
-		echo -e "${YELLOW}⚠ Rust toolchain version not found in manifest; using stable${NC}"
-	fi
-	if [ $DRY_RUN -eq 1 ]; then
-		log_info "[DRY-RUN] Would install Rust toolchain (${RUST_TOOLCHAIN_VERSION}), clippy, and rustfmt"
-	else
-		rust_ready=false
-		if command -v rustc &>/dev/null && cargo clippy --version &>/dev/null && rustfmt --version &>/dev/null; then
-			if [ "$RUST_TOOLCHAIN_VERSION" = "stable" ]; then
-				rust_ready=true
-			else
-				installed_version=$(rustc --version 2>/dev/null | awk '{print $2}')
-				if [ -n "$installed_version" ] && [ "$installed_version" = "$RUST_TOOLCHAIN_VERSION" ]; then
-					rust_ready=true
+				if command -v sha256sum >/dev/null 2>&1; then
+					actual=$(sha256sum "$tmpdir/osv-scanner" | awk '{print $1}')
+				elif command -v shasum >/dev/null 2>&1; then
+					actual=$(shasum -a 256 "$tmpdir/osv-scanner" | awk '{print $1}')
 				else
-					echo -e "${YELLOW}⚠ rustc version ${installed_version:-unknown} != ${RUST_TOOLCHAIN_VERSION}, reinstalling...${NC}"
+					echo -e "${RED}✗ No sha256sum or shasum available for checksum verification${NC}"
+					rm -rf "$tmpdir"
+					exit 1
 				fi
-			fi
-		fi
-
-		if [ "$rust_ready" = true ]; then
-			echo -e "${GREEN}✓ Rust toolchain, clippy, and rustfmt already installed${NC}"
-		else
-			# Install rustup if not present
-			if ! command -v rustup &>/dev/null; then
-				echo -e "${YELLOW}Installing rustup...${NC}"
-				curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y \
-					--default-toolchain "$RUST_TOOLCHAIN_VERSION" --component clippy --component rustfmt
-				# Source cargo environment (respect CARGO_HOME if set)
-				cargo_env="${CARGO_HOME:-$HOME/.cargo}/env"
-				if [ -f "$cargo_env" ]; then
-					# SC1090: cargo env is created by rustup installer at runtime
-					# shellcheck disable=SC1090
-					source "$cargo_env"
+				if [ "$expected" != "$actual" ]; then
+					echo -e "${RED}✗ Checksum mismatch for osv-scanner${NC}"
+					rm -rf "$tmpdir"
+					exit 1
 				fi
+				echo -e "${GREEN}✓ Checksum verified${NC}"
+				mv "$tmpdir/osv-scanner" "$BIN_DIR/osv-scanner"
+				rm -rf "$tmpdir"
+				echo -e "${GREEN}✓ osv-scanner installed successfully${NC}"
 			else
-				echo -e "${YELLOW}rustup already installed, updating toolchain...${NC}"
-				if [ "$RUST_TOOLCHAIN_VERSION" = "stable" ]; then
-					rustup update stable
-				else
-					rustup toolchain install "$RUST_TOOLCHAIN_VERSION"
-					rustup default "$RUST_TOOLCHAIN_VERSION"
-				fi
-				if [ "$RUST_TOOLCHAIN_VERSION" = "stable" ]; then
-					rustup component add clippy
-					rustup component add rustfmt
-				else
-					rustup component add clippy --toolchain "$RUST_TOOLCHAIN_VERSION"
-					rustup component add rustfmt --toolchain "$RUST_TOOLCHAIN_VERSION"
-				fi
-			fi
-
-			# Verify installation
-			if command -v rustc &>/dev/null && cargo clippy --version &>/dev/null && rustfmt --version &>/dev/null; then
-				if [ "$RUST_TOOLCHAIN_VERSION" != "stable" ]; then
-					installed_version=$(rustc --version 2>/dev/null | awk '{print $2}')
-					if [ -z "$installed_version" ] || [ "$installed_version" != "$RUST_TOOLCHAIN_VERSION" ]; then
-						echo -e "${RED}✗ rustc version mismatch (expected ${RUST_TOOLCHAIN_VERSION}, got ${installed_version:-unknown})${NC}"
-						exit 1
-					fi
-				fi
-				echo -e "${GREEN}✓ Rust toolchain, clippy, and rustfmt installed successfully${NC}"
-			else
-				echo -e "${RED}✗ Failed to install Rust toolchain, clippy, and rustfmt${NC}"
+				echo -e "${RED}✗ Failed to download osv-scanner${NC}"
+				rm -rf "$tmpdir"
 				exit 1
 			fi
 		fi
-	fi
+	fi # osv-scanner
 
-	# Install cargo-audit (Rust dependency vulnerability scanner)
-	# Prefer pre-built binary from cargo-quickinstall to avoid 20+ minute compile times
-	echo -e "${BLUE}Installing cargo-audit...${NC}"
-	CARGO_AUDIT_VERSION=$(get_tool_version "cargo_audit") || exit 1
-	if [ $DRY_RUN -eq 1 ]; then
-		log_info "[DRY-RUN] Would install cargo-audit==${CARGO_AUDIT_VERSION}"
-	elif command -v cargo-audit &>/dev/null; then
-		echo -e "${GREEN}✓ cargo-audit already installed${NC}"
-	else
-		cargo_audit_installed=false
-		# Try pre-built binary from cargo-quickinstall first (much faster than cargo install)
-		tmpdir=$(mktemp -d)
-		os=$(uname -s | tr '[:upper:]' '[:lower:]')
-		arch=$(uname -m)
-		case "$arch" in
-		x86_64 | amd64) target="x86_64-unknown-linux-gnu" ;;
-		aarch64 | arm64) target="aarch64-unknown-linux-gnu" ;;
-		*) target="" ;;
-		esac
-		# cargo-quickinstall only provides linux binaries
-		if [[ "$os" == "linux" ]] && [[ -n "$target" ]]; then
-			tgz_url="https://github.com/cargo-bins/cargo-quickinstall/releases/download/cargo-audit-${CARGO_AUDIT_VERSION}/cargo-audit-${CARGO_AUDIT_VERSION}-${target}.tar.gz"
-			echo -e "${YELLOW}Trying pre-built binary from cargo-quickinstall...${NC}"
-			if download_with_retries "$tgz_url" "$tmpdir/cargo-audit.tar.gz" 3; then
-				tar -xzf "$tmpdir/cargo-audit.tar.gz" -C "$tmpdir"
-				if [ -f "$tmpdir/cargo-audit" ]; then
-					cp "$tmpdir/cargo-audit" "$BIN_DIR/cargo-audit"
-					chmod +x "$BIN_DIR/cargo-audit"
-					echo -e "${GREEN}✓ cargo-audit installed from pre-built binary${NC}"
+	if should_install "actionlint"; then
+		# Install actionlint (GitHub Actions workflow linter)
+		# Prebuilt binaries: https://github.com/rhysd/actionlint/releases
+		echo -e "${BLUE}Installing actionlint...${NC}"
+		ACTIONLINT_VERSION="v$(get_tool_version "actionlint")" || exit 1
+		if [ $DRY_RUN -eq 1 ]; then
+			log_info "[DRY-RUN] Would install actionlint ${ACTIONLINT_VERSION}"
+		else
+			tmpdir=$(mktemp -d)
+			os=$(uname -s)
+			arch=$(uname -m)
+			case "$os" in
+			Darwin) os_name="darwin" ;;
+			Linux) os_name="linux" ;;
+			*) os_name="linux" ;;
+			esac
+			case "$arch" in
+			x86_64 | amd64) arch_name="amd64" ;;
+			aarch64 | arm64) arch_name="arm64" ;;
+			*) arch_name="amd64" ;;
+			esac
+			tgz_url="https://github.com/rhysd/actionlint/releases/download/${ACTIONLINT_VERSION}/actionlint_${ACTIONLINT_VERSION#v}_${os_name}_${arch_name}.tar.gz"
+			tgz_name="actionlint_${ACTIONLINT_VERSION#v}_${os_name}_${arch_name}.tar.gz"
+			if download_with_retries "$tgz_url" "$tmpdir/actionlint.tgz" 3; then
+				# Require checksum verification before installing
+				checksum_url="https://github.com/rhysd/actionlint/releases/download/${ACTIONLINT_VERSION}/actionlint_${ACTIONLINT_VERSION#v}_checksums.txt"
+				if ! download_with_retries "$checksum_url" "$tmpdir/checksums.txt" 3; then
+					echo -e "${RED}✗ Failed to download checksum file for actionlint${NC}"
+					rm -rf "$tmpdir"
+					exit 1
+				fi
+				echo -e "${BLUE}Verifying checksum for actionlint...${NC}"
+				expected=$(grep "$tgz_name" "$tmpdir/checksums.txt" | awk '{print $1}')
+				if [ -z "$expected" ]; then
+					echo -e "${RED}✗ Checksum entry not found for ${tgz_name}${NC}"
+					rm -rf "$tmpdir"
+					exit 1
+				fi
+				if command -v sha256sum >/dev/null 2>&1; then
+					actual=$(sha256sum "$tmpdir/actionlint.tgz" | awk '{print $1}')
+				elif command -v shasum >/dev/null 2>&1; then
+					actual=$(shasum -a 256 "$tmpdir/actionlint.tgz" | awk '{print $1}')
+				else
+					echo -e "${RED}✗ No hash tool found (sha256sum or shasum required)${NC}"
+					rm -rf "$tmpdir"
+					exit 1
+				fi
+				if [ "$expected" != "$actual" ]; then
+					echo -e "${RED}✗ Checksum mismatch for actionlint (expected: $expected, got: $actual)${NC}"
+					rm -rf "$tmpdir"
+					exit 1
+				fi
+				echo -e "${GREEN}✓ Checksum verified${NC}"
+				if ! tar -xzf "$tmpdir/actionlint.tgz" -C "$tmpdir" >/dev/null 2>&1; then
+					echo -e "${RED}✗ Failed to extract actionlint archive${NC}"
+					rm -rf "$tmpdir"
+					exit 1
+				fi
+				if [ -f "$tmpdir/actionlint" ]; then
+					cp "$tmpdir/actionlint" "$BIN_DIR/actionlint"
+					chmod +x "$BIN_DIR/actionlint"
+					echo -e "${GREEN}✓ actionlint installed successfully${NC}"
+				else
+					echo -e "${RED}✗ Could not find extracted actionlint binary${NC}"
+					rm -rf "$tmpdir"
+					exit 1
+				fi
+			else
+				echo -e "${RED}✗ Failed to download actionlint prebuilt binary${NC}"
+				rm -rf "$tmpdir"
+				exit 1
+			fi
+			rm -rf "$tmpdir" || true
+		fi
+	fi # actionlint
+
+	if should_install "shfmt"; then
+		# Install shfmt (shell script formatter)
+		echo -e "${BLUE}Installing shfmt...${NC}"
+		SHFMT_VERSION=$(get_tool_version "shfmt") || exit 1
+		if [ $DRY_RUN -eq 1 ]; then
+			log_info "[DRY-RUN] Would install shfmt v${SHFMT_VERSION}"
+		elif command -v shfmt &>/dev/null; then
+			echo -e "${GREEN}✓ shfmt already installed${NC}"
+		else
+			os=$(uname -s | tr '[:upper:]' '[:lower:]')
+			arch=$(uname -m)
+			case "$arch" in
+			x86_64 | amd64) arch="amd64" ;;
+			aarch64 | arm64) arch="arm64" ;;
+			esac
+			binary_url="https://github.com/mvdan/sh/releases/download/v${SHFMT_VERSION}/shfmt_v${SHFMT_VERSION}_${os}_${arch}"
+			if download_with_retries "$binary_url" "$BIN_DIR/shfmt" 3; then
+				chmod +x "$BIN_DIR/shfmt"
+				echo -e "${GREEN}✓ shfmt installed successfully${NC}"
+			else
+				echo -e "${RED}✗ Failed to download shfmt${NC}"
+				exit 1
+			fi
+		fi
+	fi # shfmt
+
+	# Shared helper: ensure Rust toolchain is installed with the required component.
+	# Called by both the rustfmt and clippy blocks to avoid duplicating toolchain setup.
+	# Usage: ensure_rust_toolchain <component>  (e.g. "rustfmt" or "clippy")
+	ensure_rust_toolchain() {
+		local component="$1"
+
+		if [ -z "${RUST_TOOLCHAIN_VERSION:-}" ]; then
+			if RUST_TOOLCHAIN_VERSION=$(get_tool_version "rustc" 2>/dev/null); then
+				log_verbose "Pinned Rust toolchain version: ${RUST_TOOLCHAIN_VERSION}"
+			else
+				RUST_TOOLCHAIN_VERSION="stable"
+				echo -e "${YELLOW}⚠ Rust toolchain version not found in manifest; using stable${NC}"
+			fi
+		fi
+
+		if [ $DRY_RUN -eq 1 ]; then
+			log_info "[DRY-RUN] Would install Rust toolchain (${RUST_TOOLCHAIN_VERSION}) with ${component}"
+			return 0
+		fi
+
+		# Check if toolchain + component already available
+		if command -v rustc &>/dev/null && command -v "$component" &>/dev/null; then
+			if [ "$RUST_TOOLCHAIN_VERSION" = "stable" ]; then
+				echo -e "${GREEN}✓ ${component} already installed${NC}"
+				return 0
+			fi
+			installed_version=$(rustc --version 2>/dev/null | awk '{print $2}')
+			if [ -n "$installed_version" ] && [ "$installed_version" = "$RUST_TOOLCHAIN_VERSION" ]; then
+				echo -e "${GREEN}✓ ${component} already installed${NC}"
+				return 0
+			fi
+			echo -e "${YELLOW}⚠ rustc version ${installed_version:-unknown} != ${RUST_TOOLCHAIN_VERSION}, reinstalling...${NC}"
+		fi
+
+		# Install rustup if not present
+		if ! command -v rustup &>/dev/null; then
+			echo -e "${YELLOW}Installing rustup...${NC}"
+			curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y \
+				--default-toolchain "$RUST_TOOLCHAIN_VERSION" --component "$component"
+			# Source cargo environment (respect CARGO_HOME if set)
+			cargo_env="${CARGO_HOME:-$HOME/.cargo}/env"
+			if [ -f "$cargo_env" ]; then
+				# SC1090: cargo env is created by rustup installer at runtime
+				# shellcheck disable=SC1090
+				source "$cargo_env"
+			fi
+		else
+			echo -e "${YELLOW}rustup already installed, ensuring ${component}...${NC}"
+			if [ "$RUST_TOOLCHAIN_VERSION" = "stable" ]; then
+				rustup update stable
+				rustup component add "$component"
+			else
+				rustup toolchain install "$RUST_TOOLCHAIN_VERSION"
+				rustup default "$RUST_TOOLCHAIN_VERSION"
+				rustup component add "$component" --toolchain "$RUST_TOOLCHAIN_VERSION"
+			fi
+		fi
+
+		# Verify
+		if ! command -v "$component" &>/dev/null; then
+			echo -e "${RED}✗ Failed to install ${component}${NC}"
+			exit 1
+		fi
+		if [ "$RUST_TOOLCHAIN_VERSION" != "stable" ]; then
+			installed_version=$(rustc --version 2>/dev/null | awk '{print $2}')
+			if [ -z "$installed_version" ] || [ "$installed_version" != "$RUST_TOOLCHAIN_VERSION" ]; then
+				echo -e "${RED}✗ rustc version mismatch (expected ${RUST_TOOLCHAIN_VERSION}, got ${installed_version:-unknown})${NC}"
+				exit 1
+			fi
+		fi
+		echo -e "${GREEN}✓ ${component} installed successfully${NC}"
+	}
+
+	if should_install "rustfmt"; then
+		echo -e "${BLUE}Installing rustfmt...${NC}"
+		ensure_rust_toolchain "rustfmt"
+	fi # rustfmt
+
+	if should_install "clippy"; then
+		echo -e "${BLUE}Installing clippy...${NC}"
+		# clippy is invoked via cargo, verify with cargo clippy
+		if [ $DRY_RUN -eq 1 ]; then
+			log_info "[DRY-RUN] Would install clippy"
+		elif command -v cargo &>/dev/null && cargo clippy --version &>/dev/null; then
+			echo -e "${GREEN}✓ clippy already installed${NC}"
+		else
+			ensure_rust_toolchain "clippy"
+		fi
+	fi # clippy
+
+	if should_install "cargo-audit"; then
+		# Install cargo-audit (Rust dependency vulnerability scanner)
+		# Prefer pre-built binary from cargo-quickinstall to avoid 20+ minute compile times
+		echo -e "${BLUE}Installing cargo-audit...${NC}"
+		CARGO_AUDIT_VERSION=$(get_tool_version "cargo_audit") || exit 1
+		if [ $DRY_RUN -eq 1 ]; then
+			log_info "[DRY-RUN] Would install cargo-audit==${CARGO_AUDIT_VERSION}"
+		elif command -v cargo-audit &>/dev/null; then
+			echo -e "${GREEN}✓ cargo-audit already installed${NC}"
+		else
+			cargo_audit_installed=false
+			# Try pre-built binary from cargo-quickinstall first (much faster than cargo install)
+			tmpdir=$(mktemp -d)
+			os=$(uname -s | tr '[:upper:]' '[:lower:]')
+			arch=$(uname -m)
+			case "$arch" in
+			x86_64 | amd64) target="x86_64-unknown-linux-gnu" ;;
+			aarch64 | arm64) target="aarch64-unknown-linux-gnu" ;;
+			*) target="" ;;
+			esac
+			# cargo-quickinstall only provides linux binaries
+			if [[ "$os" == "linux" ]] && [[ -n "$target" ]]; then
+				tgz_url="https://github.com/cargo-bins/cargo-quickinstall/releases/download/cargo-audit-${CARGO_AUDIT_VERSION}/cargo-audit-${CARGO_AUDIT_VERSION}-${target}.tar.gz"
+				echo -e "${YELLOW}Trying pre-built binary from cargo-quickinstall...${NC}"
+				if download_with_retries "$tgz_url" "$tmpdir/cargo-audit.tar.gz" 3; then
+					tar -xzf "$tmpdir/cargo-audit.tar.gz" -C "$tmpdir"
+					if [ -f "$tmpdir/cargo-audit" ]; then
+						cp "$tmpdir/cargo-audit" "$BIN_DIR/cargo-audit"
+						chmod +x "$BIN_DIR/cargo-audit"
+						echo -e "${GREEN}✓ cargo-audit installed from pre-built binary${NC}"
+						cargo_audit_installed=true
+					fi
+				fi
+			fi
+			rm -rf "$tmpdir"
+
+			# Fallback to cargo install if pre-built binary not available
+			if [ "$cargo_audit_installed" = false ] && command -v cargo &>/dev/null; then
+				echo -e "${YELLOW}Pre-built binary not available, falling back to cargo install...${NC}"
+				ensure_cargo_audit_deps
+				if cargo install cargo-audit --locked --version "$CARGO_AUDIT_VERSION"; then
+					echo -e "${GREEN}✓ cargo-audit installed via cargo${NC}"
 					cargo_audit_installed=true
 				fi
 			fi
-		fi
-		rm -rf "$tmpdir"
 
-		# Fallback to cargo install if pre-built binary not available
-		if [ "$cargo_audit_installed" = false ] && command -v cargo &>/dev/null; then
-			echo -e "${YELLOW}Pre-built binary not available, falling back to cargo install...${NC}"
-			ensure_cargo_audit_deps
-			if cargo install cargo-audit --locked --version "$CARGO_AUDIT_VERSION"; then
-				echo -e "${GREEN}✓ cargo-audit installed via cargo${NC}"
-				cargo_audit_installed=true
+			if [ "$cargo_audit_installed" = false ]; then
+				echo -e "${YELLOW}⚠ Failed to install cargo-audit (optional tool)${NC}"
 			fi
 		fi
+	fi # cargo-audit
 
-		if [ "$cargo_audit_installed" = false ]; then
-			echo -e "${YELLOW}⚠ Failed to install cargo-audit (optional tool)${NC}"
-		fi
-	fi
+	if should_install "cargo-deny"; then
+		# Install cargo-deny (Rust dependency license/advisory checker)
+		# Prefer pre-built binary from cargo-quickinstall to avoid long compile times
+		echo -e "${BLUE}Installing cargo-deny...${NC}"
+		CARGO_DENY_VERSION=$(get_tool_version "cargo_deny") || exit 1
+		if [ $DRY_RUN -eq 1 ]; then
+			log_info "[DRY-RUN] Would install cargo-deny==${CARGO_DENY_VERSION}"
+		elif command -v cargo-deny &>/dev/null; then
+			echo -e "${GREEN}✓ cargo-deny already installed${NC}"
+		else
+			cargo_deny_installed=false
+			# Try pre-built binary from cargo-quickinstall first (much faster than cargo install)
+			tmpdir=$(mktemp -d)
+			os=$(uname -s | tr '[:upper:]' '[:lower:]')
+			arch=$(uname -m)
+			case "$arch" in
+			x86_64 | amd64) target="x86_64-unknown-linux-gnu" ;;
+			aarch64 | arm64) target="aarch64-unknown-linux-gnu" ;;
+			*) target="" ;;
+			esac
+			# cargo-quickinstall only provides linux binaries
+			if [[ "$os" == "linux" ]] && [[ -n "$target" ]]; then
+				tgz_url="https://github.com/cargo-bins/cargo-quickinstall/releases/download/cargo-deny-${CARGO_DENY_VERSION}/cargo-deny-${CARGO_DENY_VERSION}-${target}.tar.gz"
+				echo -e "${YELLOW}Trying pre-built binary from cargo-quickinstall...${NC}"
+				if download_with_retries "$tgz_url" "$tmpdir/cargo-deny.tar.gz" 3; then
+					tar -xzf "$tmpdir/cargo-deny.tar.gz" -C "$tmpdir"
+					if [ -f "$tmpdir/cargo-deny" ]; then
+						cp "$tmpdir/cargo-deny" "$BIN_DIR/cargo-deny"
+						chmod +x "$BIN_DIR/cargo-deny"
+						echo -e "${GREEN}✓ cargo-deny installed from pre-built binary${NC}"
+						cargo_deny_installed=true
+					fi
+				fi
+			fi
+			rm -rf "$tmpdir"
 
-	# Install cargo-deny (Rust dependency license/advisory checker)
-	# Prefer pre-built binary from cargo-quickinstall to avoid long compile times
-	echo -e "${BLUE}Installing cargo-deny...${NC}"
-	CARGO_DENY_VERSION=$(get_tool_version "cargo_deny") || exit 1
-	if [ $DRY_RUN -eq 1 ]; then
-		log_info "[DRY-RUN] Would install cargo-deny==${CARGO_DENY_VERSION}"
-	elif command -v cargo-deny &>/dev/null; then
-		echo -e "${GREEN}✓ cargo-deny already installed${NC}"
-	else
-		cargo_deny_installed=false
-		# Try pre-built binary from cargo-quickinstall first (much faster than cargo install)
-		tmpdir=$(mktemp -d)
-		os=$(uname -s | tr '[:upper:]' '[:lower:]')
-		arch=$(uname -m)
-		case "$arch" in
-		x86_64 | amd64) target="x86_64-unknown-linux-gnu" ;;
-		aarch64 | arm64) target="aarch64-unknown-linux-gnu" ;;
-		*) target="" ;;
-		esac
-		# cargo-quickinstall only provides linux binaries
-		if [[ "$os" == "linux" ]] && [[ -n "$target" ]]; then
-			tgz_url="https://github.com/cargo-bins/cargo-quickinstall/releases/download/cargo-deny-${CARGO_DENY_VERSION}/cargo-deny-${CARGO_DENY_VERSION}-${target}.tar.gz"
-			echo -e "${YELLOW}Trying pre-built binary from cargo-quickinstall...${NC}"
-			if download_with_retries "$tgz_url" "$tmpdir/cargo-deny.tar.gz" 3; then
-				tar -xzf "$tmpdir/cargo-deny.tar.gz" -C "$tmpdir"
-				if [ -f "$tmpdir/cargo-deny" ]; then
-					cp "$tmpdir/cargo-deny" "$BIN_DIR/cargo-deny"
-					chmod +x "$BIN_DIR/cargo-deny"
-					echo -e "${GREEN}✓ cargo-deny installed from pre-built binary${NC}"
+			# Fallback to cargo install if pre-built binary not available
+			if [ "$cargo_deny_installed" = false ] && command -v cargo &>/dev/null; then
+				echo -e "${YELLOW}Pre-built binary not available, falling back to cargo install...${NC}"
+				ensure_cargo_audit_deps
+				if cargo install cargo-deny --locked --version "$CARGO_DENY_VERSION"; then
+					echo -e "${GREEN}✓ cargo-deny installed via cargo${NC}"
 					cargo_deny_installed=true
 				fi
 			fi
-		fi
-		rm -rf "$tmpdir"
 
-		# Fallback to cargo install if pre-built binary not available
-		if [ "$cargo_deny_installed" = false ] && command -v cargo &>/dev/null; then
-			echo -e "${YELLOW}Pre-built binary not available, falling back to cargo install...${NC}"
-			ensure_cargo_audit_deps
-			if cargo install cargo-deny --locked --version "$CARGO_DENY_VERSION"; then
-				echo -e "${GREEN}✓ cargo-deny installed via cargo${NC}"
-				cargo_deny_installed=true
+			if [ "$cargo_deny_installed" = false ]; then
+				echo -e "${YELLOW}⚠ Failed to install cargo-deny (optional tool)${NC}"
 			fi
 		fi
+	fi # cargo-deny
 
-		if [ "$cargo_deny_installed" = false ]; then
-			echo -e "${YELLOW}⚠ Failed to install cargo-deny (optional tool)${NC}"
-		fi
-	fi
-
-	# Install ruff (Python linting and formatting)
-	echo -e "${BLUE}Installing ruff...${NC}"
-	RUFF_VERSION=$(get_tool_version "ruff") || exit 1
-	if [ $DRY_RUN -eq 1 ]; then
-		log_info "[DRY-RUN] Would install ruff==${RUFF_VERSION}"
-	elif install_python_package "ruff" "$RUFF_VERSION"; then
-		echo -e "${GREEN}✓ ruff installed successfully${NC}"
-	else
-		if command -v brew &>/dev/null; then
-			echo -e "${YELLOW}Trying Homebrew for ruff...${NC}"
-			if [ $DRY_RUN -eq 1 ]; then
-				log_info "[DRY-RUN] Would install ruff via brew"
-			else
-				brew install ruff || {
-					echo -e "${RED}✗ Failed to install ruff via Homebrew${NC}"
-					exit 1
-				}
-			fi
-			echo -e "${GREEN}✓ ruff installed successfully via Homebrew${NC}"
+	if should_install "ruff"; then
+		# Install ruff (Python linting and formatting)
+		echo -e "${BLUE}Installing ruff...${NC}"
+		RUFF_VERSION=$(get_tool_version "ruff") || exit 1
+		if [ $DRY_RUN -eq 1 ]; then
+			log_info "[DRY-RUN] Would install ruff==${RUFF_VERSION}"
+		elif install_python_package "ruff" "$RUFF_VERSION"; then
+			echo -e "${GREEN}✓ ruff installed successfully${NC}"
 		else
-			echo -e "${RED}✗ Cannot install ruff automatically; please install via your package manager.${NC}"
+			if command -v brew &>/dev/null; then
+				echo -e "${YELLOW}Trying Homebrew for ruff...${NC}"
+				if [ $DRY_RUN -eq 1 ]; then
+					log_info "[DRY-RUN] Would install ruff via brew"
+				else
+					brew install ruff || {
+						echo -e "${RED}✗ Failed to install ruff via Homebrew${NC}"
+						exit 1
+					}
+				fi
+				echo -e "${GREEN}✓ ruff installed successfully via Homebrew${NC}"
+			else
+				echo -e "${RED}✗ Cannot install ruff automatically; please install via your package manager.${NC}"
+				exit 1
+			fi
+		fi
+	fi # ruff
+
+	if should_install "black"; then
+		# Install black (Python code formatter)
+		echo -e "${BLUE}Installing black...${NC}"
+		BLACK_VERSION=$(get_tool_version "black") || exit 1
+		if [ $DRY_RUN -eq 1 ]; then
+			log_info "[DRY-RUN] Would install black==${BLACK_VERSION}"
+		elif install_python_package "black" "$BLACK_VERSION"; then
+			echo -e "${GREEN}✓ black installed successfully${NC}"
+		else
+			echo -e "${RED}✗ Failed to install black${NC}"
 			exit 1
 		fi
-	fi
+	fi # black
 
-	# Install black (Python code formatter)
-	echo -e "${BLUE}Installing black...${NC}"
-	BLACK_VERSION=$(get_tool_version "black") || exit 1
-	if [ $DRY_RUN -eq 1 ]; then
-		log_info "[DRY-RUN] Would install black==${BLACK_VERSION}"
-	elif install_python_package "black" "$BLACK_VERSION"; then
-		echo -e "${GREEN}✓ black installed successfully${NC}"
-	else
-		echo -e "${RED}✗ Failed to install black${NC}"
-		exit 1
-	fi
-
-	# Install bandit (Python security linter)
-	echo -e "${BLUE}Installing bandit...${NC}"
-	BANDIT_VERSION=$(get_tool_version "bandit") || exit 1
-	if [ $DRY_RUN -eq 1 ]; then
-		log_info "[DRY-RUN] Would install bandit==${BANDIT_VERSION}"
-	elif install_python_package "bandit" "$BANDIT_VERSION"; then
-		echo -e "${GREEN}✓ bandit installed successfully${NC}"
-	else
-		echo -e "${RED}✗ Failed to install bandit${NC}"
-		exit 1
-	fi
-
-	# Install mypy (Python type checker)
-	echo -e "${BLUE}Installing mypy...${NC}"
-	MYPY_VERSION=$(get_tool_version "mypy") || exit 1
-	if [ $DRY_RUN -eq 1 ]; then
-		log_info "[DRY-RUN] Would install mypy==${MYPY_VERSION}"
-	elif install_python_package "mypy" "$MYPY_VERSION"; then
-		echo -e "${GREEN}✓ mypy installed successfully${NC}"
-	else
-		echo -e "${RED}✗ Failed to install mypy${NC}"
-		exit 1
-	fi
-
-	# Install prettier via bun (JavaScript/JSON formatting)
-	echo -e "${BLUE}Installing prettier...${NC}"
-
-	# Ensure bun is available
-	if ! ensure_bun_installed; then
-		exit 1
-	fi
-
-	# Read prettier version from _tool_versions.py (single source of truth)
-	PRETTIER_VERSION=$(get_tool_version "prettier") || exit 1
-
-	if [ $DRY_RUN -eq 1 ]; then
-		log_info "[DRY-RUN] Would install prettier@${PRETTIER_VERSION} globally via bun"
-	elif bun add -g "prettier@${PRETTIER_VERSION}"; then
-		echo -e "${GREEN}✓ prettier@${PRETTIER_VERSION} installed successfully${NC}"
-	else
-		echo -e "${RED}✗ Failed to install prettier${NC}"
-		exit 1
-	fi
-
-	# Install markdownlint-cli2 via bun (Markdown linting)
-	echo -e "${BLUE}Installing markdownlint-cli2...${NC}"
-
-	# Ensure bun is available (should already be installed for prettier)
-	if ! ensure_bun_installed; then
-		exit 1
-	fi
-
-	# Read markdownlint-cli2 version from _tool_versions.py (single source of truth)
-	# Uses package alias: "markdownlint-cli2" -> ToolName.MARKDOWNLINT
-	MARKDOWNLINT_VERSION=$(get_tool_version "markdownlint-cli2") || exit 1
-
-	if [ $DRY_RUN -eq 1 ]; then
-		log_info "[DRY-RUN] Would install markdownlint-cli2@${MARKDOWNLINT_VERSION} globally via bun"
-	elif bun add -g "markdownlint-cli2@${MARKDOWNLINT_VERSION}"; then
-		echo -e "${GREEN}✓ markdownlint-cli2@${MARKDOWNLINT_VERSION} installed successfully${NC}"
-	else
-		echo -e "${RED}✗ Failed to install markdownlint-cli2${NC}"
-		exit 1
-	fi
-
-	# Install semgrep (security scanner)
-	echo -e "${BLUE}Installing semgrep...${NC}"
-	SEMGREP_VERSION=$(get_tool_version "semgrep") || exit 1
-	if [ $DRY_RUN -eq 1 ]; then
-		log_info "[DRY-RUN] Would install semgrep==${SEMGREP_VERSION}"
-	elif install_python_package "semgrep" "$SEMGREP_VERSION"; then
-		echo -e "${GREEN}✓ semgrep installed successfully${NC}"
-	else
-		echo -e "${RED}✗ Failed to install semgrep${NC}"
-		exit 1
-	fi
-
-	# Install shellcheck (shell script linter)
-	echo -e "${BLUE}Installing shellcheck...${NC}"
-	SHELLCHECK_VERSION=$(get_tool_version "shellcheck") || exit 1
-
-	# Helper function for shellcheck binary installation
-	install_shellcheck_binary() {
-		local tmpdir
-		tmpdir=$(mktemp -d)
-		local os arch tar_url
-		os=$(uname -s | tr '[:upper:]' '[:lower:]')
-		arch=$(uname -m)
-		case "$arch" in
-		x86_64 | amd64) arch="x86_64" ;;
-		aarch64 | arm64) arch="aarch64" ;;
-		esac
-		tar_url="https://github.com/koalaman/shellcheck/releases/download/v${SHELLCHECK_VERSION}/shellcheck-v${SHELLCHECK_VERSION}.${os}.${arch}.tar.xz"
-		if download_with_retries "$tar_url" "$tmpdir/shellcheck.tar.xz" 3; then
-			tar -xJf "$tmpdir/shellcheck.tar.xz" -C "$tmpdir"
-			cp "$tmpdir/shellcheck-v${SHELLCHECK_VERSION}/shellcheck" "$BIN_DIR/shellcheck"
-			chmod +x "$BIN_DIR/shellcheck"
-			rm -rf "$tmpdir"
-			return 0
+	if should_install "bandit"; then
+		# Install bandit (Python security linter)
+		echo -e "${BLUE}Installing bandit...${NC}"
+		BANDIT_VERSION=$(get_tool_version "bandit") || exit 1
+		if [ $DRY_RUN -eq 1 ]; then
+			log_info "[DRY-RUN] Would install bandit==${BANDIT_VERSION}"
+		elif install_python_package "bandit" "$BANDIT_VERSION"; then
+			echo -e "${GREEN}✓ bandit installed successfully${NC}"
 		else
-			rm -rf "$tmpdir"
-			return 1
+			echo -e "${RED}✗ Failed to install bandit${NC}"
+			exit 1
 		fi
-	}
+	fi # bandit
 
-	if [ $DRY_RUN -eq 1 ]; then
-		log_info "[DRY-RUN] Would install shellcheck v${SHELLCHECK_VERSION}"
-	elif command -v shellcheck &>/dev/null; then
-		# Check if installed version meets minimum requirement
-		installed_version=$(shellcheck --version 2>/dev/null | grep -oE 'version: [0-9]+\.[0-9]+\.[0-9]+' | cut -d' ' -f2)
-		if [ -n "$installed_version" ]; then
-			# Compare versions using portable version_ge function from utils.sh
-			if version_ge "$installed_version" "$SHELLCHECK_VERSION"; then
-				echo -e "${GREEN}✓ shellcheck v${installed_version} already installed (>= v${SHELLCHECK_VERSION})${NC}"
+	if should_install "mypy"; then
+		# Install mypy (Python type checker)
+		echo -e "${BLUE}Installing mypy...${NC}"
+		MYPY_VERSION=$(get_tool_version "mypy") || exit 1
+		if [ $DRY_RUN -eq 1 ]; then
+			log_info "[DRY-RUN] Would install mypy==${MYPY_VERSION}"
+		elif install_python_package "mypy" "$MYPY_VERSION"; then
+			echo -e "${GREEN}✓ mypy installed successfully${NC}"
+		else
+			echo -e "${RED}✗ Failed to install mypy${NC}"
+			exit 1
+		fi
+	fi # mypy
+
+	if should_install "prettier"; then
+		# Install prettier via bun (JavaScript/JSON formatting)
+		echo -e "${BLUE}Installing prettier...${NC}"
+
+		# Ensure bun is available
+		if ! ensure_bun_installed; then
+			exit 1
+		fi
+
+		# Read prettier version from _tool_versions.py (single source of truth)
+		PRETTIER_VERSION=$(get_tool_version "prettier") || exit 1
+
+		if [ $DRY_RUN -eq 1 ]; then
+			log_info "[DRY-RUN] Would install prettier@${PRETTIER_VERSION} globally via bun"
+		elif bun add -g "prettier@${PRETTIER_VERSION}"; then
+			echo -e "${GREEN}✓ prettier@${PRETTIER_VERSION} installed successfully${NC}"
+		else
+			echo -e "${RED}✗ Failed to install prettier${NC}"
+			exit 1
+		fi
+	fi # prettier
+
+	if should_install "markdownlint" || should_install "markdownlint-cli2"; then
+		# Install markdownlint-cli2 via bun (Markdown linting)
+		echo -e "${BLUE}Installing markdownlint-cli2...${NC}"
+
+		# Ensure bun is available (should already be installed for prettier)
+		if ! ensure_bun_installed; then
+			exit 1
+		fi
+
+		# Read markdownlint-cli2 version from _tool_versions.py (single source of truth)
+		# Uses package alias: "markdownlint-cli2" -> ToolName.MARKDOWNLINT
+		MARKDOWNLINT_VERSION=$(get_tool_version "markdownlint-cli2") || exit 1
+
+		if [ $DRY_RUN -eq 1 ]; then
+			log_info "[DRY-RUN] Would install markdownlint-cli2@${MARKDOWNLINT_VERSION} globally via bun"
+		elif bun add -g "markdownlint-cli2@${MARKDOWNLINT_VERSION}"; then
+			echo -e "${GREEN}✓ markdownlint-cli2@${MARKDOWNLINT_VERSION} installed successfully${NC}"
+		else
+			echo -e "${RED}✗ Failed to install markdownlint-cli2${NC}"
+			exit 1
+		fi
+	fi # markdownlint
+
+	if should_install "semgrep"; then
+		# Install semgrep (security scanner)
+		echo -e "${BLUE}Installing semgrep...${NC}"
+		SEMGREP_VERSION=$(get_tool_version "semgrep") || exit 1
+		if [ $DRY_RUN -eq 1 ]; then
+			log_info "[DRY-RUN] Would install semgrep==${SEMGREP_VERSION}"
+		elif install_python_package "semgrep" "$SEMGREP_VERSION"; then
+			echo -e "${GREEN}✓ semgrep installed successfully${NC}"
+		else
+			echo -e "${RED}✗ Failed to install semgrep${NC}"
+			exit 1
+		fi
+	fi # semgrep
+
+	if should_install "shellcheck"; then
+		# Install shellcheck (shell script linter)
+		echo -e "${BLUE}Installing shellcheck...${NC}"
+		SHELLCHECK_VERSION=$(get_tool_version "shellcheck") || exit 1
+
+		# Helper function for shellcheck binary installation
+		install_shellcheck_binary() {
+			local tmpdir
+			tmpdir=$(mktemp -d)
+			local os arch tar_url
+			os=$(uname -s | tr '[:upper:]' '[:lower:]')
+			arch=$(uname -m)
+			case "$arch" in
+			x86_64 | amd64) arch="x86_64" ;;
+			aarch64 | arm64) arch="aarch64" ;;
+			esac
+			tar_url="https://github.com/koalaman/shellcheck/releases/download/v${SHELLCHECK_VERSION}/shellcheck-v${SHELLCHECK_VERSION}.${os}.${arch}.tar.xz"
+			if download_with_retries "$tar_url" "$tmpdir/shellcheck.tar.xz" 3; then
+				tar -xJf "$tmpdir/shellcheck.tar.xz" -C "$tmpdir"
+				cp "$tmpdir/shellcheck-v${SHELLCHECK_VERSION}/shellcheck" "$BIN_DIR/shellcheck"
+				chmod +x "$BIN_DIR/shellcheck"
+				rm -rf "$tmpdir"
+				return 0
 			else
-				echo -e "${YELLOW}⚠ shellcheck v${installed_version} is older than required v${SHELLCHECK_VERSION}, upgrading...${NC}"
+				rm -rf "$tmpdir"
+				return 1
+			fi
+		}
+
+		if [ $DRY_RUN -eq 1 ]; then
+			log_info "[DRY-RUN] Would install shellcheck v${SHELLCHECK_VERSION}"
+		elif command -v shellcheck &>/dev/null; then
+			# Check if installed version meets minimum requirement
+			installed_version=$(shellcheck --version 2>/dev/null | grep -oE 'version: [0-9]+\.[0-9]+\.[0-9]+' | cut -d' ' -f2)
+			if [ -n "$installed_version" ]; then
+				# Compare versions using portable version_ge function from utils.sh
+				if version_ge "$installed_version" "$SHELLCHECK_VERSION"; then
+					echo -e "${GREEN}✓ shellcheck v${installed_version} already installed (>= v${SHELLCHECK_VERSION})${NC}"
+				else
+					echo -e "${YELLOW}⚠ shellcheck v${installed_version} is older than required v${SHELLCHECK_VERSION}, upgrading...${NC}"
+					if install_shellcheck_binary; then
+						echo -e "${GREEN}✓ shellcheck upgraded to v${SHELLCHECK_VERSION}${NC}"
+					else
+						echo -e "${RED}✗ Failed to download shellcheck${NC}"
+						exit 1
+					fi
+				fi
+			else
+				# Could not parse version, treat as not installed
+				echo -e "${YELLOW}⚠ Could not determine shellcheck version, installing v${SHELLCHECK_VERSION}...${NC}"
 				if install_shellcheck_binary; then
-					echo -e "${GREEN}✓ shellcheck upgraded to v${SHELLCHECK_VERSION}${NC}"
+					echo -e "${GREEN}✓ shellcheck installed successfully${NC}"
 				else
 					echo -e "${RED}✗ Failed to download shellcheck${NC}"
 					exit 1
 				fi
 			fi
 		else
-			# Could not parse version, treat as not installed
-			echo -e "${YELLOW}⚠ Could not determine shellcheck version, installing v${SHELLCHECK_VERSION}...${NC}"
 			if install_shellcheck_binary; then
 				echo -e "${GREEN}✓ shellcheck installed successfully${NC}"
 			else
@@ -917,223 +1137,254 @@ main() {
 				exit 1
 			fi
 		fi
-	else
-		if install_shellcheck_binary; then
-			echo -e "${GREEN}✓ shellcheck installed successfully${NC}"
-		else
-			echo -e "${RED}✗ Failed to download shellcheck${NC}"
+	fi # end shellcheck block
+
+	if should_install "oxlint"; then
+		# Install oxlint via bun (JavaScript/TypeScript linting)
+		echo -e "${BLUE}Installing oxlint...${NC}"
+
+		# Ensure bun is available (should already be installed for prettier)
+		if ! ensure_bun_installed; then
 			exit 1
 		fi
-	fi
 
-	# Install oxlint via bun (JavaScript/TypeScript linting)
-	echo -e "${BLUE}Installing oxlint...${NC}"
-
-	# Ensure bun is available (should already be installed for prettier)
-	if ! ensure_bun_installed; then
-		exit 1
-	fi
-
-	OXLINT_VERSION=$(get_tool_version "oxlint") || exit 1
-	if [ $DRY_RUN -eq 1 ]; then
-		log_info "[DRY-RUN] Would install oxlint@${OXLINT_VERSION} globally via bun"
-	elif bun add -g "oxlint@${OXLINT_VERSION}"; then
-		echo -e "${GREEN}✓ oxlint@${OXLINT_VERSION} installed successfully${NC}"
-	else
-		echo -e "${RED}✗ Failed to install oxlint${NC}"
-		exit 1
-	fi
-
-	# Install oxfmt via bun (JavaScript/TypeScript formatting)
-	echo -e "${BLUE}Installing oxfmt...${NC}"
-
-	OXFMT_VERSION=$(get_tool_version "oxfmt") || exit 1
-	if [ $DRY_RUN -eq 1 ]; then
-		log_info "[DRY-RUN] Would install oxfmt@${OXFMT_VERSION} globally via bun"
-	elif bun add -g "oxfmt@${OXFMT_VERSION}"; then
-		echo -e "${GREEN}✓ oxfmt@${OXFMT_VERSION} installed successfully${NC}"
-	else
-		echo -e "${RED}✗ Failed to install oxfmt${NC}"
-		exit 1
-	fi
-
-	# Install yamllint (Python package)
-	echo -e "${BLUE}Installing yamllint...${NC}"
-	YAMLLINT_VERSION=$(get_tool_version "yamllint") || exit 1
-	if [ $DRY_RUN -eq 1 ]; then
-		log_info "[DRY-RUN] Would install yamllint==${YAMLLINT_VERSION}"
-	elif install_python_package "yamllint" "$YAMLLINT_VERSION"; then
-		echo -e "${GREEN}✓ yamllint installed successfully${NC}"
-	else
-		echo -e "${RED}✗ Failed to install yamllint${NC}"
-		exit 1
-	fi
-
-	# Install pydoclint (Python docstring linter)
-	echo -e "${BLUE}Installing pydoclint...${NC}"
-	PYDOCLINT_VERSION=$(get_tool_version "pydoclint") || exit 1
-
-	if [ $DRY_RUN -eq 1 ]; then
-		log_info "[DRY-RUN] Would install pydoclint==${PYDOCLINT_VERSION}"
-	elif install_python_package "pydoclint" "$PYDOCLINT_VERSION"; then
-		echo -e "${GREEN}✓ pydoclint installed successfully${NC}"
-	else
-		echo -e "${RED}✗ Failed to install pydoclint${NC}"
-		exit 1
-	fi
-
-	# Install sqlfluff (SQL linter and formatter)
-	echo -e "${BLUE}Installing sqlfluff...${NC}"
-	SQLFLUFF_VERSION=$(get_tool_version "sqlfluff") || exit 1
-	if [ $DRY_RUN -eq 1 ]; then
-		log_info "[DRY-RUN] Would install sqlfluff==${SQLFLUFF_VERSION}"
-	elif install_python_package "sqlfluff" "$SQLFLUFF_VERSION"; then
-		echo -e "${GREEN}✓ sqlfluff installed successfully${NC}"
-	else
-		echo -e "${RED}✗ Failed to install sqlfluff${NC}"
-		exit 1
-	fi
-
-	# Install taplo (TOML linter and formatter)
-	echo -e "${BLUE}Installing taplo...${NC}"
-	TAPLO_VERSION=$(get_tool_version "taplo") || exit 1
-	if [ $DRY_RUN -eq 1 ]; then
-		log_info "[DRY-RUN] Would install taplo v${TAPLO_VERSION}"
-	elif command -v taplo &>/dev/null; then
-		echo -e "${GREEN}✓ taplo already installed${NC}"
-	else
-		taplo_installed=false
-		tmpdir=$(mktemp -d)
-		os=$(uname -s | tr '[:upper:]' '[:lower:]')
-		arch=$(uname -m)
-		case "$arch" in
-		x86_64 | amd64) arch="x86_64" ;;
-		aarch64 | arm64) arch="aarch64" ;;
-		esac
-		# taplo releases use format: taplo-{os}-{arch}.gz (changed from taplo-full- in v0.9+)
-		gz_url="https://github.com/tamasfe/taplo/releases/download/${TAPLO_VERSION}/taplo-${os}-${arch}.gz"
-		# Check if GitHub release exists before attempting download
-		if curl -sfIL "$gz_url" >/dev/null 2>&1; then
-			if download_with_retries "$gz_url" "$tmpdir/taplo.gz" 3; then
-				# Verify checksum BEFORE installing binary
-				checksum_url="${gz_url}.sha256"
-				checksum_ok=true
-				if download_with_retries "$checksum_url" "$tmpdir/taplo.gz.sha256" 3; then
-					echo -e "${BLUE}Verifying checksum for taplo...${NC}"
-					expected=$(awk '{print $1}' "$tmpdir/taplo.gz.sha256" | head -n1)
-					if command -v sha256sum >/dev/null 2>&1; then
-						actual=$(sha256sum "$tmpdir/taplo.gz" | awk '{print $1}')
-					elif command -v shasum >/dev/null 2>&1; then
-						actual=$(shasum -a 256 "$tmpdir/taplo.gz" | awk '{print $1}')
-					else
-						echo -e "${YELLOW}⚠ No sha256 tool available, skipping checksum verification${NC}"
-						actual="$expected"
-					fi
-					if [ "$expected" = "$actual" ]; then
-						echo -e "${GREEN}✓ Checksum verified${NC}"
-					else
-						echo -e "${RED}✗ Checksum mismatch for taplo (expected: $expected, got: $actual)${NC}"
-						checksum_ok=false
-					fi
-					rm -f "$tmpdir/taplo.gz.sha256" || true
-				fi
-				# Only install if checksum passed (or wasn't available)
-				if [ "$checksum_ok" = true ]; then
-					gunzip -c "$tmpdir/taplo.gz" >"$BIN_DIR/taplo"
-					chmod +x "$BIN_DIR/taplo"
-					echo -e "${GREEN}✓ taplo installed successfully${NC}"
-					taplo_installed=true
-				fi
-			fi
+		OXLINT_VERSION=$(get_tool_version "oxlint") || exit 1
+		if [ $DRY_RUN -eq 1 ]; then
+			log_info "[DRY-RUN] Would install oxlint@${OXLINT_VERSION} globally via bun"
+		elif bun add -g "oxlint@${OXLINT_VERSION}"; then
+			echo -e "${GREEN}✓ oxlint@${OXLINT_VERSION} installed successfully${NC}"
 		else
-			echo -e "${YELLOW}⚠ GitHub release for taplo v${TAPLO_VERSION} not available${NC}"
+			echo -e "${RED}✗ Failed to install oxlint${NC}"
+			exit 1
 		fi
-		rm -rf "$tmpdir"
+	fi # oxlint
 
-		# Fallback to cargo if binary download failed
-		if [ "$taplo_installed" = false ]; then
-			echo -e "${BLUE}Attempting fallback installation via cargo...${NC}"
-			if command -v cargo &>/dev/null; then
-				echo -e "${BLUE}Installing taplo via cargo...${NC}"
-				if cargo install taplo-cli --locked; then
-					# Derive cargo bin directory from CARGO_HOME or default
-					cargo_bin="${CARGO_HOME:-$HOME/.cargo}/bin"
-					# Check for executable taplo in cargo bin, fall back to PATH
-					if [ -x "$cargo_bin/taplo" ]; then
-						cp "$cargo_bin/taplo" "$BIN_DIR/taplo"
+	if should_install "oxfmt"; then
+		# Install oxfmt via bun (JavaScript/TypeScript formatting)
+		echo -e "${BLUE}Installing oxfmt...${NC}"
+
+		if ! ensure_bun_installed; then
+			exit 1
+		fi
+
+		OXFMT_VERSION=$(get_tool_version "oxfmt") || exit 1
+		if [ $DRY_RUN -eq 1 ]; then
+			log_info "[DRY-RUN] Would install oxfmt@${OXFMT_VERSION} globally via bun"
+		elif bun add -g "oxfmt@${OXFMT_VERSION}"; then
+			echo -e "${GREEN}✓ oxfmt@${OXFMT_VERSION} installed successfully${NC}"
+		else
+			echo -e "${RED}✗ Failed to install oxfmt${NC}"
+			exit 1
+		fi
+	fi # oxfmt
+
+	if should_install "yamllint"; then
+		# Install yamllint (Python package)
+		echo -e "${BLUE}Installing yamllint...${NC}"
+		YAMLLINT_VERSION=$(get_tool_version "yamllint") || exit 1
+		if [ $DRY_RUN -eq 1 ]; then
+			log_info "[DRY-RUN] Would install yamllint==${YAMLLINT_VERSION}"
+		elif install_python_package "yamllint" "$YAMLLINT_VERSION"; then
+			echo -e "${GREEN}✓ yamllint installed successfully${NC}"
+		else
+			echo -e "${RED}✗ Failed to install yamllint${NC}"
+			exit 1
+		fi
+	fi # yamllint
+
+	if should_install "pydoclint"; then
+		# Install pydoclint (Python docstring linter)
+		echo -e "${BLUE}Installing pydoclint...${NC}"
+		PYDOCLINT_VERSION=$(get_tool_version "pydoclint") || exit 1
+
+		if [ $DRY_RUN -eq 1 ]; then
+			log_info "[DRY-RUN] Would install pydoclint==${PYDOCLINT_VERSION}"
+		elif install_python_package "pydoclint" "$PYDOCLINT_VERSION"; then
+			echo -e "${GREEN}✓ pydoclint installed successfully${NC}"
+		else
+			echo -e "${RED}✗ Failed to install pydoclint${NC}"
+			exit 1
+		fi
+	fi # pydoclint
+
+	if should_install "sqlfluff"; then
+		# Install sqlfluff (SQL linter and formatter)
+		echo -e "${BLUE}Installing sqlfluff...${NC}"
+		SQLFLUFF_VERSION=$(get_tool_version "sqlfluff") || exit 1
+		if [ $DRY_RUN -eq 1 ]; then
+			log_info "[DRY-RUN] Would install sqlfluff==${SQLFLUFF_VERSION}"
+		elif install_python_package "sqlfluff" "$SQLFLUFF_VERSION"; then
+			echo -e "${GREEN}✓ sqlfluff installed successfully${NC}"
+		else
+			echo -e "${RED}✗ Failed to install sqlfluff${NC}"
+			exit 1
+		fi
+	fi # sqlfluff
+
+	if should_install "taplo"; then
+		# Install taplo (TOML linter and formatter)
+		echo -e "${BLUE}Installing taplo...${NC}"
+		TAPLO_VERSION=$(get_tool_version "taplo") || exit 1
+		if [ $DRY_RUN -eq 1 ]; then
+			log_info "[DRY-RUN] Would install taplo v${TAPLO_VERSION}"
+		elif command -v taplo &>/dev/null; then
+			echo -e "${GREEN}✓ taplo already installed${NC}"
+		else
+			taplo_installed=false
+			tmpdir=$(mktemp -d)
+			os=$(uname -s | tr '[:upper:]' '[:lower:]')
+			arch=$(uname -m)
+			case "$arch" in
+			x86_64 | amd64) arch="x86_64" ;;
+			aarch64 | arm64) arch="aarch64" ;;
+			esac
+			# taplo releases use format: taplo-{os}-{arch}.gz (changed from taplo-full- in v0.9+)
+			gz_url="https://github.com/tamasfe/taplo/releases/download/${TAPLO_VERSION}/taplo-${os}-${arch}.gz"
+			# Check if GitHub release exists before attempting download
+			if curl -sfIL "$gz_url" >/dev/null 2>&1; then
+				if download_with_retries "$gz_url" "$tmpdir/taplo.gz" 3; then
+					# Require checksum verification before installing
+					checksum_url="${gz_url}.sha256"
+					checksum_ok=false
+					if download_with_retries "$checksum_url" "$tmpdir/taplo.gz.sha256" 3; then
+						echo -e "${BLUE}Verifying checksum for taplo...${NC}"
+						expected=$(awk '{print $1}' "$tmpdir/taplo.gz.sha256" | head -n1)
+						if command -v sha256sum >/dev/null 2>&1; then
+							actual=$(sha256sum "$tmpdir/taplo.gz" | awk '{print $1}')
+						elif command -v shasum >/dev/null 2>&1; then
+							actual=$(shasum -a 256 "$tmpdir/taplo.gz" | awk '{print $1}')
+						else
+							echo -e "${RED}✗ No sha256sum or shasum available for checksum verification${NC}"
+						fi
+						if [ "$expected" = "$actual" ]; then
+							echo -e "${GREEN}✓ Checksum verified${NC}"
+							checksum_ok=true
+						else
+							echo -e "${RED}✗ Checksum mismatch for taplo (expected: $expected, got: $actual)${NC}"
+						fi
+						rm -f "$tmpdir/taplo.gz.sha256" || true
+					else
+						echo -e "${RED}✗ Failed to download checksum file for taplo${NC}"
+					fi
+					# Only install if checksum verification passed
+					if [ "$checksum_ok" = true ]; then
+						gunzip -c "$tmpdir/taplo.gz" >"$BIN_DIR/taplo"
 						chmod +x "$BIN_DIR/taplo"
-						echo -e "${GREEN}✓ taplo installed via cargo${NC}"
-						taplo_installed=true
-					elif command -v taplo &>/dev/null; then
-						echo -e "${GREEN}✓ taplo installed via cargo (found on PATH)${NC}"
+						echo -e "${GREEN}✓ taplo installed successfully${NC}"
 						taplo_installed=true
 					fi
 				fi
+			else
+				echo -e "${YELLOW}⚠ GitHub release for taplo v${TAPLO_VERSION} not available${NC}"
+			fi
+			rm -rf "$tmpdir"
+
+			# Fallback to cargo if binary download failed
+			if [ "$taplo_installed" = false ]; then
+				echo -e "${BLUE}Attempting fallback installation via cargo...${NC}"
+				if command -v cargo &>/dev/null; then
+					echo -e "${BLUE}Installing taplo via cargo...${NC}"
+					if cargo install taplo-cli --locked; then
+						# Derive cargo bin directory from CARGO_HOME or default
+						cargo_bin="${CARGO_HOME:-$HOME/.cargo}/bin"
+						# Check for executable taplo in cargo bin, fall back to PATH
+						if [ -x "$cargo_bin/taplo" ]; then
+							cp "$cargo_bin/taplo" "$BIN_DIR/taplo"
+							chmod +x "$BIN_DIR/taplo"
+							echo -e "${GREEN}✓ taplo installed via cargo${NC}"
+							taplo_installed=true
+						elif command -v taplo &>/dev/null; then
+							echo -e "${GREEN}✓ taplo installed via cargo (found on PATH)${NC}"
+							taplo_installed=true
+						fi
+					fi
+				fi
+			fi
+
+			if [ "$taplo_installed" = false ]; then
+				echo -e "${RED}✗ Failed to install taplo${NC}"
+				exit 1
 			fi
 		fi
+	fi # taplo
 
-		if [ "$taplo_installed" = false ]; then
-			echo -e "${RED}✗ Failed to install taplo${NC}"
+	if should_install "tsc"; then
+		# Install typescript via bun (TypeScript compiler)
+		echo -e "${BLUE}Installing typescript...${NC}"
+
+		if ! ensure_bun_installed; then
 			exit 1
 		fi
-	fi
 
-	# Install typescript via bun (TypeScript compiler)
-	echo -e "${BLUE}Installing typescript...${NC}"
+		TYPESCRIPT_VERSION=$(get_tool_version "typescript") || exit 1
+		if [ $DRY_RUN -eq 1 ]; then
+			log_info "[DRY-RUN] Would install typescript@${TYPESCRIPT_VERSION} globally via bun"
+		elif bun add -g "typescript@${TYPESCRIPT_VERSION}"; then
+			echo -e "${GREEN}✓ typescript@${TYPESCRIPT_VERSION} installed successfully${NC}"
+		else
+			echo -e "${RED}✗ Failed to install typescript${NC}"
+			exit 1
+		fi
+	fi # tsc
 
-	if ! ensure_bun_installed; then
-		exit 1
-	fi
+	if should_install "astro"; then
+		# Install astro and @astrojs/check via bun (Astro type checking)
+		echo -e "${BLUE}Installing astro and @astrojs/check...${NC}"
 
-	TYPESCRIPT_VERSION=$(get_tool_version "typescript") || exit 1
-	if [ $DRY_RUN -eq 1 ]; then
-		log_info "[DRY-RUN] Would install typescript@${TYPESCRIPT_VERSION} globally via bun"
-	elif bun add -g "typescript@${TYPESCRIPT_VERSION}"; then
-		echo -e "${GREEN}✓ typescript@${TYPESCRIPT_VERSION} installed successfully${NC}"
-	else
-		echo -e "${RED}✗ Failed to install typescript${NC}"
-		exit 1
-	fi
+		if ! ensure_bun_installed; then
+			exit 1
+		fi
 
-	# Install astro and @astrojs/check via bun (Astro type checking)
-	echo -e "${BLUE}Installing astro and @astrojs/check...${NC}"
+		ASTRO_VERSION=$(get_tool_version "astro") || exit 1
+		ASTRO_CHECK_VERSION=$(get_tool_version "@astrojs/check") || exit 1
+		if [ $DRY_RUN -eq 1 ]; then
+			log_info "[DRY-RUN] Would install astro@${ASTRO_VERSION} and @astrojs/check@${ASTRO_CHECK_VERSION} globally via bun"
+		elif bun add -g "astro@${ASTRO_VERSION}" "@astrojs/check@${ASTRO_CHECK_VERSION}"; then
+			echo -e "${GREEN}✓ astro@${ASTRO_VERSION} and @astrojs/check@${ASTRO_CHECK_VERSION} installed successfully${NC}"
+		else
+			echo -e "${RED}✗ Failed to install astro and @astrojs/check${NC}"
+			exit 1
+		fi
+	fi # astro
 
-	ASTRO_VERSION=$(get_tool_version "astro") || exit 1
-	ASTRO_CHECK_VERSION=$(get_tool_version "@astrojs/check") || exit 1
-	if [ $DRY_RUN -eq 1 ]; then
-		log_info "[DRY-RUN] Would install astro@${ASTRO_VERSION} and @astrojs/check@${ASTRO_CHECK_VERSION} globally via bun"
-	elif bun add -g "astro@${ASTRO_VERSION}" "@astrojs/check@${ASTRO_CHECK_VERSION}"; then
-		echo -e "${GREEN}✓ astro@${ASTRO_VERSION} and @astrojs/check@${ASTRO_CHECK_VERSION} installed successfully${NC}"
-	else
-		echo -e "${RED}✗ Failed to install astro and @astrojs/check${NC}"
-		exit 1
-	fi
+	if should_install "svelte-check"; then
+		# Install svelte-check via bun (Svelte type checking)
+		echo -e "${BLUE}Installing svelte-check...${NC}"
 
-	# Install svelte-check via bun (Svelte type checking)
-	echo -e "${BLUE}Installing svelte-check...${NC}"
+		if ! ensure_bun_installed; then
+			exit 1
+		fi
 
-	SVELTE_CHECK_VERSION=$(get_tool_version "svelte-check") || exit 1
-	if [ $DRY_RUN -eq 1 ]; then
-		log_info "[DRY-RUN] Would install svelte-check@${SVELTE_CHECK_VERSION} globally via bun"
-	elif bun add -g "svelte-check@${SVELTE_CHECK_VERSION}"; then
-		echo -e "${GREEN}✓ svelte-check@${SVELTE_CHECK_VERSION} installed successfully${NC}"
-	else
-		echo -e "${RED}✗ Failed to install svelte-check${NC}"
-		exit 1
-	fi
+		SVELTE_CHECK_VERSION=$(get_tool_version "svelte-check") || exit 1
+		if [ $DRY_RUN -eq 1 ]; then
+			log_info "[DRY-RUN] Would install svelte-check@${SVELTE_CHECK_VERSION} globally via bun"
+		elif bun add -g "svelte-check@${SVELTE_CHECK_VERSION}"; then
+			echo -e "${GREEN}✓ svelte-check@${SVELTE_CHECK_VERSION} installed successfully${NC}"
+		else
+			echo -e "${RED}✗ Failed to install svelte-check${NC}"
+			exit 1
+		fi
+	fi # svelte-check
 
-	# Install vue-tsc via bun (Vue TypeScript type checking)
-	echo -e "${BLUE}Installing vue-tsc...${NC}"
+	if should_install "vue-tsc"; then
+		# Install vue-tsc via bun (Vue TypeScript type checking)
+		echo -e "${BLUE}Installing vue-tsc...${NC}"
 
-	VUE_TSC_VERSION=$(get_tool_version "vue-tsc") || exit 1
-	if [ $DRY_RUN -eq 1 ]; then
-		log_info "[DRY-RUN] Would install vue-tsc@${VUE_TSC_VERSION} globally via bun"
-	elif bun add -g "vue-tsc@${VUE_TSC_VERSION}"; then
-		echo -e "${GREEN}✓ vue-tsc@${VUE_TSC_VERSION} installed successfully${NC}"
-	else
-		echo -e "${RED}✗ Failed to install vue-tsc${NC}"
-		exit 1
-	fi
+		if ! ensure_bun_installed; then
+			exit 1
+		fi
+
+		VUE_TSC_VERSION=$(get_tool_version "vue-tsc") || exit 1
+		if [ $DRY_RUN -eq 1 ]; then
+			log_info "[DRY-RUN] Would install vue-tsc@${VUE_TSC_VERSION} globally via bun"
+		elif bun add -g "vue-tsc@${VUE_TSC_VERSION}"; then
+			echo -e "${GREEN}✓ vue-tsc@${VUE_TSC_VERSION} installed successfully${NC}"
+		else
+			echo -e "${RED}✗ Failed to install vue-tsc${NC}"
+			exit 1
+		fi
+
+	fi # vue-tsc
 
 	echo ""
 	echo -e "${GREEN}=== Installation Complete! ===${NC}"
@@ -1153,6 +1404,7 @@ main() {
 	echo "  - hadolint (Docker linting)"
 	echo "  - markdownlint-cli2 (Markdown linting)"
 	echo "  - mypy (Python type checking)"
+	echo "  - osv-scanner (Multi-ecosystem vulnerability scanning)"
 	echo "  - oxfmt (JavaScript/TypeScript formatting)"
 	echo "  - oxlint (JavaScript/TypeScript linting)"
 	echo "  - prettier (JavaScript/JSON formatting)"
@@ -1170,7 +1422,19 @@ main() {
 	# Verify installations
 	echo -e "${YELLOW}Verifying installations...${NC}"
 
-	tools_to_verify=("actionlint" "astro" "bandit" "black" "cargo-audit" "cargo-deny" "clippy" "rustfmt" "gitleaks" "hadolint" "markdownlint-cli2" "mypy" "oxfmt" "oxlint" "prettier" "pydoclint" "ruff" "semgrep" "shellcheck" "shfmt" "sqlfluff" "svelte-check" "taplo" "tsc" "vue-tsc" "yamllint")
+	tools_to_verify=("actionlint" "astro" "bandit" "black" "cargo-audit" "cargo-deny" "clippy" "rustfmt" "gitleaks" "hadolint" "markdownlint-cli2" "mypy" "osv-scanner" "oxfmt" "oxlint" "prettier" "pydoclint" "ruff" "semgrep" "shellcheck" "shfmt" "sqlfluff" "svelte-check" "taplo" "tsc" "vue-tsc" "yamllint")
+
+	# Filter verification list when --tools is set
+	if [[ -n "$TOOL_FILTER" ]]; then
+		filtered=()
+		for tool in "${tools_to_verify[@]}"; do
+			if should_install "$tool"; then
+				filtered+=("$tool")
+			fi
+		done
+		tools_to_verify=("${filtered[@]}")
+	fi
+
 	for tool in "${tools_to_verify[@]}"; do
 		if [ "$tool" = "clippy" ]; then
 			# Clippy is invoked through cargo

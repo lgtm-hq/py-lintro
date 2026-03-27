@@ -27,7 +27,7 @@ jobs:
       GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     steps:
       - name: Harden Runner
-        uses: step-security/harden-runner@e3f713f2d8f53843e71c69a996d56f51aa9adfb9
+        uses: step-security/harden-runner@fa2e9d605c4eeb9fcad4c99c224cee0c6c7f3594
         with:
           egress-policy: 'block'
           allowed-endpoints: >
@@ -73,11 +73,6 @@ jobs:
 
       - name: Sync dependencies
         run: uv sync --dev --no-progress
-
-      - name: Security audit dependencies
-        run: |
-          uv export --no-emit-project > /tmp/requirements.txt
-          uv run pip-audit --strict --progress-spinner=off -r /tmp/requirements.txt
 
       - name: Quality gate
         id: version

@@ -128,6 +128,7 @@ RUN echo "=== Verifying all tools ===" && \
     echo "hadolint: $(hadolint --version)" && \
     echo "markdownlint-cli2: $(markdownlint-cli2 --version)" && \
     echo "mypy: $(mypy --version)" && \
+    echo "osv-scanner: $(osv-scanner --version)" && \
     echo "oxfmt: $(oxfmt --version)" && \
     echo "oxlint: $(oxlint --version)" && \
     echo "prettier: $(prettier --version)" && \

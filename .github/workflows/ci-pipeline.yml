@@ -37,7 +37,7 @@ jobs:
       changed: ${{ steps.tools.outputs.changed }}
     steps:
       - name: Harden Runner
-        uses: step-security/harden-runner@e3f713f2d8f53843e71c69a996d56f51aa9adfb9
+        uses: step-security/harden-runner@fa2e9d605c4eeb9fcad4c99c224cee0c6c7f3594
         with:
           egress-policy: 'block'
           allowed-endpoints: >
@@ -101,7 +101,7 @@ jobs:
       github.event.pull_request.draft == false
     steps:
       - name: Harden Runner
-        uses: step-security/harden-runner@e3f713f2d8f53843e71c69a996d56f51aa9adfb9
+        uses: step-security/harden-runner@fa2e9d605c4eeb9fcad4c99c224cee0c6c7f3594
         with:
           egress-policy: 'block'
           allowed-endpoints: >
@@ -149,7 +149,7 @@ jobs:
       is-fork: ${{ steps.fork-check.outputs.is-fork }}
     steps:
       - name: Harden Runner
-        uses: step-security/harden-runner@e3f713f2d8f53843e71c69a996d56f51aa9adfb9
+        uses: step-security/harden-runner@fa2e9d605c4eeb9fcad4c99c224cee0c6c7f3594
         with:
           egress-policy: 'block'
           allowed-endpoints: >
@@ -283,7 +283,7 @@ jobs:
       cancel-in-progress: true
     steps:
       - name: Harden Runner
-        uses: step-security/harden-runner@e3f713f2d8f53843e71c69a996d56f51aa9adfb9
+        uses: step-security/harden-runner@fa2e9d605c4eeb9fcad4c99c224cee0c6c7f3594
         with:
           egress-policy: 'block'
           allowed-endpoints: >
@@ -312,6 +312,8 @@ jobs:
             index.crates.io:443
             semgrep.dev:443
             metrics.semgrep.dev:443
+            api.osv.dev:443
+            api.deps.dev:443
       - name: Checkout
         uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
         with:
@@ -381,7 +383,7 @@ jobs:
         python-version: ['3.11', '3.14']
     steps:
       - name: Harden Runner
-        uses: step-security/harden-runner@e3f713f2d8f53843e71c69a996d56f51aa9adfb9
+        uses: step-security/harden-runner@fa2e9d605c4eeb9fcad4c99c224cee0c6c7f3594
         with:
           egress-policy: 'block'
           allowed-endpoints: >
@@ -431,7 +433,7 @@ jobs:
       cancel-in-progress: true
     steps:
       - name: Harden Runner
-        uses: step-security/harden-runner@e3f713f2d8f53843e71c69a996d56f51aa9adfb9
+        uses: step-security/harden-runner@fa2e9d605c4eeb9fcad4c99c224cee0c6c7f3594
         with:
           egress-policy: 'block'
           allowed-endpoints: >
@@ -440,30 +442,36 @@ jobs:
             codeload.github.com:443
             release-assets.githubusercontent.com:443
             objects.githubusercontent.com:443
-            pypi.org:443
-            files.pythonhosted.org:443
+            ghcr.io:443
+            pkg-containers.githubusercontent.com:443
             api.osv.dev:443
-            astral.sh:443
-            releases.astral.sh:443
+            api.deps.dev:443
 
       - name: Checkout
         uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
 
-      - name: Environment setup
-        uses: ./.github/actions/setup-env
-        with:
-          python-version: '3.14'
+      - name: Pull CI image from GHCR
+        if: needs.docker-build.outputs.is-fork != 'true'
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          BOOTSTRAP_SKIP_INSTALL_TOOLS: '1'
-
-      - name: Sync dependencies
-        run: uv sync --dev --no-progress
+          CI_TAG: ci-${{ github.run_id }}
+        run: |
+          docker pull "ghcr.io/lgtm-hq/py-lintro:${CI_TAG}"
+          docker tag "ghcr.io/lgtm-hq/py-lintro:${CI_TAG}" py-lintro:latest
+      - name: Download Docker images artifact (fork fallback)
+        if: needs.docker-build.outputs.is-fork == 'true'
+        # yamllint disable-line rule:line-length
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
+        with:
+          name: docker-images
+          path: /tmp
+      - name: Load Docker images (fork fallback)
+        if: needs.docker-build.outputs.is-fork == 'true'
+        run: docker load -i /tmp/py-lintro-images.tar
 
       - name: Run security audit
         id: audit
         continue-on-error: true
-        run: scripts/ci/security-audit.sh
+        run: scripts/ci/security-comment.sh
 
       - name: Comment PR with security audit results
         if: github.event_name == 'pull_request'
@@ -504,7 +512,7 @@ jobs:
       coverage-percentage: ${{ steps.coverage.outputs.percentage }}
     steps:
       - name: Harden Runner
-        uses: step-security/harden-runner@e3f713f2d8f53843e71c69a996d56f51aa9adfb9
+        uses: step-security/harden-runner@fa2e9d605c4eeb9fcad4c99c224cee0c6c7f3594
         with:
           egress-policy: 'block'
           allowed-endpoints: >
@@ -538,6 +546,8 @@ jobs:
             index.crates.io:443
             semgrep.dev:443
             metrics.semgrep.dev:443
+            api.osv.dev:443
+            api.deps.dev:443
       - name: Checkout
         uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
         with:
@@ -668,7 +678,7 @@ jobs:
       pull-requests: write
     steps:
       - name: Harden Runner
-        uses: step-security/harden-runner@e3f713f2d8f53843e71c69a996d56f51aa9adfb9
+        uses: step-security/harden-runner@fa2e9d605c4eeb9fcad4c99c224cee0c6c7f3594
         with:
           egress-policy: 'block'
           allowed-endpoints: >
@@ -756,7 +766,7 @@ jobs:
       cancel-in-progress: true
     steps:
       - name: Harden Runner
-        uses: step-security/harden-runner@e3f713f2d8f53843e71c69a996d56f51aa9adfb9
+        uses: step-security/harden-runner@fa2e9d605c4eeb9fcad4c99c224cee0c6c7f3594
         with:
           egress-policy: 'block'
           allowed-endpoints: >
@@ -806,7 +816,7 @@ jobs:
       cancel-in-progress: true
     steps:
       - name: Harden Runner
-        uses: step-security/harden-runner@e3f713f2d8f53843e71c69a996d56f51aa9adfb9
+        uses: step-security/harden-runner@fa2e9d605c4eeb9fcad4c99c224cee0c6c7f3594
         with:
           egress-policy: 'block'
           allowed-endpoints: >
@@ -895,7 +905,7 @@ jobs:
       cancel-in-progress: false
     steps:
       - name: Harden Runner
-        uses: step-security/harden-runner@e3f713f2d8f53843e71c69a996d56f51aa9adfb9
+        uses: step-security/harden-runner@fa2e9d605c4eeb9fcad4c99c224cee0c6c7f3594
         with:
           egress-policy: 'block'
           allowed-endpoints: >
@@ -1012,7 +1022,7 @@ jobs:
     timeout-minutes: 5
     steps:
       - name: Harden Runner
-        uses: step-security/harden-runner@e3f713f2d8f53843e71c69a996d56f51aa9adfb9
+        uses: step-security/harden-runner@fa2e9d605c4eeb9fcad4c99c224cee0c6c7f3594
         with:
           egress-policy: 'block'
           allowed-endpoints: >
