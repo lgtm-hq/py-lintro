@@ -28,7 +28,7 @@ from __future__ import annotations
 import shutil
 import sys
 from abc import ABC, abstractmethod
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, ClassVar
 
 from loguru import logger
 
@@ -503,7 +503,7 @@ class StandaloneBuilder(CommandBuilder):
 
     # Explicit mapping from internal tool name to binary name.
     # Only tools whose binary name differs need an entry here.
-    TOOL_BINARY_MAP: dict[str, str] = {
+    TOOL_BINARY_MAP: ClassVar[dict[str, str]] = {
         "osv_scanner": "osv-scanner",
     }
 

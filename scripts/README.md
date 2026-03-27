@@ -234,7 +234,7 @@ Runs Lintro analysis in Docker for CI pipeline.
 **Usage:**
 
 ```bash
-./scripts/ci/ci-lintro.sh
+./scripts/ci/testing/ci-lintro.sh
 ```
 
 #### `coverage-badge-update.sh`

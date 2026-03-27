@@ -11,6 +11,10 @@
       "enabled": true
     },
     {
+      "matchCategories": ["javascript"],
+      "enabled": true
+    },
+    {
       "matchDatasources": ["pypi"],
       "matchUpdateTypes": ["patch"],
       "automerge": true,

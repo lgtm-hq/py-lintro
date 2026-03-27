@@ -31,6 +31,14 @@ def _escape_md_cell(value: str) -> str:
     return value.replace("|", "\\|").replace("\n", " ").replace("\r", "")
 
 
+def _fence_code_block(text: str) -> str:
+    """Wrap text in a Markdown code fence safe against embedded backticks."""
+    fence = "```"
+    while fence in text:
+        fence += "`"
+    return f"{fence}\n{text}\n{fence}"
+
+
 def format_comment(json_path: str) -> str | None:
     """Format osv-scanner JSON results as markdown.
 
@@ -104,7 +112,7 @@ def format_comment(json_path: str) -> str | None:
             # Show first 500 chars of output for debugging context
             preview = output_text[:500]
             sections.append("")
-            sections.append(f"```\n{preview}\n```")
+            sections.append(_fence_code_block(preview))
     else:
         sections.append("No security vulnerabilities found in dependencies.")
 

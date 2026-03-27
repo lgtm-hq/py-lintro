@@ -8,7 +8,7 @@ results and expiry dates.
 from __future__ import annotations
 
 import tomllib
-from datetime import date
+from datetime import date, datetime
 from pathlib import Path
 from typing import Any
 
@@ -56,7 +56,7 @@ def parse_suppressions(toml_path: Path) -> list[SuppressionEntry]:
             continue
 
         ignore_until = item.get("ignoreUntil")
-        if not isinstance(ignore_until, date):
+        if not isinstance(ignore_until, date) or isinstance(ignore_until, datetime):
             logger.debug(
                 "Skipping IgnoredVulns entry '{}': missing or invalid ignoreUntil",
                 vuln_id,

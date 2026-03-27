@@ -166,7 +166,8 @@ class OsvScannerPlugin(BaseToolPlugin):
         Returns:
             Command list for running osv-scanner with JSON output.
         """
-        cmd = self._get_executable_command("osv-scanner") + [
+        cmd = [
+            *self._get_executable_command("osv-scanner"),
             "scan",
             "--format",
             "json",
@@ -190,7 +191,8 @@ class OsvScannerPlugin(BaseToolPlugin):
         Returns:
             Command list for running osv-scanner without suppressions.
         """
-        cmd = self._get_executable_command("osv-scanner") + [
+        cmd = [
+            *self._get_executable_command("osv-scanner"),
             "scan",
             "--format",
             "json",

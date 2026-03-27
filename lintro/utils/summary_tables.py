@@ -426,7 +426,9 @@ def print_summary_table(
                     notes_display = f"{_YELLOW}deferred to framework checker{_RESET}"
 
                 # Surface stale/expired suppression counts for security tools
-                ai_meta = getattr(result, "ai_metadata", None) or {}
+                ai_meta = getattr(result, "ai_metadata", None)
+                if not isinstance(ai_meta, dict):
+                    ai_meta = {}
                 suppressions = ai_meta.get("suppressions", [])
                 if suppressions:
                     stale = sum(

@@ -52,10 +52,12 @@ docker run --rm --user "$(id -u):$(id -g)" -e HOME=/tmp \
 
 # Format JSON results as markdown PR comment body
 format_err=$(mktemp)
+FORMAT_FAILED=0
 if ! COMMENT_BODY=$(python3 "$SCRIPT_DIR/format-security-comment.py" osv-results.json 2>"$format_err"); then
 	log_error "format-security-comment.py failed:"
 	cat "$format_err" >&2
-	COMMENT_BODY=""
+	COMMENT_BODY="⚠️ Failed to format security audit results. See CI logs for details."
+	FORMAT_FAILED=1
 fi
 rm -f "$format_err"
 
@@ -63,7 +65,7 @@ rm -f "$format_err"
 # lintro exits non-zero when issues are found; check the JSON output to
 # determine whether vulnerabilities were actually reported vs a scan failure.
 HAS_VULNS=0
-AUDIT_FAILED=0
+AUDIT_FAILED=$FORMAT_FAILED
 if [[ "$OSV_EXIT_CODE" -ne 0 ]]; then
 	if [[ -f osv-results.json ]] && python3 -c "
 import json, sys
@@ -92,8 +94,8 @@ ${COMMENT_BODY}"
 # Generate the comment file using shared function
 generate_pr_comment "🔐 Security Audit" "$STATUS" "$CONTENT" "$COMMENT_FILE" "lintro + osv-scanner"
 
-# Only cleanup artifacts on success (preserve for debugging on failure)
-if [[ "$HAS_VULNS" -eq 0 ]]; then
+# Only cleanup artifacts on full success (preserve for debugging on failure)
+if [[ "$HAS_VULNS" -eq 0 && "$AUDIT_FAILED" -eq 0 ]]; then
 	rm -f osv-results.json osv-output.txt
 fi
 
