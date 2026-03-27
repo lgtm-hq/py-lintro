@@ -3,18 +3,6 @@
   "extends": ["config:recommended"],
   "packageRules": [
     {
-      "matchCategories": ["python"],
-      "enabled": true
-    },
-    {
-      "matchCategories": ["docker"],
-      "enabled": true
-    },
-    {
-      "matchCategories": ["javascript"],
-      "enabled": true
-    },
-    {
       "matchDatasources": ["pypi"],
       "matchUpdateTypes": ["patch"],
       "automerge": true,

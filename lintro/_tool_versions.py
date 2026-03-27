@@ -82,14 +82,14 @@ _TOOL_TO_NPM_PACKAGE: dict[ToolName, str] = {
 # Fallback npm tool versions - used when package.json is not found.
 # CI should verify these match package.json to prevent drift.
 _FALLBACK_NPM_VERSIONS: dict[ToolName, str] = {
-    ToolName.ASTRO_CHECK: "5.17.1",
-    ToolName.SVELTE_CHECK: "4.3.6",
+    ToolName.ASTRO_CHECK: "5.18.1",
+    ToolName.SVELTE_CHECK: "4.4.5",
     ToolName.TSC: "5.9.3",
-    ToolName.VUE_TSC: "3.2.4",
+    ToolName.VUE_TSC: "3.2.6",
     ToolName.PRETTIER: "3.8.1",
-    ToolName.MARKDOWNLINT: "0.17.2",
-    ToolName.OXLINT: "1.42.0",
-    ToolName.OXFMT: "0.27.0",
+    ToolName.MARKDOWNLINT: "0.22.0",
+    ToolName.OXLINT: "1.57.0",
+    ToolName.OXFMT: "0.42.0",
 }
 
 # Companion npm packages - packages that support a tool but have separate versions
