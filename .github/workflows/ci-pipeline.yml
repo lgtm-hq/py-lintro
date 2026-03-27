@@ -415,11 +415,11 @@ jobs:
           -x
 
   # ============================================================================
-  # Stage 3c: Security Audit (runs in parallel with test after lint)
+  # Stage 3b: Security Audit (parallel with lint and test)
   # ============================================================================
   security-audit:
     name: 🔐 Security Audit
-    needs: [docker-build, lint]
+    needs: [docker-build]
     runs-on: ubuntu-24.04
     permissions:
       contents: read
@@ -488,11 +488,11 @@ jobs:
           exit 1
 
   # ============================================================================
-  # Stage 4: Test (GATED on lint)
+  # Stage 3c: Test (parallel with lint and security-audit)
   # ============================================================================
   test:
     name: 🧪 Test Suite & Coverage
-    needs: [resolve-tools, docker-build, lint]
+    needs: [resolve-tools, docker-build]
     runs-on: ubuntu-24.04
     permissions:
       contents: read
