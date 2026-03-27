@@ -1,0 +1,8 @@
+# OSV-Scanner configuration for the lintro project.
+# Suppressions for known vulnerabilities with no patched version available.
+# Review periodically and remove once upstream fixes land.
+
+[[IgnoredVulns]]
+id = "GHSA-5239-wwwm-4pmq"
+ignoreUntil = 2026-06-23
+reason = "Pygments ReDoS in AdlLexer GUID matching regex. Transitive dep via diff-cover, low practical risk for CLI tool — requires local access."

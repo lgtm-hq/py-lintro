@@ -492,9 +492,11 @@ class CargoBuilder(CommandBuilder):
 
 @register_command_builder
 class StandaloneBuilder(CommandBuilder):
-    """Builder for standalone binary tools (Hadolint, Actionlint).
+    """Builder for standalone binary tools.
 
     These tools are invoked directly by name without any wrapper.
+    Tool names with underscores are converted to hyphens to match
+    the actual binary name (e.g. osv_scanner -> osv-scanner).
     """
 
     _tools: frozenset[ToolName] | None = None
@@ -511,8 +513,13 @@ class StandaloneBuilder(CommandBuilder):
 
             self._tools = frozenset(
                 {
-                    ToolName.HADOLINT,
                     ToolName.ACTIONLINT,
+                    ToolName.GITLEAKS,
+                    ToolName.HADOLINT,
+                    ToolName.OSV_SCANNER,
+                    ToolName.SHELLCHECK,
+                    ToolName.SHFMT,
+                    ToolName.SEMGREP,
                 },
             )
         return self._tools
@@ -540,6 +547,6 @@ class StandaloneBuilder(CommandBuilder):
             tool_name_enum: Tool name enum.
 
         Returns:
-            Command list containing just the tool name.
+            Command list containing the binary name.
         """
-        return [tool_name]
+        return [tool_name.replace("_", "-")]
