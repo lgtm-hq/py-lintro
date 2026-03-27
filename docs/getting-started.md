@@ -86,6 +86,9 @@ Some tools require separate installation. Their minimum versions are also manage
 - `taplo` - TOML linter and formatter (`brew install taplo` or GitHub releases)
 - `cargo-audit` - Rust dependency vulnerability scanner (`cargo install cargo-audit`)
 - `cargo-deny` - Rust dependency license/advisory checker (`cargo install cargo-deny`)
+- `osv-scanner` - Multi-ecosystem vulnerability scanner using the OSV database
+  (`go install github.com/google/osv-scanner/v2/cmd/osv-scanner@latest` or GitHub
+  releases)
 - `typescript` - TypeScript compiler for type checking (`brew install typescript`,
   `bun add -g typescript`, or `npm install -g typescript`)
 - `astro` - Astro type checker for `.astro` files (install locally with

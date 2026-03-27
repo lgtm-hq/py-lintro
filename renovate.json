@@ -273,6 +273,19 @@
       "extractVersionTemplate": "^v(?<version>.*)$"
     },
     {
+      "description": "Update osv-scanner version in _tool_versions.py",
+      "customType": "regex",
+      "managerFilePatterns": [
+        "lintro/_tool_versions\\.py"
+      ],
+      "matchStrings": [
+        "ToolName\\.OSV_SCANNER:\\s*\"(?<currentValue>[0-9]+\\.[0-9]+\\.[0-9]+)\""
+      ],
+      "datasourceTemplate": "github-releases",
+      "packageNameTemplate": "google/osv-scanner",
+      "extractVersionTemplate": "^v(?<version>.*)$"
+    },
+    {
       "description": "Update shellcheck version in _tool_versions.py",
       "customType": "regex",
       "managerFilePatterns": [
@@ -456,6 +469,19 @@
       ],
       "datasourceTemplate": "github-releases",
       "packageNameTemplate": "hadolint/hadolint",
+      "extractVersionTemplate": "^v(?<version>.*)$"
+    },
+    {
+      "description": "Update osv_scanner version in manifest.json",
+      "customType": "regex",
+      "managerFilePatterns": [
+        "lintro/tools/manifest\\.json"
+      ],
+      "matchStrings": [
+        "\"name\":\\s*\"osv_scanner\",\\s*\"version\":\\s*\"(?<currentValue>[0-9]+\\.[0-9]+\\.[0-9]+)\""
+      ],
+      "datasourceTemplate": "github-releases",
+      "packageNameTemplate": "google/osv-scanner",
       "extractVersionTemplate": "^v(?<version>.*)$"
     },
     {
