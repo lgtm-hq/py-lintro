@@ -50,6 +50,7 @@ OSV_SCANNER_FILE_PATTERNS: list[str] = [
     "uv.lock",
     # JavaScript/TypeScript
     "package-lock.json",
+    "bun.lock",
     "yarn.lock",
     "pnpm-lock.yaml",
     # Go
