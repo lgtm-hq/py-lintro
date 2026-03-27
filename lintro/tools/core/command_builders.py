@@ -495,11 +495,17 @@ class StandaloneBuilder(CommandBuilder):
     """Builder for standalone binary tools.
 
     These tools are invoked directly by name without any wrapper.
-    Tool names with underscores are converted to hyphens to match
-    the actual binary name (e.g. osv_scanner -> osv-scanner).
+    Uses an explicit mapping for tools whose binary name differs
+    from their internal tool name.
     """
 
     _tools: frozenset[ToolName] | None = None
+
+    # Explicit mapping from internal tool name to binary name.
+    # Only tools whose binary name differs need an entry here.
+    TOOL_BINARY_MAP: dict[str, str] = {
+        "osv_scanner": "osv-scanner",
+    }
 
     @property
     def tools(self) -> frozenset[ToolName]:
@@ -549,4 +555,4 @@ class StandaloneBuilder(CommandBuilder):
         Returns:
             Command list containing the binary name.
         """
-        return [tool_name.replace("_", "-")]
+        return [self.TOOL_BINARY_MAP.get(tool_name, tool_name)]

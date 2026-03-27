@@ -542,7 +542,7 @@ main() {
 			case "$arch" in
 			x86_64 | amd64) arch_name="x64" ;;
 			aarch64 | arm64) arch_name="arm64" ;;
-			*) arch_name="x64" ;;
+			*) echo -e "${RED}✗ Unsupported architecture: $arch${NC}" && exit 1 ;;
 			esac
 			tgz_url="https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_${os}_${arch_name}.tar.gz"
 			checksum_url="https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_checksums.txt"
@@ -602,7 +602,7 @@ main() {
 			case "$arch" in
 			x86_64 | amd64) arch_name="amd64" ;;
 			aarch64 | arm64) arch_name="arm64" ;;
-			*) arch_name="amd64" ;;
+			*) echo -e "${RED}✗ Unsupported architecture: $arch${NC}" && exit 1 ;;
 			esac
 			binary_url="https://github.com/google/osv-scanner/releases/download/v${OSV_SCANNER_VERSION}/osv-scanner_${os}_${arch_name}"
 			checksum_url="https://github.com/google/osv-scanner/releases/download/v${OSV_SCANNER_VERSION}/osv-scanner_SHA256SUMS"
@@ -667,7 +667,7 @@ main() {
 			case "$arch" in
 			x86_64 | amd64) arch_name="amd64" ;;
 			aarch64 | arm64) arch_name="arm64" ;;
-			*) arch_name="amd64" ;;
+			*) echo -e "${RED}✗ Unsupported architecture: $arch${NC}" && exit 1 ;;
 			esac
 			tgz_url="https://github.com/rhysd/actionlint/releases/download/${ACTIONLINT_VERSION}/actionlint_${ACTIONLINT_VERSION#v}_${os_name}_${arch_name}.tar.gz"
 			tgz_name="actionlint_${ACTIONLINT_VERSION#v}_${os_name}_${arch_name}.tar.gz"
@@ -1284,7 +1284,7 @@ main() {
 				echo -e "${BLUE}Attempting fallback installation via cargo...${NC}"
 				if command -v cargo &>/dev/null; then
 					echo -e "${BLUE}Installing taplo via cargo...${NC}"
-					if cargo install taplo-cli --locked; then
+					if cargo install taplo-cli --locked --version "$TAPLO_VERSION"; then
 						# Derive cargo bin directory from CARGO_HOME or default
 						cargo_bin="${CARGO_HOME:-$HOME/.cargo}/bin"
 						# Check for executable taplo in cargo bin, fall back to PATH
@@ -1424,11 +1424,15 @@ main() {
 
 	tools_to_verify=("actionlint" "astro" "bandit" "black" "cargo-audit" "cargo-deny" "clippy" "rustfmt" "gitleaks" "hadolint" "markdownlint-cli2" "mypy" "osv-scanner" "oxfmt" "oxlint" "prettier" "pydoclint" "ruff" "semgrep" "shellcheck" "shfmt" "sqlfluff" "svelte-check" "taplo" "tsc" "vue-tsc" "yamllint")
 
-	# Filter verification list when --tools is set
+	# Filter verification list when --tools is set.
+	# Map aliases so e.g. --tools markdownlint verifies markdownlint-cli2.
 	if [[ -n "$TOOL_FILTER" ]]; then
 		filtered=()
 		for tool in "${tools_to_verify[@]}"; do
 			if should_install "$tool"; then
+				filtered+=("$tool")
+			# markdownlint alias → markdownlint-cli2 verification
+			elif [[ "$tool" == "markdownlint-cli2" ]] && should_install "markdownlint"; then
 				filtered+=("$tool")
 			fi
 		done

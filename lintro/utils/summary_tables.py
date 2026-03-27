@@ -429,9 +429,15 @@ def print_summary_table(
                 ai_meta = getattr(result, "ai_metadata", None) or {}
                 suppressions = ai_meta.get("suppressions", [])
                 if suppressions:
-                    stale = sum(1 for s in suppressions if s.get("status") == "stale")
+                    stale = sum(
+                        1
+                        for s in suppressions
+                        if isinstance(s, dict) and s.get("status") == "stale"
+                    )
                     expired = sum(
-                        1 for s in suppressions if s.get("status") == "expired"
+                        1
+                        for s in suppressions
+                        if isinstance(s, dict) and s.get("status") == "expired"
                     )
                     parts: list[str] = []
                     if expired:

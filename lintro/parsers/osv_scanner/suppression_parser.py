@@ -35,7 +35,8 @@ def parse_suppressions(toml_path: Path) -> list[SuppressionEntry]:
         return []
 
     try:
-        data: dict[str, Any] = tomllib.loads(toml_path.read_text())
+        with toml_path.open("rb") as f:
+            data: dict[str, Any] = tomllib.load(f)
     except (tomllib.TOMLDecodeError, OSError) as e:
         logger.warning("Failed to parse {}: {}", toml_path, e)
         return []

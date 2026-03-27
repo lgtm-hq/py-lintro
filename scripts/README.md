@@ -78,7 +78,7 @@ Scripts for GitHub Actions workflows and continuous integration.
 | `backfill-generate-matrix.sh`       | Generate JSON tag matrix for backfill batch                           | `BATCH=1 ./scripts/ci/backfill-generate-matrix.sh`                                               |
 | `coverage-manager.sh`               | Unified coverage ops (extract/badge/comment/threshold)                | `./scripts/utils/coverage-manager.sh --help`                                                     |
 | `ci-extract-coverage.sh`            | Extract coverage percentage                                           | `./scripts/ci/ci-extract-coverage.sh`                                                            |
-| `ci-lintro.sh`                      | Run Lintro analysis in Docker for CI                                  | `./scripts/ci/ci-lintro.sh`                                                                      |
+| `ci-lintro.sh`                      | Run Lintro analysis in Docker for CI                                  | `./scripts/ci/testing/ci-lintro.sh`                                                              |
 | `ci-log.sh`                         | Generic CI logging utility for workflow status messages               | `./scripts/ci/ci-log.sh <message>`                                                               |
 | `ci-post-pr-comment.sh`             | Post comments to PRs using GitHub API                                 | `./scripts/ci/ci-post-pr-comment.sh [file]`                                                      |
 | `ci-pr-comment.sh`                  | Generate PR comments with Lintro results                              | `./scripts/ci/ci-pr-comment.sh`                                                                  |

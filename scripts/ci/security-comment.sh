@@ -101,6 +101,7 @@ fi
 # Not consumed by current workflows but kept for future use.
 if [[ -n "${GITHUB_OUTPUT:-}" ]]; then
 	echo "has_vulns=$HAS_VULNS" >>"$GITHUB_OUTPUT"
+	echo "audit_failed=$AUDIT_FAILED" >>"$GITHUB_OUTPUT"
 fi
 
 if [[ "$AUDIT_FAILED" -eq 1 ]]; then

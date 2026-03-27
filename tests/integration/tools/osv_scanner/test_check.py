@@ -46,10 +46,7 @@ def test_check_clean_file(
     get_plugin: Callable[[str], BaseToolPlugin],
     osv_clean_file: str,
 ) -> None:
-    """Verify osv-scanner finds no vulnerabilities in a clean lockfile.
-
-    Note: osv-scanner may return non-zero (exit 128) for files with no
-    parseable packages, so we only assert on issues_count, not success.
+    """Verify osv-scanner passes on a lockfile with no known vulnerabilities.
 
     Args:
         get_plugin: Fixture factory to get plugin instances.
@@ -60,6 +57,7 @@ def test_check_clean_file(
 
     assert_that(result).is_not_none()
     assert_that(result.name).is_equal_to("osv_scanner")
+    assert_that(result.success).is_true()
     assert_that(result.issues_count).is_equal_to(0)
 
 

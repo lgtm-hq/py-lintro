@@ -93,6 +93,18 @@ def format_comment(json_path: str) -> str | None:
             "3. If no fix is available, add a suppression to "
             ".osv-scanner.toml with an expiry date",
         )
+    elif osv_result.get("success") is False:
+        output_text = osv_result.get("output", "")
+        sections.append("### ⚠️ Scanner Error:")
+        sections.append(
+            "osv-scanner encountered an error during scanning. "
+            "Review the CI logs for details.",
+        )
+        if output_text:
+            # Show first 500 chars of output for debugging context
+            preview = output_text[:500]
+            sections.append("")
+            sections.append(f"```\n{preview}\n```")
     else:
         sections.append("No security vulnerabilities found in dependencies.")
 
