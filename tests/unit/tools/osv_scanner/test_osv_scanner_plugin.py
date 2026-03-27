@@ -18,7 +18,6 @@ from lintro.parsers.osv_scanner.osv_scanner_issue import OsvScannerIssue
 from lintro.tools.definitions.osv_scanner import (
     OSV_SCANNER_DEFAULT_TIMEOUT,
     OsvScannerPlugin,
-    _find_scan_root,
 )
 
 # =============================================================================
@@ -219,23 +218,18 @@ def test_check_timeout(
     assert_that(result.output).contains("timed out")
 
 
-def test_check_no_lockfiles_skips(
+def test_check_empty_paths(
     osv_scanner_plugin: OsvScannerPlugin,
-    tmp_path: Path,
 ) -> None:
-    """Check skips gracefully when no lockfiles are found.
+    """Check returns early when given no paths.
 
     Args:
         osv_scanner_plugin: The OsvScannerPlugin instance to test.
-        tmp_path: Temporary directory path for test files.
     """
-    # Create a directory with no lockfiles
-    src_file = tmp_path / "main.py"
-    src_file.write_text("print('hello')\n")
-
-    result = osv_scanner_plugin.check([str(tmp_path)], {})
+    result = osv_scanner_plugin.check([], {})
 
     assert_that(result.success).is_true()
+    assert_that(result.issues_count).is_equal_to(0)
 
 
 # =============================================================================
@@ -251,58 +245,6 @@ def test_fix_raises_not_implemented(osv_scanner_plugin: OsvScannerPlugin) -> Non
     """
     with pytest.raises(NotImplementedError, match="cannot automatically fix"):
         osv_scanner_plugin.fix(["src/"], {})
-
-
-# =============================================================================
-# Tests for _find_scan_root
-# =============================================================================
-
-
-def test_find_scan_root_empty_list() -> None:
-    """Empty path list returns None."""
-    assert_that(_find_scan_root([])).is_none()
-
-
-def test_find_scan_root_single_file(tmp_path: Path) -> None:
-    """Single file returns its parent directory."""
-    lockfile = tmp_path / "requirements.txt"
-    lockfile.write_text("requests==2.32.3\n")
-
-    result = _find_scan_root([str(lockfile)])
-    assert_that(result).is_equal_to(tmp_path)
-
-
-def test_find_scan_root_single_directory(tmp_path: Path) -> None:
-    """Single directory returns itself."""
-    result = _find_scan_root([str(tmp_path)])
-    assert_that(result).is_equal_to(tmp_path)
-
-
-def test_find_scan_root_same_directory(tmp_path: Path) -> None:
-    """Multiple files in same directory returns that directory."""
-    req = tmp_path / "requirements.txt"
-    req.write_text("")
-    lock = tmp_path / "package-lock.json"
-    lock.write_text("{}")
-
-    result = _find_scan_root([str(req), str(lock)])
-    assert_that(result).is_equal_to(tmp_path)
-
-
-def test_find_scan_root_nested_directories(tmp_path: Path) -> None:
-    """Multiple files in nested directories returns common ancestor."""
-    frontend = tmp_path / "frontend"
-    frontend.mkdir()
-    backend = tmp_path / "backend"
-    backend.mkdir()
-
-    pkg_lock = frontend / "package-lock.json"
-    pkg_lock.write_text("{}")
-    req = backend / "requirements.txt"
-    req.write_text("")
-
-    result = _find_scan_root([str(pkg_lock), str(req)])
-    assert_that(result).is_equal_to(tmp_path)
 
 
 # =============================================================================
@@ -444,20 +386,23 @@ def test_check_suppressions_probe_timeout(
     assert_that(result.ai_metadata).is_none()
 
 
-def test_build_probe_command_internal(osv_scanner_plugin: OsvScannerPlugin) -> None:
-    """Probe command includes --config with platform null device.
+def test_build_probe_command_internal(
+    osv_scanner_plugin: OsvScannerPlugin,
+    tmp_path: Path,
+) -> None:
+    """Probe command includes --recursive and --config with null device.
 
     Tests the private _build_probe_command directly because exercising it
     through check() requires complex subprocess mocking with two sequential
     calls (gating scan + probe scan) that obscures the command structure
     being verified.
     """
-    cmd = osv_scanner_plugin._build_probe_command(["requirements.txt"])
+    cmd = osv_scanner_plugin._build_probe_command(tmp_path)
 
+    assert_that(cmd).contains("--recursive")
     assert_that(cmd).contains("--config")
     assert_that(cmd).contains(os.devnull)
-    assert_that(cmd).contains("--lockfile")
-    assert_that(cmd).contains("requirements.txt")
+    assert_that(cmd).contains(str(tmp_path))
 
 
 def test_find_config_file_in_scan_root(tmp_path: Path) -> None:

@@ -12,10 +12,7 @@ import os
 import subprocess  # nosec B404 - used safely with shell disabled
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
-
-if TYPE_CHECKING:
-    from lintro.plugins.base import ExecutionContext
+from typing import Any
 
 from loguru import logger
 
@@ -29,6 +26,10 @@ from lintro.parsers.osv_scanner import (
     parse_suppressions,
 )
 from lintro.plugins.base import BaseToolPlugin
+from lintro.plugins.execution_preparation import (
+    get_effective_timeout,
+    verify_tool_version,
+)
 from lintro.plugins.protocol import ToolDefinition
 from lintro.plugins.registry import register_tool
 from lintro.tools.core.option_validators import validate_bool, validate_positive_int
@@ -36,72 +37,6 @@ from lintro.tools.core.option_validators import validate_bool, validate_positive
 # Constants
 OSV_SCANNER_DEFAULT_TIMEOUT: int = 120  # Network operations can be slow
 OSV_SCANNER_DEFAULT_PRIORITY: int = 90  # High priority for security tool
-
-# Lockfile patterns that osv-scanner recognizes.
-# These are exact filenames (not source-code globs) — osv-scanner discovers
-# the ecosystem from the lockfile format, so we only need to list files that
-# the tool can actually parse.
-OSV_SCANNER_FILE_PATTERNS: list[str] = [
-    # Python
-    "requirements.txt",
-    "Pipfile.lock",
-    "poetry.lock",
-    "pdm.lock",
-    "uv.lock",
-    # JavaScript/TypeScript
-    "package-lock.json",
-    "bun.lock",
-    "yarn.lock",
-    "pnpm-lock.yaml",
-    # Go
-    "go.sum",
-    # Rust
-    "Cargo.lock",
-    # Ruby
-    "Gemfile.lock",
-    # PHP
-    "composer.lock",
-    # .NET
-    "packages.lock.json",
-    # Java
-    "pom.xml",
-    "gradle.lockfile",
-]
-
-
-def _find_scan_root(paths: list[str]) -> Path | None:
-    """Return the common ancestor directory for all lockfile paths.
-
-    When multiple lockfiles are provided (e.g., requirements.txt in /app
-    and package-lock.json in /app/frontend), returns their lowest common
-    ancestor so osv-scanner runs from an appropriate root.
-
-    Args:
-        paths: List of file paths discovered by file discovery.
-
-    Returns:
-        Path to common ancestor directory, or None if no paths given.
-    """
-    parents: list[Path] = []
-    for raw_path in paths:
-        current = Path(raw_path).resolve()
-        if current.is_file():
-            parents.append(current.parent)
-        elif current.is_dir():
-            parents.append(current)
-
-    if not parents:
-        return None
-
-    if len(parents) == 1:
-        return parents[0]
-
-    # Find lowest common ancestor of all lockfile directories
-    try:
-        return Path(os.path.commonpath([str(p) for p in parents]))
-    except ValueError:
-        # Different drives on Windows — fall back to first parent
-        return parents[0]
 
 
 @register_tool
@@ -111,6 +46,10 @@ class OsvScannerPlugin(BaseToolPlugin):
 
     This plugin integrates OSV-Scanner with Lintro for scanning lockfiles
     for known vulnerabilities across multiple ecosystems.
+
+    Unlike other tool plugins, osv-scanner handles its own file discovery
+    via --recursive, so file_patterns is empty and check() bypasses the
+    standard file discovery pipeline.
     """
 
     @property
@@ -128,7 +67,7 @@ class OsvScannerPlugin(BaseToolPlugin):
             ),
             can_fix=False,
             tool_type=ToolType.SECURITY,
-            file_patterns=OSV_SCANNER_FILE_PATTERNS,
+            file_patterns=[],
             priority=OSV_SCANNER_DEFAULT_PRIORITY,
             conflicts_with=[],
             native_configs=[".osv-scanner.toml"],
@@ -154,31 +93,28 @@ class OsvScannerPlugin(BaseToolPlugin):
             validate_bool(kwargs["check_suppressions"], "check_suppressions")
         super().set_options(**kwargs)
 
-    def _build_command(self, lockfiles: list[str]) -> list[str]:
+    def _build_command(self, scan_root: Path) -> list[str]:
         """Build the osv-scanner scan command.
 
-        Uses --lockfile for each discovered lockfile for precise scanning,
-        rather than --recursive which may scan unintended files.
+        Uses --recursive to let osv-scanner discover lockfiles itself,
+        rather than maintaining a separate list of file patterns.
 
         Args:
-            lockfiles: List of lockfile paths to scan.
+            scan_root: Root directory to scan recursively.
 
         Returns:
             Command list for running osv-scanner with JSON output.
         """
-        cmd = [
+        return [
             *self._get_executable_command("osv-scanner"),
             "scan",
+            "--recursive",
             "--format",
             "json",
+            str(scan_root),
         ]
 
-        for lockfile in lockfiles:
-            cmd.extend(["--lockfile", lockfile])
-
-        return cmd
-
-    def _build_probe_command(self, lockfiles: list[str]) -> list[str]:
+    def _build_probe_command(self, scan_root: Path) -> list[str]:
         """Build an osv-scanner command that ignores all suppressions.
 
         Uses --config /dev/null to disable .osv-scanner.toml so the
@@ -186,24 +122,21 @@ class OsvScannerPlugin(BaseToolPlugin):
         This "probe" output is used to detect stale suppressions.
 
         Args:
-            lockfiles: List of lockfile paths to scan.
+            scan_root: Root directory to scan recursively.
 
         Returns:
             Command list for running osv-scanner without suppressions.
         """
-        cmd = [
+        return [
             *self._get_executable_command("osv-scanner"),
             "scan",
+            "--recursive",
             "--format",
             "json",
             "--config",
             os.devnull,
+            str(scan_root),
         ]
-
-        for lockfile in lockfiles:
-            cmd.extend(["--lockfile", lockfile])
-
-        return cmd
 
     @staticmethod
     def _find_config_file(scan_root: Path) -> Path | None:
@@ -226,8 +159,34 @@ class OsvScannerPlugin(BaseToolPlugin):
                 return config
         return None
 
+    def _resolve_scan_root(self, paths: list[str]) -> Path:
+        """Resolve the scan root from input paths.
+
+        Args:
+            paths: Input file or directory paths.
+
+        Returns:
+            Common ancestor directory for all paths.
+        """
+        resolved: list[Path] = []
+        for raw_path in paths:
+            p = Path(raw_path).resolve()
+            resolved.append(p if p.is_dir() else p.parent)
+
+        if len(resolved) == 1:
+            return resolved[0]
+
+        try:
+            return Path(os.path.commonpath([str(p) for p in resolved]))
+        except ValueError:
+            return resolved[0]
+
     def check(self, paths: list[str], options: dict[str, object]) -> ToolResult:
-        """Scan lockfiles with OSV-Scanner for known vulnerabilities.
+        """Scan for known vulnerabilities using osv-scanner --recursive.
+
+        Bypasses the standard file discovery pipeline since osv-scanner
+        discovers lockfiles itself. Only does version checking and
+        options merging before running the scan.
 
         Args:
             paths: List of file or directory paths to scan.
@@ -236,23 +195,30 @@ class OsvScannerPlugin(BaseToolPlugin):
         Returns:
             ToolResult with scan results.
         """
-        ctx = self._prepare_execution(paths, options)
-        if ctx.should_skip:
-            return ctx.early_result  # type: ignore[return-value]
-
-        # Find the scan root from discovered lockfiles.
-        # _prepare_execution already skips when no files match, so ctx.files
-        # is guaranteed non-empty here — assert the invariant.
-        scan_root = _find_scan_root(ctx.files)
-        if scan_root is None:
+        if not paths:
             return ToolResult(
                 name=self.definition.name,
-                success=False,
-                output="No scan root found from discovered lockfiles",
+                success=True,
+                output="No paths to check.",
                 issues_count=0,
             )
 
-        cmd = self._build_command(ctx.files)
+        # Version check
+        version_result = verify_tool_version(self.definition)
+        if version_result is not None:
+            return version_result
+
+        # Merge options
+        merged_options = dict(self.options)
+        merged_options.update(options)
+        timeout = get_effective_timeout(
+            timeout=None,
+            options=merged_options,
+            default_timeout=self.definition.default_timeout,
+        )
+
+        scan_root = self._resolve_scan_root(paths)
+        cmd = self._build_command(scan_root)
         logger.debug(
             f"[osv-scanner] Running: {' '.join(cmd[:10])}... (cwd={scan_root})",
         )
@@ -261,14 +227,14 @@ class OsvScannerPlugin(BaseToolPlugin):
             # osv-scanner returns non-zero when vulnerabilities exist
             success, output = self._run_subprocess(
                 cmd,
-                timeout=ctx.timeout,
+                timeout=timeout,
                 cwd=str(scan_root),
             )
         except subprocess.TimeoutExpired:
             return ToolResult(
                 name=self.definition.name,
                 success=False,
-                output=f"OSV-Scanner timed out after {ctx.timeout}s",
+                output=f"OSV-Scanner timed out after {timeout}s",
                 issues_count=0,
             )
 
@@ -283,12 +249,11 @@ class OsvScannerPlugin(BaseToolPlugin):
         # issues (execution error case)
         should_show_output = bool(issues) or not success
 
-        # Suppression staleness check: run a probe scan without suppressions
-        # to detect which suppressed vulnerabilities are still present.
+        # Suppression staleness check
         suppression_metadata = self._check_suppression_staleness(
-            ctx=ctx,
             scan_root=scan_root,
-            options=options,
+            timeout=timeout,
+            options=merged_options,
         )
 
         return ToolResult(
@@ -302,8 +267,8 @@ class OsvScannerPlugin(BaseToolPlugin):
 
     def _check_suppression_staleness(
         self,
-        ctx: ExecutionContext,
         scan_root: Path,
+        timeout: float,
         options: dict[str, object],
     ) -> dict[str, Any] | None:
         """Run a probe scan to classify suppression entries.
@@ -312,14 +277,13 @@ class OsvScannerPlugin(BaseToolPlugin):
         with suppressions exists.
 
         Args:
-            ctx: Execution context from _prepare_execution().
             scan_root: Root directory for the scan.
-            options: Runtime options (may override self.options).
+            timeout: Timeout for subprocess execution.
+            options: Merged runtime options.
 
         Returns:
             Metadata dict with suppression classifications, or None.
         """
-        # Runtime options override instance defaults
         check = options.get(
             "check_suppressions",
             self.options.get("check_suppressions", True),
@@ -336,11 +300,11 @@ class OsvScannerPlugin(BaseToolPlugin):
             return None
 
         # Run osv-scanner without suppressions to see all vulnerabilities
-        probe_cmd = self._build_probe_command(ctx.files)
+        probe_cmd = self._build_probe_command(scan_root)
         try:
             _probe_success, probe_output = self._run_subprocess(
                 probe_cmd,
-                timeout=ctx.timeout,
+                timeout=timeout,
                 cwd=str(scan_root),
             )
         except subprocess.TimeoutExpired:

@@ -69,12 +69,17 @@ AUDIT_FAILED=$FORMAT_FAILED
 if [[ "$OSV_EXIT_CODE" -ne 0 ]]; then
 	if [[ -f osv-results.json ]] && python3 -c "
 import json, sys
-d = json.load(open('osv-results.json'))
-r = next((x for x in d.get('results', []) if x.get('tool') == 'osv_scanner'), None)
-sys.exit(0 if r and r.get('issues_count', 0) > 0 else 1)
-" 2>/dev/null; then
+try:
+    d = json.load(open('osv-results.json'))
+    r = next((x for x in d.get('results', []) if x.get('tool') == 'osv_scanner'), None)
+    sys.exit(0 if r and r.get('issues_count', 0) > 0 else 1)
+except (json.JSONDecodeError, KeyError) as e:
+    print(f'Failed to parse osv-results.json: {e}', file=sys.stderr)
+    sys.exit(1)
+" 2>&1; then
 		HAS_VULNS=1
 	else
+		log_info "osv-scanner exited non-zero but no valid vulnerability data found in osv-results.json"
 		AUDIT_FAILED=1
 	fi
 fi

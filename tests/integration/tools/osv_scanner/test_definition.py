@@ -30,11 +30,9 @@ def test_definition_attributes(
     assert_that(getattr(plugin.definition, attr)).is_equal_to(expected)
 
 
-def test_definition_file_patterns(
+def test_definition_file_patterns_empty(
     get_plugin: Callable[[str], BaseToolPlugin],
 ) -> None:
-    """Verify OsvScannerPlugin definition includes lockfile patterns."""
+    """Verify OsvScannerPlugin has empty file_patterns (uses --recursive)."""
     plugin = get_plugin("osv_scanner")
-    assert_that(plugin.definition.file_patterns).contains("requirements.txt")
-    assert_that(plugin.definition.file_patterns).contains("package-lock.json")
-    assert_that(plugin.definition.file_patterns).contains("Cargo.lock")
+    assert_that(plugin.definition.file_patterns).is_empty()

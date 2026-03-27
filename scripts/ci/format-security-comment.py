@@ -57,7 +57,12 @@ def format_comment(json_path: str) -> str | None:
         )
         return None
 
-    data = json.loads(path.read_text())
+    try:
+        data = json.loads(path.read_text())
+    except json.JSONDecodeError as e:
+        print(f"Failed to parse JSON from {path}: {e}", file=sys.stderr)
+        return None
+
     results = data.get("results", [])
 
     # Find osv_scanner result (key is "tool" in lintro JSON output)
