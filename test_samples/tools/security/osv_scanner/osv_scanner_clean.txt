@@ -1,0 +1,2 @@
+# Clean requirements file with no known vulnerabilities.
+# Used by integration tests to verify clean scan behavior.

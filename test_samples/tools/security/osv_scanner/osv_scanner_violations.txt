@@ -1,0 +1,6 @@
+# Sample requirements file with known vulnerable packages.
+# Used by integration tests and manual testing.
+# See: lintro check test_samples/ --tools osv_scanner
+requests==2.25.0
+flask==2.0.0
+django==3.2.0
