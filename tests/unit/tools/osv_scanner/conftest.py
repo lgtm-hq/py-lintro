@@ -18,7 +18,7 @@ def osv_scanner_plugin() -> Generator[OsvScannerPlugin, None, None]:
         OsvScannerPlugin: An OsvScannerPlugin instance with version checks bypassed.
     """
     with patch(
-        "lintro.plugins.execution_preparation.verify_tool_version",
+        "lintro.tools.definitions.osv_scanner.verify_tool_version",
         return_value=None,
     ):
         yield OsvScannerPlugin()

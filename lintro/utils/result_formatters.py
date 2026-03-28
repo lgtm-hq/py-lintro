@@ -43,7 +43,8 @@ def _print_suppression_table(
 
     # Compute column widths
     id_width = max(
-        len(str(s.get("id", ""))) for s in suppressions if isinstance(s, dict)
+        (len(str(s.get("id", ""))) for s in suppressions if isinstance(s, dict)),
+        default=0,
     )
     id_width = max(id_width, 2) + 2  # padding
     exp_width = 12  # YYYY-MM-DD + padding

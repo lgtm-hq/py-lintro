@@ -101,10 +101,14 @@ def format_comment(json_path: str) -> str | None:
         return None
 
     issues = osv_result.get("issues", [])
-    ai_meta = osv_result.get("ai_metadata") or {}
-    probe_suppressions = (
-        ai_meta.get("suppressions", []) if isinstance(ai_meta, dict) else []
-    )
+    ai_meta = osv_result.get("ai_metadata")
+    # None means probe didn't run; [] means probe ran but found no suppressions
+    probe_suppressions: list[dict[str, object]] | None = None
+    if isinstance(ai_meta, dict) and isinstance(
+        ai_meta.get("suppressions"),
+        list,
+    ):
+        probe_suppressions = ai_meta["suppressions"]
 
     sections: list[str] = []
 
@@ -151,10 +155,13 @@ def format_comment(json_path: str) -> str | None:
     # fall back to static entries from .osv-scanner.toml
     sections.append("")
     sections.append("### 🔇 Suppressed Vulnerabilities:")
-    if probe_suppressions:
+    if probe_suppressions is not None:
         # Probe ran: show status (active/stale/expired) from scan result
-        sections.append("| ID | Expires | Status | Reason |")
-        sections.append("|----|---------|--------|--------|")
+        if not probe_suppressions:
+            sections.append("No suppressions configured.")
+        else:
+            sections.append("| ID | Expires | Status | Reason |")
+            sections.append("|----|---------|--------|--------|")
         for s in probe_suppressions:
             if not isinstance(s, dict):
                 continue
