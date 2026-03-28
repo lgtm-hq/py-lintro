@@ -214,7 +214,9 @@ def format_comment(json_path: str) -> str | None:
                         f"| `{sid}` | {expires} | Active | {reason} |",
                     )
     else:
-        # No probe data: fall back to static TOML entries
+        # No probe data: fall back to static TOML entries.
+        # Note: TOML uses camelCase keys (e.g. "ignoreUntil") while
+        # probe-derived ai_metadata uses snake_case ("ignore_until").
         toml_suppressions = _read_suppressions_from_toml()
         if toml_suppressions:
             sections.append("| ID | Expires | Reason |")
