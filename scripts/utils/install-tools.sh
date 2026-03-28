@@ -770,8 +770,16 @@ main() {
 			return 0
 		fi
 
-		# Check if toolchain + component already available
-		if command -v rustc &>/dev/null && command -v "$component" &>/dev/null; then
+		# Check if toolchain + component already available.
+		# clippy is a cargo subcommand, not a standalone binary.
+		_component_available() {
+			if [ "$1" = "clippy" ]; then
+				cargo clippy --version &>/dev/null
+			else
+				command -v "$1" &>/dev/null
+			fi
+		}
+		if command -v rustc &>/dev/null && _component_available "$component"; then
 			if [ "$RUST_TOOLCHAIN_VERSION" = "stable" ]; then
 				echo -e "${GREEN}✓ ${component} already installed${NC}"
 				return 0
@@ -809,7 +817,7 @@ main() {
 		fi
 
 		# Verify
-		if ! command -v "$component" &>/dev/null; then
+		if ! _component_available "$component"; then
 			echo -e "${RED}✗ Failed to install ${component}${NC}"
 			exit 1
 		fi
