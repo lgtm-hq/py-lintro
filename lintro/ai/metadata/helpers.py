@@ -150,4 +150,9 @@ def normalize_ai_metadata(raw: dict[str, Any]) -> dict[str, Any]:
 
         normalized["ai_metrics"] = copy.deepcopy(ai_metrics)
 
+    # Pass through tool-specific metadata (e.g. osv-scanner suppressions)
+    suppressions = raw.get("suppressions")
+    if isinstance(suppressions, list):
+        normalized["suppressions"] = suppressions
+
     return normalized

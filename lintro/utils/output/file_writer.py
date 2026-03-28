@@ -82,6 +82,9 @@ def write_output_file(
                 "issues_count": getattr(result, "issues_count", 0),
                 "output": getattr(result, "output", ""),
             }
+            ai_metadata = getattr(result, "ai_metadata", None)
+            if isinstance(ai_metadata, dict) and ai_metadata:
+                result_data["ai_metadata"] = ai_metadata
             if hasattr(result, "issues") and result.issues:
                 result_data["issues"] = [
                     {
