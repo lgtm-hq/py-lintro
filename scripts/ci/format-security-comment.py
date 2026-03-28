@@ -28,7 +28,12 @@ def _escape_md_cell(value: str) -> str:
     Replaces pipe characters and strips newlines so the value cannot
     break table formatting.
     """
-    return value.replace("|", "\\|").replace("\n", " ").replace("\r", "")
+    return (
+        value.replace("|", "\\|")
+        .replace("`", "\\`")
+        .replace("\n", " ")
+        .replace("\r", "")
+    )
 
 
 def _read_suppressions_from_toml() -> list[dict[str, object]]:
@@ -100,7 +105,6 @@ def format_comment(json_path: str) -> str | None:
         print("osv-scanner did not produce results.", file=sys.stderr)
         return None
 
-    issues = osv_result.get("issues", [])
     ai_meta = osv_result.get("ai_metadata")
     # None means probe didn't run; [] means probe ran but found no suppressions
     probe_suppressions: list[dict[str, object]] | None = None
@@ -118,12 +122,13 @@ def format_comment(json_path: str) -> str | None:
     )
     sections.append("")
 
-    # Vulnerability table
-    if issues:
+    # Vulnerability table — use issues_count as the primary indicator
+    # since the JSON writer may omit the issues list
+    if osv_result.get("issues_count", 0) > 0:
         sections.append("### 🚨 Vulnerability Report:")
         sections.append("| Vulnerability | File |")
         sections.append("|---------------|------|")
-        for issue in issues:
+        for issue in osv_result.get("issues", []):
             # Lintro display format: message = "[GHSA-xxx] pkg@ver (fix: X.Y.Z)"
             msg = _escape_md_cell(issue.get("message", "?"))
             file = _escape_md_cell(issue.get("file", "?"))

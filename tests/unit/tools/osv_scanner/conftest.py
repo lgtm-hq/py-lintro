@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Generator
+from collections.abc import Iterator
 from unittest.mock import patch
 
 import pytest
@@ -11,7 +11,7 @@ from lintro.tools.definitions.osv_scanner import OsvScannerPlugin
 
 
 @pytest.fixture
-def osv_scanner_plugin() -> Generator[OsvScannerPlugin, None, None]:
+def osv_scanner_plugin() -> Iterator[OsvScannerPlugin]:
     """Provide an OsvScannerPlugin instance for testing.
 
     Yields:
