@@ -17,18 +17,6 @@ name: CI Pipeline
   pull_request:
     branches: [main]
     types: [opened, synchronize, reopened, ready_for_review]
-    paths:
-      - '**.py'
-      - 'pyproject.toml'
-      - 'uv.lock'
-      - 'Dockerfile*'
-      - 'docker-compose.yml'
-      - '.github/workflows/ci-pipeline.yml'
-      - '.github/actions/**'
-      - 'scripts/**'
-      - 'tests/**'
-      - 'package.json'
-      - 'bun.lock'
   workflow_dispatch:
 
 concurrency:
