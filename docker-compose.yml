@@ -8,7 +8,7 @@ services:
       dockerfile: Dockerfile
       args:
         # yamllint disable-line rule:line-length
-        TOOLS_IMAGE: ${TOOLS_IMAGE:-ghcr.io/lgtm-hq/lintro-tools:latest@sha256:bbd86e9ba5b1fdef9eb4d235ec03809f3a3a223a467b672d457fc42b3de3be7c}
+        TOOLS_IMAGE: ${TOOLS_IMAGE:-ghcr.io/lgtm-hq/lintro-tools:latest@sha256:e924a619a82e7da3cb7b0b5202bbeabc53bea1ae7dbc850bb3b859126df59886}
         WITH_AI: ${WITH_AI:-false}
     logging:
       driver: local
@@ -33,7 +33,7 @@ services:
       dockerfile: Dockerfile
       args:
         # yamllint disable-line rule:line-length
-        TOOLS_IMAGE: ${TOOLS_IMAGE:-ghcr.io/lgtm-hq/lintro-tools:latest@sha256:bbd86e9ba5b1fdef9eb4d235ec03809f3a3a223a467b672d457fc42b3de3be7c}
+        TOOLS_IMAGE: ${TOOLS_IMAGE:-ghcr.io/lgtm-hq/lintro-tools:latest@sha256:e924a619a82e7da3cb7b0b5202bbeabc53bea1ae7dbc850bb3b859126df59886}
         WITH_AI: ${WITH_AI:-false}
     image: py-lintro-test:latest
     logging:
