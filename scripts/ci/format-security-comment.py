@@ -192,25 +192,27 @@ def format_comment(json_path: str) -> str | None:
         else:
             sections.append("| ID | Expires | Status | Reason |")
             sections.append("|----|---------|--------|--------|")
-        for s in probe_suppressions:
-            if not isinstance(s, dict):
-                continue
-            sid = _escape_md_cell(str(s.get("id", "?")))
-            expires = _escape_md_cell(str(s.get("ignore_until", "?")))
-            status = str(s.get("status", "active"))
-            reason = _escape_md_cell(str(s.get("reason", "")))
-            if status == "expired":
-                sections.append(
-                    f"| :warning: `{sid}` | **EXPIRED** {expires} "
-                    f"| :warning: Expired | {reason} |",
-                )
-            elif status == "stale":
-                sections.append(
-                    f"| `{sid}` | {expires} "
-                    f"| :warning: **Stale — safe to remove** | {reason} |",
-                )
-            else:
-                sections.append(f"| `{sid}` | {expires} | Active | {reason} |")
+            for s in probe_suppressions:
+                if not isinstance(s, dict):
+                    continue
+                sid = _escape_md_cell(str(s.get("id", "?")))
+                expires = _escape_md_cell(str(s.get("ignore_until", "?")))
+                status = str(s.get("status", "active"))
+                reason = _escape_md_cell(str(s.get("reason", "")))
+                if status == "expired":
+                    sections.append(
+                        f"| :warning: `{sid}` | **EXPIRED** {expires} "
+                        f"| :warning: Expired | {reason} |",
+                    )
+                elif status == "stale":
+                    sections.append(
+                        f"| `{sid}` | {expires} "
+                        f"| :warning: **Stale — safe to remove** | {reason} |",
+                    )
+                else:
+                    sections.append(
+                        f"| `{sid}` | {expires} | Active | {reason} |",
+                    )
     else:
         # No probe data: fall back to static TOML entries
         toml_suppressions = _read_suppressions_from_toml()
