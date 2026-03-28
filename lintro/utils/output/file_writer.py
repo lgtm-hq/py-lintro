@@ -84,7 +84,11 @@ def write_output_file(
             }
             ai_metadata = getattr(result, "ai_metadata", None)
             if isinstance(ai_metadata, dict) and ai_metadata:
-                result_data["ai_metadata"] = ai_metadata
+                from lintro.ai.metadata import normalize_ai_metadata
+
+                normalized = normalize_ai_metadata(ai_metadata)
+                if normalized:
+                    result_data["ai_metadata"] = normalized
             if hasattr(result, "issues") and result.issues:
                 result_data["issues"] = [
                     {

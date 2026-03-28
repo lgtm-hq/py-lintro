@@ -153,6 +153,6 @@ def normalize_ai_metadata(raw: dict[str, Any]) -> dict[str, Any]:
     # Pass through tool-specific metadata (e.g. osv-scanner suppressions)
     suppressions = raw.get("suppressions")
     if isinstance(suppressions, list):
-        normalized["suppressions"] = suppressions
+        normalized["suppressions"] = [s for s in suppressions if isinstance(s, dict)]
 
     return normalized

@@ -98,6 +98,13 @@ def format_comment(json_path: str) -> str | None:
         print(f"Failed to parse JSON from {path}: {e}", file=sys.stderr)
         return None
 
+    if not isinstance(data, dict):
+        print(
+            "Invalid JSON structure: top-level value is not an object",
+            file=sys.stderr,
+        )
+        return None
+
     results = data.get("results", [])
     if not isinstance(results, list):
         print("Invalid JSON structure: 'results' is not a list", file=sys.stderr)
@@ -143,8 +150,8 @@ def format_comment(json_path: str) -> str | None:
             for issue in issues_list:
                 if not isinstance(issue, dict):
                     continue
-                msg = _escape_md_cell(issue.get("message", "?"))
-                file = _escape_md_cell(issue.get("file", "?"))
+                msg = _escape_md_cell(str(issue.get("message") or "?"))
+                file = _escape_md_cell(str(issue.get("file") or "?"))
                 sections.append(f"| {msg} | `{file}` |")
         else:
             sections.append(
