@@ -3,10 +3,13 @@
 ---
 name: CI Pipeline
 
-# Gated CI: resolve-tools → docker-build → lint → test → smoke-test → publish
-#                                                test → deploy-pages (main only)
-# Each stage depends on the previous passing. Docker image built ONCE and shared
-# via GHCR registry (ci-<run_id> tags), with artifact fallback for fork PRs.
+# Gated CI: resolve-tools → docker-build ─┬─ lint (all tools)
+#                                         ├─ test (+ smoke) ──→ publish
+#                                         └─ security-audit
+#           test-matrix runs in parallel (no Docker dependency)
+#                                         test → deploy-pages (main only)
+# Docker image built ONCE and shared via GHCR (ci-<run_id> tags), with artifact
+# fallback for fork PRs. Smoke test folded into test job.
 
 'on':
   push:
@@ -15,6 +18,11 @@ name: CI Pipeline
     branches: [main]
     types: [opened, synchronize, reopened, ready_for_review]
   workflow_dispatch:
+
+concurrency:
+  group: ci-pipeline-${{ github.ref }}
+  # Cancel in-progress PR runs on new pushes; never cancel main (publish must complete)
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 permissions: {}
 
@@ -200,10 +208,6 @@ jobs:
           sudo docker image prune -af
       - name: Checkout
         uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
-        with:
-          fetch-depth: 0
-          fetch-tags: true
-          persist-credentials: true
       - name: Set up Docker Buildx
         # Action SHA pin exceeds 88 chars
         # yamllint disable-line rule:line-length
@@ -317,7 +321,6 @@ jobs:
       - name: Checkout
         uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
         with:
-          fetch-depth: 0
           token: ${{ secrets.GITHUB_TOKEN }}
       - name: Log in to GHCR
         if: needs.docker-build.outputs.is-fork != 'true'
@@ -372,11 +375,13 @@ jobs:
   # ============================================================================
   test-matrix:
     name: "\U0001F40D Python Compatibility (${{ matrix.python-version }})"
-    needs: [lint]
     runs-on: ubuntu-24.04
     permissions:
       contents: read
     timeout-minutes: 20
+    if: >-
+      github.event_name != 'pull_request' ||
+      github.event.pull_request.draft == false
     strategy:
       fail-fast: false
       matrix:
@@ -550,8 +555,6 @@ jobs:
             api.deps.dev:443
       - name: Checkout
         uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
-        with:
-          fetch-depth: 0
       - name: Log in to GHCR
         if: needs.docker-build.outputs.is-fork != 'true'
         # yamllint disable-line rule:line-length
@@ -580,6 +583,11 @@ jobs:
       - name: Load Docker images (fork fallback)
         if: needs.docker-build.outputs.is-fork == 'true'
         run: docker load -i /tmp/py-lintro-images.tar
+      # -- Smoke tests (short-circuit before heavy test suite if image is broken) --
+      - name: Smoke Test Docker Image (py-lintro:latest)
+        run: ./scripts/docker/docker-build-test.sh
+      - name: Smoke Test Base Image (py-lintro:base)
+        run: docker run --rm py-lintro:base lintro --version
       - name: Set up Docker Buildx
         # Action SHA pin exceeds 88 chars
         # yamllint disable-line rule:line-length
@@ -688,23 +696,6 @@ jobs:
             release-assets.githubusercontent.com:443
             objects.githubusercontent.com:443
             img.shields.io:443
-            pings.codecov.com:443
-            codecov.io:443
-            uploader.codecov.io:443
-            storage.googleapis.com:443
-            pypi.org:443
-            files.pythonhosted.org:443
-            static.rust-lang.org:443
-            bun.sh:443
-            astral.sh:443
-            releases.astral.sh:443
-            sh.rustup.rs:443
-            registry.npmjs.org:443
-            crates.io:443
-            static.crates.io:443
-            index.crates.io:443
-            semgrep.dev:443
-            metrics.semgrep.dev:443
       - name: Checkout
         uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
       - name: Download coverage XML artifact (fallback for comment generation)
@@ -798,98 +789,11 @@ jobs:
           path: _site
 
   # ============================================================================
-  # Stage 5: Smoke Test (GATED on test)
-  # ============================================================================
-  smoke-test:
-    name: 🔥 Docker Smoke Test
-    needs: [resolve-tools, docker-build, test]
-    runs-on: ubuntu-24.04
-    permissions:
-      contents: read
-      packages: write
-    timeout-minutes: 15
-    defaults:
-      run:
-        shell: bash
-    concurrency:
-      group: smoke-test-${{ github.ref }}
-      cancel-in-progress: true
-    steps:
-      - name: Harden Runner
-        uses: step-security/harden-runner@e3f713f2d8f53843e71c69a996d56f51aa9adfb9
-        with:
-          egress-policy: 'block'
-          allowed-endpoints: >
-            github.com:443
-            api.github.com:443
-            codeload.github.com:443
-            release-assets.githubusercontent.com:443
-            objects.githubusercontent.com:443
-            ghcr.io:443
-            pkg-containers.githubusercontent.com:443
-            docker.io:443
-            registry-1.docker.io:443
-            auth.docker.io:443
-            production.cloudflare.docker.com:443
-            pypi.org:443
-            files.pythonhosted.org:443
-            static.rust-lang.org:443
-            bun.sh:443
-            astral.sh:443
-            releases.astral.sh:443
-            sh.rustup.rs:443
-            deb.debian.org:80
-            registry.npmjs.org:443
-            crates.io:443
-            static.crates.io:443
-            index.crates.io:443
-            semgrep.dev:443
-            metrics.semgrep.dev:443
-      - name: Checkout
-        uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
-        with:
-          fetch-depth: 0
-          fetch-tags: true
-          persist-credentials: true
-      - name: Log in to GHCR
-        if: needs.docker-build.outputs.is-fork != 'true'
-        # yamllint disable-line rule:line-length
-        uses: docker/login-action@5e57cd118135c172c3672efd75eb46360885c0ef # v3.6.0
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-      - name: Pull CI images from GHCR
-        if: needs.docker-build.outputs.is-fork != 'true'
-        env:
-          CI_TAG: ci-${{ github.run_id }}
-        run: |
-          docker pull "ghcr.io/lgtm-hq/py-lintro:${CI_TAG}"
-          docker tag "ghcr.io/lgtm-hq/py-lintro:${CI_TAG}" py-lintro:latest
-          docker pull "ghcr.io/lgtm-hq/py-lintro:${CI_TAG}-base"
-          docker tag "ghcr.io/lgtm-hq/py-lintro:${CI_TAG}-base" py-lintro:base
-      - name: Download Docker images artifact (fork fallback)
-        if: needs.docker-build.outputs.is-fork == 'true'
-        # Action SHA pin exceeds 88 chars
-        # yamllint disable-line rule:line-length
-        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
-        with:
-          name: docker-images
-          path: /tmp
-      - name: Load Docker images (fork fallback)
-        if: needs.docker-build.outputs.is-fork == 'true'
-        run: docker load -i /tmp/py-lintro-images.tar
-      - name: Test Docker Image (py-lintro:latest)
-        run: ./scripts/docker/docker-build-test.sh
-      - name: Smoke Test Base Image (py-lintro:base)
-        run: docker run --rm py-lintro:base lintro --version
-
-  # ============================================================================
-  # Stage 6: Publish (GATED on smoke-test, only main/release)
+  # Stage 5: Publish (GATED on test, only main/release)
   # ============================================================================
   publish:
     name: 📦 Publish to GHCR
-    needs: [resolve-tools, smoke-test]
+    needs: [resolve-tools, lint, security-audit, test]
     runs-on: ubuntu-24.04
     permissions:
       contents: read
@@ -1011,7 +915,7 @@ jobs:
     # publish is included so cleanup waits for it on main pushes before
     # deleting CI-tagged images; on PRs publish is skipped and always()
     # lets cleanup proceed without blocking.
-    needs: [docker-build, lint, test, smoke-test, publish, deploy-pages]
+    needs: [docker-build, lint, security-audit, test, publish, deploy-pages]
     if: >-
       always() &&
       needs.docker-build.outputs.is-fork != 'true'
