@@ -99,11 +99,14 @@ def format_comment(json_path: str) -> str | None:
         return None
 
     results = data.get("results", [])
+    if not isinstance(results, list):
+        print("Invalid JSON structure: 'results' is not a list", file=sys.stderr)
+        return None
 
     # Find osv_scanner result (key is "tool" in lintro JSON output)
     osv_result = None
     for r in results:
-        if r.get("tool") == "osv_scanner":
+        if isinstance(r, dict) and r.get("tool") == "osv_scanner":
             osv_result = r
             break
 
@@ -130,15 +133,24 @@ def format_comment(json_path: str) -> str | None:
 
     # Vulnerability table — use issues_count as the primary indicator
     # since the JSON writer may omit the issues list
-    if osv_result.get("issues_count", 0) > 0:
+    issues_count = osv_result.get("issues_count", 0)
+    if issues_count > 0:
+        issues_list = osv_result.get("issues", [])
         sections.append("### 🚨 Vulnerability Report:")
         sections.append("| Vulnerability | File |")
         sections.append("|---------------|------|")
-        for issue in osv_result.get("issues", []):
-            # Lintro display format: message = "[GHSA-xxx] pkg@ver (fix: X.Y.Z)"
-            msg = _escape_md_cell(issue.get("message", "?"))
-            file = _escape_md_cell(issue.get("file", "?"))
-            sections.append(f"| {msg} | `{file}` |")
+        if issues_list:
+            for issue in issues_list:
+                if not isinstance(issue, dict):
+                    continue
+                msg = _escape_md_cell(issue.get("message", "?"))
+                file = _escape_md_cell(issue.get("file", "?"))
+                sections.append(f"| {msg} | `{file}` |")
+        else:
+            sections.append(
+                f"| {issues_count} vulnerabilities found"
+                " (details unavailable) | — |",
+            )
         sections.append("")
         sections.append("### 🔧 Recommended Actions:")
         sections.append("1. Review the vulnerabilities above")
