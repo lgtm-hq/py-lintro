@@ -11,6 +11,7 @@ name: Quality Check - Action Pinning Validation
     paths:
       - '.github/workflows/**'
       - '.github/actions/**'
+      - 'scripts/ci/maintenance/validate-action-pinning.sh'
   workflow_dispatch:
 
 permissions: {}

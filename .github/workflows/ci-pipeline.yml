@@ -595,6 +595,11 @@ jobs:
       - name: Load Docker images (fork fallback)
         if: needs.docker-build.outputs.is-fork == 'true'
         run: docker load -i /tmp/py-lintro-images.tar
+      # -- Smoke tests (short-circuit before heavy test suite if image is broken) --
+      - name: Smoke Test Docker Image (py-lintro:latest)
+        run: ./scripts/docker/docker-build-test.sh
+      - name: Smoke Test Base Image (py-lintro:base)
+        run: docker run --rm py-lintro:base lintro --version
       - name: Set up Docker Buildx
         # Action SHA pin exceeds 88 chars
         # yamllint disable-line rule:line-length
@@ -670,11 +675,6 @@ jobs:
         with:
           name: coverage-badge
           path: assets/images/coverage-badge.svg
-      # -- Smoke tests (folded in from former standalone smoke-test job) --
-      - name: Smoke Test Docker Image (py-lintro:latest)
-        run: ./scripts/docker/docker-build-test.sh
-      - name: Smoke Test Base Image (py-lintro:base)
-        run: docker run --rm py-lintro:base lintro --version
 
   # ============================================================================
   # Stage 4b: Coverage PR Comment (runs in parallel after test)
@@ -805,7 +805,7 @@ jobs:
   # ============================================================================
   publish:
     name: 📦 Publish to GHCR
-    needs: [resolve-tools, test]
+    needs: [resolve-tools, lint, security-audit, test]
     runs-on: ubuntu-24.04
     permissions:
       contents: read
@@ -927,7 +927,7 @@ jobs:
     # publish is included so cleanup waits for it on main pushes before
     # deleting CI-tagged images; on PRs publish is skipped and always()
     # lets cleanup proceed without blocking.
-    needs: [docker-build, lint, test, publish, deploy-pages]
+    needs: [docker-build, lint, security-audit, test, publish, deploy-pages]
     if: >-
       always() &&
       needs.docker-build.outputs.is-fork != 'true'
