@@ -3,11 +3,6 @@
 # or where the fix requires a breaking major version upgrade.
 # Review periodically and remove once upstream fixes land.
 
-[[IgnoredVulns]]
-id = "GHSA-5239-wwwm-4pmq"
-ignoreUntil = 2026-06-23
-reason = "Pygments ReDoS in AdlLexer GUID matching regex. Transitive dep via diff-cover, low practical risk for CLI tool — requires local access."
-
 # --- Transitive npm dependencies (dev-only, not shipped) ---
 # These are pulled in by astro, svelte-check, markdownlint-cli2, etc.
 # and cannot be upgraded independently. Dev-only deps with no runtime exposure.
@@ -58,21 +53,6 @@ ignoreUntil = 2026-06-25
 reason = "h3@1.15.5 — transitive dev dep via astro, fix requires h3 v2 (breaking)"
 
 [[IgnoredVulns]]
-id = "GHSA-mh29-5h37-fv8m"
-ignoreUntil = 2026-06-25
-reason = "js-yaml@4.1.0 — transitive dev dep, no untrusted YAML parsed by lintro's JS deps"
-
-[[IgnoredVulns]]
-id = "GHSA-xxjr-mmjv-4gpg"
-ignoreUntil = 2026-06-25
-reason = "lodash@4.17.21 — transitive dev dep, prototype pollution not reachable in lintro context"
-
-[[IgnoredVulns]]
-id = "GHSA-38c4-r59v-3vqw"
-ignoreUntil = 2026-06-25
-reason = "markdown-it@14.1.0 — transitive dev dep via markdownlint-cli2, no untrusted input"
-
-[[IgnoredVulns]]
 id = "GHSA-3v7f-55p6-f55p"
 ignoreUntil = 2026-06-25
 reason = "picomatch ReDoS — transitive dev dep, fix requires major version bump (v4)"
@@ -116,11 +96,6 @@ reason = "svelte@5.49.2 XSS — transitive dev dep via svelte-check, not used at
 id = "GHSA-phwv-c562-gvmh"
 ignoreUntil = 2026-06-25
 reason = "svelte@5.49.2 XSS — transitive dev dep via svelte-check, not used at runtime"
-
-[[IgnoredVulns]]
-id = "GHSA-xpqw-6gx7-v673"
-ignoreUntil = 2026-06-25
-reason = "svgo@4.0.0 — suggested fix (2.8.1) is a downgrade, not applicable to v4 line"
 
 [[IgnoredVulns]]
 id = "GHSA-48c2-rrv3-qjmp"
