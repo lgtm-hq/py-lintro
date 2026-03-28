@@ -75,6 +75,8 @@ jobs:
             index.crates.io:443
             semgrep.dev:443
             metrics.semgrep.dev:443
+            api.osv.dev:443
+            api.deps.dev:443
       - name: Checkout
         uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6
         with:
