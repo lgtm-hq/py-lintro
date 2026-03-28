@@ -276,6 +276,13 @@ main() {
 	# Ensure Python CLI tools used by integration tests are present
 	ensure_python_cli_tools
 
+	# Install project-level node_modules for integration tests that need
+	# npm plugins (e.g. prettier-plugin-astro for astro formatting tests)
+	if command -v bun &>/dev/null && [ -f "package.json" ] && [ ! -d "node_modules" ]; then
+		echo -e "${BLUE}Installing project node_modules for integration tests...${NC}"
+		bun install --no-save 2>/dev/null || true
+	fi
+
 	# Discover available tools and tests
 	discover_tests
 
