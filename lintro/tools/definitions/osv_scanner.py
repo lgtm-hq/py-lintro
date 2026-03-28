@@ -248,6 +248,13 @@ class OsvScannerPlugin(BaseToolPlugin):
 
         issues = parse_osv_scanner_output(output)
 
+        # Treat "no package sources found" as a successful no-op, not an error.
+        # osv-scanner returns non-zero when it finds no lockfiles to scan.
+        if not success and len(issues) == 0 and output:
+            no_op_indicators = ["no package sources found", "0 packages"]
+            if any(indicator in output.lower() for indicator in no_op_indicators):
+                success = True
+
         # Determine overall success: subprocess must succeed AND no issues
         # found. A non-zero exit with 0 parsed issues indicates an execution
         # error (e.g. network failure), not a clean scan.

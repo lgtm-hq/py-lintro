@@ -31,14 +31,18 @@ def _escape_md_cell(value: str) -> str:
     return value.replace("|", "\\|").replace("\n", " ").replace("\r", "")
 
 
-def _read_suppressions() -> list[dict[str, object]]:
-    """Read suppression entries from .osv-scanner.toml if it exists."""
+def _read_suppressions_from_toml() -> list[dict[str, object]]:
+    """Read suppression entries from .osv-scanner.toml as a fallback.
+
+    Returns:
+        List of suppression entry dicts, or empty list if not available.
+    """
+    import tomllib
+
     toml_path = Path(".osv-scanner.toml")
     if not toml_path.exists():
         return []
     try:
-        import tomllib
-
         with toml_path.open("rb") as f:
             data = tomllib.load(f)
         return [
@@ -46,7 +50,8 @@ def _read_suppressions() -> list[dict[str, object]]:
             for entry in data.get("IgnoredVulns", [])
             if isinstance(entry, dict) and "id" in entry
         ]
-    except Exception:
+    except (tomllib.TOMLDecodeError, OSError) as e:
+        print(f"Warning: failed to parse {toml_path}: {e}", file=sys.stderr)
         return []
 
 
@@ -96,6 +101,10 @@ def format_comment(json_path: str) -> str | None:
         return None
 
     issues = osv_result.get("issues", [])
+    ai_meta = osv_result.get("ai_metadata") or {}
+    probe_suppressions = (
+        ai_meta.get("suppressions", []) if isinstance(ai_meta, dict) else []
+    )
 
     sections: list[str] = []
 
@@ -138,20 +147,46 @@ def format_comment(json_path: str) -> str | None:
     else:
         sections.append("No security vulnerabilities found in dependencies.")
 
-    # Suppression table — read directly from .osv-scanner.toml
-    toml_suppressions = _read_suppressions()
+    # Suppression table — prefer probe-derived status from scan result,
+    # fall back to static entries from .osv-scanner.toml
     sections.append("")
     sections.append("### 🔇 Suppressed Vulnerabilities:")
-    if toml_suppressions:
-        sections.append("| ID | Expires | Reason |")
-        sections.append("|----|---------|--------|")
-        for s in toml_suppressions:
+    if probe_suppressions:
+        # Probe ran: show status (active/stale/expired) from scan result
+        sections.append("| ID | Expires | Status | Reason |")
+        sections.append("|----|---------|--------|--------|")
+        for s in probe_suppressions:
+            if not isinstance(s, dict):
+                continue
             sid = _escape_md_cell(str(s.get("id", "?")))
-            expires = _escape_md_cell(str(s.get("ignoreUntil", "?")))
+            expires = _escape_md_cell(str(s.get("ignore_until", "?")))
+            status = str(s.get("status", "active"))
             reason = _escape_md_cell(str(s.get("reason", "")))
-            sections.append(f"| `{sid}` | {expires} | {reason} |")
+            if status == "expired":
+                sections.append(
+                    f"| :warning: `{sid}` | **EXPIRED** {expires} "
+                    f"| :warning: Expired | {reason} |",
+                )
+            elif status == "stale":
+                sections.append(
+                    f"| `{sid}` | {expires} "
+                    f"| :warning: **Stale — safe to remove** | {reason} |",
+                )
+            else:
+                sections.append(f"| `{sid}` | {expires} | Active | {reason} |")
     else:
-        sections.append("No suppressions configured.")
+        # No probe data: fall back to static TOML entries
+        toml_suppressions = _read_suppressions_from_toml()
+        if toml_suppressions:
+            sections.append("| ID | Expires | Reason |")
+            sections.append("|----|---------|--------|")
+            for s in toml_suppressions:
+                sid = _escape_md_cell(str(s.get("id", "?")))
+                expires = _escape_md_cell(str(s.get("ignoreUntil", "?")))
+                reason = _escape_md_cell(str(s.get("reason", "")))
+                sections.append(f"| `{sid}` | {expires} | {reason} |")
+        else:
+            sections.append("No suppressions configured.")
 
     return "\n".join(sections)
 

@@ -228,6 +228,7 @@ def _display_fix_result(
             raw_output_for_meta=result.output,
             action=action,
             success=result.success,
+            ai_metadata=result.ai_metadata,
         )
         return
 
@@ -255,15 +256,22 @@ def _display_fix_result(
             raw_output_for_meta=result.output,
             action=action,
             success=result.success,
+            ai_metadata=result.ai_metadata,
         )
     elif (
         result.issues_count == 0
         and result.success
         and not getattr(result, "fixed_issues_count", 0)
     ):
-        console_output_func(
-            text="✓ No issues found.",
-            color="green",
+        print_tool_result(
+            console_output_func=console_output_func,
+            success_func=success_func,
+            tool_name=result.name,
+            output="",
+            issues_count=0,
+            action=action,
+            success=result.success,
+            ai_metadata=result.ai_metadata,
         )
 
 
