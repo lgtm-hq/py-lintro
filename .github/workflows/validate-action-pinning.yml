@@ -8,6 +8,9 @@ name: Quality Check - Action Pinning Validation
 
 'on':
   pull_request:
+    paths:
+      - '.github/workflows/**'
+      - '.github/actions/**'
   workflow_dispatch:
 
 permissions: {}
