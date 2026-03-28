@@ -87,7 +87,13 @@ def format_comment(json_path: str) -> str | None:
         return None
 
     try:
-        data = json.loads(path.read_text())
+        content = path.read_text()
+    except (OSError, UnicodeDecodeError) as e:
+        print(f"Failed to read {path}: {e}", file=sys.stderr)
+        return None
+
+    try:
+        data = json.loads(content)
     except json.JSONDecodeError as e:
         print(f"Failed to parse JSON from {path}: {e}", file=sys.stderr)
         return None
