@@ -55,9 +55,11 @@ set +e # Don't exit on error
 # Run with matching UID/GID to allow writes to mounted volume (e.g., bun install for node_modules)
 # Enable auto-install for CI (uses --ignore-scripts for security)
 # Set HOME=/tmp to ensure tools like semgrep can write config/cache files (no valid home dir for UID)
+# Disable osv_scanner suppression probe here; the dedicated security scan job handles it
 docker run --rm --user "$(id -u):$(id -g)" -e HOME=/tmp -e LINTRO_AUTO_INSTALL_DEPS=1 \
 	-v "$PWD:/code" -w /code py-lintro:latest lintro check . \
-	--tool-options pydoclint:timeout=120 2>&1 | tee chk-output.txt
+	--tool-options "pydoclint:timeout=120,osv_scanner:check_suppressions=false" \
+	2>&1 | tee chk-output.txt
 CHK_EXIT_CODE=${PIPESTATUS[0]}
 set -e # Exit on error again
 

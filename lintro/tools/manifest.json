@@ -4,162 +4,245 @@
     {
       "name": "actionlint",
       "version": "1.7.5",
-      "install": { "type": "binary" },
+      "install": {
+        "type": "binary"
+      },
       "tier": "tools"
     },
     {
       "name": "astro_check",
-      "version": "5.17.1",
-      "install": { "type": "npm", "package": "astro", "bin": "astro" },
+      "version": "5.18.1",
+      "install": {
+        "type": "npm",
+        "package": "astro",
+        "bin": "astro"
+      },
       "tier": "tools"
     },
     {
       "name": "bandit",
       "version": "1.9.2",
-      "install": { "type": "pip", "package": "bandit" },
+      "install": {
+        "type": "pip",
+        "package": "bandit"
+      },
       "tier": "tools"
     },
     {
       "name": "black",
       "version": "26.3.1",
-      "install": { "type": "pip", "package": "black" },
+      "install": {
+        "type": "pip",
+        "package": "black"
+      },
       "tier": "tools"
     },
     {
       "name": "cargo_audit",
       "version": "0.21.0",
-      "install": { "type": "cargo", "package": "cargo-audit" },
+      "install": {
+        "type": "cargo",
+        "package": "cargo-audit"
+      },
       "tier": "tools"
     },
     {
       "name": "cargo_deny",
       "version": "0.19.0",
-      "install": { "type": "cargo", "package": "cargo-deny" },
+      "install": {
+        "type": "cargo",
+        "package": "cargo-deny"
+      },
       "tier": "tools"
     },
     {
       "name": "clippy",
       "version": "1.92.0",
-      "install": { "type": "rustup", "component": "clippy" },
+      "install": {
+        "type": "rustup",
+        "component": "clippy"
+      },
       "tier": "tools"
     },
     {
       "name": "rustc",
       "version": "1.92.0",
-      "install": { "type": "rustup" },
+      "install": {
+        "type": "rustup"
+      },
       "tier": "tools"
     },
     {
       "name": "gitleaks",
       "version": "8.21.2",
-      "install": { "type": "binary" },
+      "install": {
+        "type": "binary"
+      },
       "tier": "tools"
     },
     {
       "name": "hadolint",
       "version": "2.12.0",
-      "install": { "type": "binary" },
+      "install": {
+        "type": "binary"
+      },
       "tier": "tools"
     },
     {
       "name": "markdownlint",
-      "version": "0.17.2",
-      "install": { "type": "npm", "package": "markdownlint-cli2" },
+      "version": "0.22.0",
+      "install": {
+        "type": "npm",
+        "package": "markdownlint-cli2"
+      },
       "tier": "tools"
     },
     {
       "name": "mypy",
       "version": "1.19.1",
-      "install": { "type": "pip", "package": "mypy" },
+      "install": {
+        "type": "pip",
+        "package": "mypy"
+      },
+      "tier": "tools"
+    },
+    {
+      "name": "osv_scanner",
+      "version": "2.3.5",
+      "install": {
+        "type": "binary",
+        "version_command": ["osv-scanner", "--version"]
+      },
       "tier": "tools"
     },
     {
       "name": "oxfmt",
-      "version": "0.27.0",
-      "install": { "type": "npm", "package": "oxfmt" },
+      "version": "0.42.0",
+      "install": {
+        "type": "npm",
+        "package": "oxfmt"
+      },
       "tier": "tools"
     },
     {
       "name": "oxlint",
-      "version": "1.42.0",
-      "install": { "type": "npm", "package": "oxlint" },
+      "version": "1.57.0",
+      "install": {
+        "type": "npm",
+        "package": "oxlint"
+      },
       "tier": "tools"
     },
     {
       "name": "prettier",
       "version": "3.8.1",
-      "install": { "type": "npm", "package": "prettier" },
+      "install": {
+        "type": "npm",
+        "package": "prettier"
+      },
       "tier": "tools"
     },
     {
       "name": "pydoclint",
       "version": "0.8.3",
-      "install": { "type": "pip", "package": "pydoclint" },
+      "install": {
+        "type": "pip",
+        "package": "pydoclint"
+      },
       "tier": "tools"
     },
     {
       "name": "pytest",
       "version": "9.0.2",
-      "install": { "type": "pip", "package": "pytest" },
+      "install": {
+        "type": "pip",
+        "package": "pytest"
+      },
       "tier": "dev"
     },
     {
       "name": "ruff",
       "version": "0.14.10",
-      "install": { "type": "pip", "package": "ruff" },
+      "install": {
+        "type": "pip",
+        "package": "ruff"
+      },
       "tier": "tools"
     },
     {
       "name": "rustfmt",
       "version": "1.8.0",
-      "install": { "type": "rustup", "component": "rustfmt" },
+      "install": {
+        "type": "rustup",
+        "component": "rustfmt"
+      },
       "tier": "tools"
     },
     {
       "name": "semgrep",
       "version": "1.151.0",
-      "install": { "type": "pip", "package": "semgrep" },
+      "install": {
+        "type": "pip",
+        "package": "semgrep"
+      },
       "tier": "tools"
     },
     {
       "name": "shellcheck",
       "version": "0.11.0",
-      "install": { "type": "binary" },
+      "install": {
+        "type": "binary"
+      },
       "tier": "tools"
     },
     {
       "name": "shfmt",
       "version": "3.10.0",
-      "install": { "type": "binary" },
+      "install": {
+        "type": "binary"
+      },
       "tier": "tools"
     },
     {
       "name": "sqlfluff",
       "version": "4.0.0",
-      "install": { "type": "pip", "package": "sqlfluff" },
+      "install": {
+        "type": "pip",
+        "package": "sqlfluff"
+      },
       "tier": "tools"
     },
     {
       "name": "svelte_check",
-      "version": "4.3.6",
-      "install": { "type": "npm", "package": "svelte-check", "bin": "svelte-check" },
+      "version": "4.4.5",
+      "install": {
+        "type": "npm",
+        "package": "svelte-check",
+        "bin": "svelte-check"
+      },
       "tier": "tools"
     },
     {
       "name": "taplo",
       "version": "0.10.0",
-      "install": { "type": "binary" },
+      "install": {
+        "type": "binary"
+      },
       "tier": "tools"
     },
     {
       "name": "tsc",
       "version": "5.9.3",
-      "install": { "type": "npm", "package": "typescript", "bin": "tsc" },
+      "install": {
+        "type": "npm",
+        "package": "typescript",
+        "bin": "tsc"
+      },
       "tier": "tools"
     },
     {
       "name": "vue_tsc",
-      "version": "3.2.4",
+      "version": "3.2.6",
       "install": {
         "type": "npm",
         "package": "vue-tsc",
@@ -175,7 +258,10 @@
     {
       "name": "yamllint",
       "version": "1.37.1",
-      "install": { "type": "pip", "package": "yamllint" },
+      "install": {
+        "type": "pip",
+        "package": "yamllint"
+      },
       "tier": "tools"
     }
   ]

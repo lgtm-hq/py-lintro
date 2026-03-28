@@ -425,6 +425,32 @@ def print_summary_table(
                 ):
                     notes_display = f"{_YELLOW}deferred to framework checker{_RESET}"
 
+                # Surface stale/expired suppression counts for security tools
+                ai_meta = getattr(result, "ai_metadata", None)
+                if not isinstance(ai_meta, dict):
+                    ai_meta = {}
+                suppressions = ai_meta.get("suppressions", [])
+                if suppressions:
+                    stale = sum(
+                        1
+                        for s in suppressions
+                        if isinstance(s, dict) and s.get("status") == "stale"
+                    )
+                    expired = sum(
+                        1
+                        for s in suppressions
+                        if isinstance(s, dict) and s.get("status") == "expired"
+                    )
+                    parts: list[str] = []
+                    if expired:
+                        parts.append(f"{expired} expired")
+                    if stale:
+                        parts.append(f"{stale} stale")
+                    if parts:
+                        notes_display = (
+                            f"{_YELLOW}{', '.join(parts)} suppression(s){_RESET}"
+                        )
+
                 if (has_execution_failure and issues_count == 0) or (
                     not success and issues_count == 0
                 ):

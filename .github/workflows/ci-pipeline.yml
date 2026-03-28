@@ -312,6 +312,8 @@ jobs:
             index.crates.io:443
             semgrep.dev:443
             metrics.semgrep.dev:443
+            api.osv.dev:443
+            api.deps.dev:443
       - name: Checkout
         uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
         with:
@@ -413,11 +415,11 @@ jobs:
           -x
 
   # ============================================================================
-  # Stage 3c: Security Audit (runs in parallel with test after lint)
+  # Stage 3b: Security Audit (parallel with lint and test)
   # ============================================================================
   security-audit:
     name: 🔐 Security Audit
-    needs: [docker-build, lint]
+    needs: [docker-build]
     runs-on: ubuntu-24.04
     permissions:
       contents: read
@@ -440,30 +442,36 @@ jobs:
             codeload.github.com:443
             release-assets.githubusercontent.com:443
             objects.githubusercontent.com:443
-            pypi.org:443
-            files.pythonhosted.org:443
+            ghcr.io:443
+            pkg-containers.githubusercontent.com:443
             api.osv.dev:443
-            astral.sh:443
-            releases.astral.sh:443
+            api.deps.dev:443
 
       - name: Checkout
         uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
 
-      - name: Environment setup
-        uses: ./.github/actions/setup-env
-        with:
-          python-version: '3.14'
+      - name: Pull CI image from GHCR
+        if: needs.docker-build.outputs.is-fork != 'true'
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          BOOTSTRAP_SKIP_INSTALL_TOOLS: '1'
-
-      - name: Sync dependencies
-        run: uv sync --dev --no-progress
+          CI_TAG: ci-${{ github.run_id }}
+        run: |
+          docker pull "ghcr.io/lgtm-hq/py-lintro:${CI_TAG}"
+          docker tag "ghcr.io/lgtm-hq/py-lintro:${CI_TAG}" py-lintro:latest
+      - name: Download Docker images artifact (fork fallback)
+        if: needs.docker-build.outputs.is-fork == 'true'
+        # yamllint disable-line rule:line-length
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
+        with:
+          name: docker-images
+          path: /tmp
+      - name: Load Docker images (fork fallback)
+        if: needs.docker-build.outputs.is-fork == 'true'
+        run: docker load -i /tmp/py-lintro-images.tar
 
       - name: Run security audit
         id: audit
         continue-on-error: true
-        run: scripts/ci/security-audit.sh
+        run: scripts/ci/security-comment.sh
 
       - name: Comment PR with security audit results
         if: github.event_name == 'pull_request'
@@ -480,11 +488,11 @@ jobs:
           exit 1
 
   # ============================================================================
-  # Stage 4: Test (GATED on lint)
+  # Stage 3c: Test (parallel with lint and security-audit)
   # ============================================================================
   test:
     name: 🧪 Test Suite & Coverage
-    needs: [resolve-tools, docker-build, lint]
+    needs: [resolve-tools, docker-build]
     runs-on: ubuntu-24.04
     permissions:
       contents: read
@@ -538,6 +546,8 @@ jobs:
             index.crates.io:443
             semgrep.dev:443
             metrics.semgrep.dev:443
+            api.osv.dev:443
+            api.deps.dev:443
       - name: Checkout
         uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
         with:

@@ -722,6 +722,58 @@ lintro check --tools gitleaks --tool-options gitleaks:baseline_path=gitleaks-bas
 lintro check --tools gitleaks --tool-options gitleaks:max_target_megabytes=10
 ```
 
+#### OSV-Scanner Configuration
+
+OSV-Scanner is Google's vulnerability scanner using the Open-Source Vulnerabilities
+(OSV) database. It scans lockfiles for known vulnerabilities across multiple ecosystems
+including PyPI, npm, Go, Rust, Ruby, PHP, .NET, and Java.
+
+**Install:** `go install github.com/google/osv-scanner/v2/cmd/osv-scanner@latest` or
+download from [GitHub Releases](https://github.com/google/osv-scanner/releases).
+
+**File:** `.osv-scanner.toml`
+
+```toml
+# Ignore specific vulnerabilities (ignoreUntil is required for lintro classification)
+[[IgnoredVulns]]
+id = "GHSA-xxxx-xxxx-xxxx"
+ignoreUntil = 2026-12-31
+reason = "Not applicable to this project"
+
+# Override package scanning behavior
+[[PackageOverrides]]
+name = "example-package"
+ecosystem = "PyPI"
+ignore = true
+reason = "False positive"
+```
+
+**Available Options:**
+
+| Option               | Type    | Description                                                 |
+| -------------------- | ------- | ----------------------------------------------------------- |
+| `timeout`            | integer | Scan timeout in seconds (default: 120)                      |
+| `check_suppressions` | boolean | Run probe scan to detect stale suppressions (default: true) |
+
+When `check_suppressions` is enabled, lintro runs a second osv-scanner scan without
+suppressions to classify each `.osv-scanner.toml` entry as **Active** (vulnerability
+still present), **Stale** (vulnerability resolved upstream — safe to remove), or
+**Expired** (past the `ignoreUntil` date). Results appear in the summary table Notes
+column and in JSON output under `ai_metadata.suppressions`.
+
+**Usage Examples:**
+
+```bash
+# Scan for vulnerabilities in lockfiles
+lintro check --tools osv_scanner
+
+# With custom timeout for slow networks
+lintro check --tools osv_scanner --tool-options "osv_scanner:timeout=300"
+
+# Skip suppression staleness check
+lintro check --tools osv_scanner --tool-options "osv_scanner:check_suppressions=false"
+```
+
 #### pydoclint Configuration
 
 **File:** `pyproject.toml`

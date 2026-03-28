@@ -28,7 +28,7 @@ from __future__ import annotations
 import shutil
 import sys
 from abc import ABC, abstractmethod
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, ClassVar
 
 from loguru import logger
 
@@ -371,6 +371,8 @@ class NodeJSBuilder(CommandBuilder):
             self._package_names = {
                 ToolName.ASTRO_CHECK: "astro",
                 ToolName.MARKDOWNLINT: "markdownlint-cli2",
+                ToolName.OXFMT: "oxfmt",
+                ToolName.OXLINT: "oxlint",
                 ToolName.SVELTE_CHECK: "svelte-check",
                 ToolName.TSC: "typescript",
                 ToolName.VUE_TSC: "vue-tsc",
@@ -492,12 +494,20 @@ class CargoBuilder(CommandBuilder):
 
 @register_command_builder
 class StandaloneBuilder(CommandBuilder):
-    """Builder for standalone binary tools (Hadolint, Actionlint).
+    """Builder for standalone binary tools.
 
     These tools are invoked directly by name without any wrapper.
+    Uses an explicit mapping for tools whose binary name differs
+    from their internal tool name.
     """
 
     _tools: frozenset[ToolName] | None = None
+
+    # Explicit mapping from internal tool name to binary name.
+    # Only tools whose binary name differs need an entry here.
+    TOOL_BINARY_MAP: ClassVar[dict[str, str]] = {
+        "osv_scanner": "osv-scanner",
+    }
 
     @property
     def tools(self) -> frozenset[ToolName]:
@@ -511,8 +521,13 @@ class StandaloneBuilder(CommandBuilder):
 
             self._tools = frozenset(
                 {
-                    ToolName.HADOLINT,
                     ToolName.ACTIONLINT,
+                    ToolName.GITLEAKS,
+                    ToolName.HADOLINT,
+                    ToolName.OSV_SCANNER,
+                    ToolName.SHELLCHECK,
+                    ToolName.SHFMT,
+                    ToolName.SEMGREP,
                 },
             )
         return self._tools
@@ -540,6 +555,6 @@ class StandaloneBuilder(CommandBuilder):
             tool_name_enum: Tool name enum.
 
         Returns:
-            Command list containing just the tool name.
+            Command list containing the binary name.
         """
-        return [tool_name]
+        return [self.TOOL_BINARY_MAP.get(tool_name, tool_name)]

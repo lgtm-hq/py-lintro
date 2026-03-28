@@ -81,6 +81,7 @@ RUN echo "Verifying tools..." && \
     shfmt --version && \
     taplo --version && \
     gitleaks version && \
+    osv-scanner --version && \
     prettier --version && \
     markdownlint-cli2 --version && \
     tsc --version && \
@@ -113,6 +114,7 @@ RUN echo "Verifying tools as non-root user..." && \
     gosu lintro cargo clippy --version && \
     gosu lintro cargo audit --version && \
     gosu lintro cargo deny --version && \
+    gosu lintro osv-scanner --version && \
     gosu lintro semgrep --version && \
     echo "All tools verified for non-root user!"
 

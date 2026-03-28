@@ -74,11 +74,6 @@ jobs:
       - name: Sync dependencies
         run: uv sync --dev --no-progress
 
-      - name: Security audit dependencies
-        run: |
-          uv export --no-emit-project > /tmp/requirements.txt
-          uv run pip-audit --strict --progress-spinner=off -r /tmp/requirements.txt
-
       - name: Quality gate
         id: version
         run: scripts/ci/testing/reusable-quality-entry.sh

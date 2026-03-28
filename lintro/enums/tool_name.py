@@ -22,6 +22,7 @@ class ToolName(StrEnum):
     HADOLINT = auto()
     MARKDOWNLINT = auto()
     MYPY = auto()
+    OSV_SCANNER = auto()
     OXFMT = auto()
     OXLINT = auto()
     PRETTIER = auto()

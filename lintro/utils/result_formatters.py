@@ -13,6 +13,79 @@ from loguru import logger
 from lintro.enums.action import Action, normalize_action
 from lintro.enums.tool_name import ToolName
 
+# ANSI color codes for suppression table
+_YELLOW = "\033[33m"
+_RESET = "\033[0m"
+_DIM = "\033[2m"
+
+
+def _print_suppression_table(
+    console_output_func: Callable[..., None],
+    ai_metadata: dict[str, object] | None,
+) -> None:
+    """Print suppression details table if ai_metadata contains suppressions.
+
+    Args:
+        console_output_func: Function to output text to console.
+        ai_metadata: Tool metadata dict with optional suppressions list.
+    """
+    if not isinstance(ai_metadata, dict):
+        return
+
+    suppressions = ai_metadata.get("suppressions", [])
+    if not isinstance(suppressions, list) or not suppressions:
+        return
+
+    console_output_func(text="")
+    console_output_func(
+        text="  🔇 Suppressed Vulnerabilities (via .osv-scanner.toml):",
+    )
+
+    # Compute column widths
+    id_width = max(
+        (len(str(s.get("id", ""))) for s in suppressions if isinstance(s, dict)),
+        default=0,
+    )
+    id_width = max(id_width, 2) + 2  # padding
+    exp_width = 12  # YYYY-MM-DD + padding
+    status_width = 11  # "⚠ Expired" + padding
+
+    # Header
+    header = (
+        f"  {'ID':<{id_width}} {'Expires':<{exp_width}} "
+        f"{'Status':<{status_width}} Reason"
+    )
+    console_output_func(text=f"  {'-' * (len(header) - 2)}")
+    console_output_func(text=header)
+    console_output_func(text=f"  {'-' * (len(header) - 2)}")
+
+    for s in suppressions:
+        if not isinstance(s, dict):
+            continue
+        sid = str(s.get("id", "?"))
+        expires = str(s.get("ignore_until", "?"))
+        status = str(s.get("status", "active"))
+        reason = str(s.get("reason", ""))
+
+        # Truncate long reasons
+        max_reason = 60
+        if len(reason) > max_reason:
+            reason = reason[: max_reason - 1] + "…"
+
+        if status == "expired":
+            status_display = f"{_YELLOW}⚠ Expired{_RESET}"
+        elif status == "stale":
+            status_display = f"{_YELLOW}⚠ Stale{_RESET}"
+        else:
+            status_display = f"{_DIM}Active{_RESET}  "
+
+        console_output_func(
+            text=f"  {sid:<{id_width}} {expires:<{exp_width}} "
+            f"{status_display}  {_DIM}{reason}{_RESET}",
+        )
+
+    console_output_func(text=f"  {'-' * (len(header) - 2)}")
+
 
 def print_tool_result(
     console_output_func: Callable[..., None],
@@ -23,6 +96,7 @@ def print_tool_result(
     raw_output_for_meta: str | None = None,
     action: str | Action = "check",
     success: bool | None = None,
+    ai_metadata: dict[str, object] | None = None,
 ) -> None:
     """Print the result for a tool.
 
@@ -38,6 +112,8 @@ def print_tool_result(
         success: bool | None: Whether the tool run succeeded. When False,
             the result is treated as a failure even if no issues were
             counted (e.g., parse or runtime errors).
+        ai_metadata: dict[str, object] | None: Tool-specific metadata
+            (e.g. suppression classifications for osv-scanner).
     """
     # Normalize action to enum
     action = normalize_action(action)
@@ -336,6 +412,7 @@ def print_tool_result(
                         color="yellow",
                     )
 
-    # Remove redundant tip; consolidated above as a single auto-fix message
+    # Display suppression table for osv-scanner when suppressions exist
+    _print_suppression_table(console_output_func, ai_metadata)
 
     console_output_func(text="")  # Blank line after each tool

@@ -172,6 +172,9 @@ def get_install_hints() -> dict[str, str]:
         "gitleaks": (
             "Install via: https://github.com/gitleaks/gitleaks/releases (v{version}+)"
         ),
+        "osv_scanner": (
+            "Install via: https://github.com/google/osv-scanner/releases (v{version}+)"
+        ),
         "shellcheck": (
             "Install via: https://github.com/koalaman/shellcheck/releases (v{version}+)"
         ),

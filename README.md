@@ -235,6 +235,12 @@ system.
 <td><code>cargo install cargo-deny</code></td>
 </tr>
 <tr>
+<td><a href="https://github.com/google/osv-scanner"><img src="https://img.shields.io/badge/OSV--Scanner-4285F4?logo=google&logoColor=white" alt="OSV-Scanner"></a></td>
+<td>🔒 Multi-ecosystem</td>
+<td>-</td>
+<td><a href="https://github.com/google/osv-scanner/releases">GitHub Releases</a></td>
+</tr>
+<tr>
 <td><a href="https://semgrep.dev/"><img src="https://img.shields.io/badge/Semgrep-5b21b6?logo=semgrep&logoColor=white" alt="Semgrep"></a></td>
 <td>🔒 Multi-language</td>
 <td>-</td>
