@@ -98,6 +98,8 @@ class OsvScannerPlugin(BaseToolPlugin):
 
         Uses --recursive to let osv-scanner discover lockfiles itself,
         rather than maintaining a separate list of file patterns.
+        Passes --config explicitly because osv-scanner's auto-discovery
+        does not work reliably in --recursive mode.
 
         Args:
             scan_root: Root directory to scan recursively.
@@ -105,14 +107,20 @@ class OsvScannerPlugin(BaseToolPlugin):
         Returns:
             Command list for running osv-scanner with JSON output.
         """
-        return [
+        cmd = [
             *self._get_executable_command("osv-scanner"),
             "scan",
             "--recursive",
             "--format",
             "json",
-            str(scan_root),
         ]
+
+        config = self._find_config_file(scan_root)
+        if config is not None:
+            cmd.extend(["--config", str(config)])
+
+        cmd.append(str(scan_root))
+        return cmd
 
     def _build_probe_command(self, scan_root: Path) -> list[str]:
         """Build an osv-scanner command that ignores all suppressions.

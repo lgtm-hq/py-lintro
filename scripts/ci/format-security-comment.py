@@ -31,6 +31,25 @@ def _escape_md_cell(value: str) -> str:
     return value.replace("|", "\\|").replace("\n", " ").replace("\r", "")
 
 
+def _read_suppressions() -> list[dict[str, object]]:
+    """Read suppression entries from .osv-scanner.toml if it exists."""
+    toml_path = Path(".osv-scanner.toml")
+    if not toml_path.exists():
+        return []
+    try:
+        import tomllib
+
+        with toml_path.open("rb") as f:
+            data = tomllib.load(f)
+        return [
+            entry
+            for entry in data.get("IgnoredVulns", [])
+            if isinstance(entry, dict) and "id" in entry
+        ]
+    except Exception:
+        return []
+
+
 def _fence_code_block(text: str) -> str:
     """Wrap text in a Markdown code fence safe against embedded backticks."""
     fence = "```"
@@ -77,8 +96,6 @@ def format_comment(json_path: str) -> str | None:
         return None
 
     issues = osv_result.get("issues", [])
-    ai_meta = osv_result.get("ai_metadata") or {}
-    suppressions = ai_meta.get("suppressions", [])
 
     sections: list[str] = []
 
@@ -121,29 +138,20 @@ def format_comment(json_path: str) -> str | None:
     else:
         sections.append("No security vulnerabilities found in dependencies.")
 
-    # Suppression table
-    if suppressions:
-        sections.append("")
-        sections.append("### 🔇 Suppressed Vulnerabilities:")
-        sections.append("| ID | Expires | Status | Reason |")
-        sections.append("|----|---------|--------|--------|")
-        for s in suppressions:
-            sid = _escape_md_cell(s.get("id", "?"))
-            expires = _escape_md_cell(s.get("ignore_until", "?"))
-            status = _escape_md_cell(s.get("status", "?"))
-            reason = _escape_md_cell(s.get("reason", ""))
-            if status == "expired":
-                sections.append(
-                    f"| :warning: `{sid}` | **EXPIRED** {expires} "
-                    f"| :warning: Expired | {reason} |",
-                )
-            elif status == "stale":
-                sections.append(
-                    f"| `{sid}` | {expires} "
-                    f"| :warning: **Stale — safe to remove** | {reason} |",
-                )
-            else:
-                sections.append(f"| `{sid}` | {expires} | Active | {reason} |")
+    # Suppression table — read directly from .osv-scanner.toml
+    toml_suppressions = _read_suppressions()
+    sections.append("")
+    sections.append("### 🔇 Suppressed Vulnerabilities:")
+    if toml_suppressions:
+        sections.append("| ID | Expires | Reason |")
+        sections.append("|----|---------|--------|")
+        for s in toml_suppressions:
+            sid = _escape_md_cell(str(s.get("id", "?")))
+            expires = _escape_md_cell(str(s.get("ignoreUntil", "?")))
+            reason = _escape_md_cell(str(s.get("reason", "")))
+            sections.append(f"| `{sid}` | {expires} | {reason} |")
+    else:
+        sections.append("No suppressions configured.")
 
     return "\n".join(sections)
 
