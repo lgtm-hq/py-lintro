@@ -11,6 +11,10 @@ name: Vulnerability Suppression Check
 
 permissions: {}
 
+concurrency:
+  group: vuln-suppression-check-${{ github.repository }}
+  cancel-in-progress: false
+
 jobs:
   check-suppressions:
     runs-on: ubuntu-24.04
