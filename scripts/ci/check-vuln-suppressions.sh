@@ -174,8 +174,7 @@ if ! git diff --quiet; then
 	git config user.name "github-actions[bot]"
 	git config user.email "github-actions[bot]@users.noreply.github.com"
 	git checkout -b "$BRANCH"
-	git add "$OSV_TOML" 2>/dev/null || true
-	git add -u
+	git add -A -- "$OSV_TOML"
 	git commit -m "$(
 		cat <<EOF
 chore(security): remove stale vulnerability suppressions
