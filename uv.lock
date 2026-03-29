@@ -3,7 +3,10 @@ revision = 3
 requires-python = ">=3.11"
 
 [manifest]
-constraints = [{ name = "virtualenv", specifier = ">=20.36.1" }]
+constraints = [
+    { name = "pyjwt", specifier = ">=2.12.1" },
+    { name = "virtualenv", specifier = ">=20.36.1" },
+]
 overrides = [{ name = "rich", specifier = ">=14.2.0" }]
 
 [[package]]

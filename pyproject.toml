@@ -300,6 +300,8 @@ check_untyped_defs = true
 constraint-dependencies = [
   # Security fix: TOCTOU vulnerability in directory creation (dependabot alert #4)
   "virtualenv>=20.36.1",
+  # Security fix: accepts unknown crit header extensions, RFC 7515 violation (dependabot alert #26)
+  "pyjwt>=2.12.1",
 ]
 override-dependencies = [
   # semgrep 1.151.0 pins rich~=13.5.2 but lintro requires rich>=14.2.0.
