@@ -129,7 +129,7 @@ runs:
       # yamllint enable rule:line-length
 
     - name: Harden Runner
-      uses: step-security/harden-runner@e3f713f2d8f53843e71c69a996d56f51aa9adfb9
+      uses: step-security/harden-runner@fa2e9d605c4eeb9fcad4c99c224cee0c6c7f3594
       with:
         egress-policy: ${{ inputs.policy }}
         allowed-endpoints: ${{ steps.endpoints.outputs.endpoints }}
