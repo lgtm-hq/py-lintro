@@ -45,6 +45,7 @@ jobs:
             pypi.org:443
             files.pythonhosted.org:443
             api.osv.dev:443
+            api.deps.dev:443
             static.rust-lang.org:443
             bun.sh:443
             astral.sh:443
