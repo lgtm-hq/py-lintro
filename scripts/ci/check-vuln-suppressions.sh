@@ -19,9 +19,10 @@ Usage: check-vuln-suppressions.sh
 
 Detect stale or expired vulnerability suppressions in .osv-scanner.toml.
 
-Runs osv-scanner without suppressions to see which suppressed
-vulnerabilities are still present. Opens a PR removing entries that
-are stale (vuln resolved) or expired (past expiry date).
+Runs osv-scanner recursively without suppressions to scan all
+supported lockfiles (uv.lock, bun.lock, etc.) and see which
+suppressed vulnerabilities are still present. Opens a PR removing
+entries that are stale (vuln resolved) or expired (past expiry date).
 
 Requires GH_TOKEN for PR management.
 EOF
@@ -43,20 +44,16 @@ if [[ ! -f "$OSV_TOML" ]]; then
 	exit 0
 fi
 
-# Export deps and probe osv-scanner without suppressions
-log_info "Exporting dependencies..."
-REQUIREMENTS_FILE=$(mktemp --tmpdir requirements.XXXXXX.txt)
+# Probe osv-scanner without suppressions (scan all lockfiles recursively)
 AWK_TMPFILE=$(mktemp --tmpdir osv-toml-rewrite.XXXXXX.toml)
 # shellcheck disable=SC2064
-# Intentional: expand $REQUIREMENTS_FILE and $AWK_TMPFILE now, not at trap time
-trap "rm -f '$REQUIREMENTS_FILE' '$AWK_TMPFILE'" EXIT
-
-uv export --no-emit-project >"$REQUIREMENTS_FILE"
+# Intentional: expand $AWK_TMPFILE now, not at trap time
+trap "rm -f '$AWK_TMPFILE'" EXIT
 
 log_info "Probing osv-scanner without suppressions..."
 PROBE_OUTPUT=$(
-	osv-scanner scan --format json --config /dev/null \
-		--lockfile "$REQUIREMENTS_FILE" 2>&1 || true
+	osv-scanner scan --recursive --format json --config /dev/null \
+		. 2>&1 || true
 )
 
 # Classify suppressions using lintro's Python parser
@@ -193,6 +190,7 @@ EOF
 
 	gh pr create \
 		--title "chore(security): remove stale vulnerability suppressions" \
+		--label "security,dependencies,automation" \
 		--body "$(
 			cat <<EOF
 ## Summary
