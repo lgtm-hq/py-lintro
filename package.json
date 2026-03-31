@@ -12,9 +12,12 @@
     "type": "git",
     "url": "git+https://github.com/lgtm-hq/py-lintro.git"
   },
+  "engines": {
+    "node": ">=22"
+  },
   "devDependencies": {
-    "@astrojs/check": "0.9.6",
-    "astro": "5.18.1",
+    "@astrojs/check": "0.9.8",
+    "astro": "6.0.8",
     "markdownlint-cli2": "0.22.0",
     "oxfmt": "0.42.0",
     "oxlint": "1.57.0",

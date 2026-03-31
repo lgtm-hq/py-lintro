@@ -82,7 +82,7 @@ _TOOL_TO_NPM_PACKAGE: dict[ToolName, str] = {
 # Fallback npm tool versions - used when package.json is not found.
 # CI should verify these match package.json to prevent drift.
 _FALLBACK_NPM_VERSIONS: dict[ToolName, str] = {
-    ToolName.ASTRO_CHECK: "5.18.1",
+    ToolName.ASTRO_CHECK: "6.0.8",
     ToolName.SVELTE_CHECK: "4.4.5",
     ToolName.TSC: "5.9.3",
     ToolName.VUE_TSC: "3.2.6",
@@ -96,7 +96,7 @@ _FALLBACK_NPM_VERSIONS: dict[ToolName, str] = {
 # These are NOT mapped to ToolName (they're companion packages, not tools themselves)
 # Used by install scripts to get the correct version for related packages
 _COMPANION_NPM_PACKAGES: dict[str, str] = {
-    "@astrojs/check": "0.9.6",  # Type checking companion for astro
+    "@astrojs/check": "0.9.8",  # Type checking companion for astro
 }
 
 
