@@ -11,10 +11,12 @@ import json
 import subprocess  # nosec B404 - used safely with shell disabled
 from dataclasses import dataclass
 from typing import Any
+from urllib.parse import quote as url_quote
 
 from loguru import logger
 
 from lintro._tool_versions import get_min_version
+from lintro.enums.doc_url_template import DocUrlTemplate
 from lintro.enums.semgrep_enums import SemgrepSeverity, normalize_semgrep_severity
 from lintro.enums.tool_name import ToolName
 from lintro.enums.tool_type import ToolType
@@ -244,6 +246,27 @@ class SemgrepPlugin(BaseToolPlugin):
         cmd.extend(files)
 
         return cmd
+
+    def doc_url(self, code: str) -> str | None:
+        """Return Semgrep registry URL for the given rule ID.
+
+        Registry rule IDs use dotted notation (e.g.,
+        ``python.lang.security.insecure-random``). Custom rules loaded
+        from local files typically contain ``/`` and are not in the
+        public registry.
+
+        Args:
+            code: Semgrep rule ID.
+
+        Returns:
+            URL to the Semgrep registry page, or None if the rule is
+            empty or appears to be a local/custom rule.
+        """
+        if not code:
+            return None
+        if "." in code and "/" not in code:
+            return DocUrlTemplate.SEMGREP.format(code=url_quote(code, safe=""))
+        return None
 
     def check(self, paths: list[str], options: dict[str, object]) -> ToolResult:
         """Check files with Semgrep for security issues and code quality.

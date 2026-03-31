@@ -32,6 +32,7 @@ from typing import Any, NoReturn
 from loguru import logger
 
 from lintro._tool_versions import get_min_version
+from lintro.enums.doc_url_template import DocUrlTemplate
 from lintro.enums.tool_name import ToolName
 from lintro.enums.tool_type import ToolType
 from lintro.models.core.tool_result import ToolResult
@@ -366,6 +367,27 @@ class TscPlugin(BaseToolPlugin):
             cmd.extend(files)
 
         return cmd
+
+    def doc_url(self, code: str) -> str | None:
+        """Return TypeScript error documentation URL.
+
+        Uses typescript.tv, a third-party error reference, since the
+        official TypeScript handbook does not provide per-error pages.
+
+        Args:
+            code: TypeScript error code (e.g., "TS2307" or "2307").
+
+        Returns:
+            URL to the TypeScript error documentation, or None if invalid.
+        """
+        if not code:
+            return None
+        # Strip "TS"/"ts" prefix if present to get the numeric portion
+        upper = code.upper()
+        num = code[2:] if upper.startswith("TS") else code
+        if num.isdigit():
+            return DocUrlTemplate.TSC.format(code=num)
+        return None
 
     def check(self, paths: list[str], options: dict[str, object]) -> ToolResult:
         """Check files with tsc.

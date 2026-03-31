@@ -353,6 +353,35 @@ def _write_artifacts(
             _emit(f"Warning: Failed to write {artifact} artifact: {e}")
 
 
+def _enrich_issues_with_doc_urls(
+    tool: BaseToolPlugin,
+    result: ToolResult,
+) -> None:
+    """Populate doc_url on each issue using the plugin's doc_url method.
+
+    Skips issues that already have a doc_url set.
+
+    Args:
+        tool: Plugin instance that may provide a doc_url method.
+        result: ToolResult whose issues will be enriched in-place.
+    """
+    if not hasattr(tool, "doc_url") or not result.issues:
+        return
+    for issue in result.issues:
+        if getattr(issue, "doc_url", ""):
+            continue
+        # Resolve the code attribute via DISPLAY_FIELD_MAP so tools that
+        # store their identifier under a different name (e.g. advisory_id,
+        # vuln_id, rule_id) are handled correctly.
+        field_map = getattr(issue, "DISPLAY_FIELD_MAP", {})
+        code_attr = field_map.get("code", "code")
+        code = str(getattr(issue, code_attr, "") or "")
+        if code:
+            url = tool.doc_url(code)
+            if url:
+                issue.doc_url = url
+
+
 def run_lint_tools_simple(
     *,
     action: str | Action,
@@ -589,6 +618,14 @@ def run_lint_tools_simple(
             max_fix_retries=lintro_config.execution.max_fix_retries,
         )
 
+        # Enrich parallel results with doc_url from each plugin
+        for result in all_results:
+            try:
+                tool = tool_manager.get_tool(result.name)
+                _enrich_issues_with_doc_urls(tool, result)
+            except (KeyError, ValueError):
+                pass  # Tool not found — skip enrichment
+
         # Calculate totals from parallel results using helper
         total_issues, total_fixed, total_remaining = aggregate_tool_results(
             all_results,
@@ -644,6 +681,9 @@ def run_lint_tools_simple(
                     )
                 else:
                     result = tool.check(paths, {})
+
+                # Populate doc_url on each issue from the plugin
+                _enrich_issues_with_doc_urls(tool, result)
 
                 all_results.append(result)
 
@@ -844,10 +884,16 @@ def run_lint_tools_simple(
                         suggestions_from_results,
                         summary_from_results,
                     )
+                    from lintro.utils.output.file_writer import build_doc_url_map
 
                     suggestions = suggestions_from_results(all_results)
                     summary = summary_from_results(all_results)
-                    write_sarif(suggestions, summary, output_path=Path(output_file))
+                    write_sarif(
+                        suggestions,
+                        summary,
+                        output_path=Path(output_file),
+                        doc_urls=build_doc_url_map(all_results) or None,
+                    )
                 else:
                     write_output_file(
                         output_path=output_file,

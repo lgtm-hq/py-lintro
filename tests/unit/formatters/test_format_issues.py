@@ -431,3 +431,69 @@ def test_format_issues_with_sections_empty_list_returns_no_issues_message() -> N
     result = format_issues_with_sections([], group_by_fixable=True)
 
     assert_that(result).is_equal_to("No issues found.")
+
+
+# =============================================================================
+# Tests for doc_url conditional column
+# =============================================================================
+
+
+def test_format_issues_shows_docs_column_when_doc_url_present() -> None:
+    """Verify Docs column appears in grid output when at least one issue has doc_url."""
+    issues = [
+        RuffIssue(
+            file="src/main.py",
+            line=10,
+            column=5,
+            code="E501",
+            message="Line too long",
+            doc_url="https://docs.astral.sh/ruff/rules/line-too-long/",
+        ),
+    ]
+
+    result = format_issues(issues, output_format="grid")
+
+    assert_that(result).contains("Docs")
+    assert_that(result).contains("https://docs.astral.sh/ruff/rules/line-too-long/")
+
+
+def test_format_issues_hides_docs_column_when_no_doc_url() -> None:
+    """Verify Docs column is absent when no issues have doc_url."""
+    issues = [
+        RuffIssue(
+            file="src/main.py",
+            line=10,
+            column=5,
+            code="E501",
+            message="Line too long",
+        ),
+    ]
+
+    result = format_issues(issues, output_format="grid")
+
+    assert_that(result).does_not_contain("Docs")
+
+
+def test_format_issues_docs_column_respects_explicit_columns() -> None:
+    """Verify explicit columns parameter is not overridden by doc_url detection."""
+    issues = [
+        RuffIssue(
+            file="src/main.py",
+            line=10,
+            column=5,
+            code="E501",
+            message="Line too long",
+            doc_url="https://docs.astral.sh/ruff/rules/line-too-long/",
+        ),
+    ]
+
+    result = format_issues(
+        issues,
+        output_format="grid",
+        columns=[DisplayColumn.FILE, DisplayColumn.CODE, DisplayColumn.MESSAGE],
+    )
+
+    assert_that(result).does_not_contain("Docs")
+    assert_that(result).contains("File")
+    assert_that(result).contains("Code")
+    assert_that(result).contains("Message")

@@ -20,6 +20,7 @@ from lintro.enums.bandit_levels import (
     normalize_bandit_confidence_level,
     normalize_bandit_severity_level,
 )
+from lintro.enums.doc_url_template import DocUrlTemplate
 from lintro.enums.tool_type import ToolType
 from lintro.models.core.tool_result import ToolResult
 from lintro.parsers.bandit.bandit_parser import parse_bandit_output
@@ -331,6 +332,22 @@ class BanditPlugin(BaseToolPlugin):
         cmd.extend(files)
 
         return cmd
+
+    def doc_url(self, code: str) -> str | None:
+        """Return Bandit documentation URL for the given code.
+
+        Returns the plugins index page. Individual plugin page slugs do not
+        follow a deterministic pattern so we link to the index instead.
+
+        Args:
+            code: Bandit code (e.g., "B101").
+
+        Returns:
+            URL to the Bandit plugins index page, or None if code is empty.
+        """
+        if code:
+            return DocUrlTemplate.BANDIT
+        return None
 
     def check(self, paths: list[str], options: dict[str, object]) -> ToolResult:
         """Check files with Bandit for security issues.

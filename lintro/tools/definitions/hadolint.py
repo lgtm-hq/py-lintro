@@ -12,6 +12,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from lintro._tool_versions import get_min_version
+from lintro.enums.doc_url_template import DocUrlTemplate
 from lintro.enums.hadolint_enums import (
     HadolintFailureThreshold,
     HadolintFormat,
@@ -233,6 +234,27 @@ class HadolintPlugin(BaseToolPlugin):
                 issues=[],
                 error=str(e),
             )
+
+    def doc_url(self, code: str) -> str | None:
+        """Return documentation URL for the given code.
+
+        Hadolint emits both native DL rules and ShellCheck SC rules.
+        Routes each prefix to the appropriate documentation site.
+
+        Args:
+            code: Rule code (e.g., "DL3008", "SC2046").
+
+        Returns:
+            URL to the rule documentation, or None if code is empty.
+        """
+        if not code:
+            return None
+        upper = code.upper()
+        if upper.startswith("SC"):
+            return DocUrlTemplate.SHELLCHECK.format(code=upper)
+        if upper.startswith("DL"):
+            return DocUrlTemplate.HADOLINT.format(code=upper)
+        return None
 
     def check(self, paths: list[str], options: dict[str, object]) -> ToolResult:
         """Check files with Hadolint.

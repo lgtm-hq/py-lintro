@@ -26,6 +26,7 @@ from typing import Any, NoReturn
 from loguru import logger
 
 from lintro._tool_versions import get_min_version
+from lintro.enums.doc_url_template import DocUrlTemplate
 from lintro.enums.tool_name import ToolName
 from lintro.enums.tool_type import ToolType
 from lintro.models.core.tool_result import ToolResult
@@ -323,6 +324,26 @@ class VueTscPlugin(BaseToolPlugin):
             cmd.extend(files)
 
         return cmd
+
+    def doc_url(self, code: str) -> str | None:
+        """Return TypeScript error documentation URL for Vue.
+
+        Vue-tsc emits TypeScript error codes. Uses the same reference
+        as tsc since the error codes are identical.
+
+        Args:
+            code: TypeScript error code (e.g., "TS2322" or "2322").
+
+        Returns:
+            URL to the TypeScript error documentation, or None if invalid.
+        """
+        if not code:
+            return None
+        upper = code.upper()
+        num = code[2:] if upper.startswith("TS") else code
+        if num.isdigit():
+            return DocUrlTemplate.TSC.format(code=num)
+        return None
 
     def check(self, paths: list[str], options: dict[str, object]) -> ToolResult:
         """Check files with vue-tsc.

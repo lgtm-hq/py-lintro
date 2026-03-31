@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Any
 
 from lintro._tool_versions import get_min_version
+from lintro.enums.doc_url_template import DocUrlTemplate
 from lintro.enums.tool_name import ToolName
 from lintro.enums.tool_type import ToolType
 from lintro.models.core.tool_result import ToolResult
@@ -108,6 +109,19 @@ class CargoAuditPlugin(BaseToolPlugin):
             Command list for running cargo-audit with JSON output.
         """
         return ["cargo", "audit", "--json"]
+
+    def doc_url(self, code: str) -> str | None:
+        """Return RustSec advisory URL for the given advisory ID.
+
+        Args:
+            code: RUSTSEC advisory ID (e.g., "RUSTSEC-2021-0124").
+
+        Returns:
+            URL to the RustSec advisory page, or None if code is empty.
+        """
+        if not code:
+            return None
+        return DocUrlTemplate.CARGO_AUDIT.format(code=code)
 
     def check(self, paths: list[str], options: dict[str, object]) -> ToolResult:
         """Check Rust dependencies for security vulnerabilities.

@@ -21,6 +21,7 @@ try:
 except ImportError:
     yaml = None  # type: ignore[assignment]
 
+from lintro.enums.doc_url_template import DocUrlTemplate
 from lintro.enums.tool_type import ToolType
 from lintro.enums.yamllint_format import (
     YamllintFormat,
@@ -350,6 +351,20 @@ class YamllintPlugin(BaseToolPlugin):
             logger.debug(f"Yamllint execution error for {file_path}: {e}")
             results["all_success"] = False
             results["execution_failures"] += 1
+
+    def doc_url(self, code: str) -> str | None:
+        """Return yamllint documentation URL for the given rule.
+
+        Args:
+            code: Yamllint rule name (e.g., "line-length").
+
+        Returns:
+            URL to the yamllint rule documentation.
+        """
+        normalized = code.strip() if code else ""
+        if normalized:
+            return DocUrlTemplate.YAMLLINT.format(code=normalized)
+        return None
 
     def check(self, paths: list[str], options: dict[str, object]) -> ToolResult:
         """Check files with Yamllint.

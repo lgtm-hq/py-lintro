@@ -13,6 +13,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from lintro.enums.doc_url_template import DocUrlTemplate
 from lintro.enums.tool_type import ToolType
 from lintro.models.core.tool_result import ToolResult
 from lintro.parsers.cargo_deny.cargo_deny_parser import parse_cargo_deny_output
@@ -139,6 +140,19 @@ class CargoDenyPlugin(BaseToolPlugin):
 
         options = filter_none_options(timeout=timeout)
         super().set_options(**options, **kwargs)
+
+    def doc_url(self, code: str) -> str | None:
+        """Return cargo-deny documentation URL.
+
+        Args:
+            code: cargo-deny code (e.g., "L001", "A001").
+
+        Returns:
+            URL to the cargo-deny documentation, or None if code is empty.
+        """
+        if not code:
+            return None
+        return DocUrlTemplate.CARGO_DENY
 
     def check(self, paths: list[str], options: dict[str, object]) -> ToolResult:
         """Run `cargo deny check` and parse results.

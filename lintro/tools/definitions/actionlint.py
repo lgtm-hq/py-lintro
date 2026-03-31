@@ -14,6 +14,7 @@ from typing import Any
 import click
 
 from lintro._tool_versions import get_min_version
+from lintro.enums.doc_url_template import DocUrlTemplate
 from lintro.enums.tool_name import ToolName
 from lintro.enums.tool_type import ToolType
 from lintro.models.core.tool_result import ToolResult
@@ -118,6 +119,21 @@ class ActionlintPlugin(BaseToolPlugin):
             results["all_success"] = False
             results["all_outputs"].append(f"Error checking {file_path}: {e}")
             results["execution_failures"] += 1
+
+    def doc_url(self, code: str) -> str | None:
+        """Return actionlint documentation URL.
+
+        Actionlint uses a single documentation page for all checks.
+
+        Args:
+            code: Actionlint check identifier (unused, single doc page).
+
+        Returns:
+            URL to the actionlint checks documentation, or None if code is empty.
+        """
+        if not code:
+            return None
+        return DocUrlTemplate.ACTIONLINT
 
     def check(self, paths: list[str], options: dict[str, object]) -> ToolResult:
         """Check GitHub Actions workflow files with actionlint.

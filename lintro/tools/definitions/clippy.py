@@ -18,6 +18,7 @@ from pathlib import Path
 from typing import Any
 
 from lintro._tool_versions import get_min_version
+from lintro.enums.doc_url_template import DocUrlTemplate
 from lintro.enums.tool_name import ToolName
 from lintro.enums.tool_type import ToolType
 from lintro.models.core.tool_result import ToolResult
@@ -179,6 +180,19 @@ class ClippyPlugin(BaseToolPlugin):
 
         options = filter_none_options(timeout=timeout)
         super().set_options(**options, **kwargs)
+
+    def doc_url(self, code: str) -> str | None:
+        """Return Clippy documentation URL for the given lint name.
+
+        Args:
+            code: Clippy lint name (e.g., "needless_return").
+
+        Returns:
+            URL to the Clippy lint documentation.
+        """
+        if code:
+            return DocUrlTemplate.CLIPPY.format(code=code)
+        return None
 
     def check(self, paths: list[str], options: dict[str, object]) -> ToolResult:
         """Run `cargo clippy` and parse linting issues.

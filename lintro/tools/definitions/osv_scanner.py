@@ -17,6 +17,7 @@ from typing import Any
 from loguru import logger
 
 from lintro._tool_versions import get_min_version
+from lintro.enums.doc_url_template import DocUrlTemplate
 from lintro.enums.tool_name import ToolName
 from lintro.enums.tool_type import ToolType
 from lintro.models.core.tool_result import ToolResult
@@ -188,6 +189,19 @@ class OsvScannerPlugin(BaseToolPlugin):
             return Path(os.path.commonpath([str(p) for p in resolved]))
         except ValueError:
             return resolved[0]
+
+    def doc_url(self, code: str) -> str | None:
+        """Return OSV vulnerability database URL for the given ID.
+
+        Args:
+            code: Vulnerability ID (e.g., "GHSA-xxxx", "CVE-xxxx", "PYSEC-xxxx").
+
+        Returns:
+            URL to the OSV vulnerability page, or None if code is empty.
+        """
+        if not code:
+            return None
+        return DocUrlTemplate.OSV.format(code=code)
 
     def check(self, paths: list[str], options: dict[str, object]) -> ToolResult:
         """Scan for known vulnerabilities using osv-scanner --recursive.

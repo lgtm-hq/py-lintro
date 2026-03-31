@@ -18,6 +18,7 @@ from typing import Any
 from loguru import logger
 
 from lintro._tool_versions import get_min_version
+from lintro.enums.doc_url_template import DocUrlTemplate
 from lintro.enums.tool_name import ToolName
 from lintro.enums.tool_type import ToolType
 from lintro.models.core.tool_result import ToolResult
@@ -202,6 +203,19 @@ class MarkdownlintPlugin(BaseToolPlugin):
                 f"[MarkdownlintPlugin] Could not create temp config file: {e}",
             )
             return None
+
+    def doc_url(self, code: str) -> str | None:
+        """Return markdownlint documentation URL for the given code.
+
+        Args:
+            code: Markdownlint code (e.g., "MD013").
+
+        Returns:
+            URL to the markdownlint rule documentation.
+        """
+        if code:
+            return DocUrlTemplate.MARKDOWNLINT.format(code=code.lower())
+        return None
 
     def check(self, paths: list[str], options: dict[str, object]) -> ToolResult:
         """Check files with Markdownlint.

@@ -35,6 +35,7 @@ _COLUMN_KEY_MAP: dict[DisplayColumn, str] = {
     DisplayColumn.MESSAGE: "message",
     DisplayColumn.SEVERITY: "severity",
     DisplayColumn.FIXABLE: "fixable",
+    DisplayColumn.DOC_URL: "doc_url",
 }
 
 
@@ -124,7 +125,13 @@ def format_issues(
         return "No issues found."
 
     normalized_format = normalize_output_format(output_format)
-    descriptor = UnifiedTableDescriptor(columns=columns)
+
+    # Conditionally include DOC_URL column when at least one issue has a doc_url
+    effective_columns = columns
+    if columns is None and any(getattr(issue, "doc_url", "") for issue in issues):
+        effective_columns = [*STANDARD_COLUMNS, DisplayColumn.DOC_URL]
+
+    descriptor = UnifiedTableDescriptor(columns=effective_columns)
 
     style = get_style(normalized_format)
     cols = descriptor.get_columns()

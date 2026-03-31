@@ -11,6 +11,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from lintro._tool_versions import get_min_version
+from lintro.enums.doc_url_template import DocUrlTemplate
 from lintro.enums.tool_name import ToolName
 from lintro.enums.tool_type import ToolType
 from lintro.models.core.tool_result import ToolResult
@@ -147,6 +148,19 @@ class ShellcheckPlugin(BaseToolPlugin):
             shell=shell,  # nosec B604 - shell is dialect, not subprocess shell=True
         )
         super().set_options(**options, **kwargs)
+
+    def doc_url(self, code: str) -> str | None:
+        """Return ShellCheck wiki URL for the given code.
+
+        Args:
+            code: ShellCheck code (e.g., "SC2086").
+
+        Returns:
+            URL to the ShellCheck wiki page.
+        """
+        if code:
+            return DocUrlTemplate.SHELLCHECK.format(code=code.upper())
+        return None
 
     def _build_command(self) -> list[str]:
         """Build the shellcheck command.

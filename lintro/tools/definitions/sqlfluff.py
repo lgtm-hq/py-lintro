@@ -11,6 +11,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from lintro._tool_versions import get_min_version
+from lintro.enums.doc_url_template import DocUrlTemplate
 from lintro.enums.tool_name import ToolName
 from lintro.enums.tool_type import ToolType
 from lintro.models.core.tool_result import ToolResult
@@ -254,6 +255,19 @@ class SqlfluffPlugin(BaseToolPlugin):
                 issues=[],
                 error=str(e),
             )
+
+    def doc_url(self, code: str) -> str | None:
+        """Return SQLFluff documentation URL for the given rule code.
+
+        Args:
+            code: SQLFluff rule code (e.g., "LT01").
+
+        Returns:
+            URL to the SQLFluff rule documentation.
+        """
+        if code:
+            return DocUrlTemplate.SQLFLUFF.format(code=code)
+        return None
 
     def check(self, paths: list[str], options: dict[str, object]) -> ToolResult:
         """Check files with SQLFluff.

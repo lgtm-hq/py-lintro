@@ -15,6 +15,7 @@ from typing import Any
 
 from loguru import logger
 
+from lintro.enums.doc_url_template import DocUrlTemplate
 from lintro.enums.tool_type import ToolType
 from lintro.models.core.tool_result import ToolResult
 from lintro.parsers.mypy.mypy_parser import parse_mypy_output
@@ -297,6 +298,22 @@ class MypyPlugin(BaseToolPlugin):
                     effective_excludes.append(glob_pattern)
 
         return effective_excludes
+
+    def doc_url(self, code: str) -> str | None:
+        """Return mypy documentation URL for the given error code.
+
+        Returns the error code list page. Individual anchor mapping is not
+        reliable because mypy docs don't use the raw code as fragment IDs.
+
+        Args:
+            code: mypy error code (e.g., "import-untyped").
+
+        Returns:
+            URL to the mypy error codes page, or None if code is empty.
+        """
+        if code:
+            return DocUrlTemplate.MYPY
+        return None
 
     def check(self, paths: list[str], options: dict[str, object]) -> ToolResult:
         """Check files with Mypy.
