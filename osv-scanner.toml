@@ -1,5 +1,0 @@
-# OSV-Scanner Configuration
-# https://google.github.io/osv-scanner/configuration/
-#
-# Suppress known vulnerabilities that have been assessed and accepted.
-# Each entry must include an expiry date and a reason.
