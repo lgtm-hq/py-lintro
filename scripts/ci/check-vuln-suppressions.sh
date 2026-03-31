@@ -53,7 +53,7 @@ trap "rm -f '$AWK_TMPFILE'" EXIT
 log_info "Probing osv-scanner without suppressions..."
 PROBE_OUTPUT=$(
 	osv-scanner scan --recursive --format json --config /dev/null \
-		. 2>&1 || true
+		. || true
 )
 
 # Classify suppressions using lintro's Python parser
