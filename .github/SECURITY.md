@@ -12,7 +12,8 @@
 If you discover a security vulnerability in lintro, please report it by:
 
 1. **Do NOT open a public GitHub issue**
-2. Email the maintainers directly or use GitHub's private vulnerability reporting
+2. Report via
+   [GitHub's private vulnerability reporting](https://github.com/lgtm-hq/py-lintro/security/advisories/new)
 3. Include detailed steps to reproduce the vulnerability
 4. Allow reasonable time for the issue to be addressed before public disclosure
 
