@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 from typing import TYPE_CHECKING
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 from assertpy import assert_that
@@ -399,17 +399,19 @@ def test_get_executable_command_python_bundled_tools_python_module_in_venv(
         fake_tool_plugin: Fixture providing a FakeToolPlugin instance.
         tool_name: Name of the tool being tested.
     """
-    # Mock Path chain: Path(sys.prefix) / "bin" / tool_name -> exists() = True
-    mock_venv_bin = MagicMock()
-    mock_venv_bin.exists.return_value = True
-    mock_bin_dir = MagicMock()
-    mock_bin_dir.__truediv__ = MagicMock(return_value=mock_venv_bin)
-    mock_prefix_path = MagicMock()
-    mock_prefix_path.__truediv__ = MagicMock(return_value=mock_bin_dir)
 
-    # Simulate running inside a venv with tool present in venv bin
+    # Mock shutil.which to find tool in venv scripts dir but not via PATH
+    def which_side_effect(
+        name: str,
+        path: str | None = None,
+    ) -> str | None:
+        if path is not None:
+            return f"/app/.venv/bin/{name}"  # Found in venv scripts
+        return f"/usr/local/bin/{name}"  # Also in PATH
+
+    # Simulate running inside a venv with tool present in venv scripts
     with (
-        patch("shutil.which", return_value=f"/usr/local/bin/{tool_name}"),
+        patch("shutil.which", side_effect=which_side_effect),
         patch(
             "lintro.tools.core.command_builders.sys.prefix",
             "/app/.venv",
@@ -423,8 +425,8 @@ def test_get_executable_command_python_bundled_tools_python_module_in_venv(
             return_value=False,
         ),
         patch(
-            "lintro.tools.core.command_builders.Path",
-            return_value=mock_prefix_path,
+            "lintro.tools.core.command_builders.sysconfig.get_path",
+            return_value="/app/.venv/bin",
         ),
     ):
         result = fake_tool_plugin._get_executable_command(tool_name)

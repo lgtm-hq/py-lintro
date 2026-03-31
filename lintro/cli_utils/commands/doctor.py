@@ -17,7 +17,7 @@ import click
 from rich.console import Console
 from rich.table import Table
 
-from lintro._tool_versions import TOOL_VERSIONS
+from lintro._tool_versions import TOOL_VERSIONS, get_all_expected_versions
 from lintro.tools.core.version_parsing import extract_version_from_output
 from lintro.utils.environment import (
     EnvironmentReport,
@@ -321,12 +321,13 @@ def doctor_command(
             f"{', '.join(uncovered_tools)}[/yellow]",
         )
 
-    # Filter tools if specified
+    # Use all expected versions (manifest + npm + TOOL_VERSIONS)
+    all_versions = get_all_expected_versions()
     if tools:
         tool_list = [t.strip() for t in tools.split(",")]
-        versions_to_check = {k: v for k, v in TOOL_VERSIONS.items() if k in tool_list}
+        versions_to_check = {k: v for k, v in all_versions.items() if k in tool_list}
     else:
-        versions_to_check = TOOL_VERSIONS
+        versions_to_check = all_versions
 
     results: dict[str, dict[str, str | None]] = {}
     ok_count = 0

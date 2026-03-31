@@ -27,8 +27,8 @@ from __future__ import annotations
 
 import shutil
 import sys
+import sysconfig
 from abc import ABC, abstractmethod
-from pathlib import Path
 from typing import TYPE_CHECKING, ClassVar
 
 from loguru import logger
@@ -255,13 +255,16 @@ class PythonBundledBuilder(CommandBuilder):
         # separate Homebrew formulae — not in the venv. In that case, fall
         # through to PATH discovery instead of using python -m.
         if sys.prefix != sys.base_prefix:
-            venv_bin = Path(sys.prefix) / "bin" / tool_name
-            if venv_bin.exists():
+            scripts_dir = sysconfig.get_path("scripts")
+            venv_tool = (
+                shutil.which(tool_name, path=scripts_dir) if scripts_dir else None
+            )
+            if venv_tool:
                 python_exe = sys.executable
                 if python_exe:
                     logger.debug(
                         f"Running in venv ({sys.prefix}), "
-                        f"{tool_name} found in venv bin, "
+                        f"{tool_name} found in venv scripts, "
                         f"using python -m {tool_name}",
                     )
                     return [python_exe, "-m", tool_name]
@@ -271,7 +274,7 @@ class PythonBundledBuilder(CommandBuilder):
                 if tool_path:
                     logger.debug(
                         f"Running in venv ({sys.prefix}), "
-                        f"{tool_name} not in venv bin, "
+                        f"{tool_name} not in venv scripts, "
                         f"found in PATH: {tool_path}",
                     )
                     return [tool_path]
@@ -354,13 +357,16 @@ class PytestBuilder(CommandBuilder):
         # Homebrew installs lintro in a venv but pytest may be a separate
         # install — not in the venv. Fall through to PATH discovery if so.
         if sys.prefix != sys.base_prefix:
-            venv_bin = Path(sys.prefix) / "bin" / "pytest"
-            if venv_bin.exists():
+            scripts_dir = sysconfig.get_path("scripts")
+            venv_tool = (
+                shutil.which("pytest", path=scripts_dir) if scripts_dir else None
+            )
+            if venv_tool:
                 python_exe = sys.executable
                 if python_exe:
                     logger.debug(
                         f"Running in venv ({sys.prefix}), "
-                        "pytest found in venv bin, "
+                        "pytest found in venv scripts, "
                         "using python -m pytest",
                     )
                     return [python_exe, "-m", "pytest"]
@@ -369,7 +375,7 @@ class PytestBuilder(CommandBuilder):
                 if tool_path:
                     logger.debug(
                         f"Running in venv ({sys.prefix}), "
-                        "pytest not in venv bin, "
+                        "pytest not in venv scripts, "
                         f"found in PATH: {tool_path}",
                     )
                     return [tool_path]

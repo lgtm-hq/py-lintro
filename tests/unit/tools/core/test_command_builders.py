@@ -20,28 +20,36 @@ from lintro.tools.core.command_builders import (
 )
 
 
-def _mock_venv_bin_exists(*, exists: bool) -> MagicMock:
-    """Create a mock for Path that controls venv bin existence.
+def _mock_which_for_venv(
+    *,
+    in_venv: bool,
+    in_path: str | None = None,
+) -> MagicMock:
+    """Create a shutil.which mock that controls venv vs PATH discovery.
 
-    Mocks the chain: Path(sys.prefix) / "bin" / tool_name -> .exists()
+    When in_venv is True, shutil.which(tool, path=scripts_dir) returns
+    a path (simulating the tool being in the venv). When False, it returns
+    None for the venv lookup but returns in_path for the PATH lookup.
 
     Args:
-        exists: Whether the venv bin path should report as existing.
+        in_venv: Whether the tool should be found in the venv scripts dir.
+        in_path: Path to return for PATH-based discovery (None = not found).
 
     Returns:
-        Mock to use with patch("lintro.tools.core.command_builders.Path", ...).
+        Mock to use with patch("shutil.which", ...).
     """
-    mock_venv_bin = MagicMock()
-    mock_venv_bin.exists.return_value = exists
 
-    mock_bin_dir = MagicMock()
-    mock_bin_dir.__truediv__ = MagicMock(return_value=mock_venv_bin)
+    def which_side_effect(
+        name: str,
+        path: str | None = None,
+    ) -> str | None:
+        if path is not None:
+            # This is the venv scripts lookup
+            return f"/fake/venv/bin/{name}" if in_venv else None
+        # This is the PATH lookup
+        return in_path
 
-    mock_prefix_path = MagicMock()
-    mock_prefix_path.__truediv__ = MagicMock(return_value=mock_bin_dir)
-
-    mock_path_cls = MagicMock(return_value=mock_prefix_path)
-    return mock_path_cls
+    return MagicMock(side_effect=which_side_effect)
 
 
 @pytest.fixture(autouse=True)
@@ -109,11 +117,11 @@ def test_python_bundled_builder_prefers_path_binary_outside_venv() -> None:
 
 
 def test_python_bundled_builder_prefers_python_module_in_venv() -> None:
-    """PythonBundledBuilder prefers python -m when tool is in venv bin."""
+    """PythonBundledBuilder prefers python -m when tool is in venv scripts."""
     builder = PythonBundledBuilder()
-    # Simulate running inside a venv with the tool present in venv bin
+    # Simulate running inside a venv with the tool present in venv scripts
     with (
-        patch("shutil.which", return_value="/usr/local/bin/ruff"),
+        patch("shutil.which", _mock_which_for_venv(in_venv=True)),
         patch(
             "lintro.tools.core.command_builders.sys.prefix",
             "/app/.venv",
@@ -127,8 +135,8 @@ def test_python_bundled_builder_prefers_python_module_in_venv() -> None:
             return_value=False,
         ),
         patch(
-            "lintro.tools.core.command_builders.Path",
-            _mock_venv_bin_exists(exists=True),
+            "lintro.tools.core.command_builders.sysconfig.get_path",
+            return_value="/app/.venv/bin",
         ),
     ):
         cmd = builder.get_command("ruff", ToolName.RUFF)
@@ -139,11 +147,17 @@ def test_python_bundled_builder_prefers_python_module_in_venv() -> None:
 
 
 def test_python_bundled_builder_prefers_path_when_tool_not_in_venv() -> None:
-    """PythonBundledBuilder uses PATH when tool is not in venv bin (Homebrew)."""
+    """PythonBundledBuilder uses PATH when tool is not in venv (Homebrew)."""
     builder = PythonBundledBuilder()
     # Simulate Homebrew: in a venv, but tool is a separate Homebrew formula
     with (
-        patch("shutil.which", return_value="/opt/homebrew/bin/ruff"),
+        patch(
+            "shutil.which",
+            _mock_which_for_venv(
+                in_venv=False,
+                in_path="/opt/homebrew/bin/ruff",
+            ),
+        ),
         patch(
             "lintro.tools.core.command_builders.sys.prefix",
             "/opt/homebrew/Cellar/lintro/0.57.7/libexec",
@@ -157,8 +171,8 @@ def test_python_bundled_builder_prefers_path_when_tool_not_in_venv() -> None:
             return_value=False,
         ),
         patch(
-            "lintro.tools.core.command_builders.Path",
-            _mock_venv_bin_exists(exists=False),
+            "lintro.tools.core.command_builders.sysconfig.get_path",
+            return_value="/opt/homebrew/Cellar/lintro/0.57.7/libexec/bin",
         ),
     ):
         cmd = builder.get_command("ruff", ToolName.RUFF)
@@ -168,9 +182,9 @@ def test_python_bundled_builder_prefers_path_when_tool_not_in_venv() -> None:
 def test_python_bundled_builder_last_resort_python_m_in_venv() -> None:
     """PythonBundledBuilder falls back to python -m when tool nowhere."""
     builder = PythonBundledBuilder()
-    # In a venv, tool NOT in venv bin, NOT in PATH
+    # In a venv, tool NOT in venv scripts, NOT in PATH
     with (
-        patch("shutil.which", return_value=None),
+        patch("shutil.which", _mock_which_for_venv(in_venv=False, in_path=None)),
         patch(
             "lintro.tools.core.command_builders.sys.prefix",
             "/opt/homebrew/Cellar/lintro/0.57.7/libexec",
@@ -184,8 +198,8 @@ def test_python_bundled_builder_last_resort_python_m_in_venv() -> None:
             return_value=False,
         ),
         patch(
-            "lintro.tools.core.command_builders.Path",
-            _mock_venv_bin_exists(exists=False),
+            "lintro.tools.core.command_builders.sysconfig.get_path",
+            return_value="/opt/homebrew/Cellar/lintro/0.57.7/libexec/bin",
         ),
     ):
         cmd = builder.get_command("ruff", ToolName.RUFF)
@@ -268,11 +282,11 @@ def test_pytest_builder_prefers_path_binary_outside_venv() -> None:
 
 
 def test_pytest_builder_prefers_python_module_in_venv() -> None:
-    """PytestBuilder prefers python -m pytest when tool is in venv bin."""
+    """PytestBuilder prefers python -m pytest when tool is in venv scripts."""
     builder = PytestBuilder()
-    # Simulate running inside a venv with pytest present in venv bin
+    # Simulate running inside a venv with pytest present in venv scripts
     with (
-        patch("shutil.which", return_value="/usr/local/bin/pytest"),
+        patch("shutil.which", _mock_which_for_venv(in_venv=True)),
         patch(
             "lintro.tools.core.command_builders.sys.prefix",
             "/app/.venv",
@@ -286,8 +300,8 @@ def test_pytest_builder_prefers_python_module_in_venv() -> None:
             return_value=False,
         ),
         patch(
-            "lintro.tools.core.command_builders.Path",
-            _mock_venv_bin_exists(exists=True),
+            "lintro.tools.core.command_builders.sysconfig.get_path",
+            return_value="/app/.venv/bin",
         ),
     ):
         cmd = builder.get_command("pytest", ToolName.PYTEST)
@@ -298,10 +312,16 @@ def test_pytest_builder_prefers_python_module_in_venv() -> None:
 
 
 def test_pytest_builder_prefers_path_when_tool_not_in_venv() -> None:
-    """PytestBuilder uses PATH when pytest is not in venv bin (Homebrew)."""
+    """PytestBuilder uses PATH when pytest is not in venv (Homebrew)."""
     builder = PytestBuilder()
     with (
-        patch("shutil.which", return_value="/opt/homebrew/bin/pytest"),
+        patch(
+            "shutil.which",
+            _mock_which_for_venv(
+                in_venv=False,
+                in_path="/opt/homebrew/bin/pytest",
+            ),
+        ),
         patch(
             "lintro.tools.core.command_builders.sys.prefix",
             "/opt/homebrew/Cellar/lintro/0.57.7/libexec",
@@ -315,8 +335,8 @@ def test_pytest_builder_prefers_path_when_tool_not_in_venv() -> None:
             return_value=False,
         ),
         patch(
-            "lintro.tools.core.command_builders.Path",
-            _mock_venv_bin_exists(exists=False),
+            "lintro.tools.core.command_builders.sysconfig.get_path",
+            return_value="/opt/homebrew/Cellar/lintro/0.57.7/libexec/bin",
         ),
     ):
         cmd = builder.get_command("pytest", ToolName.PYTEST)
@@ -327,7 +347,7 @@ def test_pytest_builder_last_resort_python_m_in_venv() -> None:
     """PytestBuilder falls back to python -m when pytest nowhere."""
     builder = PytestBuilder()
     with (
-        patch("shutil.which", return_value=None),
+        patch("shutil.which", _mock_which_for_venv(in_venv=False, in_path=None)),
         patch(
             "lintro.tools.core.command_builders.sys.prefix",
             "/opt/homebrew/Cellar/lintro/0.57.7/libexec",
@@ -341,8 +361,8 @@ def test_pytest_builder_last_resort_python_m_in_venv() -> None:
             return_value=False,
         ),
         patch(
-            "lintro.tools.core.command_builders.Path",
-            _mock_venv_bin_exists(exists=False),
+            "lintro.tools.core.command_builders.sysconfig.get_path",
+            return_value="/opt/homebrew/Cellar/lintro/0.57.7/libexec/bin",
         ),
     ):
         cmd = builder.get_command("pytest", ToolName.PYTEST)

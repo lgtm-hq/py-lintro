@@ -293,12 +293,12 @@ def main() -> int:
             tool_versions = _load_tool_versions(repo_root)
             tv_version = tool_versions.get(name)
             if tv_version is None:
-                # Try with underscores (manifest uses underscores, TOOL_VERSIONS
-                # uses ToolName enum values which are also underscore-based)
-                pass  # name is already underscore-based from manifest
-            if tv_version is not None and tv_version != version_str:
                 errors.append(
-                    f"{name}: manifest {version_str} != " f"TOOL_VERSIONS {tv_version}",
+                    f"{name}: missing from TOOL_VERSIONS in _tool_versions.py",
+                )
+            elif tv_version != version_str:
+                errors.append(
+                    f"{name}: manifest {version_str} != TOOL_VERSIONS {tv_version}",
                 )
             continue
 
