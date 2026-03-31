@@ -13,6 +13,7 @@ from __future__ import annotations
 import subprocess  # nosec B404 - used safely with shell disabled
 from dataclasses import dataclass
 
+from lintro.enums.doc_url_template import DocUrlTemplate
 from lintro.enums.tool_type import ToolType
 from lintro.models.core.tool_result import ToolResult
 from lintro.parsers.pydoclint.pydoclint_parser import parse_pydoclint_output
@@ -120,9 +121,11 @@ class PydoclintPlugin(BaseToolPlugin):
             code: Pydoclint code (e.g., "DOC301").
 
         Returns:
-            URL to the pydoclint documentation.
+            URL to the pydoclint documentation, or None if code is empty.
         """
-        return "https://jsh9.github.io/pydoclint/how_to_config.html"
+        if not code:
+            return None
+        return DocUrlTemplate.PYDOCLINT
 
     def check(self, paths: list[str], options: dict[str, object]) -> ToolResult:
         """Check files with pydoclint.

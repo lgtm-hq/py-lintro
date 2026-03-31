@@ -11,6 +11,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from lintro._tool_versions import get_min_version
+from lintro.enums.doc_url_template import DocUrlTemplate
 from lintro.enums.tool_name import ToolName
 from lintro.enums.tool_type import ToolType
 from lintro.models.core.tool_result import ToolResult
@@ -158,7 +159,7 @@ class ShellcheckPlugin(BaseToolPlugin):
             URL to the ShellCheck wiki page.
         """
         if code:
-            return f"https://www.shellcheck.net/wiki/{code}"
+            return DocUrlTemplate.SHELLCHECK.format(code=code)
         return None
 
     def _build_command(self) -> list[str]:

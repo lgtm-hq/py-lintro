@@ -13,6 +13,7 @@ from typing import Any
 from loguru import logger
 
 from lintro._tool_versions import get_min_version
+from lintro.enums.doc_url_template import DocUrlTemplate
 from lintro.enums.tool_name import ToolName
 from lintro.enums.tool_type import ToolType
 from lintro.models.core.tool_result import ToolResult
@@ -242,7 +243,7 @@ class OxlintPlugin(BaseToolPlugin):
             URL to the oxlint rule documentation.
         """
         if code and "/" in code:
-            return f"https://oxc.rs/docs/guide/usage/linter/rules/{code}"
+            return DocUrlTemplate.OXLINT.format(code=code)
         return None
 
     def check(self, paths: list[str], options: dict[str, object]) -> ToolResult:

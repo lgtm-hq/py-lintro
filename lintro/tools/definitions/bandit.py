@@ -20,6 +20,7 @@ from lintro.enums.bandit_levels import (
     normalize_bandit_confidence_level,
     normalize_bandit_severity_level,
 )
+from lintro.enums.doc_url_template import DocUrlTemplate
 from lintro.enums.tool_type import ToolType
 from lintro.models.core.tool_result import ToolResult
 from lintro.parsers.bandit.bandit_parser import parse_bandit_output
@@ -345,7 +346,7 @@ class BanditPlugin(BaseToolPlugin):
             URL to the Bandit plugins index page, or None if code is empty.
         """
         if code:
-            return "https://bandit.readthedocs.io/en/latest/plugins/index.html"
+            return DocUrlTemplate.BANDIT
         return None
 
     def check(self, paths: list[str], options: dict[str, object]) -> ToolResult:

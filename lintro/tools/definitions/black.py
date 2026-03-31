@@ -13,6 +13,7 @@ from typing import Any
 
 from loguru import logger
 
+from lintro.enums.doc_url_template import DocUrlTemplate
 from lintro.enums.tool_type import ToolType
 from lintro.models.core.tool_result import ToolResult
 from lintro.parsers.black.black_issue import BlackIssue
@@ -228,6 +229,19 @@ class BlackPlugin(BaseToolPlugin):
             issues=[],
             cwd=cwd,
         )
+
+    def doc_url(self, code: str) -> str | None:
+        """Return Black documentation URL.
+
+        Args:
+            code: Black code (rarely emitted).
+
+        Returns:
+            URL to the Black documentation, or None if code is empty.
+        """
+        if not code:
+            return None
+        return DocUrlTemplate.BLACK
 
     def check(self, paths: list[str], options: dict[str, object]) -> ToolResult:
         """Check files using Black without applying changes.

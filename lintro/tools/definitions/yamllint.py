@@ -21,6 +21,7 @@ try:
 except ImportError:
     yaml = None  # type: ignore[assignment]
 
+from lintro.enums.doc_url_template import DocUrlTemplate
 from lintro.enums.tool_type import ToolType
 from lintro.enums.yamllint_format import (
     YamllintFormat,
@@ -361,7 +362,7 @@ class YamllintPlugin(BaseToolPlugin):
             URL to the yamllint rule documentation.
         """
         if code:
-            return f"https://yamllint.readthedocs.io/en/stable/rules.html#{code}"
+            return DocUrlTemplate.YAMLLINT.format(code=code)
         return None
 
     def check(self, paths: list[str], options: dict[str, object]) -> ToolResult:

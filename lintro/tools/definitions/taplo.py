@@ -13,6 +13,7 @@ from typing import Any
 from loguru import logger
 
 from lintro._tool_versions import get_min_version
+from lintro.enums.doc_url_template import DocUrlTemplate
 from lintro.enums.tool_name import ToolName
 from lintro.enums.tool_type import ToolType
 from lintro.models.core.tool_result import ToolResult
@@ -193,6 +194,19 @@ class TaploPlugin(BaseToolPlugin):
             issues_count=1,
             issues=[timeout_issue],
         )
+
+    def doc_url(self, code: str) -> str | None:
+        """Return Taplo documentation URL.
+
+        Args:
+            code: Taplo rule code (e.g., "invalid_value").
+
+        Returns:
+            URL to the Taplo documentation, or None if code is empty.
+        """
+        if not code:
+            return None
+        return DocUrlTemplate.TAPLO
 
     def check(self, paths: list[str], options: dict[str, object]) -> ToolResult:
         """Check TOML files using Taplo.

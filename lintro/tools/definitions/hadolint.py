@@ -12,6 +12,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from lintro._tool_versions import get_min_version
+from lintro.enums.doc_url_template import DocUrlTemplate
 from lintro.enums.hadolint_enums import (
     HadolintFailureThreshold,
     HadolintFormat,
@@ -250,9 +251,9 @@ class HadolintPlugin(BaseToolPlugin):
             return None
         upper = code.upper()
         if upper.startswith("SC"):
-            return f"https://www.shellcheck.net/wiki/{upper}"
+            return DocUrlTemplate.SHELLCHECK.format(code=upper)
         if upper.startswith("DL"):
-            return f"https://github.com/hadolint/hadolint/wiki/{upper}"
+            return DocUrlTemplate.HADOLINT.format(code=upper)
         return None
 
     def check(self, paths: list[str], options: dict[str, object]) -> ToolResult:

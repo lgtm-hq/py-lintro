@@ -32,6 +32,7 @@ from typing import Any, NoReturn
 from loguru import logger
 
 from lintro._tool_versions import get_min_version
+from lintro.enums.doc_url_template import DocUrlTemplate
 from lintro.enums.tool_name import ToolName
 from lintro.enums.tool_type import ToolType
 from lintro.models.core.tool_result import ToolResult
@@ -385,7 +386,7 @@ class TscPlugin(BaseToolPlugin):
         upper = code.upper()
         num = code[2:] if upper.startswith("TS") else code
         if num.isdigit():
-            return f"https://typescript.tv/errors/#ts{num}"
+            return DocUrlTemplate.TSC.format(code=num)
         return None
 
     def check(self, paths: list[str], options: dict[str, object]) -> ToolResult:

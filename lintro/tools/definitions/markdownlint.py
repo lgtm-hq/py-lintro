@@ -18,6 +18,7 @@ from typing import Any
 from loguru import logger
 
 from lintro._tool_versions import get_min_version
+from lintro.enums.doc_url_template import DocUrlTemplate
 from lintro.enums.tool_name import ToolName
 from lintro.enums.tool_type import ToolType
 from lintro.models.core.tool_result import ToolResult
@@ -213,7 +214,7 @@ class MarkdownlintPlugin(BaseToolPlugin):
             URL to the markdownlint rule documentation.
         """
         if code:
-            return f"https://github.com/DavidAnson/markdownlint/blob/main/doc/{code.lower()}.md"
+            return DocUrlTemplate.MARKDOWNLINT.format(code=code.lower())
         return None
 
     def check(self, paths: list[str], options: dict[str, object]) -> ToolResult:

@@ -15,6 +15,7 @@ from typing import Any
 
 from loguru import logger
 
+from lintro.enums.doc_url_template import DocUrlTemplate
 from lintro.enums.tool_type import ToolType
 from lintro.models.core.tool_result import ToolResult
 from lintro.parsers.mypy.mypy_parser import parse_mypy_output
@@ -311,7 +312,7 @@ class MypyPlugin(BaseToolPlugin):
             URL to the mypy error codes page, or None if code is empty.
         """
         if code:
-            return "https://mypy.readthedocs.io/en/stable/error_code_list.html"
+            return DocUrlTemplate.MYPY
         return None
 
     def check(self, paths: list[str], options: dict[str, object]) -> ToolResult:

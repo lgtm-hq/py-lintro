@@ -23,6 +23,7 @@ from typing import Any, NoReturn
 from loguru import logger
 
 from lintro._tool_versions import get_min_version
+from lintro.enums.doc_url_template import DocUrlTemplate
 from lintro.enums.tool_name import ToolName
 from lintro.enums.tool_type import ToolType
 from lintro.models.core.tool_result import ToolResult
@@ -172,6 +173,22 @@ class AstroCheckPlugin(BaseToolPlugin):
 
     # Canonical message for "no Astro files" early returns
     _NO_FILES_MESSAGE: str = "No Astro files to check."
+
+    def doc_url(self, code: str) -> str | None:
+        """Return Astro TypeScript documentation URL.
+
+        Astro check emits TypeScript error codes. Links to the Astro
+        TypeScript guide since per-error pages are not available.
+
+        Args:
+            code: TypeScript error code (e.g., "TS2322").
+
+        Returns:
+            URL to the Astro TypeScript guide, or None if code is empty.
+        """
+        if not code:
+            return None
+        return DocUrlTemplate.ASTRO_CHECK
 
     def check(self, paths: list[str], options: dict[str, object]) -> ToolResult:
         """Check files with astro check.

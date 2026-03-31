@@ -24,6 +24,7 @@ from typing import Any, NoReturn
 from loguru import logger
 
 from lintro._tool_versions import get_min_version
+from lintro.enums.doc_url_template import DocUrlTemplate
 from lintro.enums.tool_name import ToolName
 from lintro.enums.tool_type import ToolType
 from lintro.models.core.tool_result import ToolResult
@@ -177,6 +178,19 @@ class SvelteCheckPlugin(BaseToolPlugin):
             cmd.extend(["--tsconfig", str(tsconfig)])
 
         return cmd
+
+    def doc_url(self, code: str) -> str | None:
+        """Return svelte-check documentation URL.
+
+        Args:
+            code: Error code (e.g., "ts-2322", "css-unused-selector").
+
+        Returns:
+            URL to the svelte-check documentation, or None if code is empty.
+        """
+        if not code:
+            return None
+        return DocUrlTemplate.SVELTE_CHECK
 
     def check(self, paths: list[str], options: dict[str, object]) -> ToolResult:
         """Check files with svelte-check.

@@ -14,6 +14,7 @@ from typing import Any
 
 from loguru import logger
 
+from lintro.enums.doc_url_template import DocUrlTemplate
 from lintro.enums.tool_type import ToolType
 from lintro.models.core.tool_result import ToolResult
 from lintro.plugins.base import BaseToolPlugin
@@ -240,7 +241,7 @@ class RuffPlugin(BaseToolPlugin):
             return None
         name = self._resolve_rule_name(code)
         if name:
-            return f"https://docs.astral.sh/ruff/rules/{name}/"
+            return DocUrlTemplate.RUFF.format(code=name)
         return None
 
     def check(self, paths: list[str], options: dict[str, object]) -> ToolResult:

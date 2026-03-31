@@ -18,6 +18,7 @@ from typing import Any
 from loguru import logger
 
 from lintro._tool_versions import get_min_version
+from lintro.enums.doc_url_template import DocUrlTemplate
 from lintro.enums.tool_name import ToolName
 from lintro.enums.tool_type import ToolType
 from lintro.models.core.tool_result import ToolResult
@@ -161,6 +162,19 @@ class GitleaksPlugin(BaseToolPlugin):
         cmd.append("0")
 
         return cmd
+
+    def doc_url(self, code: str) -> str | None:
+        """Return Gitleaks documentation URL.
+
+        Args:
+            code: Gitleaks rule ID (e.g., "aws-access-key-id").
+
+        Returns:
+            URL to the Gitleaks repository, or None if code is empty.
+        """
+        if not code:
+            return None
+        return DocUrlTemplate.GITLEAKS
 
     def check(self, paths: list[str], options: dict[str, object]) -> ToolResult:
         """Check files with Gitleaks for hardcoded secrets.
