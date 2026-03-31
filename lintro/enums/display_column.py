@@ -21,6 +21,7 @@ class DisplayColumn(StrEnum):
     SEVERITY = "Severity"
     FIXABLE = "Fixable"
     MESSAGE = "Message"
+    DOC_URL = "Docs"
 
 
 # Standard column order for display - includes all fields since most tools report them

@@ -75,6 +75,7 @@ def to_sarif(
     *,
     tool_name: str = "lintro-ai",
     tool_version: str = "",
+    doc_urls: dict[str, str] | None = None,
 ) -> dict[str, Any]:
     """Convert AI findings to a SARIF v2.1.0 document.
 
@@ -83,6 +84,8 @@ def to_sarif(
         summary: Optional AI summary to attach as run properties.
         tool_name: Name for the SARIF tool driver.
         tool_version: Version string for the tool driver.
+        doc_urls: Optional mapping of rule codes to documentation URLs.
+            When provided, matching rules get a ``helpUri`` property.
 
     Returns:
         SARIF document as a dictionary.
@@ -102,6 +105,11 @@ def to_sarif(
             rule["shortDescription"] = {"text": short_desc}
             if s.explanation:
                 rule["fullDescription"] = {"text": s.explanation}
+            # Attach documentation URL when available
+            if doc_urls:
+                help_uri = doc_urls.get(s.code, "") or doc_urls.get(rule_id, "")
+                if help_uri:
+                    rule["helpUri"] = help_uri
             if s.tool_name:
                 rule["properties"] = {"tool": s.tool_name}
             rules_map[rule_id] = rule
@@ -237,6 +245,7 @@ def write_sarif(
     output_path: Path,
     tool_name: str = "lintro-ai",
     tool_version: str = "",
+    doc_urls: dict[str, str] | None = None,
 ) -> None:
     """Write AI findings as a SARIF file.
 
@@ -246,12 +255,14 @@ def write_sarif(
         output_path: Path to write the SARIF file.
         tool_name: Name for the SARIF tool driver.
         tool_version: Version string for the tool driver.
+        doc_urls: Optional mapping of rule codes to documentation URLs.
     """
     sarif = to_sarif(
         suggestions,
         summary,
         tool_name=tool_name,
         tool_version=tool_version,
+        doc_urls=doc_urls,
     )
     output_path.parent.mkdir(parents=True, exist_ok=True)
     output_path.write_text(

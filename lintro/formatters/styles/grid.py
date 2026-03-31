@@ -63,6 +63,7 @@ class GridStyle(OutputStyle):
                 "Line": 8,
                 "Column": 8,
                 "Fixable": 8,
+                "Docs": 52,
             }
             maxcolwidths = [width_map.get(col) for col in columns]
 

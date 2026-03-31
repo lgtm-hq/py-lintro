@@ -370,7 +370,12 @@ def _enrich_issues_with_doc_urls(
     for issue in result.issues:
         if getattr(issue, "doc_url", ""):
             continue
-        code = str(getattr(issue, "code", "") or "")
+        # Resolve the code attribute via DISPLAY_FIELD_MAP so tools that
+        # store their identifier under a different name (e.g. advisory_id,
+        # vuln_id, rule_id) are handled correctly.
+        field_map = getattr(issue, "DISPLAY_FIELD_MAP", {})
+        code_attr = field_map.get("code", "code")
+        code = str(getattr(issue, code_attr, "") or "")
         if code:
             url = tool.doc_url(code)
             if url:

@@ -252,7 +252,23 @@ def write_output_file(
 
         suggestions = suggestions_from_results(all_results)
         summary = summary_from_results(all_results)
-        write_sarif(suggestions, summary, output_path=output_file)
+
+        # Build doc_url map from enriched issues for SARIF helpUri
+        doc_url_map: dict[str, str] = {}
+        for result in all_results:
+            if hasattr(result, "issues") and result.issues:
+                for issue in result.issues:
+                    code = str(getattr(issue, "code", "") or "")
+                    url = str(getattr(issue, "doc_url", "") or "")
+                    if code and url:
+                        doc_url_map[code] = url
+
+        write_sarif(
+            suggestions,
+            summary,
+            output_path=output_file,
+            doc_urls=doc_url_map if doc_url_map else None,
+        )
 
     else:
         # Plain or Grid format - write formatted text output
