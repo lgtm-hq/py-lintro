@@ -111,10 +111,7 @@
       "version": "2.3.5",
       "install": {
         "type": "binary",
-        "version_command": [
-          "osv-scanner",
-          "--version"
-        ]
+        "version_command": ["osv-scanner", "--version"]
       },
       "tier": "tools"
     },
