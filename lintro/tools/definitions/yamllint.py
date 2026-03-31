@@ -361,8 +361,9 @@ class YamllintPlugin(BaseToolPlugin):
         Returns:
             URL to the yamllint rule documentation.
         """
-        if code:
-            return DocUrlTemplate.YAMLLINT.format(code=code)
+        normalized = code.strip() if code else ""
+        if normalized:
+            return DocUrlTemplate.YAMLLINT.format(code=normalized)
         return None
 
     def check(self, paths: list[str], options: dict[str, object]) -> ToolResult:

@@ -41,6 +41,29 @@ if TYPE_CHECKING:
     from lintro.models.core.tool_result import ToolResult
 
 
+def build_doc_url_map(all_results: Sequence[Any]) -> dict[str, str]:
+    """Build a mapping of rule codes to documentation URLs from results.
+
+    Iterates all issues across results and collects non-empty doc_url
+    values keyed by their code. Used by SARIF output to populate helpUri.
+
+    Args:
+        all_results: Sequence of ToolResult objects.
+
+    Returns:
+        Mapping of rule codes to documentation URLs (may be empty).
+    """
+    doc_url_map: dict[str, str] = {}
+    for result in all_results:
+        if hasattr(result, "issues") and result.issues:
+            for issue in result.issues:
+                code = str(getattr(issue, "code", "") or "")
+                url = str(getattr(issue, "doc_url", "") or "")
+                if code and url:
+                    doc_url_map[code] = url
+    return doc_url_map
+
+
 def write_output_file(
     *,
     output_path: str,
@@ -253,21 +276,11 @@ def write_output_file(
         suggestions = suggestions_from_results(all_results)
         summary = summary_from_results(all_results)
 
-        # Build doc_url map from enriched issues for SARIF helpUri
-        doc_url_map: dict[str, str] = {}
-        for result in all_results:
-            if hasattr(result, "issues") and result.issues:
-                for issue in result.issues:
-                    code = str(getattr(issue, "code", "") or "")
-                    url = str(getattr(issue, "doc_url", "") or "")
-                    if code and url:
-                        doc_url_map[code] = url
-
         write_sarif(
             suggestions,
             summary,
             output_path=output_file,
-            doc_urls=doc_url_map if doc_url_map else None,
+            doc_urls=build_doc_url_map(all_results) or None,
         )
 
     else:

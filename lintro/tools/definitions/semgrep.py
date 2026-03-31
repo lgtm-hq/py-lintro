@@ -11,6 +11,7 @@ import json
 import subprocess  # nosec B404 - used safely with shell disabled
 from dataclasses import dataclass
 from typing import Any
+from urllib.parse import quote as url_quote
 
 from loguru import logger
 
@@ -264,7 +265,7 @@ class SemgrepPlugin(BaseToolPlugin):
         if not code:
             return None
         if "." in code and "/" not in code:
-            return DocUrlTemplate.SEMGREP.format(code=code)
+            return DocUrlTemplate.SEMGREP.format(code=url_quote(code, safe=""))
         return None
 
     def check(self, paths: list[str], options: dict[str, object]) -> ToolResult:

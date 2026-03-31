@@ -207,13 +207,13 @@ class BaseToolPlugin(ABC):
         if ToolOptionKey.INCLUDE_VENV.value in kwargs:
             self.include_venv = bool(kwargs[ToolOptionKey.INCLUDE_VENV.value])
 
-    def doc_url(self, code: str) -> str | None:
+    def doc_url(self, _code: str) -> str | None:
         """Return a documentation URL for the given rule code.
 
         Override in subclasses to provide tool-specific documentation links.
 
         Args:
-            code: The rule/error code (e.g., "E501", "SC2086").
+            _code: The rule/error code (e.g., "E501", "SC2086").
 
         Returns:
             Documentation URL string, or None if no docs are available.

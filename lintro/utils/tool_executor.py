@@ -884,10 +884,16 @@ def run_lint_tools_simple(
                         suggestions_from_results,
                         summary_from_results,
                     )
+                    from lintro.utils.output.file_writer import build_doc_url_map
 
                     suggestions = suggestions_from_results(all_results)
                     summary = summary_from_results(all_results)
-                    write_sarif(suggestions, summary, output_path=Path(output_file))
+                    write_sarif(
+                        suggestions,
+                        summary,
+                        output_path=Path(output_file),
+                        doc_urls=build_doc_url_map(all_results) or None,
+                    )
                 else:
                     write_output_file(
                         output_path=output_file,

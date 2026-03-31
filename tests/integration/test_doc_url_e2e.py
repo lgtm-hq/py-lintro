@@ -27,12 +27,16 @@ from lintro.utils.tool_executor import _enrich_issues_with_doc_urls
 
 
 @pytest.fixture
-def enriched_ruff_result() -> ToolResult:
+def enriched_ruff_result(monkeypatch: pytest.MonkeyPatch) -> ToolResult:
     """Create a ToolResult with RuffIssues and enriched doc_urls.
+
+    Args:
+        monkeypatch: Pytest monkeypatch for environment isolation.
 
     Returns:
         ToolResult with doc_url-enriched issues.
     """
+    monkeypatch.setenv("LINTRO_TEST_MODE", "1")
     issues = [
         RuffIssue(
             file="src/main.py",

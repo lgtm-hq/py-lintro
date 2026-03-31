@@ -159,7 +159,7 @@ class ShellcheckPlugin(BaseToolPlugin):
             URL to the ShellCheck wiki page.
         """
         if code:
-            return DocUrlTemplate.SHELLCHECK.format(code=code)
+            return DocUrlTemplate.SHELLCHECK.format(code=code.upper())
         return None
 
     def _build_command(self) -> list[str]:
