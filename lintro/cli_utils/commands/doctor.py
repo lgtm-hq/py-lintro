@@ -11,13 +11,14 @@ import json
 import shutil
 import subprocess
 import sys
+import sysconfig
 from dataclasses import asdict, dataclass
 
 import click
 from rich.console import Console
 from rich.table import Table
 
-from lintro._tool_versions import TOOL_VERSIONS, get_all_expected_versions
+from lintro._tool_versions import get_all_expected_versions
 from lintro.tools.core.version_parsing import extract_version_from_output
 from lintro.utils.environment import (
     EnvironmentReport,
@@ -29,12 +30,19 @@ from lintro.utils.environment import (
 def _pytest_version_command() -> list[str]:
     """Build the pytest version check command.
 
-    Uses PATH discovery when available (handles Homebrew installs where pytest
-    may not be in lintro's venv), falling back to python -m.
+    Uses the same venv-first resolution as PytestBuilder.get_command():
+    checks sysconfig scripts dir first, then PATH, then python -m fallback.
 
     Returns:
         Command list to check pytest version.
     """
+    # In a venv, check the venv scripts dir first (matches PytestBuilder logic)
+    if sys.prefix != sys.base_prefix:
+        scripts_dir = sysconfig.get_path("scripts")
+        venv_pytest = shutil.which("pytest", path=scripts_dir) if scripts_dir else None
+        if venv_pytest:
+            return [venv_pytest, "--version"]
+    # PATH discovery (Homebrew, system, pipx, etc.)
     pytest_path = shutil.which("pytest")
     if pytest_path:
         return [pytest_path, "--version"]
@@ -81,12 +89,15 @@ TOOL_COMMANDS: dict[str, list[str]] = {
 
 
 def _check_tool_commands_coverage() -> list[str]:
-    """Check for tools in TOOL_VERSIONS that don't have commands defined.
+    """Check for expected tools that don't have version commands defined.
+
+    Uses get_all_expected_versions() to match the same tool set used by
+    the doctor checklist.
 
     Returns:
-        List of tool names that are in TOOL_VERSIONS but not in TOOL_COMMANDS.
+        List of tool names that are expected but not in TOOL_COMMANDS.
     """
-    return [tool for tool in TOOL_VERSIONS if tool not in TOOL_COMMANDS]
+    return [tool for tool in get_all_expected_versions() if tool not in TOOL_COMMANDS]
 
 
 def _get_installed_version(tool_name: str) -> VersionCheckResult:
