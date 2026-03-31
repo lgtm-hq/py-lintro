@@ -30,19 +30,25 @@ from lintro.utils.environment import (
 def _pytest_version_command() -> list[str]:
     """Build the pytest version check command.
 
-    Uses the same venv-first resolution as PytestBuilder.get_command():
-    checks sysconfig scripts dir first, then PATH, then python -m fallback.
+    Matches PytestBuilder.get_command() resolution: when pytest is found in
+    the venv scripts dir, uses python -m pytest (same as the builder). When
+    not in venv or not found in venv, falls back to PATH then python -m.
 
     Returns:
         Command list to check pytest version.
     """
-    # In a venv, check the venv scripts dir first (matches PytestBuilder logic)
     if sys.prefix != sys.base_prefix:
         scripts_dir = sysconfig.get_path("scripts")
         venv_pytest = shutil.which("pytest", path=scripts_dir) if scripts_dir else None
         if venv_pytest:
-            return [venv_pytest, "--version"]
-    # PATH discovery (Homebrew, system, pipx, etc.)
+            # Found in venv — use python -m to match PytestBuilder
+            return [sys.executable, "-m", "pytest", "--version"]
+        # Not in venv — try PATH (e.g., separate Homebrew formula)
+        pytest_path = shutil.which("pytest")
+        if pytest_path:
+            return [pytest_path, "--version"]
+        return [sys.executable, "-m", "pytest", "--version"]
+    # Outside venv: PATH discovery
     pytest_path = shutil.which("pytest")
     if pytest_path:
         return [pytest_path, "--version"]
@@ -339,6 +345,13 @@ def doctor_command(
     checkable = {k: v for k, v in all_versions.items() if k in TOOL_COMMANDS}
     if tools:
         tool_list = [t.strip() for t in tools.split(",")]
+        # Warn about requested tools that exist but have no version command
+        uncheckable = [t for t in tool_list if t in all_versions and t not in checkable]
+        if uncheckable and not json_output and not report:
+            console.print(
+                f"[yellow]Warning: No version command for requested tool(s): "
+                f"{', '.join(uncheckable)}[/yellow]",
+            )
         versions_to_check = {k: v for k, v in checkable.items() if k in tool_list}
     else:
         versions_to_check = checkable
