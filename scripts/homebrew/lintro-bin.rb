@@ -33,26 +33,25 @@ class LintroBin < Formula
   def caveats
     <<~EOS
       lintro-bin is a standalone binary that doesn't require Python.
+      External tools must be installed separately.
 
-      However, the external tools must be installed separately.
-      Install them via Homebrew:
-        brew install ruff black mypy bandit rust \\
-          hadolint actionlint gitleaks markdownlint-cli2 prettier \\
-          yamllint semgrep shellcheck shfmt sqlfluff taplo
+      Run 'lintro doctor' to see which tools are available and which
+      are missing, with install hints for each.
 
-      For JavaScript/TypeScript linting and formatting, install via bun/npm:
-        bun add -d oxlint oxfmt
+      Quick setup — install common tools via Homebrew:
+        brew install ruff black mypy bandit yamllint \\
+          shellcheck shfmt prettier hadolint actionlint \\
+          gitleaks semgrep markdownlint-cli2 taplo sqlfluff
 
-      After installing rust, add clippy and rustfmt via rustup:
+      JS / TS tools (via bun or npm):
+        bun add -g oxlint oxfmt
+
+      Rust tools:
+        brew install rust
         rustup component add clippy rustfmt
+        cargo install cargo-audit cargo-deny
 
-      Optional Rust tools (install via cargo):
-        cargo install cargo-audit
-
-      Or for Python tools via pipx:
-        pipx install ruff black mypy bandit pydoclint yamllint sqlfluff semgrep
-
-      For the Python-based version with bundled tools, use:
+      For the Python-based version with all tools bundled:
         brew install lgtm-hq/tap/lintro
     EOS
   end
