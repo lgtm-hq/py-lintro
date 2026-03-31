@@ -46,8 +46,8 @@ class LintroBin < Formula
       JS / TS tools (via bun or npm):
         bun add -g oxlint oxfmt
 
-      Rust tools:
-        brew install rust
+      Rust tools (requires rustup, not Homebrew rust):
+        curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
         rustup component add clippy rustfmt
         cargo install cargo-audit cargo-deny
 

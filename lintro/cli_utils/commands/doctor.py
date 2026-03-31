@@ -349,14 +349,14 @@ def doctor_command(
         unknown = [t for t in tool_list if t not in all_versions]
         if unknown and not json_output and not report:
             console.print(
-                f"[yellow]Warning: Unknown tool(s): " f"{', '.join(unknown)}[/yellow]",
+                f"[yellow]Warning: Unknown tool(s): {', '.join(unknown)}[/yellow]",
             )
         # Warn about requested tools that exist but have no version command
         uncheckable = [t for t in tool_list if t in all_versions and t not in checkable]
         if uncheckable and not json_output and not report:
             console.print(
-                f"[yellow]Warning: No version command for requested tool(s): "
-                f"{', '.join(uncheckable)}[/yellow]",
+                f"[yellow]Warning: No version command for requested tool(s):"
+                f" {', '.join(uncheckable)}[/yellow]",
             )
         versions_to_check = {k: v for k, v in checkable.items() if k in tool_list}
     else:
