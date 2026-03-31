@@ -28,6 +28,7 @@ from __future__ import annotations
 import shutil
 import sys
 from abc import ABC, abstractmethod
+from pathlib import Path
 from typing import TYPE_CHECKING, ClassVar
 
 from loguru import logger
@@ -249,14 +250,40 @@ class PythonBundledBuilder(CommandBuilder):
             )
             return [tool_name]
 
-        # When running in a venv, always use python -m to ensure consistent env
+        # When running in a venv, check if the tool is actually in this venv.
+        # Homebrew installs lintro in a venv but tools (ruff, black, etc.) are
+        # separate Homebrew formulae — not in the venv. In that case, fall
+        # through to PATH discovery instead of using python -m.
         if sys.prefix != sys.base_prefix:
-            python_exe = sys.executable
-            if python_exe:
-                logger.debug(
-                    f"Running in venv ({sys.prefix}), using python -m {tool_name}",
-                )
-                return [python_exe, "-m", tool_name]
+            venv_bin = Path(sys.prefix) / "bin" / tool_name
+            if venv_bin.exists():
+                python_exe = sys.executable
+                if python_exe:
+                    logger.debug(
+                        f"Running in venv ({sys.prefix}), "
+                        f"{tool_name} found in venv bin, "
+                        f"using python -m {tool_name}",
+                    )
+                    return [python_exe, "-m", tool_name]
+            else:
+                # Tool not in venv — try PATH (e.g., separate Homebrew formula)
+                tool_path = shutil.which(tool_name)
+                if tool_path:
+                    logger.debug(
+                        f"Running in venv ({sys.prefix}), "
+                        f"{tool_name} not in venv bin, "
+                        f"found in PATH: {tool_path}",
+                    )
+                    return [tool_path]
+                # Last resort: try python -m anyway
+                python_exe = sys.executable
+                if python_exe:
+                    logger.debug(
+                        f"Running in venv ({sys.prefix}), "
+                        f"{tool_name} not in venv or PATH, "
+                        f"falling back to python -m {tool_name}",
+                    )
+                    return [python_exe, "-m", tool_name]
 
         # Outside venv: prefer PATH binary (Homebrew, apt, pipx, etc.)
         tool_path = shutil.which(tool_name)
@@ -323,15 +350,37 @@ class PytestBuilder(CommandBuilder):
             )
             return ["pytest"]
 
-        # When running in a venv, always use python -m pytest to ensure
-        # pytest has access to the same packages as lintro (e.g., loguru)
+        # When running in a venv, check if pytest is actually in this venv.
+        # Homebrew installs lintro in a venv but pytest may be a separate
+        # install — not in the venv. Fall through to PATH discovery if so.
         if sys.prefix != sys.base_prefix:
-            python_exe = sys.executable
-            if python_exe:
-                logger.debug(
-                    f"Running in venv ({sys.prefix}), using python -m pytest",
-                )
-                return [python_exe, "-m", "pytest"]
+            venv_bin = Path(sys.prefix) / "bin" / "pytest"
+            if venv_bin.exists():
+                python_exe = sys.executable
+                if python_exe:
+                    logger.debug(
+                        f"Running in venv ({sys.prefix}), "
+                        "pytest found in venv bin, "
+                        "using python -m pytest",
+                    )
+                    return [python_exe, "-m", "pytest"]
+            else:
+                tool_path = shutil.which("pytest")
+                if tool_path:
+                    logger.debug(
+                        f"Running in venv ({sys.prefix}), "
+                        "pytest not in venv bin, "
+                        f"found in PATH: {tool_path}",
+                    )
+                    return [tool_path]
+                python_exe = sys.executable
+                if python_exe:
+                    logger.debug(
+                        f"Running in venv ({sys.prefix}), "
+                        "pytest not in venv or PATH, "
+                        "falling back to python -m pytest",
+                    )
+                    return [python_exe, "-m", "pytest"]
 
         # Outside venv: prefer PATH binary (Homebrew, apt, pipx, etc.)
         tool_path = shutil.which("pytest")

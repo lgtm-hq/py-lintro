@@ -26,6 +26,21 @@ from lintro.utils.environment import (
 )
 
 
+def _pytest_version_command() -> list[str]:
+    """Build the pytest version check command.
+
+    Uses PATH discovery when available (handles Homebrew installs where pytest
+    may not be in lintro's venv), falling back to python -m.
+
+    Returns:
+        Command list to check pytest version.
+    """
+    pytest_path = shutil.which("pytest")
+    if pytest_path:
+        return [pytest_path, "--version"]
+    return [sys.executable, "-m", "pytest", "--version"]
+
+
 @dataclass
 class VersionCheckResult:
     """Result of a version check for a tool.
@@ -55,7 +70,7 @@ TOOL_COMMANDS: dict[str, list[str]] = {
     "osv_scanner": ["osv-scanner", "--version"],
     "oxfmt": ["oxfmt", "--version"],
     "oxlint": ["oxlint", "--version"],
-    "pytest": [sys.executable, "-m", "pytest", "--version"],
+    "pytest": _pytest_version_command(),
     "rustfmt": ["rustfmt", "--version"],
     "semgrep": ["semgrep", "--version"],
     "shellcheck": ["shellcheck", "--version"],

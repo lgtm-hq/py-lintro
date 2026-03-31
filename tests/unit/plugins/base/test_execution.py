@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 from typing import TYPE_CHECKING
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 from assertpy import assert_that
@@ -393,13 +393,21 @@ def test_get_executable_command_python_bundled_tools_python_module_in_venv(
     fake_tool_plugin: FakeToolPlugin,
     tool_name: str,
 ) -> None:
-    """Verify Python bundled tools prefer python -m when inside venv.
+    """Verify Python bundled tools prefer python -m when tool is in venv bin.
 
     Args:
         fake_tool_plugin: Fixture providing a FakeToolPlugin instance.
         tool_name: Name of the tool being tested.
     """
-    # Simulate running inside a venv (prefix != base_prefix)
+    # Mock Path chain: Path(sys.prefix) / "bin" / tool_name -> exists() = True
+    mock_venv_bin = MagicMock()
+    mock_venv_bin.exists.return_value = True
+    mock_bin_dir = MagicMock()
+    mock_bin_dir.__truediv__ = MagicMock(return_value=mock_venv_bin)
+    mock_prefix_path = MagicMock()
+    mock_prefix_path.__truediv__ = MagicMock(return_value=mock_bin_dir)
+
+    # Simulate running inside a venv with tool present in venv bin
     with (
         patch("shutil.which", return_value=f"/usr/local/bin/{tool_name}"),
         patch(
@@ -414,10 +422,14 @@ def test_get_executable_command_python_bundled_tools_python_module_in_venv(
             "lintro.tools.core.command_builders._is_compiled_binary",
             return_value=False,
         ),
+        patch(
+            "lintro.tools.core.command_builders.Path",
+            return_value=mock_prefix_path,
+        ),
     ):
         result = fake_tool_plugin._get_executable_command(tool_name)
 
-    # Should return [python_exe, "-m", tool_name] even when PATH has tool
+    # Should return [python_exe, "-m", tool_name] when tool is in venv
     assert_that(result).is_length(3)
     assert_that(result[1]).is_equal_to("-m")
     assert_that(result[2]).is_equal_to(tool_name)
