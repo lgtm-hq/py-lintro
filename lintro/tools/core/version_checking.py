@@ -16,18 +16,30 @@ via pyproject.toml dependencies and don't need tracking in _tool_versions.py.
 
 ## Adding a New Tool
 
+All tool types must be added to manifest.json with the correct install type.
+CI runs verify-manifest-sync.py which validates every manifest entry against
+its authoritative source (pyproject.toml for pip, package.json for npm,
+TOOL_VERSIONS for binary/cargo/rustup). PRs will fail if they drift.
+
 ### For npm Tools:
 1. Add to package.json devDependencies
 2. Add mapping in _NPM_PACKAGE_TO_TOOL in _tool_versions.py
-3. Renovate updates package.json automatically
+3. Add entry to manifest.json with install.type = "npm"
+4. Renovate updates package.json automatically
 
-### For Non-npm External Tools:
+### For Non-npm External Tools (binary, cargo, rustup):
 1. Add to TOOL_VERSIONS in _tool_versions.py
-2. Add Renovate regex manager in renovate.json
+2. Add entry to manifest.json (version must match TOOL_VERSIONS)
+3. Add Renovate regex manager in renovate.json for both files
+4. If installable via Homebrew, add depends_on to lintro.rb.template
 
 ### For Bundled Python Tools:
 1. Add as dependency in pyproject.toml
-2. Renovate tracks it automatically
+2. Add entry to manifest.json with install.type = "pip"
+3. Renovate tracks it automatically
+4. Note: Homebrew formula excludes bundled Python tools from the venv
+   (via generate_resources.py --exclude). They are installed as separate
+   Homebrew formulae and discovered via PATH, not python -m.
 """
 
 import os
