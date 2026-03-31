@@ -11,7 +11,7 @@ import json
 import shutil
 import subprocess
 import sys
-import sysconfig
+from collections.abc import Callable
 from dataclasses import asdict, dataclass
 
 import click
@@ -19,6 +19,8 @@ from rich.console import Console
 from rich.table import Table
 
 from lintro._tool_versions import get_all_expected_versions
+from lintro.plugins.subprocess_executor import is_compiled_binary
+from lintro.tools.core.command_builders import _resolve_venv_tool_command
 from lintro.tools.core.version_parsing import extract_version_from_output
 from lintro.utils.environment import (
     EnvironmentReport,
@@ -30,29 +32,36 @@ from lintro.utils.environment import (
 def _pytest_version_command() -> list[str]:
     """Build the pytest version check command.
 
-    Matches PytestBuilder.get_command() resolution: when pytest is found in
-    the venv scripts dir, uses python -m pytest (same as the builder). When
-    not in venv or not found in venv, falls back to PATH then python -m.
+    Mirrors PytestBuilder.get_command() resolution order:
+    1. Compiled binary → PATH only (no python -m)
+    2. In venv → shared _resolve_venv_tool_command helper
+    3. Outside venv → PATH, then python -m fallback
 
     Returns:
         Command list to check pytest version.
     """
-    if sys.prefix != sys.base_prefix:
-        scripts_dir = sysconfig.get_path("scripts")
-        venv_pytest = shutil.which("pytest", path=scripts_dir) if scripts_dir else None
-        if venv_pytest:
-            # Found in venv — use python -m to match PytestBuilder
-            return [sys.executable, "-m", "pytest", "--version"]
-        # Not in venv — try PATH (e.g., separate Homebrew formula)
+    # Compiled binary: sys.executable is the lintro binary, not Python
+    if is_compiled_binary():
         pytest_path = shutil.which("pytest")
         if pytest_path:
             return [pytest_path, "--version"]
-        return [sys.executable, "-m", "pytest", "--version"]
+        return ["pytest", "--version"]
+
+    # Venv resolution (shared with PytestBuilder)
+    venv_cmd = _resolve_venv_tool_command("pytest")
+    if venv_cmd is not None:
+        return [*venv_cmd, "--version"]
+
     # Outside venv: PATH discovery
     pytest_path = shutil.which("pytest")
     if pytest_path:
         return [pytest_path, "--version"]
-    return [sys.executable, "-m", "pytest", "--version"]
+
+    # Last resort
+    python_exe = sys.executable
+    if python_exe:
+        return [python_exe, "-m", "pytest", "--version"]
+    return ["pytest", "--version"]
 
 
 @dataclass
@@ -73,8 +82,10 @@ class VersionCheckResult:
     path: str | None = None
 
 
-# Map tool names to commands (external tools only)
-TOOL_COMMANDS: dict[str, list[str]] = {
+# Map tool names to version commands or callables that return them.
+# Callables are invoked at runtime (not import time) so environment-dependent
+# resolution (venv detection, compiled binary check) is always fresh.
+TOOL_COMMANDS: dict[str, list[str] | Callable[[], list[str]]] = {
     "actionlint": ["actionlint", "--version"],
     "cargo_audit": ["cargo", "audit", "--version"],
     "clippy": ["cargo", "clippy", "--version"],
@@ -84,7 +95,7 @@ TOOL_COMMANDS: dict[str, list[str]] = {
     "osv_scanner": ["osv-scanner", "--version"],
     "oxfmt": ["oxfmt", "--version"],
     "oxlint": ["oxlint", "--version"],
-    "pytest": _pytest_version_command(),
+    "pytest": _pytest_version_command,
     "rustfmt": ["rustfmt", "--version"],
     "semgrep": ["semgrep", "--version"],
     "shellcheck": ["shellcheck", "--version"],
@@ -115,9 +126,12 @@ def _get_installed_version(tool_name: str) -> VersionCheckResult:
     Returns:
         VersionCheckResult with version if successful, or error details if not.
     """
-    command = TOOL_COMMANDS.get(tool_name)
-    if not command:
+    command_or_callable = TOOL_COMMANDS.get(tool_name)
+    if not command_or_callable:
         return VersionCheckResult(error="no_command")
+    command = (
+        command_or_callable() if callable(command_or_callable) else command_or_callable
+    )
 
     # Check if the main executable exists and capture its path
     main_cmd = command[0]
