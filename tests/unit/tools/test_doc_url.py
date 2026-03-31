@@ -207,38 +207,40 @@ def test_simple_doc_url(
 # =============================================================================
 
 
-class TestHadolintDocUrl:
-    """Tests for hadolint doc_url routing between DL and SC prefixes."""
+def test_hadolint_dl_code_returns_hadolint_wiki() -> None:
+    """DL-prefixed codes route to hadolint GitHub wiki."""
+    plugin = HadolintPlugin()
+    assert_that(plugin.doc_url("DL3008")).is_equal_to(
+        "https://github.com/hadolint/hadolint/wiki/DL3008",
+    )
 
-    def setup_method(self) -> None:
-        """Create a hadolint plugin instance."""
-        self.plugin = HadolintPlugin()
 
-    def test_dl_code_returns_hadolint_wiki(self) -> None:
-        """DL-prefixed codes route to hadolint GitHub wiki."""
-        assert_that(self.plugin.doc_url("DL3008")).is_equal_to(
-            "https://github.com/hadolint/hadolint/wiki/DL3008",
-        )
+def test_hadolint_sc_code_returns_shellcheck_wiki() -> None:
+    """SC-prefixed codes route to shellcheck.net wiki."""
+    plugin = HadolintPlugin()
+    assert_that(plugin.doc_url("SC2046")).is_equal_to(
+        "https://www.shellcheck.net/wiki/SC2046",
+    )
 
-    def test_sc_code_returns_shellcheck_wiki(self) -> None:
-        """SC-prefixed codes route to shellcheck.net wiki."""
-        assert_that(self.plugin.doc_url("SC2046")).is_equal_to(
-            "https://www.shellcheck.net/wiki/SC2046",
-        )
 
-    def test_lowercase_dl_code_uppercased(self) -> None:
-        """Lowercase DL codes are uppercased in the URL."""
-        assert_that(self.plugin.doc_url("dl3008")).is_equal_to(
-            "https://github.com/hadolint/hadolint/wiki/DL3008",
-        )
+def test_hadolint_lowercase_dl_code_uppercased() -> None:
+    """Lowercase DL codes are uppercased in the URL."""
+    plugin = HadolintPlugin()
+    assert_that(plugin.doc_url("dl3008")).is_equal_to(
+        "https://github.com/hadolint/hadolint/wiki/DL3008",
+    )
 
-    def test_unknown_prefix_returns_none(self) -> None:
-        """Codes with unknown prefixes return None."""
-        assert_that(self.plugin.doc_url("XX123")).is_none()
 
-    def test_empty_code_returns_none(self) -> None:
-        """Empty codes return None."""
-        assert_that(self.plugin.doc_url("")).is_none()
+def test_hadolint_unknown_prefix_returns_none() -> None:
+    """Codes with unknown prefixes return None."""
+    plugin = HadolintPlugin()
+    assert_that(plugin.doc_url("XX123")).is_none()
+
+
+def test_hadolint_empty_code_returns_none() -> None:
+    """Empty codes return None."""
+    plugin = HadolintPlugin()
+    assert_that(plugin.doc_url("")).is_none()
 
 
 # =============================================================================
@@ -246,28 +248,26 @@ class TestHadolintDocUrl:
 # =============================================================================
 
 
-class TestOxlintDocUrl:
-    """Tests for oxlint doc_url requiring category/rule format."""
+def test_oxlint_category_rule_format() -> None:
+    """Codes with category/rule format return oxc.rs URL."""
+    plugin = OxlintPlugin()
+    assert_that(
+        plugin.doc_url("deepscan/bad-comparison-sequence"),
+    ).is_equal_to(
+        "https://oxc.rs/docs/guide/usage/linter/rules/deepscan/bad-comparison-sequence",
+    )
 
-    def setup_method(self) -> None:
-        """Create an oxlint plugin instance."""
-        self.plugin = OxlintPlugin()
 
-    def test_category_rule_format(self) -> None:
-        """Codes with category/rule format return oxc.rs URL."""
-        assert_that(
-            self.plugin.doc_url("deepscan/bad-comparison-sequence"),
-        ).is_equal_to(
-            "https://oxc.rs/docs/guide/usage/linter/rules/deepscan/bad-comparison-sequence",
-        )
+def test_oxlint_no_slash_returns_none() -> None:
+    """Codes without a slash return None."""
+    plugin = OxlintPlugin()
+    assert_that(plugin.doc_url("no-unused-vars")).is_none()
 
-    def test_no_slash_returns_none(self) -> None:
-        """Codes without a slash return None."""
-        assert_that(self.plugin.doc_url("no-unused-vars")).is_none()
 
-    def test_empty_code_returns_none(self) -> None:
-        """Empty codes return None."""
-        assert_that(self.plugin.doc_url("")).is_none()
+def test_oxlint_empty_code_returns_none() -> None:
+    """Empty codes return None."""
+    plugin = OxlintPlugin()
+    assert_that(plugin.doc_url("")).is_none()
 
 
 # =============================================================================
@@ -275,165 +275,32 @@ class TestOxlintDocUrl:
 # =============================================================================
 
 
-class TestTscDocUrl:
-    """Tests for tsc doc_url with TS prefix handling."""
-
-    def setup_method(self) -> None:
-        """Create a tsc plugin instance."""
-        self.plugin = TscPlugin()
-
-    def test_ts_prefixed_code(self) -> None:
-        """TS-prefixed codes return typescript.tv URL."""
-        assert_that(self.plugin.doc_url("TS2307")).is_equal_to(
-            "https://typescript.tv/errors/#ts2307",
-        )
-
-    def test_numeric_only_code(self) -> None:
-        """Numeric-only codes work without TS prefix."""
-        assert_that(self.plugin.doc_url("2307")).is_equal_to(
-            "https://typescript.tv/errors/#ts2307",
-        )
-
-    def test_non_numeric_code_returns_none(self) -> None:
-        """Non-numeric codes return None."""
-        assert_that(self.plugin.doc_url("TSfoo")).is_none()
-
-    def test_empty_code_returns_none(self) -> None:
-        """Empty codes return None."""
-        assert_that(self.plugin.doc_url("")).is_none()
+def test_tsc_ts_prefixed_code() -> None:
+    """TS-prefixed codes return typescript.tv URL."""
+    plugin = TscPlugin()
+    assert_that(plugin.doc_url("TS2307")).is_equal_to(
+        "https://typescript.tv/errors/#ts2307",
+    )
 
 
-# =============================================================================
-# Semgrep — registry vs. custom rule detection
-# =============================================================================
+def test_tsc_numeric_only_code() -> None:
+    """Numeric-only codes work without TS prefix."""
+    plugin = TscPlugin()
+    assert_that(plugin.doc_url("2307")).is_equal_to(
+        "https://typescript.tv/errors/#ts2307",
+    )
 
 
-class TestSemgrepDocUrl:
-    """Tests for semgrep doc_url with registry rule detection."""
-
-    def setup_method(self) -> None:
-        """Create a semgrep plugin instance."""
-        self.plugin = SemgrepPlugin()
-
-    def test_registry_rule_id(self) -> None:
-        """Dotted registry rule IDs return semgrep.dev URL."""
-        assert_that(
-            self.plugin.doc_url("python.lang.security.insecure-random"),
-        ).is_equal_to(
-            "https://semgrep.dev/r/python.lang.security.insecure-random",
-        )
-
-    def test_local_rule_with_slash_returns_none(self) -> None:
-        """Custom rules with path separators return None."""
-        assert_that(self.plugin.doc_url("rules/custom-rule")).is_none()
-
-    def test_simple_name_without_dot_returns_none(self) -> None:
-        """Simple names without dots return None (likely local rules)."""
-        assert_that(self.plugin.doc_url("my-custom-rule")).is_none()
-
-    def test_empty_code_returns_none(self) -> None:
-        """Empty codes return None."""
-        assert_that(self.plugin.doc_url("")).is_none()
+def test_tsc_non_numeric_code_returns_none() -> None:
+    """Non-numeric codes return None."""
+    plugin = TscPlugin()
+    assert_that(plugin.doc_url("TSfoo")).is_none()
 
 
-# =============================================================================
-# Ruff — subprocess-based rule name resolution with caching
-# =============================================================================
-
-
-class TestRuffDocUrl:
-    """Tests for ruff doc_url with subprocess rule name resolution."""
-
-    def setup_method(self) -> None:
-        """Create a ruff plugin instance."""
-        self.plugin = RuffPlugin()
-
-    @patch("subprocess.run")
-    def test_resolves_rule_name_to_url(self, mock_run: MagicMock) -> None:
-        """Valid codes resolve to ruff docs URL via subprocess.
-
-        Args:
-            mock_run: Mocked subprocess.run.
-        """
-        mock_run.return_value = MagicMock(
-            returncode=0,
-            stdout=json.dumps({"name": "line-too-long"}),
-        )
-
-        result = self.plugin.doc_url("E501")
-
-        assert_that(result).is_equal_to(
-            "https://docs.astral.sh/ruff/rules/line-too-long/",
-        )
-
-    @patch("subprocess.run")
-    def test_caches_resolved_name(self, mock_run: MagicMock) -> None:
-        """Second call for same code uses cache, not subprocess.
-
-        Args:
-            mock_run: Mocked subprocess.run.
-        """
-        mock_run.return_value = MagicMock(
-            returncode=0,
-            stdout=json.dumps({"name": "line-too-long"}),
-        )
-
-        self.plugin.doc_url("E501")
-        self.plugin.doc_url("E501")
-
-        assert_that(mock_run.call_count).is_equal_to(1)
-
-    @patch("subprocess.run")
-    def test_timeout_returns_none_and_caches(self, mock_run: MagicMock) -> None:
-        """Subprocess timeout returns None and caches the failure.
-
-        Args:
-            mock_run: Mocked subprocess.run.
-        """
-        mock_run.side_effect = subprocess.TimeoutExpired(cmd="ruff", timeout=5)
-
-        result1 = self.plugin.doc_url("E501")
-        result2 = self.plugin.doc_url("E501")
-
-        assert_that(result1).is_none()
-        assert_that(result2).is_none()
-        assert_that(mock_run.call_count).is_equal_to(1)
-
-    @patch("subprocess.run")
-    def test_json_error_returns_none(self, mock_run: MagicMock) -> None:
-        """Malformed JSON from subprocess returns None.
-
-        Args:
-            mock_run: Mocked subprocess.run.
-        """
-        mock_run.return_value = MagicMock(
-            returncode=0,
-            stdout="not json",
-        )
-
-        result = self.plugin.doc_url("E501")
-
-        assert_that(result).is_none()
-
-    @patch("subprocess.run")
-    def test_nonzero_exit_returns_none(self, mock_run: MagicMock) -> None:
-        """Non-zero exit code from subprocess returns None.
-
-        Args:
-            mock_run: Mocked subprocess.run.
-        """
-        mock_run.return_value = MagicMock(
-            returncode=1,
-            stdout="",
-        )
-
-        result = self.plugin.doc_url("UNKNOWN")
-
-        assert_that(result).is_none()
-
-    def test_empty_code_returns_none(self) -> None:
-        """Empty codes return None without calling subprocess."""
-        assert_that(self.plugin.doc_url("")).is_none()
+def test_tsc_empty_code_returns_none() -> None:
+    """Empty codes return None."""
+    plugin = TscPlugin()
+    assert_that(plugin.doc_url("")).is_none()
 
 
 # =============================================================================
@@ -441,29 +308,166 @@ class TestRuffDocUrl:
 # =============================================================================
 
 
-class TestVueTscDocUrl:
-    """Tests for vue-tsc doc_url with TS prefix handling."""
+def test_vue_tsc_ts_prefixed_code() -> None:
+    """TS-prefixed codes return typescript.tv URL."""
+    plugin = VueTscPlugin()
+    assert_that(plugin.doc_url("TS2322")).is_equal_to(
+        "https://typescript.tv/errors/#ts2322",
+    )
 
-    def setup_method(self) -> None:
-        """Create a vue-tsc plugin instance."""
-        self.plugin = VueTscPlugin()
 
-    def test_ts_prefixed_code(self) -> None:
-        """TS-prefixed codes return typescript.tv URL."""
-        assert_that(self.plugin.doc_url("TS2322")).is_equal_to(
-            "https://typescript.tv/errors/#ts2322",
-        )
+def test_vue_tsc_numeric_only_code() -> None:
+    """Numeric-only codes work without TS prefix."""
+    plugin = VueTscPlugin()
+    assert_that(plugin.doc_url("2322")).is_equal_to(
+        "https://typescript.tv/errors/#ts2322",
+    )
 
-    def test_numeric_only_code(self) -> None:
-        """Numeric-only codes work without TS prefix."""
-        assert_that(self.plugin.doc_url("2322")).is_equal_to(
-            "https://typescript.tv/errors/#ts2322",
-        )
 
-    def test_non_numeric_code_returns_none(self) -> None:
-        """Non-numeric codes return None."""
-        assert_that(self.plugin.doc_url("TSfoo")).is_none()
+def test_vue_tsc_non_numeric_code_returns_none() -> None:
+    """Non-numeric codes return None."""
+    plugin = VueTscPlugin()
+    assert_that(plugin.doc_url("TSfoo")).is_none()
 
-    def test_empty_code_returns_none(self) -> None:
-        """Empty codes return None."""
-        assert_that(self.plugin.doc_url("")).is_none()
+
+def test_vue_tsc_empty_code_returns_none() -> None:
+    """Empty codes return None."""
+    plugin = VueTscPlugin()
+    assert_that(plugin.doc_url("")).is_none()
+
+
+# =============================================================================
+# Semgrep — registry vs. custom rule detection
+# =============================================================================
+
+
+def test_semgrep_registry_rule_id() -> None:
+    """Dotted registry rule IDs return semgrep.dev URL."""
+    plugin = SemgrepPlugin()
+    assert_that(
+        plugin.doc_url("python.lang.security.insecure-random"),
+    ).is_equal_to(
+        "https://semgrep.dev/r/python.lang.security.insecure-random",
+    )
+
+
+def test_semgrep_local_rule_with_slash_returns_none() -> None:
+    """Custom rules with path separators return None."""
+    plugin = SemgrepPlugin()
+    assert_that(plugin.doc_url("rules/custom-rule")).is_none()
+
+
+def test_semgrep_simple_name_without_dot_returns_none() -> None:
+    """Simple names without dots return None (likely local rules)."""
+    plugin = SemgrepPlugin()
+    assert_that(plugin.doc_url("my-custom-rule")).is_none()
+
+
+def test_semgrep_empty_code_returns_none() -> None:
+    """Empty codes return None."""
+    plugin = SemgrepPlugin()
+    assert_that(plugin.doc_url("")).is_none()
+
+
+# =============================================================================
+# Ruff — subprocess-based rule name resolution with caching
+# =============================================================================
+
+
+@patch("subprocess.run")
+def test_ruff_resolves_rule_name_to_url(mock_run: MagicMock) -> None:
+    """Valid codes resolve to ruff docs URL via subprocess.
+
+    Args:
+        mock_run: Mocked subprocess.run.
+    """
+    mock_run.return_value = MagicMock(
+        returncode=0,
+        stdout=json.dumps({"name": "line-too-long"}),
+    )
+    plugin = RuffPlugin()
+
+    result = plugin.doc_url("E501")
+
+    assert_that(result).is_equal_to(
+        "https://docs.astral.sh/ruff/rules/line-too-long/",
+    )
+
+
+@patch("subprocess.run")
+def test_ruff_caches_resolved_name(mock_run: MagicMock) -> None:
+    """Second call for same code uses cache, not subprocess.
+
+    Args:
+        mock_run: Mocked subprocess.run.
+    """
+    mock_run.return_value = MagicMock(
+        returncode=0,
+        stdout=json.dumps({"name": "line-too-long"}),
+    )
+    plugin = RuffPlugin()
+
+    plugin.doc_url("E501")
+    plugin.doc_url("E501")
+
+    assert_that(mock_run.call_count).is_equal_to(1)
+
+
+@patch("subprocess.run")
+def test_ruff_timeout_returns_none_and_caches(mock_run: MagicMock) -> None:
+    """Subprocess timeout returns None and caches the failure.
+
+    Args:
+        mock_run: Mocked subprocess.run.
+    """
+    mock_run.side_effect = subprocess.TimeoutExpired(cmd="ruff", timeout=5)
+    plugin = RuffPlugin()
+
+    result1 = plugin.doc_url("E501")
+    result2 = plugin.doc_url("E501")
+
+    assert_that(result1).is_none()
+    assert_that(result2).is_none()
+    assert_that(mock_run.call_count).is_equal_to(1)
+
+
+@patch("subprocess.run")
+def test_ruff_json_error_returns_none(mock_run: MagicMock) -> None:
+    """Malformed JSON from subprocess returns None.
+
+    Args:
+        mock_run: Mocked subprocess.run.
+    """
+    mock_run.return_value = MagicMock(
+        returncode=0,
+        stdout="not json",
+    )
+    plugin = RuffPlugin()
+
+    result = plugin.doc_url("E501")
+
+    assert_that(result).is_none()
+
+
+@patch("subprocess.run")
+def test_ruff_nonzero_exit_returns_none(mock_run: MagicMock) -> None:
+    """Non-zero exit code from subprocess returns None.
+
+    Args:
+        mock_run: Mocked subprocess.run.
+    """
+    mock_run.return_value = MagicMock(
+        returncode=1,
+        stdout="",
+    )
+    plugin = RuffPlugin()
+
+    result = plugin.doc_url("UNKNOWN")
+
+    assert_that(result).is_none()
+
+
+def test_ruff_empty_code_returns_none() -> None:
+    """Empty codes return None without calling subprocess."""
+    plugin = RuffPlugin()
+    assert_that(plugin.doc_url("")).is_none()
