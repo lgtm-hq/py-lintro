@@ -8,7 +8,7 @@ the current directory. Outputs a JSON object with stale, expired, and
 active ID arrays.
 
 Usage:
-    osv-scanner scan --format json --config /dev/null --lockfile req.txt \
+    osv-scanner scan --recursive --format json --config /dev/null . \
         | python3 scripts/ci/classify-suppressions.py
 
 Exit codes:
@@ -36,6 +36,19 @@ def main() -> None:
     entries = parse_suppressions(toml_path)
 
     probe_output = sys.stdin.read()
+
+    # Guard against empty/unparseable scanner output. When osv-scanner finds
+    # no vulnerabilities it still returns valid JSON (e.g. empty results list).
+    # Completely empty output means the scan itself failed or produced no data,
+    # which would cause every suppression to be falsely classified as stale.
+    if not probe_output.strip():
+        print(
+            "ERROR: osv-scanner produced no output — cannot classify "
+            "suppressions without scan results",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
     probe_issues = parse_osv_scanner_output(probe_output)
     probe_ids = {i.vuln_id for i in probe_issues}
 
