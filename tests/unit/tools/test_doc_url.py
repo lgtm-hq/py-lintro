@@ -16,11 +16,9 @@ from assertpy import assert_that
 from lintro.tools.definitions.actionlint import ActionlintPlugin
 from lintro.tools.definitions.astro_check import AstroCheckPlugin
 from lintro.tools.definitions.bandit import BanditPlugin
-from lintro.tools.definitions.black import BlackPlugin
 from lintro.tools.definitions.cargo_audit import CargoAuditPlugin
 from lintro.tools.definitions.cargo_deny import CargoDenyPlugin
 from lintro.tools.definitions.clippy import ClippyPlugin
-from lintro.tools.definitions.gitleaks import GitleaksPlugin
 from lintro.tools.definitions.hadolint import HadolintPlugin
 from lintro.tools.definitions.markdownlint import MarkdownlintPlugin
 from lintro.tools.definitions.mypy import MypyPlugin
@@ -31,7 +29,6 @@ from lintro.tools.definitions.ruff import RuffPlugin
 from lintro.tools.definitions.semgrep import SemgrepPlugin
 from lintro.tools.definitions.shellcheck import ShellcheckPlugin
 from lintro.tools.definitions.sqlfluff import SqlfluffPlugin
-from lintro.tools.definitions.svelte_check import SvelteCheckPlugin
 from lintro.tools.definitions.taplo import TaploPlugin
 from lintro.tools.definitions.tsc import TscPlugin
 from lintro.tools.definitions.vue_tsc import VueTscPlugin
@@ -66,9 +63,6 @@ from lintro.tools.definitions.yamllint import YamllintPlugin
             "https://bandit.readthedocs.io/en/latest/plugins/index.html",
         ),
         (BanditPlugin, "", None),
-        # black — single-page docs
-        (BlackPlugin, "E501", "https://black.readthedocs.io/"),
-        (BlackPlugin, "", None),
         # cargo-audit — per-advisory URL
         (
             CargoAuditPlugin,
@@ -90,13 +84,6 @@ from lintro.tools.definitions.yamllint import YamllintPlugin
             "https://rust-lang.github.io/rust-clippy/master/index.html#needless_return",
         ),
         (ClippyPlugin, "", None),
-        # gitleaks — single-page docs
-        (
-            GitleaksPlugin,
-            "aws-access-key-id",
-            "https://github.com/gitleaks/gitleaks",
-        ),
-        (GitleaksPlugin, "", None),
         # markdownlint — per-rule doc page (lowercased)
         (
             MarkdownlintPlugin,
@@ -131,13 +118,6 @@ from lintro.tools.definitions.yamllint import YamllintPlugin
         # sqlfluff — rules anchor
         (SqlfluffPlugin, "LT01", "https://docs.sqlfluff.com/en/stable/rules.html#LT01"),
         (SqlfluffPlugin, "", None),
-        # svelte-check — single-page docs
-        (
-            SvelteCheckPlugin,
-            "ts-2322",
-            "https://svelte.dev/docs/cli/sv-check",
-        ),
-        (SvelteCheckPlugin, "", None),
         # taplo — single-page docs
         (TaploPlugin, "invalid_value", "https://taplo.tamasfe.dev/"),
         (TaploPlugin, "", None),
@@ -156,16 +136,12 @@ from lintro.tools.definitions.yamllint import YamllintPlugin
         "astro-check-empty",
         "bandit-valid",
         "bandit-empty",
-        "black-valid",
-        "black-empty",
         "cargo-audit-valid",
         "cargo-audit-empty",
         "cargo-deny-valid",
         "cargo-deny-empty",
         "clippy-valid",
         "clippy-empty",
-        "gitleaks-valid",
-        "gitleaks-empty",
         "markdownlint-valid",
         "markdownlint-empty",
         "mypy-valid",
@@ -178,8 +154,6 @@ from lintro.tools.definitions.yamllint import YamllintPlugin
         "shellcheck-empty",
         "sqlfluff-valid",
         "sqlfluff-empty",
-        "svelte-check-valid",
-        "svelte-check-empty",
         "taplo-valid",
         "taplo-empty",
         "yamllint-valid",

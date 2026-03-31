@@ -208,6 +208,7 @@ class RuffPlugin(BaseToolPlugin):
                 capture_output=True,
                 text=True,
                 timeout=5,
+                check=False,
             )
             if result.returncode == 0 and result.stdout:
                 data = json.loads(result.stdout)

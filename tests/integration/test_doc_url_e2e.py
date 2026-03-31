@@ -20,6 +20,9 @@ from lintro.models.core.tool_result import ToolResult
 from lintro.parsers.ruff.ruff_issue import RuffIssue
 from lintro.tools.definitions.ruff import RuffPlugin
 from lintro.utils.output.file_writer import write_output_file
+
+# Relies on internal enrichment function to simulate the post-execution
+# doc_url population step without running actual tool subprocesses.
 from lintro.utils.tool_executor import _enrich_issues_with_doc_urls
 
 
@@ -54,9 +57,10 @@ def enriched_ruff_result() -> ToolResult:
         issues=issues,
     )
 
-    # Simulate the enrichment step that tool_executor performs
+    # Simulate the enrichment step that tool_executor performs.
+    # Relies on internal cache structure (_rule_name_cache) to avoid
+    # subprocess calls — update if RuffPlugin caching is refactored.
     plugin = RuffPlugin()
-    # Pre-populate the cache to avoid subprocess calls in tests
     plugin._rule_name_cache["E501"] = "line-too-long"
     plugin._rule_name_cache["F401"] = "unused-import"
     _enrich_issues_with_doc_urls(plugin, result)
