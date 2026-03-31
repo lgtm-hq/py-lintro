@@ -345,6 +345,12 @@ def doctor_command(
     checkable = {k: v for k, v in all_versions.items() if k in TOOL_COMMANDS}
     if tools:
         tool_list = [t.strip() for t in tools.split(",")]
+        # Warn about completely unknown tool names
+        unknown = [t for t in tool_list if t not in all_versions]
+        if unknown and not json_output and not report:
+            console.print(
+                f"[yellow]Warning: Unknown tool(s): " f"{', '.join(unknown)}[/yellow]",
+            )
         # Warn about requested tools that exist but have no version command
         uncheckable = [t for t in tool_list if t in all_versions and t not in checkable]
         if uncheckable and not json_output and not report:
