@@ -16,6 +16,40 @@ from typing import Any
 from packaging.requirements import InvalidRequirement, Requirement
 from packaging.version import InvalidVersion, Version
 
+# Cache for TOOL_VERSIONS loaded from _tool_versions.py
+_tool_versions_cache: dict[str, str] | None = None
+
+
+def _load_tool_versions(repo_root: Path) -> dict[str, str]:
+    """Load TOOL_VERSIONS from _tool_versions.py by regex extraction.
+
+    Parses the TOOL_VERSIONS dict from source to avoid importing lintro
+    (which may have uninstalled dependencies in CI).
+
+    Args:
+        repo_root: Path to the repository root.
+
+    Returns:
+        Dictionary mapping tool names (underscore-based) to version strings.
+    """
+    global _tool_versions_cache  # noqa: PLW0603
+    if _tool_versions_cache is not None:
+        return _tool_versions_cache
+
+    tv_path = repo_root / "lintro" / "_tool_versions.py"
+    content = tv_path.read_text()
+
+    # Extract entries like: ToolName.ACTIONLINT: "1.7.10",
+    pattern = re.compile(r'ToolName\.(\w+)\s*:\s*"([^"]+)"')
+    versions: dict[str, str] = {}
+    for match in pattern.finditer(content):
+        tool_name = match.group(1).lower()
+        version = match.group(2)
+        versions[tool_name] = version
+
+    _tool_versions_cache = versions
+    return versions
+
 
 def _parse_requirement_safe(req_str: str) -> Requirement | None:
     """Parse a requirement string safely, returning None on failure.
@@ -254,8 +288,19 @@ def main() -> int:
                     )
             continue
 
-        # Skip other install types (binary, cargo, rustup, etc.)
-        # These are not managed via pyproject.toml or package.json
+        # Binary, cargo, and rustup tools: verify against TOOL_VERSIONS
+        if install_type in {"binary", "cargo", "rustup"}:
+            tool_versions = _load_tool_versions(repo_root)
+            tv_version = tool_versions.get(name)
+            if tv_version is None:
+                # Try with underscores (manifest uses underscores, TOOL_VERSIONS
+                # uses ToolName enum values which are also underscore-based)
+                pass  # name is already underscore-based from manifest
+            if tv_version is not None and tv_version != version_str:
+                errors.append(
+                    f"{name}: manifest {version_str} != " f"TOOL_VERSIONS {tv_version}",
+                )
+            continue
 
     if errors:
         print("Manifest sync check failed:")
@@ -268,7 +313,10 @@ def main() -> int:
     if errors:
         return 1
 
-    print("Manifest versions are aligned with pyproject.toml and package.json")
+    print(
+        "Manifest versions are aligned with "
+        "pyproject.toml, package.json, and TOOL_VERSIONS",
+    )
     return 0
 
 

@@ -65,7 +65,7 @@ def test_gitleaks_check_parses_output(
     ) -> SimpleNamespace:
         # Handle version check calls (check for --version flag)
         if "--version" in cmd or "version" in cmd:
-            return SimpleNamespace(stdout="8.21.2", stderr="", returncode=0)
+            return SimpleNamespace(stdout="8.30.0", stderr="", returncode=0)
         # Handle actual check calls - write JSON to the report file
         report_path = _get_report_path(cmd)
         if report_path:
@@ -110,7 +110,7 @@ def test_gitleaks_check_handles_no_secrets(
     ) -> SimpleNamespace:
         # Handle version check calls (check for --version flag)
         if "--version" in cmd or "version" in cmd:
-            return SimpleNamespace(stdout="8.21.2", stderr="", returncode=0)
+            return SimpleNamespace(stdout="8.30.0", stderr="", returncode=0)
         # Handle actual check calls - write empty array to report file
         report_path = _get_report_path(cmd)
         if report_path:
@@ -149,7 +149,7 @@ def test_gitleaks_check_handles_unparseable_output(
     ) -> SimpleNamespace:
         # Handle version check calls (check for --version flag)
         if "--version" in cmd or "version" in cmd:
-            return SimpleNamespace(stdout="8.21.2", stderr="", returncode=0)
+            return SimpleNamespace(stdout="8.30.0", stderr="", returncode=0)
         # Handle actual check calls - write invalid JSON to report file
         report_path = _get_report_path(cmd)
         if report_path:
