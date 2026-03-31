@@ -332,13 +332,16 @@ def doctor_command(
             f"{', '.join(uncovered_tools)}[/yellow]",
         )
 
-    # Use all expected versions (manifest + npm + TOOL_VERSIONS)
+    # Use all expected versions (manifest + npm + TOOL_VERSIONS),
+    # but only check tools that have version commands defined.
+    # Tools without commands are reported via the uncovered_tools warning above.
     all_versions = get_all_expected_versions()
+    checkable = {k: v for k, v in all_versions.items() if k in TOOL_COMMANDS}
     if tools:
         tool_list = [t.strip() for t in tools.split(",")]
-        versions_to_check = {k: v for k, v in all_versions.items() if k in tool_list}
+        versions_to_check = {k: v for k, v in checkable.items() if k in tool_list}
     else:
-        versions_to_check = all_versions
+        versions_to_check = checkable
 
     results: dict[str, dict[str, str | None]] = {}
     ok_count = 0
