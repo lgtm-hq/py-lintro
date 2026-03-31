@@ -493,3 +493,75 @@ def test_grid_format_same_as_plain(
 
     content = output_path.read_text()
     assert_that(content).contains("Lintro Check Report")
+
+
+def test_doc_url_rendered_in_csv(tmp_path: Path) -> None:
+    """Test doc_url appears in CSV output when set.
+
+    Args:
+        tmp_path: Temporary directory path for testing.
+    """
+    doc_link = "https://docs.astral.sh/ruff/rules/line-too-long/"
+
+    mock_issue = MagicMock()
+    mock_issue.file = "foo.py"
+    mock_issue.line = 7
+    mock_issue.code = "E501"
+    mock_issue.message = "Line too long"
+    mock_issue.doc_url = doc_link
+
+    result = ToolResult(
+        name="ruff",
+        success=False,
+        output="Issues found",
+        issues_count=1,
+        issues=[mock_issue],
+    )
+
+    csv_path = tmp_path / "report.csv"
+    write_output_file(
+        output_path=str(csv_path),
+        output_format=OutputFormat.CSV,
+        all_results=[result],
+        action=Action.CHECK,
+        total_issues=1,
+        total_fixed=0,
+    )
+    content = csv_path.read_text()
+    assert_that(content).contains("doc_url")
+    assert_that(content).contains(doc_link)
+
+
+def test_empty_doc_url_is_empty_string_in_csv(tmp_path: Path) -> None:
+    """Test empty doc_url appears as empty cell in CSV, not 'None'.
+
+    Args:
+        tmp_path: Temporary directory path for testing.
+    """
+    mock_issue = MagicMock()
+    mock_issue.file = "bar.py"
+    mock_issue.line = 10
+    mock_issue.code = "W001"
+    mock_issue.message = "Some warning"
+    mock_issue.doc_url = ""
+
+    result = ToolResult(
+        name="test-tool",
+        success=False,
+        output="Issues found",
+        issues_count=1,
+        issues=[mock_issue],
+    )
+
+    csv_path = tmp_path / "no_doc.csv"
+    write_output_file(
+        output_path=str(csv_path),
+        output_format=OutputFormat.CSV,
+        all_results=[result],
+        action=Action.CHECK,
+        total_issues=1,
+        total_fixed=0,
+    )
+    content = csv_path.read_text()
+    assert_that(content).contains("doc_url")
+    assert_that(content).does_not_contain("None")
