@@ -20,7 +20,7 @@ from rich.table import Table
 
 from lintro._tool_versions import get_all_expected_versions
 from lintro.plugins.subprocess_executor import is_compiled_binary
-from lintro.tools.core.command_builders import _resolve_venv_tool_command
+from lintro.tools.core.command_builders import resolve_venv_tool_command
 from lintro.tools.core.version_parsing import extract_version_from_output
 from lintro.utils.environment import (
     EnvironmentReport,
@@ -34,7 +34,7 @@ def _pytest_version_command() -> list[str]:
 
     Mirrors PytestBuilder.get_command() resolution order:
     1. Compiled binary → PATH only (no python -m)
-    2. In venv → shared _resolve_venv_tool_command helper
+    2. In venv → shared resolve_venv_tool_command helper
     3. Outside venv → PATH, then python -m fallback
 
     Returns:
@@ -48,7 +48,7 @@ def _pytest_version_command() -> list[str]:
         return ["pytest", "--version"]
 
     # Venv resolution (shared with PytestBuilder)
-    venv_cmd = _resolve_venv_tool_command("pytest")
+    venv_cmd = resolve_venv_tool_command("pytest")
     if venv_cmd is not None:
         return [*venv_cmd, "--version"]
 
@@ -235,12 +235,19 @@ def _format_failure_reason(
 def _generate_markdown_report(
     env: EnvironmentReport,
     tool_results: dict[str, dict[str, str | None]],
+    *,
+    uncovered_tools: list[str] | None = None,
+    unknown_tools: list[str] | None = None,
+    uncheckable_tools: list[str] | None = None,
 ) -> str:
     """Generate markdown report suitable for GitHub issues.
 
     Args:
         env: Environment report data.
         tool_results: Tool check results.
+        uncovered_tools: Tools with no version command defined.
+        unknown_tools: Requested tool names not found in any source.
+        uncheckable_tools: Requested tools that exist but have no version command.
 
     Returns:
         Markdown-formatted report string.
@@ -274,6 +281,24 @@ def _generate_markdown_report(
         lines.append(f"| {tool_name} | {version} | {status_icon} {status} |")
 
     lines.append("")
+
+    # Warnings section
+    has_warnings = uncovered_tools or unknown_tools or uncheckable_tools
+    if has_warnings:
+        lines.append("### Warnings")
+        lines.append("")
+        if uncovered_tools:
+            lines.append(
+                f"- No version command defined for: {', '.join(uncovered_tools)}",
+            )
+        if unknown_tools:
+            lines.append(f"- Unknown tool(s): {', '.join(unknown_tools)}")
+        if uncheckable_tools:
+            lines.append(
+                f"- No version command for requested tool(s): "
+                f"{', '.join(uncheckable_tools)}",
+            )
+        lines.append("")
 
     # Config info
     if env.lintro.config_file:
@@ -357,6 +382,8 @@ def doctor_command(
     # Tools without commands are reported via the uncovered_tools warning above.
     all_versions = get_all_expected_versions()
     checkable = {k: v for k, v in all_versions.items() if k in TOOL_COMMANDS}
+    unknown: list[str] = []
+    uncheckable: list[str] = []
     if tools:
         tool_list = [t.strip() for t in tools.split(",")]
         # Warn about completely unknown tool names
@@ -410,7 +437,13 @@ def doctor_command(
         # env_report is guaranteed to be set since report=True implies
         # the condition (verbose or report or json_output) was True above
         assert env_report is not None
-        markdown = _generate_markdown_report(env_report, results)
+        markdown = _generate_markdown_report(
+            env_report,
+            results,
+            uncovered_tools=uncovered_tools,
+            unknown_tools=unknown,
+            uncheckable_tools=uncheckable,
+        )
         click.echo(markdown)
         return
 
@@ -450,10 +483,15 @@ def doctor_command(
                 "unknown": unknown_count,
             },
         }
+        warnings: dict[str, list[str]] = {}
         if uncovered_tools:
-            output["warnings"] = {
-                "uncovered_tools": uncovered_tools,
-            }
+            warnings["uncovered_tools"] = uncovered_tools
+        if unknown:
+            warnings["unknown_tools"] = unknown
+        if uncheckable:
+            warnings["uncheckable_tools"] = uncheckable
+        if warnings:
+            output["warnings"] = warnings
         # Include environment info in JSON output
         if env_report:
             output["environment"] = {

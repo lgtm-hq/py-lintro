@@ -31,7 +31,12 @@ TOOL_VERSIONS for binary/cargo/rustup). PRs will fail if they drift.
 1. Add to TOOL_VERSIONS in _tool_versions.py
 2. Add entry to manifest.json (version must match TOOL_VERSIONS)
 3. Add Renovate regex manager in renovate.json for both files
-4. If installable via Homebrew, add depends_on to lintro.rb.template
+4. If installable via Homebrew: verify the Homebrew formula provides a
+   version compatible with the entry in TOOL_VERSIONS and manifest.json
+   before adding depends_on to lintro.rb.template. Homebrew's depends_on
+   cannot pin versions, so only add it when the Homebrew package version
+   matches. If versions diverge, omit the depends_on line and document
+   alternative install instructions (or add a note in renovate.json).
 
 ### For Bundled Python Tools:
 1. Add as dependency in pyproject.toml

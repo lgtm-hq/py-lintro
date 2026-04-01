@@ -17,8 +17,8 @@ from typing import Any
 from packaging.requirements import InvalidRequirement, Requirement
 from packaging.version import InvalidVersion, Version
 
-# Cache for TOOL_VERSIONS loaded from _tool_versions.py
-_tool_versions_cache: dict[str, str] | None = None
+# Cache for TOOL_VERSIONS loaded from _tool_versions.py, keyed by repo_root
+_tool_versions_cache: dict[str, dict[str, str]] = {}
 
 
 def _load_tool_versions(repo_root: Path) -> dict[str, str]:
@@ -33,9 +33,9 @@ def _load_tool_versions(repo_root: Path) -> dict[str, str]:
     Returns:
         Dictionary mapping tool names (underscore-based) to version strings.
     """
-    global _tool_versions_cache  # noqa: PLW0603
-    if _tool_versions_cache is not None:
-        return _tool_versions_cache
+    cache_key = str(repo_root)
+    if cache_key in _tool_versions_cache:
+        return _tool_versions_cache[cache_key]
 
     tv_path = repo_root / "lintro" / "_tool_versions.py"
     content = tv_path.read_text()
@@ -45,20 +45,21 @@ def _load_tool_versions(repo_root: Path) -> dict[str, str]:
     tree = ast.parse(content)
     tv_source: str | None = None
     for node in ast.walk(tree):
-        is_assign = (
+        stmt: ast.Assign | ast.AnnAssign | None = None
+        if (
             isinstance(node, ast.Assign)
             and len(node.targets) == 1
             and isinstance(node.targets[0], ast.Name)
             and node.targets[0].id == "TOOL_VERSIONS"
-        )
-        is_ann_assign = (
+        ) or (
             isinstance(node, ast.AnnAssign)
             and isinstance(node.target, ast.Name)
             and node.target.id == "TOOL_VERSIONS"
-        )
-        if is_assign or is_ann_assign:
+        ):
+            stmt = node
+        if stmt is not None:
             lines = content.splitlines(keepends=True)
-            tv_source = "".join(lines[node.lineno - 1 : node.end_lineno])
+            tv_source = "".join(lines[stmt.lineno - 1 : stmt.end_lineno])
             break
 
     pattern = re.compile(r'ToolName\.(\w+)\s*:\s*"([^"]+)"')
@@ -68,7 +69,7 @@ def _load_tool_versions(repo_root: Path) -> dict[str, str]:
         version = match.group(2)
         versions[tool_name] = version
 
-    _tool_versions_cache = versions
+    _tool_versions_cache[cache_key] = versions
     return versions
 
 

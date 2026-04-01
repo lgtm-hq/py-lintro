@@ -170,7 +170,7 @@ def _is_compiled_binary() -> bool:
     return is_compiled_binary()
 
 
-def _resolve_venv_tool_command(tool_name: str) -> list[str] | None:
+def resolve_venv_tool_command(tool_name: str) -> list[str] | None:
     """Resolve a Python tool command when running inside a virtualenv.
 
     Checks if the tool exists in the venv's scripts directory (via sysconfig)
@@ -278,7 +278,7 @@ class PythonBundledBuilder(CommandBuilder):
     ) -> list[str]:
         """Get command for Python bundled tool.
 
-        When running in a virtual environment, uses _resolve_venv_tool_command
+        When running in a virtual environment, uses resolve_venv_tool_command
         which prefers python -m if the tool binary lives inside the venv, but
         falls back to a PATH-based binary when the tool is installed externally
         (e.g. via a separate Homebrew formula). Outside a venv, prefers PATH
@@ -304,7 +304,7 @@ class PythonBundledBuilder(CommandBuilder):
             return [tool_name]
 
         # When running in a venv, resolve using shared helper
-        venv_cmd = _resolve_venv_tool_command(tool_name)
+        venv_cmd = resolve_venv_tool_command(tool_name)
         if venv_cmd is not None:
             return venv_cmd
 
@@ -350,7 +350,7 @@ class PytestBuilder(CommandBuilder):
     ) -> list[str]:
         """Get command for pytest.
 
-        When running in a virtual environment, uses _resolve_venv_tool_command
+        When running in a virtual environment, uses resolve_venv_tool_command
         which prefers python -m pytest if the pytest binary lives inside the
         venv, but falls back to a PATH-based binary when pytest is installed
         externally (e.g. via a separate Homebrew formula). Outside a venv,
@@ -377,7 +377,7 @@ class PytestBuilder(CommandBuilder):
             return ["pytest"]
 
         # When running in a venv, resolve using shared helper
-        venv_cmd = _resolve_venv_tool_command("pytest")
+        venv_cmd = resolve_venv_tool_command("pytest")
         if venv_cmd is not None:
             return venv_cmd
 

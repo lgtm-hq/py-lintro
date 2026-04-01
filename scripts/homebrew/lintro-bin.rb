@@ -44,7 +44,8 @@ class LintroBin < Formula
           gitleaks semgrep markdownlint-cli2 taplo sqlfluff
 
       JS / TS tools (via bun or npm):
-        bun add -g oxlint oxfmt
+        bun add -g oxlint oxfmt       # if using bun
+        npm install -g oxlint oxfmt   # if using npm
 
       Rust tools (requires rustup, not Homebrew rust):
         curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh

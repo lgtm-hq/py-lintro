@@ -24,29 +24,40 @@ def _mock_which_for_venv(
     *,
     in_venv: bool,
     in_path: str | None = None,
+    expected_names: str | set[str],
 ) -> MagicMock:
     """Create a shutil.which mock that controls venv vs PATH discovery.
 
     When in_venv is True, shutil.which(tool, path=scripts_dir) returns
     a path (simulating the tool being in the venv). When False, it returns
     None for the venv lookup but returns in_path for the PATH lookup.
+    The mock validates that the requested name matches expected_names and
+    that the scripts directory path looks correct before returning results.
 
     Args:
         in_venv: Whether the tool should be found in the venv scripts dir.
         in_path: Path to return for PATH-based discovery (None = not found).
+        expected_names: Executable name(s) this mock should respond to.
 
     Returns:
         Mock to use with patch("shutil.which", ...).
     """
+    names = {expected_names} if isinstance(expected_names, str) else expected_names
 
     def which_side_effect(
         name: str,
         path: str | None = None,
     ) -> str | None:
         if path is not None:
-            # This is the venv scripts lookup
+            # Venv scripts lookup: validate name and path
+            if name not in names:
+                return None
+            if not (path.endswith("/bin") or path.endswith("\\Scripts")):
+                return None
             return f"/fake/venv/bin/{name}" if in_venv else None
-        # This is the PATH lookup
+        # PATH lookup: validate name
+        if name not in names:
+            return None
         return in_path
 
     return MagicMock(side_effect=which_side_effect)
@@ -121,7 +132,10 @@ def test_python_bundled_builder_prefers_python_module_in_venv() -> None:
     builder = PythonBundledBuilder()
     # Simulate running inside a venv with the tool present in venv scripts
     with (
-        patch("shutil.which", _mock_which_for_venv(in_venv=True)),
+        patch(
+            "shutil.which",
+            _mock_which_for_venv(in_venv=True, expected_names="ruff"),
+        ),
         patch(
             "lintro.tools.core.command_builders.sys.prefix",
             "/app/.venv",
@@ -156,6 +170,7 @@ def test_python_bundled_builder_prefers_path_when_tool_not_in_venv() -> None:
             _mock_which_for_venv(
                 in_venv=False,
                 in_path="/opt/homebrew/bin/ruff",
+                expected_names="ruff",
             ),
         ),
         patch(
@@ -184,7 +199,10 @@ def test_python_bundled_builder_last_resort_python_m_in_venv() -> None:
     builder = PythonBundledBuilder()
     # In a venv, tool NOT in venv scripts, NOT in PATH
     with (
-        patch("shutil.which", _mock_which_for_venv(in_venv=False, in_path=None)),
+        patch(
+            "shutil.which",
+            _mock_which_for_venv(in_venv=False, in_path=None, expected_names="ruff"),
+        ),
         patch(
             "lintro.tools.core.command_builders.sys.prefix",
             "/opt/homebrew/Cellar/lintro/0.57.7/libexec",
@@ -286,7 +304,10 @@ def test_pytest_builder_prefers_python_module_in_venv() -> None:
     builder = PytestBuilder()
     # Simulate running inside a venv with pytest present in venv scripts
     with (
-        patch("shutil.which", _mock_which_for_venv(in_venv=True)),
+        patch(
+            "shutil.which",
+            _mock_which_for_venv(in_venv=True, expected_names="pytest"),
+        ),
         patch(
             "lintro.tools.core.command_builders.sys.prefix",
             "/app/.venv",
@@ -320,6 +341,7 @@ def test_pytest_builder_prefers_path_when_tool_not_in_venv() -> None:
             _mock_which_for_venv(
                 in_venv=False,
                 in_path="/opt/homebrew/bin/pytest",
+                expected_names="pytest",
             ),
         ),
         patch(
@@ -347,7 +369,10 @@ def test_pytest_builder_last_resort_python_m_in_venv() -> None:
     """PytestBuilder falls back to python -m when pytest nowhere."""
     builder = PytestBuilder()
     with (
-        patch("shutil.which", _mock_which_for_venv(in_venv=False, in_path=None)),
+        patch(
+            "shutil.which",
+            _mock_which_for_venv(in_venv=False, in_path=None, expected_names="pytest"),
+        ),
         patch(
             "lintro.tools.core.command_builders.sys.prefix",
             "/opt/homebrew/Cellar/lintro/0.57.7/libexec",

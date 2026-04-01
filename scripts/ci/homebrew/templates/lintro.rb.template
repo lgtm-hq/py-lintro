@@ -67,7 +67,7 @@ class Lintro < Formula
 
   def caveats
     <<~EOS
-      Lintro is now installed (#{deps.count} Homebrew dependencies included).
+      Lintro is now installed (#{deps.count} Homebrew formulae included).
 
       Python quality:   ruff, black, mypy, bandit, pydoclint (bundled)
       YAML / TOML:      yamllint, taplo
