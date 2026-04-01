@@ -52,7 +52,7 @@ def _mock_which_for_venv(
             # Venv scripts lookup: validate name and path
             if name not in names:
                 return None
-            if not (path.endswith("/bin") or path.endswith("\\Scripts")):
+            if not path.endswith(("/bin", "\\Scripts")):
                 return None
             return f"/fake/venv/bin/{name}" if in_venv else None
         # PATH lookup: validate name
