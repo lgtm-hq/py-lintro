@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import sys
 from collections.abc import Generator
 from unittest.mock import MagicMock, patch
 
@@ -156,6 +157,7 @@ def test_python_bundled_builder_prefers_python_module_in_venv() -> None:
         cmd = builder.get_command("ruff", ToolName.RUFF)
         # Should return [python_exe, "-m", "ruff"] when tool is in venv
         assert_that(cmd).is_length(3)
+        assert_that(cmd[0]).is_equal_to(sys.executable)
         assert_that(cmd[1]).is_equal_to("-m")
         assert_that(cmd[2]).is_equal_to("ruff")
 
@@ -223,6 +225,7 @@ def test_python_bundled_builder_last_resort_python_m_in_venv() -> None:
         cmd = builder.get_command("ruff", ToolName.RUFF)
         # Last resort: python -m
         assert_that(cmd).is_length(3)
+        assert_that(cmd[0]).is_equal_to(sys.executable)
         assert_that(cmd[1]).is_equal_to("-m")
         assert_that(cmd[2]).is_equal_to("ruff")
 
@@ -240,6 +243,7 @@ def test_python_bundled_builder_falls_back_to_python_module() -> None:
         cmd = builder.get_command("ruff", ToolName.RUFF)
         # Should return [python_exe, "-m", "ruff"]
         assert_that(cmd).is_length(3)
+        assert_that(cmd[0]).is_equal_to(sys.executable)
         assert_that(cmd[1]).is_equal_to("-m")
         assert_that(cmd[2]).is_equal_to("ruff")
 
@@ -328,6 +332,7 @@ def test_pytest_builder_prefers_python_module_in_venv() -> None:
         cmd = builder.get_command("pytest", ToolName.PYTEST)
         # Should return [python_exe, "-m", "pytest"] when tool is in venv
         assert_that(cmd).is_length(3)
+        assert_that(cmd[0]).is_equal_to(sys.executable)
         assert_that(cmd[1]).is_equal_to("-m")
         assert_that(cmd[2]).is_equal_to("pytest")
 
@@ -392,6 +397,7 @@ def test_pytest_builder_last_resort_python_m_in_venv() -> None:
     ):
         cmd = builder.get_command("pytest", ToolName.PYTEST)
         assert_that(cmd).is_length(3)
+        assert_that(cmd[0]).is_equal_to(sys.executable)
         assert_that(cmd[1]).is_equal_to("-m")
         assert_that(cmd[2]).is_equal_to("pytest")
 
@@ -409,6 +415,7 @@ def test_pytest_builder_falls_back_to_python_module() -> None:
         cmd = builder.get_command("pytest", ToolName.PYTEST)
         # Should return [python_exe, "-m", "pytest"]
         assert_that(cmd).is_length(3)
+        assert_that(cmd[0]).is_equal_to(sys.executable)
         assert_that(cmd[1]).is_equal_to("-m")
         assert_that(cmd[2]).is_equal_to("pytest")
 
