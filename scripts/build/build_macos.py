@@ -34,7 +34,6 @@ INCLUDE_PACKAGES = [
     "click",
     "loguru",
     "tabulate",
-    "toml",
     "defusedxml",
     "httpx",
 ]
