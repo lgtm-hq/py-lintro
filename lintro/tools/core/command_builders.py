@@ -278,9 +278,11 @@ class PythonBundledBuilder(CommandBuilder):
     ) -> list[str]:
         """Get command for Python bundled tool.
 
-        When running in a virtual environment, always uses python -m to ensure
-        the tool runs with the same packages as lintro. Otherwise, prefers
-        PATH binary (works with Homebrew, system packages, pipx, uv tool, etc.).
+        When running in a virtual environment, uses _resolve_venv_tool_command
+        which prefers python -m if the tool binary lives inside the venv, but
+        falls back to a PATH-based binary when the tool is installed externally
+        (e.g. via a separate Homebrew formula). Outside a venv, prefers PATH
+        binary (works with Homebrew, system packages, pipx, uv tool, etc.).
 
         Args:
             tool_name: String name of the tool.
@@ -348,9 +350,12 @@ class PytestBuilder(CommandBuilder):
     ) -> list[str]:
         """Get command for pytest.
 
-        When running in a virtual environment, always uses python -m pytest to
-        ensure pytest runs with the same packages as lintro. Otherwise, prefers
-        PATH binary (works with Homebrew, system packages, pipx, uv tool, etc.).
+        When running in a virtual environment, uses _resolve_venv_tool_command
+        which prefers python -m pytest if the pytest binary lives inside the
+        venv, but falls back to a PATH-based binary when pytest is installed
+        externally (e.g. via a separate Homebrew formula). Outside a venv,
+        prefers PATH binary (works with Homebrew, system packages, pipx,
+        uv tool, etc.).
 
         Args:
             tool_name: String name of the tool.

@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import ast
 import json
 import os
 import re
@@ -39,10 +40,24 @@ def _load_tool_versions(repo_root: Path) -> dict[str, str]:
     tv_path = repo_root / "lintro" / "_tool_versions.py"
     content = tv_path.read_text()
 
-    # Extract entries like: ToolName.ACTIONLINT: "1.7.10",
+    # Use AST to find the TOOL_VERSIONS assignment, then extract entries
+    # only from that dict (not from other dicts that also use ToolName keys).
+    tree = ast.parse(content)
+    tv_source: str | None = None
+    for node in ast.walk(tree):
+        if (
+            isinstance(node, ast.Assign)
+            and len(node.targets) == 1
+            and isinstance(node.targets[0], ast.Name)
+            and node.targets[0].id == "TOOL_VERSIONS"
+        ):
+            lines = content.splitlines(keepends=True)
+            tv_source = "".join(lines[node.lineno - 1 : node.end_lineno])
+            break
+
     pattern = re.compile(r'ToolName\.(\w+)\s*:\s*"([^"]+)"')
     versions: dict[str, str] = {}
-    for match in pattern.finditer(content):
+    for match in pattern.finditer(tv_source or ""):
         tool_name = match.group(1).lower()
         version = match.group(2)
         versions[tool_name] = version

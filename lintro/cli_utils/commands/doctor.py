@@ -368,10 +368,9 @@ def doctor_command(
         # Warn about requested tools that exist but have no version command
         uncheckable = [t for t in tool_list if t in all_versions and t not in checkable]
         if uncheckable and not json_output and not report:
-            console.print(
-                f"[yellow]Warning: No version command for requested tool(s):"
-                f" {', '.join(uncheckable)}[/yellow]",
-            )
+            names = ", ".join(uncheckable)
+            msg = f"No version command for requested tool(s): {names}"
+            console.print(f"[yellow]Warning: {msg}[/yellow]")
         versions_to_check = {k: v for k, v in checkable.items() if k in tool_list}
     else:
         versions_to_check = checkable

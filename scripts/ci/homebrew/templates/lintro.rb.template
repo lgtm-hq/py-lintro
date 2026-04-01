@@ -82,10 +82,7 @@ class Lintro < Formula
 
       Not installed automatically (install if needed):
         cargo install cargo-audit cargo-deny   # Rust dependency auditing
-        bun add -g astro svelte-check vue-tsc  # Framework type-checkers
-
-      Note: clippy and rustfmt require rustup (not included in Homebrew rust).
-      Install rustup first, then: rustup component add clippy rustfmt
+        npm install -g astro svelte-check vue-tsc  # Framework type-checkers
 
       Run 'lintro doctor' to check tool status and get install hints.
 
