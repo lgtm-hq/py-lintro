@@ -45,12 +45,18 @@ def _load_tool_versions(repo_root: Path) -> dict[str, str]:
     tree = ast.parse(content)
     tv_source: str | None = None
     for node in ast.walk(tree):
-        if (
+        is_assign = (
             isinstance(node, ast.Assign)
             and len(node.targets) == 1
             and isinstance(node.targets[0], ast.Name)
             and node.targets[0].id == "TOOL_VERSIONS"
-        ):
+        )
+        is_ann_assign = (
+            isinstance(node, ast.AnnAssign)
+            and isinstance(node.target, ast.Name)
+            and node.target.id == "TOOL_VERSIONS"
+        )
+        if is_assign or is_ann_assign:
             lines = content.splitlines(keepends=True)
             tv_source = "".join(lines[node.lineno - 1 : node.end_lineno])
             break
