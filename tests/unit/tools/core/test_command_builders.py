@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
+import sys
 from collections.abc import Generator
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 from assertpy import assert_that
@@ -18,6 +19,49 @@ from lintro.tools.core.command_builders import (
     PythonBundledBuilder,
     StandaloneBuilder,
 )
+
+
+def _mock_which_for_venv(
+    *,
+    in_venv: bool,
+    in_path: str | None = None,
+    expected_names: str | set[str],
+) -> MagicMock:
+    """Create a shutil.which mock that controls venv vs PATH discovery.
+
+    When in_venv is True, shutil.which(tool, path=scripts_dir) returns
+    a path (simulating the tool being in the venv). When False, it returns
+    None for the venv lookup but returns in_path for the PATH lookup.
+    The mock validates that the requested name matches expected_names and
+    that the scripts directory path looks correct before returning results.
+
+    Args:
+        in_venv: Whether the tool should be found in the venv scripts dir.
+        in_path: Path to return for PATH-based discovery (None = not found).
+        expected_names: Executable name(s) this mock should respond to.
+
+    Returns:
+        Mock to use with patch("shutil.which", ...).
+    """
+    names = {expected_names} if isinstance(expected_names, str) else expected_names
+
+    def which_side_effect(
+        name: str,
+        path: str | None = None,
+    ) -> str | None:
+        if path is not None:
+            # Venv scripts lookup: validate name and path
+            if name not in names:
+                return None
+            if not path.endswith(("/bin", "\\Scripts")):
+                return None
+            return f"/fake/venv/bin/{name}" if in_venv else None
+        # PATH lookup: validate name
+        if name not in names:
+            return None
+        return in_path
+
+    return MagicMock(side_effect=which_side_effect)
 
 
 @pytest.fixture(autouse=True)
@@ -85,11 +129,14 @@ def test_python_bundled_builder_prefers_path_binary_outside_venv() -> None:
 
 
 def test_python_bundled_builder_prefers_python_module_in_venv() -> None:
-    """PythonBundledBuilder prefers python -m when inside venv."""
+    """PythonBundledBuilder prefers python -m when tool is in venv scripts."""
     builder = PythonBundledBuilder()
-    # Simulate running inside a venv (prefix != base_prefix)
+    # Simulate running inside a venv with the tool present in venv scripts
     with (
-        patch("shutil.which", return_value="/usr/local/bin/ruff"),
+        patch(
+            "shutil.which",
+            _mock_which_for_venv(in_venv=True, expected_names="ruff"),
+        ),
         patch(
             "lintro.tools.core.command_builders.sys.prefix",
             "/app/.venv",
@@ -102,10 +149,83 @@ def test_python_bundled_builder_prefers_python_module_in_venv() -> None:
             "lintro.tools.core.command_builders._is_compiled_binary",
             return_value=False,
         ),
+        patch(
+            "lintro.tools.core.command_builders.sysconfig.get_path",
+            return_value="/app/.venv/bin",
+        ),
     ):
         cmd = builder.get_command("ruff", ToolName.RUFF)
-        # Should return [python_exe, "-m", "ruff"] even when PATH has ruff
+        # Should return [python_exe, "-m", "ruff"] when tool is in venv
         assert_that(cmd).is_length(3)
+        assert_that(cmd[0]).is_equal_to(sys.executable)
+        assert_that(cmd[1]).is_equal_to("-m")
+        assert_that(cmd[2]).is_equal_to("ruff")
+
+
+def test_python_bundled_builder_prefers_path_when_tool_not_in_venv() -> None:
+    """PythonBundledBuilder uses PATH when tool is not in venv (Homebrew)."""
+    builder = PythonBundledBuilder()
+    # Simulate Homebrew: in a venv, but tool is a separate Homebrew formula
+    with (
+        patch(
+            "shutil.which",
+            _mock_which_for_venv(
+                in_venv=False,
+                in_path="/opt/homebrew/bin/ruff",
+                expected_names="ruff",
+            ),
+        ),
+        patch(
+            "lintro.tools.core.command_builders.sys.prefix",
+            "/opt/homebrew/Cellar/lintro/0.57.7/libexec",
+        ),
+        patch(
+            "lintro.tools.core.command_builders.sys.base_prefix",
+            "/opt/homebrew/Cellar/python@3.13/3.13.0/Frameworks",
+        ),
+        patch(
+            "lintro.tools.core.command_builders._is_compiled_binary",
+            return_value=False,
+        ),
+        patch(
+            "lintro.tools.core.command_builders.sysconfig.get_path",
+            return_value="/opt/homebrew/Cellar/lintro/0.57.7/libexec/bin",
+        ),
+    ):
+        cmd = builder.get_command("ruff", ToolName.RUFF)
+        assert_that(cmd).is_equal_to(["/opt/homebrew/bin/ruff"])
+
+
+def test_python_bundled_builder_last_resort_python_m_in_venv() -> None:
+    """PythonBundledBuilder falls back to python -m when tool nowhere."""
+    builder = PythonBundledBuilder()
+    # In a venv, tool NOT in venv scripts, NOT in PATH
+    with (
+        patch(
+            "shutil.which",
+            _mock_which_for_venv(in_venv=False, in_path=None, expected_names="ruff"),
+        ),
+        patch(
+            "lintro.tools.core.command_builders.sys.prefix",
+            "/opt/homebrew/Cellar/lintro/0.57.7/libexec",
+        ),
+        patch(
+            "lintro.tools.core.command_builders.sys.base_prefix",
+            "/opt/homebrew/Cellar/python@3.13/3.13.0/Frameworks",
+        ),
+        patch(
+            "lintro.tools.core.command_builders._is_compiled_binary",
+            return_value=False,
+        ),
+        patch(
+            "lintro.tools.core.command_builders.sysconfig.get_path",
+            return_value="/opt/homebrew/Cellar/lintro/0.57.7/libexec/bin",
+        ),
+    ):
+        cmd = builder.get_command("ruff", ToolName.RUFF)
+        # Last resort: python -m
+        assert_that(cmd).is_length(3)
+        assert_that(cmd[0]).is_equal_to(sys.executable)
         assert_that(cmd[1]).is_equal_to("-m")
         assert_that(cmd[2]).is_equal_to("ruff")
 
@@ -123,6 +243,7 @@ def test_python_bundled_builder_falls_back_to_python_module() -> None:
         cmd = builder.get_command("ruff", ToolName.RUFF)
         # Should return [python_exe, "-m", "ruff"]
         assert_that(cmd).is_length(3)
+        assert_that(cmd[0]).is_equal_to(sys.executable)
         assert_that(cmd[1]).is_equal_to("-m")
         assert_that(cmd[2]).is_equal_to("ruff")
 
@@ -183,11 +304,14 @@ def test_pytest_builder_prefers_path_binary_outside_venv() -> None:
 
 
 def test_pytest_builder_prefers_python_module_in_venv() -> None:
-    """PytestBuilder prefers python -m pytest when inside venv."""
+    """PytestBuilder prefers python -m pytest when tool is in venv scripts."""
     builder = PytestBuilder()
-    # Simulate running inside a venv (prefix != base_prefix)
+    # Simulate running inside a venv with pytest present in venv scripts
     with (
-        patch("shutil.which", return_value="/usr/local/bin/pytest"),
+        patch(
+            "shutil.which",
+            _mock_which_for_venv(in_venv=True, expected_names="pytest"),
+        ),
         patch(
             "lintro.tools.core.command_builders.sys.prefix",
             "/app/.venv",
@@ -200,10 +324,80 @@ def test_pytest_builder_prefers_python_module_in_venv() -> None:
             "lintro.tools.core.command_builders._is_compiled_binary",
             return_value=False,
         ),
+        patch(
+            "lintro.tools.core.command_builders.sysconfig.get_path",
+            return_value="/app/.venv/bin",
+        ),
     ):
         cmd = builder.get_command("pytest", ToolName.PYTEST)
-        # Should return [python_exe, "-m", "pytest"] even when PATH has pytest
+        # Should return [python_exe, "-m", "pytest"] when tool is in venv
         assert_that(cmd).is_length(3)
+        assert_that(cmd[0]).is_equal_to(sys.executable)
+        assert_that(cmd[1]).is_equal_to("-m")
+        assert_that(cmd[2]).is_equal_to("pytest")
+
+
+def test_pytest_builder_prefers_path_when_tool_not_in_venv() -> None:
+    """PytestBuilder uses PATH when pytest is not in venv (Homebrew)."""
+    builder = PytestBuilder()
+    with (
+        patch(
+            "shutil.which",
+            _mock_which_for_venv(
+                in_venv=False,
+                in_path="/opt/homebrew/bin/pytest",
+                expected_names="pytest",
+            ),
+        ),
+        patch(
+            "lintro.tools.core.command_builders.sys.prefix",
+            "/opt/homebrew/Cellar/lintro/0.57.7/libexec",
+        ),
+        patch(
+            "lintro.tools.core.command_builders.sys.base_prefix",
+            "/opt/homebrew/Cellar/python@3.13/3.13.0/Frameworks",
+        ),
+        patch(
+            "lintro.tools.core.command_builders._is_compiled_binary",
+            return_value=False,
+        ),
+        patch(
+            "lintro.tools.core.command_builders.sysconfig.get_path",
+            return_value="/opt/homebrew/Cellar/lintro/0.57.7/libexec/bin",
+        ),
+    ):
+        cmd = builder.get_command("pytest", ToolName.PYTEST)
+        assert_that(cmd).is_equal_to(["/opt/homebrew/bin/pytest"])
+
+
+def test_pytest_builder_last_resort_python_m_in_venv() -> None:
+    """PytestBuilder falls back to python -m when pytest nowhere."""
+    builder = PytestBuilder()
+    with (
+        patch(
+            "shutil.which",
+            _mock_which_for_venv(in_venv=False, in_path=None, expected_names="pytest"),
+        ),
+        patch(
+            "lintro.tools.core.command_builders.sys.prefix",
+            "/opt/homebrew/Cellar/lintro/0.57.7/libexec",
+        ),
+        patch(
+            "lintro.tools.core.command_builders.sys.base_prefix",
+            "/opt/homebrew/Cellar/python@3.13/3.13.0/Frameworks",
+        ),
+        patch(
+            "lintro.tools.core.command_builders._is_compiled_binary",
+            return_value=False,
+        ),
+        patch(
+            "lintro.tools.core.command_builders.sysconfig.get_path",
+            return_value="/opt/homebrew/Cellar/lintro/0.57.7/libexec/bin",
+        ),
+    ):
+        cmd = builder.get_command("pytest", ToolName.PYTEST)
+        assert_that(cmd).is_length(3)
+        assert_that(cmd[0]).is_equal_to(sys.executable)
         assert_that(cmd[1]).is_equal_to("-m")
         assert_that(cmd[2]).is_equal_to("pytest")
 
@@ -221,6 +415,7 @@ def test_pytest_builder_falls_back_to_python_module() -> None:
         cmd = builder.get_command("pytest", ToolName.PYTEST)
         # Should return [python_exe, "-m", "pytest"]
         assert_that(cmd).is_length(3)
+        assert_that(cmd[0]).is_equal_to(sys.executable)
         assert_that(cmd[1]).is_equal_to("-m")
         assert_that(cmd[2]).is_equal_to("pytest")
 

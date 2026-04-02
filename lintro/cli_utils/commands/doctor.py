@@ -11,19 +11,57 @@ import json
 import shutil
 import subprocess
 import sys
+from collections.abc import Callable
 from dataclasses import asdict, dataclass
 
 import click
 from rich.console import Console
 from rich.table import Table
 
-from lintro._tool_versions import TOOL_VERSIONS
+from lintro._tool_versions import get_all_expected_versions
+from lintro.plugins.subprocess_executor import is_compiled_binary
+from lintro.tools.core.command_builders import resolve_venv_tool_command
 from lintro.tools.core.version_parsing import extract_version_from_output
 from lintro.utils.environment import (
     EnvironmentReport,
     collect_full_environment,
     render_environment_report,
 )
+
+
+def _pytest_version_command() -> list[str]:
+    """Build the pytest version check command.
+
+    Mirrors PytestBuilder.get_command() resolution order:
+    1. Compiled binary → PATH only (no python -m)
+    2. In venv → shared resolve_venv_tool_command helper
+    3. Outside venv → PATH, then python -m fallback
+
+    Returns:
+        Command list to check pytest version.
+    """
+    # Compiled binary: sys.executable is the lintro binary, not Python
+    if is_compiled_binary():
+        pytest_path = shutil.which("pytest")
+        if pytest_path:
+            return [pytest_path, "--version"]
+        return ["pytest", "--version"]
+
+    # Venv resolution (shared with PytestBuilder)
+    venv_cmd = resolve_venv_tool_command("pytest")
+    if venv_cmd is not None:
+        return [*venv_cmd, "--version"]
+
+    # Outside venv: PATH discovery
+    pytest_path = shutil.which("pytest")
+    if pytest_path:
+        return [pytest_path, "--version"]
+
+    # Last resort
+    python_exe = sys.executable
+    if python_exe:
+        return [python_exe, "-m", "pytest", "--version"]
+    return ["pytest", "--version"]
 
 
 @dataclass
@@ -44,8 +82,10 @@ class VersionCheckResult:
     path: str | None = None
 
 
-# Map tool names to commands (external tools only)
-TOOL_COMMANDS: dict[str, list[str]] = {
+# Map tool names to version commands or callables that return them.
+# Callables are invoked at runtime (not import time) so environment-dependent
+# resolution (venv detection, compiled binary check) is always fresh.
+TOOL_COMMANDS: dict[str, list[str] | Callable[[], list[str]]] = {
     "actionlint": ["actionlint", "--version"],
     "cargo_audit": ["cargo", "audit", "--version"],
     "clippy": ["cargo", "clippy", "--version"],
@@ -55,7 +95,7 @@ TOOL_COMMANDS: dict[str, list[str]] = {
     "osv_scanner": ["osv-scanner", "--version"],
     "oxfmt": ["oxfmt", "--version"],
     "oxlint": ["oxlint", "--version"],
-    "pytest": [sys.executable, "-m", "pytest", "--version"],
+    "pytest": _pytest_version_command,
     "rustfmt": ["rustfmt", "--version"],
     "semgrep": ["semgrep", "--version"],
     "shellcheck": ["shellcheck", "--version"],
@@ -66,12 +106,15 @@ TOOL_COMMANDS: dict[str, list[str]] = {
 
 
 def _check_tool_commands_coverage() -> list[str]:
-    """Check for tools in TOOL_VERSIONS that don't have commands defined.
+    """Check for expected tools that don't have version commands defined.
+
+    Uses get_all_expected_versions() to match the same tool set used by
+    the doctor checklist.
 
     Returns:
-        List of tool names that are in TOOL_VERSIONS but not in TOOL_COMMANDS.
+        List of tool names that are expected but not in TOOL_COMMANDS.
     """
-    return [tool for tool in TOOL_VERSIONS if tool not in TOOL_COMMANDS]
+    return [tool for tool in get_all_expected_versions() if tool not in TOOL_COMMANDS]
 
 
 def _get_installed_version(tool_name: str) -> VersionCheckResult:
@@ -83,9 +126,12 @@ def _get_installed_version(tool_name: str) -> VersionCheckResult:
     Returns:
         VersionCheckResult with version if successful, or error details if not.
     """
-    command = TOOL_COMMANDS.get(tool_name)
-    if not command:
+    command_or_callable = TOOL_COMMANDS.get(tool_name)
+    if not command_or_callable:
         return VersionCheckResult(error="no_command")
+    command = (
+        command_or_callable() if callable(command_or_callable) else command_or_callable
+    )
 
     # Check if the main executable exists and capture its path
     main_cmd = command[0]
@@ -189,12 +235,19 @@ def _format_failure_reason(
 def _generate_markdown_report(
     env: EnvironmentReport,
     tool_results: dict[str, dict[str, str | None]],
+    *,
+    uncovered_tools: list[str] | None = None,
+    unknown_tools: list[str] | None = None,
+    uncheckable_tools: list[str] | None = None,
 ) -> str:
     """Generate markdown report suitable for GitHub issues.
 
     Args:
         env: Environment report data.
         tool_results: Tool check results.
+        uncovered_tools: Tools with no version command defined.
+        unknown_tools: Requested tool names not found in any source.
+        uncheckable_tools: Requested tools that exist but have no version command.
 
     Returns:
         Markdown-formatted report string.
@@ -228,6 +281,24 @@ def _generate_markdown_report(
         lines.append(f"| {tool_name} | {version} | {status_icon} {status} |")
 
     lines.append("")
+
+    # Warnings section
+    has_warnings = uncovered_tools or unknown_tools or uncheckable_tools
+    if has_warnings:
+        lines.append("### Warnings")
+        lines.append("")
+        if uncovered_tools:
+            lines.append(
+                f"- No version command defined for: {', '.join(uncovered_tools)}",
+            )
+        if unknown_tools:
+            lines.append(f"- Unknown tool(s): {', '.join(unknown_tools)}")
+        if uncheckable_tools:
+            lines.append(
+                f"- No version command for requested tool(s): "
+                f"{', '.join(uncheckable_tools)}",
+            )
+        lines.append("")
 
     # Config info
     if env.lintro.config_file:
@@ -306,12 +377,30 @@ def doctor_command(
             f"{', '.join(uncovered_tools)}[/yellow]",
         )
 
-    # Filter tools if specified
+    # Use all expected versions (manifest + npm + TOOL_VERSIONS),
+    # but only check tools that have version commands defined.
+    # Tools without commands are reported via the uncovered_tools warning above.
+    all_versions = get_all_expected_versions()
+    checkable = {k: v for k, v in all_versions.items() if k in TOOL_COMMANDS}
+    unknown: list[str] = []
+    uncheckable: list[str] = []
     if tools:
         tool_list = [t.strip() for t in tools.split(",")]
-        versions_to_check = {k: v for k, v in TOOL_VERSIONS.items() if k in tool_list}
+        # Warn about completely unknown tool names
+        unknown = [t for t in tool_list if t not in all_versions]
+        if unknown and not json_output and not report:
+            console.print(
+                f"[yellow]Warning: Unknown tool(s): {', '.join(unknown)}[/yellow]",
+            )
+        # Warn about requested tools that exist but have no version command
+        uncheckable = [t for t in tool_list if t in all_versions and t not in checkable]
+        if uncheckable and not json_output and not report:
+            names = ", ".join(uncheckable)
+            msg = f"No version command for requested tool(s): {names}"
+            console.print(f"[yellow]Warning: {msg}[/yellow]")
+        versions_to_check = {k: v for k, v in checkable.items() if k in tool_list}
     else:
-        versions_to_check = TOOL_VERSIONS
+        versions_to_check = checkable
 
     results: dict[str, dict[str, str | None]] = {}
     ok_count = 0
@@ -348,7 +437,13 @@ def doctor_command(
         # env_report is guaranteed to be set since report=True implies
         # the condition (verbose or report or json_output) was True above
         assert env_report is not None
-        markdown = _generate_markdown_report(env_report, results)
+        markdown = _generate_markdown_report(
+            env_report,
+            results,
+            uncovered_tools=uncovered_tools,
+            unknown_tools=unknown,
+            uncheckable_tools=uncheckable,
+        )
         click.echo(markdown)
         return
 
@@ -388,10 +483,15 @@ def doctor_command(
                 "unknown": unknown_count,
             },
         }
+        warnings: dict[str, list[str]] = {}
         if uncovered_tools:
-            output["warnings"] = {
-                "uncovered_tools": uncovered_tools,
-            }
+            warnings["uncovered_tools"] = uncovered_tools
+        if unknown:
+            warnings["unknown_tools"] = unknown
+        if uncheckable:
+            warnings["uncheckable_tools"] = uncheckable
+        if warnings:
+            output["warnings"] = warnings
         # Include environment info in JSON output
         if env_report:
             output["environment"] = {

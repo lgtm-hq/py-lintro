@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import shutil
 import sys
+import sysconfig
 from abc import ABC, abstractmethod
 from typing import TYPE_CHECKING, ClassVar
 
@@ -169,6 +170,57 @@ def _is_compiled_binary() -> bool:
     return is_compiled_binary()
 
 
+def resolve_venv_tool_command(tool_name: str) -> list[str] | None:
+    """Resolve a Python tool command when running inside a virtualenv.
+
+    Checks if the tool exists in the venv's scripts directory (via sysconfig)
+    and returns the appropriate command. Used by both PythonBundledBuilder
+    and PytestBuilder to avoid duplicated venv detection logic.
+
+    Args:
+        tool_name: Name of the tool binary (e.g., "ruff", "pytest").
+
+    Returns:
+        Command list if in a venv and resolved, None if not in a venv.
+    """
+    if sys.prefix == sys.base_prefix:
+        return None  # Not in a venv
+
+    scripts_dir = sysconfig.get_path("scripts")
+    venv_tool = shutil.which(tool_name, path=scripts_dir) if scripts_dir else None
+    if venv_tool:
+        python_exe = sys.executable
+        if python_exe:
+            logger.debug(
+                f"Running in venv ({sys.prefix}), "
+                f"{tool_name} found in venv scripts, "
+                f"using python -m {tool_name}",
+            )
+            return [python_exe, "-m", tool_name]
+
+    # Tool not in venv — try PATH (e.g., separate Homebrew formula)
+    tool_path = shutil.which(tool_name)
+    if tool_path:
+        logger.debug(
+            f"Running in venv ({sys.prefix}), "
+            f"{tool_name} not in venv scripts, "
+            f"found in PATH: {tool_path}",
+        )
+        return [tool_path]
+
+    # Last resort: try python -m anyway
+    python_exe = sys.executable
+    if python_exe:
+        logger.debug(
+            f"Running in venv ({sys.prefix}), "
+            f"{tool_name} not in venv or PATH, "
+            f"falling back to python -m {tool_name}",
+        )
+        return [python_exe, "-m", tool_name]
+
+    return [tool_name]
+
+
 # -----------------------------------------------------------------------------
 # Built-in Builders
 # -----------------------------------------------------------------------------
@@ -226,9 +278,11 @@ class PythonBundledBuilder(CommandBuilder):
     ) -> list[str]:
         """Get command for Python bundled tool.
 
-        When running in a virtual environment, always uses python -m to ensure
-        the tool runs with the same packages as lintro. Otherwise, prefers
-        PATH binary (works with Homebrew, system packages, pipx, uv tool, etc.).
+        When running in a virtual environment, uses resolve_venv_tool_command
+        which prefers python -m if the tool binary lives inside the venv, but
+        falls back to a PATH-based binary when the tool is installed externally
+        (e.g. via a separate Homebrew formula). Outside a venv, prefers PATH
+        binary (works with Homebrew, system packages, pipx, uv tool, etc.).
 
         Args:
             tool_name: String name of the tool.
@@ -249,14 +303,10 @@ class PythonBundledBuilder(CommandBuilder):
             )
             return [tool_name]
 
-        # When running in a venv, always use python -m to ensure consistent env
-        if sys.prefix != sys.base_prefix:
-            python_exe = sys.executable
-            if python_exe:
-                logger.debug(
-                    f"Running in venv ({sys.prefix}), using python -m {tool_name}",
-                )
-                return [python_exe, "-m", tool_name]
+        # When running in a venv, resolve using shared helper
+        venv_cmd = resolve_venv_tool_command(tool_name)
+        if venv_cmd is not None:
+            return venv_cmd
 
         # Outside venv: prefer PATH binary (Homebrew, apt, pipx, etc.)
         tool_path = shutil.which(tool_name)
@@ -300,9 +350,12 @@ class PytestBuilder(CommandBuilder):
     ) -> list[str]:
         """Get command for pytest.
 
-        When running in a virtual environment, always uses python -m pytest to
-        ensure pytest runs with the same packages as lintro. Otherwise, prefers
-        PATH binary (works with Homebrew, system packages, pipx, uv tool, etc.).
+        When running in a virtual environment, uses resolve_venv_tool_command
+        which prefers python -m pytest if the pytest binary lives inside the
+        venv, but falls back to a PATH-based binary when pytest is installed
+        externally (e.g. via a separate Homebrew formula). Outside a venv,
+        prefers PATH binary (works with Homebrew, system packages, pipx,
+        uv tool, etc.).
 
         Args:
             tool_name: String name of the tool.
@@ -323,15 +376,10 @@ class PytestBuilder(CommandBuilder):
             )
             return ["pytest"]
 
-        # When running in a venv, always use python -m pytest to ensure
-        # pytest has access to the same packages as lintro (e.g., loguru)
-        if sys.prefix != sys.base_prefix:
-            python_exe = sys.executable
-            if python_exe:
-                logger.debug(
-                    f"Running in venv ({sys.prefix}), using python -m pytest",
-                )
-                return [python_exe, "-m", "pytest"]
+        # When running in a venv, resolve using shared helper
+        venv_cmd = resolve_venv_tool_command("pytest")
+        if venv_cmd is not None:
+            return venv_cmd
 
         # Outside venv: prefer PATH binary (Homebrew, apt, pipx, etc.)
         tool_path = shutil.which("pytest")

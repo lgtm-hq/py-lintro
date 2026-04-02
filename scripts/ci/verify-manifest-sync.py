@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import ast
 import json
 import os
 import re
@@ -15,6 +16,61 @@ from typing import Any
 
 from packaging.requirements import InvalidRequirement, Requirement
 from packaging.version import InvalidVersion, Version
+
+# Cache for TOOL_VERSIONS loaded from _tool_versions.py, keyed by repo_root
+_tool_versions_cache: dict[str, dict[str, str]] = {}
+
+
+def _load_tool_versions(repo_root: Path) -> dict[str, str]:
+    """Load TOOL_VERSIONS from _tool_versions.py by regex extraction.
+
+    Parses the TOOL_VERSIONS dict from source to avoid importing lintro
+    (which may have uninstalled dependencies in CI).
+
+    Args:
+        repo_root: Path to the repository root.
+
+    Returns:
+        Dictionary mapping tool names (underscore-based) to version strings.
+    """
+    cache_key = str(repo_root)
+    if cache_key in _tool_versions_cache:
+        return _tool_versions_cache[cache_key]
+
+    tv_path = repo_root / "lintro" / "_tool_versions.py"
+    content = tv_path.read_text()
+
+    # Use AST to find the TOOL_VERSIONS assignment, then extract entries
+    # only from that dict (not from other dicts that also use ToolName keys).
+    tree = ast.parse(content)
+    tv_source: str | None = None
+    for node in ast.walk(tree):
+        stmt: ast.Assign | ast.AnnAssign | None = None
+        if (
+            isinstance(node, ast.Assign)
+            and len(node.targets) == 1
+            and isinstance(node.targets[0], ast.Name)
+            and node.targets[0].id == "TOOL_VERSIONS"
+        ) or (
+            isinstance(node, ast.AnnAssign)
+            and isinstance(node.target, ast.Name)
+            and node.target.id == "TOOL_VERSIONS"
+        ):
+            stmt = node
+        if stmt is not None:
+            lines = content.splitlines(keepends=True)
+            tv_source = "".join(lines[stmt.lineno - 1 : stmt.end_lineno])
+            break
+
+    pattern = re.compile(r'ToolName\.(\w+)\s*:\s*"([^"]+)"')
+    versions: dict[str, str] = {}
+    for match in pattern.finditer(tv_source or ""):
+        tool_name = match.group(1).lower()
+        version = match.group(2)
+        versions[tool_name] = version
+
+    _tool_versions_cache[cache_key] = versions
+    return versions
 
 
 def _parse_requirement_safe(req_str: str) -> Requirement | None:
@@ -254,8 +310,19 @@ def main() -> int:
                     )
             continue
 
-        # Skip other install types (binary, cargo, rustup, etc.)
-        # These are not managed via pyproject.toml or package.json
+        # Binary, cargo, and rustup tools: verify against TOOL_VERSIONS
+        if install_type in {"binary", "cargo", "rustup"}:
+            tool_versions = _load_tool_versions(repo_root)
+            tv_version = tool_versions.get(name)
+            if tv_version is None:
+                errors.append(
+                    f"{name}: missing from TOOL_VERSIONS in _tool_versions.py",
+                )
+            elif tv_version != version_str:
+                errors.append(
+                    f"{name}: manifest {version_str} != TOOL_VERSIONS {tv_version}",
+                )
+            continue
 
     if errors:
         print("Manifest sync check failed:")
@@ -268,7 +335,10 @@ def main() -> int:
     if errors:
         return 1
 
-    print("Manifest versions are aligned with pyproject.toml and package.json")
+    print(
+        "Manifest versions are aligned with "
+        "pyproject.toml, package.json, and TOOL_VERSIONS",
+    )
     return 0
 
 

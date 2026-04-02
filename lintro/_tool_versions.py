@@ -9,11 +9,15 @@ pyproject.toml dependencies but can be pinned in the manifest for deterministic
 Docker builds.
 
 Version sources (in priority order):
-- Manifest (lintro/tools/manifest.json)
+- Manifest (lintro/tools/manifest.json) — authoritative when present
 - npm tools (prettier, oxlint, etc.): Read from package.json
   (Renovate updates it natively)
 - Non-npm tools (hadolint, shellcheck, etc.): Defined in TOOL_VERSIONS below
   (Renovate updates via custom regex managers)
+
+IMPORTANT: manifest.json and TOOL_VERSIONS must stay in sync for
+binary/cargo/rustup tools. CI enforces this via verify-manifest-sync.py.
+When adding or updating a tool version, update BOTH files.
 
 For shell scripts that need these versions, use:
     python3 -c "from lintro._tool_versions import get_tool_version; \
@@ -53,11 +57,11 @@ TOOL_VERSIONS: dict[ToolName | str, str] = {
     ToolName.PYTEST: "9.0.2",
     ToolName.RUSTC: "1.92.0",
     ToolName.RUSTFMT: "1.8.0",
-    ToolName.SEMGREP: "1.85.0",
+    ToolName.SEMGREP: "1.151.0",
     ToolName.SHELLCHECK: "0.11.0",
     ToolName.SHFMT: "3.12.0",
     ToolName.SQLFLUFF: "4.0.0",
-    ToolName.TAPLO: "0.13.0",
+    ToolName.TAPLO: "0.10.0",
 }
 
 # Mapping from npm package names to ToolName for npm-managed tools
