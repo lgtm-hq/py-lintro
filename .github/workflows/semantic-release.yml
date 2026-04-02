@@ -58,12 +58,21 @@ jobs:
             metrics.semgrep.dev:443
             api.osv.dev:443
             api.deps.dev:443
+      - name: Create GitHub App installation token
+        id: app-token
+        # yamllint disable-line rule:line-length
+        uses: actions/create-github-app-token@f8d387b68d61c58ab83c6c016672934102569859 # v3
+        with:
+          app-id: ${{ secrets.RELEASE_APP_ID }}
+          private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+
       - name: Checkout
         uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6
         with:
           fetch-depth: 0
           fetch-tags: true
-          token: ${{ secrets.RELEASE_TOKEN || secrets.GITHUB_TOKEN }}
+          token: ${{ steps.app-token.outputs.token }}
 
       - name: Environment setup
         uses: ./.github/actions/setup-env
@@ -80,8 +89,7 @@ jobs:
       - name: Compute next version (semantic-release dry run)
         id: semrel
         env:
-          RELEASE_TOKEN: ${{ secrets.RELEASE_TOKEN }}
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ steps.app-token.outputs.token }}
           MAX_BUMP: minor
         run: uv run python scripts/ci/maintenance/semantic_release_compute_next.py
       - name: Fail if no release tag baseline
@@ -137,7 +145,7 @@ jobs:
         # yamllint disable-line rule:line-length
         uses: peter-evans/create-pull-request@c0f553fe549906ede9cf27b5156039d195d2ece0 # v8
         with:
-          token: ${{ secrets.RELEASE_TOKEN || secrets.GITHUB_TOKEN }}
+          token: ${{ steps.app-token.outputs.token }}
           commit-message: 'chore(release): cut ${{ steps.semrel.outputs.next_version }}'
           title: 'chore(release): prepare ${{ steps.semrel.outputs.next_version }}'
           body: |
