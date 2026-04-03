@@ -13,7 +13,7 @@
     "url": "git+https://github.com/lgtm-hq/py-lintro.git"
   },
   "engines": {
-    "node": ">=22"
+    "node": "v25.9.0"
   },
   "devDependencies": {
     "@astrojs/check": "0.9.8",
@@ -24,7 +24,7 @@
     "prettier": "3.8.1",
     "prettier-plugin-astro": "0.14.1",
     "svelte-check": "4.4.5",
-    "typescript": "^5.9.3",
+    "typescript": "5.9.3",
     "vue-tsc": "3.2.6"
   }
 }

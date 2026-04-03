@@ -4,7 +4,7 @@ version = "0.1.0"
 description = "Resize and standardize ASCII art to consistent dimensions"
 readme = "README.md"
 requires-python = ">=3.11"
-dependencies = ["click>=8.0", "numpy>=1.24", "pillow>=10.0"]
+dependencies = ["click>=8.0", "numpy==2.4.4", "pillow==12.2.0"]
 
 [project.scripts]
 ascii-resizer = "ascii_resizer.cli:main"
@@ -30,4 +30,4 @@ select = ["E", "F", "I", "N", "W", "UP"]
 testpaths = ["tests"]
 
 [dependency-groups]
-dev = ["assertpy>=1.1", "pytest>=9.0.2"]
+dev = ["assertpy==1.1", "pytest>=9.0.2"]

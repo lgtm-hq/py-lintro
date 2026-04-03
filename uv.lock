@@ -1164,26 +1164,26 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "allure-pytest", marker = "extra == 'dev'", specifier = ">=2.15.3" },
-    { name = "anthropic", marker = "extra == 'ai'", specifier = ">=0.39.0" },
-    { name = "assertpy", marker = "extra == 'dev'", specifier = ">=1.1" },
-    { name = "assertpy", marker = "extra == 'test'", specifier = ">=1.1" },
-    { name = "bandit", specifier = ">=1.9.2" },
-    { name = "black", specifier = ">=26.3.1" },
+    { name = "allure-pytest", marker = "extra == 'dev'", specifier = "==2.15.3" },
+    { name = "anthropic", marker = "extra == 'ai'", specifier = "==0.85.0" },
+    { name = "assertpy", marker = "extra == 'dev'", specifier = "==1.1" },
+    { name = "assertpy", marker = "extra == 'test'", specifier = "==1.1" },
+    { name = "bandit", specifier = "==1.9.2" },
+    { name = "black", specifier = "==26.3.1" },
     { name = "click", specifier = ">=8.1.8" },
-    { name = "coverage-badge", specifier = ">=1.1.2" },
-    { name = "coverage-badge", marker = "extra == 'dev'", specifier = ">=1.1.2" },
-    { name = "defusedxml", specifier = ">=0.7.1" },
-    { name = "httpx", specifier = ">=0.28.1" },
-    { name = "httpx", marker = "extra == 'dev'", specifier = ">=0.28.1" },
-    { name = "loguru", specifier = ">=0.7.3" },
-    { name = "mypy", specifier = ">=1.19.1" },
-    { name = "mypy", marker = "extra == 'dev'", specifier = ">=1.19.1" },
-    { name = "openai", marker = "extra == 'ai'", specifier = ">=1.50.0" },
-    { name = "packaging", specifier = ">=25.0" },
-    { name = "pathspec", specifier = ">=0.12.1" },
-    { name = "pydantic", specifier = ">=2.12.5" },
-    { name = "pydoclint", specifier = ">=0.8.3" },
+    { name = "coverage-badge", specifier = "==1.1.2" },
+    { name = "coverage-badge", marker = "extra == 'dev'", specifier = "==1.1.2" },
+    { name = "defusedxml", specifier = "==0.7.1" },
+    { name = "httpx", specifier = "==0.28.1" },
+    { name = "httpx", marker = "extra == 'dev'", specifier = "==0.28.1" },
+    { name = "loguru", specifier = "==0.7.3" },
+    { name = "mypy", specifier = "==1.19.1" },
+    { name = "mypy", marker = "extra == 'dev'", specifier = "==1.19.1" },
+    { name = "openai", marker = "extra == 'ai'", specifier = "==2.28.0" },
+    { name = "packaging", specifier = "==25.0" },
+    { name = "pathspec", specifier = "==1.0.4" },
+    { name = "pydantic", specifier = "==2.12.5" },
+    { name = "pydoclint", specifier = "==0.8.3" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=9.0.2" },
     { name = "pytest", marker = "extra == 'test'", specifier = ">=9.0.2" },
     { name = "pytest-cov", marker = "extra == 'dev'", specifier = ">=7.0.0" },
@@ -1194,43 +1194,43 @@ requires-dist = [
     { name = "pytest-xdist", marker = "extra == 'dev'", specifier = ">=3.8.0" },
     { name = "pytest-xdist", marker = "extra == 'test'", specifier = ">=3.8.0" },
     { name = "python-semantic-release", marker = "extra == 'dev'", specifier = ">=10.5.3" },
-    { name = "rich", specifier = ">=14.2.0" },
-    { name = "ruff", specifier = ">=0.14.10" },
-    { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.14.10" },
-    { name = "semgrep", marker = "extra == 'tools'", specifier = ">=1.151.0" },
-    { name = "sqlfluff", marker = "extra == 'tools'", specifier = ">=4.0.0" },
-    { name = "tabulate", specifier = ">=0.9.0" },
-    { name = "tox", marker = "extra == 'dev'", specifier = ">=4.34.1" },
-    { name = "types-setuptools", marker = "extra == 'typing'", specifier = ">=80.9.0.20251223" },
-    { name = "types-tabulate", marker = "extra == 'typing'", specifier = ">=0.9.0.20241207" },
-    { name = "yamllint", specifier = ">=1.37.1" },
+    { name = "rich", specifier = "==14.2.0" },
+    { name = "ruff", specifier = "==0.14.10" },
+    { name = "ruff", marker = "extra == 'dev'", specifier = "==0.14.10" },
+    { name = "semgrep", marker = "extra == 'tools'", specifier = "==1.151.0" },
+    { name = "sqlfluff", marker = "extra == 'tools'", specifier = "==4.0.0" },
+    { name = "tabulate", specifier = "==0.9.0" },
+    { name = "tox", marker = "extra == 'dev'", specifier = "==4.34.1" },
+    { name = "types-setuptools", marker = "extra == 'typing'", specifier = "==80.9.0.20251223" },
+    { name = "types-tabulate", marker = "extra == 'typing'", specifier = "==0.9.0.20241207" },
+    { name = "yamllint", specifier = "==1.37.1" },
 ]
 provides-extras = ["dev", "test", "typing", "ai", "tools"]
 
 [package.metadata.requires-dev]
 build = [
-    { name = "nuitka", specifier = ">=2.8.9" },
-    { name = "ordered-set", specifier = ">=4.1.0" },
-    { name = "zstandard", specifier = ">=0.25.0" },
+    { name = "nuitka", specifier = "==2.8.9" },
+    { name = "ordered-set", specifier = "==4.1.0" },
+    { name = "zstandard", specifier = "==0.25.0" },
 ]
 dev = [
-    { name = "assertpy", specifier = ">=1.1" },
-    { name = "bandit", specifier = ">=1.9.2" },
-    { name = "black", specifier = ">=26.3.1" },
-    { name = "build", specifier = ">=1.4.0" },
-    { name = "mypy", specifier = ">=1.19.1" },
+    { name = "assertpy", specifier = "==1.1" },
+    { name = "bandit", specifier = "==1.9.2" },
+    { name = "black", specifier = "==26.3.1" },
+    { name = "build", specifier = "==1.4.0" },
+    { name = "mypy", specifier = "==1.19.1" },
     { name = "pytest", specifier = ">=9.0.2" },
     { name = "pytest-cov", specifier = ">=7.0.0" },
     { name = "pytest-mock", specifier = ">=3.15.1" },
     { name = "pytest-timeout", specifier = ">=2.4.0" },
     { name = "pytest-xdist", specifier = ">=3.8.0" },
-    { name = "ruff", specifier = ">=0.14.10" },
-    { name = "tomlkit", specifier = ">=0.13.3" },
-    { name = "twine", specifier = ">=6.2.0" },
-    { name = "types-defusedxml", specifier = ">=0.7.0.20250822" },
-    { name = "types-pyyaml", specifier = ">=6.0.12.20250915" },
-    { name = "types-tabulate", specifier = ">=0.9.0.20241207" },
-    { name = "yamllint", specifier = ">=1.37.1" },
+    { name = "ruff", specifier = "==0.14.10" },
+    { name = "tomlkit", specifier = "==0.13.3" },
+    { name = "twine", specifier = "==6.2.0" },
+    { name = "types-defusedxml", specifier = "==0.7.0.20250822" },
+    { name = "types-pyyaml", specifier = "==6.0.12.20250915" },
+    { name = "types-tabulate", specifier = "==0.9.0.20241207" },
+    { name = "yamllint", specifier = "==1.37.1" },
 ]
 
 [[package]]
@@ -2303,15 +2303,15 @@ wheels = [
 
 [[package]]
 name = "rich"
-version = "14.2.0"
+version = "14.3.3"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "markdown-it-py" },
     { name = "pygments" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/fb/d2/8920e102050a0de7bfabeb4c4614a49248cf8d5d7a8d01885fbb24dc767a/rich-14.2.0.tar.gz", hash = "sha256:73ff50c7c0c1c77c8243079283f4edb376f0f6442433aecb8ce7e6d0b92d1fe4", size = 219990, upload-time = "2025-10-09T14:16:53.064Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/b3/c6/f3b320c27991c46f43ee9d856302c70dc2d0fb2dba4842ff739d5f46b393/rich-14.3.3.tar.gz", hash = "sha256:b8daa0b9e4eef54dd8cf7c86c03713f53241884e814f4e2f5fb342fe520f639b", size = 230582, upload-time = "2026-02-19T17:23:12.474Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/25/7a/b0178788f8dc6cafce37a212c99565fa1fe7872c70c6c9c1e1a372d9d88f/rich-14.2.0-py3-none-any.whl", hash = "sha256:76bc51fe2e57d2b1be1f96c524b890b816e334ab4c1e45888799bfaab0021edd", size = 243393, upload-time = "2025-10-09T14:16:51.245Z" },
+    { url = "https://files.pythonhosted.org/packages/14/25/b208c5683343959b670dc001595f2f3737e051da617f66c31f7c4fa93abc/rich-14.3.3-py3-none-any.whl", hash = "sha256:793431c1f8619afa7d3b52b2cdec859562b950ea0d4b6b505397612db8d5362d", size = 310458, upload-time = "2026-02-19T17:23:13.732Z" },
 ]
 
 [[package]]
