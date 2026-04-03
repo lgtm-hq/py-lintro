@@ -436,6 +436,8 @@ class ToolInstaller:
         """
         if tool.install_type != "binary":
             return False
+        if not shutil.which("bash"):
+            return False
         script = (
             Path(__file__).parent.parent.parent.parent
             / "scripts"

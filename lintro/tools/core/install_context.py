@@ -115,7 +115,12 @@ def _detect_platform_label() -> str:
 def _is_ci() -> bool:
     """Detect if running in a CI environment.
 
-    Checks the generic ``CI`` env var (set by most CI systems) and
-    falls back to specific CI system detection via :class:`CISystem`.
+    Parses the generic ``CI`` env var as a boolean (``CI=false`` is not CI)
+    and falls back to specific CI system detection via :class:`CISystem`.
     """
-    return bool(os.environ.get("CI")) or CISystem.detect() is not None
+    ci_value = os.environ.get("CI", "").lower()
+    if ci_value in ("1", "true", "yes", "on"):
+        return True
+    if ci_value in ("0", "false", "no", "off"):
+        return False
+    return CISystem.detect() is not None
