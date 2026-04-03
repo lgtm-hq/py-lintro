@@ -1,0 +1,89 @@
+{
+  "version": 2,
+  "profiles": {
+    "minimal": {
+      "description": "Bare-minimum linting",
+      "tools": ["ruff", "mypy"]
+    },
+    "recommended": {
+      "description": "Language auto-detect",
+      "strategy": "auto-detect"
+    },
+    "complete": {
+      "description": "Every tool",
+      "strategy": "all"
+    },
+    "ci": {
+      "description": "CI pipeline (no formatters)",
+      "strategy": "filter",
+      "exclude_types": ["formatter"]
+    }
+  },
+  "language_map": {
+    "python": ["ruff", "mypy"],
+    "docker": ["hadolint"],
+    "security": ["gitleaks"]
+  },
+  "tools": [
+    {
+      "name": "ruff",
+      "version": "0.14.0",
+      "install": { "type": "pip", "package": "ruff" },
+      "tier": "tools",
+      "category": "bundled",
+      "version_command": ["ruff", "--version"],
+      "languages": ["python"],
+      "tags": ["linter", "formatter"]
+    },
+    {
+      "name": "mypy",
+      "version": "1.15.0",
+      "install": { "type": "pip", "package": "mypy" },
+      "tier": "tools",
+      "category": "bundled",
+      "version_command": ["mypy", "--version"],
+      "languages": ["python"],
+      "tags": ["type-checker"]
+    },
+    {
+      "name": "hadolint",
+      "version": "2.12.0",
+      "install": { "type": "binary" },
+      "tier": "tools",
+      "category": "external",
+      "version_command": ["hadolint", "--version"],
+      "languages": ["docker"],
+      "tags": ["linter"]
+    },
+    {
+      "name": "gitleaks",
+      "version": "8.18.0",
+      "install": { "type": "binary" },
+      "tier": "tools",
+      "category": "external",
+      "version_command": ["gitleaks", "version"],
+      "languages": [],
+      "tags": ["security"]
+    },
+    {
+      "name": "dev-tool",
+      "version": "0.1.0",
+      "install": { "type": "pip" },
+      "tier": "dev",
+      "category": "bundled",
+      "version_command": ["dev-tool", "--version"],
+      "languages": ["python"],
+      "tags": ["linter"]
+    },
+    {
+      "name": "black",
+      "version": "24.0.0",
+      "install": { "type": "pip", "package": "black" },
+      "tier": "tools",
+      "category": "bundled",
+      "version_command": ["black", "--version"],
+      "languages": ["python"],
+      "tags": ["formatter"]
+    }
+  ]
+}

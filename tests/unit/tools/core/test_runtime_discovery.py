@@ -83,7 +83,7 @@ def test_discover_tool_unavailable() -> None:
 
 
 def test_discover_tool_handles_timeout() -> None:
-    """Handle timeout during version check."""
+    """Tool is unavailable when version probe times out."""
     import subprocess
 
     with (
@@ -95,7 +95,7 @@ def test_discover_tool_handles_timeout() -> None:
     ):
         result = discover_tool("slow_tool", use_cache=False)
 
-        assert_that(result.available).is_true()
+        assert_that(result.available).is_false()
         assert_that(result.version).is_none()
 
 
