@@ -4,7 +4,7 @@ version = "0.1.0"
 description = "Resize and standardize ASCII art to consistent dimensions"
 readme = "README.md"
 requires-python = ">=3.11"
-dependencies = ["click>=8.0", "numpy>=1.24", "pillow>=10.0"]
+dependencies = ["click==8.1.8", "numpy>=1.24", "pillow>=10.0"]
 
 [project.scripts]
 ascii-resizer = "ascii_resizer.cli:main"
