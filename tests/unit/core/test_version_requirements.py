@@ -426,27 +426,14 @@ def test_get_all_tool_versions(mock_run: MagicMock) -> None:
 
     results = get_all_tool_versions()
 
-    # Should have results for all supported tools
+    # Dynamically build expected set from registry (same source of truth)
+    from lintro.tools.core.tool_registry import ToolRegistry
+
+    registry = ToolRegistry.load()
     expected_tools = {
-        "ruff",
-        "black",
-        "bandit",
-        "yamllint",
-        "sqlfluff",
-        "mypy",
-        "pytest",
-        "pydoclint",
-        "hadolint",
-        "actionlint",
-        "markdownlint",
-        "clippy",
-        "rustfmt",
-        "semgrep",
-        "gitleaks",
-        "shellcheck",
-        "shfmt",
-        "taplo",
-        "cargo_audit",
+        tool.name
+        for tool in registry.all_tools(include_dev=True)
+        if tool.version_command
     }
 
     assert_that(set(results.keys())).is_equal_to(expected_tools)

@@ -24,7 +24,9 @@ from lintro.cli_utils.commands.config import config_command  # noqa: E402
 from lintro.cli_utils.commands.doctor import doctor_command  # noqa: E402
 from lintro.cli_utils.commands.format import format_command  # noqa: E402
 from lintro.cli_utils.commands.init import init_command  # noqa: E402
+from lintro.cli_utils.commands.install import install_command  # noqa: E402
 from lintro.cli_utils.commands.list_tools import list_tools_command  # noqa: E402
+from lintro.cli_utils.commands.setup import setup_command  # noqa: E402
 from lintro.cli_utils.commands.test import test_command  # noqa: E402
 from lintro.cli_utils.commands.versions import versions_command  # noqa: E402
 from lintro.tools.core.runtime_discovery import clear_discovery_cache  # noqa: E402
@@ -191,6 +193,8 @@ cast(Any, config_command)._canonical_name = "config"
 cast(Any, doctor_command)._canonical_name = "doctor"
 cast(Any, format_command)._canonical_name = "format"
 cast(Any, init_command)._canonical_name = "init"
+cast(Any, install_command)._canonical_name = "install"
+cast(Any, setup_command)._canonical_name = "setup"
 cast(Any, test_command)._canonical_name = "test"
 cast(Any, list_tools_command)._canonical_name = "list-tools"
 cast(Any, versions_command)._canonical_name = "versions"
@@ -200,6 +204,8 @@ cli.add_command(config_command, name="config")
 cli.add_command(doctor_command, name="doctor")
 cli.add_command(format_command, name="format")
 cli.add_command(init_command, name="init")
+cli.add_command(install_command, name="install")
+cli.add_command(setup_command, name="setup")
 cli.add_command(test_command, name="test")
 cli.add_command(list_tools_command, name="list-tools")
 cli.add_command(versions_command, name="versions")
@@ -213,6 +219,8 @@ cli.add_command(format_command, name="fix")
 cli.add_command(test_command, name="tst")
 cli.add_command(list_tools_command, name="ls")
 cli.add_command(list_tools_command, name="tools")
+cli.add_command(install_command, name="ins")
+cli.add_command(setup_command, name="su")
 cli.add_command(versions_command, name="ver")
 cli.add_command(versions_command, name="version")
 

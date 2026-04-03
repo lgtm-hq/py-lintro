@@ -25,6 +25,7 @@ Usage:
 
 from __future__ import annotations
 
+import json
 import re
 import shutil
 import subprocess
@@ -36,20 +37,43 @@ from loguru import logger
 # Default timeout for version checks (seconds)
 VERSION_CHECK_TIMEOUT: int = 5
 
-# Tool name to version command mapping
-TOOL_VERSION_COMMANDS: dict[str, list[str]] = {
-    "ruff": ["ruff", "--version"],
-    "black": ["black", "--version"],
-    "mypy": ["mypy", "--version"],
-    "bandit": ["bandit", "--version"],
-    "pydoclint": ["pydoclint", "--version"],
-    "yamllint": ["yamllint", "--version"],
-    "pytest": ["pytest", "--version"],
-    "actionlint": ["actionlint", "--version"],
-    "hadolint": ["hadolint", "--version"],
-    "markdownlint": ["markdownlint", "--version"],
-    "clippy": ["cargo", "clippy", "--version"],
-}
+
+@dataclass
+class _ToolProbeInfo:
+    """Internal probe metadata for a single tool."""
+
+    version_command: tuple[str, ...]
+    executable: str | None = None
+
+
+def _get_tool_probe_info() -> dict[str, _ToolProbeInfo] | None:
+    """Get tool probe info (version commands + preferred executable) from the registry.
+
+    Returns:
+        Dict mapping tool names to probe info,
+        or None if the registry is unavailable (early startup).
+    """
+    try:
+        from lintro.tools.core.tool_registry import ToolRegistry
+
+        registry = ToolRegistry.load()
+        return {
+            tool.name: _ToolProbeInfo(
+                version_command=tool.version_command,
+                executable=tool.install_bin,
+            )
+            for tool in registry.all_tools(include_dev=True)
+            if tool.version_command
+        }
+    except (
+        ImportError,
+        FileNotFoundError,
+        KeyError,
+        ValueError,
+        json.JSONDecodeError,
+    ) as exc:
+        logger.debug("Registry unavailable, tool discovery limited: {}", exc)
+        return None
 
 
 @dataclass
@@ -117,7 +141,12 @@ def _extract_version(output: str) -> str | None:
     return None
 
 
-def discover_tool(tool_name: str, use_cache: bool = True) -> DiscoveredTool:
+def discover_tool(
+    tool_name: str,
+    use_cache: bool = True,
+    *,
+    _probe_info: dict[str, _ToolProbeInfo] | None = None,
+) -> DiscoveredTool:
     """Discover a single tool in the system PATH.
 
     Thread-safe: uses lock to protect cache access.
@@ -125,6 +154,8 @@ def discover_tool(tool_name: str, use_cache: bool = True) -> DiscoveredTool:
     Args:
         tool_name: Name of the tool to discover (e.g., "ruff", "black").
         use_cache: Whether to use cached results if available.
+        _probe_info: Pre-loaded probe info map (avoids redundant registry
+            lookups when called from discover_all_tools).
 
     Returns:
         DiscoveredTool with information about the tool.
@@ -136,24 +167,58 @@ def discover_tool(tool_name: str, use_cache: bool = True) -> DiscoveredTool:
 
     logger.debug(f"Discovering tool: {tool_name}")
 
+    # Get probe metadata from the registry (version_command + preferred executable)
+    probe_info_map = _probe_info if _probe_info is not None else _get_tool_probe_info()
+    if probe_info_map is None:
+        # Registry unavailable — don't cache guessed probes so we retry later
+        logger.debug(f"Registry unavailable, skipping discovery for {tool_name}")
+        return DiscoveredTool(
+            name=tool_name,
+            available=False,
+            error_message="registry unavailable",
+        )
+
+    probe = probe_info_map.get(tool_name)
+    version_cmd = probe.version_command if probe else [tool_name, "--version"]
+
+    # Prefer the registry-provided executable (install_bin) over deriving
+    # from version_cmd[0], which misreports tools invoked via wrappers
+    # (e.g., cargo subcommands, node -e probes).
+    if probe and probe.executable:
+        executable = probe.executable
+    else:
+        executable = version_cmd[0] if version_cmd else tool_name
+        # For shell/interpreter-wrapped probes (e.g., ["sh","-c","..."],
+        # ["node","-e","..."], ["python","-c","..."]), resolve the inner
+        # command's executable instead of caching the wrapper path.
+        _wrappers = ("sh", "bash", "zsh", "node", "python", "python3", "ruby", "perl")
+        if (
+            executable in _wrappers
+            and len(version_cmd) >= 3
+            and version_cmd[1] in ("-c", "-e")
+        ):
+            inner_tokens = version_cmd[2].split()
+            if inner_tokens:
+                executable = inner_tokens[0]
+
     # Find the executable in PATH (outside lock - this is IO-bound)
-    path = shutil.which(tool_name)
+    path = shutil.which(executable)
 
     if not path:
         result = DiscoveredTool(
             name=tool_name,
             path="",
             available=False,
-            error_message=f"{tool_name} not found in PATH",
+            error_message=f"{executable} not found in PATH",
         )
         with _discovery_cache_lock:
             _discovery_cache.tools[tool_name] = result
-        logger.debug(f"Tool {tool_name} not found in PATH")
+        logger.debug(f"Tool {tool_name} ({executable}) not found in PATH")
         return result
 
-    # Try to get version (outside lock - this is IO-bound)
+    # Run the full version probe — only mark available if it succeeds
     version: str | None = None
-    version_cmd = TOOL_VERSION_COMMANDS.get(tool_name, [tool_name, "--version"])
+    probe_ok = False
 
     try:
         proc_result = subprocess.run(
@@ -164,6 +229,7 @@ def discover_tool(tool_name: str, use_cache: bool = True) -> DiscoveredTool:
         )
         if proc_result.returncode == 0:
             version = _extract_version(proc_result.stdout or proc_result.stderr)
+            probe_ok = True
     except subprocess.TimeoutExpired:
         logger.debug(f"Version check for {tool_name} timed out")
     except (OSError, subprocess.SubprocessError) as e:
@@ -173,7 +239,8 @@ def discover_tool(tool_name: str, use_cache: bool = True) -> DiscoveredTool:
         name=tool_name,
         path=path,
         version=version,
-        available=True,
+        available=probe_ok,
+        error_message=None if probe_ok else f"{tool_name} version probe failed",
     )
 
     with _discovery_cache_lock:
@@ -198,10 +265,23 @@ def discover_all_tools(use_cache: bool = True) -> dict[str, DiscoveredTool]:
         if use_cache and _discovery_cache.is_populated:
             return _discovery_cache.tools.copy()
 
-    for tool_name in TOOL_VERSION_COMMANDS:
-        discover_tool(tool_name, use_cache=False)
+    probe_info_map = _get_tool_probe_info()
+    if probe_info_map is None:
+        # Registry unavailable — clear stale discoveries so downstream
+        # get_available_tools()/get_unavailable_tools() don't see outdated entries
+        with _discovery_cache_lock:
+            _discovery_cache.tools.clear()
+            _discovery_cache.is_populated = False
+        return {}
+
+    for tool_name in probe_info_map:
+        discover_tool(tool_name, use_cache=False, _probe_info=probe_info_map)
 
     with _discovery_cache_lock:
+        # Prune stale entries for tools no longer in the registry
+        stale = _discovery_cache.tools.keys() - probe_info_map.keys()
+        for key in stale:
+            del _discovery_cache.tools[key]
         _discovery_cache.is_populated = True
         return _discovery_cache.tools.copy()
 
