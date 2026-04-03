@@ -169,6 +169,7 @@ packages = [
   "lintro.plugins",
   "lintro.tools",
   "lintro.tools.core",
+  "lintro.tools.core.install_strategies",
   "lintro.tools.definitions",
   "lintro.tools.implementations",
   "lintro.tools.implementations.pytest",
