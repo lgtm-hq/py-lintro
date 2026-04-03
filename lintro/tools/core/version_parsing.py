@@ -179,12 +179,19 @@ def compare_versions(version1: str, version2: str) -> int:
     return (v1 > v2) - (v1 < v2)
 
 
-def check_tool_version(tool_name: str, command: list[str]) -> ToolVersionInfo:
+def check_tool_version(
+    tool_name: str,
+    command: list[str],
+    *,
+    append_version: bool = True,
+) -> ToolVersionInfo:
     """Check if a tool meets minimum version requirements.
 
     Args:
         tool_name: Name of the tool to check
         command: Command list to run the tool (e.g., ["python", "-m", "ruff"])
+        append_version: Whether to append --version to command (default True).
+            Set to False when command already includes a version subcommand.
 
     Returns:
         ToolVersionInfo: Version check results
@@ -223,8 +230,8 @@ def check_tool_version(tool_name: str, command: list[str]) -> ToolVersionInfo:
     )
 
     try:
-        # Run the tool with --version flag
-        version_cmd = command + ["--version"]
+        # Run the tool with --version flag (unless caller already included it)
+        version_cmd = command if not append_version else [*command, "--version"]
 
         run_env = get_subprocess_env()
 

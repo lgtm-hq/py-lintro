@@ -52,12 +52,60 @@ def _parse_version(output: str, tool_name: str) -> str | None:
     return match.group(0)
 
 
-def _tool_command(tool_name: str, install: dict[str, Any]) -> list[str]:
-    # Use custom version_command from manifest when provided.
-    version_command = install.get("version_command")
+def _tool_command(
+    tool_name: str,
+    install: dict[str, Any],
+    tool_entry: dict[str, Any] | None = None,
+    *,
+    manifest_version: int = 1,
+) -> list[str]:
+    # v2: version_command at top level only; v1 compat: fall back to install
+    version_command: list[str] | None = None
+    if manifest_version >= 2 and tool_entry is not None:
+        version_command = tool_entry.get("version_command")
+        if not isinstance(version_command, list) or not version_command:
+            raise ValueError(
+                f"v2 manifest: tool {tool_name!r} requires a non-empty "
+                f"'version_command' list, got {version_command!r}",
+            )
+        bad = [t for t in version_command if not isinstance(t, str) or not t.strip()]
+        if bad:
+            raise ValueError(
+                f"v2 manifest: tool {tool_name!r} has invalid "
+                f"version_command tokens: {bad!r}",
+            )
+    else:
+        version_command = (
+            tool_entry.get("version_command") if tool_entry else None
+        ) or install.get("version_command", [])
     if isinstance(version_command, list) and version_command:
+        bad = [t for t in version_command if not isinstance(t, str) or not t.strip()]
+        if bad:
+            raise ValueError(
+                f"tool {tool_name!r} has invalid version_command tokens: {bad!r}",
+            )
         return version_command
 
+    return _fallback_version_command(tool_name, install)
+
+
+def _fallback_version_command(
+    tool_name: str,
+    install: dict[str, Any],
+) -> list[str]:
+    """Resolve a version command when no explicit version_command is set.
+
+    Uses tool-specific overrides for known tools that don't follow the
+    standard ``<binary> --version`` pattern.  Falls back to the install
+    block's ``bin`` field (or the tool name) plus ``--version``.
+
+    Args:
+        tool_name: Canonical tool name.
+        install: The ``install`` block from the manifest entry.
+
+    Returns:
+        A list of strings suitable for ``subprocess.run``.
+    """
     bin_name = install.get("bin") if isinstance(install, dict) else None
 
     if tool_name == "cargo_audit":
@@ -83,13 +131,33 @@ def _tool_command(tool_name: str, install: dict[str, Any]) -> list[str]:
     return [bin_name or tool_name, "--version"]
 
 
-def _load_manifest(path: str) -> list[dict[str, Any]]:
+def _load_manifest(path: str) -> tuple[list[dict[str, Any]], int]:
     with open(path, encoding="utf-8") as handle:
         data = json.load(handle)
+    if not isinstance(data, dict):
+        raise ValueError(f"manifest must be a JSON object, got {type(data).__name__}")
     tools = data.get("tools", [])
     if not isinstance(tools, list):
         raise ValueError("manifest tools must be a list")
-    return [t for t in tools if isinstance(t, dict)]
+    for i, entry in enumerate(tools):
+        if not isinstance(entry, dict):
+            raise ValueError(
+                f"manifest tools[{i}] must be a dict, got {type(entry).__name__}",
+            )
+    raw_version = data.get("version", 1)
+    if isinstance(raw_version, bool):
+        raise ValueError(f"manifest version must be an integer, got {raw_version!r}")
+    if isinstance(raw_version, int):
+        manifest_version = raw_version
+    elif isinstance(raw_version, str) and raw_version.isdigit():
+        manifest_version = int(raw_version)
+    else:
+        raise ValueError(f"manifest version must be an integer, got {raw_version!r}")
+    if manifest_version not in {1, 2}:
+        raise ValueError(
+            f"unsupported manifest version {manifest_version}, allowed: {{1, 2}}",
+        )
+    return tools, manifest_version
 
 
 def _iter_tools(
@@ -121,7 +189,12 @@ def main() -> int:
     args = parser.parse_args()
 
     tiers = [t.strip() for t in args.tiers.split(",")]
-    tools = _iter_tools(_load_manifest(args.manifest), tiers)
+    all_tools, manifest_version = _load_manifest(args.manifest)
+    tools = _iter_tools(all_tools, tiers)
+
+    if not tools:
+        print(f"No tools found for tiers {tiers} in {args.manifest}")
+        return 2
 
     failures: list[str] = []
     for tool in tools:
@@ -132,7 +205,12 @@ def main() -> int:
             failures.append(f"{name or '<unknown>'}: missing name or version")
             continue
 
-        cmd = _tool_command(name, install if isinstance(install, dict) else {})
+        cmd = _tool_command(
+            name,
+            install if isinstance(install, dict) else {},
+            tool,
+            manifest_version=manifest_version,
+        )
         code, output = _run(cmd)
         if code != 0:
             cmd_str = " ".join(cmd)

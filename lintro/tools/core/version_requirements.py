@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from loguru import logger
 
+from lintro.tools.core.tool_registry import ToolRegistry
 from lintro.tools.core.version_checking import (
     get_install_hints,
     get_minimum_versions,
@@ -31,54 +32,42 @@ __all__ = [
 def get_all_tool_versions() -> dict[str, ToolVersionInfo]:
     """Get version information for all supported tools.
 
+    Uses the unified ToolRegistry (manifest.json) as the single source of truth
+    for tool commands and version requirements.
+
     Returns:
         dict[str, ToolVersionInfo]: Dictionary mapping tool names to version info.
     """
-    # Define tool commands - handles module-based invocation correctly
-    tool_commands = {
-        # Python bundled tools (available as scripts when installed)
-        "ruff": ["ruff"],
-        "black": ["black"],
-        "bandit": ["bandit"],
-        "yamllint": ["yamllint"],
-        "sqlfluff": ["sqlfluff"],
-        "pydoclint": ["pydoclint"],
-        # Python user tools - require module-based invocation
-        "mypy": ["python", "-m", "mypy"],
-        "pytest": ["python", "-m", "pytest"],
-        # Node.js tools
-        # Note: Users must install these tools explicitly via bun
-        "markdownlint": ["markdownlint-cli2"],
-        # Binary tools
-        "hadolint": ["hadolint"],
-        "actionlint": ["actionlint"],
-        "taplo": ["taplo"],
-        # Security tools
-        "gitleaks": ["gitleaks"],
-        # Rust/Cargo tools
-        "clippy": ["cargo", "clippy"],
-        "rustfmt": ["rustfmt"],
-        # Shell tools
-        "shellcheck": ["shellcheck"],
-        "shfmt": ["shfmt"],
-        # Security tools
-        "semgrep": ["semgrep"],
-        "cargo_audit": ["cargo", "audit"],
-    }
-
+    registry = ToolRegistry.load()
     results = {}
     minimum_versions = get_minimum_versions()
     install_hints = get_install_hints()
 
-    for tool_name, command in tool_commands.items():
+    for tool in registry.all_tools(include_dev=True):
+        if not tool.version_command:
+            continue
+
+        # The manifest's version_command is the complete probe command;
+        # never append an extra --version flag.
         try:
-            results[tool_name] = check_tool_version(tool_name, command)
+            results[tool.name] = check_tool_version(
+                tool.name,
+                list(tool.version_command),
+                append_version=False,
+            )
         except (OSError, ValueError, RuntimeError) as e:
-            logger.debug(f"Failed to check version for {tool_name}: {e}")
-            min_version = minimum_versions.get(tool_name, "unknown")
-            install_hint = install_hints.get(tool_name, f"Install {tool_name}")
-            results[tool_name] = ToolVersionInfo(
-                name=tool_name,
+            logger.debug(f"Failed to check version for {tool.name}: {e}")
+            normalized_key = tool.name.replace("-", "_")
+            min_version = minimum_versions.get(
+                tool.name,
+                minimum_versions.get(normalized_key, "unknown"),
+            )
+            install_hint = install_hints.get(
+                tool.name,
+                install_hints.get(normalized_key, f"Install {tool.name}"),
+            )
+            results[tool.name] = ToolVersionInfo(
+                name=tool.name,
                 min_version=min_version,
                 install_hint=install_hint,
                 error_message=f"Failed to check version: {e}",
