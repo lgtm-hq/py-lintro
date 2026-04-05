@@ -331,19 +331,10 @@ class SqlfluffPlugin(BaseToolPlugin):
                 initial_issues=check_issues,
             )
 
-        if not fix_success:
-            return FileFixResult(
-                file_result=FileProcessingResult(
-                    success=False,
-                    output=fix_output,
-                    issues=check_issues,
-                ),
-                initial_count=len(check_issues),
-                fixed_count=0,
-                initial_issues=check_issues,
-            )
-
-        # Verify remaining issues after fix
+        # Always verify — sqlfluff fix can partially apply fixes even when
+        # the command exits non-zero (e.g. unfixable rules). Rerun the
+        # lint pass to get the true remaining issues before deciding how
+        # many were fixed.
         try:
             verify_success, verify_output = self._run_subprocess(
                 cmd=lint_cmd,
@@ -355,7 +346,7 @@ class SqlfluffPlugin(BaseToolPlugin):
             return FileFixResult(
                 file_result=FileProcessingResult(
                     success=False,
-                    output="",
+                    output=fix_output,
                     issues=check_issues,
                 ),
                 initial_count=len(check_issues),
@@ -379,11 +370,16 @@ class SqlfluffPlugin(BaseToolPlugin):
             )
 
         fixed_count = max(0, len(check_issues) - len(remaining_issues))
+        # Overall success requires both: fix invocation succeeded AND no
+        # issues remain. Surface the fix command's output on failure so
+        # users can see why some fixes didn't apply.
+        overall_success = fix_success and len(remaining_issues) == 0
+        output_text = "" if overall_success else fix_output
 
         return FileFixResult(
             file_result=FileProcessingResult(
-                success=len(remaining_issues) == 0,
-                output="",
+                success=overall_success,
+                output=output_text,
                 issues=remaining_issues,
             ),
             initial_count=len(check_issues),
@@ -453,14 +449,19 @@ class SqlfluffPlugin(BaseToolPlugin):
         if ctx.should_skip:
             return ctx.early_result  # type: ignore[return-value]
 
-        # Track fix-specific metrics
+        # Track fix-specific metrics. We tally per-file so skipped or
+        # errored files still contribute their counts — AggregatedResult
+        # drops issues for those cases, so result.total_issues would
+        # undercount remaining.
         initial_issues_total = 0
+        remaining_issues_total = 0
         all_initial_issues: list[BaseIssue] = []
 
         def processor(file_path: str) -> FileProcessingResult:
-            nonlocal initial_issues_total
+            nonlocal initial_issues_total, remaining_issues_total
             fix_result = self._process_single_file_fix(file_path, ctx.timeout)
             initial_issues_total += fix_result.initial_count
+            remaining_issues_total += fix_result.remaining_count
             all_initial_issues.extend(fix_result.initial_issues)
             return fix_result.file_result
 
@@ -471,10 +472,7 @@ class SqlfluffPlugin(BaseToolPlugin):
             label="Fixing files",
         )
 
-        # Derive remaining_count from the actual issues list to stay
-        # consistent with issues=result.all_issues. Reconcile fixed_count
-        # so the ToolResult invariant (initial == fixed + remaining) holds.
-        remaining_count = result.total_issues
+        remaining_count = remaining_issues_total
         fixed_count = max(0, initial_issues_total - remaining_count)
 
         return ToolResult(
