@@ -351,6 +351,7 @@ class ClippyPlugin(BaseToolPlugin):
                 initial_issues_count=initial_count,
                 fixed_issues_count=0,
                 remaining_issues_count=1,
+                initial_issues=initial_issues if initial_issues else None,
             )
 
         # Re-check after fix to count remaining issues
@@ -378,6 +379,7 @@ class ClippyPlugin(BaseToolPlugin):
                 initial_issues_count=initial_count,
                 fixed_issues_count=0,
                 remaining_issues_count=1,
+                initial_issues=initial_issues if initial_issues else None,
             )
 
         remaining_issues = parse_clippy_output(output=output_after)
@@ -397,4 +399,5 @@ class ClippyPlugin(BaseToolPlugin):
             initial_issues_count=initial_count,
             fixed_issues_count=fixed_count,
             remaining_issues_count=remaining_count,
+            initial_issues=initial_issues if initial_issues else None,
         )

@@ -7,8 +7,12 @@ It parses SQL into an AST and performs linting rules on top of it.
 from __future__ import annotations
 
 import subprocess  # nosec B404 - used safely with shell disabled
+from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from lintro.parsers.base_issue import BaseIssue
 
 from lintro._tool_versions import get_min_version
 from lintro.enums.doc_url_template import DocUrlTemplate
@@ -223,38 +227,133 @@ class SqlfluffPlugin(BaseToolPlugin):
         self,
         file_path: str,
         timeout: int,
-    ) -> FileProcessingResult:
+    ) -> tuple[FileProcessingResult, int, int, Sequence[BaseIssue]]:
         """Process a single SQL file with sqlfluff fix.
+
+        Runs check→fix→verify to track initial and remaining issues.
 
         Args:
             file_path: Path to the SQL file to fix.
             timeout: Timeout in seconds for the sqlfluff command.
 
         Returns:
-            FileProcessingResult with fix results for this file.
+            Tuple of (FileProcessingResult, initial_issues_count,
+            fixed_issues_count, initial_issues).
         """
-        cmd = self._build_fix_command(files=[str(file_path)])
+        # Check for issues before fixing
+        lint_cmd = self._build_lint_command(files=[str(file_path)])
         try:
-            success, output = self._run_subprocess(cmd=cmd, timeout=timeout)
-            return FileProcessingResult(
-                success=success,
-                output=output,
-                issues=[],
-            )
+            _, check_output = self._run_subprocess(cmd=lint_cmd, timeout=timeout)
+            check_issues = parse_sqlfluff_output(output=check_output)
         except subprocess.TimeoutExpired:
-            return FileProcessingResult(
-                success=False,
-                output="",
-                issues=[],
-                skipped=True,
+            return (
+                FileProcessingResult(
+                    success=False,
+                    output="",
+                    issues=[],
+                    skipped=True,
+                ),
+                0,
+                0,
+                [],
             )
         except (OSError, ValueError, RuntimeError) as e:
-            return FileProcessingResult(
-                success=False,
-                output="",
-                issues=[],
-                error=str(e),
+            return (
+                FileProcessingResult(
+                    success=False,
+                    output="",
+                    issues=[],
+                    error=str(e),
+                ),
+                0,
+                0,
+                [],
             )
+
+        if not check_issues:
+            return (
+                FileProcessingResult(success=True, output="", issues=[]),
+                0,
+                0,
+                [],
+            )
+
+        # Apply fix
+        fix_cmd = self._build_fix_command(files=[str(file_path)])
+        try:
+            fix_success, fix_output = self._run_subprocess(
+                cmd=fix_cmd,
+                timeout=timeout,
+            )
+        except subprocess.TimeoutExpired:
+            return (
+                FileProcessingResult(
+                    success=False,
+                    output="",
+                    issues=check_issues,
+                    skipped=True,
+                ),
+                len(check_issues),
+                0,
+                check_issues,
+            )
+        except (OSError, ValueError, RuntimeError) as e:
+            return (
+                FileProcessingResult(
+                    success=False,
+                    output="",
+                    issues=check_issues,
+                    error=str(e),
+                ),
+                len(check_issues),
+                0,
+                check_issues,
+            )
+
+        if not fix_success:
+            return (
+                FileProcessingResult(
+                    success=False,
+                    output=fix_output,
+                    issues=check_issues,
+                ),
+                len(check_issues),
+                0,
+                check_issues,
+            )
+
+        # Verify remaining issues after fix
+        try:
+            _, verify_output = self._run_subprocess(
+                cmd=lint_cmd,
+                timeout=timeout,
+            )
+            remaining_issues = parse_sqlfluff_output(output=verify_output)
+        except (subprocess.TimeoutExpired, OSError, ValueError, RuntimeError):
+            # Verification failed — conservatively report all initial as remaining
+            return (
+                FileProcessingResult(
+                    success=False,
+                    output="",
+                    issues=check_issues,
+                ),
+                len(check_issues),
+                0,
+                check_issues,
+            )
+
+        fixed_count = max(0, len(check_issues) - len(remaining_issues))
+
+        return (
+            FileProcessingResult(
+                success=len(remaining_issues) == 0,
+                output="",
+                issues=remaining_issues,
+            ),
+            len(check_issues),
+            fixed_count,
+            check_issues,
+        )
 
     def doc_url(self, code: str) -> str | None:
         """Return SQLFluff documentation URL for the given rule code.
@@ -318,9 +417,19 @@ class SqlfluffPlugin(BaseToolPlugin):
         if ctx.should_skip:
             return ctx.early_result  # type: ignore[return-value]
 
-        # Process files with progress bar support
+        # Track fix-specific metrics
+        initial_issues_total = 0
+        fixed_issues_total = 0
+        all_initial_issues: list[BaseIssue] = []
+
         def processor(file_path: str) -> FileProcessingResult:
-            return self._process_single_file_fix(file_path, ctx.timeout)
+            nonlocal initial_issues_total, fixed_issues_total
+            fix_out = self._process_single_file_fix(file_path, ctx.timeout)
+            result, initial, fixed, file_initial_issues = fix_out
+            initial_issues_total += initial
+            fixed_issues_total += fixed
+            all_initial_issues.extend(file_initial_issues)
+            return result
 
         result = self._process_files_with_progress(
             files=ctx.files,
@@ -329,10 +438,16 @@ class SqlfluffPlugin(BaseToolPlugin):
             label="Fixing files",
         )
 
+        remaining_count = initial_issues_total - fixed_issues_total
+
         return ToolResult(
             name=self.definition.name,
-            success=result.all_success,
+            success=result.all_success and remaining_count == 0,
             output=result.build_output(timeout=ctx.timeout),
-            issues_count=0,
-            issues=[],
+            issues_count=remaining_count,
+            issues=result.all_issues,
+            initial_issues_count=initial_issues_total,
+            fixed_issues_count=fixed_issues_total,
+            remaining_issues_count=remaining_count,
+            initial_issues=all_initial_issues if all_initial_issues else None,
         )

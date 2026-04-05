@@ -8,8 +8,12 @@ issues in diff mode.
 from __future__ import annotations
 
 import subprocess  # nosec B404 - used safely with shell disabled
+from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from lintro.parsers.base_issue import BaseIssue
 
 from loguru import logger
 
@@ -212,7 +216,7 @@ class ShfmtPlugin(BaseToolPlugin):
         self,
         file_path: str,
         timeout: int,
-    ) -> tuple[FileProcessingResult, int, int]:
+    ) -> tuple[FileProcessingResult, int, int, Sequence[BaseIssue]]:
         """Process a single file in fix mode.
 
         Args:
@@ -220,7 +224,8 @@ class ShfmtPlugin(BaseToolPlugin):
             timeout: Timeout in seconds for the shfmt command.
 
         Returns:
-            Tuple of (FileProcessingResult, initial_issues_count, fixed_issues_count).
+            Tuple of (FileProcessingResult, initial_issues_count,
+            fixed_issues_count, initial_issues).
         """
         # First check if file needs formatting
         check_cmd = self._get_executable_command(tool_name="shfmt") + ["-d"]
@@ -244,6 +249,7 @@ class ShfmtPlugin(BaseToolPlugin):
                     ),
                     0,
                     0,
+                    [],
                 )
 
             # Apply fix with -w flag
@@ -265,6 +271,7 @@ class ShfmtPlugin(BaseToolPlugin):
                     ),
                     len(check_issues),
                     len(check_issues),
+                    check_issues,
                 )
             return (
                 FileProcessingResult(
@@ -274,6 +281,7 @@ class ShfmtPlugin(BaseToolPlugin):
                 ),
                 len(check_issues),
                 0,
+                check_issues,
             )
 
         except subprocess.TimeoutExpired:
@@ -286,6 +294,7 @@ class ShfmtPlugin(BaseToolPlugin):
                 ),
                 0,
                 0,
+                [],
             )
         except (OSError, ValueError, RuntimeError) as e:
             return (
@@ -297,6 +306,7 @@ class ShfmtPlugin(BaseToolPlugin):
                 ),
                 0,
                 0,
+                [],
             )
 
     def check(self, paths: list[str], options: dict[str, object]) -> ToolResult:
@@ -349,6 +359,7 @@ class ShfmtPlugin(BaseToolPlugin):
         initial_issues_total = 0
         fixed_issues_total = 0
         fixed_files: list[str] = []
+        all_initial_issues: list[BaseIssue] = []
 
         def process_fix(file_path: str) -> FileProcessingResult:
             """Process a single file for fixing.
@@ -360,12 +371,13 @@ class ShfmtPlugin(BaseToolPlugin):
                 FileProcessingResult with processing outcome.
             """
             nonlocal initial_issues_total, fixed_issues_total, fixed_files
-            result, initial, fixed = self._process_single_file_fix(
+            result, initial, fixed, file_initial_issues = self._process_single_file_fix(
                 file_path=file_path,
                 timeout=ctx.timeout,
             )
             initial_issues_total += initial
             fixed_issues_total += fixed
+            all_initial_issues.extend(file_initial_issues)
             if fixed > 0:
                 fixed_files.append(file_path)
             return result
@@ -411,4 +423,5 @@ class ShfmtPlugin(BaseToolPlugin):
             initial_issues_count=initial_issues_total,
             fixed_issues_count=fixed_issues_total,
             remaining_issues_count=remaining_issues,
+            initial_issues=all_initial_issues if all_initial_issues else None,
         )

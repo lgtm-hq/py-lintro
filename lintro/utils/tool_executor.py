@@ -192,33 +192,24 @@ def _display_fix_result(
         success_func: Function to display success message.
         action: The action being performed.
     """
+    from lintro.formatters import format_fix_results
     from lintro.utils.output import format_tool_output
     from lintro.utils.result_formatters import print_tool_result
 
-    # When in fix mode and initial_issues is populated and ALL issues
-    # were fixed (remaining == 0), show what was fixed. When some issues
-    # remain, the initial_issues list is misleading because not all of
-    # them were actually resolved.
-    remaining = getattr(result, "remaining_issues_count", None)
-    if remaining is None:
-        remaining = getattr(result, "issues_count", None)
-    if (
-        action == Action.FIX
-        and result.initial_issues
-        and not raw_output
-        and remaining == 0
-    ):
-        # Format the initial issues as a table
-        issues_display = format_tool_output(
-            tool_name=result.name,
-            output="",
+    # When in fix mode and initial_issues is populated, show two tables:
+    # "Detected issues" (pre-fix) and "Remaining issues" (post-fix).
+    if action == Action.FIX and result.initial_issues and not raw_output:
+        remaining_issues = list(result.issues) if result.issues else None
+        issues_display = format_fix_results(
+            detected_issues=list(result.initial_issues),
+            remaining_issues=remaining_issues,
             output_format=output_format,
-            issues=list(result.initial_issues),
+            tool_name=result.name,
         )
         if issues_display and issues_display.strip():
             console_output_func(text=issues_display)
 
-        # Show the count summary below the table
+        # Show the count summary below the tables
         print_tool_result(
             console_output_func=console_output_func,
             success_func=success_func,
