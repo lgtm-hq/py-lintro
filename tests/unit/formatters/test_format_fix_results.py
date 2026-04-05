@@ -89,11 +89,19 @@ def test_json_format_merges_tables() -> None:
 
 
 def test_json_format_deduplicates() -> None:
-    """JSON format deduplicates issues present in both detected and remaining."""
-    issue = _make_issue(code="E501", message="line too long")
+    """JSON dedupes by attributes, not object identity.
+
+    Construct two distinct RuffIssue instances with identical attributes
+    to verify the key used for deduplication is attribute-based.
+    """
+    detected_issue = _make_issue(code="E501", message="line too long")
+    remaining_issue = _make_issue(code="E501", message="line too long")
+    # Sanity check: these are different instances
+    assert_that(detected_issue).is_not_same_as(remaining_issue)
+
     result = format_fix_results(
-        [issue],
-        remaining_issues=[issue],
+        [detected_issue],
+        remaining_issues=[remaining_issue],
         output_format="json",
     )
 
