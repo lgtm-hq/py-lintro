@@ -92,12 +92,15 @@ def test_write_json_file_includes_parsed_issues(
     assert_that(issues[0]["message"]).is_equal_to("Test error")
 
 
-def test_write_json_file_includes_initial_issues(
+def test_write_json_file_omits_initial_issues(
     tmp_path: Path,
     mock_tool_result_factory: Callable[..., MockToolResult],
     mock_issue_factory: Callable[..., MockIssue],
 ) -> None:
-    """Verify pre-fix issues from initial_issues are exported to JSON.
+    """JSON file output stays collapsed — no initial_issues key is emitted.
+
+    The JSON schema is unchanged for backward compatibility even when the
+    ToolResult carries pre-fix issues.
 
     Args:
         tmp_path: Temporary directory path for test output.
@@ -111,7 +114,6 @@ def test_write_json_file_includes_initial_issues(
             issues_count=0,
             initial_issues=[
                 mock_issue_factory(file="a.py", line=1, code="F401", message="x"),
-                mock_issue_factory(file="b.py", line=2, code="E501", message="y"),
             ],
         ),
     ]
@@ -122,12 +124,8 @@ def test_write_json_file_includes_initial_issues(
         all_results=results,  # type: ignore[arg-type]
         action=Action.FIX,
         total_issues=0,
-        total_fixed=2,
+        total_fixed=1,
     )
 
     content = json.loads(output_path.read_text())
-    initial = content["results"][0]["initial_issues"]
-
-    assert_that(initial).is_length(2)
-    assert_that(initial[0]["code"]).is_equal_to("F401")
-    assert_that(initial[1]["code"]).is_equal_to("E501")
+    assert_that(content["results"][0]).does_not_contain_key("initial_issues")
