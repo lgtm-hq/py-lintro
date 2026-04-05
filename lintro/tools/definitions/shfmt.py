@@ -304,7 +304,7 @@ class ShfmtPlugin(BaseToolPlugin):
         ]
 
         try:
-            fix_success, _ = self._run_subprocess(
+            fix_success, fix_output = self._run_subprocess(
                 cmd=fix_cmd,
                 timeout=timeout,
             )
@@ -344,10 +344,12 @@ class ShfmtPlugin(BaseToolPlugin):
                 fixed_count=len(check_issues),
                 initial_issues=check_issues,
             )
+        # Fix command exited non-zero: preserve the subprocess output
+        # (stderr/stdout) so users can see why the fix failed.
         return FileFixResult(
             file_result=FileProcessingResult(
                 success=False,
-                output="",
+                output=fix_output,
                 issues=check_issues,
             ),
             initial_count=len(check_issues),
@@ -457,7 +459,15 @@ class ShfmtPlugin(BaseToolPlugin):
                 f"Failed to process {result.execution_failures} file(s)",
             )
 
-        final_output = "\n".join(summary_parts) if summary_parts else "No fixes needed."
+        summary = "\n".join(summary_parts) if summary_parts else "No fixes needed."
+        # Combine the summary with per-file diagnostic output so failure
+        # messages from the fix subprocess are preserved alongside the
+        # high-level counts.
+        per_file_output = result.build_output(timeout=ctx.timeout) or ""
+        if per_file_output.strip():
+            final_output = f"{summary}\n\n{per_file_output}".rstrip()
+        else:
+            final_output = summary
 
         logger.debug(
             f"[ShfmtPlugin] Fix complete: initial={initial_issues_total}, "

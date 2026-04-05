@@ -341,13 +341,16 @@ class SqlfluffPlugin(BaseToolPlugin):
                 timeout=timeout,
             )
             remaining_issues = parse_sqlfluff_output(output=verify_output)
-        except (subprocess.TimeoutExpired, OSError, ValueError, RuntimeError):
-            # Verification failed — conservatively report all initial as remaining
+        except (subprocess.TimeoutExpired, OSError, ValueError, RuntimeError) as e:
+            # Verification failed — mark as execution failure so
+            # AggregatedResult treats it as such, and conservatively
+            # report all initial as remaining.
             return FileFixResult(
                 file_result=FileProcessingResult(
                     success=False,
                     output=fix_output,
                     issues=check_issues,
+                    error=str(e),
                 ),
                 initial_count=len(check_issues),
                 fixed_count=0,
