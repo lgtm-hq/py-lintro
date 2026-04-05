@@ -132,7 +132,7 @@ def test_is_not_available_without_pr_number(test_token: str) -> None:
 def test_reads_env_vars() -> None:
     """Read token, repo, and PR number from environment."""
     env = {
-        "GITHUB_TOKEN": "ghp_from_env",
+        "GITHUB_TOKEN": "ghp_from_env",  # nosec B105
         "GITHUB_REPOSITORY": "org/repo",
         "GITHUB_REF": "refs/pull/99/merge",
     }
