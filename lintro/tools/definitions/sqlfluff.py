@@ -450,19 +450,19 @@ class SqlfluffPlugin(BaseToolPlugin):
             return ctx.early_result  # type: ignore[return-value]
 
         # Track fix-specific metrics. We tally per-file so skipped or
-        # errored files still contribute their counts — AggregatedResult
-        # drops issues for those cases, so result.total_issues would
-        # undercount remaining.
+        # errored files still contribute their issues — AggregatedResult
+        # drops issues for those cases, so result.all_issues would miss
+        # them.
         initial_issues_total = 0
-        remaining_issues_total = 0
         all_initial_issues: list[BaseIssue] = []
+        all_remaining_issues: list[BaseIssue] = []
 
         def processor(file_path: str) -> FileProcessingResult:
-            nonlocal initial_issues_total, remaining_issues_total
+            nonlocal initial_issues_total
             fix_result = self._process_single_file_fix(file_path, ctx.timeout)
             initial_issues_total += fix_result.initial_count
-            remaining_issues_total += fix_result.remaining_count
             all_initial_issues.extend(fix_result.initial_issues)
+            all_remaining_issues.extend(fix_result.remaining_issues)
             return fix_result.file_result
 
         result = self._process_files_with_progress(
@@ -472,7 +472,7 @@ class SqlfluffPlugin(BaseToolPlugin):
             label="Fixing files",
         )
 
-        remaining_count = remaining_issues_total
+        remaining_count = len(all_remaining_issues)
         fixed_count = max(0, initial_issues_total - remaining_count)
 
         return ToolResult(
@@ -480,7 +480,7 @@ class SqlfluffPlugin(BaseToolPlugin):
             success=result.all_success and remaining_count == 0,
             output=result.build_output(timeout=ctx.timeout),
             issues_count=remaining_count,
-            issues=result.all_issues,
+            issues=all_remaining_issues,
             initial_issues_count=initial_issues_total,
             fixed_issues_count=fixed_count,
             remaining_issues_count=remaining_count,

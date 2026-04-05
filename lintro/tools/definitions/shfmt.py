@@ -226,9 +226,12 @@ class ShfmtPlugin(BaseToolPlugin):
             FileFixResult with per-file processing result and fix metrics.
         """
         # First check if file needs formatting
-        check_cmd = self._get_executable_command(tool_name="shfmt") + ["-d"]
-        check_cmd.extend(self._build_common_args())
-        check_cmd.append(file_path)
+        check_cmd = [
+            *self._get_executable_command(tool_name="shfmt"),
+            "-d",
+            *self._build_common_args(),
+            file_path,
+        ]
 
         # Check step
         try:
@@ -293,9 +296,12 @@ class ShfmtPlugin(BaseToolPlugin):
             )
 
         # Apply fix with -w flag
-        fix_cmd = self._get_executable_command(tool_name="shfmt") + ["-w"]
-        fix_cmd.extend(self._build_common_args())
-        fix_cmd.append(file_path)
+        fix_cmd = [
+            *self._get_executable_command(tool_name="shfmt"),
+            "-w",
+            *self._build_common_args(),
+            file_path,
+        ]
 
         try:
             fix_success, _ = self._run_subprocess(
@@ -395,11 +401,14 @@ class ShfmtPlugin(BaseToolPlugin):
         if ctx.should_skip:
             return ctx.early_result  # type: ignore[return-value]
 
-        # Track fix-specific metrics
+        # Track fix-specific metrics. We collect remaining issues per-file
+        # because AggregatedResult drops issues from skipped/errored files,
+        # which would undercount the final issues list.
         initial_issues_total = 0
         fixed_issues_total = 0
         fixed_files: list[str] = []
         all_initial_issues: list[BaseIssue] = []
+        all_remaining_issues: list[BaseIssue] = []
 
         def process_fix(file_path: str) -> FileProcessingResult:
             """Process a single file for fixing.
@@ -418,6 +427,7 @@ class ShfmtPlugin(BaseToolPlugin):
             initial_issues_total += fix_result.initial_count
             fixed_issues_total += fix_result.fixed_count
             all_initial_issues.extend(fix_result.initial_issues)
+            all_remaining_issues.extend(fix_result.remaining_issues)
             if fix_result.fixed_count > 0:
                 fixed_files.append(file_path)
             return fix_result.file_result
@@ -459,7 +469,7 @@ class ShfmtPlugin(BaseToolPlugin):
             success=result.all_success and remaining_issues == 0,
             output=final_output,
             issues_count=remaining_issues,
-            issues=result.all_issues,
+            issues=all_remaining_issues,
             initial_issues_count=initial_issues_total,
             fixed_issues_count=fixed_issues_total,
             remaining_issues_count=remaining_issues,
