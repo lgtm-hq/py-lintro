@@ -51,6 +51,28 @@ class FileProcessingResult:
 
 
 @dataclass
+class FileFixResult:
+    """Result from processing a single file in fix mode.
+
+    Bundles the standard FileProcessingResult with fix-specific metrics
+    so tools can report both pre-fix detection and post-fix remaining
+    issues to the two-table display pipeline.
+
+    Attributes:
+        file_result: Standard per-file processing result (carries the
+            remaining issues in `file_result.issues`).
+        initial_count: Number of issues detected before the fix ran.
+        fixed_count: Number of issues the fix resolved.
+        initial_issues: The pre-fix issues, preserved for display.
+    """
+
+    file_result: FileProcessingResult
+    initial_count: int
+    fixed_count: int
+    initial_issues: Sequence[BaseIssue]
+
+
+@dataclass
 class AggregatedResult:
     """Aggregated results from processing multiple files.
 

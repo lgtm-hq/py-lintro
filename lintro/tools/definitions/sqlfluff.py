@@ -7,7 +7,6 @@ It parses SQL into an AST and performs linting rules on top of it.
 from __future__ import annotations
 
 import subprocess  # nosec B404 - used safely with shell disabled
-from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
@@ -21,7 +20,7 @@ from lintro.enums.tool_type import ToolType
 from lintro.models.core.tool_result import ToolResult
 from lintro.parsers.sqlfluff.sqlfluff_parser import parse_sqlfluff_output
 from lintro.plugins.base import BaseToolPlugin
-from lintro.plugins.file_processor import FileProcessingResult
+from lintro.plugins.file_processor import FileFixResult, FileProcessingResult
 from lintro.plugins.protocol import ToolDefinition
 from lintro.plugins.registry import register_tool
 from lintro.tools.core.option_validators import (
@@ -227,7 +226,7 @@ class SqlfluffPlugin(BaseToolPlugin):
         self,
         file_path: str,
         timeout: int,
-    ) -> tuple[FileProcessingResult, int, int, Sequence[BaseIssue]]:
+    ) -> FileFixResult:
         """Process a single SQL file with sqlfluff fix.
 
         Runs check→fix→verify to track initial and remaining issues.
@@ -237,8 +236,7 @@ class SqlfluffPlugin(BaseToolPlugin):
             timeout: Timeout in seconds for the sqlfluff command.
 
         Returns:
-            Tuple of (FileProcessingResult, initial_issues_count,
-            fixed_issues_count, initial_issues).
+            FileFixResult with per-file processing result and fix metrics.
         """
         # Check for issues before fixing
         lint_cmd = self._build_lint_command(files=[str(file_path)])
@@ -249,52 +247,56 @@ class SqlfluffPlugin(BaseToolPlugin):
             )
             check_issues = parse_sqlfluff_output(output=check_output)
         except subprocess.TimeoutExpired:
-            return (
-                FileProcessingResult(
+            return FileFixResult(
+                file_result=FileProcessingResult(
                     success=False,
                     output="",
                     issues=[],
                     skipped=True,
                 ),
-                0,
-                0,
-                [],
+                initial_count=0,
+                fixed_count=0,
+                initial_issues=[],
             )
         except (OSError, ValueError, RuntimeError) as e:
-            return (
-                FileProcessingResult(
+            return FileFixResult(
+                file_result=FileProcessingResult(
                     success=False,
                     output="",
                     issues=[],
                     error=str(e),
                 ),
-                0,
-                0,
-                [],
+                initial_count=0,
+                fixed_count=0,
+                initial_issues=[],
             )
 
         # sqlfluff returns non-zero when issues are found (expected). If it
         # returns non-zero and we also parsed no issues, the tool itself
         # failed — surface that instead of reporting success.
         if not check_success and not check_issues:
-            return (
-                FileProcessingResult(
+            return FileFixResult(
+                file_result=FileProcessingResult(
                     success=False,
                     output=check_output,
                     issues=[],
                     error="sqlfluff lint failed before fix",
                 ),
-                0,
-                0,
-                [],
+                initial_count=0,
+                fixed_count=0,
+                initial_issues=[],
             )
 
         if not check_issues:
-            return (
-                FileProcessingResult(success=True, output="", issues=[]),
-                0,
-                0,
-                [],
+            return FileFixResult(
+                file_result=FileProcessingResult(
+                    success=True,
+                    output="",
+                    issues=[],
+                ),
+                initial_count=0,
+                fixed_count=0,
+                initial_issues=[],
             )
 
         # Apply fix
@@ -305,40 +307,40 @@ class SqlfluffPlugin(BaseToolPlugin):
                 timeout=timeout,
             )
         except subprocess.TimeoutExpired:
-            return (
-                FileProcessingResult(
+            return FileFixResult(
+                file_result=FileProcessingResult(
                     success=False,
                     output="",
                     issues=check_issues,
                     skipped=True,
                 ),
-                len(check_issues),
-                0,
-                check_issues,
+                initial_count=len(check_issues),
+                fixed_count=0,
+                initial_issues=check_issues,
             )
         except (OSError, ValueError, RuntimeError) as e:
-            return (
-                FileProcessingResult(
+            return FileFixResult(
+                file_result=FileProcessingResult(
                     success=False,
                     output="",
                     issues=check_issues,
                     error=str(e),
                 ),
-                len(check_issues),
-                0,
-                check_issues,
+                initial_count=len(check_issues),
+                fixed_count=0,
+                initial_issues=check_issues,
             )
 
         if not fix_success:
-            return (
-                FileProcessingResult(
+            return FileFixResult(
+                file_result=FileProcessingResult(
                     success=False,
                     output=fix_output,
                     issues=check_issues,
                 ),
-                len(check_issues),
-                0,
-                check_issues,
+                initial_count=len(check_issues),
+                fixed_count=0,
+                initial_issues=check_issues,
             )
 
         # Verify remaining issues after fix
@@ -350,43 +352,43 @@ class SqlfluffPlugin(BaseToolPlugin):
             remaining_issues = parse_sqlfluff_output(output=verify_output)
         except (subprocess.TimeoutExpired, OSError, ValueError, RuntimeError):
             # Verification failed — conservatively report all initial as remaining
-            return (
-                FileProcessingResult(
+            return FileFixResult(
+                file_result=FileProcessingResult(
                     success=False,
                     output="",
                     issues=check_issues,
                 ),
-                len(check_issues),
-                0,
-                check_issues,
+                initial_count=len(check_issues),
+                fixed_count=0,
+                initial_issues=check_issues,
             )
 
         # Verification tool failure: non-zero exit with no parsed issues means
         # the verify lint invocation itself failed, not that issues remain.
         if not verify_success and not remaining_issues:
-            return (
-                FileProcessingResult(
+            return FileFixResult(
+                file_result=FileProcessingResult(
                     success=False,
                     output=verify_output,
                     issues=check_issues,
                     error="sqlfluff lint failed during verification",
                 ),
-                len(check_issues),
-                0,
-                check_issues,
+                initial_count=len(check_issues),
+                fixed_count=0,
+                initial_issues=check_issues,
             )
 
         fixed_count = max(0, len(check_issues) - len(remaining_issues))
 
-        return (
-            FileProcessingResult(
+        return FileFixResult(
+            file_result=FileProcessingResult(
                 success=len(remaining_issues) == 0,
                 output="",
                 issues=remaining_issues,
             ),
-            len(check_issues),
-            fixed_count,
-            check_issues,
+            initial_count=len(check_issues),
+            fixed_count=fixed_count,
+            initial_issues=check_issues,
         )
 
     def doc_url(self, code: str) -> str | None:
@@ -457,11 +459,10 @@ class SqlfluffPlugin(BaseToolPlugin):
 
         def processor(file_path: str) -> FileProcessingResult:
             nonlocal initial_issues_total
-            fix_out = self._process_single_file_fix(file_path, ctx.timeout)
-            result, initial, _fixed, file_initial_issues = fix_out
-            initial_issues_total += initial
-            all_initial_issues.extend(file_initial_issues)
-            return result
+            fix_result = self._process_single_file_fix(file_path, ctx.timeout)
+            initial_issues_total += fix_result.initial_count
+            all_initial_issues.extend(fix_result.initial_issues)
+            return fix_result.file_result
 
         result = self._process_files_with_progress(
             files=ctx.files,

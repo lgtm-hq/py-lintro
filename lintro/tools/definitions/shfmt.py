@@ -8,7 +8,6 @@ issues in diff mode.
 from __future__ import annotations
 
 import subprocess  # nosec B404 - used safely with shell disabled
-from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
@@ -23,7 +22,7 @@ from lintro.enums.tool_type import ToolType
 from lintro.models.core.tool_result import ToolResult
 from lintro.parsers.shfmt.shfmt_parser import parse_shfmt_output
 from lintro.plugins.base import BaseToolPlugin
-from lintro.plugins.file_processor import FileProcessingResult
+from lintro.plugins.file_processor import FileFixResult, FileProcessingResult
 from lintro.plugins.protocol import ToolDefinition
 from lintro.plugins.registry import register_tool
 from lintro.tools.core.option_validators import (
@@ -216,7 +215,7 @@ class ShfmtPlugin(BaseToolPlugin):
         self,
         file_path: str,
         timeout: int,
-    ) -> tuple[FileProcessingResult, int, int, Sequence[BaseIssue]]:
+    ) -> FileFixResult:
         """Process a single file in fix mode.
 
         Args:
@@ -224,8 +223,7 @@ class ShfmtPlugin(BaseToolPlugin):
             timeout: Timeout in seconds for the shfmt command.
 
         Returns:
-            Tuple of (FileProcessingResult, initial_issues_count,
-            fixed_issues_count, initial_issues).
+            FileFixResult with per-file processing result and fix metrics.
         """
         # First check if file needs formatting
         check_cmd = self._get_executable_command(tool_name="shfmt") + ["-d"]
@@ -241,15 +239,15 @@ class ShfmtPlugin(BaseToolPlugin):
 
             if not check_issues:
                 # No issues found, file is already formatted
-                return (
-                    FileProcessingResult(
+                return FileFixResult(
+                    file_result=FileProcessingResult(
                         success=True,
                         output="",
                         issues=[],
                     ),
-                    0,
-                    0,
-                    [],
+                    initial_count=0,
+                    fixed_count=0,
+                    initial_issues=[],
                 )
 
             # Apply fix with -w flag
@@ -263,50 +261,50 @@ class ShfmtPlugin(BaseToolPlugin):
             )
 
             if fix_success:
-                return (
-                    FileProcessingResult(
+                return FileFixResult(
+                    file_result=FileProcessingResult(
                         success=True,
                         output="",
                         issues=[],
                     ),
-                    len(check_issues),
-                    len(check_issues),
-                    check_issues,
+                    initial_count=len(check_issues),
+                    fixed_count=len(check_issues),
+                    initial_issues=check_issues,
                 )
-            return (
-                FileProcessingResult(
+            return FileFixResult(
+                file_result=FileProcessingResult(
                     success=False,
                     output="",
                     issues=check_issues,
                 ),
-                len(check_issues),
-                0,
-                check_issues,
+                initial_count=len(check_issues),
+                fixed_count=0,
+                initial_issues=check_issues,
             )
 
         except subprocess.TimeoutExpired:
-            return (
-                FileProcessingResult(
+            return FileFixResult(
+                file_result=FileProcessingResult(
                     success=False,
                     output="",
                     issues=[],
                     skipped=True,
                 ),
-                0,
-                0,
-                [],
+                initial_count=0,
+                fixed_count=0,
+                initial_issues=[],
             )
         except (OSError, ValueError, RuntimeError) as e:
-            return (
-                FileProcessingResult(
+            return FileFixResult(
+                file_result=FileProcessingResult(
                     success=False,
                     output="",
                     issues=[],
                     error=str(e),
                 ),
-                0,
-                0,
-                [],
+                initial_count=0,
+                fixed_count=0,
+                initial_issues=[],
             )
 
     def check(self, paths: list[str], options: dict[str, object]) -> ToolResult:
@@ -371,16 +369,16 @@ class ShfmtPlugin(BaseToolPlugin):
                 FileProcessingResult with processing outcome.
             """
             nonlocal initial_issues_total, fixed_issues_total, fixed_files
-            result, initial, fixed, file_initial_issues = self._process_single_file_fix(
+            fix_result = self._process_single_file_fix(
                 file_path=file_path,
                 timeout=ctx.timeout,
             )
-            initial_issues_total += initial
-            fixed_issues_total += fixed
-            all_initial_issues.extend(file_initial_issues)
-            if fixed > 0:
+            initial_issues_total += fix_result.initial_count
+            fixed_issues_total += fix_result.fixed_count
+            all_initial_issues.extend(fix_result.initial_issues)
+            if fix_result.fixed_count > 0:
                 fixed_files.append(file_path)
-            return result
+            return fix_result.file_result
 
         result = self._process_files_with_progress(
             files=ctx.files,
