@@ -17,7 +17,7 @@ from lintro.utils.output.file_writer import write_output_file
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-    from .conftest import MockIssue, MockToolResult
+    from .conftest import MockToolResult
 
 
 def test_write_plain_file_creates_valid_structure(
@@ -81,14 +81,16 @@ def test_write_plain_file_shows_fixed_count_for_fix_action(
 def test_write_plain_fix_mode_shows_detected_and_remaining(
     tmp_path: Path,
     mock_tool_result_factory: Callable[..., MockToolResult],
-    mock_issue_factory: Callable[..., MockIssue],
 ) -> None:
     """Fix-mode plain output renders Detected and Remaining tables.
+
+    Uses real RuffIssue instances because the plain/grid path delegates
+    to ``format_fix_results`` which requires BaseIssue subclasses — the
+    shared ``MockIssue`` fixture used elsewhere doesn't inherit from it.
 
     Args:
         tmp_path: Temporary directory path for test output.
         mock_tool_result_factory: Factory for creating mock tool results.
-        mock_issue_factory: Factory for creating mock issues.
     """
     from lintro.parsers.ruff.ruff_issue import RuffIssue
 

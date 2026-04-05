@@ -230,75 +230,13 @@ class ShfmtPlugin(BaseToolPlugin):
         check_cmd.extend(self._build_common_args())
         check_cmd.append(file_path)
 
+        # Check step
         try:
             check_success, check_output = self._run_subprocess(
                 cmd=check_cmd,
                 timeout=timeout,
             )
             check_issues = parse_shfmt_output(output=check_output)
-
-            # shfmt -d exits non-zero when a diff is produced (expected).
-            # If it exits non-zero AND we parsed no diff, the invocation
-            # itself failed — surface the error instead of reporting a
-            # clean file.
-            if not check_success and not check_issues:
-                return FileFixResult(
-                    file_result=FileProcessingResult(
-                        success=False,
-                        output=check_output,
-                        issues=[],
-                        error="shfmt check failed before fix",
-                    ),
-                    initial_count=0,
-                    fixed_count=0,
-                    initial_issues=[],
-                )
-
-            if not check_issues:
-                # No issues found, file is already formatted
-                return FileFixResult(
-                    file_result=FileProcessingResult(
-                        success=True,
-                        output="",
-                        issues=[],
-                    ),
-                    initial_count=0,
-                    fixed_count=0,
-                    initial_issues=[],
-                )
-
-            # Apply fix with -w flag
-            fix_cmd = self._get_executable_command(tool_name="shfmt") + ["-w"]
-            fix_cmd.extend(self._build_common_args())
-            fix_cmd.append(file_path)
-
-            fix_success, _ = self._run_subprocess(
-                cmd=fix_cmd,
-                timeout=timeout,
-            )
-
-            if fix_success:
-                return FileFixResult(
-                    file_result=FileProcessingResult(
-                        success=True,
-                        output="",
-                        issues=[],
-                    ),
-                    initial_count=len(check_issues),
-                    fixed_count=len(check_issues),
-                    initial_issues=check_issues,
-                )
-            return FileFixResult(
-                file_result=FileProcessingResult(
-                    success=False,
-                    output="",
-                    issues=check_issues,
-                ),
-                initial_count=len(check_issues),
-                fixed_count=0,
-                initial_issues=check_issues,
-            )
-
         except subprocess.TimeoutExpired:
             return FileFixResult(
                 file_result=FileProcessingResult(
@@ -323,6 +261,93 @@ class ShfmtPlugin(BaseToolPlugin):
                 fixed_count=0,
                 initial_issues=[],
             )
+
+        # shfmt -d exits non-zero when a diff is produced (expected).
+        # If it exits non-zero AND we parsed no diff, the invocation
+        # itself failed — surface the error instead of reporting a
+        # clean file.
+        if not check_success and not check_issues:
+            return FileFixResult(
+                file_result=FileProcessingResult(
+                    success=False,
+                    output=check_output,
+                    issues=[],
+                    error="shfmt check failed before fix",
+                ),
+                initial_count=0,
+                fixed_count=0,
+                initial_issues=[],
+            )
+
+        if not check_issues:
+            # No issues found, file is already formatted
+            return FileFixResult(
+                file_result=FileProcessingResult(
+                    success=True,
+                    output="",
+                    issues=[],
+                ),
+                initial_count=0,
+                fixed_count=0,
+                initial_issues=[],
+            )
+
+        # Apply fix with -w flag
+        fix_cmd = self._get_executable_command(tool_name="shfmt") + ["-w"]
+        fix_cmd.extend(self._build_common_args())
+        fix_cmd.append(file_path)
+
+        try:
+            fix_success, _ = self._run_subprocess(
+                cmd=fix_cmd,
+                timeout=timeout,
+            )
+        except subprocess.TimeoutExpired:
+            return FileFixResult(
+                file_result=FileProcessingResult(
+                    success=False,
+                    output="",
+                    issues=check_issues,
+                    skipped=True,
+                ),
+                initial_count=len(check_issues),
+                fixed_count=0,
+                initial_issues=check_issues,
+            )
+        except (OSError, ValueError, RuntimeError) as e:
+            return FileFixResult(
+                file_result=FileProcessingResult(
+                    success=False,
+                    output="",
+                    issues=check_issues,
+                    error=str(e),
+                ),
+                initial_count=len(check_issues),
+                fixed_count=0,
+                initial_issues=check_issues,
+            )
+
+        if fix_success:
+            return FileFixResult(
+                file_result=FileProcessingResult(
+                    success=True,
+                    output="",
+                    issues=[],
+                ),
+                initial_count=len(check_issues),
+                fixed_count=len(check_issues),
+                initial_issues=check_issues,
+            )
+        return FileFixResult(
+            file_result=FileProcessingResult(
+                success=False,
+                output="",
+                issues=check_issues,
+            ),
+            initial_count=len(check_issues),
+            fixed_count=0,
+            initial_issues=check_issues,
+        )
 
     def check(self, paths: list[str], options: dict[str, object]) -> ToolResult:
         """Check files with shfmt.
