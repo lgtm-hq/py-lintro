@@ -8,6 +8,11 @@
 # and cannot be upgraded independently. Dev-only deps with no runtime exposure.
 
 [[IgnoredVulns]]
+id = "GHSA-737v-mqg7-c878"
+ignoreUntil = 2026-06-25
+reason = "defu@6.1.4 — transitive dev dep via h3→astro, fix in 6.1.5 pending upstream h3 update"
+
+[[IgnoredVulns]]
 id = "GHSA-v3rj-xjv7-4jmq"
 ignoreUntil = 2026-06-25
 reason = "smol-toml@1.6.0 — transitive dev dep via astro, pending upstream update"
