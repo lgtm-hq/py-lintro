@@ -23,7 +23,11 @@ import lintro.utils.output.parser_registration  # noqa: F401
 from lintro.enums.action import Action
 from lintro.enums.output_format import OutputFormat, normalize_output_format
 from lintro.enums.tool_name import ToolName
-from lintro.formatters.formatter import format_issues, format_issues_with_sections
+from lintro.formatters.formatter import (
+    format_issues,
+    format_issues_with_sections,
+    merge_detected_and_remaining,
+)
 from lintro.parsers.base_issue import BaseIssue
 from lintro.utils.output.helpers import sanitize_csv_value
 from lintro.utils.output.parser_registration import ParserError
@@ -196,10 +200,18 @@ def write_output_file(
             "results": [],
         }
         for result in all_results:
+            # Merge pre-fix and remaining issues (deduped) so fix-mode
+            # JSON matches the CLI JSON output from format_fix_results.
+            # For check mode, initial_issues is None and the merged list
+            # equals result.issues.
+            merged_issues = merge_detected_and_remaining(
+                getattr(result, "initial_issues", None),
+                getattr(result, "issues", None),
+            )
             result_data = {
                 "tool": result.name,
                 "success": getattr(result, "success", True),
-                "issues_count": getattr(result, "issues_count", 0),
+                "issues_count": len(merged_issues),
                 "output": getattr(result, "output", ""),
             }
             ai_metadata = getattr(result, "ai_metadata", None)
@@ -209,9 +221,9 @@ def write_output_file(
                 normalized = normalize_ai_metadata(ai_metadata)
                 if normalized:
                     result_data["ai_metadata"] = normalized
-            if hasattr(result, "issues") and result.issues:
+            if merged_issues:
                 result_data["issues"] = [
-                    _serialize_issue(issue) for issue in result.issues
+                    _serialize_issue(issue) for issue in merged_issues
                 ]
             json_data["results"].append(result_data)
         output_file.write_text(

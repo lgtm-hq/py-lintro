@@ -92,15 +92,18 @@ def test_write_json_file_includes_parsed_issues(
     assert_that(issues[0]["message"]).is_equal_to("Test error")
 
 
-def test_write_json_file_omits_initial_issues(
+def test_write_json_file_merges_fix_mode_issues(
     tmp_path: Path,
     mock_tool_result_factory: Callable[..., MockToolResult],
     mock_issue_factory: Callable[..., MockIssue],
 ) -> None:
-    """JSON file output stays collapsed — no initial_issues key is emitted.
+    """JSON output merges pre-fix and remaining issues with deduplication.
 
-    The JSON schema is unchanged for backward compatibility even when the
-    ToolResult carries pre-fix issues.
+    Mirrors the CLI JSON output from ``format_fix_results`` — the file
+    artifact emits a single ``issues`` list containing every detected
+    issue (pre-fix + any remaining), deduplicated by attributes.
+    ``issues_count`` reflects the merged list length. No separate
+    ``initial_issues`` key is emitted.
 
     Args:
         tmp_path: Temporary directory path for test output.
@@ -108,13 +111,20 @@ def test_write_json_file_omits_initial_issues(
         mock_issue_factory: Factory for creating mock issues.
     """
     output_path = tmp_path / "report.json"
+    # Two initial issues; one of them (E501) is also still remaining.
+    initial = [
+        mock_issue_factory(file="a.py", line=1, code="F401", message="fixed"),
+        mock_issue_factory(file="b.py", line=2, code="E501", message="remains"),
+    ]
+    remaining = [
+        mock_issue_factory(file="b.py", line=2, code="E501", message="remains"),
+    ]
     results = [
         mock_tool_result_factory(
             name="ruff",
-            issues_count=0,
-            initial_issues=[
-                mock_issue_factory(file="a.py", line=1, code="F401", message="x"),
-            ],
+            issues_count=1,
+            issues=remaining,
+            initial_issues=initial,
         ),
     ]
 
@@ -123,9 +133,16 @@ def test_write_json_file_omits_initial_issues(
         output_format=OutputFormat.JSON,
         all_results=results,  # type: ignore[arg-type]
         action=Action.FIX,
-        total_issues=0,
+        total_issues=1,
         total_fixed=1,
     )
 
     content = json.loads(output_path.read_text())
-    assert_that(content["results"][0]).does_not_contain_key("initial_issues")
+    entry = content["results"][0]
+    assert_that(entry).does_not_contain_key("initial_issues")
+    # Merged + deduped: F401 + E501 (E501 appears once, not twice)
+    assert_that(entry["issues_count"]).is_equal_to(2)
+    assert_that(entry["issues"]).is_length(2)
+    codes = [i["code"] for i in entry["issues"]]
+    assert_that(codes).contains("F401")
+    assert_that(codes).contains("E501")

@@ -19,12 +19,80 @@ Example:
 from __future__ import annotations
 
 from collections.abc import Sequence
+from dataclasses import dataclass
 
 from lintro.enums.display_column import STANDARD_COLUMNS, DisplayColumn
 from lintro.enums.output_format import OutputFormat, normalize_output_format
 from lintro.formatters.core.format_registry import TableDescriptor, get_style
 from lintro.parsers.base_issue import BaseIssue
 from lintro.utils.path_utils import normalize_file_path_for_display
+
+
+@dataclass(frozen=True)
+class IssueDedupKey:
+    """Dedup key for merging detected and remaining issue lists.
+
+    Frozen so instances are hashable and usable in sets. Used by both
+    the CLI and file-artifact fix-mode renderers so their JSON outputs
+    stay consistent.
+
+    Attributes:
+        file: Source file the issue refers to.
+        line: 1-indexed line number (0 when absent).
+        column: 1-indexed column number (0 when absent).
+        code: Rule/code identifier.
+        message: Human-readable issue message.
+    """
+
+    file: str
+    line: int
+    column: int
+    code: str
+    message: str
+
+    @classmethod
+    def of(cls, issue: BaseIssue) -> IssueDedupKey:
+        """Build a key from a BaseIssue's attributes.
+
+        Args:
+            issue: The issue to extract key fields from.
+
+        Returns:
+            A hashable key representing the issue's identity.
+        """
+        return cls(
+            file=getattr(issue, "file", "") or "",
+            line=getattr(issue, "line", None) or 0,
+            column=getattr(issue, "column", None) or 0,
+            code=getattr(issue, "code", "") or "",
+            message=getattr(issue, "message", "") or "",
+        )
+
+
+def merge_detected_and_remaining(
+    initial_issues: Sequence[BaseIssue] | None,
+    remaining_issues: Sequence[BaseIssue] | None,
+) -> list[BaseIssue]:
+    """Merge initial and remaining issues, deduplicating by attributes.
+
+    Args:
+        initial_issues: Issues detected before the fix ran.
+        remaining_issues: Issues still present after the fix ran.
+
+    Returns:
+        Flattened list with remaining issues appended only when their
+        attribute key is not already present in initial.
+    """
+    detected = list(initial_issues or [])
+    seen: set[IssueDedupKey] = {IssueDedupKey.of(i) for i in detected}
+    merged: list[BaseIssue] = list(detected)
+    for issue in remaining_issues or []:
+        key = IssueDedupKey.of(issue)
+        if key not in seen:
+            merged.append(issue)
+            seen.add(key)
+    return merged
+
 
 # Map DisplayColumn enum to row dict keys
 _COLUMN_KEY_MAP: dict[DisplayColumn, str] = {
@@ -244,26 +312,7 @@ def format_fix_results(
 
     # JSON/GitHub: merge detected + remaining, deduplicating by attributes
     if normalized_format in {OutputFormat.JSON, OutputFormat.GITHUB}:
-
-        def _issue_key(issue: BaseIssue) -> tuple[str, int, int, str, str]:
-            return (
-                issue.file,
-                issue.line,
-                issue.column,
-                getattr(issue, "code", "") or "",
-                issue.message,
-            )
-
-        seen_keys: set[tuple[str, int, int, str, str]] = {
-            _issue_key(i) for i in detected_issues
-        }
-        merged: list[BaseIssue] = list(detected_issues)
-        if remaining_issues:
-            for issue in remaining_issues:
-                key = _issue_key(issue)
-                if key not in seen_keys:
-                    merged.append(issue)
-                    seen_keys.add(key)
+        merged = merge_detected_and_remaining(detected_issues, remaining_issues)
         return format_issues(
             merged,
             output_format=normalized_format,
