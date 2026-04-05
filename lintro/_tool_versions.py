@@ -61,7 +61,7 @@ TOOL_VERSIONS: dict[ToolName | str, str] = {
     ToolName.SHELLCHECK: "0.11.0",
     ToolName.SHFMT: "3.13.0",
     ToolName.SQLFLUFF: "4.0.0",
-    ToolName.TAPLO: "0.13.0",
+    ToolName.TAPLO: "0.10.0",
 }
 
 # Mapping from npm package names to ToolName for npm-managed tools
@@ -92,8 +92,8 @@ _FALLBACK_NPM_VERSIONS: dict[ToolName, str] = {
     ToolName.VUE_TSC: "3.2.6",
     ToolName.PRETTIER: "3.8.1",
     ToolName.MARKDOWNLINT: "0.22.0",
-    ToolName.OXLINT: "1.57.0",
-    ToolName.OXFMT: "0.42.0",
+    ToolName.OXLINT: "1.58.0",
+    ToolName.OXFMT: "0.43.0",
 }
 
 # Companion npm packages - packages that support a tool but have separate versions
