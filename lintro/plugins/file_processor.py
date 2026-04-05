@@ -71,6 +71,19 @@ class FileFixResult:
     fixed_count: int
     initial_issues: Sequence[BaseIssue]
 
+    @property
+    def remaining_count(self) -> int:
+        """Number of issues still present after the fix ran.
+
+        Derived from ``initial_count`` and ``fixed_count`` so the
+        ``initial == fixed + remaining`` invariant is enforced at the
+        source.
+
+        Returns:
+            Issues remaining after the fix attempt.
+        """
+        return max(0, self.initial_count - self.fixed_count)
+
 
 @dataclass
 class AggregatedResult:

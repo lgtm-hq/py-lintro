@@ -231,11 +231,28 @@ class ShfmtPlugin(BaseToolPlugin):
         check_cmd.append(file_path)
 
         try:
-            _, check_output = self._run_subprocess(
+            check_success, check_output = self._run_subprocess(
                 cmd=check_cmd,
                 timeout=timeout,
             )
             check_issues = parse_shfmt_output(output=check_output)
+
+            # shfmt -d exits non-zero when a diff is produced (expected).
+            # If it exits non-zero AND we parsed no diff, the invocation
+            # itself failed — surface the error instead of reporting a
+            # clean file.
+            if not check_success and not check_issues:
+                return FileFixResult(
+                    file_result=FileProcessingResult(
+                        success=False,
+                        output=check_output,
+                        issues=[],
+                        error="shfmt check failed before fix",
+                    ),
+                    initial_count=0,
+                    fixed_count=0,
+                    initial_issues=[],
+                )
 
             if not check_issues:
                 # No issues found, file is already formatted

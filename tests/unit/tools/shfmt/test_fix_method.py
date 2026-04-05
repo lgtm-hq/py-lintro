@@ -98,3 +98,34 @@ def test_fix_initial_issues_none_when_no_issues(
 
     assert_that(result.success).is_true()
     assert_that(result.initial_issues).is_none()
+
+
+def test_fix_surfaces_check_subprocess_failure(
+    shfmt_plugin: ShfmtPlugin,
+    tmp_path: Path,
+) -> None:
+    """When shfmt -d exits non-zero with no diff, report it as an error.
+
+    Previously the missing success boolean meant a failed check was
+    silently treated as a clean file.
+
+    Args:
+        shfmt_plugin: The ShfmtPlugin instance to test.
+        tmp_path: Temporary directory path for test files.
+    """
+    test_file = tmp_path / "broken.sh"
+    test_file.write_text("#!/bin/bash\nif then fi\n")
+
+    with patch(
+        "lintro.plugins.execution_preparation.verify_tool_version",
+        return_value=None,
+    ):
+        with patch.object(
+            shfmt_plugin,
+            "_run_subprocess",
+            return_value=(False, "syntax error: unexpected 'then'"),
+        ):
+            result = shfmt_plugin.fix([str(test_file)], {})
+
+    # Non-zero exit with no diff should NOT be treated as success
+    assert_that(result.success).is_false()
