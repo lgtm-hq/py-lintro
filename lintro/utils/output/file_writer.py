@@ -297,6 +297,13 @@ def write_output_file(
                 else:
                     lines.append("#### All issues were auto-fixed.")
                     lines.append("")
+                tool_output = getattr(result, "output", "") or ""
+                if tool_output.strip():
+                    lines.append("#### Tool output")
+                    lines.append("```")
+                    lines.append(tool_output.strip())
+                    lines.append("```")
+                    lines.append("")
             elif hasattr(result, "issues") and result.issues:
                 lines.append(_MARKDOWN_ISSUES_HEADER)
                 lines.extend(_render_markdown_issue_rows(result.issues))
@@ -341,6 +348,10 @@ def write_output_file(
                     html_lines.append("</table>")
                 else:
                     html_lines.append("<p>All issues were auto-fixed.</p>")
+                tool_output = getattr(result, "output", "") or ""
+                if tool_output.strip():
+                    html_lines.append("<h4>Tool output</h4>")
+                    html_lines.append(f"<pre>{html.escape(tool_output.strip())}</pre>")
             elif hasattr(result, "issues") and result.issues:
                 html_lines.append(_HTML_ISSUES_HEADER)
                 html_lines.extend(_render_html_issue_rows(result.issues))
@@ -384,6 +395,9 @@ def write_output_file(
                 )
                 if split_output and split_output.strip():
                     lines.append(split_output.strip())
+                tool_output = getattr(result, "output", "") or ""
+                if tool_output.strip():
+                    lines.append(tool_output.strip())
             else:
                 output_text = getattr(result, "output", "")
                 if output_text and output_text.strip():
