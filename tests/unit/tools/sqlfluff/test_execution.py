@@ -115,16 +115,41 @@ def test_fix_with_mocked_subprocess_success(
     test_file = tmp_path / "test_query.sql"
     test_file.write_text("select * from users;\n")
 
+    sqlfluff_lint_output = """[
+        {
+            "filepath": "test_query.sql",
+            "violations": [
+                {
+                    "start_line_no": 1,
+                    "start_line_pos": 1,
+                    "end_line_no": 1,
+                    "end_line_pos": 6,
+                    "code": "L010",
+                    "description": "Keywords must be upper case.",
+                    "name": "capitalisation.keywords"
+                }
+            ]
+        }
+    ]"""
+
     # Note: verify_tool_version is already patched by the sqlfluff_plugin fixture
     with patch.object(
         sqlfluff_plugin,
         "_run_subprocess",
-        return_value=(True, "Fixed 1 file(s)"),
+        side_effect=[
+            (False, sqlfluff_lint_output),  # Initial lint check - issues found
+            (True, "Fixed 1 file(s)"),  # Fix command
+            (True, "[]"),  # Verification lint - no issues
+        ],
     ):
         result = sqlfluff_plugin.fix([str(test_file)], {})
 
     assert_that(result.success).is_true()
     assert_that(result.issues_count).is_equal_to(0)
+    assert_that(result.initial_issues_count).is_equal_to(1)
+    assert_that(result.fixed_issues_count).is_equal_to(1)
+    assert_that(result.initial_issues).is_not_none()
+    assert_that(result.initial_issues).is_length(1)
 
 
 def test_fix_with_mocked_subprocess_no_changes(
@@ -141,10 +166,11 @@ def test_fix_with_mocked_subprocess_no_changes(
     test_file.write_text("SELECT * FROM users;\n")
 
     # Note: verify_tool_version is already patched by the sqlfluff_plugin fixture
+    # Initial lint check finds no issues, so fix and verify are skipped
     with patch.object(
         sqlfluff_plugin,
         "_run_subprocess",
-        return_value=(True, ""),
+        return_value=(True, "[]"),
     ):
         result = sqlfluff_plugin.fix([str(test_file)], {})
 

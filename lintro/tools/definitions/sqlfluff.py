@@ -8,7 +8,10 @@ from __future__ import annotations
 
 import subprocess  # nosec B404 - used safely with shell disabled
 from dataclasses import dataclass
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from lintro.parsers.base_issue import BaseIssue
 
 from lintro._tool_versions import get_min_version
 from lintro.enums.doc_url_template import DocUrlTemplate
@@ -17,7 +20,7 @@ from lintro.enums.tool_type import ToolType
 from lintro.models.core.tool_result import ToolResult
 from lintro.parsers.sqlfluff.sqlfluff_parser import parse_sqlfluff_output
 from lintro.plugins.base import BaseToolPlugin
-from lintro.plugins.file_processor import FileProcessingResult
+from lintro.plugins.file_processor import FileFixResult, FileProcessingResult
 from lintro.plugins.protocol import ToolDefinition
 from lintro.plugins.registry import register_tool
 from lintro.tools.core.option_validators import (
@@ -223,38 +226,169 @@ class SqlfluffPlugin(BaseToolPlugin):
         self,
         file_path: str,
         timeout: int,
-    ) -> FileProcessingResult:
+    ) -> FileFixResult:
         """Process a single SQL file with sqlfluff fix.
+
+        Runs check→fix→verify to track initial and remaining issues.
 
         Args:
             file_path: Path to the SQL file to fix.
             timeout: Timeout in seconds for the sqlfluff command.
 
         Returns:
-            FileProcessingResult with fix results for this file.
+            FileFixResult with per-file processing result and fix metrics.
         """
-        cmd = self._build_fix_command(files=[str(file_path)])
+        # Check for issues before fixing
+        lint_cmd = self._build_lint_command(files=[str(file_path)])
         try:
-            success, output = self._run_subprocess(cmd=cmd, timeout=timeout)
-            return FileProcessingResult(
-                success=success,
-                output=output,
-                issues=[],
+            check_success, check_output = self._run_subprocess(
+                cmd=lint_cmd,
+                timeout=timeout,
             )
+            check_issues = parse_sqlfluff_output(output=check_output)
         except subprocess.TimeoutExpired:
-            return FileProcessingResult(
-                success=False,
-                output="",
-                issues=[],
-                skipped=True,
+            return FileFixResult(
+                file_result=FileProcessingResult(
+                    success=False,
+                    output="",
+                    issues=[],
+                    skipped=True,
+                ),
+                initial_count=0,
+                fixed_count=0,
+                initial_issues=[],
             )
         except (OSError, ValueError, RuntimeError) as e:
-            return FileProcessingResult(
-                success=False,
-                output="",
-                issues=[],
-                error=str(e),
+            return FileFixResult(
+                file_result=FileProcessingResult(
+                    success=False,
+                    output="",
+                    issues=[],
+                    error=str(e),
+                ),
+                initial_count=0,
+                fixed_count=0,
+                initial_issues=[],
             )
+
+        # sqlfluff returns non-zero when issues are found (expected). If it
+        # returns non-zero and we also parsed no issues, the tool itself
+        # failed — surface that instead of reporting success.
+        if not check_success and not check_issues:
+            return FileFixResult(
+                file_result=FileProcessingResult(
+                    success=False,
+                    output=check_output,
+                    issues=[],
+                    error="sqlfluff lint failed before fix",
+                ),
+                initial_count=0,
+                fixed_count=0,
+                initial_issues=[],
+            )
+
+        if not check_issues:
+            return FileFixResult(
+                file_result=FileProcessingResult(
+                    success=True,
+                    output="",
+                    issues=[],
+                ),
+                initial_count=0,
+                fixed_count=0,
+                initial_issues=[],
+            )
+
+        # Apply fix
+        fix_cmd = self._build_fix_command(files=[str(file_path)])
+        try:
+            fix_success, fix_output = self._run_subprocess(
+                cmd=fix_cmd,
+                timeout=timeout,
+            )
+        except subprocess.TimeoutExpired:
+            return FileFixResult(
+                file_result=FileProcessingResult(
+                    success=False,
+                    output="",
+                    issues=check_issues,
+                    skipped=True,
+                ),
+                initial_count=len(check_issues),
+                fixed_count=0,
+                initial_issues=check_issues,
+            )
+        except (OSError, ValueError, RuntimeError) as e:
+            return FileFixResult(
+                file_result=FileProcessingResult(
+                    success=False,
+                    output="",
+                    issues=check_issues,
+                    error=str(e),
+                ),
+                initial_count=len(check_issues),
+                fixed_count=0,
+                initial_issues=check_issues,
+            )
+
+        # Always verify — sqlfluff fix can partially apply fixes even when
+        # the command exits non-zero (e.g. unfixable rules). Rerun the
+        # lint pass to get the true remaining issues before deciding how
+        # many were fixed.
+        try:
+            verify_success, verify_output = self._run_subprocess(
+                cmd=lint_cmd,
+                timeout=timeout,
+            )
+            remaining_issues = parse_sqlfluff_output(output=verify_output)
+        except (subprocess.TimeoutExpired, OSError, ValueError, RuntimeError) as e:
+            # Verification failed — mark as execution failure so
+            # AggregatedResult treats it as such, and conservatively
+            # report all initial as remaining.
+            return FileFixResult(
+                file_result=FileProcessingResult(
+                    success=False,
+                    output=fix_output,
+                    issues=check_issues,
+                    error=str(e),
+                ),
+                initial_count=len(check_issues),
+                fixed_count=0,
+                initial_issues=check_issues,
+            )
+
+        # Verification tool failure: non-zero exit with no parsed issues means
+        # the verify lint invocation itself failed, not that issues remain.
+        if not verify_success and not remaining_issues:
+            return FileFixResult(
+                file_result=FileProcessingResult(
+                    success=False,
+                    output=verify_output,
+                    issues=check_issues,
+                    error="sqlfluff lint failed during verification",
+                ),
+                initial_count=len(check_issues),
+                fixed_count=0,
+                initial_issues=check_issues,
+            )
+
+        fixed_count = max(0, len(check_issues) - len(remaining_issues))
+        # Overall success requires both: fix invocation succeeded AND no
+        # issues remain. Surface the fix command's output on failure so
+        # users can see why some fixes didn't apply.
+        overall_success = fix_success and len(remaining_issues) == 0
+        output_text = "" if overall_success else fix_output
+
+        return FileFixResult(
+            file_result=FileProcessingResult(
+                success=overall_success,
+                output=output_text,
+                issues=remaining_issues,
+            ),
+            initial_count=len(check_issues),
+            fixed_count=fixed_count,
+            initial_issues=check_issues,
+        )
 
     def doc_url(self, code: str) -> str | None:
         """Return SQLFluff documentation URL for the given rule code.
@@ -318,9 +452,21 @@ class SqlfluffPlugin(BaseToolPlugin):
         if ctx.should_skip:
             return ctx.early_result  # type: ignore[return-value]
 
-        # Process files with progress bar support
+        # Track fix-specific metrics. We tally per-file so skipped or
+        # errored files still contribute their issues — AggregatedResult
+        # drops issues for those cases, so result.all_issues would miss
+        # them.
+        initial_issues_total = 0
+        all_initial_issues: list[BaseIssue] = []
+        all_remaining_issues: list[BaseIssue] = []
+
         def processor(file_path: str) -> FileProcessingResult:
-            return self._process_single_file_fix(file_path, ctx.timeout)
+            nonlocal initial_issues_total
+            fix_result = self._process_single_file_fix(file_path, ctx.timeout)
+            initial_issues_total += fix_result.initial_count
+            all_initial_issues.extend(fix_result.initial_issues)
+            all_remaining_issues.extend(fix_result.remaining_issues)
+            return fix_result.file_result
 
         result = self._process_files_with_progress(
             files=ctx.files,
@@ -329,10 +475,17 @@ class SqlfluffPlugin(BaseToolPlugin):
             label="Fixing files",
         )
 
+        remaining_count = len(all_remaining_issues)
+        fixed_count = max(0, initial_issues_total - remaining_count)
+
         return ToolResult(
             name=self.definition.name,
-            success=result.all_success,
+            success=result.all_success and remaining_count == 0,
             output=result.build_output(timeout=ctx.timeout),
-            issues_count=0,
-            issues=[],
+            issues_count=remaining_count,
+            issues=all_remaining_issues,
+            initial_issues_count=initial_issues_total,
+            fixed_issues_count=fixed_count,
+            remaining_issues_count=remaining_count,
+            initial_issues=all_initial_issues if all_initial_issues else None,
         )

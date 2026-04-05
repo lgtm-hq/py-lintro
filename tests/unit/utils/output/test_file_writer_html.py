@@ -116,3 +116,81 @@ def test_write_html_file_escapes_xss_characters(
     assert_that(content).does_not_contain("<script>")
     assert_that(content).contains("&lt;script&gt;")
     assert_that(content).contains("&lt;b&gt;test&lt;/b&gt;")
+
+
+def test_write_html_fix_mode_shows_detected_and_remaining(
+    tmp_path: Path,
+    mock_tool_result_factory: Callable[..., MockToolResult],
+    mock_issue_factory: Callable[..., MockIssue],
+) -> None:
+    """Fix-mode HTML output renders Detected and Remaining tables.
+
+    Args:
+        tmp_path: Temporary directory path for test output.
+        mock_tool_result_factory: Factory for creating mock tool results.
+        mock_issue_factory: Factory for creating mock issues.
+    """
+    output_path = tmp_path / "report.html"
+    results = [
+        mock_tool_result_factory(
+            name="ruff",
+            issues_count=1,
+            issues=[mock_issue_factory(code="E501", message="still here")],
+            initial_issues=[
+                mock_issue_factory(code="F401", message="was fixed"),
+                mock_issue_factory(code="E501", message="still here"),
+            ],
+        ),
+    ]
+
+    write_output_file(
+        output_path=str(output_path),
+        output_format=OutputFormat.HTML,
+        all_results=results,  # type: ignore[arg-type]
+        action=Action.FIX,
+        total_issues=1,
+        total_fixed=1,
+    )
+
+    content = output_path.read_text()
+    assert_that(content).contains("<h4>Detected issues (2)</h4>")
+    assert_that(content).contains("<h4>Remaining issues (1)</h4>")
+    assert_that(content).contains("F401")
+    assert_that(content).contains("E501")
+
+
+def test_write_html_fix_mode_all_fixed(
+    tmp_path: Path,
+    mock_tool_result_factory: Callable[..., MockToolResult],
+    mock_issue_factory: Callable[..., MockIssue],
+) -> None:
+    """When all issues were fixed, HTML shows 'All issues were auto-fixed'.
+
+    Args:
+        tmp_path: Temporary directory path for test output.
+        mock_tool_result_factory: Factory for creating mock tool results.
+        mock_issue_factory: Factory for creating mock issues.
+    """
+    output_path = tmp_path / "report.html"
+    results = [
+        mock_tool_result_factory(
+            name="ruff",
+            issues_count=0,
+            issues=[],
+            initial_issues=[mock_issue_factory(code="F401", message="was fixed")],
+        ),
+    ]
+
+    write_output_file(
+        output_path=str(output_path),
+        output_format=OutputFormat.HTML,
+        all_results=results,  # type: ignore[arg-type]
+        action=Action.FIX,
+        total_issues=0,
+        total_fixed=1,
+    )
+
+    content = output_path.read_text()
+    assert_that(content).contains("<h4>Detected issues (1)</h4>")
+    assert_that(content).contains("<p>All issues were auto-fixed.</p>")
+    assert_that(content).does_not_contain("Remaining issues")

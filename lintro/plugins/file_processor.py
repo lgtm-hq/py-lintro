@@ -51,6 +51,55 @@ class FileProcessingResult:
 
 
 @dataclass
+class FileFixResult:
+    """Result from processing a single file in fix mode.
+
+    Bundles the standard FileProcessingResult with fix-specific metrics
+    so tools can report both pre-fix detection and post-fix remaining
+    issues to the two-table display pipeline.
+
+    Attributes:
+        file_result: Standard per-file processing result (carries the
+            remaining issues in `file_result.issues`).
+        initial_count: Number of issues detected before the fix ran.
+        fixed_count: Number of issues the fix resolved.
+        initial_issues: The pre-fix issues, preserved for display.
+    """
+
+    file_result: FileProcessingResult
+    initial_count: int
+    fixed_count: int
+    initial_issues: Sequence[BaseIssue]
+
+    @property
+    def remaining_count(self) -> int:
+        """Number of issues still present after the fix ran.
+
+        Derived from ``initial_count`` and ``fixed_count`` so the
+        ``initial == fixed + remaining`` invariant is enforced at the
+        source.
+
+        Returns:
+            Issues remaining after the fix attempt.
+        """
+        return max(0, self.initial_count - self.fixed_count)
+
+    @property
+    def remaining_issues(self) -> Sequence[BaseIssue]:
+        """Issues still present after the fix ran.
+
+        Exposes ``file_result.issues`` so aggregators can collect the
+        actual issue objects (rather than just a count). This covers
+        skipped/errored files, whose issues would otherwise be dropped
+        by ``AggregatedResult``.
+
+        Returns:
+            Issues remaining after the fix attempt.
+        """
+        return self.file_result.issues
+
+
+@dataclass
 class AggregatedResult:
     """Aggregated results from processing multiple files.
 
@@ -140,5 +189,6 @@ class AggregatedResult:
 
 __all__ = [
     "AggregatedResult",
+    "FileFixResult",
     "FileProcessingResult",
 ]

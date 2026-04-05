@@ -9,7 +9,10 @@ from __future__ import annotations
 
 import subprocess  # nosec B404 - used safely with shell disabled
 from dataclasses import dataclass
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from lintro.parsers.base_issue import BaseIssue
 
 from loguru import logger
 
@@ -19,7 +22,7 @@ from lintro.enums.tool_type import ToolType
 from lintro.models.core.tool_result import ToolResult
 from lintro.parsers.shfmt.shfmt_parser import parse_shfmt_output
 from lintro.plugins.base import BaseToolPlugin
-from lintro.plugins.file_processor import FileProcessingResult
+from lintro.plugins.file_processor import FileFixResult, FileProcessingResult
 from lintro.plugins.protocol import ToolDefinition
 from lintro.plugins.registry import register_tool
 from lintro.tools.core.option_validators import (
@@ -212,7 +215,7 @@ class ShfmtPlugin(BaseToolPlugin):
         self,
         file_path: str,
         timeout: int,
-    ) -> tuple[FileProcessingResult, int, int]:
+    ) -> FileFixResult:
         """Process a single file in fix mode.
 
         Args:
@@ -220,84 +223,139 @@ class ShfmtPlugin(BaseToolPlugin):
             timeout: Timeout in seconds for the shfmt command.
 
         Returns:
-            Tuple of (FileProcessingResult, initial_issues_count, fixed_issues_count).
+            FileFixResult with per-file processing result and fix metrics.
         """
         # First check if file needs formatting
-        check_cmd = self._get_executable_command(tool_name="shfmt") + ["-d"]
-        check_cmd.extend(self._build_common_args())
-        check_cmd.append(file_path)
+        check_cmd = [
+            *self._get_executable_command(tool_name="shfmt"),
+            "-d",
+            *self._build_common_args(),
+            file_path,
+        ]
 
+        # Check step
         try:
-            _, check_output = self._run_subprocess(
+            check_success, check_output = self._run_subprocess(
                 cmd=check_cmd,
                 timeout=timeout,
             )
             check_issues = parse_shfmt_output(output=check_output)
-
-            if not check_issues:
-                # No issues found, file is already formatted
-                return (
-                    FileProcessingResult(
-                        success=True,
-                        output="",
-                        issues=[],
-                    ),
-                    0,
-                    0,
-                )
-
-            # Apply fix with -w flag
-            fix_cmd = self._get_executable_command(tool_name="shfmt") + ["-w"]
-            fix_cmd.extend(self._build_common_args())
-            fix_cmd.append(file_path)
-
-            fix_success, _ = self._run_subprocess(
-                cmd=fix_cmd,
-                timeout=timeout,
-            )
-
-            if fix_success:
-                return (
-                    FileProcessingResult(
-                        success=True,
-                        output="",
-                        issues=[],
-                    ),
-                    len(check_issues),
-                    len(check_issues),
-                )
-            return (
-                FileProcessingResult(
-                    success=False,
-                    output="",
-                    issues=check_issues,
-                ),
-                len(check_issues),
-                0,
-            )
-
         except subprocess.TimeoutExpired:
-            return (
-                FileProcessingResult(
+            return FileFixResult(
+                file_result=FileProcessingResult(
                     success=False,
                     output="",
                     issues=[],
                     skipped=True,
                 ),
-                0,
-                0,
+                initial_count=0,
+                fixed_count=0,
+                initial_issues=[],
             )
         except (OSError, ValueError, RuntimeError) as e:
-            return (
-                FileProcessingResult(
+            return FileFixResult(
+                file_result=FileProcessingResult(
                     success=False,
                     output="",
                     issues=[],
                     error=str(e),
                 ),
-                0,
-                0,
+                initial_count=0,
+                fixed_count=0,
+                initial_issues=[],
             )
+
+        # shfmt -d exits non-zero when a diff is produced (expected).
+        # If it exits non-zero AND we parsed no diff, the invocation
+        # itself failed — surface the error instead of reporting a
+        # clean file.
+        if not check_success and not check_issues:
+            return FileFixResult(
+                file_result=FileProcessingResult(
+                    success=False,
+                    output=check_output,
+                    issues=[],
+                    error="shfmt check failed before fix",
+                ),
+                initial_count=0,
+                fixed_count=0,
+                initial_issues=[],
+            )
+
+        if not check_issues:
+            # No issues found, file is already formatted
+            return FileFixResult(
+                file_result=FileProcessingResult(
+                    success=True,
+                    output="",
+                    issues=[],
+                ),
+                initial_count=0,
+                fixed_count=0,
+                initial_issues=[],
+            )
+
+        # Apply fix with -w flag
+        fix_cmd = [
+            *self._get_executable_command(tool_name="shfmt"),
+            "-w",
+            *self._build_common_args(),
+            file_path,
+        ]
+
+        try:
+            fix_success, fix_output = self._run_subprocess(
+                cmd=fix_cmd,
+                timeout=timeout,
+            )
+        except subprocess.TimeoutExpired:
+            return FileFixResult(
+                file_result=FileProcessingResult(
+                    success=False,
+                    output="",
+                    issues=check_issues,
+                    skipped=True,
+                ),
+                initial_count=len(check_issues),
+                fixed_count=0,
+                initial_issues=check_issues,
+            )
+        except (OSError, ValueError, RuntimeError) as e:
+            return FileFixResult(
+                file_result=FileProcessingResult(
+                    success=False,
+                    output="",
+                    issues=check_issues,
+                    error=str(e),
+                ),
+                initial_count=len(check_issues),
+                fixed_count=0,
+                initial_issues=check_issues,
+            )
+
+        if fix_success:
+            return FileFixResult(
+                file_result=FileProcessingResult(
+                    success=True,
+                    output="",
+                    issues=[],
+                ),
+                initial_count=len(check_issues),
+                fixed_count=len(check_issues),
+                initial_issues=check_issues,
+            )
+        # Fix command exited non-zero: preserve the subprocess output
+        # (stderr/stdout) so users can see why the fix failed.
+        return FileFixResult(
+            file_result=FileProcessingResult(
+                success=False,
+                output=fix_output,
+                issues=check_issues,
+            ),
+            initial_count=len(check_issues),
+            fixed_count=0,
+            initial_issues=check_issues,
+        )
 
     def check(self, paths: list[str], options: dict[str, object]) -> ToolResult:
         """Check files with shfmt.
@@ -345,10 +403,14 @@ class ShfmtPlugin(BaseToolPlugin):
         if ctx.should_skip:
             return ctx.early_result  # type: ignore[return-value]
 
-        # Track fix-specific metrics
+        # Track fix-specific metrics. We collect remaining issues per-file
+        # because AggregatedResult drops issues from skipped/errored files,
+        # which would undercount the final issues list.
         initial_issues_total = 0
         fixed_issues_total = 0
         fixed_files: list[str] = []
+        all_initial_issues: list[BaseIssue] = []
+        all_remaining_issues: list[BaseIssue] = []
 
         def process_fix(file_path: str) -> FileProcessingResult:
             """Process a single file for fixing.
@@ -360,15 +422,17 @@ class ShfmtPlugin(BaseToolPlugin):
                 FileProcessingResult with processing outcome.
             """
             nonlocal initial_issues_total, fixed_issues_total, fixed_files
-            result, initial, fixed = self._process_single_file_fix(
+            fix_result = self._process_single_file_fix(
                 file_path=file_path,
                 timeout=ctx.timeout,
             )
-            initial_issues_total += initial
-            fixed_issues_total += fixed
-            if fixed > 0:
+            initial_issues_total += fix_result.initial_count
+            fixed_issues_total += fix_result.fixed_count
+            all_initial_issues.extend(fix_result.initial_issues)
+            all_remaining_issues.extend(fix_result.remaining_issues)
+            if fix_result.fixed_count > 0:
                 fixed_files.append(file_path)
-            return result
+            return fix_result.file_result
 
         result = self._process_files_with_progress(
             files=ctx.files,
@@ -395,7 +459,15 @@ class ShfmtPlugin(BaseToolPlugin):
                 f"Failed to process {result.execution_failures} file(s)",
             )
 
-        final_output = "\n".join(summary_parts) if summary_parts else "No fixes needed."
+        summary = "\n".join(summary_parts) if summary_parts else "No fixes needed."
+        # Combine the summary with per-file diagnostic output so failure
+        # messages from the fix subprocess are preserved alongside the
+        # high-level counts.
+        per_file_output = result.build_output(timeout=ctx.timeout) or ""
+        if per_file_output.strip():
+            final_output = f"{summary}\n\n{per_file_output}".rstrip()
+        else:
+            final_output = summary
 
         logger.debug(
             f"[ShfmtPlugin] Fix complete: initial={initial_issues_total}, "
@@ -407,8 +479,9 @@ class ShfmtPlugin(BaseToolPlugin):
             success=result.all_success and remaining_issues == 0,
             output=final_output,
             issues_count=remaining_issues,
-            issues=result.all_issues,
+            issues=all_remaining_issues,
             initial_issues_count=initial_issues_total,
             fixed_issues_count=fixed_issues_total,
             remaining_issues_count=remaining_issues,
+            initial_issues=all_initial_issues if all_initial_issues else None,
         )

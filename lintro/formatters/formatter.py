@@ -19,12 +19,80 @@ Example:
 from __future__ import annotations
 
 from collections.abc import Sequence
+from dataclasses import dataclass
 
 from lintro.enums.display_column import STANDARD_COLUMNS, DisplayColumn
 from lintro.enums.output_format import OutputFormat, normalize_output_format
 from lintro.formatters.core.format_registry import TableDescriptor, get_style
 from lintro.parsers.base_issue import BaseIssue
 from lintro.utils.path_utils import normalize_file_path_for_display
+
+
+@dataclass(frozen=True)
+class IssueDedupKey:
+    """Dedup key for merging detected and remaining issue lists.
+
+    Frozen so instances are hashable and usable in sets. Used by both
+    the CLI and file-artifact fix-mode renderers so their JSON outputs
+    stay consistent.
+
+    Attributes:
+        file: Source file the issue refers to.
+        line: 1-indexed line number (0 when absent).
+        column: 1-indexed column number (0 when absent).
+        code: Rule/code identifier.
+        message: Human-readable issue message.
+    """
+
+    file: str
+    line: int
+    column: int
+    code: str
+    message: str
+
+    @classmethod
+    def of(cls, issue: BaseIssue) -> IssueDedupKey:
+        """Build a key from a BaseIssue's attributes.
+
+        Args:
+            issue: The issue to extract key fields from.
+
+        Returns:
+            A hashable key representing the issue's identity.
+        """
+        return cls(
+            file=getattr(issue, "file", "") or "",
+            line=getattr(issue, "line", None) or 0,
+            column=getattr(issue, "column", None) or 0,
+            code=getattr(issue, "code", "") or "",
+            message=getattr(issue, "message", "") or "",
+        )
+
+
+def merge_detected_and_remaining(
+    initial_issues: Sequence[BaseIssue] | None,
+    remaining_issues: Sequence[BaseIssue] | None,
+) -> list[BaseIssue]:
+    """Merge initial and remaining issues, deduplicating by attributes.
+
+    Args:
+        initial_issues: Issues detected before the fix ran.
+        remaining_issues: Issues still present after the fix ran.
+
+    Returns:
+        Flattened list with remaining issues appended only when their
+        attribute key is not already present in initial.
+    """
+    detected = list(initial_issues or [])
+    seen: set[IssueDedupKey] = {IssueDedupKey.of(i) for i in detected}
+    merged: list[BaseIssue] = list(detected)
+    for issue in remaining_issues or []:
+        key = IssueDedupKey.of(issue)
+        if key not in seen:
+            merged.append(issue)
+            seen.add(key)
+    return merged
+
 
 # Map DisplayColumn enum to row dict keys
 _COLUMN_KEY_MAP: dict[DisplayColumn, str] = {
@@ -207,6 +275,72 @@ def format_issues_with_sections(
 
     if not sections:
         return "No issues found."
+
+    return "\n\n".join(sections)
+
+
+def format_fix_results(
+    detected_issues: Sequence[BaseIssue],
+    remaining_issues: Sequence[BaseIssue] | None,
+    output_format: OutputFormat | str = OutputFormat.GRID,
+    *,
+    tool_name: str | None = None,
+) -> str:
+    """Format fix-mode results as two separate tables.
+
+    Renders a "Detected issues" table and a "Remaining issues" table
+    so users can clearly see what was auto-fixed vs what still needs
+    attention. When all issues are fixed, the "Remaining" table is omitted.
+
+    For JSON/GitHub formats, returns a single combined table for
+    backward compatibility.
+
+    Args:
+        detected_issues: Issues found before fixes were applied.
+        remaining_issues: Issues still present after fixes, or None/empty
+            if all were fixed.
+        output_format: Output format (grid, json, plain, etc.).
+        tool_name: Tool name for JSON output.
+
+    Returns:
+        Formatted string with one or two labeled tables.
+    """
+    if not detected_issues:
+        return "No issues found."
+
+    normalized_format = normalize_output_format(output_format)
+
+    # JSON/GitHub: merge detected + remaining, deduplicating by attributes
+    if normalized_format in {OutputFormat.JSON, OutputFormat.GITHUB}:
+        merged = merge_detected_and_remaining(detected_issues, remaining_issues)
+        return format_issues(
+            merged,
+            output_format=normalized_format,
+            tool_name=tool_name,
+        )
+
+    sections: list[str] = []
+
+    # Always show detected issues
+    detected_output = format_issues(
+        detected_issues,
+        output_format=normalized_format,
+        tool_name=tool_name,
+    )
+    sections.append(f"Detected issues ({len(detected_issues)})\n{detected_output}")
+
+    # Only show remaining if there are any
+    if remaining_issues:
+        remaining_output = format_issues(
+            remaining_issues,
+            output_format=normalized_format,
+            tool_name=tool_name,
+        )
+        sections.append(
+            f"Remaining issues ({len(remaining_issues)})\n{remaining_output}",
+        )
+    else:
+        sections.append("All issues were auto-fixed.")
 
     return "\n\n".join(sections)
 
