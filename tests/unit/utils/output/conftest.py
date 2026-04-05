@@ -34,6 +34,7 @@ class MockToolResult:
     issues_count: int = 0
     output: str = ""
     issues: list[MockIssue] = field(default_factory=list)
+    initial_issues: list[MockIssue] | None = None
 
 
 @pytest.fixture

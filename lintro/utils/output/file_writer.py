@@ -137,11 +137,11 @@ def write_output_file(
                 result_data["issues"] = [
                     _serialize_issue(issue) for issue in result.issues
                 ]
-            # Include detected (pre-fix) issues when available
-            detected = getattr(result, "detected_issues", None)
-            if detected:
-                result_data["detected_issues"] = [
-                    _serialize_issue(issue) for issue in detected
+            # Include pre-fix issues when available (for fix-mode results)
+            initial = getattr(result, "initial_issues", None)
+            if initial:
+                result_data["initial_issues"] = [
+                    _serialize_issue(issue) for issue in initial
                 ]
             json_data["results"].append(result_data)
         output_file.write_text(
