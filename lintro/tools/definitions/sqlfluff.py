@@ -243,7 +243,10 @@ class SqlfluffPlugin(BaseToolPlugin):
         # Check for issues before fixing
         lint_cmd = self._build_lint_command(files=[str(file_path)])
         try:
-            _, check_output = self._run_subprocess(cmd=lint_cmd, timeout=timeout)
+            check_success, check_output = self._run_subprocess(
+                cmd=lint_cmd,
+                timeout=timeout,
+            )
             check_issues = parse_sqlfluff_output(output=check_output)
         except subprocess.TimeoutExpired:
             return (
@@ -264,6 +267,22 @@ class SqlfluffPlugin(BaseToolPlugin):
                     output="",
                     issues=[],
                     error=str(e),
+                ),
+                0,
+                0,
+                [],
+            )
+
+        # sqlfluff returns non-zero when issues are found (expected). If it
+        # returns non-zero and we also parsed no issues, the tool itself
+        # failed — surface that instead of reporting success.
+        if not check_success and not check_issues:
+            return (
+                FileProcessingResult(
+                    success=False,
+                    output=check_output,
+                    issues=[],
+                    error="sqlfluff lint failed before fix",
                 ),
                 0,
                 0,
@@ -324,7 +343,7 @@ class SqlfluffPlugin(BaseToolPlugin):
 
         # Verify remaining issues after fix
         try:
-            _, verify_output = self._run_subprocess(
+            verify_success, verify_output = self._run_subprocess(
                 cmd=lint_cmd,
                 timeout=timeout,
             )
@@ -336,6 +355,21 @@ class SqlfluffPlugin(BaseToolPlugin):
                     success=False,
                     output="",
                     issues=check_issues,
+                ),
+                len(check_issues),
+                0,
+                check_issues,
+            )
+
+        # Verification tool failure: non-zero exit with no parsed issues means
+        # the verify lint invocation itself failed, not that issues remain.
+        if not verify_success and not remaining_issues:
+            return (
+                FileProcessingResult(
+                    success=False,
+                    output=verify_output,
+                    issues=check_issues,
+                    error="sqlfluff lint failed during verification",
                 ),
                 len(check_issues),
                 0,
@@ -419,15 +453,13 @@ class SqlfluffPlugin(BaseToolPlugin):
 
         # Track fix-specific metrics
         initial_issues_total = 0
-        fixed_issues_total = 0
         all_initial_issues: list[BaseIssue] = []
 
         def processor(file_path: str) -> FileProcessingResult:
-            nonlocal initial_issues_total, fixed_issues_total
+            nonlocal initial_issues_total
             fix_out = self._process_single_file_fix(file_path, ctx.timeout)
-            result, initial, fixed, file_initial_issues = fix_out
+            result, initial, _fixed, file_initial_issues = fix_out
             initial_issues_total += initial
-            fixed_issues_total += fixed
             all_initial_issues.extend(file_initial_issues)
             return result
 
@@ -438,7 +470,11 @@ class SqlfluffPlugin(BaseToolPlugin):
             label="Fixing files",
         )
 
-        remaining_count = initial_issues_total - fixed_issues_total
+        # Derive remaining_count from the actual issues list to stay
+        # consistent with issues=result.all_issues. Reconcile fixed_count
+        # so the ToolResult invariant (initial == fixed + remaining) holds.
+        remaining_count = result.total_issues
+        fixed_count = max(0, initial_issues_total - remaining_count)
 
         return ToolResult(
             name=self.definition.name,
@@ -447,7 +483,7 @@ class SqlfluffPlugin(BaseToolPlugin):
             issues_count=remaining_count,
             issues=result.all_issues,
             initial_issues_count=initial_issues_total,
-            fixed_issues_count=fixed_issues_total,
+            fixed_issues_count=fixed_count,
             remaining_issues_count=remaining_count,
             initial_issues=all_initial_issues if all_initial_issues else None,
         )
