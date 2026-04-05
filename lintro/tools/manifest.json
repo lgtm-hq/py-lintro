@@ -260,7 +260,7 @@
     },
     {
       "name": "ruff",
-      "version": "0.14.10",
+      "version": "0.15.9",
       "install": {
         "type": "pip",
         "package": "ruff"
