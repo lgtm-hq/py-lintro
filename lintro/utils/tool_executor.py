@@ -35,8 +35,9 @@ from lintro.utils.post_checks import execute_post_checks
 from lintro.utils.unified_config import UnifiedConfigManager
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import Callable, Sequence
 
+    from lintro.parsers.base_issue import BaseIssue
     from lintro.plugins.base import BaseToolPlugin
 
 # Re-export constants for backwards compatibility
@@ -350,27 +351,37 @@ def _enrich_issues_with_doc_urls(
 ) -> None:
     """Populate doc_url on each issue using the plugin's doc_url method.
 
-    Skips issues that already have a doc_url set.
+    Enriches both remaining issues (``result.issues``) and any pre-fix
+    issues (``result.initial_issues``) so the fix-mode "Detected" and
+    "Remaining" tables both show doc URLs. Skips issues that already
+    have a doc_url set.
 
     Args:
         tool: Plugin instance that may provide a doc_url method.
         result: ToolResult whose issues will be enriched in-place.
     """
-    if not hasattr(tool, "doc_url") or not result.issues:
+    if not hasattr(tool, "doc_url"):
         return
-    for issue in result.issues:
-        if getattr(issue, "doc_url", ""):
-            continue
-        # Resolve the code attribute via DISPLAY_FIELD_MAP so tools that
-        # store their identifier under a different name (e.g. advisory_id,
-        # vuln_id, rule_id) are handled correctly.
-        field_map = getattr(issue, "DISPLAY_FIELD_MAP", {})
-        code_attr = field_map.get("code", "code")
-        code = str(getattr(issue, code_attr, "") or "")
-        if code:
-            url = tool.doc_url(code)
-            if url:
-                issue.doc_url = url
+
+    def _enrich(issues: Sequence[BaseIssue] | None) -> None:
+        if not issues:
+            return
+        for issue in issues:
+            if getattr(issue, "doc_url", ""):
+                continue
+            # Resolve the code attribute via DISPLAY_FIELD_MAP so tools
+            # that store their identifier under a different name (e.g.
+            # advisory_id, vuln_id, rule_id) are handled correctly.
+            field_map = getattr(issue, "DISPLAY_FIELD_MAP", {})
+            code_attr = field_map.get("code", "code")
+            code = str(getattr(issue, code_attr, "") or "")
+            if code:
+                url = tool.doc_url(code)
+                if url:
+                    issue.doc_url = url
+
+    _enrich(result.issues)
+    _enrich(result.initial_issues)
 
 
 def run_lint_tools_simple(
