@@ -101,7 +101,10 @@ def _render_markdown_issue_rows(issues: Sequence[BaseIssue]) -> list[str]:
         code_val = str(getattr(issue, "code", "") or "").replace("|", r"\|")
         msg_val = str(getattr(issue, "message", "") or "").replace("|", r"\|")
         doc_url = str(getattr(issue, "doc_url", "") or "")
-        doc_val = f"[docs]({doc_url})".replace("|", r"\|") if doc_url else ""
+        # Percent-encode pipes in the URL so they don't break the
+        # markdown table, and keep the label ("docs") untouched since
+        # it has no special chars to escape.
+        doc_val = f"[docs]({doc_url.replace('|', '%7C')})" if doc_url else ""
         rows.append(
             f"| {file_val} | {line_val} | {code_val} | {msg_val} | {doc_val} |",
         )
