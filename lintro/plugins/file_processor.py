@@ -84,6 +84,20 @@ class FileFixResult:
         """
         return max(0, self.initial_count - self.fixed_count)
 
+    @property
+    def remaining_issues(self) -> Sequence[BaseIssue]:
+        """Issues still present after the fix ran.
+
+        Exposes ``file_result.issues`` so aggregators can collect the
+        actual issue objects (rather than just a count). This covers
+        skipped/errored files, whose issues would otherwise be dropped
+        by ``AggregatedResult``.
+
+        Returns:
+            Issues remaining after the fix attempt.
+        """
+        return self.file_result.issues
+
 
 @dataclass
 class AggregatedResult:
@@ -175,5 +189,6 @@ class AggregatedResult:
 
 __all__ = [
     "AggregatedResult",
+    "FileFixResult",
     "FileProcessingResult",
 ]
