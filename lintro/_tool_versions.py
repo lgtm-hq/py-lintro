@@ -48,7 +48,7 @@ _MANIFEST_PATH = Path(__file__).parent / "tools" / "manifest.json"
 # Keys use ToolName enum values for type safety
 TOOL_VERSIONS: dict[ToolName | str, str] = {
     ToolName.ACTIONLINT: "1.7.10",
-    ToolName.CARGO_AUDIT: "0.21.0",
+    ToolName.CARGO_AUDIT: "0.22.0",
     ToolName.CARGO_DENY: "0.19.0",
     ToolName.CLIPPY: "1.92.0",
     ToolName.GITLEAKS: "8.30.0",
