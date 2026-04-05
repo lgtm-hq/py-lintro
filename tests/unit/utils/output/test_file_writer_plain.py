@@ -17,7 +17,7 @@ from lintro.utils.output.file_writer import write_output_file
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-    from .conftest import MockToolResult
+    from .conftest import MockIssue, MockToolResult
 
 
 def test_write_plain_file_creates_valid_structure(
@@ -76,3 +76,64 @@ def test_write_plain_file_shows_fixed_count_for_fix_action(
 
     assert_that(content).contains("Lintro Fix Report")
     assert_that(content).contains("Total Fixed: 5")
+
+
+def test_write_plain_fix_mode_shows_detected_and_remaining(
+    tmp_path: Path,
+    mock_tool_result_factory: Callable[..., MockToolResult],
+    mock_issue_factory: Callable[..., MockIssue],
+) -> None:
+    """Fix-mode plain output renders Detected and Remaining tables.
+
+    Args:
+        tmp_path: Temporary directory path for test output.
+        mock_tool_result_factory: Factory for creating mock tool results.
+        mock_issue_factory: Factory for creating mock issues.
+    """
+    from lintro.parsers.ruff.ruff_issue import RuffIssue
+
+    output_path = tmp_path / "report.txt"
+    results = [
+        mock_tool_result_factory(
+            name="ruff",
+            issues_count=1,
+            issues=[
+                RuffIssue(
+                    file="a.py",
+                    line=1,
+                    column=1,
+                    code="E501",
+                    message="still here",
+                ),
+            ],
+            initial_issues=[
+                RuffIssue(
+                    file="a.py",
+                    line=1,
+                    column=1,
+                    code="F401",
+                    message="was fixed",
+                ),
+                RuffIssue(
+                    file="a.py",
+                    line=1,
+                    column=1,
+                    code="E501",
+                    message="still here",
+                ),
+            ],
+        ),
+    ]
+
+    write_output_file(
+        output_path=str(output_path),
+        output_format=OutputFormat.PLAIN,
+        all_results=results,  # type: ignore[arg-type]
+        action=Action.FIX,
+        total_issues=1,
+        total_fixed=1,
+    )
+
+    content = output_path.read_text()
+    assert_that(content).contains("Detected issues (2)")
+    assert_that(content).contains("Remaining issues (1)")
