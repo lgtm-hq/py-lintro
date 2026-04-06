@@ -126,7 +126,13 @@ def main() -> int:
     dockerfile_args: dict[str, dict[str, str]] = {}
     for dockerfile in sorted(project_root.glob("Dockerfile*")):
         if dockerfile.is_file():
-            for line in dockerfile.read_text(encoding="utf-8").splitlines():
+            try:
+                content = dockerfile.read_text(encoding="utf-8")
+            except OSError as exc:
+                errors.append(f"Failed to read {dockerfile.name}: {exc}")
+                print(f"  ✗ {dockerfile.name}: read error ({exc})")
+                continue
+            for line in content.splitlines():
                 match = arg_pattern.match(line)
                 if match:
                     arg_name, arg_value = match.group(1), match.group(2)
