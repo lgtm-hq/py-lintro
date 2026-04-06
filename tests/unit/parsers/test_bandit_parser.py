@@ -10,6 +10,8 @@ from typing import Any
 import pytest
 from assertpy import assert_that
 
+from lintro._tool_versions import get_min_version
+from lintro.enums.tool_name import ToolName
 from lintro.models.core.tool_result import ToolResult
 from lintro.parsers.bandit.bandit_parser import parse_bandit_output
 from lintro.plugins import ToolRegistry
@@ -215,7 +217,11 @@ def test_bandit_check_handles_nonzero_rc_with_errors_array(
     ) -> NS:
         # Handle version check calls
         if "--version" in cmd:
-            return NS(stdout="bandit 1.9.2", stderr="", returncode=0)
+            return NS(
+                stdout=f"bandit {get_min_version(ToolName.BANDIT)}",
+                stderr="",
+                returncode=0,
+            )
         # Handle actual check calls
         return NS(stdout=json.dumps(sample), stderr="", returncode=1)
 
@@ -249,7 +255,11 @@ def test_bandit_check_handles_unparseable_output(
     ) -> SimpleNamespace:
         # Handle version check calls
         if "--version" in cmd:
-            return SimpleNamespace(stdout="bandit 1.9.2", stderr="", returncode=0)
+            return SimpleNamespace(
+                stdout=f"bandit {get_min_version(ToolName.BANDIT)}",
+                stderr="",
+                returncode=0,
+            )
         # Handle actual check calls
         return SimpleNamespace(stdout="nonsense", stderr="also nonsense", returncode=1)
 

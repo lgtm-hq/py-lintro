@@ -51,6 +51,20 @@
       "rangeStrategy": "widen"
     },
     {
+      "description": "Bump pyproject.toml floors for bundled Python tools so uv.lock stays in sync with manifest pins",
+      "groupName": "bundled python tools",
+      "matchPackageNames": [
+        "ruff",
+        "mypy",
+        "bandit",
+        "black",
+        "semgrep",
+        "sqlfluff",
+        "pydoclint"
+      ],
+      "rangeStrategy": "bump"
+    },
+    {
       "groupName": "linting tools",
       "groupSlug": "linting-tools",
       "matchPackageNames": [
@@ -155,34 +169,173 @@
       "packageNameTemplate": "bomctl/bomctl",
       "extractVersionTemplate": "^v(?<version>.*)$"
     },
+
     {
-      "description": "Update hadolint version in _tool_versions.py",
+      "description": "Update actionlint in _tool_versions.py and manifest.json",
       "customType": "regex",
       "managerFilePatterns": [
-        "lintro/_tool_versions\\.py"
+        "lintro/_tool_versions\\.py",
+        "lintro/tools/manifest\\.json"
       ],
       "matchStrings": [
-        "ToolName\\.HADOLINT:\\s*\"(?<currentValue>[0-9]+\\.[0-9]+\\.[0-9]+)\""
-      ],
-      "datasourceTemplate": "github-releases",
-      "packageNameTemplate": "hadolint/hadolint",
-      "extractVersionTemplate": "^v(?<version>.*)$"
-    },
-    {
-      "description": "Update actionlint version in _tool_versions.py",
-      "customType": "regex",
-      "managerFilePatterns": [
-        "lintro/_tool_versions\\.py"
-      ],
-      "matchStrings": [
-        "ToolName\\.ACTIONLINT:\\s*\"(?<currentValue>[0-9]+\\.[0-9]+\\.[0-9]+)\""
+        "ToolName\\.ACTIONLINT:\\s*\"(?<currentValue>[0-9]+\\.[0-9]+\\.[0-9]+)\"",
+        "\"name\":\\s*\"actionlint\",\\s*\"version\":\\s*\"(?<currentValue>[0-9]+\\.[0-9]+\\.[0-9]+)\""
       ],
       "datasourceTemplate": "github-releases",
       "packageNameTemplate": "rhysd/actionlint",
       "extractVersionTemplate": "^v(?<version>.*)$"
     },
     {
-      "description": "Update astro version in _tool_versions.py",
+      "description": "Update gitleaks in _tool_versions.py and manifest.json",
+      "customType": "regex",
+      "managerFilePatterns": [
+        "lintro/_tool_versions\\.py",
+        "lintro/tools/manifest\\.json"
+      ],
+      "matchStrings": [
+        "ToolName\\.GITLEAKS:\\s*\"(?<currentValue>[0-9]+\\.[0-9]+\\.[0-9]+)\"",
+        "\"name\":\\s*\"gitleaks\",\\s*\"version\":\\s*\"(?<currentValue>[0-9]+\\.[0-9]+\\.[0-9]+)\""
+      ],
+      "datasourceTemplate": "github-releases",
+      "packageNameTemplate": "gitleaks/gitleaks",
+      "extractVersionTemplate": "^v(?<version>.*)$"
+    },
+    {
+      "description": "Update hadolint in _tool_versions.py and manifest.json",
+      "customType": "regex",
+      "managerFilePatterns": [
+        "lintro/_tool_versions\\.py",
+        "lintro/tools/manifest\\.json"
+      ],
+      "matchStrings": [
+        "ToolName\\.HADOLINT:\\s*\"(?<currentValue>[0-9]+\\.[0-9]+\\.[0-9]+)\"",
+        "\"name\":\\s*\"hadolint\",\\s*\"version\":\\s*\"(?<currentValue>[0-9]+\\.[0-9]+\\.[0-9]+)\""
+      ],
+      "datasourceTemplate": "github-releases",
+      "packageNameTemplate": "hadolint/hadolint",
+      "extractVersionTemplate": "^v(?<version>.*)$"
+    },
+    {
+      "description": "Update osv-scanner in _tool_versions.py and manifest.json",
+      "customType": "regex",
+      "managerFilePatterns": [
+        "lintro/_tool_versions\\.py",
+        "lintro/tools/manifest\\.json"
+      ],
+      "matchStrings": [
+        "ToolName\\.OSV_SCANNER:\\s*\"(?<currentValue>[0-9]+\\.[0-9]+\\.[0-9]+)\"",
+        "\"name\":\\s*\"osv_scanner\",\\s*\"version\":\\s*\"(?<currentValue>[0-9]+\\.[0-9]+\\.[0-9]+)\""
+      ],
+      "datasourceTemplate": "github-releases",
+      "packageNameTemplate": "google/osv-scanner",
+      "extractVersionTemplate": "^v(?<version>.*)$"
+    },
+    {
+      "description": "Update shellcheck in _tool_versions.py and manifest.json",
+      "customType": "regex",
+      "managerFilePatterns": [
+        "lintro/_tool_versions\\.py",
+        "lintro/tools/manifest\\.json"
+      ],
+      "matchStrings": [
+        "ToolName\\.SHELLCHECK:\\s*\"(?<currentValue>[0-9]+\\.[0-9]+\\.[0-9]+)\"",
+        "\"name\":\\s*\"shellcheck\",\\s*\"version\":\\s*\"(?<currentValue>[0-9]+\\.[0-9]+\\.[0-9]+)\""
+      ],
+      "datasourceTemplate": "github-releases",
+      "packageNameTemplate": "koalaman/shellcheck",
+      "extractVersionTemplate": "^v(?<version>.*)$"
+    },
+    {
+      "description": "Update shfmt in _tool_versions.py and manifest.json",
+      "customType": "regex",
+      "managerFilePatterns": [
+        "lintro/_tool_versions\\.py",
+        "lintro/tools/manifest\\.json"
+      ],
+      "matchStrings": [
+        "ToolName\\.SHFMT:\\s*\"(?<currentValue>[0-9]+\\.[0-9]+\\.[0-9]+)\"",
+        "\"name\":\\s*\"shfmt\",\\s*\"version\":\\s*\"(?<currentValue>[0-9]+\\.[0-9]+\\.[0-9]+)\""
+      ],
+      "datasourceTemplate": "github-releases",
+      "packageNameTemplate": "mvdan/sh",
+      "extractVersionTemplate": "^v(?<version>.*)$"
+    },
+    {
+      "description": "Update taplo in _tool_versions.py and manifest.json (CLI releases use plain semver tags)",
+      "customType": "regex",
+      "managerFilePatterns": [
+        "lintro/_tool_versions\\.py",
+        "lintro/tools/manifest\\.json"
+      ],
+      "matchStrings": [
+        "ToolName\\.TAPLO:\\s*\"(?<currentValue>[0-9]+\\.[0-9]+\\.[0-9]+)\"",
+        "\"name\":\\s*\"taplo\",\\s*\"version\":\\s*\"(?<currentValue>[0-9]+\\.[0-9]+\\.[0-9]+)\""
+      ],
+      "datasourceTemplate": "github-releases",
+      "packageNameTemplate": "tamasfe/taplo",
+      "extractVersionTemplate": "^(?<version>[0-9]+\\.[0-9]+\\.[0-9]+)$"
+    },
+    {
+      "description": "Update cargo-audit in _tool_versions.py and manifest.json",
+      "customType": "regex",
+      "managerFilePatterns": [
+        "lintro/_tool_versions\\.py",
+        "lintro/tools/manifest\\.json"
+      ],
+      "matchStrings": [
+        "ToolName\\.CARGO_AUDIT:\\s*\"(?<currentValue>[0-9]+\\.[0-9]+\\.[0-9]+)\"",
+        "\"name\":\\s*\"cargo_audit\",\\s*\"version\":\\s*\"(?<currentValue>[0-9]+\\.[0-9]+\\.[0-9]+)\""
+      ],
+      "datasourceTemplate": "crate",
+      "packageNameTemplate": "cargo-audit"
+    },
+    {
+      "description": "Update cargo-deny in _tool_versions.py and manifest.json",
+      "customType": "regex",
+      "managerFilePatterns": [
+        "lintro/_tool_versions\\.py",
+        "lintro/tools/manifest\\.json"
+      ],
+      "matchStrings": [
+        "ToolName\\.CARGO_DENY:\\s*\"(?<currentValue>[0-9]+\\.[0-9]+\\.[0-9]+)\"",
+        "\"name\":\\s*\"cargo_deny\",\\s*\"version\":\\s*\"(?<currentValue>[0-9]+\\.[0-9]+\\.[0-9]+)\""
+      ],
+      "datasourceTemplate": "crate",
+      "packageNameTemplate": "cargo-deny"
+    },
+    {
+      "description": "Update clippy in _tool_versions.py and manifest.json",
+      "customType": "regex",
+      "managerFilePatterns": [
+        "lintro/_tool_versions\\.py",
+        "lintro/tools/manifest\\.json"
+      ],
+      "matchStrings": [
+        "ToolName\\.CLIPPY:\\s*\"(?<currentValue>[0-9]+\\.[0-9]+\\.[0-9]+)\"",
+        "\"name\":\\s*\"clippy\",\\s*\"version\":\\s*\"(?<currentValue>[0-9]+\\.[0-9]+\\.[0-9]+)\""
+      ],
+      "datasourceTemplate": "github-tags",
+      "packageNameTemplate": "rust-lang/rust-clippy",
+      "extractVersionTemplate": "^rust-(?<version>.*)$"
+    },
+    {
+      "description": "Update rustfmt in _tool_versions.py and manifest.json",
+      "customType": "regex",
+      "managerFilePatterns": [
+        "lintro/_tool_versions\\.py",
+        "lintro/tools/manifest\\.json"
+      ],
+      "matchStrings": [
+        "ToolName\\.RUSTFMT:\\s*\"(?<currentValue>[0-9]+\\.[0-9]+\\.[0-9]+)\"",
+        "\"name\":\\s*\"rustfmt\",\\s*\"version\":\\s*\"(?<currentValue>[0-9]+\\.[0-9]+\\.[0-9]+)\""
+      ],
+      "datasourceTemplate": "github-tags",
+      "packageNameTemplate": "rust-lang/rustfmt",
+      "extractVersionTemplate": "^v(?<version>.*)$"
+    },
+
+    {
+      "description": "Update astro fallback version in _tool_versions.py",
       "customType": "regex",
       "managerFilePatterns": [
         "lintro/_tool_versions\\.py"
@@ -194,7 +347,7 @@
       "packageNameTemplate": "astro"
     },
     {
-      "description": "Update @astrojs/check version in _tool_versions.py",
+      "description": "Update @astrojs/check companion version in _tool_versions.py",
       "customType": "regex",
       "managerFilePatterns": [
         "lintro/_tool_versions\\.py"
@@ -206,7 +359,7 @@
       "packageNameTemplate": "@astrojs/check"
     },
     {
-      "description": "Update svelte-check version in _tool_versions.py",
+      "description": "Update svelte-check fallback version in _tool_versions.py",
       "customType": "regex",
       "managerFilePatterns": [
         "lintro/_tool_versions\\.py"
@@ -218,7 +371,7 @@
       "packageNameTemplate": "svelte-check"
     },
     {
-      "description": "Update vue-tsc version in _tool_versions.py",
+      "description": "Update vue-tsc fallback version in _tool_versions.py",
       "customType": "regex",
       "managerFilePatterns": [
         "lintro/_tool_versions\\.py"
@@ -230,70 +383,66 @@
       "packageNameTemplate": "vue-tsc"
     },
     {
-      "description": "Update gitleaks version in _tool_versions.py",
+      "description": "Update oxlint fallback version in _tool_versions.py",
       "customType": "regex",
       "managerFilePatterns": [
         "lintro/_tool_versions\\.py"
       ],
       "matchStrings": [
-        "ToolName\\.GITLEAKS:\\s*\"(?<currentValue>[0-9]+\\.[0-9]+\\.[0-9]+)\""
+        "ToolName\\.OXLINT:\\s*\"(?<currentValue>[0-9]+\\.[0-9]+\\.[0-9]+)\""
       ],
-      "datasourceTemplate": "github-releases",
-      "packageNameTemplate": "gitleaks/gitleaks",
-      "extractVersionTemplate": "^v(?<version>.*)$"
+      "datasourceTemplate": "npm",
+      "packageNameTemplate": "oxlint"
     },
     {
-      "description": "Update osv-scanner version in _tool_versions.py",
+      "description": "Update oxfmt fallback version in _tool_versions.py",
       "customType": "regex",
       "managerFilePatterns": [
         "lintro/_tool_versions\\.py"
       ],
       "matchStrings": [
-        "ToolName\\.OSV_SCANNER:\\s*\"(?<currentValue>[0-9]+\\.[0-9]+\\.[0-9]+)\""
+        "ToolName\\.OXFMT:\\s*\"(?<currentValue>[0-9]+\\.[0-9]+\\.[0-9]+)\""
       ],
-      "datasourceTemplate": "github-releases",
-      "packageNameTemplate": "google/osv-scanner",
-      "extractVersionTemplate": "^v(?<version>.*)$"
+      "datasourceTemplate": "npm",
+      "packageNameTemplate": "oxfmt"
     },
     {
-      "description": "Update shellcheck version in _tool_versions.py",
+      "description": "Update prettier fallback version in _tool_versions.py",
       "customType": "regex",
       "managerFilePatterns": [
         "lintro/_tool_versions\\.py"
       ],
       "matchStrings": [
-        "ToolName\\.SHELLCHECK:\\s*\"(?<currentValue>[0-9]+\\.[0-9]+\\.[0-9]+)\""
+        "ToolName\\.PRETTIER:\\s*\"(?<currentValue>[0-9]+\\.[0-9]+\\.[0-9]+)\""
       ],
-      "datasourceTemplate": "github-releases",
-      "packageNameTemplate": "koalaman/shellcheck",
-      "extractVersionTemplate": "^v(?<version>.*)$"
+      "datasourceTemplate": "npm",
+      "packageNameTemplate": "prettier"
     },
     {
-      "description": "Update shfmt version in _tool_versions.py",
+      "description": "Update markdownlint fallback version in _tool_versions.py",
       "customType": "regex",
       "managerFilePatterns": [
         "lintro/_tool_versions\\.py"
       ],
       "matchStrings": [
-        "ToolName\\.SHFMT:\\s*\"(?<currentValue>[0-9]+\\.[0-9]+\\.[0-9]+)\""
+        "ToolName\\.MARKDOWNLINT:\\s*\"(?<currentValue>[0-9]+\\.[0-9]+\\.[0-9]+)\""
       ],
-      "datasourceTemplate": "github-releases",
-      "packageNameTemplate": "mvdan/sh",
-      "extractVersionTemplate": "^v(?<version>.*)$"
+      "datasourceTemplate": "npm",
+      "packageNameTemplate": "markdownlint-cli2"
     },
     {
-      "description": "Update taplo version in _tool_versions.py",
+      "description": "Update tsc fallback version in _tool_versions.py",
       "customType": "regex",
       "managerFilePatterns": [
         "lintro/_tool_versions\\.py"
       ],
       "matchStrings": [
-        "ToolName\\.TAPLO:\\s*\"(?<currentValue>[0-9]+\\.[0-9]+\\.[0-9]+)\""
+        "ToolName\\.TSC:\\s*\"(?<currentValue>[0-9]+\\.[0-9]+\\.[0-9]+)\""
       ],
-      "datasourceTemplate": "github-releases",
-      "packageNameTemplate": "tamasfe/taplo",
-      "extractVersionTemplate": "^release-taplo-(?<version>.*)$"
+      "datasourceTemplate": "npm",
+      "packageNameTemplate": "typescript"
     },
+
     {
       "description": "Update semgrep version in _tool_versions.py",
       "customType": "regex",
@@ -330,56 +479,7 @@
       "datasourceTemplate": "pypi",
       "packageNameTemplate": "pytest"
     },
-    {
-      "description": "Update cargo-audit version in _tool_versions.py",
-      "customType": "regex",
-      "managerFilePatterns": [
-        "lintro/_tool_versions\\.py"
-      ],
-      "matchStrings": [
-        "ToolName\\.CARGO_AUDIT:\\s*\"(?<currentValue>[0-9]+\\.[0-9]+\\.[0-9]+)\""
-      ],
-      "datasourceTemplate": "crate",
-      "packageNameTemplate": "cargo-audit"
-    },
-    {
-      "description": "Update cargo-deny version in _tool_versions.py",
-      "customType": "regex",
-      "managerFilePatterns": [
-        "lintro/_tool_versions\\.py"
-      ],
-      "matchStrings": [
-        "ToolName\\.CARGO_DENY:\\s*\"(?<currentValue>[0-9]+\\.[0-9]+\\.[0-9]+)\""
-      ],
-      "datasourceTemplate": "crate",
-      "packageNameTemplate": "cargo-deny"
-    },
-    {
-      "description": "Update clippy version in _tool_versions.py",
-      "customType": "regex",
-      "managerFilePatterns": [
-        "lintro/_tool_versions\\.py"
-      ],
-      "matchStrings": [
-        "ToolName\\.CLIPPY:\\s*\"(?<currentValue>[0-9]+\\.[0-9]+\\.[0-9]+)\""
-      ],
-      "datasourceTemplate": "github-tags",
-      "packageNameTemplate": "rust-lang/rust-clippy",
-      "extractVersionTemplate": "^rust-(?<version>.*)$"
-    },
-    {
-      "description": "Update rustfmt version in _tool_versions.py",
-      "customType": "regex",
-      "managerFilePatterns": [
-        "lintro/_tool_versions\\.py"
-      ],
-      "matchStrings": [
-        "ToolName\\.RUSTFMT:\\s*\"(?<currentValue>[0-9]+\\.[0-9]+\\.[0-9]+)\""
-      ],
-      "datasourceTemplate": "github-tags",
-      "packageNameTemplate": "rust-lang/rustfmt",
-      "extractVersionTemplate": "^v(?<version>.*)$"
-    },
+
     {
       "description": "Update npm tool versions in manifest.json",
       "customType": "regex",
@@ -401,135 +501,6 @@
         "\"name\":\\s*\"[^\"]+\",\\s*\"version\":\\s*\"(?<currentValue>[0-9]+\\.[0-9]+\\.[0-9]+)\",\\s*\"install\":\\s*\\{\\s*\"type\":\\s*\"pip\",\\s*\"package\":\\s*\"(?<depName>[^\"]+)\""
       ],
       "datasourceTemplate": "pypi"
-    },
-    {
-      "description": "Update actionlint version in manifest.json",
-      "customType": "regex",
-      "managerFilePatterns": [
-        "lintro/tools/manifest\\.json"
-      ],
-      "matchStrings": [
-        "\"name\":\\s*\"actionlint\",\\s*\"version\":\\s*\"(?<currentValue>[0-9]+\\.[0-9]+\\.[0-9]+)\""
-      ],
-      "datasourceTemplate": "github-releases",
-      "packageNameTemplate": "rhysd/actionlint",
-      "extractVersionTemplate": "^v(?<version>.*)$"
-    },
-    {
-      "description": "Update gitleaks version in manifest.json",
-      "customType": "regex",
-      "managerFilePatterns": [
-        "lintro/tools/manifest\\.json"
-      ],
-      "matchStrings": [
-        "\"name\":\\s*\"gitleaks\",\\s*\"version\":\\s*\"(?<currentValue>[0-9]+\\.[0-9]+\\.[0-9]+)\""
-      ],
-      "datasourceTemplate": "github-releases",
-      "packageNameTemplate": "gitleaks/gitleaks",
-      "extractVersionTemplate": "^v(?<version>.*)$"
-    },
-    {
-      "description": "Update hadolint version in manifest.json",
-      "customType": "regex",
-      "managerFilePatterns": [
-        "lintro/tools/manifest\\.json"
-      ],
-      "matchStrings": [
-        "\"name\":\\s*\"hadolint\",\\s*\"version\":\\s*\"(?<currentValue>[0-9]+\\.[0-9]+\\.[0-9]+)\""
-      ],
-      "datasourceTemplate": "github-releases",
-      "packageNameTemplate": "hadolint/hadolint",
-      "extractVersionTemplate": "^v(?<version>.*)$"
-    },
-    {
-      "description": "Update osv_scanner version in manifest.json",
-      "customType": "regex",
-      "managerFilePatterns": [
-        "lintro/tools/manifest\\.json"
-      ],
-      "matchStrings": [
-        "\"name\":\\s*\"osv_scanner\",\\s*\"version\":\\s*\"(?<currentValue>[0-9]+\\.[0-9]+\\.[0-9]+)\""
-      ],
-      "datasourceTemplate": "github-releases",
-      "packageNameTemplate": "google/osv-scanner",
-      "extractVersionTemplate": "^v(?<version>.*)$"
-    },
-    {
-      "description": "Update shellcheck version in manifest.json",
-      "customType": "regex",
-      "managerFilePatterns": [
-        "lintro/tools/manifest\\.json"
-      ],
-      "matchStrings": [
-        "\"name\":\\s*\"shellcheck\",\\s*\"version\":\\s*\"(?<currentValue>[0-9]+\\.[0-9]+\\.[0-9]+)\""
-      ],
-      "datasourceTemplate": "github-releases",
-      "packageNameTemplate": "koalaman/shellcheck",
-      "extractVersionTemplate": "^v(?<version>.*)$"
-    },
-    {
-      "description": "Update shfmt version in manifest.json",
-      "customType": "regex",
-      "managerFilePatterns": [
-        "lintro/tools/manifest\\.json"
-      ],
-      "matchStrings": [
-        "\"name\":\\s*\"shfmt\",\\s*\"version\":\\s*\"(?<currentValue>[0-9]+\\.[0-9]+\\.[0-9]+)\""
-      ],
-      "datasourceTemplate": "github-releases",
-      "packageNameTemplate": "mvdan/sh",
-      "extractVersionTemplate": "^v(?<version>.*)$"
-    },
-    {
-      "description": "Update taplo version in manifest.json",
-      "customType": "regex",
-      "managerFilePatterns": [
-        "lintro/tools/manifest\\.json"
-      ],
-      "matchStrings": [
-        "\"name\":\\s*\"taplo\",\\s*\"version\":\\s*\"(?<currentValue>[0-9]+\\.[0-9]+\\.[0-9]+)\""
-      ],
-      "datasourceTemplate": "github-releases",
-      "packageNameTemplate": "tamasfe/taplo",
-      "extractVersionTemplate": "^release-taplo-(?<version>.*)$"
-    },
-    {
-      "description": "Update cargo_audit version in manifest.json",
-      "customType": "regex",
-      "managerFilePatterns": [
-        "lintro/tools/manifest\\.json"
-      ],
-      "matchStrings": [
-        "\"name\":\\s*\"cargo_audit\",\\s*\"version\":\\s*\"(?<currentValue>[0-9]+\\.[0-9]+\\.[0-9]+)\""
-      ],
-      "datasourceTemplate": "crate",
-      "packageNameTemplate": "cargo-audit"
-    },
-    {
-      "description": "Update clippy version in manifest.json",
-      "customType": "regex",
-      "managerFilePatterns": [
-        "lintro/tools/manifest\\.json"
-      ],
-      "matchStrings": [
-        "\"name\":\\s*\"clippy\",\\s*\"version\":\\s*\"(?<currentValue>[0-9]+\\.[0-9]+\\.[0-9]+)\""
-      ],
-      "datasourceTemplate": "github-tags",
-      "packageNameTemplate": "rust-lang/rust-clippy",
-      "extractVersionTemplate": "^rust-(?<version>.*)$"
-    },
-    {
-      "description": "Update rustfmt version in manifest.json",
-      "customType": "regex",
-      "managerFilePatterns": [
-        "lintro/tools/manifest\\.json"
-      ],
-      "matchStrings": [
-        "\"name\":\\s*\"rustfmt\",\\s*\"version\":\\s*\"(?<currentValue>[0-9]+\\.[0-9]+\\.[0-9]+)\""
-      ],
-      "datasourceTemplate": "github-tags",
-      "packageNameTemplate": "rust-lang/rustfmt",
-      "extractVersionTemplate": "^v(?<version>.*)$"
     }
   ]
 }

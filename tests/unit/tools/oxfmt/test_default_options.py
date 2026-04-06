@@ -7,6 +7,8 @@ from typing import TYPE_CHECKING, Any
 import pytest
 from assertpy import assert_that
 
+from lintro._tool_versions import get_min_version
+from lintro.enums.tool_name import ToolName
 from lintro.enums.tool_type import ToolType
 from lintro.tools.definitions.oxfmt import (
     OXFMT_DEFAULT_PRIORITY,
@@ -35,7 +37,7 @@ if TYPE_CHECKING:
         ("tool_type", ToolType.FORMATTER),
         ("priority", OXFMT_DEFAULT_PRIORITY),
         ("default_timeout", OXFMT_DEFAULT_TIMEOUT),
-        ("min_version", "0.42.0"),
+        ("min_version", get_min_version(ToolName.OXFMT)),
     ],
     ids=[
         "name_equals_oxfmt",
@@ -44,7 +46,7 @@ if TYPE_CHECKING:
         "tool_type_is_formatter",
         "priority_equals_80",
         "default_timeout_equals_30",
-        "min_version_is_0.42.0",
+        "min_version_matches_tool_versions",
     ],
 )
 def test_definition_attributes(
