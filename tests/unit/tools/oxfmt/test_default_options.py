@@ -35,7 +35,6 @@ if TYPE_CHECKING:
         ("tool_type", ToolType.FORMATTER),
         ("priority", OXFMT_DEFAULT_PRIORITY),
         ("default_timeout", OXFMT_DEFAULT_TIMEOUT),
-        ("min_version", "0.42.0"),
     ],
     ids=[
         "name_equals_oxfmt",
@@ -44,7 +43,6 @@ if TYPE_CHECKING:
         "tool_type_is_formatter",
         "priority_equals_80",
         "default_timeout_equals_30",
-        "min_version_is_0.42.0",
     ],
 )
 def test_definition_attributes(
@@ -60,6 +58,17 @@ def test_definition_attributes(
         expected: The expected value for the attribute.
     """
     assert_that(getattr(oxfmt_plugin.definition, attr)).is_equal_to(expected)
+
+
+def test_definition_min_version_is_set(oxfmt_plugin: OxfmtPlugin) -> None:
+    """Definition has a valid semver min_version from the version infrastructure.
+
+    Args:
+        oxfmt_plugin: The OxfmtPlugin instance to test.
+    """
+    min_version = oxfmt_plugin.definition.min_version
+    assert_that(min_version).is_not_none()
+    assert_that(min_version).matches(r"^\d+\.\d+\.\d+$")
 
 
 def test_definition_file_patterns(oxfmt_plugin: OxfmtPlugin) -> None:
