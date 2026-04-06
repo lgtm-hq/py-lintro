@@ -6,6 +6,7 @@ This script validates that:
 2. Non-npm tool versions are defined in _tool_versions.py
 3. All expected tools have versions available
 4. Fallback npm versions match package.json to prevent drift
+5. Dockerfile ARG versions are consistent across all Dockerfiles
 
 Exit codes:
     0: All versions are correctly loaded
@@ -15,6 +16,7 @@ Exit codes:
 from __future__ import annotations
 
 import json
+import re
 import sys
 from pathlib import Path
 
@@ -115,6 +117,33 @@ def main() -> int:
         if isinstance(tool_name_key, ToolName) and is_npm_managed(tool_name_key):
             errors.append(f"is_npm_managed({tool_name_key}) should be False")
             print(f"  ✗ {tool_name_key.value} should NOT be npm-managed")
+
+    print()
+
+    # Check Dockerfile ARG version consistency across all Dockerfiles
+    print("Dockerfile ARG version consistency:")
+    arg_pattern = re.compile(r"^ARG\s+(\w+_VERSION)=([0-9]+\.[0-9]+\.[0-9]+)")
+    dockerfile_args: dict[str, dict[str, str]] = {}
+    for dockerfile in sorted(project_root.glob("Dockerfile*")):
+        if dockerfile.is_file():
+            for line in dockerfile.read_text(encoding="utf-8").splitlines():
+                match = arg_pattern.match(line)
+                if match:
+                    arg_name, arg_value = match.group(1), match.group(2)
+                    dockerfile_args.setdefault(arg_name, {})[
+                        dockerfile.name
+                    ] = arg_value
+
+    for arg_name, file_versions in sorted(dockerfile_args.items()):
+        unique_versions = set(file_versions.values())
+        if len(unique_versions) == 1:
+            version = next(iter(unique_versions))
+            files = ", ".join(sorted(file_versions))
+            print(f"  ✓ {arg_name}: {version} ({files})")
+        else:
+            detail = ", ".join(f"{f}={v}" for f, v in sorted(file_versions.items()))
+            errors.append(f"Dockerfile {arg_name} mismatch: {detail}")
+            print(f"  ✗ {arg_name} mismatch: {detail}")
 
     print()
 
