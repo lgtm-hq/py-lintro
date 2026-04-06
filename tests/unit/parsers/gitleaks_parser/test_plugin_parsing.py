@@ -28,7 +28,7 @@ def _get_report_path(cmd: list[str]) -> str | None:
     try:
         idx = cmd.index("--report-path")
         return cmd[idx + 1]
-    except (ValueError, IndexError):
+    except (ValueError, IndexError):  # fmt: skip  # parens required for py311-py313
         return None
 
 
@@ -68,7 +68,9 @@ def test_gitleaks_check_parses_output(
         # Handle version check calls (check for --version flag)
         if "--version" in cmd or "version" in cmd:
             return SimpleNamespace(
-                stdout=get_min_version(ToolName.GITLEAKS), stderr="", returncode=0,
+                stdout=get_min_version(ToolName.GITLEAKS),
+                stderr="",
+                returncode=0,
             )
         # Handle actual check calls - write JSON to the report file
         report_path = _get_report_path(cmd)
@@ -115,7 +117,9 @@ def test_gitleaks_check_handles_no_secrets(
         # Handle version check calls (check for --version flag)
         if "--version" in cmd or "version" in cmd:
             return SimpleNamespace(
-                stdout=get_min_version(ToolName.GITLEAKS), stderr="", returncode=0,
+                stdout=get_min_version(ToolName.GITLEAKS),
+                stderr="",
+                returncode=0,
             )
         # Handle actual check calls - write empty array to report file
         report_path = _get_report_path(cmd)
@@ -156,7 +160,9 @@ def test_gitleaks_check_handles_unparseable_output(
         # Handle version check calls (check for --version flag)
         if "--version" in cmd or "version" in cmd:
             return SimpleNamespace(
-                stdout=get_min_version(ToolName.GITLEAKS), stderr="", returncode=0,
+                stdout=get_min_version(ToolName.GITLEAKS),
+                stderr="",
+                returncode=0,
             )
         # Handle actual check calls - write invalid JSON to report file
         report_path = _get_report_path(cmd)

@@ -122,7 +122,9 @@ def main() -> int:
 
     # Check Dockerfile ARG version consistency across all Dockerfiles
     print("Dockerfile ARG version consistency:")
-    arg_pattern = re.compile(r"^ARG\s+(\w+_VERSION)=([0-9]+\.[0-9]+\.[0-9]+)")
+    arg_pattern = re.compile(
+        r"^\s*ARG\s+(\w+_VERSION)=([0-9]+\.[0-9]+\.[0-9]+)\s*(?:#.*)?$",
+    )
     dockerfile_args: dict[str, dict[str, str]] = {}
     for dockerfile in sorted(project_root.glob("Dockerfile*")):
         if dockerfile.is_file():
