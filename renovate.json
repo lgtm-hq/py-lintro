@@ -53,6 +53,7 @@
     {
       "description": "Bump pyproject.toml floors for bundled Python tools so uv.lock stays in sync with manifest pins",
       "groupName": "bundled python tools",
+      "matchDatasources": ["pypi"],
       "matchPackageNames": [
         "ruff",
         "mypy",
