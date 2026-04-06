@@ -148,6 +148,7 @@
     {
       "customType": "regex",
       "managerFilePatterns": [
+        "Dockerfile\\.base",
         "Dockerfile\\.tools"
       ],
       "matchStrings": [
