@@ -47,11 +47,11 @@ _MANIFEST_PATH = Path(__file__).parent / "tools" / "manifest.json"
 # Non-npm external tools - updated by Renovate via custom regex managers
 # Keys use ToolName enum values for type safety
 TOOL_VERSIONS: dict[ToolName | str, str] = {
-    ToolName.ACTIONLINT: "1.7.10",
+    ToolName.ACTIONLINT: "1.7.12",
     ToolName.CARGO_AUDIT: "0.22.0",
     ToolName.CARGO_DENY: "0.19.0",
     ToolName.CLIPPY: "1.92.0",
-    ToolName.GITLEAKS: "8.30.0",
+    ToolName.GITLEAKS: "8.30.1",
     ToolName.HADOLINT: "2.14.0",
     ToolName.OSV_SCANNER: "2.3.5",
     ToolName.PYTEST: "9.0.2",
@@ -59,7 +59,7 @@ TOOL_VERSIONS: dict[ToolName | str, str] = {
     ToolName.RUSTFMT: "1.8.0",
     ToolName.SEMGREP: "1.151.0",
     ToolName.SHELLCHECK: "0.11.0",
-    ToolName.SHFMT: "3.12.0",
+    ToolName.SHFMT: "3.13.0",
     ToolName.SQLFLUFF: "4.0.0",
     ToolName.TAPLO: "0.10.0",
 }
@@ -86,14 +86,14 @@ _TOOL_TO_NPM_PACKAGE: dict[ToolName, str] = {
 # Fallback npm tool versions - used when package.json is not found.
 # CI should verify these match package.json to prevent drift.
 _FALLBACK_NPM_VERSIONS: dict[ToolName, str] = {
-    ToolName.ASTRO_CHECK: "6.0.8",
-    ToolName.SVELTE_CHECK: "4.4.5",
+    ToolName.ASTRO_CHECK: "6.1.3",
+    ToolName.SVELTE_CHECK: "4.4.6",
     ToolName.TSC: "5.9.3",
     ToolName.VUE_TSC: "3.2.6",
     ToolName.PRETTIER: "3.8.1",
     ToolName.MARKDOWNLINT: "0.22.0",
-    ToolName.OXLINT: "1.57.0",
-    ToolName.OXFMT: "0.42.0",
+    ToolName.OXLINT: "1.58.0",
+    ToolName.OXFMT: "0.43.0",
 }
 
 # Companion npm packages - packages that support a tool but have separate versions

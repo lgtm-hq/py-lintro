@@ -41,7 +41,7 @@
   "tools": [
     {
       "name": "actionlint",
-      "version": "1.7.10",
+      "version": "1.7.12",
       "install": {
         "type": "binary"
       },
@@ -53,7 +53,7 @@
     },
     {
       "name": "astro_check",
-      "version": "6.0.8",
+      "version": "6.1.3",
       "install": {
         "type": "npm",
         "package": "astro",
@@ -132,7 +132,7 @@
     },
     {
       "name": "gitleaks",
-      "version": "8.30.0",
+      "version": "8.30.1",
       "install": {
         "type": "binary"
       },
@@ -195,7 +195,7 @@
     },
     {
       "name": "oxfmt",
-      "version": "0.42.0",
+      "version": "0.43.0",
       "install": {
         "type": "npm",
         "package": "oxfmt"
@@ -208,7 +208,7 @@
     },
     {
       "name": "oxlint",
-      "version": "1.57.0",
+      "version": "1.58.0",
       "install": {
         "type": "npm",
         "package": "oxlint"
@@ -323,7 +323,7 @@
     },
     {
       "name": "shfmt",
-      "version": "3.12.0",
+      "version": "3.13.0",
       "install": {
         "type": "binary"
       },
@@ -348,7 +348,7 @@
     },
     {
       "name": "svelte_check",
-      "version": "4.4.5",
+      "version": "4.4.6",
       "install": {
         "type": "npm",
         "package": "svelte-check",
