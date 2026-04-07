@@ -42,10 +42,10 @@ dependencies = [
   "yamllint>=1.37.1",
   "httpx>=0.28.1",
   "defusedxml>=0.7.1",
-  "ruff>=0.14.10",
+  "ruff>=0.15.9",
   "black>=26.3.1",
-  "bandit>=1.9.2",
-  "mypy>=1.19.1",
+  "bandit>=1.9.4",
+  "mypy>=1.20.0",
   "pydoclint>=0.8.3",
 ]
 authors = [{ name = "lgtm-hq", email = "turbocoder13@gmail.com" }]
@@ -65,8 +65,8 @@ dev = [
   "pytest-sugar>=1.1.1",
   "tox>=4.34.1",
   "allure-pytest>=2.15.3",
-  "ruff>=0.14.10",
-  "mypy>=1.19.1",
+  "ruff>=0.15.9",
+  "mypy>=1.20.0",
   "coverage-badge>=1.1.2",
   "python-semantic-release>=10.5.3",
   "assertpy>=1.1",
@@ -81,7 +81,7 @@ test = [
 ]
 typing = ["types-setuptools>=80.9.0.20251223", "types-tabulate>=0.9.0.20241207"]
 ai = ["anthropic>=0.39.0", "openai>=1.50.0"]
-tools = ["semgrep>=1.151.0", "sqlfluff>=4.0.0"]
+tools = ["semgrep>=1.157.0", "sqlfluff>=4.1.0"]
 
 [project.scripts]
 lintro = "lintro.cli:main"
@@ -102,12 +102,12 @@ dev = [
   "twine>=6.2.0",
   "assertpy>=1.1",
   "pytest-mock>=3.15.1",
-  "bandit>=1.9.2",
+  "bandit>=1.9.4",
   "black>=26.3.1",
-  "ruff>=0.14.10",
+  "ruff>=0.15.9",
   "yamllint>=1.37.1",
   "pytest-timeout>=2.4.0",
-  "mypy>=1.19.1",
+  "mypy>=1.20.0",
   "types-PyYAML>=6.0.12.20250915",
   "types-tabulate>=0.9.0.20241207",
   "types-defusedxml>=0.7.0.20250822",

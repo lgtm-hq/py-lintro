@@ -57,10 +57,10 @@ TOOL_VERSIONS: dict[ToolName | str, str] = {
     ToolName.PYTEST: "9.0.2",
     ToolName.RUSTC: "1.92.0",
     ToolName.RUSTFMT: "1.8.0",
-    ToolName.SEMGREP: "1.151.0",
+    ToolName.SEMGREP: "1.157.0",
     ToolName.SHELLCHECK: "0.11.0",
     ToolName.SHFMT: "3.12.0",
-    ToolName.SQLFLUFF: "4.0.0",
+    ToolName.SQLFLUFF: "4.1.0",
     ToolName.TAPLO: "0.10.0",
 }
 
