@@ -21,3 +21,18 @@ reason = "smol-toml@1.6.0 — transitive dev dep via astro, pending upstream upd
 id = "GHSA-48c2-rrv3-qjmp"
 ignoreUntil = 2026-06-25
 reason = "yaml@2.7.1 — transitive dev dep, pending upstream update to 2.8.3"
+
+[[IgnoredVulns]]
+id = "GHSA-4w7w-66w2-5vf9"
+ignoreUntil = 2026-06-25
+reason = "vite@7.3.1 — transitive dev dep via astro, fix requires vite 8 which astro doesn't support yet"
+
+[[IgnoredVulns]]
+id = "GHSA-p9ff-h696-f583"
+ignoreUntil = 2026-06-25
+reason = "vite@7.3.1 — transitive dev dep via astro, fix requires vite 8 which astro doesn't support yet"
+
+[[IgnoredVulns]]
+id = "GHSA-v2wj-q39q-566r"
+ignoreUntil = 2026-06-25
+reason = "vite@7.3.1 — transitive dev dep via astro, fix requires vite 8 which astro doesn't support yet"
