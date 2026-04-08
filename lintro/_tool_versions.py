@@ -56,7 +56,7 @@ TOOL_VERSIONS: dict[ToolName | str, str] = {
     ToolName.OSV_SCANNER: "2.3.5",
     ToolName.PYTEST: "9.0.2",
     ToolName.RUSTC: "1.92.0",
-    ToolName.RUSTFMT: "1.8.0",
+    ToolName.RUSTFMT: "1.9.0",
     ToolName.SEMGREP: "1.151.0",
     ToolName.SHELLCHECK: "0.11.0",
     ToolName.SHFMT: "3.13.0",
