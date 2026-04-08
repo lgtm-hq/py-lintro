@@ -757,12 +757,24 @@ main() {
 		local component="$1"
 
 		if [ -z "${RUST_TOOLCHAIN_VERSION:-}" ]; then
-			if RUST_TOOLCHAIN_VERSION=$(get_tool_version "rustc" 2>/dev/null); then
-				log_verbose "Pinned Rust toolchain version: ${RUST_TOOLCHAIN_VERSION}"
+			# Clippy versions match Rust release versions (clippy 1.94.0 = Rust 1.94.0).
+			# Use the highest version among rustc and clippy so that Renovate PRs
+			# that bump clippy independently install the correct toolchain.
+			local _rustc_ver _clippy_ver
+			_rustc_ver=$(get_tool_version "rustc" 2>/dev/null || echo "")
+			_clippy_ver=$(get_tool_version "clippy" 2>/dev/null || echo "")
+
+			if [ -n "$_rustc_ver" ] && [ -n "$_clippy_ver" ]; then
+				RUST_TOOLCHAIN_VERSION=$(printf '%s\n%s\n' "$_rustc_ver" "$_clippy_ver" | sort -V | tail -1)
+			elif [ -n "$_rustc_ver" ]; then
+				RUST_TOOLCHAIN_VERSION="$_rustc_ver"
+			elif [ -n "$_clippy_ver" ]; then
+				RUST_TOOLCHAIN_VERSION="$_clippy_ver"
 			else
 				RUST_TOOLCHAIN_VERSION="stable"
 				echo -e "${YELLOW}⚠ Rust toolchain version not found in manifest; using stable${NC}"
 			fi
+			log_verbose "Pinned Rust toolchain version: ${RUST_TOOLCHAIN_VERSION}"
 		fi
 
 		if [ $DRY_RUN -eq 1 ]; then
