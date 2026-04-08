@@ -51,6 +51,15 @@
       "rangeStrategy": "widen"
     },
     {
+      "groupName": "rust toolchain",
+      "groupSlug": "rust-toolchain",
+      "description": "Group rustc and clippy because clippy versions match Rust release versions",
+      "matchPackageNames": [
+        "rust-lang/rust",
+        "rust-lang/rust-clippy"
+      ]
+    },
+    {
       "groupName": "linting tools",
       "groupSlug": "linting-tools",
       "matchPackageNames": [
@@ -355,26 +364,45 @@
       "packageNameTemplate": "cargo-deny"
     },
     {
-      "description": "Update clippy version in _tool_versions.py",
+      "description": "Update rustc in _tool_versions.py and manifest.json",
       "customType": "regex",
       "managerFilePatterns": [
-        "lintro/_tool_versions\\.py"
+        "lintro/_tool_versions\\.py",
+        "lintro/tools/manifest\\.json"
       ],
       "matchStrings": [
-        "ToolName\\.CLIPPY:\\s*\"(?<currentValue>[0-9]+\\.[0-9]+\\.[0-9]+)\""
+        "ToolName\\.RUSTC:\\s*\"(?<currentValue>[0-9]+\\.[0-9]+\\.[0-9]+)\"",
+        "\"name\":\\s*\"rustc\",\\s*\"version\":\\s*\"(?<currentValue>[0-9]+\\.[0-9]+\\.[0-9]+)\""
+      ],
+      "datasourceTemplate": "github-tags",
+      "packageNameTemplate": "rust-lang/rust",
+      "extractVersionTemplate": "^(?<version>[0-9]+\\.[0-9]+\\.[0-9]+)$"
+    },
+    {
+      "description": "Update clippy in _tool_versions.py and manifest.json",
+      "customType": "regex",
+      "managerFilePatterns": [
+        "lintro/_tool_versions\\.py",
+        "lintro/tools/manifest\\.json"
+      ],
+      "matchStrings": [
+        "ToolName\\.CLIPPY:\\s*\"(?<currentValue>[0-9]+\\.[0-9]+\\.[0-9]+)\"",
+        "\"name\":\\s*\"clippy\",\\s*\"version\":\\s*\"(?<currentValue>[0-9]+\\.[0-9]+\\.[0-9]+)\""
       ],
       "datasourceTemplate": "github-tags",
       "packageNameTemplate": "rust-lang/rust-clippy",
       "extractVersionTemplate": "^rust-(?<version>.*)$"
     },
     {
-      "description": "Update rustfmt version in _tool_versions.py",
+      "description": "Update rustfmt in _tool_versions.py and manifest.json",
       "customType": "regex",
       "managerFilePatterns": [
-        "lintro/_tool_versions\\.py"
+        "lintro/_tool_versions\\.py",
+        "lintro/tools/manifest\\.json"
       ],
       "matchStrings": [
-        "ToolName\\.RUSTFMT:\\s*\"(?<currentValue>[0-9]+\\.[0-9]+\\.[0-9]+)\""
+        "ToolName\\.RUSTFMT:\\s*\"(?<currentValue>[0-9]+\\.[0-9]+\\.[0-9]+)\"",
+        "\"name\":\\s*\"rustfmt\",\\s*\"version\":\\s*\"(?<currentValue>[0-9]+\\.[0-9]+\\.[0-9]+)\""
       ],
       "datasourceTemplate": "github-tags",
       "packageNameTemplate": "rust-lang/rustfmt",
@@ -504,32 +532,6 @@
       ],
       "datasourceTemplate": "crate",
       "packageNameTemplate": "cargo-audit"
-    },
-    {
-      "description": "Update clippy version in manifest.json",
-      "customType": "regex",
-      "managerFilePatterns": [
-        "lintro/tools/manifest\\.json"
-      ],
-      "matchStrings": [
-        "\"name\":\\s*\"clippy\",\\s*\"version\":\\s*\"(?<currentValue>[0-9]+\\.[0-9]+\\.[0-9]+)\""
-      ],
-      "datasourceTemplate": "github-tags",
-      "packageNameTemplate": "rust-lang/rust-clippy",
-      "extractVersionTemplate": "^rust-(?<version>.*)$"
-    },
-    {
-      "description": "Update rustfmt version in manifest.json",
-      "customType": "regex",
-      "managerFilePatterns": [
-        "lintro/tools/manifest\\.json"
-      ],
-      "matchStrings": [
-        "\"name\":\\s*\"rustfmt\",\\s*\"version\":\\s*\"(?<currentValue>[0-9]+\\.[0-9]+\\.[0-9]+)\""
-      ],
-      "datasourceTemplate": "github-tags",
-      "packageNameTemplate": "rust-lang/rustfmt",
-      "extractVersionTemplate": "^v(?<version>.*)$"
     }
   ]
 }
