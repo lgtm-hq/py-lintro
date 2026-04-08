@@ -20,6 +20,7 @@ import argparse
 import os
 import re
 import shutil
+# Used safely with shell disabled
 import subprocess  # nosec B404
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -356,6 +357,7 @@ def compute() -> ComputeResult:
         }
         # Query associated PRs for this commit and inspect labels
         try:
+            # Timeout is set in constructor
             with httpx.Client(timeout=10.0) as client:  # nosec B113
                 resp = client.get(url, headers=headers)
                 if resp.status_code == 200:

@@ -203,6 +203,7 @@ class RuffPlugin(BaseToolPlugin):
         try:
             cmd = self._get_executable_command(tool_name="ruff")
             cmd.extend(["rule", "--output-format", "json", code])
+            # Args list, shell=False
             result = subprocess.run(  # nosec B603
                 cmd,
                 capture_output=True,

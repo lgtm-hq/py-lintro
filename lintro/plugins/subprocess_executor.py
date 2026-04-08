@@ -258,8 +258,9 @@ def run_subprocess_streaming(
         effective_env = {**os.environ, **env}
 
     try:
-        # Use Popen for streaming output  # nosec B603
-        process = subprocess.Popen(
+        # Use Popen for streaming output
+        # Args list, shell=False
+        process = subprocess.Popen(  # nosec B603
             cmd,
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,

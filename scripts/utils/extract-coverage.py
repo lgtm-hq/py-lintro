@@ -10,6 +10,7 @@ standard library with explicit justification.
 import os
 import sys
 import types
+# Fallback only; defusedxml is preferred below
 import xml.etree.ElementTree as StdlibET  # nosec B405
 
 ET: types.ModuleType
