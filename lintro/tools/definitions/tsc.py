@@ -594,6 +594,7 @@ class TscPlugin(BaseToolPlugin):
         all_issues: list[Any] = []
         output_sections: list[str] = []
         temp_files: list[Path] = []
+        any_succeeded = False
 
         try:
             for tsconfig_info, project_files in partitions:
@@ -655,6 +656,7 @@ class TscPlugin(BaseToolPlugin):
                     logger.warning("[tsc] Sub-project {} failed: {}", project_dir, e)
                     continue
 
+                any_succeeded = True
                 issues = parse_tsc_output(output=output or "")
                 all_issues.extend(issues)
 
@@ -671,9 +673,10 @@ class TscPlugin(BaseToolPlugin):
 
             total_issues = len(all_issues)
             output_text = "\n".join(output_sections) if output_sections else None
+            success = any_succeeded and total_issues == 0
             return ToolResult(
                 name=self.definition.name,
-                success=total_issues == 0,
+                success=success,
                 output=output_text,
                 issues_count=total_issues,
                 issues=all_issues,

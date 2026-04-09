@@ -14,6 +14,7 @@ These utilities are consumed by :mod:`lintro.tools.definitions.tsc` and
 
 from __future__ import annotations
 
+import fnmatch
 import json
 import os
 import tempfile
@@ -341,7 +342,11 @@ def _walk_for_tsconfigs(
     for dirpath, dirnames, filenames in os.walk(root):
         # Prune excluded directories in-place
         dirnames[:] = [
-            d for d in dirnames if d not in always_skip and not d.startswith(".")
+            d
+            for d in dirnames
+            if d not in always_skip
+            and not d.startswith(".")
+            and not any(fnmatch.fnmatch(d, pat) for pat in exclude_patterns)
         ]
 
         if "tsconfig.json" in filenames:

@@ -9,11 +9,6 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
-### Fixed
-
-- **tsc/vue-tsc**: Respect tsconfig.json `include`/`exclude`/`files` scoping instead of
-  overriding with all discovered files (#851)
-
 ### Added
 
 - **tsc/vue-tsc**: Support TypeScript project references in monorepos — automatic
@@ -57,6 +52,8 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Fixed
 
+- **tsc/vue-tsc**: Respect tsconfig.json `include`/`exclude`/`files` scoping instead of
+  overriding with all discovered files (#851)
 - **Critical**: Fixed circular import bug in `lintro.parsers` module
   - Issue:
     `ImportError: cannot import name 'bandit' from partially initialized module 'lintro.parsers'`
