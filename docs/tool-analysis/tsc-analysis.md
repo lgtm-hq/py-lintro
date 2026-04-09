@@ -24,6 +24,10 @@ This analysis compares Lintro's wrapper with core tsc behavior.
 - ✅ Respects native `tsconfig.json` compiler options (auto-discovered or via
   `--project`)
 - ✅ **File targeting works even with tsconfig.json** (see below)
+- ✅ Respects tsconfig.json `include`/`exclude`/`files` scoping (#851)
+- ✅ TypeScript project references (`references`) support (#803)
+- ✅ Multi-project monorepo discovery and per-project type checking (#805)
+- ✅ Per-project framework detection in monorepos
 - ✅ Supports `--strict` mode toggle
 - ✅ Supports `--skipLibCheck` for faster checks (enabled by default)
 - ✅ File discovery for `*.ts`, `*.tsx`, `*.mts`, `*.cts`
@@ -56,6 +60,32 @@ This gives you the best of both worlds:
 - **Default:** Lintro-style file targeting with tsconfig.json compiler options
 - **Opt-in:** Native tsconfig.json file selection when needed
 
+**Respecting tsconfig scoping (#851):** When your `tsconfig.json` has an explicit
+`include` or `files` field, lintro now respects it — running `tsc --project <tsconfig>`
+directly instead of generating a temp config that overrides the scoping. This prevents
+false positives from files the project intentionally excludes (e.g.,
+`vitest.config.ts`).
+
+### Monorepo Support (#803, #805)
+
+Lintro automatically discovers TypeScript sub-projects in monorepos:
+
+1. **Project references:** Follows `references` arrays in tsconfig.json recursively
+2. **Tree walking:** Discovers `tsconfig.json` files in subdirectories
+3. **Deepest wins:** When parent and child tsconfigs overlap, files are assigned to the
+   deepest (most specific) tsconfig, preventing double-checking under conflicting
+   compiler options
+4. **Per-project framework detection:** Astro/Vue/Svelte detection is scoped per
+   sub-project, not globally
+
+```bash
+# Monorepo with project references — each sub-project checked independently
+lintro check . --tools tsc
+# → packages/api: tsc -p packages/api/tsconfig.json
+# → packages/web: skipped (Vue detected, use vue-tsc)
+# → packages/lib: tsc -p packages/lib/tsconfig.json
+```
+
 ### ⚠️ Limited / Missing
 
 **Build & Watch Modes:**
@@ -83,7 +113,6 @@ This gives you the best of both worlds:
 
 **Advanced Features:**
 
-- ❌ No project references support
 - ❌ No plugins configuration
 - ❌ No `--generateTrace` performance profiling
 - ❌ No custom diagnostic formatting
@@ -217,4 +246,3 @@ lintro check src/ --tools tsc --tool-options "tsc:project=tsconfig.build.json"
   - Incremental compilation for large projects
   - JavaScript/declaration file output
   - Fine-grained compiler option control beyond tsconfig.json
-  - Project references in monorepos

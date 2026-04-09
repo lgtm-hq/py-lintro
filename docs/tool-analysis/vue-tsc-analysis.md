@@ -28,6 +28,8 @@ types. This analysis compares Lintro's wrapper with core vue-tsc behavior.
 - Parses vue-tsc output into structured `ToolResult` with file/line/column/code
 - Auto-install support for Node.js dependencies
 - Temporary tsconfig generation for targeted file checking
+- Respects tsconfig.json `include`/`exclude`/`files` scoping (#851)
+- Multi-project monorepo discovery and per-project checking (#803, #805)
 - Dependency error categorization with helpful suggestions
 
 ### Limited / Missing
@@ -44,7 +46,7 @@ types. This analysis compares Lintro's wrapper with core vue-tsc behavior.
 **Advanced Features:**
 
 - No declaration file generation (`--declaration`)
-- No composite project references (`--build`)
+- No composite project building (`--build`)
 
 ### Enhancements
 
