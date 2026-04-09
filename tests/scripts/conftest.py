@@ -31,7 +31,8 @@ def mock_github_env(monkeypatch: pytest.MonkeyPatch) -> dict[str, str]:
         dict: Dictionary of mocked environment variables.
     """
     env_vars = {
-        "GITHUB_TOKEN": "mock-token",
+        # Fake test fixture token, not a real credential
+        "GITHUB_TOKEN": "mock-token",  # nosec B105
         "GITHUB_REPOSITORY": "test/repo",
         "GITHUB_EVENT_NAME": "pull_request",
         "GITHUB_REF": "refs/pull/123/merge",

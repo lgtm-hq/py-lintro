@@ -131,6 +131,7 @@ def test_invalid_shell(
     """
     shellcheck_plugin = get_plugin("shellcheck")
     with pytest.raises(ValueError, match="Invalid shell dialect"):
+        # shell is dialect name, not subprocess shell=True
         shellcheck_plugin.set_options(shell="invalid")  # nosec B604
 
 

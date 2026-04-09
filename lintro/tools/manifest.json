@@ -67,7 +67,7 @@
     },
     {
       "name": "bandit",
-      "version": "1.9.2",
+      "version": "1.9.4",
       "install": {
         "type": "pip",
         "package": "bandit"

@@ -20,7 +20,8 @@ def test_parse_gitleaks_valid_output() -> None:
                 "StartColumn": 15,
                 "EndColumn": 35,
                 "Match": "AKIAIOSFODNN7EXAMPLE",
-                "Secret": "AKIAIOSFODNN7EXAMPLE",
+                # AWS example key from docs, not a real credential
+                "Secret": "AKIAIOSFODNN7EXAMPLE",  # nosec B105
                 "File": "config.py",
                 "SymlinkFile": "",
                 "Commit": "",

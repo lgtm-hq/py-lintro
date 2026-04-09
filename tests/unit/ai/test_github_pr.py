@@ -20,6 +20,7 @@ from lintro.ai.models import AIFixSuggestion, AISummary
 _TEST_TOKEN = (
     "ghp_test_fixture_token"  # noqa: S105  # nosec B105 — fake test fixture token
 )
+# Fake test fixture token, not a real credential
 _EMPTY_TOKEN = ""  # noqa: S105  # nosec B105
 
 
@@ -132,7 +133,8 @@ def test_is_not_available_without_pr_number(test_token: str) -> None:
 def test_reads_env_vars() -> None:
     """Read token, repo, and PR number from environment."""
     env = {
-        "GITHUB_TOKEN": "ghp_from_env",
+        # Fake test fixture token, not a real credential
+        "GITHUB_TOKEN": "ghp_from_env",  # nosec B105
         "GITHUB_REPOSITORY": "org/repo",
         "GITHUB_REF": "refs/pull/99/merge",
     }

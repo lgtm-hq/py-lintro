@@ -113,6 +113,7 @@ def test_set_options_shell_case_insensitive(
     Args:
         shellcheck_plugin: The ShellcheckPlugin instance to test.
     """
+    # shell is dialect name, not subprocess shell=True
     shellcheck_plugin.set_options(shell="BASH")  # nosec B604
     assert_that(shellcheck_plugin.options.get("shell")).is_equal_to("bash")
 
@@ -212,6 +213,7 @@ def test_build_command_with_shell_dialect(shellcheck_plugin: ShellcheckPlugin) -
     Args:
         shellcheck_plugin: The ShellcheckPlugin instance to test.
     """
+    # shell is dialect name, not subprocess shell=True
     shellcheck_plugin.set_options(shell="bash")  # nosec B604
     cmd = shellcheck_plugin._build_command()
 
@@ -229,6 +231,7 @@ def test_build_command_with_all_options(shellcheck_plugin: ShellcheckPlugin) -> 
     shellcheck_plugin.set_options(
         severity="warning",
         exclude=["SC2086"],
+        # shell is dialect name, not subprocess shell=True
         shell="ksh",  # nosec B604
     )
     cmd = shellcheck_plugin._build_command()

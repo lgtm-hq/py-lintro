@@ -126,7 +126,8 @@ def test_script_fails_with_missing_comment_file(ci_script_path: Path) -> None:
             "GITHUB_EVENT_NAME": "pull_request",
             "PR_NUMBER": "123",
             "GITHUB_REPOSITORY": "test/repo",
-            "GITHUB_TOKEN": "fake-token",
+            # Fake test fixture token, not a real credential
+            "GITHUB_TOKEN": "fake-token",  # nosec B105
         },
     )
 
@@ -162,7 +163,8 @@ def test_script_uses_default_comment_file(ci_script_path: Path) -> None:
                 "GITHUB_EVENT_NAME": "pull_request",
                 "PR_NUMBER": "123",
                 "GITHUB_REPOSITORY": "test/repo",
-                "GITHUB_TOKEN": "fake-token",
+                # Fake test fixture token, not a real credential
+                "GITHUB_TOKEN": "fake-token",  # nosec B105
             },
         )
 
@@ -190,7 +192,8 @@ def test_script_uses_default_comment_file(ci_script_path: Path) -> None:
         "GITHUB_EVENT_NAME": "pull_request",
         "PR_NUMBER": "123",
         "GITHUB_REPOSITORY": "test/repo",
-        "GITHUB_TOKEN": "fake-token",
+        # Fake test fixture token, not a real credential
+        "GITHUB_TOKEN": "fake-token",  # nosec B105
     },
 )
 def test_script_integrates_with_python_utilities(
@@ -220,7 +223,8 @@ def test_script_integrates_with_python_utilities(
                 "GITHUB_EVENT_NAME": "pull_request",
                 "PR_NUMBER": "123",
                 "GITHUB_REPOSITORY": "test/repo",
-                "GITHUB_TOKEN": "fake-token",
+                # Fake test fixture token, not a real credential
+                "GITHUB_TOKEN": "fake-token",  # nosec B105
             },
         )
 
