@@ -3,11 +3,17 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 import pytest
 from assertpy import assert_that
 
-from lintro.utils.jsonc import load_jsonc, strip_jsonc_comments, strip_trailing_commas
+from lintro.utils.jsonc import (
+    extract_tsconfig_fields,
+    load_jsonc,
+    strip_jsonc_comments,
+    strip_trailing_commas,
+)
 
 # =============================================================================
 # Tests for strip_jsonc_comments
@@ -160,3 +166,54 @@ def test_load_jsonc_tsconfig_with_comments_and_type_roots() -> None:
         ["./types", "./node_modules/@types"],
     )
     assert_that(result["compilerOptions"]["strict"]).is_true()
+
+
+# =============================================================================
+# Tests for extract_tsconfig_fields
+# =============================================================================
+
+
+def test_extract_tsconfig_fields_full(tmp_path: Path) -> None:
+    """Extract all fields from a complete tsconfig dict."""
+    (tmp_path / "packages" / "api").mkdir(parents=True)
+    (tmp_path / "packages" / "api" / "tsconfig.json").write_text("{}")
+
+    content = {
+        "include": ["src/**/*.ts"],
+        "exclude": ["dist"],
+        "files": ["globals.d.ts"],
+        "extends": "./base.json",
+        "compilerOptions": {"composite": True},
+        "references": [{"path": "./packages/api"}],
+    }
+    result = extract_tsconfig_fields(content, tmp_path)
+    assert_that(result["include"]).is_equal_to(["src/**/*.ts"])
+    assert_that(result["exclude"]).is_equal_to(["dist"])
+    assert_that(result["files"]).is_equal_to(["globals.d.ts"])
+    assert_that(result["extends"]).is_equal_to("./base.json")
+    assert_that(result["composite"]).is_true()
+    assert_that(result["references"]).is_length(1)
+
+
+def test_extract_tsconfig_fields_empty_dict() -> None:
+    """Return defaults for an empty dict."""
+    result = extract_tsconfig_fields({}, Path("/fake"))
+    assert_that(result["include"]).is_none()
+    assert_that(result["exclude"]).is_none()
+    assert_that(result["files"]).is_none()
+    assert_that(result["references"]).is_empty()
+    assert_that(result["extends"]).is_none()
+    assert_that(result["composite"]).is_false()
+
+
+def test_extract_tsconfig_fields_non_dict() -> None:
+    """Return defaults for non-dict content."""
+    result = extract_tsconfig_fields(["not", "a", "dict"], Path("/fake"))
+    assert_that(result["include"]).is_none()
+
+
+def test_extract_tsconfig_fields_array_extends() -> None:
+    """Handle TS 5.0+ array extends syntax."""
+    content = {"extends": ["./base1.json", "./base2.json"]}
+    result = extract_tsconfig_fields(content, Path("/fake"))
+    assert_that(result["extends"]).is_equal_to(["./base1.json", "./base2.json"])
