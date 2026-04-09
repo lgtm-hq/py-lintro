@@ -21,10 +21,9 @@ Example:
 
 from __future__ import annotations
 
-import json
+import os
 import shutil
 import subprocess  # nosec B404 - used safely with shell disabled
-import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, NoReturn
@@ -42,11 +41,17 @@ from lintro.parsers.tsc.tsc_parser import (
     extract_missing_modules,
     parse_tsc_output,
 )
-from lintro.plugins.base import BaseToolPlugin
+from lintro.plugins.base import BaseToolPlugin, ExecutionContext
 from lintro.plugins.protocol import ToolDefinition
 from lintro.plugins.registry import register_tool
 from lintro.tools.core.timeout_utils import create_timeout_result
-from lintro.utils.jsonc import extract_type_roots, load_jsonc
+from lintro.utils.tsconfig import (
+    create_temp_tsconfig,
+    discover_tsconfigs,
+    has_explicit_scoping,
+    partition_files,
+    resolve_extends_chain,
+)
 
 # Constants for Tsc configuration
 TSC_DEFAULT_TIMEOUT: int = 60
@@ -224,8 +229,8 @@ class TscPlugin(BaseToolPlugin):
     ) -> Path:
         """Create a temporary tsconfig.json that extends the base config.
 
-        This allows lintro to respect user file selection while preserving
-        all compiler options from the project's tsconfig.json.
+        Delegates to the shared implementation in
+        :func:`lintro.utils.tsconfig.create_temp_tsconfig`.
 
         Args:
             base_tsconfig: Path to the original tsconfig.json to extend.
@@ -234,97 +239,14 @@ class TscPlugin(BaseToolPlugin):
 
         Returns:
             Path to the temporary tsconfig.json file.
-
-        Raises:
-            OSError: If the temporary file cannot be created or written.
         """
-        abs_base = base_tsconfig.resolve()
-
-        # Convert relative file paths to absolute paths since the temp tsconfig
-        # may be in a different directory than cwd
-        abs_files = [str((cwd / f).resolve()) for f in files]
-
-        compiler_options: dict[str, Any] = {
-            # Ensure noEmit is set (type checking only)
-            "noEmit": True,
-        }
-
-        # Read typeRoots from the base tsconfig so they are preserved in the
-        # temp config.  TypeScript resolves typeRoots relative to the config
-        # file, so we resolve them to absolute paths here because the temp
-        # config lives in a different directory.
-        try:
-            base_content = load_jsonc(abs_base.read_text(encoding="utf-8"))
-            resolved_roots = extract_type_roots(base_content, abs_base.parent)
-            if resolved_roots is not None:
-                compiler_options["typeRoots"] = resolved_roots
-        except (json.JSONDecodeError, OSError) as exc:
-            logger.debug("[tsc] Could not read typeRoots from {}: {}", abs_base, exc)
-
-        temp_config = {
-            "extends": str(abs_base),
-            "include": abs_files,
-            "exclude": [],
-            "compilerOptions": compiler_options,
-        }
-
-        # Create temp file next to the base tsconfig so TypeScript can resolve
-        # types/typeRoots by walking up from the temp file to node_modules.
-        # Falls back to system temp dir with explicit typeRoots for read-only
-        # filesystems (e.g. Docker volume mounts).
-        try:
-            fd, temp_path = tempfile.mkstemp(
-                suffix=".json",
-                prefix=".lintro-tsc-",
-                dir=abs_base.parent,
-            )
-        except OSError:
-            fd, temp_path = tempfile.mkstemp(
-                suffix=".json",
-                prefix="lintro-tsc-",
-            )
-            # Preserve existing typeRoots from the base tsconfig and add
-            # the default node_modules/@types path so TypeScript can still
-            # resolve type packages from the system temp dir.
-            existing_type_roots: list[str] = []
-            type_roots_explicit = False
-            try:
-                base_content = load_jsonc(
-                    base_tsconfig.read_text(encoding="utf-8"),
-                )
-                extracted = extract_type_roots(base_content, abs_base.parent)
-                if extracted is not None:
-                    existing_type_roots = extracted
-                    type_roots_explicit = True
-            except (json.JSONDecodeError, OSError):
-                pass
-            default_root = str(cwd / "node_modules" / "@types")
-            # Add the default root when typeRoots was absent or had
-            # entries (the temp file lives outside the project tree so
-            # TypeScript cannot discover it by walking up).  When the
-            # user explicitly set typeRoots: [] to disable global types,
-            # honour that intent and leave the list empty.
-            if (
-                not type_roots_explicit or existing_type_roots
-            ) and default_root not in existing_type_roots:
-                existing_type_roots.append(default_root)
-            compiler_options["typeRoots"] = existing_type_roots
-
-        try:
-            with open(fd, "w", encoding="utf-8") as f:
-                json.dump(temp_config, f, indent=2)
-        except OSError:
-            # Clean up on failure
-            Path(temp_path).unlink(missing_ok=True)
-            raise
-
-        logger.debug(
-            "[tsc] Created temp tsconfig at {} extending {} with {} files",
-            temp_path,
-            abs_base,
-            len(files),
+        return create_temp_tsconfig(
+            base_tsconfig,
+            files,
+            cwd,
+            prefix=".lintro-tsc-",
+            tool_label="tsc",
         )
-        return Path(temp_path)
 
     def _build_command(
         self,
@@ -523,16 +445,81 @@ class TscPlugin(BaseToolPlugin):
         use_project_files = merged_options.get("use_project_files", False)
         explicit_project_opt = merged_options.get("project")
         explicit_project = str(explicit_project_opt) if explicit_project_opt else None
+
+        # Bypass partitioning when user explicitly controls the config
+        if use_project_files or explicit_project:
+            return self._check_single_project(
+                ctx,
+                cwd_path,
+                merged_options,
+                use_project_files=True,
+                explicit_project=explicit_project,
+            )
+
+        # Compute discovery root from original paths (not file-derived cwd).
+        # When the user passes a directory, use it directly.  When files are
+        # passed, use the directory containing those files.  This ensures we
+        # find tsconfigs that are *above* the discovered files.
+        discovery_root = cwd_path
+        if paths:
+            candidate = Path(paths[0]).resolve()
+            if candidate.is_dir():
+                discovery_root = candidate
+            elif candidate.parent.exists():
+                discovery_root = candidate.parent
+
+        # Discover tsconfigs for multi-project support
+        tsconfigs = discover_tsconfigs(discovery_root, self.exclude_patterns)
+
+        if len(tsconfigs) > 1:
+            return self._check_multi_project(ctx, cwd_path, tsconfigs, merged_options)
+
+        # Pass the discovered tsconfig (if any) so _check_single_project
+        # doesn't have to re-discover it from a potentially different cwd.
+        discovered_tsconfig = tsconfigs[0].path if tsconfigs else None
+        return self._check_single_project(
+            ctx,
+            cwd_path,
+            merged_options,
+            discovered_tsconfig=discovered_tsconfig,
+        )
+
+    # -----------------------------------------------------------------
+    # Single-project check
+    # -----------------------------------------------------------------
+
+    def _check_single_project(
+        self,
+        ctx: ExecutionContext,
+        cwd_path: Path,
+        options: dict[str, object],
+        *,
+        use_project_files: bool = False,
+        explicit_project: str | None = None,
+        discovered_tsconfig: Path | None = None,
+    ) -> ToolResult:
+        """Run tsc against a single project.
+
+        Args:
+            ctx: Prepared execution context with discovered files.
+            cwd_path: Working directory.
+            options: Merged runtime options.
+            use_project_files: Use native tsconfig file selection.
+            explicit_project: Explicit ``--project`` path.
+            discovered_tsconfig: Pre-discovered tsconfig path from
+                :func:`discover_tsconfigs`, avoiding re-discovery from a
+                potentially different cwd.
+
+        Returns:
+            ToolResult with check results.
+        """
         temp_tsconfig: Path | None = None
         project_path: str | None = None
 
         try:
-            # Find existing tsconfig.json
-            base_tsconfig = self._find_tsconfig(cwd_path)
+            base_tsconfig = discovered_tsconfig or self._find_tsconfig(cwd_path)
 
             if use_project_files or explicit_project:
-                # Native mode: use tsconfig.json as-is for file selection
-                # or explicit project path was provided
                 project_path = explicit_project or (
                     str(base_tsconfig) if base_tsconfig else None
                 )
@@ -541,179 +528,323 @@ class TscPlugin(BaseToolPlugin):
                     project_path,
                 )
             elif base_tsconfig:
-                # Lintro mode: create temp tsconfig to respect file targeting
-                # while preserving compiler options from the project's config
-                temp_tsconfig = self._create_temp_tsconfig(
-                    base_tsconfig=base_tsconfig,
-                    files=ctx.rel_files,
-                    cwd=cwd_path,
-                )
-                project_path = str(temp_tsconfig)
-                logger.debug(
-                    "[tsc] Using temp tsconfig for file targeting: {}",
-                    project_path,
-                )
+                # Issue #851: respect tsconfig include/exclude/files scoping.
+                # When the tsconfig has explicit scoping, run tsc -p directly
+                # instead of creating a temp tsconfig that overrides include.
+                tsconfig_info = resolve_extends_chain(base_tsconfig)
+                if has_explicit_scoping(tsconfig_info):
+                    project_path = str(base_tsconfig)
+                    logger.info(
+                        "[tsc] Respecting native tsconfig scoping: {}",
+                        base_tsconfig,
+                    )
+                else:
+                    temp_tsconfig = self._create_temp_tsconfig(
+                        base_tsconfig=base_tsconfig,
+                        files=ctx.rel_files,
+                        cwd=cwd_path,
+                    )
+                    project_path = str(temp_tsconfig)
+                    logger.debug(
+                        "[tsc] Using temp tsconfig for file targeting: {}",
+                        project_path,
+                    )
             else:
-                # No tsconfig.json found - pass files directly
                 project_path = None
                 logger.debug("[tsc] No tsconfig.json found, passing files directly")
 
-            # Build command
-            cmd = self._build_command(
-                files=ctx.rel_files if not project_path else [],
+            return self._run_tsc_and_parse(
+                ctx=ctx,
+                cwd_path=cwd_path,
                 project_path=project_path,
-                options=merged_options,
-            )
-            logger.debug("[tsc] Running with cwd={} and cmd={}", ctx.cwd, cmd)
-
-            try:
-                success, output = self._run_subprocess(
-                    cmd=cmd,
-                    timeout=ctx.timeout,
-                    cwd=ctx.cwd,
-                )
-            except subprocess.TimeoutExpired:
-                timeout_result = create_timeout_result(
-                    tool=self,
-                    timeout=ctx.timeout,
-                    cmd=cmd,
-                )
-                return ToolResult(
-                    name=self.definition.name,
-                    success=timeout_result.success,
-                    output=timeout_result.output,
-                    issues_count=timeout_result.issues_count,
-                    issues=timeout_result.issues,
-                )
-            except FileNotFoundError as e:
-                return ToolResult(
-                    name=self.definition.name,
-                    success=False,
-                    output=f"TypeScript compiler not found: {e}\n\n"
-                    "Please ensure tsc is installed:\n"
-                    "  - Run 'npm install -g typescript' or 'bun add -g typescript'\n"
-                    "  - Or install locally: 'npm install typescript'",
-                    issues_count=0,
-                )
-            except OSError as e:
-                logger.error("[tsc] Failed to run tsc: {}", e)
-                return ToolResult(
-                    name=self.definition.name,
-                    success=False,
-                    output="tsc execution failed: " + str(e),
-                    issues_count=0,
-                )
-
-            # Parse output (parser handles ANSI stripping internally)
-            all_issues = parse_tsc_output(output=output or "")
-            issues_count = len(all_issues)
-
-            # Normalize output for fallback substring matching below
-            normalized_output = strip_ansi_codes(output) if output else ""
-
-            # Categorize issues into type errors vs dependency errors
-            type_errors, dependency_errors = categorize_tsc_issues(all_issues)
-
-            # If we have dependency errors, provide helpful guidance
-            if dependency_errors:
-                missing_modules = extract_missing_modules(dependency_errors)
-                dep_output_lines = [
-                    "Missing dependencies detected:",
-                    f"  {len(dependency_errors)} dependency error(s)",
-                ]
-                if missing_modules:
-                    modules_str = ", ".join(missing_modules[:10])
-                    if len(missing_modules) > 10:
-                        modules_str += f", ... (+{len(missing_modules) - 10} more)"
-                    dep_output_lines.append(f"  Missing: {modules_str}")
-
-                dep_output_lines.extend(
-                    [
-                        "",
-                        "Suggestions:",
-                        "  - Run 'bun install' or 'npm install' in your project",
-                        "  - Use '--auto-install' flag to auto-install dependencies",
-                        "  - If using Docker, ensure node_modules is available",
-                    ],
-                )
-
-                # If there are also type errors, show both
-                if type_errors:
-                    dep_output_lines.insert(
-                        0,
-                        f"Type errors: {len(type_errors)}",
-                    )
-                    dep_output_lines.insert(1, "")
-
-                # Return all issues but with helpful output
-                return ToolResult(
-                    name=self.definition.name,
-                    success=False,
-                    output="\n".join(dep_output_lines),
-                    issues_count=issues_count,
-                    issues=all_issues,
-                )
-
-            if not success and issues_count == 0 and normalized_output:
-                # Execution failed but no structured issues were parsed.
-                # This can happen with malformed output or non-standard error formats.
-                # Detect common dependency/configuration errors via substring matching
-                # as a fallback when the parser couldn't extract structured issues.
-
-                # Type definition errors (usually means node_modules not installed)
-                if (
-                    "Cannot find type definition file" in normalized_output
-                    or "Cannot find module" in normalized_output
-                ):
-                    helpful_output = (
-                        f"TypeScript configuration error:\n{normalized_output}\n\n"
-                        "This usually means dependencies aren't installed.\n"
-                        "Suggestions:\n"
-                        "  - Run 'bun install' or 'npm install' in your project\n"
-                        "  - Use '--auto-install' flag to auto-install dependencies\n"
-                        "  - If using Docker, ensure node_modules is available\n"
-                        "  - Use --tool-options 'tsc:skip_lib_check=true' to skip "
-                        "type checking of declaration files"
-                    )
-                    return ToolResult(
-                        name=self.definition.name,
-                        success=False,
-                        output=helpful_output,
-                        issues_count=0,
-                    )
-
-                # Generic failure
-                return ToolResult(
-                    name=self.definition.name,
-                    success=False,
-                    output=normalized_output or "tsc execution failed.",
-                    issues_count=0,
-                )
-
-            if not success and issues_count == 0:
-                # No output - generic failure
-                return ToolResult(
-                    name=self.definition.name,
-                    success=False,
-                    output="tsc execution failed.",
-                    issues_count=0,
-                )
-
-            return ToolResult(
-                name=self.definition.name,
-                success=issues_count == 0,
-                output=None,
-                issues_count=issues_count,
-                issues=all_issues,
+                options=options,
             )
         finally:
-            # Clean up temp tsconfig
             if temp_tsconfig and temp_tsconfig.exists():
                 try:
                     temp_tsconfig.unlink()
                     logger.debug("[tsc] Cleaned up temp tsconfig: {}", temp_tsconfig)
                 except OSError as e:
                     logger.warning("[tsc] Failed to clean up temp tsconfig: {}", e)
+
+    # -----------------------------------------------------------------
+    # Multi-project check
+    # -----------------------------------------------------------------
+
+    def _check_multi_project(
+        self,
+        ctx: ExecutionContext,
+        cwd_path: Path,
+        tsconfigs: list[Any],
+        options: dict[str, object],
+    ) -> ToolResult:
+        """Run tsc against each discovered sub-project and aggregate results.
+
+        Args:
+            ctx: Prepared execution context with discovered files.
+            cwd_path: Working directory (monorepo root).
+            tsconfigs: Discovered TsconfigInfo objects, deepest-first.
+            options: Merged runtime options.
+
+        Returns:
+            Aggregated ToolResult across all sub-projects.
+        """
+        partitions = partition_files(ctx.files, tsconfigs)
+
+        all_issues: list[Any] = []
+        output_sections: list[str] = []
+        temp_files: list[Path] = []
+
+        try:
+            for tsconfig_info, project_files in partitions:
+                if not project_files and tsconfig_info is not None:
+                    continue
+
+                project_dir = tsconfig_info.project_dir if tsconfig_info else cwd_path
+
+                # Per-project framework detection
+                if tsconfig_info is not None:
+                    framework_info = self._detect_framework_project(project_dir)
+                    if framework_info:
+                        framework_name, recommended_tool = framework_info
+                        try:
+                            rel = project_dir.relative_to(cwd_path)
+                        except ValueError:
+                            rel = project_dir
+                        output_sections.append(
+                            f"── {rel} ──\n"
+                            f"  Skipped: {framework_name} project "
+                            f"(use {recommended_tool})",
+                        )
+                        continue
+
+                # Determine project_path for this sub-project
+                temp_tsconfig: Path | None = None
+                project_path: str | None = None
+
+                if tsconfig_info is not None and has_explicit_scoping(tsconfig_info):
+                    project_path = str(tsconfig_info.path)
+                elif tsconfig_info is not None:
+                    rel_files = [os.path.relpath(f, project_dir) for f in project_files]
+                    temp_tsconfig = self._create_temp_tsconfig(
+                        tsconfig_info.path,
+                        rel_files,
+                        project_dir,
+                    )
+                    temp_files.append(temp_tsconfig)
+                    project_path = str(temp_tsconfig)
+
+                # Build and run
+                cmd = self._build_command(
+                    files=(
+                        [os.path.relpath(f, project_dir) for f in project_files]
+                        if not project_path
+                        else []
+                    ),
+                    project_path=project_path,
+                    options=options,
+                )
+
+                try:
+                    success, output = self._run_subprocess(
+                        cmd=cmd,
+                        timeout=ctx.timeout,
+                        cwd=str(project_dir),
+                    )
+                except (subprocess.TimeoutExpired, FileNotFoundError, OSError) as e:
+                    logger.warning("[tsc] Sub-project {} failed: {}", project_dir, e)
+                    continue
+
+                issues = parse_tsc_output(output=output or "")
+                all_issues.extend(issues)
+
+                try:
+                    rel_project = project_dir.relative_to(cwd_path)
+                except ValueError:
+                    rel_project = project_dir
+                count = len(issues)
+                section = (
+                    f"── {rel_project} "
+                    f"({count} issue{'s' if count != 1 else ''}) ──"
+                )
+                output_sections.append(section)
+
+            total_issues = len(all_issues)
+            output_text = "\n".join(output_sections) if output_sections else None
+            return ToolResult(
+                name=self.definition.name,
+                success=total_issues == 0,
+                output=output_text,
+                issues_count=total_issues,
+                issues=all_issues,
+            )
+        finally:
+            for temp in temp_files:
+                try:
+                    if temp.exists():
+                        temp.unlink()
+                except OSError:
+                    pass
+
+    # -----------------------------------------------------------------
+    # Shared tsc execution + output parsing
+    # -----------------------------------------------------------------
+
+    def _run_tsc_and_parse(
+        self,
+        ctx: ExecutionContext,
+        cwd_path: Path,
+        project_path: str | None,
+        options: dict[str, object],
+    ) -> ToolResult:
+        """Build the tsc command, run it, and parse the output.
+
+        Args:
+            ctx: Prepared execution context.
+            cwd_path: Working directory.
+            project_path: ``--project`` path or ``None``.
+            options: Merged runtime options.
+
+        Returns:
+            ToolResult with parsed issues.
+        """
+        cmd = self._build_command(
+            files=ctx.rel_files if not project_path else [],
+            project_path=project_path,
+            options=options,
+        )
+        logger.debug("[tsc] Running with cwd={} and cmd={}", ctx.cwd, cmd)
+
+        try:
+            success, output = self._run_subprocess(
+                cmd=cmd,
+                timeout=ctx.timeout,
+                cwd=ctx.cwd,
+            )
+        except subprocess.TimeoutExpired:
+            timeout_result = create_timeout_result(
+                tool=self,
+                timeout=ctx.timeout,
+                cmd=cmd,
+            )
+            return ToolResult(
+                name=self.definition.name,
+                success=timeout_result.success,
+                output=timeout_result.output,
+                issues_count=timeout_result.issues_count,
+                issues=timeout_result.issues,
+            )
+        except FileNotFoundError as e:
+            return ToolResult(
+                name=self.definition.name,
+                success=False,
+                output=f"TypeScript compiler not found: {e}\n\n"
+                "Please ensure tsc is installed:\n"
+                "  - Run 'npm install -g typescript' or 'bun add -g typescript'\n"
+                "  - Or install locally: 'npm install typescript'",
+                issues_count=0,
+            )
+        except OSError as e:
+            logger.error("[tsc] Failed to run tsc: {}", e)
+            return ToolResult(
+                name=self.definition.name,
+                success=False,
+                output="tsc execution failed: " + str(e),
+                issues_count=0,
+            )
+
+        # Parse output (parser handles ANSI stripping internally)
+        all_issues = parse_tsc_output(output=output or "")
+        issues_count = len(all_issues)
+
+        # Normalize output for fallback substring matching below
+        normalized_output = strip_ansi_codes(output) if output else ""
+
+        # Categorize issues into type errors vs dependency errors
+        type_errors, dependency_errors = categorize_tsc_issues(all_issues)
+
+        # If we have dependency errors, provide helpful guidance
+        if dependency_errors:
+            missing_modules = extract_missing_modules(dependency_errors)
+            dep_output_lines = [
+                "Missing dependencies detected:",
+                f"  {len(dependency_errors)} dependency error(s)",
+            ]
+            if missing_modules:
+                modules_str = ", ".join(missing_modules[:10])
+                if len(missing_modules) > 10:
+                    modules_str += f", ... (+{len(missing_modules) - 10} more)"
+                dep_output_lines.append(f"  Missing: {modules_str}")
+
+            dep_output_lines.extend(
+                [
+                    "",
+                    "Suggestions:",
+                    "  - Run 'bun install' or 'npm install' in your project",
+                    "  - Use '--auto-install' flag to auto-install dependencies",
+                    "  - If using Docker, ensure node_modules is available",
+                ],
+            )
+
+            if type_errors:
+                dep_output_lines.insert(
+                    0,
+                    f"Type errors: {len(type_errors)}",
+                )
+                dep_output_lines.insert(1, "")
+
+            return ToolResult(
+                name=self.definition.name,
+                success=False,
+                output="\n".join(dep_output_lines),
+                issues_count=issues_count,
+                issues=all_issues,
+            )
+
+        if not success and issues_count == 0 and normalized_output:
+            if (
+                "Cannot find type definition file" in normalized_output
+                or "Cannot find module" in normalized_output
+            ):
+                helpful_output = (
+                    f"TypeScript configuration error:\n{normalized_output}\n\n"
+                    "This usually means dependencies aren't installed.\n"
+                    "Suggestions:\n"
+                    "  - Run 'bun install' or 'npm install' in your project\n"
+                    "  - Use '--auto-install' flag to auto-install dependencies\n"
+                    "  - If using Docker, ensure node_modules is available\n"
+                    "  - Use --tool-options 'tsc:skip_lib_check=true' to skip "
+                    "type checking of declaration files"
+                )
+                return ToolResult(
+                    name=self.definition.name,
+                    success=False,
+                    output=helpful_output,
+                    issues_count=0,
+                )
+
+            return ToolResult(
+                name=self.definition.name,
+                success=False,
+                output=normalized_output or "tsc execution failed.",
+                issues_count=0,
+            )
+
+        if not success and issues_count == 0:
+            return ToolResult(
+                name=self.definition.name,
+                success=False,
+                output="tsc execution failed.",
+                issues_count=0,
+            )
+
+        return ToolResult(
+            name=self.definition.name,
+            success=issues_count == 0,
+            output=None,
+            issues_count=issues_count,
+            issues=all_issues,
+        )
 
     def fix(self, paths: list[str], options: dict[str, object]) -> NoReturn:
         """Tsc does not support auto-fixing.
