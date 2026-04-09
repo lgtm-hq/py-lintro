@@ -119,7 +119,7 @@
     },
     {
       "name": "clippy",
-      "version": "1.92.0",
+      "version": "1.94.0",
       "install": {
         "type": "rustup",
         "component": "clippy"
@@ -273,7 +273,7 @@
     },
     {
       "name": "rustc",
-      "version": "1.92.0",
+      "version": "1.94.0",
       "install": {
         "type": "rustup"
       },
