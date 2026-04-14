@@ -18,7 +18,6 @@ import fnmatch
 import json
 import os
 import tempfile
-from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -29,6 +28,9 @@ from lintro.utils.jsonc import (
     extract_type_roots,
     load_jsonc,
 )
+from lintro.utils.tsconfig_info import TsconfigInfo
+
+__all__ = ["TsconfigInfo"]
 
 # Config file names that are NOT used for type-checking by default.
 # These are only included when explicitly referenced via ``references``.
@@ -39,35 +41,6 @@ _NON_CHECKING_CONFIGS: frozenset[str] = frozenset(
         "tsconfig.emit.json",
     },
 )
-
-
-@dataclass
-class TsconfigInfo:
-    """Parsed tsconfig metadata for a single TypeScript project."""
-
-    path: Path
-    """Absolute path to the tsconfig.json file."""
-
-    project_dir: Path
-    """Parent directory of the tsconfig (the project root)."""
-
-    include_patterns: list[str] = field(default_factory=list)
-    """Resolved ``include`` glob patterns from the extends chain."""
-
-    exclude_patterns: list[str] = field(default_factory=list)
-    """Resolved ``exclude`` patterns from the extends chain."""
-
-    files_list: list[str] = field(default_factory=list)
-    """Explicit ``files`` entries from the extends chain."""
-
-    references: list[Path] = field(default_factory=list)
-    """Resolved ``references`` paths (to other tsconfig files)."""
-
-    is_composite: bool = False
-    """Whether ``compilerOptions.composite`` is ``true``."""
-
-    raw_config: dict[str, Any] = field(default_factory=dict)
-    """The parsed JSONC content of the tsconfig file itself."""
 
 
 # ---------------------------------------------------------------------------
@@ -168,7 +141,8 @@ def resolve_extends_chain(
         parent_path = _resolve_extends_path(ext, info.project_dir)
         if parent_path is None:
             continue
-        parent_info = resolve_extends_chain(parent_path, _seen=_seen)
+        # Pass a copy so sibling extends branches don't share visited state
+        parent_info = resolve_extends_chain(parent_path, _seen=set(_seen))
         # Parent values become the base
         if parent_info.include_patterns:
             merged_include = parent_info.include_patterns
@@ -460,17 +434,19 @@ def partition_files(
 def has_explicit_scoping(info: TsconfigInfo) -> bool:
     """Return whether the tsconfig has explicit file scoping.
 
-    A tsconfig with a non-empty ``include`` or ``files`` field has declared
-    which files it intends to check.  Lintro should respect this rather than
-    overriding with all discovered files.
+    A tsconfig with a non-empty ``include``, ``files``, or ``exclude`` field
+    has declared its own file scoping.  Lintro should respect this rather
+    than overriding with all discovered files.  ``exclude`` counts because a
+    temp tsconfig would clear the exclusions, which is equally incorrect.
 
     Args:
         info: Parsed tsconfig metadata.
 
     Returns:
-        ``True`` if the tsconfig has explicit ``include`` or ``files``.
+        ``True`` if the tsconfig has explicit ``include``, ``files``, or
+        ``exclude``.
     """
-    return bool(info.include_patterns or info.files_list)
+    return bool(info.include_patterns or info.files_list or info.exclude_patterns)
 
 
 # ---------------------------------------------------------------------------
