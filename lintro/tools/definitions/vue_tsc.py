@@ -373,14 +373,10 @@ class VueTscPlugin(BaseToolPlugin):
                 explicit_project=explicit_project,
             )
 
-        # Compute discovery root from original paths (not file-derived cwd).
+        # Use the prepared execution cwd as the discovery root so that
+        # tsconfigs across all workspace packages are found, regardless of
+        # which specific paths were passed.
         discovery_root = cwd_path
-        if paths:
-            candidate = Path(paths[0]).resolve()
-            if candidate.is_dir():
-                discovery_root = candidate
-            elif candidate.parent.exists():
-                discovery_root = candidate.parent
 
         # Discover tsconfigs for multi-project support
         tsconfigs = discover_tsconfigs(discovery_root, self.exclude_patterns)
@@ -512,6 +508,7 @@ class VueTscPlugin(BaseToolPlugin):
         output_sections: list[str] = []
         temp_files: list[Path] = []
         any_succeeded = False
+        had_subproject_error = False
 
         try:
             for tsconfig_info, project_files in partitions:
@@ -547,7 +544,7 @@ class VueTscPlugin(BaseToolPlugin):
                 )
 
                 try:
-                    success, output = self._run_subprocess(
+                    proc_success, output = self._run_subprocess(
                         cmd=cmd,
                         timeout=ctx.timeout,
                         cwd=str(project_dir),
@@ -558,9 +555,11 @@ class VueTscPlugin(BaseToolPlugin):
                         project_dir,
                         e,
                     )
+                    had_subproject_error = True
                     continue
 
-                any_succeeded = True
+                if proc_success:
+                    any_succeeded = True
                 issues = parse_vue_tsc_output(output=output or "")
                 all_issues.extend(issues)
 
@@ -577,7 +576,7 @@ class VueTscPlugin(BaseToolPlugin):
 
             total_issues = len(all_issues)
             output_text = "\n".join(output_sections) if output_sections else None
-            success = any_succeeded and total_issues == 0
+            success = any_succeeded and not had_subproject_error and total_issues == 0
             return ToolResult(
                 name=self.definition.name,
                 success=success,

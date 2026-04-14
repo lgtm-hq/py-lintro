@@ -456,17 +456,19 @@ class TscPlugin(BaseToolPlugin):
                 explicit_project=explicit_project,
             )
 
-        # Compute discovery root from original paths (not file-derived cwd).
-        # When the user passes a directory, use it directly.  When files are
-        # passed, use the directory containing those files.  This ensures we
-        # find tsconfigs that are *above* the discovered files.
+        # Compute discovery root as the common ancestor of all input paths so
+        # that tsconfigs in sibling packages are also discovered when multiple
+        # paths are provided.
         discovery_root = cwd_path
         if paths:
-            candidate = Path(paths[0]).resolve()
-            if candidate.is_dir():
-                discovery_root = candidate
-            elif candidate.parent.exists():
-                discovery_root = candidate.parent
+            resolved_dirs = []
+            for p in paths:
+                r = Path(p).resolve()
+                resolved_dirs.append(str(r if r.is_dir() else r.parent))
+            if resolved_dirs:
+                common = Path(os.path.commonpath(resolved_dirs))
+                if common.exists():
+                    discovery_root = common
 
         # Discover tsconfigs for multi-project support
         tsconfigs = discover_tsconfigs(discovery_root, self.exclude_patterns)
@@ -595,6 +597,7 @@ class TscPlugin(BaseToolPlugin):
         output_sections: list[str] = []
         temp_files: list[Path] = []
         any_succeeded = False
+        had_subproject_error = False
 
         try:
             for tsconfig_info, project_files in partitions:
@@ -647,16 +650,18 @@ class TscPlugin(BaseToolPlugin):
                 )
 
                 try:
-                    success, output = self._run_subprocess(
+                    proc_success, output = self._run_subprocess(
                         cmd=cmd,
                         timeout=ctx.timeout,
                         cwd=str(project_dir),
                     )
                 except (subprocess.TimeoutExpired, FileNotFoundError, OSError) as e:
                     logger.warning("[tsc] Sub-project {} failed: {}", project_dir, e)
+                    had_subproject_error = True
                     continue
 
-                any_succeeded = True
+                if proc_success:
+                    any_succeeded = True
                 issues = parse_tsc_output(output=output or "")
                 all_issues.extend(issues)
 
@@ -673,7 +678,7 @@ class TscPlugin(BaseToolPlugin):
 
             total_issues = len(all_issues)
             output_text = "\n".join(output_sections) if output_sections else None
-            success = any_succeeded and total_issues == 0
+            success = any_succeeded and not had_subproject_error and total_issues == 0
             return ToolResult(
                 name=self.definition.name,
                 success=success,
