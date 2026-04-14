@@ -54,7 +54,7 @@ TOOL_VERSIONS: dict[ToolName | str, str] = {
     ToolName.GITLEAKS: "8.30.1",
     ToolName.HADOLINT: "2.14.0",
     ToolName.OSV_SCANNER: "2.3.5",
-    ToolName.PYTEST: "9.0.2",
+    ToolName.PYTEST: "9.0.3",
     ToolName.RUSTC: "1.94.0",
     ToolName.RUSTFMT: "1.8.0",
     ToolName.SEMGREP: "1.151.0",
