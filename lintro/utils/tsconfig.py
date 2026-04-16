@@ -192,13 +192,20 @@ def _resolve_extends_path(extends: str, base_dir: Path) -> Path | None:
             return with_json
         return None
 
-    # Node module resolution (e.g. "@tsconfig/node18/tsconfig.json")
-    node_modules = base_dir / "node_modules" / extends
-    if node_modules.exists():
-        return node_modules.resolve()
-    with_json = node_modules.with_suffix(".json")
-    if with_json.exists():
-        return with_json.resolve()
+    # Node module resolution — walk ancestors to find hoisted packages
+    # (e.g. "@tsconfig/node18/tsconfig.json" may live in a monorepo root)
+    ancestor = base_dir
+    while True:
+        node_modules = ancestor / "node_modules" / extends
+        if node_modules.exists():
+            return node_modules.resolve()
+        with_json = node_modules.with_suffix(".json")
+        if with_json.exists():
+            return with_json.resolve()
+        parent = ancestor.parent
+        if parent == ancestor:
+            break
+        ancestor = parent
 
     return None
 
@@ -314,13 +321,21 @@ def _walk_for_tsconfigs(
     }
 
     for dirpath, dirnames, filenames in os.walk(root):
-        # Prune excluded directories in-place
+        # Prune excluded directories in-place — match both basename and
+        # relative path so gitignore-style patterns like "packages/*/dist" work
         dirnames[:] = [
             d
             for d in dirnames
             if d not in always_skip
             and not d.startswith(".")
-            and not any(fnmatch.fnmatch(d, pat) for pat in exclude_patterns)
+            and not any(
+                fnmatch.fnmatch(d, pat)
+                or fnmatch.fnmatch(
+                    Path(os.path.relpath(os.path.join(dirpath, d), root)).as_posix(),
+                    pat,
+                )
+                for pat in exclude_patterns
+            )
         ]
 
         if "tsconfig.json" in filenames:

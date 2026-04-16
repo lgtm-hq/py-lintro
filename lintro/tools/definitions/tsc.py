@@ -557,7 +557,6 @@ class TscPlugin(BaseToolPlugin):
 
             return self._run_tsc_and_parse(
                 ctx=ctx,
-                cwd_path=cwd_path,
                 project_path=project_path,
                 options=options,
             )
@@ -701,7 +700,6 @@ class TscPlugin(BaseToolPlugin):
     def _run_tsc_and_parse(
         self,
         ctx: ExecutionContext,
-        cwd_path: Path,
         project_path: str | None,
         options: dict[str, object],
     ) -> ToolResult:
@@ -709,7 +707,6 @@ class TscPlugin(BaseToolPlugin):
 
         Args:
             ctx: Prepared execution context.
-            cwd_path: Working directory.
             project_path: ``--project`` path or ``None``.
             options: Merged runtime options.
 
@@ -848,7 +845,7 @@ class TscPlugin(BaseToolPlugin):
 
         return ToolResult(
             name=self.definition.name,
-            success=issues_count == 0,
+            success=success and issues_count == 0,
             output=None,
             issues_count=issues_count,
             issues=all_issues,

@@ -462,7 +462,6 @@ class VueTscPlugin(BaseToolPlugin):
 
             return self._run_vue_tsc_and_parse(
                 ctx=ctx,
-                cwd_path=cwd_path,
                 project_path=project_path,
                 options=options,
             )
@@ -599,7 +598,6 @@ class VueTscPlugin(BaseToolPlugin):
     def _run_vue_tsc_and_parse(
         self,
         ctx: ExecutionContext,
-        cwd_path: Path,
         project_path: str | None,
         options: dict[str, object],
     ) -> ToolResult:
@@ -607,7 +605,6 @@ class VueTscPlugin(BaseToolPlugin):
 
         Args:
             ctx: Prepared execution context.
-            cwd_path: Working directory.
             project_path: ``--project`` path or ``None``.
             options: Merged runtime options.
 
