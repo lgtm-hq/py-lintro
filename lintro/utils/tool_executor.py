@@ -861,9 +861,28 @@ def run_lint_tools_simple(
             else:
                 logger.console_output(msg)
 
+        # Capture the raw console buffer so report.md mirrors the terminal
+        # output and downstream consumers (PR comment job, fail-on-lint) can
+        # read console.log from the run directory.
+        console_text: str | None = None
+        if not _is_machine:
+            get_buffer = getattr(logger, "get_buffer", None)
+            if callable(get_buffer):
+                buffered = get_buffer()
+                if isinstance(buffered, str):
+                    console_text = buffered
+            if console_text is not None:
+                try:
+                    output_manager.write_console_log(content=console_text)
+                except OSError as e:
+                    _warn(f"Warning: Failed to write console.log: {e}")
+
         # Write report files (markdown, html, csv)
         try:
-            output_manager.write_reports_from_results(all_results)
+            output_manager.write_reports_from_results(
+                all_results,
+                console_text=console_text,
+            )
         except (OSError, ValueError, TypeError) as e:
             _warn(f"Warning: Failed to write reports: {e}")
             # Continue execution - report writing failures should not stop the tool

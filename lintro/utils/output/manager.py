@@ -10,6 +10,7 @@ import csv
 import datetime
 import json
 import os
+import re
 import shutil
 import tempfile
 from pathlib import Path
@@ -28,6 +29,98 @@ from lintro.utils.output.helpers import html_escape, markdown_escape
 
 if TYPE_CHECKING:
     from lintro.models.core.tool_result import ToolResult
+
+
+ACTIVE_RUN_MARKER: str = ".active"
+
+# Matches ANSI CSI sequences (colors, cursor moves) commonly embedded in
+# click-styled console output captured by ThreadSafeConsoleLogger.
+_ANSI_ESCAPE_RE = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")
+
+# Docker bind-mount prefix used by CI (-v "$PWD:/code"). Stripping this makes
+# report paths repo-relative for readers who view reports outside the container.
+_DOCKER_MOUNT_PREFIX = "/code/"
+
+
+def _strip_ansi(text: str) -> str:
+    """Remove ANSI CSI escape sequences from ``text``.
+
+    Args:
+        text: Text that may contain ANSI colour/control sequences.
+
+    Returns:
+        Text with ANSI sequences removed.
+    """
+    return _ANSI_ESCAPE_RE.sub("", text)
+
+
+def _repo_relative_path(file_path: str) -> str:
+    """Normalise an issue file path for reports.
+
+    Strips the Docker bind-mount prefix used in CI and, where possible,
+    rewrites absolute paths inside the current working directory to be
+    repo-relative. Paths outside the workspace are returned unchanged.
+
+    Args:
+        file_path: Raw file path captured from tool output.
+
+    Returns:
+        A path suitable for inclusion in human-readable reports.
+    """
+    if not file_path:
+        return ""
+
+    if file_path.startswith(_DOCKER_MOUNT_PREFIX):
+        return file_path[len(_DOCKER_MOUNT_PREFIX) :]
+
+    if os.path.isabs(file_path):
+        try:
+            return str(Path(file_path).resolve().relative_to(Path.cwd().resolve()))
+        except (OSError, ValueError):
+            return file_path
+
+    return file_path
+
+
+def _format_issue_field(value: str | None) -> str:
+    """Return ``-`` for empty issue fields, otherwise the original value.
+
+    Args:
+        value: Optional issue metadata field (code, line, message).
+
+    Returns:
+        The value or the dash placeholder when empty.
+    """
+    if value is None:
+        return "-"
+    stripped = value.strip()
+    return stripped or "-"
+
+
+def _format_issue_line(line: object) -> str:
+    """Render an issue line number, showing ``-`` when unknown.
+
+    Args:
+        line: Raw line number attribute from an issue.
+
+    Returns:
+        A textual representation suitable for reports.
+    """
+    if line in (None, 0, "0", ""):
+        return "-"
+    return str(line)
+
+
+def _issues_suffix(count: int) -> str:
+    """Return the ``issue``/``issues`` suffix for a count.
+
+    Args:
+        count: Issue count.
+
+    Returns:
+        Singular or plural suffix.
+    """
+    return "issue" if count == 1 else "issues"
 
 
 class OutputManager:
@@ -56,6 +149,36 @@ class OutputManager:
             self.base_dir = Path(base_dir)
         self.keep_last = keep_last
         self.run_dir = self._create_run_dir()
+        self._mark_run_dir_active()
+
+    def _create_unique_run_dir(self, base_dir: Path, timestamp: str) -> Path:
+        """Create a unique run directory for the given timestamp.
+
+        Args:
+            base_dir: Base directory where run directories are stored.
+            timestamp: Timestamp string used in the directory name.
+
+        Returns:
+            Path to the created run directory.
+
+        Raises:
+            RuntimeError: If no unique suffix is available after many attempts.
+        """
+        base_name = f"{DEFAULT_RUN_PREFIX}{timestamp}-{os.getpid()}"
+        max_attempts = 10000
+
+        for suffix in range(max_attempts):
+            run_dir = base_dir / f"{base_name}-{suffix:04d}"
+            try:
+                run_dir.mkdir(parents=True, exist_ok=False)
+                return run_dir
+            except FileExistsError:
+                continue
+
+        raise RuntimeError(
+            f"Unable to allocate a unique run directory under {base_dir} for "
+            f"{base_name} after {max_attempts} attempts.",
+        )
 
     def _create_run_dir(self) -> Path:
         """Create a new timestamped run directory.
@@ -63,20 +186,75 @@ class OutputManager:
         Returns:
             Path: Path to the created run directory.
         """
-        timestamp: str = datetime.datetime.now().strftime(DEFAULT_TIMESTAMP_FORMAT)
-        run_dir: Path = self.base_dir / f"{DEFAULT_RUN_PREFIX}{timestamp}"
+        timestamp: str = datetime.datetime.now(tz=datetime.UTC).strftime(
+            f"{DEFAULT_TIMESTAMP_FORMAT}-%f",
+        )
         try:
-            run_dir.mkdir(parents=True, exist_ok=True)
+            return self._create_unique_run_dir(self.base_dir, timestamp)
         except PermissionError:
-            # Fallback to temp directory if not writable
+            # Fallback to temp directory if not writable. Also redirect
+            # self.base_dir so cleanup_old_runs scans the fallback location
+            # where the run was actually created.
             temp_base: Path = Path(tempfile.gettempdir()) / DEFAULT_TEMP_PREFIX
-            run_dir = temp_base / f"{DEFAULT_RUN_PREFIX}{timestamp}"
-            run_dir.mkdir(parents=True, exist_ok=True)
+            run_dir = self._create_unique_run_dir(temp_base, timestamp)
             logger.warning(
                 f"Cannot write to {self.base_dir} (permission denied), "
                 f"using fallback: {run_dir}",
             )
-        return run_dir
+            self.base_dir = temp_base
+            return run_dir
+
+    def _active_marker_path(self, run_dir: Path) -> Path:
+        """Return the marker path for an active run directory."""
+        return run_dir / ACTIVE_RUN_MARKER
+
+    def _mark_run_dir_active(self) -> None:
+        """Mark the current run directory as active for cleanup protection."""
+        marker_path = self._active_marker_path(self.run_dir)
+        try:
+            marker_path.write_text(f"{os.getpid()}\n", encoding="utf-8")
+        except OSError as exc:
+            logger.warning(
+                f"Failed to write active-run marker {marker_path}: {exc}. "
+                "Concurrent cleanup may delete this run directory.",
+            )
+
+    def _pid_is_active(self, pid: int) -> bool:
+        """Check whether a process ID is still alive."""
+        if pid <= 0:
+            return False
+
+        try:
+            os.kill(pid, 0)
+        except ProcessLookupError:
+            return False
+        except PermissionError:
+            return True
+        except OSError:
+            return False
+        return True
+
+    def _is_run_dir_active(self, run_dir: Path) -> bool:
+        """Return whether a run directory is still in active use."""
+        marker_path = self._active_marker_path(run_dir)
+        if not marker_path.exists():
+            return False
+
+        try:
+            pid = int(marker_path.read_text(encoding="utf-8").strip())
+        except (OSError, ValueError):
+            return False
+
+        if self._pid_is_active(pid):
+            return True
+
+        try:
+            marker_path.unlink()
+        except OSError as exc:
+            logger.debug(
+                f"Failed to remove stale active marker {marker_path}: {exc}",
+            )
+        return False
 
     def write_console_log(
         self,
@@ -150,25 +328,74 @@ class OutputManager:
     def write_reports_from_results(
         self,
         results: list[ToolResult],
+        console_text: str | None = None,
     ) -> None:
         """Generate and write Markdown, HTML, and CSV reports from tool results.
 
         Args:
-            results: list["ToolResult"]: List of ToolResult objects from a Lintro run.
+            results: List of ToolResult objects from a Lintro run.
+            console_text: Optional captured console output. When provided, the
+                Markdown report mirrors the console dump verbatim (with ANSI
+                sequences stripped). When omitted, a structured table layout is
+                used as a fallback for callers that do not capture stdout.
         """
-        self._write_markdown_report(results=results)
+        self._write_markdown_report(results=results, console_text=console_text)
         self._write_html_report(results=results)
         self._write_csv_summary(results=results)
 
     def _write_markdown_report(
         self,
         results: list[ToolResult],
+        console_text: str | None = None,
     ) -> None:
-        """Write a Markdown report summarizing all tool results and issues.
+        """Write a Markdown report for the current run.
 
         Args:
-            results: list["ToolResult"]: List of ToolResult objects from the linting
-                run.
+            results: List of ToolResult objects from the linting run.
+            console_text: Optional captured console output used to render the
+                report as a preformatted dump.
+        """
+        if console_text is not None:
+            self.write_markdown(
+                content=self._render_markdown_console_dump(console_text=console_text),
+            )
+            return
+
+        self.write_markdown(content=self._render_markdown_tables(results=results))
+
+    def _render_markdown_console_dump(self, console_text: str) -> str:
+        """Render ``report.md`` as a header plus fenced console dump.
+
+        Args:
+            console_text: Raw captured console output.
+
+        Returns:
+            Markdown content suitable for writing to ``report.md``.
+        """
+        timestamp = datetime.datetime.now(tz=datetime.UTC).isoformat(timespec="seconds")
+        body = _strip_ansi(console_text).rstrip("\n")
+        if not body:
+            body = "(no console output captured)"
+        return (
+            "# Lintro Report\n"
+            "\n"
+            f"_Generated {timestamp} · {self.run_dir.name}_\n"
+            "\n"
+            "```text\n"
+            f"{body}\n"
+            "```\n"
+        )
+
+    def _render_markdown_tables(self, results: list[ToolResult]) -> str:
+        """Render ``report.md`` using per-tool Markdown tables.
+
+        Kept as a fallback for callers that do not capture console output.
+
+        Args:
+            results: List of ToolResult objects.
+
+        Returns:
+            Markdown content suitable for writing to ``report.md``.
         """
         lines: list[str] = ["# Lintro Report", ""]
         lines.append("## Summary\n")
@@ -178,20 +405,27 @@ class OutputManager:
             lines.append(f"| {r.name} | {r.issues_count} |")
         lines.append("")
         for r in results:
-            lines.append(f"### {r.name} ({r.issues_count} issues)")
+            lines.append(
+                f"### {r.name} ({r.issues_count} {_issues_suffix(r.issues_count)})",
+            )
             if hasattr(r, "issues") and r.issues:
                 lines.append("| File | Line | Code | Message |")
                 lines.append("|------|------|------|---------|")
                 for issue in r.issues:
-                    file: str = markdown_escape(getattr(issue, "file", "") or "")
-                    line = getattr(issue, "line", None) or 0
-                    code: str = markdown_escape(getattr(issue, "code", "") or "")
-                    msg: str = markdown_escape(getattr(issue, "message", "") or "")
+                    raw_file = getattr(issue, "file", "") or ""
+                    file: str = markdown_escape(_repo_relative_path(raw_file))
+                    line = _format_issue_line(getattr(issue, "line", None))
+                    code: str = markdown_escape(
+                        _format_issue_field(getattr(issue, "code", "") or ""),
+                    )
+                    msg: str = markdown_escape(
+                        _format_issue_field(getattr(issue, "message", "") or ""),
+                    )
                     lines.append(f"| {file} | {line} | {code} | {msg} |")
                 lines.append("")
             else:
                 lines.append("No issues found.\n")
-        self.write_markdown(content="\n".join(lines))
+        return "\n".join(lines)
 
     def _write_html_report(
         self,
@@ -216,7 +450,8 @@ class OutputManager:
         html_content.append("</table>")
         for r in results:
             html_content.append(
-                f"<h3>{html_escape(r.name)} ({r.issues_count} issues)</h3>",
+                f"<h3>{html_escape(r.name)} "
+                f"({r.issues_count} {_issues_suffix(r.issues_count)})</h3>",
             )
             if hasattr(r, "issues") and r.issues:
                 html_content.append(
@@ -224,10 +459,15 @@ class OutputManager:
                     "<th>Message</th></tr>",
                 )
                 for issue in r.issues:
-                    file: str = html_escape(getattr(issue, "file", "") or "")
-                    line = getattr(issue, "line", None) or 0
-                    code: str = html_escape(getattr(issue, "code", "") or "")
-                    msg: str = html_escape(getattr(issue, "message", "") or "")
+                    raw_file = getattr(issue, "file", "") or ""
+                    file: str = html_escape(_repo_relative_path(raw_file))
+                    line = _format_issue_line(getattr(issue, "line", None))
+                    code: str = html_escape(
+                        _format_issue_field(getattr(issue, "code", "") or ""),
+                    )
+                    msg: str = html_escape(
+                        _format_issue_field(getattr(issue, "message", "") or ""),
+                    )
                     html_content.append(
                         f"<tr><td>{file}</td><td>{line}</td><td>{code}</td>"
                         f"<td>{msg}</td></tr>",
@@ -253,14 +493,15 @@ class OutputManager:
         for r in results:
             if hasattr(r, "issues") and r.issues:
                 for issue in r.issues:
+                    raw_file = getattr(issue, "file", "") or ""
                     rows.append(
                         [
                             r.name,
                             str(r.issues_count),
-                            getattr(issue, "file", "") or "",
-                            str(getattr(issue, "line", None) or 0),
-                            getattr(issue, "code", "") or "",
-                            getattr(issue, "message", "") or "",
+                            _repo_relative_path(raw_file),
+                            _format_issue_line(getattr(issue, "line", None)),
+                            _format_issue_field(getattr(issue, "code", "") or ""),
+                            _format_issue_field(getattr(issue, "message", "") or ""),
                         ],
                     )
             else:
@@ -281,7 +522,12 @@ class OutputManager:
             reverse=True,
         )
         for old_run in runs[self.keep_last :]:
-            shutil.rmtree(old_run)
+            if self._is_run_dir_active(old_run):
+                continue
+            try:
+                shutil.rmtree(old_run)
+            except FileNotFoundError:
+                logger.debug(f"Run directory already removed during cleanup: {old_run}")
 
     def get_run_dir(self) -> Path:
         """Get the current run directory.
