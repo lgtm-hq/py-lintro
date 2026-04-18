@@ -58,7 +58,7 @@ content-type = "text/markdown"
 
 [project.optional-dependencies]
 dev = [
-  "pytest>=9.0.2",
+  "pytest>=9.0.3",
   "pytest-cov>=7.0.0",
   "pytest-mock>=3.15.1",
   "pytest-xdist>=3.8.0",
@@ -73,7 +73,7 @@ dev = [
   "httpx>=0.28.1",
 ]
 test = [
-  "pytest>=9.0.2",
+  "pytest>=9.0.3",
   "pytest-cov>=7.0.0",
   "pytest-mock>=3.15.1",
   "pytest-xdist>=3.8.0",
@@ -96,7 +96,7 @@ Source = "https://github.com/lgtm-hq/py-lintro"
 [dependency-groups]
 dev = [
   "build>=1.4.0",
-  "pytest>=9.0.2",
+  "pytest>=9.0.3",
   "pytest-cov>=7.0.0",
   "pytest-xdist>=3.8.0",
   "twine>=6.2.0",
