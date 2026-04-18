@@ -3,11 +3,24 @@
 ---
 name: CI Pipeline
 
-# Gated CI: resolve-tools → docker-build ─┬─ lint (all tools)
-#                                         ├─ test (+ smoke) ──→ publish
-#                                         └─ security-audit
-#           test-matrix runs in parallel (no Docker dependency)
-#                                         test → deploy-pages (main only)
+# Gated CI:
+#   detect-tool-changes ──→ call-tools-image (PR + tool files changed via workflow_call)
+#                      ╲                    ╲
+# yamllint disable rule:line-length
+#                       ╲──────────────────→ resolve-tools (immutable image ref / artifact fallback) → docker-build ─┬─ lint
+#                                                                                                                       ├─ test ──→ publish
+#                                                                                                                       └─ security-audit
+# yamllint enable rule:line-length
+#   manifest-sync (parallel, no Docker)
+#   test-matrix   (parallel, no Docker)
+# yamllint disable-line rule:line-length
+#                                                            test → deploy-pages (main only)
+#
+# tools-image.yml is called via workflow_call for pull requests that change tool
+# files, and resolve-tools chooses the final tools image source for downstream jobs.
+# Same-repo runs use pinned/immutable image references, while fork PRs fall back to
+# the saved tools-image artifact because they cannot publish to GHCR. Main pushes
+# also resolve immutable tools-image references here before docker-build runs.
 # Docker image built ONCE and shared via GHCR (ci-<run_id> tags), with artifact
 # fallback for fork PRs. Smoke test folded into test job.
 
@@ -28,21 +41,93 @@ permissions: {}
 
 jobs:
   # ============================================================================
-  # Stage 1: Resolve tools image
+  # Stage 1a: Detect if tool files changed (drives whether we call tools-image.yml)
   # ============================================================================
-  resolve-tools:
-    name: 🔧 Resolve Tools Image
+  detect-tool-changes:
+    name: 🔍 Detect Tool Changes
     runs-on: ubuntu-24.04
     permissions:
       contents: read
-      packages: write
-    timeout-minutes: 30
+    timeout-minutes: 5
     if: >-
       github.event_name != 'pull_request' ||
       github.event.pull_request.draft == false
     outputs:
-      image: ${{ steps.tools.outputs.image }}
-      changed: ${{ steps.tools.outputs.changed }}
+      tools-changed: ${{ steps.detect.outputs.tools_changed }}
+    steps:
+      - name: Harden Runner
+        uses: step-security/harden-runner@fe104658747b27e96e4f7e80cd0a94068e53901d
+        with:
+          egress-policy: 'block'
+          allowed-endpoints: >
+            github.com:443
+            api.github.com:443
+            codeload.github.com:443
+            release-assets.githubusercontent.com:443
+            objects.githubusercontent.com:443
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Detect tool file changes
+        id: detect
+        env:
+          GITHUB_EVENT_NAME: ${{ github.event_name }}
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          GITHUB_EVENT_BEFORE: ${{ github.event.before }}
+        run: scripts/ci/tools-image-detect-changes.sh
+
+  # ============================================================================
+  # Stage 1b: Build fresh tools image (PR events with tool changes)
+  # Delegates to tools-image.yml via workflow_call — no polling required.
+  # ============================================================================
+  call-tools-image:
+    name: 🔧 Build Tools Image
+    needs: detect-tool-changes
+    # if: references only github context — NOT needs.outputs — to avoid startup_failure.
+    # GitHub rejects reusable-workflow call jobs whose if: references needs outputs.
+    # The tools-changed check moves to skip_if_unchanged (runtime with: expression)
+    # so startup validation never sees a needs-output reference in this condition.
+    if: >-
+      github.event_name == 'pull_request' &&
+      github.event.pull_request.draft == false
+    uses: ./.github/workflows/tools-image.yml
+    permissions:
+      contents: write
+      packages: write
+      id-token: write
+      attestations: write
+    with:
+      # yamllint disable-line rule:line-length
+      skip_if_unchanged: ${{ needs.detect-tool-changes.outputs.tools-changed != 'true' }}
+      pr_number: ${{ github.event.pull_request.number }}
+
+  # ============================================================================
+  # Stage 1c: Resolve final tools image reference
+  # ============================================================================
+  resolve-tools:
+    name: 🔧 Resolve Tools Image
+    needs: [detect-tool-changes, call-tools-image]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      packages: read
+    timeout-minutes: 5
+    # Run when detect-tool-changes AND call-tools-image both succeeded or were skipped.
+    # call-tools-image skips for push events or PRs without tool changes.
+    # yamllint disable rule:line-length
+    if: >-
+      always() &&
+      (github.event_name != 'pull_request' || github.event.pull_request.draft == false) &&
+      needs.detect-tool-changes.result == 'success' &&
+      (needs.call-tools-image.result == 'success' || needs.call-tools-image.result == 'skipped')
+    # yamllint enable rule:line-length
+    outputs:
+      image: ${{ steps.resolve.outputs.image }}
+      source: ${{ steps.resolve.outputs.source }}
+      changed: ${{ needs.detect-tool-changes.outputs.tools-changed }}
     steps:
       - name: Harden Runner
         uses: step-security/harden-runner@fe104658747b27e96e4f7e80cd0a94068e53901d
@@ -56,47 +141,34 @@ jobs:
             objects.githubusercontent.com:443
             ghcr.io:443
             pkg-containers.githubusercontent.com:443
-            docker.io:443
-            registry-1.docker.io:443
-            auth.docker.io:443
-            production.cloudflare.docker.com:443
-            pypi.org:443
-            files.pythonhosted.org:443
-            static.rust-lang.org:443
-            bun.sh:443
-            astral.sh:443
-            releases.astral.sh:443
-            sh.rustup.rs:443
-            deb.debian.org:80
-            registry.npmjs.org:443
-            crates.io:443
-            static.crates.io:443
-            index.crates.io:443
-            semgrep.dev:443
-            metrics.semgrep.dev:443
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
-          fetch-depth: 0
-          fetch-tags: true
-          persist-credentials: true
+          persist-credentials: false
       - name: Resolve tools image
-        id: tools
-        uses: ./.github/actions/resolve-tools-image
+        id: resolve
+        env:
+          GITHUB_EVENT_NAME: ${{ github.event_name }}
+          GITHUB_SHA: ${{ github.sha }}
+          IMAGE_NAME: ghcr.io/lgtm-hq/lintro-tools
+          # Use .result (not .outputs) to avoid startup_failure — GitHub rejects
+          # workflows where downstream jobs reference .outputs of a conditional
+          # reusable-workflow job. The PR tag is deterministic (pr-<number>), so
+          # we derive it from PR_NUMBER + CALL_RESULT instead of passing the output.
+          CALL_RESULT: ${{ needs.call-tools-image.result }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          IS_FORK_PR: ${{ github.event.pull_request.head.repo.fork }}
+          TOOLS_CHANGED: ${{ needs.detect-tool-changes.outputs.tools-changed }}
+        run: scripts/ci/tools-image-resolve.sh
       - name: Summary
         env:
-          TOOLS_IMAGE: ${{ steps.tools.outputs.image }}
-          TOOLS_CHANGED: ${{ steps.tools.outputs.changed }}
-        run: |
-          {
-            echo "## Tools Image Resolution"
-            echo ""
-            echo "- **Image:** \`${TOOLS_IMAGE}\`"
-            echo "- **Changed:** ${TOOLS_CHANGED}"
-          } >> "$GITHUB_STEP_SUMMARY"
+          TOOLS_IMAGE: ${{ steps.resolve.outputs.image }}
+          TOOLS_SOURCE: ${{ steps.resolve.outputs.source }}
+          TOOLS_CHANGED: ${{ needs.detect-tool-changes.outputs.tools-changed }}
+        run: scripts/ci/tools-image-resolve-summary.sh
 
   # ============================================================================
-  # Stage 1b: Verify manifest/pyproject version sync (lightweight, no Docker)
+  # Stage 1d: Verify manifest/pyproject version sync (lightweight, no Docker)
   # ============================================================================
   manifest-sync:
     name: 📋 Manifest Sync
@@ -200,15 +272,35 @@ jobs:
           echo "is-fork=${IS_FORK}" >> "$GITHUB_OUTPUT"
       # Fork PRs cannot push to GHCR, so they fall back to docker save which
       # duplicates image data on disk. Free pre-installed software to make room.
+      # Run BEFORE loading the tools image artifact so docker image prune -af
+      # does not delete the freshly loaded image.
       - name: Free disk space (fork fallback)
         if: steps.fork-check.outputs.is-fork == 'true'
         run: |
           sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc \
             /usr/local/share/boost
           sudo docker image prune -af
+      - name: Download tools image artifact
+        if: needs.resolve-tools.outputs.source == 'artifact'
+        # yamllint disable-line rule:line-length
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
+        with:
+          name: tools-image
+          path: /tmp/tools-image
+      - name: Load tools image artifact
+        if: needs.resolve-tools.outputs.source == 'artifact'
+        run: docker load -i /tmp/tools-image/tools-image.tar
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-      - name: Set up Docker Buildx
+      - name: Set up Docker Buildx (artifact tools image)
+        if: needs.resolve-tools.outputs.source == 'artifact'
+        # Action SHA pin exceeds 88 chars
+        # yamllint disable-line rule:line-length
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+        with:
+          driver: docker
+      - name: Set up Docker Buildx (registry tools image)
+        if: needs.resolve-tools.outputs.source != 'artifact'
         # Action SHA pin exceeds 88 chars
         # yamllint disable-line rule:line-length
         uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
@@ -276,7 +368,6 @@ jobs:
     runs-on: ubuntu-24.04
     permissions:
       contents: read
-      pull-requests: write
       packages: write
     timeout-minutes: 30
     defaults:
@@ -352,23 +443,68 @@ jobs:
         id: lintro
         run: ./scripts/ci/testing/ci-lintro.sh
         continue-on-error: true
-      - name: Generate PR Comment
-        if: github.event_name == 'pull_request'
-        continue-on-error: true
-        run: ./scripts/ci/ci-pr-comment.sh
-      - name: Comment PR with Lintro Results
-        if: github.event_name == 'pull_request'
-        continue-on-error: true
-        uses: ./.github/actions/post-pr-comment
+      - name: Upload lintro run artifact
+        if: always()
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
         with:
-          file: pr-comment.txt
-          marker: '<!-- lintro-report -->'
-          merge-update: 'true'
+          name: lintro-run
+          path: .lintro/
+          retention-days: 7
+          if-no-files-found: warn
       - name: Fail on Linting Issues
         if: ${{ env.CHK_EXIT_CODE != '0' }}
         env:
           CHK_EXIT_CODE: ${{ env.CHK_EXIT_CODE }}
         run: scripts/ci/fail-on-lint.sh
+
+  lint-comment:
+    name: 💬 Lintro PR Comment
+    needs: lint
+    if: >-
+      always() &&
+      github.event_name == 'pull_request' &&
+      needs.lint.result != 'skipped' &&
+      github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-24.04
+    permissions:
+      actions: read
+      contents: read
+      pull-requests: write
+    timeout-minutes: 10
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Harden Runner
+        uses: step-security/harden-runner@fe104658747b27e96e4f7e80cd0a94068e53901d
+        with:
+          egress-policy: 'block'
+          allowed-endpoints: >
+            github.com:443
+            api.github.com:443
+            codeload.github.com:443
+            objects.githubusercontent.com:443
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Download lintro run artifact
+        continue-on-error: true
+        # yamllint disable-line rule:line-length
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
+        with:
+          name: lintro-run
+          path: .lintro
+      - name: Generate PR Comment
+        env:
+          CHK_EXIT_CODE: ${{ needs.lint.result == 'success' && '0' || '1' }}
+        run: ./scripts/ci/ci-pr-comment.sh
+      - name: Comment PR with Lintro Results
+        uses: ./.github/actions/post-pr-comment
+        with:
+          file: pr-comment.txt
+          marker: '<!-- lintro-report -->'
+          merge-update: 'true'
 
   # ============================================================================
   # Stage 3b: Python Compatibility Matrix (runs in parallel with Docker test)
@@ -592,7 +728,19 @@ jobs:
         # Action SHA pin exceeds 88 chars
         # yamllint disable-line rule:line-length
         uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+      - name: Download tools image artifact
+        if: needs.resolve-tools.outputs.source == 'artifact'
+        # Action SHA pin exceeds 88 chars
+        # yamllint disable-line rule:line-length
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
+        with:
+          name: tools-image
+          path: /tmp/tools-image
+      - name: Load tools image artifact
+        if: needs.resolve-tools.outputs.source == 'artifact'
+        run: docker load -i /tmp/tools-image/tools-image.tar
       - name: Pull tools image
+        if: needs.resolve-tools.outputs.source != 'artifact'
         env:
           TOOLS_IMAGE: ${{ needs.resolve-tools.outputs.image }}
         run: docker pull "$TOOLS_IMAGE"
@@ -623,6 +771,8 @@ jobs:
           name: coverage-report-python-3.14
           path: htmlcov/
           retention-days: 30
+      - name: Verify coverage.xml was generated
+        run: scripts/ci/testing/verify-coverage-xml.sh
       - name: Upload coverage XML as artifact
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
         with:
@@ -726,6 +876,9 @@ jobs:
           export JOB_RESULT
           ./scripts/ci/github/coverage-pr-comment.sh
       - name: Comment PR with coverage info
+        if: >-
+          success() &&
+          github.event.pull_request.head.repo.full_name == github.repository
         uses: ./.github/actions/post-pr-comment
         with:
           file: coverage-pr-comment.txt
