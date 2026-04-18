@@ -6,21 +6,19 @@ name: Build - Tools Image
 # Runs weekly to pick up base image security updates and on changes to tool configs.
 # Can be called as a reusable workflow by other workflows.
 
+# Triggers:
+# yamllint disable rule:line-length
+#   push to main (path-filtered) — primary production build; runs pin-digest after success
+#   schedule (weekly)           — picks up base-image security updates
+#   workflow_dispatch           — manual rebuild; pass force_latest=true to retag :latest
+#   workflow_call               — called by ci-pipeline.yml for PRs with tool file changes;
+#                                 pull_request trigger removed — ci-pipeline.yml owns that path
+# yamllint enable rule:line-length
 'on':
   schedule:
     # Weekly on Sunday at 00:00 UTC
     - cron: '0 0 * * 0'
   push:
-    branches: [main]
-    paths:
-      - Dockerfile.tools
-      - scripts/utils/install-tools.sh
-      - scripts/ci/tools-image-*.sh
-      - package.json
-      - lintro/_tool_versions.py
-      - lintro/tools/manifest.json
-      - .github/workflows/tools-image.yml
-  pull_request:
     branches: [main]
     paths:
       - Dockerfile.tools
@@ -37,17 +35,21 @@ name: Build - Tools Image
         required: false
         default: 'false'
 
-  # Reusable workflow support
+  # Reusable workflow support — called by ci-pipeline.yml when a PR changes tool files.
+  # pr_number must be passed so tags.sh generates the expected pr-N tag.
+  # No workflow_call outputs: ci-pipeline.yml derives the built image tag from
+  # CALL_RESULT + PR_NUMBER directly, avoiding the workflow_call output reference
+  # restriction that triggers startup_failure when the providing job is conditional.
   workflow_call:
     inputs:
       skip_if_unchanged:
         description: 'Skip build if tool files unchanged (for workflow_call)'
         type: boolean
         default: true
-    outputs:
-      image-tag:
-        description: 'The tools image tag to use'
-        value: ${{ jobs.resolve-tag.outputs.tag }}
+      pr_number:
+        description: 'PR number when called from a pull_request context'
+        type: string
+        default: ''
 
 permissions: {}
 
@@ -106,14 +108,17 @@ jobs:
     name: Build Tools Image
     runs-on: ubuntu-24.04
     needs: [check-changes]
-    # Run if: check-changes was skipped (non-workflow_call), OR changes detected,
-    # OR skip_if_unchanged=false. Use always() to force evaluation when dependency
-    # is skipped.
+    # Run if: check-changes succeeded AND event is allowed AND build is needed.
+    # workflow_dispatch is restricted to main (non-main dispatches skip the build
+    # since pin-digest won't run anyway and we want to avoid stray image tags).
+    # yamllint disable rule:line-length
     if: >-
-      always() &&
-      ((needs.check-changes.result == 'skipped') ||
+      needs.check-changes.result == 'success' &&
+      (github.event_name != 'workflow_dispatch' || github.ref == 'refs/heads/main') &&
+      ((needs.check-changes.outputs.is-workflow-call != 'true') ||
       (needs.check-changes.outputs.tools-changed == 'true') ||
       (inputs.skip_if_unchanged == false))
+    # yamllint enable rule:line-length
     permissions:
       contents: read
       packages: write
@@ -128,6 +133,7 @@ jobs:
       cancel-in-progress: true
     outputs:
       primary-tag: ${{ steps.tags.outputs.primary_tag }}
+      digest: ${{ steps.digest.outputs.digest }}
 
     steps:
       - name: Harden Runner
@@ -170,11 +176,24 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
 
+      - name: Check if fork PR
+        id: fork-check
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          IS_FORK_PR: ${{ github.event.pull_request.head.repo.fork }}
+        run: |
+          IS_FORK="false"
+          if [[ "$EVENT_NAME" == "workflow_call" && "$IS_FORK_PR" == "true" ]]; then
+            IS_FORK="true"
+          fi
+          echo "is-fork=${IS_FORK}" >> "$GITHUB_OUTPUT"
+
       - name: Set up Docker Buildx
         # yamllint disable-line rule:line-length
         uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
 
       - name: Log in to GitHub Container Registry
+        if: steps.fork-check.outputs.is-fork != 'true'
         uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3.7.0
         with:
           registry: ghcr.io
@@ -187,7 +206,10 @@ jobs:
           EVENT_NAME: ${{ github.event_name }}
           GIT_REF: ${{ github.ref }}
           FORCE_LATEST: ${{ inputs.force_latest }}
-          PR_NUMBER: ${{ github.event.pull_request.number }}
+          # For workflow_call triggered by a PR, the PR number is passed as an
+          # input so tags.sh generates the pr-N tag (github.event.pull_request.number
+          # is empty under workflow_call events).
+          PR_NUMBER: ${{ inputs.pr_number }}
         run: scripts/ci/tools-image-tags.sh
 
       - name: Build tools image
@@ -206,39 +228,35 @@ jobs:
         run: scripts/ci/tools-image-verify.sh
 
       - name: Push tools image
-        # yamllint disable-line rule:line-length
-        if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.fork == false
+        if: steps.fork-check.outputs.is-fork != 'true'
         env:
           TAGS: ${{ steps.tags.outputs.tags }}
         run: scripts/ci/tools-image-push.sh
 
-      - name: Resolve image digest
-        # yamllint disable-line rule:line-length
-        if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.fork == false
-        id: digest
+      - name: Save tools image to tarball
+        if: steps.fork-check.outputs.is-fork == 'true'
         env:
           IMAGE_TAG: ${{ steps.tags.outputs.primary_tag }}
-        run: |
-          IMAGE_NAME="${IMAGE_TAG%%:*}"
-          docker pull "$IMAGE_TAG"
-          FORMAT='{{range .RepoDigests}}{{println .}}{{end}}'
-          REPO_DIGESTS=$(docker inspect --format="$FORMAT" "$IMAGE_TAG" || echo "")
-          DIGEST=$(echo "$REPO_DIGESTS" \
-            | awk -v name="$IMAGE_NAME" -F@ '$1==name {print $2; exit}')
-          if [[ -z "$DIGEST" ]]; then
-            echo "::error::Unable to resolve digest for $IMAGE_TAG"
-            echo "Available repo digests:"
-            echo "$REPO_DIGESTS"
-            echo "Raw docker inspect output:"
-            docker inspect "$IMAGE_TAG" --format='{{json .RepoDigests}}' || true
-            exit 1
-          fi
-          echo "image_name=$IMAGE_NAME" >> "$GITHUB_OUTPUT"
-          echo "digest=$DIGEST" >> "$GITHUB_OUTPUT"
+        run: docker save "$IMAGE_TAG" -o /tmp/tools-image.tar
+
+      - name: Upload tools image artifact
+        if: steps.fork-check.outputs.is-fork == 'true'
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: tools-image
+          path: /tmp/tools-image.tar
+          retention-days: 1
+
+      - name: Resolve image digest
+        id: digest
+        if: steps.fork-check.outputs.is-fork != 'true'
+        env:
+          IMAGE_TAG: ${{ steps.tags.outputs.primary_tag }}
+        run: scripts/ci/tools-image-resolve-digest.sh
 
       - name: Attest tools image provenance
         # yamllint disable-line rule:line-length
-        if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.fork == false
+        if: steps.fork-check.outputs.is-fork != 'true'
         # actions/attest-build-provenance v3.1.0
         uses: actions/attest-build-provenance@10334b5f1e684784025c3fc0a277c88c19089275
         with:
@@ -253,25 +271,44 @@ jobs:
           PR_TAG: ${{ steps.tags.outputs.pr_tag }}
         run: scripts/ci/tools-image-summary.sh
 
-  # Output the appropriate image tag for callers
-  resolve-tag:
-    name: Resolve Image Tag
+  # Commit updated digest back to main after a successful image build.
+  # Isolated from build-tools-image so it only needs contents: write — the build
+  # job keeps its minimal read-only content permission.
+  pin-digest:
+    name: Pin Digest in Repository
     runs-on: ubuntu-24.04
-    needs: [check-changes, build-tools-image]
-    if: always() && needs.check-changes.outputs.is-workflow-call == 'true'
+    needs: [build-tools-image]
+    # Only runs on default branch, non-PR, non-workflow_call events that actually
+    # produced a pushed image (schedule, push to main, workflow_dispatch on main).
+    if: >-
+      needs.build-tools-image.result == 'success' &&
+      github.ref == 'refs/heads/main' &&
+      github.event_name != 'pull_request' &&
+      github.event_name != 'workflow_call'
     permissions:
-      contents: read
-    outputs:
-      tag: ${{ steps.resolve.outputs.tag }}
+      contents: write
+    defaults:
+      run:
+        shell: bash
     steps:
+      - name: Harden Runner
+        uses: step-security/harden-runner@fe104658747b27e96e4f7e80cd0a94068e53901d
+        with:
+          egress-policy: 'block'
+          allowed-endpoints: >
+            github.com:443
+            api.github.com:443
+
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
         with:
+          fetch-depth: 0
           persist-credentials: false
 
-      - name: Resolve image tag
-        id: resolve
+      - name: Pin digest in repository
         env:
-          BUILD_TAG: ${{ needs.build-tools-image.outputs.primary-tag }}
-          BUILD_RESULT: ${{ needs.build-tools-image.result }}
-        run: scripts/ci/tools-image-resolve-tag.sh
+          DIGEST: ${{ needs.build-tools-image.outputs.digest }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          BUILT_COMMIT: ${{ github.sha }}
+        run: scripts/ci/tools-image-commit-digest.sh

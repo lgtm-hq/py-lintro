@@ -3,16 +3,29 @@
 # For license details, see the repository root LICENSE file.
 #
 # Resolve the tools image tag based on context.
-# Used by resolve-tools-image action.
+# Called from ci-pipeline.yml resolve-tools job and resolve-tools-image composite action.
+#
+# Resolution order:
+#   1. BUILT_IMAGE                    (set when ci-pipeline.yml called tools-image.yml via workflow_call)
+#   2. IMAGE_NAME:sha-${GITHUB_SHA}@digest (push events with tool changes)
+#   3. STABLE_IMAGE                   (PRs without tool changes and pushes without tool changes)
+#      If STABLE_IMAGE is not provided, reads the pinned value from Dockerfile.
 #
 # Required environment variables:
-#   TOOLS_CHANGED       - "true" or "false"
-#   GITHUB_EVENT_NAME   - "push" or "pull_request"
+#   GITHUB_EVENT_NAME   - "push", "pull_request", or "workflow_dispatch"
 #   IMAGE_NAME          - Base image name (e.g., ghcr.io/lgtm-hq/lintro-tools)
-#   STABLE_IMAGE        - Full stable image reference with digest
 #   GITHUB_OUTPUT       - Path to GitHub outputs file
-# Optional:
-#   PR_NUMBER           - PR number (required if pull_request + tools changed)
+#
+# Optional environment variables:
+#   CALL_RESULT         - Result of the call-tools-image job ("success", "skipped", etc.)
+#                         When "success", TOOLS_CHANGED is true, and PR_NUMBER is set,
+#                         derives the built PR image tag.
+#   PR_NUMBER           - PR number; used with CALL_RESULT to derive the PR image tag.
+#   BUILT_IMAGE         - Pre-built image override (takes priority over CALL_RESULT if set)
+#   STABLE_IMAGE        - Full stable image reference with digest; read from Dockerfile if unset
+#   TOOLS_CHANGED       - "true"/"false" to decide whether a fresh build/image must be used
+#   GITHUB_SHA          - Commit SHA for push/main resolution
+#   IS_FORK_PR          - "true" when the pull request comes from a fork (uses artifact fallback)
 
 set -euo pipefail
 
@@ -23,66 +36,136 @@ Resolve the tools image tag based on context.
 Usage:
   scripts/ci/tools-image-resolve.sh
 
+Resolution order:
+  1. BUILT_IMAGE                 — pre-built image from workflow_call (highest priority)
+  2. IMAGE_NAME:sha-${GITHUB_SHA}@digest — push events with tool changes
+  3. STABLE_IMAGE                — PRs without tool changes (read from Dockerfile if unset)
+
 Environment Variables (required):
-  TOOLS_CHANGED       "true" or "false" - whether tool files changed
-  GITHUB_EVENT_NAME   GitHub event name (push or pull_request)
+  GITHUB_EVENT_NAME   GitHub event name (push, pull_request, workflow_dispatch, ...)
   IMAGE_NAME          Base image name (e.g., ghcr.io/lgtm-hq/lintro-tools)
-  STABLE_IMAGE        Full stable image reference with digest
   GITHUB_OUTPUT       Path to GitHub output file
 
 Environment Variables (optional):
-  PR_NUMBER           PR number (required if pull_request + tools changed)
+  BUILT_IMAGE         Full image reference from a workflow_call build; if set, used directly
+  STABLE_IMAGE        Full stable image reference with digest; read from Dockerfile if unset
+  TOOLS_CHANGED       "true"/"false" — gates BUILT_IMAGE derivation from CALL_RESULT/PR_NUMBER
+                      and chooses between fresh-digest resolution and STABLE_IMAGE on push
 
 Outputs (to GITHUB_OUTPUT):
   image               Full image reference to use
+  source              Where the image comes from: registry, artifact, or stable
 
-Logic:
-  - PR with tool changes:  IMAGE_NAME:pr-PR_NUMBER
-  - Push with tool changes: IMAGE_NAME:latest
-  - No tool changes:        STABLE_IMAGE (pinned digest)
+Example (fresh build from workflow_call via CALL_RESULT):
+  CALL_RESULT=success PR_NUMBER=123 \
+  GITHUB_EVENT_NAME=pull_request IMAGE_NAME=ghcr.io/org/lintro-tools \
+  GITHUB_OUTPUT=/tmp/out ./scripts/ci/tools-image-resolve.sh
 
-Example:
-  TOOLS_CHANGED=false GITHUB_EVENT_NAME=push IMAGE_NAME=ghcr.io/org/tools \
-    STABLE_IMAGE=ghcr.io/org/tools:latest@sha256:abc GITHUB_OUTPUT=/tmp/out \
-    ./scripts/ci/tools-image-resolve.sh
+Example (stable image for PR without tool changes):
+  GITHUB_EVENT_NAME=pull_request IMAGE_NAME=ghcr.io/org/lintro-tools \
+  GITHUB_OUTPUT=/tmp/out ./scripts/ci/tools-image-resolve.sh
 EOF
 	exit 0
 fi
 
-: "${TOOLS_CHANGED:?TOOLS_CHANGED is required}"
 : "${GITHUB_EVENT_NAME:?GITHUB_EVENT_NAME is required}"
 : "${IMAGE_NAME:?IMAGE_NAME is required}"
-: "${STABLE_IMAGE:?STABLE_IMAGE is required}"
 : "${GITHUB_OUTPUT:?GITHUB_OUTPUT is required}"
 
-if [[ "$TOOLS_CHANGED" == "true" ]] &&
-	[[ "$GITHUB_EVENT_NAME" == "pull_request" ]]; then
-	# For PRs with tool changes, PR_NUMBER is required
-	if [[ -z "${PR_NUMBER:-}" ]]; then
-		echo "::error::PR_NUMBER is required when TOOLS_CHANGED=true and event is pull_request"
-		echo "  IMAGE_NAME=${IMAGE_NAME}"
-		echo "  PR_NUMBER=${PR_NUMBER:-<unset>}"
+get_tools_image_from_dockerfile() {
+	# Echo the pinned TOOLS_IMAGE value from Dockerfile or an empty string
+	# if the file or ARG line is missing. Keeps error output quiet so callers
+	# can decide how to surface the failure.
+	grep -E '^ARG TOOLS_IMAGE=' Dockerfile 2>/dev/null | head -n1 | cut -d= -f2 || true
+}
+
+resolve_image_digest() {
+	local image_tag="$1"
+	local max_attempts="$2"
+	local sleep_seconds="$3"
+	local image_name attempt repo_digests digest
+
+	image_name="${image_tag%:*}"
+	for attempt in $(seq 1 "$max_attempts"); do
+		echo "Resolving digest for ${image_tag} (attempt ${attempt}/${max_attempts})" >&2
+		if docker pull "$image_tag" >/dev/null 2>&1; then
+			repo_digests=$(docker inspect --format='{{range .RepoDigests}}{{println .}}{{end}}' "$image_tag" || true)
+			digest=$(echo "$repo_digests" | awk -v name="$image_name" -F@ '$1==name {print $2; exit}')
+			if [[ -n "$digest" ]]; then
+				printf '%s@%s\n' "$image_name" "$digest"
+				return 0
+			fi
+		fi
+		if ((attempt < max_attempts)); then
+			sleep "$sleep_seconds"
+		fi
+	done
+
+	echo "::error::Unable to resolve a published digest for ${image_tag}" >&2
+	return 1
+}
+
+# Derive BUILT_IMAGE from CALL_RESULT + PR_NUMBER when not set directly.
+# This avoids referencing reusable-workflow job outputs (which causes startup_failure
+# when the calling job has a conditional if:).
+if [[ -z "${BUILT_IMAGE:-}" && "${CALL_RESULT:-}" == "success" &&
+	"${TOOLS_CHANGED:-false}" == "true" && -n "${PR_NUMBER:-}" ]]; then
+	BUILT_IMAGE="${IMAGE_NAME}:pr-${PR_NUMBER}"
+fi
+
+# ------------------------------------------------------------------
+# 1. Pre-built image from workflow_call (highest priority)
+# ------------------------------------------------------------------
+if [[ -n "${BUILT_IMAGE:-}" ]]; then
+	IMAGE="$BUILT_IMAGE"
+	if [[ "${IS_FORK_PR:-false}" == "true" ]]; then
+		SOURCE="artifact"
+		echo "Using pre-built tools image artifact from workflow_call: ${IMAGE}"
+	else
+		SOURCE="registry"
+		echo "Using pre-built tools image from workflow_call: ${IMAGE}"
+	fi
+
+# ------------------------------------------------------------------
+# 2. Push to main — require the commit-scoped SHA tag when tool files changed
+# ------------------------------------------------------------------
+elif [[ "$GITHUB_EVENT_NAME" == "push" ]]; then
+	CHANGED="${TOOLS_CHANGED:-false}"
+	if [[ "$CHANGED" == "true" ]]; then
+		: "${GITHUB_SHA:?GITHUB_SHA is required when TOOLS_CHANGED=true on push}"
+		IMAGE_TAG="${IMAGE_NAME}:sha-${GITHUB_SHA}"
+		IMAGE=$(resolve_image_digest "$IMAGE_TAG" 20 15)
+		SOURCE="registry"
+		echo "Using commit-scoped tools image digest for push: ${IMAGE}"
+	else
+		if [[ -z "${STABLE_IMAGE:-}" ]]; then
+			STABLE_IMAGE=$(get_tools_image_from_dockerfile)
+		fi
+		if [[ -z "${STABLE_IMAGE:-}" ]]; then
+			echo "::error::STABLE_IMAGE is unset and could not be read from Dockerfile"
+			exit 1
+		fi
+		IMAGE="${STABLE_IMAGE}"
+		SOURCE="stable"
+		echo "Using stable tools image (no tool changes on push): ${IMAGE}"
+	fi
+
+# ------------------------------------------------------------------
+# 3. Stable pinned image — PRs without tool changes, workflow_dispatch, etc.
+# ------------------------------------------------------------------
+else
+	if [[ -z "${STABLE_IMAGE:-}" ]]; then
+		# Read the pinned digest directly from Dockerfile — kept current by pin-digest job
+		STABLE_IMAGE=$(get_tools_image_from_dockerfile)
+	fi
+	if [[ -z "${STABLE_IMAGE:-}" ]]; then
+		echo "::error::STABLE_IMAGE is unset and could not be read from Dockerfile"
 		exit 1
 	fi
-	# Use the freshly built pr-N image
-	IMAGE="${IMAGE_NAME}:pr-${PR_NUMBER}"
-	echo "Using fresh tools image for PR: ${IMAGE}"
-elif [[ "$GITHUB_EVENT_NAME" == "push" ]]; then
-	# For ALL push events on main, use :latest tag (not pinned digest)
-	# This ensures we always use the current tools image, avoiding race conditions
-	# where the pinned digest in STABLE_IMAGE hasn't been updated yet.
-	# The :latest tag is authoritative for main branch builds.
-	IMAGE="${IMAGE_NAME}:latest"
-	if [[ "$TOOLS_CHANGED" == "true" ]]; then
-		echo "Using latest tools image (tool files changed on push): ${IMAGE}"
-	else
-		echo "Using latest tools image (main branch always uses latest): ${IMAGE}"
-	fi
-else
-	# For PRs without tool changes, use stable image (pinned digest)
-	# This ensures PR builds are reproducible and don't break if :latest drifts
 	IMAGE="${STABLE_IMAGE}"
-	echo "Using stable tools image: ${IMAGE}"
+	SOURCE="stable"
+	echo "Using stable tools image (pinned digest): ${IMAGE}"
 fi
 
 echo "image=${IMAGE}" >>"$GITHUB_OUTPUT"
+echo "source=${SOURCE}" >>"$GITHUB_OUTPUT"
