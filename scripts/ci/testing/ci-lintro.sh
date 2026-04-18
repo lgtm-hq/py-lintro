@@ -49,25 +49,32 @@ trap 'echo "CHK_EXIT_CODE=${CHK_EXIT_CODE:-1}" >> "$GITHUB_ENV"' EXIT
 # Run lintro check in Docker container against the entire project
 # The .lintro-ignore file will automatically exclude test_samples/
 # Note: pydoclint timeout increased for CI (Docker is slower than local)
+# Lintro writes its full console output, structured reports, and console.log
+# into .lintro/run-<timestamp>/ on the host (via the -v mount). Downstream jobs
+# (fail-on-lint.sh, the PR comment job) consume report.md / console.log from
+# that directory instead of scraping stdout, so no tee is needed here.
 set +e # Don't exit on error
 # Use the image entrypoint to invoke lintro directly; avoid shell passthrough
-# Use tee to write output to both stdout (build logs) and chk-output.txt (step summary/PR comments)
 # Run with matching UID/GID to allow writes to mounted volume (e.g., bun install for node_modules)
 # Enable auto-install for CI (uses --ignore-scripts for security)
 # Set HOME=/tmp to ensure tools like semgrep can write config/cache files (no valid home dir for UID)
 # Disable osv_scanner suppression probe here; the dedicated security scan job handles it
 docker run --rm --user "$(id -u):$(id -g)" -e HOME=/tmp -e LINTRO_AUTO_INSTALL_DEPS=1 \
 	-v "$PWD:/code" -w /code py-lintro:latest lintro check . \
-	--tool-options "pydoclint:timeout=120,osv_scanner:check_suppressions=false" \
-	2>&1 | tee chk-output.txt
-CHK_EXIT_CODE=${PIPESTATUS[0]}
+	--tool-options "pydoclint:timeout=120,osv_scanner:check_suppressions=false"
+CHK_EXIT_CODE=$?
 set -e # Exit on error again
+
+# Locate the newest run directory so we can surface its console.log in the
+# GitHub step summary. The directory is created per-invocation by OutputManager.
+LATEST_RUN_DIR=$(find .lintro -maxdepth 1 -type d -name 'run-*' -print0 2>/dev/null |
+	xargs -0 ls -dt 2>/dev/null | head -n1)
 
 {
 	echo "### 📊 Linting Results:"
 	echo '```'
-	if [ -f chk-output.txt ]; then
-		cat chk-output.txt
+	if [ -n "$LATEST_RUN_DIR" ] && [ -f "$LATEST_RUN_DIR/console.log" ]; then
+		cat "$LATEST_RUN_DIR/console.log"
 	else
 		echo "No linting output captured"
 	fi
@@ -76,11 +83,6 @@ set -e # Exit on error again
 	echo "**Linting exit code:** $CHK_EXIT_CODE"
 	echo ""
 } >>"$GITHUB_STEP_SUMMARY"
-
-# Keep full chk-output.txt; summarization now handled in PR comment script
-if [ ! -f chk-output.txt ]; then
-	echo "No linting output captured" >chk-output.txt
-fi
 
 # Store the exit code for the PR comment step
 echo "CHK_EXIT_CODE=$CHK_EXIT_CODE" >>"$GITHUB_ENV"

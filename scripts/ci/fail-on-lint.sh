@@ -31,14 +31,18 @@ if [[ "${code}" != "0" ]]; then
 	echo "❌ Linting checks failed (exit code: ${code})"
 	echo ""
 
-	# Display actual linting errors if available
-	if [[ -f chk-output.txt ]]; then
-		echo "=== Linting Output ==="
-		cat chk-output.txt
+	# Display actual linting errors if available. Lintro's OutputManager
+	# writes console.log to .lintro/run-<timestamp>/ on every run; pick the
+	# newest one so the failure context matches this invocation.
+	latest_run_dir=$(find .lintro -maxdepth 1 -type d -name 'run-*' -print0 2>/dev/null |
+		xargs -0 ls -dt 2>/dev/null | head -n1)
+	if [[ -n "${latest_run_dir}" && -f "${latest_run_dir}/console.log" ]]; then
+		echo "=== Linting Output (${latest_run_dir}/console.log) ==="
+		cat "${latest_run_dir}/console.log"
 		echo ""
 		echo "=== End of Linting Output ==="
 	else
-		echo "⚠️  No linting output file (chk-output.txt) found."
+		echo "⚠️  No console.log found under .lintro/run-*."
 		echo "Check the build logs above for details."
 	fi
 
