@@ -23,7 +23,7 @@ MAX_FALLBACK_LINES = 50
 
 # Case-sensitive: matches status-column cells (FAIL, ERROR) and the ❌ emoji,
 # but not lowercase/title-case header labels like "Failed | 0".
-_FAILURE_MARKER = re.compile(r"❌|\bFAIL\b|\bERROR\b")
+_FAILURE_MARKER = re.compile(r"❌|\bFAIL(?:ED)?\b|\bERROR\b")
 # Non-zero issue counts in lintro's totals table.
 _NONZERO_ISSUES = re.compile(
     r"(?:Total|Remaining)\s+Issues\s*\|\s*[1-9]",
