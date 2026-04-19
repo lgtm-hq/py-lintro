@@ -38,25 +38,13 @@ fi
 : "${IMAGE_TAG:?IMAGE_TAG is required}"
 : "${GITHUB_OUTPUT:?GITHUB_OUTPUT is required}"
 
+# shellcheck disable=SC1091 # helper path resolved at runtime via $(dirname "$0")
+source "$(dirname "$0")/tools-image-digest-helpers.sh"
+
 IMAGE_NAME="${IMAGE_TAG%:*}"
 
-echo "Pulling image to resolve digest: $IMAGE_TAG"
-docker pull "$IMAGE_TAG"
-
-FORMAT='{{range .RepoDigests}}{{println .}}{{end}}'
-REPO_DIGESTS=$(docker inspect --format="$FORMAT" "$IMAGE_TAG" || echo "")
-
-DIGEST=$(echo "$REPO_DIGESTS" |
-	awk -v name="$IMAGE_NAME" -F@ '$1==name {print $2; exit}')
-
-if [[ -z "$DIGEST" ]]; then
-	echo "::error::Unable to resolve digest for $IMAGE_TAG"
-	echo "Available repo digests:"
-	echo "$REPO_DIGESTS"
-	echo "Raw docker inspect output:"
-	docker inspect "$IMAGE_TAG" --format='{{json .RepoDigests}}' || true
-	exit 1
-fi
+RESOLVED=$(resolve_image_digest "$IMAGE_TAG")
+DIGEST="${RESOLVED#*@}"
 
 echo "image_name=$IMAGE_NAME" >>"$GITHUB_OUTPUT"
 echo "digest=$DIGEST" >>"$GITHUB_OUTPUT"

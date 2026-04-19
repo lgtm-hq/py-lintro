@@ -19,7 +19,11 @@ def test_scripts_have_help() -> None:
 
     for script_file in script_dir.rglob("*.sh"):
         # Skip utility files that are sourced by other scripts
-        if script_file.name in ["utils.sh", "install.sh"]:
+        if script_file.name in [
+            "utils.sh",
+            "install.sh",
+            "tools-image-digest-helpers.sh",
+        ]:
             continue
 
         try:

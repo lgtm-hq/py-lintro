@@ -79,31 +79,8 @@ get_tools_image_from_dockerfile() {
 	grep -E '^ARG TOOLS_IMAGE=' Dockerfile 2>/dev/null | head -n1 | cut -d= -f2 || true
 }
 
-resolve_image_digest() {
-	local image_tag="$1"
-	local max_attempts="$2"
-	local sleep_seconds="$3"
-	local image_name attempt repo_digests digest
-
-	image_name="${image_tag%:*}"
-	for attempt in $(seq 1 "$max_attempts"); do
-		echo "Resolving digest for ${image_tag} (attempt ${attempt}/${max_attempts})" >&2
-		if docker pull "$image_tag" >/dev/null 2>&1; then
-			repo_digests=$(docker inspect --format='{{range .RepoDigests}}{{println .}}{{end}}' "$image_tag" || true)
-			digest=$(echo "$repo_digests" | awk -v name="$image_name" -F@ '$1==name {print $2; exit}')
-			if [[ -n "$digest" ]]; then
-				printf '%s@%s\n' "$image_name" "$digest"
-				return 0
-			fi
-		fi
-		if ((attempt < max_attempts)); then
-			sleep "$sleep_seconds"
-		fi
-	done
-
-	echo "::error::Unable to resolve a published digest for ${image_tag}" >&2
-	return 1
-}
+# shellcheck disable=SC1091 # helper path resolved at runtime via $(dirname "$0")
+source "$(dirname "$0")/tools-image-digest-helpers.sh"
 
 # Derive BUILT_IMAGE from CALL_RESULT + PR_NUMBER when not set directly.
 # This avoids referencing reusable-workflow job outputs (which causes startup_failure
