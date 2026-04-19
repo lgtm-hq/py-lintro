@@ -117,9 +117,9 @@ def _strip_report_md_wrapper(text: str) -> str:
         text when no fenced block is found.
     """
     fence_match = re.search(
-        r"^```[^\n]*\n(.*?)\n```\s*$",
+        r"\A# Lintro Report\n.*?\n```[^\n]*\n(.*?)\n```\s*\Z",
         text,
-        re.DOTALL | re.MULTILINE,
+        re.DOTALL,
     )
     if fence_match is not None:
         return fence_match.group(1)

@@ -451,6 +451,8 @@ jobs:
           path: .lintro/
           retention-days: 7
           if-no-files-found: warn
+          # .lintro/ is dotfiled; v6 excludes hidden files by default.
+          include-hidden-files: true
       - name: Fail on Linting Issues
         if: ${{ env.CHK_EXIT_CODE != '0' }}
         env:
