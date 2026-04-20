@@ -52,7 +52,15 @@ if ! [[ "$FULL_SHA" =~ ^[0-9a-fA-F]{40}$ ]]; then
 	echo "::error::FULL_SHA must be a 40-character hex commit hash (got: ${FULL_SHA})"
 	exit 1
 fi
-IS_PR=$([[ "$EVENT_NAME" == "pull_request" ]] && echo true || echo false)
+
+# Treat as a PR context when triggered by a pull_request event directly OR when
+# called via workflow_call with an explicit PR number (ci-pipeline.yml passes
+# pr_number when calling tools-image.yml on behalf of a PR).
+if [[ "$EVENT_NAME" == "pull_request" ]] || [[ -n "$PR_NUMBER" ]]; then
+	IS_PR="true"
+else
+	IS_PR="false"
+fi
 
 # Start with SHA tag (always included)
 TAGS="${IMAGE_BASE}:sha-${FULL_SHA}"

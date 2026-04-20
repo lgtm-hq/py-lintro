@@ -1,70 +1,86 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Show help if requested
+# CI PR Comment Script
+# Generates the lintro PR comment from the newest .lintro/run-*/report.md
+# artifact produced by the lint job. The lint job uploads .lintro/ as a
+# workflow artifact; this job downloads it before invoking this script, so
+# the single source of truth is report.md (no log scraping required).
+
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+FORMATTER_SCRIPT="$SCRIPT_DIR/format-lintro-pr-comment.py"
+
 if [ "${1:-}" = "--help" ] || [ "${1:-}" = "-h" ]; then
-	echo "Usage: $0 [--help|-h]"
-	echo ""
-	echo "CI PR Comment Script"
-	echo "Generates a PR comment from chk-summary.txt within a GitHub Actions run."
-	echo ""
-	echo "This script is intended for CI and will no-op outside pull_request events."
+	cat <<'EOF'
+Usage: ci-pr-comment.sh [--help|-h]
+
+Generates pr-comment.txt from the newest .lintro/run-*/report.md produced
+by the lint job (downloaded as the "lintro-run" artifact in the comment job).
+Falls back to an "output unavailable" comment when the artifact is missing.
+
+Environment:
+  CHK_EXIT_CODE  Optional lint exit code (from the lint job's GITHUB_ENV).
+EOF
 	exit 0
 fi
 
-# CI PR Comment Script
-# Generates and posts comments to PRs with lintro analysis results
+# shellcheck source=../utils/utils.sh disable=SC1091
+source "$SCRIPT_DIR/../utils/utils.sh"
 
-# Source shared utilities
-# shellcheck source=../utils/utils.sh disable=SC1091 # Can't follow dynamic path; verified at runtime
-source "$(dirname "$0")/../utils/utils.sh"
-
-# Check if we're in a PR context
 if ! is_pr_context; then
 	log_info "Not in a PR context, skipping comment generation"
 	exit 0
 fi
 
-# Read the summary file (robust extraction) and derive status from exit code
-if [ -f chk-output.txt ]; then
-	# Try to extract from the EXECUTION SUMMARY section regardless of emoji
-	start_line=$(grep -n "EXECUTION SUMMARY" chk-output.txt | head -n1 | cut -d: -f1 || true)
-	if [ -n "${start_line:-}" ]; then
-		tail -n +"$start_line" chk-output.txt >chk-summary.txt || true
-	else
-		# Fallback to last 50 lines to capture table if header not found
-		tail -n 50 chk-output.txt >chk-summary.txt || true
-	fi
+TMP_DIR=$(mktemp -d)
+trap 'rm -rf "$TMP_DIR"' EXIT
+STATUS_FILE="$TMP_DIR/lintro-comment-status.txt"
+CONTENT_FILE="$TMP_DIR/lintro-comment-content.md"
+
+write_unavailable_payload() {
+	local reason="$1"
+	local details="${2:-}"
+	log_warning "$reason"
+	python3 "$FORMATTER_SCRIPT" \
+		--fallback-reason "$reason" \
+		--details "$details" \
+		--status-file "$STATUS_FILE" \
+		--content-file "$CONTENT_FILE"
+}
+
+# Newest run directory wins — OutputManager mints a fresh run-<timestamp>/
+# per invocation, so "newest" == "this run" under the lint-job workdir.
+# Tolerate empty results / missing .lintro under set -euo pipefail.
+REPORT_MD=""
+if [ -d .lintro ]; then
+	REPORT_MD=$({ find .lintro -maxdepth 2 -type f -name 'report.md' -path '.lintro/run-*/*' -print0 2>/dev/null || true; } |
+		{ xargs -0 ls -t 2>/dev/null || true; } |
+		head -n1 || true)
 fi
 
-if [ -f chk-summary.txt ]; then
-	OUTPUT=$(cat chk-summary.txt)
+if [ -n "$REPORT_MD" ] && [ -f "$REPORT_MD" ]; then
+	log_info "Building PR comment from $REPORT_MD"
+	python3 "$FORMATTER_SCRIPT" \
+		--report-md "$REPORT_MD" \
+		--exit-code "${CHK_EXIT_CODE:-}" \
+		--status-file "$STATUS_FILE" \
+		--content-file "$CONTENT_FILE"
 else
-	OUTPUT="❌ Analysis failed - check the CI logs for details"
+	write_unavailable_payload \
+		"The lintro run artifact (.lintro/run-*/report.md) was not available in the comment job." \
+		"Ensure the lint job uploaded the lintro-run artifact and that this job downloaded it before invoking ci-pr-comment.sh."
 fi
 
-# Prefer the recorded exit code to determine status; fallback to grep
-if [ "${CHK_EXIT_CODE:-1}" != "0" ]; then
-	STATUS="⚠️ ISSUES FOUND"
-else
-	if echo "$OUTPUT" | grep -q "❌\|FAILED\|ERROR"; then
-		STATUS="⚠️ ISSUES FOUND"
-	else
-		STATUS="✅ PASSED"
-	fi
-fi
+STATUS=$(cat "$STATUS_FILE")
+CONTENT=$(cat "$CONTENT_FILE")
 
-# Create the comment content with marker
 CONTENT="<!-- lintro-report -->
 
 **Workflow:**
 1. ✅ Applied formatting fixes with \`lintro format\`
 2. 🔍 Performed code quality checks with \`lintro check\`
 
-### 📋 Results:
-\`\`\`
-$OUTPUT
-\`\`\`"
+$CONTENT
+"
 
-# Generate PR comment using shared function
 generate_pr_comment "🔧 Lintro Code Quality Analysis" "$STATUS" "$CONTENT" "pr-comment.txt"

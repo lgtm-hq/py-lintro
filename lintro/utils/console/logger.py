@@ -129,6 +129,17 @@ class ThreadSafeConsoleLogger:
         self.console_output(text=f"✅ {message}", color="green")
         logger.info(f"SUCCESS: {message}", **kwargs)
 
+    def get_buffer(self) -> str:
+        """Return the captured console output as a single string.
+
+        Thread-safe: Uses lock when reading message list.
+
+        Returns:
+            Newline-joined copy of tracked console messages.
+        """
+        with self._lock:
+            return "\n".join(self._messages)
+
     def save_console_log(self, run_dir: str | Path | None = None) -> None:
         """Save tracked console messages to console.log.
 

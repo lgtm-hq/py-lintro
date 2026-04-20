@@ -47,16 +47,37 @@ fi
 : "${GITHUB_EVENT_NAME:?GITHUB_EVENT_NAME is required}"
 : "${GITHUB_OUTPUT:?GITHUB_OUTPUT is required}"
 
-# Define tool-related file patterns that affect image CONTENT
-# Note: scripts/ci/tools-image-*.sh are CI helpers (tags, verify, summary)
-# and don't affect image content, so they're not included here
+# Define tool-related file patterns that require CI to use a freshly built
+# tools image. This list must stay aligned with the reusable workflow's
+# workflow_call change detection so resolve-tools picks the same image that the
+# build stage produced.
 TOOL_PATTERNS=(
 	"Dockerfile.tools"
 	"scripts/utils/install-tools.sh"
 	"package.json"
 	"lintro/_tool_versions.py"
 	"lintro/tools/manifest.json"
+	".github/workflows/tools-image.yml"
 )
+
+matches_tool_pattern() {
+	local changed_file="$1"
+	local pattern
+
+	for pattern in "${TOOL_PATTERNS[@]}"; do
+		if [[ "$changed_file" == "$pattern" ]]; then
+			echo "$pattern"
+			return 0
+		fi
+	done
+
+	if [[ "$changed_file" == scripts/ci/tools-image-*.sh ]]; then
+		echo "scripts/ci/tools-image-*.sh"
+		return 0
+	fi
+
+	return 1
+}
 
 tools_changed="false"
 
@@ -69,13 +90,14 @@ if [[ "$GITHUB_EVENT_NAME" == "pull_request" ]]; then
 	changed_files=$(git diff --name-only "$PR_BASE_SHA" "$PR_HEAD_SHA" \
 		2>/dev/null || echo "")
 
-	for pattern in "${TOOL_PATTERNS[@]}"; do
-		if echo "$changed_files" | grep -qF "$pattern"; then
-			echo "Found tool file change matching: $pattern"
+	while IFS= read -r changed_file; do
+		[[ -z "$changed_file" ]] && continue
+		if matched_pattern=$(matches_tool_pattern "$changed_file"); then
+			echo "Found tool file change matching: $matched_pattern ($changed_file)"
 			tools_changed="true"
 			break
 		fi
-	done
+	done <<<"$changed_files"
 elif [[ "$GITHUB_EVENT_NAME" == "push" ]]; then
 	# For push events, check if tool files changed in the pushed commits
 	echo "Checking for tool file changes in push..."
@@ -85,13 +107,14 @@ elif [[ "$GITHUB_EVENT_NAME" == "push" ]]; then
 	if [[ -n "$BEFORE_SHA" ]] && [[ "$BEFORE_SHA" != "$ZERO_SHA" ]]; then
 		changed_files=$(git diff --name-only "$BEFORE_SHA" HEAD \
 			2>/dev/null || echo "")
-		for pattern in "${TOOL_PATTERNS[@]}"; do
-			if echo "$changed_files" | grep -qF "$pattern"; then
-				echo "Found tool file change matching: $pattern"
+		while IFS= read -r changed_file; do
+			[[ -z "$changed_file" ]] && continue
+			if matched_pattern=$(matches_tool_pattern "$changed_file"); then
+				echo "Found tool file change matching: $matched_pattern ($changed_file)"
 				tools_changed="true"
 				break
 			fi
-		done
+		done <<<"$changed_files"
 	fi
 else
 	echo "Event type: $GITHUB_EVENT_NAME, using stable image"
@@ -99,3 +122,13 @@ fi
 
 echo "tools_changed=${tools_changed}" >>"$GITHUB_OUTPUT"
 echo "Tools changed: ${tools_changed}"
+
+if [[ "$tools_changed" == "true" ]]; then
+	if [[ "$GITHUB_EVENT_NAME" == "pull_request" ]]; then
+		echo "::notice::Tool files changed — fresh tools image will be built via workflow_call"
+	else
+		echo "::notice::Tool files changed — tools-image.yml will build a fresh image"
+	fi
+else
+	echo "::notice::No tool file changes detected — stable pinned image will be used"
+fi

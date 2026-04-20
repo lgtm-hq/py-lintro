@@ -3,27 +3,33 @@
 ---
 name: Resolve Tools Image
 description: >-
-  Detect tool file changes and wait for the tools-image workflow to complete.
-  Outputs the appropriate tools image tag to use for Docker builds.
-  For PRs/pushes with tool changes, waits for the dedicated tools-image.yml
-  workflow instead of building inline.
+  Detect tool file changes and resolve the appropriate tools image reference.
+  Returns the stable pinned image for contexts without tool changes. For
+  main-branch pushes with tool changes the resolver produces a commit-scoped
+  sha-${GITHUB_SHA} tag and translates it into a digest-backed image reference.
+  Callers that need a freshly built image for a PR with tool changes should
+  call tools-image.yml via workflow_call and pass the result as BUILT_IMAGE to
+  tools-image-resolve.sh directly (see ci-pipeline.yml).
 inputs:
   image-name:
-    description: Full image name without tag (for pushing new PR images)
+    description: Base image name without tag
     required: false
     default: ghcr.io/lgtm-hq/lintro-tools
   stable-image:
-    # yamllint disable-line rule:line-length
-    description: Full stable image reference (may differ during migrations)
+    description: >-
+      Override the stable image reference. If unset, tools-image-resolve.sh reads
+      the pinned digest from Dockerfile automatically.
     required: false
-    # yamllint disable-line rule:line-length
-    default: ghcr.io/lgtm-hq/lintro-tools:latest@sha256:7d2d20aeff5b81decc9761cafcd4b068b797c06876b1b14105ef76b646153a6c
+    default: ''
 outputs:
   image:
-    description: Full tools image reference to use (either fresh pr-N or stable)
+    description: Full tools image reference to use
     value: ${{ steps.resolve.outputs.image }}
+  source:
+    description: Where the image comes from (registry, artifact, or stable)
+    value: ${{ steps.resolve.outputs.source }}
   changed:
-    description: Whether tool files were changed and a fresh image was built
+    description: Whether tool files changed in this event
     value: ${{ steps.filter.outputs.tools_changed }}
 runs:
   using: composite
@@ -38,45 +44,12 @@ runs:
         GITHUB_EVENT_BEFORE: ${{ github.event.before }}
       run: scripts/ci/tools-image-detect-changes.sh
 
-    - name: Log detection result
-      shell: bash
-      env:
-        TOOLS_CHANGED: ${{ steps.filter.outputs.tools_changed }}
-      run: |
-        if [[ "$TOOLS_CHANGED" == "true" ]]; then
-          echo "::notice::Tool files changed, waiting for tools-image workflow"
-        else
-          echo "::notice::No tool changes, using stable image"
-        fi
-
-    - name: Wait for tools image (PR with changes)
-      # yamllint disable-line rule:line-length
-      if: steps.filter.outputs.tools_changed == 'true' && github.event_name == 'pull_request'
-      shell: bash
-      env:
-        GH_TOKEN: ${{ github.token }}
-        COMMIT_SHA: ${{ github.event.pull_request.head.sha }}
-        PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-        PR_NUMBER: ${{ github.event.pull_request.number }}
-        EVENT_TYPE: pull_request
-      run: scripts/ci/tools-image-wait.sh
-
-    - name: Wait for tools image (push with changes)
-      if: steps.filter.outputs.tools_changed == 'true' && github.event_name == 'push'
-      shell: bash
-      env:
-        GH_TOKEN: ${{ github.token }}
-        COMMIT_SHA: ${{ github.sha }}
-        EVENT_TYPE: push
-      run: scripts/ci/tools-image-wait.sh
-
     - name: Resolve image tag
       id: resolve
       shell: bash
       env:
-        TOOLS_CHANGED: ${{ steps.filter.outputs.tools_changed }}
         GITHUB_EVENT_NAME: ${{ github.event_name }}
         IMAGE_NAME: ${{ inputs.image-name }}
         STABLE_IMAGE: ${{ inputs.stable-image }}
-        PR_NUMBER: ${{ github.event.pull_request.number }}
+        TOOLS_CHANGED: ${{ steps.filter.outputs.tools_changed }}
       run: scripts/ci/tools-image-resolve.sh

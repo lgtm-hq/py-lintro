@@ -396,11 +396,7 @@
       },
       "tier": "tools",
       "category": "npm",
-      "version_command": [
-        "node",
-        "-e",
-        "try{console.log(require('vue-tsc/package.json').version)}catch(e){var g=require('child_process').execSync('npm root -g',{encoding:'utf8'}).trim();console.log(require(require('path').join(g,'vue-tsc','package.json')).version)}"
-      ],
+      "version_command": ["bash", "scripts/ci/resolve-vue-tsc-version.sh"],
       "languages": ["vue"],
       "tags": ["linter", "type_checker"]
     },
