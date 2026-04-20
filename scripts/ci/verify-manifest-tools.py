@@ -153,7 +153,11 @@ def main() -> int:
         code, output = _run(cmd)
         if code != 0:
             cmd_str = " ".join(cmd)
-            failures.append(f"{name}: command failed with exit code {code} ({cmd_str})")
+            diagnostic = output.strip()
+            message = f"{name}: command failed with exit code {code} ({cmd_str})"
+            if diagnostic:
+                message = f"{message}: {diagnostic}"
+            failures.append(message)
             continue
 
         actual = _parse_version(output, name)
