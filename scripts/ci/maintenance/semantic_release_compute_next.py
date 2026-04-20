@@ -32,6 +32,20 @@ from lintro.enums.git_ref import GitRef
 SEMVER_RE = re.compile(r"^(\d+)\.(\d+)\.(\d+)$")
 TAG_RE = re.compile(r"^v\d+\.\d+\.\d+$")
 
+# Tools image coordinates used for digest-drift detection. The registry
+# reference must match what Dockerfile pins and what tools-image.yml pushes,
+# otherwise drift detection silently compares the wrong image.
+TOOLS_IMAGE_REPO = "lgtm-hq/lintro-tools"
+TOOLS_IMAGE_TAG = "latest"
+DOCKERFILE_DIGEST_RE = re.compile(
+    r"^ARG\s+TOOLS_IMAGE=ghcr\.io/"
+    + re.escape(TOOLS_IMAGE_REPO)
+    + r":"
+    + re.escape(TOOLS_IMAGE_TAG)
+    + r"@(sha256:[a-f0-9]{64})",
+    re.MULTILINE,
+)
+
 # Allowed git arguments for security validation
 ALLOWED_GIT_DESCRIBE_ARGS = {
     "--tags",
@@ -62,6 +76,8 @@ class ComputeResult:
         has_breaking: Whether breaking commits were detected
         has_feat: Whether feature commits were detected
         has_fix_or_perf: Whether fix/perf commits were detected
+        has_digest_drift: Whether pinned tools digest differs from registry
+        bump_reason: Human-readable reason string for the computed bump
     """
 
     base_ref: str = field(default="")
@@ -70,6 +86,8 @@ class ComputeResult:
     has_breaking: bool = field(default=False)
     has_feat: bool = field(default=False)
     has_fix_or_perf: bool = field(default=False)
+    has_digest_drift: bool = field(default=False)
+    bump_reason: str = field(default="")
 
 
 def _validate_git_args(arguments: list[str]) -> None:
@@ -213,6 +231,82 @@ def read_pyproject_version() -> str:
         if m:
             return m.group(1)
     return ""
+
+
+def read_pinned_tools_digest() -> str:
+    """Read the tools image digest pinned in ``Dockerfile``.
+
+    The Dockerfile ``ARG TOOLS_IMAGE=...@sha256:<hex>`` line is the single
+    source of truth; ``.github/actions/resolve-tools-image/action.yml`` reads
+    this value at runtime when its ``stable-image`` input is unset.
+
+    Returns:
+        The ``sha256:<hex>`` digest string, or empty string when not found.
+    """
+    path = Path("Dockerfile")
+    if not path.exists():
+        return ""
+    match = DOCKERFILE_DIGEST_RE.search(path.read_text())
+    return match.group(1) if match else ""
+
+
+def fetch_registry_tools_digest() -> str:
+    """Resolve the current ``:latest`` digest from GHCR via the registry API.
+
+    Uses an anonymous pull token (public package) and a HEAD request against
+    the manifest endpoint so the body is never downloaded. Network failures
+    are silent on purpose: drift detection is a best-effort signal, not a
+    hard gate. A missing registry response leaves drift unknown, which the
+    caller treats as "no drift" so the release pipeline stays functional.
+
+    Returns:
+        The registry's ``Docker-Content-Digest`` header value, or empty
+        string on any failure.
+    """
+    image = TOOLS_IMAGE_REPO
+    tag = TOOLS_IMAGE_TAG
+    try:
+        with httpx.Client(timeout=10.0) as client:  # nosec B113 — timeout set in ctor
+            token_resp = client.get(
+                f"https://ghcr.io/token?scope=repository:{image}:pull",
+            )
+            if token_resp.status_code != 200:
+                return ""
+            token = str(token_resp.json().get("token", ""))
+            if not token:
+                return ""
+            headers = {
+                "Accept": (
+                    "application/vnd.oci.image.index.v1+json, "
+                    "application/vnd.docker.distribution.manifest.list.v2+json, "
+                    "application/vnd.docker.distribution.manifest.v2+json"
+                ),
+                "Authorization": f"Bearer {token}",
+            }
+            resp = client.head(
+                f"https://ghcr.io/v2/{image}/manifests/{tag}",
+                headers=headers,
+            )
+            if resp.status_code != 200:
+                return ""
+            return str(resp.headers.get("Docker-Content-Digest", ""))
+    except Exception:
+        return ""
+
+
+def detect_digest_drift() -> tuple[bool, str, str]:
+    """Compare the pinned tools digest against the registry ``:latest`` digest.
+
+    Returns:
+        Tuple of (drift_detected, pinned_digest, registry_digest). Drift is
+        only True when both digests are non-empty and differ; an unreadable
+        pin or an unreachable registry returns False so the release pipeline
+        is never blocked by a transient infra failure.
+    """
+    pinned = read_pinned_tools_digest()
+    registry = fetch_registry_tools_digest()
+    drift = bool(pinned and registry and pinned != registry)
+    return drift, pinned, registry
 
 
 def parse_semver(version: str) -> tuple[int, int, int]:
@@ -374,6 +468,16 @@ def compute() -> ComputeResult:
 
     next_version = compute_next_version(base_version, breaking, feat, fix)
 
+    # Digest drift is an independent patch-bump reason. Weekly cron rebuilds
+    # and Renovate `chore(deps):` tool bumps both land without a conventional
+    # commit that semantic-release recognises, so without this check the new
+    # base image never reaches users. When commits already warrant a bump we
+    # keep that larger bump; drift only upgrades "no bump" into a patch.
+    drift, pinned_digest, registry_digest = detect_digest_drift()
+    if drift and not next_version:
+        maj, mnr, ptc = parse_semver(base_version)
+        next_version = f"{maj}.{mnr}.{ptc + 1}"
+
     if breaking and not major_allowed:
         # If explicit clamp policy is set, apply it; otherwise fail fast
         max_bump = os.getenv("MAX_BUMP")
@@ -388,6 +492,25 @@ def compute() -> ComputeResult:
             )
 
     next_version = clamp_to_minor(base_version, next_version, os.getenv("MAX_BUMP"))
+
+    reasons: list[str] = []
+    if breaking:
+        reasons.append("breaking")
+    if feat:
+        reasons.append("feat")
+    if fix:
+        reasons.append("fix-perf")
+    if drift:
+        reasons.append("digest-drift")
+    bump_reason = "+".join(reasons)
+
+    if drift:
+        print(
+            "Tools image digest drift detected: "
+            f"pinned={pinned_digest or '<unknown>'} "
+            f"registry={registry_digest or '<unknown>'}",
+        )
+
     return ComputeResult(
         base_ref=base_ref,
         base_version=base_version,
@@ -395,6 +518,8 @@ def compute() -> ComputeResult:
         has_breaking=breaking,
         has_feat=feat,
         has_fix_or_perf=fix,
+        has_digest_drift=drift,
+        bump_reason=bump_reason,
     )
 
 
@@ -428,15 +553,19 @@ def main() -> None:
         "Detected: "
         f"breaking={result.has_breaking} "
         f"feat={result.has_feat} "
-        f"fix/perf={result.has_fix_or_perf}",
+        f"fix/perf={result.has_fix_or_perf} "
+        f"digest-drift={result.has_digest_drift}",
     )
 
     if args.print_only or not os.getenv("GITHUB_OUTPUT"):
         print(f"next_version={result.next_version}")
+        print(f"bump_reason={result.bump_reason}")
         return
 
     with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as fh:
         fh.write(f"next_version={result.next_version}\n")
+        fh.write(f"bump_reason={result.bump_reason}\n")
+        fh.write(f"digest_drift={'true' if result.has_digest_drift else 'false'}\n")
 
 
 if __name__ == "__main__":
