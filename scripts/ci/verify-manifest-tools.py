@@ -122,7 +122,11 @@ def main() -> int:
     args = parser.parse_args()
 
     tiers = [t.strip() for t in args.tiers.split(",")]
-    all_tools = _load_manifest(args.manifest)
+    try:
+        all_tools = _load_manifest(args.manifest)
+    except (ValueError, OSError, json.JSONDecodeError) as exc:
+        print(f"Failed to load manifest {args.manifest}: {exc}", file=sys.stderr)
+        return 2
     tools = _iter_tools(all_tools, tiers)
 
     if not tools:
@@ -137,7 +141,11 @@ def main() -> int:
             failures.append(f"{name or '<unknown>'}: missing name or version")
             continue
 
-        cmd = _tool_command(name, tool)
+        try:
+            cmd = _tool_command(name, tool)
+        except ValueError as exc:
+            failures.append(f"{name}: invalid manifest entry ({exc})")
+            continue
         code, output = _run(cmd)
         if code != 0:
             cmd_str = " ".join(cmd)
