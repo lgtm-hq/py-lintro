@@ -26,6 +26,10 @@ def _run(cmd: list[str]) -> tuple[int, str]:
         )
     except FileNotFoundError:
         return 127, ""
+    except PermissionError as exc:
+        return 126, f"permission denied: {exc}"
+    except OSError as exc:
+        return 125, f"OS error running command: {exc}"
     except subprocess.TimeoutExpired as exc:
         stdout = (
             exc.stdout.decode() if isinstance(exc.stdout, bytes) else (exc.stdout or "")
