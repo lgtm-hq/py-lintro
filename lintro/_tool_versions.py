@@ -86,7 +86,7 @@ _TOOL_TO_NPM_PACKAGE: dict[ToolName, str] = {
 # Fallback npm tool versions - used when package.json is not found.
 # CI should verify these match package.json to prevent drift.
 _FALLBACK_NPM_VERSIONS: dict[ToolName, str] = {
-    ToolName.ASTRO_CHECK: "6.1.3",
+    ToolName.ASTRO_CHECK: "6.1.6",
     ToolName.SVELTE_CHECK: "4.4.6",
     ToolName.TSC: "5.9.3",
     ToolName.VUE_TSC: "3.2.6",
