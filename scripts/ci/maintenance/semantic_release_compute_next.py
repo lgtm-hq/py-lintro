@@ -32,17 +32,14 @@ from lintro.enums.git_ref import GitRef
 SEMVER_RE = re.compile(r"^(\d+)\.(\d+)\.(\d+)$")
 TAG_RE = re.compile(r"^v\d+\.\d+\.\d+$")
 
-# Tools image coordinates used for digest-drift detection. The registry
-# reference must match what Dockerfile pins and what tools-image.yml pushes,
-# otherwise drift detection silently compares the wrong image.
-TOOLS_IMAGE_REPO = "lgtm-hq/lintro-tools"
-TOOLS_IMAGE_TAG = "latest"
-DOCKERFILE_DIGEST_RE = re.compile(
-    r"^ARG\s+TOOLS_IMAGE=ghcr\.io/"
-    + re.escape(TOOLS_IMAGE_REPO)
-    + r":"
-    + re.escape(TOOLS_IMAGE_TAG)
-    + r"@(sha256:[a-f0-9]{64})",
+# Parse the Dockerfile `ARG TOOLS_IMAGE=<registry>/<repo>:<tag>@<digest>` line.
+# Dockerfile is the single source of truth for which image is pinned; registry
+# coordinates are *derived* from that string so renaming the image in the
+# Dockerfile does not silently disable drift detection.
+TOOLS_IMAGE_ARG_RE = re.compile(
+    r"^ARG\s+TOOLS_IMAGE="
+    r"(?P<registry>[^/\s]+)/(?P<repo>[^:\s]+):(?P<tag>[^@\s]+)"
+    r"@(?P<digest>sha256:[a-f0-9]{64})",
     re.MULTILINE,
 )
 
@@ -233,42 +230,79 @@ def read_pyproject_version() -> str:
     return ""
 
 
-def read_pinned_tools_digest() -> str:
-    """Read the tools image digest pinned in ``Dockerfile``.
+@dataclass
+class ToolsImagePin:
+    """Parsed tools-image reference from ``Dockerfile``.
 
-    The Dockerfile ``ARG TOOLS_IMAGE=...@sha256:<hex>`` line is the single
-    source of truth; ``.github/actions/resolve-tools-image/action.yml`` reads
-    this value at runtime when its ``stable-image`` input is unset.
+    Attributes:
+        registry: Registry host (e.g. ``ghcr.io``).
+        repo: Repository path below the registry (e.g. ``lgtm-hq/lintro-tools``).
+        tag: Image tag (e.g. ``latest``).
+        digest: ``sha256:<hex>`` digest literal.
+    """
+
+    registry: str = field(default="")
+    repo: str = field(default="")
+    tag: str = field(default="")
+    digest: str = field(default="")
+
+
+def read_tools_image_pin() -> ToolsImagePin | None:
+    """Parse the ``ARG TOOLS_IMAGE=...`` line from ``Dockerfile``.
+
+    Dockerfile is the single source of truth: registry, repo, tag, and
+    digest are all extracted from the same literal used to pin the image,
+    so renaming the image does not silently break drift detection.
 
     Returns:
-        The ``sha256:<hex>`` digest string, or empty string when not found.
+        ``ToolsImagePin`` when the line parses, else ``None``.
     """
     path = Path("Dockerfile")
     if not path.exists():
-        return ""
-    match = DOCKERFILE_DIGEST_RE.search(path.read_text())
-    return match.group(1) if match else ""
+        return None
+    match = TOOLS_IMAGE_ARG_RE.search(path.read_text())
+    if not match:
+        return None
+    return ToolsImagePin(
+        registry=match.group("registry"),
+        repo=match.group("repo"),
+        tag=match.group("tag"),
+        digest=match.group("digest"),
+    )
 
 
-def fetch_registry_tools_digest() -> str:
-    """Resolve the current ``:latest`` digest from GHCR via the registry API.
-
-    Uses an anonymous pull token (public package) and a HEAD request against
-    the manifest endpoint so the body is never downloaded. Network failures
-    are silent on purpose: drift detection is a best-effort signal, not a
-    hard gate. A missing registry response leaves drift unknown, which the
-    caller treats as "no drift" so the release pipeline stays functional.
+def read_pinned_tools_digest() -> str:
+    """Return just the digest portion of the Dockerfile tools-image pin.
 
     Returns:
-        The registry's ``Docker-Content-Digest`` header value, or empty
-        string on any failure.
+        The ``sha256:<hex>`` string, or empty string when the pin is absent.
     """
-    image = TOOLS_IMAGE_REPO
-    tag = TOOLS_IMAGE_TAG
+    pin = read_tools_image_pin()
+    return pin.digest if pin else ""
+
+
+def fetch_registry_tools_digest(repo: str, tag: str) -> str:
+    """Resolve the current digest for ``repo:tag`` from GHCR.
+
+    Uses an anonymous pull token (public package) and a HEAD request against
+    the manifest endpoint so the body is never downloaded. Only transport
+    and parse failures are swallowed — unexpected programming errors still
+    propagate so they surface in logs rather than masquerading as "no drift".
+
+    Args:
+        repo: Repository path (e.g. ``lgtm-hq/lintro-tools``).
+        tag: Image tag (e.g. ``latest``).
+
+    Returns:
+        The ``Docker-Content-Digest`` header value, or empty string when
+        the registry is unreachable or returned an unexpected response.
+    """
+    if not repo or not tag:
+        return ""
     try:
         with httpx.Client(timeout=10.0) as client:  # nosec B113 — timeout set in ctor
             token_resp = client.get(
-                f"https://ghcr.io/token?scope=repository:{image}:pull",
+                f"https://ghcr.io/token?scope=repository:{repo}:pull",
             )
             if token_resp.status_code != 200:
                 return ""
@@ -284,18 +318,22 @@ def fetch_registry_tools_digest() -> str:
                 "Authorization": f"Bearer {token}",
             }
             resp = client.head(
-                f"https://ghcr.io/v2/{image}/manifests/{tag}",
+                f"https://ghcr.io/v2/{repo}/manifests/{tag}",
                 headers=headers,
             )
             if resp.status_code != 200:
                 return ""
             return str(resp.headers.get("Docker-Content-Digest", ""))
-    except Exception:
+    except (httpx.HTTPError, ValueError):
+        # httpx.HTTPError covers transport + HTTP errors (incl. timeouts);
+        # ValueError covers JSONDecodeError from token_resp.json(). Anything
+        # else (AttributeError, TypeError, etc.) is a bug, not a transient
+        # network failure, and must not be silently swallowed.
         return ""
 
 
 def detect_digest_drift() -> tuple[bool, str, str]:
-    """Compare the pinned tools digest against the registry ``:latest`` digest.
+    """Compare the pinned tools digest against the registry digest.
 
     Returns:
         Tuple of (drift_detected, pinned_digest, registry_digest). Drift is
@@ -303,10 +341,12 @@ def detect_digest_drift() -> tuple[bool, str, str]:
         pin or an unreachable registry returns False so the release pipeline
         is never blocked by a transient infra failure.
     """
-    pinned = read_pinned_tools_digest()
-    registry = fetch_registry_tools_digest()
-    drift = bool(pinned and registry and pinned != registry)
-    return drift, pinned, registry
+    pin = read_tools_image_pin()
+    if pin is None:
+        return False, "", ""
+    registry = fetch_registry_tools_digest(pin.repo, pin.tag)
+    drift = bool(pin.digest and registry and pin.digest != registry)
+    return drift, pin.digest, registry
 
 
 def parse_semver(version: str) -> tuple[int, int, int]:

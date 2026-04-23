@@ -194,7 +194,11 @@ def test_detect_digest_drift_true_when_pinned_differs_from_registry(
     registry = "sha256:" + ("b" * 64)
     _write_dockerfile(tmp_path, pinned)
     monkeypatch.chdir(tmp_path)
-    monkeypatch.setattr(mod, "fetch_registry_tools_digest", lambda: registry)
+    monkeypatch.setattr(
+        mod,
+        "fetch_registry_tools_digest",
+        lambda _repo, _tag: registry,
+    )
 
     drift, got_pinned, got_registry = mod.detect_digest_drift()
 
@@ -212,7 +216,11 @@ def test_detect_digest_drift_false_when_registry_unknown(
 
     _write_dockerfile(tmp_path, "sha256:" + ("a" * 64))
     monkeypatch.chdir(tmp_path)
-    monkeypatch.setattr(mod, "fetch_registry_tools_digest", lambda: "")
+    monkeypatch.setattr(
+        mod,
+        "fetch_registry_tools_digest",
+        lambda _repo, _tag: "",
+    )
 
     drift, _, registry = mod.detect_digest_drift()
 
@@ -230,11 +238,79 @@ def test_detect_digest_drift_false_when_digests_match(
     digest = "sha256:" + ("c" * 64)
     _write_dockerfile(tmp_path, digest)
     monkeypatch.chdir(tmp_path)
-    monkeypatch.setattr(mod, "fetch_registry_tools_digest", lambda: digest)
+    monkeypatch.setattr(
+        mod,
+        "fetch_registry_tools_digest",
+        lambda _repo, _tag: digest,
+    )
 
     drift, _, _ = mod.detect_digest_drift()
 
     assert_that(drift).is_false()
+
+
+def test_read_tools_image_pin_extracts_all_fields(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Registry, repo, tag, and digest come from the Dockerfile line itself.
+
+    This guards against reintroducing a second source of truth for the image
+    coordinates — the pin must stay derivable from the Dockerfile alone so
+    renaming the image does not silently disable drift detection.
+    """
+    from scripts.ci.maintenance import semantic_release_compute_next as mod
+
+    digest = "sha256:" + ("d" * 64)
+    _write_dockerfile(tmp_path, digest)
+    monkeypatch.chdir(tmp_path)
+
+    pin = mod.read_tools_image_pin()
+
+    assert pin is not None
+    assert_that(pin.registry).is_equal_to("ghcr.io")
+    assert_that(pin.repo).is_equal_to("lgtm-hq/lintro-tools")
+    assert_that(pin.tag).is_equal_to("latest")
+    assert_that(pin.digest).is_equal_to(digest)
+
+
+def test_fetch_registry_tools_digest_returns_empty_on_http_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Transport failures must be swallowed — drift falls back to False."""
+    import httpx
+
+    from scripts.ci.maintenance import semantic_release_compute_next as mod
+
+    def _raise(*_a: object, **_k: object) -> None:
+        raise httpx.ConnectError("boom")
+
+    monkeypatch.setattr(httpx, "Client", _raise)
+
+    result = mod.fetch_registry_tools_digest("lgtm-hq/lintro-tools", "latest")
+    assert_that(result).is_equal_to("")
+
+
+def test_fetch_registry_tools_digest_propagates_programming_errors(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Non-transport errors must propagate so bugs surface in CI.
+
+    The previous broad ``except Exception`` masked any coding mistake as a
+    silent "registry unknown" — drift detection then never fires and the
+    bug hides forever. Confirm ``AttributeError`` bubbles up.
+    """
+    import httpx
+
+    from scripts.ci.maintenance import semantic_release_compute_next as mod
+
+    def _raise(*_a: object, **_k: object) -> None:
+        raise AttributeError("programming error")
+
+    monkeypatch.setattr(httpx, "Client", _raise)
+
+    with pytest.raises(AttributeError):
+        mod.fetch_registry_tools_digest("lgtm-hq/lintro-tools", "latest")
 
 
 def test_compute_forces_patch_bump_on_digest_drift(

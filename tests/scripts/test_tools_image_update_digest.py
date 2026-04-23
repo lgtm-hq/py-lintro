@@ -26,12 +26,18 @@ OLD_DIGEST = "sha256:" + ("a" * 64)
 NEW_DIGEST = "sha256:" + ("b" * 64)
 IMAGE = "ghcr.io/lgtm-hq/lintro-tools:latest"
 
+# Sentinel for ``action_yml_digest`` that means "do not create action.yml at
+# all" — distinct from ``None`` which means "create it without the digest
+# pattern". The script has separate code paths for each case and both need
+# to be covered.
+ACTION_YML_MISSING = object()
+
 
 def _make_project(
     tmp_path: Path,
     *,
     dockerfile_digest: str | None = OLD_DIGEST,
-    action_yml_digest: str | None = None,
+    action_yml_digest: str | None | object = None,
     compose_digest: str | None = None,
 ) -> Path:
     """Build a minimal project tree with the update script and target files.
@@ -41,7 +47,9 @@ def _make_project(
         dockerfile_digest: Digest literal to seed into Dockerfile. ``None``
             omits the pinned line (the script should then fail).
         action_yml_digest: Digest literal to seed into action.yml. ``None``
-            writes an action.yml without the pattern — valid after #870.
+            writes an action.yml *without* the digest pattern (the post-#870
+            shape). Pass ``ACTION_YML_MISSING`` to omit the file entirely —
+            this exercises the script's ``ACTION_YML_AVAILABLE=false`` branch.
         compose_digest: Digest literal to seed into docker-compose.yml.
             ``None`` omits docker-compose entirely.
 
@@ -65,7 +73,9 @@ def _make_project(
         )
 
     action_yml = project / ".github" / "actions" / "resolve-tools-image" / "action.yml"
-    if action_yml_digest is None:
+    if action_yml_digest is ACTION_YML_MISSING:
+        pass  # leave the directory empty — exercises the missing-file branch
+    elif action_yml_digest is None:
         action_yml.write_text(
             "name: Resolve Tools Image\ninputs:\n  stable-image:\n    default: ''\n",
         )
@@ -157,6 +167,24 @@ def test_update_digest_substitutes_all_present_files(tmp_path: Path) -> None:
             NEW_DIGEST,
         ),
     ).is_true()
+
+
+def test_update_digest_handles_missing_action_yml(tmp_path: Path) -> None:
+    """action.yml absent entirely must still update Dockerfile and exit 0.
+
+    Covers the ``ACTION_YML_AVAILABLE=false`` path in the script, which is
+    distinct from "action.yml present but without the digest pattern".
+    """
+    script = _make_project(tmp_path, action_yml_digest=ACTION_YML_MISSING)
+    project = script.parent.parent.parent
+
+    result = _run(script, NEW_DIGEST)
+
+    assert_that(result.returncode).described_as(result.stderr).is_equal_to(0)
+    assert_that(
+        (project / ".github/actions/resolve-tools-image/action.yml").exists(),
+    ).is_false()
+    assert_that((project / "Dockerfile").read_text()).contains(NEW_DIGEST)
 
 
 def test_update_digest_handles_missing_docker_compose(tmp_path: Path) -> None:
