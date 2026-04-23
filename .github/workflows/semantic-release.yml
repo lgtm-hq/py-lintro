@@ -127,41 +127,7 @@ jobs:
         env:
           BEFORE_SHA: ${{ github.event.before }}
           AFTER_SHA: ${{ github.sha }}
-        run: |
-          paths=(
-            "Dockerfile.tools"
-            "scripts/utils/install-tools.sh"
-            "package.json"
-            "lintro/_tool_versions.py"
-            "lintro/tools/manifest.json"
-            ".github/workflows/tools-image.yml"
-          )
-          zero_sha="0000000000000000000000000000000000000000"
-          if [[ -z "$BEFORE_SHA" || "$BEFORE_SHA" == "$zero_sha" ]]; then
-            changed=$(git show --name-only --pretty=format: "$AFTER_SHA")
-          else
-            changed=$(git diff --name-only "$BEFORE_SHA" "$AFTER_SHA")
-          fi
-          should_skip=false
-          while IFS= read -r file; do
-            [[ -z "$file" ]] && continue
-            for pat in "${paths[@]}"; do
-              if [[ "$file" == "$pat" ]]; then
-                should_skip=true
-                break 2
-              fi
-            done
-            if [[ "$file" == scripts/ci/tools-image-*.sh ]]; then
-              should_skip=true
-              break
-            fi
-          done <<<"$changed"
-          if [[ "$should_skip" == "true" ]]; then
-            echo "Tool-path change detected — deferring to workflow_run trigger"
-            echo "skip=true" >>"$GITHUB_OUTPUT"
-          else
-            echo "skip=false" >>"$GITHUB_OUTPUT"
-          fi
+        run: scripts/ci/github/semantic-release-helpers.sh skip_on_tool_path_push
 
       - name: Environment setup
         if: steps.tool_path.outputs.skip != 'true'
