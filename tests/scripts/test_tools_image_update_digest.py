@@ -21,6 +21,10 @@ from assertpy import assert_that
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 SCRIPT_SOURCE = REPO_ROOT / "scripts" / "ci" / "tools-image-update-digest.sh"
+_BASH = shutil.which("bash")
+if _BASH is None:  # pragma: no cover — CI and dev hosts always ship bash
+    raise RuntimeError("bash not found on PATH; cannot run shell-script tests")
+BASH: str = _BASH
 
 OLD_DIGEST = "sha256:" + ("a" * 64)
 NEW_DIGEST = "sha256:" + ("b" * 64)
@@ -104,8 +108,12 @@ def _run(script: Path, *args: str) -> subprocess.CompletedProcess[str]:
     Returns:
         Completed process with captured stdout/stderr.
     """
-    return subprocess.run(
-        ["bash", str(script), *args],
+    # `script` is a path under the repo copied by `_prepare`, and `args` are
+    # test-fixture strings — no untrusted input flows into this invocation,
+    # and BASH is resolved to an absolute path at import time, so the
+    # subprocess call is safe despite Ruff S603/S607.
+    return subprocess.run(  # noqa: S603
+        [BASH, str(script), *args],
         capture_output=True,
         text=True,
         check=False,

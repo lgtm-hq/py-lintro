@@ -281,8 +281,8 @@ def read_pinned_tools_digest() -> str:
     return pin.digest if pin else ""
 
 
-def fetch_registry_tools_digest(repo: str, tag: str) -> str:
-    """Resolve the current digest for ``repo:tag`` from GHCR.
+def fetch_registry_tools_digest(repo: str, tag: str, registry: str = "ghcr.io") -> str:
+    """Resolve the current digest for ``repo:tag`` from ``registry``.
 
     Uses an anonymous pull token (public package) and a HEAD request against
     the manifest endpoint so the body is never downloaded. Only transport
@@ -292,17 +292,19 @@ def fetch_registry_tools_digest(repo: str, tag: str) -> str:
     Args:
         repo: Repository path (e.g. ``lgtm-hq/lintro-tools``).
         tag: Image tag (e.g. ``latest``).
+        registry: Registry host (e.g. ``ghcr.io``) taken from the Dockerfile
+            pin so non-GHCR registries work without a code change.
 
     Returns:
         The ``Docker-Content-Digest`` header value, or empty string when
         the registry is unreachable or returned an unexpected response.
     """
-    if not repo or not tag:
+    if not repo or not tag or not registry:
         return ""
     try:
         with httpx.Client(timeout=10.0) as client:  # nosec B113 — timeout set in ctor
             token_resp = client.get(
-                f"https://ghcr.io/token?scope=repository:{repo}:pull",
+                f"https://{registry}/token?scope=repository:{repo}:pull",
             )
             if token_resp.status_code != 200:
                 return ""
@@ -318,7 +320,7 @@ def fetch_registry_tools_digest(repo: str, tag: str) -> str:
                 "Authorization": f"Bearer {token}",
             }
             resp = client.head(
-                f"https://ghcr.io/v2/{repo}/manifests/{tag}",
+                f"https://{registry}/v2/{repo}/manifests/{tag}",
                 headers=headers,
             )
             if resp.status_code != 200:
@@ -344,7 +346,7 @@ def detect_digest_drift() -> tuple[bool, str, str]:
     pin = read_tools_image_pin()
     if pin is None:
         return False, "", ""
-    registry = fetch_registry_tools_digest(pin.repo, pin.tag)
+    registry = fetch_registry_tools_digest(pin.repo, pin.tag, pin.registry)
     drift = bool(pin.digest and registry and pin.digest != registry)
     return drift, pin.digest, registry
 

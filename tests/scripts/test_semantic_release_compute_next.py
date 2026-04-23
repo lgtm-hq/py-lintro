@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import subprocess
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import pytest
 from assertpy import assert_that
@@ -197,7 +197,7 @@ def test_detect_digest_drift_true_when_pinned_differs_from_registry(
     monkeypatch.setattr(
         mod,
         "fetch_registry_tools_digest",
-        lambda _repo, _tag: registry,
+        lambda _repo, _tag, _registry: registry,
     )
 
     drift, got_pinned, got_registry = mod.detect_digest_drift()
@@ -219,12 +219,34 @@ def test_detect_digest_drift_false_when_registry_unknown(
     monkeypatch.setattr(
         mod,
         "fetch_registry_tools_digest",
-        lambda _repo, _tag: "",
+        lambda _repo, _tag, _registry: "",
     )
 
     drift, _, registry = mod.detect_digest_drift()
 
     assert_that(drift).is_false()
+    assert_that(registry).is_equal_to("")
+
+
+def test_detect_digest_drift_false_when_pin_unreadable(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Missing Dockerfile must short-circuit to (False, '', '').
+
+    `read_tools_image_pin()` returns None when the Dockerfile is absent or
+    malformed; the drift check must not blow up or call the registry in
+    that case — it returns "no drift, nothing known" so the release
+    pipeline keeps moving.
+    """
+    from scripts.ci.maintenance import semantic_release_compute_next as mod
+
+    monkeypatch.chdir(tmp_path)
+
+    drift, pinned, registry = mod.detect_digest_drift()
+
+    assert_that(drift).is_false()
+    assert_that(pinned).is_equal_to("")
     assert_that(registry).is_equal_to("")
 
 
@@ -241,7 +263,7 @@ def test_detect_digest_drift_false_when_digests_match(
     monkeypatch.setattr(
         mod,
         "fetch_registry_tools_digest",
-        lambda _repo, _tag: digest,
+        lambda _repo, _tag, _registry: digest,
     )
 
     drift, _, _ = mod.detect_digest_drift()
@@ -267,7 +289,8 @@ def test_read_tools_image_pin_extracts_all_fields(
 
     pin = mod.read_tools_image_pin()
 
-    assert pin is not None
+    assert_that(pin).is_not_none()
+    pin = cast("mod.ToolsImagePin", pin)
     assert_that(pin.registry).is_equal_to("ghcr.io")
     assert_that(pin.repo).is_equal_to("lgtm-hq/lintro-tools")
     assert_that(pin.tag).is_equal_to("latest")
