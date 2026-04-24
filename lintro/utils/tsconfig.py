@@ -182,7 +182,7 @@ def _resolve_extends_path(extends: str, base_dir: Path) -> Path | None:
         Resolved path or ``None`` if unresolvable.
     """
     # Relative paths
-    if extends.startswith(".") or extends.startswith("/"):
+    if extends.startswith((".", "/")):
         candidate = (base_dir / extends).resolve()
         # TypeScript appends .json if missing
         if candidate.exists():

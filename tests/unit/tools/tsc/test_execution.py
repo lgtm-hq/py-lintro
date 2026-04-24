@@ -199,10 +199,11 @@ def test_check_respects_tsconfig_include(
 
     assert_that(result.success).is_true()
 
-    # Verify --project was used (not individual files passed directly)
+    # Verify --project points to the real tsconfig (not a temp file)
     cmd = mock_run.call_args[1].get("cmd") or mock_run.call_args[0][0]
-    cmd_str = " ".join(cmd)
-    assert_that(cmd_str).contains("--project")
+    project_idx = cmd.index("--project")
+    project_arg = cmd[project_idx + 1]
+    assert_that(project_arg).is_equal_to(str(tsconfig.resolve()))
 
 
 def test_check_creates_temp_when_no_include(
@@ -298,6 +299,7 @@ def test_check_multi_project_runs_per_project(
     web_file.write_text("const y: string = 'hello';\n")
 
     run_count = 0
+    observed_cwds: list[str] = []
 
     def mock_run(
         cmd: list[str],
@@ -307,6 +309,8 @@ def test_check_multi_project_runs_per_project(
     ) -> tuple[bool, str]:
         nonlocal run_count
         run_count += 1
+        if cwd:
+            observed_cwds.append(cwd)
         return (True, "")
 
     with patch(
@@ -319,6 +323,11 @@ def test_check_multi_project_runs_per_project(
     assert_that(result.success).is_true()
     # Should run at least twice (once per sub-project)
     assert_that(run_count).is_greater_than_or_equal_to(2)
+    # Each sub-project directory should have been used as the working directory
+    api_cwd = str(api_dir.resolve())
+    web_cwd = str(web_dir.resolve())
+    assert_that(observed_cwds).contains(api_cwd)
+    assert_that(observed_cwds).contains(web_cwd)
 
 
 def test_check_multi_project_aggregates_issues(

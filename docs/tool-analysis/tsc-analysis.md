@@ -61,10 +61,10 @@ This gives you the best of both worlds:
 - **Opt-in:** Native tsconfig.json file selection when needed
 
 **Respecting tsconfig scoping (#851):** When your `tsconfig.json` has an explicit
-`include` or `files` field, lintro now respects it — running `tsc --project <tsconfig>`
-directly instead of generating a temp config that overrides the scoping. This prevents
-false positives from files the project intentionally excludes (e.g.,
-`vitest.config.ts`).
+`include`, `files`, or `exclude` field, lintro now respects it — running
+`tsc --project <tsconfig>` directly instead of generating a temp config that overrides
+the scoping. This prevents false positives from files the project intentionally excludes
+(e.g., `vitest.config.ts`).
 
 ### Monorepo Support (#803, #805)
 
