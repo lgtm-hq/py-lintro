@@ -5,9 +5,15 @@
 # tools-image-update-digest.sh - Update pinned tools image digest in repository files
 #
 # This script updates the tools image digest in:
-#   - Dockerfile (TOOLS_IMAGE ARG)
-#   - .github/actions/resolve-tools-image/action.yml (stable-image default)
+#   - Dockerfile (TOOLS_IMAGE ARG) — required; pattern must be present
+#   - .github/actions/resolve-tools-image/action.yml (stable-image default, if present)
 #   - docker-compose.yml (TOOLS_IMAGE default, if present)
+#
+# action.yml and docker-compose.yml are optional: if the file exists but does
+# not carry the pinned `image:latest@sha256:...` literal, the script prints an
+# informational line and moves on. Only Dockerfile is authoritative — the
+# resolve-tools-image action reads the Dockerfile digest at runtime when the
+# `stable-image` input is unset.
 #
 # Usage:
 #   ./scripts/ci/tools-image-update-digest.sh <new-digest>
@@ -82,9 +88,10 @@ if [[ ! -f "$DOCKERFILE" ]]; then
 	exit 1
 fi
 
-if [[ ! -f "$ACTION_YML" ]]; then
-	echo "ERROR: action.yml not found at $ACTION_YML" >&2
-	exit 1
+if [[ -f "$ACTION_YML" ]]; then
+	ACTION_YML_AVAILABLE="true"
+else
+	ACTION_YML_AVAILABLE="false"
 fi
 if [[ -f "$DOCKER_COMPOSE" ]]; then
 	COMPOSE_AVAILABLE="true"
@@ -116,20 +123,22 @@ else
 	exit 1
 fi
 
-# Update action.yml
-echo "  Updating $ACTION_YML..."
-if grep -qE "$DIGEST_PATTERN" "$ACTION_YML"; then
-	if [[ "$OSTYPE" == "darwin"* ]]; then
-		sed -i '' -E "s|${DIGEST_PATTERN}|${REPLACEMENT}|g" "$ACTION_YML"
+# Update action.yml if present and carries the digest pattern. As of the
+# resolve-tools-image refactor (stable-image default = ''), the digest lives
+# only in Dockerfile and is read dynamically, so a missing pattern here is
+# informational, not an error.
+if [[ "$ACTION_YML_AVAILABLE" == "true" ]]; then
+	echo "  Updating $ACTION_YML..."
+	if grep -qE "$DIGEST_PATTERN" "$ACTION_YML"; then
+		if [[ "$OSTYPE" == "darwin"* ]]; then
+			sed -i '' -E "s|${DIGEST_PATTERN}|${REPLACEMENT}|g" "$ACTION_YML"
+		else
+			sed -i -E "s|${DIGEST_PATTERN}|${REPLACEMENT}|g" "$ACTION_YML"
+		fi
+		echo "    ✓ Updated action.yml"
 	else
-		sed -i -E "s|${DIGEST_PATTERN}|${REPLACEMENT}|g" "$ACTION_YML"
+		echo "    (No digest reference found in action.yml — skipping)"
 	fi
-	echo "    ✓ Updated action.yml"
-else
-	echo "ERROR: Pattern not found in action.yml" >&2
-	echo "       Expected: ${IMAGE_PATTERN}@sha256:<digest>" >&2
-	echo "       File: $ACTION_YML" >&2
-	exit 1
 fi
 
 # Update docker-compose.yml if present
@@ -152,8 +161,10 @@ echo ""
 echo "Verification:"
 echo "  Dockerfile:"
 grep -n "TOOLS_IMAGE=" "$DOCKERFILE" | head -1 || echo "    (TOOLS_IMAGE not found)"
-echo "  action.yml:"
-grep -n "stable-image" "$ACTION_YML" | grep -v description | head -1 || echo "    (stable-image not found)"
+if [[ "$ACTION_YML_AVAILABLE" == "true" ]]; then
+	echo "  action.yml:"
+	grep -n "stable-image" "$ACTION_YML" | grep -v description | head -1 || echo "    (stable-image not found)"
+fi
 if [[ "$COMPOSE_AVAILABLE" == "true" ]]; then
 	echo "  docker-compose.yml:"
 	grep -n "TOOLS_IMAGE" "$DOCKER_COMPOSE" | head -2 || echo "    (TOOLS_IMAGE not found)"

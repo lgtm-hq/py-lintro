@@ -7,6 +7,7 @@ semantic-release helper functions:
   fail_no_tag_baseline
   read_current_version
   skip_no_new_version <next> <current>
+  skip_on_tool_path_push
   update_version_files <version>
   update_tools_digest
   install_external_tools
@@ -26,6 +27,54 @@ read_current_version() {
 
 skip_no_new_version() {
 	echo "No new version to release (next='${1}', current='${2}'). Skipping."
+}
+
+# Decide whether a push-triggered semantic-release run must defer to the
+# workflow_run trigger because the push touched a tools-image input.
+#
+# Reads:
+#   BEFORE_SHA — previous commit on the branch (may be zero-sha on first push)
+#   AFTER_SHA  — pushed commit
+# Writes `skip=true|false` to $GITHUB_OUTPUT so the workflow can gate every
+# subsequent step on it. See semantic-release.yml for the rationale.
+skip_on_tool_path_push() {
+	local before="${BEFORE_SHA:-}"
+	local after="${AFTER_SHA:?AFTER_SHA is required}"
+	local paths=(
+		"Dockerfile.tools"
+		"scripts/utils/install-tools.sh"
+		"package.json"
+		"lintro/_tool_versions.py"
+		"lintro/tools/manifest.json"
+		".github/workflows/tools-image.yml"
+	)
+	local zero_sha="0000000000000000000000000000000000000000"
+	local changed
+	if [[ -z "$before" || "$before" == "$zero_sha" ]]; then
+		changed=$(git show --name-only --pretty=format: "$after")
+	else
+		changed=$(git diff --name-only "$before" "$after")
+	fi
+	local should_skip=false file pat
+	while IFS= read -r file; do
+		[[ -z "$file" ]] && continue
+		for pat in "${paths[@]}"; do
+			if [[ "$file" == "$pat" ]]; then
+				should_skip=true
+				break 2
+			fi
+		done
+		if [[ "$file" == scripts/ci/tools-image-*.sh ]]; then
+			should_skip=true
+			break
+		fi
+	done <<<"$changed"
+	if [[ "$should_skip" == "true" ]]; then
+		echo "Tool-path change detected — deferring to workflow_run trigger"
+		echo "skip=true" >>"${GITHUB_OUTPUT:?GITHUB_OUTPUT is required}"
+	else
+		echo "skip=false" >>"${GITHUB_OUTPUT:?GITHUB_OUTPUT is required}"
+	fi
 }
 
 update_version_files() {

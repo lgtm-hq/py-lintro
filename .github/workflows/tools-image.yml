@@ -8,8 +8,12 @@ name: Build - Tools Image
 
 # Triggers:
 # yamllint disable rule:line-length
-#   push to main (path-filtered) — primary production build; runs pin-digest after success
-#   schedule (weekly)           — picks up base-image security updates
+#   push to main (path-filtered) — primary production build; digest pin is applied
+#                                 in the semantic-release PR (see semantic-release.yml,
+#                                 triggered by workflow_run on this workflow's success).
+#   schedule (weekly)           — picks up base-image security updates; semantic-release
+#                                 detects the new :latest digest via drift check and
+#                                 opens a patch-bump release PR so the rebuild ships.
 #   workflow_dispatch           — manual rebuild; pass force_latest=true to retag :latest
 #   workflow_call               — called by ci-pipeline.yml for PRs with tool file changes;
 #                                 pull_request trigger removed — ci-pipeline.yml owns that path
@@ -270,45 +274,3 @@ jobs:
           PUSH_LATEST: ${{ steps.tags.outputs.push_latest }}
           PR_TAG: ${{ steps.tags.outputs.pr_tag }}
         run: scripts/ci/tools-image-summary.sh
-
-  # Commit updated digest back to main after a successful image build.
-  # Isolated from build-tools-image so it only needs contents: write — the build
-  # job keeps its minimal read-only content permission.
-  pin-digest:
-    name: Pin Digest in Repository
-    runs-on: ubuntu-24.04
-    needs: [build-tools-image]
-    # Only runs on default branch, non-PR, non-workflow_call events that actually
-    # produced a pushed image (schedule, push to main, workflow_dispatch on main).
-    if: >-
-      needs.build-tools-image.result == 'success' &&
-      github.ref == 'refs/heads/main' &&
-      github.event_name != 'pull_request' &&
-      github.event_name != 'workflow_call'
-    permissions:
-      contents: write
-    defaults:
-      run:
-        shell: bash
-    steps:
-      - name: Harden Runner
-        uses: step-security/harden-runner@fe104658747b27e96e4f7e80cd0a94068e53901d
-        with:
-          egress-policy: 'block'
-          allowed-endpoints: >
-            github.com:443
-            api.github.com:443
-
-      - name: Checkout
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
-        with:
-          fetch-depth: 0
-          persist-credentials: false
-
-      - name: Pin digest in repository
-        env:
-          DIGEST: ${{ needs.build-tools-image.outputs.digest }}
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          GITHUB_REPOSITORY: ${{ github.repository }}
-          BUILT_COMMIT: ${{ github.sha }}
-        run: scripts/ci/tools-image-commit-digest.sh
