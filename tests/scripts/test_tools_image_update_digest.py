@@ -108,7 +108,7 @@ def _run(script: Path, *args: str) -> subprocess.CompletedProcess[str]:
     Returns:
         Completed process with captured stdout/stderr.
     """
-    # `script` is a path under the repo copied by `_prepare`, and `args` are
+    # `script` is a path under the repo copied by `_make_project`, and `args` are
     # test-fixture strings — no untrusted input flows into this invocation,
     # and BASH is resolved to an absolute path at import time, so the
     # subprocess call is safe despite Ruff S603/S607.
