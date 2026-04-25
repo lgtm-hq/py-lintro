@@ -335,38 +335,6 @@ class TscPlugin(BaseToolPlugin):
         merged_options = dict(self.options)
         merged_options.update(options)
 
-        # Determine working directory for framework detection
-        # Verify the path exists before using it (paths[0] could be a glob or missing)
-        cwd_for_detection = Path.cwd()
-        if paths:
-            candidate = Path(paths[0]).resolve()
-            if candidate.exists():
-                if candidate.is_file():
-                    cwd_for_detection = candidate.parent
-                else:
-                    cwd_for_detection = candidate
-            elif candidate.parent.exists():
-                cwd_for_detection = candidate.parent
-
-        # Check for framework-specific projects that have their own type checkers
-        framework_info = self._detect_framework_project(cwd_for_detection)
-        if framework_info:
-            framework_name, recommended_tool = framework_info
-            return ToolResult(
-                name=self.definition.name,
-                success=True,
-                output=(
-                    f"SKIPPED: {framework_name} project detected.\n"
-                    f"{framework_name} has its own type checker that handles "
-                    f"framework-specific syntax.\n"
-                    f"Use '{recommended_tool}' instead: "
-                    f"lintro check . --tools {recommended_tool}"
-                ),
-                issues_count=0,
-                skipped=True,
-                skip_reason=f"deferred to {recommended_tool}",
-            )
-
         # Use shared preparation for version check, path validation, file discovery
         ctx = self._prepare_execution(
             paths,
@@ -521,6 +489,28 @@ class TscPlugin(BaseToolPlugin):
         try:
             base_tsconfig = discovered_tsconfig or self._find_tsconfig(cwd_path)
 
+            # Per-project framework detection.  Use the tsconfig's project_dir
+            # when available (so a Vue sub-project nested under cwd is still
+            # detected), falling back to cwd_path when no tsconfig was found.
+            detection_dir = base_tsconfig.parent if base_tsconfig else cwd_path
+            framework_info = self._detect_framework_project(detection_dir)
+            if framework_info:
+                framework_name, recommended_tool = framework_info
+                return ToolResult(
+                    name=self.definition.name,
+                    success=True,
+                    output=(
+                        f"SKIPPED: {framework_name} project detected.\n"
+                        f"{framework_name} has its own type checker that handles "
+                        f"framework-specific syntax.\n"
+                        f"Use '{recommended_tool}' instead: "
+                        f"lintro check . --tools {recommended_tool}"
+                    ),
+                    issues_count=0,
+                    skipped=True,
+                    skip_reason=f"deferred to {recommended_tool}",
+                )
+
             if use_project_files or explicit_project:
                 project_path = explicit_project or (
                     str(base_tsconfig) if base_tsconfig else None
@@ -661,6 +651,8 @@ class TscPlugin(BaseToolPlugin):
 
                 if proc_success:
                     any_succeeded = True
+                else:
+                    had_subproject_error = True
                 issues = parse_tsc_output(output=output or "")
                 all_issues.extend(issues)
 

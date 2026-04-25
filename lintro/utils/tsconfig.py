@@ -74,9 +74,9 @@ def parse_tsconfig(path: Path) -> TsconfigInfo:
     return TsconfigInfo(
         path=abs_path,
         project_dir=project_dir,
-        include_patterns=fields["include"] or [],
-        exclude_patterns=fields["exclude"] or [],
-        files_list=fields["files"] or [],
+        include_patterns=fields["include"],
+        exclude_patterns=fields["exclude"],
+        files_list=fields["files"],
         references=[Path(r) for r in fields["references"]],
         is_composite=fields["composite"],
         raw_config=content,
@@ -132,10 +132,11 @@ def resolve_extends_chain(
         extends_list = [v for v in extends_val if isinstance(v, str)]
 
     # Resolve parents and merge (later parents override earlier ones,
-    # child overrides everything)
-    merged_include: list[str] = []
-    merged_exclude: list[str] = []
-    merged_files: list[str] = []
+    # child overrides everything).  None means "not set"; [] means
+    # "explicitly empty" — a child can clear a parent by setting [].
+    merged_include: list[str] | None = None
+    merged_exclude: list[str] | None = None
+    merged_files: list[str] | None = None
 
     for ext in extends_list:
         parent_path = _resolve_extends_path(ext, info.project_dir)
@@ -143,20 +144,20 @@ def resolve_extends_chain(
             continue
         # Pass a copy so sibling extends branches don't share visited state
         parent_info = resolve_extends_chain(parent_path, _seen=set(_seen))
-        # Parent values become the base
-        if parent_info.include_patterns:
+        # Parent values become the base (None means parent didn't set it)
+        if parent_info.include_patterns is not None:
             merged_include = parent_info.include_patterns
-        if parent_info.exclude_patterns:
+        if parent_info.exclude_patterns is not None:
             merged_exclude = parent_info.exclude_patterns
-        if parent_info.files_list:
+        if parent_info.files_list is not None:
             merged_files = parent_info.files_list
 
-    # Child overrides parent if it has its own values
-    if info.include_patterns:
+    # Child overrides parent if it explicitly set the field ([] clears parent)
+    if info.include_patterns is not None:
         merged_include = info.include_patterns
-    if info.exclude_patterns:
+    if info.exclude_patterns is not None:
         merged_exclude = info.exclude_patterns
-    if info.files_list:
+    if info.files_list is not None:
         merged_files = info.files_list
 
     return TsconfigInfo(
@@ -218,6 +219,8 @@ def _resolve_extends_path(extends: str, base_dir: Path) -> Path | None:
 def discover_tsconfigs(
     root: Path,
     exclude_patterns: list[str] | None = None,
+    *,
+    basenames: list[str] | None = None,
 ) -> list[TsconfigInfo]:
     """Discover all TypeScript sub-projects in a directory tree.
 
@@ -234,6 +237,8 @@ def discover_tsconfigs(
     Args:
         root: Root directory to search.
         exclude_patterns: Gitignore-style patterns to skip directories.
+        basenames: Tsconfig filenames to look for during the directory walk.
+            Defaults to ``["tsconfig.json", "tsconfig.app.json"]``.
 
     Returns:
         List of :class:`TsconfigInfo` sorted deepest-first.
@@ -249,7 +254,12 @@ def discover_tsconfigs(
 
     # Phase 2: Walk the directory tree
     walked_configs: dict[str, TsconfigInfo] = {}
-    _walk_for_tsconfigs(root, walked_configs, exclude_patterns)
+    _walk_for_tsconfigs(
+        root,
+        walked_configs,
+        exclude_patterns,
+        basenames=basenames,
+    )
 
     # Phase 3: Merge — references take precedence
     all_configs: dict[str, TsconfigInfo] = {}
@@ -299,8 +309,10 @@ def _walk_for_tsconfigs(
     root: Path,
     result: dict[str, TsconfigInfo],
     exclude_patterns: list[str],
+    *,
+    basenames: list[str] | None = None,
 ) -> None:
-    """Walk the directory tree finding tsconfig.json files.
+    """Walk the directory tree finding tsconfig files.
 
     Skips ``node_modules``, ``.git``, and directories matching
     *exclude_patterns*.
@@ -309,7 +321,13 @@ def _walk_for_tsconfigs(
         root: Root directory to walk.
         result: Accumulator dict keyed by resolved path string.
         exclude_patterns: Patterns to exclude.
+        basenames: Filenames to look for. Defaults to
+            ``["tsconfig.json", "tsconfig.app.json"]``.  Callers (e.g. the
+            vue-tsc plugin) can pass a different list to discover
+            framework-specific configs.
     """
+    if basenames is None:
+        basenames = ["tsconfig.json", "tsconfig.app.json"]
     always_skip = {
         "node_modules",
         ".git",
@@ -338,11 +356,12 @@ def _walk_for_tsconfigs(
             )
         ]
 
-        if "tsconfig.json" in filenames:
-            tsconfig_path = Path(dirpath) / "tsconfig.json"
-            abs_key = str(tsconfig_path.resolve())
-            if abs_key not in result:
-                result[abs_key] = resolve_extends_chain(tsconfig_path)
+        for basename in basenames:
+            if basename in filenames:
+                tsconfig_path = Path(dirpath) / basename
+                abs_key = str(tsconfig_path.resolve())
+                if abs_key not in result:
+                    result[abs_key] = resolve_extends_chain(tsconfig_path)
 
 
 # ---------------------------------------------------------------------------
@@ -461,7 +480,11 @@ def has_explicit_scoping(info: TsconfigInfo) -> bool:
         ``True`` if the tsconfig has explicit ``include``, ``files``, or
         ``exclude``.
     """
-    return bool(info.include_patterns or info.files_list or info.exclude_patterns)
+    return (
+        info.include_patterns is not None
+        or info.files_list is not None
+        or info.exclude_patterns is not None
+    )
 
 
 # ---------------------------------------------------------------------------

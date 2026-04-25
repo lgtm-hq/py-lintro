@@ -559,6 +559,8 @@ class VueTscPlugin(BaseToolPlugin):
 
                 if proc_success:
                     any_succeeded = True
+                else:
+                    had_subproject_error = True
                 issues = parse_vue_tsc_output(output=output or "")
                 all_issues.extend(issues)
 

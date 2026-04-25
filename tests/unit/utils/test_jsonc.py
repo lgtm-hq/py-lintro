@@ -193,6 +193,8 @@ def test_extract_tsconfig_fields_full(tmp_path: Path) -> None:
     assert_that(result["extends"]).is_equal_to("./base.json")
     assert_that(result["composite"]).is_true()
     assert_that(result["references"]).is_length(1)
+    expected_ref = str((tmp_path / "packages" / "api" / "tsconfig.json").resolve())
+    assert_that(result["references"][0]).is_equal_to(expected_ref)
 
 
 def test_extract_tsconfig_fields_empty_dict() -> None:

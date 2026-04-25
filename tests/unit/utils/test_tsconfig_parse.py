@@ -36,9 +36,9 @@ def test_parse_tsconfig_no_optional_fields(tmp_path: Path) -> None:
         {"compilerOptions": {"strict": True}},
     )
     info = parse_tsconfig(tsconfig)
-    assert_that(info.include_patterns).is_empty()
-    assert_that(info.exclude_patterns).is_empty()
-    assert_that(info.files_list).is_empty()
+    assert_that(info.include_patterns).is_none()
+    assert_that(info.exclude_patterns).is_none()
+    assert_that(info.files_list).is_none()
     assert_that(info.references).is_empty()
     assert_that(info.is_composite).is_false()
 
@@ -83,7 +83,7 @@ def test_parse_tsconfig_malformed_file(tmp_path: Path) -> None:
     tsconfig_path = tmp_path / "tsconfig.json"
     tsconfig_path.write_text("not valid json", encoding="utf-8")
     info = parse_tsconfig(tsconfig_path)
-    assert_that(info.include_patterns).is_empty()
+    assert_that(info.include_patterns).is_none()
     assert_that(info.raw_config).is_empty()
 
 
@@ -92,4 +92,4 @@ def test_parse_tsconfig_non_dict_content(tmp_path: Path) -> None:
     tsconfig_path = tmp_path / "tsconfig.json"
     tsconfig_path.write_text('["not", "a", "dict"]', encoding="utf-8")
     info = parse_tsconfig(tsconfig_path)
-    assert_that(info.include_patterns).is_empty()
+    assert_that(info.include_patterns).is_none()

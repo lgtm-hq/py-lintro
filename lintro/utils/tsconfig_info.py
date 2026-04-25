@@ -17,14 +17,24 @@ class TsconfigInfo:
     project_dir: Path
     """Parent directory of the tsconfig (the project root)."""
 
-    include_patterns: list[str] = field(default_factory=list)
-    """Resolved ``include`` glob patterns from the extends chain."""
+    include_patterns: list[str] | None = None
+    """Resolved ``include`` glob patterns from the extends chain.
 
-    exclude_patterns: list[str] = field(default_factory=list)
-    """Resolved ``exclude`` patterns from the extends chain."""
+    ``None`` means the field is absent from the config; ``[]`` means it was
+    explicitly set to an empty list (which clears any parent-inherited value).
+    """
 
-    files_list: list[str] = field(default_factory=list)
-    """Explicit ``files`` entries from the extends chain."""
+    exclude_patterns: list[str] | None = None
+    """Resolved ``exclude`` patterns from the extends chain.
+
+    ``None`` means absent; ``[]`` means explicitly empty.
+    """
+
+    files_list: list[str] | None = None
+    """Explicit ``files`` entries from the extends chain.
+
+    ``None`` means absent; ``[]`` means explicitly empty.
+    """
 
     references: list[Path] = field(default_factory=list)
     """Resolved ``references`` paths (to other tsconfig files)."""
