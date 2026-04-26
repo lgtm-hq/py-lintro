@@ -202,20 +202,61 @@ def _resolve_extends_path(extends: str, base_dir: Path) -> Path | None:
         return None
 
     # Node module resolution — walk ancestors to find hoisted packages
-    # (e.g. "@tsconfig/node18/tsconfig.json" may live in a monorepo root)
+    # (e.g. "@tsconfig/node18/tsconfig.json" may live in a monorepo root).
+    # When the resolved path is a package directory, follow TypeScript's
+    # behaviour: read package.json's ``tsconfig`` field if present, else
+    # fall back to ``<package>/tsconfig.json``.  Always return a file
+    # path — never a directory — so callers can read it directly.
     ancestor = base_dir
     while True:
         node_modules = ancestor / "node_modules" / extends
-        if node_modules.exists():
+        if node_modules.is_file():
             return node_modules.resolve()
+        if node_modules.is_dir():
+            resolved = _resolve_package_tsconfig(node_modules)
+            if resolved is not None:
+                return resolved
         with_json = node_modules.with_suffix(".json")
-        if with_json.exists():
+        if with_json.is_file():
             return with_json.resolve()
         parent = ancestor.parent
         if parent == ancestor:
             break
         ancestor = parent
 
+    return None
+
+
+def _resolve_package_tsconfig(package_dir: Path) -> Path | None:
+    """Resolve a tsconfig file path inside a node_modules package directory.
+
+    Honours TypeScript's lookup order: ``package.json``'s ``tsconfig`` field
+    first, then ``tsconfig.json`` inside the package.
+
+    Args:
+        package_dir: Directory of an installed node package.
+
+    Returns:
+        Resolved path to a tsconfig file, or ``None`` if none found.
+    """
+    package_json = package_dir / "package.json"
+    if package_json.is_file():
+        try:
+            data = json.loads(package_json.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError):
+            data = None
+        if isinstance(data, dict):
+            tsconfig_field = data.get("tsconfig")
+            if isinstance(tsconfig_field, str):
+                candidate = (package_dir / tsconfig_field).resolve()
+                if candidate.is_file():
+                    return candidate
+                with_json = candidate.with_suffix(".json")
+                if with_json.is_file():
+                    return with_json
+    fallback = package_dir / "tsconfig.json"
+    if fallback.is_file():
+        return fallback.resolve()
     return None
 
 
@@ -256,9 +297,10 @@ def discover_tsconfigs(
 
     # Phase 1: Follow references from root tsconfig
     ref_configs: dict[str, TsconfigInfo] = {}
+    ref_seen: set[str] = set()
     root_tsconfig = root / "tsconfig.json"
     if root_tsconfig.exists():
-        _collect_references(root_tsconfig, ref_configs, _seen=set())
+        _collect_references(root_tsconfig, ref_configs, _seen=ref_seen)
 
     # Phase 2: Walk the directory tree
     walked_configs: dict[str, TsconfigInfo] = {}
@@ -268,6 +310,13 @@ def discover_tsconfigs(
         exclude_patterns,
         basenames=basenames,
     )
+
+    # Phase 2b: Collect references from each walked tsconfig too.  Without
+    # this, a non-checking config (e.g. ``tsconfig.build.json``) referenced
+    # only by a sub-project would be filtered out in Phase 4 because it was
+    # never recorded as ref-discovered.
+    for walked_path in list(walked_configs):
+        _collect_references(Path(walked_path), ref_configs, _seen=ref_seen)
 
     # Phase 3: Merge — references take precedence
     all_configs: dict[str, TsconfigInfo] = {}
@@ -380,6 +429,8 @@ def _walk_for_tsconfigs(
 def partition_files(
     files: list[str],
     tsconfigs: list[TsconfigInfo],
+    *,
+    log_label: str = "tsconfig",
 ) -> list[tuple[TsconfigInfo | None, list[str]]]:
     """Assign files to their governing tsconfig ("deepest wins").
 
@@ -395,6 +446,8 @@ def partition_files(
     Args:
         files: Absolute file paths to partition.
         tsconfigs: Discovered tsconfigs, deepest-first.
+        log_label: Prefix used in the overlap-stripping log line so the
+            calling tool (e.g. ``"tsc"`` or ``"vue-tsc"``) is identifiable.
 
     Returns:
         List of ``(tsconfig_info_or_none, files)`` tuples.
@@ -445,7 +498,8 @@ def partition_files(
             # parent_info is a parent of info
             if assigned_files:
                 logger.info(
-                    "[tsc] {} — skipping {} file(s) under {} (governed by {})",
+                    "[{}] {} — skipping {} file(s) under {} (governed by {})",
+                    log_label,
                     parent_info.path,
                     len(assigned_files),
                     info.project_dir,

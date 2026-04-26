@@ -590,7 +590,7 @@ class TscPlugin(BaseToolPlugin):
         Returns:
             Aggregated ToolResult across all sub-projects.
         """
-        partitions = partition_files(ctx.files, tsconfigs)
+        partitions = partition_files(ctx.files, tsconfigs, log_label="tsc")
 
         all_issues: list[Any] = []
         output_sections: list[str] = []
