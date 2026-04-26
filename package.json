@@ -26,5 +26,8 @@
     "svelte-check": "4.4.6",
     "typescript": "^5.9.3",
     "vue-tsc": "3.2.6"
+  },
+  "overrides": {
+    "postcss": "^8.5.10"
   }
 }

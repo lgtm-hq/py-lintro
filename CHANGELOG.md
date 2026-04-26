@@ -11,6 +11,13 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Added
 
+- **tsc/vue-tsc**: Support TypeScript project references in monorepos — automatic
+  sub-project discovery via `references` and directory walking (#803, #805)
+- **tsc/vue-tsc**: Per-project framework detection in monorepos — Astro/Vue/Svelte
+  detection is scoped per sub-project, not globally
+- **tsc/vue-tsc**: "Deepest tsconfig wins" partitioning — overlapping parent/child
+  configs no longer cause duplicate checking under conflicting compiler options
+
 - **AI-Powered Features** (BYO API key, install with `'lintro[ai]'`):
   - AI-powered issue summaries with pattern analysis and prioritized actions
   - Interactive fix suggestions with AI-generated code diffs
@@ -45,6 +52,8 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Fixed
 
+- **tsc/vue-tsc**: Respect tsconfig.json `include`/`exclude`/`files` scoping instead of
+  overriding with all discovered files (#851)
 - **Critical**: Fixed circular import bug in `lintro.parsers` module
   - Issue:
     `ImportError: cannot import name 'bandit' from partially initialized module 'lintro.parsers'`

@@ -206,6 +206,78 @@ def extract_type_roots(base_content: Any, base_dir: Path) -> list[str] | None:
     return resolved
 
 
+def extract_tsconfig_fields(
+    content: Any,
+    base_dir: Path,
+) -> dict[str, Any]:
+    """Extract tsconfig scoping and reference fields from parsed content.
+
+    Extracts ``include``, ``exclude``, ``files``, ``references``, ``extends``,
+    and ``composite`` from a parsed tsconfig dict.  Reference paths are resolved
+    relative to *base_dir*.
+
+    Args:
+        content: Parsed tsconfig content (expected to be a dict).
+        base_dir: Directory of the tsconfig for resolving relative paths.
+
+    Returns:
+        Dict with keys ``include``, ``exclude``, ``files``, ``references``,
+        ``extends``, ``composite``.  Missing fields have ``None`` values
+        except ``references`` which defaults to an empty list.
+    """
+    result: dict[str, Any] = {
+        "include": None,
+        "exclude": None,
+        "files": None,
+        "references": [],
+        "extends": None,
+        "composite": False,
+    }
+
+    if not isinstance(content, dict):
+        return result
+
+    # Simple list/string fields
+    for key in ("include", "exclude", "files"):
+        val = content.get(key)
+        if isinstance(val, list):
+            result[key] = [v for v in val if isinstance(v, str)]
+
+    # extends — string or list of strings (TS 5.0+)
+    extends_val = content.get("extends")
+    if isinstance(extends_val, str):
+        result["extends"] = extends_val
+    elif isinstance(extends_val, list):
+        result["extends"] = [v for v in extends_val if isinstance(v, str)]
+
+    # composite flag from compilerOptions
+    comp_opts = content.get("compilerOptions")
+    if isinstance(comp_opts, dict):
+        result["composite"] = bool(comp_opts.get("composite", False))
+
+    # references — resolve paths relative to base_dir
+    refs = content.get("references")
+    if isinstance(refs, list):
+        resolved_refs: list[str] = []
+        for ref in refs:
+            if isinstance(ref, dict):
+                ref_path = ref.get("path")
+                if isinstance(ref_path, str):
+                    resolved = base_dir / ref_path
+                    # If the path points to a directory, look for tsconfig.json inside
+                    tsconfig_at = resolved / "tsconfig.json"
+                    try:
+                        if tsconfig_at.exists():
+                            resolved_refs.append(str(tsconfig_at.resolve()))
+                        elif resolved.exists():
+                            resolved_refs.append(str(resolved.resolve()))
+                    except OSError:
+                        continue
+        result["references"] = resolved_refs
+
+    return result
+
+
 def load_jsonc(text: str) -> Any:
     """Parse JSONC text into a Python object.
 
