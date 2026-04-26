@@ -208,6 +208,29 @@ def test_extract_tsconfig_fields_empty_dict() -> None:
     assert_that(result["composite"]).is_false()
 
 
+def test_extract_tsconfig_fields_empty_lists() -> None:
+    """Preserve [] vs None for include/exclude/files.
+
+    The distinction matters for ``has_explicit_scoping`` and for child
+    configs that clear a parent's value via an explicit empty list.
+    ``extract_tsconfig_fields`` must return ``[]`` (not ``None``) when the
+    field is present but empty so :func:`has_explicit_scoping` still
+    recognizes it as explicit scoping.
+    """
+    content: dict[str, list[str]] = {
+        "include": [],
+        "exclude": [],
+        "files": [],
+    }
+    result = extract_tsconfig_fields(content, Path("/fake"))
+    assert_that(result["include"]).is_equal_to([])
+    assert_that(result["exclude"]).is_equal_to([])
+    assert_that(result["files"]).is_equal_to([])
+    assert_that(result["references"]).is_empty()
+    assert_that(result["extends"]).is_none()
+    assert_that(result["composite"]).is_false()
+
+
 def test_extract_tsconfig_fields_non_dict() -> None:
     """Return defaults for non-dict content."""
     result = extract_tsconfig_fields(["not", "a", "dict"], Path("/fake"))

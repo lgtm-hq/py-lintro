@@ -75,7 +75,14 @@ def test_parse_tsconfig_with_references(tmp_path: Path) -> None:
         },
     )
     info = parse_tsconfig(tsconfig)
+    expected_refs = {
+        (tmp_path / "packages" / "api" / "tsconfig.json").resolve(),
+        (tmp_path / "packages" / "web" / "tsconfig.json").resolve(),
+    }
     assert_that(info.references).is_length(2)
+    assert_that({Path(r).resolve() for r in info.references}).is_equal_to(
+        expected_refs,
+    )
 
 
 def test_parse_tsconfig_malformed_file(tmp_path: Path) -> None:

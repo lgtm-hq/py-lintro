@@ -487,7 +487,17 @@ class TscPlugin(BaseToolPlugin):
         project_path: str | None = None
 
         try:
-            base_tsconfig = discovered_tsconfig or self._find_tsconfig(cwd_path)
+            # Resolve explicit_project first so framework detection runs
+            # against the project the user pointed at, not cwd_path.
+            base_tsconfig: Path | None = discovered_tsconfig
+            if base_tsconfig is None and explicit_project:
+                explicit_path = Path(explicit_project)
+                if not explicit_path.is_absolute():
+                    explicit_path = (cwd_path / explicit_path).resolve()
+                if explicit_path.exists():
+                    base_tsconfig = explicit_path
+            if base_tsconfig is None:
+                base_tsconfig = self._find_tsconfig(cwd_path)
 
             # Per-project framework detection.  Use the tsconfig's project_dir
             # when available (so a Vue sub-project nested under cwd is still
@@ -609,6 +619,10 @@ class TscPlugin(BaseToolPlugin):
                             f"  Skipped: {framework_name} project "
                             f"(use {recommended_tool})",
                         )
+                        # An intentional skip is not a failure — mark as
+                        # succeeded so an all-framework monorepo doesn't
+                        # report as failed.
+                        any_succeeded = True
                         continue
 
                 # Determine project_path for this sub-project
