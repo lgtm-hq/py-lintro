@@ -30,7 +30,15 @@ from lintro.utils.jsonc import (
 )
 from lintro.utils.tsconfig_info import TsconfigInfo
 
-__all__ = ["TsconfigInfo"]
+__all__ = [
+    "TsconfigInfo",
+    "create_temp_tsconfig",
+    "discover_tsconfigs",
+    "has_explicit_scoping",
+    "parse_tsconfig",
+    "partition_files",
+    "resolve_extends_chain",
+]
 
 # Config file names that are NOT used for type-checking by default.
 # These are only included when explicitly referenced via ``references``.
@@ -468,17 +476,26 @@ def partition_files(
 def has_explicit_scoping(info: TsconfigInfo) -> bool:
     """Return whether the tsconfig has explicit file scoping.
 
-    A tsconfig with a non-empty ``include``, ``files``, or ``exclude`` field
-    has declared its own file scoping.  Lintro should respect this rather
-    than overriding with all discovered files.  ``exclude`` counts because a
-    temp tsconfig would clear the exclusions, which is equally incorrect.
+    A tsconfig has explicit scoping when ``include``, ``files``, or
+    ``exclude`` was provided in the config (or anywhere in its ``extends``
+    chain) — including when the value is an explicit empty list (e.g.
+    ``"files": []``).  Lintro should respect this rather than overriding
+    with all discovered files.  An explicit empty list still counts as
+    explicit scoping because the user has signaled intent: a child config
+    may use ``[]`` to clear a parent's value, and a temp tsconfig would
+    silently undo that.  ``exclude`` counts for the same reason — a temp
+    tsconfig would clear the exclusions, which is equally incorrect.
+
+    The check uses ``is not None`` rather than truthiness so that an
+    explicit empty list is distinguished from an absent field.
 
     Args:
         info: Parsed tsconfig metadata.
 
     Returns:
-        ``True`` if the tsconfig has explicit ``include``, ``files``, or
-        ``exclude``.
+        ``True`` if ``include_patterns``, ``files_list``, or
+        ``exclude_patterns`` is not ``None`` (i.e. was explicitly set,
+        possibly to an empty list).
     """
     return (
         info.include_patterns is not None
@@ -533,15 +550,15 @@ def create_temp_tsconfig(
         "noEmit": True,
     }
 
-    # Read typeRoots from the base tsconfig so they are preserved in the
-    # temp config.  TypeScript resolves typeRoots relative to the config
-    # file, so we resolve them to absolute paths here because the temp
-    # config lives in a different directory.
+    # Read typeRoots from the base tsconfig once, up-front, and reuse the
+    # extracted value in both the main and the read-only-fallback paths
+    # below.  TypeScript resolves typeRoots relative to the config file,
+    # so we resolve them to absolute paths here because the temp config
+    # lives in a different directory.
+    resolved_roots: list[str] | None = None
     try:
         base_content = load_jsonc(abs_base.read_text(encoding="utf-8"))
         resolved_roots = extract_type_roots(base_content, abs_base.parent)
-        if resolved_roots is not None:
-            compiler_options["typeRoots"] = resolved_roots
     except (json.JSONDecodeError, OSError) as exc:
         logger.debug(
             "[{}] Could not read typeRoots from {}: {}",
@@ -549,6 +566,8 @@ def create_temp_tsconfig(
             abs_base,
             exc,
         )
+    if resolved_roots is not None:
+        compiler_options["typeRoots"] = resolved_roots
 
     temp_config = {
         "extends": str(abs_base),
@@ -574,19 +593,13 @@ def create_temp_tsconfig(
         )
         # Preserve existing typeRoots from the base tsconfig and add
         # the default node_modules/@types path so TypeScript can still
-        # resolve type packages from the system temp dir.
-        existing_type_roots: list[str] = []
-        type_roots_explicit = False
-        try:
-            base_content = load_jsonc(
-                base_tsconfig.read_text(encoding="utf-8"),
-            )
-            extracted = extract_type_roots(base_content, abs_base.parent)
-            if extracted is not None:
-                existing_type_roots = extracted
-                type_roots_explicit = True
-        except (json.JSONDecodeError, OSError):
-            pass
+        # resolve type packages from the system temp dir.  Reuse the
+        # already-extracted typeRoots from the up-front read above
+        # instead of re-parsing the file.
+        existing_type_roots: list[str] = (
+            list(resolved_roots) if resolved_roots is not None else []
+        )
+        type_roots_explicit = resolved_roots is not None
         default_root = str(cwd / "node_modules" / "@types")
         # Add the default root when typeRoots was absent or had
         # entries (the temp file lives outside the project tree so
