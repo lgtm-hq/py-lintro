@@ -30,6 +30,7 @@ name: CI Pipeline
   pull_request:
     branches: [main]
     types: [opened, synchronize, reopened, ready_for_review]
+  merge_group:
   workflow_dispatch:
 
 concurrency:
@@ -74,8 +75,10 @@ jobs:
         id: detect
         env:
           GITHUB_EVENT_NAME: ${{ github.event_name }}
-          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
-          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          # yamllint disable rule:line-length
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.event.merge_group.head_sha }}
+          # yamllint enable rule:line-length
           GITHUB_EVENT_BEFORE: ${{ github.event.before }}
         run: scripts/ci/tools-image-detect-changes.sh
 

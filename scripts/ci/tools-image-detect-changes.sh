@@ -81,12 +81,12 @@ matches_tool_pattern() {
 
 tools_changed="false"
 
-if [[ "$GITHUB_EVENT_NAME" == "pull_request" ]]; then
-	: "${PR_BASE_SHA:?PR_BASE_SHA is required for pull_request events}"
-	: "${PR_HEAD_SHA:?PR_HEAD_SHA is required for pull_request events}"
+if [[ "$GITHUB_EVENT_NAME" == "pull_request" || "$GITHUB_EVENT_NAME" == "merge_group" ]]; then
+	: "${PR_BASE_SHA:?PR_BASE_SHA is required for ${GITHUB_EVENT_NAME} events}"
+	: "${PR_HEAD_SHA:?PR_HEAD_SHA is required for ${GITHUB_EVENT_NAME} events}"
 
-	# For PRs, compare base to head
-	echo "Checking for tool file changes in PR..."
+	# For PRs / merge queue, compare base to head
+	echo "Checking for tool file changes in $GITHUB_EVENT_NAME..."
 	changed_files=$(git diff --name-only "$PR_BASE_SHA" "$PR_HEAD_SHA" \
 		2>/dev/null || echo "")
 
@@ -124,11 +124,17 @@ echo "tools_changed=${tools_changed}" >>"$GITHUB_OUTPUT"
 echo "Tools changed: ${tools_changed}"
 
 if [[ "$tools_changed" == "true" ]]; then
-	if [[ "$GITHUB_EVENT_NAME" == "pull_request" ]]; then
+	case "$GITHUB_EVENT_NAME" in
+	pull_request)
 		echo "::notice::Tool files changed — fresh tools image will be built via workflow_call"
-	else
+		;;
+	merge_group)
+		echo "::notice::Tool files changed in merge queue — stable image will be used (PR build already validated)"
+		;;
+	*)
 		echo "::notice::Tool files changed — tools-image.yml will build a fresh image"
-	fi
+		;;
+	esac
 else
 	echo "::notice::No tool file changes detected — stable pinned image will be used"
 fi
