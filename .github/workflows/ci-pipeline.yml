@@ -41,12 +41,18 @@ concurrency:
 permissions: {}
 
 env:
-  # Per-event cache tag. PRs scope to pr-<N>; everything else (push/main,
-  # merge_group, schedule, workflow_dispatch) reads/writes :main.
+  # Per-event cache tag.
+  #   pull_request → pr-<N>     (per-PR isolated)
+  #   merge_group  → mq-<run>   (ephemeral; queue runs may abort, cannot pollute main)
+  #   push/main, schedule, workflow_dispatch → main
   CACHE_TAG: >-
-    ${{ github.event_name == 'pull_request'
+    ${{
+      github.event_name == 'pull_request'
         && format('pr-{0}', github.event.pull_request.number)
-        || 'main' }}
+      || github.event_name == 'merge_group'
+        && format('mq-{0}', github.run_id)
+      || 'main'
+    }}
   CACHE_OPTS: mode=max,compression=zstd,oci-mediatypes=true,image-manifest=true
 
 jobs:
@@ -115,6 +121,8 @@ jobs:
       # yamllint disable-line rule:line-length
       skip_if_unchanged: ${{ needs.detect-tool-changes.outputs.tools-changed != 'true' }}
       pr_number: ${{ github.event.pull_request.number }}
+      # yamllint disable-line rule:line-length
+      is_fork_pr: ${{ github.event.pull_request.head.repo.fork && 'true' || 'false' }}
 
   # ============================================================================
   # Stage 1c: Resolve final tools image reference
