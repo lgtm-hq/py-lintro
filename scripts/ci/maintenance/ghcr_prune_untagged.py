@@ -16,6 +16,7 @@ Requires GITHUB_TOKEN with packages:write scope in Actions.
 from __future__ import annotations
 
 import os
+import re
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
@@ -26,6 +27,28 @@ from loguru import logger
 
 # Default minimum age before an untagged version can be deleted (days)
 DEFAULT_MIN_AGE_DAYS = 7
+
+# Default minimum age before an ephemeral PR buildcache tag can be deleted (days)
+DEFAULT_BUILDCACHE_PR_AGE_DAYS = 14
+
+# Buildcache packages: separate registry repos for BuildKit registry cache exports.
+# Distinct retention rules apply (see prune_buildcache_package).
+BUILDCACHE_PACKAGES: tuple[str, ...] = (
+    "lintro-tools-buildcache",
+    "py-lintro-buildcache",
+    "py-lintro-base-buildcache",
+)
+
+# Permanent buildcache tag preserved across all prune runs.
+BUILDCACHE_PERMANENT_TAG = "main"
+
+# Pattern for ephemeral buildcache tags eligible for age-based deletion.
+#   pr-<N>          — pull_request runs
+#   mq-<run_id>     — merge_group runs (queue attempts can abort)
+#   dispatch-<run>  — workflow_dispatch on a non-main branch (feature dry-runs)
+# All must not share the permanent ``main`` tag because they can carry code
+# that never reaches main.
+EPHEMERAL_TAG_PATTERN = re.compile(r"^(?:pr-\d+|mq-\d+|dispatch-\d+)$")
 
 
 @dataclass
@@ -399,6 +422,141 @@ def prune_package(
     return deleted
 
 
+def _resolve_base_path(client: GhcrClient, owner: str) -> str:
+    """Return the GHCR API base path for ``owner`` (user vs org).
+
+    Args:
+        client: Authenticated HTTP client.
+        owner: Repository owner (user/org).
+
+    Returns:
+        Base URL up to ``/packages/container``.
+    """
+    owner_type = _get_owner_type(client, owner)
+    if owner_type == "Organization":
+        return f"https://api.github.com/orgs/{owner}/packages/container"
+    return f"https://api.github.com/users/{owner}/packages/container"
+
+
+def _is_ephemeral_only_tagged(version: GhcrVersion) -> bool:
+    """Return True if every tag on the version matches the ephemeral pattern.
+
+    Ephemeral tags are ``pr-<N>`` (pull_request) and ``mq-<run_id>``
+    (merge_group). A version with mixed tags (e.g. ``["pr-1", "main"]``) is
+    not eligible — any non-ephemeral tag protects the version.
+
+    Args:
+        version: Version under inspection.
+
+    Returns:
+        True when at least one tag is present and all tags match the
+        ephemeral pattern.
+    """
+    if not version.tags:
+        return False
+    return all(EPHEMERAL_TAG_PATTERN.match(t) for t in version.tags)
+
+
+def prune_buildcache_package(
+    client: GhcrClient,
+    owner: str,
+    package_name: str,
+    *,
+    dry_run: bool,
+    min_age_days: int,
+    pr_age_days: int,
+) -> int:
+    """Prune a buildcache package using ephemeral-tag-aware retention.
+
+    Rules:
+    - Versions tagged ``main`` (or any non-ephemeral tag) are preserved.
+    - Versions tagged only with ephemeral tags (``pr-<N>`` from pull_request
+      runs or ``mq-<run_id>`` from merge_group runs) are deleted when older
+      than ``pr_age_days``.
+    - Untagged versions are deleted when older than ``min_age_days``.
+
+    Args:
+        client: Authenticated HTTP client.
+        owner: Repository owner (user/org).
+        package_name: Buildcache package name.
+        dry_run: If True, only log what would be deleted.
+        min_age_days: Minimum age in days before untagged versions delete.
+        pr_age_days: Minimum age in days before ephemeral tags delete.
+
+    Returns:
+        Number of versions deleted (or that would be deleted in dry-run).
+
+    Raises:
+        httpx.HTTPStatusError: If API request fails (except 404 which is handled).
+    """
+    logger.info("Processing buildcache package: {}", package_name)
+
+    base_path = _resolve_base_path(client, owner)
+
+    try:
+        versions = list_container_versions(
+            client=client,
+            owner=owner,
+            package_name=package_name,
+            base_path=base_path,
+        )
+    except httpx.HTTPStatusError as e:
+        if e.response.status_code == 404:
+            logger.warning("Package {} not found, skipping", package_name)
+            return 0
+        raise
+
+    pr_tagged_old = [
+        v
+        for v in versions
+        if _is_ephemeral_only_tagged(v)
+        and is_older_than_days(v.created_at, pr_age_days)
+    ]
+    untagged_old = [
+        v
+        for v in versions
+        if not v.tags and is_older_than_days(v.created_at, min_age_days)
+    ]
+    to_delete = pr_tagged_old + untagged_old
+
+    logger.info(
+        "Buildcache {}: {} total, {} pr-tag eligible, {} untagged eligible",
+        package_name,
+        len(versions),
+        len(pr_tagged_old),
+        len(untagged_old),
+    )
+
+    deleted = 0
+    for v in to_delete:
+        if dry_run:
+            logger.info(
+                "[dry-run] Would delete {} version id={} tags={} created_at={}",
+                package_name,
+                v.id,
+                v.tags,
+                v.created_at,
+            )
+        else:
+            delete_version(
+                client=client,
+                owner=owner,
+                version_id=v.id,
+                package_name=package_name,
+                base_path=base_path,
+            )
+            logger.info(
+                "Deleted {} version id={} tags={} created_at={}",
+                package_name,
+                v.id,
+                v.tags,
+                v.created_at,
+            )
+        deleted += 1
+
+    return deleted
+
+
 def main() -> int:
     """Entry point.
 
@@ -440,14 +598,28 @@ def main() -> int:
     if keep_n < 0:
         keep_n = 0
 
-    # Packages to clean up
+    # Minimum age for ephemeral pr-<N> buildcache tags
+    pr_age_env = os.environ.get(
+        "GHCR_PRUNE_BUILDCACHE_PR_AGE_DAYS",
+        str(DEFAULT_BUILDCACHE_PR_AGE_DAYS),
+    )
+    try:
+        pr_age_days = int(pr_age_env)
+    except ValueError:
+        pr_age_days = DEFAULT_BUILDCACHE_PR_AGE_DAYS
+    if pr_age_days < 0:
+        pr_age_days = DEFAULT_BUILDCACHE_PR_AGE_DAYS
+
+    # Production image packages — delete untagged only.
     packages = ["py-lintro", "lintro-tools"]
 
     logger.info(
-        "GHCR cleanup starting (dry_run={}, min_age_days={}, keep_n={})",
+        "GHCR cleanup starting (dry_run={}, min_age_days={}, keep_n={}, "
+        "buildcache_pr_age_days={})",
         dry_run,
         min_age_days,
         keep_n,
+        pr_age_days,
     )
 
     total_deleted = 0
@@ -465,9 +637,23 @@ def main() -> int:
                 keep_n=keep_n,
             )
             total_deleted += deleted
+        for package_name in BUILDCACHE_PACKAGES:
+            deleted = prune_buildcache_package(
+                client=typed_client,
+                owner=owner,
+                package_name=package_name,
+                dry_run=dry_run,
+                min_age_days=min_age_days,
+                pr_age_days=pr_age_days,
+            )
+            total_deleted += deleted
 
     action = "Would delete" if dry_run else "Deleted"
-    logger.info("{} {} untagged GHCR versions total", action, total_deleted)
+    logger.info(
+        "{} {} GHCR versions total (untagged + ephemeral pr-*/mq-* buildcache)",
+        action,
+        total_deleted,
+    )
     return 0
 
 

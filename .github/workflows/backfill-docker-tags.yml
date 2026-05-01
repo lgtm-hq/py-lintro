@@ -151,12 +151,15 @@ jobs:
         run: _ci/scripts/ci/backfill-compute-tags.sh
 
       - name: Build and push main image
+        env:
+          REPO: ghcr.io/lgtm-hq/py-lintro-buildcache
         # yamllint disable-line rule:line-length
         uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
         with:
           context: .
           push: ${{ inputs.dry-run != 'true' }}
           tags: ${{ steps.tags.outputs.main-tags }}
+          cache-from: type=registry,ref=${{ env.REPO }}:main
           # Provenance/SBOM disabled: creates untagged OCI child manifests that
           # ghcr_prune_untagged.py deletes, breaking tagged image indexes.
           provenance: false
@@ -164,6 +167,8 @@ jobs:
 
       - name: Build and push base image
         if: steps.tags.outputs.has-base == 'true'
+        env:
+          REPO: ghcr.io/lgtm-hq/py-lintro-base-buildcache
         # yamllint disable-line rule:line-length
         uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
         with:
@@ -171,6 +176,7 @@ jobs:
           file: Dockerfile.base
           push: ${{ inputs.dry-run != 'true' }}
           tags: ${{ steps.tags.outputs.base-tags }}
+          cache-from: type=registry,ref=${{ env.REPO }}:main
           # Provenance/SBOM disabled: same reason as above.
           provenance: false
           sbom: false

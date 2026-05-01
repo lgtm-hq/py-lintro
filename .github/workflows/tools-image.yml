@@ -54,6 +54,14 @@ name: Build - Tools Image
         description: 'PR number when called from a pull_request context'
         type: string
         default: ''
+      is_fork_pr:
+        # github.event.pull_request.head.repo.fork is unreliable under
+        # workflow_call in some configurations — caller forwards an explicit
+        # signal so fork-only steps (skip GHCR login, drop cache-to) gate
+        # correctly.
+        description: 'Whether the calling pull request comes from a fork'
+        type: string
+        default: 'false'
 
 permissions: {}
 
@@ -184,10 +192,17 @@ jobs:
         id: fork-check
         env:
           EVENT_NAME: ${{ github.event_name }}
-          IS_FORK_PR: ${{ github.event.pull_request.head.repo.fork }}
+          # Prefer the caller-forwarded signal under workflow_call; fall back
+          # to github.event for direct triggers (push/schedule/dispatch).
+          IS_FORK_PR_INPUT: ${{ inputs.is_fork_pr }}
+          IS_FORK_PR_EVENT: ${{ github.event.pull_request.head.repo.fork }}
         run: |
           IS_FORK="false"
-          if [[ "$EVENT_NAME" == "workflow_call" && "$IS_FORK_PR" == "true" ]]; then
+          if [[ "$EVENT_NAME" == "workflow_call" ]]; then
+            if [[ "$IS_FORK_PR_INPUT" == "true" ]]; then
+              IS_FORK="true"
+            fi
+          elif [[ "$IS_FORK_PR_EVENT" == "true" ]]; then
             IS_FORK="true"
           fi
           echo "is-fork=${IS_FORK}" >> "$GITHUB_OUTPUT"
@@ -219,12 +234,31 @@ jobs:
       - name: Build tools image
         # yamllint disable-line rule:line-length
         uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
+        env:
+          # PRs scope to pr-<N>; everything else (push/main, schedule,
+          # workflow_dispatch) reads/writes :main. workflow_call inherits the
+          # caller's event context, so pull_request still resolves correctly.
+          CACHE_TAG: >-
+            ${{ inputs.pr_number != ''
+                && format('pr-{0}', inputs.pr_number)
+                || 'main' }}
+          REPO: ghcr.io/lgtm-hq/lintro-tools-buildcache
+          # yamllint disable-line rule:line-length
+          CACHE_OPTS: mode=max,compression=zstd,oci-mediatypes=true,image-manifest=true
         with:
           context: .
           file: Dockerfile.tools
           push: false
           load: true
           tags: ${{ steps.tags.outputs.tags }}
+          cache-from: |
+            type=registry,ref=${{ env.REPO }}:${{ env.CACHE_TAG }}
+            type=registry,ref=${{ env.REPO }}:main
+          cache-to: >-
+            ${{ steps.fork-check.outputs.is-fork != 'true' &&
+                format('type=registry,ref={0}:{1},{2}',
+                       env.REPO, env.CACHE_TAG, env.CACHE_OPTS)
+                || '' }}
 
       - name: Verify tools installation
         env:

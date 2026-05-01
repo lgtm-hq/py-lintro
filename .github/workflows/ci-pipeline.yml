@@ -40,6 +40,24 @@ concurrency:
 
 permissions: {}
 
+env:
+  # Per-event cache tag.
+  #   pull_request                → pr-<N>           (per-PR isolated)
+  #   merge_group                 → mq-<run>         (queue may abort)
+  #   push to refs/heads/main     → main
+  #   workflow_dispatch on main   → main
+  #   workflow_dispatch off main  → dispatch-<run>   (feature dry-runs)
+  CACHE_TAG: >-
+    ${{
+      github.event_name == 'pull_request'
+        && format('pr-{0}', github.event.pull_request.number)
+      || github.event_name == 'merge_group'
+        && format('mq-{0}', github.run_id)
+      || github.ref == 'refs/heads/main' && 'main'
+      || format('dispatch-{0}', github.run_id)
+    }}
+  CACHE_OPTS: mode=max,compression=zstd,oci-mediatypes=true,image-manifest=true
+
 jobs:
   # ============================================================================
   # Stage 1a: Detect if tool files changed (drives whether we call tools-image.yml)
@@ -106,6 +124,8 @@ jobs:
       # yamllint disable-line rule:line-length
       skip_if_unchanged: ${{ needs.detect-tool-changes.outputs.tools-changed != 'true' }}
       pr_number: ${{ github.event.pull_request.number }}
+      # yamllint disable-line rule:line-length
+      is_fork_pr: ${{ github.event.pull_request.head.repo.fork && 'true' || 'false' }}
 
   # ============================================================================
   # Stage 1c: Resolve final tools image reference
@@ -316,6 +336,8 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
       - name: Build Docker image (py-lintro:latest)
+        env:
+          REPO: ghcr.io/lgtm-hq/py-lintro-buildcache
         # Action SHA pin exceeds 88 chars
         # yamllint disable-line rule:line-length
         uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
@@ -326,8 +348,21 @@ jobs:
           tags: py-lintro:latest
           build-args: |
             TOOLS_IMAGE=${{ needs.resolve-tools.outputs.image }}
+          # Registry cache requires the docker-container buildx driver. The
+          # artifact path (fork PRs) uses driver:docker which cannot import
+          # type=registry refs, so cache-from collapses to empty entries.
+          # build-push-action treats blank lines as no-op.
+          # yamllint disable rule:line-length
+          cache-from: |
+            ${{ needs.resolve-tools.outputs.source != 'artifact' && format('type=registry,ref={0}:{1}', env.REPO, env.CACHE_TAG) || '' }}
+            ${{ needs.resolve-tools.outputs.source != 'artifact' && format('type=registry,ref={0}:main', env.REPO) || '' }}
+          cache-to: ${{ steps.fork-check.outputs.is-fork != 'true' && needs.resolve-tools.outputs.source != 'artifact' && format('type=registry,ref={0}:{1},{2}', env.REPO, env.CACHE_TAG, env.CACHE_OPTS) || '' }}
+          # yamllint enable rule:line-length
           provenance: false
+
       - name: Build Base Docker image (py-lintro:base)
+        env:
+          REPO: ghcr.io/lgtm-hq/py-lintro-base-buildcache
         # Action SHA pin exceeds 88 chars
         # yamllint disable-line rule:line-length
         uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
@@ -337,6 +372,12 @@ jobs:
           push: false
           load: true
           tags: py-lintro:base
+          # yamllint disable rule:line-length
+          cache-from: |
+            ${{ needs.resolve-tools.outputs.source != 'artifact' && format('type=registry,ref={0}:{1}', env.REPO, env.CACHE_TAG) || '' }}
+            ${{ needs.resolve-tools.outputs.source != 'artifact' && format('type=registry,ref={0}:main', env.REPO) || '' }}
+          cache-to: ${{ steps.fork-check.outputs.is-fork != 'true' && needs.resolve-tools.outputs.source != 'artifact' && format('type=registry,ref={0}:{1},{2}', env.REPO, env.CACHE_TAG, env.CACHE_OPTS) || '' }}
+          # yamllint enable rule:line-length
           provenance: false
       - name: Push CI images to GHCR
         if: steps.fork-check.outputs.is-fork != 'true'
@@ -1036,6 +1077,8 @@ jobs:
             type=semver,pattern={{major}},suffix=-base
             type=raw,value=base,enable={{is_default_branch}}
       - name: Build and push Docker image
+        env:
+          REPO: ghcr.io/lgtm-hq/py-lintro-buildcache
         # Action SHA pin exceeds 88 chars
         # yamllint disable-line rule:line-length
         uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
@@ -1046,12 +1089,19 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           build-args: |
             TOOLS_IMAGE=${{ needs.resolve-tools.outputs.image }}
+          cache-from: |
+            type=registry,ref=${{ env.REPO }}:${{ env.CACHE_TAG }}
+            type=registry,ref=${{ env.REPO }}:main
+          cache-to: >-
+            type=registry,ref=${{ env.REPO }}:${{ env.CACHE_TAG }},${{ env.CACHE_OPTS }}
           # Provenance/SBOM disabled: creates untagged OCI child manifests that
           # ghcr_prune_untagged.py deletes, breaking tagged image indexes.
           # Produces simple Docker v2 manifests (like ci-* tags).
           provenance: false
           sbom: false
       - name: Build and push Base Docker image
+        env:
+          REPO: ghcr.io/lgtm-hq/py-lintro-base-buildcache
         # Action SHA pin exceeds 88 chars
         # yamllint disable-line rule:line-length
         uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
@@ -1061,6 +1111,11 @@ jobs:
           push: true
           tags: ${{ steps.meta-base.outputs.tags }}
           labels: ${{ steps.meta-base.outputs.labels }}
+          cache-from: |
+            type=registry,ref=${{ env.REPO }}:${{ env.CACHE_TAG }}
+            type=registry,ref=${{ env.REPO }}:main
+          cache-to: >-
+            type=registry,ref=${{ env.REPO }}:${{ env.CACHE_TAG }},${{ env.CACHE_OPTS }}
           # Provenance/SBOM disabled: same reason as above.
           provenance: false
           sbom: false
