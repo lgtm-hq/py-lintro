@@ -436,17 +436,19 @@ def _resolve_base_path(client: GhcrClient, owner: str) -> str:
     return f"https://api.github.com/users/{owner}/packages/container"
 
 
-def _is_pr_only_tagged(version: GhcrVersion) -> bool:
-    """Return True if every tag on the version is a ``pr-<N>`` tag.
+def _is_ephemeral_only_tagged(version: GhcrVersion) -> bool:
+    """Return True if every tag on the version matches the ephemeral pattern.
 
-    A version with mixed tags (e.g. ``["pr-1", "main"]``) is not eligible —
-    any non-PR tag protects the version.
+    Ephemeral tags are ``pr-<N>`` (pull_request) and ``mq-<run_id>``
+    (merge_group). A version with mixed tags (e.g. ``["pr-1", "main"]``) is
+    not eligible — any non-ephemeral tag protects the version.
 
     Args:
         version: Version under inspection.
 
     Returns:
-        True when at least one tag is present and all tags match PR pattern.
+        True when at least one tag is present and all tags match the
+        ephemeral pattern.
     """
     if not version.tags:
         return False
@@ -505,7 +507,8 @@ def prune_buildcache_package(
     pr_tagged_old = [
         v
         for v in versions
-        if _is_pr_only_tagged(v) and is_older_than_days(v.created_at, pr_age_days)
+        if _is_ephemeral_only_tagged(v)
+        and is_older_than_days(v.created_at, pr_age_days)
     ]
     untagged_old = [
         v
@@ -644,7 +647,11 @@ def main() -> int:
             total_deleted += deleted
 
     action = "Would delete" if dry_run else "Deleted"
-    logger.info("{} {} untagged GHCR versions total", action, total_deleted)
+    logger.info(
+        "{} {} GHCR versions total (untagged + ephemeral pr-*/mq-* buildcache)",
+        action,
+        total_deleted,
+    )
     return 0
 
 
