@@ -42,16 +42,19 @@ permissions: {}
 
 env:
   # Per-event cache tag.
-  #   pull_request → pr-<N>     (per-PR isolated)
-  #   merge_group  → mq-<run>   (ephemeral; queue runs may abort, cannot pollute main)
-  #   push/main, schedule, workflow_dispatch → main
+  #   pull_request                → pr-<N>           (per-PR isolated)
+  #   merge_group                 → mq-<run>         (queue may abort)
+  #   push to refs/heads/main     → main
+  #   workflow_dispatch on main   → main
+  #   workflow_dispatch off main  → dispatch-<run>   (feature dry-runs)
   CACHE_TAG: >-
     ${{
       github.event_name == 'pull_request'
         && format('pr-{0}', github.event.pull_request.number)
       || github.event_name == 'merge_group'
         && format('mq-{0}', github.run_id)
-      || 'main'
+      || github.ref == 'refs/heads/main' && 'main'
+      || format('dispatch-{0}', github.run_id)
     }}
   CACHE_OPTS: mode=max,compression=zstd,oci-mediatypes=true,image-manifest=true
 

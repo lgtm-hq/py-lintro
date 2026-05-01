@@ -42,11 +42,13 @@ BUILDCACHE_PACKAGES: tuple[str, ...] = (
 # Permanent buildcache tag preserved across all prune runs.
 BUILDCACHE_PERMANENT_TAG = "main"
 
-# Pattern for ephemeral per-PR / per-merge-queue buildcache tags eligible for
-# age-based deletion. ``pr-<N>`` is written by pull_request runs;
-# ``mq-<run_id>`` is written by merge_group runs (queue attempts can abort, so
-# they must not share the permanent ``main`` tag).
-EPHEMERAL_TAG_PATTERN = re.compile(r"^(?:pr-\d+|mq-\d+)$")
+# Pattern for ephemeral buildcache tags eligible for age-based deletion.
+#   pr-<N>          — pull_request runs
+#   mq-<run_id>     — merge_group runs (queue attempts can abort)
+#   dispatch-<run>  — workflow_dispatch on a non-main branch (feature dry-runs)
+# All must not share the permanent ``main`` tag because they can carry code
+# that never reaches main.
+EPHEMERAL_TAG_PATTERN = re.compile(r"^(?:pr-\d+|mq-\d+|dispatch-\d+)$")
 
 
 @dataclass
