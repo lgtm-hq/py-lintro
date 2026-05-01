@@ -9,8 +9,8 @@
 #
 # Each line: {run_id, event, head_branch, conclusion, tools_seconds,
 #             main_seconds, base_seconds, cache_state}
-# cache_state is "cold" / "warm" / "unknown" derived from the docker-build job
-# log scan for "importing cache manifest from".
+# cache_state is "cold" / "warm" / "fallback" / "unknown" derived from the
+# docker-build job log scan for "importing cache manifest from".
 #
 # Requires: gh, jq.
 
@@ -34,8 +34,10 @@ Output (one JSON line per run):
   {run_id, event, head_branch, conclusion,
    tools_seconds, main_seconds, base_seconds, cache_state}
 
-cache_state is "cold" / "warm" / "unknown" derived from the docker-build
-job log scan for "importing cache manifest from".
+cache_state is "cold" / "warm" / "fallback" / "unknown" derived from the
+docker-build job log scan for "importing cache manifest from". "fallback"
+means at least one ref missed but another imported successfully (e.g. a
+PR cold-start that warmed from :main).
 
 Requires: gh, jq.
 EOF
@@ -66,10 +68,18 @@ duration_seconds() {
 	}'
 }
 
-job_seconds() {
-	local run_id="$1" name_substr="$2"
+step_seconds() {
+	# Per-step duration, scoped to a job. job-level timings include setup
+	# (Harden Runner, checkout, login, ...) and would dwarf the actual build.
+	local run_id="$1" job_substr="$2" step_substr="$3"
 	gh run view "$run_id" --json jobs \
-		--jq ".jobs[] | select(.name | contains(\"${name_substr}\")) | [.startedAt, .completedAt] | @tsv" |
+		--jq "
+			.jobs[]
+			| select(.name | contains(\"${job_substr}\"))
+			| .steps[]
+			| select(.name | contains(\"${step_substr}\"))
+			| [.startedAt, .completedAt]
+			| @tsv" |
 		head -n 1 |
 		duration_seconds
 }
@@ -108,9 +118,9 @@ cache_state_for_run() {
 for run_id in "$@"; do
 	meta=$(gh run view "$run_id" --json event,headBranch,conclusion --jq \
 		'{event: .event, head_branch: .headBranch, conclusion: .conclusion}')
-	tools_s=$(job_seconds "$run_id" "Build Tools Image / Build Tools Image" || echo null)
-	main_s=$(job_seconds "$run_id" "Build Docker Images" || echo null)
-	base_s=$(job_seconds "$run_id" "Build Base" || echo null)
+	tools_s=$(step_seconds "$run_id" "Build Tools Image" "Build tools image" || echo null)
+	main_s=$(step_seconds "$run_id" "Build Docker Images" "Build Docker image (py-lintro:latest)" || echo null)
+	base_s=$(step_seconds "$run_id" "Build Docker Images" "Build Base Docker image" || echo null)
 	cache=$(cache_state_for_run "$run_id")
 	jq -nc \
 		--arg run_id "$run_id" \
