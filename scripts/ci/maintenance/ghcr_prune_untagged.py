@@ -42,8 +42,11 @@ BUILDCACHE_PACKAGES: tuple[str, ...] = (
 # Permanent buildcache tag preserved across all prune runs.
 BUILDCACHE_PERMANENT_TAG = "main"
 
-# Pattern for ephemeral per-PR buildcache tags eligible for age-based deletion.
-PR_TAG_PATTERN = re.compile(r"^pr-\d+$")
+# Pattern for ephemeral per-PR / per-merge-queue buildcache tags eligible for
+# age-based deletion. ``pr-<N>`` is written by pull_request runs;
+# ``mq-<run_id>`` is written by merge_group runs (queue attempts can abort, so
+# they must not share the permanent ``main`` tag).
+EPHEMERAL_TAG_PATTERN = re.compile(r"^(?:pr-\d+|mq-\d+)$")
 
 
 @dataclass
@@ -447,7 +450,7 @@ def _is_pr_only_tagged(version: GhcrVersion) -> bool:
     """
     if not version.tags:
         return False
-    return all(PR_TAG_PATTERN.match(t) for t in version.tags)
+    return all(EPHEMERAL_TAG_PATTERN.match(t) for t in version.tags)
 
 
 def prune_buildcache_package(
@@ -459,11 +462,13 @@ def prune_buildcache_package(
     min_age_days: int,
     pr_age_days: int,
 ) -> int:
-    """Prune a buildcache package using PR-tag-aware retention.
+    """Prune a buildcache package using ephemeral-tag-aware retention.
 
     Rules:
-    - Versions tagged ``main`` (or any non-PR tag) are preserved.
-    - Versions tagged only ``pr-<N>`` are deleted when older than ``pr_age_days``.
+    - Versions tagged ``main`` (or any non-ephemeral tag) are preserved.
+    - Versions tagged only with ephemeral tags (``pr-<N>`` from pull_request
+      runs or ``mq-<run_id>`` from merge_group runs) are deleted when older
+      than ``pr_age_days``.
     - Untagged versions are deleted when older than ``min_age_days``.
 
     Args:
@@ -472,7 +477,7 @@ def prune_buildcache_package(
         package_name: Buildcache package name.
         dry_run: If True, only log what would be deleted.
         min_age_days: Minimum age in days before untagged versions delete.
-        pr_age_days: Minimum age in days before ``pr-<N>``-tagged versions delete.
+        pr_age_days: Minimum age in days before ephemeral tags delete.
 
     Returns:
         Number of versions deleted (or that would be deleted in dry-run).

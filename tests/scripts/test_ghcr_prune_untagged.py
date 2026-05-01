@@ -518,6 +518,32 @@ def test_buildcache_deletes_old_pr_tag() -> None:
     assert_that(deleted).is_equal_to([42])
 
 
+def test_buildcache_deletes_old_mq_tag() -> None:
+    """`mq-<run_id>` tags older than pr_age_days are deleted."""
+    deleted: list[int] = []
+    client = _buildcache_client(
+        versions_data=[
+            {
+                "id": 77,
+                "created_at": _now_minus(30),
+                "metadata": {"container": {"tags": ["mq-123456"]}},
+            },
+        ],
+        deleted=deleted,
+    )
+
+    n = prune_buildcache_package(
+        client=client,
+        owner="owner",
+        package_name="py-lintro-buildcache",
+        dry_run=False,
+        min_age_days=7,
+        pr_age_days=14,
+    )
+    assert_that(n).is_equal_to(1)
+    assert_that(deleted).is_equal_to([77])
+
+
 def test_buildcache_preserves_young_pr_tag() -> None:
     """`pr-<N>` tags younger than pr_age_days are preserved."""
     deleted: list[int] = []
