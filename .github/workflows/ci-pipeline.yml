@@ -345,14 +345,16 @@ jobs:
           tags: py-lintro:latest
           build-args: |
             TOOLS_IMAGE=${{ needs.resolve-tools.outputs.image }}
+          # Registry cache requires the docker-container buildx driver. The
+          # artifact path (fork PRs) uses driver:docker which cannot import
+          # type=registry refs, so cache-from collapses to empty entries.
+          # build-push-action treats blank lines as no-op.
+          # yamllint disable rule:line-length
           cache-from: |
-            type=registry,ref=${{ env.REPO }}:${{ env.CACHE_TAG }}
-            type=registry,ref=${{ env.REPO }}:main
-          cache-to: >-
-            ${{ steps.fork-check.outputs.is-fork != 'true' &&
-                format('type=registry,ref={0}:{1},{2}',
-                       env.REPO, env.CACHE_TAG, env.CACHE_OPTS)
-                || '' }}
+            ${{ needs.resolve-tools.outputs.source != 'artifact' && format('type=registry,ref={0}:{1}', env.REPO, env.CACHE_TAG) || '' }}
+            ${{ needs.resolve-tools.outputs.source != 'artifact' && format('type=registry,ref={0}:main', env.REPO) || '' }}
+          cache-to: ${{ steps.fork-check.outputs.is-fork != 'true' && needs.resolve-tools.outputs.source != 'artifact' && format('type=registry,ref={0}:{1},{2}', env.REPO, env.CACHE_TAG, env.CACHE_OPTS) || '' }}
+          # yamllint enable rule:line-length
           provenance: false
 
       - name: Build Base Docker image (py-lintro:base)
@@ -367,14 +369,12 @@ jobs:
           push: false
           load: true
           tags: py-lintro:base
+          # yamllint disable rule:line-length
           cache-from: |
-            type=registry,ref=${{ env.REPO }}:${{ env.CACHE_TAG }}
-            type=registry,ref=${{ env.REPO }}:main
-          cache-to: >-
-            ${{ steps.fork-check.outputs.is-fork != 'true' &&
-                format('type=registry,ref={0}:{1},{2}',
-                       env.REPO, env.CACHE_TAG, env.CACHE_OPTS)
-                || '' }}
+            ${{ needs.resolve-tools.outputs.source != 'artifact' && format('type=registry,ref={0}:{1}', env.REPO, env.CACHE_TAG) || '' }}
+            ${{ needs.resolve-tools.outputs.source != 'artifact' && format('type=registry,ref={0}:main', env.REPO) || '' }}
+          cache-to: ${{ steps.fork-check.outputs.is-fork != 'true' && needs.resolve-tools.outputs.source != 'artifact' && format('type=registry,ref={0}:{1},{2}', env.REPO, env.CACHE_TAG, env.CACHE_OPTS) || '' }}
+          # yamllint enable rule:line-length
           provenance: false
       - name: Push CI images to GHCR
         if: steps.fork-check.outputs.is-fork != 'true'
