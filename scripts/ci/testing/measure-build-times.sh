@@ -85,15 +85,27 @@ step_seconds() {
 }
 
 cache_state_for_run() {
+	# Cache state for the py-lintro main + base build (docker-build job).
+	# Whole-run logs include the tools-image job's cache lines, which would
+	# conflate states; scope to the docker-build job only via --job <id>.
+	#
 	# Successful import wins over "not found": a PR cold-start that hits the
 	# `:pr-<N>` ref but falls back to `:main` reports "fallback", not "cold".
 	#   warm     — at least one ref imported, none missed
 	#   fallback — at least one ref imported AND at least one missed
 	#   cold     — all attempted refs missed
-	#   unknown  — no import attempts logged
+	#   unknown  — no import attempts logged (or job not found)
 	local run_id="$1"
+	local job_id
+	job_id=$(gh run view "$run_id" --json jobs \
+		--jq '.jobs[] | select(.name | contains("Build Docker Images")) | .databaseId' |
+		head -n 1)
+	if [[ -z "$job_id" ]]; then
+		echo "unknown"
+		return
+	fi
 	local log
-	log=$(gh run view "$run_id" --log 2>/dev/null || true)
+	log=$(gh run view --job "$job_id" --log 2>/dev/null || true)
 	if [[ -z "$log" ]]; then
 		echo "unknown"
 		return
