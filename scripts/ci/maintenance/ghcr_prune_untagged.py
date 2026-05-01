@@ -5,16 +5,23 @@ Google-style docstring.
 This script lists container package versions for the current repo on GHCR and
 deletes those that have no tags AND are older than a retention period.
 
-NOTE: All publish jobs now use ``provenance: false`` and ``sbom: false``,
-producing simple Docker v2 manifests with no untagged OCI child manifests.
-The min-age guard is retained as defense-in-depth but is no longer the
-primary protection mechanism.
+When ``GHCR_PRUNE_PROTECT_REFERENCED`` is set (default on), the script first
+fetches every tagged manifest from the registry and protects any untagged
+version whose digest is referenced as a child of a tagged image-index or as
+the ``subject`` of a tagged manifest. This preserves multi-arch image
+children and SLSA provenance / SBOM attestations that ``provenance: mode=max``
+publishes as untagged OCI children of a tagged image-index. Without this
+protection the cron would delete the attestations weekly, breaking
+``gh attestation verify`` on shipped images.
+
+The min-age guard is retained as defense-in-depth.
 
 Requires GITHUB_TOKEN with packages:write scope in Actions.
 """
 
 from __future__ import annotations
 
+import base64
 import os
 import re
 from collections.abc import Mapping
@@ -315,6 +322,7 @@ def prune_package(
     dry_run: bool,
     min_age_days: int,
     keep_n: int,
+    referenced_digests: set[str] | None = None,
 ) -> int:
     """Prune untagged versions for a single package.
 
@@ -325,6 +333,9 @@ def prune_package(
         dry_run: If True, only log what would be deleted.
         min_age_days: Minimum age in days before deletion is allowed.
         keep_n: Keep at least N most recent untagged versions.
+        referenced_digests: Digests referenced by tagged manifests (multi-arch
+            children, SLSA attestation children, OCI ``subject``). Versions
+            whose ``name`` is in this set are protected from deletion.
 
     Returns:
         Number of versions deleted (or would be deleted in dry-run).
@@ -332,6 +343,7 @@ def prune_package(
     Raises:
         httpx.HTTPStatusError: If API request fails (except 404 which is handled).
     """
+    referenced = referenced_digests or set()
     logger.info("Processing package: {}", package_name)
 
     # Compute base_path once to avoid redundant API calls
@@ -373,6 +385,19 @@ def prune_package(
             protected_count,
             min_age_days,
         )
+
+    # Protect versions referenced by tagged manifests (multi-arch children,
+    # SLSA provenance / SBOM attestations attached as untagged OCI children
+    # of a tagged image-index, OCI subject referrers).
+    if referenced:
+        before = len(old_enough)
+        old_enough = [v for v in old_enough if v.name not in referenced]
+        protected_refs = before - len(old_enough)
+        if protected_refs > 0:
+            logger.info(
+                "Protected {} untagged versions referenced by tagged manifests",
+                protected_refs,
+            )
 
     # Keep the N most recent untagged by created_at (descending)
     if keep_n > 0:
@@ -436,6 +461,159 @@ def _resolve_base_path(client: GhcrClient, owner: str) -> str:
     if owner_type == "Organization":
         return f"https://api.github.com/orgs/{owner}/packages/container"
     return f"https://api.github.com/users/{owner}/packages/container"
+
+
+_MANIFEST_ACCEPT = ", ".join(
+    [
+        "application/vnd.oci.image.index.v1+json",
+        "application/vnd.docker.distribution.manifest.list.v2+json",
+        "application/vnd.oci.image.manifest.v1+json",
+        "application/vnd.docker.distribution.manifest.v2+json",
+    ],
+)
+
+
+def _exchange_registry_token(
+    client: GhcrClient,
+    owner: str,
+    package_name: str,
+    github_token: str,
+) -> str | None:
+    """Exchange ``GITHUB_TOKEN`` for a ghcr.io registry pull bearer token.
+
+    GHCR rejects the GitHub API token directly on its registry endpoints; the
+    Docker registry token-exchange flow returns a short-lived bearer scoped to
+    the requested package.
+
+    Args:
+        client: Authenticated HTTP client (only its ``get`` is used).
+        owner: Package owner (user/org).
+        package_name: Container package name.
+        github_token: A token with ``read:packages`` scope (Actions
+            ``GITHUB_TOKEN`` is sufficient for repo-owned packages).
+
+    Returns:
+        Registry bearer token string, or ``None`` if the exchange fails (caller
+        treats this as "skip protection").
+    """
+    auth = base64.b64encode(f"x:{github_token}".encode()).decode()
+    url = (
+        "https://ghcr.io/token"
+        f"?service=ghcr.io&scope=repository:{owner}/{package_name}:pull"
+    )
+    try:
+        resp = client.get(url, headers={"Authorization": f"Basic {auth}"})
+        resp.raise_for_status()
+    except httpx.HTTPError as e:
+        logger.warning(
+            "Registry token exchange failed for {}/{}: {}",
+            owner,
+            package_name,
+            e,
+        )
+        return None
+    data: dict[str, Any] = resp.json()
+    token = data.get("token") or data.get("access_token")
+    return str(token) if token else None
+
+
+def fetch_manifest(
+    client: GhcrClient,
+    owner: str,
+    package_name: str,
+    digest: str,
+    registry_token: str,
+) -> dict[str, Any] | None:
+    """Fetch a manifest from ghcr.io by digest.
+
+    Args:
+        client: Authenticated HTTP client.
+        owner: Package owner.
+        package_name: Container package name.
+        digest: Manifest digest including ``sha256:`` prefix.
+        registry_token: Bearer token from :func:`_exchange_registry_token`.
+
+    Returns:
+        Parsed manifest JSON, or ``None`` if not found / unparseable.
+    """
+    url = f"https://ghcr.io/v2/{owner}/{package_name}/manifests/{digest}"
+    headers = {
+        "Authorization": f"Bearer {registry_token}",
+        "Accept": _MANIFEST_ACCEPT,
+    }
+    try:
+        resp = client.get(url, headers=headers)
+    except httpx.HTTPError as e:
+        logger.warning("Manifest fetch failed for {}: {}", digest, e)
+        return None
+    if resp.status_code == 404:
+        return None
+    if resp.status_code >= 400:
+        logger.warning(
+            "Manifest fetch returned {} for {}",
+            resp.status_code,
+            digest,
+        )
+        return None
+    try:
+        data: dict[str, Any] = resp.json()
+    except ValueError:
+        return None
+    return data
+
+
+def collect_referenced_digests(
+    client: GhcrClient,
+    owner: str,
+    package_name: str,
+    versions: list[GhcrVersion],
+    registry_token: str,
+) -> set[str]:
+    """Collect digests referenced by any tagged manifest in ``versions``.
+
+    For each tagged version, fetches its manifest from the registry and
+    records:
+
+    - Every ``manifests[].digest`` entry (image-index / manifest-list children
+      — multi-arch, provenance, SBOM).
+    - The ``subject.digest`` if present (OCI referrer pattern, e.g.
+      ``cosign`` / ``in-toto`` attestations).
+
+    Args:
+        client: Authenticated HTTP client.
+        owner: Package owner.
+        package_name: Container package name.
+        versions: All known versions for the package.
+        registry_token: Bearer token for ghcr.io.
+
+    Returns:
+        Set of ``sha256:...`` digests that must not be deleted.
+    """
+    referenced: set[str] = set()
+    for v in versions:
+        if not v.tags:
+            continue
+        if not v.name.startswith("sha256:"):
+            continue
+        manifest = fetch_manifest(
+            client=client,
+            owner=owner,
+            package_name=package_name,
+            digest=v.name,
+            registry_token=registry_token,
+        )
+        if manifest is None:
+            continue
+        for child in manifest.get("manifests") or []:
+            digest = child.get("digest") if isinstance(child, dict) else None
+            if isinstance(digest, str):
+                referenced.add(digest)
+        subject = manifest.get("subject")
+        if isinstance(subject, dict):
+            subject_digest = subject.get("digest")
+            if isinstance(subject_digest, str):
+                referenced.add(subject_digest)
+    return referenced
 
 
 def _is_ephemeral_only_tagged(version: GhcrVersion) -> bool:
@@ -562,6 +740,10 @@ def main() -> int:
 
     Returns:
         int: Process exit code.
+
+    Raises:
+        httpx.HTTPStatusError: If a non-404 GitHub API error occurs while
+            listing versions for reference protection.
     """
     token = os.environ.get("GITHUB_TOKEN")
     if not token:
@@ -613,13 +795,16 @@ def main() -> int:
     # Production image packages — delete untagged only.
     packages = ["py-lintro", "lintro-tools"]
 
+    protect_referenced = os.environ.get("GHCR_PRUNE_PROTECT_REFERENCED", "1") == "1"
+
     logger.info(
         "GHCR cleanup starting (dry_run={}, min_age_days={}, keep_n={}, "
-        "buildcache_pr_age_days={})",
+        "buildcache_pr_age_days={}, protect_referenced={})",
         dry_run,
         min_age_days,
         keep_n,
         pr_age_days,
+        protect_referenced,
     )
 
     total_deleted = 0
@@ -628,6 +813,46 @@ def main() -> int:
         # but mypy can't verify this due to httpx's complex method signatures
         typed_client = cast(GhcrClient, client)
         for package_name in packages:
+            referenced: set[str] = set()
+            if protect_referenced:
+                base_path = _resolve_base_path(typed_client, owner)
+                try:
+                    versions = list_container_versions(
+                        client=typed_client,
+                        owner=owner,
+                        package_name=package_name,
+                        base_path=base_path,
+                    )
+                except httpx.HTTPStatusError as e:
+                    if e.response.status_code != 404:
+                        raise
+                    versions = []
+                if versions:
+                    reg_token = _exchange_registry_token(
+                        client=typed_client,
+                        owner=owner,
+                        package_name=package_name,
+                        github_token=token,
+                    )
+                    if reg_token is not None:
+                        referenced = collect_referenced_digests(
+                            client=typed_client,
+                            owner=owner,
+                            package_name=package_name,
+                            versions=versions,
+                            registry_token=reg_token,
+                        )
+                        logger.info(
+                            "Collected {} referenced digests for {}",
+                            len(referenced),
+                            package_name,
+                        )
+                    else:
+                        logger.warning(
+                            "Skipping reference protection for {} "
+                            "(no registry token)",
+                            package_name,
+                        )
             deleted = prune_package(
                 client=typed_client,
                 owner=owner,
@@ -635,6 +860,7 @@ def main() -> int:
                 dry_run=dry_run,
                 min_age_days=min_age_days,
                 keep_n=keep_n,
+                referenced_digests=referenced,
             )
             total_deleted += deleted
         for package_name in BUILDCACHE_PACKAGES:
@@ -650,7 +876,8 @@ def main() -> int:
 
     action = "Would delete" if dry_run else "Deleted"
     logger.info(
-        "{} {} GHCR versions total (untagged + ephemeral pr-*/mq-* buildcache)",
+        "{} {} GHCR versions total (untagged + ephemeral pr-*/mq-*/dispatch-* "
+        "buildcache; referenced digests preserved)",
         action,
         total_deleted,
     )
