@@ -40,6 +40,15 @@ concurrency:
 
 permissions: {}
 
+env:
+  # Per-event cache tag. PRs scope to pr-<N>; everything else (push/main,
+  # merge_group, schedule, workflow_dispatch) reads/writes :main.
+  CACHE_TAG: >-
+    ${{ github.event_name == 'pull_request'
+        && format('pr-{0}', github.event.pull_request.number)
+        || 'main' }}
+  CACHE_OPTS: mode=max,compression=zstd,oci-mediatypes=true,image-manifest=true
+
 jobs:
   # ============================================================================
   # Stage 1a: Detect if tool files changed (drives whether we call tools-image.yml)
@@ -316,6 +325,8 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
       - name: Build Docker image (py-lintro:latest)
+        env:
+          REPO: ghcr.io/lgtm-hq/py-lintro-buildcache
         # Action SHA pin exceeds 88 chars
         # yamllint disable-line rule:line-length
         uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
@@ -326,8 +337,19 @@ jobs:
           tags: py-lintro:latest
           build-args: |
             TOOLS_IMAGE=${{ needs.resolve-tools.outputs.image }}
+          cache-from: |
+            type=registry,ref=${{ env.REPO }}:${{ env.CACHE_TAG }}
+            type=registry,ref=${{ env.REPO }}:main
+          cache-to: >-
+            ${{ steps.fork-check.outputs.is-fork != 'true' &&
+                format('type=registry,ref={0}:{1},{2}',
+                       env.REPO, env.CACHE_TAG, env.CACHE_OPTS)
+                || '' }}
           provenance: false
+
       - name: Build Base Docker image (py-lintro:base)
+        env:
+          REPO: ghcr.io/lgtm-hq/py-lintro-base-buildcache
         # Action SHA pin exceeds 88 chars
         # yamllint disable-line rule:line-length
         uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
@@ -337,6 +359,14 @@ jobs:
           push: false
           load: true
           tags: py-lintro:base
+          cache-from: |
+            type=registry,ref=${{ env.REPO }}:${{ env.CACHE_TAG }}
+            type=registry,ref=${{ env.REPO }}:main
+          cache-to: >-
+            ${{ steps.fork-check.outputs.is-fork != 'true' &&
+                format('type=registry,ref={0}:{1},{2}',
+                       env.REPO, env.CACHE_TAG, env.CACHE_OPTS)
+                || '' }}
           provenance: false
       - name: Push CI images to GHCR
         if: steps.fork-check.outputs.is-fork != 'true'
@@ -1036,6 +1066,8 @@ jobs:
             type=semver,pattern={{major}},suffix=-base
             type=raw,value=base,enable={{is_default_branch}}
       - name: Build and push Docker image
+        env:
+          REPO: ghcr.io/lgtm-hq/py-lintro-buildcache
         # Action SHA pin exceeds 88 chars
         # yamllint disable-line rule:line-length
         uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
@@ -1046,12 +1078,19 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           build-args: |
             TOOLS_IMAGE=${{ needs.resolve-tools.outputs.image }}
+          cache-from: |
+            type=registry,ref=${{ env.REPO }}:${{ env.CACHE_TAG }}
+            type=registry,ref=${{ env.REPO }}:main
+          cache-to: >-
+            type=registry,ref=${{ env.REPO }}:${{ env.CACHE_TAG }},${{ env.CACHE_OPTS }}
           # Provenance/SBOM disabled: creates untagged OCI child manifests that
           # ghcr_prune_untagged.py deletes, breaking tagged image indexes.
           # Produces simple Docker v2 manifests (like ci-* tags).
           provenance: false
           sbom: false
       - name: Build and push Base Docker image
+        env:
+          REPO: ghcr.io/lgtm-hq/py-lintro-base-buildcache
         # Action SHA pin exceeds 88 chars
         # yamllint disable-line rule:line-length
         uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
@@ -1061,6 +1100,11 @@ jobs:
           push: true
           tags: ${{ steps.meta-base.outputs.tags }}
           labels: ${{ steps.meta-base.outputs.labels }}
+          cache-from: |
+            type=registry,ref=${{ env.REPO }}:${{ env.CACHE_TAG }}
+            type=registry,ref=${{ env.REPO }}:main
+          cache-to: >-
+            type=registry,ref=${{ env.REPO }}:${{ env.CACHE_TAG }},${{ env.CACHE_OPTS }}
           # Provenance/SBOM disabled: same reason as above.
           provenance: false
           sbom: false
