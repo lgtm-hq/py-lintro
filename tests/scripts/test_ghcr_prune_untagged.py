@@ -3,17 +3,20 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
+from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any, cast
 
 import pytest
 from assertpy import assert_that
 
 from scripts.ci.maintenance.ghcr_prune_untagged import (
+    BUILDCACHE_PACKAGES,
     GhcrClient,
     GhcrVersion,
     delete_version,
     list_container_versions,
     main,
+    prune_buildcache_package,
 )
 
 if TYPE_CHECKING:
@@ -312,7 +315,7 @@ def test_main_deletes_only_untagged(monkeypatch: pytest.MonkeyPatch) -> None:
     mock_client = make_mock_client(
         versions_data=versions_data,
         deleted=deleted,
-        missing_packages=["lintro-tools"],
+        missing_packages=["lintro-tools", *BUILDCACHE_PACKAGES],
     )
 
     mock_httpx = type(
@@ -364,7 +367,7 @@ def test_main_respects_keep_n_and_dry_run(monkeypatch: pytest.MonkeyPatch) -> No
     mock_client = make_mock_client(
         versions_data=versions_data,
         deleted=deleted,
-        missing_packages=["lintro-tools"],
+        missing_packages=["lintro-tools", *BUILDCACHE_PACKAGES],
     )
 
     mock_httpx = type(
@@ -384,3 +387,283 @@ def test_main_respects_keep_n_and_dry_run(monkeypatch: pytest.MonkeyPatch) -> No
     assert_that(rc).is_equal_to(0)
     # Keep 2 newest untagged (100, 200). Would delete only 300; dry-run prevents it
     assert_that(deleted).is_equal_to([])
+
+
+# =============================================================================
+# Buildcache retention tests
+# =============================================================================
+
+
+def _now_minus(days: int) -> str:
+    """Return an ISO-8601 UTC timestamp for ``now - days``.
+
+    Args:
+        days: Days to subtract from current UTC time.
+
+    Returns:
+        Timestamp formatted with trailing ``Z``.
+    """
+    return (
+        (datetime.now(UTC) - timedelta(days=days))
+        .isoformat()
+        .replace(
+            "+00:00",
+            "Z",
+        )
+    )
+
+
+def _buildcache_client(
+    versions_data: list[dict[str, Any]],
+    deleted: list[int],
+) -> GhcrClient:
+    """Build a GhcrClient mock returning ``versions_data`` for any package.
+
+    Args:
+        versions_data: Raw API version dicts to return on GET.
+        deleted: Mutable list collecting deleted version IDs.
+
+    Returns:
+        Mock client typed as ``GhcrClient``.
+    """
+
+    class _Resp:
+        def __init__(self) -> None:
+            self.status_code = 200
+            self.headers: dict[str, str] = {}
+
+        def raise_for_status(self) -> None:
+            return
+
+        def json(self) -> Any:
+            return self._payload  # type: ignore[attr-defined]
+
+    class _Client:
+        def get(
+            self,
+            url: str,
+            *,
+            headers: Mapping[str, str] | None = None,
+        ) -> _Resp:  # noqa: ARG002
+            r = _Resp()
+            if "/users/" in url and "/packages/" not in url:
+                r._payload = {"type": "User"}  # type: ignore[attr-defined]
+            else:
+                r._payload = versions_data  # type: ignore[attr-defined]
+            return r
+
+        def delete(
+            self,
+            url: str,
+            *,
+            headers: Mapping[str, str] | None = None,
+        ) -> _Resp:  # noqa: ARG002
+            deleted.append(int(url.rstrip("/").split("/")[-1]))
+            r = _Resp()
+            r.status_code = 204
+            return r
+
+    return cast(GhcrClient, _Client())
+
+
+def test_buildcache_preserves_main_tag() -> None:
+    """`main` tag survives regardless of age."""
+    deleted: list[int] = []
+    client = _buildcache_client(
+        versions_data=[
+            {
+                "id": 1,
+                "created_at": _now_minus(365),
+                "metadata": {"container": {"tags": ["main"]}},
+            },
+        ],
+        deleted=deleted,
+    )
+
+    n = prune_buildcache_package(
+        client=client,
+        owner="owner",
+        package_name="py-lintro-buildcache",
+        dry_run=False,
+        min_age_days=7,
+        pr_age_days=14,
+    )
+    assert_that(n).is_equal_to(0)
+    assert_that(deleted).is_equal_to([])
+
+
+def test_buildcache_deletes_old_pr_tag() -> None:
+    """`pr-<N>` tags older than pr_age_days are deleted."""
+    deleted: list[int] = []
+    client = _buildcache_client(
+        versions_data=[
+            {
+                "id": 42,
+                "created_at": _now_minus(30),
+                "metadata": {"container": {"tags": ["pr-890"]}},
+            },
+        ],
+        deleted=deleted,
+    )
+
+    n = prune_buildcache_package(
+        client=client,
+        owner="owner",
+        package_name="py-lintro-buildcache",
+        dry_run=False,
+        min_age_days=7,
+        pr_age_days=14,
+    )
+    assert_that(n).is_equal_to(1)
+    assert_that(deleted).is_equal_to([42])
+
+
+def test_buildcache_preserves_young_pr_tag() -> None:
+    """`pr-<N>` tags younger than pr_age_days are preserved."""
+    deleted: list[int] = []
+    client = _buildcache_client(
+        versions_data=[
+            {
+                "id": 7,
+                "created_at": _now_minus(3),
+                "metadata": {"container": {"tags": ["pr-1"]}},
+            },
+        ],
+        deleted=deleted,
+    )
+
+    n = prune_buildcache_package(
+        client=client,
+        owner="owner",
+        package_name="py-lintro-buildcache",
+        dry_run=False,
+        min_age_days=7,
+        pr_age_days=14,
+    )
+    assert_that(n).is_equal_to(0)
+    assert_that(deleted).is_equal_to([])
+
+
+def test_buildcache_deletes_old_untagged() -> None:
+    """Untagged buildcache versions older than min_age_days delete."""
+    deleted: list[int] = []
+    client = _buildcache_client(
+        versions_data=[
+            {
+                "id": 99,
+                "created_at": _now_minus(30),
+                "metadata": {"container": {"tags": []}},
+            },
+        ],
+        deleted=deleted,
+    )
+
+    n = prune_buildcache_package(
+        client=client,
+        owner="owner",
+        package_name="py-lintro-buildcache",
+        dry_run=False,
+        min_age_days=7,
+        pr_age_days=14,
+    )
+    assert_that(n).is_equal_to(1)
+    assert_that(deleted).is_equal_to([99])
+
+
+def test_buildcache_protects_mixed_tags() -> None:
+    """A version tagged with both `main` and `pr-<N>` is fully protected."""
+    deleted: list[int] = []
+    client = _buildcache_client(
+        versions_data=[
+            {
+                "id": 5,
+                "created_at": _now_minus(60),
+                "metadata": {"container": {"tags": ["main", "pr-3"]}},
+            },
+        ],
+        deleted=deleted,
+    )
+
+    n = prune_buildcache_package(
+        client=client,
+        owner="owner",
+        package_name="py-lintro-buildcache",
+        dry_run=False,
+        min_age_days=7,
+        pr_age_days=14,
+    )
+    assert_that(n).is_equal_to(0)
+    assert_that(deleted).is_equal_to([])
+
+
+def test_main_iterates_buildcache_packages(monkeypatch: pytest.MonkeyPatch) -> None:
+    """`main()` invokes buildcache prune for every BUILDCACHE_PACKAGES entry.
+
+    Args:
+        monkeypatch: Pytest monkeypatch fixture.
+    """
+    import httpx
+
+    import scripts.ci.maintenance.ghcr_prune_untagged as mod
+
+    seen: list[str] = []
+
+    class _Resp:
+        def __init__(self, payload: Any, status: int = 200) -> None:
+            self._payload = payload
+            self.status_code = status
+            self.headers: dict[str, str] = {}
+
+        def raise_for_status(self) -> None:
+            if self.status_code == 404:
+                raise httpx.HTTPStatusError(
+                    message="Not Found",
+                    request=httpx.Request("GET", "http://test"),
+                    response=httpx.Response(404),
+                )
+
+        def json(self) -> Any:
+            return self._payload
+
+    class _Client:
+        def __init__(
+            self,
+            headers: dict[str, str],
+            timeout: int,
+        ) -> None:  # noqa: ARG002
+            return
+
+        def __enter__(self) -> _Client:
+            return self
+
+        def __exit__(self, *_: object) -> None:
+            return None
+
+        def get(self, url: str, headers: dict[str, str]) -> _Resp:  # noqa: ARG002
+            if "/users/" in url and "/packages/" not in url:
+                return _Resp({"type": "User"})
+            for name in (*BUILDCACHE_PACKAGES, "py-lintro", "lintro-tools"):
+                if f"/{name}/" in url:
+                    seen.append(name)
+                    break
+            return _Resp([])
+
+        def delete(self, url: str, headers: dict[str, str]) -> _Resp:  # noqa: ARG002
+            return _Resp(None, status=204)
+
+    mock_httpx = type(
+        "MockHttpx",
+        (),
+        {"Client": _Client, "HTTPStatusError": httpx.HTTPStatusError},
+    )
+
+    monkeypatch.setenv("GITHUB_TOKEN", "x")
+    monkeypatch.setenv("GITHUB_REPOSITORY", "owner/name")
+    monkeypatch.setattr(mod, "httpx", mock_httpx)
+
+    rc = main()
+    assert_that(rc).is_equal_to(0)
+    for pkg in BUILDCACHE_PACKAGES:
+        assert_that(seen).contains(pkg)
+    assert_that(seen).contains("py-lintro")
+    assert_that(seen).contains("lintro-tools")
