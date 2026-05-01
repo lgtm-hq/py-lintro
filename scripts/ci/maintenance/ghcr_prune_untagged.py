@@ -323,6 +323,7 @@ def prune_package(
     min_age_days: int,
     keep_n: int,
     referenced_digests: set[str] | None = None,
+    versions: list[GhcrVersion] | None = None,
 ) -> int:
     """Prune untagged versions for a single package.
 
@@ -336,6 +337,10 @@ def prune_package(
         referenced_digests: Digests referenced by tagged manifests (multi-arch
             children, SLSA attestation children, OCI ``subject``). Versions
             whose ``name`` is in this set are protected from deletion.
+        versions: Pre-fetched version list. When provided the function skips
+            the GitHub API call and reuses the caller's list (used when the
+            caller has already fetched versions to compute
+            ``referenced_digests``).
 
     Returns:
         Number of versions deleted (or would be deleted in dry-run).
@@ -346,25 +351,20 @@ def prune_package(
     referenced = referenced_digests or set()
     logger.info("Processing package: {}", package_name)
 
-    # Compute base_path once to avoid redundant API calls
-    owner_type = _get_owner_type(client, owner)
-    if owner_type == "Organization":
-        base_path = f"https://api.github.com/orgs/{owner}/packages/container"
-    else:
-        base_path = f"https://api.github.com/users/{owner}/packages/container"
-
-    try:
-        versions = list_container_versions(
-            client=client,
-            owner=owner,
-            package_name=package_name,
-            base_path=base_path,
-        )
-    except httpx.HTTPStatusError as e:
-        if e.response.status_code == 404:
-            logger.warning("Package {} not found, skipping", package_name)
-            return 0
-        raise
+    base_path = _resolve_base_path(client, owner)
+    if versions is None:
+        try:
+            versions = list_container_versions(
+                client=client,
+                owner=owner,
+                package_name=package_name,
+                base_path=base_path,
+            )
+        except httpx.HTTPStatusError as e:
+            if e.response.status_code == 404:
+                logger.warning("Package {} not found, skipping", package_name)
+                return 0
+            raise
 
     # Filter to untagged versions only
     untagged = [v for v in versions if len(v.tags) == 0]
@@ -814,10 +814,11 @@ def main() -> int:
         typed_client = cast(GhcrClient, client)
         for package_name in packages:
             referenced: set[str] = set()
+            prefetched: list[GhcrVersion] | None = None
             if protect_referenced:
                 base_path = _resolve_base_path(typed_client, owner)
                 try:
-                    versions = list_container_versions(
+                    prefetched = list_container_versions(
                         client=typed_client,
                         owner=owner,
                         package_name=package_name,
@@ -826,8 +827,8 @@ def main() -> int:
                 except httpx.HTTPStatusError as e:
                     if e.response.status_code != 404:
                         raise
-                    versions = []
-                if versions:
+                    prefetched = []
+                if prefetched:
                     reg_token = _exchange_registry_token(
                         client=typed_client,
                         owner=owner,
@@ -839,7 +840,7 @@ def main() -> int:
                             client=typed_client,
                             owner=owner,
                             package_name=package_name,
-                            versions=versions,
+                            versions=prefetched,
                             registry_token=reg_token,
                         )
                         logger.info(
@@ -861,6 +862,7 @@ def main() -> int:
                 min_age_days=min_age_days,
                 keep_n=keep_n,
                 referenced_digests=referenced,
+                versions=prefetched,
             )
             total_deleted += deleted
         for package_name in BUILDCACHE_PACKAGES:
