@@ -75,6 +75,12 @@ job_seconds() {
 }
 
 cache_state_for_run() {
+	# Successful import wins over "not found": a PR cold-start that hits the
+	# `:pr-<N>` ref but falls back to `:main` reports "fallback", not "cold".
+	#   warm     — at least one ref imported, none missed
+	#   fallback — at least one ref imported AND at least one missed
+	#   cold     — all attempted refs missed
+	#   unknown  — no import attempts logged
 	local run_id="$1"
 	local log
 	log=$(gh run view "$run_id" --log 2>/dev/null || true)
@@ -82,10 +88,18 @@ cache_state_for_run() {
 		echo "unknown"
 		return
 	fi
-	if grep -q 'importing cache manifest from .* not found' <<<"$log"; then
-		echo "cold"
-	elif grep -q 'importing cache manifest from' <<<"$log"; then
+	local missed=0 imported=0
+	grep -q 'importing cache manifest from .* not found' <<<"$log" && missed=1
+	# Successful import: "importing cache manifest from <ref>" without
+	# "not found" on the same line.
+	grep 'importing cache manifest from' <<<"$log" |
+		grep -vq 'not found' && imported=1
+	if ((imported && missed)); then
+		echo "fallback"
+	elif ((imported)); then
 		echo "warm"
+	elif ((missed)); then
+		echo "cold"
 	else
 		echo "unknown"
 	fi
