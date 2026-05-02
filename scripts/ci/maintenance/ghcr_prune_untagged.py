@@ -512,7 +512,12 @@ def _exchange_registry_token(
             e,
         )
         return None
-    data: dict[str, Any] = resp.json()
+    try:
+        data: Any = resp.json()
+    except ValueError:
+        return None
+    if not isinstance(data, dict):
+        return None
     token = data.get("token") or data.get("access_token")
     return str(token) if token else None
 
@@ -556,8 +561,10 @@ def fetch_manifest(
         )
         return None
     try:
-        data: dict[str, Any] = resp.json()
+        data: Any = resp.json()
     except ValueError:
+        return None
+    if not isinstance(data, dict):
         return None
     return data
 
@@ -886,9 +893,10 @@ def main() -> int:
     action = "Would delete" if dry_run else "Deleted"
     logger.info(
         "{} {} GHCR versions total (untagged + ephemeral pr-*/mq-*/dispatch-* "
-        "buildcache; referenced digests preserved)",
+        "buildcache; referenced digests {})",
         action,
         total_deleted,
+        "preserved" if protect_referenced else "NOT preserved",
     )
     return 0
 

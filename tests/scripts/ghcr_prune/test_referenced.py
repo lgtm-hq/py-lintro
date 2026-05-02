@@ -51,6 +51,20 @@ def test_fetch_manifest_returns_none_on_404() -> None:
     assert_that(result).is_none()
 
 
+def test_fetch_manifest_returns_none_on_non_dict_payload() -> None:
+    """Non-object JSON (e.g. a list) yields ``None`` rather than crashing."""
+    # registry_client serves whatever payload type ManifestResp wraps.
+    client = registry_client(manifests={"sha256:weird": [1, 2, 3]})
+    result = fetch_manifest(
+        client=client,
+        owner="owner",
+        package_name="pkg",
+        digest="sha256:weird",
+        registry_token=_TEST_REGISTRY_TOKEN,
+    )
+    assert_that(result).is_none()
+
+
 def test_collect_referenced_digests_image_index() -> None:
     """Image-index children become referenced digests."""
     manifest: dict[str, Any] = {

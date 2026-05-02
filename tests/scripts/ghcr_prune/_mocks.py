@@ -180,11 +180,13 @@ class ManifestResp:
         return self._payload
 
 
-def registry_client(manifests: dict[str, dict[str, Any]]) -> GhcrClient:
+def registry_client(manifests: dict[str, Any]) -> GhcrClient:
     """Build a mock client that serves manifests by digest substring.
 
     Args:
-        manifests: Mapping of digest -> manifest body.
+        manifests: Mapping of digest -> manifest body. The body is returned
+            verbatim by ``ManifestResp.json()``, including non-dict payloads
+            so tests can exercise defensive parsing paths.
 
     Returns:
         Mock ``GhcrClient`` instance.
