@@ -18,7 +18,7 @@ from scripts.ci.maintenance.ghcr_prune_untagged import (
     main,
 )
 
-from ._mocks import make_mock_client
+from ._mocks import make_mock_client, now_minus
 
 
 @pytest.fixture
@@ -70,25 +70,28 @@ def test_main_deletes_only_untagged(
         stub_main_env: Fixture that sets the baseline env.
     """
     deleted: list[int] = []
+    # Timestamps are relative to "now" so the >7-day age guard fires
+    # regardless of when the test runs.
+    old = now_minus(days=30)
     versions_data = [
         {
             "id": 11,
-            "created_at": "2025-08-24T10:00:00Z",
+            "created_at": old,
             "metadata": {"container": {"tags": ["latest"]}},
         },
         {
             "id": 22,
-            "created_at": "2025-08-24T09:00:00Z",
+            "created_at": old,
             "metadata": {"container": {"tags": []}},
         },
         {
             "id": 33,
-            "created_at": "2025-08-24T08:00:00Z",
+            "created_at": old,
             "metadata": {"container": {"tags": ["0.4.1"]}},
         },
         {
             "id": 44,
-            "created_at": "2025-08-24T07:00:00Z",
+            "created_at": old,
             "metadata": {"container": {"tags": []}},
         },
     ]
@@ -111,20 +114,21 @@ def test_main_respects_keep_n_and_dry_run(
         stub_main_env: Fixture that sets the baseline env.
     """
     deleted: list[int] = []
+    # Stagger ages so keep-N selects predictably newest -> oldest.
     versions_data = [
         {
             "id": 100,
-            "created_at": "2025-08-24T12:00:00Z",
+            "created_at": now_minus(days=10),
             "metadata": {"container": {"tags": []}},
         },
         {
             "id": 200,
-            "created_at": "2025-08-24T11:00:00Z",
+            "created_at": now_minus(days=20),
             "metadata": {"container": {"tags": []}},
         },
         {
             "id": 300,
-            "created_at": "2025-08-24T10:00:00Z",
+            "created_at": now_minus(days=30),
             "metadata": {"container": {"tags": []}},
         },
     ]

@@ -827,7 +827,14 @@ def main() -> int:
                 except httpx.HTTPStatusError as e:
                     if e.response.status_code != 404:
                         raise
-                    prefetched = []
+                    # Package missing entirely: log here and skip the prune
+                    # call rather than passing an empty list (which would
+                    # silently bypass prune_package's missing-package warning).
+                    logger.warning(
+                        "Package {} not found, skipping",
+                        package_name,
+                    )
+                    continue
                 if prefetched:
                     reg_token = _exchange_registry_token(
                         client=typed_client,

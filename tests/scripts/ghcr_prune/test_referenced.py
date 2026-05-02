@@ -30,6 +30,7 @@ from ._mocks import (
     MockOwnerResponse,
     make_mock_client,
     make_versions_response,
+    now_minus,
     registry_client,
 )
 
@@ -120,23 +121,24 @@ def test_collect_referenced_digests_skips_untagged() -> None:
 def test_prune_package_skips_referenced_digests() -> None:
     """``referenced_digests`` digests are preserved; orphan untagged is reaped."""
     deleted: list[int] = []
+    old = now_minus(days=30)
     versions_data = [
         {
             "id": 10,
             "name": "sha256:tagged",
-            "created_at": "2025-01-01T00:00:00Z",
+            "created_at": old,
             "metadata": {"container": {"tags": ["v1"]}},
         },
         {
             "id": 11,
             "name": "sha256:slsa-child",
-            "created_at": "2025-01-01T00:00:00Z",
+            "created_at": old,
             "metadata": {"container": {"tags": []}},
         },
         {
             "id": 12,
             "name": "sha256:orphan",
-            "created_at": "2025-01-01T00:00:00Z",
+            "created_at": old,
             "metadata": {"container": {"tags": []}},
         },
     ]
@@ -167,29 +169,30 @@ def test_main_protects_slsa_children_end_to_end(
         monkeypatch: Pytest monkeypatch fixture.
     """
     deleted: list[int] = []
+    old = now_minus(days=30)
     versions_data: list[dict[str, Any]] = [
         {
             "id": 1,
             "name": "sha256:tagged-index",
-            "created_at": "2025-01-01T00:00:00Z",
+            "created_at": old,
             "metadata": {"container": {"tags": ["v1.0.0"]}},
         },
         {
             "id": 2,
             "name": "sha256:slsa-attestation",
-            "created_at": "2025-01-01T00:00:00Z",
+            "created_at": old,
             "metadata": {"container": {"tags": []}},
         },
         {
             "id": 3,
             "name": "sha256:image-layer",
-            "created_at": "2025-01-01T00:00:00Z",
+            "created_at": old,
             "metadata": {"container": {"tags": []}},
         },
         {
             "id": 4,
             "name": "sha256:orphan",
-            "created_at": "2025-01-01T00:00:00Z",
+            "created_at": old,
             "metadata": {"container": {"tags": []}},
         },
     ]
