@@ -569,6 +569,61 @@ def fetch_manifest(
     return data
 
 
+def fetch_referrers(
+    client: GhcrClient,
+    owner: str,
+    package_name: str,
+    digest: str,
+    registry_token: str,
+) -> list[dict[str, Any]]:
+    """Return descriptors from the OCI Referrers API for ``digest``.
+
+    The Referrers API (``GET /v2/<name>/referrers/<digest>``, OCI v1.1)
+    returns an image-index listing every manifest whose ``subject`` points
+    at ``digest``. This is how cosign / in-toto attestations are discovered
+    when they have no tag of their own — the only link from the tagged
+    image is via the referrers index.
+
+    Args:
+        client: Authenticated HTTP client.
+        owner: Package owner.
+        package_name: Container package name.
+        digest: Subject digest including ``sha256:`` prefix.
+        registry_token: Bearer token from :func:`_exchange_registry_token`.
+
+    Returns:
+        List of referrer descriptors (each a dict with at least ``digest``);
+        empty on 404 / unparseable / non-conformant responses.
+    """
+    url = f"https://ghcr.io/v2/{owner}/{package_name}/referrers/{digest}"
+    headers = {
+        "Authorization": f"Bearer {registry_token}",
+        "Accept": "application/vnd.oci.image.index.v1+json",
+    }
+    try:
+        resp = client.get(url, headers=headers)
+    except httpx.HTTPError as e:
+        logger.warning("Referrers fetch failed for {}: {}", digest, e)
+        return []
+    if resp.status_code == 404:
+        return []
+    if resp.status_code >= 400:
+        logger.warning(
+            "Referrers fetch returned {} for {}",
+            resp.status_code,
+            digest,
+        )
+        return []
+    try:
+        data: Any = resp.json()
+    except ValueError:
+        return []
+    if not isinstance(data, dict):
+        return []
+    descriptors = data.get("manifests") or []
+    return [d for d in descriptors if isinstance(d, dict)]
+
+
 def collect_referenced_digests(
     client: GhcrClient,
     owner: str,
@@ -582,9 +637,12 @@ def collect_referenced_digests(
     records:
 
     - Every ``manifests[].digest`` entry (image-index / manifest-list children
-      — multi-arch, provenance, SBOM).
-    - The ``subject.digest`` if present (OCI referrer pattern, e.g.
-      ``cosign`` / ``in-toto`` attestations).
+      — multi-arch, provenance / SBOM children of a tagged index).
+    - Every descriptor returned by the OCI Referrers API for the tagged
+      digest (untagged cosign / in-toto attestations whose ``subject``
+      points at the tagged image).
+    - The ``subject.digest`` of the tagged manifest itself, when present
+      (defense-in-depth for older attestation layouts).
 
     Args:
         client: Authenticated HTTP client.
@@ -609,17 +667,27 @@ def collect_referenced_digests(
             digest=v.name,
             registry_token=registry_token,
         )
-        if manifest is None:
-            continue
-        for child in manifest.get("manifests") or []:
-            digest = child.get("digest") if isinstance(child, dict) else None
-            if isinstance(digest, str):
-                referenced.add(digest)
-        subject = manifest.get("subject")
-        if isinstance(subject, dict):
-            subject_digest = subject.get("digest")
-            if isinstance(subject_digest, str):
-                referenced.add(subject_digest)
+        if manifest is not None:
+            for child in manifest.get("manifests") or []:
+                digest = child.get("digest") if isinstance(child, dict) else None
+                if isinstance(digest, str):
+                    referenced.add(digest)
+            subject = manifest.get("subject")
+            if isinstance(subject, dict):
+                subject_digest = subject.get("digest")
+                if isinstance(subject_digest, str):
+                    referenced.add(subject_digest)
+        # Discover untagged referrers (cosign signatures, attestations).
+        for descriptor in fetch_referrers(
+            client=client,
+            owner=owner,
+            package_name=package_name,
+            digest=v.name,
+            registry_token=registry_token,
+        ):
+            ref_digest = descriptor.get("digest")
+            if isinstance(ref_digest, str):
+                referenced.add(ref_digest)
     return referenced
 
 

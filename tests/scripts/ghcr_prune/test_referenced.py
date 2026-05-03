@@ -7,6 +7,7 @@ Covers ``fetch_manifest``, ``collect_referenced_digests``, the
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from typing import Any, cast
 
 import httpx
@@ -20,6 +21,7 @@ from scripts.ci.maintenance.ghcr_prune_untagged import (
     GhcrVersion,
     collect_referenced_digests,
     fetch_manifest,
+    fetch_referrers,
     main,
     prune_package,
 )
@@ -49,6 +51,103 @@ def test_fetch_manifest_returns_none_on_404() -> None:
         registry_token=_TEST_REGISTRY_TOKEN,
     )
     assert_that(result).is_none()
+
+
+def _route_client(routes: dict[str, Any]) -> GhcrClient:
+    """Build a mock client matching URL substrings to JSON payloads.
+
+    The first matching key wins, so callers should order specific paths
+    (``/referrers/``) before generic ones (``/manifests/``).
+
+    Args:
+        routes: Mapping of URL substring -> JSON body for ``ManifestResp``.
+
+    Returns:
+        Mock ``GhcrClient`` instance.
+    """
+
+    class _Client:
+        def get(
+            self,
+            url: str,
+            *,
+            headers: Mapping[str, str] | None = None,
+        ) -> ManifestResp:  # noqa: ARG002
+            for needle, body in routes.items():
+                if needle in url:
+                    return ManifestResp(payload=body)
+            return ManifestResp(payload={}, status_code=404)
+
+    return cast(GhcrClient, _Client())
+
+
+def test_fetch_referrers_returns_descriptors() -> None:
+    """Referrers index ``manifests`` list is returned as descriptor dicts."""
+    referrers_index: dict[str, Any] = {
+        "mediaType": "application/vnd.oci.image.index.v1+json",
+        "manifests": [
+            {
+                "digest": "sha256:cosign-sig",
+                "artifactType": "application/vnd.dev.cosign.simplesigning.v1+json",
+            },
+            {"digest": "sha256:slsa-attestation"},
+        ],
+    }
+    client = _route_client(routes={"/referrers/sha256:img": referrers_index})
+
+    descriptors = fetch_referrers(
+        client=client,
+        owner="owner",
+        package_name="pkg",
+        digest="sha256:img",
+        registry_token=_TEST_REGISTRY_TOKEN,
+    )
+    assert_that([d["digest"] for d in descriptors]).is_equal_to(
+        ["sha256:cosign-sig", "sha256:slsa-attestation"],
+    )
+
+
+def test_fetch_referrers_returns_empty_on_404() -> None:
+    """A 404 (registry without OCI 1.1 support) yields an empty list."""
+    client = _route_client(routes={})
+    result = fetch_referrers(
+        client=client,
+        owner="owner",
+        package_name="pkg",
+        digest="sha256:any",
+        registry_token=_TEST_REGISTRY_TOKEN,
+    )
+    assert_that(result).is_empty()
+
+
+def test_collect_referenced_digests_includes_referrers() -> None:
+    """Untagged referrers (e.g. cosign signatures) are protected."""
+    image_manifest: dict[str, Any] = {
+        "mediaType": "application/vnd.oci.image.manifest.v1+json",
+    }
+    referrers_index: dict[str, Any] = {
+        "manifests": [
+            {"digest": "sha256:cosign-sig"},
+            {"digest": "sha256:in-toto-attestation"},
+        ],
+    }
+    # /referrers/ routed before /manifests/ so the more specific path wins.
+    client = _route_client(
+        routes={
+            "/referrers/sha256:img": referrers_index,
+            "/manifests/sha256:img": image_manifest,
+        },
+    )
+    versions = [GhcrVersion(id=1, tags=["v1"], name="sha256:img")]
+
+    refs = collect_referenced_digests(
+        client=client,
+        owner="owner",
+        package_name="pkg",
+        versions=versions,
+        registry_token=_TEST_REGISTRY_TOKEN,
+    )
+    assert_that(refs).contains("sha256:cosign-sig", "sha256:in-toto-attestation")
 
 
 def test_fetch_manifest_returns_none_on_non_dict_payload() -> None:
