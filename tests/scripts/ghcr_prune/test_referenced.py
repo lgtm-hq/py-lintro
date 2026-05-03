@@ -360,6 +360,8 @@ def test_main_protects_slsa_children_end_to_end(
     )
     monkeypatch.setenv("GITHUB_TOKEN", "ghs_test")
     monkeypatch.setenv("GITHUB_REPOSITORY", "owner/name")
+    # Force protection on regardless of runner/local default.
+    monkeypatch.setenv("GHCR_PRUNE_PROTECT_REFERENCED", "1")
     monkeypatch.setattr(mod, "httpx", mock_httpx)
 
     rc = main()
