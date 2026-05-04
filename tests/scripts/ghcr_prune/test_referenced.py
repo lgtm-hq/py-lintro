@@ -273,6 +273,73 @@ def test_prune_package_skips_referenced_digests() -> None:
     assert_that(deleted).is_equal_to([12])
 
 
+def test_main_skips_prune_when_registry_auth_fails(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """``main()`` must not delete anything when registry token exchange fails.
+
+    Args:
+        monkeypatch: Pytest monkeypatch fixture.
+    """
+    deleted: list[int] = []
+    old = now_minus(days=30)
+    versions_data: list[dict[str, Any]] = [
+        {
+            "id": 1,
+            "name": "sha256:would-be-orphan",
+            "created_at": old,
+            "metadata": {"container": {"tags": []}},
+        },
+    ]
+
+    class _Client:
+        def __init__(
+            self,
+            headers: dict[str, str],
+            timeout: int,
+        ) -> None:  # noqa: ARG002
+            return
+
+        def __enter__(self) -> _Client:
+            return self
+
+        def __exit__(self, *_: object) -> None:
+            return None
+
+        def get(self, url: str, headers: dict[str, str]) -> Any:  # noqa: ARG002
+            if "/users/" in url and "/packages/" not in url:
+                return MockOwnerResponse()
+            if url.startswith("https://ghcr.io/token"):
+                # Auth failure: 401
+                return ManifestResp(payload={}, status_code=401)
+            for pkg in ("lintro-tools", *BUILDCACHE_PACKAGES):
+                if pkg in url:
+                    return make_versions_response(
+                        versions_data=[],
+                        status_code=404,
+                    )()
+            return make_versions_response(versions_data=versions_data)()
+
+        def delete(self, url: str, headers: dict[str, str]) -> Any:  # noqa: ARG002
+            deleted.append(int(url.rstrip("/").split("/")[-1]))
+            return MockDeleteResponse()
+
+    mock_httpx = type(
+        "MockHttpx",
+        (),
+        {"Client": _Client, "HTTPStatusError": httpx.HTTPStatusError},
+    )
+    monkeypatch.setenv("GITHUB_TOKEN", "ghs_test")
+    monkeypatch.setenv("GITHUB_REPOSITORY", "owner/name")
+    monkeypatch.setenv("GHCR_PRUNE_PROTECT_REFERENCED", "1")
+    monkeypatch.setattr(mod, "httpx", mock_httpx)
+
+    rc = main()
+    assert_that(rc).is_equal_to(0)
+    # Auth failure short-circuits prune; the orphan untagged version survives.
+    assert_that(deleted).is_empty()
+
+
 def test_main_protects_slsa_children_end_to_end(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

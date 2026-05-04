@@ -917,25 +917,29 @@ def main() -> int:
                         package_name=package_name,
                         github_token=token,
                     )
-                    if reg_token is not None:
-                        referenced = collect_referenced_digests(
-                            client=typed_client,
-                            owner=owner,
-                            package_name=package_name,
-                            versions=prefetched,
-                            registry_token=reg_token,
-                        )
-                        logger.info(
-                            "Collected {} referenced digests for {}",
-                            len(referenced),
-                            package_name,
-                        )
-                    else:
+                    if reg_token is None:
+                        # Auth failed: skip pruning this package this run
+                        # rather than risk deleting unprotected SLSA / cosign
+                        # children. Operator must fix auth or set
+                        # GHCR_PRUNE_PROTECT_REFERENCED=0 to opt out.
                         logger.warning(
-                            "Skipping reference protection for {} "
-                            "(no registry token)",
+                            "Skipping prune for {} (registry auth failed; "
+                            "cannot compute reference protection)",
                             package_name,
                         )
+                        continue
+                    referenced = collect_referenced_digests(
+                        client=typed_client,
+                        owner=owner,
+                        package_name=package_name,
+                        versions=prefetched,
+                        registry_token=reg_token,
+                    )
+                    logger.info(
+                        "Collected {} referenced digests for {}",
+                        len(referenced),
+                        package_name,
+                    )
             deleted = prune_package(
                 client=typed_client,
                 owner=owner,
