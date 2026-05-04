@@ -12,7 +12,7 @@ import httpx
 import pytest
 from assertpy import assert_that
 
-import scripts.ci.maintenance.ghcr_prune_untagged as mod
+import scripts.ci.maintenance.ghcr_prune.cli as mod
 from scripts.ci.maintenance.ghcr_prune_untagged import (
     BUILDCACHE_PACKAGES,
     main,

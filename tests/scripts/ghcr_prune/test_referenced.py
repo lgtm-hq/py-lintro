@@ -14,11 +14,12 @@ import httpx
 import pytest
 from assertpy import assert_that
 
-import scripts.ci.maintenance.ghcr_prune_untagged as mod
+import scripts.ci.maintenance.ghcr_prune.cli as mod
 from scripts.ci.maintenance.ghcr_prune_untagged import (
     BUILDCACHE_PACKAGES,
     GhcrClient,
     GhcrVersion,
+    RegistryFetchError,
     collect_referenced_digests,
     fetch_manifest,
     fetch_referrers,
@@ -140,28 +141,64 @@ def test_collect_referenced_digests_includes_referrers() -> None:
     )
     versions = [GhcrVersion(id=1, tags=["v1"], name="sha256:img")]
 
-    refs = collect_referenced_digests(
+    result = collect_referenced_digests(
         client=client,
         owner="owner",
         package_name="pkg",
         versions=versions,
         registry_token=_TEST_REGISTRY_TOKEN,
     )
-    assert_that(refs).contains("sha256:cosign-sig", "sha256:in-toto-attestation")
+    assert_that(result.digests).contains(
+        "sha256:cosign-sig",
+        "sha256:in-toto-attestation",
+    )
 
 
-def test_fetch_manifest_returns_none_on_non_dict_payload() -> None:
-    """Non-object JSON (e.g. a list) yields ``None`` rather than crashing."""
-    # registry_client serves whatever payload type ManifestResp wraps.
+def test_fetch_manifest_raises_on_non_dict_payload() -> None:
+    """Non-object JSON raises ``RegistryFetchError`` (transient/unsafe).
+
+    Treating a malformed manifest as "no children" would silently shrink the
+    protection set and risk false deletions.
+    """
     client = registry_client(manifests={"sha256:weird": [1, 2, 3]})
-    result = fetch_manifest(
+    with pytest.raises(RegistryFetchError):
+        fetch_manifest(
+            client=client,
+            owner="owner",
+            package_name="pkg",
+            digest="sha256:weird",
+            registry_token=_TEST_REGISTRY_TOKEN,
+        )
+
+
+def test_collect_referenced_digests_marks_incomplete_on_transient() -> None:
+    """A transient registry failure flips ``complete=False`` so callers skip.
+
+    Mirrors the production safety net: any registry hiccup means the
+    caller must NOT prune until the next run.
+    """
+
+    class _Client:
+        def get(
+            self,
+            url: str,
+            *,
+            headers: Mapping[str, str] | None = None,
+        ) -> ManifestResp:  # noqa: ARG002
+            # 503 simulates a transient upstream error.
+            return ManifestResp(payload={}, status_code=503)
+
+    client = cast(GhcrClient, _Client())
+    versions = [GhcrVersion(id=1, tags=["v1"], name="sha256:img")]
+
+    result = collect_referenced_digests(
         client=client,
         owner="owner",
         package_name="pkg",
-        digest="sha256:weird",
+        versions=versions,
         registry_token=_TEST_REGISTRY_TOKEN,
     )
-    assert_that(result).is_none()
+    assert_that(result.complete).is_false()
 
 
 def test_collect_referenced_digests_image_index() -> None:
@@ -180,14 +217,14 @@ def test_collect_referenced_digests_image_index() -> None:
         GhcrVersion(id=2, tags=[], name="sha256:child-amd64"),
     ]
 
-    refs = collect_referenced_digests(
+    result = collect_referenced_digests(
         client=client,
         owner="owner",
         package_name="pkg",
         versions=versions,
         registry_token=_TEST_REGISTRY_TOKEN,
     )
-    assert_that(refs).contains(
+    assert_that(result.digests).contains(
         "sha256:child-amd64",
         "sha256:child-arm64",
         "sha256:provenance",
@@ -203,14 +240,14 @@ def test_collect_referenced_digests_subject_referrer() -> None:
     client = registry_client(manifests={"sha256:attestation": manifest})
     versions = [GhcrVersion(id=1, tags=["sha-abc"], name="sha256:attestation")]
 
-    refs = collect_referenced_digests(
+    result = collect_referenced_digests(
         client=client,
         owner="owner",
         package_name="pkg",
         versions=versions,
         registry_token=_TEST_REGISTRY_TOKEN,
     )
-    assert_that(refs).contains("sha256:attested")
+    assert_that(result.digests).contains("sha256:attested")
 
 
 def test_collect_referenced_digests_skips_untagged() -> None:
@@ -221,14 +258,15 @@ def test_collect_referenced_digests_skips_untagged() -> None:
     client = registry_client(manifests={"sha256:untagged-parent": manifest})
     versions = [GhcrVersion(id=1, tags=[], name="sha256:untagged-parent")]
 
-    refs = collect_referenced_digests(
+    result = collect_referenced_digests(
         client=client,
         owner="owner",
         package_name="pkg",
         versions=versions,
         registry_token=_TEST_REGISTRY_TOKEN,
     )
-    assert_that(refs).is_empty()
+    assert_that(result.digests).is_empty()
+    assert_that(result.complete).is_true()
 
 
 def test_prune_package_skips_referenced_digests() -> None:
@@ -404,6 +442,10 @@ def test_main_protects_slsa_children_end_to_end(
             if url.startswith("https://ghcr.io/token"):
                 fake_token = "registry-bearer"  # noqa: S105 # nosec B105
                 return ManifestResp(payload={"token": fake_token})
+            if "/v2/" in url and "/referrers/" in url:
+                # No referrers in this scenario (registry without OCI 1.1, or
+                # genuinely no signatures) — protection set stays complete.
+                return ManifestResp(payload={}, status_code=404)
             if "/v2/" in url and "/manifests/" in url:
                 if "sha256:tagged-index" in url:
                     return ManifestResp(payload=index_manifest)
