@@ -65,8 +65,11 @@ def test_list_container_versions_handles_malformed_metadata(
             self,
             url: str,
             *,
-            headers: Mapping[str, str] | None = None,
-        ) -> DummyResp | MockOwnerResponse:  # noqa: ARG002
+            # headers required by GhcrClient protocol; not exercised here.
+            headers: (
+                Mapping[str, str] | None
+            ) = None,  # noqa: ARG002 — protocol-required
+        ) -> DummyResp | MockOwnerResponse:
             if "/users/" in url and "/packages/" not in url:
                 return MockOwnerResponse()
             return DummyResp(data=[raw])
@@ -98,8 +101,11 @@ def test_list_container_versions_parses_minimal_structure() -> None:
             self,
             url: str,
             *,
-            headers: Mapping[str, str] | None = None,
-        ) -> DummyResp | MockOwnerResponse:  # noqa: ARG002
+            # headers required by GhcrClient protocol; not exercised here.
+            headers: (
+                Mapping[str, str] | None
+            ) = None,  # noqa: ARG002 — protocol-required
+        ) -> DummyResp | MockOwnerResponse:
             if "/users/" in url and "/packages/" not in url:
                 return MockOwnerResponse()
             return DummyResp(
@@ -160,8 +166,11 @@ def test_list_container_versions_handles_non_list_payload() -> None:
             self,
             url: str,
             *,
-            headers: Mapping[str, str] | None = None,
-        ) -> DummyResp | MockOwnerResponse:  # noqa: ARG002
+            # headers required by GhcrClient protocol; not exercised here.
+            headers: (
+                Mapping[str, str] | None
+            ) = None,  # noqa: ARG002 — protocol-required
+        ) -> DummyResp | MockOwnerResponse:
             if "/users/" in url and "/packages/" not in url:
                 return MockOwnerResponse()
             return DummyResp()
@@ -192,8 +201,11 @@ def test_list_container_versions_skips_non_dict_items() -> None:
             self,
             url: str,
             *,
-            headers: Mapping[str, str] | None = None,
-        ) -> DummyResp | MockOwnerResponse:  # noqa: ARG002
+            # headers required by GhcrClient protocol; not exercised here.
+            headers: (
+                Mapping[str, str] | None
+            ) = None,  # noqa: ARG002 — protocol-required
+        ) -> DummyResp | MockOwnerResponse:
             if "/users/" in url and "/packages/" not in url:
                 return MockOwnerResponse()
             return DummyResp(
@@ -218,9 +230,13 @@ def test_delete_version_allows_404() -> None:
     class DummyClient:
         def delete(
             self,
-            url: str,  # noqa: ARG002
+            # url + headers are required by the GhcrClient protocol but not
+            # exercised by this test — suppress unused-arg per param.
+            url: str,  # noqa: ARG002 — protocol-required
             *,
-            headers: Mapping[str, str] | None = None,  # noqa: ARG002
+            headers: (
+                Mapping[str, str] | None
+            ) = None,  # noqa: ARG002 — protocol-required
         ) -> MockDeleteResponse:
             return MockDeleteResponse(status_code=404)
 
@@ -238,9 +254,13 @@ def test_delete_version_raises_on_non_204_non_404() -> None:
     class DummyClient:
         def delete(
             self,
-            url: str,  # noqa: ARG002
+            # url + headers are required by the GhcrClient protocol but not
+            # exercised by this test — suppress unused-arg per param.
+            url: str,  # noqa: ARG002 — protocol-required
             *,
-            headers: Mapping[str, str] | None = None,  # noqa: ARG002
+            headers: (
+                Mapping[str, str] | None
+            ) = None,  # noqa: ARG002 — protocol-required
         ) -> MockDeleteResponse:
             return MockDeleteResponse(status_code=500)
 

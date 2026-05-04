@@ -194,7 +194,12 @@ def test_main_iterates_buildcache_packages(
     seen: list[str] = []
 
     class _Client:
-        def __init__(self, headers: dict[str, str], timeout: int) -> None:  # noqa: ARG002
+        def __init__(
+            self,
+            # match httpx.Client signature; mock ignores both.
+            headers: dict[str, str],  # noqa: ARG002 — match httpx signature
+            timeout: int,  # noqa: ARG002 — match httpx signature
+        ) -> None:
             return
 
         def __enter__(self) -> _Client:
@@ -203,7 +208,12 @@ def test_main_iterates_buildcache_packages(
         def __exit__(self, *_: object) -> None:
             return None
 
-        def get(self, url: str, headers: dict[str, str]) -> Any:  # noqa: ARG002
+        # GhcrClient protocol requires headers; this mock keys on url only.
+        def get(
+            self,
+            url: str,
+            headers: dict[str, str],  # noqa: ARG002 — protocol-required
+        ) -> Any:
             if "/users/" in url and "/packages/" not in url:
                 return MockOwnerResponse()
             for name in (
@@ -216,7 +226,11 @@ def test_main_iterates_buildcache_packages(
                     break
             return make_versions_response(versions_data=[])()
 
-        def delete(self, url: str, headers: dict[str, str]) -> Any:  # noqa: ARG002
+        def delete(
+            self,
+            url: str,  # noqa: ARG002 — recorded only when delete asserted on
+            headers: dict[str, str],  # noqa: ARG002 — protocol-required
+        ) -> Any:
             return MockDeleteResponse()
 
     mock_httpx = type(
@@ -256,8 +270,9 @@ def _buildcache_client(
             self,
             url: str,
             *,
-            headers: dict[str, str] | None = None,
-        ) -> Any:  # noqa: ARG002
+            # protocol-required; mock keys on url only.
+            headers: dict[str, str] | None = None,  # noqa: ARG002 — protocol-required
+        ) -> Any:
             if "/users/" in url and "/packages/" not in url:
                 return MockOwnerResponse()
             return ManifestResp(payload=versions_data)
@@ -266,8 +281,8 @@ def _buildcache_client(
             self,
             url: str,
             *,
-            headers: dict[str, str] | None = None,
-        ) -> MockDeleteResponse:  # noqa: ARG002
+            headers: dict[str, str] | None = None,  # noqa: ARG002 — protocol-required
+        ) -> MockDeleteResponse:
             deleted.append(int(url.rstrip("/").split("/")[-1]))
             return MockDeleteResponse()
 

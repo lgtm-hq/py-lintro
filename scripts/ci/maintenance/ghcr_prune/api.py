@@ -40,12 +40,12 @@ def _parse_link_header(link_header: str | None) -> str | None:
     if not link_header:
         return None
     for part in link_header.split(","):
-        part = part.strip()
-        if 'rel="next"' in part:
-            start = part.find("<")
-            end = part.find(">")
+        candidate = part.strip()
+        if 'rel="next"' in candidate:
+            start = candidate.find("<")
+            end = candidate.find(">")
             if start != -1 and end != -1:
-                return part[start + 1 : end]
+                return candidate[start + 1 : end]
     return None
 
 

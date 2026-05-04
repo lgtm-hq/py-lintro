@@ -118,9 +118,11 @@ def make_mock_client(
     class _MockClient:  # noqa: N801 — factory class name
         def __init__(
             self,
-            headers: dict[str, str],
-            timeout: int,
-        ) -> None:  # noqa: ARG002
+            # httpx.Client(headers=, timeout=) shape — match for substitution
+            # but the mock ignores both.
+            headers: dict[str, str],  # noqa: ARG002 — match httpx signature
+            timeout: int,  # noqa: ARG002 — match httpx signature
+        ) -> None:
             return
 
         def __enter__(self) -> _MockClient:
@@ -137,8 +139,9 @@ def make_mock_client(
         def get(
             self,
             url: str,
-            headers: dict[str, str],
-        ) -> MockOwnerResponse | Any:  # noqa: ARG002
+            # GhcrClient protocol requires headers; this mock keys on url only.
+            headers: dict[str, str],  # noqa: ARG002 — protocol-required
+        ) -> MockOwnerResponse | Any:
             if "/users/" in url and "/packages/" not in url:
                 return MockOwnerResponse()
             for pkg in missing:
@@ -149,8 +152,8 @@ def make_mock_client(
         def delete(
             self,
             url: str,
-            headers: dict[str, str],
-        ) -> MockDeleteResponse:  # noqa: ARG002
+            headers: dict[str, str],  # noqa: ARG002 — protocol-required
+        ) -> MockDeleteResponse:
             deleted.append(int(url.rstrip("/").split("/")[-1]))
             return MockDeleteResponse()
 
@@ -197,8 +200,11 @@ def registry_client(manifests: dict[str, Any]) -> GhcrClient:
             self,
             url: str,
             *,
-            headers: Mapping[str, str] | None = None,
-        ) -> ManifestResp:  # noqa: ARG002
+            # protocol param; this mock keys on url only.
+            headers: (
+                Mapping[str, str] | None
+            ) = None,  # noqa: ARG002 — protocol-required
+        ) -> ManifestResp:
             for digest, body in manifests.items():
                 if digest in url:
                     return ManifestResp(payload=body)

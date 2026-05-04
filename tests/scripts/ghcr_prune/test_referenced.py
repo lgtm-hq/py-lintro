@@ -72,8 +72,11 @@ def _route_client(routes: dict[str, Any]) -> GhcrClient:
             self,
             url: str,
             *,
-            headers: Mapping[str, str] | None = None,
-        ) -> ManifestResp:  # noqa: ARG002
+            # protocol-required; this mock routes on url substrings.
+            headers: (
+                Mapping[str, str] | None
+            ) = None,  # noqa: ARG002 — protocol-required
+        ) -> ManifestResp:
             for needle, body in routes.items():
                 if needle in url:
                     return ManifestResp(payload=body)
@@ -181,10 +184,12 @@ def test_collect_referenced_digests_marks_incomplete_on_transient() -> None:
     class _Client:
         def get(
             self,
-            url: str,
+            url: str,  # noqa: ARG002 — every URL returns 503 in this scenario
             *,
-            headers: Mapping[str, str] | None = None,
-        ) -> ManifestResp:  # noqa: ARG002
+            headers: (
+                Mapping[str, str] | None
+            ) = None,  # noqa: ARG002 — protocol-required
+        ) -> ManifestResp:
             # 503 simulates a transient upstream error.
             return ManifestResp(payload={}, status_code=503)
 
@@ -333,9 +338,10 @@ def test_main_skips_prune_when_registry_auth_fails(
     class _Client:
         def __init__(
             self,
-            headers: dict[str, str],
-            timeout: int,
-        ) -> None:  # noqa: ARG002
+            # match httpx.Client signature; mock ignores both.
+            headers: dict[str, str],  # noqa: ARG002 — match httpx signature
+            timeout: int,  # noqa: ARG002 — match httpx signature
+        ) -> None:
             return
 
         def __enter__(self) -> _Client:
@@ -344,7 +350,11 @@ def test_main_skips_prune_when_registry_auth_fails(
         def __exit__(self, *_: object) -> None:
             return None
 
-        def get(self, url: str, headers: dict[str, str]) -> Any:  # noqa: ARG002
+        def get(
+            self,
+            url: str,
+            headers: dict[str, str],  # noqa: ARG002 — protocol-required
+        ) -> Any:
             if "/users/" in url and "/packages/" not in url:
                 return MockOwnerResponse()
             if url.startswith("https://ghcr.io/token"):
@@ -358,7 +368,11 @@ def test_main_skips_prune_when_registry_auth_fails(
                     )()
             return make_versions_response(versions_data=versions_data)()
 
-        def delete(self, url: str, headers: dict[str, str]) -> Any:  # noqa: ARG002
+        def delete(
+            self,
+            url: str,
+            headers: dict[str, str],  # noqa: ARG002 — protocol-required
+        ) -> Any:
             deleted.append(int(url.rstrip("/").split("/")[-1]))
             return MockDeleteResponse()
 
@@ -425,9 +439,10 @@ def test_main_protects_slsa_children_end_to_end(
     class _Client:
         def __init__(
             self,
-            headers: dict[str, str],
-            timeout: int,
-        ) -> None:  # noqa: ARG002
+            # match httpx.Client signature; mock ignores both.
+            headers: dict[str, str],  # noqa: ARG002 — match httpx signature
+            timeout: int,  # noqa: ARG002 — match httpx signature
+        ) -> None:
             return
 
         def __enter__(self) -> _Client:
@@ -436,7 +451,11 @@ def test_main_protects_slsa_children_end_to_end(
         def __exit__(self, *_: object) -> None:
             return None
 
-        def get(self, url: str, headers: dict[str, str]) -> Any:  # noqa: ARG002
+        def get(
+            self,
+            url: str,
+            headers: dict[str, str],  # noqa: ARG002 — protocol-required
+        ) -> Any:
             if "/users/" in url and "/packages/" not in url:
                 return MockOwnerResponse()
             if url.startswith("https://ghcr.io/token"):
@@ -458,7 +477,11 @@ def test_main_protects_slsa_children_end_to_end(
                     )()
             return make_versions_response(versions_data=versions_data)()
 
-        def delete(self, url: str, headers: dict[str, str]) -> Any:  # noqa: ARG002
+        def delete(
+            self,
+            url: str,
+            headers: dict[str, str],  # noqa: ARG002 — protocol-required
+        ) -> Any:
             deleted.append(int(url.rstrip("/").split("/")[-1]))
             return MockDeleteResponse()
 
