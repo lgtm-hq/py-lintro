@@ -148,8 +148,23 @@ def list_container_versions(
     while url:
         resp = client.get(url, headers={"Accept": "application/vnd.github+json"})
         resp.raise_for_status()
-        data: list[dict[str, Any]] = resp.json()
+        data: Any = resp.json()
+        if not isinstance(data, list):
+            logger.warning(
+                "Expected list payload from {} for {}, got {}; treating as empty",
+                url,
+                package_name,
+                type(data).__name__,
+            )
+            break
         for item in data:
+            if not isinstance(item, dict):
+                logger.warning(
+                    "Skipping non-dict version entry of type {} in {}",
+                    type(item).__name__,
+                    package_name,
+                )
+                continue
             version = _parse_version_item(item=item)
             if version is not None:
                 versions.append(version)

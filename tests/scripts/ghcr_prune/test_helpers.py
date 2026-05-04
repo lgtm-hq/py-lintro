@@ -142,6 +142,96 @@ def test_delete_version_calls_delete() -> None:
     assert_that(calls[0][0]).contains("versions/42")
 
 
+def test_list_container_versions_handles_non_list_payload() -> None:
+    """A non-list API payload yields an empty result, not an exception."""
+
+    class DummyResp:
+        def __init__(self) -> None:
+            self.headers: dict[str, str] = {}
+
+        def raise_for_status(self) -> None:  # pragma: no cover
+            return
+
+        def json(self) -> dict[str, str]:
+            return {"message": "weird shape"}
+
+    class DummyClient:
+        def get(
+            self,
+            url: str,
+            *,
+            headers: Mapping[str, str] | None = None,
+        ) -> DummyResp | MockOwnerResponse:  # noqa: ARG002
+            if "/users/" in url and "/packages/" not in url:
+                return MockOwnerResponse()
+            return DummyResp()
+
+    versions = list_container_versions(
+        client=cast(GhcrClient, DummyClient()),
+        owner="owner",
+    )
+    assert_that(versions).is_empty()
+
+
+def test_list_container_versions_skips_non_dict_items() -> None:
+    """Non-dict entries inside the list are skipped, not crashed on."""
+
+    class DummyResp:
+        def __init__(self, data: list[Any]) -> None:
+            self._data = data
+            self.headers: dict[str, str] = {}
+
+        def raise_for_status(self) -> None:  # pragma: no cover
+            return
+
+        def json(self) -> list[Any]:
+            return self._data
+
+    class DummyClient:
+        def get(
+            self,
+            url: str,
+            *,
+            headers: Mapping[str, str] | None = None,
+        ) -> DummyResp | MockOwnerResponse:  # noqa: ARG002
+            if "/users/" in url and "/packages/" not in url:
+                return MockOwnerResponse()
+            return DummyResp(
+                data=[
+                    "string-not-dict",
+                    None,
+                    {"id": 7, "metadata": {"container": {"tags": ["latest"]}}},
+                    42,
+                ],
+            )
+
+    versions = list_container_versions(
+        client=cast(GhcrClient, DummyClient()),
+        owner="owner",
+    )
+    assert_that([v.id for v in versions]).is_equal_to([7])
+
+
+def test_delete_version_allows_404() -> None:
+    """A 404 (already deleted) is treated as success — no exception."""
+
+    class DummyClient:
+        def delete(
+            self,
+            url: str,  # noqa: ARG002
+            *,
+            headers: Mapping[str, str] | None = None,  # noqa: ARG002
+        ) -> MockDeleteResponse:
+            return MockDeleteResponse(status_code=404)
+
+    delete_version(
+        client=cast(GhcrClient, DummyClient()),
+        owner="owner",
+        version_id=1,
+        base_path="https://api.github.com/users/owner/packages/container",
+    )
+
+
 def test_delete_version_raises_on_non_204_non_404() -> None:
     """Unexpected delete status (e.g. 500) propagates as ``RuntimeError``."""
 
