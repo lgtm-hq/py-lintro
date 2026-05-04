@@ -75,10 +75,13 @@ def _parse_version_item(item: dict[str, Any]) -> GhcrVersion | None:
             e,
         )
         return None
-    raw_tags = item.get("metadata", {}).get("container", {}).get("tags")
+    metadata = item.get("metadata")
+    container = metadata.get("container") if isinstance(metadata, dict) else None
+    raw_tags = container.get("tags") if isinstance(container, dict) else None
+    tags = list(raw_tags) if isinstance(raw_tags, list) else []
     return GhcrVersion(
         id=vid,
-        tags=list(raw_tags or []),
+        tags=tags,
         created_at=str(item.get("created_at", "")),
         name=str(item.get("name", "")),
     )

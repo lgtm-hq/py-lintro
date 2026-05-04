@@ -9,7 +9,18 @@ resolve.
 
 from __future__ import annotations
 
-from scripts.ci.maintenance.ghcr_prune import (
+import sys
+from pathlib import Path
+
+# When invoked as ``python scripts/ci/maintenance/ghcr_prune_untagged.py``
+# (no ``-m``), Python sets ``sys.path[0]`` to this file's directory and the
+# top-level ``scripts`` package is unreachable. Insert the repo root so the
+# absolute import below resolves.
+_REPO_ROOT = Path(__file__).resolve().parents[3]
+if str(_REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(_REPO_ROOT))
+
+from scripts.ci.maintenance.ghcr_prune import (  # noqa: E402
     BUILDCACHE_PACKAGES,
     BUILDCACHE_PERMANENT_TAG,
     DEFAULT_BUILDCACHE_PR_AGE_DAYS,

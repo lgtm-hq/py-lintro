@@ -29,6 +29,56 @@ def test_version_dataclass() -> None:
     assert_that(v.tags).is_equal_to(["latest"])
 
 
+@pytest.mark.parametrize(
+    "raw",
+    [
+        {"id": 1, "metadata": None},
+        {"id": 1, "metadata": "not-a-dict"},
+        {"id": 1, "metadata": {"container": None}},
+        {"id": 1, "metadata": {"container": "not-a-dict"}},
+        {"id": 1, "metadata": {"container": {"tags": None}}},
+        {"id": 1, "metadata": {"container": {"tags": "not-a-list"}}},
+    ],
+)
+def test_list_container_versions_handles_malformed_metadata(
+    raw: dict[str, Any],
+) -> None:
+    """Malformed metadata yields an empty ``tags`` list, never AttributeError.
+
+    Args:
+        raw: Raw API item with various malformed ``metadata`` shapes.
+    """
+
+    class DummyResp:
+        def __init__(self, data: list[dict[str, Any]]) -> None:
+            self._data = data
+            self.headers: dict[str, str] = {}
+
+        def raise_for_status(self) -> None:  # pragma: no cover
+            return
+
+        def json(self) -> list[dict[str, Any]]:
+            return self._data
+
+    class DummyClient:
+        def get(
+            self,
+            url: str,
+            *,
+            headers: Mapping[str, str] | None = None,
+        ) -> DummyResp | MockOwnerResponse:  # noqa: ARG002
+            if "/users/" in url and "/packages/" not in url:
+                return MockOwnerResponse()
+            return DummyResp(data=[raw])
+
+    versions = list_container_versions(
+        client=cast(GhcrClient, DummyClient()),
+        owner="owner",
+    )
+    assert_that(versions).is_length(1)
+    assert_that(versions[0].tags).is_equal_to([])
+
+
 def test_list_container_versions_parses_minimal_structure() -> None:
     """Parse a minimal API response into ``GhcrVersion`` objects."""
 
