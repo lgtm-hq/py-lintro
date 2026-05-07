@@ -66,11 +66,8 @@ jobs:
         with:
           python-version: '3.14'
 
-      - name: Verify manifest sync
-        run: python3 scripts/ci/verify-manifest-sync.py
-
-      - name: Verify tool version sync
-        run: python3 scripts/ci/verify-tool-version-sync.py
+      - name: Verify generated tool versions
+        run: python3 scripts/ci/generate-tool-versions.py --check
 
       - name: Sync dependencies
         run: uv sync --dev --no-progress
