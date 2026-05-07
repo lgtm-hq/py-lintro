@@ -35,7 +35,6 @@ if TYPE_CHECKING:
         ("tool_type", ToolType.FORMATTER),
         ("priority", OXFMT_DEFAULT_PRIORITY),
         ("default_timeout", OXFMT_DEFAULT_TIMEOUT),
-        ("min_version", "0.43.0"),
     ],
     ids=[
         "name_equals_oxfmt",
@@ -44,7 +43,6 @@ if TYPE_CHECKING:
         "tool_type_is_formatter",
         "priority_equals_80",
         "default_timeout_equals_30",
-        "min_version_is_0.43.0",
     ],
 )
 def test_definition_attributes(
