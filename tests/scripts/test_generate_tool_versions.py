@@ -25,6 +25,11 @@ SCRIPT_PATH = REPO_ROOT / "scripts" / "ci" / "generate-tool-versions.py"
 def gen() -> ModuleType:
     """Import the hyphen-named generator script as a module.
 
+    Loading the entry script also bootstraps ``sys.path`` so its sibling
+    ``_generator`` package becomes importable. Private helpers from that
+    package that tests exercise directly are attached to the returned
+    module for ergonomic access (``gen._collect_dep_strings``).
+
     Returns:
         Imported generator module exposing all top-level helpers.
     """
@@ -32,9 +37,18 @@ def gen() -> ModuleType:
         "generate_tool_versions",
         SCRIPT_PATH,
     )
-    assert spec is not None and spec.loader is not None
+    if spec is None or spec.loader is None:
+        pytest.fail(f"could not load generator script at {SCRIPT_PATH}")
     module = importlib.util.module_from_spec(spec)
+    # Register before exec so frozen-dataclass machinery
+    # (sys.modules.get(cls.__module__).__dict__) resolves cleanly.
+    sys.modules["generate_tool_versions"] = module
     spec.loader.exec_module(module)
+
+    # Expose private package helpers needed by tests.
+    from _generator.inputs import _collect_dep_strings  # noqa: PLC0415
+
+    module._collect_dep_strings = _collect_dep_strings  # type: ignore[attr-defined]
     return module
 
 
