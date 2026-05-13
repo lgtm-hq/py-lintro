@@ -250,6 +250,8 @@ jobs:
       cancel-in-progress: true
     outputs:
       is-fork: ${{ steps.fork-check.outputs.is-fork }}
+    # Non-fork: push from Buildx to GHCR (avoids load ×2 then long docker push).
+    # Fork: load + tarball artifact (cannot push to GHCR).
     steps:
       - name: Harden Runner
         uses: step-security/harden-runner@fe104658747b27e96e4f7e80cd0a94068e53901d
@@ -335,7 +337,8 @@ jobs:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-      - name: Build Docker image (py-lintro:latest)
+      - name: Build Docker image (py-lintro:latest, fork)
+        if: steps.fork-check.outputs.is-fork == 'true'
         env:
           REPO: ghcr.io/lgtm-hq/py-lintro-buildcache
         # Action SHA pin exceeds 88 chars
@@ -360,7 +363,29 @@ jobs:
           # yamllint enable rule:line-length
           provenance: false
 
-      - name: Build Base Docker image (py-lintro:base)
+      - name: Build and push Docker image (py-lintro, GHCR CI tag)
+        if: steps.fork-check.outputs.is-fork != 'true'
+        env:
+          REPO: ghcr.io/lgtm-hq/py-lintro-buildcache
+        # Action SHA pin exceeds 88 chars
+        # yamllint disable-line rule:line-length
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
+        with:
+          context: .
+          push: true
+          tags: ghcr.io/lgtm-hq/py-lintro:ci-${{ github.run_id }}
+          build-args: |
+            TOOLS_IMAGE=${{ needs.resolve-tools.outputs.image }}
+          # yamllint disable rule:line-length
+          cache-from: |
+            ${{ needs.resolve-tools.outputs.source != 'artifact' && format('type=registry,ref={0}:{1}', env.REPO, env.CACHE_TAG) || '' }}
+            ${{ needs.resolve-tools.outputs.source != 'artifact' && format('type=registry,ref={0}:main', env.REPO) || '' }}
+          cache-to: ${{ steps.fork-check.outputs.is-fork != 'true' && needs.resolve-tools.outputs.source != 'artifact' && format('type=registry,ref={0}:{1},{2}', env.REPO, env.CACHE_TAG, env.CACHE_OPTS) || '' }}
+          # yamllint enable rule:line-length
+          provenance: false
+
+      - name: Build Base Docker image (py-lintro:base, fork)
+        if: steps.fork-check.outputs.is-fork == 'true'
         env:
           REPO: ghcr.io/lgtm-hq/py-lintro-base-buildcache
         # Action SHA pin exceeds 88 chars
@@ -379,17 +404,26 @@ jobs:
           cache-to: ${{ steps.fork-check.outputs.is-fork != 'true' && needs.resolve-tools.outputs.source != 'artifact' && format('type=registry,ref={0}:{1},{2}', env.REPO, env.CACHE_TAG, env.CACHE_OPTS) || '' }}
           # yamllint enable rule:line-length
           provenance: false
-      - name: Push CI images to GHCR
+
+      - name: Build and push Base Docker image (py-lintro-base, GHCR CI tag)
         if: steps.fork-check.outputs.is-fork != 'true'
         env:
-          CI_TAG: ci-${{ github.run_id }}
-        run: |
-          docker tag py-lintro:latest \
-            "ghcr.io/lgtm-hq/py-lintro:${CI_TAG}"
-          docker tag py-lintro:base \
-            "ghcr.io/lgtm-hq/py-lintro-base:${CI_TAG}"
-          docker push "ghcr.io/lgtm-hq/py-lintro:${CI_TAG}"
-          docker push "ghcr.io/lgtm-hq/py-lintro-base:${CI_TAG}"
+          REPO: ghcr.io/lgtm-hq/py-lintro-base-buildcache
+        # Action SHA pin exceeds 88 chars
+        # yamllint disable-line rule:line-length
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
+        with:
+          context: .
+          file: Dockerfile.base
+          push: true
+          tags: ghcr.io/lgtm-hq/py-lintro-base:ci-${{ github.run_id }}
+          # yamllint disable rule:line-length
+          cache-from: |
+            ${{ needs.resolve-tools.outputs.source != 'artifact' && format('type=registry,ref={0}:{1}', env.REPO, env.CACHE_TAG) || '' }}
+            ${{ needs.resolve-tools.outputs.source != 'artifact' && format('type=registry,ref={0}:main', env.REPO) || '' }}
+          cache-to: ${{ steps.fork-check.outputs.is-fork != 'true' && needs.resolve-tools.outputs.source != 'artifact' && format('type=registry,ref={0}:{1},{2}', env.REPO, env.CACHE_TAG, env.CACHE_OPTS) || '' }}
+          # yamllint enable rule:line-length
+          provenance: false
       - name: Save Docker images to tarball (fork fallback)
         if: steps.fork-check.outputs.is-fork == 'true'
         run: |

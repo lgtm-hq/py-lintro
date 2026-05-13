@@ -5,7 +5,7 @@
 # Environment variables:
 #   TAG               - Git tag (e.g. v0.52.2)
 #   SHA               - Full commit SHA
-#   GITHUB_REPOSITORY - Owner/repo (e.g. lgtm-hq/py-lintro), used for registry
+#   GITHUB_REPOSITORY - Owner/repo (e.g. lgtm-hq/py-lintro); owner derives GHCR path
 #
 # Outputs (via GITHUB_OUTPUT):
 #   main-tags  - Comma-separated tags for ghcr.io/<owner>/py-lintro
@@ -41,8 +41,9 @@ if ! [[ "$SHA" =~ ^[0-9a-f]{40}$ ]]; then
 	exit 1
 fi
 
-# Derive registry from GITHUB_REPOSITORY (lowercase for GHCR compatibility).
-# Full image: ghcr.io/<owner>/py-lintro — base image: ghcr.io/<owner>/py-lintro-base
+# Derive owner from GITHUB_REPOSITORY; GHCR packages are fixed names
+# py-lintro / py-lintro-base (split packages). Repo rename requires updating REGISTRY*,
+# BASE_REGISTRY below (legacy single-package code used ghcr.io/<owner>/<repo-lowercase>).
 repo="${GITHUB_REPOSITORY:-lgtm-hq/py-lintro}"
 owner="${repo%%/*}"
 REGISTRY="ghcr.io/${owner,,}/py-lintro"
