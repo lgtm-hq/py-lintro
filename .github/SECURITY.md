@@ -24,11 +24,12 @@ documentation of their purposes and security considerations.
 
 ### Required Secrets
 
-| Secret Name          | Purpose                              | Scope              | Rotation     |
-| -------------------- | ------------------------------------ | ------------------ | ------------ |
-| `GITHUB_TOKEN`       | Built-in token for GitHub API access | Automatic          | Per-workflow |
-| `HOMEBREW_TAP_TOKEN` | Push to homebrew-tap repository      | `repo` on tap repo | Annually     |
-| `CODECOV_TOKEN`      | Upload coverage reports              | Codecov org        | As needed    |
+| Secret Name                    | Purpose                                           | Scope                               | Rotation                  |
+| ------------------------------ | ------------------------------------------------- | ----------------------------------- | ------------------------- |
+| `GITHUB_TOKEN`                 | Built-in token for GitHub API access              | Automatic                           | Per-workflow              |
+| `HOMEBREW_TAP_APP_ID`          | GitHub App ID for homebrew-tap formula automation | App registered under org            | If app reset              |
+| `HOMEBREW_TAP_APP_PRIVATE_KEY` | PEM for Homebrew tap GitHub App (see workflow)    | `contents: write` on `homebrew-tap` | On compromise or key roll |
+| `CODECOV_TOKEN`                | Upload coverage reports                           | Codecov org                         | As needed                 |
 
 ### Optional Secrets
 
@@ -46,7 +47,7 @@ documentation of their purposes and security considerations.
    publishing instead of API tokens. This eliminates long-lived credentials.
 
 3. **Token Rotation Schedule**:
-   - `HOMEBREW_TAP_TOKEN`: Rotate annually or immediately if compromised
+   - `HOMEBREW_TAP_APP_PRIVATE_KEY`: Rotate if compromised; regenerate in App settings
    - `CODECOV_TOKEN`: Rotate if Codecov reports suspicious activity
    - `GITHUB_TOKEN`: Automatic, no rotation needed
 

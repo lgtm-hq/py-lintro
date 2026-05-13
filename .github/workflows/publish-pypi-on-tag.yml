@@ -176,11 +176,25 @@ jobs:
         with:
           python-version: '3.14'
 
+      # GitHub App (e.g. homebrew-tap-release-bot) installed on org with access to
+      # homebrew-tap; must appear in that repo’s ruleset bypass list if main blocks
+      # direct pushes.
+      - name: Create Homebrew tap GitHub App token
+        id: homebrew-app-token
+        # yamllint disable-line rule:line-length
+        uses: actions/create-github-app-token@f8d387b68d61c58ab83c6c016672934102569859 # v3
+        with:
+          app-id: ${{ secrets.HOMEBREW_TAP_APP_ID }}
+          private-key: ${{ secrets.HOMEBREW_TAP_APP_PRIVATE_KEY }}
+          owner: lgtm-hq
+          repositories: homebrew-tap
+          permission-contents: write
+
       - name: Checkout homebrew-tap
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
         with:
           repository: lgtm-hq/homebrew-tap
-          token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          token: ${{ steps.homebrew-app-token.outputs.token }}
           path: homebrew-tap
 
       - name: Generate Homebrew formula
