@@ -85,6 +85,17 @@ If you want to publish the weekly report to Pages, prefer using a dedicated
 - 📦 **GHCR integration** — Full image at `ghcr.io/lgtm-hq/py-lintro`
 - 📦 **GHCR base image** — Minimal image at `ghcr.io/lgtm-hq/py-lintro-base`
 
+The **full** image (`ghcr.io/lgtm-hq/py-lintro`) includes the runtime and optional
+tooling so you can run Lintro out of the box. The **base** image
+(`ghcr.io/lgtm-hq/py-lintro-base`) is a slimmer layer with core dependencies only—use it
+when you want a smaller footprint, CI-only steps, or a foundation for a custom image.
+Add your own packages or layers on top of the base as needed.
+
+```dockerfile
+FROM ghcr.io/lgtm-hq/py-lintro-base
+# Install project-specific tools or copy your app here
+```
+
 ### 7. OpenSSF Allstar (Repository Security Enforcement)
 
 Allstar is an OpenSSF GitHub App that enforces repository security policies org-wide or
