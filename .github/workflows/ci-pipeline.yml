@@ -137,7 +137,9 @@ jobs:
     permissions:
       contents: read
       packages: read
-    timeout-minutes: 5
+    # Must exceed tools-image-resolve digest polling ((attempts-1)*sleep_seconds)
+    # plus docker pull latency — see scripts/ci/tools-image-resolve.sh push path.
+    timeout-minutes: 15
     # Run when detect-tool-changes AND call-tools-image both succeeded or were skipped.
     # call-tools-image skips for push events or PRs without tool changes.
     # yamllint disable rule:line-length

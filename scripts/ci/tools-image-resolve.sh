@@ -111,7 +111,9 @@ elif [[ "$GITHUB_EVENT_NAME" == "push" ]]; then
 	if [[ "$CHANGED" == "true" ]]; then
 		: "${GITHUB_SHA:?GITHUB_SHA is required when TOOLS_CHANGED=true on push}"
 		IMAGE_TAG="${IMAGE_NAME}:sha-${GITHUB_SHA}"
-		IMAGE=$(resolve_image_digest "$IMAGE_TAG" 20 15)
+		# Poll until GHCR serves the commit-scoped tag (tools-image.yml may still
+		# be publishing). Budget ~8.5m sleeps + pulls; ci job timeout must exceed this.
+		IMAGE=$(resolve_image_digest "$IMAGE_TAG" 35 15)
 		SOURCE="registry"
 		echo "Using commit-scoped tools image digest for push: ${IMAGE}"
 	else
