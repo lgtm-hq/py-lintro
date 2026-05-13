@@ -387,9 +387,9 @@ jobs:
           docker tag py-lintro:latest \
             "ghcr.io/lgtm-hq/py-lintro:${CI_TAG}"
           docker tag py-lintro:base \
-            "ghcr.io/lgtm-hq/py-lintro:${CI_TAG}-base"
+            "ghcr.io/lgtm-hq/py-lintro-base:${CI_TAG}"
           docker push "ghcr.io/lgtm-hq/py-lintro:${CI_TAG}"
-          docker push "ghcr.io/lgtm-hq/py-lintro:${CI_TAG}-base"
+          docker push "ghcr.io/lgtm-hq/py-lintro-base:${CI_TAG}"
       - name: Save Docker images to tarball (fork fallback)
         if: steps.fork-check.outputs.is-fork == 'true'
         run: |
@@ -752,8 +752,8 @@ jobs:
         run: |
           docker pull "ghcr.io/lgtm-hq/py-lintro:${CI_TAG}"
           docker tag "ghcr.io/lgtm-hq/py-lintro:${CI_TAG}" py-lintro:latest
-          docker pull "ghcr.io/lgtm-hq/py-lintro:${CI_TAG}-base"
-          docker tag "ghcr.io/lgtm-hq/py-lintro:${CI_TAG}-base" py-lintro:base
+          docker pull "ghcr.io/lgtm-hq/py-lintro-base:${CI_TAG}"
+          docker tag "ghcr.io/lgtm-hq/py-lintro-base:${CI_TAG}" py-lintro:base
       - name: Download Docker images artifact (fork fallback)
         if: needs.docker-build.outputs.is-fork == 'true'
         # Action SHA pin exceeds 88 chars
@@ -1065,17 +1065,21 @@ jobs:
             type=semver,pattern={{major}}.{{minor}}
             type=semver,pattern={{major}}
             type=raw,value=latest,enable={{is_default_branch}}
+      # Base image uses a separate GHCR package so digest pins for py-lintro
+      # cannot accidentally resolve to the minimal (no bundled tools) variant.
       - name: Extract metadata (base)
         id: meta-base
         uses: docker/metadata-action@c299e40c65443455700f0fdfc63efafe5b349051 # v5
         with:
-          images: ghcr.io/lgtm-hq/py-lintro
+          images: ghcr.io/lgtm-hq/py-lintro-base
           tags: |
-            type=sha,prefix=sha-,suffix=-base,format=long
-            type=semver,pattern={{version}},suffix=-base
-            type=semver,pattern={{major}}.{{minor}},suffix=-base
-            type=semver,pattern={{major}},suffix=-base
-            type=raw,value=base,enable={{is_default_branch}}
+            type=ref,event=branch
+            type=ref,event=pr
+            type=sha,prefix=sha-,format=long
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=semver,pattern={{major}}
+            type=raw,value=latest,enable={{is_default_branch}}
       - name: Build and push Docker image
         env:
           REPO: ghcr.io/lgtm-hq/py-lintro-buildcache
@@ -1150,12 +1154,13 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           CI_TAG: ci-${{ github.run_id }}
         run: |
-          for tag_suffix in "" "-base"; do
-            tag="${CI_TAG}${tag_suffix}"
-            echo "Looking up version for tag: ${tag}"
+          delete_ci_tag() {
+            local pkg="$1"
+            local tag="$2"
+            echo "Looking up version for ${pkg}:${tag}"
             api_stderr=$(mktemp)
             version_id=$(gh api \
-              "orgs/lgtm-hq/packages/container/py-lintro/versions" \
+              "orgs/lgtm-hq/packages/container/${pkg}/versions" \
               --paginate \
               --jq ".[] |
                 select(.metadata.container.tags[] == \"${tag}\") |
@@ -1163,18 +1168,20 @@ jobs:
             stderr_text=$(cat "$api_stderr")
             rm -f "$api_stderr"
             if [[ -n "$stderr_text" ]]; then
-              echo "::warning::gh api lookup for tag ${tag}: ${stderr_text}"
+              echo "::warning::gh api lookup for ${pkg}:${tag}: ${stderr_text}"
             fi
             if [[ -n "$version_id" ]]; then
               while IFS= read -r vid; do
                 [[ -z "$vid" ]] && continue
                 gh api --method DELETE \
-                  "orgs/lgtm-hq/packages/container/py-lintro/versions/${vid}" \
+                  "orgs/lgtm-hq/packages/container/${pkg}/versions/${vid}" \
                   2>/dev/null && \
-                  echo "Deleted version ${vid} (tag: ${tag})" || \
+                  echo "Deleted version ${vid} (${pkg}:${tag})" || \
                   echo "::warning::Failed to delete version ${vid}"
               done <<< "$version_id"
             else
-              echo "No version found for tag: ${tag} (may already be cleaned)"
+              echo "No version found for ${pkg}:${tag} (may already be cleaned)"
             fi
-          done
+          }
+          delete_ci_tag py-lintro "${CI_TAG}"
+          delete_ci_tag py-lintro-base "${CI_TAG}"

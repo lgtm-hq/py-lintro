@@ -49,7 +49,7 @@ def _patch_httpx(
     mock_client = make_mock_client(
         versions_data=versions_data,
         deleted=deleted,
-        missing_packages=["lintro-tools", *BUILDCACHE_PACKAGES],
+        missing_packages=["lintro-tools", "py-lintro-base", *BUILDCACHE_PACKAGES],
     )
     mock_httpx = type(
         "MockHttpx",
