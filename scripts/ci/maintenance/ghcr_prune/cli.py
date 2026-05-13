@@ -44,7 +44,7 @@ DEFAULT_MIN_AGE_DAYS = 7
 DEFAULT_BUILDCACHE_PR_AGE_DAYS = 14
 
 # Production image packages — referenced-digest protection applies here.
-_PROD_PACKAGES: tuple[str, ...] = ("py-lintro", "lintro-tools")
+_PROD_PACKAGES: tuple[str, ...] = ("py-lintro", "py-lintro-base", "lintro-tools")
 
 
 def _read_int_env(name: str, default: int) -> int:

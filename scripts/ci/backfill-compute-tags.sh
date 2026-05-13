@@ -5,11 +5,11 @@
 # Environment variables:
 #   TAG               - Git tag (e.g. v0.52.2)
 #   SHA               - Full commit SHA
-#   GITHUB_REPOSITORY - Owner/repo (e.g. lgtm-hq/py-lintro), used for registry
+#   GITHUB_REPOSITORY - Owner/repo (e.g. lgtm-hq/py-lintro); owner derives GHCR path
 #
 # Outputs (via GITHUB_OUTPUT):
-#   main-tags  - Comma-separated GHCR tags for the main image
-#   base-tags  - Comma-separated GHCR tags for the base image (if Dockerfile.base exists)
+#   main-tags  - Comma-separated tags for ghcr.io/<owner>/py-lintro
+#   base-tags  - Comma-separated tags for ghcr.io/<owner>/py-lintro-base (if Dockerfile.base exists)
 #   has-base   - "true" if Dockerfile.base exists, "false" otherwise
 set -euo pipefail
 
@@ -18,7 +18,7 @@ if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
 Usage: TAG=v0.52.2 SHA=876464d9f1a2b3c4d5e6f7081920a1b2c3d4e5f6 ./scripts/ci/backfill-compute-tags.sh
 
 Computes Docker image tags for a release. Outputs semver tags (X.Y.Z, X.Y, X)
-and sha-prefixed tags for both main and base images.
+and sha-prefixed tags for both packages (py-lintro and py-lintro-base).
 
 Required environment variables:
   TAG                Git tag (e.g. v0.52.2)
@@ -41,9 +41,13 @@ if ! [[ "$SHA" =~ ^[0-9a-f]{40}$ ]]; then
 	exit 1
 fi
 
-# Derive registry from GITHUB_REPOSITORY (lowercase for GHCR compatibility)
+# Derive owner from GITHUB_REPOSITORY; GHCR packages are fixed names
+# py-lintro / py-lintro-base (split packages). Repo rename requires updating REGISTRY*,
+# BASE_REGISTRY below (legacy single-package code used ghcr.io/<owner>/<repo-lowercase>).
 repo="${GITHUB_REPOSITORY:-lgtm-hq/py-lintro}"
-REGISTRY="ghcr.io/${repo,,}"
+owner="${repo%%/*}"
+REGISTRY="ghcr.io/${owner,,}/py-lintro"
+BASE_REGISTRY="ghcr.io/${owner,,}/py-lintro-base"
 
 # Parse semver components (vMAJOR.MINOR.PATCH)
 version="${TAG#v}"
@@ -63,10 +67,10 @@ echo "main-tags=${tags}" >>"$GITHUB_OUTPUT"
 
 # Base image tags (Dockerfile.base exists from v0.42.7+)
 if [[ -f Dockerfile.base ]]; then
-	base_tags="${REGISTRY}:${version}-base"
-	base_tags+=",${REGISTRY}:${major}.${minor}-base"
-	base_tags+=",${REGISTRY}:${major}-base"
-	base_tags+=",${REGISTRY}:sha-${SHA}-base"
+	base_tags="${BASE_REGISTRY}:${version}"
+	base_tags+=",${BASE_REGISTRY}:${major}.${minor}"
+	base_tags+=",${BASE_REGISTRY}:${major}"
+	base_tags+=",${BASE_REGISTRY}:sha-${SHA}"
 	echo "base-tags=${base_tags}" >>"$GITHUB_OUTPUT"
 	echo "has-base=true" >>"$GITHUB_OUTPUT"
 else

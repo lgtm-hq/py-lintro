@@ -294,7 +294,7 @@ brew tap lgtm-hq/tap && brew install lintro-bin
 docker run --rm -v $(pwd):/code ghcr.io/lgtm-hq/py-lintro:latest check
 
 # Docker (base image - minimal, no external tools)
-docker run --rm -v $(pwd):/code ghcr.io/lgtm-hq/py-lintro:base check
+docker run --rm -v $(pwd):/code ghcr.io/lgtm-hq/py-lintro-base:latest check
 ```
 
 See [Getting Started](docs/getting-started.md) for detailed installation options.
@@ -333,8 +333,8 @@ docker run --rm -v $(pwd):/code ghcr.io/lgtm-hq/py-lintro:latest check
 # With formatting
 docker run --rm -v $(pwd):/code ghcr.io/lgtm-hq/py-lintro:latest check --output-format grid
 
-# Base image (minimal, no external tools)
-docker run --rm -v $(pwd):/code ghcr.io/lgtm-hq/py-lintro:base check
+# Base image (minimal, no external tools; separate GHCR package)
+docker run --rm -v $(pwd):/code ghcr.io/lgtm-hq/py-lintro-base:latest check
 ```
 
 ## 📚 Documentation

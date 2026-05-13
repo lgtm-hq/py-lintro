@@ -5,6 +5,10 @@
 # only. It does NOT include external linting tools like shellcheck, gitleaks,
 # or rust toolchain. Use this for lightweight runtimes or when tools are
 # provided by the host environment.
+#
+# Published separately from the full image at ghcr.io/lgtm-hq/py-lintro-base so
+# digest pins for ghcr.io/lgtm-hq/py-lintro always refer to the tools-backed
+# variant only.
 # =============================================================================
 
 FROM python:3.14-slim@sha256:5e59aae31ff0e87511226be8e2b94d78c58f05216efda3b07dbbed938ec8583b
@@ -14,7 +18,7 @@ ARG UV_VERSION=0.11.10
 # Add Docker labels
 LABEL maintainer="lgtm-hq"
 LABEL org.opencontainers.image.source="https://github.com/lgtm-hq/py-lintro"
-LABEL org.opencontainers.image.description="Lintro base image (no external tools)"
+LABEL org.opencontainers.image.description="Lintro base image (no external tools); GHCR package py-lintro-base"
 LABEL org.opencontainers.image.licenses="MIT"
 
 # Set environment variables

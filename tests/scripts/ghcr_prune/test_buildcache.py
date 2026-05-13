@@ -218,6 +218,7 @@ def test_main_iterates_buildcache_packages(
                 return MockOwnerResponse()
             for name in (
                 *BUILDCACHE_PACKAGES,
+                "py-lintro-base",
                 "py-lintro",
                 "lintro-tools",
             ):
@@ -247,6 +248,7 @@ def test_main_iterates_buildcache_packages(
     assert_that(rc).is_equal_to(0)
     for pkg in BUILDCACHE_PACKAGES:
         assert_that(seen).contains(pkg)
+    assert_that(seen).contains("py-lintro-base")
     assert_that(seen).contains("py-lintro")
     assert_that(seen).contains("lintro-tools")
 

@@ -53,7 +53,7 @@ jobs:
         run: docker run --rm ghcr.io/lgtm-hq/py-lintro:latest lintro --version
 
       - name: Pull base image
-        run: docker pull ghcr.io/lgtm-hq/py-lintro:base
+        run: docker pull ghcr.io/lgtm-hq/py-lintro-base:latest
 
       - name: Smoke test base image
-        run: docker run --rm ghcr.io/lgtm-hq/py-lintro:base lintro --version
+        run: docker run --rm ghcr.io/lgtm-hq/py-lintro-base:latest lintro --version

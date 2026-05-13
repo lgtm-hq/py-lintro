@@ -248,17 +248,21 @@ jobs:
             type=semver,pattern={{major}}.{{minor}}
             type=semver,pattern={{major}}
             type=raw,value=latest,enable={{is_default_branch}}
+      # Base image uses a separate GHCR package so digest pins for py-lintro
+      # cannot accidentally resolve to the minimal (no bundled tools) variant.
       - name: Extract metadata (base)
         id: meta-base
         uses: docker/metadata-action@c299e40c65443455700f0fdfc63efafe5b349051 # v5
         with:
-          images: ghcr.io/lgtm-hq/py-lintro
+          images: ghcr.io/lgtm-hq/py-lintro-base
           tags: |
-            type=sha,prefix=sha-,suffix=-base,format=long
-            type=semver,pattern={{version}},suffix=-base
-            type=semver,pattern={{major}}.{{minor}},suffix=-base
-            type=semver,pattern={{major}},suffix=-base
-            type=raw,value=base,enable={{is_default_branch}}
+            type=ref,event=branch
+            type=ref,event=pr
+            type=sha,prefix=sha-,format=long
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=semver,pattern={{major}}
+            type=raw,value=latest,enable={{is_default_branch}}
       - name: Build and push Docker image
         env:
           REPO: ghcr.io/lgtm-hq/py-lintro-buildcache

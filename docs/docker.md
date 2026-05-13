@@ -24,7 +24,7 @@ docker run --rm -v $(pwd):/code ghcr.io/lgtm-hq/py-lintro:latest check --tools r
 docker run --rm -v $(pwd):/code ghcr.io/lgtm-hq/py-lintro:latest format
 
 # Base image (minimal, no external tools)
-docker run --rm -v $(pwd):/code ghcr.io/lgtm-hq/py-lintro:base check
+docker run --rm -v $(pwd):/code ghcr.io/lgtm-hq/py-lintro-base:latest check
 ```
 
 ### Development Setup
@@ -63,13 +63,26 @@ Lintro provides a pre-built Docker image available on GitHub Container Registry 
 
 ### Image Details
 
-- **Registry**: `ghcr.io/lgtm-hq/py-lintro`
-- **Tags**:
-  - `latest` - Tools image (recommended; includes external tools)
-  - `main` - Main branch version
-  - `base` - Minimal image (no external tools)
-  - `v1.0.0` - Specific release versions (when available)
-  - `v1.0.0-base` - Base image for that release
+The **tools-backed** image (recommended for CI) is published as
+**`ghcr.io/lgtm-hq/py-lintro`**.
+
+The **minimal** image (lintro only; supply linters from the host or opt-in installs) is
+**`ghcr.io/lgtm-hq/py-lintro-base`**. A separate package avoids digest/tag collisions so
+pins to `py-lintro` never resolve to the minimal variant.
+
+**Full image** (`ghcr.io/lgtm-hq/py-lintro`) tags:
+
+- `latest` — default branch release build with bundled external tools
+- `main` — main branch version
+- `v1.0.0` — semver releases when published
+
+**Base image** (`ghcr.io/lgtm-hq/py-lintro-base`) tags mirror the same semver and
+`sha-*` conventions without a `-base` suffix on the tag (the package name carries that
+distinction).
+
+**Migration:** Older docs referred to `ghcr.io/lgtm-hq/py-lintro:base` or
+`py-lintro:vX.Y.Z-base`. Use `ghcr.io/lgtm-hq/py-lintro-base:latest` or
+`py-lintro-base:vX.Y.Z` instead.
 
 ### Using the Published Image
 
@@ -84,7 +97,7 @@ docker run --rm -v $(pwd):/code ghcr.io/lgtm-hq/py-lintro:latest check
 docker run --rm -v $(pwd):/code ghcr.io/lgtm-hq/py-lintro:main check
 
 # Use the base image (minimal)
-docker run --rm -v $(pwd):/code ghcr.io/lgtm-hq/py-lintro:base check
+docker run --rm -v $(pwd):/code ghcr.io/lgtm-hq/py-lintro-base:latest check
 ```
 
 ### CI/CD Integration
@@ -106,7 +119,7 @@ lintro:
 
 # Base image example (minimal, no external tools)
 lintro_base:
-  image: ghcr.io/lgtm-hq/py-lintro:base
+  image: ghcr.io/lgtm-hq/py-lintro-base:latest
   script:
     - lintro check --output-format grid
 ```
