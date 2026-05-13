@@ -82,7 +82,8 @@ If you want to publish the weekly report to Pages, prefer using a dedicated
 - 🐳 **Automated Docker image building** and publishing to GHCR
 - 🏷️ **Smart tagging** - Latest, main branch, and semantic versions
 - 🔄 **Release integration** - Images published on releases
-- 📦 **GHCR integration** - Images available at `ghcr.io/lgtm-hq/py-lintro`
+- 📦 **GHCR integration** — Full image at `ghcr.io/lgtm-hq/py-lintro`
+- 📦 **GHCR base image** — Minimal image at `ghcr.io/lgtm-hq/py-lintro-base`
 
 ### 7. OpenSSF Allstar (Repository Security Enforcement)
 
