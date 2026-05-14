@@ -7,8 +7,8 @@
 #
 # Resolution order:
 #   1. BUILT_IMAGE                    (set when ci-pipeline.yml called tools-image.yml via workflow_call)
-#   2. IMAGE_NAME:sha-${GITHUB_SHA}@digest (push events with tool changes)
-#   3. STABLE_IMAGE                   (PRs without tool changes and pushes without tool changes)
+#   2. IMAGE_NAME:sha-${GITHUB_SHA}   (merge queue with tool changes)
+#   3. STABLE_IMAGE                   (main pushes, PRs without tool changes, and other events)
 #      If STABLE_IMAGE is not provided, reads the pinned value from Dockerfile.
 #
 # Required environment variables:
@@ -18,13 +18,13 @@
 #
 # Optional environment variables:
 #   CALL_RESULT         - Result of the call-tools-image job ("success", "skipped", etc.)
-#                         When "success", TOOLS_CHANGED is true, and PR_NUMBER is set,
-#                         derives the built PR image tag.
+#                         When "success" and TOOLS_CHANGED is true, derives the
+#                         built PR or merge-queue image tag.
 #   PR_NUMBER           - PR number; used with CALL_RESULT to derive the PR image tag.
 #   BUILT_IMAGE         - Pre-built image override (takes priority over CALL_RESULT if set)
 #   STABLE_IMAGE        - Full stable image reference with digest; read from Dockerfile if unset
-#   TOOLS_CHANGED       - "true"/"false" to decide whether a fresh build/image must be used
-#   GITHUB_SHA          - Commit SHA for push/main resolution
+#   TOOLS_CHANGED       - "true"/"false" to decide whether a fresh gate image must be used
+#   GITHUB_SHA          - Commit SHA for merge-queue resolution
 #   IS_FORK_PR          - "true" when the pull request comes from a fork (uses artifact fallback)
 
 set -euo pipefail
@@ -38,8 +38,8 @@ Usage:
 
 Resolution order:
   1. BUILT_IMAGE                 — pre-built image from workflow_call (highest priority)
-  2. IMAGE_NAME:sha-${GITHUB_SHA}@digest — push events with tool changes
-  3. STABLE_IMAGE                — PRs without tool changes (read from Dockerfile if unset)
+  2. IMAGE_NAME:sha-${GITHUB_SHA} — merge queue with tool changes
+  3. STABLE_IMAGE                — main pushes, PRs without tool changes, and other events
 
 Environment Variables (required):
   GITHUB_EVENT_NAME   GitHub event name (push, pull_request, workflow_dispatch, ...)
@@ -49,16 +49,20 @@ Environment Variables (required):
 Environment Variables (optional):
   BUILT_IMAGE         Full image reference from a workflow_call build; if set, used directly
   STABLE_IMAGE        Full stable image reference with digest; read from Dockerfile if unset
-  TOOLS_CHANGED       "true"/"false" — gates BUILT_IMAGE derivation from CALL_RESULT/PR_NUMBER
-                      and chooses between fresh-digest resolution and STABLE_IMAGE on push
+  TOOLS_CHANGED       "true"/"false" — gates BUILT_IMAGE derivation from CALL_RESULT
 
 Outputs (to GITHUB_OUTPUT):
   image               Full image reference to use
   source              Where the image comes from: registry, artifact, or stable
 
-Example (fresh build from workflow_call via CALL_RESULT):
+Example (fresh PR build from workflow_call via CALL_RESULT):
   CALL_RESULT=success PR_NUMBER=123 \
   GITHUB_EVENT_NAME=pull_request IMAGE_NAME=ghcr.io/org/lintro-tools \
+  GITHUB_OUTPUT=/tmp/out ./scripts/ci/tools-image-resolve.sh
+
+Example (fresh merge-queue build from workflow_call via CALL_RESULT):
+  CALL_RESULT=success GITHUB_SHA=abc123... TOOLS_CHANGED=true \
+  GITHUB_EVENT_NAME=merge_group IMAGE_NAME=ghcr.io/org/lintro-tools \
   GITHUB_OUTPUT=/tmp/out ./scripts/ci/tools-image-resolve.sh
 
 Example (stable image for PR without tool changes):
@@ -79,15 +83,16 @@ get_tools_image_from_dockerfile() {
 	grep -E '^ARG TOOLS_IMAGE=' Dockerfile 2>/dev/null | head -n1 | cut -d= -f2 || true
 }
 
-# shellcheck disable=SC1091 # helper path resolved at runtime via $(dirname "$0")
-source "$(dirname "$0")/tools-image-digest-helpers.sh"
-
-# Derive BUILT_IMAGE from CALL_RESULT + PR_NUMBER when not set directly.
+# Derive BUILT_IMAGE from CALL_RESULT + event context when not set directly.
 # This avoids referencing reusable-workflow job outputs (which causes startup_failure
 # when the calling job has a conditional if:).
 if [[ -z "${BUILT_IMAGE:-}" && "${CALL_RESULT:-}" == "success" &&
 	"${TOOLS_CHANGED:-false}" == "true" && -n "${PR_NUMBER:-}" ]]; then
 	BUILT_IMAGE="${IMAGE_NAME}:pr-${PR_NUMBER}"
+elif [[ -z "${BUILT_IMAGE:-}" && "${CALL_RESULT:-}" == "success" &&
+	"${TOOLS_CHANGED:-false}" == "true" && "$GITHUB_EVENT_NAME" == "merge_group" ]]; then
+	: "${GITHUB_SHA:?GITHUB_SHA is required for merge_group fresh tools image resolution}"
+	BUILT_IMAGE="${IMAGE_NAME}:sha-${GITHUB_SHA}"
 fi
 
 # ------------------------------------------------------------------
@@ -104,37 +109,12 @@ if [[ -n "${BUILT_IMAGE:-}" ]]; then
 	fi
 
 # ------------------------------------------------------------------
-# 2. Push to main — require the commit-scoped SHA tag when tool files changed
-# ------------------------------------------------------------------
-elif [[ "$GITHUB_EVENT_NAME" == "push" ]]; then
-	CHANGED="${TOOLS_CHANGED:-false}"
-	if [[ "$CHANGED" == "true" ]]; then
-		: "${GITHUB_SHA:?GITHUB_SHA is required when TOOLS_CHANGED=true on push}"
-		IMAGE_TAG="${IMAGE_NAME}:sha-${GITHUB_SHA}"
-		# Poll until GHCR serves the commit-scoped tag (tools-image.yml may still
-		# be publishing). Budget ~8.5m sleeps + pulls; ci job timeout must exceed this.
-		IMAGE=$(resolve_image_digest "$IMAGE_TAG" 35 15)
-		SOURCE="registry"
-		echo "Using commit-scoped tools image digest for push: ${IMAGE}"
-	else
-		if [[ -z "${STABLE_IMAGE:-}" ]]; then
-			STABLE_IMAGE=$(get_tools_image_from_dockerfile)
-		fi
-		if [[ -z "${STABLE_IMAGE:-}" ]]; then
-			echo "::error::STABLE_IMAGE is unset and could not be read from Dockerfile"
-			exit 1
-		fi
-		IMAGE="${STABLE_IMAGE}"
-		SOURCE="stable"
-		echo "Using stable tools image (no tool changes on push): ${IMAGE}"
-	fi
-
-# ------------------------------------------------------------------
-# 3. Stable pinned image — PRs without tool changes, workflow_dispatch, etc.
+# 2. Stable pinned image — main pushes and runs without fresh gate images
 # ------------------------------------------------------------------
 else
 	if [[ -z "${STABLE_IMAGE:-}" ]]; then
-		# Read the pinned digest directly from Dockerfile — kept current by pin-digest job
+		# Read the pinned digest directly from Dockerfile. The release flow keeps
+		# it current after successful production tools-image builds.
 		STABLE_IMAGE=$(get_tools_image_from_dockerfile)
 	fi
 	if [[ -z "${STABLE_IMAGE:-}" ]]; then
@@ -143,7 +123,11 @@ else
 	fi
 	IMAGE="${STABLE_IMAGE}"
 	SOURCE="stable"
-	echo "Using stable tools image (pinned digest): ${IMAGE}"
+	if [[ "$GITHUB_EVENT_NAME" == "push" && "${TOOLS_CHANGED:-false}" == "true" ]]; then
+		echo "Using stable tools image for main push; Build - Tools Image validates production image: ${IMAGE}"
+	else
+		echo "Using stable tools image (pinned digest): ${IMAGE}"
+	fi
 fi
 
 echo "image=${IMAGE}" >>"$GITHUB_OUTPUT"

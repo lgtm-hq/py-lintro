@@ -84,7 +84,7 @@ def _run_script(
             },
         )
 
-        if event == "pull_request":
+        if event in {"pull_request", "merge_group"}:
             env.update(
                 {
                     "PR_BASE_SHA": "base-sha",
@@ -128,6 +128,34 @@ def test_detect_changes_matches_tools_image_on_push() -> None:
     assert_that(result.returncode).is_equal_to(0)
     assert_that(output_text).contains("tools_changed=true")
     assert_that(result.stdout).contains("scripts/ci/tools-image-*.sh")
+
+
+def test_detect_changes_matches_tools_image_on_merge_group() -> None:
+    """Merge queue events request a fresh tools-image build for tool changes."""
+    result, output_text = _run_script(
+        changed_files="scripts/ci/tools-image-resolve.sh\nREADME.md",
+        event="merge_group",
+    )
+
+    assert_that(result.returncode).is_equal_to(0)
+    assert_that(output_text).contains("tools_changed=true")
+    assert_that(result.stdout).contains(
+        "fresh tools image will be built via workflow_call",
+    )
+
+
+def test_detect_changes_on_push_uses_production_tools_image_notice() -> None:
+    """Main pushes leave production image validation to Build - Tools Image."""
+    result, output_text = _run_script(
+        changed_files="scripts/ci/tools-image-resolve.sh\nREADME.md",
+        event="push",
+    )
+
+    assert_that(result.returncode).is_equal_to(0)
+    assert_that(output_text).contains("tools_changed=true")
+    assert_that(result.stdout).contains(
+        "production tools image will be built by Build - Tools Image",
+    )
 
 
 def _shell_tool_paths() -> frozenset[str]:

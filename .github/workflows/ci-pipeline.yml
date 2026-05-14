@@ -4,7 +4,7 @@
 name: CI Pipeline
 
 # Gated CI:
-#   detect-tool-changes ──→ call-tools-image (PR + tool files changed via workflow_call)
+#   detect-tool-changes ──→ call-tools-image (fresh PR/MQ tools image)
 #                      ╲                    ╲
 # yamllint disable rule:line-length
 #                       ╲──────────────────→ resolve-tools (immutable image ref / artifact fallback) → docker-build ─┬─ lint
@@ -16,11 +16,12 @@ name: CI Pipeline
 # yamllint disable-line rule:line-length
 #                                                            test → deploy-pages (main only)
 #
-# tools-image.yml is called via workflow_call for pull requests that change tool
-# files, and resolve-tools chooses the final tools image source for downstream jobs.
-# Same-repo runs use pinned/immutable image references, while fork PRs fall back to
-# the saved tools-image artifact because they cannot publish to GHCR. Main pushes
-# also resolve immutable tools-image references here before docker-build runs.
+# tools-image.yml is called via workflow_call for PRs and merge queue runs that
+# change tool files. resolve-tools chooses the final tools image source for
+# downstream jobs. Same-repo gate runs use fresh immutable image references, while
+# fork PRs fall back to the saved tools-image artifact because they cannot publish
+# to GHCR. Main push CI uses the stable pinned tools image; the separate
+# Build - Tools Image workflow publishes and validates production tools images.
 # Docker image built ONCE and shared via GHCR (ci-<run_id> tags), with artifact
 # fallback for fork PRs. Smoke test folded into test job.
 
@@ -101,7 +102,7 @@ jobs:
         run: scripts/ci/tools-image-detect-changes.sh
 
   # ============================================================================
-  # Stage 1b: Build fresh tools image (PR events with tool changes)
+  # Stage 1b: Build fresh tools image (PR and merge queue events with tool changes)
   # Delegates to tools-image.yml via workflow_call — no polling required.
   # ============================================================================
   call-tools-image:
@@ -112,8 +113,9 @@ jobs:
     # The tools-changed check moves to skip_if_unchanged (runtime with: expression)
     # so startup validation never sees a needs-output reference in this condition.
     if: >-
-      github.event_name == 'pull_request' &&
-      github.event.pull_request.draft == false
+      (github.event_name == 'pull_request' &&
+        github.event.pull_request.draft == false) ||
+      github.event_name == 'merge_group'
     uses: ./.github/workflows/tools-image.yml
     permissions:
       contents: write
@@ -123,9 +125,10 @@ jobs:
     with:
       # yamllint disable-line rule:line-length
       skip_if_unchanged: ${{ needs.detect-tool-changes.outputs.tools-changed != 'true' }}
-      pr_number: ${{ github.event.pull_request.number }}
       # yamllint disable-line rule:line-length
-      is_fork_pr: ${{ github.event.pull_request.head.repo.fork && 'true' || 'false' }}
+      pr_number: ${{ github.event_name == 'pull_request' && github.event.pull_request.number || '' }}
+      # yamllint disable-line rule:line-length
+      is_fork_pr: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.fork && 'true' || 'false' }}
 
   # ============================================================================
   # Stage 1c: Resolve final tools image reference
@@ -137,9 +140,7 @@ jobs:
     permissions:
       contents: read
       packages: read
-    # Must exceed tools-image-resolve digest polling ((attempts-1)*sleep_seconds)
-    # plus docker pull latency — see scripts/ci/tools-image-resolve.sh push path.
-    timeout-minutes: 15
+    timeout-minutes: 5
     # Run when detect-tool-changes AND call-tools-image both succeeded or were skipped.
     # call-tools-image skips for push events or PRs without tool changes.
     # yamllint disable rule:line-length
@@ -178,8 +179,9 @@ jobs:
           IMAGE_NAME: ghcr.io/lgtm-hq/lintro-tools
           # Use .result (not .outputs) to avoid startup_failure — GitHub rejects
           # workflows where downstream jobs reference .outputs of a conditional
-          # reusable-workflow job. The PR tag is deterministic (pr-<number>), so
-          # we derive it from PR_NUMBER + CALL_RESULT instead of passing the output.
+          # reusable-workflow job. Fresh gate tags are deterministic (pr-<number>
+          # for PRs, sha-<commit> for merge queue), so we derive them from event
+          # context + CALL_RESULT instead of passing the output.
           CALL_RESULT: ${{ needs.call-tools-image.result }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
           IS_FORK_PR: ${{ github.event.pull_request.head.repo.fork }}
