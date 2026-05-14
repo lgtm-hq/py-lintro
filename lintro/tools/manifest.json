@@ -182,7 +182,7 @@
     },
     {
       "name": "osv_scanner",
-      "version": "2.3.5",
+      "version": "2.3.8",
       "install": {
         "type": "binary",
         "package": "osv-scanner"
