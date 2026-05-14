@@ -6,7 +6,7 @@
 # Used by resolve-tools-image action.
 #
 # Required environment variables:
-#   GITHUB_EVENT_NAME     - "push" or "pull_request"
+#   GITHUB_EVENT_NAME     - "push", "pull_request", or "merge_group"
 #   GITHUB_OUTPUT         - Path to GitHub outputs file
 # Required for pull_request:
 #   PR_BASE_SHA           - Base commit SHA for PR
@@ -24,7 +24,7 @@ Usage:
   scripts/ci/tools-image-detect-changes.sh
 
 Environment Variables (required):
-  GITHUB_EVENT_NAME   GitHub event name (push or pull_request)
+  GITHUB_EVENT_NAME   GitHub event name (push, pull_request, or merge_group)
   GITHUB_OUTPUT       Path to GitHub output file
 
 Environment Variables (for pull_request):
@@ -47,10 +47,10 @@ fi
 : "${GITHUB_EVENT_NAME:?GITHUB_EVENT_NAME is required}"
 : "${GITHUB_OUTPUT:?GITHUB_OUTPUT is required}"
 
-# Define tool-related file patterns that require CI to use a freshly built
+# Define tool-related file patterns that require merge-gating CI to use a fresh
 # tools image. This list must stay aligned with the reusable workflow's
 # workflow_call change detection so resolve-tools picks the same image that the
-# build stage produced.
+# build stage produced for PR and merge queue runs.
 TOOL_PATTERNS=(
 	"Dockerfile.tools"
 	"scripts/utils/install-tools.sh"
@@ -129,10 +129,10 @@ if [[ "$tools_changed" == "true" ]]; then
 		echo "::notice::Tool files changed — fresh tools image will be built via workflow_call"
 		;;
 	merge_group)
-		echo "::notice::Tool files changed in merge queue — stable image will be used (PR build already validated)"
+		echo "::notice::Tool files changed in merge queue — fresh tools image will be built via workflow_call"
 		;;
 	*)
-		echo "::notice::Tool files changed — tools-image.yml will build a fresh image"
+		echo "::notice::Tool files changed — production tools image will be built by Build - Tools Image"
 		;;
 	esac
 else

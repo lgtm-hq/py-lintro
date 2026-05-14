@@ -4,12 +4,10 @@
 name: Resolve Tools Image
 description: >-
   Detect tool file changes and resolve the appropriate tools image reference.
-  Returns the stable pinned image for contexts without tool changes. For
-  main-branch pushes with tool changes the resolver produces a commit-scoped
-  sha-${GITHUB_SHA} tag and translates it into a digest-backed image reference.
-  Callers that need a freshly built image for a PR with tool changes should
-  call tools-image.yml via workflow_call and pass the result as BUILT_IMAGE to
-  tools-image-resolve.sh directly (see ci-pipeline.yml).
+  Returns the stable pinned image for contexts that do not provide a freshly
+  built workflow_call image. Callers that need a fresh gate image for PR or
+  merge queue validation should call tools-image.yml via workflow_call and pass
+  the result context to tools-image-resolve.sh directly (see ci-pipeline.yml).
 inputs:
   image-name:
     description: Base image name without tag
@@ -39,8 +37,14 @@ runs:
       shell: bash
       env:
         GITHUB_EVENT_NAME: ${{ github.event_name }}
-        PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
-        PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        PR_BASE_SHA: >-
+          ${{ github.event.pull_request.base.sha ||
+          github.event.merge_group.base_sha ||
+          github.event.merge_group.base_commit_oid }}
+        PR_HEAD_SHA: >-
+          ${{ github.event.pull_request.head.sha ||
+          github.event.merge_group.head_sha ||
+          github.event.merge_group.head_commit_oid }}
         GITHUB_EVENT_BEFORE: ${{ github.event.before }}
       run: scripts/ci/tools-image-detect-changes.sh
 
