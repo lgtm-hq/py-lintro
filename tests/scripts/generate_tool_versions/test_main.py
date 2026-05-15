@@ -82,3 +82,23 @@ def test_main_input_error_exits_two(
     rc = retargeted_gen.main([])
     assert_that(rc).is_equal_to(retargeted_gen.EXIT_INPUT_ERROR)
     assert_that(capsys.readouterr().err).contains("oxfmt")
+
+
+def test_main_invalid_manifest_exits_two(
+    retargeted_gen: ModuleType,
+    fake_repo: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Malformed manifest JSON yields exit code 2.
+
+    Args:
+        retargeted_gen: Generator module pointed at the fake repo.
+        fake_repo: Fake repo fixture root.
+        capsys: Pytest stdout/stderr capture.
+    """
+    manifest = fake_repo / "lintro" / "tools" / "manifest.json"
+    manifest.write_text('{"tools": [')
+
+    rc = retargeted_gen.main([])
+    assert_that(rc).is_equal_to(retargeted_gen.EXIT_INPUT_ERROR)
+    assert_that(capsys.readouterr().err).contains("manifest.json")

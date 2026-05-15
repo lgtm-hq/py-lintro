@@ -9,6 +9,11 @@ from typing import Any
 from _generator.errors import GenerationError
 from _generator.seed import Seed
 
+# Install types that resolve from ``binary_versions`` parsed out of
+# ``lintro/_tool_versions.py``. Update this set when the manifest schema gains a
+# new binary-like installer such as ``binary``, ``cargo``, or ``rustup``.
+BINARY_INSTALL_TYPES = frozenset({"binary", "cargo", "rustup"})
+
 GENERATED_HEADER = '''\
 """Auto-generated tool versions. Do not edit by hand.
 
@@ -60,9 +65,8 @@ def build_target_versions(
     """Resolve each manifest entry's expected version from the right source.
 
     ``install.type`` determines the source: ``npm``/``pip`` look up the
-    ``install.package`` in the relevant generated dict; everything else
-    (``binary``, ``cargo``, ``rustup``) is matched against ``binary_versions``
-    by manifest entry name.
+    ``install.package`` in the relevant generated dict; binary-like installers
+    are matched against ``binary_versions`` by manifest entry name.
 
     Args:
         manifest_data: Parsed manifest.json content.
@@ -96,7 +100,7 @@ def build_target_versions(
             and package in pypi_versions
         ):
             targets[name] = pypi_versions[package]
-        elif name in binary_versions:
+        elif install_type in BINARY_INSTALL_TYPES and name in binary_versions:
             targets[name] = binary_versions[name]
     return targets
 
@@ -104,8 +108,8 @@ def build_target_versions(
 def render_manifest(current_text: str, target_versions: dict[str, str]) -> str:
     """Apply targeted ``version`` updates to ``manifest.json`` text.
 
-    Edits only the ``"version": "..."`` field that immediately follows each
-    target tool's ``"name"`` field. All other bytes of the file (whitespace,
+    Edits only the ``"version": "..."`` field in each target tool object after
+    that tool's ``"name"`` field. All other bytes of the file (whitespace,
     key order, inline-array formatting) are preserved — round-tripping
     through ``json.dumps`` would reflow inline arrays into a noisy diff.
 
@@ -117,9 +121,8 @@ def render_manifest(current_text: str, target_versions: dict[str, str]) -> str:
         New manifest.json text.
 
     Raises:
-        GenerationError: If the manifest is malformed, or if a target name
-            has its ``version`` field separated from its ``name`` sibling by
-            intervening keys, or appears more than once.
+        GenerationError: If the manifest is malformed, a target name has no
+            following ``version`` field, or appears more than once.
     """
     try:
         json.loads(current_text)
@@ -129,14 +132,15 @@ def render_manifest(current_text: str, target_versions: dict[str, str]) -> str:
     text = current_text
     for name, version in target_versions.items():
         pattern = re.compile(
-            rf'("name":\s*"{re.escape(name)}",\s*"version":\s*")[^"]+(")',
+            rf'("name":\s*"{re.escape(name)}".*?"version":\s*")[^"]+(")',
+            re.DOTALL,
         )
         text, count = pattern.subn(rf"\g<1>{version}\g<2>", text)
         if count == 0:
             raise GenerationError(
-                f"manifest.json has no '{name}' entry with adjacent name/version "
-                f"fields. Add the entry, or restore the conventional "
-                f"name-then-version key order.",
+                f"manifest.json has no '{name}' entry with a following version "
+                f"field. Add the entry, or restore the conventional "
+                f"name-before-version key order.",
             )
         if count > 1:
             raise GenerationError(

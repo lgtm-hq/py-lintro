@@ -58,6 +58,11 @@ def test_scripts_readme_coverage() -> None:
     # Get all script files
     script_files = set()
     for script_file in Path("scripts").rglob("*.sh"):
+        # Skip files inside private packages (e.g. ``scripts/ci/_generator/``);
+        # those are implementation detail of a documented entry script, not
+        # separately invokable scripts.
+        if any(part.startswith("_") for part in script_file.parts):
+            continue
         script_files.add(script_file.name)
     for script_file in Path("scripts").rglob("*.py"):
         if script_file.name == "__init__.py":

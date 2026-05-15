@@ -21,17 +21,19 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 SCRIPT_PATH = REPO_ROOT / "scripts" / "ci" / "generate-tool-versions.py"
 
 
-@pytest.fixture(scope="session")
-def gen() -> ModuleType:
-    """Import the generator entry script as a module.
+def _load_generator_module(module_name: str) -> ModuleType:
+    """Import the generator entry script under ``module_name``.
+
+    Args:
+        module_name: Name used to register the loaded module in ``sys.modules``.
 
     Returns:
-        Imported module exposing top-level helpers and path constants.
-        Private package helpers exercised by tests are attached as module
-        attributes for ergonomic access.
+        Imported module exposing top-level helpers and path constants. Private
+        package helpers exercised by tests are attached as module attributes for
+        ergonomic access.
     """
     spec = importlib.util.spec_from_file_location(
-        "generate_tool_versions",
+        module_name,
         SCRIPT_PATH,
     )
     if spec is None or spec.loader is None:
@@ -39,7 +41,7 @@ def gen() -> ModuleType:
     module = importlib.util.module_from_spec(spec)
     # Register before exec so frozen-dataclass machinery
     # (sys.modules.get(cls.__module__).__dict__) resolves cleanly.
-    sys.modules["generate_tool_versions"] = module
+    sys.modules[module_name] = module
     spec.loader.exec_module(module)
 
     # Expose private package helpers needed by tests.
@@ -47,6 +49,16 @@ def gen() -> ModuleType:
 
     module._collect_dep_strings = _collect_dep_strings  # type: ignore[attr-defined]
     return module
+
+
+@pytest.fixture(scope="session")
+def gen() -> ModuleType:
+    """Import the generator entry script as a module.
+
+    Returns:
+        Imported module exposing top-level helpers and path constants.
+    """
+    return _load_generator_module("generate_tool_versions")
 
 
 @pytest.fixture
@@ -93,7 +105,10 @@ def fake_repo(tmp_path: Path) -> Generator[Path, None, None]:
     )
 
     (tmp_path / "pyproject.toml").write_text(
-        "[project]\n" 'name = "fake"\n' 'dependencies = ["pytest>=9.0.3"]\n',
+        """[project]
+name = "fake"
+dependencies = ["pytest>=9.0.3"]
+""",
     )
 
     (tmp_path / "lintro" / "tools" / "manifest.json").write_text(
@@ -121,26 +136,24 @@ def fake_repo(tmp_path: Path) -> Generator[Path, None, None]:
 
 
 @pytest.fixture
-def retargeted_gen(gen: ModuleType, fake_repo: Path) -> ModuleType:
-    """Generator module with its module-level paths pointed at ``fake_repo``.
+def retargeted_gen(fake_repo: Path) -> ModuleType:
+    """Fresh generator module with its module-level paths pointed at ``fake_repo``.
 
-    Mutates the session-scoped ``gen`` module in place; relies on the only
-    callers being end-to-end ``main()`` tests that always retarget before
-    invoking. The hyphen-named import means mypy cannot statically resolve
-    these attributes, hence the per-line type-ignore.
+    The hyphen-named import means mypy cannot statically resolve these
+    attributes, hence the per-line type-ignore.
 
     Args:
-        gen: Imported generator module (session-scoped).
         fake_repo: Fake repo fixture root.
 
     Returns:
-        The same generator module, with paths bound to the fake repo.
+        A generator module instance with paths bound to the fake repo.
     """
-    gen.REPO_ROOT = fake_repo  # type: ignore[attr-defined]
-    gen.SEED_PATH = fake_repo / "lintro" / "_tool_packages.py"  # type: ignore[attr-defined]
-    gen.TOOL_VERSIONS_PATH = fake_repo / "lintro" / "_tool_versions.py"  # type: ignore[attr-defined]
-    gen.PACKAGE_JSON_PATH = fake_repo / "package.json"  # type: ignore[attr-defined]
-    gen.PYPROJECT_PATH = fake_repo / "pyproject.toml"  # type: ignore[attr-defined]
-    gen.MANIFEST_PATH = fake_repo / "lintro" / "tools" / "manifest.json"  # type: ignore[attr-defined]
-    gen.GENERATED_PATH = fake_repo / "lintro" / "_generated_versions.py"  # type: ignore[attr-defined]
-    return gen
+    module = _load_generator_module(f"generate_tool_versions_{id(fake_repo)}")
+    module.REPO_ROOT = fake_repo  # type: ignore[attr-defined]
+    module.SEED_PATH = fake_repo / "lintro" / "_tool_packages.py"  # type: ignore[attr-defined]
+    module.TOOL_VERSIONS_PATH = fake_repo / "lintro" / "_tool_versions.py"  # type: ignore[attr-defined]
+    module.PACKAGE_JSON_PATH = fake_repo / "package.json"  # type: ignore[attr-defined]
+    module.PYPROJECT_PATH = fake_repo / "pyproject.toml"  # type: ignore[attr-defined]
+    module.MANIFEST_PATH = fake_repo / "lintro" / "tools" / "manifest.json"  # type: ignore[attr-defined]
+    module.GENERATED_PATH = fake_repo / "lintro" / "_generated_versions.py"  # type: ignore[attr-defined]
+    return module

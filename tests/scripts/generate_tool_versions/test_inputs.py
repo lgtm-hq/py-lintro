@@ -18,6 +18,10 @@ _NON_EXACT_NPM_SPECS = [
     "workspace:*",
     "npm:foo@1.0.0",
     "1.x",
+    "1.2.3-rc..1",
+    "1.2.3-.rc",
+    "1.2.3-rc.",
+    "1.2.3+build..5",
 ]
 
 _EXACT_NPM_SPECS = [
@@ -26,6 +30,7 @@ _EXACT_NPM_SPECS = [
     "~1.2.3",
     "1.2.3-rc.1",
     "1.2.3+build.5",
+    "1.2.3-rc.1+build.5",
 ]
 
 
@@ -226,3 +231,20 @@ def test_read_binary_tool_versions(gen: ModuleType, tmp_path: Path) -> None:
     )
     versions = gen.read_binary_tool_versions(tv)
     assert_that(versions).is_equal_to({"hadolint": "2.14.0", "rustfmt": "1.8.0"})
+
+
+def test_read_binary_tool_versions_invalid_python_raises(
+    gen: ModuleType,
+    tmp_path: Path,
+) -> None:
+    """Malformed ``_tool_versions.py`` is normalized to GenerationError.
+
+    Args:
+        gen: Imported generator module.
+        tmp_path: Pytest temp dir.
+    """
+    tv = tmp_path / "_tool_versions.py"
+    tv.write_text("TOOL_VERSIONS = {\n")
+
+    with pytest.raises(gen.GenerationError, match="not valid Python"):
+        gen.read_binary_tool_versions(tv)

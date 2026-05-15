@@ -92,8 +92,13 @@ def collect_outputs(seed: Seed) -> tuple[str, str]:
 
     binary_versions = read_binary_tool_versions(TOOL_VERSIONS_PATH)
 
-    manifest_current = MANIFEST_PATH.read_text()
-    manifest_data = json.loads(manifest_current)
+    try:
+        manifest_current = MANIFEST_PATH.read_text()
+        manifest_data = json.loads(manifest_current)
+    except OSError as exc:
+        raise GenerationError(f"manifest.json could not be read: {exc}") from exc
+    except json.JSONDecodeError as exc:
+        raise GenerationError(f"manifest.json is not valid JSON: {exc}") from exc
     target_versions = build_target_versions(
         manifest_data=manifest_data,
         npm_versions=npm_versions,

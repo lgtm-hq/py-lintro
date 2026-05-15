@@ -21,8 +21,11 @@ _SPEC_RE = re.compile(
 )
 
 # Strict exact-version pattern for npm specs after ``^``/``~`` stripping.
-# Accepts ``X.Y.Z`` and ``X.Y.Z-pre`` / ``X.Y.Z+build`` SemVer suffixes.
-_EXACT_VERSION_RE = re.compile(r"^\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.\-]+)?$")
+# Accepts ``X.Y.Z`` plus optional prerelease and build metadata SemVer suffixes.
+_SEMVER_IDENTIFIER = r"[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*"
+_EXACT_VERSION_RE = re.compile(
+    rf"^\d+\.\d+\.\d+(?:-{_SEMVER_IDENTIFIER})?(?:\+{_SEMVER_IDENTIFIER})?$",
+)
 
 
 def read_package_json(
@@ -214,7 +217,10 @@ def read_binary_tool_versions(path: Path) -> dict[str, str]:
         raise GenerationError(f"_tool_versions.py not found: {path}")
 
     content = path.read_text()
-    tree = ast.parse(content)
+    try:
+        tree = ast.parse(content)
+    except SyntaxError as exc:
+        raise GenerationError(f"_tool_versions.py is not valid Python: {exc}") from exc
     block: ast.Assign | ast.AnnAssign | None = None
     for node in ast.walk(tree):
         if extract_assign_target(node) == "TOOL_VERSIONS":

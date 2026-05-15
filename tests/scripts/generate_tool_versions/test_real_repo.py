@@ -10,21 +10,11 @@ from assertpy import assert_that
 from tests.scripts.generate_tool_versions.conftest import REPO_ROOT, SCRIPT_PATH
 
 
-def test_generator_runs_against_real_repo() -> None:
-    """Generator is idempotent against the real repo.
+def test_generator_check_passes_against_real_repo() -> None:
+    """Generator check mode passes against the real repo.
 
-    Runs the generator twice as a subprocess and asserts the second run with
-    ``--check`` exits 0.
+    Runs only ``--check`` so the test cannot repair drift before asserting.
     """
-    write_rc = subprocess.run(
-        [sys.executable, str(SCRIPT_PATH)],
-        cwd=REPO_ROOT,
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-    assert_that(write_rc.returncode).is_equal_to(0)
-
     check_rc = subprocess.run(
         [sys.executable, str(SCRIPT_PATH), "--check"],
         cwd=REPO_ROOT,

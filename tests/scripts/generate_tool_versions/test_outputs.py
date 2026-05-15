@@ -61,6 +61,34 @@ def test_render_manifest_preserves_inline_arrays(gen: ModuleType) -> None:
     assert_that(new_text).contains('"version": "9.0.3"')
 
 
+def test_render_manifest_allows_intervening_fields(gen: ModuleType) -> None:
+    """Manifest update tolerates metadata between name and version.
+
+    Args:
+        gen: Imported generator module.
+    """
+    manifest = (
+        "{\n"
+        '  "tools": [\n'
+        "    {\n"
+        '      "name": "oxfmt",\n'
+        '      "description": "formatter",\n'
+        '      "version": "0.0.0",\n'
+        '      "install": {"type": "npm", "package": "oxfmt"}\n'
+        "    }\n"
+        "  ]\n"
+        "}\n"
+    )
+
+    new_text = gen.render_manifest(
+        current_text=manifest,
+        target_versions={"oxfmt": "0.43.0"},
+    )
+
+    assert_that(new_text).contains('"description": "formatter"')
+    assert_that(new_text).contains('"version": "0.43.0"')
+
+
 def test_render_manifest_missing_entry_raises(gen: ModuleType) -> None:
     """A target name with no manifest entry triggers a clear error.
 
@@ -98,3 +126,26 @@ def test_build_target_versions_dispatches_by_install_type(
     assert_that(targets).is_equal_to(
         {"oxfmt": "0.43.0", "pytest": "9.0.3", "hadolint": "2.14.0"},
     )
+
+
+def test_build_target_versions_does_not_fallback_for_npm_entry(
+    gen: ModuleType,
+) -> None:
+    """Misconfigured npm entries do not fall back to binary versions by name.
+
+    Args:
+        gen: Imported generator module.
+    """
+    manifest = {
+        "tools": [
+            {"name": "oxfmt", "install": {"type": "npm", "package": "missing"}},
+        ],
+    }
+    targets = gen.build_target_versions(
+        manifest_data=manifest,
+        npm_versions={"other": "0.43.0"},
+        pypi_versions={},
+        binary_versions={"oxfmt": "9.9.9"},
+    )
+
+    assert_that(targets).is_empty()
