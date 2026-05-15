@@ -47,7 +47,10 @@ def parse_seed(path: Path) -> Seed:
     if not path.exists():
         raise GenerationError(f"seed file not found: {path}")
 
-    tree = ast.parse(path.read_text())
+    try:
+        tree = ast.parse(path.read_text())
+    except SyntaxError as exc:
+        raise GenerationError(f"seed file is not valid Python: {exc}") from exc
     npm: dict[str, str | None] | None = None
     pypi: dict[str, str | None] | None = None
 

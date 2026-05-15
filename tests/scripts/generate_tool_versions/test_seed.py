@@ -34,6 +34,20 @@ def test_parse_seed_missing_file_errors(gen: ModuleType, tmp_path: Path) -> None
         gen.parse_seed(tmp_path / "nope.py")
 
 
+def test_parse_seed_invalid_python_errors(gen: ModuleType, tmp_path: Path) -> None:
+    """Malformed seed Python raises GenerationError.
+
+    Args:
+        gen: Imported generator module.
+        tmp_path: Pytest temp dir.
+    """
+    bad = tmp_path / "seed.py"
+    bad.write_text("NPM_PACKAGE_OWNERS = {\n")
+
+    with pytest.raises(gen.GenerationError, match="not valid Python"):
+        gen.parse_seed(bad)
+
+
 def test_parse_seed_rejects_non_toolname_value(
     gen: ModuleType,
     tmp_path: Path,

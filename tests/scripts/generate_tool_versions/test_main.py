@@ -54,7 +54,7 @@ def test_main_check_drift_exits_one(
 
     pkg = fake_repo / "package.json"
     data = json.loads(pkg.read_text())
-    data["devDependencies"]["oxfmt"] = "^0.99.0"
+    data["devDependencies"]["oxfmt"] = "0.99.0"
     pkg.write_text(json.dumps(data, indent=2))
 
     rc = retargeted_gen.main(["--check"])
