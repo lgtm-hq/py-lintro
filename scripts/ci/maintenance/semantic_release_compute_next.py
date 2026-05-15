@@ -75,6 +75,7 @@ class ComputeResult:
         has_fix_or_perf: Whether fix/perf commits were detected
         has_digest_drift: Whether pinned tools digest differs from registry
         bump_reason: Human-readable reason string for the computed bump
+        bump_type: Semantic bump type (major, minor, patch, or none)
     """
 
     base_ref: str = field(default="")
@@ -85,6 +86,7 @@ class ComputeResult:
     has_fix_or_perf: bool = field(default=False)
     has_digest_drift: bool = field(default=False)
     bump_reason: str = field(default="")
+    bump_type: str = field(default="none")
 
 
 def _validate_git_args(arguments: list[str]) -> None:
@@ -351,6 +353,31 @@ def detect_digest_drift() -> tuple[bool, str, str]:
     return drift, pin.digest, registry
 
 
+def classify_bump_type(base_version: str, next_version: str) -> str:
+    """Classify the semver bump between two versions.
+
+    Args:
+        base_version: Current semantic version.
+        next_version: Proposed next semantic version.
+
+    Returns:
+        ``major``, ``minor``, ``patch``, or ``none`` when unchanged/invalid.
+    """
+    if not next_version or base_version == next_version:
+        return "none"
+
+    base_major, base_minor, base_patch = parse_semver(base_version)
+    next_major, next_minor, next_patch = parse_semver(next_version)
+
+    if next_major > base_major:
+        return "major"
+    if next_minor > base_minor:
+        return "minor"
+    if next_patch > base_patch:
+        return "patch"
+    return "none"
+
+
 def parse_semver(version: str) -> tuple[int, int, int]:
     """Parse a semantic version into integer components.
 
@@ -545,6 +572,7 @@ def compute() -> ComputeResult:
     if drift:
         reasons.append("digest-drift")
     bump_reason = "+".join(reasons)
+    bump_type = classify_bump_type(base_version, next_version)
 
     if drift:
         print(
@@ -562,6 +590,7 @@ def compute() -> ComputeResult:
         has_fix_or_perf=fix,
         has_digest_drift=drift,
         bump_reason=bump_reason,
+        bump_type=bump_type,
     )
 
 
@@ -602,11 +631,13 @@ def main() -> None:
     if args.print_only or not os.getenv("GITHUB_OUTPUT"):
         print(f"next_version={result.next_version}")
         print(f"bump_reason={result.bump_reason}")
+        print(f"bump_type={result.bump_type}")
         return
 
     with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as fh:
         fh.write(f"next_version={result.next_version}\n")
         fh.write(f"bump_reason={result.bump_reason}\n")
+        fh.write(f"bump_type={result.bump_type}\n")
         fh.write(f"digest_drift={'true' if result.has_digest_drift else 'false'}\n")
 
 
