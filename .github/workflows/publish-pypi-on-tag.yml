@@ -177,8 +177,7 @@ jobs:
           python-version: '3.14'
 
       # GitHub App (e.g. homebrew-tap-release-bot) installed on org with access to
-      # homebrew-tap; must appear in that repo’s ruleset bypass list if main blocks
-      # direct pushes.
+      # homebrew-tap. It opens a formula PR and enables auto-merge after checks pass.
       - name: Create Homebrew tap GitHub App token
         id: homebrew-app-token
         # yamllint disable-line rule:line-length
@@ -189,6 +188,7 @@ jobs:
           owner: lgtm-hq
           repositories: homebrew-tap
           permission-contents: write
+          permission-pull-requests: write
 
       - name: Checkout homebrew-tap
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
@@ -203,11 +203,18 @@ jobs:
             "${{ steps.version.outputs.version }}" \
             "homebrew-tap/Formula/lintro.rb"
 
-      - name: Commit and push
+      - name: Create Homebrew tap PR
         env:
+          GH_TOKEN: ${{ steps.homebrew-app-token.outputs.token }}
           WORKING_DIR: homebrew-tap
-        run: |
-          lintro/scripts/ci/git-commit-push.sh \
-            "Formula/lintro.rb" \
-            "Update lintro to ${{ steps.version.outputs.version }}" \
-            --skip-if-empty
+          PR_BRANCH: homebrew/lintro-${{ steps.version.outputs.version }}
+          PR_TITLE: Update lintro to ${{ steps.version.outputs.version }}
+          PR_BODY: |
+            Updates `Formula/lintro.rb` for lintro ${{ steps.version.outputs.version }}.
+
+            Auto-merge is enabled once `validate-formula` passes.
+        run: >-
+          lintro/scripts/ci/homebrew/create-tap-pr.sh
+          "Formula/lintro.rb"
+          "Update lintro to ${{ steps.version.outputs.version }}"
+          --skip-if-empty
