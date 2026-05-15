@@ -280,6 +280,7 @@ jobs:
           owner: lgtm-hq
           repositories: homebrew-tap
           permission-contents: write
+          permission-pull-requests: write
 
       - name: Checkout homebrew-tap
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
@@ -296,10 +297,19 @@ jobs:
             "${{ steps.checksums.outputs.x86_64_sha256 }}" \
             "homebrew-tap/Formula/lintro-bin.rb"
 
-      - name: Commit and push
+      - name: Create Homebrew tap PR
         env:
+          GH_TOKEN: ${{ steps.homebrew-app-token.outputs.token }}
           WORKING_DIR: homebrew-tap
-        run: |
-          lintro/scripts/ci/git-commit-push.sh \
-            "Formula/lintro-bin.rb" \
-            "Update lintro-bin to ${{ steps.version.outputs.version }}"
+          PR_BRANCH: homebrew/lintro-bin-${{ steps.version.outputs.version }}
+          PR_TITLE: Update lintro-bin to ${{ steps.version.outputs.version }}
+          PR_BODY: |
+            Updates `Formula/lintro-bin.rb` for lintro
+            ${{ steps.version.outputs.version }}.
+
+            Auto-merge is enabled once `validate-formula` passes.
+        run: >-
+          lintro/scripts/ci/homebrew/create-tap-pr.sh
+          "Formula/lintro-bin.rb"
+          "Update lintro-bin to ${{ steps.version.outputs.version }}"
+          --skip-if-empty
