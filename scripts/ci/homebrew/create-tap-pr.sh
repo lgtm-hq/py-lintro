@@ -14,6 +14,9 @@ Create or update a Homebrew tap PR and enable auto-merge.
 
 Usage: create-tap-pr.sh <file-pattern> <commit-message> [--skip-if-empty]
 
+Options:
+  --skip-if-empty  Exit 0 if there are no changes (default: error)
+
 Environment:
   WORKING_DIR   Tap checkout directory (default: current directory)
   PR_BRANCH     Branch to push in the tap repo
@@ -36,6 +39,11 @@ PR_BASE="${PR_BASE:-main}"
 : "${PR_BODY:?PR_BODY is required}"
 : "${GH_TOKEN:?GH_TOKEN is required}"
 
+if [[ -n "$SKIP_IF_EMPTY" && "$SKIP_IF_EMPTY" != "--skip-if-empty" ]]; then
+	log_error "Unknown option: $SKIP_IF_EMPTY"
+	exit 1
+fi
+
 cd "$WORKING_DIR"
 
 git config user.name "lgtm-homebrew-tap[bot]"
@@ -50,8 +58,8 @@ if git diff --staged --quiet; then
 		exit 0
 	fi
 
-	log_warning "No changes to commit"
-	exit 0
+	log_error "No changes to commit"
+	exit 1
 fi
 
 log_info "Creating update commit"
@@ -89,8 +97,9 @@ log_info "Enabling auto-merge for Homebrew tap PR #$pr_number"
 gh pr merge "$pr_number" --auto --squash --delete-branch
 
 if [[ -n "${GITHUB_OUTPUT:-}" ]]; then
+	tap_repository="$(gh repo view --json nameWithOwner --jq .nameWithOwner)"
 	echo "pr-number=$pr_number" >>"$GITHUB_OUTPUT"
-	echo "pr-url=${GITHUB_SERVER_URL}/lgtm-hq/homebrew-tap/pull/${pr_number}" >>"$GITHUB_OUTPUT"
+	echo "pr-url=${GITHUB_SERVER_URL}/${tap_repository}/pull/${pr_number}" >>"$GITHUB_OUTPUT"
 fi
 
 log_success "Homebrew tap PR ready: #$pr_number"
