@@ -11,9 +11,9 @@ fi
 ./scripts/utils/install-tools.sh --local
 echo "$HOME/.local/bin" >>"$GITHUB_PATH"
 
-# Verify tool versions are synchronized between package.json and _tool_versions.py
-echo "Verifying tool version synchronization..."
-python scripts/ci/verify-tool-version-sync.py
+# Verify generated tool-version artifacts are in sync with package.json/pyproject.toml
+echo "Verifying generated tool versions..."
+python scripts/ci/generate-tool-versions.py --check
 
 uv run lintro check . --output-format grid
 

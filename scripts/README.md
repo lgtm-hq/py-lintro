@@ -151,8 +151,7 @@ Scripts for GitHub Actions workflows and continuous integration.
 | `resolve-vue-tsc-version.sh`          | Read installed vue-tsc version from bun's global install root         | `./scripts/ci/resolve-vue-tsc-version.sh --help`                                                                                      |
 | `tools-image-resolve-summary.sh`      | Write tools image resolution summary to GitHub step summary           | `./scripts/ci/tools-image-resolve-summary.sh --help`                                                                                  |
 | `verify-manifest-tools.py`            | Verify tools in image match manifest versions                         | `python scripts/ci/verify-manifest-tools.py --help`                                                                                   |
-| `verify-manifest-sync.py`             | Verify manifest versions match pyproject and package.json             | `python scripts/ci/verify-manifest-sync.py --help`                                                                                    |
-| `verify-tool-version-sync.py`         | Verify tool versions match between package.json and pyproject.toml    | `python scripts/ci/verify-tool-version-sync.py`                                                                                       |
+| `generate-tool-versions.py`           | Generate `_generated_versions.py` and sync `manifest.json` versions   | `python scripts/ci/generate-tool-versions.py [--check]`                                                                               |
 
 #### Homebrew Scripts (`ci/homebrew/`)
 

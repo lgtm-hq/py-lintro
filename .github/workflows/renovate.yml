@@ -40,6 +40,7 @@ jobs:
             objects.githubusercontent.com:443
             pypi.org:443
             files.pythonhosted.org:443
+            registry.npmjs.org:443
 
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
@@ -57,3 +58,9 @@ jobs:
         env:
           # yamllint disable-line rule:line-length
           LOG_LEVEL: ${{ github.event_name == 'workflow_dispatch' && 'debug' || 'info' }}
+          # Allow the generator to run as a postUpgradeTask. Anchored regex
+          # rejects any other invocation; bot-level grant is required by
+          # self-hosted Renovate's security model (repos cannot allowlist
+          # their own commands via renovate.json).
+          # yamllint disable-line rule:line-length
+          RENOVATE_ALLOWED_POST_UPGRADE_COMMANDS: '["^python3 scripts/ci/generate-tool-versions\\.py$"]'
