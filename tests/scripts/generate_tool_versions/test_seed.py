@@ -48,6 +48,28 @@ def test_parse_seed_invalid_python_errors(gen: ModuleType, tmp_path: Path) -> No
         gen.parse_seed(bad)
 
 
+def test_parse_seed_rejects_duplicate_top_level_mapping(
+    gen: ModuleType,
+    tmp_path: Path,
+) -> None:
+    """Duplicate top-level seed mappings raise GenerationError.
+
+    Args:
+        gen: Imported generator module.
+        tmp_path: Pytest temp dir.
+    """
+    bad = tmp_path / "seed.py"
+    bad.write_text(
+        "from lintro.enums.tool_name import ToolName\n"
+        "NPM_PACKAGE_OWNERS: dict[str, object] = {}\n"
+        "NPM_PACKAGE_OWNERS: dict[str, object] = {}\n"
+        "PYPI_PACKAGE_OWNERS: dict[str, object] = {}\n",
+    )
+
+    with pytest.raises(gen.GenerationError, match="NPM_PACKAGE_OWNERS more than once"):
+        gen.parse_seed(bad)
+
+
 def test_parse_seed_rejects_non_toolname_value(
     gen: ModuleType,
     tmp_path: Path,

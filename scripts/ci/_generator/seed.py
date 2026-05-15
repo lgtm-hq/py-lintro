@@ -31,9 +31,10 @@ class Seed:
 def parse_seed(path: Path) -> Seed:
     """Parse the seed mapping without importing lintro.
 
-    AST-walks ``_tool_packages.py`` for the ``NPM_PACKAGE_OWNERS`` and
-    ``PYPI_PACKAGE_OWNERS`` assignments and extracts package name to
-    ToolName-attribute pairs. ``None`` values are preserved as ``None``.
+    Scans top-level statements in ``_tool_packages.py`` for the
+    ``NPM_PACKAGE_OWNERS`` and ``PYPI_PACKAGE_OWNERS`` assignments and extracts
+    package name to ToolName-attribute pairs. ``None`` values are preserved as
+    ``None``.
 
     Args:
         path: Path to ``lintro/_tool_packages.py``.
@@ -54,11 +55,15 @@ def parse_seed(path: Path) -> Seed:
     npm: dict[str, str | None] | None = None
     pypi: dict[str, str | None] | None = None
 
-    for node in ast.walk(tree):
+    for node in tree.body:
         target_name = extract_assign_target(node)
         if target_name == "NPM_PACKAGE_OWNERS":
+            if npm is not None:
+                raise GenerationError("seed defines NPM_PACKAGE_OWNERS more than once")
             npm = _extract_owner_mapping(node)
         elif target_name == "PYPI_PACKAGE_OWNERS":
+            if pypi is not None:
+                raise GenerationError("seed defines PYPI_PACKAGE_OWNERS more than once")
             pypi = _extract_owner_mapping(node)
 
     if npm is None or pypi is None:
