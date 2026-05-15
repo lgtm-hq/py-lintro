@@ -25,6 +25,7 @@ scripts/ci/
 │   ├── ci-pr-comment.sh
 │   ├── coverage-pr-comment.sh
 │   ├── post-pr-delete-previous.sh
+│   ├── release-visibility.sh
 │   ├── semantic-pr-title-check.sh
 │   └── semantic-release-helpers.sh
 ├── maintenance/         # System maintenance and automation
