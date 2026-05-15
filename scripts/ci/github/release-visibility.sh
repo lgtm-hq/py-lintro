@@ -168,15 +168,14 @@ EOF
 }
 
 find_existing_issue() {
-	local branch
-	branch="$(release_branch)"
-	local title_search="release automation failed on ${branch} in:title"
+	local failure_marker
+	failure_marker="$(issue_marker)"
 	gh issue list \
 		--repo "${GITHUB_REPOSITORY:?GITHUB_REPOSITORY is required}" \
 		--state open \
 		--label release \
 		--label automation \
-		--search "$title_search" \
+		--search "$failure_marker" \
 		--json number \
 		--jq '.[0].number // empty'
 }

@@ -167,6 +167,9 @@ def test_notify_failure_creates_issue_when_none_exists(tmp_path: Path) -> None:
     gh_log = (tmp_path / "gh.log").read_text()
     body = (tmp_path / "body.md").read_text()
     assert_that(gh_log).contains("issue list")
+    assert_that(gh_log).contains(
+        "release-automation-failure:Release - Automated PR Creation:main",
+    )
     assert_that(gh_log).contains("issue create")
     assert_that(gh_log).does_not_contain("issue comment")
     assert_that(body).contains("release-automation-failure")
@@ -185,6 +188,9 @@ def test_notify_failure_comments_on_existing_issue(tmp_path: Path) -> None:
     assert_that(result.returncode).described_as(result.stderr).is_equal_to(0)
     gh_log = (tmp_path / "gh.log").read_text()
     assert_that(gh_log).contains("issue list")
+    assert_that(gh_log).contains(
+        "release-automation-failure:Release - Automated PR Creation:main",
+    )
     assert_that(gh_log).contains("issue comment 907")
     assert_that(gh_log).does_not_contain("issue create")
 
