@@ -1,5 +1,5 @@
 ---
-name: Build Binary
+name: Publish - Homebrew Tap
 
 'on':
   workflow_run:
@@ -218,7 +218,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   update-homebrew:
-    name: Update Homebrew Formula
+    name: Update Homebrew Tap
     needs: [get-release-info, build-macos]
     runs-on: ubuntu-24.04
     permissions:
@@ -235,6 +235,8 @@ jobs:
           allowed-endpoints: >
             github.com:443
             api.github.com:443
+            pypi.org:443
+            files.pythonhosted.org:443
 
       - name: Checkout lintro scripts and actions
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
@@ -270,6 +272,15 @@ jobs:
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
           echo "Extracted version: $VERSION from tag: $TAG"
 
+      - name: Wait for PyPI availability
+        # yamllint disable-line rule:line-length
+        run: lintro/scripts/ci/homebrew/wait-for-pypi.sh lintro "${{ steps.version.outputs.version }}"
+
+      - name: Set up Python
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6
+        with:
+          python-version: '3.14'
+
       - name: Create Homebrew tap GitHub App token
         id: homebrew-app-token
         # yamllint disable-line rule:line-length
@@ -289,7 +300,13 @@ jobs:
           token: ${{ steps.homebrew-app-token.outputs.token }}
           path: homebrew-tap
 
-      - name: Generate formula
+      - name: Generate PyPI formula
+        run: |
+          lintro/scripts/ci/homebrew/generate-pypi-formula.sh \
+            "${{ steps.version.outputs.version }}" \
+            "homebrew-tap/Formula/lintro.rb"
+
+      - name: Generate binary formula
         run: |
           lintro/scripts/ci/homebrew/generate-binary-formula.sh \
             "${{ steps.version.outputs.version }}" \
@@ -301,15 +318,20 @@ jobs:
         env:
           GH_TOKEN: ${{ steps.homebrew-app-token.outputs.token }}
           WORKING_DIR: homebrew-tap
-          PR_BRANCH: homebrew/lintro-bin-${{ steps.version.outputs.version }}
-          PR_TITLE: Update lintro-bin to ${{ steps.version.outputs.version }}
+          PR_BRANCH: homebrew/lintro-${{ steps.version.outputs.version }}
+          PR_TITLE: >-
+            chore(homebrew): update lintro to
+            ${{ steps.version.outputs.version }}
           PR_BODY: |
-            Updates `Formula/lintro-bin.rb` for lintro
-            ${{ steps.version.outputs.version }}.
+            Updates Homebrew formulas for lintro ${{ steps.version.outputs.version }}:
+
+            - `Formula/lintro.rb`
+            - `Formula/lintro-bin.rb`
 
             Auto-merge is enabled once `validate-formula` passes.
         run: >-
           lintro/scripts/ci/homebrew/create-tap-pr.sh
+          "Formula/lintro.rb"
           "Formula/lintro-bin.rb"
-          "Update lintro-bin to ${{ steps.version.outputs.version }}"
+          "chore(homebrew): update lintro to ${{ steps.version.outputs.version }}"
           --skip-if-empty

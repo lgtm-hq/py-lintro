@@ -12,7 +12,7 @@ if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
 	cat <<'EOF'
 Create or update a Homebrew tap PR and enable auto-merge.
 
-Usage: create-tap-pr.sh <file-pattern> <commit-message> [--skip-if-empty]
+Usage: create-tap-pr.sh <file-pattern>... <commit-message> [--skip-if-empty]
 
 Options:
   --skip-if-empty  Exit 0 if there are no changes (default: error)
@@ -28,9 +28,24 @@ EOF
 	exit 0
 fi
 
-FILE_PATTERN="${1:?File pattern is required}"
-COMMIT_MESSAGE="${2:?Commit message is required}"
-SKIP_IF_EMPTY="${3:-}"
+if [[ "$#" -lt 2 ]]; then
+	log_error "At least one file pattern and a commit message are required"
+	exit 1
+fi
+
+SKIP_IF_EMPTY=""
+if [[ "${!#}" == "--skip-if-empty" ]]; then
+	SKIP_IF_EMPTY="--skip-if-empty"
+	set -- "${@:1:$(($# - 1))}"
+fi
+
+if [[ "$#" -lt 2 ]]; then
+	log_error "At least one file pattern and a commit message are required"
+	exit 1
+fi
+
+COMMIT_MESSAGE="${!#}"
+FILE_PATTERNS=("${@:1:$(($# - 1))}")
 WORKING_DIR="${WORKING_DIR:-.}"
 PR_BASE="${PR_BASE:-main}"
 
@@ -39,18 +54,13 @@ PR_BASE="${PR_BASE:-main}"
 : "${PR_BODY:?PR_BODY is required}"
 : "${GH_TOKEN:?GH_TOKEN is required}"
 
-if [[ -n "$SKIP_IF_EMPTY" && "$SKIP_IF_EMPTY" != "--skip-if-empty" ]]; then
-	log_error "Unknown option: $SKIP_IF_EMPTY"
-	exit 1
-fi
-
 cd "$WORKING_DIR"
 
 git config user.name "lgtm-homebrew-tap[bot]"
 git config user.email "lgtm-homebrew-tap[bot]@users.noreply.github.com"
 
-log_info "Staging changes: $FILE_PATTERN"
-git add "$FILE_PATTERN"
+log_info "Staging changes: ${FILE_PATTERNS[*]}"
+git add -- "${FILE_PATTERNS[@]}"
 
 if git diff --staged --quiet; then
 	if [[ "$SKIP_IF_EMPTY" == "--skip-if-empty" ]]; then
