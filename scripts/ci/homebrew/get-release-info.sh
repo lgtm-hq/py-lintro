@@ -37,7 +37,7 @@ fi
 
 VERSION="${TAG#v}"
 IS_PRERELEASE=false
-if [[ "$VERSION" =~ (a|b|rc)[0-9]* ]]; then
+if [[ "$VERSION" =~ (a|b|rc)[0-9]+ ]]; then
 	IS_PRERELEASE=true
 fi
 
