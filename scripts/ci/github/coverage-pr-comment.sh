@@ -92,26 +92,19 @@ if ! is_pr_context; then
 	exit 0
 fi
 
-# Get coverage value using shared function
-COVERAGE_VALUE=$(get_coverage_value)
-COVERAGE_STATUS=$(get_coverage_status "$COVERAGE_VALUE")
 JOB_RESULT_TEXT="${JOB_RESULT:-success}"
-if [ "$JOB_RESULT_TEXT" != "success" ]; then
+if [ "$JOB_RESULT_TEXT" = "cancelled" ]; then
+	BUILD_STATUS="⚠️ Tests cancelled before completion"
+elif [ "$JOB_RESULT_TEXT" != "success" ]; then
 	BUILD_STATUS="❌ Tests failed"
 else
 	BUILD_STATUS="✅ Tests passed"
 fi
 
-# Determine status text
-if [ "$COVERAGE_STATUS" = "✅" ]; then
-	STATUS_TEXT="Target met (>80%)"
-else
-	STATUS_TEXT="Below target (<80%)"
-fi
-
 # Try to load test summary from JSON file if available
 TEST_SUMMARY_TABLE=""
 COVERAGE_DETAILS=""
+COVERAGE_VALUE=$(get_coverage_value)
 
 if [ -f "test-summary.json" ]; then
 	log_info "Loading test summary from test-summary.json"
@@ -135,6 +128,13 @@ if [ -f "test-summary.json" ]; then
 	COV_LINES_TOTAL=$(parse_json_field "test-summary.json" "lines_total")
 	COV_LINES_MISSING=$(parse_json_field "test-summary.json" "lines_missing")
 	COV_FILES=$(parse_json_field "test-summary.json" "files" "last")
+
+	if [ "$COVERAGE_VALUE" = "0.0" ] && [ "${COV_LINES_TOTAL:-0}" -gt 0 ]; then
+		COVERAGE_VALUE=$(awk \
+			-v covered="$COV_LINES_COVERED" \
+			-v total="$COV_LINES_TOTAL" \
+			'BEGIN { printf "%.1f", (covered / total) * 100 }')
+	fi
 
 	# Validate extracted values
 	TEST_PASSED=$(validate_test_value "$TEST_PASSED" "TEST_PASSED")
@@ -196,8 +196,48 @@ else
 	log_warning "test-summary.json not found, using basic format"
 fi
 
-# Create the comment content with marker
-CONTENT="<!-- coverage-report -->
+COVERAGE_STATUS=$(get_coverage_status "$COVERAGE_VALUE")
+
+# Determine status text
+if [ "$JOB_RESULT_TEXT" = "cancelled" ]; then
+	COMMENT_TITLE="🧪 Test Execution Report"
+	STATUS_TEXT="Tests cancelled"
+elif [ "$JOB_RESULT_TEXT" != "success" ]; then
+	COMMENT_TITLE="🧪 Test Execution Report"
+	STATUS_TEXT="Tests failed"
+elif [ "$COVERAGE_STATUS" = "✅" ]; then
+	COMMENT_TITLE="📊 Code Coverage Report"
+	STATUS_TEXT="Target met (>80%)"
+else
+	COMMENT_TITLE="📊 Code Coverage Report"
+	STATUS_TEXT="Below target (<80%)"
+fi
+
+if [ "$JOB_RESULT_TEXT" = "cancelled" ]; then
+	CONTENT="<!-- coverage-report -->
+
+**Build:** $BUILD_STATUS
+
+Test execution did not complete, so coverage reporting is skipped for this run.
+
+$TEST_SUMMARY_TABLE
+### 📋 Test Details
+- **Generated:** $(date +%Y-%m-%d)
+- **Commit:** [$GITHUB_SHA](https://github.com/$GITHUB_REPOSITORY/commit/$GITHUB_SHA)"
+elif [ "$JOB_RESULT_TEXT" != "success" ]; then
+	CONTENT="<!-- coverage-report -->
+
+**Build:** $BUILD_STATUS
+
+Test execution did not pass, so coverage reporting is skipped for this run.
+
+$TEST_SUMMARY_TABLE
+### 📋 Test Details
+- **Generated:** $(date +%Y-%m-%d)
+- **Commit:** [$GITHUB_SHA](https://github.com/$GITHUB_REPOSITORY/commit/$GITHUB_SHA)"
+else
+	# Create the comment content with marker
+	CONTENT="<!-- coverage-report -->
 
 **Build:** $BUILD_STATUS
 
@@ -219,6 +259,7 @@ Or download manually:
 2. Find this workflow run
 3. Download the \"coverage-report-python-3.14\" artifact
 4. Extract and open \`index.html\` in your browser"
+fi
 
 # Generate PR comment using shared function (always produce the file before posting)
-generate_pr_comment "📊 Code Coverage Report" "$STATUS_TEXT" "$CONTENT" "coverage-pr-comment.txt"
+generate_pr_comment "$COMMENT_TITLE" "$STATUS_TEXT" "$CONTENT" "coverage-pr-comment.txt"

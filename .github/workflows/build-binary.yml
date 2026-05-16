@@ -1,5 +1,5 @@
 ---
-name: Build Binary
+name: Publish - Homebrew Tap
 
 'on':
   workflow_run:
@@ -32,21 +32,20 @@ jobs:
        !startsWith(github.event.workflow_run.head_branch, 'actions-v'))
     outputs:
       release_tag: ${{ steps.get-tag.outputs.tag }}
+      is_prerelease: ${{ steps.get-tag.outputs.is_prerelease }}
 
     steps:
+      - name: Checkout scripts
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          sparse-checkout: scripts
+
       - name: Get release tag
         id: get-tag
-        run: |
-          if [[ "${{ github.event_name }}" == "workflow_run" ]]; then
-            TAG="${{ github.event.workflow_run.head_branch }}"
-          else
-            # For workflow_dispatch, get latest release tag
-            TAG=$(gh release view --json tagName -q .tagName 2>/dev/null || echo "")
-          fi
-          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
-          echo "Release tag: $TAG"
+        run: scripts/ci/homebrew/get-release-info.sh
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          WORKFLOW_RUN_HEAD_BRANCH: ${{ github.event.workflow_run.head_branch }}
 
   build-macos:
     name: Build macOS Binary
@@ -218,14 +217,18 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   update-homebrew:
-    name: Update Homebrew Formula
+    name: Update Homebrew Tap
     needs: [get-release-info, build-macos]
     runs-on: ubuntu-24.04
     permissions:
       contents: read
     if: >-
+      always() &&
+      !cancelled() &&
       github.event_name == 'workflow_run' &&
-      needs.get-release-info.outputs.release_tag != ''
+      needs.get-release-info.result == 'success' &&
+      needs.get-release-info.outputs.release_tag != '' &&
+      needs.get-release-info.outputs.is_prerelease == 'false'
 
     steps:
       - name: Harden Runner
@@ -235,6 +238,9 @@ jobs:
           allowed-endpoints: >
             github.com:443
             api.github.com:443
+            objects.githubusercontent.com:443
+            pypi.org:443
+            files.pythonhosted.org:443
 
       - name: Checkout lintro scripts and actions
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
@@ -245,6 +251,7 @@ jobs:
           path: lintro
 
       - name: Download SHA256 artifacts
+        if: ${{ needs.build-macos.result == 'success' }}
         uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
         with:
           pattern: sha256-*
@@ -252,6 +259,7 @@ jobs:
           merge-multiple: true
 
       - name: Read checksums
+        if: ${{ needs.build-macos.result == 'success' }}
         id: checksums
         run: |
           ARM64_SHA=$(cat checksums/sha256-arm64.txt)
@@ -269,6 +277,15 @@ jobs:
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
           echo "Extracted version: $VERSION from tag: $TAG"
+
+      - name: Wait for PyPI availability
+        # yamllint disable-line rule:line-length
+        run: lintro/scripts/ci/homebrew/wait-for-pypi.sh lintro "${{ steps.version.outputs.version }}"
+
+      - name: Set up Python
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6
+        with:
+          python-version: '3.14'
 
       - name: Create Homebrew tap GitHub App token
         id: homebrew-app-token
@@ -289,7 +306,14 @@ jobs:
           token: ${{ steps.homebrew-app-token.outputs.token }}
           path: homebrew-tap
 
-      - name: Generate formula
+      - name: Generate PyPI formula
+        run: |
+          lintro/scripts/ci/homebrew/generate-pypi-formula.sh \
+            "${{ steps.version.outputs.version }}" \
+            "homebrew-tap/Formula/lintro.rb"
+
+      - name: Generate binary formula
+        if: ${{ needs.build-macos.result == 'success' }}
         run: |
           lintro/scripts/ci/homebrew/generate-binary-formula.sh \
             "${{ steps.version.outputs.version }}" \
@@ -301,15 +325,19 @@ jobs:
         env:
           GH_TOKEN: ${{ steps.homebrew-app-token.outputs.token }}
           WORKING_DIR: homebrew-tap
-          PR_BRANCH: homebrew/lintro-bin-${{ steps.version.outputs.version }}
-          PR_TITLE: Update lintro-bin to ${{ steps.version.outputs.version }}
+          PR_BRANCH: homebrew/lintro-${{ steps.version.outputs.version }}
+          PR_TITLE: >-
+            chore(homebrew): update lintro to
+            ${{ steps.version.outputs.version }}
           PR_BODY: |
-            Updates `Formula/lintro-bin.rb` for lintro
-            ${{ steps.version.outputs.version }}.
+            Updates applicable Homebrew formulas for lintro
+            ${{ steps.version.outputs.version }}:
+
+            - `Formula/lintro.rb`
+            - `Formula/lintro-bin.rb` when macOS binaries are available
 
             Auto-merge is enabled once `validate-formula` passes.
         run: >-
-          lintro/scripts/ci/homebrew/create-tap-pr.sh
-          "Formula/lintro-bin.rb"
-          "Update lintro-bin to ${{ steps.version.outputs.version }}"
+          lintro/scripts/ci/homebrew/create-lintro-tap-pr.sh
+          "${{ steps.version.outputs.version }}"
           --skip-if-empty

@@ -13,7 +13,7 @@ echo "$HOME/.local/bin" >>"$GITHUB_PATH"
 
 # Verify generated tool-version artifacts are in sync with package.json/pyproject.toml
 echo "Verifying generated tool versions..."
-python scripts/ci/generate-tool-versions.py --check
+python3 scripts/ci/generate-tool-versions.py --check
 
 uv run lintro check . --output-format grid
 

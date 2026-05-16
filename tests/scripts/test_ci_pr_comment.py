@@ -126,3 +126,31 @@ def test_ci_pr_comment_builds_from_report_md(tmp_path: Path) -> None:
     content = (tmp_path / "pr-comment.txt").read_text(encoding="utf-8")
     assert_that(content).contains("✅ PASSED")
     assert_that(content).contains("EXECUTION SUMMARY")
+
+
+def test_ci_pr_comment_reports_cancelled_lint_job(tmp_path: Path) -> None:
+    """Script writes an explicit report when lint job was cancelled."""
+    env = os.environ.copy()
+    env.update(
+        {
+            "GITHUB_EVENT_NAME": "pull_request",
+            "GITHUB_REPOSITORY": "test/repo",
+            "GITHUB_RUN_ID": "12345",
+            "LINT_JOB_RESULT": "cancelled",
+        },
+    )
+
+    result = subprocess.run(
+        [str(SCRIPT_PATH)],
+        capture_output=True,
+        text=True,
+        cwd=tmp_path,
+        env=env,
+        check=False,
+    )
+
+    assert_that(result.returncode).is_equal_to(0)
+    content = (tmp_path / "pr-comment.txt").read_text(encoding="utf-8")
+    assert_that(content).contains("⚠️ CANCELLED")
+    assert_that(content).contains("Lintro did not produce a report")
+    assert_that(content).does_not_contain("OUTPUT UNAVAILABLE")

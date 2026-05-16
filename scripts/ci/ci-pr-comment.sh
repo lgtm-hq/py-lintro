@@ -32,6 +32,19 @@ if ! is_pr_context; then
 	exit 0
 fi
 
+if [ "${LINT_JOB_RESULT:-}" = "cancelled" ]; then
+	CONTENT="<!-- lintro-report -->
+
+**Workflow:**
+1. ⚠️ Lint job was cancelled before \`lintro format\` and \`lintro check\` could complete.
+
+Lintro did not produce a report for this run because the upstream lint job was cancelled.
+
+Please inspect the workflow run to determine whether this was superseded by a newer run or interrupted by CI."
+	generate_pr_comment "🔧 Lintro Code Quality Analysis" "⚠️ CANCELLED" "$CONTENT" "pr-comment.txt"
+	exit 0
+fi
+
 TMP_DIR=$(mktemp -d)
 trap 'rm -rf "$TMP_DIR"' EXIT
 STATUS_FILE="$TMP_DIR/lintro-comment-status.txt"

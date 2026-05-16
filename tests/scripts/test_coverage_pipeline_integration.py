@@ -7,6 +7,7 @@ generation, verifying that data flows correctly between components.
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import tempfile
 from pathlib import Path
@@ -91,6 +92,7 @@ TOTAL                       235     25    89%
             capture_output=True,
             text=True,
             cwd=tmpdir,
+            check=False,
         )
 
         # Verify extraction succeeded
@@ -155,6 +157,7 @@ def test_pipeline_handles_missing_coverage_xml() -> None:
             capture_output=True,
             text=True,
             cwd=tmpdir,
+            check=False,
         )
 
         assert_that(result.returncode).is_equal_to(0)
@@ -163,6 +166,91 @@ def test_pipeline_handles_missing_coverage_xml() -> None:
         assert_that(summary["tests"]["passed"]).is_equal_to(10)
         assert_that(summary["coverage"]["percentage"]).is_equal_to(0)
         assert_that(summary["coverage"]["files"]).is_equal_to(0)
+
+
+def test_failed_test_comment_reports_test_execution_not_coverage() -> None:
+    """Failed test runs should report test execution instead of coverage."""
+    summary = {
+        "tests": {
+            "passed": 5192,
+            "failed": 2,
+            "skipped": 8,
+            "errors": 0,
+            "total": 5202,
+            "duration": 125.84,
+        },
+        "coverage": {
+            "percentage": 0,
+            "lines_covered": 5458,
+            "lines_total": 19750,
+            "lines_missing": 14292,
+            "files": 393,
+        },
+    }
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        workdir = Path(tmpdir)
+        (workdir / "test-summary.json").write_text(json.dumps(summary))
+
+        env = {
+            **os.environ,
+            "COVERAGE_PERCENTAGE": "0.0",
+            "GITHUB_EVENT_NAME": "pull_request",
+            "GITHUB_REPOSITORY": "lgtm-hq/py-lintro",
+            "GITHUB_RUN_ID": "123456",
+            "GITHUB_SHA": "abc123",
+            "JOB_RESULT": "failure",
+        }
+        result = subprocess.run(
+            [str(COMMENT_SCRIPT)],
+            capture_output=True,
+            text=True,
+            cwd=workdir,
+            env=env,
+            check=False,
+        )
+
+        assert_that(result.returncode).is_equal_to(0)
+        comment = (workdir / "coverage-pr-comment.txt").read_text()
+        assert_that(comment).contains("## 🧪 Test Execution Report")
+        assert_that(comment).contains("### 📊 Status: Tests failed")
+        assert_that(comment).contains(
+            "| 🧪 pytest | ❌ FAIL | 5192 | 2 | 0 | 8 | 5202 | 125.84s |",
+        )
+        assert_that(comment).does_not_contain("**Coverage:**")
+        assert_that(comment).does_not_contain("HTML Coverage Report")
+
+
+def test_cancelled_test_comment_reports_interrupted_execution() -> None:
+    """Cancelled test runs should post an explicit interrupted test report."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        workdir = Path(tmpdir)
+
+        env = {
+            **os.environ,
+            "COVERAGE_PERCENTAGE": "0.0",
+            "GITHUB_EVENT_NAME": "pull_request",
+            "GITHUB_REPOSITORY": "lgtm-hq/py-lintro",
+            "GITHUB_RUN_ID": "123456",
+            "GITHUB_SHA": "abc123",
+            "JOB_RESULT": "cancelled",
+        }
+        result = subprocess.run(
+            [str(COMMENT_SCRIPT)],
+            capture_output=True,
+            text=True,
+            cwd=workdir,
+            env=env,
+            check=False,
+        )
+
+        assert_that(result.returncode).is_equal_to(0)
+        comment = (workdir / "coverage-pr-comment.txt").read_text()
+        assert_that(comment).contains("## 🧪 Test Execution Report")
+        assert_that(comment).contains("### 📊 Status: Tests cancelled")
+        assert_that(comment).contains("Tests cancelled before completion")
+        assert_that(comment).does_not_contain("**Coverage:**")
+        assert_that(comment).does_not_contain("HTML Coverage Report")
 
 
 def test_pipeline_quiet_mode_produces_valid_json() -> None:
@@ -180,6 +268,7 @@ def test_pipeline_quiet_mode_produces_valid_json() -> None:
             capture_output=True,
             text=True,
             cwd=tmpdir,
+            check=False,
         )
 
         assert_that(result.returncode).is_equal_to(0)
