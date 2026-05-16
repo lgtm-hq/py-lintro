@@ -224,7 +224,10 @@ jobs:
     permissions:
       contents: read
     if: >-
+      always() &&
+      !cancelled() &&
       github.event_name == 'workflow_run' &&
+      needs.get-release-info.result == 'success' &&
       needs.get-release-info.outputs.release_tag != ''
 
     steps:
@@ -235,6 +238,7 @@ jobs:
           allowed-endpoints: >
             github.com:443
             api.github.com:443
+            objects.githubusercontent.com:443
             pypi.org:443
             files.pythonhosted.org:443
 
@@ -247,6 +251,7 @@ jobs:
           path: lintro
 
       - name: Download SHA256 artifacts
+        if: ${{ needs.build-macos.result == 'success' }}
         uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
         with:
           pattern: sha256-*
@@ -254,6 +259,7 @@ jobs:
           merge-multiple: true
 
       - name: Read checksums
+        if: ${{ needs.build-macos.result == 'success' }}
         id: checksums
         run: |
           ARM64_SHA=$(cat checksums/sha256-arm64.txt)
@@ -307,6 +313,7 @@ jobs:
             "homebrew-tap/Formula/lintro.rb"
 
       - name: Generate binary formula
+        if: ${{ needs.build-macos.result == 'success' }}
         run: |
           lintro/scripts/ci/homebrew/generate-binary-formula.sh \
             "${{ steps.version.outputs.version }}" \
@@ -323,10 +330,11 @@ jobs:
             chore(homebrew): update lintro to
             ${{ steps.version.outputs.version }}
           PR_BODY: |
-            Updates Homebrew formulas for lintro ${{ steps.version.outputs.version }}:
+            Updates applicable Homebrew formulas for lintro
+            ${{ steps.version.outputs.version }}:
 
             - `Formula/lintro.rb`
-            - `Formula/lintro-bin.rb`
+            - `Formula/lintro-bin.rb` when macOS binaries are available
 
             Auto-merge is enabled once `validate-formula` passes.
         run: >-

@@ -164,10 +164,10 @@ Scripts for generating and updating Homebrew formulas.
 | `generate-pypi-formula.sh`   | Generate lintro.rb formula from PyPI                | `./scripts/ci/homebrew/generate-pypi-formula.sh 1.0.0 out`                                                     |
 | `generate-binary-formula.sh` | Generate lintro-bin.rb formula for binaries         | `./scripts/ci/homebrew/generate-binary-formula.sh ...`                                                         |
 | `pypi_utils.py`              | Shared PyPI API utilities module                    | Imported by other Python scripts                                                                               |
-| `fetch_package_info.py`      | Fetch package tarball info from PyPI                | `python3 fetch_package_info.py lintro 1.0.0`                                                                   |
-| `fetch_wheel_info.py`        | Fetch wheel info and generate resource stanzas      | `python3 fetch_wheel_info.py pydoclint --type universal`                                                       |
-| `render_formula.py`          | Render Homebrew formula from template               | `python3 render_formula.py --tarball-url ... -o out.rb`                                                        |
-| `generate_resources.py`      | Generate Homebrew resource stanzas (replaces poet)  | `python3 generate_resources.py lintro --exclude pkg1 pkg2`                                                     |
+| `fetch_package_info.py`      | Fetch package tarball info from PyPI                | `python3 scripts/ci/homebrew/fetch_package_info.py lintro 1.0.0`                                               |
+| `fetch_wheel_info.py`        | Fetch wheel info and generate resource stanzas      | `python3 scripts/ci/homebrew/fetch_wheel_info.py pydoclint --type universal`                                   |
+| `render_formula.py`          | Render Homebrew formula from template               | `python3 scripts/ci/homebrew/render_formula.py --tarball-url ... -o out.rb`                                    |
+| `generate_resources.py`      | Generate Homebrew resource stanzas (replaces poet)  | `python3 scripts/ci/homebrew/generate_resources.py lintro --exclude pkg1 pkg2`                                 |
 
 ### 🐳 Docker Scripts (`docker/`)
 
