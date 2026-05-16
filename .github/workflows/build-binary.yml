@@ -35,25 +35,17 @@ jobs:
       is_prerelease: ${{ steps.get-tag.outputs.is_prerelease }}
 
     steps:
+      - name: Checkout scripts
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          sparse-checkout: scripts
+
       - name: Get release tag
         id: get-tag
-        run: |
-          if [[ "${{ github.event_name }}" == "workflow_run" ]]; then
-            TAG="${{ github.event.workflow_run.head_branch }}"
-          else
-            # For workflow_dispatch, get latest release tag
-            TAG=$(gh release view --json tagName -q .tagName 2>/dev/null || echo "")
-          fi
-          VERSION="${TAG#v}"
-          IS_PRERELEASE=false
-          if [[ "$VERSION" =~ (a|b|rc)[0-9]* ]]; then
-            IS_PRERELEASE=true
-          fi
-          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
-          echo "is_prerelease=$IS_PRERELEASE" >> "$GITHUB_OUTPUT"
-          echo "Release tag: $TAG (prerelease: $IS_PRERELEASE)"
+        run: scripts/ci/homebrew/get-release-info.sh
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          WORKFLOW_RUN_HEAD_BRANCH: ${{ github.event.workflow_run.head_branch }}
 
   build-macos:
     name: Build macOS Binary
