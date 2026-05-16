@@ -106,6 +106,9 @@
     ],
     "executionMode": "branch"
   },
+  "allowedPostUpgradeCommands": [
+    "python3 scripts/ci/generate-tool-versions.py"
+  ],
   "customManagers": [
     {
       "customType": "regex",

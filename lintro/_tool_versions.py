@@ -239,17 +239,18 @@ def get_all_expected_versions() -> dict[ToolName | str, str]:
     Returns:
         Dictionary mapping tool names to version strings.
     """
-    all_versions: dict[ToolName | str, str] = dict(TOOL_VERSIONS)
-    for tool_name, version in _NPM_VERSIONS_BY_TOOL.items():
-        all_versions[tool_name] = version
-    for tool_name, version in _PYPI_VERSIONS_BY_TOOL.items():
-        all_versions[tool_name] = version
-
     manifest_versions, _ = _load_manifest_versions()
-    for tool_name, version in manifest_versions.items():
-        all_versions[tool_name] = version
 
-    return all_versions
+    return {
+        tool_name: version
+        for source in (
+            TOOL_VERSIONS,
+            _NPM_VERSIONS_BY_TOOL,
+            _PYPI_VERSIONS_BY_TOOL,
+            manifest_versions,
+        )
+        for tool_name, version in source.items()
+    }
 
 
 def is_npm_managed(tool_name: ToolName) -> bool:

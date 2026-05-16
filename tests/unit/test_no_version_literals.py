@@ -37,12 +37,12 @@ def _canonical_versions() -> dict[ToolName, str]:
     Returns:
         Mapping of ToolName -> canonical version string.
     """
-    versions: dict[ToolName, str] = {}
-    for source in (TOOL_VERSIONS, _NPM_VERSIONS_BY_TOOL, _PYPI_VERSIONS_BY_TOOL):
-        for tool, version in source.items():
-            if isinstance(tool, ToolName):
-                versions[tool] = version
-    return versions
+    return {
+        tool: version
+        for source in (TOOL_VERSIONS, _NPM_VERSIONS_BY_TOOL, _PYPI_VERSIONS_BY_TOOL)
+        for tool, version in source.items()
+        if isinstance(tool, ToolName)
+    }
 
 
 @pytest.mark.parametrize(
