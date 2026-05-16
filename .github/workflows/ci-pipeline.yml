@@ -580,6 +580,7 @@ jobs:
       - name: Generate PR Comment
         env:
           CHK_EXIT_CODE: ${{ needs.lint.result == 'success' && '0' || '1' }}
+          LINT_JOB_RESULT: ${{ needs.lint.result }}
         run: ./scripts/ci/ci-pr-comment.sh
       - name: Comment PR with Lintro Results
         uses: ./.github/actions/post-pr-comment
@@ -910,6 +911,7 @@ jobs:
     if: >
       always() &&
       github.event_name == 'pull_request' &&
+      needs.test.result != 'skipped' &&
       github.event.pull_request.draft == false
     env:
       GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

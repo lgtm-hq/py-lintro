@@ -32,6 +32,7 @@ jobs:
        !startsWith(github.event.workflow_run.head_branch, 'actions-v'))
     outputs:
       release_tag: ${{ steps.get-tag.outputs.tag }}
+      is_prerelease: ${{ steps.get-tag.outputs.is_prerelease }}
 
     steps:
       - name: Get release tag
@@ -43,8 +44,14 @@ jobs:
             # For workflow_dispatch, get latest release tag
             TAG=$(gh release view --json tagName -q .tagName 2>/dev/null || echo "")
           fi
+          VERSION="${TAG#v}"
+          IS_PRERELEASE=false
+          if [[ "$VERSION" =~ (a|b|rc)[0-9]* ]]; then
+            IS_PRERELEASE=true
+          fi
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
-          echo "Release tag: $TAG"
+          echo "is_prerelease=$IS_PRERELEASE" >> "$GITHUB_OUTPUT"
+          echo "Release tag: $TAG (prerelease: $IS_PRERELEASE)"
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -228,7 +235,8 @@ jobs:
       !cancelled() &&
       github.event_name == 'workflow_run' &&
       needs.get-release-info.result == 'success' &&
-      needs.get-release-info.outputs.release_tag != ''
+      needs.get-release-info.outputs.release_tag != '' &&
+      needs.get-release-info.outputs.is_prerelease == 'false'
 
     steps:
       - name: Harden Runner
