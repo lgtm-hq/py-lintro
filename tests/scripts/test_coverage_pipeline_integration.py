@@ -92,6 +92,7 @@ TOTAL                       235     25    89%
             capture_output=True,
             text=True,
             cwd=tmpdir,
+            check=False,
         )
 
         # Verify extraction succeeded
@@ -156,6 +157,7 @@ def test_pipeline_handles_missing_coverage_xml() -> None:
             capture_output=True,
             text=True,
             cwd=tmpdir,
+            check=False,
         )
 
         assert_that(result.returncode).is_equal_to(0)
@@ -205,6 +207,7 @@ def test_failed_test_comment_reports_test_execution_not_coverage() -> None:
             text=True,
             cwd=workdir,
             env=env,
+            check=False,
         )
 
         assert_that(result.returncode).is_equal_to(0)
@@ -238,6 +241,7 @@ def test_cancelled_test_comment_reports_interrupted_execution() -> None:
             text=True,
             cwd=workdir,
             env=env,
+            check=False,
         )
 
         assert_that(result.returncode).is_equal_to(0)
@@ -264,6 +268,7 @@ def test_pipeline_quiet_mode_produces_valid_json() -> None:
             capture_output=True,
             text=True,
             cwd=tmpdir,
+            check=False,
         )
 
         assert_that(result.returncode).is_equal_to(0)

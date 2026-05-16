@@ -161,6 +161,7 @@ Scripts for generating and updating Homebrew formulas.
 | ---------------------------- | --------------------------------------------------- | -------------------------------------------------------------------------------------------------------------- |
 | `wait-for-pypi.sh`           | Poll PyPI until package version is available        | `./scripts/ci/homebrew/wait-for-pypi.sh lintro 1.0.0`                                                          |
 | `create-tap-pr.sh`           | Create/update Homebrew tap PR and enable auto-merge | `./scripts/ci/homebrew/create-tap-pr.sh Formula/lintro.rb Formula/lintro-bin.rb "chore(homebrew): update ..."` |
+| `create-lintro-tap-pr.sh`    | Create/update lintro's generated formula PR         | `./scripts/ci/homebrew/create-lintro-tap-pr.sh 1.0.0 --skip-if-empty`                                          |
 | `generate-pypi-formula.sh`   | Generate lintro.rb formula from PyPI                | `./scripts/ci/homebrew/generate-pypi-formula.sh 1.0.0 out`                                                     |
 | `generate-binary-formula.sh` | Generate lintro-bin.rb formula for binaries         | `./scripts/ci/homebrew/generate-binary-formula.sh ...`                                                         |
 | `pypi_utils.py`              | Shared PyPI API utilities module                    | Imported by other Python scripts                                                                               |

@@ -346,8 +346,6 @@ jobs:
 
             Auto-merge is enabled once `validate-formula` passes.
         run: >-
-          lintro/scripts/ci/homebrew/create-tap-pr.sh
-          "Formula/lintro.rb"
-          "Formula/lintro-bin.rb"
-          "chore(homebrew): update lintro to ${{ steps.version.outputs.version }}"
+          lintro/scripts/ci/homebrew/create-lintro-tap-pr.sh
+          "${{ steps.version.outputs.version }}"
           --skip-if-empty
