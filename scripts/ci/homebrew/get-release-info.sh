@@ -16,6 +16,7 @@ Usage: get-release-info.sh
 
 Environment:
   GITHUB_EVENT_NAME          GitHub Actions event name.
+  WORKFLOW_CALL_RELEASE_TAG  Release tag passed by a reusable workflow caller.
   WORKFLOW_RUN_HEAD_BRANCH   Release tag from the upstream workflow_run event.
   GITHUB_OUTPUT              GitHub Actions output file.
   GH_TOKEN                   GitHub token for workflow_dispatch release lookup.
@@ -29,7 +30,9 @@ fi
 
 EVENT_NAME="${GITHUB_EVENT_NAME:?GITHUB_EVENT_NAME is required}"
 
-if [[ "$EVENT_NAME" == "workflow_run" ]]; then
+if [[ "$EVENT_NAME" == "workflow_call" ]]; then
+	TAG="${WORKFLOW_CALL_RELEASE_TAG:?WORKFLOW_CALL_RELEASE_TAG is required}"
+elif [[ "$EVENT_NAME" == "workflow_run" ]]; then
 	TAG="${WORKFLOW_RUN_HEAD_BRANCH:?WORKFLOW_RUN_HEAD_BRANCH is required}"
 else
 	TAG="$(gh release view --json tagName -q .tagName 2>/dev/null || true)"

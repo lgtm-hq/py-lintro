@@ -121,6 +121,25 @@ jobs:
           files: |
             dist/*
 
+  homebrew-tap:
+    name: Publish Homebrew Tap
+    needs: publish
+    # Skip for pre-release tags and internal action version tags.
+    if: >-
+      ${{
+        !startsWith(github.ref_name, 'actions-v') &&
+        !contains(github.ref_name, 'a') &&
+        !contains(github.ref_name, 'b') &&
+        !contains(github.ref_name, 'rc')
+      }}
+    uses: ./.github/workflows/build-binary.yml
+    permissions:
+      contents: write
+    with:
+      release_tag: ${{ github.ref_name }}
+      arch: universal
+    secrets: inherit
+
   docker-publish:
     name: Publish Docker Images to GHCR
     needs: publish

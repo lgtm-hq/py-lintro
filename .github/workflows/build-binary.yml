@@ -2,9 +2,17 @@
 name: Publish - Homebrew Tap
 
 'on':
-  workflow_run:
-    workflows: ['Publish - PyPI Production']
-    types: [completed]
+  workflow_call:
+    inputs:
+      release_tag:
+        description: 'Release tag to publish'
+        required: true
+        type: string
+      arch:
+        description: 'Target architecture'
+        required: false
+        default: universal
+        type: string
   workflow_dispatch:
     inputs:
       arch:
@@ -25,11 +33,10 @@ jobs:
     runs-on: ubuntu-24.04
     permissions:
       contents: read
-    # Only run on workflow_dispatch or successful workflow_run (skip actions-v* tags)
+    # Release workflows call this after PyPI publishes; manual runs use latest release.
     if: >-
       github.event_name == 'workflow_dispatch' ||
-      (github.event.workflow_run.conclusion == 'success' &&
-       !startsWith(github.event.workflow_run.head_branch, 'actions-v'))
+      github.event_name == 'workflow_call'
     outputs:
       release_tag: ${{ steps.get-tag.outputs.tag }}
       is_prerelease: ${{ steps.get-tag.outputs.is_prerelease }}
@@ -45,7 +52,7 @@ jobs:
         run: scripts/ci/homebrew/get-release-info.sh
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          WORKFLOW_RUN_HEAD_BRANCH: ${{ github.event.workflow_run.head_branch }}
+          WORKFLOW_CALL_RELEASE_TAG: ${{ inputs.release_tag }}
 
   build-macos:
     name: Build macOS Binary
@@ -57,9 +64,8 @@ jobs:
       matrix:
         arch: >-
           ${{
-            github.event_name == 'workflow_dispatch' &&
-            github.event.inputs.arch != 'universal' &&
-            fromJSON(format('["{0}"]', github.event.inputs.arch)) ||
+            inputs.arch != 'universal' &&
+            fromJSON(format('["{0}"]', inputs.arch)) ||
             fromJSON('["arm64", "x86_64"]')
           }}
 
@@ -143,7 +149,7 @@ jobs:
 
       - name: Upload to release
         if: >-
-          github.event_name == 'workflow_run' &&
+          github.event_name == 'workflow_call' &&
           needs.get-release-info.outputs.release_tag != ''
         uses: softprops/action-gh-release@153bb8e04406b158c6c84fc1615b65b24149a1fe # v2
         with:
@@ -159,9 +165,8 @@ jobs:
     permissions:
       contents: write
     if: >-
-      github.event_name == 'workflow_run' ||
-      (github.event_name == 'workflow_dispatch' &&
-       github.event.inputs.arch == 'universal')
+      github.event_name == 'workflow_call' ||
+      inputs.arch == 'universal'
 
     steps:
       - name: Harden Runner
@@ -207,7 +212,7 @@ jobs:
 
       - name: Upload to release
         if: >-
-          github.event_name == 'workflow_run' &&
+          github.event_name == 'workflow_call' &&
           needs.get-release-info.outputs.release_tag != ''
         uses: softprops/action-gh-release@153bb8e04406b158c6c84fc1615b65b24149a1fe # v2
         with:
@@ -225,7 +230,7 @@ jobs:
     if: >-
       always() &&
       !cancelled() &&
-      github.event_name == 'workflow_run' &&
+      github.event_name == 'workflow_call' &&
       needs.get-release-info.result == 'success' &&
       needs.get-release-info.outputs.release_tag != '' &&
       needs.get-release-info.outputs.is_prerelease == 'false'
