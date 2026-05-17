@@ -164,9 +164,7 @@ jobs:
     runs-on: macos-latest
     permissions:
       contents: write
-    if: >-
-      github.event_name == 'workflow_call' ||
-      inputs.arch == 'universal'
+    if: inputs.arch == 'universal'
 
     steps:
       - name: Harden Runner
@@ -341,7 +339,8 @@ jobs:
             - `Formula/lintro.rb`
             - `Formula/lintro-bin.rb` when macOS binaries are available
 
-            Auto-merge is enabled once `validate-formula` passes.
+            The tap repository merges this PR automatically after `validate-formula`
+            succeeds (release-bot merge workflow).
         run: >-
           lintro/scripts/ci/homebrew/create-lintro-tap-pr.sh
           "${{ steps.version.outputs.version }}"

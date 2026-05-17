@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: MIT
-# Purpose: Commit Homebrew tap updates to a branch and enable PR auto-merge.
+# Purpose: Commit Homebrew tap updates and open or refresh the tap PR.
 
 set -euo pipefail
 
@@ -10,7 +10,7 @@ source "$SCRIPT_DIR/../../utils/utils.sh"
 
 if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
 	cat <<'EOF'
-Create or update a Homebrew tap PR and enable auto-merge.
+Create or update a Homebrew tap PR (merge is handled by tap automation).
 
 Usage: create-tap-pr.sh <file-pattern>... <commit-message> [--skip-if-empty]
 
@@ -102,9 +102,6 @@ else
 	)"
 	pr_number="${pr_url##*/}"
 fi
-
-log_info "Enabling auto-merge for Homebrew tap PR #$pr_number"
-gh pr merge "$pr_number" --auto --squash --delete-branch
 
 if [[ -n "${GITHUB_OUTPUT:-}" ]]; then
 	tap_repository="$(gh repo view --json nameWithOwner --jq .nameWithOwner)"
