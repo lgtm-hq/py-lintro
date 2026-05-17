@@ -126,12 +126,10 @@ jobs:
     needs: publish
     # Skip for pre-release tags and internal action version tags.
     if: >-
-      ${{
-        !startsWith(github.ref_name, 'actions-v') &&
-        !contains(github.ref_name, 'a') &&
-        !contains(github.ref_name, 'b') &&
-        !contains(github.ref_name, 'rc')
-      }}
+      !startsWith(github.ref_name, 'actions-v') &&
+      !contains(github.ref_name, 'a') &&
+      !contains(github.ref_name, 'b') &&
+      !contains(github.ref_name, 'rc')
     uses: ./.github/workflows/build-binary.yml
     permissions:
       contents: write
