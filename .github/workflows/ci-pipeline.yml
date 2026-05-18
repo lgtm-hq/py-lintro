@@ -271,6 +271,7 @@ jobs:
             registry-1.docker.io:443
             auth.docker.io:443
             production.cloudflare.docker.com:443
+            production.cloudfront.docker.com:443
             pypi.org:443
             files.pythonhosted.org:443
             static.rust-lang.org:443
@@ -473,6 +474,7 @@ jobs:
             registry-1.docker.io:443
             auth.docker.io:443
             production.cloudflare.docker.com:443
+            production.cloudfront.docker.com:443
             pypi.org:443
             files.pythonhosted.org:443
             static.rust-lang.org:443
@@ -752,6 +754,7 @@ jobs:
             registry-1.docker.io:443
             auth.docker.io:443
             production.cloudflare.docker.com:443
+            production.cloudfront.docker.com:443
             pypi.org:443
             files.pythonhosted.org:443
             codecov.io:443
@@ -1061,6 +1064,7 @@ jobs:
             registry-1.docker.io:443
             auth.docker.io:443
             production.cloudflare.docker.com:443
+            production.cloudfront.docker.com:443
             pypi.org:443
             files.pythonhosted.org:443
             static.rust-lang.org:443
