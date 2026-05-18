@@ -30,8 +30,8 @@ fi
 
 EVENT_NAME="${GITHUB_EVENT_NAME:?GITHUB_EVENT_NAME is required}"
 
-if [[ "$EVENT_NAME" == "workflow_call" ]]; then
-	TAG="${WORKFLOW_CALL_RELEASE_TAG:?WORKFLOW_CALL_RELEASE_TAG is required}"
+if [[ -n "${WORKFLOW_CALL_RELEASE_TAG:-}" ]]; then
+	TAG="$WORKFLOW_CALL_RELEASE_TAG"
 elif [[ "$EVENT_NAME" == "workflow_run" ]]; then
 	# Keep workflow_run support explicit so future callers do not fall back to
 	# the latest release when the triggering branch already identifies the tag.

@@ -33,10 +33,11 @@ jobs:
     runs-on: ubuntu-24.04
     permissions:
       contents: read
-    # Release workflows call this after PyPI publishes; manual runs use latest release.
+    # Manual runs use latest release. Tag releases pass inputs.release_tag via
+    # workflow_call; the caller's push event is inherited (not workflow_call).
     if: >-
       github.event_name == 'workflow_dispatch' ||
-      github.event_name == 'workflow_call'
+      inputs.release_tag != ''
     outputs:
       release_tag: ${{ steps.get-tag.outputs.tag }}
       is_prerelease: ${{ steps.get-tag.outputs.is_prerelease }}
@@ -148,9 +149,7 @@ jobs:
           retention-days: 7
 
       - name: Upload to release
-        if: >-
-          github.event_name == 'workflow_call' &&
-          needs.get-release-info.outputs.release_tag != ''
+        if: inputs.release_tag != ''
         uses: softprops/action-gh-release@153bb8e04406b158c6c84fc1615b65b24149a1fe # v2
         with:
           tag_name: ${{ needs.get-release-info.outputs.release_tag }}
@@ -209,9 +208,7 @@ jobs:
           retention-days: 7
 
       - name: Upload to release
-        if: >-
-          github.event_name == 'workflow_call' &&
-          needs.get-release-info.outputs.release_tag != ''
+        if: inputs.release_tag != ''
         uses: softprops/action-gh-release@153bb8e04406b158c6c84fc1615b65b24149a1fe # v2
         with:
           tag_name: ${{ needs.get-release-info.outputs.release_tag }}
@@ -228,7 +225,7 @@ jobs:
     if: >-
       always() &&
       !cancelled() &&
-      github.event_name == 'workflow_call' &&
+      inputs.release_tag != '' &&
       needs.get-release-info.result == 'success' &&
       needs.get-release-info.outputs.release_tag != '' &&
       needs.get-release-info.outputs.is_prerelease == 'false'
