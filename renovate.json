@@ -101,8 +101,12 @@
       "python3 scripts/ci/generate-tool-versions.py"
     ],
     "fileFilters": [
-      "lintro/_generated_versions.py",
-      "lintro/tools/manifest.json"
+      "lintro/_tool_versions.py",
+      "package.json",
+      "pyproject.toml",
+      "Dockerfile",
+      "Dockerfile.tools",
+      "Dockerfile.base"
     ],
     "executionMode": "branch"
   },
