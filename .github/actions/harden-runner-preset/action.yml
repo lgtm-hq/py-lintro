@@ -48,6 +48,7 @@ runs:
             PRESET_ENDPOINTS+=" ghcr.io:443 docker.io:443"
             PRESET_ENDPOINTS+=" registry-1.docker.io:443 auth.docker.io:443"
             PRESET_ENDPOINTS+=" production.cloudflare.docker.com:443"
+            PRESET_ENDPOINTS+=" production.cloudfront.docker.com:443"
             ;;
           codecov)
             PRESET_ENDPOINTS="pypi.org:443 files.pythonhosted.org:443"
@@ -86,6 +87,7 @@ runs:
             PRESET_ENDPOINTS+=" ghcr.io:443 pkg-containers.githubusercontent.com:443"
             PRESET_ENDPOINTS+=" docker.io:443 registry-1.docker.io:443"
             PRESET_ENDPOINTS+=" auth.docker.io:443 production.cloudflare.docker.com:443"
+            PRESET_ENDPOINTS+=" production.cloudfront.docker.com:443"
             # Codecov
             PRESET_ENDPOINTS+=" codecov.io:443 uploader.codecov.io:443"
             PRESET_ENDPOINTS+=" storage.googleapis.com:443 pings.codecov.com:443"
