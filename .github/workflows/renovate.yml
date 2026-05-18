@@ -56,11 +56,8 @@ jobs:
           token: ${{ secrets.GITHUB_TOKEN }}
           configurationFile: renovate.json
         env:
+          # Regex allowlist for post-upgrade commands (global-only).
+          # yamllint disable-line rule:line-length
+          RENOVATE_ALLOWED_COMMANDS: '["^python3 scripts/ci/generate-tool-versions\\.py$"]'
           # yamllint disable-line rule:line-length
           LOG_LEVEL: ${{ github.event_name == 'workflow_dispatch' && 'debug' || 'info' }}
-          # Allow the generator to run as a postUpgradeTask. Anchored regex
-          # rejects any other invocation; bot-level grant is required by
-          # self-hosted Renovate's security model (repos cannot allowlist
-          # their own commands via renovate.json).
-          # yamllint disable-line rule:line-length
-          RENOVATE_ALLOWED_POST_UPGRADE_COMMANDS: '["^python3 scripts/ci/generate-tool-versions\\.py$"]'
