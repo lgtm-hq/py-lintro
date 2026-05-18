@@ -40,6 +40,11 @@ else
 	TAG="$(gh release view --json tagName -q .tagName 2>/dev/null || true)"
 fi
 
+# Trim surrounding whitespace, then fail fast if the tag is still empty.
+TAG="${TAG#"${TAG%%[![:space:]]*}"}"
+TAG="${TAG%"${TAG##*[![:space:]]}"}"
+: "${TAG:?Release tag is required but was empty or whitespace-only}"
+
 VERSION="${TAG#v}"
 IS_PRERELEASE=false
 if [[ "$VERSION" =~ (a|b|rc)[0-9]+ ]]; then
