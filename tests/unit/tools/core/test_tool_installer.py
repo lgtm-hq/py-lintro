@@ -225,6 +225,30 @@ def test_plan_tool_outdated_no_upgrade(
     assert_that(plan.to_upgrade).is_empty()
 
 
+def test_plan_tool_outdated_default_min_version(
+    installer: ToolInstaller,
+    make_tool: Callable[..., ManifestTool],
+) -> None:
+    """Outdated tool with default min_version (== version) is not auto-upgraded.
+
+    Regression: when min_version defaults to version, below-version tools
+    must go to plan.outdated, not plan.to_upgrade, without --upgrade.
+
+    Args:
+        installer: ToolInstaller fixture.
+        make_tool: ManifestTool factory.
+    """
+    tool = make_tool(version="2.0.0", min_version="2.0.0")
+    plan = InstallPlan()
+
+    with patch.object(installer, "_get_installed_version", return_value="1.5.0"):
+        installer._plan_tool(plan, tool, upgrade=False)
+
+    assert_that(plan.outdated).is_length(1)
+    assert_that(plan.outdated[0][0]).is_equal_to(tool)
+    assert_that(plan.to_upgrade).is_empty()
+
+
 def test_plan_tool_outdated_with_upgrade(
     installer: ToolInstaller,
     make_tool: Callable[..., ManifestTool],

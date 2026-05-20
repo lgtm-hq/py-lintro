@@ -150,7 +150,7 @@ class ToolInstaller:
             )
             if meets_recommended:
                 plan.already_ok.append(tool)
-            elif not meets_min or upgrade:
+            elif upgrade or (not meets_min and tool.min_version != tool.version):
                 skip_reason = self._check_prerequisites(tool)
                 if skip_reason:
                     plan.manual.append((tool, skip_reason))
