@@ -156,6 +156,76 @@ def _generate_config(
     return "\n".join(lines)
 
 
+def _merge_config(
+    path: Path,
+    new_content: str,
+    console: Console,
+) -> str | None:
+    """Merge generated config into an existing file.
+
+    Preserves user-managed keys; only updates ``tools`` entries and
+    ``execution.enabled_tools`` that Lintro owns. Returns the merged
+    content, or None if nothing changed.
+    """
+    try:
+        import yaml
+    except ImportError:
+        console.print(
+            f"  [yellow]{path} exists; install PyYAML to merge, "
+            "or use --force to overwrite.[/yellow]",
+        )
+        raise SystemExit(1)  # noqa: B904
+
+    try:
+        existing_raw = path.read_text(encoding="utf-8")
+        existing = yaml.safe_load(existing_raw)
+    except (OSError, yaml.YAMLError) as exc:
+        console.print(
+            f"  [yellow]Could not parse {path}: {exc}; "
+            "use --force to overwrite.[/yellow]",
+        )
+        raise SystemExit(1) from exc
+
+    if not isinstance(existing, dict):
+        console.print(
+            f"  [yellow]{path} is not a YAML mapping; "
+            "use --force to overwrite.[/yellow]",
+        )
+        raise SystemExit(1)
+
+    new = yaml.safe_load(new_content)
+    if not isinstance(new, dict):
+        return new_content
+
+    changed = False
+
+    # Merge tools section: add new tools, preserve existing
+    new_tools = new.get("tools", {})
+    existing_tools = existing.setdefault("tools", {})
+    for tool_name, tool_cfg in (new_tools or {}).items():
+        if tool_name not in existing_tools:
+            existing_tools[tool_name] = tool_cfg
+            changed = True
+
+    # Update enabled_tools list if present in new config
+    new_exec = new.get("execution", {})
+    existing_exec = existing.setdefault("execution", {})
+    new_enabled = new_exec.get("enabled_tools", [])
+    if new_enabled:
+        existing_enabled = set(existing_exec.get("enabled_tools") or [])
+        merged_enabled = sorted(existing_enabled | set(new_enabled))
+        if merged_enabled != sorted(existing_enabled):
+            existing_exec["enabled_tools"] = merged_enabled
+            changed = True
+
+    if not changed:
+        console.print(f"  [dim]{path} is already up to date.[/dim]")
+        return None
+
+    console.print(f"  [green]Merged new entries into {path}[/green]")
+    return yaml.dump(existing, default_flow_style=False, sort_keys=False)
+
+
 def _generate_native_configs(console: Console, *, force: bool) -> list[str]:
     """Generate optional native tool configuration files."""
     created: list[str] = []
@@ -243,13 +313,6 @@ def init_command(
     console = Console()
     output_path = Path(output)
 
-    if output_path.exists() and not force:
-        console.print(
-            f"[red]Error: {output_path} already exists. "
-            "Use --force to overwrite.[/red]",
-        )
-        raise SystemExit(1)
-
     if static:
         config_content = MINIMAL_CONFIG_TEMPLATE if minimal else DEFAULT_CONFIG_TEMPLATE
         tool_names: list[str] = []
@@ -275,6 +338,12 @@ def init_command(
             detected_langs,
             minimal=minimal,
         )
+
+    if output_path.exists() and not force:
+        merged = _merge_config(output_path, config_content, console)
+        if merged is None:
+            return
+        config_content = merged
 
     try:
         output_path.write_text(config_content, encoding="utf-8")
