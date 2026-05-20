@@ -312,32 +312,35 @@ def safe_parse_items_with_stats(
 ) -> tuple[list[IssueT], int]:
     """Safely parse items and return parse failure count.
 
+    A ``None`` return from *parse_func* means the item was intentionally
+    filtered (e.g. noise, suppressed finding) and is **not** counted as a
+    parse failure.  Only non-dict items and exceptions represent genuine
+    failures.
+
     Args:
         items: List of items to parse.
         parse_func: Per-item parse function.
         tool_name: Tool name for logging.
 
     Returns:
-        Tuple of parsed issues and count of skipped/unparseable items.
+        Tuple of parsed issues and count of genuinely unparseable items.
     """
     results: list[IssueT] = []
-    skipped_count = 0
+    failure_count = 0
 
     for item in items:
         if not isinstance(item, dict):
             logger.debug(f"Skipping non-dict item in {tool_name} output")
-            skipped_count += 1
+            failure_count += 1
             continue
 
         try:
             parsed = parse_func(item)
             if parsed is not None:
                 results.append(parsed)
-            else:
-                skipped_count += 1
         except (KeyError, TypeError, ValueError) as e:
             logger.debug(f"Failed to parse {tool_name} item: {e}")
-            skipped_count += 1
+            failure_count += 1
             continue
 
-    return results, skipped_count
+    return results, failure_count

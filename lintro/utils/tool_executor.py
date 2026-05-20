@@ -221,6 +221,7 @@ def _display_fix_result(
             action=action,
             success=result.success,
             ai_metadata=result.ai_metadata,
+            parse_failures_count=result.parse_failures_count or 0,
         )
         return
 
@@ -249,6 +250,7 @@ def _display_fix_result(
             action=action,
             success=result.success,
             ai_metadata=result.ai_metadata,
+            parse_failures_count=result.parse_failures_count or 0,
         )
     elif (
         result.issues_count == 0
@@ -264,6 +266,7 @@ def _display_fix_result(
             action=action,
             success=result.success,
             ai_metadata=result.ai_metadata,
+            parse_failures_count=result.parse_failures_count or 0,
         )
 
 
