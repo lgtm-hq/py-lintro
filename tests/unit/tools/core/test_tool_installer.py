@@ -377,11 +377,11 @@ def test_plan_tool_upgrade_manual_hint(
     assert_that(plan.to_upgrade).is_empty()
 
 
-def test_plan_tool_skipped_no_cargo(
+def test_plan_tool_manual_no_cargo(
     registry: MagicMock,
     make_tool: Callable[..., ManifestTool],
 ) -> None:
-    """Skip cargo tool when cargo is not available.
+    """Place cargo tool in manual when cargo is not available.
 
     Args:
         registry: Mock ToolRegistry.
@@ -412,15 +412,15 @@ def test_plan_tool_skipped_no_cargo(
     with patch.object(inst, "_get_installed_version", return_value=None):
         inst._plan_tool(plan, tool, upgrade=False)
 
-    assert_that(plan.skipped).is_length(1)
-    assert_that(plan.skipped[0][1]).contains("cargo")
+    assert_that(plan.manual).is_length(1)
+    assert_that(plan.manual[0][1]).contains("cargo")
 
 
-def test_plan_tool_skipped_no_npm(
+def test_plan_tool_manual_no_npm(
     registry: MagicMock,
     make_tool: Callable[..., ManifestTool],
 ) -> None:
-    """Skip npm tool when bun and npm are both unavailable.
+    """Place npm tool in manual when bun and npm are both unavailable.
 
     Args:
         registry: Mock ToolRegistry.
@@ -451,8 +451,8 @@ def test_plan_tool_skipped_no_npm(
     with patch.object(inst, "_get_installed_version", return_value=None):
         inst._plan_tool(plan, tool, upgrade=False)
 
-    assert_that(plan.skipped).is_length(1)
-    assert_that(plan.skipped[0][1]).contains("npm")
+    assert_that(plan.manual).is_length(1)
+    assert_that(plan.manual[0][1]).contains("npm")
 
 
 # ---------------------------------------------------------------------------

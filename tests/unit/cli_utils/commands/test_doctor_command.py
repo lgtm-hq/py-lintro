@@ -88,9 +88,10 @@ def _make_context(*, has_brew: bool = False) -> RuntimeContext:
         ("1.0.0", "1.0.0", ToolStatus.OK),
         ("1.0.0", "1.2.0", ToolStatus.OUTDATED),
         ("0.14.0", "0.15.0", ToolStatus.OUTDATED),
+        ("0.0.1", "2.0.0", ToolStatus.INCOMPATIBLE),
         ("invalid", "1.0.0", ToolStatus.UNKNOWN),
     ],
-    ids=["above", "equal", "below", "minor_below", "invalid"],
+    ids=["above", "equal", "below", "minor_below", "incompatible", "invalid"],
 )
 def test_compare_versions(installed: str, expected: str, want: ToolStatus) -> None:
     """Compare two version strings and return the correct ToolStatus."""

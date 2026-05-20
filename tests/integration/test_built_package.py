@@ -155,7 +155,7 @@ def test_built_wheel_with_full_extra() -> None:
         )
         assert_that(install_result.returncode).is_equal_to(0)
 
-        for module in ("ruff", "black", "mypy"):
+        for module in ("ruff", "black", "mypy", "bandit", "pydoclint", "yamllint"):
             import_result = subprocess.run(
                 [str(python_exe), "-c", f"import {module}"],
                 capture_output=True,

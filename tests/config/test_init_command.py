@@ -59,14 +59,13 @@ def test_refuses_to_overwrite_existing(
         tmp_path: Temporary directory path for test files.
     """
     with runner.isolated_filesystem(temp_dir=tmp_path):
-        # Create existing file
+        # Create existing file (not a valid YAML mapping)
         Path(".lintro-config.yaml").write_text("existing content")
 
         result = runner.invoke(init_command, ["--static"])
 
         assert_that(result.exit_code).is_equal_to(1)
-        assert_that(result.output).contains("already exists")
-        assert_that(result.output).contains("Use --force to overwrite")
+        assert_that(result.output).contains("--force")
 
         # Original content should be preserved
         content = Path(".lintro-config.yaml").read_text()

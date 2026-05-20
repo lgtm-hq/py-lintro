@@ -159,7 +159,7 @@ python3 "$SCRIPT_DIR/render_formula.py" \
 if [[ "$(basename "$OUTPUT_FILE")" == "lintro-full.rb" ]]; then
 	sed -i.bak \
 		-e 's/^class Lintro </class LintroFull </' \
-		-e 's/Unified CLI tool for code formatting/Unified CLI for code quality (all tools included)/' \
+		-e 's/Unified CLI tool for code formatting, linting, and quality assurance/Unified CLI for code quality (all tools included)/' \
 		"$OUTPUT_FILE"
 	rm -f "${OUTPUT_FILE}.bak"
 fi
