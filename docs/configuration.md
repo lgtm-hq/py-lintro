@@ -309,6 +309,53 @@ and a note explaining the reason. Common skip reasons:
 Skipped tools do not affect exit codes — only tools that run and find issues contribute
 to a non-zero exit.
 
+### Project Setup with `lintro init`
+
+Run `lintro init` to detect project languages, select an install profile, and generate
+a `.lintro-config.yaml` tailored to your stack:
+
+```bash
+lintro init                        # auto-detect languages and write config
+lintro init --minimal              # fewer defaults
+lintro init --profile python       # use a specific profile
+lintro init --force                # overwrite existing config
+```
+
+If a config file already exists, `lintro init` merges new tool entries without
+clobbering user-managed sections. Use `--force` to replace the file entirely.
+
+After init, run `lintro install --profile recommended` and `lintro doctor` to install
+and verify tools.
+
+### Doctor: Config-Aware Health Checks
+
+`lintro doctor` respects `execution.enabled_tools` and per-tool `tools.<name>.enabled`
+settings. By default, disabled tools are shown separately and not counted as failures:
+
+```bash
+lintro doctor                      # check enabled tools only
+lintro doctor --all                # check every manifest tool
+lintro doctor --tools ruff,mypy    # explicit tools override config filtering
+lintro doctor --json               # machine-readable output for CI
+```
+
+The `--json` output includes per-tool fields: `installed`, `recommended`,
+`min_version`, `status` (OK, MISSING, OUTDATED, INCOMPATIBLE, DISABLED, UNKNOWN),
+`install_hint`, and `upgrade_hint`.
+
+### Install Lock / Export
+
+Use `lintro install --write-lock` to capture the resolved install plan:
+
+```bash
+lintro install --profile recommended --write-lock
+```
+
+This writes `.lintro-install.lock.json` containing every tool in the plan with its
+version, install hint, and status (`to_install`, `to_upgrade`, `ok`, `outdated`,
+`manual`, `skipped`), plus the selected profile and detected languages. Share this
+file with teammates or CI to reproduce the same tool set.
+
 ## Tool Configuration
 
 Lintro respects each tool's native configuration files, allowing you to leverage
