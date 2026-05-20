@@ -340,6 +340,8 @@ def _generate_markdown_report(
                 ToolStatus.OK: "OK",
                 ToolStatus.MISSING: "MISSING",
                 ToolStatus.OUTDATED: "OUTDATED",
+                ToolStatus.INCOMPATIBLE: "INCOMPATIBLE",
+                ToolStatus.DISABLED: "DISABLED",
                 ToolStatus.UNKNOWN: "?",
             }.get(r.status, "?")
             lines.append(
@@ -601,15 +603,18 @@ def doctor_command(
         f"[dim]({total_prod} production tools)[/dim]",
     )
 
-    has_fixable = missing_count > 0 or outdated_count > 0
+    has_fixable = missing_count > 0 or outdated_count > 0 or incompatible_count > 0
     if has_fixable:
         display_console.print()
         affected_names = [
             r.tool.name
             for r in prod_results
-            if r.status in (ToolStatus.MISSING, ToolStatus.OUTDATED)
+            if r.status
+            in (ToolStatus.MISSING, ToolStatus.OUTDATED, ToolStatus.INCOMPATIBLE)
         ]
-        upgrade_flag = " --upgrade" if outdated_count > 0 else ""
+        upgrade_flag = (
+            " --upgrade" if outdated_count > 0 or incompatible_count > 0 else ""
+        )
         display_console.print(
             f"  [dim]Quick fix: lintro install{upgrade_flag}"
             f" {' '.join(affected_names)}[/dim]",
@@ -619,12 +624,14 @@ def doctor_command(
 
     if fix and has_fixable:
         _run_fix(display_console, prod_results, context, registry)
-        # Re-check after fix attempt (unknown may resolve to ok/missing/outdated)
         rechecked = [_check_tool(tool, context) for tool in tools_to_check]
         rechecked_prod = [r for r in rechecked if r.tool.tier != "dev"]
         missing_count = sum(1 for r in rechecked_prod if r.status == ToolStatus.MISSING)
         outdated_count = sum(
             1 for r in rechecked_prod if r.status == ToolStatus.OUTDATED
+        )
+        incompatible_count = sum(
+            1 for r in rechecked_prod if r.status == ToolStatus.INCOMPATIBLE
         )
         unknown_count = sum(1 for r in rechecked_prod if r.status == ToolStatus.UNKNOWN)
 
@@ -753,7 +760,10 @@ def _run_fix(
     from lintro.tools.core.tool_installer import ToolInstaller
 
     fixable = [
-        r for r in results if r.status in (ToolStatus.MISSING, ToolStatus.OUTDATED)
+        r
+        for r in results
+        if r.status
+        in (ToolStatus.MISSING, ToolStatus.OUTDATED, ToolStatus.INCOMPATIBLE)
     ]
     if not fixable:
         return
@@ -763,7 +773,9 @@ def _run_fix(
 
     installer = ToolInstaller(registry, context)
     tool_names = [r.tool.name for r in fixable]
-    has_outdated = any(r.status == ToolStatus.OUTDATED for r in fixable)
+    has_outdated = any(
+        r.status in (ToolStatus.OUTDATED, ToolStatus.INCOMPATIBLE) for r in fixable
+    )
     plan = installer.plan(tools=tool_names, upgrade=has_outdated)
     install_results = installer.execute(plan)
 

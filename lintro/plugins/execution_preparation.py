@@ -89,6 +89,14 @@ def verify_tool_version(definition: ToolDefinition) -> ToolResult | None:
     version_info = check_tool_version(definition.name, command)
 
     if version_info.version_check_passed:
+        if version_info.below_recommended:
+            logger.warning(
+                "{} {} is below recommended version {} (minimum {} met)",
+                definition.name,
+                version_info.current_version,
+                version_info.recommended_version,
+                version_info.min_version,
+            )
         return None
 
     # Binary exists and responded but version could not be parsed — proceed
