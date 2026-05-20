@@ -632,7 +632,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           BOOTSTRAP_SKIP_INSTALL_TOOLS: '1'
       - name: Sync dependencies
-        run: uv sync --dev --no-progress
+        run: uv sync --dev --extra full --no-progress
       - name: Run unit and component tests
         run: >
           uv run pytest

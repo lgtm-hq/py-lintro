@@ -77,8 +77,8 @@ fi
 # Build uv sync command
 sync_cmd="uv sync --no-progress"
 if [ $INCLUDE_DEV -eq 1 ]; then
-	sync_cmd="$sync_cmd --dev"
-	log_info "Syncing Python dependencies (including dev dependencies)"
+	sync_cmd="$sync_cmd --dev --extra full"
+	log_info "Syncing Python dependencies (including dev and full extras)"
 else
 	log_info "Syncing Python dependencies (production only)"
 fi

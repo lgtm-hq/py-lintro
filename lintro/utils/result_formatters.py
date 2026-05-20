@@ -97,6 +97,7 @@ def print_tool_result(
     action: str | Action = "check",
     success: bool | None = None,
     ai_metadata: dict[str, object] | None = None,
+    parse_failures_count: int = 0,
 ) -> None:
     """Print the result for a tool.
 
@@ -114,6 +115,7 @@ def print_tool_result(
             counted (e.g., parse or runtime errors).
         ai_metadata: dict[str, object] | None: Tool-specific metadata
             (e.g. suppression classifications for osv-scanner).
+        parse_failures_count: Number of tool-output items that could not be parsed.
     """
     # Normalize action to enum
     action = normalize_action(action)
@@ -273,10 +275,25 @@ def print_tool_result(
             )
 
         # Don't show summary line here - it will be in the Execution Summary table
+        if parse_failures_count > 0:
+            console_output_func(
+                text=(
+                    f"  [yellow]Warning: {parse_failures_count} issue(s) could not "
+                    f"be parsed (tool version may be incompatible)[/yellow]"
+                ),
+            )
         if issues_count == 0 and not output:
             success_func(message="✓ No issues found.")
 
         return
+
+    if parse_failures_count > 0:
+        console_output_func(
+            text=(
+                f"  [yellow]Warning: {parse_failures_count} issue(s) could not be "
+                f"parsed (tool version may be incompatible)[/yellow]"
+            ),
+        )
 
     if output and output.strip():
         # Display the output (either raw or formatted, depending on what was passed)

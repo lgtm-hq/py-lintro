@@ -13,10 +13,21 @@ Usage:
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import click
 from rich.console import Console
 
+from lintro.cli_utils.onboarding import (
+    is_interactive_tty,
+    print_install_next_steps,
+)
 from lintro.tools.core.install_context import RuntimeContext
+from lintro.tools.core.install_lock import (
+    InstallLock,
+    InstallLockEntry,
+    write_install_lock,
+)
 from lintro.tools.core.tool_installer import ToolInstaller
 from lintro.tools.core.tool_registry import ToolRegistry
 
@@ -26,7 +37,10 @@ from lintro.tools.core.tool_registry import ToolRegistry
 @click.option(
     "--profile",
     type=str,
-    help="Install tools for a named profile (minimal, recommended, complete, ci).",
+    help=(
+        "Install tools for a named profile "
+        "(minimal, recommended, python, web, ci, full, complete)."
+    ),
 )
 @click.option(
     "--upgrade",
@@ -44,6 +58,17 @@ from lintro.tools.core.tool_registry import ToolRegistry
     is_flag=True,
     help="Install all supported tools.",
 )
+@click.option(
+    "--yes",
+    "-y",
+    is_flag=True,
+    help="Non-interactive mode (skip prompts, use defaults).",
+)
+@click.option(
+    "--write-lock",
+    is_flag=True,
+    help="Write resolved install plan to .lintro-install.lock.json.",
+)
 def install_command(
     tools: tuple[str, ...],
     profile: str | None,
@@ -51,6 +76,8 @@ def install_command(
     upgrade: bool,
     dry_run: bool,
     install_all: bool,
+    yes: bool,
+    write_lock: bool,
 ) -> None:
     """Install or upgrade external tools used by lintro.
 
@@ -64,6 +91,8 @@ def install_command(
         upgrade: Upgrade existing tools.
         dry_run: Show plan only.
         install_all: Install all tools.
+        yes: Skip interactive prompts.
+        write_lock: Write install lock file after planning.
 
     Raises:
         SystemExit: When tool installation fails.
@@ -91,7 +120,7 @@ def install_command(
             "Cannot combine tool names, --profile, and --all; supply exactly one",
         )
     if install_all:
-        effective_profile = "complete"
+        effective_profile = "full"
 
     # Validate tool names against registry
     if tool_list:
@@ -119,6 +148,15 @@ def install_command(
         if effective_profile == "recommended":
             detected_langs = _detect_languages()
 
+    # Interactive profile/tool selection in TTY mode
+    if not tool_list and not yes and is_interactive_tty() and not dry_run:
+        tool_list, effective_profile = _interactive_select(
+            console,
+            registry,
+            effective_profile,
+            detected_langs,
+        )
+
     # Create plan
     plan = installer.plan(
         tools=tool_list,
@@ -127,30 +165,22 @@ def install_command(
         detected_langs=detected_langs,
     )
 
-    # Display plan
-    console.print()
-    if plan.to_install:
-        console.print(f"  [bold]To install ({len(plan.to_install)}):[/bold]")
-        for tool, cmd in plan.to_install:
-            console.print(f"    {tool.name:<20} [dim]{cmd}[/dim]")
+    if write_lock:
+        from pathlib import Path
 
-    if plan.to_upgrade:
-        console.print(f"  [bold]To upgrade ({len(plan.to_upgrade)}):[/bold]")
-        for tool, current, cmd in plan.to_upgrade:
-            console.print(
-                f"    {tool.name:<20} [yellow]{current}[/yellow] → "
-                f"[green]{tool.version}[/green]  [dim]{cmd}[/dim]",
-            )
-
-    if plan.already_ok:
-        console.print(
-            f"  [dim]Already installed: {len(plan.already_ok)} tools[/dim]",
+        lock_path = Path(".lintro-install.lock.json")
+        _write_plan_lock(
+            lock_path,
+            plan,
+            profile=effective_profile,
+            detected_langs=detected_langs or [],
         )
+        console.print(f"  [green]Wrote install lock:[/green] {lock_path}")
+        if dry_run or not plan.has_work:
+            return
 
-    if plan.skipped:
-        console.print(f"  [yellow]Skipped ({len(plan.skipped)}):[/yellow]")
-        for tool, reason in plan.skipped:
-            console.print(f"    {tool.name:<20} [dim]{reason}[/dim]")
+    # Display plan
+    _display_plan(console, plan)
 
     if not plan.has_work:
         if plan.outdated:
@@ -158,10 +188,10 @@ def install_command(
                 f"  [yellow]Outdated: {len(plan.outdated)} tool(s) "
                 f"(use --upgrade to update)[/yellow]",
             )
-        if not plan.outdated and not plan.skipped:
+        if not plan.outdated and not plan.skipped and not plan.manual:
             console.print("  [green]All tools are already installed.[/green]")
         console.print()
-        if plan.skipped or plan.outdated:
+        if plan.skipped or plan.outdated or plan.manual:
             raise SystemExit(1)
         return
 
@@ -176,7 +206,7 @@ def install_command(
                 f"(use --upgrade to update)[/yellow]",
             )
         console.print()
-        if plan.skipped or plan.outdated:
+        if plan.skipped or plan.outdated or plan.manual:
             raise SystemExit(1)
         return
 
@@ -198,7 +228,7 @@ def install_command(
             console.print(f"  [red]FAIL[/red]  {r.tool.name}: {r.message}")
 
     console.print()
-    has_issues = failed > 0 or plan.skipped or plan.outdated
+    has_issues = failed > 0 or plan.skipped or plan.outdated or plan.manual
 
     if failed > 0:
         console.print(
@@ -215,9 +245,126 @@ def install_command(
             f"(use --upgrade to update)[/yellow]",
         )
 
-    console.print()
+    print_install_next_steps(console, include_init=True)
+
     if has_issues:
         raise SystemExit(1)
+
+
+def _display_plan(console: Console, plan: object) -> None:
+    """Render install plan sections."""
+    from lintro.tools.core.install_plan import InstallPlan
+
+    assert isinstance(plan, InstallPlan)
+    console.print()
+    if plan.to_install:
+        console.print(f"  [bold]To install ({len(plan.to_install)}):[/bold]")
+        for tool, cmd in plan.to_install:
+            console.print(f"    {tool.name:<20} [dim]{cmd}[/dim]")
+
+    if plan.to_upgrade:
+        console.print(f"  [bold]To upgrade ({len(plan.to_upgrade)}):[/bold]")
+        for tool, current, cmd in plan.to_upgrade:
+            console.print(
+                f"    {tool.name:<20} [yellow]{current}[/yellow] → "
+                f"[green]{tool.version}[/green]  [dim]{cmd}[/dim]",
+            )
+
+    if plan.already_ok:
+        console.print(
+            f"  [dim]Already installed: {len(plan.already_ok)} tools[/dim]",
+        )
+
+    if plan.manual:
+        console.print(
+            f"  [yellow]Manual installation required ({len(plan.manual)}):[/yellow]",
+        )
+        for tool, hint in plan.manual:
+            console.print(f"    {tool.name:<20}")
+            for line in hint.split("\n"):
+                console.print(f"      [dim]{line}[/dim]")
+
+    if plan.skipped:
+        console.print(f"  [yellow]Skipped ({len(plan.skipped)}):[/yellow]")
+        for tool, reason in plan.skipped:
+            console.print(f"    {tool.name:<20} [dim]{reason}[/dim]")
+
+
+def _interactive_select(
+    console: Console,
+    registry: ToolRegistry,
+    profile: str | None,
+    detected_langs: list[str] | None,
+) -> tuple[list[str] | None, str | None]:
+    """Prompt for profile when running interactively without explicit args."""
+    profiles = registry.profile_names
+    default = profile or "recommended"
+    if default not in profiles:
+        default = "recommended"
+
+    if detected_langs:
+        console.print(
+            f"  [dim]Detected languages: {', '.join(detected_langs)}[/dim]",
+        )
+
+    console.print()
+    console.print("  [bold]Select install profile:[/bold]")
+    for idx, name in enumerate(profiles, start=1):
+        desc = registry.profiles[name].description
+        marker = " (default)" if name == default else ""
+        console.print(f"    {idx}. {name}{marker} — {desc}")
+
+    choice = click.prompt(
+        "Profile number or name",
+        default=default,
+        show_default=True,
+    )
+    if isinstance(choice, int) or (isinstance(choice, str) and choice.isdigit()):
+        idx = int(choice) - 1
+        if 0 <= idx < len(profiles):
+            return None, profiles[idx]
+    choice_str = str(choice).strip()
+    if choice_str in profiles:
+        return None, choice_str
+    raise click.UsageError(f"Invalid profile selection: {choice!r}")
+
+
+def _write_plan_lock(
+    path: Path,
+    plan: object,
+    *,
+    profile: str | None,
+    detected_langs: list[str],
+) -> None:
+    """Serialize install plan to lock file."""
+    from lintro.tools.core.install_plan import InstallPlan
+
+    assert isinstance(plan, InstallPlan)
+    entries: list[InstallLockEntry] = []
+    for tool, cmd in plan.to_install:
+        entries.append(
+            InstallLockEntry(
+                name=tool.name,
+                version=tool.version,
+                install_hint=cmd,
+                profile=profile,
+            ),
+        )
+    for tool, _current, cmd in plan.to_upgrade:
+        entries.append(
+            InstallLockEntry(
+                name=tool.name,
+                version=tool.version,
+                install_hint=cmd,
+                profile=profile,
+            ),
+        )
+    lock = InstallLock(
+        profile=profile,
+        detected_languages=detected_langs,
+        tools=entries,
+    )
+    write_install_lock(path, lock)
 
 
 def _detect_languages() -> list[str]:

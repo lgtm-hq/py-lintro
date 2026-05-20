@@ -52,7 +52,7 @@ jobs:
           enable-cache: true
 
       - name: Sync dependencies
-        run: uv sync --dev --no-progress
+        run: uv sync --dev --extra full --no-progress
 
       - name: Install osv-scanner
         run: scripts/utils/install-tools.sh --tools osv-scanner

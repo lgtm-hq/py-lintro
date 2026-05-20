@@ -39,6 +39,7 @@ def make_tool() -> Callable[..., ManifestTool]:
         defaults = {
             "name": "faketool",
             "version": "1.2.0",
+            "min_version": "1.2.0",
             "install_type": "pip",
             "install_package": "faketool-pkg",
             "version_command": ("faketool", "--version"),
@@ -212,15 +213,15 @@ def test_plan_tool_outdated_no_upgrade(
         installer: ToolInstaller fixture.
         make_tool: ManifestTool factory.
     """
-    tool = make_tool(version="2.0.0")
+    tool = make_tool(version="2.0.0", min_version="1.0.0")
     plan = InstallPlan()
 
-    with patch.object(installer, "_get_installed_version", return_value="1.0.0"):
+    with patch.object(installer, "_get_installed_version", return_value="1.5.0"):
         installer._plan_tool(plan, tool, upgrade=False)
 
     assert_that(plan.outdated).is_length(1)
     assert_that(plan.outdated[0][0]).is_equal_to(tool)
-    assert_that(plan.outdated[0][1]).is_equal_to("1.0.0")
+    assert_that(plan.outdated[0][1]).is_equal_to("1.5.0")
     assert_that(plan.to_upgrade).is_empty()
 
 
@@ -286,7 +287,7 @@ def test_plan_tool_missing_manual_hint(
     installer: ToolInstaller,
     make_tool: Callable[..., ManifestTool],
 ) -> None:
-    """Place tool in skipped when not installed and hint is manual.
+    """Place tool in manual when not installed and hint is manual.
 
     Args:
         installer: ToolInstaller fixture.
@@ -307,8 +308,8 @@ def test_plan_tool_missing_manual_hint(
     ):
         installer._plan_tool(plan, tool, upgrade=False)
 
-    assert_that(plan.skipped).is_length(1)
-    assert_that(plan.skipped[0][0]).is_equal_to(tool)
+    assert_that(plan.manual).is_length(1)
+    assert_that(plan.manual[0][0]).is_equal_to(tool)
     assert_that(plan.to_install).is_empty()
 
 
@@ -347,13 +348,17 @@ def test_plan_tool_upgrade_manual_hint(
     installer: ToolInstaller,
     make_tool: Callable[..., ManifestTool],
 ) -> None:
-    """Place tool in skipped when upgrade hint is manual.
+    """Place tool in manual when upgrade hint is manual.
 
     Args:
         installer: ToolInstaller fixture.
         make_tool: ManifestTool factory.
     """
-    tool = make_tool(version="2.0.0", install_type="binary")
+    tool = make_tool(
+        version="2.0.0",
+        min_version="1.0.0",
+        install_type="binary",
+    )
     plan = InstallPlan()
 
     with (
@@ -367,8 +372,8 @@ def test_plan_tool_upgrade_manual_hint(
     ):
         installer._plan_tool(plan, tool, upgrade=True)
 
-    assert_that(plan.skipped).is_length(1)
-    assert_that(plan.skipped[0][0]).is_equal_to(tool)
+    assert_that(plan.manual).is_length(1)
+    assert_that(plan.manual[0][0]).is_equal_to(tool)
     assert_that(plan.to_upgrade).is_empty()
 
 

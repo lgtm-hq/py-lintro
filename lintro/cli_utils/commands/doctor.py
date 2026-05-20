@@ -137,7 +137,7 @@ def _check_tool(tool: ManifestTool, context: RuntimeContext) -> ToolCheckResult:
                 install_hint=hint,
             )
 
-        status = _compare_versions(version, tool.version)
+        status = _compare_versions(version, tool.version, tool.min_version)
         return ToolCheckResult(
             tool=tool,
             status=status,
@@ -166,25 +166,27 @@ def _check_tool(tool: ManifestTool, context: RuntimeContext) -> ToolCheckResult:
         )
 
 
-def _compare_versions(installed: str, expected: str) -> ToolStatus:
-    """Compare installed version against expected minimum.
-
-    Delegates to version_parsing.compare_versions which uses the
-    packaging library for robust PEP 440 version comparison.
+def _compare_versions(
+    installed: str,
+    recommended: str,
+    minimum: str,
+) -> ToolStatus:
+    """Compare installed version against recommended and minimum versions.
 
     Args:
         installed: Installed version string.
-        expected: Expected minimum version string.
+        recommended: Recommended/tested version from manifest.
+        minimum: Hard minimum compatible version from manifest.
 
     Returns:
-        ToolStatus.OK, ToolStatus.OUTDATED, or ToolStatus.UNKNOWN.
+        ToolStatus.OK, OUTDATED, INCOMPATIBLE, or UNKNOWN.
     """
     try:
-        return (
-            ToolStatus.OK
-            if compare_versions(installed, expected) >= 0
-            else ToolStatus.OUTDATED
-        )
+        if compare_versions(installed, minimum) < 0:
+            return ToolStatus.INCOMPATIBLE
+        if compare_versions(installed, recommended) < 0:
+            return ToolStatus.OUTDATED
+        return ToolStatus.OK
     except ValueError:
         return ToolStatus.UNKNOWN
 
@@ -251,9 +253,25 @@ def _render_tool_line(
         line.append("[!!] ", style="yellow bold")
         line.append(name, style="cyan")
         line.append(f"{r.installed_version:<10}", style="yellow")
-        line.append(expected, style="dim")
+        line.append(f"(>= {r.tool.min_version}, rec. {r.tool.version})", style="dim")
         console.print(line)
         console.print(f"         [dim]Upgrade: {r.upgrade_hint}[/dim]")
+
+    elif r.status == ToolStatus.INCOMPATIBLE:
+        line = Text("    ")
+        line.append("[XX] ", style="red bold")
+        line.append(name, style="cyan")
+        line.append(f"{r.installed_version or '?':<10}", style="red")
+        line.append(f"(>= {r.tool.min_version})", style="dim")
+        console.print(line)
+        console.print(f"         [dim]Upgrade: {r.upgrade_hint}[/dim]")
+
+    elif r.status == ToolStatus.DISABLED:
+        line = Text("    ")
+        line.append("[--] ", style="dim")
+        line.append(name, style="dim")
+        line.append("disabled in config", style="dim")
+        console.print(line)
 
     elif r.status == ToolStatus.MISSING:
         line = Text("    ")
@@ -366,6 +384,12 @@ def _generate_markdown_report(
     is_flag=True,
     help="Attempt to install missing tools.",
 )
+@click.option(
+    "--all",
+    "check_all",
+    is_flag=True,
+    help="Check all tools regardless of config enablement.",
+)
 def doctor_command(
     json_output: bool,
     tools: str | None,
@@ -373,6 +397,7 @@ def doctor_command(
     verbose: bool,
     report: bool,
     fix: bool,
+    check_all: bool,
 ) -> None:
     """Check tool installation status and version compatibility.
 
@@ -385,6 +410,7 @@ def doctor_command(
         verbose: Show environment details and tool paths.
         report: Generate markdown report.
         fix: Attempt to install missing tools.
+        check_all: Check all tools regardless of project config.
 
     Raises:
         SystemExit: When missing or broken tools are detected.
@@ -406,6 +432,10 @@ def doctor_command(
     if verbose or report or json_output:
         env_report = collect_full_environment()
 
+    from lintro.config.config_loader import get_config
+
+    config = get_config()
+
     # Determine which tools to check
     if tools:
         tool_names = [t.strip() for t in tools.split(",") if t.strip()]
@@ -420,14 +450,36 @@ def doctor_command(
             display_console.print(f"  [dim]Available: {available}[/dim]")
             raise SystemExit(1)
         tools_to_check = [registry.get(n) for n in tool_names]
+        disabled_results: list[ToolCheckResult] = []
     else:
-        tools_to_check = list(registry.all_tools(include_dev=True))
+        all_tools = list(registry.all_tools(include_dev=True))
+        if check_all:
+            tools_to_check = all_tools
+            disabled_results = []
+        else:
+            tools_to_check = [t for t in all_tools if config.is_tool_enabled(t.name)]
+            disabled_results = [
+                ToolCheckResult(
+                    tool=t,
+                    status=ToolStatus.DISABLED,
+                    install_hint="",
+                    upgrade_hint="",
+                )
+                for t in all_tools
+                if not config.is_tool_enabled(t.name)
+            ]
 
-    # Check all tools
+    # Check enabled tools
     all_results = [_check_tool(tool, context) for tool in tools_to_check]
+    all_results.extend(disabled_results)
 
     # Split into production and dev
-    prod_results = [r for r in all_results if r.tool.tier != "dev"]
+    prod_results = [
+        r
+        for r in all_results
+        if r.tool.tier != "dev" and r.status != ToolStatus.DISABLED
+    ]
+    disabled_prod = [r for r in all_results if r.status == ToolStatus.DISABLED]
     dev_results = [r for r in all_results if r.tool.tier == "dev"]
 
     # Group production results by category
@@ -439,6 +491,9 @@ def doctor_command(
     ok_count = sum(1 for r in prod_results if r.status == ToolStatus.OK)
     missing_count = sum(1 for r in prod_results if r.status == ToolStatus.MISSING)
     outdated_count = sum(1 for r in prod_results if r.status == ToolStatus.OUTDATED)
+    incompatible_count = sum(
+        1 for r in prod_results if r.status == ToolStatus.INCOMPATIBLE
+    )
     unknown_count = sum(1 for r in prod_results if r.status == ToolStatus.UNKNOWN)
     dev_ok = sum(1 for r in dev_results if r.status == ToolStatus.OK)
     dev_total = len(dev_results)
@@ -458,7 +513,12 @@ def doctor_command(
             dev_results,
         )
         click.echo(markdown)
-        if missing_count > 0 or outdated_count > 0 or unknown_count > 0:
+        if (
+            missing_count > 0
+            or outdated_count > 0
+            or incompatible_count > 0
+            or unknown_count > 0
+        ):
             sys.exit(1)
         return
 
@@ -471,9 +531,15 @@ def doctor_command(
             ok_count,
             missing_count,
             outdated_count,
+            incompatible_count,
             unknown_count,
         )
-        if missing_count > 0 or outdated_count > 0 or unknown_count > 0:
+        if (
+            missing_count > 0
+            or outdated_count > 0
+            or incompatible_count > 0
+            or unknown_count > 0
+        ):
             sys.exit(1)
         return
 
@@ -507,6 +573,14 @@ def doctor_command(
             is_dev=True,
         )
 
+    if disabled_prod:
+        _render_category(
+            display_console,
+            "Disabled tools",
+            disabled_prod,
+            verbose=verbose,
+        )
+
     # Summary
     display_console.print()
     summary_parts: list[str] = []
@@ -515,6 +589,8 @@ def doctor_command(
         summary_parts.append(f"[red]{missing_count}[/red] missing")
     if outdated_count > 0:
         summary_parts.append(f"[yellow]{outdated_count}[/yellow] outdated")
+    if incompatible_count > 0:
+        summary_parts.append(f"[red]{incompatible_count}[/red] incompatible")
     if unknown_count > 0:
         summary_parts.append(f"[dim]{unknown_count}[/dim] unknown")
     if dev_total > 0:
@@ -552,7 +628,12 @@ def doctor_command(
         )
         unknown_count = sum(1 for r in rechecked_prod if r.status == ToolStatus.UNKNOWN)
 
-    if missing_count > 0 or outdated_count > 0 or unknown_count > 0:
+    if (
+        missing_count > 0
+        or outdated_count > 0
+        or incompatible_count > 0
+        or unknown_count > 0
+    ):
         raise SystemExit(1)
 
 
@@ -563,6 +644,7 @@ def _output_json(
     ok_count: int,
     missing_count: int,
     outdated_count: int,
+    incompatible_count: int,
     unknown_count: int,
 ) -> None:
     """Output doctor results as JSON."""
@@ -571,6 +653,8 @@ def _output_json(
 
     for r in all_results:
         tools_json[r.tool.name] = {
+            "recommended": r.tool.version,
+            "min_version": r.tool.min_version,
             "expected": r.tool.version,
             "installed": r.installed_version,
             "status": r.status,
@@ -601,6 +685,17 @@ def _output_json(
                     "upgrade_hint": r.upgrade_hint,
                 },
             )
+        elif r.status == ToolStatus.INCOMPATIBLE and r.tool.tier != "dev":
+            issues.append(
+                {
+                    "tool": r.tool.name,
+                    "severity": "error",
+                    "message": (
+                        f"incompatible ({r.installed_version} < {r.tool.min_version})"
+                    ),
+                    "upgrade_hint": r.upgrade_hint,
+                },
+            )
         elif r.status == ToolStatus.UNKNOWN and r.tool.tier != "dev":
             issues.append(
                 {
@@ -620,11 +715,19 @@ def _output_json(
         "tools": tools_json,
         "issues": issues,
         "summary": {
-            "total": ok_count + missing_count + outdated_count + unknown_count,
+            "total": (
+                ok_count
+                + missing_count
+                + outdated_count
+                + incompatible_count
+                + unknown_count
+            ),
             "ok": ok_count,
             "missing": missing_count,
             "outdated": outdated_count,
+            "incompatible": incompatible_count,
             "unknown": unknown_count,
+            "disabled": sum(1 for r in all_results if r.status == ToolStatus.DISABLED),
         },
     }
 

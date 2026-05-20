@@ -73,6 +73,9 @@ class ToolResult:
     skipped: bool = field(default=False)
     skip_reason: str | None = field(default=None)
 
+    # Parser failures (items that could not be parsed from tool output)
+    parse_failures_count: int = field(default=0)
+
     def __post_init__(self) -> None:
         """Validate that the issue counts and skip state are consistent.
 

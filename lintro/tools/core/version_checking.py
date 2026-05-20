@@ -54,7 +54,7 @@ from loguru import logger
 
 from lintro._tool_versions import (
     _NPM_PACKAGE_TO_TOOL,
-    get_all_expected_versions,
+    get_all_minimum_versions,
 )
 from lintro.enums.tool_name import ToolName
 
@@ -110,8 +110,8 @@ def get_minimum_versions() -> dict[str, str]:
     """
     result: dict[str, str] = {}
 
-    # Get all versions (both npm and non-npm tools)
-    all_versions = get_all_expected_versions()
+    # Minimum compatible versions (manifest min_version when set)
+    all_versions = get_all_minimum_versions()
 
     # Convert ToolName keys to their string values
     for tool_name, version in all_versions.items():

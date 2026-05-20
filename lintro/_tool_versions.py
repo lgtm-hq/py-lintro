@@ -99,28 +99,34 @@ _COMPANION_NPM_PACKAGES: dict[str, str] = {
 
 
 @lru_cache(maxsize=1)
-def _load_manifest_versions() -> tuple[dict[ToolName, str], dict[str, ToolName]]:
+def _load_manifest_versions() -> tuple[
+    dict[ToolName, str],
+    dict[ToolName, str],
+    dict[str, ToolName],
+]:
     """Load tool versions from the manifest, if present.
 
     Returns:
         Tuple of:
-        - versions: mapping of ToolName -> version string
+        - versions: mapping of ToolName -> recommended version string
+        - min_versions: mapping of ToolName -> minimum compatible version
         - npm_map: mapping of npm package name -> ToolName
     """
     if not _MANIFEST_PATH.exists():
-        return {}, {}
+        return {}, {}, {}
 
     try:
         data = json.loads(_MANIFEST_PATH.read_text())
     except (json.JSONDecodeError, OSError) as exc:
         _logger.debug("Failed to read manifest: %s", exc)
-        return {}, {}
+        return {}, {}, {}
 
     tools = data.get("tools", [])
     if not isinstance(tools, list):
-        return {}, {}
+        return {}, {}, {}
 
     versions: dict[ToolName, str] = {}
+    min_versions: dict[ToolName, str] = {}
     npm_map: dict[str, ToolName] = {}
     for entry in tools:
         if not isinstance(entry, dict):
@@ -133,14 +139,17 @@ def _load_manifest_versions() -> tuple[dict[ToolName, str], dict[str, ToolName]]
             tool_name = normalize_tool_name(str(name))
         except ValueError:
             continue
-        versions[tool_name] = str(version)
+        version_str = str(version)
+        versions[tool_name] = version_str
+        raw_min = entry.get("min_version")
+        min_versions[tool_name] = str(raw_min) if raw_min else version_str
         install = entry.get("install", {})
         if isinstance(install, dict) and install.get("type") == "npm":
             package = install.get("package")
             if package:
                 npm_map[str(package)] = tool_name
 
-    return versions, npm_map
+    return versions, min_versions, npm_map
 
 
 def get_tool_version(tool_name: ToolName | str) -> str | None:
@@ -154,7 +163,7 @@ def get_tool_version(tool_name: ToolName | str) -> str | None:
     Returns:
         Version string if found, None otherwise.
     """
-    manifest_versions, manifest_npm_map = _load_manifest_versions()
+    manifest_versions, _manifest_min, manifest_npm_map = _load_manifest_versions()
 
     # Store original string for companion npm-package lookup
     original_name = tool_name if isinstance(tool_name, str) else None
@@ -206,20 +215,23 @@ def _get_npm_package_version(package_name: str) -> str | None:
 
 
 def get_min_version(tool_name: ToolName) -> str:
-    """Get the minimum required version for an external tool.
+    """Get the minimum compatible version for an external tool.
 
-    Use this in tool definitions for the ``min_version`` field. Unlike
-    ``get_tool_version``, this raises if the tool isn't registered.
+    Use this in tool definitions for the ``min_version`` field. Falls back to
+    recommended ``version`` when ``min_version`` is not set in manifest.json.
 
     Args:
         tool_name: ToolName enum member.
 
     Returns:
-        Version string.
+        Minimum compatible version string.
 
     Raises:
         KeyError: If the tool is not registered.
     """
+    _versions, min_versions, _ = _load_manifest_versions()
+    if tool_name in min_versions:
+        return min_versions[tool_name]
     version = get_tool_version(tool_name)
     if version is None:
         raise KeyError(
@@ -228,6 +240,11 @@ def get_min_version(tool_name: ToolName) -> str:
             f"matching pin in package.json/pyproject.toml.",
         )
     return version
+
+
+def get_recommended_version(tool_name: ToolName | str) -> str | None:
+    """Get the recommended/tested version for a tool (manifest ``version`` field)."""
+    return get_tool_version(tool_name)
 
 
 def get_all_expected_versions() -> dict[ToolName | str, str]:
@@ -239,7 +256,7 @@ def get_all_expected_versions() -> dict[ToolName | str, str]:
     Returns:
         Dictionary mapping tool names to version strings.
     """
-    manifest_versions, _ = _load_manifest_versions()
+    manifest_versions, manifest_min, _ = _load_manifest_versions()
 
     return {
         tool_name: version
@@ -253,6 +270,26 @@ def get_all_expected_versions() -> dict[ToolName | str, str]:
     }
 
 
+def get_all_minimum_versions() -> dict[ToolName | str, str]:
+    """Get minimum compatible versions for all external tools."""
+    manifest_versions, manifest_min, _ = _load_manifest_versions()
+    combined: dict[ToolName | str, str] = {}
+    for source in (
+        TOOL_VERSIONS,
+        _NPM_VERSIONS_BY_TOOL,
+        _PYPI_VERSIONS_BY_TOOL,
+        manifest_versions,
+    ):
+        for tool_name, version in source.items():
+            if isinstance(tool_name, ToolName):
+                combined[tool_name] = manifest_min.get(tool_name, version)
+            else:
+                combined[tool_name] = version
+    for tool_name, min_ver in manifest_min.items():
+        combined[tool_name] = min_ver
+    return combined
+
+
 def is_npm_managed(tool_name: ToolName) -> bool:
     """Check if a tool's version is managed via npm/package.json.
 
@@ -262,7 +299,7 @@ def is_npm_managed(tool_name: ToolName) -> bool:
     Returns:
         True if the tool version comes from package.json, False otherwise.
     """
-    _, manifest_npm_map = _load_manifest_versions()
+    _, _, manifest_npm_map = _load_manifest_versions()
     if manifest_npm_map:
         return tool_name in manifest_npm_map.values()
     return tool_name in _TOOL_TO_NPM_PACKAGE

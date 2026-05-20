@@ -306,20 +306,20 @@ jobs:
           token: ${{ steps.homebrew-app-token.outputs.token }}
           path: homebrew-tap
 
-      - name: Generate PyPI formula
+      - name: Generate PyPI formula (lintro-full)
         run: |
           lintro/scripts/ci/homebrew/generate-pypi-formula.sh \
             "${{ steps.version.outputs.version }}" \
-            "homebrew-tap/Formula/lintro.rb"
+            "homebrew-tap/Formula/lintro-full.rb"
 
-      - name: Generate binary formula
+      - name: Generate binary formula (lintro)
         if: ${{ needs.build-macos.result == 'success' }}
         run: |
           lintro/scripts/ci/homebrew/generate-binary-formula.sh \
             "${{ steps.version.outputs.version }}" \
             "${{ steps.checksums.outputs.arm64_sha256 }}" \
             "${{ steps.checksums.outputs.x86_64_sha256 }}" \
-            "homebrew-tap/Formula/lintro-bin.rb"
+            "homebrew-tap/Formula/lintro.rb"
 
       - name: Create Homebrew tap PR
         env:
@@ -333,8 +333,8 @@ jobs:
             Updates applicable Homebrew formulas for lintro
             ${{ steps.version.outputs.version }}:
 
-            - `Formula/lintro.rb`
-            - `Formula/lintro-bin.rb` when macOS binaries are available
+            - `Formula/lintro.rb` (lightweight binary) when macOS binaries are available
+            - `Formula/lintro-full.rb` (PyPI + bundled tools)
 
             The tap repository merges this PR automatically after `validate-formula`
             succeeds (release-bot merge workflow).

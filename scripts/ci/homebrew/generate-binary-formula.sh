@@ -18,10 +18,10 @@ Arguments:
   version      Package version (e.g., 1.0.0)
   arm64-sha    SHA256 of the arm64 binary
   x86-sha      SHA256 of the x86_64 binary
-  output-file  Path to write the formula (e.g., Formula/lintro-bin.rb)
+  output-file  Path to write the formula (e.g., Formula/lintro.rb)
 
 Examples:
-  generate-binary-formula.sh 1.0.0 abc123... def456... Formula/lintro-bin.rb
+  generate-binary-formula.sh 1.0.0 abc123... def456... Formula/lintro.rb
 EOF
 	exit 0
 fi
@@ -31,7 +31,7 @@ ARM64_SHA="${2:?ARM64 SHA256 is required}"
 X86_SHA="${3:?x86_64 SHA256 is required}"
 OUTPUT_FILE="${4:?Output file is required}"
 
-log_info "Generating lintro-bin formula for version ${VERSION}"
+log_info "Generating lightweight lintro formula for version ${VERSION}"
 log_info "ARM64 SHA256: ${ARM64_SHA}"
 log_info "x86_64 SHA256: ${X86_SHA}"
 
@@ -41,8 +41,8 @@ cat >"$OUTPUT_FILE" <<EOF
 
 # Homebrew formula for lintro binary distribution
 # Auto-generated - do not edit manually
-class LintroBin < Formula
-  desc "Unified CLI for code quality (binary)"
+class Lintro < Formula
+  desc "Unified CLI for code formatting, linting, and quality assurance"
   homepage "https://github.com/lgtm-hq/py-lintro"
   version "${VERSION}"
   license "MIT"
@@ -70,14 +70,14 @@ class LintroBin < Formula
 
   def caveats
     <<~EOS
-      lintro-bin is a standalone binary that doesn't require Python.
+      lintro is a lightweight standalone binary (no Python required).
 
-      The external tools (ruff, black, mypy, etc.) must be installed
-      separately:
-        brew install ruff black mypy
+      Install tools with:
+        lintro doctor
+        lintro install --profile recommended
 
-      For the Python version with bundled tools:
-        brew install lgtm-hq/tap/lintro
+      For all tools bundled via Homebrew dependencies:
+        brew install lgtm-hq/tap/lintro-full
     EOS
   end
 

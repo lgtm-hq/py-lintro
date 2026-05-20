@@ -110,3 +110,58 @@ def test_built_wheel_imports() -> None:
         )
         assert_that(cli_result.returncode).is_equal_to(0)
         assert_that(cli_result.stdout).contains("lintro")
+
+
+@pytest.mark.slow
+def test_built_wheel_with_full_extra() -> None:
+    """Test that lintro[full] extra installs bundled Python tools."""
+    project_root = Path(__file__).parent.parent.parent
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        tmpdir_path = Path(tmpdir)
+        venv_path = tmpdir_path / "test_venv"
+        dist_dir = tmpdir_path / "dist"
+
+        build_result = subprocess.run(
+            ["uv", "build", "--out-dir", str(dist_dir)],
+            cwd=str(project_root),
+            capture_output=True,
+            text=True,
+            timeout=60,
+        )
+        assert_that(build_result.returncode).is_equal_to(0)
+
+        wheels = list(dist_dir.glob("*.whl"))
+        assert_that(wheels).is_not_empty()
+        wheel_path = wheels[0]
+
+        subprocess.run(
+            [sys.executable, "-m", "venv", str(venv_path)],
+            check=True,
+            capture_output=True,
+            timeout=30,
+        )
+
+        if sys.platform == "win32":
+            python_exe = venv_path / "Scripts" / "python.exe"
+        else:
+            python_exe = venv_path / "bin" / "python"
+
+        install_result = subprocess.run(
+            [str(python_exe), "-m", "pip", "install", f"{wheel_path}[full]"],
+            capture_output=True,
+            text=True,
+            timeout=120,
+        )
+        assert_that(install_result.returncode).is_equal_to(0)
+
+        for module in ("ruff", "black", "mypy"):
+            import_result = subprocess.run(
+                [str(python_exe), "-c", f"import {module}"],
+                capture_output=True,
+                text=True,
+                timeout=10,
+            )
+            assert_that(import_result.returncode).described_as(
+                f"Expected {module} from lintro[full]",
+            ).is_equal_to(0)

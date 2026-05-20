@@ -167,6 +167,9 @@ consistent UX and maintainable implementation.
   resolve companion package versions.
 - Do not add companion packages to the manifest unless they provide a standalone binary
   tool.
+- Each manifest tool entry has `version` (recommended/tested) and optional `min_version`
+  (hard parser compatibility floor). If you change a parser, verify whether
+  `min_version` must be bumped. Renovate updates `version` only.
 
 4. Docs checklist
 

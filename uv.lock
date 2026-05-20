@@ -1092,22 +1092,15 @@ name = "lintro"
 version = "0.63.4"
 source = { editable = "." }
 dependencies = [
-    { name = "bandit" },
-    { name = "black" },
     { name = "click" },
-    { name = "coverage-badge" },
     { name = "defusedxml" },
     { name = "httpx" },
     { name = "loguru" },
-    { name = "mypy" },
     { name = "packaging" },
     { name = "pathspec" },
     { name = "pydantic" },
-    { name = "pydoclint" },
     { name = "rich" },
-    { name = "ruff" },
     { name = "tabulate" },
-    { name = "yamllint" },
 ]
 
 [package.optional-dependencies]
@@ -1129,6 +1122,14 @@ dev = [
     { name = "python-semantic-release" },
     { name = "ruff" },
     { name = "tox" },
+]
+full = [
+    { name = "bandit" },
+    { name = "black" },
+    { name = "mypy" },
+    { name = "pydoclint" },
+    { name = "ruff" },
+    { name = "yamllint" },
 ]
 test = [
     { name = "assertpy" },
@@ -1178,22 +1179,21 @@ requires-dist = [
     { name = "anthropic", marker = "extra == 'ai'", specifier = ">=0.39.0" },
     { name = "assertpy", marker = "extra == 'dev'", specifier = ">=1.1" },
     { name = "assertpy", marker = "extra == 'test'", specifier = ">=1.1" },
-    { name = "bandit", specifier = ">=1.9.4" },
-    { name = "black", specifier = ">=26.3.1" },
+    { name = "bandit", marker = "extra == 'full'", specifier = ">=1.9.4" },
+    { name = "black", marker = "extra == 'full'", specifier = ">=26.3.1" },
     { name = "click", specifier = ">=8.1.8" },
-    { name = "coverage-badge", specifier = ">=1.1.2" },
     { name = "coverage-badge", marker = "extra == 'dev'", specifier = ">=1.1.2" },
     { name = "defusedxml", specifier = ">=0.7.1" },
     { name = "httpx", specifier = ">=0.28.1" },
     { name = "httpx", marker = "extra == 'dev'", specifier = ">=0.28.1" },
     { name = "loguru", specifier = ">=0.7.3" },
-    { name = "mypy", specifier = ">=1.19.1" },
     { name = "mypy", marker = "extra == 'dev'", specifier = ">=1.19.1" },
+    { name = "mypy", marker = "extra == 'full'", specifier = ">=1.19.1" },
     { name = "openai", marker = "extra == 'ai'", specifier = ">=1.50.0" },
     { name = "packaging", specifier = ">=25.0" },
     { name = "pathspec", specifier = ">=0.12.1" },
     { name = "pydantic", specifier = ">=2.12.5" },
-    { name = "pydoclint", specifier = ">=0.8.3" },
+    { name = "pydoclint", marker = "extra == 'full'", specifier = ">=0.8.3" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=9.0.3" },
     { name = "pytest", marker = "extra == 'test'", specifier = ">=9.0.3" },
     { name = "pytest-cov", marker = "extra == 'dev'", specifier = ">=7.0.0" },
@@ -1205,17 +1205,17 @@ requires-dist = [
     { name = "pytest-xdist", marker = "extra == 'test'", specifier = ">=3.8.0" },
     { name = "python-semantic-release", marker = "extra == 'dev'", specifier = ">=10.5.3" },
     { name = "rich", specifier = ">=14.2.0" },
-    { name = "ruff", specifier = ">=0.15.9" },
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.15.9" },
+    { name = "ruff", marker = "extra == 'full'", specifier = ">=0.15.9" },
     { name = "semgrep", marker = "extra == 'tools'", specifier = ">=1.151.0" },
     { name = "sqlfluff", marker = "extra == 'tools'", specifier = ">=4.0.0" },
     { name = "tabulate", specifier = ">=0.9.0" },
     { name = "tox", marker = "extra == 'dev'", specifier = ">=4.34.1" },
     { name = "types-setuptools", marker = "extra == 'typing'", specifier = ">=80.9.0.20251223" },
     { name = "types-tabulate", marker = "extra == 'typing'", specifier = ">=0.9.0.20241207" },
-    { name = "yamllint", specifier = ">=1.37.1" },
+    { name = "yamllint", marker = "extra == 'full'", specifier = ">=1.37.1" },
 ]
-provides-extras = ["dev", "test", "typing", "ai", "tools"]
+provides-extras = ["dev", "test", "typing", "full", "ai", "tools"]
 
 [package.metadata.requires-dev]
 build = [

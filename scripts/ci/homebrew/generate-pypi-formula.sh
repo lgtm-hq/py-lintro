@@ -25,7 +25,7 @@ This script uses generate_resources.py with importlib.metadata
 to generate dependency resource stanzas (replacing homebrew-pypi-poet).
 
 Examples:
-  generate-pypi-formula.sh 1.0.0 Formula/lintro.rb
+  generate-pypi-formula.sh 1.0.0 Formula/lintro-full.rb
 EOF
 	exit 0
 fi
@@ -154,5 +154,14 @@ python3 "$SCRIPT_DIR/render_formula.py" \
 	--pydoclint-resource "$TMPDIR/pydoclint.txt" \
 	--pydantic-resource "$TMPDIR/pydantic.txt" \
 	--output "$OUTPUT_FILE"
+
+# Rename class for full formula when output targets lintro-full.rb
+if [[ "$(basename "$OUTPUT_FILE")" == "lintro-full.rb" ]]; then
+	sed -i.bak \
+		-e 's/^class Lintro </class LintroFull </' \
+		-e 's/Unified CLI tool for code formatting/Unified CLI for code quality (all tools included)/' \
+		"$OUTPUT_FILE"
+	rm -f "${OUTPUT_FILE}.bak"
+fi
 
 log_success "Formula written to ${OUTPUT_FILE}"

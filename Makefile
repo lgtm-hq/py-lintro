@@ -12,14 +12,14 @@ all: setup test
 # Setup development environment
 setup:
 	@echo "Setting up development environment with uv..."
-	uv sync --dev
+	uv sync --dev --extra full
 	uv pip install -e .
 	@echo "Setup complete! Try 'make test' or 'make lintro-check'"
 
 # Install the package
 install:
 	@echo "Installing package with uv..."
-	uv sync --dev
+	uv sync --dev --extra full
 	uv pip install -e .
 
 # Run all tests

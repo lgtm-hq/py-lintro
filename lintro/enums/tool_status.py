@@ -16,4 +16,6 @@ class ToolStatus(StrEnum):
     OK = auto()
     MISSING = auto()
     OUTDATED = auto()
+    INCOMPATIBLE = auto()
+    DISABLED = auto()
     UNKNOWN = auto()

@@ -34,6 +34,7 @@ class InstallPlan:
         already_ok: Tools already installed at correct version.
         outdated: Tools with outdated versions (not upgrading).
         skipped: Tools skipped (e.g., Rust tools when cargo unavailable).
+        manual: Tools that require manual installation, with install hints.
     """
 
     to_install: list[tuple[ManifestTool, str]] = field(default_factory=list)
@@ -41,6 +42,7 @@ class InstallPlan:
     already_ok: list[ManifestTool] = field(default_factory=list)
     outdated: list[tuple[ManifestTool, str]] = field(default_factory=list)
     skipped: list[tuple[ManifestTool, str]] = field(default_factory=list)
+    manual: list[tuple[ManifestTool, str]] = field(default_factory=list)
 
     @property
     def has_work(self) -> bool:

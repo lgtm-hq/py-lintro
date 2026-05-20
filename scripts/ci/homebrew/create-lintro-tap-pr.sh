@@ -34,15 +34,19 @@ fi
 VERSION="${1:?Version is required}"
 SKIP_IF_EMPTY="${2:-}"
 WORKING_DIR="${WORKING_DIR:-.}"
-FORMULA_PATHS=("Formula/lintro.rb")
+FORMULA_PATHS=()
 
 if [[ -n "$SKIP_IF_EMPTY" && "$SKIP_IF_EMPTY" != "--skip-if-empty" ]]; then
 	log_error "Unknown option: $SKIP_IF_EMPTY"
 	exit 1
 fi
 
-if [[ -f "$WORKING_DIR/Formula/lintro-bin.rb" ]]; then
-	FORMULA_PATHS+=("Formula/lintro-bin.rb")
+if [[ -f "$WORKING_DIR/Formula/lintro.rb" ]]; then
+	FORMULA_PATHS+=("Formula/lintro.rb")
+fi
+
+if [[ -f "$WORKING_DIR/Formula/lintro-full.rb" ]]; then
+	FORMULA_PATHS+=("Formula/lintro-full.rb")
 fi
 
 ARGS=(
