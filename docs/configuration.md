@@ -311,8 +311,8 @@ to a non-zero exit.
 
 ### Project Setup with `lintro init`
 
-Run `lintro init` to detect project languages, select an install profile, and generate
-a `.lintro-config.yaml` tailored to your stack:
+Run `lintro init` to detect project languages, select an install profile, and generate a
+`.lintro-config.yaml` tailored to your stack:
 
 ```bash
 lintro init                        # auto-detect languages and write config
@@ -339,9 +339,9 @@ lintro doctor --tools ruff,mypy    # explicit tools override config filtering
 lintro doctor --json               # machine-readable output for CI
 ```
 
-The `--json` output includes per-tool fields: `installed`, `recommended`,
-`min_version`, `status` (OK, MISSING, OUTDATED, INCOMPATIBLE, DISABLED, UNKNOWN),
-`install_hint`, and `upgrade_hint`.
+The `--json` output includes per-tool fields: `installed`, `recommended`, `min_version`,
+`status` (OK, MISSING, OUTDATED, INCOMPATIBLE, DISABLED, UNKNOWN), `install_hint`, and
+`upgrade_hint`.
 
 ### Install Lock / Export
 
@@ -353,8 +353,8 @@ lintro install --profile recommended --write-lock
 
 This writes `.lintro-install.lock.json` containing every tool in the plan with its
 version, install hint, and status (`to_install`, `to_upgrade`, `ok`, `outdated`,
-`manual`, `skipped`), plus the selected profile and detected languages. Share this
-file with teammates or CI to reproduce the same tool set.
+`manual`, `skipped`), plus the selected profile and detected languages. Share this file
+with teammates or CI to reproduce the same tool set.
 
 ## Tool Configuration
 
