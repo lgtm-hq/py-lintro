@@ -149,7 +149,14 @@ def install_command(
             detected_langs = _detect_languages()
 
     # Interactive profile/tool selection in TTY mode
-    if not tool_list and not yes and is_interactive_tty() and not dry_run:
+    if (
+        not tool_list
+        and not profile
+        and not install_all
+        and not yes
+        and is_interactive_tty()
+        and not dry_run
+    ):
         tool_list, effective_profile = _interactive_select(
             console,
             registry,
@@ -165,9 +172,10 @@ def install_command(
         detected_langs=detected_langs,
     )
 
-    if write_lock:
-        from pathlib import Path
+    # Display plan
+    _display_plan(console, plan)
 
+    if write_lock:
         lock_path = Path(".lintro-install.lock.json")
         _write_plan_lock(
             lock_path,
@@ -176,11 +184,6 @@ def install_command(
             detected_langs=detected_langs or [],
         )
         console.print(f"  [green]Wrote install lock:[/green] {lock_path}")
-        if dry_run or not plan.has_work:
-            return
-
-    # Display plan
-    _display_plan(console, plan)
 
     if not plan.has_work:
         if plan.outdated:
@@ -296,7 +299,7 @@ def _interactive_select(
     profile: str | None,
     detected_langs: list[str] | None,
 ) -> tuple[list[str] | None, str | None]:
-    """Prompt for profile when running interactively without explicit args."""
+    """Prompt for profile and optionally refine tool list interactively."""
     profiles = registry.profile_names
     default = profile or "recommended"
     if default not in profiles:
@@ -319,14 +322,64 @@ def _interactive_select(
         default=default,
         show_default=True,
     )
+    selected_profile: str | None = None
     if isinstance(choice, int) or (isinstance(choice, str) and choice.isdigit()):
         idx = int(choice) - 1
         if 0 <= idx < len(profiles):
-            return None, profiles[idx]
-    choice_str = str(choice).strip()
-    if choice_str in profiles:
-        return None, choice_str
-    raise click.UsageError(f"Invalid profile selection: {choice!r}")
+            selected_profile = profiles[idx]
+    if selected_profile is None:
+        choice_str = str(choice).strip()
+        if choice_str in profiles:
+            selected_profile = choice_str
+        else:
+            raise click.UsageError(f"Invalid profile selection: {choice!r}")
+
+    # Resolve profile to tool list and offer per-tool refinement
+    resolved = registry.tools_for_profile(
+        selected_profile,
+        detected_langs,
+    )
+    if not resolved:
+        return None, selected_profile
+
+    console.print()
+    console.print(
+        f"  [bold]Profile [cyan]{selected_profile}[/cyan] "
+        f"resolves to {len(resolved)} tools:[/bold]",
+    )
+
+    # Group by category for display
+    by_cat: dict[str, list[str]] = {}
+    for t in resolved:
+        by_cat.setdefault(t.category, []).append(t.name)
+    for cat, names in by_cat.items():
+        label = {"bundled": "Python", "npm": "npm", "external": "External"}.get(
+            cat,
+            cat,
+        )
+        console.print(f"    [dim]{label}:[/dim] {', '.join(sorted(names))}")
+
+    console.print()
+    customize = click.prompt(
+        "Install all, or customize? [a]ll / [c]ustomize",
+        default="a",
+        show_default=True,
+    )
+    if customize.strip().lower() not in ("c", "customize"):
+        return None, selected_profile
+
+    # Per-tool toggle
+    selected: list[str] = []
+    for t in sorted(resolved, key=lambda x: (x.category, x.name)):
+        include = click.confirm(f"    Install {t.name}?", default=True)
+        if include:
+            selected.append(t.name)
+
+    if not selected:
+        console.print("  [yellow]No tools selected.[/yellow]")
+        raise SystemExit(0)
+
+    return selected, selected_profile
 
 
 def _write_plan_lock(
@@ -347,7 +400,7 @@ def _write_plan_lock(
                 name=tool.name,
                 version=tool.version,
                 install_hint=cmd,
-                profile=profile,
+                status="to_install",
             ),
         )
     for tool, _current, cmd in plan.to_upgrade:
@@ -356,7 +409,42 @@ def _write_plan_lock(
                 name=tool.name,
                 version=tool.version,
                 install_hint=cmd,
-                profile=profile,
+                status="to_upgrade",
+            ),
+        )
+    for tool in plan.already_ok:
+        entries.append(
+            InstallLockEntry(
+                name=tool.name,
+                version=tool.version,
+                status="ok",
+            ),
+        )
+    for tool, installed_ver in plan.outdated:
+        entries.append(
+            InstallLockEntry(
+                name=tool.name,
+                version=tool.version,
+                install_hint=f"installed: {installed_ver}",
+                status="outdated",
+            ),
+        )
+    for tool, hint in plan.manual:
+        entries.append(
+            InstallLockEntry(
+                name=tool.name,
+                version=tool.version,
+                install_hint=hint,
+                status="manual",
+            ),
+        )
+    for tool, reason in plan.skipped:
+        entries.append(
+            InstallLockEntry(
+                name=tool.name,
+                version=tool.version,
+                install_hint=reason,
+                status="skipped",
             ),
         )
     lock = InstallLock(

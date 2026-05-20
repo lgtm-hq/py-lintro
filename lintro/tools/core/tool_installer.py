@@ -153,7 +153,7 @@ class ToolInstaller:
             elif not meets_min or upgrade:
                 skip_reason = self._check_prerequisites(tool)
                 if skip_reason:
-                    plan.skipped.append((tool, skip_reason))
+                    plan.manual.append((tool, skip_reason))
                     return
                 hint = self._get_install_command(tool, upgrade=True)
                 if self._is_manual_hint(hint):
@@ -167,10 +167,10 @@ class ToolInstaller:
                 plan.outdated.append((tool, installed_version))
             return
 
-        # Only check prerequisites when we need to install
+        # Missing prerequisites → manual install (not a hard skip)
         skip_reason = self._check_prerequisites(tool)
         if skip_reason:
-            plan.skipped.append((tool, skip_reason))
+            plan.manual.append((tool, skip_reason))
             return
 
         hint = self._get_install_command(tool)

@@ -16,7 +16,7 @@ class InstallLockEntry:
     name: str
     version: str
     install_hint: str = ""
-    profile: str | None = None
+    status: str = "to_install"
 
 
 @dataclass
@@ -48,7 +48,7 @@ class InstallLock:
                             name=str(entry["name"]),
                             version=str(entry.get("version", "")),
                             install_hint=str(entry.get("install_hint", "")),
-                            profile=entry.get("profile"),
+                            status=str(entry.get("status", "to_install")),
                         ),
                     )
         langs = data.get("detected_languages", [])
@@ -70,12 +70,10 @@ def write_install_lock(path: Path, lock: InstallLock) -> None:
         try:
             import yaml
         except ImportError:
-            path = path.with_suffix(".json")
-            path.write_text(
-                json.dumps(lock.to_dict(), indent=2) + "\n",
-                encoding="utf-8",
-            )
-            return
+            raise ImportError(
+                f"PyYAML is required to write {path}. "
+                f"Install it with 'pip install pyyaml' or use a .json path instead.",
+            ) from None
         path.write_text(yaml.safe_dump(lock.to_dict()), encoding="utf-8")
     else:
         out = path if path.suffix == ".json" else path.with_suffix(".json")
