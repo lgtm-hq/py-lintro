@@ -481,7 +481,11 @@ def doctor_command(
         for r in all_results
         if r.tool.tier != "dev" and r.status != ToolStatus.DISABLED
     ]
-    disabled_prod = [r for r in all_results if r.status == ToolStatus.DISABLED]
+    disabled_prod = [
+        r
+        for r in all_results
+        if r.status == ToolStatus.DISABLED and r.tool.tier != "dev"
+    ]
     dev_results = [r for r in all_results if r.tool.tier == "dev"]
 
     # Group production results by category
@@ -662,7 +666,7 @@ def _output_json(
         tools_json[r.tool.name] = {
             "recommended": r.tool.version,
             "min_version": r.tool.min_version,
-            "expected": r.tool.version,
+            "expected": r.tool.min_version,
             "installed": r.installed_version,
             "status": r.status,
             "category": r.tool.category,
@@ -728,6 +732,7 @@ def _output_json(
                 + outdated_count
                 + incompatible_count
                 + unknown_count
+                + sum(1 for r in all_results if r.status == ToolStatus.DISABLED)
             ),
             "ok": ok_count,
             "missing": missing_count,

@@ -200,23 +200,25 @@ def _merge_config(
     changed = False
 
     # Merge tools section: add new tools, preserve existing
-    new_tools = new.get("tools", {})
-    existing_tools = existing.setdefault("tools", {})
-    for tool_name, tool_cfg in (new_tools or {}).items():
-        if tool_name not in existing_tools:
-            existing_tools[tool_name] = tool_cfg
-            changed = True
+    new_tools = new.get("tools")
+    if isinstance(new_tools, dict) and isinstance(existing.get("tools", {}), dict):
+        existing_tools = existing.setdefault("tools", {})
+        for tool_name, tool_cfg in new_tools.items():
+            if tool_name not in existing_tools:
+                existing_tools[tool_name] = tool_cfg
+                changed = True
 
     # Update enabled_tools list if present in new config
-    new_exec = new.get("execution", {})
-    existing_exec = existing.setdefault("execution", {})
-    new_enabled = new_exec.get("enabled_tools", [])
-    if new_enabled:
-        existing_enabled = set(existing_exec.get("enabled_tools") or [])
-        merged_enabled = sorted(existing_enabled | set(new_enabled))
-        if merged_enabled != sorted(existing_enabled):
-            existing_exec["enabled_tools"] = merged_enabled
-            changed = True
+    new_exec = new.get("execution")
+    if isinstance(new_exec, dict) and isinstance(existing.get("execution", {}), dict):
+        existing_exec = existing.setdefault("execution", {})
+        new_enabled = new_exec.get("enabled_tools", [])
+        if new_enabled:
+            existing_enabled = set(existing_exec.get("enabled_tools") or [])
+            merged_enabled = sorted(existing_enabled | set(new_enabled))
+            if merged_enabled != sorted(existing_enabled):
+                existing_exec["enabled_tools"] = merged_enabled
+                changed = True
 
     if not changed:
         console.print(f"  [dim]{path} is already up to date.[/dim]")

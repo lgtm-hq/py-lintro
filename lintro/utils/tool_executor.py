@@ -481,9 +481,11 @@ def run_lint_tools_simple(
         return 0
 
     if not tools_to_run and skipped_tools:
+        _missing_keywords = ("not found", "missing")
         all_missing = all(
-            st.reason and "not found" in st.reason.lower() for st in skipped_tools
-        ) or all("missing" in (st.reason or "").lower() for st in skipped_tools)
+            st.reason and any(kw in st.reason.lower() for kw in _missing_keywords)
+            for st in skipped_tools
+        )
         from lintro.enums.output_format import OutputFormat, normalize_output_format
 
         fmt = normalize_output_format(output_format)
