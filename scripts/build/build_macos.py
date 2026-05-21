@@ -16,6 +16,7 @@ Requirements:
 from __future__ import annotations
 
 import argparse
+import json
 import platform
 import shutil
 import subprocess
@@ -96,8 +97,10 @@ def build_nuitka_command(*, arch: str, verbose: bool = False) -> list[str]:
 
     for data_file in INCLUDE_DATA_FILES:
         data_path = PROJECT_ROOT / data_file.split("=")[0]
-        if data_path.exists():
-            cmd.append(f"--include-data-files={data_file}")
+        if not data_path.exists():
+            msg = f"Required runtime data file missing for Nuitka build: {data_path}"
+            raise FileNotFoundError(msg)
+        cmd.append(f"--include-data-files={data_file}")
 
     if verbose:
         cmd.append("--verbose")
@@ -122,7 +125,11 @@ def build_macos_binary(arch: str = "arm64", verbose: bool = False) -> int:
     # Ensure output directory exists
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
-    cmd = build_nuitka_command(arch=arch, verbose=verbose)
+    try:
+        cmd = build_nuitka_command(arch=arch, verbose=verbose)
+    except FileNotFoundError as exc:
+        print(str(exc), file=sys.stderr)
+        return 1
 
     print(f"Running: {' '.join(cmd)}")
 
@@ -142,6 +149,41 @@ def build_macos_binary(arch: str = "arm64", verbose: bool = False) -> int:
             file=sys.stderr,
         )
         return 1
+
+
+def _doctor_check_error(result: subprocess.CompletedProcess[str]) -> str | None:
+    """Validate ``lintro doctor --json`` output from binary verification.
+
+    Args:
+        result: Completed doctor subprocess result.
+
+    Returns:
+        Error message when verification failed, otherwise ``None``.
+    """
+    stderr = result.stderr or ""
+    crash_markers = ("Traceback", "FileNotFoundError", "manifest.json")
+    if any(marker in stderr for marker in crash_markers):
+        return f"Doctor check failed: {stderr}"
+
+    stdout = (result.stdout or "").strip()
+    if not stdout:
+        return "Doctor check failed: JSON output is empty"
+
+    try:
+        data = json.loads(stdout)
+    except json.JSONDecodeError as exc:
+        return f"Doctor check failed: invalid JSON ({exc})"
+
+    if not isinstance(data, dict) or not data or "tools" not in data:
+        return "Doctor check failed: JSON output is empty or missing 'tools'"
+
+    if result.returncode not in (0, 1):
+        detail = stderr or stdout[:200]
+        return (
+            f"Doctor check failed with exit code {result.returncode}: {detail}"
+        )
+
+    return None
 
 
 def verify_binary() -> bool:
@@ -200,16 +242,15 @@ def verify_binary() -> bool:
             text=True,
             timeout=60,
         )
-        if "manifest.json" in result.stderr and "FileNotFoundError" in result.stderr:
-            print(f"Doctor check failed: {result.stderr}", file=sys.stderr)
-            return False
-        if result.returncode not in (0, 1):
-            print(f"Doctor check failed: {result.stderr}", file=sys.stderr)
-            return False
-        print("Doctor command: OK")
     except subprocess.TimeoutExpired:
         print("Doctor check timed out", file=sys.stderr)
         return False
+    else:
+        doctor_error = _doctor_check_error(result)
+        if doctor_error is not None:
+            print(doctor_error, file=sys.stderr)
+            return False
+        print("Doctor command: OK")
 
     # Check file size
     size_mb = binary_path.stat().st_size / (1024 * 1024)

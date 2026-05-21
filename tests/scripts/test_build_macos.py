@@ -5,7 +5,9 @@ from __future__ import annotations
 import importlib.util
 import sys
 from pathlib import Path
+from unittest.mock import patch
 
+import pytest
 from assertpy import assert_that
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -31,9 +33,22 @@ def test_build_nuitka_command_includes_manifest_json() -> None:
     """Nuitka command must bundle manifest.json for onefile runtime."""
     build_macos = _load_build_macos_module()
 
-    cmd = build_macos.build_nuitka_command(arch="arm64")
+    with patch.object(Path, "exists", return_value=True):
+        cmd = build_macos.build_nuitka_command(arch="arm64")
 
     assert_that(cmd).contains("--include-package-data=lintro")
     assert_that(cmd).contains(
         "--include-data-files=lintro/tools/manifest.json=lintro/tools/manifest.json",
     )
+
+
+def test_build_nuitka_command_raises_when_manifest_missing(tmp_path: Path) -> None:
+    """Missing manifest.json must fail the build instead of omitting the flag."""
+    build_macos = _load_build_macos_module()
+    main_entry = tmp_path / "lintro" / "__main__.py"
+    main_entry.parent.mkdir(parents=True)
+    main_entry.write_text("", encoding="utf-8")
+
+    with patch.object(build_macos, "PROJECT_ROOT", tmp_path):
+        with pytest.raises(FileNotFoundError, match="manifest.json"):
+            build_macos.build_nuitka_command(arch="arm64")
