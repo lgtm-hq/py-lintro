@@ -659,6 +659,11 @@ def _output_json(
     unknown_count: int,
 ) -> None:
     """Output doctor results as JSON."""
+    disabled_count = sum(
+        1
+        for r in all_results
+        if r.status == ToolStatus.DISABLED and r.tool.tier != "dev"
+    )
     tools_json: dict[str, dict[str, str | None]] = {}
     issues: list[dict[str, str]] = []
 
@@ -732,14 +737,14 @@ def _output_json(
                 + outdated_count
                 + incompatible_count
                 + unknown_count
-                + sum(1 for r in all_results if r.status == ToolStatus.DISABLED)
+                + disabled_count
             ),
             "ok": ok_count,
             "missing": missing_count,
             "outdated": outdated_count,
             "incompatible": incompatible_count,
             "unknown": unknown_count,
-            "disabled": sum(1 for r in all_results if r.status == ToolStatus.DISABLED),
+            "disabled": disabled_count,
         },
     }
 

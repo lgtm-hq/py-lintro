@@ -86,6 +86,35 @@ tools:
 """
 
 
+def _extract_tool_names(config_content: str) -> list[str]:
+    """Extract tool names from a YAML config template without importing PyYAML.
+
+    Looks for lines under a top-level ``tools:`` key that match the pattern
+    ``  <name>:`` (two-space indent, no further nesting).
+
+    Args:
+        config_content: Raw YAML config string.
+
+    Returns:
+        List of tool names found.
+    """
+    import re
+
+    names: list[str] = []
+    in_tools = False
+    for line in config_content.splitlines():
+        if re.match(r"^tools:\s*$", line):
+            in_tools = True
+            continue
+        if in_tools:
+            m = re.match(r"^  (\w[\w-]*):", line)
+            if m:
+                names.append(m.group(1))
+            elif line and not line.startswith(" "):
+                break
+    return names
+
+
 def _write_file(
     path: Path,
     content: str,
@@ -213,12 +242,19 @@ def _merge_config(
     if isinstance(new_exec, dict) and isinstance(existing.get("execution", {}), dict):
         existing_exec = existing.setdefault("execution", {})
         new_enabled = new_exec.get("enabled_tools", [])
-        if new_enabled:
-            existing_enabled = set(existing_exec.get("enabled_tools") or [])
+        existing_enabled_raw = existing_exec.get("enabled_tools")
+        if isinstance(new_enabled, list) and isinstance(
+            existing_enabled_raw,
+            (list, type(None)),
+        ):
+            existing_enabled = set(existing_enabled_raw or [])
             merged_enabled = sorted(existing_enabled | set(new_enabled))
             if merged_enabled != sorted(existing_enabled):
                 existing_exec["enabled_tools"] = merged_enabled
                 changed = True
+        elif isinstance(new_enabled, list) and new_enabled:
+            existing_exec["enabled_tools"] = new_enabled
+            changed = True
 
     if not changed:
         console.print(f"  [dim]{path} is already up to date.[/dim]")
@@ -317,7 +353,7 @@ def init_command(
 
     if static:
         config_content = MINIMAL_CONFIG_TEMPLATE if minimal else DEFAULT_CONFIG_TEMPLATE
-        tool_names: list[str] = []
+        tool_names: list[str] = _extract_tool_names(config_content)
         detected_langs: list[str] = []
     else:
         registry = ToolRegistry.load()
