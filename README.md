@@ -284,17 +284,24 @@ See the [AI Features Guide](docs/ai-features.md) for full documentation.
 **Python 3.11+** is required. Check tool versions with `lintro list-tools`.
 
 ```bash
-# PyPI (recommended)
-uv pip install lintro        # or: pip install lintro
+# Lightweight (CLI only — detects tools on PATH)
+uv pip install lintro
+brew tap lgtm-hq/tap && brew install lintro
 
-# Homebrew (macOS binary)
-brew tap lgtm-hq/tap && brew install lintro-bin
+# Full (bundled Python tools: ruff, black, mypy, bandit, pydoclint, yamllint)
+uv pip install 'lintro[full]'
+brew tap lgtm-hq/tap && brew install lintro-full
 
-# Docker (tools image - includes all external tools)
+# Docker (all tools)
 docker run --rm -v $(pwd):/code ghcr.io/lgtm-hq/py-lintro:latest check
 
-# Docker (base image - minimal, no external tools)
+# Docker (CLI only)
 docker run --rm -v $(pwd):/code ghcr.io/lgtm-hq/py-lintro-base:latest check
+
+# First run after lightweight install
+lintro init
+lintro doctor
+lintro install --profile recommended
 ```
 
 See [Getting Started](docs/getting-started.md) for detailed installation options.

@@ -20,6 +20,7 @@ def _make_tool(name: str = "ruff", version: str = "0.14.0") -> ManifestTool:
     return ManifestTool(
         name=name,
         version=version,
+        min_version=version,
         install_type="pip",
         tier="tools",
         category="bundled",
@@ -30,7 +31,15 @@ def _make_tool(name: str = "ruff", version: str = "0.14.0") -> ManifestTool:
 def _mock_registry() -> MagicMock:
     """Build a mock ToolRegistry."""
     registry = MagicMock()
-    registry.profile_names = ["minimal", "recommended", "complete", "ci"]
+    registry.profile_names = [
+        "minimal",
+        "recommended",
+        "complete",
+        "ci",
+        "full",
+        "python",
+        "web",
+    ]
     registry.__contains__ = lambda self, name: name in ("ruff", "mypy")
     registry.all_tools.return_value = [_make_tool("ruff"), _make_tool("mypy")]
     registry.get.side_effect = _make_tool
@@ -161,7 +170,7 @@ def test_install_unknown_profile() -> None:
 
 
 def test_install_all_flag() -> None:
-    """--all resolves to the 'complete' profile."""
+    """--all resolves to the 'full' profile."""
     runner = CliRunner()
     p1, p2 = _patches()
 
@@ -177,10 +186,10 @@ def test_install_all_flag() -> None:
         result = runner.invoke(install_command, ["--all"])
 
     assert_that(result.exit_code).is_equal_to(0)
-    # Verify the plan was called with profile="complete"
+    # Verify the plan was called with profile="full"
     assert_that(
         mock_cls.return_value.plan.call_args.kwargs["profile"],
-    ).is_equal_to("complete")
+    ).is_equal_to("full")
 
 
 def test_install_failure_exit_1() -> None:

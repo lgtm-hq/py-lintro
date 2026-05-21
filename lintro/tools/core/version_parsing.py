@@ -104,9 +104,11 @@ class ToolVersionInfo:
 
     name: str = field(default="")
     min_version: str = field(default="")
+    recommended_version: str = field(default="")
     install_hint: str = field(default="")
     current_version: str | None = field(default=None)
     version_check_passed: bool = field(default=False)
+    below_recommended: bool = field(default=False)
     error_message: str | None = field(default=None)
 
 
@@ -221,9 +223,16 @@ def check_tool_version(
             install_hint = install_hints.get(lookup_name, install_hint)
             break
 
+    from lintro._tool_versions import get_recommended_version
+
+    rec_version = get_recommended_version(tool_name) or ""
+    if not rec_version and normalized_tool_name is not None:
+        rec_version = get_recommended_version(normalized_tool_name) or ""
+
     info = ToolVersionInfo(
         name=tool_name,
         min_version=min_version,
+        recommended_version=rec_version,
         install_hint=install_hint,
         # If no requirements, assume check passes
         version_check_passed=not has_requirements,
@@ -285,6 +294,13 @@ def check_tool_version(
                 f"[VersionCheck] Version check failed for {tool_name}: "
                 f"{info.error_message}",
             )
+        elif rec_version and rec_version != VERSION_UNKNOWN:
+            try:
+                rec_cmp = compare_versions(info.current_version, rec_version)
+                if rec_cmp < 0:
+                    info.below_recommended = True
+            except ValueError:
+                pass
 
     except (subprocess.TimeoutExpired, OSError) as e:
         info.error_message = f"Failed to run version check: {e}"

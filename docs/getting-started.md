@@ -19,29 +19,40 @@ formatting tools, Lintro provides:
 
 ## Installation
 
-### Standard Installation
+### Lightweight (recommended)
+
+Install the CLI only; Lintro detects tools already on your system:
 
 ```bash
-# Development installation (package not yet published)
-git clone https://github.com/lgtm-hq/py-lintro.git
-cd py-lintro
-pip install -e .
+pip install lintro
+# or: brew tap lgtm-hq/tap && brew install lintro
+```
+
+### Full (bundled Python tools)
+
+Install the CLI plus bundled Python linters (same behavior as older releases):
+
+```bash
+pip install 'lintro[full]'
+# or: brew tap lgtm-hq/tap && brew install lintro-full
 ```
 
 ### Development Installation
 
-If you want to contribute or use the latest features:
-
 ```bash
-# Clone the repository
 git clone https://github.com/lgtm-hq/py-lintro.git
 cd py-lintro
+uv sync --dev --extra full
+```
 
-# Install with UV (recommended)
-uv sync
+### First-run onboarding
 
-# Or with pip
-pip install -e .
+```bash
+lintro init                        # detect stack, write .lintro-config.yaml
+lintro doctor                      # see installed / missing tools
+lintro doctor --json               # machine-readable health for CI
+lintro install --profile recommended
+lintro check .
 ```
 
 ## Requirements
@@ -53,9 +64,9 @@ older Python versions.
 
 ### Tool Dependencies
 
-Lintro bundles several Python tools as direct dependencies for consistent behavior.
-These tools are automatically installed when you install Lintro and their minimum
-versions are centrally managed in `pyproject.toml`:
+Bundled Python tools are available via the `lintro[full]` extra (or Homebrew
+`lintro-full`). The default `pip install lintro` installs the CLI only. Tool versions
+are centrally managed in `manifest.json` and `pyproject.toml`:
 
 **Bundled Python Tools:**
 

@@ -31,6 +31,7 @@ from lintro.tools.core.tool_registry import ManifestTool
 def _make_tool(
     name: str = "ruff",
     version: str = "0.14.0",
+    min_version: str | None = None,
     *,
     install_type: str = "pip",
     tier: str = "tools",
@@ -41,6 +42,7 @@ def _make_tool(
     return ManifestTool(
         name=name,
         version=version,
+        min_version=min_version or version,
         install_type=install_type,
         tier=tier,
         category=category,
@@ -86,13 +88,15 @@ def _make_context(*, has_brew: bool = False) -> RuntimeContext:
         ("1.0.0", "1.0.0", ToolStatus.OK),
         ("1.0.0", "1.2.0", ToolStatus.OUTDATED),
         ("0.14.0", "0.15.0", ToolStatus.OUTDATED),
+        ("0.0.1", "2.0.0", ToolStatus.INCOMPATIBLE),
         ("invalid", "1.0.0", ToolStatus.UNKNOWN),
     ],
-    ids=["above", "equal", "below", "minor_below", "invalid"],
+    ids=["above", "equal", "below", "minor_below", "incompatible", "invalid"],
 )
 def test_compare_versions(installed: str, expected: str, want: ToolStatus) -> None:
     """Compare two version strings and return the correct ToolStatus."""
-    assert_that(_compare_versions(installed, expected)).is_equal_to(want)
+    minimum = expected if want == ToolStatus.INCOMPATIBLE else "0.0.0"
+    assert_that(_compare_versions(installed, expected, minimum)).is_equal_to(want)
 
 
 # ── _check_tool ──────────────────────────────────────────────────────
@@ -120,8 +124,8 @@ def test_check_tool_ok() -> None:
 
 
 def test_check_tool_outdated() -> None:
-    """Tool found but version below minimum."""
-    tool = _make_tool(version="1.0.0")
+    """Tool found but version below recommended."""
+    tool = _make_tool(version="1.0.0", min_version="0.3.0")
     ctx = _make_context()
 
     with (
@@ -137,6 +141,25 @@ def test_check_tool_outdated() -> None:
 
     assert_that(result.status).is_equal_to(ToolStatus.OUTDATED)
     assert_that(result.installed_version).is_equal_to("0.5.0")
+
+
+def test_check_tool_incompatible() -> None:
+    """Tool found but version below hard minimum."""
+    tool = _make_tool(version="1.0.0", min_version="1.0.0")
+    ctx = _make_context()
+
+    with (
+        patch("shutil.which", return_value="/usr/bin/ruff"),
+        patch("subprocess.run") as mock_run,
+    ):
+        mock_run.return_value = MagicMock(
+            returncode=0,
+            stdout="ruff 0.5.0",
+            stderr="",
+        )
+        result = _check_tool(tool, ctx)
+
+    assert_that(result.status).is_equal_to(ToolStatus.INCOMPATIBLE)
 
 
 def test_check_tool_missing_not_in_path() -> None:
@@ -274,7 +297,7 @@ def test_output_json_produces_valid_json() -> None:
 
     output = StringIO()
     with patch("click.echo", side_effect=output.write):
-        _output_json([result], ctx, None, 1, 0, 0, 0)
+        _output_json([result], ctx, None, 1, 0, 0, 0, 0)
 
     data = json.loads(output.getvalue())
     assert_that(data).contains_key("context", "tools", "issues", "summary")
@@ -297,7 +320,7 @@ def test_output_json_includes_unknown_in_issues() -> None:
 
     output = StringIO()
     with patch("click.echo", side_effect=output.write):
-        _output_json([result], ctx, None, 0, 0, 0, 1)
+        _output_json([result], ctx, None, 0, 0, 0, 0, 1)
 
     data = json.loads(output.getvalue())
     assert_that(data["issues"]).is_length(1)

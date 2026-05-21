@@ -221,6 +221,7 @@ def _display_fix_result(
             action=action,
             success=result.success,
             ai_metadata=result.ai_metadata,
+            parse_failures_count=result.parse_failures_count or 0,
         )
         return
 
@@ -249,6 +250,7 @@ def _display_fix_result(
             action=action,
             success=result.success,
             ai_metadata=result.ai_metadata,
+            parse_failures_count=result.parse_failures_count or 0,
         )
     elif (
         result.issues_count == 0
@@ -264,6 +266,7 @@ def _display_fix_result(
             action=action,
             success=result.success,
             ai_metadata=result.ai_metadata,
+            parse_failures_count=result.parse_failures_count or 0,
         )
 
 
@@ -478,10 +481,35 @@ def run_lint_tools_simple(
         return 0
 
     if not tools_to_run and skipped_tools:
-        skipped_names = ", ".join(st.name for st in skipped_tools)
-        logger.console_output(
-            f"All tools were skipped ({len(skipped_tools)}): {skipped_names}",
+        _missing_keywords = ("not found", "missing")
+        all_missing = all(
+            st.reason and any(kw in st.reason.lower() for kw in _missing_keywords)
+            for st in skipped_tools
         )
+        from lintro.enums.output_format import OutputFormat, normalize_output_format
+
+        fmt = normalize_output_format(output_format)
+        machine_readable = fmt in (OutputFormat.JSON, OutputFormat.SARIF)
+        if all_missing and not machine_readable:
+            from lintro.cli_utils.onboarding import (
+                is_interactive_tty,
+                print_first_run_guidance,
+            )
+
+            if is_interactive_tty():
+                from rich.console import Console
+
+                print_first_run_guidance(Console())
+            else:
+                skipped_names = ", ".join(st.name for st in skipped_tools)
+                logger.console_output(
+                    f"All tools were skipped ({len(skipped_tools)}): {skipped_names}",
+                )
+        else:
+            skipped_names = ", ".join(st.name for st in skipped_tools)
+            logger.console_output(
+                f"All tools were skipped ({len(skipped_tools)}): {skipped_names}",
+            )
 
     # Load post-checks config early to exclude those tools from main phase
     post_cfg_early = load_post_checks_config()

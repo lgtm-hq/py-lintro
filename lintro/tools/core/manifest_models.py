@@ -11,7 +11,9 @@ class ManifestTool:
 
     Attributes:
         name: Canonical tool name (e.g., "ruff", "hadolint").
-        version: Expected/minimum version string.
+        version: Recommended/tested version string.
+        min_version: Hard minimum compatible version (required; set equal to
+            version when compatibility range is not yet proven).
         install_type: Installation method (pip, npm, binary, cargo, rustup).
         install_package: Package name for pip/npm/cargo installs.
         install_bin: Binary name if different from package.
@@ -25,6 +27,7 @@ class ManifestTool:
 
     name: str
     version: str
+    min_version: str
     install_type: str
     install_package: str | None = None
     install_bin: str | None = None

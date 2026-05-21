@@ -208,9 +208,29 @@ class ToolRegistry:
             }
             category = category_map.get(install_type, "external")
 
+        raw_min = entry.get("min_version")
+        min_version = str(raw_min) if raw_min else str(version)
+
+        # Validate min_version <= version
+        try:
+            from lintro.tools.core.version_parsing import compare_versions
+
+            if compare_versions(min_version, str(version)) > 0:
+                _logger.warning(
+                    "Tool %r has min_version %r > version %r; "
+                    "clamping min_version to version",
+                    name,
+                    min_version,
+                    version,
+                )
+                min_version = str(version)
+        except (ValueError, ImportError):
+            pass
+
         return ManifestTool(
             name=name,
             version=str(version),
+            min_version=min_version,
             install_type=install_type,
             install_package=install.get("package"),
             install_bin=install.get("bin"),

@@ -47,9 +47,9 @@ ARG WITH_AI=false
 
 # Install Python dependencies (conditionally include AI extras)
 RUN if [ "$WITH_AI" = "true" ]; then \
-      uv sync --dev --extra tools --extra ai --no-progress; \
+      uv sync --dev --extra full --extra tools --extra ai --no-progress; \
     else \
-      uv sync --dev --extra tools --no-progress; \
+      uv sync --dev --extra full --extra tools --no-progress; \
     fi && (uv cache clean || true)
 
 # Install gosu for secure privilege dropping in the entrypoint

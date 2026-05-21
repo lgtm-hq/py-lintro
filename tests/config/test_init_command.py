@@ -34,7 +34,7 @@ def test_creates_minimal_template(
         tmp_path: Temporary directory path for test files.
     """
     with runner.isolated_filesystem(temp_dir=tmp_path):
-        runner.invoke(init_command, ["--minimal"])
+        runner.invoke(init_command, ["--minimal", "--static"])
 
         config_file = Path(".lintro-config.yaml")
         content = config_file.read_text()
@@ -59,14 +59,13 @@ def test_refuses_to_overwrite_existing(
         tmp_path: Temporary directory path for test files.
     """
     with runner.isolated_filesystem(temp_dir=tmp_path):
-        # Create existing file
+        # Create existing file (not a valid YAML mapping)
         Path(".lintro-config.yaml").write_text("existing content")
 
-        result = runner.invoke(init_command)
+        result = runner.invoke(init_command, ["--static"])
 
         assert_that(result.exit_code).is_equal_to(1)
-        assert_that(result.output).contains("already exists")
-        assert_that(result.output).contains("Use --force to overwrite")
+        assert_that(result.output).contains("--force")
 
         # Original content should be preserved
         content = Path(".lintro-config.yaml").read_text()
@@ -87,7 +86,7 @@ def test_force_overwrites_existing(
         # Create existing file
         Path(".lintro-config.yaml").write_text("existing content")
 
-        result = runner.invoke(init_command, ["--force"])
+        result = runner.invoke(init_command, ["--force", "--static"])
 
         assert_that(result.exit_code).is_equal_to(0)
         assert_that(result.output).contains("Created .lintro-config.yaml")
@@ -110,7 +109,7 @@ def test_custom_output_path(
     with runner.isolated_filesystem(temp_dir=tmp_path):
         result = runner.invoke(
             init_command,
-            ["--output", "custom-config.yaml"],
+            ["--output", "custom-config.yaml", "--static"],
         )
 
         assert_that(result.exit_code).is_equal_to(0)
@@ -131,7 +130,7 @@ def test_shows_next_steps(
         tmp_path: Temporary directory path for test files.
     """
     with runner.isolated_filesystem(temp_dir=tmp_path):
-        result = runner.invoke(init_command)
+        result = runner.invoke(init_command, ["--static"])
 
         assert_that(result.output).contains("Next steps:")
         assert_that(result.output).contains("lintro config")

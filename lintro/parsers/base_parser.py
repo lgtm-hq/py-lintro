@@ -301,11 +301,37 @@ def safe_parse_items(
         >>> safe_parse_items(items, parse_item, "mytool")  # doctest: +SKIP
         [MyIssue(file='a.py'), MyIssue(file='b.py')]
     """
+    parsed, _skipped = safe_parse_items_with_stats(items, parse_func, tool_name)
+    return parsed
+
+
+def safe_parse_items_with_stats(
+    items: list[object],
+    parse_func: Callable[[dict[str, object]], IssueT | None],
+    tool_name: str = "tool",
+) -> tuple[list[IssueT], int]:
+    """Safely parse items and return parse failure count.
+
+    A ``None`` return from *parse_func* means the item was intentionally
+    filtered (e.g. noise, suppressed finding) and is **not** counted as a
+    parse failure.  Only non-dict items and exceptions represent genuine
+    failures.
+
+    Args:
+        items: List of items to parse.
+        parse_func: Per-item parse function.
+        tool_name: Tool name for logging.
+
+    Returns:
+        Tuple of parsed issues and count of genuinely unparseable items.
+    """
     results: list[IssueT] = []
+    failure_count = 0
 
     for item in items:
         if not isinstance(item, dict):
             logger.debug(f"Skipping non-dict item in {tool_name} output")
+            failure_count += 1
             continue
 
         try:
@@ -314,6 +340,7 @@ def safe_parse_items(
                 results.append(parsed)
         except (KeyError, TypeError, ValueError) as e:
             logger.debug(f"Failed to parse {tool_name} item: {e}")
+            failure_count += 1
             continue
 
-    return results
+    return results, failure_count

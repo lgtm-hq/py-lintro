@@ -89,7 +89,31 @@ def verify_tool_version(definition: ToolDefinition) -> ToolResult | None:
     version_info = check_tool_version(definition.name, command)
 
     if version_info.version_check_passed:
+        if version_info.below_recommended:
+            logger.warning(
+                "{} {} is below recommended version {} (minimum {} met)",
+                definition.name,
+                version_info.current_version,
+                version_info.recommended_version,
+                version_info.min_version,
+            )
         return None
+
+    # Binary exists and responded but version could not be parsed — proceed
+    if (
+        version_info.current_version is None
+        and version_info.error_message
+        and "Could not parse version" in version_info.error_message
+    ):
+        import shutil
+
+        main_cmd = command[0] if command else definition.name
+        if shutil.which(main_cmd):
+            logger.debug(
+                "Could not parse version for {}, proceeding anyway",
+                definition.name,
+            )
+            return None
 
     skip_message = (
         f"Skipping {definition.name}: {version_info.error_message}. "

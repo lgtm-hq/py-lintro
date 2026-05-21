@@ -13,6 +13,18 @@
       "description": "All supported tools",
       "strategy": "all"
     },
+    "full": {
+      "description": "All supported tools (alias for complete)",
+      "strategy": "all"
+    },
+    "python": {
+      "description": "Python linting and formatting tools",
+      "tools": ["ruff", "black", "mypy", "bandit", "pydoclint", "yamllint"]
+    },
+    "web": {
+      "description": "JavaScript and TypeScript tools",
+      "tools": ["prettier", "oxlint", "oxfmt", "tsc"]
+    },
     "ci": {
       "description": "Linters and security tools only (no formatters)",
       "strategy": "filter",

@@ -71,7 +71,7 @@ jobs:
         run: python3 scripts/ci/generate-tool-versions.py --check
 
       - name: Sync dependencies
-        run: uv sync --dev --no-progress
+        run: uv sync --dev --extra full --no-progress
 
       - name: Quality gate
         id: version

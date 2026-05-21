@@ -140,35 +140,37 @@ class ToolInstaller:
         installed_version = self._get_installed_version(tool)
 
         if installed_version:
-            is_current = self._version_meets_minimum(
+            meets_min = self._version_meets_minimum(
+                installed_version,
+                tool.min_version,
+            )
+            meets_recommended = self._version_meets_minimum(
                 installed_version,
                 tool.version,
             )
-            if is_current:
+            if meets_recommended:
                 plan.already_ok.append(tool)
-            elif upgrade:
+            elif upgrade or (not meets_min and tool.min_version != tool.version):
                 skip_reason = self._check_prerequisites(tool)
                 if skip_reason:
-                    plan.skipped.append((tool, skip_reason))
+                    plan.manual.append((tool, skip_reason))
                     return
                 hint = self._get_install_command(tool, upgrade=True)
                 if self._is_manual_hint(hint):
                     if self._has_install_script(tool):
                         hint = f"via install-tools.sh ({tool.name})"
                     else:
-                        plan.skipped.append(
-                            (tool, f"manual upgrade required: {hint}"),
-                        )
+                        plan.manual.append((tool, hint))
                         return
                 plan.to_upgrade.append((tool, installed_version, hint))
             else:
                 plan.outdated.append((tool, installed_version))
             return
 
-        # Only check prerequisites when we need to install
+        # Missing prerequisites → manual install (not a hard skip)
         skip_reason = self._check_prerequisites(tool)
         if skip_reason:
-            plan.skipped.append((tool, skip_reason))
+            plan.manual.append((tool, skip_reason))
             return
 
         hint = self._get_install_command(tool)
@@ -176,7 +178,7 @@ class ToolInstaller:
             if self._has_install_script(tool):
                 hint = f"via install-tools.sh ({tool.name})"
             else:
-                plan.skipped.append((tool, f"manual install required: {hint}"))
+                plan.manual.append((tool, hint))
                 return
         plan.to_install.append((tool, hint))
 

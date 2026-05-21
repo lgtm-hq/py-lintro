@@ -11,6 +11,29 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Added
 
+- **install**: Default `pip install lintro` is now lightweight (CLI only); bundled
+  Python tools (ruff, black, mypy, bandit, pydoclint, yamllint) moved to `lintro[full]`
+- **install**: Install profiles (`minimal`, `recommended`, `python`, `web`, `ci`,
+  `full`) driven by `manifest.json`
+- **install**: Interactive profile and tool selection in TTY mode; `--yes` / `-y` for
+  non-interactive use
+- **install**: `--write-lock` exports resolved plan to `.lintro-install.lock.json`
+- **install**: Manual install bucket for tools whose package manager is unavailable
+- **init**: `lintro init` detects project languages and generates `.lintro-config.yaml`;
+  merges with existing config on rerun instead of clobbering
+- **doctor**: Config-aware — respects `enabled_tools` and per-tool `enabled: false`;
+  `--all` overrides; `--tools` takes explicit precedence
+- **doctor**: `INCOMPATIBLE` status for versions below `min_version`; structured JSON
+  output includes `min_version`, `recommended`, `disabled` counts
+- **doctor**: `--fix` now also remediates `INCOMPATIBLE` tools
+- **version**: `min_version` field in manifest for version tolerance; execution warns
+  when installed version is below recommended but above minimum
+- **parser**: `parse_failures_count` on `ToolResult`; surfaced in CLI and JSON output
+- **onboarding**: First-run guidance when no tools are available; post-install next
+  steps suggest `lintro init`, `lintro doctor`, `lintro check .`
+- **homebrew**: Lightweight `lintro` formula (binary); `lintro-full` formula (PyPI with
+  bundled tools)
+
 - **tsc/vue-tsc**: Support TypeScript project references in monorepos — automatic
   sub-project discovery via `references` and directory walking (#803, #805)
 - **tsc/vue-tsc**: Per-project framework detection in monorepos — Astro/Vue/Svelte
