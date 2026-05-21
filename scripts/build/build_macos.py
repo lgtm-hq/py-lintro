@@ -16,6 +16,7 @@ Requirements:
 from __future__ import annotations
 
 import argparse
+import json
 import platform
 import shutil
 import subprocess
@@ -43,6 +44,11 @@ INCLUDE_DATA_DIRS = [
     "lintro/assets=lintro/assets",
 ]
 
+# Non-Python data files required at runtime (not included by --include-package)
+INCLUDE_DATA_FILES = [
+    "lintro/tools/manifest.json=lintro/tools/manifest.json",
+]
+
 
 def get_default_arch() -> str:
     """Get the default architecture based on the current system.
@@ -54,6 +60,53 @@ def get_default_arch() -> str:
     if machine in ("arm64", "aarch64"):
         return "arm64"
     return "x86_64"
+
+
+def build_nuitka_command(*, arch: str, verbose: bool = False) -> list[str]:
+    """Build the Nuitka command for a macOS onefile binary.
+
+    Args:
+        arch: Target architecture (arm64, x86_64, or universal).
+        verbose: Enable verbose output during compilation.
+
+    Returns:
+        Nuitka command argv list.
+    """
+    cmd = [
+        sys.executable,
+        "-m",
+        "nuitka",
+        "--standalone",
+        "--onefile",
+        f"--output-dir={OUTPUT_DIR}",
+        "--output-filename=lintro",
+        "--follow-imports",
+        "--assume-yes-for-downloads",
+        f"--macos-target-arch={arch}",
+    ]
+
+    for pkg in INCLUDE_PACKAGES:
+        cmd.append(f"--include-package={pkg}")
+
+    cmd.append("--include-package-data=lintro")
+
+    for data_dir in INCLUDE_DATA_DIRS:
+        data_path = PROJECT_ROOT / data_dir.split("=")[0]
+        if data_path.exists():
+            cmd.append(f"--include-data-dir={data_dir}")
+
+    for data_file in INCLUDE_DATA_FILES:
+        data_path = PROJECT_ROOT / data_file.split("=")[0]
+        if not data_path.exists():
+            msg = f"Required runtime data file missing for Nuitka build: {data_path}"
+            raise FileNotFoundError(msg)
+        cmd.append(f"--include-data-files={data_file}")
+
+    if verbose:
+        cmd.append("--verbose")
+
+    cmd.append(str(PROJECT_ROOT / "lintro" / "__main__.py"))
+    return cmd
 
 
 def build_macos_binary(arch: str = "arm64", verbose: bool = False) -> int:
@@ -72,38 +125,11 @@ def build_macos_binary(arch: str = "arm64", verbose: bool = False) -> int:
     # Ensure output directory exists
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
-    # Base Nuitka command
-    cmd = [
-        sys.executable,
-        "-m",
-        "nuitka",
-        "--standalone",
-        "--onefile",
-        f"--output-dir={OUTPUT_DIR}",
-        "--output-filename=lintro",
-        "--follow-imports",
-        "--assume-yes-for-downloads",
-        # macOS-specific options
-        f"--macos-target-arch={arch}",
-        # Include all lintro packages
-    ]
-
-    # Add package includes
-    for pkg in INCLUDE_PACKAGES:
-        cmd.append(f"--include-package={pkg}")
-
-    # Add data directories
-    for data_dir in INCLUDE_DATA_DIRS:
-        data_path = PROJECT_ROOT / data_dir.split("=")[0]
-        if data_path.exists():
-            cmd.append(f"--include-data-dir={data_dir}")
-
-    # Add verbose flag if requested
-    if verbose:
-        cmd.append("--verbose")
-
-    # Add the main entry point
-    cmd.append(str(PROJECT_ROOT / "lintro" / "__main__.py"))
+    try:
+        cmd = build_nuitka_command(arch=arch, verbose=verbose)
+    except FileNotFoundError as exc:
+        print(str(exc), file=sys.stderr)
+        return 1
 
     print(f"Running: {' '.join(cmd)}")
 
@@ -123,6 +149,41 @@ def build_macos_binary(arch: str = "arm64", verbose: bool = False) -> int:
             file=sys.stderr,
         )
         return 1
+
+
+def _doctor_check_error(result: subprocess.CompletedProcess[str]) -> str | None:
+    """Validate ``lintro doctor --json`` output from binary verification.
+
+    Args:
+        result: Completed doctor subprocess result.
+
+    Returns:
+        Error message when verification failed, otherwise ``None``.
+    """
+    stderr = result.stderr or ""
+    crash_markers = ("Traceback", "FileNotFoundError", "manifest.json")
+    if any(marker in stderr for marker in crash_markers):
+        return f"Doctor check failed: {stderr}"
+
+    stdout = (result.stdout or "").strip()
+    if not stdout:
+        return "Doctor check failed: JSON output is empty"
+
+    try:
+        data = json.loads(stdout)
+    except json.JSONDecodeError as exc:
+        return f"Doctor check failed: invalid JSON ({exc})"
+
+    if not isinstance(data, dict) or not data or "tools" not in data:
+        return "Doctor check failed: JSON output is empty or missing 'tools'"
+
+    if result.returncode not in (0, 1):
+        detail = stderr or stdout[:200]
+        return (
+            f"Doctor check failed with exit code {result.returncode}: {detail}"
+        )
+
+    return None
 
 
 def verify_binary() -> bool:
@@ -172,6 +233,24 @@ def verify_binary() -> bool:
     except subprocess.TimeoutExpired:
         print("Help check timed out", file=sys.stderr)
         return False
+
+    # Check doctor loads manifest.json (required for tool registry)
+    try:
+        result = subprocess.run(
+            [str(binary_path), "doctor", "--json"],
+            capture_output=True,
+            text=True,
+            timeout=60,
+        )
+    except subprocess.TimeoutExpired:
+        print("Doctor check timed out", file=sys.stderr)
+        return False
+    else:
+        doctor_error = _doctor_check_error(result)
+        if doctor_error is not None:
+            print(doctor_error, file=sys.stderr)
+            return False
+        print("Doctor command: OK")
 
     # Check file size
     size_mb = binary_path.stat().st_size / (1024 * 1024)
