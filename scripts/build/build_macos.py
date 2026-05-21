@@ -43,6 +43,11 @@ INCLUDE_DATA_DIRS = [
     "lintro/assets=lintro/assets",
 ]
 
+# Non-Python data files required at runtime (not included by --include-package)
+INCLUDE_DATA_FILES = [
+    "lintro/tools/manifest.json=lintro/tools/manifest.json",
+]
+
 
 def get_default_arch() -> str:
     """Get the default architecture based on the current system.
@@ -54,6 +59,51 @@ def get_default_arch() -> str:
     if machine in ("arm64", "aarch64"):
         return "arm64"
     return "x86_64"
+
+
+def build_nuitka_command(*, arch: str, verbose: bool = False) -> list[str]:
+    """Build the Nuitka command for a macOS onefile binary.
+
+    Args:
+        arch: Target architecture (arm64, x86_64, or universal).
+        verbose: Enable verbose output during compilation.
+
+    Returns:
+        Nuitka command argv list.
+    """
+    cmd = [
+        sys.executable,
+        "-m",
+        "nuitka",
+        "--standalone",
+        "--onefile",
+        f"--output-dir={OUTPUT_DIR}",
+        "--output-filename=lintro",
+        "--follow-imports",
+        "--assume-yes-for-downloads",
+        f"--macos-target-arch={arch}",
+    ]
+
+    for pkg in INCLUDE_PACKAGES:
+        cmd.append(f"--include-package={pkg}")
+
+    cmd.append("--include-package-data=lintro")
+
+    for data_dir in INCLUDE_DATA_DIRS:
+        data_path = PROJECT_ROOT / data_dir.split("=")[0]
+        if data_path.exists():
+            cmd.append(f"--include-data-dir={data_dir}")
+
+    for data_file in INCLUDE_DATA_FILES:
+        data_path = PROJECT_ROOT / data_file.split("=")[0]
+        if data_path.exists():
+            cmd.append(f"--include-data-files={data_file}")
+
+    if verbose:
+        cmd.append("--verbose")
+
+    cmd.append(str(PROJECT_ROOT / "lintro" / "__main__.py"))
+    return cmd
 
 
 def build_macos_binary(arch: str = "arm64", verbose: bool = False) -> int:
@@ -72,38 +122,7 @@ def build_macos_binary(arch: str = "arm64", verbose: bool = False) -> int:
     # Ensure output directory exists
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
-    # Base Nuitka command
-    cmd = [
-        sys.executable,
-        "-m",
-        "nuitka",
-        "--standalone",
-        "--onefile",
-        f"--output-dir={OUTPUT_DIR}",
-        "--output-filename=lintro",
-        "--follow-imports",
-        "--assume-yes-for-downloads",
-        # macOS-specific options
-        f"--macos-target-arch={arch}",
-        # Include all lintro packages
-    ]
-
-    # Add package includes
-    for pkg in INCLUDE_PACKAGES:
-        cmd.append(f"--include-package={pkg}")
-
-    # Add data directories
-    for data_dir in INCLUDE_DATA_DIRS:
-        data_path = PROJECT_ROOT / data_dir.split("=")[0]
-        if data_path.exists():
-            cmd.append(f"--include-data-dir={data_dir}")
-
-    # Add verbose flag if requested
-    if verbose:
-        cmd.append("--verbose")
-
-    # Add the main entry point
-    cmd.append(str(PROJECT_ROOT / "lintro" / "__main__.py"))
+    cmd = build_nuitka_command(arch=arch, verbose=verbose)
 
     print(f"Running: {' '.join(cmd)}")
 
@@ -171,6 +190,25 @@ def verify_binary() -> bool:
             return False
     except subprocess.TimeoutExpired:
         print("Help check timed out", file=sys.stderr)
+        return False
+
+    # Check doctor loads manifest.json (required for tool registry)
+    try:
+        result = subprocess.run(
+            [str(binary_path), "doctor", "--json"],
+            capture_output=True,
+            text=True,
+            timeout=60,
+        )
+        if "manifest.json" in result.stderr and "FileNotFoundError" in result.stderr:
+            print(f"Doctor check failed: {result.stderr}", file=sys.stderr)
+            return False
+        if result.returncode not in (0, 1):
+            print(f"Doctor check failed: {result.stderr}", file=sys.stderr)
+            return False
+        print("Doctor command: OK")
+    except subprocess.TimeoutExpired:
+        print("Doctor check timed out", file=sys.stderr)
         return False
 
     # Check file size
