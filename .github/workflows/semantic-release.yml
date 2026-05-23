@@ -228,7 +228,9 @@ jobs:
           # yamllint enable
 
       - name: Enable auto-merge for Release PR
-        if: ${{ steps.cpr.outputs.pull-request-number != '' }}
+        if: >-
+          steps.cpr.outputs.pull-request-number != ''
+          && steps.semrel.outputs.bump_type == 'patch'
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: >
