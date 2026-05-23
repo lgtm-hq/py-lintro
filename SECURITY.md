@@ -17,27 +17,27 @@ Currently supporting the latest stable version:
 
 Found a security vulnerability? Here's how to report it:
 
-### **Private Reporting Only**
+> **Do NOT open a public GitHub issue for security vulnerabilities.** All vulnerability
+> reports must be submitted privately through one of the channels below.
 
-Please **do not** create public GitHub issues for security vulnerabilities. This helps
-prevent potential exploitation while we work on a fix. Public disclosure of
-vulnerabilities before a fix is available puts all users at risk.
+### How to Report
 
-### **How to Report**
+Choose one of the following channels to disclose a vulnerability:
 
-1. **GitHub Security Advisories**: Use
+1. **GitHub Security Advisories** (preferred): Use
    [GitHub Security Advisories](https://github.com/lgtm-hq/py-lintro/security/advisories/new)
-   to privately disclose a vulnerability. This is the preferred reporting channel as it
-   allows structured coordination and tracking.
-2. **Email**: Send details to `turbocoder13@gmail.com`
-3. **Subject**: Include "SECURITY: Lintro" in the subject line
-4. **Details**: Provide a clear description of the vulnerability
+   to privately report and disclose the vulnerability
+2. **Email**: Send a vulnerability report to `turbocoder13@gmail.com` with "SECURITY:
+   Lintro" in the subject line
 
-### **What to Include**
+### What to Include
 
-- Description of the vulnerability and its potential impact
-- Steps to reproduce (if possible)
-- Affected versions and configurations
+Regardless of the reporting channel, please include the following in your vulnerability
+disclosure:
+
+- Detailed steps to reproduce the vulnerability
+- Affected version(s) and environment details
+- Potential impact or severity assessment, if known
 - Any suggested fixes or mitigations you might have
 
 ### **Vulnerability Disclosure Timeline**

@@ -11,8 +11,8 @@
 
 If you discover a security vulnerability in lintro, please report it responsibly.
 
-> **Do NOT open a public GitHub issue for security vulnerabilities.**
-> All vulnerability reports must be submitted privately through one of the channels below.
+> **Do NOT open a public GitHub issue for security vulnerabilities.** All vulnerability
+> reports must be submitted privately through one of the channels below.
 
 ### How to Report
 
