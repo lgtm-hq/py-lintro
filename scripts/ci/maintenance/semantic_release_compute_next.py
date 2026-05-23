@@ -363,7 +363,7 @@ def classify_bump_type(base_version: str, next_version: str) -> str:
     Returns:
         ``major``, ``minor``, ``patch``, or ``none`` when unchanged/invalid.
     """
-    if not next_version or base_version == next_version:
+    if not base_version or not next_version or base_version == next_version:
         return "none"
 
     base_major, base_minor, base_patch = parse_semver(base_version)
