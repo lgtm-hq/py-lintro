@@ -87,7 +87,7 @@ Scripts for GitHub Actions workflows and continuous integration.
 | `maintenance/ghcr_prune/registry.py`  | OCI manifest + Referrers walk; SLSA / cosign protection set           | imported by `scripts/ci/maintenance/ghcr_prune_untagged.py`      |
 | `maintenance/ghcr_prune/tags.py`      | Cache tag constants and ephemeral-tag detection                       | imported by `scripts/ci/maintenance/ghcr_prune_untagged.py`      |
 | `maintenance/ghcr_prune/version.py`   | `GhcrVersion` dataclass                                               | imported by `scripts/ci/maintenance/ghcr_prune_untagged.py`      |
-| `coverage-badge-update.sh`            | Generate and update coverage badge                                    | `./scripts/ci/testing/coverage-badge-update.sh --help`           |
+| `coverage-badge-update.sh`            | Generate and update coverage badge                                    | `./scripts/ci/coverage-badge-update.sh --help`                   |
 | `sbom-generate.sh`                    | Generate and export SBOMs via bomctl                                  | `./scripts/ci/sbom-generate.sh --help`                           |
 | `egress-audit-lite.sh`                | Audit reachability of allowed endpoints                               | `./scripts/ci/egress-audit-lite.sh --help`                       |
 | `detect-changes.sh`                   | Detect repo diffs and set has_changes output                          | `./scripts/ci/detect-changes.sh --help`                          |
