@@ -20,4 +20,11 @@ fi
 
 output_path="${1:-/tmp/py-lintro-images.tar}"
 
+for image in py-lintro:latest py-lintro:base; do
+	if ! docker image inspect "$image" >/dev/null 2>&1; then
+		echo "Error: Docker image not found: ${image}" >&2
+		exit 1
+	fi
+done
+
 docker save py-lintro:latest py-lintro:base -o "$output_path"

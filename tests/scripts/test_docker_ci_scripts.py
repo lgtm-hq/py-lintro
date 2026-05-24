@@ -14,17 +14,17 @@ _REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 
 
 @pytest.mark.parametrize(
-    ("script",),
+    "script",
     [
-        ("scripts/ci/detect-fork-pr.sh",),
-        ("scripts/ci/free-disk-space.sh",),
-        ("scripts/ci/fail-on-security-audit.sh",),
-        ("scripts/ci/testing/pull-ci-docker-images.sh",),
-        ("scripts/ci/testing/load-ci-docker-images.sh",),
-        ("scripts/ci/maintenance/delete-ci-ghcr-tags.sh",),
-        ("scripts/docker/save-ci-images-tarball.sh",),
-        ("scripts/docker/run-docker-test-suite.sh",),
-        ("scripts/docker/smoke-test-base-image.sh",),
+        "scripts/ci/detect-fork-pr.sh",
+        "scripts/ci/free-disk-space.sh",
+        "scripts/ci/fail-on-security-audit.sh",
+        "scripts/ci/testing/pull-ci-docker-images.sh",
+        "scripts/ci/testing/load-ci-docker-images.sh",
+        "scripts/ci/maintenance/delete-ci-ghcr-tags.sh",
+        "scripts/docker/save-ci-images-tarball.sh",
+        "scripts/docker/run-docker-test-suite.sh",
+        "scripts/docker/smoke-test-base-image.sh",
     ],
 )
 def test_docker_ci_scripts_expose_help(script: str) -> None:
@@ -58,21 +58,24 @@ def test_detect_fork_pr_writes_github_output(
     with tempfile.NamedTemporaryFile(mode="w+", delete=False) as output_file:
         output_path = output_file.name
 
-    result = subprocess.run(
-        [str(script_path)],
-        capture_output=True,
-        text=True,
-        check=False,
-        env={
-            **os.environ.copy(),
-            "EVENT_NAME": event_name,
-            "IS_FORK_PR": is_fork_pr,
-            "GITHUB_OUTPUT": output_path,
-        },
-    )
+    try:
+        result = subprocess.run(
+            [str(script_path)],
+            capture_output=True,
+            text=True,
+            check=False,
+            env={
+                **os.environ.copy(),
+                "EVENT_NAME": event_name,
+                "IS_FORK_PR": is_fork_pr,
+                "GITHUB_OUTPUT": output_path,
+            },
+        )
 
-    assert_that(result.returncode).is_equal_to(0)
-    assert_that(Path(output_path).read_text().strip()).is_equal_to(expected)
+        assert_that(result.returncode).is_equal_to(0)
+        assert_that(Path(output_path).read_text().strip()).is_equal_to(expected)
+    finally:
+        Path(output_path).unlink(missing_ok=True)
 
 
 def test_pull_ci_docker_images_requires_ci_tag() -> None:

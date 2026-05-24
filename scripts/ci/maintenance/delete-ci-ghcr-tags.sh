@@ -36,28 +36,29 @@ delete_ci_tag() {
 	local pkg="$1"
 	local tag="$2"
 	local version_id=""
-	local err_output=""
+	local output=""
+	local delete_output=""
 
-	if ! err_output=$(gh api \
+	if ! output=$(gh api \
 		"orgs/lgtm-hq/packages/container/${pkg}/versions" \
 		--paginate \
 		--jq ".[] |
 			select((.metadata.container.tags // [])[] == \"${tag}\") |
 			.id" 2>&1); then
-		echo "::warning::Failed to query versions for ${pkg}:${tag}: ${err_output}" >&2
+		echo "::warning::Failed to query versions for ${pkg}:${tag}: ${output}" >&2
 		return
 	fi
-	version_id="$err_output"
+	version_id="$output"
 
 	if [[ -n "$version_id" ]]; then
 		while IFS= read -r vid; do
 			[[ -z "$vid" ]] && continue
-			if err_output=$(gh api --method DELETE \
+			if delete_output=$(gh api --method DELETE \
 				"orgs/lgtm-hq/packages/container/${pkg}/versions/${vid}" \
 				2>&1); then
 				echo "Deleted version ${vid} (${pkg}:${tag})"
 			else
-				echo "::warning::Failed to delete version ${vid}: ${err_output}"
+				echo "::warning::Failed to delete version ${vid}: ${delete_output}"
 			fi
 		done <<<"$version_id"
 	else

@@ -264,6 +264,7 @@ main() {
 	# SC2034: verbose is used for conditional logic and exported via VERBOSE
 	# shellcheck disable=SC2034
 	local verbose=false
+	local test_path_set=false
 	while [ $# -gt 0 ]; do
 		case "$1" in
 		--verbose | -v)
@@ -279,11 +280,23 @@ main() {
 			exit 1
 			;;
 		*)
+			if [ "$test_path_set" = true ]; then
+				echo -e "${RED}Error: Multiple test paths specified. Only one test-path argument is allowed.${NC}" >&2
+				show_usage
+				exit 1
+			fi
 			TEST_PATH="$1"
+			test_path_set=true
 			shift
 			;;
 		esac
 	done
+
+	if [ ! -e "$TEST_PATH" ]; then
+		echo -e "${RED}Error: Test path does not exist: ${TEST_PATH}${NC}" >&2
+		show_usage
+		exit 1
+	fi
 
 	# Setup Python environment
 	setup_python_env
@@ -399,7 +412,7 @@ show_usage() {
 	echo ""
 	echo "Options:"
 	echo "  --verbose, -v    Run tests with verbose output"
-	echo "  test-path        Pytest path (default: tests; Docker uses tests/integration)"
+	echo "  test-path        Pytest path (default: tests; only one path allowed)"
 	echo ""
 	echo "The script will run all tests under test-path and skip tool tests when tools aren't installed."
 	echo "Use './scripts/local/local-lintro.sh --install' to install missing tools."

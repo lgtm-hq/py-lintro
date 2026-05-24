@@ -196,8 +196,6 @@ CMD ["--help"]
 # -----------------------------------------------------------------------------
 FROM python:3.14-slim@sha256:7a500125bc50693f2214e842a621440a1b1b9cbb2188f74ab045d29ed2ea5856 AS base
 
-ARG UV_VERSION=0.11.10
-
 LABEL org.opencontainers.image.description="Lintro base image (no external tools); GHCR package py-lintro-base"
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
@@ -218,21 +216,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     apt-get clean && \
     rm -rf /var/lib/apt/lists/*
 
-# hadolint ignore=DL3003,SC2086
-RUN ARCH=$(uname -m) && \
-    if [ "$ARCH" = "x86_64" ]; then UV_ARCH="x86_64"; \
-    elif [ "$ARCH" = "aarch64" ]; then UV_ARCH="aarch64"; \
-    else echo "Unsupported arch: $ARCH" && exit 1; fi && \
-    UV_TAR="uv-${UV_ARCH}-unknown-linux-gnu.tar.gz" && \
-    UV_URL="https://github.com/astral-sh/uv/releases/download/${UV_VERSION}/${UV_TAR}" && \
-    CHECKSUM_URL="https://github.com/astral-sh/uv/releases/download/${UV_VERSION}/${UV_TAR}.sha256" && \
-    curl -fsSL "$UV_URL" -o "/tmp/${UV_TAR}" && \
-    curl -fsSL "$CHECKSUM_URL" -o "/tmp/${UV_TAR}.sha256" && \
-    cd /tmp && sha256sum -c "${UV_TAR}.sha256" && \
-    tar -xzf "${UV_TAR}" && \
-    mv "uv-${UV_ARCH}-unknown-linux-gnu/uv" /usr/local/bin/uv && \
-    chmod +x /usr/local/bin/uv && \
-    rm -rf /tmp/uv*
+COPY --from=tools /usr/local/bin/uv /usr/local/bin/uv
 
 COPY pyproject.toml uv.lock /app/
 COPY lintro/ /app/lintro/
