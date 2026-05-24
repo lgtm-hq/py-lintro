@@ -23,6 +23,5 @@ jobs:
       allowed-endpoints: >
         github.com:443
         api.github.com:443
-      tooling-ref: '22a7c110415d75843c2c216f95ed47aaeb8e26fc'
     permissions:
       contents: read

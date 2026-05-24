@@ -26,7 +26,6 @@ jobs:
         codeload.github.com:443
         release-assets.githubusercontent.com:443
         objects.githubusercontent.com:443
-      tooling-ref: '22a7c110415d75843c2c216f95ed47aaeb8e26fc'
     permissions:
       contents: read
       security-events: write
