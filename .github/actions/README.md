@@ -5,41 +5,14 @@ inputs in its action.yml.
 
 ## Versioning Strategy
 
-Internal actions use **semantic version tags** with the `actions-` prefix (e.g.,
-`actions-v1.0.0`, `actions-v1.0.1`) instead of commit SHAs. Workflows reference actions
-using explicit version tags like `@actions-v1.0.10`. This approach:
+**Local composite actions** in this repository (referenced as
+`uses: ./.github/actions/<name>`) ship with the py-lintro repo. They are not tagged or
+versioned separately. When you change a local action, update the workflows that call it
+in the same commit/PR — there is no `@actions-v*` pin to bump.
 
-- Provides explicit, reproducible builds
-- Provides clear versioning for action stability
-- Separates action versions from lintro PyPI release versions
-- Follows industry best practices for monorepos
-
-### Action Versioning
-
-Local composite actions are referenced via `uses: ./.github/actions/<name>` and follow
-the repository version. No separate action version tags are maintained.
-
-### Updating Workflow References
-
-After a new action version is created, update workflow references:
-
-1. Check the latest tag: `git tag -l 'actions-v1.*' | sort -V | tail -1`
-2. Update all workflow files referencing `@actions-v1.x.x` to the new version
-3. Commit and push the updated workflows
-
-### Manual Versioning (Breaking Changes Only)
-
-For major version changes (breaking changes), manually create a new major version tag:
-
-1. **Make your breaking changes** to the action files
-2. **Create and push the tag**:
-
-   ```bash
-   git tag actions-v2.0.0 -m "Major version: breaking changes"
-   git push origin actions-v2.0.0
-   ```
-
-3. **Update workflow references** to use `@actions-v2.0.0`
+**External actions** (Marketplace, other repos, or lgtm-ci) must stay pinned to commit
+SHAs in workflow files, per org policy. Breaking changes to those actions are absorbed
+by repinning the SHA in the caller workflow.
 
 ## .github/actions/setup-docker
 
