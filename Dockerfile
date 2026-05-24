@@ -186,6 +186,8 @@ RUN echo "Verifying tools as non-root user..." && \
     gosu lintro semgrep --version && \
     echo "All tools verified for non-root user!"
 
+USER lintro
+
 ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
 CMD ["--help"]
 
@@ -247,6 +249,8 @@ RUN getent group tools >/dev/null || groupadd -r tools && \
 
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
     CMD /app/.venv/bin/python -m lintro --version || exit 1
+
+USER lintro
 
 ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
 CMD ["--help"]
