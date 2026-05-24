@@ -92,10 +92,10 @@ RUN groupadd -r tools && \
 
 RUN --mount=type=cache,target=/opt/cargo/registry,sharing=locked \
     --mount=type=cache,target=/opt/cargo/git,sharing=locked \
-    --mount=type=cache,target=/opt/rustup,sharing=locked \
     --mount=type=cache,target=/root/.cache/uv,sharing=locked \
     find /app/scripts -type f -name "*.sh" -exec chmod +x {} \; && \
     /app/scripts/utils/install-tools.sh --docker && \
+    rustup default stable && \
     rustup component add clippy
 
 RUN chgrp -R tools /opt/cargo /opt/rustup /opt/bun && \

@@ -24,11 +24,9 @@ jobs:
     with:
       post-pr-comment: true
       python-versions: '3.11,3.14'
-      test-path: >-
-        tests/unit tests/cli tests/config tests/formatters
-        tests/scripts tests/utils
+      test-path: tests
       extras: 'full'
-      extra-args: '-x'
+      extra-args: '-x --ignore=tests/integration'
       coverage: true
       coverage-format: xml
       coverage-threshold: 80

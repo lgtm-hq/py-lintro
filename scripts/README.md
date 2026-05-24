@@ -80,6 +80,7 @@ Scripts for GitHub Actions workflows and continuous integration.
 | `post-pr-delete-previous.sh`          | Delete previous PR comments by marker                                 | `./scripts/ci/post-pr-delete-previous.sh --help`                                                                                      |
 | `lintro-report-generate.sh`           | Generate comprehensive Lintro reports                                 | `./scripts/ci/lintro-report-generate.sh`                                                                                              |
 | `pull-lintro-image.sh`                | Pull lintro Docker image from GHCR and log digest                     | `./scripts/ci/testing/pull-lintro-image.sh`                                                                                           |
+| `maintenance/delete-ci-ghcr-tags.sh`  | Delete ephemeral CI GHCR tags after PR merge or close                 | `./scripts/ci/maintenance/delete-ci-ghcr-tags.sh`                                                                                     |
 | `maintenance/ghcr_prune_untagged.py`  | Prune untagged GHCR package versions (CLI entry shim)                 | `uv run python scripts/ci/maintenance/ghcr_prune_untagged.py`                                                                         |
 | `maintenance/ghcr_prune/api.py`       | GhcrVersion list/delete/owner-type GitHub API helpers                 | imported by `scripts/ci/maintenance/ghcr_prune_untagged.py`                                                                           |
 | `maintenance/ghcr_prune/cli.py`       | Entry-point and env-var handling for the prune CLI                    | imported by `scripts/ci/maintenance/ghcr_prune_untagged.py`                                                                           |
@@ -93,6 +94,9 @@ Scripts for GitHub Actions workflows and continuous integration.
 | `sbom-generate.sh`                    | Generate and export SBOMs via bomctl                                  | `./scripts/ci/sbom-generate.sh --help`                                                                                                |
 | `egress-audit-lite.sh`                | Audit reachability of allowed endpoints                               | `./scripts/ci/egress-audit-lite.sh --help`                                                                                            |
 | `detect-changes.sh`                   | Detect repo diffs and set has_changes output                          | `./scripts/ci/detect-changes.sh --help`                                                                                               |
+| `detect-fork-pr.sh`                   | Detect fork PRs and set `is-fork` output for conditional steps        | `EVENT_NAME=pull_request ./scripts/ci/detect-fork-pr.sh`                                                                              |
+| `fail-on-security-audit.sh`           | Fail CI when security audit finds vulnerabilities                     | `./scripts/ci/fail-on-security-audit.sh`                                                                                              |
+| `free-disk-space.sh`                  | Free disk space on CI runner for Docker builds                        | `./scripts/ci/free-disk-space.sh`                                                                                                     |
 | `security-comment.sh`                 | Run osv-scanner via lintro in Docker and generate security PR comment | `./scripts/ci/security-comment.sh --help`                                                                                             |
 | `classify-suppressions.py`            | Classify vulnerability suppressions as active, stale, or expired      | `osv-scanner ... \| python3 scripts/ci/classify-suppressions.py`                                                                      |
 | `format-security-comment.py`          | Format lintro osv_scanner JSON as security PR comment markdown        | `python3 scripts/ci/format-security-comment.py osv-results.json`                                                                      |
@@ -104,6 +108,8 @@ Scripts for GitHub Actions workflows and continuous integration.
 | `test-verify-cli.sh`                  | Verify lintro CLI entry points in installed package                   | `./scripts/ci/test-verify-cli.sh`                                                                                                     |
 | `test-verify-imports.sh`              | Verify critical package imports in installed lintro                   | `./scripts/ci/test-verify-imports.sh wheel`                                                                                           |
 | `extract-test-summary.sh`             | Extract pytest test summary to JSON for PR comments                   | `./scripts/ci/testing/extract-test-summary.sh <log> <out.json>`                                                                       |
+| `load-ci-docker-images.sh`            | Load Docker images from CI tarball artifact                           | `./scripts/ci/testing/load-ci-docker-images.sh`                                                                                       |
+| `pull-ci-docker-images.sh`            | Pull CI Docker images from GHCR for testing                           | `./scripts/ci/testing/pull-ci-docker-images.sh`                                                                                       |
 | `resolve-vue-tsc-version.sh`          | Read installed vue-tsc version from bun's global install root         | `./scripts/ci/resolve-vue-tsc-version.sh --help`                                                                                      |
 | `verify-manifest-tools.py`            | Verify tools in image match manifest versions                         | `python scripts/ci/verify-manifest-tools.py --help`                                                                                   |
 | `generate-tool-versions.py`           | Generate `_generated_versions.py` and sync `manifest.json` versions   | `python scripts/ci/generate-tool-versions.py [--check]`                                                                               |
@@ -130,13 +136,16 @@ Scripts for generating and updating Homebrew formulas.
 
 Scripts for containerized development and testing.
 
-| Script                 | Purpose                         | Usage                                     |
-| ---------------------- | ------------------------------- | ----------------------------------------- |
-| `docker-build-test.sh` | Build and test Docker image     | `./scripts/docker/docker-build-test.sh`   |
-| `docker-lintro.sh`     | Run Lintro in Docker container  | `./scripts/docker/docker-lintro.sh check` |
-| `docker-test.sh`       | Run integration tests in Docker | `./scripts/docker/docker-test.sh`         |
-| `entrypoint.sh`        | Docker container entrypoint     | Internal use by Dockerfile                |
-| `fix-permissions.sh`   | Fix mounted volume permissions  | Internal use by Dockerfile                |
+| Script                      | Purpose                                                 | Usage                                        |
+| --------------------------- | ------------------------------------------------------- | -------------------------------------------- |
+| `docker-build-test.sh`      | Build and test Docker image                             | `./scripts/docker/docker-build-test.sh`      |
+| `docker-lintro.sh`          | Run Lintro in Docker container                          | `./scripts/docker/docker-lintro.sh check`    |
+| `docker-test.sh`            | Run integration tests in Docker                         | `./scripts/docker/docker-test.sh`            |
+| `entrypoint.sh`             | Docker container entrypoint                             | Internal use by Dockerfile                   |
+| `fix-permissions.sh`        | Fix mounted volume permissions                          | Internal use by Dockerfile                   |
+| `run-docker-test-suite.sh`  | Run the full Docker test suite against built images     | `./scripts/docker/run-docker-test-suite.sh`  |
+| `save-ci-images-tarball.sh` | Save built Docker images as tarball for downstream jobs | `./scripts/docker/save-ci-images-tarball.sh` |
+| `smoke-test-base-image.sh`  | Smoke-test the base Docker image                        | `./scripts/docker/smoke-test-base-image.sh`  |
 
 ### 💻 Local Development Scripts (`local/`)
 
