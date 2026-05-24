@@ -110,6 +110,10 @@ jobs:
             index.crates.io:443
             semgrep.dev:443
             metrics.semgrep.dev:443
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
       - name: Check if fork PR
         id: fork-check
         env:
@@ -119,10 +123,6 @@ jobs:
       - name: Free disk space (fork fallback)
         if: steps.fork-check.outputs.is-fork == 'true'
         run: scripts/ci/free-disk-space.sh
-      - name: Checkout
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-        with:
-          persist-credentials: false
       - name: Set up Docker Buildx (fork)
         if: steps.fork-check.outputs.is-fork == 'true'
         # yamllint disable-line rule:line-length
@@ -567,6 +567,10 @@ jobs:
           allowed-endpoints: >
             github.com:443
             api.github.com:443
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
       - name: Delete CI-tagged images
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
