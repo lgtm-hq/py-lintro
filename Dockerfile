@@ -242,8 +242,7 @@ RUN uv sync --no-dev --no-progress && (uv cache clean || true)
 COPY scripts/docker/entrypoint.sh /usr/local/bin/entrypoint.sh
 RUN chmod +x /usr/local/bin/entrypoint.sh
 
-RUN getent group tools >/dev/null || groupadd -r tools && \
-    useradd -m -G tools lintro && \
+RUN useradd -m lintro && \
     mkdir -p /code && \
     chown -R lintro:lintro /app /code
 
