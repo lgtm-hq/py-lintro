@@ -68,8 +68,8 @@ jobs:
     name: 🐳 Build Docker Images
     runs-on: ubuntu-24.04
     permissions:
-      contents: read
-      packages: write
+      contents: read # checkout and build context
+      packages: write # push CI-tagged images to GHCR
     timeout-minutes: 30
     defaults:
       run:
@@ -217,7 +217,7 @@ jobs:
       pull-requests: write
     with:
       tooling-ref: '80dbd2fc1568963da3bc24c468ff2221ff71b904'
-      job-name: '🛠️ Dogfooding Lint'
+      job-name: '🛠️ Lintro Code Quality'
       post-pr-comment: true
       egress-policy: block
       allowed-endpoints: >
@@ -254,6 +254,7 @@ jobs:
       # Fork PRs: CI images are not pushed to GHCR (artifact tarball only), so
       # fall back to the pinned release image — integration tests still use the
       # fork-built image via the tarball path.
+      # Pinned digest — keep in sync with ci.yml / pyproject.toml lintro pin
       lintro-image: >-
         ${{ needs.docker-build.outputs.is-fork == 'true'
         && format(
@@ -425,8 +426,8 @@ jobs:
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
     runs-on: ubuntu-24.04
     permissions:
-      contents: read
-      packages: write
+      contents: read # checkout and metadata extraction
+      packages: write # push release images to GHCR
     timeout-minutes: 30
     concurrency:
       group: publish-${{ github.ref }}
@@ -518,8 +519,8 @@ jobs:
       needs.docker-build.outputs.is-fork != 'true'
     runs-on: ubuntu-24.04
     permissions:
-      contents: read
-      packages: write
+      contents: read # checkout delete-ci-ghcr-tags.sh
+      packages: write # delete ephemeral CI tags from GHCR
     timeout-minutes: 5
     steps:
       - name: Harden Runner

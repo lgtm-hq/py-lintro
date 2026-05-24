@@ -51,6 +51,30 @@ jobs:
       contents: read
       pull-requests: write
 
+  # Org ruleset (checks-py-lintro) requires this exact check name.
+  test-suite-coverage:
+    name: '🧪 Test Suite & Coverage'
+    needs: test
+    if: >-
+      always() &&
+      (
+        github.event_name != 'pull_request' ||
+        github.event.pull_request.draft == false
+      )
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    steps:
+      - name: Require passing test suite
+        env:
+          TEST_RESULT: ${{ needs.test.result }}
+          TEST_PASSED: ${{ needs.test.outputs.passed }}
+        run: |
+          if [ "$TEST_RESULT" != "success" ] || [ "$TEST_PASSED" != "true" ]; then
+            echo "::error::Test suite failed (result=$TEST_RESULT passed=$TEST_PASSED)"
+            exit 1
+          fi
+
   publish-coverage:
     name: Publish Coverage to Pages
     needs: test
