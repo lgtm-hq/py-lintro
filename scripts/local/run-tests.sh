@@ -12,6 +12,7 @@ source "$SCRIPT_DIR/../utils/utils.sh"
 
 # Global variables
 VERBOSE=0
+TEST_PATH="tests"
 TEST_FILES=()
 
 # Function to check if venv is valid and functional
@@ -112,11 +113,10 @@ check_system_tool() {
 # Function to discover available tools and build test list
 discover_tests() {
 	echo -e "${BLUE}Discovering tests to run...${NC}"
-	# Always run all tests in the tests directory
 	# SC2034: TEST_FILES is exported for use in subshells and other scripts
 	# shellcheck disable=SC2034
-	TEST_FILES=("tests")
-	echo -e "${GREEN}All tests in the tests directory will be run.${NC}"
+	TEST_FILES=("$TEST_PATH")
+	echo -e "${GREEN}Tests in ${TEST_PATH} will be run.${NC}"
 }
 
 # Ensure required Python CLI tools are available in the active uv environment
@@ -196,7 +196,7 @@ run_tests() {
 	local workers="${LINTRO_PYTEST_WORKERS:-auto}"
 
 	# Build lintro tst arguments
-	local tst_args=("tests")
+	local tst_args=("$TEST_PATH")
 
 	# Add verbose flag if requested
 	local tool_opts="pytest:coverage_report=True,pytest:coverage_html=htmlcov,pytest:coverage_xml=coverage.xml,pytest:timeout=600"
@@ -264,12 +264,26 @@ main() {
 	# SC2034: verbose is used for conditional logic and exported via VERBOSE
 	# shellcheck disable=SC2034
 	local verbose=false
-	if [ "${1:-}" = "--verbose" ] || [ "${1:-}" = "-v" ]; then
-		# shellcheck disable=SC2034
-		verbose=true
-		VERBOSE=1
-		echo -e "${YELLOW}Verbose mode enabled${NC}"
-	fi
+	while [ $# -gt 0 ]; do
+		case "$1" in
+		--verbose | -v)
+			# shellcheck disable=SC2034
+			verbose=true
+			VERBOSE=1
+			echo -e "${YELLOW}Verbose mode enabled${NC}"
+			shift
+			;;
+		-*)
+			echo -e "${RED}Unknown option: $1${NC}" >&2
+			show_usage
+			exit 1
+			;;
+		*)
+			TEST_PATH="$1"
+			shift
+			;;
+		esac
+	done
 
 	# Setup Python environment
 	setup_python_env
@@ -375,18 +389,19 @@ main() {
 
 # Show usage information
 show_usage() {
-	echo "Usage: $0 [--verbose|-v]"
+	echo "Usage: $0 [--verbose|-v] [test-path]"
 	echo ""
 	echo "This script automatically:"
 	echo "  1. Sets up the Python environment"
 	echo "  2. Discovers available linting tools"
-	echo "  3. Runs all core tests plus integration tests for available tools"
+	echo "  3. Runs tests for available tools under test-path (default: tests)"
 	echo "  4. Generates coverage reports"
 	echo ""
 	echo "Options:"
 	echo "  --verbose, -v    Run tests with verbose output"
+	echo "  test-path        Pytest path (default: tests; Docker uses tests/integration)"
 	echo ""
-	echo "The script will run all core tests and skip integration tests for tools that aren't installed."
+	echo "The script will run all tests under test-path and skip tool tests when tools aren't installed."
 	echo "Use './scripts/local/local-lintro.sh --install' to install missing tools."
 }
 

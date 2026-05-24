@@ -46,6 +46,7 @@ services:
       - ${PWD:-./}:/app
     command:
       - /app/scripts/local/run-tests.sh
+      - tests/integration
     entrypoint:
       - ''
     environment:
