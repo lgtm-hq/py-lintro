@@ -31,8 +31,30 @@ jobs:
         codeload.github.com:443
         release-assets.githubusercontent.com:443
         objects.githubusercontent.com:443
+        raw.githubusercontent.com:443
         ghcr.io:443
         pkg-containers.githubusercontent.com:443
+        docker.io:443
+        registry-1.docker.io:443
+        auth.docker.io:443
+        production.cloudflare.docker.com:443
+        production.cloudfront.docker.com:443
+        pypi.org:443
+        files.pythonhosted.org:443
+        static.rust-lang.org:443
+        bun.sh:443
+        astral.sh:443
+        releases.astral.sh:443
+        sh.rustup.rs:443
+        deb.debian.org:80
+        registry.npmjs.org:443
+        crates.io:443
+        static.crates.io:443
+        index.crates.io:443
+        semgrep.dev:443
+        metrics.semgrep.dev:443
+        api.osv.dev:443
+        api.deps.dev:443
     permissions:
       contents: read
       packages: read
