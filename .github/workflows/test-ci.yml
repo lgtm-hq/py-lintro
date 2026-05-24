@@ -76,9 +76,29 @@ jobs:
             exit 1
           fi
 
+  merge-coverage:
+    name: Merge Coverage Artifacts
+    needs: test
+    if: >-
+      github.ref == 'refs/heads/main' &&
+      github.event_name == 'push' &&
+      needs.test.outputs.passed == 'true'
+    runs-on: ubuntu-24.04
+    permissions:
+      actions: read
+    steps:
+      - name: Merge per-version coverage into single artifact
+        # yamllint disable-line rule:line-length
+        uses: actions/upload-artifact/merge@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: python-coverage
+          pattern: python-coverage-*
+          delete-merged: true
+          retention-days: 7
+
   publish-coverage:
     name: Publish Coverage to Pages
-    needs: test
+    needs: [test, merge-coverage]
     if: >-
       github.ref == 'refs/heads/main' &&
       github.event_name == 'push' &&

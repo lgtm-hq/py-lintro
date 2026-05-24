@@ -64,6 +64,7 @@ jobs:
         anchore.io:443
         get.anchore.io:443
         toolbox-data.anchore.io:443
+        grype.anchore.io:443
         pipelines.actions.githubusercontent.com:443
         fulcio.sigstore.dev:443
         rekor.sigstore.dev:443
