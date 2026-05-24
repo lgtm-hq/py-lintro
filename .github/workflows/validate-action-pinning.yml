@@ -22,6 +22,13 @@ jobs:
     # yamllint disable-line rule:line-length
     uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-validate-action-pinning.yml@d9b302c919efc84fc001e9f3ef63bc9061d04b8f
     with:
+      egress-policy: block
+      allowed-endpoints: >
+        github.com:443
+        api.github.com:443
+        codeload.github.com:443
+        objects.githubusercontent.com:443
+        raw.githubusercontent.com:443
       tooling-ref: 'd9b302c919efc84fc001e9f3ef63bc9061d04b8f'
     permissions:
       contents: read

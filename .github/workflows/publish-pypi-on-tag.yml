@@ -53,6 +53,23 @@ jobs:
       sbom-format: cyclonedx-json
       scan-vulnerabilities: true
       create-attestation: true
+      egress-policy: block
+      allowed-endpoints: >
+        github.com:443
+        api.github.com:443
+        codeload.github.com:443
+        release-assets.githubusercontent.com:443
+        objects.githubusercontent.com:443
+        raw.githubusercontent.com:443
+        anchore.io:443
+        get.anchore.io:443
+        toolbox-data.anchore.io:443
+        pipelines.actions.githubusercontent.com:443
+        fulcio.sigstore.dev:443
+        rekor.sigstore.dev:443
+        timestamp.sigstore.dev:443
+        tuf-repo-cdn.sigstore.dev:443
+        sigstore-tuf-root.storage.googleapis.com:443
       tooling-ref: 'd9b302c919efc84fc001e9f3ef63bc9061d04b8f'
     permissions:
       contents: read
