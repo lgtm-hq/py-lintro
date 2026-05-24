@@ -23,6 +23,7 @@ from lintro.enums.tool_type import ToolType
 from lintro.models.core.tool_result import ToolResult
 from lintro.parsers.osv_scanner import (
     classify_suppressions,
+    extract_osv_scanner_payload,
     parse_osv_scanner_output,
     parse_suppressions,
 )
@@ -268,6 +269,15 @@ class OsvScannerPlugin(BaseToolPlugin):
             no_op_indicators = ["no package sources found", "0 packages"]
             if any(indicator in output.lower() for indicator in no_op_indicators):
                 success = True
+
+        # Some osv-scanner builds emit log lines before JSON and may exit
+        # non-zero even when the parsed results list is empty.
+        if not success and len(issues) == 0:
+            payload = extract_osv_scanner_payload(output)
+            if payload is not None and "results" in payload:
+                results = payload["results"]
+                if isinstance(results, list) and len(results) == 0:
+                    success = True
 
         # Determine overall success: subprocess must succeed AND no issues
         # found. A non-zero exit with 0 parsed issues indicates an execution

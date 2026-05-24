@@ -360,7 +360,7 @@ def test_main_skips_prune_when_registry_auth_fails(
             if url.startswith("https://ghcr.io/token"):
                 # Auth failure: 401
                 return ManifestResp(payload={}, status_code=401)
-            for pkg in ("lintro-tools", "py-lintro-base", *BUILDCACHE_PACKAGES):
+            for pkg in ("py-lintro-base", *BUILDCACHE_PACKAGES):
                 if pkg in url:
                     return make_versions_response(
                         versions_data=[],
@@ -469,7 +469,7 @@ def test_main_protects_slsa_children_end_to_end(
                 if "sha256:tagged-index" in url:
                     return ManifestResp(payload=index_manifest)
                 return ManifestResp(payload={}, status_code=404)
-            for pkg in ("lintro-tools", "py-lintro-base", *BUILDCACHE_PACKAGES):
+            for pkg in ("py-lintro-base", *BUILDCACHE_PACKAGES):
                 if pkg in url:
                     return make_versions_response(
                         versions_data=[],

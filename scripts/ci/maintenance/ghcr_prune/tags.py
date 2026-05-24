@@ -6,16 +6,15 @@ import re
 
 from .version import GhcrVersion
 
-# Buildcache packages: dedicated registry repos for BuildKit registry cache
-# exports. Distinct retention rules apply (see prune_buildcache_package).
-BUILDCACHE_PACKAGES: tuple[str, ...] = (
-    "lintro-tools-buildcache",
-    "py-lintro-buildcache",
-    "py-lintro-base-buildcache",
-)
+# BuildKit registry cache lives on production packages as ``:cache`` (and
+# platform-specific ``cache-*`` tags). Ephemeral ``pr-*`` / ``mq-*`` /
+# ``dispatch-*`` cache exports share those packages — see
+# :func:`prune_buildcache_package` with ``prune_untagged=False``.
+BUILDCACHE_PACKAGES: tuple[str, ...] = ()
 
-# Permanent buildcache tag preserved across all prune runs.
-BUILDCACHE_PERMANENT_TAG = "main"
+# Permanent cache tag preserved across all prune runs (also protects ``main``,
+# semver, ``latest``, and other non-ephemeral tags via mixed-tag rules).
+BUILDCACHE_PERMANENT_TAG = "cache"
 
 # Pattern for ephemeral buildcache tags eligible for age-based deletion:
 #   pr-<N>          — pull_request runs

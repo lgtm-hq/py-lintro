@@ -14,6 +14,8 @@ from typing import TYPE_CHECKING
 
 from loguru import logger
 
+from lintro.plugins.subprocess_failure import format_subprocess_failure
+
 if TYPE_CHECKING:
     from collections.abc import Callable
 
@@ -173,6 +175,7 @@ def run_subprocess(
             env=effective_env,
         )
 
+        combined = (result.stdout or "") + (result.stderr or "")
         if result.returncode != 0:
             stderr_preview = (result.stderr or "")[:500]
             if stderr_preview:
@@ -180,8 +183,19 @@ def run_subprocess(
                     f"Subprocess {cmd[0]} exited with code {result.returncode}, "
                     f"stderr: {stderr_preview}",
                 )
+            if not combined.strip():
+                combined = format_subprocess_failure(
+                    tool_name=cmd[0],
+                    cmd=cmd,
+                    returncode=result.returncode,
+                    stdout=result.stdout or "",
+                    stderr=result.stderr or "",
+                    cwd=cwd,
+                    timeout=timeout,
+                )
+                logger.warning(combined)
 
-        return result.returncode == 0, result.stdout + result.stderr
+        return result.returncode == 0, combined
     except subprocess.TimeoutExpired as e:
         logger.warning(f"Subprocess {cmd[0]} timed out after {timeout}s")
         # Preserve partial output from the original exception
@@ -316,15 +330,25 @@ def run_subprocess_streaming(
                 output="\n".join(output_lines),
             ) from e
 
+        output = "\n".join(output_lines)
         if returncode != 0:
-            output_preview = "\n".join(output_lines)[:500]
+            output_preview = output[:500]
             if output_preview:
                 logger.debug(
                     f"Subprocess {cmd[0]} exited with code {returncode}, "
                     f"output: {output_preview}",
                 )
+            if not output.strip():
+                output = format_subprocess_failure(
+                    tool_name=cmd[0],
+                    cmd=cmd,
+                    returncode=returncode,
+                    cwd=cwd,
+                    timeout=timeout,
+                )
+                logger.warning(output)
 
-        return returncode == 0, "\n".join(output_lines)
+        return returncode == 0, output
 
     except FileNotFoundError as e:
         logger.warning(

@@ -1,0 +1,104 @@
+# SPDX-License-Identifier: MIT
+# For license details, see the repository root LICENSE file.
+---
+name: CI - Tests
+
+'on':
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened, ready_for_review]
+  merge_group:
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: test-ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+jobs:
+  test:
+    # yamllint disable-line rule:line-length
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-test-python.yml@22a7c110415d75843c2c216f95ed47aaeb8e26fc
+    with:
+      post-pr-comment: true
+      python-versions: '3.11,3.14'
+      test-path: tests
+      extras: 'full'
+      extra-args: '-x --ignore=tests/integration'
+      coverage: true
+      coverage-format: xml
+      coverage-threshold: 80
+      upload-coverage: true
+      draft-pr-skip: true
+      job-name: Python Compatibility
+      runner-image: ubuntu-24.04
+      tooling-ref: '22a7c110415d75843c2c216f95ed47aaeb8e26fc'
+      egress-policy: block
+      allowed-endpoints: >
+        github.com:443
+        api.github.com:443
+        codeload.github.com:443
+        release-assets.githubusercontent.com:443
+        objects.githubusercontent.com:443
+        raw.githubusercontent.com:443
+        pypi.org:443
+        files.pythonhosted.org:443
+        astral.sh:443
+        releases.astral.sh:443
+    permissions:
+      contents: read
+      pull-requests: write
+
+  # Org ruleset (checks-py-lintro) requires this exact check name.
+  test-suite-coverage:
+    name: '🧪 Test Suite & Coverage'
+    needs: test
+    if: >-
+      always() &&
+      (
+        github.event_name != 'pull_request' ||
+        github.event.pull_request.draft == false
+      )
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    steps:
+      - name: Require passing test suite
+        env:
+          TEST_RESULT: ${{ needs.test.result }}
+          TEST_PASSED: ${{ needs.test.outputs.passed }}
+        run: |
+          if [ "$TEST_RESULT" != "success" ] || [ "$TEST_PASSED" != "true" ]; then
+            echo "::error::Test suite failed (result=$TEST_RESULT passed=$TEST_PASSED)"
+            exit 1
+          fi
+
+  publish-coverage:
+    name: Publish Coverage to Pages
+    needs: test
+    if: >-
+      github.ref == 'refs/heads/main' &&
+      github.event_name == 'push' &&
+      needs.test.outputs.passed == 'true'
+    # yamllint disable-line rule:line-length
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-test-python-publish.yml@22a7c110415d75843c2c216f95ed47aaeb8e26fc
+    with:
+      coverage-percent: ${{ needs.test.outputs.coverage-percent }}
+      upload-coverage: true
+      job-name: Deploy Coverage to Pages
+      runner-image: ubuntu-24.04
+      tooling-ref: '22a7c110415d75843c2c216f95ed47aaeb8e26fc'
+      egress-policy: block
+      allowed-endpoints: >
+        github.com:443
+        api.github.com:443
+        codeload.github.com:443
+        release-assets.githubusercontent.com:443
+        objects.githubusercontent.com:443
+    permissions:
+      contents: write
+      pages: write
+      id-token: write

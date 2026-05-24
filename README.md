@@ -12,7 +12,7 @@ assurance tools under a single command-line interface.
 
 <!-- Badges: Build & Quality -->
 <p align="center">
-<a href="https://github.com/lgtm-hq/py-lintro/actions/workflows/ci-pipeline.yml?query=branch%3Amain"><img src="https://img.shields.io/github/actions/workflow/status/lgtm-hq/py-lintro/ci-pipeline.yml?label=ci&branch=main&logo=githubactions&logoColor=white" alt="CI"></a>
+<a href="https://github.com/lgtm-hq/py-lintro/actions/workflows/docker-ci.yml?query=branch%3Amain"><img src="https://img.shields.io/github/actions/workflow/status/lgtm-hq/py-lintro/docker-ci.yml?label=ci&branch=main&logo=githubactions&logoColor=white" alt="CI"></a>
 <a href="https://github.com/lgtm-hq/py-lintro/actions/workflows/docker-build-publish.yml?query=branch%3Amain"><img src="https://img.shields.io/github/actions/workflow/status/lgtm-hq/py-lintro/docker-build-publish.yml?label=docker&logo=docker&branch=main" alt="Docker"></a>
 <a href="https://codecov.io/gh/lgtm-hq/py-lintro"><img src="https://codecov.io/gh/lgtm-hq/py-lintro/branch/main/graph/badge.svg" alt="Coverage"></a>
 </p>

@@ -4,8 +4,9 @@ Two entry points:
 
 - :func:`prune_package` — production image packages (delete untagged only,
   honour ``referenced_digests``, ``keep_n``, ``min_age_days``).
-- :func:`prune_buildcache_package` — buildcache repos (also reaps
-  ephemeral ``pr-<N>`` / ``mq-<run>`` / ``dispatch-<run>`` tags).
+- :func:`prune_buildcache_package` — reap ephemeral ``pr-<N>`` /
+  ``mq-<run>`` / ``dispatch-<run>`` cache tags on production packages
+  (called with ``prune_untagged=False`` from ``cli.main``).
 """
 
 from __future__ import annotations
@@ -154,22 +155,27 @@ def prune_buildcache_package(
     dry_run: bool,
     min_age_days: int,
     pr_age_days: int,
+    prune_untagged: bool = True,
 ) -> int:
-    """Prune a buildcache package using ephemeral-tag-aware retention.
+    """Prune ephemeral BuildKit cache tags (and optionally untagged versions).
 
     Rules:
-    - Versions tagged ``main`` (or any non-ephemeral tag) are preserved.
+    - Versions tagged ``cache``, ``main``, or any non-ephemeral tag are preserved.
     - Versions tagged only with ephemeral tags (``pr-<N>``, ``mq-<run_id>``,
       ``dispatch-<run_id>``) are deleted when older than ``pr_age_days``.
-    - Untagged versions are deleted when older than ``min_age_days``.
+    - Untagged versions are deleted when older than ``min_age_days`` only when
+      ``prune_untagged`` is True (default for standalone callers). Production
+      packages pass ``prune_untagged=False`` so untagged cleanup stays in
+      :func:`prune_package` with referenced-digest protection.
 
     Args:
         client: Authenticated HTTP client.
         owner: Repository owner (user/org).
-        package_name: Buildcache package name.
+        package_name: Container package name.
         dry_run: If True, only log what would be deleted.
         min_age_days: Minimum age in days before untagged versions delete.
         pr_age_days: Minimum age in days before ephemeral tags delete.
+        prune_untagged: When False, skip untagged version deletion.
 
     Returns:
         Number of versions deleted (or that would be in dry-run).
@@ -177,7 +183,11 @@ def prune_buildcache_package(
     Raises:
         httpx.HTTPStatusError: On non-404 GitHub API errors.
     """
-    logger.info("Processing buildcache package: {}", package_name)
+    logger.info(
+        "Processing cache/ephemeral tags for package: {} (prune_untagged={})",
+        package_name,
+        prune_untagged,
+    )
 
     base_path = resolve_base_path(client=client, owner=owner)
 
@@ -200,11 +210,13 @@ def prune_buildcache_package(
         if is_ephemeral_only_tagged(version=v)
         and is_older_than_days(v.created_at, pr_age_days)
     ]
-    untagged_old = [
-        v
-        for v in versions
-        if not v.tags and is_older_than_days(v.created_at, min_age_days)
-    ]
+    untagged_old: list[GhcrVersion] = []
+    if prune_untagged:
+        untagged_old = [
+            v
+            for v in versions
+            if not v.tags and is_older_than_days(v.created_at, min_age_days)
+        ]
     to_delete = pr_tagged_old + untagged_old
 
     logger.info(

@@ -36,10 +36,8 @@ pipelines.
 
 **Examples**:
 
-- `ci-lintro.sh` - Run lintro in CI context
 - `ci-post-pr-comment.sh` - Post comments to PRs via GitHub API
-- `auto-tag-unified.sh` - Automated tagging in CI
-- `semantic-pr-title-check.sh` - PR title validation
+- `ghcr_prune_untagged.py` - Prune untagged GHCR versions and stale cache tags
 
 ### `scripts/local/` - Local Development Scripts
 

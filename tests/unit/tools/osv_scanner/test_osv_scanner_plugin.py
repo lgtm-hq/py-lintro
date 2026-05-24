@@ -113,6 +113,51 @@ def test_check_no_vulnerabilities(
     assert_that(result.issues_count).is_equal_to(0)
 
 
+def test_check_clean_scan_with_log_prefix_and_nonzero_exit(
+    osv_scanner_plugin: OsvScannerPlugin,
+    tmp_path: Path,
+) -> None:
+    """Check treats empty parsed results as success despite non-zero exit."""
+    lockfile = tmp_path / "requirements.txt"
+    lockfile.write_text("setuptools==80.9.0\n")
+
+    osv_output = (
+        "Scanning dir /tmp/example\n"
+        '{"results": [], "experimental_config": {"licenses": {"summary": false}}}\n'
+    )
+
+    with patch.object(
+        osv_scanner_plugin,
+        "_run_subprocess",
+        return_value=(False, osv_output),
+    ):
+        result = osv_scanner_plugin.check([str(lockfile)], {})
+
+    assert_that(result.success).is_true()
+    assert_that(result.issues_count).is_equal_to(0)
+
+
+def test_check_error_payload_without_results_is_not_success(
+    osv_scanner_plugin: OsvScannerPlugin,
+    tmp_path: Path,
+) -> None:
+    """Check does not treat error-only JSON payloads as clean scans."""
+    lockfile = tmp_path / "requirements.txt"
+    lockfile.write_text("setuptools==80.9.0\n")
+
+    osv_output = '{"error": "failed to load config"}\n'
+
+    with patch.object(
+        osv_scanner_plugin,
+        "_run_subprocess",
+        return_value=(False, osv_output),
+    ):
+        result = osv_scanner_plugin.check([str(lockfile)], {})
+
+    assert_that(result.success).is_false()
+    assert_that(result.issues_count).is_equal_to(0)
+
+
 def test_check_with_vulnerabilities(
     osv_scanner_plugin: OsvScannerPlugin,
     tmp_path: Path,

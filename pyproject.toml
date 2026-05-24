@@ -61,7 +61,6 @@ dev = [
   "ruff>=0.15.9",
   "mypy>=1.19.1",
   "coverage-badge>=1.1.2",
-  "python-semantic-release>=10.5.3",
   "assertpy>=1.1",
   "httpx>=0.28.1",
 ]
@@ -184,19 +183,6 @@ packages = [
 
 [tool.setuptools.package-data]
 lintro = ["tools/*.json"]
-
-[tool.semantic_release]
-branch = "main"
-version_variables = [
-  "pyproject.toml:project.version",
-  "lintro/__init__.py:__version__",
-]
-upload_to_release = false
-build_command = ""
-changelog_file = "CHANGELOG.md"
-commit_parser = "angular"
-tag_format = "v{version}"
-major_on_zero = false
 
 [tool.ruff]
 line-length = 88

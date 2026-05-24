@@ -1,74 +1,48 @@
 # Workflows overview
 
 This repository uses GitHub Actions for quality gates, release automation, and
-publishing.
+publishing. Shared workflows are thin callers to
+[lgtm-ci](https://github.com/lgtm-hq/lgtm-ci) reusable workflows pinned at
+`22a7c110415d75843c2c216f95ed47aaeb8e26fc` (**v0.18.1**; includes
+[lgtm-ci#206](https://github.com/lgtm-hq/lgtm-ci/pull/206) host-user docker quality and
+`lintro-tool-options` passthrough).
 
-## Token Usage Guidelines
+## CI (main branch)
 
-Workflows use one of two token patterns:
+- **test-ci.yml** — Python unit/component tests (3.11 + 3.14) via
+  `reusable-test-python.yml`
+- **docker-ci.yml** — Manifest sync, multi-stage Docker build, dogfooding quality
+  (`reusable-quality.yml` + CI-built image), integration tests, security audit, GHCR
+  publish (main), CI tag cleanup
 
-### Standard Token (`secrets.GITHUB_TOKEN`)
+## Release
 
-Use for regular CI operations that don't require elevated permissions:
+- **release-version-pr.yml** — Opens version bump PR via
+  `reusable-release-version-pr.yml` (Python ecosystem, auto-merge, max minor)
+- **release-auto-tag.yml** — Creates tags on release commits via
+  `reusable-release-auto-tag.yml` (`create-release: false`; GitHub Release is created by
+  publish workflow)
 
-- Quality checks (linting, testing, code scanning)
-- PR comments and status updates
-- Artifact uploads
-- Dependency review
+## Publish
 
-### Release Token Fallback (`secrets.RELEASE_TOKEN || secrets.GITHUB_TOKEN`)
+- **publish-pypi-on-tag.yml** — PyPI publish via `reusable-publish-pypi.yml`; bespoke
+  GitHub Release assets, Homebrew (`build-binary.yml`), and Docker
+  (`docker-build-publish.yml`)
+- **docker-build-publish.yml** — Multi-arch GHCR publish via `reusable-docker.yml`
+  (full + base images, registry cache at `:cache`, no-cache on version tags)
 
-Use for operations requiring elevated permissions or bypassing rate limits:
+## Security & maintenance (bespoke)
 
-- **Tag creation/pushing** (auto-tag-on-main.yml)
-- **Release PR creation** (semantic-release.yml)
-- **Internal reference bumping** (auto-bump-internal-refs.yml)
-- **SBOM generation on main** (sbom-on-main.yml)
+- **vuln-suppression-check.yml**, **lintro-report-scheduled.yml**,
+  **pr-comment-cleanup.yml**, **test-built-package.yml**, **build-binary.yml**
 
-The fallback ensures workflows function with standard token when RELEASE_TOKEN is
-unavailable, while benefiting from elevated permissions when available.
+## Token patterns
 
-## Concurrency Group Naming
+- **`secrets.GITHUB_TOKEN`** — CI, PR comments, artifacts
+- **`secrets.RELEASE_APP_*`** — Release PR and auto-tag (GitHub App installation token
+  via lgtm-ci release workflows)
 
-All workflows use concurrency groups to prevent duplicate runs. The standard pattern is:
+## Concurrency
 
-```yaml
-<context>-${{ github.ref }}
-```
-
-Examples:
-
-- `tests-${{ github.ref }}` - Test workflows
-- `lintro-ci-${{ github.ref }}` - Lintro CI analysis
-- `docker-${{ github.ref }}` - Docker build/test
-- `pages-deploy-${{ github.ref }}` - GitHub Pages deployment
-
-For workflows that should be unique per commit (e.g., manual TestPyPI publish), use
-`${{ github.sha }}` instead of `${{ github.ref }}`.
-
-## Quick Reference by File Name
-
-- ci-pipeline.yml: Gated CI pipeline — resolve-tools, docker-build, lint, test (with
-  coverage), smoke-test, publish, and deploy-pages (coverage to GitHub Pages on main).
-- ci-lintro-analysis.yml: Run Lintro on PRs/pushes; Docker build; PR comment.
-- lintro-report-scheduled.yml: Scheduled/manual Lintro run that uploads a markdown
-  report.
-- docker-build-publish.yml: Build/test Docker image; publish to GHCR on main/release.
-- lintro-renovate.yml: Renovate bot.
-- reusable-quality.yml: Reusable quality gate (Lintro format/check) exporting the
-  project version.
-- reusable-build.yml: Reusable build (uv sync, build sdist/wheel, twine check), uploads
-  `dist/`.
-- publish-pypi-on-tag.yml: Publish to PyPI on tag push (OIDC). Verifies pushed tag
-  matches `pyproject.toml` version.
-- publish-pypi-on-release.yml: [Removed] superseded by tag-based publishing.
-- publish-testpypi.yml: Manual dispatch to publish to TestPyPI (OIDC), reusing quality
-  and build workflows.
-- release-create.yml: [Removed] replaced by Release PR → tag flow.
-- auto-tag-on-main.yml: On push to `main` affecting `pyproject.toml`, guarded by a
-  release-commit check, if the version changed and the tag doesn't exist, create and
-  push the tag.
-- semantic-release.yml: Computes next version and opens a Release PR via uvx
-  python-semantic-release (no direct push to main).
-- semantic-pr-title.yml: Validates PR title follows Conventional Commits and
-  comments/fails if not, preventing merges until corrected.
+Standard pattern: `<workflow>-${{ github.ref }}` with
+`cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}` for CI workflows.

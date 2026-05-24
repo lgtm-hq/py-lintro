@@ -9,6 +9,8 @@ venv
 env
 # Claude Code project memory and config (not source code)
 .claude
+# Sparse lgtm-ci tooling checkout for reusable workflow scripts (not project source)
+.lgtm-ci-tooling
 
 __pycache__
 .lintro/*

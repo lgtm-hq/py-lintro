@@ -1,21 +1,25 @@
 # SPDX-License-Identifier: MIT
 # For license details, see the repository root LICENSE file.
 ---
-name: Publish - TestPyPI Staging
+name: Release - Auto Tag
 
 'on':
+  push:
+    branches: [main]
   workflow_dispatch:
 
 permissions: {}
 
+concurrency:
+  group: release-auto-tag-${{ github.repository }}
+  cancel-in-progress: false
+
 jobs:
-  publish:
+  auto-tag:
     # yamllint disable-line rule:line-length
-    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-publish-pypi.yml@22a7c110415d75843c2c216f95ed47aaeb8e26fc
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-release-auto-tag.yml@22a7c110415d75843c2c216f95ed47aaeb8e26fc
     with:
-      test-pypi: true
-      update-homebrew: false
-      python-version: '3.14'
+      create-release: false
       tooling-ref: '22a7c110415d75843c2c216f95ed47aaeb8e26fc'
       egress-policy: block
       allowed-endpoints: >
@@ -24,11 +28,8 @@ jobs:
         codeload.github.com:443
         release-assets.githubusercontent.com:443
         objects.githubusercontent.com:443
-        pypi.org:443
-        files.pythonhosted.org:443
-        test.pypi.org:443
-        upload.test.pypi.org:443
+    secrets:
+      RELEASE_APP_ID: ${{ secrets.RELEASE_APP_ID }}
+      RELEASE_APP_PRIVATE_KEY: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
     permissions:
-      contents: read
-      id-token: write
-      attestations: write
+      contents: write

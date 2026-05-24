@@ -5,49 +5,14 @@ inputs in its action.yml.
 
 ## Versioning Strategy
 
-Internal actions use **semantic version tags** with the `actions-` prefix (e.g.,
-`actions-v1.0.0`, `actions-v1.0.1`) instead of commit SHAs. Workflows reference actions
-using explicit version tags like `@actions-v1.0.10`. This approach:
+**Local composite actions** in this repository (referenced as
+`uses: ./.github/actions/<name>`) ship with the py-lintro repo. They are not tagged or
+versioned separately. When you change a local action, update the workflows that call it
+in the same commit/PR — there is no `@actions-v*` pin to bump.
 
-- Provides explicit, reproducible builds
-- Provides clear versioning for action stability
-- Separates action versions from lintro PyPI release versions
-- Follows industry best practices for monorepos
-
-### Automatic Versioning
-
-The `auto-version-actions.yml` workflow automatically creates new patch version tags
-when actions or reusable workflows are modified.
-
-**How it works:**
-
-1. Modify an action file (e.g., `.github/actions/setup-env/action.yml`)
-2. Commit and push to main
-3. Workflow automatically creates `actions-v1.0.0` (first run) or the next patch version
-   (e.g., `actions-v1.0.11`)
-4. Update workflow references to use the new version tag
-
-### Updating Workflow References
-
-After a new action version is created, update workflow references:
-
-1. Check the latest tag: `git tag -l 'actions-v1.*' | sort -V | tail -1`
-2. Update all workflow files referencing `@actions-v1.x.x` to the new version
-3. Commit and push the updated workflows
-
-### Manual Versioning (Breaking Changes Only)
-
-For major version changes (breaking changes), manually create a new major version tag:
-
-1. **Make your breaking changes** to the action files
-2. **Create and push the tag**:
-
-   ```bash
-   git tag actions-v2.0.0 -m "Major version: breaking changes"
-   git push origin actions-v2.0.0
-   ```
-
-3. **Update workflow references** to use `@actions-v2.0.0`
+**External actions** (Marketplace, other repos, or lgtm-ci) must stay pinned to commit
+SHAs in workflow files, per org policy. Breaking changes to those actions are absorbed
+by repinning the SHA in the caller workflow.
 
 ## .github/actions/setup-docker
 
@@ -71,51 +36,6 @@ Example:
     registry: ghcr.io
     username: ${{ github.actor }}
     password: ${{ secrets.GITHUB_TOKEN }}
-```
-
-## .github/actions/post-pr-comment
-
-- Purpose: Delete previous PR comments by marker (optional) and post a prepared comment
-  file
-- Inputs:
-  - file (string, required): path to the comment file
-  - marker (string, optional): marker used to delete previous comments
-
-Prerequisites:
-
-- The workflow must set up Python and `uv` and sync project dependencies (the composite
-  invokes repo scripts that use `uv` and Python deps like `httpx`).
-- Required env vars are provided by GitHub Actions: `GITHUB_TOKEN`, `GITHUB_REPOSITORY`,
-  and `github.event.pull_request.number`.
-
-Example:
-
-```yaml
-- name: Comment PR
-  uses: ./.github/actions/post-pr-comment
-  with:
-    file: pr-comment.txt
-    marker: '<!-- lintro-report -->'
-```
-
-## .github/actions/pages-deploy
-
-- Purpose: Configure Pages, upload an artifact directory, and deploy
-- Inputs:
-  - path (string, required): directory to upload for Pages
-
-Usage note:
-
-- Ensure the directory specified by `path` exists before calling the composite (e.g.,
-  generate `_site` first).
-
-Example:
-
-```yaml
-- name: Deploy coverage report to Pages
-  uses: ./.github/actions/pages-deploy
-  with:
-    path: _site
 ```
 
 ## .github/actions/extract-version

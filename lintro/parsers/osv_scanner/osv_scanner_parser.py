@@ -196,6 +196,41 @@ def _parse_single_result(result: dict[str, Any]) -> list[OsvScannerIssue]:
     return issues
 
 
+def extract_osv_scanner_payload(output: str | None) -> dict[str, Any] | None:
+    """Extract the JSON object from mixed osv-scanner stdout/stderr output.
+
+    osv-scanner may emit human-readable log lines before or after the JSON
+    payload. ``_run_subprocess`` also concatenates stdout and stderr.
+
+    Args:
+        output: Combined subprocess output from osv-scanner.
+
+    Returns:
+        Parsed JSON object when a payload is present, otherwise ``None``.
+    """
+    if output is None or not output.strip():
+        return None
+
+    start = output.find("{")
+    if start == -1:
+        return None
+
+    try:
+        data, _ = json.JSONDecoder().raw_decode(output[start:])
+    except (json.JSONDecodeError, ValueError) as exc:
+        logger.warning("Failed to parse OSV-Scanner JSON output: {}", exc)
+        return None
+
+    if not isinstance(data, dict):
+        logger.warning(
+            "OSV-Scanner output must be a JSON object, got {}",
+            type(data).__name__,
+        )
+        return None
+
+    return data
+
+
 def parse_osv_scanner_output(output: str | None) -> list[OsvScannerIssue]:
     """Parse OSV-Scanner JSON output into OsvScannerIssue objects.
 
@@ -206,23 +241,8 @@ def parse_osv_scanner_output(output: str | None) -> list[OsvScannerIssue]:
         List of parsed vulnerability issues. Returns empty list for
         None, empty string, invalid JSON, or unexpected data structure.
     """
-    if output is None or not output.strip():
-        return []
-
-    try:
-        # Use raw_decode to ignore trailing stderr text that
-        # _run_subprocess appends after the JSON stdout.
-        decoder = json.JSONDecoder()
-        data, _ = decoder.raw_decode(output.lstrip())
-    except (json.JSONDecodeError, ValueError) as e:
-        logger.warning("Failed to parse OSV-Scanner JSON output: {}", e)
-        return []
-
-    if not isinstance(data, dict):
-        logger.warning(
-            "OSV-Scanner output must be a JSON object, got {}",
-            type(data).__name__,
-        )
+    data = extract_osv_scanner_payload(output)
+    if data is None:
         return []
 
     results = data.get("results", [])
