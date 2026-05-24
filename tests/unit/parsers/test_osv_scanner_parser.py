@@ -236,6 +236,17 @@ def test_parse_invalid_json() -> None:
     assert_that(issues).is_equal_to([])
 
 
+def test_parse_json_with_leading_log_lines() -> None:
+    """Leading osv-scanner log lines before JSON do not break parsing."""
+    output = (
+        "Scanning dir /tmp/example\n"
+        "Starting filesystem walk for root: /\n"
+        '{"results": [], "experimental_config": {"licenses": {"summary": false}}}\n'
+    )
+    issues = parse_osv_scanner_output(output)
+    assert_that(issues).is_equal_to([])
+
+
 def test_parse_non_object_json() -> None:
     """Non-object JSON returns empty list."""
     issues = parse_osv_scanner_output(json.dumps([1, 2, 3]))
