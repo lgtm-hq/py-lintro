@@ -21,3 +21,8 @@ reason = "smol-toml@1.6.0 — transitive dev dep via astro, pending upstream upd
 id = "GHSA-48c2-rrv3-qjmp"
 ignoreUntil = 2026-06-25
 reason = "yaml@2.7.1 — transitive dev dep, pending upstream update to 2.8.3"
+
+[[IgnoredVulns]]
+id = "GHSA-77vg-94rm-hx3p"
+ignoreUntil = 2026-06-25
+reason = "devalue@5.6.4 — transitive dev dep via astro; root/svelte devalue resolved to 5.8.1 but astro still vendors 5.6.4"

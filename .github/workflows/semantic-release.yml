@@ -2,6 +2,11 @@
 # For license details, see the repository root LICENSE file.
 ---
 name: Release - Automated PR Creation
+run-name: >-
+  Release PR via ${{ github.event_name }} on
+  ${{ github.event_name == 'workflow_run'
+    && github.event.workflow_run.head_branch
+    || github.ref_name }}
 # Computes next semantic version using conventional commits and opens release PR.
 # Prevents direct pushes to main by requiring PR workflow for all releases.
 #
@@ -116,6 +121,20 @@ jobs:
               || github.sha }}
           token: ${{ steps.app-token.outputs.token }}
           persist-credentials: false
+
+      - name: Write release trigger summary
+        env:
+          CHECKOUT_SHA: >-
+            ${{ github.event_name == 'workflow_run'
+              && github.event.workflow_run.head_sha
+              || github.sha }}
+          UPSTREAM_CONCLUSION: ${{ github.event.workflow_run.conclusion }}
+          UPSTREAM_HEAD_BRANCH: ${{ github.event.workflow_run.head_branch }}
+          UPSTREAM_HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+          UPSTREAM_RUN_ID: ${{ github.event.workflow_run.id }}
+          UPSTREAM_RUN_URL: ${{ github.event.workflow_run.html_url }}
+          UPSTREAM_WORKFLOW_NAME: ${{ github.event.workflow_run.name }}
+        run: scripts/ci/github/release-visibility.sh write_summary
 
       # Skip push-triggered runs whose commit touched any tools-image input.
       # The tools-image workflow is running (or queued) for the same commit;
@@ -234,3 +253,37 @@ jobs:
         run: >
           scripts/ci/github/semantic-release-helpers.sh merge_release_pr
           "${{ steps.cpr.outputs.pull-request-number }}"
+
+  report-release-failure:
+    name: Report release automation failure
+    needs: [open-release-pr]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    if: ${{ always() && needs.open-release-pr.result == 'failure' }}
+    permissions:
+      actions: read
+      contents: read
+      issues: write
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          persist-credentials: false
+
+      - name: Create or update failure issue
+        env:
+          CHECKOUT_SHA: >-
+            ${{ github.event_name == 'workflow_run'
+              && github.event.workflow_run.head_sha
+              || github.sha }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          UPSTREAM_CONCLUSION: ${{ github.event.workflow_run.conclusion }}
+          UPSTREAM_HEAD_BRANCH: ${{ github.event.workflow_run.head_branch }}
+          UPSTREAM_HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+          UPSTREAM_RUN_ID: ${{ github.event.workflow_run.id }}
+          UPSTREAM_RUN_URL: ${{ github.event.workflow_run.html_url }}
+          UPSTREAM_WORKFLOW_NAME: ${{ github.event.workflow_run.name }}
+        run: scripts/ci/github/release-visibility.sh notify_failure
