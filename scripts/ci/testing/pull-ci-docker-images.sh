@@ -40,6 +40,7 @@ fi
 pull_full() {
 	docker pull "${registry}/py-lintro:${ci_tag}"
 	docker tag "${registry}/py-lintro:${ci_tag}" py-lintro:latest
+	docker tag "${registry}/py-lintro:${ci_tag}" py-lintro-test:latest
 }
 
 pull_base() {

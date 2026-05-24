@@ -333,6 +333,7 @@ jobs:
     runs-on: ubuntu-24.04
     permissions:
       contents: read
+      packages: read
       pull-requests: write
     timeout-minutes: 15
     steps:
@@ -351,6 +352,14 @@ jobs:
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           persist-credentials: false
+      - name: Log in to GHCR
+        if: needs.docker-build.outputs.is-fork != 'true'
+        # yamllint disable-line rule:line-length
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3.7.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
       - name: Pull CI image from GHCR
         if: needs.docker-build.outputs.is-fork != 'true'
         env:
@@ -406,6 +415,8 @@ jobs:
             docker.io:443
             registry-1.docker.io:443
             auth.docker.io:443
+            production.cloudflare.docker.com:443
+            production.cloudfront.docker.com:443
             pypi.org:443
             files.pythonhosted.org:443
             api.osv.dev:443

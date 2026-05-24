@@ -27,6 +27,7 @@ jobs:
         pypi.org:443
         files.pythonhosted.org:443
         test.pypi.org:443
+        upload.test.pypi.org:443
     permissions:
       contents: read
       id-token: write
