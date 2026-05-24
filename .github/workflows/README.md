@@ -3,11 +3,9 @@
 This repository uses GitHub Actions for quality gates, release automation, and
 publishing. Shared workflows are thin callers to
 [lgtm-ci](https://github.com/lgtm-hq/lgtm-ci) reusable workflows pinned at
-`80dbd2fc1568963da3bc24c468ff2221ff71b904` (main after **#201**; supersedes v0.18.0 for
-`lintro-image` on `reusable-quality.yml`). Dogfooding in **docker-ci.yml** pins
-`5a40e44385bc69d12ddbb89e4ec9d42603f32724`
-([lgtm-ci#206](https://github.com/lgtm-hq/lgtm-ci/pull/206)) for host-user docker
-quality runs until merged to main.
+`fe0b8d135c36a8c636b65c3e34f174839313712e` (**v0.18.1**; includes
+[lgtm-ci#206](https://github.com/lgtm-hq/lgtm-ci/pull/206) host-user docker quality and
+`lintro-tool-options` passthrough).
 
 ## CI (main branch)
 
