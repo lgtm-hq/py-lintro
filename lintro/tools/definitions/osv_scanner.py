@@ -274,9 +274,10 @@ class OsvScannerPlugin(BaseToolPlugin):
         # non-zero even when the parsed results list is empty.
         if not success and len(issues) == 0:
             payload = extract_osv_scanner_payload(output)
-            results = payload.get("results", []) if payload is not None else None
-            if isinstance(results, list) and len(results) == 0:
-                success = True
+            if payload is not None and "results" in payload:
+                results = payload["results"]
+                if isinstance(results, list) and len(results) == 0:
+                    success = True
 
         # Determine overall success: subprocess must succeed AND no issues
         # found. A non-zero exit with 0 parsed issues indicates an execution
