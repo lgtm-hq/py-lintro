@@ -17,10 +17,10 @@ concurrency:
 jobs:
   auto-tag:
     # yamllint disable-line rule:line-length
-    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-release-auto-tag.yml@fe0b8d135c36a8c636b65c3e34f174839313712e
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-release-auto-tag.yml@22a7c110415d75843c2c216f95ed47aaeb8e26fc
     with:
       create-release: false
-      tooling-ref: 'fe0b8d135c36a8c636b65c3e34f174839313712e'
+      tooling-ref: '22a7c110415d75843c2c216f95ed47aaeb8e26fc'
       egress-policy: block
       allowed-endpoints: >
         github.com:443

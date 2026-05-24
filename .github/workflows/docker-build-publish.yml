@@ -23,7 +23,7 @@ jobs:
   docker-full:
     name: 🐳 Docker Full Image
     # yamllint disable-line rule:line-length
-    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-docker.yml@fe0b8d135c36a8c636b65c3e34f174839313712e
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-docker.yml@22a7c110415d75843c2c216f95ed47aaeb8e26fc
     permissions:
       contents: read
       packages: write
@@ -52,7 +52,7 @@ jobs:
       no-cache: ${{ startsWith(github.ref, 'refs/tags/') }}
       provenance: false
       sbom: false
-      tooling-ref: 'fe0b8d135c36a8c636b65c3e34f174839313712e'
+      tooling-ref: '22a7c110415d75843c2c216f95ed47aaeb8e26fc'
       egress-policy: block
       allowed-endpoints: >
         github.com:443
@@ -86,7 +86,7 @@ jobs:
     name: 🐳 Docker Base Image
     needs: docker-full
     # yamllint disable-line rule:line-length
-    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-docker.yml@fe0b8d135c36a8c636b65c3e34f174839313712e
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-docker.yml@22a7c110415d75843c2c216f95ed47aaeb8e26fc
     permissions:
       contents: read
       packages: write
@@ -115,17 +115,32 @@ jobs:
       no-cache: ${{ startsWith(github.ref, 'refs/tags/') }}
       provenance: false
       sbom: false
-      tooling-ref: 'fe0b8d135c36a8c636b65c3e34f174839313712e'
+      tooling-ref: '22a7c110415d75843c2c216f95ed47aaeb8e26fc'
       egress-policy: block
       allowed-endpoints: >
         github.com:443
         api.github.com:443
+        codeload.github.com:443
+        release-assets.githubusercontent.com:443
+        objects.githubusercontent.com:443
         ghcr.io:443
         pkg-containers.githubusercontent.com:443
         docker.io:443
         registry-1.docker.io:443
         auth.docker.io:443
+        production.cloudflare.docker.com:443
+        production.cloudfront.docker.com:443
         pypi.org:443
         files.pythonhosted.org:443
+        static.rust-lang.org:443
+        bun.sh:443
         astral.sh:443
         releases.astral.sh:443
+        sh.rustup.rs:443
+        deb.debian.org:80
+        registry.npmjs.org:443
+        crates.io:443
+        static.crates.io:443
+        index.crates.io:443
+        semgrep.dev:443
+        metrics.semgrep.dev:443

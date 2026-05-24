@@ -3,7 +3,7 @@
 This repository uses GitHub Actions for quality gates, release automation, and
 publishing. Shared workflows are thin callers to
 [lgtm-ci](https://github.com/lgtm-hq/lgtm-ci) reusable workflows pinned at
-`fe0b8d135c36a8c636b65c3e34f174839313712e` (**v0.18.1**; includes
+`22a7c110415d75843c2c216f95ed47aaeb8e26fc` (**v0.18.1**; includes
 [lgtm-ci#206](https://github.com/lgtm-hq/lgtm-ci/pull/206) host-user docker quality and
 `lintro-tool-options` passthrough).
 

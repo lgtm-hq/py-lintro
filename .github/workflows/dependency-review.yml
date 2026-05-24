@@ -17,7 +17,7 @@ concurrency:
 jobs:
   dependency-review:
     # yamllint disable-line rule:line-length
-    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-dependency-review.yml@fe0b8d135c36a8c636b65c3e34f174839313712e
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-dependency-review.yml@22a7c110415d75843c2c216f95ed47aaeb8e26fc
     with:
       fail-on-severity: high
       egress-policy: block
@@ -29,7 +29,7 @@ jobs:
         objects.githubusercontent.com:443
         api.deps.dev:443
         api.securityscorecards.dev:443
-      tooling-ref: 'fe0b8d135c36a8c636b65c3e34f174839313712e'
+      tooling-ref: '22a7c110415d75843c2c216f95ed47aaeb8e26fc'
     permissions:
       contents: read
       pull-requests: read
