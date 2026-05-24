@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import subprocess
 import tempfile
 from pathlib import Path
@@ -63,6 +64,7 @@ def test_detect_fork_pr_writes_github_output(
         text=True,
         check=False,
         env={
+            **os.environ.copy(),
             "EVENT_NAME": event_name,
             "IS_FORK_PR": is_fork_pr,
             "GITHUB_OUTPUT": output_path,
@@ -81,7 +83,7 @@ def test_pull_ci_docker_images_requires_ci_tag() -> None:
         capture_output=True,
         text=True,
         check=False,
-        env={"CI_TAG": ""},
+        env={**os.environ.copy(), "CI_TAG": ""},
     )
     assert_that(result.returncode).is_equal_to(2)
     assert_that(result.stderr).contains("CI_TAG is required")
