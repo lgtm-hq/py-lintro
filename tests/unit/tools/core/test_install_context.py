@@ -152,6 +152,73 @@ def test_detect_pip_default(
     assert_that(result).is_equal_to(InstallContext.PIP)
 
 
+@pytest.mark.parametrize(
+    ("install_file", "executable", "expected"),
+    [
+        (
+            "/usr/lib/python3.11/site-packages/lintro/tools/core/install_context.py",
+            "/opt/homebrew/Cellar/lintro/0.64.1/bin/lintro",
+            InstallContext.HOMEBREW_BIN,
+        ),
+        (
+            "/opt/homebrew/Cellar/lintro-full/0.64.1/libexec/lib/python3.14/"
+            "site-packages/lintro/tools/core/install_context.py",
+            "/opt/homebrew/Cellar/lintro-full/0.64.1/bin/lintro",
+            InstallContext.HOMEBREW_FULL,
+        ),
+        (
+            "/opt/homebrew/Cellar/lintro-bin/0.63.4/libexec/lib/python3.14/"
+            "site-packages/lintro/tools/core/install_context.py",
+            "/opt/homebrew/Cellar/lintro-bin/0.63.4/bin/lintro",
+            InstallContext.HOMEBREW_BIN,
+        ),
+        (
+            "/usr/lib/python3.11/site-packages/lintro/tools/core/install_context.py",
+            "/usr/bin/python3",
+            InstallContext.PIP,
+        ),
+    ],
+    ids=[
+        "homebrew_binary_formula",
+        "homebrew_full_formula",
+        "homebrew_legacy_lintro_bin",
+        "pip_default",
+    ],
+)
+def test_detect_homebrew_install_context(
+    install_file: str,
+    executable: str,
+    expected: InstallContext,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Detect Homebrew binary vs full formula paths from executable and module path."""
+    monkeypatch.delenv("LINTRO_DOCKER", raising=False)
+    monkeypatch.delenv("CONTAINER", raising=False)
+
+    with (
+        patch(
+            "lintro.tools.core.install_context.os.path.exists",
+            return_value=False,
+        ),
+        patch(
+            "lintro.tools.core.install_context.__file__",
+            install_file,
+            create=True,
+        ),
+        patch(
+            "lintro.tools.core.install_context.sys.executable",
+            executable,
+        ),
+        patch(
+            "lintro.tools.core.install_context.os.path.realpath",
+            side_effect=lambda path: path,
+        ),
+    ):
+        result = _detect_install_context()
+
+    assert_that(result).is_equal_to(expected)
+
+
 # ---------------------------------------------------------------------------
 # CI detection
 # ---------------------------------------------------------------------------
