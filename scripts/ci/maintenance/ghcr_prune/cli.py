@@ -34,7 +34,6 @@ from .registry import (
     _exchange_registry_token,
     collect_referenced_digests,
 )
-from .tags import BUILDCACHE_PACKAGES
 from .version import GhcrVersion
 
 # Default minimum age before an untagged version can be deleted (days)
@@ -44,7 +43,7 @@ DEFAULT_MIN_AGE_DAYS = 7
 DEFAULT_BUILDCACHE_PR_AGE_DAYS = 14
 
 # Production image packages — referenced-digest protection applies here.
-_PROD_PACKAGES: tuple[str, ...] = ("py-lintro", "py-lintro-base", "lintro-tools")
+_PROD_PACKAGES: tuple[str, ...] = ("py-lintro", "py-lintro-base")
 
 
 def _read_int_env(name: str, default: int) -> int:
@@ -123,14 +122,6 @@ def main() -> int:
                 min_age_days=min_age_days,
                 keep_n=keep_n,
                 protect_referenced=protect_referenced,
-            )
-        for package_name in BUILDCACHE_PACKAGES:
-            total_deleted += prune_buildcache_package(
-                client=typed_client,
-                owner=owner,
-                package_name=package_name,
-                dry_run=dry_run,
-                min_age_days=min_age_days,
                 pr_age_days=pr_age_days,
             )
 
@@ -155,6 +146,7 @@ def _prune_one_prod_package(
     min_age_days: int,
     keep_n: int,
     protect_referenced: bool,
+    pr_age_days: int,
 ) -> int:
     """Prefetch + protect + prune one production package.
 
@@ -171,6 +163,7 @@ def _prune_one_prod_package(
         min_age_days: Forwarded.
         keep_n: Forwarded.
         protect_referenced: When False, skips the registry walk entirely.
+        pr_age_days: Minimum age in days before ephemeral PR tags are deleted.
 
     Returns:
         Number of versions deleted (0 when the package is skipped).
@@ -229,7 +222,7 @@ def _prune_one_prod_package(
                 len(referenced),
                 package_name,
             )
-    return prune_package(
+    deleted = prune_package(
         client=client,
         owner=owner,
         package_name=package_name,
@@ -239,3 +232,13 @@ def _prune_one_prod_package(
         referenced_digests=referenced,
         versions=prefetched,
     )
+    deleted += prune_buildcache_package(
+        client=client,
+        owner=owner,
+        package_name=package_name,
+        dry_run=dry_run,
+        min_age_days=min_age_days,
+        pr_age_days=pr_age_days,
+        prune_untagged=False,
+    )
+    return deleted

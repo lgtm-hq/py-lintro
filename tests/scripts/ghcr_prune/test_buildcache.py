@@ -1,7 +1,8 @@
 """Tests for buildcache retention rules.
 
-Buildcache packages preserve ``main`` permanently and reap ephemeral
-``pr-<N>`` / ``mq-<run>`` / ``dispatch-<run>`` tags after ``pr_age_days``.
+Registry cache tags live on production packages (``:cache`` on py-lintro /
+py-lintro-base). Ephemeral ``pr-<N>`` / ``mq-<run>`` / ``dispatch-<run>``
+exports are reaped after ``pr_age_days``; permanent ``cache`` survives.
 """
 
 from __future__ import annotations
@@ -14,7 +15,6 @@ from assertpy import assert_that
 
 import scripts.ci.maintenance.ghcr_prune.cli as mod
 from scripts.ci.maintenance.ghcr_prune_untagged import (
-    BUILDCACHE_PACKAGES,
     main,
     prune_buildcache_package,
 )
@@ -31,10 +31,10 @@ from ._mocks import (
 
 @pytest.mark.parametrize(
     "tag",
-    ["main"],
+    ["cache", "main"],
 )
-def test_buildcache_preserves_main_tag(tag: str) -> None:
-    """``main`` is never deleted regardless of age.
+def test_buildcache_preserves_permanent_tags(tag: str) -> None:
+    """``cache`` and ``main`` are never deleted regardless of age.
 
     Args:
         tag: Tag string to apply (parametrized for future expansion).
@@ -54,7 +54,7 @@ def test_buildcache_preserves_main_tag(tag: str) -> None:
     n = prune_buildcache_package(
         client=client,
         owner="owner",
-        package_name="py-lintro-buildcache",
+        package_name="py-lintro",
         dry_run=False,
         min_age_days=7,
         pr_age_days=14,
@@ -96,7 +96,7 @@ def test_buildcache_deletes_old_ephemeral_tags(
     n = prune_buildcache_package(
         client=client,
         owner="owner",
-        package_name="py-lintro-buildcache",
+        package_name="py-lintro",
         dry_run=False,
         min_age_days=7,
         pr_age_days=14,
@@ -122,7 +122,7 @@ def test_buildcache_preserves_young_pr_tag() -> None:
     n = prune_buildcache_package(
         client=client,
         owner="owner",
-        package_name="py-lintro-buildcache",
+        package_name="py-lintro",
         dry_run=False,
         min_age_days=7,
         pr_age_days=14,
@@ -148,13 +148,40 @@ def test_buildcache_deletes_old_untagged() -> None:
     n = prune_buildcache_package(
         client=client,
         owner="owner",
-        package_name="py-lintro-buildcache",
+        package_name="py-lintro",
         dry_run=False,
         min_age_days=7,
         pr_age_days=14,
     )
     assert_that(n).is_equal_to(1)
     assert_that(deleted).is_equal_to([99])
+
+
+def test_buildcache_skips_untagged_on_prod_packages() -> None:
+    """Production packages skip untagged deletion (handled by ``prune_package``)."""
+    deleted: list[int] = []
+    client = _buildcache_client(
+        versions_data=[
+            {
+                "id": 99,
+                "created_at": now_minus(days=30),
+                "metadata": {"container": {"tags": []}},
+            },
+        ],
+        deleted=deleted,
+    )
+
+    n = prune_buildcache_package(
+        client=client,
+        owner="owner",
+        package_name="py-lintro",
+        dry_run=False,
+        min_age_days=7,
+        pr_age_days=14,
+        prune_untagged=False,
+    )
+    assert_that(n).is_equal_to(0)
+    assert_that(deleted).is_equal_to([])
 
 
 def test_buildcache_protects_mixed_tags() -> None:
@@ -165,7 +192,7 @@ def test_buildcache_protects_mixed_tags() -> None:
             {
                 "id": 5,
                 "created_at": now_minus(days=60),
-                "metadata": {"container": {"tags": ["main", "pr-3"]}},
+                "metadata": {"container": {"tags": ["cache", "pr-3"]}},
             },
         ],
         deleted=deleted,
@@ -174,7 +201,7 @@ def test_buildcache_protects_mixed_tags() -> None:
     n = prune_buildcache_package(
         client=client,
         owner="owner",
-        package_name="py-lintro-buildcache",
+        package_name="py-lintro",
         dry_run=False,
         min_age_days=7,
         pr_age_days=14,
@@ -183,10 +210,10 @@ def test_buildcache_protects_mixed_tags() -> None:
     assert_that(deleted).is_equal_to([])
 
 
-def test_main_iterates_buildcache_packages(
+def test_main_prunes_ephemeral_on_prod_packages(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """``main()`` invokes prune for every package in ``BUILDCACHE_PACKAGES``.
+    """``main()`` prunes ephemeral cache tags on production packages.
 
     Args:
         monkeypatch: Pytest monkeypatch fixture.
@@ -217,10 +244,8 @@ def test_main_iterates_buildcache_packages(
             if "/users/" in url and "/packages/" not in url:
                 return MockOwnerResponse()
             for name in (
-                *BUILDCACHE_PACKAGES,
                 "py-lintro-base",
                 "py-lintro",
-                "lintro-tools",
             ):
                 if f"/{name}/" in url:
                     seen.append(name)
@@ -246,11 +271,8 @@ def test_main_iterates_buildcache_packages(
 
     rc = main()
     assert_that(rc).is_equal_to(0)
-    for pkg in BUILDCACHE_PACKAGES:
-        assert_that(seen).contains(pkg)
     assert_that(seen).contains("py-lintro-base")
     assert_that(seen).contains("py-lintro")
-    assert_that(seen).contains("lintro-tools")
 
 
 def _buildcache_client(
