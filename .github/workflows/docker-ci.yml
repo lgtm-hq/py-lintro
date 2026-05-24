@@ -210,15 +210,17 @@ jobs:
   dogfooding-quality:
     needs: [docker-build, manifest-sync]
     # yamllint disable-line rule:line-length
-    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-quality.yml@80dbd2fc1568963da3bc24c468ff2221ff71b904
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-quality.yml@5a40e44385bc69d12ddbb89e4ec9d42603f32724
     permissions:
       contents: read
-      packages: read
-      pull-requests: write
+      packages: read # pull lintro-image from GHCR in reusable-quality
+      pull-requests: write # reusable-quality post-pr-comment step
     with:
-      tooling-ref: '80dbd2fc1568963da3bc24c468ff2221ff71b904'
+      tooling-ref: '5a40e44385bc69d12ddbb89e4ec9d42603f32724'
       job-name: '🛠️ Dogfooding Lint'
       post-pr-comment: true
+      lintro-tool-options: >-
+        pydoclint:timeout=120,osv_scanner:check_suppressions=false
       egress-policy: block
       allowed-endpoints: >
         github.com:443
