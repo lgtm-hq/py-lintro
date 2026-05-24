@@ -22,6 +22,7 @@ name: Testing - Built Package Validation
       - pyproject.toml
       - MANIFEST.in
       - scripts/ci/test-*.sh
+  merge_group:
   workflow_dispatch:
 
 permissions: {}

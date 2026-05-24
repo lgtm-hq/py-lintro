@@ -3,8 +3,7 @@
 ---
 name: Publish - PyPI Production
 # Publishes package to PyPI when version tags are pushed.
-# Validates tag matches pyproject.toml version, runs quality/build checks,
-# generates SBOM, and uses OIDC for secure publishing.
+# Validates tag version and default-branch ancestry via lgtm-ci publish preflight.
 
 'on':
   push:
@@ -21,44 +20,82 @@ name: Publish - PyPI Production
 
 permissions: {}
 
+concurrency:
+  group: publish-pypi-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
   quality:
-    # Skip workflow if triggered by internal action version tags
     if: ${{ !startsWith(github.ref_name, 'actions-v') }}
-    uses: ./.github/workflows/reusable-quality.yml
+    # yamllint disable-line rule:line-length
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-quality.yml@d9b302c919efc84fc001e9f3ef63bc9061d04b8f
+    with:
+      post-pr-comment: false
+      tooling-ref: 'd9b302c919efc84fc001e9f3ef63bc9061d04b8f'
+      egress-policy: block
+      allowed-endpoints: >
+        github.com:443
+        api.github.com:443
+        ghcr.io:443
+        pkg-containers.githubusercontent.com:443
     permissions:
       contents: read
-
-  build:
-    needs: quality
-    uses: ./.github/workflows/reusable-build.yml
-    permissions:
-      contents: read
+      packages: read
 
   sbom:
     name: Generate and verify SBOM
-    # SBOM runs in parallel - does own checkout and uses GitHub Dependency Graph API
     if: ${{ !startsWith(github.ref_name, 'actions-v') }}
-    uses: ./.github/workflows/reusable-sbom.yml
+    # yamllint disable-line rule:line-length
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-sbom.yml@d9b302c919efc84fc001e9f3ef63bc9061d04b8f
+    with:
+      target: .
+      target-type: dir
+      sbom-format: cyclonedx-json
+      scan-vulnerabilities: true
+      create-attestation: true
+      tooling-ref: 'd9b302c919efc84fc001e9f3ef63bc9061d04b8f'
     permissions:
       contents: read
-      actions: write
+      security-events: write
       id-token: write
+      attestations: write
 
   publish:
     name: Upload to PyPI
-    needs: [build, quality, sbom]
+    needs: [quality, sbom]
+    # yamllint disable-line rule:line-length
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-publish-pypi.yml@d9b302c919efc84fc001e9f3ef63bc9061d04b8f
+    with:
+      python-version: '3.14'
+      validate: true
+      update-homebrew: false
+      verify-tag-version: true
+      ensure-tag-on-default-branch: true
+      tooling-ref: 'd9b302c919efc84fc001e9f3ef63bc9061d04b8f'
+      egress-policy: block
+      allowed-endpoints: >
+        github.com:443
+        api.github.com:443
+        pypi.org:443
+        upload.pypi.org:443
+        files.pythonhosted.org:443
+        fulcio.sigstore.dev:443
+        rekor.sigstore.dev:443
+        tuf-repo-cdn.sigstore.dev:443
+        oauth2.sigstore.dev:443
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+
+  github-release:
+    name: Create GitHub Release
+    needs: publish
+    if: ${{ !startsWith(github.ref_name, 'actions-v') }}
     runs-on: ubuntu-24.04
     permissions:
       contents: write
-      id-token: write
-    timeout-minutes: 20
-    environment: pypi
-    concurrency:
-      group: pypi-tag-publish-${{ github.ref }}
-      cancel-in-progress: true
-    env:
-      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    timeout-minutes: 15
     steps:
       - name: Harden Runner
         uses: step-security/harden-runner@fe104658747b27e96e4f7e80cd0a94068e53901d
@@ -71,16 +108,10 @@ jobs:
             codeload.github.com:443
             release-assets.githubusercontent.com:443
             objects.githubusercontent.com:443
-            ghcr.io:443
-            pkg-containers.githubusercontent.com:443
             pypi.org:443
-            pypi.python.org:443
-            upload.pypi.org:443
             files.pythonhosted.org:443
-            fulcio.sigstore.dev:443
-            rekor.sigstore.dev:443
-            tuf-repo-cdn.sigstore.dev:443
-            oauth2.sigstore.dev:443
+            astral.sh:443
+            releases.astral.sh:443
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
         with:
@@ -91,27 +122,10 @@ jobs:
         with:
           python-version: '3.14'
         env:
-          # Skip external tools - publish only needs Python and uv
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           BOOTSTRAP_SKIP_INSTALL_TOOLS: '1'
-      - name: Ensure tag points to a commit on main
-        run: bash scripts/ci/ensure-tag-on-main.sh
-
-      - name: Verify tag matches pyproject version
-        run: scripts/ci/verify-tag-matches-pyproject.sh
-
-      - name: Build sdist and wheel
+      - name: Build sdist and wheel for release assets
         run: uv run python -m build
-
-      - name: Twine check
-        run: uv run python -m twine check dist/*
-
-      - name: Publish to PyPI (Trusted Publishing)
-        # yamllint disable-line rule:line-length
-        uses: pypa/gh-action-pypi-publish@ed0c53931b1dc9bd32cbe73a98c7f6766f8a527e # v1.13.0
-        with:
-          skip-existing: true
-          verify-metadata: false
-
       - name: Create GitHub Release
         uses: softprops/action-gh-release@153bb8e04406b158c6c84fc1615b65b24149a1fe # v2
         with:
@@ -124,7 +138,6 @@ jobs:
   homebrew-tap:
     name: Publish Homebrew Tap
     needs: publish
-    # Skip for pre-release tags and internal action version tags.
     if: >-
       !startsWith(github.ref_name, 'actions-v') &&
       !contains(github.ref_name, 'a') &&
@@ -141,11 +154,15 @@ jobs:
   docker-publish:
     name: Publish Docker Images to GHCR
     needs: publish
-    # Skip for pre-release tags and internal action version tags
     # yamllint disable-line rule:line-length
-    if: ${{ !startsWith(github.ref_name, 'actions-v') && !contains(github.ref_name, 'a') && !contains(github.ref_name, 'b') && !contains(github.ref_name, 'rc') }}
+    if: >-
+      !startsWith(github.ref_name, 'actions-v') &&
+      !contains(github.ref_name, 'a') &&
+      !contains(github.ref_name, 'b') &&
+      !contains(github.ref_name, 'rc')
     uses: ./.github/workflows/docker-build-publish.yml
     permissions:
       contents: read
       packages: write
       id-token: write
+      attestations: write

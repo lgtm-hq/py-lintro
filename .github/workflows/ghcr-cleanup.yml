@@ -11,7 +11,7 @@ name: Maintenance - GHCR Registry Cleanup
 
 'on':
   schedule:
-    # Run weekly on Monday at 03:00 UTC (after Sunday tools-image rebuild)
+    # Run weekly on Monday at 03:00 UTC
     - cron: '0 3 * * 1'
   workflow_dispatch:
     inputs:
@@ -27,6 +27,10 @@ name: Maintenance - GHCR Registry Cleanup
         type: number
 
 permissions: {}
+
+concurrency:
+  group: ghcr-cleanup
+  cancel-in-progress: false
 
 jobs:
   prune-untagged:

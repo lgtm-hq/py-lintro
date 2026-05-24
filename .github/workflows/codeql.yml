@@ -2,9 +2,6 @@
 # For license details, see the repository root LICENSE file.
 ---
 name: Security - CodeQL Code Scanning
-# GitHub CodeQL static analysis for security vulnerabilities and code quality.
-# Scans Python code only, uploads results to GitHub Security tab.
-# JS not scanned - only prettier in node_modules (dev dependency).
 
 'on':
   push:
@@ -13,52 +10,34 @@ name: Security - CodeQL Code Scanning
   pull_request:
     branches: [main]
     paths: ['**.py', 'pyproject.toml', '.github/**']
+  merge_group:
   schedule:
-    # Run weekly on Monday at 05:00 UTC
     - cron: '0 5 * * 1'
   workflow_dispatch:
 
 permissions: {}
 
+concurrency:
+  group: codeql-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
 jobs:
-  analyze:
-    name: Analyze
+  codeql:
+    # yamllint disable-line rule:line-length
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-codeql.yml@d9b302c919efc84fc001e9f3ef63bc9061d04b8f
+    with:
+      languages: python
+      build-mode: autobuild
+      config-file: .github/codeql/codeql-config.yml
+      category: '/language:all'
+      egress-policy: block
+      allowed-endpoints: >
+        github.com:443
+        api.github.com:443
+        codeload.github.com:443
+        release-assets.githubusercontent.com:443
+        objects.githubusercontent.com:443
+      tooling-ref: 'd9b302c919efc84fc001e9f3ef63bc9061d04b8f'
     permissions:
       contents: read
       security-events: write
-    runs-on: ubuntu-24.04
-    timeout-minutes: 30
-    concurrency:
-      group: codeql-${{ github.ref }}
-      cancel-in-progress: true
-    steps:
-      - name: Harden Runner
-        uses: step-security/harden-runner@fe104658747b27e96e4f7e80cd0a94068e53901d
-        with:
-          egress-policy: 'block'
-          allowed-endpoints: >
-            github.com:443
-            api.github.com:443
-            codeload.github.com:443
-            release-assets.githubusercontent.com:443
-            objects.githubusercontent.com:443
-      - name: Checkout
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Initialize CodeQL
-        uses: github/codeql-action/init@c10b8064de6f491fea524254123dbe5e09572f13 # v4
-        with:
-          languages: python
-          config-file: .github/codeql/codeql-config.yml
-
-      - name: Autobuild
-        # yamllint disable-line rule:line-length
-        uses: github/codeql-action/autobuild@c10b8064de6f491fea524254123dbe5e09572f13 # v4
-
-      - name: Perform CodeQL Analysis
-        # yamllint disable-line rule:line-length
-        uses: github/codeql-action/analyze@c10b8064de6f491fea524254123dbe5e09572f13 # v4
-        with:
-          category: '/language:all'

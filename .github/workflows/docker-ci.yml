@@ -1,0 +1,610 @@
+# SPDX-License-Identifier: MIT
+# For license details, see the repository root LICENSE file.
+---
+name: CI - Docker
+
+# Docker build once → dogfooding lint → integration tests → security audit →
+# publish (main). manifest-sync runs in parallel (no Docker).
+
+'on':
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened, ready_for_review]
+  merge_group:
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: docker-ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+env:
+  CACHE_OPTS: mode=max,compression=zstd,oci-mediatypes=true,image-manifest=true
+
+jobs:
+  manifest-sync:
+    name: 📋 Manifest Sync
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    timeout-minutes: 5
+    if: >-
+      github.event_name != 'pull_request' ||
+      github.event.pull_request.draft == false
+    steps:
+      - name: Harden Runner
+        uses: step-security/harden-runner@fe104658747b27e96e4f7e80cd0a94068e53901d
+        with:
+          egress-policy: 'block'
+          allowed-endpoints: >
+            github.com:443
+            api.github.com:443
+            codeload.github.com:443
+            release-assets.githubusercontent.com:443
+            objects.githubusercontent.com:443
+            pypi.org:443
+            files.pythonhosted.org:443
+            astral.sh:443
+            releases.astral.sh:443
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - name: Environment setup
+        uses: ./.github/actions/setup-env
+        with:
+          python-version: '3.14'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          BOOTSTRAP_SKIP_INSTALL_TOOLS: '1'
+      - name: Verify generated tool versions
+        run: python3 scripts/ci/generate-tool-versions.py --check
+
+  docker-build:
+    name: 🐳 Build Docker Images
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      packages: write
+    timeout-minutes: 30
+    defaults:
+      run:
+        shell: bash
+    concurrency:
+      group: docker-build-${{ github.ref }}
+      cancel-in-progress: true
+    outputs:
+      is-fork: ${{ steps.fork-check.outputs.is-fork }}
+    steps:
+      - name: Harden Runner
+        uses: step-security/harden-runner@fe104658747b27e96e4f7e80cd0a94068e53901d
+        with:
+          egress-policy: 'block'
+          allowed-endpoints: >
+            github.com:443
+            api.github.com:443
+            codeload.github.com:443
+            release-assets.githubusercontent.com:443
+            objects.githubusercontent.com:443
+            ghcr.io:443
+            pkg-containers.githubusercontent.com:443
+            docker.io:443
+            registry-1.docker.io:443
+            auth.docker.io:443
+            production.cloudflare.docker.com:443
+            production.cloudfront.docker.com:443
+            pypi.org:443
+            files.pythonhosted.org:443
+            static.rust-lang.org:443
+            bun.sh:443
+            astral.sh:443
+            releases.astral.sh:443
+            sh.rustup.rs:443
+            deb.debian.org:80
+            registry.npmjs.org:443
+            crates.io:443
+            static.crates.io:443
+            index.crates.io:443
+            semgrep.dev:443
+            metrics.semgrep.dev:443
+      - name: Check if fork PR
+        id: fork-check
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          IS_FORK_PR: ${{ github.event.pull_request.head.repo.fork }}
+        run: |
+          IS_FORK="false"
+          if [[ "$EVENT_NAME" == "pull_request" && "$IS_FORK_PR" == "true" ]]; then
+            IS_FORK="true"
+          fi
+          echo "is-fork=${IS_FORK}" >> "$GITHUB_OUTPUT"
+      - name: Free disk space (fork fallback)
+        if: steps.fork-check.outputs.is-fork == 'true'
+        run: |
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc \
+            /usr/local/share/boost
+          sudo docker image prune -af
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - name: Set up Docker Buildx (fork)
+        if: steps.fork-check.outputs.is-fork == 'true'
+        # yamllint disable-line rule:line-length
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+        with:
+          driver: docker
+      - name: Set up Docker Buildx
+        if: steps.fork-check.outputs.is-fork != 'true'
+        # yamllint disable-line rule:line-length
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+      - name: Log in to GitHub Container Registry
+        if: steps.fork-check.outputs.is-fork != 'true'
+        # yamllint disable-line rule:line-length
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3.7.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Build Docker image (fork)
+        if: steps.fork-check.outputs.is-fork == 'true'
+        # yamllint disable-line rule:line-length
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
+        with:
+          context: .
+          target: full
+          push: false
+          load: true
+          tags: py-lintro:latest
+          cache-from: type=gha
+          provenance: false
+      - name: Build and push Docker image (GHCR CI tag)
+        if: steps.fork-check.outputs.is-fork != 'true'
+        # yamllint disable-line rule:line-length
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
+        with:
+          context: .
+          target: full
+          push: true
+          tags: ghcr.io/lgtm-hq/py-lintro:ci-${{ github.run_id }}
+          cache-from: |
+            type=gha
+            type=registry,ref=ghcr.io/lgtm-hq/py-lintro:cache
+          cache-to: >-
+            type=registry,ref=ghcr.io/lgtm-hq/py-lintro:cache,${{ env.CACHE_OPTS }}
+          provenance: false
+      - name: Build Base Docker image (fork)
+        if: steps.fork-check.outputs.is-fork == 'true'
+        # yamllint disable-line rule:line-length
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
+        with:
+          context: .
+          target: base
+          push: false
+          load: true
+          tags: py-lintro:base
+          cache-from: type=gha
+          provenance: false
+      - name: Build and push Base Docker image (GHCR CI tag)
+        if: steps.fork-check.outputs.is-fork != 'true'
+        # yamllint disable-line rule:line-length
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
+        with:
+          context: .
+          target: base
+          push: true
+          tags: ghcr.io/lgtm-hq/py-lintro-base:ci-${{ github.run_id }}
+          cache-from: |
+            type=gha
+            type=registry,ref=ghcr.io/lgtm-hq/py-lintro-base:cache
+          cache-to: >-
+            type=registry,ref=ghcr.io/lgtm-hq/py-lintro-base:cache,${{ env.CACHE_OPTS }}
+          provenance: false
+      - name: Save Docker images to tarball (fork fallback)
+        if: steps.fork-check.outputs.is-fork == 'true'
+        run: |
+          docker save py-lintro:latest py-lintro:base \
+            -o /tmp/py-lintro-images.tar
+      - name: Upload Docker images artifact (fork fallback)
+        if: steps.fork-check.outputs.is-fork == 'true'
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: docker-images
+          path: /tmp/py-lintro-images.tar
+          retention-days: 1
+
+  dogfooding-lint:
+    name: 🛠️ Dogfooding Lint
+    needs: [docker-build, manifest-sync]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      packages: read
+    timeout-minutes: 30
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Harden Runner
+        uses: step-security/harden-runner@fe104658747b27e96e4f7e80cd0a94068e53901d
+        with:
+          egress-policy: 'block'
+          allowed-endpoints: >
+            github.com:443
+            api.github.com:443
+            codeload.github.com:443
+            release-assets.githubusercontent.com:443
+            objects.githubusercontent.com:443
+            ghcr.io:443
+            pkg-containers.githubusercontent.com:443
+            api.osv.dev:443
+            api.deps.dev:443
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Log in to GHCR
+        if: needs.docker-build.outputs.is-fork != 'true'
+        # yamllint disable-line rule:line-length
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3.7.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Pull CI image from GHCR
+        if: needs.docker-build.outputs.is-fork != 'true'
+        env:
+          CI_TAG: ci-${{ github.run_id }}
+        run: |
+          docker pull "ghcr.io/lgtm-hq/py-lintro:${CI_TAG}"
+          docker tag "ghcr.io/lgtm-hq/py-lintro:${CI_TAG}" py-lintro:latest
+      - name: Download Docker images artifact (fork fallback)
+        if: needs.docker-build.outputs.is-fork == 'true'
+        # yamllint disable-line rule:line-length
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
+        with:
+          name: docker-images
+          path: /tmp
+      - name: Load Docker images (fork fallback)
+        if: needs.docker-build.outputs.is-fork == 'true'
+        run: docker load -i /tmp/py-lintro-images.tar
+      - name: Run Lintro Analysis in Docker
+        id: lintro
+        run: ./scripts/ci/testing/ci-lintro.sh
+        continue-on-error: true
+      - name: Upload lintro run artifact
+        if: always()
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: lintro-run
+          path: .lintro/
+          retention-days: 7
+          if-no-files-found: warn
+          include-hidden-files: true
+      - name: Fail on Linting Issues
+        if: ${{ env.CHK_EXIT_CODE != '0' }}
+        env:
+          CHK_EXIT_CODE: ${{ env.CHK_EXIT_CODE }}
+        run: scripts/ci/fail-on-lint.sh
+
+  lint-comment:
+    name: 💬 Lintro PR Comment
+    needs: dogfooding-lint
+    if: >-
+      always() &&
+      github.event_name == 'pull_request' &&
+      needs.dogfooding-lint.result != 'skipped' &&
+      github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-24.04
+    permissions:
+      actions: read
+      contents: read
+      pull-requests: write
+    timeout-minutes: 10
+    steps:
+      - name: Harden Runner
+        uses: step-security/harden-runner@fe104658747b27e96e4f7e80cd0a94068e53901d
+        with:
+          egress-policy: 'block'
+          allowed-endpoints: >
+            github.com:443
+            api.github.com:443
+            codeload.github.com:443
+            objects.githubusercontent.com:443
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Download lintro run artifact
+        continue-on-error: true
+        # yamllint disable-line rule:line-length
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
+        with:
+          name: lintro-run
+          path: .lintro
+      - name: Generate PR Comment
+        env:
+          CHK_EXIT_CODE: ${{ needs.dogfooding-lint.result == 'success' && '0' || '1' }}
+          LINT_JOB_RESULT: ${{ needs.dogfooding-lint.result }}
+        run: ./scripts/ci/ci-pr-comment.sh
+      - name: Comment PR with Lintro Results
+        uses: lgtm-hq/lgtm-ci/.github/actions/post-pr-comment@d9b302c919efc84fc001e9f3ef63bc9061d04b8f
+        with:
+          file: pr-comment.txt
+          marker: lintro-report
+          mode: upsert
+
+  security-audit:
+    name: 🔐 Security Audit
+    needs: [docker-build]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      pull-requests: write
+    timeout-minutes: 15
+    steps:
+      - name: Harden Runner
+        uses: step-security/harden-runner@fe104658747b27e96e4f7e80cd0a94068e53901d
+        with:
+          egress-policy: 'block'
+          allowed-endpoints: >
+            github.com:443
+            api.github.com:443
+            ghcr.io:443
+            pkg-containers.githubusercontent.com:443
+            api.osv.dev:443
+            api.deps.dev:443
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - name: Pull CI image from GHCR
+        if: needs.docker-build.outputs.is-fork != 'true'
+        env:
+          CI_TAG: ci-${{ github.run_id }}
+        run: |
+          docker pull "ghcr.io/lgtm-hq/py-lintro:${CI_TAG}"
+          docker tag "ghcr.io/lgtm-hq/py-lintro:${CI_TAG}" py-lintro:latest
+      - name: Download Docker images artifact (fork fallback)
+        if: needs.docker-build.outputs.is-fork == 'true'
+        # yamllint disable-line rule:line-length
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
+        with:
+          name: docker-images
+          path: /tmp
+      - name: Load Docker images (fork fallback)
+        if: needs.docker-build.outputs.is-fork == 'true'
+        run: docker load -i /tmp/py-lintro-images.tar
+      - name: Run security audit
+        id: audit
+        continue-on-error: true
+        run: scripts/ci/security-comment.sh
+      - name: Comment PR with security audit results
+        if: github.event_name == 'pull_request'
+        continue-on-error: true
+        uses: lgtm-hq/lgtm-ci/.github/actions/post-pr-comment@d9b302c919efc84fc001e9f3ef63bc9061d04b8f
+        with:
+          file: security-audit-comment.txt
+          marker: security-audit-report
+          mode: upsert
+      - name: Fail on vulnerabilities
+        if: steps.audit.outcome == 'failure'
+        run: |
+          echo "::error::Security vulnerabilities detected in dependencies"
+          exit 1
+
+  integration-test:
+    name: 🧪 Docker Integration Tests
+    needs: [docker-build]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      packages: read
+    timeout-minutes: 45
+    env:
+      LINTRO_OUTPUT_DIR: /tmp/lintro
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - name: Harden Runner
+        uses: step-security/harden-runner@fe104658747b27e96e4f7e80cd0a94068e53901d
+        with:
+          egress-policy: 'block'
+          allowed-endpoints: >
+            github.com:443
+            api.github.com:443
+            ghcr.io:443
+            pkg-containers.githubusercontent.com:443
+            docker.io:443
+            registry-1.docker.io:443
+            auth.docker.io:443
+            pypi.org:443
+            files.pythonhosted.org:443
+            api.osv.dev:443
+            api.deps.dev:443
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - name: Log in to GHCR
+        if: needs.docker-build.outputs.is-fork != 'true'
+        # yamllint disable-line rule:line-length
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3.7.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Pull CI images from GHCR
+        if: needs.docker-build.outputs.is-fork != 'true'
+        env:
+          CI_TAG: ci-${{ github.run_id }}
+        run: |
+          docker pull "ghcr.io/lgtm-hq/py-lintro:${CI_TAG}"
+          docker tag "ghcr.io/lgtm-hq/py-lintro:${CI_TAG}" py-lintro:latest
+          docker pull "ghcr.io/lgtm-hq/py-lintro-base:${CI_TAG}"
+          docker tag "ghcr.io/lgtm-hq/py-lintro-base:${CI_TAG}" py-lintro:base
+      - name: Download Docker images artifact (fork fallback)
+        if: needs.docker-build.outputs.is-fork == 'true'
+        # yamllint disable-line rule:line-length
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
+        with:
+          name: docker-images
+          path: /tmp
+      - name: Load Docker images (fork fallback)
+        if: needs.docker-build.outputs.is-fork == 'true'
+        run: docker load -i /tmp/py-lintro-images.tar
+      - name: Smoke Test Docker Image
+        run: ./scripts/docker/docker-build-test.sh
+      - name: Smoke Test Base Image
+        run: docker run --rm py-lintro:base lintro --version
+      - name: Run comprehensive test suite (with Docker tests)
+        run: |
+          ./scripts/docker/docker-test.sh 2>&1 | tee test-output.log
+          exit "${PIPESTATUS[0]}"
+      - name: Extract test summary
+        if: always()
+        run: |
+          chmod +x ./scripts/ci/testing/extract-test-summary.sh
+          ./scripts/ci/testing/extract-test-summary.sh \
+            test-output.log test-summary.json || true
+      - name: Upload test summary artifact
+        if: always()
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: test-summary
+          path: test-summary.json
+          retention-days: 30
+          if-no-files-found: warn
+
+  publish:
+    name: 📦 Publish to GHCR
+    needs: [dogfooding-lint, security-audit, integration-test]
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      packages: write
+    timeout-minutes: 30
+    concurrency:
+      group: publish-${{ github.ref }}
+      cancel-in-progress: false
+    steps:
+      - name: Harden Runner
+        uses: step-security/harden-runner@fe104658747b27e96e4f7e80cd0a94068e53901d
+        with:
+          egress-policy: 'block'
+          allowed-endpoints: >
+            github.com:443
+            api.github.com:443
+            ghcr.io:443
+            pkg-containers.githubusercontent.com:443
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+      - name: Setup Docker (Buildx + login)
+        uses: ./.github/actions/setup-docker
+        with:
+          login: 'true'
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+          driver: docker-container
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@c299e40c65443455700f0fdfc63efafe5b349051 # v5
+        with:
+          images: ghcr.io/lgtm-hq/py-lintro
+          tags: |
+            type=ref,event=branch
+            type=sha,prefix=sha-,format=long
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=semver,pattern={{major}}
+            type=raw,value=latest,enable={{is_default_branch}}
+      - name: Extract metadata (base)
+        id: meta-base
+        uses: docker/metadata-action@c299e40c65443455700f0fdfc63efafe5b349051 # v5
+        with:
+          images: ghcr.io/lgtm-hq/py-lintro-base
+          tags: |
+            type=ref,event=branch
+            type=sha,prefix=sha-,format=long
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=semver,pattern={{major}}
+            type=raw,value=latest,enable={{is_default_branch}}
+      - name: Build and push Docker image
+        # yamllint disable-line rule:line-length
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
+        with:
+          context: .
+          target: full
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: |
+            type=registry,ref=ghcr.io/lgtm-hq/py-lintro:cache
+          cache-to: >-
+            type=registry,ref=ghcr.io/lgtm-hq/py-lintro:cache,${{ env.CACHE_OPTS }}
+          provenance: false
+          sbom: false
+      - name: Build and push Base Docker image
+        # yamllint disable-line rule:line-length
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
+        with:
+          context: .
+          target: base
+          push: true
+          tags: ${{ steps.meta-base.outputs.tags }}
+          labels: ${{ steps.meta-base.outputs.labels }}
+          cache-from: |
+            type=registry,ref=ghcr.io/lgtm-hq/py-lintro-base:cache
+          cache-to: >-
+            type=registry,ref=ghcr.io/lgtm-hq/py-lintro-base:cache,${{ env.CACHE_OPTS }}
+          provenance: false
+          sbom: false
+
+  cleanup-ci-images:
+    name: 🧹 Cleanup CI Images
+    needs: [docker-build, dogfooding-lint, security-audit, integration-test, publish]
+    if: >-
+      always() &&
+      needs.docker-build.outputs.is-fork != 'true'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      packages: write
+    timeout-minutes: 5
+    steps:
+      - name: Harden Runner
+        uses: step-security/harden-runner@fe104658747b27e96e4f7e80cd0a94068e53901d
+        with:
+          egress-policy: 'block'
+          allowed-endpoints: >
+            github.com:443
+            api.github.com:443
+      - name: Delete CI-tagged images
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CI_TAG: ci-${{ github.run_id }}
+        run: |
+          delete_ci_tag() {
+            local pkg="$1"
+            local tag="$2"
+            version_id=$(gh api \
+              "orgs/lgtm-hq/packages/container/${pkg}/versions" \
+              --paginate \
+              --jq ".[] |
+                select(.metadata.container.tags[] == \"${tag}\") |
+                .id" 2>/dev/null) || version_id=""
+            if [[ -n "$version_id" ]]; then
+              while IFS= read -r vid; do
+                [[ -z "$vid" ]] && continue
+                gh api --method DELETE \
+                  "orgs/lgtm-hq/packages/container/${pkg}/versions/${vid}" \
+                  2>/dev/null && \
+                  echo "Deleted version ${vid} (${pkg}:${tag})" || \
+                  echo "::warning::Failed to delete version ${vid}"
+              done <<< "$version_id"
+            else
+              echo "No version found for ${pkg}:${tag}"
+            fi
+          }
+          delete_ci_tag py-lintro "${CI_TAG}"
+          delete_ci_tag py-lintro-base "${CI_TAG}"

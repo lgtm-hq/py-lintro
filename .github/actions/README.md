@@ -14,18 +14,10 @@ using explicit version tags like `@actions-v1.0.10`. This approach:
 - Separates action versions from lintro PyPI release versions
 - Follows industry best practices for monorepos
 
-### Automatic Versioning
+### Action Versioning
 
-The `auto-version-actions.yml` workflow automatically creates new patch version tags
-when actions or reusable workflows are modified.
-
-**How it works:**
-
-1. Modify an action file (e.g., `.github/actions/setup-env/action.yml`)
-2. Commit and push to main
-3. Workflow automatically creates `actions-v1.0.0` (first run) or the next patch version
-   (e.g., `actions-v1.0.11`)
-4. Update workflow references to use the new version tag
+Local composite actions are referenced via `uses: ./.github/actions/<name>` and follow
+the repository version. No separate action version tags are maintained.
 
 ### Updating Workflow References
 
@@ -71,51 +63,6 @@ Example:
     registry: ghcr.io
     username: ${{ github.actor }}
     password: ${{ secrets.GITHUB_TOKEN }}
-```
-
-## .github/actions/post-pr-comment
-
-- Purpose: Delete previous PR comments by marker (optional) and post a prepared comment
-  file
-- Inputs:
-  - file (string, required): path to the comment file
-  - marker (string, optional): marker used to delete previous comments
-
-Prerequisites:
-
-- The workflow must set up Python and `uv` and sync project dependencies (the composite
-  invokes repo scripts that use `uv` and Python deps like `httpx`).
-- Required env vars are provided by GitHub Actions: `GITHUB_TOKEN`, `GITHUB_REPOSITORY`,
-  and `github.event.pull_request.number`.
-
-Example:
-
-```yaml
-- name: Comment PR
-  uses: ./.github/actions/post-pr-comment
-  with:
-    file: pr-comment.txt
-    marker: '<!-- lintro-report -->'
-```
-
-## .github/actions/pages-deploy
-
-- Purpose: Configure Pages, upload an artifact directory, and deploy
-- Inputs:
-  - path (string, required): directory to upload for Pages
-
-Usage note:
-
-- Ensure the directory specified by `path` exists before calling the composite (e.g.,
-  generate `_site` first).
-
-Example:
-
-```yaml
-- name: Deploy coverage report to Pages
-  uses: ./.github/actions/pages-deploy
-  with:
-    path: _site
 ```
 
 ## .github/actions/extract-version
