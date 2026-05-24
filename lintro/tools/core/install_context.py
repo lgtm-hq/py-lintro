@@ -91,8 +91,9 @@ def _detect_install_context() -> InstallContext:
             continue
         if "lintro-full" in lower:
             return InstallContext.HOMEBREW_FULL
-        is_homebrew_bin = "/bin/" in lower or lower.endswith("/lintro")
-        if "lintro" in lower and is_homebrew_bin:
+        name = os.path.basename(lower)
+        parent = os.path.basename(os.path.dirname(lower))
+        if name == "lintro" and parent in {"bin", "sbin"}:
             return InstallContext.HOMEBREW_BIN
 
     # Development: running from a git checkout

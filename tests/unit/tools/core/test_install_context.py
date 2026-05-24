@@ -174,6 +174,11 @@ def test_detect_pip_default(
         ),
         (
             "/usr/lib/python3.11/site-packages/lintro/tools/core/install_context.py",
+            "/opt/homebrew/bin/lintro",
+            InstallContext.HOMEBREW_BIN,
+        ),
+        (
+            "/usr/lib/python3.11/site-packages/lintro/tools/core/install_context.py",
             "/usr/bin/python3",
             InstallContext.PIP,
         ),
@@ -182,6 +187,7 @@ def test_detect_pip_default(
         "homebrew_binary_formula",
         "homebrew_full_formula",
         "pip_homebrew_lib_site_packages",
+        "homebrew_bin_symlink",
         "pip_default",
     ],
 )
