@@ -11,7 +11,7 @@ name: Quality Check - PR Title Validation
 permissions: {}
 
 concurrency:
-  group: semantic-pr-title-${{ github.event.pull_request.number }}
+  group: semantic-pr-title-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 jobs:

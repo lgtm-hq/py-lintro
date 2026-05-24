@@ -51,6 +51,8 @@ jobs:
             releases.astral.sh:443
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
       - name: Environment setup
         uses: ./.github/actions/setup-env
         with:
@@ -127,6 +129,8 @@ jobs:
           sudo docker image prune -af
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
       - name: Set up Docker Buildx (fork)
         if: steps.fork-check.outputs.is-fork == 'true'
         # yamllint disable-line rule:line-length
@@ -242,6 +246,7 @@ jobs:
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
+          persist-credentials: false
       - name: Log in to GHCR
         if: needs.docker-build.outputs.is-fork != 'true'
         # yamllint disable-line rule:line-length
@@ -314,6 +319,7 @@ jobs:
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
+          persist-credentials: false
       - name: Download lintro run artifact
         continue-on-error: true
         # yamllint disable-line rule:line-length
@@ -355,6 +361,8 @@ jobs:
             api.deps.dev:443
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
       - name: Pull CI image from GHCR
         if: needs.docker-build.outputs.is-fork != 'true'
         env:
@@ -420,6 +428,8 @@ jobs:
             api.deps.dev:443
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
       - name: Log in to GHCR
         if: needs.docker-build.outputs.is-fork != 'true'
         # yamllint disable-line rule:line-length
@@ -497,6 +507,7 @@ jobs:
         with:
           fetch-depth: 0
           fetch-tags: true
+          persist-credentials: false
       - name: Setup Docker (Buildx + login)
         uses: ./.github/actions/setup-docker
         with:

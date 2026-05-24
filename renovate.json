@@ -125,10 +125,7 @@
     },
     {
       "customType": "regex",
-      "managerFilePatterns": [
-        "Dockerfile",
-        "Dockerfile\\.base"
-      ],
+      "managerFilePatterns": ["Dockerfile"],
       "matchStrings": [
         "ARG UV_VERSION=(?<currentValue>[0-9]+\\.[0-9]+\\.[0-9]+)"
       ],
