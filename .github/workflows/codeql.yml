@@ -27,7 +27,7 @@ jobs:
     uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-codeql.yml@22a7c110415d75843c2c216f95ed47aaeb8e26fc
     with:
       languages: python
-      build-mode: autobuild
+      build-mode: none
       config-file: .github/codeql/codeql-config.yml
       category: '/language:all'
       egress-policy: block
