@@ -16,6 +16,11 @@ EOF
 	exit 0
 fi
 
+if [[ "${GITHUB_ACTIONS:-}" != "true" && "${CI:-}" != "true" ]]; then
+	echo "Skipping disk cleanup (not running in CI; set GITHUB_ACTIONS=true or CI=true to enable)"
+	exit 0
+fi
+
 sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc \
 	/usr/local/share/boost
 sudo docker image prune -af

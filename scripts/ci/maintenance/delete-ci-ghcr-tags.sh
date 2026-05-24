@@ -41,7 +41,7 @@ delete_ci_tag() {
 		"orgs/lgtm-hq/packages/container/${pkg}/versions" \
 		--paginate \
 		--jq ".[] |
-			select(.metadata.container.tags[] == \"${tag}\") |
+			select((.metadata.container.tags // [])[] == \"${tag}\") |
 			.id" 2>/dev/null) || version_id=""
 
 	if [[ -n "$version_id" ]]; then

@@ -85,11 +85,15 @@ def _detect_install_context() -> InstallContext:
             if f"/Cellar/{formula}/" in path:
                 return context
         lower = path.lower()
-        if "/homebrew/" in lower:
-            if "lintro-full" in lower:
-                return InstallContext.HOMEBREW_FULL
-            if "lintro" in lower:
-                return InstallContext.HOMEBREW_BIN
+        if "/homebrew/" not in lower:
+            continue
+        if "site-packages" in lower or "/lib/python" in lower:
+            continue
+        if "lintro-full" in lower:
+            return InstallContext.HOMEBREW_FULL
+        is_homebrew_bin = "/bin/" in lower or lower.endswith("/lintro")
+        if "lintro" in lower and is_homebrew_bin:
+            return InstallContext.HOMEBREW_BIN
 
     # Development: running from a git checkout
     # install_path is lintro/tools/core/install_context.py — 4 levels to repo root

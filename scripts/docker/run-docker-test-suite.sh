@@ -19,6 +19,7 @@ EOF
 fi
 
 log_file="${1:-test-output.log}"
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-./scripts/docker/docker-test.sh 2>&1 | tee "$log_file"
+"${script_dir}/docker-test.sh" 2>&1 | tee "$log_file"
 exit "${PIPESTATUS[0]}"
