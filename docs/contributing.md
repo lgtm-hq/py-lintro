@@ -101,8 +101,8 @@ commits before merge.
 
 Release automation:
 
-- Merges to `main` run semantic-release to determine the next version from commits and
-  tag the repo.
+- Merges to `main` run `release-version-pr.yml` to open a version bump PR; after merge,
+  `release-auto-tag.yml` creates the tag.
 - Tag push publishes to PyPI (OIDC) and creates a GitHub Release with artifacts.
 
 For detailed contribution guidelines, see the project documentation or contact a
