@@ -353,8 +353,8 @@ jobs:
     runs-on: ubuntu-24.04
     permissions:
       contents: read
-      packages: read
-      pull-requests: write
+      packages: read # GHCR login and CI image pull steps below
+      pull-requests: write # post-pr-comment step for security audit results
     timeout-minutes: 15
     steps:
       - name: Harden Runner

@@ -5,6 +5,7 @@ name: Quality Check - Action Pinning Validation
 
 'on':
   pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
     paths:
       - '.github/workflows/**'
       - '.github/actions/**'

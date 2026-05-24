@@ -8,6 +8,7 @@ name: CI - Quality
     branches: [main]
   pull_request:
     branches: [main]
+    types: [opened, synchronize, reopened, ready_for_review]
   merge_group:
   workflow_dispatch:
 
@@ -57,5 +58,5 @@ jobs:
         api.deps.dev:443
     permissions:
       contents: read
-      packages: read
+      packages: read # GHCR login and image pull in reusable-quality Docker lint step
       pull-requests: write
