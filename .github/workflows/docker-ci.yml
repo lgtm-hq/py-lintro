@@ -254,7 +254,7 @@ jobs:
       # Fork PRs: CI images are not pushed to GHCR (artifact tarball only), so
       # fall back to the pinned release image — integration tests still use the
       # fork-built image via the tarball path.
-      # Pinned digest — keep in sync with ci.yml / pyproject.toml lintro pin
+      # Pinned digest — keep in sync with pyproject.toml lintro pin
       lintro-image: >-
         ${{ needs.docker-build.outputs.is-fork == 'true'
         && format(
