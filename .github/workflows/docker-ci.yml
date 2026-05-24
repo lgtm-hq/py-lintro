@@ -217,7 +217,7 @@ jobs:
       pull-requests: write
     with:
       tooling-ref: '80dbd2fc1568963da3bc24c468ff2221ff71b904'
-      job-name: '🛠️ Lintro Code Quality'
+      job-name: '🛠️ Dogfooding Lint'
       post-pr-comment: true
       egress-policy: block
       allowed-endpoints: >
@@ -262,6 +262,31 @@ jobs:
           '1ff3db35939283734b859c7c5d95be87fd8fd62734b3434e0437769d50d53578'
         )
         || format('ghcr.io/lgtm-hq/py-lintro:ci-{0}', github.run_id) }}
+
+  # Org ruleset (checks-py-lintro) requires this exact check name.
+  lintro-code-quality:
+    name: '🛠️ Lintro Code Quality'
+    needs: [dogfooding-quality]
+    if: >-
+      always() &&
+      (
+        github.event_name != 'pull_request' ||
+        github.event.pull_request.draft == false
+      )
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    steps:
+      - name: Require passing lintro quality checks
+        env:
+          QUALITY_RESULT: ${{ needs.dogfooding-quality.result }}
+          QUALITY_STATUS: ${{ needs.dogfooding-quality.outputs.status }}
+        run: |
+          if [ "$QUALITY_RESULT" != "success" ] ||
+             [ "$QUALITY_STATUS" != "passed" ]; then
+            echo "::error::Quality failed ($QUALITY_RESULT / $QUALITY_STATUS)"
+            exit 1
+          fi
 
   security-audit:
     name: 🔐 Security Audit
