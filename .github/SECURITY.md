@@ -102,8 +102,7 @@ permissions:
 
 | Workflow                   | Permissions                        | Justification         |
 | -------------------------- | ---------------------------------- | --------------------- |
-| `docker-ci.yml`            | `contents: read` (+ per-job)       | CI pipeline           |
-| `quality-ci.yml`           | `contents: read` (+ per-job)       | Quality checks        |
+| `docker-ci.yml`            | `contents: read` (+ per-job)       | CI pipeline + quality |
 | `test-ci.yml`              | `contents: read` (+ per-job)       | Unit tests            |
 | `publish-pypi-on-tag.yml`  | `contents: write, id-token: write` | Release + OIDC        |
 | `build-binary.yml`         | `contents: write`                  | Upload release assets |

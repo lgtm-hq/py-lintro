@@ -36,7 +36,6 @@ pipelines.
 
 **Examples**:
 
-- `ci-lintro.sh` - Run lintro in CI context
 - `ci-post-pr-comment.sh` - Post comments to PRs via GitHub API
 - `ghcr_prune_untagged.py` - Prune untagged GHCR versions and stale cache tags
 

@@ -3,15 +3,16 @@
 This repository uses GitHub Actions for quality gates, release automation, and
 publishing. Shared workflows are thin callers to
 [lgtm-ci](https://github.com/lgtm-hq/lgtm-ci) reusable workflows pinned at
-`d9b302c919efc84fc001e9f3ef63bc9061d04b8f` (release **v0.18.0**).
+`80dbd2fc1568963da3bc24c468ff2221ff71b904` (main after **#201**; supersedes v0.18.0 for
+`lintro-image` on `reusable-quality.yml`).
 
 ## CI (main branch)
 
-- **quality-ci.yml** — Lintro quality checks via `reusable-quality.yml`
 - **test-ci.yml** — Python unit/component tests (3.11 + 3.14) via
   `reusable-test-python.yml`
-- **docker-ci.yml** — Manifest sync, multi-stage Docker build, dogfooding lint,
-  integration tests, security audit, GHCR publish (main), CI tag cleanup
+- **docker-ci.yml** — Manifest sync, multi-stage Docker build, dogfooding quality
+  (`reusable-quality.yml` + CI-built image), integration tests, security audit, GHCR
+  publish (main), CI tag cleanup
 
 ## Release
 

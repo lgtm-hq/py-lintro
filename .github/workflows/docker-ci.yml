@@ -3,8 +3,9 @@
 ---
 name: CI - Docker
 
-# Docker build once → dogfooding lint → integration tests → security audit →
-# publish (main). manifest-sync runs in parallel (no Docker).
+# Docker build once → dogfooding quality (reusable-quality + CI image) →
+# integration tests → security audit → publish (main).
+# manifest-sync runs in parallel (no Docker).
 
 'on':
   push:
@@ -206,146 +207,60 @@ jobs:
           path: /tmp/py-lintro-images.tar
           retention-days: 1
 
-  dogfooding-lint:
-    name: 🛠️ Dogfooding Lint
+  dogfooding-quality:
     needs: [docker-build, manifest-sync]
-    runs-on: ubuntu-24.04
+    # yamllint disable-line rule:line-length
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-quality.yml@80dbd2fc1568963da3bc24c468ff2221ff71b904
     permissions:
       contents: read
       packages: read
-    timeout-minutes: 30
-    defaults:
-      run:
-        shell: bash
-    steps:
-      - name: Harden Runner
-        uses: step-security/harden-runner@fe104658747b27e96e4f7e80cd0a94068e53901d
-        with:
-          egress-policy: 'block'
-          allowed-endpoints: >
-            github.com:443
-            api.github.com:443
-            codeload.github.com:443
-            release-assets.githubusercontent.com:443
-            objects.githubusercontent.com:443
-            raw.githubusercontent.com:443
-            ghcr.io:443
-            pkg-containers.githubusercontent.com:443
-            docker.io:443
-            registry-1.docker.io:443
-            auth.docker.io:443
-            production.cloudflare.docker.com:443
-            production.cloudfront.docker.com:443
-            pypi.org:443
-            files.pythonhosted.org:443
-            static.rust-lang.org:443
-            bun.sh:443
-            astral.sh:443
-            releases.astral.sh:443
-            sh.rustup.rs:443
-            deb.debian.org:80
-            registry.npmjs.org:443
-            crates.io:443
-            static.crates.io:443
-            index.crates.io:443
-            semgrep.dev:443
-            metrics.semgrep.dev:443
-            api.osv.dev:443
-            api.deps.dev:443
-      - name: Checkout
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
-          persist-credentials: false
-      - name: Log in to GHCR
-        if: needs.docker-build.outputs.is-fork != 'true'
-        # yamllint disable-line rule:line-length
-        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3.7.0
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-      - name: Pull CI image from GHCR
-        if: needs.docker-build.outputs.is-fork != 'true'
-        env:
-          CI_TAG: ci-${{ github.run_id }}
-        run: scripts/ci/testing/pull-ci-docker-images.sh full
-      - name: Download Docker images artifact (fork fallback)
-        if: needs.docker-build.outputs.is-fork == 'true'
-        # yamllint disable-line rule:line-length
-        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
-        with:
-          name: docker-images
-          path: /tmp
-      - name: Load Docker images (fork fallback)
-        if: needs.docker-build.outputs.is-fork == 'true'
-        run: scripts/ci/testing/load-ci-docker-images.sh
-      - name: Run Lintro Analysis in Docker
-        id: lintro
-        run: ./scripts/ci/testing/ci-lintro.sh
-        continue-on-error: true
-      - name: Upload lintro run artifact
-        if: always()
-        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
-        with:
-          name: lintro-run
-          path: .lintro/
-          retention-days: 7
-          if-no-files-found: warn
-          include-hidden-files: true
-      - name: Fail on Linting Issues
-        if: ${{ env.CHK_EXIT_CODE != '0' }}
-        env:
-          CHK_EXIT_CODE: ${{ env.CHK_EXIT_CODE }}
-        run: scripts/ci/fail-on-lint.sh
-
-  lint-comment:
-    name: 💬 Lintro PR Comment
-    needs: dogfooding-lint
-    if: >-
-      always() &&
-      github.event_name == 'pull_request' &&
-      needs.dogfooding-lint.result != 'skipped' &&
-      github.event.pull_request.head.repo.full_name == github.repository
-    runs-on: ubuntu-24.04
-    permissions:
-      actions: read
-      contents: read
       pull-requests: write
-    timeout-minutes: 10
-    steps:
-      - name: Harden Runner
-        uses: step-security/harden-runner@fe104658747b27e96e4f7e80cd0a94068e53901d
-        with:
-          egress-policy: 'block'
-          allowed-endpoints: >
-            github.com:443
-            api.github.com:443
-            codeload.github.com:443
-            objects.githubusercontent.com:443
-      - name: Checkout
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
-          persist-credentials: false
-      - name: Download lintro run artifact
-        continue-on-error: true
-        # yamllint disable-line rule:line-length
-        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
-        with:
-          name: lintro-run
-          path: .lintro
-      - name: Generate PR Comment
-        env:
-          CHK_EXIT_CODE: ${{ needs.dogfooding-lint.result == 'success' && '0' || '1' }}
-          LINT_JOB_RESULT: ${{ needs.dogfooding-lint.result }}
-        run: ./scripts/ci/ci-pr-comment.sh
-      - name: Comment PR with Lintro Results
-        uses: lgtm-hq/lgtm-ci/.github/actions/post-pr-comment@d9b302c919efc84fc001e9f3ef63bc9061d04b8f
-        with:
-          file: pr-comment.txt
-          marker: lintro-report
-          mode: upsert
+    with:
+      tooling-ref: '80dbd2fc1568963da3bc24c468ff2221ff71b904'
+      job-name: '🛠️ Dogfooding Lint'
+      post-pr-comment: true
+      egress-policy: block
+      allowed-endpoints: >
+        github.com:443
+        api.github.com:443
+        codeload.github.com:443
+        release-assets.githubusercontent.com:443
+        objects.githubusercontent.com:443
+        raw.githubusercontent.com:443
+        ghcr.io:443
+        pkg-containers.githubusercontent.com:443
+        docker.io:443
+        registry-1.docker.io:443
+        auth.docker.io:443
+        production.cloudflare.docker.com:443
+        production.cloudfront.docker.com:443
+        pypi.org:443
+        files.pythonhosted.org:443
+        static.rust-lang.org:443
+        bun.sh:443
+        astral.sh:443
+        releases.astral.sh:443
+        sh.rustup.rs:443
+        deb.debian.org:80
+        registry.npmjs.org:443
+        crates.io:443
+        static.crates.io:443
+        index.crates.io:443
+        semgrep.dev:443
+        metrics.semgrep.dev:443
+        api.osv.dev:443
+        api.deps.dev:443
+      # Same-repo PRs: lint with the image built in this workflow run.
+      # Fork PRs: CI images are not pushed to GHCR (artifact tarball only), so
+      # fall back to the pinned release image — integration tests still use the
+      # fork-built image via the tarball path.
+      lintro-image: >-
+        ${{ needs.docker-build.outputs.is-fork == 'true'
+        && format(
+          'ghcr.io/lgtm-hq/py-lintro@sha256:{0}',
+          '1ff3db35939283734b859c7c5d95be87fd8fd62734b3434e0437769d50d53578'
+        )
+        || format('ghcr.io/lgtm-hq/py-lintro:ci-{0}', github.run_id) }}
 
   security-audit:
     name: 🔐 Security Audit
@@ -402,7 +317,7 @@ jobs:
       - name: Comment PR with security audit results
         if: github.event_name == 'pull_request'
         continue-on-error: true
-        uses: lgtm-hq/lgtm-ci/.github/actions/post-pr-comment@d9b302c919efc84fc001e9f3ef63bc9061d04b8f
+        uses: lgtm-hq/lgtm-ci/.github/actions/post-pr-comment@80dbd2fc1568963da3bc24c468ff2221ff71b904
         with:
           file: security-audit-comment.txt
           marker: security-audit-report
@@ -506,7 +421,7 @@ jobs:
 
   publish:
     name: 📦 Publish to GHCR
-    needs: [dogfooding-lint, security-audit, integration-test]
+    needs: [dogfooding-quality, security-audit, integration-test]
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
     runs-on: ubuntu-24.04
     permissions:
@@ -597,7 +512,7 @@ jobs:
 
   cleanup-ci-images:
     name: 🧹 Cleanup CI Images
-    needs: [docker-build, dogfooding-lint, security-audit, integration-test, publish]
+    needs: [docker-build, dogfooding-quality, security-audit, integration-test, publish]
     if: >-
       always() &&
       needs.docker-build.outputs.is-fork != 'true'

@@ -15,12 +15,14 @@ The repository includes pre-configured GitHub Actions workflows. To activate the
 
 ### 1. Quality Check Workflow
 
-**File:** `.github/workflows/quality-ci.yml`
+**File:** `.github/workflows/docker-ci.yml` (`dogfooding-quality` job)
 
-Delegates to lgtm-ci `reusable-quality.yml` which runs Lintro analysis and posts results
+Delegates to lgtm-ci `reusable-quality.yml`, linting with the Docker image built in the
+same workflow run (`lintro-image: ghcr.io/lgtm-hq/py-lintro:ci-<run_id>`). Posts results
 as a PR comment.
 
-**Triggers:** Pull requests, pushes to main, merge queue, manual dispatch.
+**Triggers:** Pull requests, pushes to main, merge queue, manual dispatch (via
+docker-ci).
 
 ### 2. Test Suite & Coverage
 
@@ -124,8 +126,8 @@ cp .github/workflows/*.yml your-project/.github/workflows/
 Edit the workflow files to match your project structure:
 
 ```yaml
-# .github/workflows/quality-ci.yml — thin caller for lgtm-ci reusable-quality
-# See quality-ci.yml for the actual configuration.
+# .github/workflows/docker-ci.yml — dogfooding-quality calls lgtm-ci reusable-quality
+# with lintro-image set to the CI-built ghcr.io/lgtm-hq/py-lintro:ci-<run_id> tag.
 ```
 
 ### 3. Configure Repository Settings (optional for Pages)
