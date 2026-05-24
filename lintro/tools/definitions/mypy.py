@@ -477,11 +477,15 @@ class MypyPlugin(BaseToolPlugin):
         issues_count = len(issues)
 
         if not success and issues_count == 0:
-            # Execution failed but no structured issues were parsed; surface raw output
+            # Execution failed but no structured issues were parsed; surface diagnostics
             return ToolResult(
                 name=self.definition.name,
                 success=False,
-                output=output or "mypy execution failed.",
+                output=output
+                or (
+                    "mypy execution failed with no output.\n"
+                    "Re-run with LINTRO_LOG_LEVEL=DEBUG for subprocess details."
+                ),
                 issues_count=0,
             )
 
