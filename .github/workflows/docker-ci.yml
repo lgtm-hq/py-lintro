@@ -115,18 +115,10 @@ jobs:
         env:
           EVENT_NAME: ${{ github.event_name }}
           IS_FORK_PR: ${{ github.event.pull_request.head.repo.fork }}
-        run: |
-          IS_FORK="false"
-          if [[ "$EVENT_NAME" == "pull_request" && "$IS_FORK_PR" == "true" ]]; then
-            IS_FORK="true"
-          fi
-          echo "is-fork=${IS_FORK}" >> "$GITHUB_OUTPUT"
+        run: scripts/ci/detect-fork-pr.sh
       - name: Free disk space (fork fallback)
         if: steps.fork-check.outputs.is-fork == 'true'
-        run: |
-          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc \
-            /usr/local/share/boost
-          sudo docker image prune -af
+        run: scripts/ci/free-disk-space.sh
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
@@ -205,9 +197,7 @@ jobs:
           provenance: false
       - name: Save Docker images to tarball (fork fallback)
         if: steps.fork-check.outputs.is-fork == 'true'
-        run: |
-          docker save py-lintro:latest py-lintro:base \
-            -o /tmp/py-lintro-images.tar
+        run: scripts/docker/save-ci-images-tarball.sh
       - name: Upload Docker images artifact (fork fallback)
         if: steps.fork-check.outputs.is-fork == 'true'
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
@@ -259,9 +249,7 @@ jobs:
         if: needs.docker-build.outputs.is-fork != 'true'
         env:
           CI_TAG: ci-${{ github.run_id }}
-        run: |
-          docker pull "ghcr.io/lgtm-hq/py-lintro:${CI_TAG}"
-          docker tag "ghcr.io/lgtm-hq/py-lintro:${CI_TAG}" py-lintro:latest
+        run: scripts/ci/testing/pull-ci-docker-images.sh full
       - name: Download Docker images artifact (fork fallback)
         if: needs.docker-build.outputs.is-fork == 'true'
         # yamllint disable-line rule:line-length
@@ -271,7 +259,7 @@ jobs:
           path: /tmp
       - name: Load Docker images (fork fallback)
         if: needs.docker-build.outputs.is-fork == 'true'
-        run: docker load -i /tmp/py-lintro-images.tar
+        run: scripts/ci/testing/load-ci-docker-images.sh
       - name: Run Lintro Analysis in Docker
         id: lintro
         run: ./scripts/ci/testing/ci-lintro.sh
@@ -367,9 +355,7 @@ jobs:
         if: needs.docker-build.outputs.is-fork != 'true'
         env:
           CI_TAG: ci-${{ github.run_id }}
-        run: |
-          docker pull "ghcr.io/lgtm-hq/py-lintro:${CI_TAG}"
-          docker tag "ghcr.io/lgtm-hq/py-lintro:${CI_TAG}" py-lintro:latest
+        run: scripts/ci/testing/pull-ci-docker-images.sh full
       - name: Download Docker images artifact (fork fallback)
         if: needs.docker-build.outputs.is-fork == 'true'
         # yamllint disable-line rule:line-length
@@ -379,7 +365,7 @@ jobs:
           path: /tmp
       - name: Load Docker images (fork fallback)
         if: needs.docker-build.outputs.is-fork == 'true'
-        run: docker load -i /tmp/py-lintro-images.tar
+        run: scripts/ci/testing/load-ci-docker-images.sh
       - name: Run security audit
         id: audit
         continue-on-error: true
@@ -394,9 +380,7 @@ jobs:
           mode: upsert
       - name: Fail on vulnerabilities
         if: steps.audit.outcome == 'failure'
-        run: |
-          echo "::error::Security vulnerabilities detected in dependencies"
-          exit 1
+        run: scripts/ci/fail-on-security-audit.sh
 
   integration-test:
     name: 🧪 Docker Integration Tests
@@ -442,11 +426,7 @@ jobs:
         if: needs.docker-build.outputs.is-fork != 'true'
         env:
           CI_TAG: ci-${{ github.run_id }}
-        run: |
-          docker pull "ghcr.io/lgtm-hq/py-lintro:${CI_TAG}"
-          docker tag "ghcr.io/lgtm-hq/py-lintro:${CI_TAG}" py-lintro:latest
-          docker pull "ghcr.io/lgtm-hq/py-lintro-base:${CI_TAG}"
-          docker tag "ghcr.io/lgtm-hq/py-lintro-base:${CI_TAG}" py-lintro:base
+        run: scripts/ci/testing/pull-ci-docker-images.sh both
       - name: Download Docker images artifact (fork fallback)
         if: needs.docker-build.outputs.is-fork == 'true'
         # yamllint disable-line rule:line-length
@@ -456,21 +436,18 @@ jobs:
           path: /tmp
       - name: Load Docker images (fork fallback)
         if: needs.docker-build.outputs.is-fork == 'true'
-        run: docker load -i /tmp/py-lintro-images.tar
+        run: scripts/ci/testing/load-ci-docker-images.sh
       - name: Smoke Test Docker Image
         run: ./scripts/docker/docker-build-test.sh
       - name: Smoke Test Base Image
-        run: docker run --rm py-lintro:base lintro --version
+        run: scripts/docker/smoke-test-base-image.sh
       - name: Run comprehensive test suite (with Docker tests)
-        run: |
-          ./scripts/docker/docker-test.sh 2>&1 | tee test-output.log
-          exit "${PIPESTATUS[0]}"
+        run: scripts/docker/run-docker-test-suite.sh
       - name: Extract test summary
         if: always()
-        run: |
-          chmod +x ./scripts/ci/testing/extract-test-summary.sh
-          ./scripts/ci/testing/extract-test-summary.sh \
-            test-output.log test-summary.json || true
+        run: >-
+          scripts/ci/testing/extract-test-summary.sh
+          test-output.log test-summary.json || true
       - name: Upload test summary artifact
         if: always()
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
@@ -594,28 +571,4 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           CI_TAG: ci-${{ github.run_id }}
-        run: |
-          delete_ci_tag() {
-            local pkg="$1"
-            local tag="$2"
-            version_id=$(gh api \
-              "orgs/lgtm-hq/packages/container/${pkg}/versions" \
-              --paginate \
-              --jq ".[] |
-                select(.metadata.container.tags[] == \"${tag}\") |
-                .id" 2>/dev/null) || version_id=""
-            if [[ -n "$version_id" ]]; then
-              while IFS= read -r vid; do
-                [[ -z "$vid" ]] && continue
-                gh api --method DELETE \
-                  "orgs/lgtm-hq/packages/container/${pkg}/versions/${vid}" \
-                  2>/dev/null && \
-                  echo "Deleted version ${vid} (${pkg}:${tag})" || \
-                  echo "::warning::Failed to delete version ${vid}"
-              done <<< "$version_id"
-            else
-              echo "No version found for ${pkg}:${tag}"
-            fi
-          }
-          delete_ci_tag py-lintro "${CI_TAG}"
-          delete_ci_tag py-lintro-base "${CI_TAG}"
+        run: scripts/ci/maintenance/delete-ci-ghcr-tags.sh
