@@ -75,10 +75,9 @@ def _detect_install_context() -> InstallContext:
     install_path = os.path.realpath(__file__)
 
     # Homebrew: resolved path under Cellar/ or linuxbrew (formula install).
-    # Match lintro-full and lintro-bin before plain lintro to avoid prefix collisions.
+    # Match lintro-full before lintro to avoid prefix collisions.
     cellar_formulas: tuple[tuple[str, InstallContext], ...] = (
         ("lintro-full", InstallContext.HOMEBREW_FULL),
-        ("lintro-bin", InstallContext.HOMEBREW_BIN),
         ("lintro", InstallContext.HOMEBREW_BIN),
     )
     for path in (install_path, exe_path):
@@ -89,8 +88,6 @@ def _detect_install_context() -> InstallContext:
         if "/homebrew/" in lower:
             if "lintro-full" in lower:
                 return InstallContext.HOMEBREW_FULL
-            if "lintro-bin" in lower:
-                return InstallContext.HOMEBREW_BIN
             if "lintro" in lower:
                 return InstallContext.HOMEBREW_BIN
 
