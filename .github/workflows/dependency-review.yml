@@ -17,7 +17,7 @@ concurrency:
 jobs:
   dependency-review:
     # yamllint disable-line rule:line-length
-    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-dependency-review.yml@22a7c110415d75843c2c216f95ed47aaeb8e26fc
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-dependency-review.yml@e42d374f1f89e0ad20d165cd611eb7732462b581
     with:
       fail-on-severity: high
       egress-policy: block
