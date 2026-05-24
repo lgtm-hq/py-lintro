@@ -10,7 +10,8 @@ scripts/ci/
 ├── github/              # PR comment posting and cleanup
 ├── homebrew/            # Homebrew formula generation and tap PRs
 ├── maintenance/         # GHCR prune, security audit, egress checks
-├── testing/             # Coverage badge, test summaries, image pull helpers
+├── testing/             # Test summaries, image pull helpers
+├── coverage-badge-update.sh  # Wrapper → testing/coverage-badge-update.sh
 ├── format-security-comment.py
 ├── security-comment.sh
 └── …                    # Tag/version helpers, manifest sync, etc.
