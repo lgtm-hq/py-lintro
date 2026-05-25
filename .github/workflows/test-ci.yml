@@ -49,7 +49,8 @@ jobs:
         astral.sh:443
         releases.astral.sh:443
     permissions:
-      actions: write  # aggregate job merges per-version python-coverage artifacts (v0.18.2+)
+      # v0.18.2 aggregate job needs actions:write for artifact merge
+      actions: write
       contents: read
       pull-requests: write
 
