@@ -3,11 +3,9 @@
 This repository uses GitHub Actions for quality gates, release automation, and
 publishing. Shared workflows are thin callers to
 [lgtm-ci](https://github.com/lgtm-hq/lgtm-ci) reusable workflows pinned at
-`e42d374f1f89e0ad20d165cd611eb7732462b581` (**v0.18.2**; includes
-[lgtm-ci#206](https://github.com/lgtm-hq/lgtm-ci/pull/206) host-user docker quality and
-`lintro-tool-options` passthrough,
-[lgtm-ci#211](https://github.com/lgtm-hq/lgtm-ci/pull/211) per-version coverage artifact
-merge).
+`4c36e28118ecf4f63df55e4a68b850d5e2697975` (**v0.18.3**; includes
+[lgtm-ci#214](https://github.com/lgtm-hq/lgtm-ci/issues/214) checkout order,
+attest-build subject-param, and python `__version__` verification fixes).
 
 ## CI (main branch)
 
