@@ -72,17 +72,25 @@ All workflows use `step-security/harden-runner` with strict egress policies:
 
 ### Action Pinning
 
-All third-party actions are pinned to full commit SHAs, not version tags:
+LGTM HQ policy ([lgtm-ci#221](https://github.com/lgtm-hq/lgtm-ci/pull/221),
+[.github#12](https://github.com/lgtm-hq/.github/pull/12)): pin third-party and lgtm-ci
+actions to **release commit SHAs** with a trailing Renovate version comment on the same
+line. Tag refs are not allowed.
 
 ```yaml
-# Good - pinned to SHA
-uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+# Good — SHA + version comment (Renovate-discoverable)
+uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
-# Bad - version tag can be moved
+# Bad — movable tag
 uses: actions/checkout@v4
+
+# Bad — bare SHA (Renovate disables; fails validate-action-pinning)
+uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
 ```
 
-The `validate-action-pinning.yml` workflow enforces this policy.
+The same rule applies to `tooling-ref:` and manual lgtm-ci checkout `ref:` fields.
+Enforcement runs via `validate-action-pinning.yml` (lgtm-ci reusable workflow). Renovate
+automation comes from the org preset (`extends: local>lgtm-hq/.github:renovate-config`).
 
 ### Permissions
 

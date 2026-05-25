@@ -10,9 +10,13 @@ inputs in its action.yml.
 versioned separately. When you change a local action, update the workflows that call it
 in the same commit/PR — there is no `@actions-v*` pin to bump.
 
-**External actions** (Marketplace, other repos, or lgtm-ci) must stay pinned to commit
-SHAs in workflow files, per org policy. Breaking changes to those actions are absorbed
-by repinning the SHA in the caller workflow.
+**External actions** (Marketplace, other repos, or lgtm-ci) must stay pinned to
+**release commit SHAs** with a trailing `# vX.Y.Z` comment on the same line, per org
+policy ([lgtm-ci#221](https://github.com/lgtm-hq/lgtm-ci/pull/221),
+[.github#12](https://github.com/lgtm-hq/.github/pull/12)). Breaking changes to those
+actions are absorbed by repinning the SHA and updating the version comment in caller
+workflows. Enforcement is via `validate-action-pinning.yml`; Renovate updates are
+handled by the org preset — not duplicated in this repo’s `renovate.json`.
 
 ## .github/actions/setup-docker
 

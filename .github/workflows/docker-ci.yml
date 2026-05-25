@@ -37,7 +37,8 @@ jobs:
       github.event.pull_request.draft == false
     steps:
       - name: Harden Runner
-        uses: step-security/harden-runner@fe104658747b27e96e4f7e80cd0a94068e53901d
+        # yamllint disable-line rule:line-length
+        uses: step-security/harden-runner@fe104658747b27e96e4f7e80cd0a94068e53901d # v2.16.1
         with:
           egress-policy: 'block'
           allowed-endpoints: >
@@ -81,7 +82,8 @@ jobs:
       is-fork: ${{ steps.fork-check.outputs.is-fork }}
     steps:
       - name: Harden Runner
-        uses: step-security/harden-runner@fe104658747b27e96e4f7e80cd0a94068e53901d
+        # yamllint disable-line rule:line-length
+        uses: step-security/harden-runner@fe104658747b27e96e4f7e80cd0a94068e53901d # v2.16.1
         with:
           egress-policy: 'block'
           allowed-endpoints: >
@@ -210,13 +212,13 @@ jobs:
   dogfooding-quality:
     needs: [docker-build, manifest-sync]
     # yamllint disable-line rule:line-length
-    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-quality.yml@4c36e28118ecf4f63df55e4a68b850d5e2697975
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-quality.yml@dfd52172e5ee817cb1b1baf24895209c5e18d5ad # v0.19.0
     permissions:
       contents: read
       packages: read # pull lintro-image from GHCR in reusable-quality
       pull-requests: write # reusable-quality post-pr-comment step
     with:
-      tooling-ref: '4c36e28118ecf4f63df55e4a68b850d5e2697975'
+      tooling-ref: 'dfd52172e5ee817cb1b1baf24895209c5e18d5ad' # v0.19.0
       job-name: '🛠️ Dogfooding Lint'
       post-pr-comment: true
       lintro-tool-options: >-
@@ -301,7 +303,8 @@ jobs:
     timeout-minutes: 15
     steps:
       - name: Harden Runner
-        uses: step-security/harden-runner@fe104658747b27e96e4f7e80cd0a94068e53901d
+        # yamllint disable-line rule:line-length
+        uses: step-security/harden-runner@fe104658747b27e96e4f7e80cd0a94068e53901d # v2.16.1
         with:
           egress-policy: 'block'
           allowed-endpoints: >
@@ -345,7 +348,8 @@ jobs:
       - name: Comment PR with security audit results
         if: github.event_name == 'pull_request'
         continue-on-error: true
-        uses: lgtm-hq/lgtm-ci/.github/actions/post-pr-comment@4c36e28118ecf4f63df55e4a68b850d5e2697975
+        # yamllint disable-line rule:line-length
+        uses: lgtm-hq/lgtm-ci/.github/actions/post-pr-comment@dfd52172e5ee817cb1b1baf24895209c5e18d5ad # v0.19.0
         with:
           file: security-audit-comment.txt
           marker: security-audit-report
@@ -367,7 +371,8 @@ jobs:
       GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     steps:
       - name: Harden Runner
-        uses: step-security/harden-runner@fe104658747b27e96e4f7e80cd0a94068e53901d
+        # yamllint disable-line rule:line-length
+        uses: step-security/harden-runner@fe104658747b27e96e4f7e80cd0a94068e53901d # v2.16.1
         with:
           egress-policy: 'block'
           allowed-endpoints: >
@@ -461,7 +466,8 @@ jobs:
       cancel-in-progress: false
     steps:
       - name: Harden Runner
-        uses: step-security/harden-runner@fe104658747b27e96e4f7e80cd0a94068e53901d
+        # yamllint disable-line rule:line-length
+        uses: step-security/harden-runner@fe104658747b27e96e4f7e80cd0a94068e53901d # v2.16.1
         with:
           egress-policy: 'block'
           allowed-endpoints: >
@@ -573,7 +579,8 @@ jobs:
     timeout-minutes: 5
     steps:
       - name: Harden Runner
-        uses: step-security/harden-runner@fe104658747b27e96e4f7e80cd0a94068e53901d
+        # yamllint disable-line rule:line-length
+        uses: step-security/harden-runner@fe104658747b27e96e4f7e80cd0a94068e53901d # v2.16.1
         with:
           egress-policy: 'block'
           allowed-endpoints: >
