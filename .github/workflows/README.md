@@ -3,9 +3,15 @@
 This repository uses GitHub Actions for quality gates, release automation, and
 publishing. Shared workflows are thin callers to
 [lgtm-ci](https://github.com/lgtm-hq/lgtm-ci) reusable workflows pinned at
-`4c36e28118ecf4f63df55e4a68b850d5e2697975` (**v0.18.3**; includes
-[lgtm-ci#214](https://github.com/lgtm-hq/lgtm-ci/issues/214) checkout order,
-attest-build subject-param, and python `__version__` verification fixes).
+`dfd52172e5ee817cb1b1baf24895209c5e18d5ad` (**v0.19.0** release commit; includes
+[lgtm-ci#221](https://github.com/lgtm-hq/lgtm-ci/pull/221) annotated SHA enforcement and
+[lgtm-ci#218](https://github.com/lgtm-hq/lgtm-ci/pull/218) Pages publish checkout-order
+fix). All workflow SHA pins include trailing `# vX.Y.Z` comments so Renovate can track
+digest updates. Policy is enforced by
+[lgtm-ci validate-action-pinning](https://github.com/lgtm-hq/lgtm-ci/pull/221) (via
+`validate-action-pinning.yml`) and automated by the
+[org Renovate preset](https://github.com/lgtm-hq/.github/pull/12)
+(`extends: local>lgtm-hq/.github:renovate-config`).
 
 ## CI (main branch)
 
