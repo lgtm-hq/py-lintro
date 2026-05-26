@@ -86,13 +86,13 @@ jobs:
       github.event_name == 'push' &&
       needs.test.outputs.passed == 'true'
     # yamllint disable-line rule:line-length
-    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-test-python-publish.yml@9315d23b1811e9dd93d1c431a1bee9577fdbdd98 # lgtm-ci#223
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-test-python-publish.yml@f2bd33fc7f9af2e3b1862ef0cfb1e365302f09eb # v0.19.1
     with:
       coverage-percent: ${{ needs.test.outputs.coverage-percent }}
       upload-coverage: true
       job-name: Deploy Coverage to Pages
       runner-image: ubuntu-24.04
-      tooling-ref: '9315d23b1811e9dd93d1c431a1bee9577fdbdd98' # lgtm-ci#223
+      tooling-ref: 'f2bd33fc7f9af2e3b1862ef0cfb1e365302f09eb' # v0.19.1
       egress-policy: block
       allowed-endpoints: >
         github.com:443
