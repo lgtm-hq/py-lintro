@@ -11,6 +11,31 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Added
 
+### Changed
+
+### Deprecated
+
+### Removed
+
+### Fixed
+
+### Security
+
+## [0.64.3] - 2026-05-26
+
+### Bug Fixes
+
+- **ci**: repin coverage Pages publish to lgtm-ci v0.19.2 (#947) (88cd875)
+- **ci**: annotate SHA pins and enable Renovate for lgtm-ci updates (#946) (9a54b4a)
+- **ci**: repin lgtm-ci to v0.18.3 and fix egress allowlists (#943) (070e106)
+- **ci**: merge coverage artifacts, add grype and Docker Hub egress (#942) (c6b4442)
+
+### Other Changes
+
+- **ci**: migrate to lgtm-ci v0.18.1 reusable workflows (#939) (7bfa7e7)
+
+### Previously Unreleased
+
 - **install**: Default `pip install lintro` is now lightweight (CLI only); bundled
   Python tools (ruff, black, mypy, bandit, pydoclint, yamllint) moved to `lintro[full]`
 - **install**: Install profiles (`minimal`, `recommended`, `python`, `web`, `ci`,
@@ -33,14 +58,12 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   steps suggest `lintro init`, `lintro doctor`, `lintro check .`
 - **homebrew**: Lightweight `lintro` formula (binary); `lintro-full` formula (PyPI with
   bundled tools)
-
 - **tsc/vue-tsc**: Support TypeScript project references in monorepos — automatic
   sub-project discovery via `references` and directory walking (#803, #805)
 - **tsc/vue-tsc**: Per-project framework detection in monorepos — Astro/Vue/Svelte
   detection is scoped per sub-project, not globally
 - **tsc/vue-tsc**: "Deepest tsconfig wins" partitioning — overlapping parent/child
   configs no longer cause duplicate checking under conflicting compiler options
-
 - **AI-Powered Features** (BYO API key, install with `'lintro[ai]'`):
   - AI-powered issue summaries with pattern analysis and prioritized actions
   - Interactive fix suggestions with AI-generated code diffs
@@ -49,9 +72,6 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   - Post-fix summary contextualizing applied changes
   - Configurable retry, context lines, search radius, and timeout settings
   - Docker AI support via `WITH_AI` build arg
-
-### Breaking Changes
-
 - **Plugin Architecture Migration**: Complete migration from tool-specific classes to
   unified plugin system
   - **API Changes**:
@@ -72,9 +92,6 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
     - `ToolRegistry.get("tool_name")` to get tool instances
 - **Python Version**: Lowered minimum Python version from 3.13 to 3.11
   - `pyproject.toml` updated with classifiers for 3.11, 3.12, 3.13
-
-### Fixed
-
 - **tsc/vue-tsc**: Respect tsconfig.json `include`/`exclude`/`files` scoping instead of
   overriding with all discovered files (#851)
 - **Critical**: Fixed circular import bug in `lintro.parsers` module
@@ -106,15 +123,11 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   - Updated Dockerfile pattern to match actual file names (`Dockerfile.*`)
   - Removed unnecessary `.rst` and `.txt` patterns for docs directory
   - Clean build process with no warnings during package creation
-
-### Technical Details
-
 - **Files Modified**:
   - `.github/workflows/publish-pypi.yml` - Added tool installation and PATH setup
   - `scripts/utils/install-tools.sh` - Improved uv compatibility for Python package
     installation
   - `MANIFEST.in` - Fixed file inclusion patterns
-
 - **Root Cause**: PyPI publish workflow was missing external tool dependencies (ruff,
   darglint, prettier, yamllint, hadolint) that integration tests require
 - **Impact**: All tests now pass in PyPI publication workflow, enabling successful
