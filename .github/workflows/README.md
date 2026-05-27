@@ -31,9 +31,12 @@ digest updates. Policy is enforced by
 
 ## Publish
 
-- **publish-pypi-on-tag.yml** — PyPI publish via `reusable-publish-pypi.yml`; bespoke
-  GitHub Release assets, Homebrew (`build-binary.yml`), and Docker
-  (`docker-build-publish.yml`)
+- **publish-pypi-on-tag.yml** — Production tag publish: lgtm-ci `reusable-quality` +
+  `reusable-sbom`, inline build/publish via `publish-pypi.sh`, GitHub Release assets,
+  Homebrew (`build-binary.yml`), Docker (`docker-build-publish.yml`). See
+  [lgtm-hq/lgtm-ci#232](https://github.com/lgtm-hq/lgtm-ci/issues/232) for consolidating
+  on `reusable-publish-pypi.yml`.
+- **publish-testpypi.yml** — TestPyPI via lgtm-ci `reusable-publish-pypi.yml`
 - **docker-build-publish.yml** — Multi-arch GHCR publish via `reusable-docker.yml`
   (full + base images, registry cache at `:cache`, no-cache on version tags)
 

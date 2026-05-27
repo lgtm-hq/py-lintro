@@ -41,6 +41,8 @@ jobs:
     permissions:
       contents: read
       packages: read
+      # reusable-quality comment job declares pull-requests: write (validated even when post-pr-comment: false)
+      pull-requests: write
 
   sbom:
     name: Generate and verify SBOM
@@ -264,3 +266,4 @@ jobs:
       packages: write
       id-token: write
       attestations: write
+      security-events: write
