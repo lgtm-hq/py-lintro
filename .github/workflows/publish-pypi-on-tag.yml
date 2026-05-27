@@ -25,24 +25,67 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  # Inline lint-only job (not reusable-quality): nested comment job forces
+  # pull-requests: write at parse time even when post-pr-comment is false.
+  # Replace with lgtm-ci reusable-quality-lint after lgtm-hq/lgtm-ci#231.
   quality:
+    name: Lintro Quality Checks
     if: ${{ !startsWith(github.ref_name, 'actions-v') }}
-    # yamllint disable-line rule:line-length
-    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-quality.yml@dfd52172e5ee817cb1b1baf24895209c5e18d5ad # v0.19.0
-    with:
-      post-pr-comment: false
-      tooling-ref: 'dfd52172e5ee817cb1b1baf24895209c5e18d5ad' # v0.19.0
-      egress-policy: block
-      allowed-endpoints: >
-        github.com:443
-        api.github.com:443
-        ghcr.io:443
-        pkg-containers.githubusercontent.com:443
+    runs-on: ubuntu-latest
     permissions:
       contents: read
       packages: read
-      # reusable-quality comment job declares pull-requests: write (validated even when post-pr-comment: false)
-      pull-requests: write
+    env:
+      # yamllint disable-line rule:line-length
+      LINTRO_IMAGE: ghcr.io/lgtm-hq/py-lintro@sha256:1ff3db35939283734b859c7c5d95be87fd8fd62734b3434e0437769d50d53578
+    steps:
+      - name: Harden runner
+        # yamllint disable-line rule:line-length
+        uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
+        with:
+          egress-policy: block
+          allowed-endpoints: >
+            github.com:443
+            api.github.com:443
+            ghcr.io:443
+            pkg-containers.githubusercontent.com:443
+      - name: Checkout repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          persist-credentials: false
+      - name: Checkout lgtm-ci tooling
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          repository: lgtm-hq/lgtm-ci
+          path: .lgtm-ci-tooling
+          ref: 'dfd52172e5ee817cb1b1baf24895209c5e18d5ad' # v0.19.0
+          sparse-checkout: scripts/ci/
+          sparse-checkout-cone-mode: true
+          persist-credentials: false
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@650006c6eb7dba73a995cc03b0b2d7f5ca915bee # v4.2.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+      - name: Run lintro quality checks
+        shell: bash
+        env:
+          STEP: check
+          FAIL_ON_ERROR: 'true'
+          MAP_HOST_USER: 'true'
+        # yamllint disable-line rule:line-length
+        run: bash "${{ github.workspace }}/.lgtm-ci-tooling/scripts/ci/quality/run-lintro-docker.sh"
+      - name: Upload linting report
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: linting-report
+          path: |
+            .lintro/
+            chk-output.txt
+          retention-days: 7
+          if-no-files-found: ignore
 
   sbom:
     name: Generate and verify SBOM
