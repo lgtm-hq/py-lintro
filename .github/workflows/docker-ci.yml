@@ -215,7 +215,7 @@ jobs:
     uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-quality-lint.yml@2b5651444346954583801fe4d0f7550143e662b6 # v0.23.0
     permissions:
       contents: read
-      packages: read
+      packages: read # pull lintro-image from GHCR in reusable-quality-lint
     with:
       tooling-ref: '2b5651444346954583801fe4d0f7550143e662b6' # v0.23.0
       job-name: '🛠️ Dogfooding Lint'
@@ -252,6 +252,11 @@ jobs:
         metrics.semgrep.dev:443
         api.osv.dev:443
         api.deps.dev:443
+      # Same-repo PRs: lint with the image built in this workflow run.
+      # Fork PRs: CI images are not pushed to GHCR (artifact tarball only), so
+      # fall back to the pinned release image — integration tests still use the
+      # fork-built image via the tarball path.
+      # Pinned digest — keep in sync with pyproject.toml lintro pin
       lintro-image: >-
         ${{ needs.docker-build.outputs.is-fork == 'true'
         && format(
@@ -380,7 +385,7 @@ jobs:
     runs-on: ubuntu-24.04
     permissions:
       contents: read
-      packages: read
+      packages: read # GHCR login and CI image pull steps below
     timeout-minutes: 45
     env:
       LINTRO_OUTPUT_DIR: /tmp/lintro
