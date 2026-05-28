@@ -229,6 +229,7 @@ jobs:
         release-assets.githubusercontent.com:443
         objects.githubusercontent.com:443
         raw.githubusercontent.com:443
+        github-releases.githubusercontent.com:443
         ghcr.io:443
         pkg-containers.githubusercontent.com:443
         docker.io:443
@@ -275,7 +276,7 @@ jobs:
     uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-quality-pr-comment.yml@2b5651444346954583801fe4d0f7550143e662b6 # v0.23.0
     permissions:
       contents: read
-      pull-requests: write
+      pull-requests: write # post lintro results as PR comment
     with:
       exit-code: ${{ needs.dogfooding-lint.outputs.exit-code }}
       tooling-ref: '2b5651444346954583801fe4d0f7550143e662b6' # v0.23.0
