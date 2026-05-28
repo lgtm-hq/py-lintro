@@ -30,7 +30,7 @@ jobs:
     name: Generate and verify SBOM
     if: ${{ !startsWith(github.ref_name, 'actions-v') }}
     # yamllint disable-line rule:line-length
-    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-sbom.yml@d3918c686e4489a3b4c3a6fec1446d080ffda86e # v0.23.0
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-sbom.yml@2b5651444346954583801fe4d0f7550143e662b6 # v0.23.0
     with:
       target: .
       target-type: dir
@@ -55,7 +55,7 @@ jobs:
         timestamp.sigstore.dev:443
         tuf-repo-cdn.sigstore.dev:443
         sigstore-tuf-root.storage.googleapis.com:443
-      tooling-ref: 'd3918c686e4489a3b4c3a6fec1446d080ffda86e' # v0.23.0
+      tooling-ref: '2b5651444346954583801fe4d0f7550143e662b6' # v0.23.0
     permissions:
       contents: read
       security-events: write
@@ -67,7 +67,7 @@ jobs:
     needs: [sbom]
     if: ${{ !startsWith(github.ref_name, 'actions-v') }}
     # yamllint disable-line rule:line-length
-    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-publish-pypi-release.yml@d3918c686e4489a3b4c3a6fec1446d080ffda86e # v0.23.0
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-publish-pypi-release.yml@2b5651444346954583801fe4d0f7550143e662b6 # v0.23.0
     permissions:
       contents: read
       id-token: write
@@ -75,7 +75,7 @@ jobs:
     with:
       python-version: '3.14'
       artifact-name: python-dist
-      tooling-ref: 'd3918c686e4489a3b4c3a6fec1446d080ffda86e' # v0.23.0
+      tooling-ref: '2b5651444346954583801fe4d0f7550143e662b6' # v0.23.0
       egress-policy: block
       allowed-endpoints: >
         github.com:443
@@ -98,13 +98,13 @@ jobs:
     needs: [pypi]
     if: ${{ !startsWith(github.ref_name, 'actions-v') }}
     # yamllint disable-line rule:line-length
-    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-github-release.yml@d3918c686e4489a3b4c3a6fec1446d080ffda86e # v0.23.0
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-github-release.yml@2b5651444346954583801fe4d0f7550143e662b6 # v0.23.0
     permissions:
       contents: write
     with:
       artifact-name: python-dist
       generate-release-notes: true
-      tooling-ref: 'd3918c686e4489a3b4c3a6fec1446d080ffda86e' # v0.23.0
+      tooling-ref: '2b5651444346954583801fe4d0f7550143e662b6' # v0.23.0
       egress-policy: block
       allowed-endpoints: >
         github.com:443
