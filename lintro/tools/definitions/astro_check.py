@@ -101,14 +101,26 @@ class AstroCheckPlugin(BaseToolPlugin):
         options = {k: v for k, v in options.items() if v is not None}
         super().set_options(**options, **kwargs)
 
-    def _get_astro_command(self) -> list[str]:
+    def _get_astro_command(self, cwd: Path | None = None) -> list[str]:
         """Get the command to run astro check.
 
-        Prefers direct astro executable, falls back to bunx/npx.
+        Prefers the project-local ``node_modules/.bin/astro`` binary so the
+        command behaves like the project's pinned ``astro check`` and does not
+        trigger the global/`bunx` interactive "install @astrojs/check?" prompt
+        that hangs without a TTY. Falls back to a global ``astro``, then
+        ``bunx``/``npx``.
+
+        Args:
+            cwd: Project root used to locate the local astro binary.
 
         Returns:
             Command arguments for astro check.
         """
+        # Prefer the project-local binary to avoid interactive install prompts
+        if cwd is not None:
+            local_astro = cwd / "node_modules" / ".bin" / "astro"
+            if local_astro.exists():
+                return [str(local_astro), "check"]
         # Prefer direct executable if available
         if shutil.which("astro"):
             return ["astro", "check"]
@@ -150,11 +162,13 @@ class AstroCheckPlugin(BaseToolPlugin):
     def _build_command(
         self,
         options: dict[str, object] | None = None,
+        cwd: Path | None = None,
     ) -> list[str]:
         """Build the astro check invocation command.
 
         Args:
             options: Options dict to use for flags. Defaults to self.options.
+            cwd: Project root used to locate the local astro binary.
 
         Returns:
             A list of command arguments ready to be executed.
@@ -162,7 +176,7 @@ class AstroCheckPlugin(BaseToolPlugin):
         if options is None:
             options = self.options
 
-        cmd: list[str] = self._get_astro_command()
+        cmd: list[str] = self._get_astro_command(cwd)
 
         # Root directory option
         root = options.get("root")
@@ -321,8 +335,19 @@ class AstroCheckPlugin(BaseToolPlugin):
                     skip_reason="node_modules not found",
                 )
 
-        # Build command
-        cmd = self._build_command(options=merged_options)
+        # Build command (cwd lets us prefer the project-local astro binary)
+        cmd = self._build_command(options=merged_options, cwd=cwd_path)
+
+        # Force non-interactive execution. Astro otherwise prompts to install
+        # @astrojs/check; without a TTY that prompt blocks until the timeout.
+        # CI=1 makes Astro non-interactive and stdin=DEVNULL ensures any read
+        # returns EOF immediately instead of hanging.
+        from lintro.utils.env import get_subprocess_env
+
+        run_env = get_subprocess_env()
+        run_env["CI"] = "1"
+        run_env["ASTRO_TELEMETRY_DISABLED"] = "1"
+
         logger.debug("[astro-check] Running with cwd={} and cmd={}", cwd_path, cmd)
 
         try:
@@ -330,8 +355,16 @@ class AstroCheckPlugin(BaseToolPlugin):
                 cmd=cmd,
                 timeout=ctx.timeout,
                 cwd=str(cwd_path),
+                env=run_env,
+                stdin=subprocess.DEVNULL,
             )
         except subprocess.TimeoutExpired:
+            logger.warning(
+                "[astro-check] Timed out after {}s (cwd={}, cmd={}, stdin closed)",
+                ctx.timeout,
+                cwd_path,
+                cmd,
+            )
             timeout_result = create_timeout_result(
                 tool=self,
                 timeout=ctx.timeout,
