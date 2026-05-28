@@ -3,11 +3,8 @@
 This repository uses GitHub Actions for quality gates, release automation, and
 publishing. Shared workflows are thin callers to
 [lgtm-ci](https://github.com/lgtm-hq/lgtm-ci) reusable workflows pinned at
-`dfd52172e5ee817cb1b1baf24895209c5e18d5ad` (**v0.19.0** release commit; includes
-[lgtm-ci#221](https://github.com/lgtm-hq/lgtm-ci/pull/221) annotated SHA enforcement and
-[lgtm-ci#218](https://github.com/lgtm-hq/lgtm-ci/pull/218) Pages publish checkout-order
-fix). All workflow SHA pins include trailing `# vX.Y.Z` comments so Renovate can track
-digest updates. Policy is enforced by
+`d3918c686e4489a3b4c3a6fec1446d080ffda86e` (**v0.23.0**). All workflow SHA pins include
+trailing `# vX.Y.Z` comments so Renovate can track digest updates. Policy is enforced by
 [lgtm-ci validate-action-pinning](https://github.com/lgtm-hq/lgtm-ci/pull/221) (via
 `validate-action-pinning.yml`) and automated by the
 [org Renovate preset](https://github.com/lgtm-hq/.github/pull/12)
@@ -18,8 +15,8 @@ digest updates. Policy is enforced by
 - **test-ci.yml** — Python unit/component tests (3.11 + 3.14) via
   `reusable-test-python.yml`
 - **docker-ci.yml** — Manifest sync, multi-stage Docker build, dogfooding quality
-  (`reusable-quality.yml` + CI-built image), integration tests, security audit, GHCR
-  publish (main), CI tag cleanup
+  (`reusable-quality-lint.yml` + PR-only `reusable-quality-pr-comment.yml`, CI-built
+  image), integration tests, security audit, GHCR publish (main), CI tag cleanup
 
 ## Release
 
@@ -31,11 +28,10 @@ digest updates. Policy is enforced by
 
 ## Publish
 
-- **publish-pypi-on-tag.yml** — Production tag publish: lgtm-ci `reusable-quality` +
-  `reusable-sbom`, inline build/publish via `publish-pypi.sh`, GitHub Release assets,
-  Homebrew (`build-binary.yml`), Docker (`docker-build-publish.yml`). See
-  [lgtm-hq/lgtm-ci#232](https://github.com/lgtm-hq/lgtm-ci/issues/232) for consolidating
-  on `reusable-publish-pypi.yml`.
+- **publish-pypi-on-tag.yml** — Production tag publish: `reusable-sbom` →
+  `reusable-publish-pypi-release` → `reusable-github-release`, then Homebrew
+  (`build-binary.yml`) and Docker (`docker-build-publish.yml`). Lint runs on `main` via
+  `docker-ci` only (no duplicate quality on tag).
 - **publish-testpypi.yml** — TestPyPI via lgtm-ci `reusable-publish-pypi.yml`
 - **docker-build-publish.yml** — Multi-arch GHCR publish via `reusable-docker.yml`
   (full + base images, registry cache at `:cache`, no-cache on version tags)
