@@ -17,7 +17,7 @@ concurrency:
 jobs:
   sbom:
     # yamllint disable-line rule:line-length
-    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-sbom.yml@4676e2737994e31cae7c7ef17d10d5106ae1c25a # v0.23.1
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-sbom.yml@d5fce750002535f59d9675d39575fa382f3427d2 # v0.23.1
     with:
       target: .
       target-type: dir
@@ -42,7 +42,7 @@ jobs:
         timestamp.sigstore.dev:443
         tuf-repo-cdn.sigstore.dev:443
         sigstore-tuf-root.storage.googleapis.com:443
-      tooling-ref: '4676e2737994e31cae7c7ef17d10d5106ae1c25a' # v0.23.1
+      tooling-ref: 'd5fce750002535f59d9675d39575fa382f3427d2' # v0.23.1
     permissions:
       contents: read
       security-events: write
