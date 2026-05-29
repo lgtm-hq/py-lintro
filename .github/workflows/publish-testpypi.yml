@@ -11,12 +11,12 @@ permissions: {}
 jobs:
   publish:
     # yamllint disable-line rule:line-length
-    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-publish-pypi.yml@2b5651444346954583801fe4d0f7550143e662b6 # v0.23.0
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-publish-pypi.yml@d5fce750002535f59d9675d39575fa382f3427d2 # v0.23.1
     with:
       test-pypi: true
       update-homebrew: false
       python-version: '3.14'
-      tooling-ref: '2b5651444346954583801fe4d0f7550143e662b6' # v0.23.0
+      tooling-ref: 'd5fce750002535f59d9675d39575fa382f3427d2' # v0.23.1
       egress-policy: block
       allowed-endpoints: >
         github.com:443
@@ -26,12 +26,19 @@ jobs:
         objects.githubusercontent.com:443
         github-releases.githubusercontent.com:443
         raw.githubusercontent.com:443
+        uploads.github.com:443
+        ghcr.io:443
+        pkg-containers.githubusercontent.com:443
         astral.sh:443
         releases.astral.sh:443
         pypi.org:443
         files.pythonhosted.org:443
         test.pypi.org:443
         upload.test.pypi.org:443
+        fulcio.sigstore.dev:443
+        rekor.sigstore.dev:443
+        tuf-repo-cdn.sigstore.dev:443
+        oauth2.sigstore.dev:443
     permissions:
       contents: read
       id-token: write
