@@ -16,6 +16,7 @@ from unittest.mock import patch
 import pytest
 from assertpy import assert_that
 
+from lintro.plugins.subprocess_executor import validate_subprocess_command
 from lintro.tools.definitions.astro_check import AstroCheckPlugin
 
 
@@ -93,7 +94,7 @@ def test_check_prefers_local_astro_binary(
     with patch.object(astro_check_plugin, "_run_subprocess", side_effect=capture):
         astro_check_plugin.check([str(astro_project)], {})
 
-    assert_that(captured["cmd"][0]).is_equal_to(str(local_astro))
+    assert_that(captured["cmd"][0]).is_equal_to(local_astro.as_posix())
     assert_that(captured["cmd"][1]).is_equal_to("check")
 
 
@@ -128,8 +129,46 @@ def test_check_prefers_local_astro_cmd_on_windows(
     ):
         astro_check_plugin.check([str(astro_project)], {})
 
-    assert_that(captured["cmd"][0]).is_equal_to(str(local_cmd))
+    assert_that(captured["cmd"][0]).is_equal_to(local_cmd.as_posix())
     assert_that(captured["cmd"][1]).is_equal_to("check")
+
+
+def test_get_astro_command_passes_subprocess_validation_on_windows(
+    astro_check_plugin: AstroCheckPlugin,
+    astro_project: Path,
+) -> None:
+    """Local astro.cmd paths use forward slashes so command validation succeeds.
+
+    Exercises validate_subprocess_command via the plugin without mocking
+    _run_subprocess.
+
+    Args:
+        astro_check_plugin: The plugin under test.
+        astro_project: Minimal Astro project fixture.
+    """
+    bin_dir = astro_project / "node_modules" / ".bin"
+    bin_dir.mkdir(parents=True, exist_ok=True)
+    local_cmd = bin_dir / "astro.cmd"
+    local_cmd.write_text("@echo off\n")
+
+    with patch(
+        "lintro.tools.definitions.astro_check.sys.platform",
+        "win32",
+    ):
+        cmd = astro_check_plugin._get_astro_command(astro_project)
+
+    assert_that(cmd).is_equal_to([local_cmd.as_posix(), "check"])
+    assert_that("\\").is_not_in(cmd[0])
+    astro_check_plugin._validate_subprocess_command(cmd)
+    validate_subprocess_command(cmd)
+
+
+def test_validate_subprocess_command_rejects_windows_backslash_executable() -> None:
+    """Backslash executable paths are rejected; POSIX form is accepted."""
+    with pytest.raises(ValueError, match="Unsafe character"):
+        validate_subprocess_command([r"C:\proj\node_modules\.bin\astro.cmd", "check"])
+
+    validate_subprocess_command([r"C:/proj/node_modules/.bin/astro.cmd", "check"])
 
 
 def test_check_windows_shell_shim_falls_back_to_global(

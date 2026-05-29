@@ -143,7 +143,8 @@ class AstroCheckPlugin(BaseToolPlugin):
         if cwd is not None:
             local_astro = _local_astro_binary(cwd)
             if local_astro is not None:
-                return [str(local_astro), "check"]
+                # POSIX path: backslashes in cmd[0] fail validate_subprocess_command
+                return [local_astro.as_posix(), "check"]
         # Prefer direct executable if available
         if shutil.which("astro"):
             return ["astro", "check"]
