@@ -121,22 +121,25 @@ jobs:
           allowed-endpoints: >
             github.com:443
             api.github.com:443
+            codeload.github.com:443
             ghcr.io:443
             pkg-containers.githubusercontent.com:443
             pypi.org:443
             upload.pypi.org:443
             files.pythonhosted.org:443
+            astral.sh:443
+            releases.astral.sh:443
             fulcio.sigstore.dev:443
             rekor.sigstore.dev:443
             tuf-repo-cdn.sigstore.dev:443
             oauth2.sigstore.dev:443
       - name: Upload to PyPI (OIDC)
         # yamllint disable-line rule:line-length
-        uses: lgtm-hq/lgtm-ci/.github/actions/upload-pypi-oidc@f96f88353ccf669dacb7c9e2bd3b5d4410d859fd # v0.24.0
+        uses: lgtm-hq/lgtm-ci/.github/actions/upload-pypi-oidc@29e82f5b128ba8fd5bd6a9ebbff749db6676f011
         with:
           artifact-name: python-dist
           python-version: '3.14'
-          tooling-ref: 'f96f88353ccf669dacb7c9e2bd3b5d4410d859fd' # v0.24.0
+          tooling-ref: '29e82f5b128ba8fd5bd6a9ebbff749db6676f011'
 
   github-release:
     name: Create GitHub Release
