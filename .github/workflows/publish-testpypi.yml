@@ -29,7 +29,7 @@ jobs:
       artifact-name: python-dist
       tooling-ref: 'f96f88353ccf669dacb7c9e2bd3b5d4410d859fd' # v0.24.0
       egress-policy: block
-      # lgtm-ci workflow-contract.md § PyPI build
+      # PyPI build egress (uv python install fetches wheels from the index)
       allowed-endpoints: >
         github.com:443
         api.github.com:443
@@ -40,6 +40,8 @@ jobs:
         raw.githubusercontent.com:443
         astral.sh:443
         releases.astral.sh:443
+        pypi.org:443
+        files.pythonhosted.org:443
 
   pypi-upload:
     name: Upload to TestPyPI
