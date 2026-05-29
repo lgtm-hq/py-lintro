@@ -77,7 +77,8 @@ jobs:
     with:
       python-version: '3.14'
       artifact-name: python-dist
-      tooling-ref: '2b5651444346954583801fe4d0f7550143e662b6' # v0.23.0
+      # lgtm-ci#246: validate-dist uses uv run twine (PEP 668 on Ubuntu 24.04)
+      tooling-ref: '4d0cbb3f1421090c5006394a117d8d421ef493fb' # v0.23.1
       egress-policy: block
       allowed-endpoints: >
         github.com:443
