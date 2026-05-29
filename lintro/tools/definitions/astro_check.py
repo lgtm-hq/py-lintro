@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import shutil
 import subprocess  # nosec B404 - used safely with shell disabled
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, NoReturn
@@ -33,6 +34,7 @@ from lintro.plugins.base import BaseToolPlugin
 from lintro.plugins.protocol import ToolDefinition
 from lintro.plugins.registry import register_tool
 from lintro.tools.core.timeout_utils import create_timeout_result
+from lintro.utils.env import get_subprocess_env
 
 # Constants for Astro check configuration
 ASTRO_CHECK_DEFAULT_TIMEOUT: int = 120
@@ -44,6 +46,27 @@ _ASTRO_CONFIG_NAMES: tuple[str, ...] = (
     "astro.config.js",
     "astro.config.cjs",
 )
+
+
+def _local_astro_binary(cwd: Path) -> Path | None:
+    """Return an executable project-local ``astro`` binary, if present.
+
+    On Windows, npm places a shell shim at ``.bin/astro`` that is not
+    executable with ``shell=False``; the ``astro.cmd`` wrapper is used instead.
+    Directories or other non-file paths are ignored.
+
+    Args:
+        cwd: Project root containing ``node_modules``.
+
+    Returns:
+        Path to the local binary, or ``None`` if none is runnable.
+    """
+    bin_dir = cwd / "node_modules" / ".bin"
+    if sys.platform == "win32":
+        cmd = bin_dir / "astro.cmd"
+        return cmd if cmd.is_file() else None
+    shim = bin_dir / "astro"
+    return shim if shim.is_file() else None
 
 
 @register_tool
@@ -118,8 +141,8 @@ class AstroCheckPlugin(BaseToolPlugin):
         """
         # Prefer the project-local binary to avoid interactive install prompts
         if cwd is not None:
-            local_astro = cwd / "node_modules" / ".bin" / "astro"
-            if local_astro.exists():
+            local_astro = _local_astro_binary(cwd)
+            if local_astro is not None:
                 return [str(local_astro), "check"]
         # Prefer direct executable if available
         if shutil.which("astro"):
@@ -342,8 +365,6 @@ class AstroCheckPlugin(BaseToolPlugin):
         # @astrojs/check; without a TTY that prompt blocks until the timeout.
         # CI=1 makes Astro non-interactive and stdin=DEVNULL ensures any read
         # returns EOF immediately instead of hanging.
-        from lintro.utils.env import get_subprocess_env
-
         run_env = get_subprocess_env()
         run_env["CI"] = "1"
         run_env["ASTRO_TELEMETRY_DISABLED"] = "1"

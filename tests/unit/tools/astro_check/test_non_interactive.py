@@ -97,6 +97,109 @@ def test_check_prefers_local_astro_binary(
     assert_that(captured["cmd"][1]).is_equal_to("check")
 
 
+def test_check_prefers_local_astro_cmd_on_windows(
+    astro_check_plugin: AstroCheckPlugin,
+    astro_project: Path,
+) -> None:
+    """On Windows, use astro.cmd instead of the non-executable shell shim.
+
+    Args:
+        astro_check_plugin: The plugin under test.
+        astro_project: Minimal Astro project fixture.
+    """
+    bin_dir = astro_project / "node_modules" / ".bin"
+    bin_dir.mkdir(parents=True, exist_ok=True)
+    (bin_dir / "astro").write_text("#!/bin/sh\n")
+    local_cmd = bin_dir / "astro.cmd"
+    local_cmd.write_text("@echo off\n")
+
+    captured: dict[str, Any] = {}
+
+    def capture(**kwargs: Any) -> tuple[bool, str]:
+        captured.update(kwargs)
+        return (True, "")
+
+    with (
+        patch(
+            "lintro.tools.definitions.astro_check.sys.platform",
+            "win32",
+        ),
+        patch.object(astro_check_plugin, "_run_subprocess", side_effect=capture),
+    ):
+        astro_check_plugin.check([str(astro_project)], {})
+
+    assert_that(captured["cmd"][0]).is_equal_to(str(local_cmd))
+    assert_that(captured["cmd"][1]).is_equal_to("check")
+
+
+def test_check_windows_shell_shim_falls_back_to_global(
+    astro_check_plugin: AstroCheckPlugin,
+    astro_project: Path,
+) -> None:
+    """On Windows, a shell shim without astro.cmd falls back to global astro.
+
+    Args:
+        astro_check_plugin: The plugin under test.
+        astro_project: Minimal Astro project fixture.
+    """
+    bin_dir = astro_project / "node_modules" / ".bin"
+    bin_dir.mkdir(parents=True, exist_ok=True)
+    (bin_dir / "astro").write_text("#!/bin/sh\n")
+
+    captured: dict[str, Any] = {}
+
+    def capture(**kwargs: Any) -> tuple[bool, str]:
+        captured.update(kwargs)
+        return (True, "")
+
+    with (
+        patch(
+            "lintro.tools.definitions.astro_check.sys.platform",
+            "win32",
+        ),
+        patch(
+            "lintro.tools.definitions.astro_check.shutil.which",
+            side_effect=lambda name: "/usr/bin/astro" if name == "astro" else None,
+        ),
+        patch.object(astro_check_plugin, "_run_subprocess", side_effect=capture),
+    ):
+        astro_check_plugin.check([str(astro_project)], {})
+
+    assert_that(captured["cmd"][:2]).is_equal_to(["astro", "check"])
+
+
+def test_check_ignores_astro_directory_in_bin(
+    astro_check_plugin: AstroCheckPlugin,
+    astro_project: Path,
+) -> None:
+    """A directory at node_modules/.bin/astro is not treated as the binary.
+
+    Args:
+        astro_check_plugin: The plugin under test.
+        astro_project: Minimal Astro project fixture.
+    """
+    bin_dir = astro_project / "node_modules" / ".bin"
+    bin_dir.mkdir(parents=True, exist_ok=True)
+    (bin_dir / "astro").mkdir()
+
+    captured: dict[str, Any] = {}
+
+    def capture(**kwargs: Any) -> tuple[bool, str]:
+        captured.update(kwargs)
+        return (True, "")
+
+    with (
+        patch(
+            "lintro.tools.definitions.astro_check.shutil.which",
+            side_effect=lambda name: "/usr/bin/astro" if name == "astro" else None,
+        ),
+        patch.object(astro_check_plugin, "_run_subprocess", side_effect=capture),
+    ):
+        astro_check_plugin.check([str(astro_project)], {})
+
+    assert_that(captured["cmd"][:2]).is_equal_to(["astro", "check"])
+
+
 def test_check_falls_back_to_global_astro(
     astro_check_plugin: AstroCheckPlugin,
     astro_project: Path,
