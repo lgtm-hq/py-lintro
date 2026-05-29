@@ -3,21 +3,28 @@
 ---
 name: Publish - TestPyPI Staging
 
+# Layout: lgtm-ci docs/python-release-publish.md (v0.24.0+)
+
 'on':
   workflow_dispatch:
 
 permissions: {}
 
 jobs:
-  publish:
+  pypi-build:
+    name: Build Python distribution
     # yamllint disable-line rule:line-length
-    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-publish-pypi.yml@d5fce750002535f59d9675d39575fa382f3427d2 # v0.23.1
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-build-python-dist.yml@ca8f9a6c00b561e9457104d4e67be11cb30eb5b1 # v0.24.0
+    permissions:
+      contents: read
     with:
-      test-pypi: true
-      update-homebrew: false
       python-version: '3.14'
-      tooling-ref: 'd5fce750002535f59d9675d39575fa382f3427d2' # v0.23.1
+      verify-tag-version: false
+      ensure-tag-on-default-branch: false
+      artifact-name: python-dist
+      tooling-ref: 'ca8f9a6c00b561e9457104d4e67be11cb30eb5b1' # v0.24.0
       egress-policy: block
+      # lgtm-ci workflow-contract.md § PyPI build
       allowed-endpoints: >
         github.com:443
         api.github.com:443
@@ -26,20 +33,42 @@ jobs:
         objects.githubusercontent.com:443
         github-releases.githubusercontent.com:443
         raw.githubusercontent.com:443
-        uploads.github.com:443
-        ghcr.io:443
-        pkg-containers.githubusercontent.com:443
         astral.sh:443
         releases.astral.sh:443
-        pypi.org:443
-        files.pythonhosted.org:443
-        test.pypi.org:443
-        upload.test.pypi.org:443
-        fulcio.sigstore.dev:443
-        rekor.sigstore.dev:443
-        tuf-repo-cdn.sigstore.dev:443
-        oauth2.sigstore.dev:443
+
+  pypi-upload:
+    name: Upload to TestPyPI
+    needs: [pypi-build]
+    runs-on: ubuntu-latest
     permissions:
       contents: read
       id-token: write
       attestations: write
+    steps:
+      - name: Harden runner
+        uses: step-security/harden-runner@fe104658747b27e96e4f7e80cd0a94068e53901d # v2.16.1
+        with:
+          egress-policy: block
+          # lgtm-ci workflow-contract.md § PyPI upload (OIDC)
+          allowed-endpoints: >
+            github.com:443
+            api.github.com:443
+            ghcr.io:443
+            pkg-containers.githubusercontent.com:443
+            pypi.org:443
+            upload.pypi.org:443
+            files.pythonhosted.org:443
+            test.pypi.org:443
+            upload.test.pypi.org:443
+            fulcio.sigstore.dev:443
+            rekor.sigstore.dev:443
+            tuf-repo-cdn.sigstore.dev:443
+            oauth2.sigstore.dev:443
+      - name: Upload to TestPyPI (OIDC)
+        # yamllint disable-line rule:line-length
+        uses: lgtm-hq/lgtm-ci/.github/actions/upload-pypi-oidc@ca8f9a6c00b561e9457104d4e67be11cb30eb5b1 # v0.24.0
+        with:
+          artifact-name: python-dist
+          test-pypi: true
+          python-version: '3.14'
+          tooling-ref: 'ca8f9a6c00b561e9457104d4e67be11cb30eb5b1' # v0.24.0

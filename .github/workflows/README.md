@@ -3,7 +3,7 @@
 This repository uses GitHub Actions for quality gates, release automation, and
 publishing. Shared workflows are thin callers to
 [lgtm-ci](https://github.com/lgtm-hq/lgtm-ci) reusable workflows pinned at
-`d5fce750002535f59d9675d39575fa382f3427d2` (**v0.23.1**). All workflow SHA pins include
+`ca8f9a6c00b561e9457104d4e67be11cb30eb5b1` (**v0.24.0**). All workflow SHA pins include
 trailing `# vX.Y.Z` comments so Renovate can track digest updates. Policy is enforced by
 [lgtm-ci validate-action-pinning](https://github.com/lgtm-hq/lgtm-ci/pull/221) (via
 `validate-action-pinning.yml`) and automated by the
@@ -29,10 +29,13 @@ trailing `# vX.Y.Z` comments so Renovate can track digest updates. Policy is enf
 ## Publish
 
 - **publish-pypi-on-tag.yml** — Production tag publish: `reusable-sbom` →
-  `reusable-publish-pypi-release` → `reusable-github-release`, then Homebrew
-  (`build-binary.yml`) and Docker (`docker-build-publish.yml`). Lint runs on `main` via
-  `docker-ci` only (no duplicate quality on tag).
-- **publish-testpypi.yml** — TestPyPI via lgtm-ci `reusable-publish-pypi.yml`
+  `reusable-build-python-dist` → caller `pypi-upload` job (`upload-pypi-oidc`) →
+  `reusable-github-release`, then Homebrew (`build-binary.yml`) and Docker
+  (`docker-build-publish.yml`). OIDC upload runs in this workflow file (not in
+  lgtm-ci reusables). Lint runs on `main` via `docker-ci` only (no duplicate quality on
+  tag).
+- **publish-testpypi.yml** — TestPyPI: `reusable-build-python-dist` + caller upload job
+  (`upload-pypi-oidc` with `test-pypi: true`)
 - **docker-build-publish.yml** — Multi-arch GHCR publish via `reusable-docker.yml`
   (full + base images, registry cache at `:cache`, no-cache on version tags)
 
