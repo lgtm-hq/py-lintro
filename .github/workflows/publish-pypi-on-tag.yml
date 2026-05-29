@@ -68,6 +68,7 @@ jobs:
     if: >-
       github.ref_type == 'tag' &&
       !startsWith(github.ref_name, 'actions-v')
+    environment: pypi
     # yamllint disable-line rule:line-length
     uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-publish-pypi-release.yml@2b5651444346954583801fe4d0f7550143e662b6 # v0.23.0
     permissions:
@@ -80,6 +81,7 @@ jobs:
       # lgtm-ci#246: validate-dist uses uv run twine (PEP 668 on Ubuntu 24.04)
       tooling-ref: '4d0cbb3f1421090c5006394a117d8d421ef493fb' # v0.23.1
       egress-policy: block
+      # Align with v0.64.2 publish job + lgtm-ci setup-python (uv) endpoints
       allowed-endpoints: >
         github.com:443
         api.github.com:443
@@ -88,6 +90,9 @@ jobs:
         objects.githubusercontent.com:443
         github-releases.githubusercontent.com:443
         raw.githubusercontent.com:443
+        uploads.github.com:443
+        ghcr.io:443
+        pkg-containers.githubusercontent.com:443
         pypi.org:443
         upload.pypi.org:443
         files.pythonhosted.org:443
@@ -121,7 +126,7 @@ jobs:
 
   homebrew-tap:
     name: Publish Homebrew Tap
-    needs: pypi
+    needs: [pypi, github-release]
     if: >-
       !startsWith(github.ref_name, 'actions-v') &&
       !contains(github.ref_name, 'a') &&
