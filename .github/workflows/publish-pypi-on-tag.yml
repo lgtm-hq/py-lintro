@@ -57,9 +57,13 @@ jobs:
         sigstore-tuf-root.storage.googleapis.com:443
       tooling-ref: 'ca8f9a6c00b561e9457104d4e67be11cb30eb5b1' # v0.24.0
     permissions:
+      # read: checkout repo for SBOM generation
       contents: read
+      # write: upload vulnerability findings to GitHub Security tab
       security-events: write
+      # write: OIDC for SBOM attestation signing
       id-token: write
+      # write: publish SBOM / build attestations
       attestations: write
 
   pypi-build:
@@ -71,6 +75,7 @@ jobs:
     # yamllint disable-line rule:line-length
     uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-build-python-dist.yml@ca8f9a6c00b561e9457104d4e67be11cb30eb5b1 # v0.24.0
     permissions:
+      # read: checkout and build sdist/wheel (reusable-build-python-dist)
       contents: read
     with:
       python-version: '3.14'
@@ -98,11 +103,15 @@ jobs:
     runs-on: ubuntu-latest
     environment: pypi
     permissions:
+      # read: download python-dist workflow artifact
       contents: read
+      # write: OIDC JWT for PyPI trusted publishing (this workflow file)
       id-token: write
+      # write: Sigstore provenance attestation after upload (best-effort)
       attestations: write
     steps:
       - name: Harden runner
+        # yamllint disable-line rule:line-length
         uses: step-security/harden-runner@fe104658747b27e96e4f7e80cd0a94068e53901d # v2.16.1
         with:
           egress-policy: block
@@ -134,6 +143,7 @@ jobs:
     # yamllint disable-line rule:line-length
     uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-github-release.yml@ca8f9a6c00b561e9457104d4e67be11cb30eb5b1 # v0.24.0
     permissions:
+      # write: create GitHub Release and upload dist assets
       contents: write
     with:
       artifact-name: python-dist
@@ -158,6 +168,7 @@ jobs:
       !contains(github.ref_name, 'rc')
     uses: ./.github/workflows/build-binary.yml
     permissions:
+      # write: push formula updates to Homebrew tap repository
       contents: write
     with:
       release_tag: ${{ github.ref_name }}
@@ -175,8 +186,13 @@ jobs:
       !contains(github.ref_name, 'rc')
     uses: ./.github/workflows/docker-build-publish.yml
     permissions:
+      # read: checkout for Docker build context
       contents: read
+      # write: push images to ghcr.io
       packages: write
+      # write: OIDC for container image signing / provenance
       id-token: write
+      # write: publish image attestations
       attestations: write
+      # write: upload container scan results to Security tab
       security-events: write
