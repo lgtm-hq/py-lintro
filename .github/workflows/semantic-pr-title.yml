@@ -17,9 +17,9 @@ concurrency:
 jobs:
   semantic-title:
     # yamllint disable-line rule:line-length
-    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-semantic-pr-title.yml@f96f88353ccf669dacb7c9e2bd3b5d4410d859fd # v0.24.0
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-semantic-pr-title.yml@51c056cf62302e367c272f5ca8c49922709b2716 # v0.29.1
     with:
-      tooling-ref: 'f96f88353ccf669dacb7c9e2bd3b5d4410d859fd' # v0.24.0
+      tooling-ref: '51c056cf62302e367c272f5ca8c49922709b2716' # v0.29.1
       egress-policy: block
       allowed-endpoints: >
         github.com:443
