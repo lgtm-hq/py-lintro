@@ -1,11 +1,9 @@
 # Workflows overview
 
 This repository uses GitHub Actions for quality gates, release automation, and
-publishing. Most shared workflows are thin callers to
+publishing. Shared workflows are thin callers to
 [lgtm-ci](https://github.com/lgtm-hq/lgtm-ci) reusable workflows pinned at
-`f96f88353ccf669dacb7c9e2bd3b5d4410d859fd` (**v0.24.0**). PyPI publish workflows
-(`publish-pypi-on-tag.yml`, `publish-testpypi.yml`) pin their lgtm-ci reusables at
-**v0.29.1** (`32022b3d920ec123790873ab194638e5db2bcd86`). All workflow SHA pins include
+`32022b3d920ec123790873ab194638e5db2bcd86` (**v0.29.1**). All workflow SHA pins include
 trailing `# vX.Y.Z` comments so Renovate can track digest updates. Policy is enforced by
 [lgtm-ci validate-action-pinning](https://github.com/lgtm-hq/lgtm-ci/pull/221) (via
 `validate-action-pinning.yml`) and automated by the
@@ -37,11 +35,10 @@ trailing `# vX.Y.Z` comments so Renovate can track digest updates. Policy is enf
   (`docker-build-publish.yml`). Upload via `pypa/gh-action-pypi-publish` (OIDC trusted
   publishing) runs in this workflow file, not in lgtm-ci reusables. Lint runs on `main`
   via `docker-ci` only (no duplicate quality on tag).
-- **publish-testpypi.yml** — TestPyPI: `reusable-build-python-dist` (v0.29.1) + caller
-  upload job (same three-step pattern with
-  `repository-url: https://test.pypi.org/legacy/`)
+- **publish-testpypi.yml** — TestPyPI: `reusable-build-python-dist` + caller upload job
+  (same three-step pattern with `repository-url: https://test.pypi.org/legacy/`)
 - **docker-build-publish.yml** — Multi-arch GHCR publish via `reusable-docker.yml`
-  (v0.24.0; full + base images, registry cache at `:cache`, no-cache on version tags)
+  (full + base images, registry cache at `:cache`, no-cache on version tags)
 
 ## Security & maintenance (bespoke)
 
