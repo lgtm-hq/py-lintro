@@ -29,12 +29,14 @@ trailing `# vX.Y.Z` comments so Renovate can track digest updates. Policy is enf
 ## Publish
 
 - **publish-pypi-on-tag.yml** — Production tag publish: `reusable-sbom` →
-  `reusable-build-python-dist` → caller `pypi-upload` job (`upload-pypi-oidc`) →
+  `reusable-build-python-dist` → caller `pypi-upload` job (`prepare-pypi-upload` →
+  `pypa/gh-action-pypi-publish` → `attest-build-provenance`) →
   `reusable-github-release`, then Homebrew (`build-binary.yml`) and Docker
   (`docker-build-publish.yml`). OIDC upload runs in this workflow file (not in lgtm-ci
-  reusables). Lint runs on `main` via `docker-ci` only (no duplicate quality on tag).
+  reusables). Publish pipeline pins lgtm-ci at **v0.29.1**. Lint runs on `main` via
+  `docker-ci` only (no duplicate quality on tag).
 - **publish-testpypi.yml** — TestPyPI: `reusable-build-python-dist` + caller upload job
-  (`upload-pypi-oidc` with `test-pypi: true`)
+  (same three-step pattern with `repository-url: https://test.pypi.org/legacy/`)
 - **docker-build-publish.yml** — Multi-arch GHCR publish via `reusable-docker.yml`
   (full + base images, registry cache at `:cache`, no-cache on version tags)
 
