@@ -138,11 +138,11 @@ jobs:
             oauth2.sigstore.dev:443
       - name: Upload to PyPI (OIDC)
         # yamllint disable-line rule:line-length
-        uses: lgtm-hq/lgtm-ci/.github/actions/upload-pypi-oidc@6e8989c47b255de12cd49c387190a898f59666fb # v0.24.1 (lgtm-ci#252)
+        uses: lgtm-hq/lgtm-ci/.github/actions/upload-pypi-oidc@6e8989c47b255de12cd49c387190a898f59666fb # v0.24.1
         with:
           artifact-name: python-dist
           python-version: '3.14'
-          tooling-ref: '6e8989c47b255de12cd49c387190a898f59666fb' # v0.24.1 (lgtm-ci#252)
+          tooling-ref: '6e8989c47b255de12cd49c387190a898f59666fb' # v0.24.1
 
   github-release:
     name: Create GitHub Release
