@@ -17,12 +17,12 @@ concurrency:
 jobs:
   version-pr:
     # yamllint disable-line rule:line-length
-    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-release-version-pr.yml@32022b3d920ec123790873ab194638e5db2bcd86 # v0.29.1
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-release-version-pr.yml@51c056cf62302e367c272f5ca8c49922709b2716 # v0.29.1
     with:
       ecosystems: python
       auto-merge: true
       max-bump: minor
-      tooling-ref: '32022b3d920ec123790873ab194638e5db2bcd86' # v0.29.1
+      tooling-ref: '51c056cf62302e367c272f5ca8c49922709b2716' # v0.29.1
       egress-policy: block
       allowed-endpoints: >
         github.com:443

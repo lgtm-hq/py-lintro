@@ -212,12 +212,12 @@ jobs:
   dogfooding-lint:
     needs: [docker-build, manifest-sync]
     # yamllint disable-line rule:line-length
-    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-quality-lint.yml@32022b3d920ec123790873ab194638e5db2bcd86 # v0.29.1
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-quality-lint.yml@51c056cf62302e367c272f5ca8c49922709b2716 # v0.29.1
     permissions:
       contents: read
       packages: read # pull lintro-image from GHCR in reusable-quality-lint
     with:
-      tooling-ref: '32022b3d920ec123790873ab194638e5db2bcd86' # v0.29.1
+      tooling-ref: '51c056cf62302e367c272f5ca8c49922709b2716' # v0.29.1
       job-name: '🛠️ Dogfooding Lint'
       lintro-tool-options: >-
         pydoclint:timeout=120,osv_scanner:check_suppressions=false
@@ -273,13 +273,13 @@ jobs:
       github.event.pull_request.head.repo.fork == false &&
       github.event.pull_request.draft == false
     # yamllint disable-line rule:line-length
-    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-quality-pr-comment.yml@32022b3d920ec123790873ab194638e5db2bcd86 # v0.29.1
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-quality-pr-comment.yml@51c056cf62302e367c272f5ca8c49922709b2716 # v0.29.1
     permissions:
       contents: read
       pull-requests: write # post lintro results as PR comment
     with:
       exit-code: ${{ needs.dogfooding-lint.outputs.exit-code }}
-      tooling-ref: '32022b3d920ec123790873ab194638e5db2bcd86' # v0.29.1
+      tooling-ref: '51c056cf62302e367c272f5ca8c49922709b2716' # v0.29.1
       job-name: '🛠️ Dogfooding Lint PR Comment'
       egress-policy: block
       allowed-endpoints: >
@@ -371,7 +371,7 @@ jobs:
         if: github.event_name == 'pull_request'
         continue-on-error: true
         # yamllint disable-line rule:line-length
-        uses: lgtm-hq/lgtm-ci/.github/actions/post-pr-comment@32022b3d920ec123790873ab194638e5db2bcd86 # v0.29.1
+        uses: lgtm-hq/lgtm-ci/.github/actions/post-pr-comment@51c056cf62302e367c272f5ca8c49922709b2716 # v0.29.1
         with:
           file: security-audit-comment.txt
           marker: security-audit-report
