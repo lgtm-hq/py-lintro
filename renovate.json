@@ -72,7 +72,7 @@
     },
     {
       "description": "Regenerate _tool_versions.py when tool version sources change",
-      "matchManagers": ["regex"],
+      "matchManagers": ["custom.regex"],
       "matchFileNames": [
         "Dockerfile",
         "lintro/_tool_versions.py"
