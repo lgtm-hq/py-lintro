@@ -69,6 +69,26 @@
         "vue-tsc"
       ],
       "automerge": false
+    },
+    {
+      "description": "Regenerate _tool_versions.py when tool version sources change",
+      "matchManagers": ["regex"],
+      "matchFileNames": [
+        "Dockerfile",
+        "lintro/_tool_versions.py"
+      ],
+      "postUpgradeTasks": {
+        "commands": [
+          "python3 scripts/ci/generate-tool-versions.py"
+        ],
+        "fileFilters": [
+          "lintro/_tool_versions.py",
+          "package.json",
+          "pyproject.toml",
+          "Dockerfile"
+        ],
+        "executionMode": "branch"
+      }
     }
   ],
   "pip_requirements": {
@@ -79,18 +99,6 @@
   "lockFileMaintenance": {
     "schedule": ["before 5am on monday"],
     "commitMessageAction": "update lockfile"
-  },
-  "postUpgradeTasks": {
-    "commands": [
-      "python3 scripts/ci/generate-tool-versions.py"
-    ],
-    "fileFilters": [
-      "lintro/_tool_versions.py",
-      "package.json",
-      "pyproject.toml",
-      "Dockerfile"
-    ],
-    "executionMode": "branch"
   },
   "customManagers": [
     {
