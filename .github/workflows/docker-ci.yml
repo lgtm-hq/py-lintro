@@ -242,7 +242,7 @@ jobs:
       github.event.pull_request.head.repo.fork == false &&
       github.event.pull_request.draft == false
     # yamllint disable-line rule:line-length
-    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-quality-pr-comment.yml@78a5255d51dc2e1e061e4103a95f3ca0c646275d # v0.32.1
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-publish-quality-summary.yml@78a5255d51dc2e1e061e4103a95f3ca0c646275d # v0.32.1
     permissions:
       contents: read
       pull-requests: write # post lintro results as PR comment

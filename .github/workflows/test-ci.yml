@@ -23,7 +23,7 @@ jobs:
     # yamllint disable-line rule:line-length
     uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-test-python.yml@78a5255d51dc2e1e061e4103a95f3ca0c646275d # v0.32.1
     with:
-      post-pr-comment: true
+      publish-test-summary: true
       python-versions: '3.11,3.14'
       test-path: tests
       extras: 'full'
