@@ -21,7 +21,7 @@ concurrency:
 jobs:
   test:
     # yamllint disable-line rule:line-length
-    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-test-python.yml@51c056cf62302e367c272f5ca8c49922709b2716 # v0.29.1
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-test-python.yml@c1f0c75eefbbcb0650adf823b4a7a303830d351b # v0.32.0
     with:
       post-pr-comment: true
       python-versions: '3.11,3.14'
@@ -35,7 +35,7 @@ jobs:
       draft-pr-skip: true
       job-name: Python Compatibility
       runner-image: ubuntu-24.04
-      tooling-ref: '51c056cf62302e367c272f5ca8c49922709b2716' # v0.29.1
+      tooling-ref: 'c1f0c75eefbbcb0650adf823b4a7a303830d351b'  # v0.32.0
       egress-policy: block
       allowed-endpoints: >
         github.com:443
@@ -87,13 +87,13 @@ jobs:
       github.event_name == 'push' &&
       needs.test.outputs.passed == 'true'
     # yamllint disable-line rule:line-length
-    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-test-python-publish.yml@51c056cf62302e367c272f5ca8c49922709b2716 # v0.29.1
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-test-python-publish.yml@c1f0c75eefbbcb0650adf823b4a7a303830d351b # v0.32.0
     with:
       coverage-percent: ${{ needs.test.outputs.coverage-percent }}
       upload-coverage: true
       job-name: Deploy Coverage to Pages
       runner-image: ubuntu-24.04
-      tooling-ref: '51c056cf62302e367c272f5ca8c49922709b2716' # v0.29.1
+      tooling-ref: 'c1f0c75eefbbcb0650adf823b4a7a303830d351b'  # v0.32.0
       egress-policy: block
       allowed-endpoints: >
         github.com:443
