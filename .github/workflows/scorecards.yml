@@ -17,25 +17,21 @@ concurrency:
 jobs:
   scorecards:
     # yamllint disable-line rule:line-length
-    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-scorecards.yml@c1f0c75eefbbcb0650adf823b4a7a303830d351b # v0.32.0
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-scorecards.yml@78a5255d51dc2e1e061e4103a95f3ca0c646275d # v0.32.1
     with:
+      tooling-ref: '78a5255d51dc2e1e061e4103a95f3ca0c646275d' # v0.32.1
       egress-policy: block
+      egress-preset: scorecard
+      allowed-endpoints-mode: append
       allowed-endpoints: >
         agent.api.stepsecurity.io:443
-        api.deps.dev:443
-        api.github.com:443
-        api.osv.dev:443
-        api.scorecard.dev:443
-        codeload.github.com:443
         fulcio.sigstore.dev:443
-        github.com:443
-        objects.githubusercontent.com:443
-        oss-fuzz-build-logs.storage.googleapis.com:443
-        ossf.github.io:443
-        release-assets.githubusercontent.com:443
         rekor.sigstore.dev:443
         sigstore.dev:443
         tuf-repo-cdn.sigstore.dev:443
+        release-assets.githubusercontent.com:443
+        oss-fuzz-build-logs.storage.googleapis.com:443
+        ossf.github.io:443
         www.bestpractices.dev:443
     permissions:
       contents: read

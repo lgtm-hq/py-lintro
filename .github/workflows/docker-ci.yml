@@ -212,47 +212,16 @@ jobs:
   dogfooding-lint:
     needs: [docker-build, manifest-sync]
     # yamllint disable-line rule:line-length
-    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-quality-lint.yml@c1f0c75eefbbcb0650adf823b4a7a303830d351b # v0.32.0
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-quality-lint.yml@78a5255d51dc2e1e061e4103a95f3ca0c646275d # v0.32.1
     permissions:
       contents: read
       packages: read # pull lintro-image from GHCR in reusable-quality-lint
     with:
-      tooling-ref: 'c1f0c75eefbbcb0650adf823b4a7a303830d351b'  # v0.32.0
+      tooling-ref: '78a5255d51dc2e1e061e4103a95f3ca0c646275d' # v0.32.1
       job-name: '🛠️ Dogfooding Lint'
       lintro-tool-options: >-
         pydoclint:timeout=120,osv_scanner:check_suppressions=false
       egress-policy: block
-      allowed-endpoints: >
-        github.com:443
-        api.github.com:443
-        codeload.github.com:443
-        release-assets.githubusercontent.com:443
-        objects.githubusercontent.com:443
-        raw.githubusercontent.com:443
-        github-releases.githubusercontent.com:443
-        ghcr.io:443
-        pkg-containers.githubusercontent.com:443
-        docker.io:443
-        registry-1.docker.io:443
-        auth.docker.io:443
-        production.cloudflare.docker.com:443
-        production.cloudfront.docker.com:443
-        pypi.org:443
-        files.pythonhosted.org:443
-        static.rust-lang.org:443
-        bun.sh:443
-        astral.sh:443
-        releases.astral.sh:443
-        sh.rustup.rs:443
-        deb.debian.org:80
-        registry.npmjs.org:443
-        crates.io:443
-        static.crates.io:443
-        index.crates.io:443
-        semgrep.dev:443
-        metrics.semgrep.dev:443
-        api.osv.dev:443
-        api.deps.dev:443
       # Same-repo PRs: lint with the image built in this workflow run.
       # Fork PRs: CI images are not pushed to GHCR (artifact tarball only), so
       # fall back to the pinned release image — integration tests still use the
@@ -273,46 +242,38 @@ jobs:
       github.event.pull_request.head.repo.fork == false &&
       github.event.pull_request.draft == false
     # yamllint disable-line rule:line-length
-    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-quality-pr-comment.yml@c1f0c75eefbbcb0650adf823b4a7a303830d351b # v0.32.0
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-quality-pr-comment.yml@78a5255d51dc2e1e061e4103a95f3ca0c646275d # v0.32.1
     permissions:
       contents: read
       pull-requests: write # post lintro results as PR comment
     with:
       exit-code: ${{ needs.dogfooding-lint.outputs.exit-code }}
-      tooling-ref: 'c1f0c75eefbbcb0650adf823b4a7a303830d351b'  # v0.32.0
+      tooling-ref: '78a5255d51dc2e1e061e4103a95f3ca0c646275d' # v0.32.1
       job-name: '🛠️ Dogfooding Lint PR Comment'
       egress-policy: block
-      allowed-endpoints: >
-        github.com:443
-        api.github.com:443
-        codeload.github.com:443
-        release-assets.githubusercontent.com:443
-        objects.githubusercontent.com:443
 
   # Org ruleset (checks-py-lintro) requires this exact check name.
   lintro-code-quality:
-    name: '🛠️ Lintro Code Quality'
-    needs: [dogfooding-lint]
+    needs: dogfooding-lint
     if: >-
       always() &&
       (
         github.event_name != 'pull_request' ||
         github.event.pull_request.draft == false
       )
-    runs-on: ubuntu-24.04
+    # yamllint disable-line rule:line-length
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-required-check.yml@78a5255d51dc2e1e061e4103a95f3ca0c646275d # v0.32.1
     permissions:
       contents: read
-    steps:
-      - name: Require passing lintro quality checks
-        env:
-          QUALITY_RESULT: ${{ needs.dogfooding-lint.result }}
-          QUALITY_STATUS: ${{ needs.dogfooding-lint.outputs.status }}
-        run: |
-          if [ "$QUALITY_RESULT" != "success" ] ||
-             [ "$QUALITY_STATUS" != "passed" ]; then
-            echo "::error::Quality failed ($QUALITY_RESULT / $QUALITY_STATUS)"
-            exit 1
-          fi
+    with:
+      tooling-ref: '78a5255d51dc2e1e061e4103a95f3ca0c646275d' # v0.32.1
+      job-name: '🛠️ Lintro Code Quality'
+      runner-image: ubuntu-24.04
+      upstream-result: ${{ needs.dogfooding-lint.result }}
+      status-output: ${{ needs.dogfooding-lint.outputs.status }}
+      status-expected: passed
+      egress-policy: block
+      egress-preset: github-tooling
 
   security-audit:
     name: 🔐 Security Audit
@@ -371,7 +332,7 @@ jobs:
         if: github.event_name == 'pull_request'
         continue-on-error: true
         # yamllint disable-line rule:line-length
-        uses: lgtm-hq/lgtm-ci/.github/actions/post-pr-comment@c1f0c75eefbbcb0650adf823b4a7a303830d351b # v0.32.0
+        uses: lgtm-hq/lgtm-ci/.github/actions/post-pr-comment@78a5255d51dc2e1e061e4103a95f3ca0c646275d # v0.32.1
         with:
           file: security-audit-comment.txt
           marker: security-audit-report

@@ -17,21 +17,14 @@ concurrency:
 jobs:
   version-pr:
     # yamllint disable-line rule:line-length
-    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-release-version-pr.yml@c1f0c75eefbbcb0650adf823b4a7a303830d351b # v0.32.0
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-release-version-pr.yml@78a5255d51dc2e1e061e4103a95f3ca0c646275d # v0.32.1
     with:
       ecosystems: python
       auto-merge: true
       max-bump: minor
-      tooling-ref: 'c1f0c75eefbbcb0650adf823b4a7a303830d351b'  # v0.32.0
+      tooling-ref: '78a5255d51dc2e1e061e4103a95f3ca0c646275d' # v0.32.1
       egress-policy: block
-      allowed-endpoints: >
-        github.com:443
-        api.github.com:443
-        codeload.github.com:443
-        release-assets.githubusercontent.com:443
-        objects.githubusercontent.com:443
-        pypi.org:443
-        files.pythonhosted.org:443
+      egress-preset: pypi
     secrets:
       RELEASE_APP_ID: ${{ secrets.RELEASE_APP_ID }}
       RELEASE_APP_PRIVATE_KEY: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
