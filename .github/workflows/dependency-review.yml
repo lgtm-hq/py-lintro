@@ -17,18 +17,16 @@ concurrency:
 jobs:
   dependency-review:
     # yamllint disable-line rule:line-length
-    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-dependency-review.yml@51c056cf62302e367c272f5ca8c49922709b2716 # v0.29.1
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-dependency-review.yml@f469f4d5c187f0700ccec4c023152fb68ee3dc89 # v0.32.3
     with:
       fail-on-severity: high
+      tooling-ref: 'f469f4d5c187f0700ccec4c023152fb68ee3dc89' # v0.32.3
       egress-policy: block
+      egress-preset: scorecard
+      allowed-endpoints-mode: append
       allowed-endpoints: >
-        github.com:443
-        api.github.com:443
-        codeload.github.com:443
-        release-assets.githubusercontent.com:443
-        objects.githubusercontent.com:443
         api.deps.dev:443
-        api.securityscorecards.dev:443
+        release-assets.githubusercontent.com:443
     permissions:
       contents: read
       pull-requests: read

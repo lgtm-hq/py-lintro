@@ -3,7 +3,7 @@
 ---
 name: Publish - TestPyPI Staging
 
-# Layout: lgtm-ci docs/python-release-publish.md (v0.29.1+)
+# Layout: lgtm-ci docs/python-release-publish.md (v0.32.3+)
 
 'on':
   workflow_dispatch:
@@ -18,7 +18,7 @@ jobs:
   pypi-build:
     name: Build Python distribution
     # yamllint disable-line rule:line-length
-    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-build-python-dist.yml@51c056cf62302e367c272f5ca8c49922709b2716 # v0.29.1
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-build-python-dist.yml@f469f4d5c187f0700ccec4c023152fb68ee3dc89 # v0.32.3
     permissions:
       # read: checkout and build sdist/wheel (reusable-build-python-dist)
       contents: read
@@ -27,21 +27,14 @@ jobs:
       verify-tag-version: false
       ensure-tag-on-default-branch: false
       artifact-name: python-dist
-      tooling-ref: '51c056cf62302e367c272f5ca8c49922709b2716' # v0.29.1
+      tooling-ref: 'f469f4d5c187f0700ccec4c023152fb68ee3dc89' # v0.32.3
       egress-policy: block
-      # PyPI build egress (uv python install fetches wheels from the index)
+      egress-preset: pypi
+      allowed-endpoints-mode: append
       allowed-endpoints: >
-        github.com:443
-        api.github.com:443
-        codeload.github.com:443
-        release-assets.githubusercontent.com:443
-        objects.githubusercontent.com:443
-        github-releases.githubusercontent.com:443
-        raw.githubusercontent.com:443
         astral.sh:443
         releases.astral.sh:443
-        pypi.org:443
-        files.pythonhosted.org:443
+        github-releases.githubusercontent.com:443
 
   pypi-upload:
     name: Upload to TestPyPI
@@ -87,11 +80,11 @@ jobs:
       - name: Prepare PyPI upload
         id: prepare
         # yamllint disable-line rule:line-length
-        uses: lgtm-hq/lgtm-ci/.github/actions/prepare-pypi-upload@51c056cf62302e367c272f5ca8c49922709b2716 # v0.29.1
+        uses: lgtm-hq/lgtm-ci/.github/actions/prepare-pypi-upload@f469f4d5c187f0700ccec4c023152fb68ee3dc89 # v0.32.3
         with:
           artifact-name: python-dist
           python-version: '3.14'
-          tooling-ref: '51c056cf62302e367c272f5ca8c49922709b2716' # v0.29.1
+          tooling-ref: 'f469f4d5c187f0700ccec4c023152fb68ee3dc89' # v0.32.3
       - name: Upload to TestPyPI
         # yamllint disable-line rule:line-length
         uses: pypa/gh-action-pypi-publish@cef221092ed1bacb1cc03d23a2d87d1d172e277b # v1.14.0
