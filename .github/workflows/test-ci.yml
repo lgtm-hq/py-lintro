@@ -23,13 +23,13 @@ jobs:
     # yamllint disable-line rule:line-length
     uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-test-python.yml@f469f4d5c187f0700ccec4c023152fb68ee3dc89 # v0.32.3
     with:
-      publish-test-summary: true
+      publish-test-summary: false
       python-versions: '3.11,3.14'
       test-path: tests
       extras: 'full'
       extra-args: '-x --ignore=tests/integration'
       coverage: true
-      coverage-format: lcov
+      coverage-format: xml
       coverage-threshold: 80
       upload-coverage: true
       draft-pr-skip: true
