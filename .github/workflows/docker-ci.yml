@@ -252,7 +252,7 @@ jobs:
       job-name: '🛠️ Dogfooding Lint PR Comment'
       egress-policy: block
 
-  # Org ruleset (checks-py-lintro) requires this exact check name.
+  # Org ruleset (checks-py-lintro): lintro-code-quality / 🛠️ Lintro Code Quality
   lintro-code-quality:
     needs: dogfooding-lint
     if: >-

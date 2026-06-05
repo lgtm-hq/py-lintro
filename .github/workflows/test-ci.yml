@@ -48,7 +48,7 @@ jobs:
       contents: read
       pull-requests: write
 
-  # Org ruleset (checks-py-lintro) requires this exact check name.
+  # Org ruleset (checks-py-lintro): test-suite-coverage / 🧪 Test Suite & Coverage
   test-suite-coverage:
     needs: test
     if: >-
