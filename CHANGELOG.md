@@ -21,6 +21,16 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.64.4] - 2026-06-05
+
+### Bug Fixes
+
+- **renovate**: scope postUpgradeTasks to regex managers only (#970) (f196589)
+
+### Other Changes
+
+- **deps**: update lgtm-hq/lgtm-ci to v0.32.0 (minor) (#971) (90e6727)
+
 ## [0.64.3] - 2026-05-26
 
 ### Bug Fixes
