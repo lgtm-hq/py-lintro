@@ -3,7 +3,7 @@
 This repository uses GitHub Actions for quality gates, release automation, and
 publishing. Shared workflows are thin callers to
 [lgtm-ci](https://github.com/lgtm-hq/lgtm-ci) reusable workflows pinned at
-`78a5255d51dc2e1e061e4103a95f3ca0c646275d` (**v0.32.1**). All workflow SHA pins include
+`f469f4d5c187f0700ccec4c023152fb68ee3dc89` (**v0.32.3**). All workflow SHA pins include
 trailing `# vX.Y.Z` comments so Renovate can track digest updates. Policy is enforced by
 [lgtm-ci validate-action-pinning](https://github.com/lgtm-hq/lgtm-ci/pull/221) (via
 `validate-action-pinning.yml`) and automated by the
@@ -15,8 +15,9 @@ trailing `# vX.Y.Z` comments so Renovate can track digest updates. Policy is enf
 - **test-ci.yml** — Python unit/component tests (3.11 + 3.14) via
   `reusable-test-python.yml`
 - **docker-ci.yml** — Manifest sync, multi-stage Docker build, dogfooding quality
-  (`reusable-quality-lint.yml` + PR-only `reusable-quality-pr-comment.yml`, CI-built
-  image), integration tests, security audit, GHCR publish (main), CI tag cleanup
+  (`reusable-quality-lint.yml` + PR-only `reusable-publish-quality-summary.yml`,
+  CI-built image), integration tests, security audit, GHCR publish (main), CI tag
+  cleanup
 
 ## Release
 

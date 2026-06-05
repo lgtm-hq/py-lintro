@@ -17,14 +17,14 @@ concurrency:
 jobs:
   sbom:
     # yamllint disable-line rule:line-length
-    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-sbom.yml@78a5255d51dc2e1e061e4103a95f3ca0c646275d # v0.32.1
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-sbom.yml@f469f4d5c187f0700ccec4c023152fb68ee3dc89 # v0.32.3
     with:
       target: .
       target-type: dir
       sbom-format: cyclonedx-json
       scan-vulnerabilities: true
       create-attestation: true
-      tooling-ref: '78a5255d51dc2e1e061e4103a95f3ca0c646275d' # v0.32.1
+      tooling-ref: 'f469f4d5c187f0700ccec4c023152fb68ee3dc89' # v0.32.3
       egress-policy: block
       egress-preset: sbom
     permissions:
