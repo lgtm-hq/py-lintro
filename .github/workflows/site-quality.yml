@@ -1,0 +1,163 @@
+# SPDX-License-Identifier: MIT
+---
+name: Quality - Documentation Site
+
+'on':
+  push:
+    branches: [main]
+    paths:
+      - 'apps/site/**'
+      - 'docs/**'
+      - 'scripts/ci/site/**'
+      - 'tests/scripts/ci/**'
+      - 'pyproject.toml'
+      - '.github/workflows/site-quality.yml'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'apps/site/**'
+      - 'docs/**'
+      - 'scripts/ci/site/**'
+      - 'tests/scripts/ci/**'
+      - 'pyproject.toml'
+      - '.github/workflows/site-quality.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: site-quality-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-and-link:
+    name: Build and check documentation site
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Harden Runner
+        # yamllint disable-line rule:line-length
+        uses: lgtm-hq/lgtm-ci/.github/actions/harden-runner@f469f4d5c187f0700ccec4c023152fb68ee3dc89 # v0.32.3
+        with:
+          egress-policy: block
+          allowed-endpoints: >
+            github.com:443
+            api.github.com:443
+            codeload.github.com:443
+            objects.githubusercontent.com:443
+            release-assets.githubusercontent.com:443
+            registry.npmjs.org:443
+            bun.sh:443
+
+      - name: Checkout
+        # yamllint disable-line rule:line-length
+        uses: lgtm-hq/lgtm-ci/.github/actions/secure-checkout@f469f4d5c187f0700ccec4c023152fb68ee3dc89 # v0.32.3
+
+      - name: Setup Node and Bun
+        # yamllint disable-line rule:line-length
+        uses: lgtm-hq/lgtm-ci/.github/actions/setup-node@f469f4d5c187f0700ccec4c023152fb68ee3dc89 # v0.32.3
+        with:
+          node-version: '22'
+          working-directory: apps/site
+          cache-dependency-path: apps/site/bun.lock
+
+      - name: Migrate docs content
+        run: uv run python scripts/ci/site/migrate-docs-content.py
+
+      - name: Build site
+        env:
+          ASTRO_BASE: /
+        run: ./scripts/ci/site/build.sh
+
+      - name: Checkout lgtm-ci tooling
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          repository: lgtm-hq/lgtm-ci
+          path: .lgtm-ci-tooling
+          ref: f469f4d5c187f0700ccec4c023152fb68ee3dc89 # v0.32.3
+          sparse-checkout: scripts/ci/
+          sparse-checkout-cone-mode: true
+          persist-credentials: false
+
+      - name: Build Lychee arguments
+        id: lychee-args
+        env:
+          PATHS: apps/site/dist
+          FILE_EXTENSIONS: html
+          CHECK_EXTERNAL: 'false'
+          WORKING_DIRECTORY: .
+        run: bash .lgtm-ci-tooling/scripts/ci/actions/build-lychee-args.sh
+
+      - name: Prepare Lychee action inputs
+        id: lychee-action
+        env:
+          RAW_ARGS: ${{ steps.lychee-args.outputs.args }}
+        run: ./scripts/ci/site/prepare-lychee-action-args.sh
+
+      - name: Check links
+        # yamllint disable-line rule:line-length
+        uses: lycheeverse/lychee-action@8646ba30535128ac92d33dfc9133794bfdd9b411 # v2.8.0
+        with:
+          args: ${{ steps.lychee-action.outputs.args }}
+          format: markdown
+          output: lychee-report.md
+          token: ${{ github.token }}
+          fail: true
+
+      - name: Upload site artifact
+        # yamllint disable-line rule:line-length
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: site-dist
+          path: apps/site/dist
+          retention-days: 1
+
+  test:
+    name: Test documentation site
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Harden Runner
+        # yamllint disable-line rule:line-length
+        uses: lgtm-hq/lgtm-ci/.github/actions/harden-runner@f469f4d5c187f0700ccec4c023152fb68ee3dc89 # v0.32.3
+        with:
+          egress-policy: block
+          allowed-endpoints: >
+            github.com:443
+            api.github.com:443
+            codeload.github.com:443
+            objects.githubusercontent.com:443
+            release-assets.githubusercontent.com:443
+            raw.githubusercontent.com:443
+            registry.npmjs.org:443
+            bun.sh:443
+            pypi.org:443
+            files.pythonhosted.org:443
+
+      - name: Checkout
+        # yamllint disable-line rule:line-length
+        uses: lgtm-hq/lgtm-ci/.github/actions/secure-checkout@f469f4d5c187f0700ccec4c023152fb68ee3dc89 # v0.32.3
+
+      - name: Setup Python and uv
+        # yamllint disable-line rule:line-length
+        uses: lgtm-hq/lgtm-ci/.github/actions/setup-python@f469f4d5c187f0700ccec4c023152fb68ee3dc89 # v0.32.3
+        with:
+          python-version: '3.12'
+          install-dependencies: false
+
+      - name: Setup Node and Bun
+        # yamllint disable-line rule:line-length
+        uses: lgtm-hq/lgtm-ci/.github/actions/setup-node@f469f4d5c187f0700ccec4c023152fb68ee3dc89 # v0.32.3
+        with:
+          node-version: '22'
+          working-directory: apps/site
+          cache-dependency-path: apps/site/bun.lock
+
+      - name: Migrate docs content
+        run: uv run python scripts/ci/site/migrate-docs-content.py
+
+      - name: Type-check site
+        run: ./scripts/ci/site/check.sh
+
+      - name: Run site tests
+        run: ./scripts/ci/site/test-all.sh

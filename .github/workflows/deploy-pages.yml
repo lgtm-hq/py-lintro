@@ -1,0 +1,48 @@
+# SPDX-License-Identifier: MIT
+---
+name: Deploy - GitHub Pages
+
+'on':
+  workflow_run:
+    workflows:
+      - CI - Tests
+      - Quality - Documentation Site
+    types:
+      - completed
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  deploy:
+    if: >-
+      (github.event_name == 'workflow_dispatch' &&
+      github.ref == 'refs/heads/main') ||
+      (github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.head_branch == 'main' &&
+      github.event.workflow_run.head_repository.full_name == github.repository)
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+      actions: read
+    # yamllint disable-line rule:line-length
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-deploy-site-with-reports.yml@f469f4d5c187f0700ccec4c023152fb68ee3dc89 # v0.32.3
+    with:
+      site-root: apps/site/dist
+      build-command: bash scripts/ci/site/build.sh
+      package-manager: bun
+      node-version: '22'
+      working-directory: apps/site
+      bundle-manifest: .github/pages-bundle-manifest.json
+      commit-sha: ${{ github.event.workflow_run.head_sha || github.sha }}
+      fallback-ref: main
+      tooling-ref: f469f4d5c187f0700ccec4c023152fb68ee3dc89 # v0.32.3
+      build-job-name: Build site and bundle reports
+      deploy-job-name: Deploy to GitHub Pages
+      runner-image: ubuntu-24.04
+      timeout-minutes: 20
