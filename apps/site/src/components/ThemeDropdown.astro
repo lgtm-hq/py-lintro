@@ -1,0 +1,266 @@
+---
+import {
+  DEFAULT_THEME,
+  themeMenuGroups,
+  themeSwatches,
+  themeTriggerLabels,
+} from '../data/themes';
+
+const defaultSwatch = themeSwatches[DEFAULT_THEME] ?? '#39ff14';
+const defaultLabel = themeTriggerLabels[DEFAULT_THEME] ?? 'Terminal';
+---
+
+<div class="theme-picker" id="theme-picker" data-pagefind-ignore>
+  <button
+    type="button"
+    class="theme-picker-trigger"
+    id="theme-picker-trigger"
+    aria-haspopup="listbox"
+    aria-expanded="false"
+    aria-controls="theme-picker-panel"
+    aria-label="Select theme"
+  >
+    <span
+      class="theme-swatch theme-swatch-current"
+      id="theme-picker-swatch"
+      style={`background: ${defaultSwatch}`}
+      aria-hidden="true"
+    ></span>
+    <span class="theme-picker-label" id="theme-picker-label">{defaultLabel}</span>
+    <svg class="theme-picker-chevron" width="12" height="12" viewBox="0 0 12 12" aria-hidden="true">
+      <path d="M2.5 4.5 6 8l3.5-3.5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" />
+    </svg>
+  </button>
+
+  <div class="theme-picker-panel" id="theme-picker-panel" role="listbox" aria-label="Themes" hidden>
+    {
+      themeMenuGroups.map((group) => (
+        <div class="theme-picker-group" role="presentation">
+          <p class="theme-picker-group-label">{group.label}</p>
+          <div class="theme-picker-options">
+            {
+              group.themes.map((theme) => (
+                <button
+                  type="button"
+                  class="theme-picker-option"
+                  role="option"
+                  data-theme-id={theme.id}
+                  data-theme-label={theme.label}
+                  data-theme-swatch={theme.swatch}
+                  aria-selected={theme.id === DEFAULT_THEME ? 'true' : 'false'}
+                >
+                  <span class="theme-swatch" style={`background: ${theme.swatch}`} aria-hidden="true"></span>
+                  <span class="theme-picker-option-label">{theme.label}</span>
+                  <span class="theme-picker-mode" aria-hidden="true">{theme.appearance === 'light' ? 'Light' : 'Dark'}</span>
+                  <svg class="theme-picker-check" width="14" height="14" viewBox="0 0 24 24" aria-hidden="true">
+                    <path d="M20 6 9 17l-5-5" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" />
+                  </svg>
+                </button>
+              ))
+            }
+          </div>
+        </div>
+      ))
+    }
+  </div>
+</div>
+
+<script>
+  let themePickerDocumentListenersBound = false;
+
+  function onThemePickerDocumentClick(event: MouseEvent): void {
+    const picker = document.getElementById('theme-picker');
+    if (!picker || picker.contains(event.target as Node)) return;
+    picker.classList.remove('is-open');
+    const trigger = document.getElementById('theme-picker-trigger');
+    const panel = document.getElementById('theme-picker-panel');
+    trigger?.setAttribute('aria-expanded', 'false');
+    panel?.setAttribute('hidden', '');
+  }
+
+  function onThemePickerDocumentKeydown(event: KeyboardEvent): void {
+    const picker = document.getElementById('theme-picker');
+    const trigger = document.getElementById('theme-picker-trigger');
+    const panel = document.getElementById('theme-picker-panel');
+    if (!picker || !trigger || !panel || !picker.classList.contains('is-open')) return;
+
+    const activeEl = document.activeElement;
+    if (
+      activeEl &&
+      activeEl !== trigger &&
+      !picker.contains(activeEl) &&
+      !trigger.contains(activeEl)
+    ) {
+      return;
+    }
+
+    const options = Array.from(picker.querySelectorAll<HTMLButtonElement>('.theme-picker-option'));
+    const activeId = panel.getAttribute('aria-activedescendant');
+    let activeIndex = options.findIndex((option) => option.id === activeId);
+    if (activeIndex < 0) {
+      activeIndex = options.findIndex((option) => option.getAttribute('aria-selected') === 'true');
+    }
+    if (activeIndex < 0) activeIndex = 0;
+
+    const moveActive = (nextIndex: number): void => {
+      const option = options[nextIndex];
+      if (!option) return;
+      panel.setAttribute('aria-activedescendant', option.id);
+      for (const candidate of options) {
+        const isFocused = candidate === option;
+        candidate.tabIndex = isFocused ? 0 : -1;
+        candidate.classList.toggle('is-keyboard-active', isFocused);
+      }
+      option.focus();
+    };
+
+    if (event.key === 'Escape') {
+      picker.classList.remove('is-open');
+      trigger.setAttribute('aria-expanded', 'false');
+      panel.setAttribute('hidden', '');
+      trigger.focus();
+      return;
+    }
+
+    if (event.key === 'ArrowDown') {
+      event.preventDefault();
+      moveActive((activeIndex + 1) % options.length);
+      return;
+    }
+
+    if (event.key === 'ArrowUp') {
+      event.preventDefault();
+      moveActive((activeIndex - 1 + options.length) % options.length);
+      return;
+    }
+
+    if (event.key === 'Home') {
+      event.preventDefault();
+      moveActive(0);
+      return;
+    }
+
+    if (event.key === 'End') {
+      event.preventDefault();
+      moveActive(options.length - 1);
+      return;
+    }
+
+    if (event.key === 'Enter' || event.key === ' ') {
+      const active = options[activeIndex];
+      if (!active) return;
+      event.preventDefault();
+      const themeId = active.dataset.themeId;
+      if (themeId) active.click();
+    }
+  }
+
+  function onTurboThemeApplied(event: Event): void {
+    const themeId = (event as CustomEvent<{ themeId: string }>).detail?.themeId;
+    if (!themeId) return;
+    const picker = document.getElementById('theme-picker');
+    if (!picker || picker.dataset.bound !== 'true') return;
+    const label = document.getElementById('theme-picker-label');
+    const swatch = document.getElementById('theme-picker-swatch');
+    const options = Array.from(picker.querySelectorAll<HTMLButtonElement>('.theme-picker-option'));
+    const active = options.find((option) => option.dataset.themeId === themeId);
+    for (const option of picker.querySelectorAll<HTMLButtonElement>('.theme-picker-option')) {
+      const isSelected = option.dataset.themeId === themeId;
+      option.setAttribute('aria-selected', isSelected ? 'true' : 'false');
+      option.classList.toggle('is-active', isSelected);
+    }
+    if (active && label && swatch) {
+      label.textContent = active.dataset.themeLabel ?? themeId;
+      swatch.style.background = active.dataset.themeSwatch ?? '';
+    }
+  }
+
+  function initThemePicker(): void {
+    const picker = document.getElementById('theme-picker');
+    const trigger = document.getElementById('theme-picker-trigger');
+    const panel = document.getElementById('theme-picker-panel');
+    const swatch = document.getElementById('theme-picker-swatch');
+    const label = document.getElementById('theme-picker-label');
+
+    if (!picker || !trigger || !panel || !swatch || !label || picker.dataset.bound === 'true') return;
+    picker.dataset.bound = 'true';
+
+    const options = Array.from(picker.querySelectorAll<HTMLButtonElement>('.theme-picker-option'));
+    for (const [index, option] of options.entries()) {
+      if (!option.id) option.id = `theme-option-${option.dataset.themeId ?? index}`;
+      option.tabIndex = option.getAttribute('aria-selected') === 'true' ? 0 : -1;
+    }
+
+    const setOpen = (open: boolean): void => {
+      trigger.setAttribute('aria-expanded', open ? 'true' : 'false');
+      picker.classList.toggle('is-open', open);
+      if (open) {
+        panel.removeAttribute('hidden');
+        const selected =
+          options.find((option) => option.getAttribute('aria-selected') === 'true') ?? options[0];
+        if (selected) {
+          panel.setAttribute('aria-activedescendant', selected.id);
+          for (const option of options) {
+            option.classList.toggle('is-keyboard-active', option === selected);
+          }
+        }
+      } else {
+        panel.setAttribute('hidden', '');
+        panel.removeAttribute('aria-activedescendant');
+        for (const option of options) {
+          option.classList.remove('is-keyboard-active');
+        }
+      }
+    };
+
+    const setActive = (themeId: string): void => {
+      const active = options.find((option) => option.dataset.themeId === themeId);
+      for (const option of options) {
+        const isSelected = option.dataset.themeId === themeId;
+        option.setAttribute('aria-selected', isSelected ? 'true' : 'false');
+        option.classList.toggle('is-active', isSelected);
+        option.classList.remove('is-keyboard-active');
+        option.tabIndex = isSelected ? 0 : -1;
+      }
+      if (active) {
+        label.textContent = active.dataset.themeLabel ?? themeId;
+        swatch.style.background = active.dataset.themeSwatch ?? '';
+        panel.setAttribute('aria-activedescendant', active.id);
+      }
+    };
+
+    const applyFromPicker = (themeId: string): void => {
+      const applyTheme = (window as Window & { __applyTheme?: (id: string) => void }).__applyTheme;
+      if (typeof applyTheme === 'function') {
+        applyTheme(themeId);
+      }
+      setActive(themeId);
+      setOpen(false);
+    };
+
+    trigger.addEventListener('click', (event) => {
+      event.stopPropagation();
+      setOpen(!picker.classList.contains('is-open'));
+    });
+
+    for (const option of options) {
+      option.addEventListener('click', () => {
+        const themeId = option.dataset.themeId;
+        if (themeId) applyFromPicker(themeId);
+      });
+    }
+
+    if (!themePickerDocumentListenersBound) {
+      document.addEventListener('click', onThemePickerDocumentClick);
+      document.addEventListener('keydown', onThemePickerDocumentKeydown);
+      document.addEventListener('turbo-theme-applied', onTurboThemeApplied);
+      themePickerDocumentListenersBound = true;
+    }
+
+    const initial = document.documentElement.getAttribute('data-theme');
+    if (initial) setActive(initial);
+  }
+
+  initThemePicker();
+  document.addEventListener('astro:page-load', initThemePicker);
+</script>

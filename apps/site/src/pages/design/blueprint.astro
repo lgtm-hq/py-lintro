@@ -1,0 +1,222 @@
+---
+import PreviewChrome from '../../components/design/PreviewChrome.astro';
+---
+
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="robots" content="noindex" />
+    <title>02 Blueprint — Lintro design</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500&family=Source+Serif+4:opsz,wght@8..60,400;8..60,600&display=swap"
+      rel="stylesheet"
+    />
+  </head>
+  <body>
+    <PreviewChrome optionId="02" optionName="Blueprint" tagline="Measured precision" />
+    <div class="page">
+      <div class="grid-bg" aria-hidden="true"></div>
+      <header class="nav">
+        <div class="mark" aria-hidden="true"></div>
+        <span class="logo">LINTRO</span>
+        <span class="rev">REV 0.1 — DOCS</span>
+        <nav>
+          <a href="#">Documentation</a>
+          <a href="#">Coverage</a>
+        </nav>
+      </header>
+
+      <section class="hero">
+        <p class="dim">FIG. 1 — SYSTEM OVERVIEW</p>
+        <h1>Precision tooling for polyglot code quality</h1>
+        <p class="sub">
+          A single orchestration layer over best-in-class linters, formatters, and test runners —
+          dimensioned for CI and local workflows alike.
+        </p>
+        <div class="actions">
+          <a class="btn" href="#">Begin specification</a>
+          <a class="btn outline" href="#">View toolchain matrix</a>
+        </div>
+      </section>
+
+      <section class="features">
+        <article>
+          <span class="fig">§2.1</span>
+          <h3>Unified interface</h3>
+          <p>One CLI entry point; consistent output schema across tools.</p>
+        </article>
+        <article>
+          <span class="fig">§2.2</span>
+          <h3>Native configuration</h3>
+          <p>Inherits project configs — no parallel config hierarchy.</p>
+        </article>
+        <article>
+          <span class="fig">§2.3</span>
+          <h3>Report formats</h3>
+          <p>Grid, SARIF, JSON — selectable per pipeline stage.</p>
+        </article>
+      </section>
+
+      <section class="docs-preview">
+        <aside>
+          <p class="dim">INDEX</p>
+          <ul>
+            <li class="active">1.0 Getting started</li>
+            <li>2.0 Configuration</li>
+            <li>3.0 Tool analysis</li>
+          </ul>
+        </aside>
+        <article>
+          <p class="dim">§1.0 — INSTALLATION</p>
+          <h2>Getting started</h2>
+          <p>Provision the package and execute an initial quality survey of the repository.</p>
+          <pre><code>uv pip install lintro
+lintro check . --output-format grid</code></pre>
+        </article>
+      </section>
+    </div>
+  </body>
+</html>
+
+<style>
+  :global(*) { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: #1e3a5f;
+    color: #e8f4ff;
+    font-family: 'Source Serif 4', Georgia, serif;
+  }
+  .page {
+    position: relative;
+    max-width: 1100px;
+    margin: 0 auto;
+    padding: 0 1.5rem 4rem;
+    overflow: hidden;
+  }
+  .grid-bg {
+    position: fixed;
+    inset: 0;
+    background-image:
+      linear-gradient(rgba(255, 255, 255, 0.06) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(255, 255, 255, 0.06) 1px, transparent 1px);
+    background-size: 24px 24px;
+    pointer-events: none;
+    z-index: 0;
+  }
+  .page > *:not(.grid-bg) { position: relative; z-index: 1; }
+  .nav {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.75rem 1.5rem;
+    padding: 1.5rem 0;
+    border-bottom: 1px dashed rgba(255, 255, 255, 0.25);
+  }
+  .mark {
+    width: 12px;
+    height: 12px;
+    border: 1px solid #c87941;
+    transform: rotate(45deg);
+  }
+  .logo {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.85rem;
+    letter-spacing: 0.2em;
+    font-weight: 500;
+  }
+  .rev {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.65rem;
+    opacity: 0.5;
+    margin-right: auto;
+  }
+  .nav a {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.75rem;
+    color: #a8d4ff;
+    text-decoration: none;
+    letter-spacing: 0.04em;
+  }
+  .dim {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.65rem;
+    letter-spacing: 0.12em;
+    opacity: 0.55;
+    margin: 0 0 0.5rem;
+  }
+  .hero { padding: 3rem 0 2.5rem; border-bottom: 1px dashed rgba(255, 255, 255, 0.2); }
+  h1 {
+    font-size: clamp(2rem, 4.5vw, 2.75rem);
+    font-weight: 600;
+    margin: 0 0 1rem;
+    letter-spacing: -0.02em;
+    max-width: 18ch;
+  }
+  .sub { max-width: 40rem; line-height: 1.65; opacity: 0.88; margin: 0 0 1.5rem; }
+  .actions { display: flex; flex-wrap: wrap; gap: 0.75rem; }
+  .btn {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.75rem;
+    padding: 0.65rem 1.25rem;
+    background: #c87941;
+    color: #1e3a5f;
+    text-decoration: none;
+    letter-spacing: 0.06em;
+    font-weight: 500;
+  }
+  .btn.outline {
+    background: transparent;
+    color: #c87941;
+    border: 1px solid #c87941;
+  }
+  .features {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 1.5rem;
+    padding: 2.5rem 0;
+    border-bottom: 1px dashed rgba(255, 255, 255, 0.2);
+  }
+  .fig {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.65rem;
+    color: #c87941;
+    letter-spacing: 0.08em;
+  }
+  .features h3 { margin: 0.35rem 0 0.5rem; font-size: 1.1rem; }
+  .features p { margin: 0; font-size: 0.95rem; opacity: 0.8; line-height: 1.55; }
+  .docs-preview {
+    display: grid;
+    grid-template-columns: 220px 1fr;
+    margin-top: 2rem;
+    border: 1px dashed rgba(255, 255, 255, 0.3);
+  }
+  .docs-preview aside {
+    padding: 1.25rem;
+    border-right: 1px dashed rgba(255, 255, 255, 0.3);
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.75rem;
+  }
+  .docs-preview ul { list-style: none; margin: 0; padding: 0; }
+  .docs-preview li { padding: 0.4rem 0; opacity: 0.65; }
+  .docs-preview li.active { opacity: 1; color: #c87941; }
+  .docs-preview article { padding: 1.5rem 1.75rem; }
+  .docs-preview h2 { margin: 0 0 0.75rem; font-size: 1.5rem; }
+  .docs-preview p { margin: 0 0 1rem; opacity: 0.85; }
+  .docs-preview pre {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.78rem;
+    margin: 0;
+    padding: 1rem;
+    background: rgba(0, 0, 0, 0.25);
+    border: 1px dashed rgba(255, 255, 255, 0.2);
+    color: #a8d4ff;
+  }
+  @media (max-width: 768px) {
+    .features, .docs-preview { grid-template-columns: 1fr; }
+    .docs-preview aside { border-right: none; border-bottom: 1px dashed rgba(255, 255, 255, 0.3); }
+  }
+</style>

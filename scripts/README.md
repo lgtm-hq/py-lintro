@@ -109,6 +109,26 @@ Scripts for GitHub Actions workflows and continuous integration.
 | `resolve-vue-tsc-version.sh`          | Read installed vue-tsc version from bun's global install root         | `./scripts/ci/resolve-vue-tsc-version.sh --help`                 |
 | `verify-manifest-tools.py`            | Verify tools in image match manifest versions                         | `python scripts/ci/verify-manifest-tools.py --help`              |
 | `generate-tool-versions.py`           | Generate `_generated_versions.py` and sync `manifest.json` versions   | `python scripts/ci/generate-tool-versions.py [--check]`          |
+| `stage-python-coverage-html.sh`       | Stage flat HTML coverage for GitHub Pages bundling                    | `./scripts/ci/testing/stage-python-coverage-html.sh --help`      |
+
+#### Documentation Site Scripts (`ci/site/`)
+
+Scripts for building, testing, and deploying the Astro documentation site at
+`apps/site/`.
+
+| Script                            | Purpose                                                    | Usage                                                      |
+| --------------------------------- | ---------------------------------------------------------- | ---------------------------------------------------------- |
+| `build.sh`                        | Build the docs site for GitHub Pages                       | `./scripts/ci/site/build.sh --help`                        |
+| `check.sh`                        | Run Astro type-check (`astro check`)                       | `./scripts/ci/site/check.sh --help`                        |
+| `test.sh`                         | Run Vitest with coverage in `apps/site`                    | `./scripts/ci/site/test.sh --help`                         |
+| `test-python.sh`                  | Run pytest for site maintenance scripts                    | `./scripts/ci/site/test-python.sh --help`                  |
+| `test-all.sh`                     | Run Vitest and site script pytest                          | `./scripts/ci/site/test-all.sh --help`                     |
+| `preview-serve.sh`                | Serve built `dist/` with production `ASTRO_BASE`           | `./scripts/ci/site/preview-serve.sh --help`                |
+| `preview-pages-local.sh`          | Build Pages-like dist with optional local coverage bundles | `./scripts/ci/site/preview-pages-local.sh --help`          |
+| `prepare-lychee-action-args.sh`   | Prepare lychee-action args for post-build link checking    | `./scripts/ci/site/prepare-lychee-action-args.sh --help`   |
+| `migrate-docs-content.py`         | Copy `docs/` into `apps/site/src/content/docs/`            | `uv run python scripts/ci/site/migrate-docs-content.py`    |
+| `fix-markdown-docs.py`            | Fix markdownlint issues in migrated Astro docs content     | `uv run python scripts/ci/site/fix-markdown-docs.py`       |
+| `generate-template-thumbnails.sh` | Optional template PNG generator (legacy helper)            | `./scripts/ci/site/generate-template-thumbnails.sh --help` |
 
 #### Homebrew Scripts (`ci/homebrew/`)
 

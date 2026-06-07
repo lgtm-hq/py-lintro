@@ -14,3 +14,9 @@ env
 
 __pycache__
 .lintro/*
+# Astro / Vitest / turbo-themes artifacts under apps/site (generated at build or test time)
+apps/site/.astro/
+apps/site/coverage/
+apps/site/dist/
+apps/site/public/assets/css/
+apps/site/node_modules/
