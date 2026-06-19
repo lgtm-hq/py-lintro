@@ -22,7 +22,7 @@ jobs:
   # Compat mode: multi-runtime matrix, no coverage or PR comments
   test-compat:
     # yamllint disable-line rule:line-length
-    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-test-python.yml@96a42109637efd4c019d176e0902e3be23295716 # v0.45.1
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-test-python.yml@a8b6e50f095c8eb1a49d60f4df71a552c460b211 # v0.45.1
     with:
       publish-test-summary: false
       python-versions: '3.11,3.14'
@@ -33,7 +33,7 @@ jobs:
       draft-pr-skip: true
       job-name: Python Compatibility
       runner-image: ubuntu-24.04
-      tooling-ref: '96a42109637efd4c019d176e0902e3be23295716' # v0.45.1
+      tooling-ref: 'a8b6e50f095c8eb1a49d60f4df71a552c460b211' # v0.45.1
       egress-policy: block
       egress-preset: pypi
       allowed-endpoints-mode: append
@@ -49,7 +49,7 @@ jobs:
   # Coverage mode: single runtime with coverage reporting
   test-coverage:
     # yamllint disable-line rule:line-length
-    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-test-python.yml@96a42109637efd4c019d176e0902e3be23295716 # v0.45.1
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-test-python.yml@a8b6e50f095c8eb1a49d60f4df71a552c460b211 # v0.45.1
     with:
       publish-test-summary: true
       python-version: '3.14'
@@ -57,13 +57,12 @@ jobs:
       extras: 'full'
       extra-args: '-x --ignore=tests/integration'
       coverage: true
-      coverage-format: xml
       coverage-threshold: 80
       upload-coverage: true
       draft-pr-skip: true
       job-name: Python Coverage
       runner-image: ubuntu-24.04
-      tooling-ref: '96a42109637efd4c019d176e0902e3be23295716' # v0.45.1
+      tooling-ref: 'a8b6e50f095c8eb1a49d60f4df71a552c460b211' # v0.45.1
       egress-policy: block
       egress-preset: pypi
       allowed-endpoints-mode: append
@@ -112,11 +111,11 @@ jobs:
     needs: test-gate
     if: always()
     # yamllint disable-line rule:line-length
-    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-required-check.yml@96a42109637efd4c019d176e0902e3be23295716 # v0.45.1
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-required-check.yml@a8b6e50f095c8eb1a49d60f4df71a552c460b211 # v0.45.1
     permissions:
       contents: read
     with:
-      tooling-ref: '96a42109637efd4c019d176e0902e3be23295716' # v0.45.1
+      tooling-ref: 'a8b6e50f095c8eb1a49d60f4df71a552c460b211' # v0.45.1
       job-name: '🧪 Test Suite & Coverage'
       runner-image: ubuntu-24.04
       upstream-result: ${{ needs.test-gate.outputs.result }}
@@ -132,13 +131,13 @@ jobs:
       github.event_name == 'push' &&
       needs.test-coverage.outputs.passed == 'true'
     # yamllint disable-line rule:line-length
-    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-test-python-publish.yml@96a42109637efd4c019d176e0902e3be23295716 # v0.45.1
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-test-python-publish.yml@a8b6e50f095c8eb1a49d60f4df71a552c460b211 # v0.45.1
     with:
       coverage-percent: ${{ needs.test-coverage.outputs.coverage-percent }}
       upload-coverage: true
       job-name: Deploy Coverage to Pages
       runner-image: ubuntu-24.04
-      tooling-ref: '96a42109637efd4c019d176e0902e3be23295716' # v0.45.1
+      tooling-ref: 'a8b6e50f095c8eb1a49d60f4df71a552c460b211' # v0.45.1
       egress-policy: block
       egress-preset: github-pages
     permissions:
