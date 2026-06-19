@@ -10,6 +10,23 @@
 
 set -euo pipefail
 
+if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
+	cat <<'EOF'
+Evaluate upstream test job results for the required org-ruleset gate.
+
+Fails when any upstream job reports "failure" or "cancelled"; treats
+"skipped" (draft PRs) as acceptable.
+
+Usage:
+  COMPAT_RESULT=success COVERAGE_RESULT=success scripts/ci/evaluate-test-gate.sh
+
+Required environment variables:
+  COMPAT_RESULT   needs.test-compat.result
+  COVERAGE_RESULT needs.test-coverage.result
+EOF
+	exit 0
+fi
+
 : "${COMPAT_RESULT:?}"
 : "${COVERAGE_RESULT:?}"
 
