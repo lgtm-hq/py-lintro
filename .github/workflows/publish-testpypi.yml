@@ -3,7 +3,7 @@
 ---
 name: Publish - TestPyPI Staging
 
-# Layout: lgtm-ci docs/python-release-publish.md (v0.32.3+)
+# Layout: lgtm-ci docs/python-release-publish.md (v0.45.1+)
 
 'on':
   workflow_dispatch:
@@ -18,7 +18,7 @@ jobs:
   pypi-build:
     name: Build Python distribution
     # yamllint disable-line rule:line-length
-    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-build-python-dist.yml@f469f4d5c187f0700ccec4c023152fb68ee3dc89 # v0.32.3
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-build-python-dist.yml@deb53fdb15a630cc60e6e5f35ecb9a8b58966690 # v0.45.2
     permissions:
       # read: checkout and build sdist/wheel (reusable-build-python-dist)
       contents: read
@@ -27,7 +27,7 @@ jobs:
       verify-tag-version: false
       ensure-tag-on-default-branch: false
       artifact-name: python-dist
-      tooling-ref: 'f469f4d5c187f0700ccec4c023152fb68ee3dc89' # v0.32.3
+      tooling-ref: 'deb53fdb15a630cc60e6e5f35ecb9a8b58966690' # v0.45.2
       egress-policy: block
       egress-preset: pypi
       allowed-endpoints-mode: append
@@ -80,11 +80,11 @@ jobs:
       - name: Prepare PyPI upload
         id: prepare
         # yamllint disable-line rule:line-length
-        uses: lgtm-hq/lgtm-ci/.github/actions/prepare-pypi-upload@f469f4d5c187f0700ccec4c023152fb68ee3dc89 # v0.32.3
+        uses: lgtm-hq/lgtm-ci/.github/actions/prepare-pypi-upload@deb53fdb15a630cc60e6e5f35ecb9a8b58966690 # v0.45.2
         with:
           artifact-name: python-dist
           python-version: '3.14'
-          tooling-ref: 'f469f4d5c187f0700ccec4c023152fb68ee3dc89' # v0.32.3
+          tooling-ref: 'deb53fdb15a630cc60e6e5f35ecb9a8b58966690' # v0.45.2
       - name: Upload to TestPyPI
         # yamllint disable-line rule:line-length
         uses: pypa/gh-action-pypi-publish@cef221092ed1bacb1cc03d23a2d87d1d172e277b # v1.14.0

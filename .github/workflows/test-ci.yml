@@ -19,23 +19,21 @@ concurrency:
   cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 jobs:
-  test:
+  # Compat mode: multi-runtime matrix, no coverage or PR comments
+  test-compat:
     # yamllint disable-line rule:line-length
-    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-test-python.yml@f469f4d5c187f0700ccec4c023152fb68ee3dc89 # v0.32.3
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-test-python.yml@deb53fdb15a630cc60e6e5f35ecb9a8b58966690 # v0.45.2
     with:
       publish-test-summary: false
       python-versions: '3.11,3.14'
       test-path: tests
       extras: 'full'
       extra-args: '-x --ignore=tests/integration'
-      coverage: true
-      coverage-format: xml
-      coverage-threshold: 80
-      upload-coverage: true
+      coverage: false
       draft-pr-skip: true
       job-name: Python Compatibility
       runner-image: ubuntu-24.04
-      tooling-ref: 'f469f4d5c187f0700ccec4c023152fb68ee3dc89' # v0.32.3
+      tooling-ref: 'deb53fdb15a630cc60e6e5f35ecb9a8b58966690' # v0.45.2
       egress-policy: block
       egress-preset: pypi
       allowed-endpoints-mode: append
@@ -43,48 +41,103 @@ jobs:
         astral.sh:443
         releases.astral.sh:443
     permissions:
-      # v0.18.2 aggregate job needs actions:write for artifact merge
+      # multi-version matrix requires actions:write for artifact aggregation
       actions: write
       contents: read
       pull-requests: write
 
+  # Coverage mode: single runtime with coverage reporting
+  test-coverage:
+    # yamllint disable-line rule:line-length
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-test-python.yml@deb53fdb15a630cc60e6e5f35ecb9a8b58966690 # v0.45.2
+    with:
+      publish-test-summary: true
+      python-version: '3.14'
+      test-path: tests
+      extras: 'full'
+      extra-args: '-x --ignore=tests/integration'
+      coverage: true
+      coverage-threshold: 80
+      upload-coverage: true
+      draft-pr-skip: true
+      job-name: Python Coverage
+      runner-image: ubuntu-24.04
+      tooling-ref: 'deb53fdb15a630cc60e6e5f35ecb9a8b58966690' # v0.45.2
+      egress-policy: block
+      egress-preset: pypi
+      allowed-endpoints-mode: append
+      allowed-endpoints: >
+        astral.sh:443
+        releases.astral.sh:443
+    permissions:
+      actions: write
+      contents: read
+      pull-requests: write
+
+  # Evaluate both upstream jobs into a single result for the required-check gate
+  test-gate:
+    name: Test Gate
+    needs: [test-compat, test-coverage]
+    if: always()
+    runs-on: ubuntu-24.04
+    permissions: {}
+    outputs:
+      result: ${{ steps.gate.outputs.result }}
+      passed: ${{ steps.gate.outputs.passed }}
+    steps:
+      - name: Checkout gate script
+        # yamllint disable-line rule:line-length
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          sparse-checkout: scripts/ci/evaluate-test-gate.sh
+          sparse-checkout-cone-mode: false
+          persist-credentials: false
+      - name: Evaluate upstream results
+        id: gate
+        env:
+          COMPAT_RESULT: ${{ needs.test-compat.result }}
+          COVERAGE_RESULT: ${{ needs.test-coverage.result }}
+        run: |
+          if bash scripts/ci/evaluate-test-gate.sh; then
+            echo "result=success" >> "$GITHUB_OUTPUT"
+            echo "passed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "result=failure" >> "$GITHUB_OUTPUT"
+            echo "passed=false" >> "$GITHUB_OUTPUT"
+          fi
+
   # Org ruleset (checks-py-lintro): test-suite-coverage / 🧪 Test Suite & Coverage
   test-suite-coverage:
-    needs: test
-    if: >-
-      always() &&
-      (
-        github.event_name != 'pull_request' ||
-        github.event.pull_request.draft == false
-      )
+    needs: test-gate
+    if: always()
     # yamllint disable-line rule:line-length
-    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-required-check.yml@f469f4d5c187f0700ccec4c023152fb68ee3dc89 # v0.32.3
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-required-check.yml@deb53fdb15a630cc60e6e5f35ecb9a8b58966690 # v0.45.2
     permissions:
       contents: read
     with:
-      tooling-ref: 'f469f4d5c187f0700ccec4c023152fb68ee3dc89' # v0.32.3
+      tooling-ref: 'deb53fdb15a630cc60e6e5f35ecb9a8b58966690' # v0.45.2
       job-name: '🧪 Test Suite & Coverage'
       runner-image: ubuntu-24.04
-      upstream-result: ${{ needs.test.result }}
-      passed-output: ${{ needs.test.outputs.passed }}
+      upstream-result: ${{ needs.test-gate.outputs.result }}
+      passed-output: ${{ needs.test-gate.outputs.passed }}
       egress-policy: block
       egress-preset: github-tooling
 
   publish-coverage:
     name: Publish Coverage to Pages
-    needs: test
+    needs: test-coverage
     if: >-
       github.ref == 'refs/heads/main' &&
       github.event_name == 'push' &&
-      needs.test.outputs.passed == 'true'
+      needs.test-coverage.outputs.passed == 'true'
     # yamllint disable-line rule:line-length
-    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-test-python-publish.yml@f469f4d5c187f0700ccec4c023152fb68ee3dc89 # v0.32.3
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-test-python-publish.yml@deb53fdb15a630cc60e6e5f35ecb9a8b58966690 # v0.45.2
     with:
-      coverage-percent: ${{ needs.test.outputs.coverage-percent }}
+      coverage-percent: ${{ needs.test-coverage.outputs.coverage-percent }}
       upload-coverage: true
       job-name: Deploy Coverage to Pages
       runner-image: ubuntu-24.04
-      tooling-ref: 'f469f4d5c187f0700ccec4c023152fb68ee3dc89' # v0.32.3
+      tooling-ref: 'deb53fdb15a630cc60e6e5f35ecb9a8b58966690' # v0.45.2
       egress-policy: block
       egress-preset: github-pages
     permissions:
