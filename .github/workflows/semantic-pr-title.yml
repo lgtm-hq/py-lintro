@@ -24,6 +24,5 @@ jobs:
       egress-preset: github-tooling
     permissions:
       contents: read
-      # lgtm-ci reusable-semantic-pr-title → amannn/action-semantic-pull-request:
-      # read PR title/metadata only (read-only; satisfies least-privilege audits).
-      pull-requests: read
+      # post-failure-comment (default: true) upserts failure comments on the PR
+      pull-requests: write
