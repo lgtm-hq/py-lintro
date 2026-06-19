@@ -30,14 +30,14 @@ jobs:
     name: Generate and verify SBOM
     if: ${{ !startsWith(github.ref_name, 'actions-v') }}
     # yamllint disable-line rule:line-length
-    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-sbom.yml@a8b6e50f095c8eb1a49d60f4df71a552c460b211 # v0.45.1
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-sbom.yml@deb53fdb15a630cc60e6e5f35ecb9a8b58966690 # v0.45.2
     with:
       target: .
       target-type: dir
       sbom-format: cyclonedx-json
       scan-vulnerabilities: true
       create-attestation: true
-      tooling-ref: 'a8b6e50f095c8eb1a49d60f4df71a552c460b211' # v0.45.1
+      tooling-ref: 'deb53fdb15a630cc60e6e5f35ecb9a8b58966690' # v0.45.2
       egress-policy: block
       egress-preset: sbom
     permissions:
@@ -57,14 +57,14 @@ jobs:
       github.ref_type == 'tag' &&
       !startsWith(github.ref_name, 'actions-v')
     # yamllint disable-line rule:line-length
-    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-build-python-dist.yml@a8b6e50f095c8eb1a49d60f4df71a552c460b211 # v0.45.1
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-build-python-dist.yml@deb53fdb15a630cc60e6e5f35ecb9a8b58966690 # v0.45.2
     permissions:
       # read: checkout and build sdist/wheel (reusable-build-python-dist)
       contents: read
     with:
       python-version: '3.14'
       artifact-name: python-dist
-      tooling-ref: 'a8b6e50f095c8eb1a49d60f4df71a552c460b211' # v0.45.1
+      tooling-ref: 'deb53fdb15a630cc60e6e5f35ecb9a8b58966690' # v0.45.2
       egress-policy: block
       egress-preset: pypi
       allowed-endpoints-mode: append
@@ -116,11 +116,11 @@ jobs:
       - name: Prepare PyPI upload
         id: prepare
         # yamllint disable-line rule:line-length
-        uses: lgtm-hq/lgtm-ci/.github/actions/prepare-pypi-upload@a8b6e50f095c8eb1a49d60f4df71a552c460b211 # v0.45.1
+        uses: lgtm-hq/lgtm-ci/.github/actions/prepare-pypi-upload@deb53fdb15a630cc60e6e5f35ecb9a8b58966690 # v0.45.2
         with:
           artifact-name: python-dist
           python-version: '3.14'
-          tooling-ref: 'a8b6e50f095c8eb1a49d60f4df71a552c460b211' # v0.45.1
+          tooling-ref: 'deb53fdb15a630cc60e6e5f35ecb9a8b58966690' # v0.45.2
       - name: Upload to PyPI
         # yamllint disable-line rule:line-length
         uses: pypa/gh-action-pypi-publish@cef221092ed1bacb1cc03d23a2d87d1d172e277b # v1.14.0
@@ -139,14 +139,14 @@ jobs:
     needs: [pypi-upload]
     if: ${{ !startsWith(github.ref_name, 'actions-v') }}
     # yamllint disable-line rule:line-length
-    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-github-release.yml@a8b6e50f095c8eb1a49d60f4df71a552c460b211 # v0.45.1
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-github-release.yml@deb53fdb15a630cc60e6e5f35ecb9a8b58966690 # v0.45.2
     permissions:
       # write: create GitHub Release and upload dist assets
       contents: write
     with:
       artifact-name: python-dist
       generate-release-notes: true
-      tooling-ref: 'a8b6e50f095c8eb1a49d60f4df71a552c460b211' # v0.45.1
+      tooling-ref: 'deb53fdb15a630cc60e6e5f35ecb9a8b58966690' # v0.45.2
       egress-policy: block
       egress-preset: github-tooling
       allowed-endpoints-mode: append
