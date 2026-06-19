@@ -76,6 +76,7 @@ jobs:
 
   # Evaluate both upstream jobs into a single result for the required-check gate
   test-gate:
+    name: Test Gate
     needs: [test-compat, test-coverage]
     if: always()
     runs-on: ubuntu-24.04
@@ -89,6 +90,7 @@ jobs:
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           sparse-checkout: scripts/ci/evaluate-test-gate.sh
+          sparse-checkout-cone-mode: false
           persist-credentials: false
       - name: Evaluate upstream results
         id: gate
