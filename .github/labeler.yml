@@ -5,7 +5,6 @@ enhancement:
   - changed-files:
       - any-glob-to-any-file:
           - 'lintro/**'
-          - 'tests/**'
 
 ci:
   - changed-files:
@@ -51,3 +50,41 @@ security:
           - 'lintro/tools/bandit.py'
           - 'lintro/tools/gitleaks.py'
           - 'lintro/tools/semgrep.py'
+
+testing:
+  - changed-files:
+      - any-glob-to-any-file:
+          - 'tests/**'
+          - 'pytest.ini'
+          - 'tox.ini'
+          - 'test_samples/**'
+          - 'scripts/ci/testing/**'
+
+release:
+  - changed-files:
+      - any-glob-to-any-file:
+          - '.github/workflows/release-*.yml'
+          - '.github/workflows/publish-*.yml'
+          - '.github/workflows/build-binary.yml'
+          - 'CHANGELOG.md'
+          - 'scripts/ci/release/**'
+          - 'scripts/ci/homebrew/**'
+
+docker:
+  - changed-files:
+      - any-glob-to-any-file:
+          - 'Dockerfile'
+          - 'docker-compose.yml'
+          - '.dockerignore'
+          - '.github/workflows/docker-*.yml'
+          - '.github/workflows/ghcr-*.yml'
+          - 'scripts/docker/**'
+
+infrastructure:
+  - changed-files:
+      - any-glob-to-any-file:
+          - '.github/workflows/**'
+          - '.github/actions/**'
+          - 'scripts/ci/**'
+          - 'renovate.json'
+          - '.allstar/**'
