@@ -29,7 +29,8 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Fixed
 
-- **ci**: grant missing permissions for lgtm-ci v0.45.2 reusable workflows (#988) (4636b7a)
+- **ci**: grant missing permissions for lgtm-ci v0.45.2 reusable workflows (#988)
+  (4636b7a)
 
 ## [0.64.4] - 2026-06-05
 
