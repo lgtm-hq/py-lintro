@@ -116,7 +116,7 @@ jobs:
       tooling-ref: '96a42109637efd4c019d176e0902e3be23295716' # v0.45.1
       job-name: '🧪 Test Suite & Coverage'
       runner-image: ubuntu-24.04
-      upstream-result: ${{ needs.test-gate.result }}
+      upstream-result: ${{ needs.test-gate.outputs.result }}
       passed-output: ${{ needs.test-gate.outputs.passed }}
       egress-policy: block
       egress-preset: github-tooling
