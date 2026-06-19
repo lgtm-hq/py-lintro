@@ -21,9 +21,9 @@ concurrency:
 jobs:
   validate:
     # yamllint disable-line rule:line-length
-    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-validate-action-pinning.yml@f469f4d5c187f0700ccec4c023152fb68ee3dc89 # v0.32.3
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-validate-action-pinning.yml@96a42109637efd4c019d176e0902e3be23295716 # v0.45.1
     with:
-      tooling-ref: 'f469f4d5c187f0700ccec4c023152fb68ee3dc89' # v0.32.3
+      tooling-ref: '96a42109637efd4c019d176e0902e3be23295716' # v0.45.1
       egress-policy: block
       egress-preset: github-tooling
     permissions:
