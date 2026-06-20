@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: MIT
 # For license details, see the repository root LICENSE file.
 ---
-name: Security - Vulnerability Suppression Check
+name: Vulnerability Suppression Check
 
 'on':
   schedule:
@@ -19,6 +19,8 @@ jobs:
   check-suppressions:
     # yamllint disable-line rule:line-length
     uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-vuln-suppression-check.yml@4aaefe64763b7841b6d92d94dc47185083d34c9a # v0.46.0
+    # contents:write + pull-requests:write — required for lgtm-ci auto-remediation
+    # (opens cleanup PRs when stale/expired suppressions are detected).
     permissions:
       contents: write
       pull-requests: write
