@@ -19,6 +19,9 @@ jobs:
   check-suppressions:
     # yamllint disable-line rule:line-length
     uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-vuln-suppression-check.yml@deb53fdb15a630cc60e6e5f35ecb9a8b58966690 # v0.45.2
+    permissions:
+      contents: write
+      pull-requests: write
     with:
       job-name: '🔍 Check Vulnerability Suppressions'
       tooling-ref: 'deb53fdb15a630cc60e6e5f35ecb9a8b58966690' # v0.45.2
@@ -28,6 +31,3 @@ jobs:
       egress-preset: osv-scanner
     secrets:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-    permissions:
-      contents: write
-      pull-requests: write

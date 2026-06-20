@@ -2,9 +2,16 @@
 # For license details, see the repository root LICENSE file.
 ---
 name: Maintenance - GHCR Registry Cleanup
+# Weekly cleanup of untagged container images from GitHub Container Registry.
+# Reduces storage costs and maintains clean registry state.
+#
+# IMPORTANT: Multi-arch images have architecture-specific manifests that appear
+# as "untagged" but are referenced by the main manifest index. To protect these,
+# we only delete untagged versions older than min_age_days (default: 7).
 
 'on':
   schedule:
+    # Run weekly on Monday at 03:00 UTC
     - cron: '0 3 * * 1'
   workflow_dispatch:
     inputs:
@@ -14,14 +21,14 @@ name: Maintenance - GHCR Registry Cleanup
         default: false
         type: boolean
       min_age_days:
-        description: 'Minimum age in days before deleting untagged images'
+        description: 'Minimum age in days before deletion (protects multi-arch deps)'
         required: false
         default: 7
         type: number
 
 concurrency:
-  group: ${{ github.workflow }}
-  cancel-in-progress: true
+  group: ghcr-cleanup
+  cancel-in-progress: false
 
 permissions: {}
 
@@ -34,10 +41,12 @@ jobs:
       packages: write
     with:
       package-name: py-lintro
-      min-age-days: ${{ inputs.min_age_days || 7 }}
+      min-age-days: >-
+        ${{ github.event_name == 'workflow_dispatch' && inputs.min_age_days || 7 }}
       dry-run: ${{ inputs.dry_run == true }}
       tooling-ref: 'deb53fdb15a630cc60e6e5f35ecb9a8b58966690' # v0.45.2
-      egress-policy: audit
+      egress-policy: block
+      egress-preset: github-tooling
       runner-image: ubuntu-24.04
     secrets:
       token: ${{ secrets.GITHUB_TOKEN }}
@@ -50,10 +59,12 @@ jobs:
       packages: write
     with:
       package-name: py-lintro-base
-      min-age-days: ${{ inputs.min_age_days || 7 }}
+      min-age-days: >-
+        ${{ github.event_name == 'workflow_dispatch' && inputs.min_age_days || 7 }}
       dry-run: ${{ inputs.dry_run == true }}
       tooling-ref: 'deb53fdb15a630cc60e6e5f35ecb9a8b58966690' # v0.45.2
-      egress-policy: audit
+      egress-policy: block
+      egress-preset: github-tooling
       runner-image: ubuntu-24.04
     secrets:
       token: ${{ secrets.GITHUB_TOKEN }}
