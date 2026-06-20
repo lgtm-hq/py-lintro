@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: MIT
 # For license details, see the repository root LICENSE file.
 ---
-name: Vulnerability Suppression Check
+name: Security - Vulnerability Suppression Check
 
 'on':
   schedule:
