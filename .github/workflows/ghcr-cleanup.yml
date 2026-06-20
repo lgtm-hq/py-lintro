@@ -37,8 +37,8 @@ jobs:
     # yamllint disable-line rule:line-length
     uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-ghcr-cleanup.yml@4aaefe64763b7841b6d92d94dc47185083d34c9a # v0.46.0
     permissions:
-      contents: read
-      packages: write
+      contents: read # checkout repo and lgtm-ci tooling sparse checkout
+      packages: write # delete untagged GHCR package versions via Packages API
     with:
       package-name: py-lintro
       min-age-days: >-
@@ -47,6 +47,10 @@ jobs:
       tooling-ref: '4aaefe64763b7841b6d92d94dc47185083d34c9a' # v0.46.0
       egress-policy: block
       egress-preset: github-tooling
+      allowed-endpoints-mode: append
+      allowed-endpoints: >
+        ghcr.io:443
+        pkg-containers.githubusercontent.com:443
       runner-image: ubuntu-24.04
     secrets:
       token: ${{ secrets.GITHUB_TOKEN }}
@@ -55,8 +59,8 @@ jobs:
     # yamllint disable-line rule:line-length
     uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-ghcr-cleanup.yml@4aaefe64763b7841b6d92d94dc47185083d34c9a # v0.46.0
     permissions:
-      contents: read
-      packages: write
+      contents: read # checkout repo and lgtm-ci tooling sparse checkout
+      packages: write # delete untagged GHCR package versions via Packages API
     with:
       package-name: py-lintro-base
       min-age-days: >-
@@ -65,6 +69,10 @@ jobs:
       tooling-ref: '4aaefe64763b7841b6d92d94dc47185083d34c9a' # v0.46.0
       egress-policy: block
       egress-preset: github-tooling
+      allowed-endpoints-mode: append
+      allowed-endpoints: >
+        ghcr.io:443
+        pkg-containers.githubusercontent.com:443
       runner-image: ubuntu-24.04
     secrets:
       token: ${{ secrets.GITHUB_TOKEN }}
