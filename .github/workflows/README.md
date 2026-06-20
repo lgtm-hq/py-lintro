@@ -41,10 +41,16 @@ trailing `# vX.Y.Z` comments so Renovate can track digest updates. Policy is enf
 - **docker-build-publish.yml** — Multi-arch GHCR publish via `reusable-docker.yml`
   (full + base images, registry cache at `:cache`, no-cache on version tags)
 
-## Security & maintenance (bespoke)
+## Security & maintenance
 
-- **vuln-suppression-check.yml**, **lintro-report-scheduled.yml**,
-  **pr-comment-cleanup.yml**, **test-built-package.yml**, **build-binary.yml**
+- **ghcr-cleanup.yml** — Scheduled GHCR cleanup via `reusable-ghcr-cleanup.yml`
+  (`py-lintro`, `py-lintro-base`)
+- **vuln-suppression-check.yml** — Weekly OSV suppression staleness via
+  `reusable-vuln-suppression-check.yml`
+- **renovate.yml** — Daily dependency updates (lgtm-ci `harden-runner` +
+  `secure-checkout`)
+- **lintro-report-scheduled.yml**, **pr-comment-cleanup.yml**,
+  **test-built-package.yml**, **build-binary.yml**
 
 ## Token patterns
 
