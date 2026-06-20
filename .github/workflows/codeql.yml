@@ -24,13 +24,13 @@ concurrency:
 jobs:
   codeql:
     # yamllint disable-line rule:line-length
-    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-codeql.yml@deb53fdb15a630cc60e6e5f35ecb9a8b58966690 # v0.45.2
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-codeql.yml@4aaefe64763b7841b6d92d94dc47185083d34c9a # v0.46.0
     with:
       languages: python
       build-mode: none
       config-file: .github/codeql/codeql-config.yml
       category: '/language:all'
-      tooling-ref: 'deb53fdb15a630cc60e6e5f35ecb9a8b58966690' # v0.45.2
+      tooling-ref: '4aaefe64763b7841b6d92d94dc47185083d34c9a' # v0.46.0
       egress-policy: block
       egress-preset: github-tooling
       allowed-endpoints-mode: append
