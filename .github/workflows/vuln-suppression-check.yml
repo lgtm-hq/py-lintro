@@ -17,17 +17,48 @@ concurrency:
 
 jobs:
   check-suppressions:
-    # yamllint disable-line rule:line-length
-    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-vuln-suppression-check.yml@deb53fdb15a630cc60e6e5f35ecb9a8b58966690 # v0.45.2
+    runs-on: ubuntu-24.04
     permissions:
       contents: write
       pull-requests: write
-    with:
-      job-name: '🔍 Check Vulnerability Suppressions'
-      tooling-ref: 'deb53fdb15a630cc60e6e5f35ecb9a8b58966690' # v0.45.2
-      workflow-file: vuln-suppression-check.yml
-      runner-image: ubuntu-24.04
-      egress-policy: block
-      egress-preset: osv-scanner
-    secrets:
-      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    timeout-minutes: 10
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Harden Runner
+        # yamllint disable-line rule:line-length
+        uses: step-security/harden-runner@fe104658747b27e96e4f7e80cd0a94068e53901d # v2.16.1
+        with:
+          egress-policy: 'block'
+          allowed-endpoints: >
+            github.com:443
+            api.github.com:443
+            codeload.github.com:443
+            objects.githubusercontent.com:443
+            release-assets.githubusercontent.com:443
+            pypi.org:443
+            files.pythonhosted.org:443
+            api.osv.dev:443
+            api.deps.dev:443
+            astral.sh:443
+            releases.astral.sh:443
+
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@d4b2f3b6ecc6e67c4457f6d3e41ec42d3d0fcb86 # v5
+        with:
+          enable-cache: true
+
+      - name: Sync dependencies
+        run: uv sync --dev --extra full --no-progress
+
+      - name: Install osv-scanner
+        run: scripts/utils/install-tools.sh --tools osv-scanner
+
+      - name: Check suppression staleness
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: scripts/ci/check-vuln-suppressions.sh
