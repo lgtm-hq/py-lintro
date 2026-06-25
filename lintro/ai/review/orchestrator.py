@@ -31,9 +31,8 @@ from lintro.ai.review.models.review_finding import ReviewFinding
 from lintro.ai.review.models.review_metadata import ReviewMetadata
 from lintro.ai.review.models.review_result import ReviewResult
 from lintro.ai.review.paths_registry import generate_interaction_paths
-from lintro.ai.token_budget import estimate_tokens
-
 from lintro.ai.review.progress import NullReviewProgress, ReviewProgressCallback
+from lintro.ai.token_budget import estimate_tokens
 
 if TYPE_CHECKING:
     from lintro.ai.config import AIConfig
