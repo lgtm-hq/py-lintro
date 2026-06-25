@@ -18,6 +18,9 @@ __all__ = [
     "format_lint_results_section",
 ]
 
+# Production prompt strings below are copied verbatim from the v3.1 spec.
+# ruff: noqa: E501
+
 REVIEW_SYSTEM = """\
 You are a senior staff engineer performing a pre-merge code review. Your job is to find logic bugs, integration gaps, silent failure modes, and test contract weaknesses — the kinds of issues that pass linters and unit tests but fail in production.
 
