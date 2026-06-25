@@ -109,6 +109,16 @@ def review_command(
         raise click.UsageError(
             "--pr requires --repo or GITHUB_REPOSITORY environment variable.",
         )
+    if pr is not None and uncommitted:
+        raise click.UsageError(
+            "--pr and --uncommitted cannot be used together.",
+        )
+    if post:
+        resolved_pr = pr or _detect_pr_number_from_env()
+        if resolved_pr is None:
+            raise click.UsageError(
+                "--post requires --pr or a CI pull-request environment.",
+            )
 
     paths = list(path_filter) if path_filter else None
     try:
@@ -165,7 +175,9 @@ def review_command(
         lint_results=lint_digest,
     )
 
-    render_review_output(result=result, output_format=output_format)
+    output = render_review_output(result=result, output_format=output_format)
+    if output is not None:
+        click.echo(output)
 
     if post:
         from lintro.ai.review.github import post_review_to_github
