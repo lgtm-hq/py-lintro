@@ -10,9 +10,7 @@ from lintro.ai.review.models.file_classification import FileClassification
 
 __all__ = ["generate_interaction_paths"]
 
-_PATH_BUILDERS: list[
-    tuple[frozenset[str], Callable[[list[str]], str]]
-] = [
+_PATH_BUILDERS: list[tuple[frozenset[str], Callable[[list[str]], str]]] = [
     (
         frozenset({FileDomain.CI.value, FileDomain.SHELL.value}),
         lambda files: (
