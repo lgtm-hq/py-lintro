@@ -327,6 +327,50 @@ def test_run_review_parallelizes_multiple_chunks() -> None:
     assert_that(provider.complete.call_count).is_equal_to(4)
 
 
+def test_run_review_uses_git_native_prompt_for_cli_transport(
+    sample_review_context: ReviewContext,
+) -> None:
+    """CLI transport uses git-native prompts for non-Cursor providers."""
+    from lintro.ai.enums import AITransport
+
+    context = ReviewContext(
+        base_ref="main",
+        head_ref="feature",
+        changed_files=[
+            ChangedFile(
+                path="src/main.py",
+                status="modified",
+                additions=1,
+                deletions=0,
+            ),
+        ],
+        unified_diff="diff --git a/src/main.py b/src/main.py\n+change",
+        pr_metadata=None,
+    )
+    provider = _mock_provider(content=_sample_response_json())
+    provider.name = "anthropic"
+
+    with patch(
+        "lintro.ai.review.orchestrator.build_git_native_review_prompt",
+    ) as mock_git_native:
+        mock_git_native.return_value = ("system", "user")
+        with patch(
+            "lintro.ai.review.orchestrator.call_ai",
+            return_value=provider.complete("prompt"),
+        ):
+            run_review(
+                context,
+                provider=provider,
+                ai_config=AIConfig(enabled=True, transport=AITransport.CLI),
+                depth=1,
+                checklist_items=[],
+                checklist_text="1. [logic-bug] Example?",
+                classifications=[],
+            )
+
+    mock_git_native.assert_called_once()
+
+
 def test_build_git_native_review_prompt_embeds_diff_when_requested(
     sample_review_context: ReviewContext,
 ) -> None:

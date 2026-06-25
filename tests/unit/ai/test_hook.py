@@ -99,6 +99,7 @@ def test_execute_calls_run_ai_enhancement(mock_run_ai_enhancement):
         logger=console_logger,
         output_format="json",
         ai_fix=True,
+        transport=None,
     )
 
 

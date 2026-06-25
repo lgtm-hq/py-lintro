@@ -8,6 +8,7 @@ from unittest.mock import MagicMock, patch
 from assertpy import assert_that
 
 from lintro.ai.config import AIConfig
+from lintro.ai.enums.ai_transport import AITransport
 from lintro.ai.models import AIFixSuggestion
 from lintro.ai.pipeline import run_fix_pipeline
 from lintro.ai.validation import ValidationResult
@@ -47,7 +48,7 @@ def _make_suggestion(
 def _default_ai_config(**overrides: object) -> AIConfig:
     defaults: dict[str, object] = {
         "enabled": True,
-        "transport": "api",
+        "transport": AITransport.API,
         "max_fix_attempts": 20,
     }
     defaults.update(overrides)
