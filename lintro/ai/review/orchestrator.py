@@ -14,7 +14,6 @@ from typing import TYPE_CHECKING, Any
 from loguru import logger
 
 from lintro.ai.budget import CostBudget
-from lintro.ai.token_budget import estimate_tokens
 from lintro.ai.fallback import complete_with_fallback
 from lintro.ai.model_pricing import (
     calculate_available_diff_tokens,
@@ -373,9 +372,7 @@ def run_review(
     )
 
     effective_ai_config = (
-        replace(ai_config, api_timeout=timeout)
-        if timeout is not None
-        else ai_config
+        replace(ai_config, api_timeout=timeout) if timeout is not None else ai_config
     )
     tracker = progress or NullReviewProgress()
     budget = CostBudget(max_cost_usd=ai_config.max_cost_usd)
