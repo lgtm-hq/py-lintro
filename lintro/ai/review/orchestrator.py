@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 import os
-import re
 import shlex
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from contextlib import suppress
@@ -36,6 +35,8 @@ from lintro.ai.prompts.review import (
 )
 from lintro.ai.registry import AIProvider
 from lintro.ai.review.chunker import chunk_review_context
+from lintro.ai.review.enums.review_strictness import ReviewStrictness
+from lintro.ai.review.exceptions import ReviewExecutionError
 from lintro.ai.review.group_labels import REL_DIRECTORY_PREFIX, REL_SINGLE_FILE
 from lintro.ai.review.models.checklist_answer import ChecklistAnswer
 from lintro.ai.review.models.review_chunk import ReviewChunk
@@ -43,20 +44,17 @@ from lintro.ai.review.models.review_finding import ReviewFinding
 from lintro.ai.review.models.review_metadata import ReviewMetadata
 from lintro.ai.review.models.review_result import ReviewResult
 from lintro.ai.review.paths_registry import generate_interaction_paths
-from lintro.ai.review.enums.review_strictness import ReviewStrictness
+from lintro.ai.review.progress import (
+    NullReviewProgress,
+    ReviewProgressCallback,
+    StepTrackingProgress,
+)
 from lintro.ai.review.sensitivity import (
     ReviewSensitivityPolicy,
     filter_findings_by_policy,
     format_strictness_prompt_section,
 )
 from lintro.ai.token_budget import estimate_tokens
-
-from lintro.ai.review.exceptions import ReviewExecutionError
-from lintro.ai.review.progress import (
-    NullReviewProgress,
-    ReviewProgressCallback,
-    StepTrackingProgress,
-)
 
 if TYPE_CHECKING:
     from lintro.ai.config import AIConfig
@@ -112,9 +110,8 @@ def resolve_review_chunks(
     Returns:
         Ordered list of review chunks to process.
     """
-    if (
-        not force_semantic_chunking
-        and estimate_tokens(context.unified_diff) <= max(diff_budget, 1)
+    if not force_semantic_chunking and estimate_tokens(context.unified_diff) <= max(
+        diff_budget, 1
     ):
         return [_single_chunk_from_context(context=context)]
 
@@ -427,9 +424,13 @@ def run_review(
     )
 
     effective_ai_config = (
+<<<<<<< HEAD
         ai_config.model_copy(update={"api_timeout": timeout})
         if timeout is not None
         else ai_config
+=======
+        replace(ai_config, api_timeout=timeout) if timeout is not None else ai_config
+>>>>>>> 6b71e3da (style: apply lintro fmt fixes for #1009)
     )
     tracker = progress or NullReviewProgress()
     budget = CostBudget(max_cost_usd=ai_config.max_cost_usd)

@@ -54,10 +54,7 @@ def check_ai_configuration(config: AIConfig) -> list[AICheckResult]:
         )
         return results
 
-    if (
-        config.provider == AIProvider.CURSOR
-        and config.transport == AITransport.API
-    ):
+    if config.provider == AIProvider.CURSOR and config.transport == AITransport.API:
         results.append(
             AICheckResult(
                 name="ai.provider+transport",

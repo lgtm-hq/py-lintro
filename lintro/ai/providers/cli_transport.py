@@ -10,7 +10,11 @@ from typing import Any
 
 from loguru import logger
 
-from lintro.ai.exceptions import AIAuthenticationError, AINotAvailableError, AIProviderError
+from lintro.ai.exceptions import (
+    AIAuthenticationError,
+    AINotAvailableError,
+    AIProviderError,
+)
 
 __all__ = ["CliTransport"]
 

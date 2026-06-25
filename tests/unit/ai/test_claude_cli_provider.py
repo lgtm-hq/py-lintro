@@ -31,14 +31,16 @@ def _cli_json(
     output_tokens: int = 50,
     total_cost_usd: float = 0.01,
 ) -> str:
-    return json.dumps({
-        "result": result,
-        "usage": {
-            "input_tokens": input_tokens,
-            "output_tokens": output_tokens,
-        },
-        "total_cost_usd": total_cost_usd,
-    })
+    return json.dumps(
+        {
+            "result": result,
+            "usage": {
+                "input_tokens": input_tokens,
+                "output_tokens": output_tokens,
+            },
+            "total_cost_usd": total_cost_usd,
+        }
+    )
 
 
 class TestClaudeCliInit:
