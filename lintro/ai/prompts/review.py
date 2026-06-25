@@ -232,9 +232,7 @@ def format_external_review_section(*, flags: list[str] | None) -> str:
     if not flags:
         return ""
     joined = ", ".join(flags)
-    return (
-        f"**External tools flagged:** {joined} — verify against current code."
-    )
+    return f"**External tools flagged:** {joined} — verify against current code."
 
 
 def format_lint_results_section(*, digest: str | None) -> str:
