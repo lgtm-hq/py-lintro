@@ -147,9 +147,7 @@ class RichReviewProgress:
             return
         self._progress.update(
             self._task_id,
-            description=(
-                f"Chunk {chunk_index + 1}/{self._total_chunks}: {step}"
-            ),
+            description=(f"Chunk {chunk_index + 1}/{self._total_chunks}: {step}"),
         )
 
     def on_chunk_done(self, *, chunk_index: int) -> None:
@@ -163,8 +161,7 @@ class RichReviewProgress:
             self._progress = None
         noun = "finding" if total_findings == 1 else "findings"
         self._console.print(
-            f"[bold green]✓[/bold green] Review complete — "
-            f"{total_findings} {noun}",
+            f"[bold green]✓[/bold green] Review complete — " f"{total_findings} {noun}",
         )
 
 
@@ -174,4 +171,4 @@ def _passes_per_chunk(depth: int) -> int:
         return 3  # questions + review + adversarial
     if depth >= 2:
         return 2  # questions + review
-    return 1      # review only
+    return 1  # review only

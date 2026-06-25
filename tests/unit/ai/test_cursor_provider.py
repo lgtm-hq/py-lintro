@@ -51,7 +51,7 @@ def _cli_json(
                 "inputTokens": input_tokens,
                 "outputTokens": output_tokens,
             },
-        }
+        },
     )
 
 
