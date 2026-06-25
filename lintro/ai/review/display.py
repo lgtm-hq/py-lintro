@@ -4,11 +4,16 @@ from __future__ import annotations
 
 from rich.console import Console
 from rich.panel import Panel
-from rich.table import Table
 from rich.text import Text
 
 from lintro.ai.cost import format_cost
 from lintro.ai.display.shared import cost_str, print_section_header
+from lintro.ai.review.checklist_display import (
+    cleared_answers,
+    orphan_concerns,
+    questions_for_finding,
+)
+from lintro.ai.review.enums.checklist_display import ChecklistDisplay
 from lintro.ai.review.models.review_finding import ReviewFinding
 from lintro.ai.review.models.review_result import ReviewResult
 
@@ -26,22 +31,27 @@ def render_review_terminal(
     *,
     result: ReviewResult,
     console: Console | None = None,
+    checklist_display: ChecklistDisplay = ChecklistDisplay.OFF,
+    question_map: dict[int, str] | None = None,
 ) -> None:
     """Render review result to the terminal with Rich formatting.
 
     Args:
         result: Review result to display.
         console: Optional Rich console instance.
+        checklist_display: Structured checklist visibility mode.
+        question_map: Prompt id to question text for linked display.
     """
     output = console or Console()
     metadata = result.metadata
+    prompt_questions = question_map or {}
 
     header_detail = (
         f"Model: {metadata.model} | Context: {metadata.context_window:,} | "
         f"Depth: {metadata.depth} | Strictness: {metadata.strictness} | Chunks: "
         f"{metadata.chunks_current}/{metadata.chunks_total} | "
         f"Files: {metadata.files_reviewed}/{metadata.files_total} | "
-        f"Checklist: {metadata.checklist_items} items"
+        f"Structured checks: {metadata.checklist_items}"
     )
     token_info = cost_str(
         metadata.token_usage.get("prompt", 0),
@@ -69,35 +79,25 @@ def render_review_terminal(
         ),
     )
 
-    _render_checklist_table(result=result, console=output)
-    _render_findings(result=result, console=output)
+    show_linked = checklist_display in {ChecklistDisplay.LINKED, ChecklistDisplay.ALL}
+    _render_findings(
+        result=result,
+        console=output,
+        show_linked_questions=show_linked,
+        question_map=prompt_questions,
+    )
+
+    if checklist_display == ChecklistDisplay.ALL:
+        _render_checklist_appendix(result=result, console=output)
 
 
-def _render_checklist_table(*, result: ReviewResult, console: Console) -> None:
-    """Render checklist answers as a Rich table."""
-    if not result.checklist:
-        return
-
-    table = Table(title="Checklist", show_header=True, header_style="bold cyan")
-    table.add_column("ID", justify="right", style="cyan", no_wrap=True)
-    table.add_column("Answer", no_wrap=True)
-    table.add_column("Evidence")
-
-    for answer in result.checklist:
-        answer_style = "red" if answer.answer.lower() == "yes" else "green"
-        evidence = answer.evidence
-        if len(evidence) > 120:
-            evidence = f"{evidence[:117]}..."
-        table.add_row(
-            str(answer.id),
-            Text(answer.answer, style=answer_style),
-            evidence,
-        )
-
-    console.print(table)
-
-
-def _render_findings(*, result: ReviewResult, console: Console) -> None:
+def _render_findings(
+    *,
+    result: ReviewResult,
+    console: Console,
+    show_linked_questions: bool,
+    question_map: dict[int, str],
+) -> None:
     """Render findings grouped by severity."""
     if not result.findings:
         console.print("[dim]No findings.[/dim]")
@@ -121,6 +121,8 @@ def _render_findings(*, result: ReviewResult, console: Console) -> None:
             index=index,
             total=len(sorted_findings),
             console=console,
+            show_linked_questions=show_linked_questions,
+            question_map=question_map,
         )
 
 
@@ -130,6 +132,8 @@ def _render_finding_panel(
     index: int,
     total: int,
     console: Console,
+    show_linked_questions: bool,
+    question_map: dict[int, str],
 ) -> None:
     """Render a single finding as a Rich panel."""
     severity_style = _SEVERITY_STYLES.get(finding.severity, "white")
@@ -147,6 +151,17 @@ def _render_finding_panel(
     body.append("Fix: ", style="bold")
     body.append(finding.fix)
 
+    if show_linked_questions:
+        linked_questions = questions_for_finding(
+            finding=finding,
+            question_map=question_map,
+        )
+        if linked_questions:
+            body.append("\n\n")
+            body.append("Review questions:\n", style="bold")
+            for question in linked_questions:
+                body.append(f"  • {question}\n")
+
     console.print(
         Panel(
             body,
@@ -156,3 +171,37 @@ def _render_finding_panel(
             padding=(0, 1),
         ),
     )
+
+
+def _render_checklist_appendix(*, result: ReviewResult, console: Console) -> None:
+    """Render cleared and orphan checklist sections for audit mode."""
+    cleared = cleared_answers(answers=result.checklist)
+    orphans = orphan_concerns(
+        answers=result.checklist,
+        findings=result.findings,
+    )
+
+    console.print()
+    console.print(f"[bold cyan]Cleared checks ({len(cleared)})[/bold cyan]")
+    if cleared:
+        for answer in cleared:
+            question = answer.question or f"(checklist item {answer.id})"
+            console.print(f"  [green]✓[/green] {question}")
+    else:
+        console.print("[dim]  (none)[/dim]")
+
+    console.print()
+    console.print(
+        f"[bold cyan]Checklist concerns without findings ({len(orphans)})[/bold cyan]",
+    )
+    if orphans:
+        for answer in orphans:
+            question = answer.question or f"(checklist item {answer.id})"
+            console.print(f"  [yellow]•[/yellow] {question}")
+            if answer.evidence.strip():
+                evidence = answer.evidence
+                if len(evidence) > 120:
+                    evidence = f"{evidence[:117]}..."
+                console.print(f"    [dim]{evidence}[/dim]")
+    else:
+        console.print("[dim]  (none — good)[/dim]")
