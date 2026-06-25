@@ -212,7 +212,7 @@ def test_fix_recomputes_totals_after_ai_changes(monkeypatch, fake_logger):
     monkeypatch.setattr(
         hook_module,
         "AIPostExecutionHook",
-        lambda lintro_config, ai_fix=False: _FakeHook(),
+        lambda lintro_config, ai_fix=False, transport=None: _FakeHook(),
     )
 
     captured: dict[str, int] = {}
