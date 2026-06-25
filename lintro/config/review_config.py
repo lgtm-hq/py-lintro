@@ -5,6 +5,7 @@ from __future__ import annotations
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from lintro.ai.review.constants import CUSTOM_CHECKLIST_ID_START
+from lintro.ai.review.enums.checklist_display import ChecklistDisplay
 from lintro.ai.review.enums.review_category import ReviewCategory
 from lintro.ai.review.enums.review_strictness import ReviewStrictness
 
@@ -87,6 +88,13 @@ class ReviewConfig(BaseModel):
     model_config = ConfigDict(frozen=False, extra="forbid")
 
     checklist: ReviewChecklistConfig = Field(default_factory=ReviewChecklistConfig)
+    checklist_display: ChecklistDisplay = Field(
+        default=ChecklistDisplay.OFF,
+        description=(
+            "Structured checklist visibility: off, linked (under findings), "
+            "or all (linked plus cleared/orphan appendices)."
+        ),
+    )
     strictness: ReviewStrictness = Field(
         default=ReviewStrictness.BALANCED,
         description=("Review sensitivity preset: focused, balanced, or thorough."),

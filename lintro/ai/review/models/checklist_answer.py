@@ -13,8 +13,10 @@ class ChecklistAnswer:
         id: Prompt checklist item id (1..N in the review pass).
         answer: ``yes`` or ``no``.
         evidence: Brief file:line or logic trace supporting the answer.
+        question: Full checklist question text (populated for JSON output).
     """
 
     id: int
     answer: str
     evidence: str
+    question: str = ""
