@@ -14,6 +14,7 @@ class ReviewMetadata:
         provider: Provider name (anthropic, openai, etc.).
         context_window: Model context window in tokens.
         depth: Review depth level (1-3).
+        strictness: Sensitivity preset (focused, balanced, thorough).
         chunks_total: Total semantic chunks processed.
         chunks_current: Chunks included in this result view.
         files_reviewed: Number of changed files included in review.
@@ -40,3 +41,4 @@ class ReviewMetadata:
     base_ref: str = ""
     head_ref: str = ""
     timestamp: str = ""
+    strictness: str = "balanced"

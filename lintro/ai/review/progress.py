@@ -73,6 +73,26 @@ class ReviewProgressCallback(Protocol):
         """
         ...
 
+    def on_error(
+        self,
+        *,
+        chunk_index: int | None = None,
+        total_chunks: int | None = None,
+        step: str | None = None,
+        completed_chunks: int = 0,
+        error: Exception | None = None,
+    ) -> None:
+        """Called when the review aborts due to an error.
+
+        Args:
+            chunk_index: Zero-based index of the failing chunk.
+            total_chunks: Total chunks planned.
+            step: Sub-step active when the error occurred.
+            completed_chunks: Chunks successfully reviewed before failure.
+            error: The underlying exception.
+        """
+        ...
+
 
 class NullReviewProgress:
     """No-op progress tracker (silent)."""
@@ -90,6 +110,17 @@ class NullReviewProgress:
         pass
 
     def on_complete(self, *, total_findings: int) -> None:
+        pass
+
+    def on_error(
+        self,
+        *,
+        chunk_index: int | None = None,
+        total_chunks: int | None = None,
+        step: str | None = None,
+        completed_chunks: int = 0,
+        error: Exception | None = None,
+    ) -> None:
         pass
 
 
@@ -147,7 +178,9 @@ class RichReviewProgress:
             return
         self._progress.update(
             self._task_id,
-            description=(f"Chunk {chunk_index + 1}/{self._total_chunks}: {step}"),
+            description=(
+                f"Chunk {chunk_index + 1}/{self._total_chunks}: {step}"
+            ),
         )
 
     def on_chunk_done(self, *, chunk_index: int) -> None:
@@ -156,13 +189,28 @@ class RichReviewProgress:
         self._progress.update(self._task_id, advance=1)
 
     def on_complete(self, *, total_findings: int) -> None:
+        self._stop_progress()
+        noun = "finding" if total_findings == 1 else "findings"
+        self._console.print(
+            f"[bold green]✓[/bold green] Review complete — "
+            f"{total_findings} {noun}",
+        )
+
+    def on_error(
+        self,
+        *,
+        chunk_index: int | None = None,
+        total_chunks: int | None = None,
+        step: str | None = None,
+        completed_chunks: int = 0,
+        error: Exception | None = None,
+    ) -> None:
+        self._stop_progress()
+
+    def _stop_progress(self) -> None:
         if self._progress is not None:
             self._progress.stop()
             self._progress = None
-        noun = "finding" if total_findings == 1 else "findings"
-        self._console.print(
-            f"[bold green]✓[/bold green] Review complete — " f"{total_findings} {noun}",
-        )
 
 
 def _passes_per_chunk(depth: int) -> int:
@@ -171,4 +219,19 @@ def _passes_per_chunk(depth: int) -> int:
         return 3  # questions + review + adversarial
     if depth >= 2:
         return 2  # questions + review
-    return 1  # review only
+    return 1      # review only
+
+
+class StepTrackingProgress:
+    """Wraps a progress tracker and records the most recent step name."""
+
+    def __init__(self, inner: ReviewProgressCallback) -> None:
+        self._inner = inner
+        self.last_step = "reviewing"
+
+    def __getattr__(self, name: str):  # noqa: ANN001
+        return getattr(self._inner, name)
+
+    def on_step(self, *, chunk_index: int, step: str) -> None:
+        self.last_step = step
+        self._inner.on_step(chunk_index=chunk_index, step=step)
