@@ -35,7 +35,7 @@ from lintro.ai.token_budget import estimate_tokens
 
 if TYPE_CHECKING:
     from lintro.ai.config import AIConfig
-    from lintro.ai.providers.base import BaseAIProvider, AIResponse
+    from lintro.ai.providers.base import AIResponse, BaseAIProvider
     from lintro.ai.review.models.checklist_item import ChecklistItem
     from lintro.ai.review.models.file_classification import FileClassification
     from lintro.ai.review.models.review_chunk import ReviewChunk
@@ -212,11 +212,7 @@ def build_review_prompt(
     """
     pr_title = context.pr_metadata.title if context.pr_metadata else "Local changes"
     pr_summary = context.pr_metadata.body if context.pr_metadata else "(no PR summary)"
-    changed_files = [
-        file
-        for file in context.changed_files
-        if file.path in chunk.files
-    ]
+    changed_files = [file for file in context.changed_files if file.path in chunk.files]
     combined_checklist = checklist_text
     if extra_checklist.strip():
         combined_checklist = f"{checklist_text}\n\n{extra_checklist.strip()}"
@@ -330,9 +326,7 @@ def merge_checklist_answers(
             if existing is None:
                 by_id[answer.id] = answer
                 continue
-            if answer.answer.lower() == "yes":
-                by_id[answer.id] = answer
-            elif existing.answer.lower() != "yes":
+            if answer.answer.lower() == "yes" or existing.answer.lower() != "yes":
                 by_id[answer.id] = answer
     return tuple(sorted(by_id.values(), key=lambda item: item.id))
 
