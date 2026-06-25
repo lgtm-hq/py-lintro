@@ -122,6 +122,11 @@ def generate_interaction_paths(
     for required_domains, builder in _PATH_BUILDERS:
         if not required_domains.issubset(domain_set):
             continue
+        if (
+            required_domains == frozenset({FileDomain.SHELL.value})
+            and FileDomain.CI.value in domain_set
+        ):
+            continue
         matching_files = _files_for_domains(
             classifications=classifications,
             domains=required_domains,
