@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any
 
 import yaml
 from assertpy import assert_that
@@ -10,9 +11,11 @@ from assertpy import assert_that
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
-def _load_workflow(*, name: str) -> dict:
+def _load_workflow(*, name: str) -> dict[str, Any]:
     path = _REPO_ROOT / ".github" / "workflows" / name
-    return yaml.safe_load(path.read_text(encoding="utf-8"))
+    data = yaml.safe_load(path.read_text(encoding="utf-8"))
+    assert isinstance(data, dict)
+    return data
 
 
 def test_release_workflows_use_paired_egress_presets() -> None:

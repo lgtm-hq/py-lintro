@@ -17,7 +17,7 @@ class SubprocessMock:
     def __init__(self) -> None:
         """Initialize empty response queues."""
         self._queues: dict[tuple[str, ...], list[CompletedProcess[str]]] = defaultdict(
-            list
+            list,
         )
 
     def queue(

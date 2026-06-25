@@ -44,10 +44,12 @@ def test_collect_branch_context_uses_merge_base(
         stdout="diff --git a/a.py b/a.py\n",
     )
     dispatcher.queue(
-        ["git", "diff", "--name-status", "base123...HEAD"], stdout="M\ta.py\n"
+        ["git", "diff", "--name-status", "base123...HEAD"],
+        stdout="M\ta.py\n",
     )
     dispatcher.queue(
-        ["git", "diff", "--numstat", "base123...HEAD"], stdout="1\t0\ta.py\n"
+        ["git", "diff", "--numstat", "base123...HEAD"],
+        stdout="1\t0\ta.py\n",
     )
     dispatcher.queue(["git", "rev-parse", "HEAD"], stdout="head456\n")
     mock_run.side_effect = dispatcher
