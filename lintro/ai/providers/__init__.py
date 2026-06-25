@@ -9,6 +9,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from lintro.ai.exceptions import AINotAvailableError  # noqa: F401 -- public re-export
+from lintro.ai.enums import AITransport
 from lintro.ai.registry import PROVIDERS, AIProvider
 
 if TYPE_CHECKING:
@@ -86,6 +87,7 @@ def get_provider(config: AIConfig) -> BaseAIProvider:
         api_key_env=config.api_key_env,
         max_tokens=config.max_tokens,
         base_url=config.api_base_url,
+        transport=config.transport or AITransport.API,
     )
 
 

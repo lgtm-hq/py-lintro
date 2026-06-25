@@ -1,11 +1,13 @@
 """Anthropic AI provider implementation.
 
-Uses the Anthropic Python SDK to communicate with Claude models.
-Requires the ``anthropic`` package (installed via ``lintro[ai]``).
+Uses the Anthropic Python SDK for ``transport: api`` and the ``claude`` CLI
+for ``transport: cli``.
 """
 
 from __future__ import annotations
 
+import json
+import os
 from collections.abc import Iterator
 from contextlib import contextmanager
 from typing import Any
@@ -13,18 +15,21 @@ from typing import Any
 from loguru import logger
 
 from lintro.ai.cost import estimate_cost
+from lintro.ai.enums import AITransport
 from lintro.ai.exceptions import (
     AIAuthenticationError,
+    AINotAvailableError,
     AIProviderError,
     AIRateLimitError,
 )
 from lintro.ai.providers.base import AIResponse, AIStreamResult, BaseAIProvider
+from lintro.ai.providers.cli_transport import CliTransport
 from lintro.ai.providers.constants import (
     DEFAULT_MAX_TOKENS,
     DEFAULT_PER_CALL_MAX_TOKENS,
     DEFAULT_TIMEOUT,
 )
-from lintro.ai.registry import PROVIDERS, AIProvider
+from lintro.ai.registry import AIProvider, PROVIDERS
 
 _has_anthropic = False
 try:
@@ -36,6 +41,73 @@ except ImportError:
 
 DEFAULT_MODEL = PROVIDERS.anthropic.default_model
 DEFAULT_API_KEY_ENV = PROVIDERS.anthropic.default_api_key_env
+_CLAUDE_BIN = "claude"
+
+
+def _find_claude() -> str | None:
+    """Return the full path to the ``claude`` binary, or None."""
+    return CliTransport.find_binary(_CLAUDE_BIN)
+
+
+class _AnthropicCliTransport(CliTransport):
+    """Anthropic ``claude -p`` subprocess transport."""
+
+    def __init__(
+        self,
+        *,
+        binary_path: str,
+        model: str,
+    ) -> None:
+        super().__init__(
+            binary_path=binary_path,
+            binary_name="Claude",
+            install_hint="Install Claude Code: https://code.claude.com/docs/en/setup",
+            api_key_env=DEFAULT_API_KEY_ENV,
+        )
+        self._model = model
+
+    def parse_stdout(self, stdout: str) -> AIResponse:
+        """Parse JSON envelope from ``claude --output-format json``."""
+        try:
+            data = json.loads(stdout.strip())
+        except json.JSONDecodeError as exc:
+            raise AIProviderError(
+                f"Claude CLI returned invalid JSON: {exc}\n"
+                f"Raw output: {stdout[:500]}",
+            ) from exc
+
+        if data.get("is_error") or data.get("subtype") == "error":
+            raise AIProviderError(
+                f"Claude CLI reported error: {data.get('result', stdout[:500])}",
+            )
+
+        content = data.get("result", "")
+        if isinstance(content, dict):
+            content = json.dumps(content)
+        elif not isinstance(content, str):
+            content = str(content)
+
+        usage = data.get("usage", {})
+        input_tokens = int(
+            usage.get("input_tokens", usage.get("inputTokens", 0)),
+        )
+        output_tokens = int(
+            usage.get("output_tokens", usage.get("outputTokens", 0)),
+        )
+        cost = data.get("total_cost_usd")
+        if cost is None:
+            cost = estimate_cost(self._model, input_tokens, output_tokens)
+        else:
+            cost = float(cost)
+
+        return AIResponse(
+            content=self.extract_json_object(content),
+            model=self._model,
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
+            cost_estimate=cost,
+            provider=AIProvider.ANTHROPIC,
+        )
 
 
 class AnthropicProvider(BaseAIProvider):
@@ -73,6 +145,7 @@ class AnthropicProvider(BaseAIProvider):
         api_key_env: str | None = None,
         max_tokens: int = DEFAULT_MAX_TOKENS,
         base_url: str | None = None,
+        transport: AITransport = AITransport.API,
     ) -> None:
         """Initialize the Anthropic provider.
 
@@ -83,7 +156,37 @@ class AnthropicProvider(BaseAIProvider):
             max_tokens: Default max tokens for completions.
             base_url: Custom API base URL for Anthropic-compatible
                 endpoints (proxies, self-hosted, etc.).
+            transport: ``api`` for SDK or ``cli`` for ``claude -p``.
         """
+        self._transport = transport
+        self._cli: _AnthropicCliTransport | None = None
+        self._session_id: str | None = None
+
+        if transport == AITransport.CLI:
+            claude_path = _find_claude()
+            if not claude_path:
+                raise AINotAvailableError(
+                    "Anthropic CLI transport requires the 'claude' binary. "
+                    "Install Claude Code: https://code.claude.com/docs/en/setup",
+                )
+            super().__init__(
+                provider_name=AIProvider.ANTHROPIC,
+                has_sdk=True,
+                sdk_package="claude CLI",
+                default_model=DEFAULT_MODEL,
+                default_api_key_env=DEFAULT_API_KEY_ENV,
+                model=model,
+                api_key_env=api_key_env,
+                max_tokens=max_tokens,
+                base_url=base_url,
+                transport=transport,
+            )
+            self._cli = _AnthropicCliTransport(
+                binary_path=claude_path,
+                model=self._model,
+            )
+            return
+
         super().__init__(
             provider_name=AIProvider.ANTHROPIC,
             has_sdk=_has_anthropic,
@@ -94,6 +197,7 @@ class AnthropicProvider(BaseAIProvider):
             api_key_env=api_key_env,
             max_tokens=max_tokens,
             base_url=base_url,
+            transport=transport,
         )
 
     def _create_client(self, *, api_key: str) -> Any:
@@ -110,6 +214,76 @@ class AnthropicProvider(BaseAIProvider):
             kwargs["base_url"] = self._base_url
         return anthropic.Anthropic(**kwargs)
 
+    def is_available(self) -> bool:
+        if self._transport == AITransport.CLI:
+            return _find_claude() is not None
+        return super().is_available()
+
+    def _complete_cli(
+        self,
+        prompt: str,
+        *,
+        system: str | None,
+        timeout: float,
+        repo_root: str | None,
+        use_one_shot: bool,
+    ) -> AIResponse:
+        if self._cli is None:
+            raise AINotAvailableError("Claude CLI transport is not initialized")
+
+        cmd = [
+            self._cli._binary_path,
+            "--bare",
+            "-p",
+            prompt,
+            "--output-format",
+            "json",
+            "--permission-mode",
+            "dontAsk",
+        ]
+        if system:
+            cmd.extend(["--append-system-prompt", system])
+        if (
+            not use_one_shot
+            and self._session_id is not None
+        ):
+            cmd.extend(["--resume", self._session_id])
+
+        logger.debug(
+            f"Claude CLI request: model={self._model}, "
+            f"resume={self._session_id is not None and not use_one_shot}, "
+            f"prompt_len={len(prompt)}",
+        )
+
+        result = self._cli.run(
+            cmd,
+            timeout=timeout,
+            cwd=repo_root or os.getcwd(),
+        )
+        self._cli.check_exit_code(
+            result,
+            auth_patterns=("authentication", "login", "not logged in"),
+            auth_hint=(
+                "Run 'claude login' or set ANTHROPIC_API_KEY "
+                "(API key billing overrides subscription credits)."
+            ),
+        )
+
+        response = self._cli.parse_stdout(result.stdout)
+        session_id = None
+        try:
+            envelope = json.loads(result.stdout.strip())
+            session_id = envelope.get("session_id")
+        except json.JSONDecodeError:
+            session_id = None
+        if (
+            not use_one_shot
+            and isinstance(session_id, str)
+            and session_id.strip()
+        ):
+            self._session_id = session_id.strip()
+        return response
+
     def complete(
         self,
         prompt: str,
@@ -121,20 +295,30 @@ class AnthropicProvider(BaseAIProvider):
         use_one_shot: bool = False,
         model: str | None = None,
     ) -> AIResponse:
-        """Generate a completion using Claude.
+        """Generate a completion using Claude (API or CLI).
 
         Args:
             prompt: The user prompt.
             system: Optional system prompt.
-            max_tokens: Maximum tokens to generate.
+            max_tokens: Maximum tokens to generate (API only).
             timeout: Request timeout in seconds.
-            repo_root: Unused; accepted for provider API parity.
-            use_one_shot: Unused; accepted for provider API parity.
+            repo_root: Working directory for CLI transport.
+            use_one_shot: When True, avoid resuming CLI sessions.
             model: Optional per-call model override.
 
         Returns:
             AIResponse: The model's response with usage metadata.
         """
+        if self._transport == AITransport.CLI:
+            del max_tokens
+            return self._complete_cli(
+                prompt,
+                system=system,
+                timeout=timeout,
+                repo_root=repo_root,
+                use_one_shot=use_one_shot,
+            )
+
         del repo_root, use_one_shot
         client = self._get_client()
         effective_model = model or self._model
@@ -193,6 +377,14 @@ class AnthropicProvider(BaseAIProvider):
         Returns:
             An AIStreamResult wrapping the token stream.
         """
+        if self._transport == AITransport.CLI:
+            return super().stream_complete(
+                prompt,
+                system=system,
+                max_tokens=max_tokens,
+                timeout=timeout,
+            )
+
         client = self._get_client()
         effective_max = min(max_tokens, self._max_tokens)
         effective_model = model or self._model
@@ -214,10 +406,6 @@ class AnthropicProvider(BaseAIProvider):
         final_response: list[AIResponse] = []
 
         def _generate() -> Iterator[str]:
-            # Note: mid-stream errors surface as exceptions during
-            # iteration and are NOT retried because partial content has
-            # already been yielded to the caller. Only setup failures
-            # (before the first token) are caught by the fallback chain.
             with self._map_errors():
                 with client.messages.stream(**kwargs) as stream:
                     yield from stream.text_stream

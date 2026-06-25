@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from lintro.ai.enums import ConfidenceLevel, SanitizeMode
+from lintro.ai.enums import AITransport, ConfidenceLevel, SanitizeMode
 from lintro.ai.registry import AIProvider
 
 
@@ -19,6 +19,7 @@ class AIProviderConfig:
     """Read-only view of provider-related AI settings."""
 
     provider: AIProvider
+    transport: AITransport | None
     model: str | None
     api_key_env: str | None
     api_base_url: str | None
