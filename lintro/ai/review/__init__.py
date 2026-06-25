@@ -4,11 +4,17 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-from lintro.ai.review.enums import FileDomain
+from lintro.ai.review.checklist_builtin import BUILTIN_CHECKLIST_ITEMS
+from lintro.ai.review.checklist_selector import (
+    format_checklist_for_prompt,
+    select_checklist_items,
+)
+from lintro.ai.review.enums import FileDomain, ReviewCategory
 from lintro.ai.review.enums.review_context_error_code import ReviewContextErrorCode
 from lintro.ai.review.exceptions import ReviewContextError
 from lintro.ai.review.models import (
     ChangedFile,
+    ChecklistItem,
     ChunkingResult,
     FileClassification,
     PRMetadata,
@@ -17,15 +23,7 @@ from lintro.ai.review.models import (
 )
 
 if TYPE_CHECKING:
-    from lintro.ai.review.chunker import chunk_review_context
-    from lintro.ai.review.classifier import classify_changed_files
-    from lintro.ai.review.context import (
-        collect_review_context,
-        parse_changed_files,
-        resolve_default_base_branch,
-        split_unified_diff_by_file,
-    )
-    from lintro.ai.review.pipeline import prepare_review_chunks
+    from lintro.config.lintro_config import LintroConfig
 
 _LAZY_EXPORTS: dict[str, tuple[str, str]] = {
     "chunk_review_context": ("lintro.ai.review.chunker", "chunk_review_context"),
@@ -47,24 +45,45 @@ _LAZY_EXPORTS: dict[str, tuple[str, str]] = {
 }
 
 __all__ = [
+    "BUILTIN_CHECKLIST_ITEMS",
     "ChangedFile",
+    "ChecklistItem",
     "ChunkingResult",
     "FileClassification",
     "FileDomain",
     "PRMetadata",
+    "ReviewCategory",
     "ReviewChunk",
     "ReviewContext",
     "ReviewContextError",
     "ReviewContextErrorCode",
     *_LAZY_EXPORTS,
-    "chunk_review_context",
-    "classify_changed_files",
-    "collect_review_context",
-    "parse_changed_files",
-    "resolve_default_base_branch",
-    "split_unified_diff_by_file",
-    "prepare_review_chunks",
+    "format_checklist_for_prompt",
+    "get_all_checklist_items",
+    "select_checklist_items",
 ]
+
+
+def get_all_checklist_items(
+    *,
+    config: LintroConfig | None = None,
+) -> list[ChecklistItem]:
+    """Load builtin and custom checklist items.
+
+    Delegates to ``checklist_registry`` to avoid config import cycles during
+    package initialization.
+
+    Args:
+        config: Loaded Lintro configuration.
+
+    Returns:
+        Combined checklist items with custom config entries appended.
+    """
+    from lintro.ai.review.checklist_registry import (
+        get_all_checklist_items as _get_all_checklist_items,
+    )
+
+    return _get_all_checklist_items(config=config)
 
 
 def __getattr__(name: str) -> Any:
