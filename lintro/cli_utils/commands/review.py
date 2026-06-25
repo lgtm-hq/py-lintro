@@ -11,7 +11,6 @@ from rich.console import Console
 from lintro.ai.availability import require_ai
 from lintro.ai.exceptions import AIError
 from lintro.ai.providers import get_provider
-from lintro.ai.transport import apply_transport_override
 from lintro.ai.review import (
     classify_changed_files,
     collect_review_context,
@@ -30,6 +29,7 @@ from lintro.ai.review.exceptions import ReviewContextError
 from lintro.ai.review.orchestrator import run_review
 from lintro.ai.review.output import render_review_output
 from lintro.ai.review.sensitivity import resolve_sensitivity_policy
+from lintro.ai.transport import apply_transport_override
 from lintro.config.config_loader import get_config
 
 

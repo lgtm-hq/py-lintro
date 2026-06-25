@@ -8,9 +8,9 @@ from assertpy import assert_that
 from click.testing import CliRunner
 
 from lintro.ai.config import AIConfig
-from lintro.ai.review.exceptions import ReviewExecutionError
-from lintro.ai.review.enums.review_strictness import ReviewStrictness
 from lintro.ai.review.enums.checklist_display import ChecklistDisplay
+from lintro.ai.review.enums.review_strictness import ReviewStrictness
+from lintro.ai.review.exceptions import ReviewExecutionError
 from lintro.ai.review.models.review_metadata import ReviewMetadata
 from lintro.ai.review.models.review_result import ReviewResult
 from lintro.cli import cli

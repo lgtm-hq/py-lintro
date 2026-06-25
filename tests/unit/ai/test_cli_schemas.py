@@ -8,7 +8,6 @@ import pytest
 from assertpy import assert_that
 
 from lintro.ai.cli_schemas import (
-    FIX_CLI_SCHEMA,
     REVIEW_CLI_SCHEMA,
     SUMMARY_CLI_SCHEMA,
     cli_schema_for_fix,

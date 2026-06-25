@@ -30,7 +30,7 @@ from lintro.ai.providers.constants import (
     DEFAULT_PER_CALL_MAX_TOKENS,
     DEFAULT_TIMEOUT,
 )
-from lintro.ai.registry import AIProvider, PROVIDERS
+from lintro.ai.registry import PROVIDERS, AIProvider
 
 _has_anthropic = False
 try:
@@ -257,10 +257,7 @@ class AnthropicProvider(BaseAIProvider):
             cmd.extend(["--json-schema", json.dumps(cli_schema.schema)])
             if cli_schema.schema_name:
                 cmd.extend(["--json-schema-name", cli_schema.schema_name])
-        if (
-            not use_one_shot
-            and self._session_id is not None
-        ):
+        if not use_one_shot and self._session_id is not None:
             cmd.extend(["--resume", self._session_id])
 
         logger.debug(
@@ -290,11 +287,7 @@ class AnthropicProvider(BaseAIProvider):
             session_id = envelope.get("session_id")
         except json.JSONDecodeError:
             session_id = None
-        if (
-            not use_one_shot
-            and isinstance(session_id, str)
-            and session_id.strip()
-        ):
+        if not use_one_shot and isinstance(session_id, str) and session_id.strip():
             self._session_id = session_id.strip()
         return response
 
