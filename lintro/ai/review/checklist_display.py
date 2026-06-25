@@ -52,10 +52,7 @@ def build_prompt_question_map(
     Returns:
         Mapping from prompt id to question string.
     """
-    return {
-        prompt_id: item.question
-        for prompt_id, item in enumerate(items, start=1)
-    }
+    return {prompt_id: item.question for prompt_id, item in enumerate(items, start=1)}
 
 
 def enrich_review_result(
@@ -118,9 +115,7 @@ def cleared_answers(
     Returns:
         Answers where the model responded ``no``.
     """
-    return tuple(
-        answer for answer in answers if answer.answer.lower() == "no"
-    )
+    return tuple(answer for answer in answers if answer.answer.lower() == "no")
 
 
 def orphan_concerns(
@@ -138,9 +133,7 @@ def orphan_concerns(
         Checklist yes answers whose prompt id is absent from all findings.
     """
     linked_ids = {
-        checklist_id
-        for finding in findings
-        for checklist_id in finding.checklist_ids
+        checklist_id for finding in findings for checklist_id in finding.checklist_ids
     }
     return tuple(
         answer
