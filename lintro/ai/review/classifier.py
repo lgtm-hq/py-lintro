@@ -68,10 +68,7 @@ def _classify_path(*, path: str) -> list[str]:
     matched_domains: list[FileDomain] = []
 
     for domain, patterns in _DOMAIN_GLOBS.items():
-        if domain == FileDomain.SHELL and normalized.startswith("scripts/"):
-            matched_domains.append(domain)
-            continue
-        if any(pure_path.match(pattern) for pattern in patterns):
+        if _matches_domain_pattern(pure_path=pure_path, patterns=patterns):
             matched_domains.append(domain)
 
     if is_test_path(normalized):
@@ -101,7 +98,24 @@ def _matches_security(
         return False
 
     path_lower = path.lower()
-    if any(keyword in path_lower for keyword in _SECURITY_KEYWORDS):
-        return True
+    return any(keyword in path_lower for keyword in _SECURITY_KEYWORDS)
 
-    return path.startswith("scripts/")
+
+def _matches_domain_pattern(
+    *,
+    pure_path: PurePosixPath,
+    patterns: tuple[str, ...],
+) -> bool:
+    """Return True when a path matches any domain glob pattern.
+
+    ``PurePosixPath.match`` does not match repository-root files for patterns
+    like ``**/*.py``; root-level filenames are checked explicitly.
+    """
+    for pattern in patterns:
+        if pure_path.match(pattern):
+            return True
+        if pattern.startswith("**/") and len(pure_path.parts) == 1:
+            suffix = pattern.removeprefix("**/")
+            if suffix.startswith("*.") and pure_path.name.endswith(suffix[1:]):
+                return True
+    return False

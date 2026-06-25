@@ -15,7 +15,7 @@ from lintro.ai.review.models.review_context import ReviewContext
 
 _DIFF_FILE_HEADER = re.compile(r"^diff --git a/(.+?) b/(.+?)$", re.MULTILINE)
 _NAME_STATUS_LINE = re.compile(
-    r"^(?P<status>[A-Z][A-Z0-9]*)\s+(?P<path>.+?)(?:\s+(?P<old_path>.+))?$",
+    r"^(?P<status>[A-Z][A-Z0-9]*)\t(?P<path>[^\t]+)(?:\t(?P<old_path>[^\t]+))?$",
 )
 _NUMSTAT_LINE = re.compile(r"^(\d+|-)\s+(\d+|-)\s+(.+)$")
 
@@ -33,7 +33,8 @@ def collect_review_context(
     Args:
         base: Base branch for ``merge-base`` three-dot diffs. When omitted,
             resolves the repository default branch via ``git symbolic-ref``.
-        uncommitted: When True, collect staged and unstaged working tree diffs.
+        uncommitted: When True, collect staged and unstaged diffs against HEAD for
+            tracked files. Untracked (never-added) files are excluded and logged.
         pr_number: Pull request number to review via ``gh``.
         repo: Optional ``owner/name`` repository for ``--pr`` mode.
         paths: Optional path prefixes to filter changed files and diff hunks.
@@ -82,6 +83,15 @@ def validate_review_context_diff(*, context: ReviewContext) -> None:
         ReviewContextError: When changed files and diff content are inconsistent.
     """
     if not context.changed_files:
+        if context.unified_diff.strip():
+            per_file_diffs = split_unified_diff_by_file(
+                unified_diff=context.unified_diff,
+            )
+            if not per_file_diffs:
+                raise ReviewContextError(
+                    "Unified diff contains changes but no parseable file sections.",
+                    code=ReviewContextErrorCode.NO_PARSEABLE_DIFF,
+                )
         return
 
     if not context.unified_diff.strip():
@@ -235,6 +245,9 @@ def split_unified_diff_by_file(*, unified_diff: str) -> dict[str, str]:
     return per_file
 
 
+_GIT_GH_TIMEOUT_SECONDS = 120.0
+
+
 def _ensure_git_repo() -> None:
     """Verify the current directory is inside a git repository.
 
@@ -277,7 +290,13 @@ def _run_git(
             capture_output=True,
             text=True,
             check=False,
+            timeout=_GIT_GH_TIMEOUT_SECONDS,
         )
+    except subprocess.TimeoutExpired as exc:
+        raise ReviewContextError(
+            f"git {' '.join(args)} timed out after {_GIT_GH_TIMEOUT_SECONDS}s",
+            code=ReviewContextErrorCode.GIT_COMMAND_FAILED,
+        ) from exc
     except OSError as exc:
         raise ReviewContextError(
             f"Failed to run git {' '.join(args)}: {exc}",
@@ -317,7 +336,13 @@ def _run_gh(*, args: list[str]) -> subprocess.CompletedProcess[str]:
             capture_output=True,
             text=True,
             check=False,
+            timeout=_GIT_GH_TIMEOUT_SECONDS,
         )
+    except subprocess.TimeoutExpired as exc:
+        raise ReviewContextError(
+            f"gh {' '.join(args)} timed out after {_GIT_GH_TIMEOUT_SECONDS}s",
+            code=ReviewContextErrorCode.GH_COMMAND_FAILED,
+        ) from exc
     except OSError as exc:
         raise ReviewContextError(
             f"Failed to run gh {' '.join(args)}: {exc}",
@@ -371,11 +396,30 @@ def _collect_branch_context(*, base: str) -> ReviewContext:
 
 
 def _collect_uncommitted_context() -> ReviewContext:
-    """Collect staged and unstaged working tree diffs against HEAD.
+    """Collect staged and unstaged diffs against HEAD for tracked files.
+
+    Untracked files are not included in ``git diff HEAD`` output. When present,
+    a warning is logged so callers know the review scope is incomplete.
 
     Returns:
         Review context for the working tree and index.
     """
+    untracked = _run_git(
+        args=["ls-files", "--others", "--exclude-standard"],
+    ).stdout.strip()
+    if untracked:
+        from loguru import logger
+
+        sample = ", ".join(untracked.splitlines()[:5])
+        suffix = "..." if len(untracked.splitlines()) > 5 else ""
+        logger.warning(
+            "Uncommitted review excludes {} untracked file(s): {}{}. "
+            "Stage or commit new files to include them.",
+            len(untracked.splitlines()),
+            sample,
+            suffix,
+        )
+
     unified_diff = _run_git(args=["diff", "HEAD"]).stdout
     changed_files = parse_changed_files(
         name_status=_run_git(args=["diff", "HEAD", "--name-status"]).stdout,

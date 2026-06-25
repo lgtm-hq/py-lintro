@@ -2,10 +2,53 @@
 
 from __future__ import annotations
 
+from collections import defaultdict
+from subprocess import CompletedProcess
+
 import pytest
 
 from lintro.ai.review.models.changed_file import ChangedFile
 from lintro.ai.review.models.review_context import ReviewContext
+
+
+class SubprocessMock:
+    """Dispatch ``subprocess.run`` by argv with per-command response queues."""
+
+    def __init__(self) -> None:
+        """Initialize empty response queues."""
+        self._queues: dict[tuple[str, ...], list[CompletedProcess[str]]] = defaultdict(
+            list
+        )
+
+    def queue(
+        self,
+        argv: list[str],
+        *,
+        stdout: str = "",
+        stderr: str = "",
+        returncode: int = 0,
+    ) -> None:
+        """Register the next response for a subprocess argv list."""
+        self._queues[tuple(argv)].append(
+            CompletedProcess(
+                args=argv,
+                returncode=returncode,
+                stdout=stdout,
+                stderr=stderr,
+            ),
+        )
+
+    def __call__(
+        self,
+        args: list[str],
+        **_kwargs: object,
+    ) -> CompletedProcess[str]:
+        """Return the next queued response for ``args``."""
+        key = tuple(args)
+        if not self._queues[key]:
+            msg = f"unexpected subprocess call: {args!r}"
+            raise AssertionError(msg)
+        return self._queues[key].pop(0)
 
 
 @pytest.fixture

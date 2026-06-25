@@ -15,7 +15,7 @@ from lintro.ai.review.models.changed_file import ChangedFile
     [
         pytest.param(
             "scripts/ci/run.sh",
-            {FileDomain.SHELL.value, FileDomain.SECURITY.value},
+            {FileDomain.SHELL.value},
             id="shell_script",
         ),
         pytest.param(
@@ -42,10 +42,19 @@ from lintro.ai.review.models.changed_file import ChangedFile
             "scripts/security/auth.py",
             {
                 FileDomain.PYTHON.value,
-                FileDomain.SHELL.value,
                 FileDomain.SECURITY.value,
             },
             id="security_script",
+        ),
+        pytest.param(
+            "main.py",
+            {FileDomain.PYTHON.value},
+            id="root_python",
+        ),
+        pytest.param(
+            "README.md",
+            {FileDomain.DOCS.value},
+            id="root_markdown",
         ),
     ],
 )

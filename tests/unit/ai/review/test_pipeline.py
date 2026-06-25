@@ -27,10 +27,10 @@ def test_prepare_review_chunks_runs_classification_and_chunking(
     assert_that(relationships).contains(REL_WORKFLOW_SCRIPT_TEST, REL_SOURCE_TEST)
 
 
-def test_prepare_review_chunks_uses_production_token_budget(
+def test_prepare_review_chunks_honors_explicit_token_budget(
     sample_review_context: ReviewContext,
 ) -> None:
-    """Pipeline succeeds at the default AI review token budget."""
+    """Pipeline chunking succeeds for an explicit max_tokens budget."""
     result = prepare_review_chunks(context=sample_review_context, max_tokens=4096)
 
     chunked_paths = {path for chunk in result.chunks for path in chunk.files}

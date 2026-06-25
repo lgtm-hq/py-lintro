@@ -14,9 +14,12 @@ from lintro.ai.review.context import (
     parse_changed_files,
     resolve_default_base_branch,
     split_unified_diff_by_file,
+    validate_review_context_diff,
 )
 from lintro.ai.review.exceptions import ReviewContextError
 from lintro.ai.review.models.changed_file import ChangedFile
+from lintro.ai.review.models.review_context import ReviewContext
+from tests.unit.ai.review.conftest import SubprocessMock
 
 
 def test_split_unified_diff_by_file_returns_sections(sample_unified_diff: str) -> None:
@@ -33,14 +36,21 @@ def test_collect_branch_context_uses_merge_base(
     mock_run: MagicMock,
 ) -> None:
     """Branch review mode uses merge-base...HEAD diff commands."""
-    mock_run.side_effect = [
-        _completed(stdout=".git\n"),
-        _completed(stdout="base123\n"),
-        _completed(stdout="diff --git a/a.py b/a.py\n"),
-        _completed(stdout="M\ta.py\n"),
-        _completed(stdout="1\t0\ta.py\n"),
-        _completed(stdout="head456\n"),
-    ]
+    dispatcher = SubprocessMock()
+    dispatcher.queue(["git", "rev-parse", "--git-dir"], stdout=".git\n")
+    dispatcher.queue(["git", "merge-base", "main", "HEAD"], stdout="base123\n")
+    dispatcher.queue(
+        ["git", "diff", "base123...HEAD"],
+        stdout="diff --git a/a.py b/a.py\n",
+    )
+    dispatcher.queue(
+        ["git", "diff", "--name-status", "base123...HEAD"], stdout="M\ta.py\n"
+    )
+    dispatcher.queue(
+        ["git", "diff", "--numstat", "base123...HEAD"], stdout="1\t0\ta.py\n"
+    )
+    dispatcher.queue(["git", "rev-parse", "HEAD"], stdout="head456\n")
+    mock_run.side_effect = dispatcher
 
     context = collect_review_context(base="main")
 
@@ -65,18 +75,26 @@ def test_collect_uncommitted_context_merges_staged_and_unstaged(
     mock_run: MagicMock,
 ) -> None:
     """Uncommitted mode uses a single git diff HEAD for index and working tree."""
-    mock_run.side_effect = [
-        _completed(stdout=".git\n"),
-        _completed(
-            stdout=(
-                "diff --git a/unstaged.py b/unstaged.py\n"
-                "diff --git a/staged.py b/staged.py\n"
-            ),
+    dispatcher = SubprocessMock()
+    dispatcher.queue(["git", "rev-parse", "--git-dir"], stdout=".git\n")
+    dispatcher.queue(["git", "ls-files", "--others", "--exclude-standard"], stdout="")
+    dispatcher.queue(
+        ["git", "diff", "HEAD"],
+        stdout=(
+            "diff --git a/unstaged.py b/unstaged.py\n"
+            "diff --git a/staged.py b/staged.py\n"
         ),
-        _completed(stdout="M\tunstaged.py\nA\tstaged.py\n"),
-        _completed(stdout="1\t0\tunstaged.py\n2\t0\tstaged.py\n"),
-        _completed(stdout="head456\n"),
-    ]
+    )
+    dispatcher.queue(
+        ["git", "diff", "HEAD", "--name-status"],
+        stdout="M\tunstaged.py\nA\tstaged.py\n",
+    )
+    dispatcher.queue(
+        ["git", "diff", "HEAD", "--numstat"],
+        stdout="1\t0\tunstaged.py\n2\t0\tstaged.py\n",
+    )
+    dispatcher.queue(["git", "rev-parse", "HEAD"], stdout="head456\n")
+    mock_run.side_effect = dispatcher
 
     context = collect_review_context(uncommitted=True)
 
@@ -305,6 +323,20 @@ def test_resolve_default_base_branch_raises_when_undetectable(
 
     with pytest.raises(ReviewContextError, match="Could not determine default branch"):
         resolve_default_base_branch()
+
+
+def test_validate_review_context_diff_rejects_unparseable_diff_without_files() -> None:
+    """Non-empty diffs that fail to parse raise before review proceeds."""
+    context = ReviewContext(
+        base_ref="abc",
+        head_ref="def",
+        changed_files=[],
+        unified_diff="not a valid unified diff header\n",
+        pr_metadata=None,
+    )
+
+    with pytest.raises(ReviewContextError, match="no parseable file sections"):
+        validate_review_context_diff(context=context)
 
 
 @pytest.mark.parametrize(

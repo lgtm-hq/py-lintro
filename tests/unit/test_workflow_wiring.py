@@ -29,8 +29,13 @@ def test_release_workflows_use_paired_egress_presets() -> None:
 
 
 def test_docker_ci_dogfooding_lint_waits_on_manifest_sync() -> None:
-    """Dogfooding lint must depend on manifest-sync for version alignment."""
+    """Dogfooding lint depends on manifest-sync and allows draft-PR skips."""
     docker_ci = _load_workflow(name="docker-ci.yml")
-    needs = docker_ci["jobs"]["dogfooding-lint"]["needs"]
+    job = docker_ci["jobs"]["dogfooding-lint"]
+    needs = job["needs"]
+    condition = job["if"]
 
     assert_that(needs).contains("docker-build", "manifest-sync")
+    assert_that(condition).contains("!cancelled()")
+    assert_that(condition).contains("manifest-sync.result == 'skipped'")
+    assert_that(condition).contains("manifest-sync.result == 'success'")

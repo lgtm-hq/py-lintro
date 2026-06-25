@@ -11,6 +11,7 @@ from lintro.ai.review.context import (
     split_unified_diff_by_file,
 )
 from lintro.ai.review.enums import FileDomain
+from lintro.ai.review.enums.review_context_error_code import ReviewContextErrorCode
 from lintro.ai.review.exceptions import ReviewContextError
 from lintro.ai.review.models import (
     ChangedFile,
@@ -31,6 +32,7 @@ __all__ = [
     "ReviewChunk",
     "ReviewContext",
     "ReviewContextError",
+    "ReviewContextErrorCode",
     "chunk_review_context",
     "classify_changed_files",
     "collect_review_context",

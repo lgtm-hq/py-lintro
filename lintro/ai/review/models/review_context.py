@@ -24,4 +24,4 @@ class ReviewContext:
     head_ref: str
     changed_files: list[ChangedFile]
     unified_diff: str
-    pr_metadata: PRMetadata | None
+    pr_metadata: PRMetadata | None = None

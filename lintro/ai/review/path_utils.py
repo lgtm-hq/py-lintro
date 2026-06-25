@@ -22,9 +22,8 @@ def is_test_path(path: str) -> bool:
         return True
     return (
         any(suffix in name for suffix in _TEST_SUFFIXES)
-        or pure_path.match(
-            "**/tests/**",
-        )
+        or pure_path.parts[:1] == ("tests",)
+        or pure_path.match("**/tests/**")
         or pure_path.match("**/__tests__/**")
     )
 
@@ -49,6 +48,8 @@ def matches_test_for_source(*, test_path: str, source_stem: str) -> bool:
         f"test_{source_stem}.rs",
         f"{source_stem}_test.rs",
         f"test_{source_stem}.bats",
+        f"test_{source_stem}.ts",
+        f"test_{source_stem}.js",
         f"{source_stem}.spec.ts",
         f"{source_stem}.test.ts",
         f"{source_stem}.spec.tsx",
