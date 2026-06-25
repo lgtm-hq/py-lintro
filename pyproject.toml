@@ -81,11 +81,7 @@ full = [
   "pydoclint>=0.8.3",
   "yamllint>=1.37.1",
 ]
-ai = [
-    "anthropic>=0.39.0",
-    "cursor-sdk>=0.1.8",
-    "openai>=1.50.0",
-]
+ai = ["anthropic>=0.39.0", "cursor-sdk>=0.1.8", "openai>=1.50.0"]
 tools = ["semgrep>=1.151.0", "sqlfluff>=4.0.0"]
 
 [project.scripts]

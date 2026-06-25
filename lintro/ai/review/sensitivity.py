@@ -187,7 +187,7 @@ def _should_report_finding(
 
     if category == ReviewCategory.BREAKING_CHANGE.value:
         if not policy.report_migration_notes and _is_migration_doc_finding(finding):
-            return True if not _is_doc_path(finding.file) else False
+            return bool(not _is_doc_path(finding.file))
         if (
             not policy.report_doc_drift
             and _is_doc_path(finding.file)
@@ -195,15 +195,12 @@ def _should_report_finding(
         ):
             return False
 
-    if (
+    return not (
         category == ReviewCategory.INTEGRATION.value
         and not policy.report_doc_drift
         and _is_doc_path(finding.file)
         and _is_migration_doc_finding(finding)
-    ):
-        return False
-
-    return True
+    )
 
 
 def _is_doc_path(path: str) -> bool:
@@ -217,9 +214,7 @@ def _is_migration_doc_finding(finding: ReviewFinding) -> bool:
     haystack = f"{finding.title} {finding.description}"
     if _MIGRATION_NOTE_PATTERN.search(haystack):
         return True
-    if _is_doc_path(finding.file) and finding.severity == "P3":
-        return True
-    return False
+    return bool(_is_doc_path(finding.file) and finding.severity == "P3")
 
 
 def _resolve_override(value: bool | None, preset: bool) -> bool:

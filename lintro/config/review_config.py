@@ -66,9 +66,7 @@ class ReviewSensitivityOverrides(BaseModel):
 
     migration_notes: bool | None = Field(
         default=None,
-        description=(
-            "Report missing migration notes and old→new command mappings."
-        ),
+        description=("Report missing migration notes and old→new command mappings."),
     )
     doc_drift: bool | None = Field(
         default=None,
@@ -91,9 +89,7 @@ class ReviewConfig(BaseModel):
     checklist: ReviewChecklistConfig = Field(default_factory=ReviewChecklistConfig)
     strictness: ReviewStrictness = Field(
         default=ReviewStrictness.BALANCED,
-        description=(
-            "Review sensitivity preset: focused, balanced, or thorough."
-        ),
+        description=("Review sensitivity preset: focused, balanced, or thorough."),
     )
     sensitivity: ReviewSensitivityOverrides = Field(
         default_factory=ReviewSensitivityOverrides,

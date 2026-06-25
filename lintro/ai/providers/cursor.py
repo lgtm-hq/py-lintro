@@ -28,7 +28,7 @@ from lintro.ai.providers.constants import (
     DEFAULT_PER_CALL_MAX_TOKENS,
     DEFAULT_TIMEOUT,
 )
-from lintro.ai.registry import AIProvider, PROVIDERS
+from lintro.ai.registry import PROVIDERS, AIProvider
 
 _AGENT_BIN = "agent"
 DEFAULT_MODEL = PROVIDERS.cursor.default_model
@@ -193,11 +193,7 @@ class CursorProvider(BaseAIProvider):
             )
 
         response, session_id = self._parse_json_output(result.stdout)
-        if (
-            not use_one_shot
-            and self._durable_repo_root is not None
-            and session_id
-        ):
+        if not use_one_shot and self._durable_repo_root is not None and session_id:
             self._session_id = session_id
         return response
 

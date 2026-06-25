@@ -267,7 +267,9 @@ def test_run_review_parallelizes_multiple_chunks() -> None:
         base_ref="main",
         head_ref="feature",
         changed_files=[
-            ChangedFile(path=f"src/file{index}.py", status="modified", additions=1, deletions=0)
+            ChangedFile(
+                path=f"src/file{index}.py", status="modified", additions=1, deletions=0
+            )
             for index in range(4)
         ],
         unified_diff="diff",
@@ -275,7 +277,12 @@ def test_run_review_parallelizes_multiple_chunks() -> None:
         repo_root="/tmp/repo",
     )
     chunks = [
-        ReviewChunk(id=index + 1, files=[f"src/file{index}.py"], diff=f"+line{index}", relationship="single-file")
+        ReviewChunk(
+            id=index + 1,
+            files=[f"src/file{index}.py"],
+            diff=f"+line{index}",
+            relationship="single-file",
+        )
         for index in range(4)
     ]
     provider = _mock_provider(content=_sample_response_json(include_finding=False))
