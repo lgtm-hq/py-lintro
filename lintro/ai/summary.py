@@ -31,7 +31,7 @@ from lintro.ai.summary_params import SummaryGenParams
 from lintro.ai.token_budget import estimate_tokens
 
 if TYPE_CHECKING:
-    from lintro.ai.providers.base import AIResponse, BaseAIProvider
+    from lintro.ai.providers.base import BaseAIProvider
     from lintro.models.core.tool_result import ToolResult
 
 __all__ = ["SummaryGenParams"]
