@@ -54,6 +54,10 @@ def get_provider(config: AIConfig) -> BaseAIProvider:
             "lintro.ai.providers.openai",
             "OpenAIProvider",
         ),
+        AIProvider.CURSOR: (
+            "lintro.ai.providers.cursor",
+            "CursorProvider",
+        ),
     }
 
     entry = provider_classes.get(provider_enum)
@@ -73,6 +77,10 @@ def get_provider(config: AIConfig) -> BaseAIProvider:
         from lintro.ai.providers.openai import OpenAIProvider
 
         provider_cls = OpenAIProvider
+    elif provider_enum is AIProvider.CURSOR:
+        from lintro.ai.providers.cursor import CursorProvider
+
+        provider_cls = CursorProvider
     return provider_cls(
         model=config.model,
         api_key_env=config.api_key_env,
