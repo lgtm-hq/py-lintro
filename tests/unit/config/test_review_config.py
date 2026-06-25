@@ -9,10 +9,10 @@ import pytest
 from assertpy import assert_that
 
 from lintro.ai.review.constants import CUSTOM_CHECKLIST_ID_START
+from lintro.ai.review.enums.checklist_display import ChecklistDisplay
 from lintro.ai.review.enums.file_domain import FileDomain
 from lintro.ai.review.enums.review_category import ReviewCategory
 from lintro.ai.review.enums.review_strictness import ReviewStrictness
-from lintro.ai.review.enums.checklist_display import ChecklistDisplay
 from lintro.config.config_loader import clear_config_cache, load_config
 from lintro.config.review_config import (
     ReviewChecklistItemConfig,

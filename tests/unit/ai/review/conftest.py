@@ -12,7 +12,6 @@ import pytest
 
 from lintro.ai.review.enums.changed_file_status import ChangedFileStatus
 from lintro.ai.review.models.changed_file import ChangedFile
-from lintro.ai.review.enums.checklist_display import ChecklistDisplay
 from lintro.ai.review.models.checklist_answer import ChecklistAnswer
 from lintro.ai.review.models.review_context import ReviewContext
 from lintro.ai.review.models.review_finding import ReviewFinding

@@ -24,8 +24,8 @@ from lintro.ai.review.checklist_display import (
     resolve_checklist_display,
 )
 from lintro.ai.review.enums.review_strictness import ReviewStrictness
-from lintro.ai.review.exceptions import ReviewContextError
 from lintro.ai.review.error_display import render_review_error
+from lintro.ai.review.exceptions import ReviewContextError
 from lintro.ai.review.orchestrator import run_review
 from lintro.ai.review.output import render_review_output
 from lintro.ai.review.sensitivity import resolve_sensitivity_policy
