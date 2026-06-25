@@ -30,6 +30,8 @@ from lintro.ai.providers.constants import (
 )
 from lintro.ai.registry import PROVIDERS, AIProvider
 
+CURSOR_MIN_TIMEOUT = 600.0
+
 _AGENT_BIN = "agent"
 DEFAULT_MODEL = PROVIDERS.cursor.default_model
 DEFAULT_API_KEY_ENV = PROVIDERS.cursor.default_api_key_env
@@ -126,7 +128,7 @@ class CursorProvider(BaseAIProvider):
             prompt: User prompt text.
             system: Optional system prompt prepended to the user prompt.
             max_tokens: Unused; kept for provider API parity.
-            timeout: Subprocess timeout in seconds (minimum 300 for agent).
+            timeout: Subprocess timeout in seconds (minimum 600 for agent).
             repo_root: Git repository root for ``--workspace``.
             use_one_shot: When True, do not resume an existing CLI session.
 
@@ -173,7 +175,7 @@ class CursorProvider(BaseAIProvider):
             f"prompt_len={len(combined_prompt)}",
         )
 
-        effective_timeout = max(timeout, 300.0)
+        effective_timeout = max(timeout, CURSOR_MIN_TIMEOUT)
         env = os.environ.copy()
         api_key = os.environ.get(self._api_key_env)
         if api_key:

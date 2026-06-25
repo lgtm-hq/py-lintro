@@ -122,7 +122,8 @@ def _format_execution_error(error: ReviewExecutionError) -> tuple[str, str, list
     hints = _provider_hints(error.cause_message or error.message)
     if "timed out" in body.lower():
         hints = [
-            "Increase ai.api_timeout in .lintro-config.yaml (e.g. 600.0)",
+            "Increase ai.api_timeout in .lintro-config.yaml (e.g. 600.0) or use --timeout",
+            "Small diffs embed inline automatically; large diffs use agentic git — allow 600s+",
             "Narrow scope with --path for large diffs",
             "Switch to anthropic/openai for faster direct API calls",
             *hints,
