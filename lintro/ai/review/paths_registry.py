@@ -22,7 +22,8 @@ _PATH_BUILDERS: list[tuple[frozenset[str], Callable[[list[str]], str]]] = [
         frozenset({FileDomain.SHELL.value}),
         lambda files: (
             "**Path A — Shell exit semantics:** Trace exit codes for ALL branches "
-            f"where error/removal ID vars are non-empty. Changed: {', '.join(files[:5])}"
+            "where error/removal ID vars are non-empty. "
+            f"Changed: {', '.join(files[:5])}"
         ),
     ),
     (
