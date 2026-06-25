@@ -14,7 +14,7 @@ from lintro.ai.exceptions import (
     AINotAvailableError,
     AIProviderError,
 )
-from lintro.ai.providers.cursor import CursorProvider, _find_agent
+from lintro.ai.providers.cursor import CURSOR_MIN_TIMEOUT, CursorProvider, _find_agent
 from lintro.ai.registry import AIProvider
 
 
@@ -161,6 +161,20 @@ def test_complete_one_shot_skips_resume(provider):
         )
         cmd = mock_run.call_args.args[0]
         assert_that(cmd).does_not_contain("--resume")
+
+    def test_timeout_floor_is_six_hundred_seconds(self, provider):
+        stdout = _cli_json(result="ok")
+        with patch("subprocess.run") as mock_run:
+            mock_run.return_value = subprocess.CompletedProcess(
+                args=[],
+                returncode=0,
+                stdout=stdout,
+                stderr="",
+            )
+            provider.complete("Hello", timeout=120.0, repo_root="/tmp/repo")
+        assert_that(mock_run.call_args.kwargs["timeout"]).is_equal_to(
+            CURSOR_MIN_TIMEOUT,
+        )
 
 
 def test_complete_prepends_system_prompt_via_stdin(provider):
