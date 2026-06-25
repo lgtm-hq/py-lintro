@@ -17,7 +17,6 @@ from loguru import logger
 
 from lintro.ai.enums import AITransport
 from lintro.ai.exceptions import (
-    AIAuthenticationError,
     AINotAvailableError,
     AIProviderError,
 )
@@ -28,7 +27,7 @@ from lintro.ai.providers.constants import (
     DEFAULT_PER_CALL_MAX_TOKENS,
     DEFAULT_TIMEOUT,
 )
-from lintro.ai.registry import AIProvider, PROVIDERS
+from lintro.ai.registry import PROVIDERS, AIProvider
 
 CURSOR_MIN_TIMEOUT = 600.0
 
@@ -260,11 +259,7 @@ class CursorProvider(BaseAIProvider):
         )
 
         response, session_id = self._cli.parse_stdout(result.stdout)
-        if (
-            not use_one_shot
-            and self._durable_repo_root is not None
-            and session_id
-        ):
+        if not use_one_shot and self._durable_repo_root is not None and session_id:
             self._session_id = session_id
         return response
 

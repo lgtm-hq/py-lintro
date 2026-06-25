@@ -23,7 +23,7 @@ def test_transport_required_when_ai_enabled() -> None:
 
 
 def test_cursor_api_combo_rejected() -> None:
-    """cursor + api is an invalid provider/transport combination."""
+    """Cursor + api is an invalid provider/transport combination."""
     with pytest.raises(ValidationError, match="cursor provider only supports"):
         AIConfig(
             enabled=True,

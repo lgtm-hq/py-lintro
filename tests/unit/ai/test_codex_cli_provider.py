@@ -26,14 +26,18 @@ def _mock_codex_on_path():
 
 def _jsonl_response(*, text: str = '{"summary": "ok"}') -> str:
     lines = [
-        json.dumps({
-            "type": "item.completed",
-            "item": {"type": "agent_message", "text": text},
-        }),
-        json.dumps({
-            "type": "turn.completed",
-            "usage": {"input_tokens": 120, "output_tokens": 40},
-        }),
+        json.dumps(
+            {
+                "type": "item.completed",
+                "item": {"type": "agent_message", "text": text},
+            }
+        ),
+        json.dumps(
+            {
+                "type": "turn.completed",
+                "usage": {"input_tokens": 120, "output_tokens": 40},
+            }
+        ),
     ]
     return "\n".join(lines)
 

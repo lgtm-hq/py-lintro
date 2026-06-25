@@ -30,7 +30,7 @@ from lintro.ai.providers.constants import (
     DEFAULT_PER_CALL_MAX_TOKENS,
     DEFAULT_TIMEOUT,
 )
-from lintro.ai.registry import AIProvider, PROVIDERS
+from lintro.ai.registry import PROVIDERS, AIProvider
 
 _has_openai = False
 try:

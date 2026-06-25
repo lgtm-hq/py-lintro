@@ -321,11 +321,10 @@ def _render_ai_checks(console: Console, checks: list[AICheckResult]) -> None:
             line.append("[OK] ", style="green")
             line.append(f"{check.name:<20}", style="cyan")
             line.append(check.message, style="dim")
-        elif check.status == ToolStatus.INCOMPATIBLE:
-            line.append("[!!] ", style="red bold")
-            line.append(f"{check.name:<20}", style="cyan")
-            line.append(check.message, style="red")
-        elif check.status == ToolStatus.MISSING:
+        elif (
+            check.status == ToolStatus.INCOMPATIBLE
+            or check.status == ToolStatus.MISSING
+        ):
             line.append("[!!] ", style="red bold")
             line.append(f"{check.name:<20}", style="cyan")
             line.append(check.message, style="red")

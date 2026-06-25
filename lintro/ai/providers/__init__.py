@@ -8,8 +8,8 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from lintro.ai.exceptions import AINotAvailableError  # noqa: F401 -- public re-export
 from lintro.ai.enums import AITransport
+from lintro.ai.exceptions import AINotAvailableError  # noqa: F401 -- public re-export
 from lintro.ai.registry import PROVIDERS, AIProvider
 
 if TYPE_CHECKING:
