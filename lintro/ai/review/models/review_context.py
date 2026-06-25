@@ -20,6 +20,7 @@ class ReviewContext:
         pr_metadata: Optional PR metadata when reviewing a pull request.
         post_image_files: Full post-change contents for changed workflow files
             keyed by repository-relative path.
+        repo_root: Absolute path to the git repository root.
     """
 
     base_ref: str
@@ -28,3 +29,4 @@ class ReviewContext:
     unified_diff: str
     pr_metadata: PRMetadata | None = None
     post_image_files: dict[str, str] = field(default_factory=dict)
+    repo_root: str = ""

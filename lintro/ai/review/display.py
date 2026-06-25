@@ -38,7 +38,7 @@ def render_review_terminal(
 
     header_detail = (
         f"Model: {metadata.model} | Context: {metadata.context_window:,} | "
-        f"Depth: {metadata.depth} | Chunks: "
+        f"Depth: {metadata.depth} | Strictness: {metadata.strictness} | Chunks: "
         f"{metadata.chunks_current}/{metadata.chunks_total} | "
         f"Files: {metadata.files_reviewed}/{metadata.files_total} | "
         f"Checklist: {metadata.checklist_items} items"

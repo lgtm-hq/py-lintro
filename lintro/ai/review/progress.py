@@ -77,6 +77,26 @@ class ReviewProgressCallback(Protocol):
         """Called when the review stops before completing successfully."""
         ...
 
+    def on_error(
+        self,
+        *,
+        chunk_index: int | None = None,
+        total_chunks: int | None = None,
+        step: str | None = None,
+        completed_chunks: int = 0,
+        error: Exception | None = None,
+    ) -> None:
+        """Called when the review aborts due to an error.
+
+        Args:
+            chunk_index: Zero-based index of the failing chunk.
+            total_chunks: Total chunks planned.
+            step: Sub-step active when the error occurred.
+            completed_chunks: Chunks successfully reviewed before failure.
+            error: The underlying exception.
+        """
+        ...
+
 
 class NullReviewProgress:
     """No-op progress tracker (silent)."""
@@ -98,6 +118,17 @@ class NullReviewProgress:
 
     def on_abort(self) -> None:
         """Ignore review abort notification."""
+
+    def on_error(
+        self,
+        *,
+        chunk_index: int | None = None,
+        total_chunks: int | None = None,
+        step: str | None = None,
+        completed_chunks: int = 0,
+        error: Exception | None = None,
+    ) -> None:
+        pass
 
 
 class RichReviewProgress:
@@ -163,7 +194,9 @@ class RichReviewProgress:
             return
         self._progress.update(
             self._task_id,
-            description=(f"Chunk {chunk_index + 1}/{self._total_chunks}: {step}"),
+            description=(
+                f"Chunk {chunk_index + 1}/{self._total_chunks}: {step}"
+            ),
         )
 
     def on_chunk_done(self, *, chunk_index: int) -> None:  # noqa: ARG002
@@ -184,6 +217,17 @@ class RichReviewProgress:
         """Stop the bar without printing a completion summary."""
         self._stop_progress()
 
+    def on_error(
+        self,
+        *,
+        chunk_index: int | None = None,
+        total_chunks: int | None = None,
+        step: str | None = None,
+        completed_chunks: int = 0,
+        error: Exception | None = None,
+    ) -> None:
+        self._stop_progress()
+
     def _stop_progress(self) -> None:
         """Stop the live progress display if it is running."""
         if self._progress is not None:
@@ -197,4 +241,19 @@ def _passes_per_chunk(depth: int) -> int:
         return 3  # questions + review + adversarial
     if depth >= 2:
         return 2  # questions + review
-    return 1  # review only
+    return 1      # review only
+
+
+class StepTrackingProgress:
+    """Wraps a progress tracker and records the most recent step name."""
+
+    def __init__(self, inner: ReviewProgressCallback) -> None:
+        self._inner = inner
+        self.last_step = "reviewing"
+
+    def __getattr__(self, name: str):  # noqa: ANN001
+        return getattr(self._inner, name)
+
+    def on_step(self, *, chunk_index: int, step: str) -> None:
+        self.last_step = step
+        self._inner.on_step(chunk_index=chunk_index, step=step)

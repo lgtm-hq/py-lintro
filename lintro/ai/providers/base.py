@@ -131,6 +131,8 @@ class BaseAIProvider(ABC):
         system: str | None = None,
         max_tokens: int = DEFAULT_PER_CALL_MAX_TOKENS,
         timeout: float = DEFAULT_TIMEOUT,
+        repo_root: str | None = None,
+        use_one_shot: bool = False,
     ) -> AIResponse:
         """Generate a completion from the AI model.
 
@@ -139,6 +141,8 @@ class BaseAIProvider(ABC):
             system: Optional system prompt to set context.
             max_tokens: Maximum number of tokens to generate.
             timeout: Request timeout in seconds.
+            repo_root: Optional repository root (Cursor provider only).
+            use_one_shot: When True, avoid durable sessions (Cursor only).
 
         Returns:
             AIResponse: The model's response with usage metadata.
