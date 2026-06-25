@@ -32,6 +32,7 @@ def test_render_timeout_includes_actionable_hints() -> None:
     assert_that(output).contains("chunk 6/6")
     assert_that(output).contains("5 chunks completed")
     assert_that(output).contains("api_timeout")
+    assert_that(output).contains("inline")
     assert_that(output).does_not_contain("Traceback")
 
 
