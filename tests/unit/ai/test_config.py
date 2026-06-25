@@ -70,8 +70,8 @@ def test_provider_invalid_rejected() -> None:
 
 
 def test_enabled_override() -> None:
-    """Enabled can be set to True."""
-    config = AIConfig(enabled=True)
+    """Enabled can be set to True with required transport."""
+    config = AIConfig(enabled=True, transport="api")  # type: ignore[arg-type]
     assert_that(config.enabled).is_true()
 
 
