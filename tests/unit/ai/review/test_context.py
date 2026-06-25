@@ -39,6 +39,7 @@ def test_collect_branch_context_uses_merge_base(
     """Branch review mode uses merge-base...HEAD diff commands."""
     dispatcher = SubprocessMock()
     dispatcher.queue(["git", "rev-parse", "--git-dir"], stdout=".git\n")
+    dispatcher.queue(["git", "rev-parse", "--show-toplevel"], stdout="/repo/root\n")
     dispatcher.queue(["git", "merge-base", "main", "HEAD"], stdout="base123\n")
     dispatcher.queue(["git", "rev-parse", "HEAD"], stdout="head456\n")
     dispatcher.queue(
@@ -59,6 +60,7 @@ def test_collect_branch_context_uses_merge_base(
 
     assert_that(context.base_ref).is_equal_to("base123")
     assert_that(context.head_ref).is_equal_to("head456")
+    assert_that(context.repo_root).is_equal_to("/repo/root")
     assert_that(context.changed_files).is_length(1)
     assert_that(context.changed_files[0]).is_equal_to(
         ChangedFile(path="a.py", status="modified", additions=1, deletions=0),
@@ -80,6 +82,7 @@ def test_collect_uncommitted_context_merges_staged_and_unstaged(
     """Uncommitted mode uses a single git diff HEAD for index and working tree."""
     dispatcher = SubprocessMock()
     dispatcher.queue(["git", "rev-parse", "--git-dir"], stdout=".git\n")
+    dispatcher.queue(["git", "rev-parse", "--show-toplevel"], stdout="/repo/root\n")
     dispatcher.queue(["git", "ls-files", "--others", "--exclude-standard"], stdout="")
     dispatcher.queue(["git", "rev-parse", "HEAD"], stdout="head456\n")
     dispatcher.queue(
@@ -102,6 +105,7 @@ def test_collect_uncommitted_context_merges_staged_and_unstaged(
     context = collect_review_context(uncommitted=True)
 
     assert_that(context.base_ref).is_equal_to("WORKTREE")
+    assert_that(context.repo_root).is_equal_to("/repo/root")
     assert_that(context.unified_diff).contains("unstaged.py")
     assert_that({file.path for file in context.changed_files}).is_equal_to(
         {"unstaged.py", "staged.py"},
@@ -144,6 +148,7 @@ def test_collect_pr_context_uses_gh(
     assert_that(metadata.number).is_equal_to(42)
     assert_that(context.base_ref).is_equal_to("abc123")
     assert_that(context.head_ref).is_equal_to("deadbeef")
+    assert_that(context.repo_root).is_equal_to("")
 
 
 @patch("lintro.ai.review.context.subprocess.run")
@@ -193,10 +198,7 @@ def test_collect_pr_context_raises_when_view_fails(
         stderr="view failed",
     )
 
-    with pytest.raises(
-        ReviewContextError,
-        match="Failed to load pull request metadata",
-    ):
+    with pytest.raises(ReviewContextError, match="Failed to load pull request metadata"):
         collect_review_context(pr_number=42)
 
 
@@ -226,6 +228,7 @@ def test_collect_review_context_filters_paths(
     """Path filters limit changed files and diff hunks."""
     mock_run.side_effect = [
         _completed(stdout=".git\n"),
+        _completed(stdout="/repo/root\n"),
         _completed(stdout="base123\n"),
         _completed(stdout="head456\n"),
         _completed(
@@ -266,6 +269,7 @@ def test_collect_review_context_raises_on_empty_diff(
     """Empty diffs raise a review context error."""
     mock_run.side_effect = [
         _completed(stdout=".git\n"),
+        _completed(stdout="/repo/root\n"),
         _completed(stdout="base123\n"),
         _completed(stdout="head456\n"),
         _completed(stdout=""),

@@ -69,6 +69,25 @@ class TestRichReviewProgress:
         p = RichReviewProgress(console=console)
         p.on_complete(total_findings=0)
 
+    def test_on_error_stops_progress(self):
+        from io import StringIO
+
+        from rich.console import Console
+
+        buf = StringIO()
+        console = Console(file=buf, force_terminal=True, width=120)
+        p = RichReviewProgress(console=console)
+        p.on_start(total_chunks=2, depth=1)
+        p.on_error(
+            chunk_index=1,
+            total_chunks=2,
+            step="reviewing",
+            completed_chunks=1,
+        )
+        p.on_complete(total_findings=0)
+        output = buf.getvalue()
+        assert_that(output).contains("Review complete")
+
     def test_single_file_shows_filename(self):
         from io import StringIO
 
