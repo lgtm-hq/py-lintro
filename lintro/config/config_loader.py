@@ -25,6 +25,7 @@ from lintro.config.lintro_config import (
     LintroConfig,
     LintroToolConfig,
 )
+from lintro.config.review_config import ReviewConfig
 from lintro.enums.config_key import ConfigKey
 
 try:
@@ -302,6 +303,29 @@ def _parse_ai_config(data: dict[str, Any]) -> AIConfig:
     return AIConfig(**filtered)
 
 
+def _parse_review_config(data: dict[str, Any]) -> ReviewConfig:
+    """Parse review configuration section.
+
+    Args:
+        data: Raw ``review`` section from config.
+
+    Returns:
+        ReviewConfig: Parsed review configuration.
+    """
+    if not data:
+        return ReviewConfig()
+
+    known_fields = set(ReviewConfig.model_fields)
+    unknown = set(data) - known_fields
+    if unknown:
+        logger.warning(
+            "Unknown review config keys ignored: {}",
+            ", ".join(sorted(unknown)),
+        )
+    filtered = {key: value for key, value in data.items() if key in known_fields}
+    return ReviewConfig(**filtered)
+
+
 def _convert_pyproject_to_config(data: dict[str, Any]) -> dict[str, Any]:
     """Convert pyproject.toml [tool.lintro] format to .lintro-config.yaml format.
 
@@ -320,6 +344,7 @@ def _convert_pyproject_to_config(data: dict[str, Any]) -> dict[str, Any]:
         "defaults": {},
         "tools": {},
         "ai": {},
+        "review": {},
     }
 
     # Inline import: ToolName is a static StrEnum that does not trigger
@@ -372,6 +397,8 @@ def _convert_pyproject_to_config(data: dict[str, Any]) -> dict[str, Any]:
         elif key_lower == "ai" and isinstance(value, dict):
             # AI configuration section
             result["ai"] = value
+        elif key_lower == "review" and isinstance(value, dict):
+            result["review"] = value
 
     return result
 
@@ -437,6 +464,7 @@ def load_config(
     defaults = _parse_defaults(data.get("defaults", {}))
     tools_config = _parse_tools_config(data.get("tools", {}))
     ai_config = _parse_ai_config(data.get("ai", {}))
+    review_config = _parse_review_config(data.get("review", {}))
 
     return LintroConfig(
         execution=execution_config,
@@ -444,6 +472,7 @@ def load_config(
         defaults=defaults,
         tools=tools_config,
         ai=ai_config,
+        review=review_config,
         config_path=resolved_path,
     )
 
