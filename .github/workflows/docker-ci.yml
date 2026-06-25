@@ -214,6 +214,7 @@ jobs:
     # Run when docker-build succeeds even if manifest-sync was skipped (draft PRs).
     if: >-
       always() &&
+      !cancelled() &&
       needs.docker-build.result == 'success' &&
       (
         needs.manifest-sync.result == 'success' ||

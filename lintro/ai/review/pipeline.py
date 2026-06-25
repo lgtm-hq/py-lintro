@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from lintro.ai.review.chunker import chunk_review_context
 from lintro.ai.review.classifier import classify_changed_files
-from lintro.ai.review.context import _validate_review_context_diff
+from lintro.ai.review.context import validate_review_context_diff
 from lintro.ai.review.models.chunking_result import ChunkingResult
 from lintro.ai.review.models.review_context import ReviewContext
 
@@ -26,7 +26,7 @@ def prepare_review_chunks(
     Returns:
         Chunking result with semantic groups and any truncation metadata.
     """
-    _validate_review_context_diff(context=context)
+    validate_review_context_diff(context=context)
     classifications = classify_changed_files(files=context.changed_files)
     return chunk_review_context(
         context=context,

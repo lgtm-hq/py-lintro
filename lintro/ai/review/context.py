@@ -67,12 +67,12 @@ def collect_review_context(
             code=ReviewContextErrorCode.NO_CHANGES,
         )
 
-    _validate_review_context_diff(context=context)
+    validate_review_context_diff(context=context)
 
     return context
 
 
-def _validate_review_context_diff(*, context: ReviewContext) -> None:
+def validate_review_context_diff(*, context: ReviewContext) -> None:
     """Ensure changed files align with parseable unified diff sections.
 
     Args:
