@@ -127,7 +127,7 @@ def test_run_review_depth1_returns_review_result() -> None:
         result = run_review(
             context,
             provider=provider,
-            ai_config=AIConfig(enabled=True),
+            ai_config=AIConfig(enabled=True, transport="api"),  # type: ignore[arg-type]
             depth=1,
             checklist_items=checklist_items,
             checklist_text="1. [logic-bug] Example?",
@@ -153,7 +153,7 @@ def test_run_review_empty_diff_returns_empty_result() -> None:
     result = run_review(
         context,
         provider=provider,
-        ai_config=AIConfig(enabled=True),
+        ai_config=AIConfig(enabled=True, transport="api"),  # type: ignore[arg-type]
         depth=1,
         checklist_items=[],
         checklist_text="",
@@ -214,7 +214,7 @@ def test_run_review_depth2_calls_provider_twice() -> None:
         result = run_review(
             context,
             provider=provider,
-            ai_config=AIConfig(enabled=True),
+            ai_config=AIConfig(enabled=True, transport="api"),  # type: ignore[arg-type]
             depth=2,
             checklist_items=[],
             checklist_text="1. [logic-bug] Example?",
@@ -322,7 +322,7 @@ def test_run_review_parallelizes_multiple_chunks(tmp_path: Path) -> None:
         run_review(
             context,
             provider=provider,
-            ai_config=AIConfig(enabled=True, max_parallel_calls=4),
+            ai_config=AIConfig(enabled=True, transport="api", max_parallel_calls=4),  # type: ignore[arg-type]
             depth=1,
             checklist_items=[],
             checklist_text="1. [logic-bug] Example?",

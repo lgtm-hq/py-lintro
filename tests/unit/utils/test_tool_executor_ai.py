@@ -131,6 +131,7 @@ def test_fix_recomputes_totals_after_ai_changes(monkeypatch, fake_logger):
         execution=ExecutionConfig(parallel=False),
         ai=AIConfig(
             enabled=True,
+            transport="api",  # type: ignore[arg-type]
             auto_apply=True,
         ),
     )

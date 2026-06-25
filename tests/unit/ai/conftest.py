@@ -106,7 +106,11 @@ def mock_provider() -> MockAIProvider:
 @pytest.fixture
 def ai_config() -> AIConfig:
     """Create a default AI config for testing."""
-    return AIConfig(enabled=True, provider="anthropic")  # type: ignore[arg-type]  # Pydantic coerces str
+    return AIConfig(
+        enabled=True,
+        provider="anthropic",  # type: ignore[arg-type]
+        transport="api",  # type: ignore[arg-type]
+    )
 
 
 @pytest.fixture
