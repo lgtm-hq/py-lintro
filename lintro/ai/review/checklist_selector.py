@@ -159,4 +159,4 @@ def _normalize_path(*, path: str) -> str:
     Returns:
         Forward-slash normalized path.
     """
-    return path.replace("\\", "/").lstrip("./")
+    return path.replace("\\", "/").removeprefix("./")

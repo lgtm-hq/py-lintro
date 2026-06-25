@@ -65,6 +65,17 @@ def test_select_checklist_items_includes_rust_tier2_for_rs_files() -> None:
     assert_that(any(item.id == 103 for item in selected)).is_true()
 
 
+def test_select_checklist_items_includes_ci_tier2_for_dotgithub_workflows() -> None:
+    """Dot-prefixed .github paths must match CI Tier 2 checklist triggers."""
+    selected = select_checklist_items(
+        changed_files=[".github/workflows/ci.yml"],
+        items=list(BUILTIN_CHECKLIST_ITEMS),
+    )
+
+    assert_that(any(item.id == 124 for item in selected)).is_true()
+    assert_that(any(item.id == 150 for item in selected)).is_true()
+
+
 def test_select_checklist_items_includes_custom_config_when_trigger_matches() -> None:
     """Custom config items follow Tier 2 trigger selection rules."""
     custom_item = ChecklistItem(
@@ -116,7 +127,9 @@ def test_format_checklist_for_prompt_renumbers_sequentially() -> None:
     assert_that(len(prompt_mapping)).is_equal_to(len(selected))
 
 
-def test_select_checklist_items_matches_root_level_files_for_double_star_globs() -> None:
+def test_select_checklist_items_matches_root_level_files_for_double_star_globs() -> (
+    None
+):
     """Root-level files match ``**/`` trigger patterns."""
     custom_item = ChecklistItem(
         id=CUSTOM_CHECKLIST_ID_START,
