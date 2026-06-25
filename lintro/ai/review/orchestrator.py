@@ -352,7 +352,7 @@ def merge_review_results(
         )
 
     summaries = [partial.summary for partial in partials if partial.summary.strip()]
-    summary = summaries[0] if len(summaries) == 1 else " ".join(summaries[:3])
+    summary = summaries[0] if len(summaries) == 1 else "\n\n".join(summaries[:3])
 
     return ReviewResult(
         metadata=_placeholder_metadata(),
