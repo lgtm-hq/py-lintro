@@ -12,7 +12,6 @@ from assertpy import assert_that
 from lintro.ai.exceptions import (
     AIAuthenticationError,
     AINotAvailableError,
-    AIProviderError,
 )
 from lintro.ai.providers.cursor import CursorProvider, _find_agent
 from lintro.ai.registry import AIProvider
@@ -42,17 +41,19 @@ def _cli_json(
     subtype: str = "success",
     session_id: str = "sess-123",
 ) -> str:
-    return json.dumps({
-        "type": "result",
-        "subtype": subtype,
-        "is_error": is_error,
-        "result": result,
-        "session_id": session_id,
-        "usage": {
-            "inputTokens": input_tokens,
-            "outputTokens": output_tokens,
-        },
-    })
+    return json.dumps(
+        {
+            "type": "result",
+            "subtype": subtype,
+            "is_error": is_error,
+            "result": result,
+            "session_id": session_id,
+            "usage": {
+                "inputTokens": input_tokens,
+                "outputTokens": output_tokens,
+            },
+        }
+    )
 
 
 # -- _find_agent -----------------------------------------------------------

@@ -129,9 +129,13 @@ def _provider_hints(message: str) -> list[str]:
     lowered = message.lower()
     hints: list[str] = []
     if "cursor" in lowered and ("login" in lowered or "authentication" in lowered):
-        hints.append("Set CURSOR_API_KEY (user or service-account key from Cursor dashboard)")
+        hints.append(
+            "Set CURSOR_API_KEY (user or service-account key from Cursor dashboard)"
+        )
     if "cursor-sdk" in lowered or "cursor sdk" in lowered:
-        hints.append("Ensure the agent CLI is installed: curl https://cursor.com/install -fsS | bash")
+        hints.append(
+            "Ensure the agent CLI is installed: curl https://cursor.com/install -fsS | bash"
+        )
     if "not found" in lowered and "agent" in lowered:
         hints.append(
             "Install the Cursor CLI: curl https://cursor.com/install -fsS | bash",

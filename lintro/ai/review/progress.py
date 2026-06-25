@@ -194,9 +194,7 @@ class RichReviewProgress:
             return
         self._progress.update(
             self._task_id,
-            description=(
-                f"Chunk {chunk_index + 1}/{self._total_chunks}: {step}"
-            ),
+            description=(f"Chunk {chunk_index + 1}/{self._total_chunks}: {step}"),
         )
 
     def on_chunk_done(self, *, chunk_index: int) -> None:  # noqa: ARG002
@@ -241,7 +239,7 @@ def _passes_per_chunk(depth: int) -> int:
         return 3  # questions + review + adversarial
     if depth >= 2:
         return 2  # questions + review
-    return 1      # review only
+    return 1  # review only
 
 
 class StepTrackingProgress:
