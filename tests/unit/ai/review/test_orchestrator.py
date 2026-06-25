@@ -9,10 +9,10 @@ from assertpy import assert_that
 
 from lintro.ai.config import AIConfig
 from lintro.ai.providers.response import AIResponse
+from lintro.ai.review.enums.review_category import ReviewCategory
 from lintro.ai.review.models.changed_file import ChangedFile
 from lintro.ai.review.models.checklist_item import ChecklistItem
 from lintro.ai.review.models.review_context import ReviewContext
-from lintro.ai.review.enums.review_category import ReviewCategory
 from lintro.ai.review.orchestrator import (
     parse_review_response,
     run_review,
