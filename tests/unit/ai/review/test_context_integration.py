@@ -31,7 +31,9 @@ def test_collect_uncommitted_context_uses_real_git(git_repo: Path) -> None:
     tracked.write_text("old\n", encoding="utf-8")
     subprocess.run(["git", "add", "tracked.py"], check=True)
     subprocess.run(
-        ["git", "commit", "-m", "add tracked"], check=True, capture_output=True
+        ["git", "commit", "-m", "add tracked"],
+        check=True,
+        capture_output=True,
     )
     tracked.write_text("new\n", encoding="utf-8")
 
@@ -49,14 +51,18 @@ def test_collect_branch_context_uses_real_git(git_repo: Path) -> None:
     subprocess.run(["git", "add", "base.py"], check=True)
     subprocess.run(["git", "commit", "-m", "add base"], check=True, capture_output=True)
     subprocess.run(
-        ["git", "checkout", "-b", "feature"], check=True, capture_output=True
+        ["git", "checkout", "-b", "feature"],
+        check=True,
+        capture_output=True,
     )
 
     feature = git_repo / "feature.py"
     feature.write_text("b\n", encoding="utf-8")
     subprocess.run(["git", "add", "feature.py"], check=True)
     subprocess.run(
-        ["git", "commit", "-m", "add feature"], check=True, capture_output=True
+        ["git", "commit", "-m", "add feature"],
+        check=True,
+        capture_output=True,
     )
 
     context = collect_review_context(base="main")

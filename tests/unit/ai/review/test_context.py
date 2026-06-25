@@ -173,7 +173,8 @@ def test_collect_pr_context_raises_when_view_fails(
     )
 
     with pytest.raises(
-        ReviewContextError, match="Failed to load pull request metadata"
+        ReviewContextError,
+        match="Failed to load pull request metadata",
     ):
         collect_review_context(pr_number=42)
 
