@@ -11,6 +11,7 @@ from rich.console import Console
 from lintro.ai.availability import require_ai
 from lintro.ai.exceptions import AIError
 from lintro.ai.providers import get_provider
+from lintro.ai.transport import apply_transport_override
 from lintro.ai.review import (
     classify_changed_files,
     collect_review_context,
@@ -118,6 +119,12 @@ from lintro.config.config_loader import get_config
     help="Override model context window size in tokens.",
 )
 @click.option(
+    "--transport",
+    type=click.Choice(["api", "cli"], case_sensitive=False),
+    default=None,
+    help="Override ai.transport for this invocation.",
+)
+@click.option(
     "--timeout",
     type=float,
     default=None,
@@ -145,6 +152,7 @@ def review_command(
     context_window: int | None,
     timeout: float | None,
     path_filter: tuple[str, ...],
+    transport: str | None,
 ) -> None:
     """Run AI-powered diff-based code review."""
     require_ai()
@@ -208,7 +216,13 @@ def review_command(
                 issue_count,
             )
 
-    provider = get_provider(lintro_config.ai)
+    effective_ai_config = apply_transport_override(lintro_config.ai, transport)
+    if timeout is not None:
+        effective_ai_config = effective_ai_config.model_copy(
+            update={"api_timeout": timeout},
+        )
+
+    provider = get_provider(effective_ai_config)
     effective_depth = depth if depth is not None else lintro_config.review.depth
     effective_strictness = ReviewStrictness(
         (strictness or lintro_config.review.strictness.value).lower(),
@@ -232,7 +246,7 @@ def review_command(
         result = run_review(
             context,
             provider=provider,
-            ai_config=lintro_config.ai,
+            ai_config=effective_ai_config,
             depth=effective_depth,
             checklist_items=selected_items,
             checklist_text=checklist_text,
@@ -242,7 +256,6 @@ def review_command(
             progress=progress_tracker,
             sensitivity=sensitivity,
             force_semantic_chunking=force_semantic_chunking,
-            timeout=timeout,
         )
     except (AIError, ValueError) as exc:
         if output_format == "json":

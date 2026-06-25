@@ -18,6 +18,7 @@ from lintro.ai.exceptions import (
     AIProviderError,
     AIRateLimitError,
 )
+from lintro.ai.json_response import CliSchemaRequest
 from lintro.ai.providers.base import AIResponse, AIStreamResult, BaseAIProvider
 
 # Serializes model_name mutations across concurrent fallback calls
@@ -147,6 +148,7 @@ def complete_with_fallback(
     timeout: float = 60.0,
     repo_root: str | None = None,
     use_one_shot: bool = False,
+    cli_schema: CliSchemaRequest | None = None,
 ) -> AIResponse:
     """Call ``provider.complete()`` with automatic model fallback.
 
@@ -169,6 +171,7 @@ def complete_with_fallback(
         timeout: Request timeout in seconds.
         repo_root: Git repository root forwarded to the provider.
         use_one_shot: When True, skip durable session resume on the provider.
+        cli_schema: Optional native CLI JSON schema request.
 
     Returns:
         The first successful ``AIResponse``.
@@ -187,6 +190,7 @@ def complete_with_fallback(
             timeout=timeout,
             repo_root=repo_root,
             use_one_shot=use_one_shot,
+            cli_schema=cli_schema,
         )
 
     return _with_fallback(

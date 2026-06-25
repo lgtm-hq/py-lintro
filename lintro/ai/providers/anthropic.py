@@ -22,6 +22,7 @@ from lintro.ai.exceptions import (
     AIProviderError,
     AIRateLimitError,
 )
+from lintro.ai.json_response import CliSchemaRequest
 from lintro.ai.providers.base import AIResponse, AIStreamResult, BaseAIProvider
 from lintro.ai.providers.cli_transport import CliTransport
 from lintro.ai.providers.constants import (
@@ -29,7 +30,7 @@ from lintro.ai.providers.constants import (
     DEFAULT_PER_CALL_MAX_TOKENS,
     DEFAULT_TIMEOUT,
 )
-from lintro.ai.registry import PROVIDERS, AIProvider
+from lintro.ai.registry import AIProvider, PROVIDERS
 
 _has_anthropic = False
 try:
@@ -82,7 +83,10 @@ class _AnthropicCliTransport(CliTransport):
             )
 
         content = data.get("result", "")
-        if isinstance(content, dict):
+        structured = data.get("structured_output")
+        if structured is not None:
+            content = json.dumps(structured)
+        elif isinstance(content, dict):
             content = json.dumps(content)
         elif not isinstance(content, str):
             content = str(content)
@@ -232,6 +236,7 @@ class AnthropicProvider(BaseAIProvider):
         timeout: float,
         repo_root: str | None,
         use_one_shot: bool,
+        cli_schema: CliSchemaRequest | None = None,
     ) -> AIResponse:
         if self._cli is None:
             raise AINotAvailableError("Claude CLI transport is not initialized")
@@ -248,7 +253,14 @@ class AnthropicProvider(BaseAIProvider):
         ]
         if system:
             cmd.extend(["--append-system-prompt", system])
-        if not use_one_shot and self._session_id is not None:
+        if cli_schema is not None:
+            cmd.extend(["--json-schema", json.dumps(cli_schema.schema)])
+            if cli_schema.schema_name:
+                cmd.extend(["--json-schema-name", cli_schema.schema_name])
+        if (
+            not use_one_shot
+            and self._session_id is not None
+        ):
             cmd.extend(["--resume", self._session_id])
 
         logger.debug(
@@ -278,7 +290,11 @@ class AnthropicProvider(BaseAIProvider):
             session_id = envelope.get("session_id")
         except json.JSONDecodeError:
             session_id = None
-        if not use_one_shot and isinstance(session_id, str) and session_id.strip():
+        if (
+            not use_one_shot
+            and isinstance(session_id, str)
+            and session_id.strip()
+        ):
             self._session_id = session_id.strip()
         return response
 
@@ -291,6 +307,7 @@ class AnthropicProvider(BaseAIProvider):
         timeout: float = DEFAULT_TIMEOUT,
         repo_root: str | None = None,
         use_one_shot: bool = False,
+        cli_schema: CliSchemaRequest | None = None,
     ) -> AIResponse:
         """Generate a completion using Claude (API or CLI).
 
@@ -313,9 +330,10 @@ class AnthropicProvider(BaseAIProvider):
                 timeout=timeout,
                 repo_root=repo_root,
                 use_one_shot=use_one_shot,
+                cli_schema=cli_schema,
             )
 
-        del repo_root, use_one_shot
+        del repo_root, use_one_shot, cli_schema
         client = self._get_client()
         effective_max = min(max_tokens, self._max_tokens)
 

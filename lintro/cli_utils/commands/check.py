@@ -121,6 +121,12 @@ DEFAULT_ACTION: str = "check"
     is_flag=True,
     help="Generate AI fix suggestions (safe fixes auto-apply in CI)",
 )
+@click.option(
+    "--transport",
+    type=click.Choice(["api", "cli"], case_sensitive=False),
+    default=None,
+    help="Override ai.transport for this AI invocation.",
+)
 def check_command(
     paths: tuple[str, ...],
     tools: str | None,
@@ -141,6 +147,7 @@ def check_command(
     auto_install: bool,
     yes: bool,
     ai_fix: bool,
+    transport: str | None,
 ) -> None:
     """Check files for issues using the specified tools.
 
@@ -207,6 +214,7 @@ def check_command(
         yes=yes,
         ai_fix=ai_fix,
         ignore_conflicts=ignore_conflicts,
+        transport=transport,
     )
 
     # Exit with code only; CLI uses this as process exit code and avoids any
