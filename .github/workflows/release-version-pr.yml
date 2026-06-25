@@ -24,12 +24,13 @@ jobs:
       max-bump: minor
       tooling-ref: '4aaefe64763b7841b6d92d94dc47185083d34c9a' # v0.46.0
       egress-policy: block
+      # Paired with release-auto-tag.yml (egress-preset: github-tooling).
       egress-preset: pypi
     secrets:
       RELEASE_APP_ID: ${{ secrets.RELEASE_APP_ID }}
       RELEASE_APP_PRIVATE_KEY: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
     permissions:
       actions: read # report-release-failure reads workflow/job metadata
-      contents: write
+      contents: write # create version bump commits and PRs
       issues: write # report-release-failure opens deduplicated failure issues
       pull-requests: write

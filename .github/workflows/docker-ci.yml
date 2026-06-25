@@ -211,6 +211,14 @@ jobs:
 
   dogfooding-lint:
     needs: [docker-build, manifest-sync]
+    # Run when docker-build succeeds even if manifest-sync was skipped (draft PRs).
+    if: >-
+      always() &&
+      needs.docker-build.result == 'success' &&
+      (
+        needs.manifest-sync.result == 'success' ||
+        needs.manifest-sync.result == 'skipped'
+      )
     # yamllint disable-line rule:line-length
     uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-quality-lint.yml@4aaefe64763b7841b6d92d94dc47185083d34c9a # v0.46.0
     permissions:
@@ -239,6 +247,8 @@ jobs:
     needs: dogfooding-lint
     if: >-
       always() &&
+      !cancelled() &&
+      needs.dogfooding-lint.result != 'cancelled' &&
       github.event_name == 'pull_request' &&
       github.event.pull_request.head.repo.fork == false &&
       github.event.pull_request.draft == false
