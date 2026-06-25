@@ -8,6 +8,8 @@ from lintro.ai.review.models.checklist_item import ChecklistItem
 __all__ = [
     "REVIEW_ADVERSARIAL_SWEEP_TEMPLATE",
     "REVIEW_GENERATE_QUESTIONS_TEMPLATE",
+    "REVIEW_GIT_NATIVE_DIFF_GIT_COMMAND",
+    "REVIEW_GIT_NATIVE_DIFF_INLINE",
     "REVIEW_GIT_NATIVE_USER_PROMPT_TEMPLATE",
     "REVIEW_OUTPUT_SCHEMA",
     "REVIEW_SYSTEM",
@@ -159,9 +161,9 @@ Answer every item. Any **yes** → add a finding. Any **no** → record in `chec
 
 ---
 
-<pull_request_diff>
-{diff}
-</pull_request_diff>
+### Diff to review
+
+{diff_section}
 
 {lint_results_section}
 
@@ -179,6 +181,20 @@ Answer every item. Any **yes** → add a finding. Any **no** → record in `chec
 - Every checklist **yes** must have a corresponding finding (link via `checklist_ids`).
 - Do not duplicate findings — merge related checklist items when they share a root cause.
 - Prioritize cross-file integration bugs over isolated nits."""
+
+REVIEW_GIT_NATIVE_DIFF_INLINE = """\
+The diff is included below — review it directly (do not run git commands):
+
+<pull_request_diff>
+{diff}
+</pull_request_diff>"""
+
+REVIEW_GIT_NATIVE_DIFF_GIT_COMMAND = """\
+Run this command in the repository root and review the output:
+
+```
+git diff {base_ref}...{head_ref} -- {git_diff_paths}
+```"""
 
 REVIEW_OUTPUT_SCHEMA = """\
 {
