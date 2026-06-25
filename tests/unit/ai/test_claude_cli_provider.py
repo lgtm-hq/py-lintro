@@ -90,7 +90,8 @@ class TestClaudeCliComplete:
 
         provider = AnthropicProvider(transport=AITransport.CLI)
         schema = CliSchemaRequest(
-            schema={"type": "object"}, schema_name="lintro_review"
+            schema={"type": "object"},
+            schema_name="lintro_review",
         )
         stdout = _cli_json(result='{"summary": "ok"}')
         with patch("subprocess.run") as mock_run:
