@@ -112,10 +112,13 @@ class CursorProvider(BaseAIProvider):
         cmd = [
             self._agent_path,
             "--print",
-            "--output-format", "json",
+            "--output-format",
+            "json",
             "--trust",
-            "--mode", "ask",
-            "--model", self._model,
+            "--mode",
+            "ask",
+            "--model",
+            self._model,
         ]
 
         logger.debug(

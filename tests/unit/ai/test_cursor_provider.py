@@ -41,16 +41,18 @@ def _cli_json(
     is_error: bool = False,
     subtype: str = "success",
 ) -> str:
-    return json.dumps({
-        "type": "result",
-        "subtype": subtype,
-        "is_error": is_error,
-        "result": result,
-        "usage": {
-            "inputTokens": input_tokens,
-            "outputTokens": output_tokens,
-        },
-    })
+    return json.dumps(
+        {
+            "type": "result",
+            "subtype": subtype,
+            "is_error": is_error,
+            "result": result,
+            "usage": {
+                "inputTokens": input_tokens,
+                "outputTokens": output_tokens,
+            },
+        }
+    )
 
 
 class TestFindAgent:
