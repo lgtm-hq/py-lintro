@@ -7,7 +7,6 @@ unified diffs. Supports parallel API calls for improved performance.
 
 from __future__ import annotations
 
-import functools
 import threading
 from collections import defaultdict
 from collections.abc import Callable, Sequence
@@ -18,8 +17,10 @@ from typing import TYPE_CHECKING
 from loguru import logger
 
 from lintro.ai.cache import cache_suggestion
+from lintro.ai.cli_schemas import cli_schema_for_fix
+from lintro.ai.config import AIConfig
+from lintro.ai.enums import AITransport
 from lintro.ai.enums.sanitize_mode import SanitizeMode
-from lintro.ai.fallback import complete_with_fallback
 from lintro.ai.fix_context import (
     CONTEXT_LINES,
     FULL_FILE_THRESHOLD,
@@ -33,6 +34,7 @@ from lintro.ai.fix_parsing import (
     parse_batch_response,
     parse_fix_response,
 )
+from lintro.ai.invoke import call_ai
 from lintro.ai.models import AIFixSuggestion
 from lintro.ai.paths import (
     resolve_workspace_file,
@@ -40,12 +42,6 @@ from lintro.ai.paths import (
     to_provider_path,
 )
 from lintro.ai.prompts import FIX_BATCH_PROMPT_TEMPLATE, FIX_SYSTEM
-from lintro.ai.retry import (
-    DEFAULT_BACKOFF_FACTOR,
-    DEFAULT_BASE_DELAY,
-    DEFAULT_MAX_DELAY,
-    with_retry,
-)
 from lintro.ai.sanitize import (
     detect_injection_patterns,
     make_boundary_marker,
@@ -59,22 +55,55 @@ if TYPE_CHECKING:
     from lintro.parsers.base_issue import BaseIssue
 
 
-def _call_provider(
-    provider: BaseAIProvider,
-    prompt: str,
-    system: str,
+def _build_ai_config_for_fix(
+    *,
+    ai_config: AIConfig | None,
     max_tokens: int,
-    timeout: float = 60.0,
-    fallback_models: list[str] | None = None,
-) -> AIResponse:
-    """Call the AI provider with model fallback (no retry — caller wraps with retry)."""
-    return complete_with_fallback(
-        provider,
-        prompt,
-        fallback_models=fallback_models,
-        system=system,
+    timeout: float,
+    max_retries: int,
+    base_delay: float | None,
+    max_delay: float | None,
+    backoff_factor: float | None,
+    fallback_models: list[str] | None,
+) -> AIConfig:
+    """Resolve AI config for fix generation."""
+    if ai_config is not None:
+        return ai_config
+    return AIConfig(
+        enabled=True,
+        transport=AITransport.API,
         max_tokens=max_tokens,
-        timeout=timeout,
+        max_retries=max_retries,
+        api_timeout=timeout,
+        retry_base_delay=base_delay if base_delay is not None else 1.0,
+        retry_max_delay=max_delay if max_delay is not None else 30.0,
+        retry_backoff_factor=backoff_factor if backoff_factor is not None else 2.0,
+        fallback_models=fallback_models or [],
+    )
+
+
+def _call_fix_ai(
+    *,
+    provider: BaseAIProvider,
+    ai_config: AIConfig,
+    prompt: str,
+    max_tokens: int,
+    workspace_root: Path,
+    batch: bool = False,
+) -> AIResponse:
+    """Invoke the unified AI transport for fix generation."""
+    return call_ai(
+        provider=provider,
+        ai_config=ai_config,
+        user_prompt=prompt,
+        system_prompt=FIX_SYSTEM,
+        budget=None,
+        max_tokens=max_tokens,
+        repo_root=str(workspace_root),
+        cli_schema=cli_schema_for_fix(
+            transport=ai_config.transport,
+            batch=batch,
+        ),
     )
 
 
@@ -88,17 +117,22 @@ def _call_and_cache_fix(
     issue: BaseIssue,
     code: str,
     tool_name: str,
-    retrying_call: Callable[..., AIResponse],
     provider: BaseAIProvider,
+    ai_config: AIConfig,
     max_tokens: int,
-    timeout: float,
     workspace_root: Path,
     file_content: str,
     enable_cache: bool,
 ) -> AIFixSuggestion | None:
     """Call the provider, parse the response, and optionally cache the result."""
     try:
-        response = retrying_call(provider, prompt, FIX_SYSTEM, max_tokens, timeout)
+        response = _call_fix_ai(
+            provider=provider,
+            ai_config=ai_config,
+            prompt=prompt,
+            max_tokens=max_tokens,
+            workspace_root=workspace_root,
+        )
 
         suggestion = parse_fix_response(
             response.content,
@@ -145,7 +179,7 @@ def _generate_single_fix(
     cache_lock: threading.Lock,
     workspace_root: Path,
     max_tokens: int,
-    retrying_call: Callable[..., AIResponse],
+    ai_config: AIConfig,
     timeout: float = 60.0,
     context_lines: int = CONTEXT_LINES,
     max_prompt_tokens: int = 12000,
@@ -167,7 +201,7 @@ def _generate_single_fix(
         cache_lock: Lock for thread-safe cache access.
         workspace_root: Root directory AI is allowed to edit/read.
         max_tokens: Maximum tokens to request from provider.
-        retrying_call: Pre-built retry wrapper around ``_call_provider``.
+        ai_config: AI configuration for retry, transport, and fallback.
         timeout: Request timeout in seconds.
         context_lines: Lines of context before/after the issue line.
         max_prompt_tokens: Token budget for the prompt (4 chars ~ 1 token).
@@ -227,10 +261,9 @@ def _generate_single_fix(
         issue,
         code,
         tool_name,
-        retrying_call,
         provider,
+        ai_config,
         max_tokens,
-        timeout,
         workspace_root,
         file_content,
         enable_cache,
@@ -245,7 +278,7 @@ def _generate_batch_fixes(
     file_content: str,
     workspace_root: Path,
     max_tokens: int,
-    retrying_call: Callable[..., AIResponse],
+    ai_config: AIConfig,
     timeout: float,
     max_prompt_tokens: int,
     sanitize_mode: SanitizeMode = SanitizeMode.WARN,
@@ -264,7 +297,7 @@ def _generate_batch_fixes(
         file_content: Full file content string.
         workspace_root: Root directory for workspace-relative paths.
         max_tokens: Maximum tokens to request from provider.
-        retrying_call: Pre-built retry wrapper around ``_call_provider``.
+        ai_config: AI configuration for retry, transport, and fallback.
         timeout: Request timeout in seconds.
         max_prompt_tokens: Token budget for the prompt.
         sanitize_mode: How to handle detected prompt injection patterns.
@@ -323,7 +356,14 @@ def _generate_batch_fixes(
         return None
 
     try:
-        response = retrying_call(provider, prompt, FIX_SYSTEM, max_tokens, timeout)
+        response = _call_fix_ai(
+            provider=provider,
+            ai_config=ai_config,
+            prompt=prompt,
+            max_tokens=max_tokens,
+            workspace_root=workspace_root,
+            batch=True,
+        )
         suggestions = parse_batch_response(response.content, file_path)
         if not suggestions:
             logger.debug(
@@ -372,6 +412,7 @@ def generate_fixes(
     provider: BaseAIProvider,
     *,
     tool_name: str,
+    ai_config: AIConfig | None = None,
     max_issues: int = 20,
     max_workers: int = DEFAULT_MAX_WORKERS,
     workspace_root: Path | None = None,
@@ -438,24 +479,20 @@ def generate_fixes(
 
     root = workspace_root or resolve_workspace_root()
 
+    effective_config = _build_ai_config_for_fix(
+        ai_config=ai_config,
+        max_tokens=max_tokens,
+        timeout=timeout,
+        max_retries=max_retries,
+        base_delay=base_delay,
+        max_delay=max_delay,
+        backoff_factor=backoff_factor,
+        fallback_models=fallback_models,
+    )
+
     # Shared file cache with thread safety (capped to limit memory usage).
     file_cache: dict[str, str | None] = {}
     cache_lock = threading.Lock()
-
-    # Build the retry wrapper once and share across all calls.
-    # Bind fallback_models via partial to avoid global mutable state.
-    bound_call = functools.partial(
-        _call_provider,
-        fallback_models=fallback_models or [],
-    )
-    retrying_call = with_retry(
-        max_retries=max_retries,
-        base_delay=base_delay if base_delay is not None else DEFAULT_BASE_DELAY,
-        max_delay=max_delay if max_delay is not None else DEFAULT_MAX_DELAY,
-        backoff_factor=(
-            backoff_factor if backoff_factor is not None else DEFAULT_BACKOFF_FACTOR
-        ),
-    )(bound_call)
 
     suggestions: list[AIFixSuggestion] = []
     completed_count = 0
@@ -502,7 +539,7 @@ def generate_fixes(
             content,
             root,
             max_tokens,
-            retrying_call,
+            effective_config,
             timeout,
             max_prompt_tokens,
             sanitize_mode=sanitize_mode,
@@ -534,7 +571,7 @@ def generate_fixes(
                 cache_lock,
                 root,
                 max_tokens,
-                retrying_call,
+                effective_config,
                 timeout,
                 context_lines,
                 max_prompt_tokens=max_prompt_tokens,
@@ -560,7 +597,7 @@ def generate_fixes(
                     cache_lock,
                     root,
                     max_tokens,
-                    retrying_call,
+                    effective_config,
                     timeout,
                     context_lines,
                     max_prompt_tokens=max_prompt_tokens,
@@ -624,6 +661,7 @@ def generate_fixes_from_params(
         issues,
         provider,
         tool_name=params.tool_name,
+        ai_config=params.ai_config,
         max_issues=params.max_issues,
         max_workers=params.max_workers,
         workspace_root=params.workspace_root,

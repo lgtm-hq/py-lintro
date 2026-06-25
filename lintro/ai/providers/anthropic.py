@@ -22,6 +22,7 @@ from lintro.ai.exceptions import (
     AIProviderError,
     AIRateLimitError,
 )
+from lintro.ai.json_response import CliSchemaRequest
 from lintro.ai.providers.base import AIResponse, AIStreamResult, BaseAIProvider
 from lintro.ai.providers.cli_transport import CliTransport
 from lintro.ai.providers.constants import (
@@ -29,7 +30,7 @@ from lintro.ai.providers.constants import (
     DEFAULT_PER_CALL_MAX_TOKENS,
     DEFAULT_TIMEOUT,
 )
-from lintro.ai.registry import PROVIDERS, AIProvider
+from lintro.ai.registry import AIProvider, PROVIDERS
 
 _has_anthropic = False
 try:
@@ -82,7 +83,10 @@ class _AnthropicCliTransport(CliTransport):
             )
 
         content = data.get("result", "")
-        if isinstance(content, dict):
+        structured = data.get("structured_output")
+        if structured is not None:
+            content = json.dumps(structured)
+        elif isinstance(content, dict):
             content = json.dumps(content)
         elif not isinstance(content, str):
             content = str(content)
@@ -232,8 +236,8 @@ class AnthropicProvider(BaseAIProvider):
         repo_root: str | None,
         use_one_shot: bool,
         model: str | None = None,
+        cli_schema: CliSchemaRequest | None = None,
     ) -> AIResponse:
-        del use_one_shot
         if self._cli is None:
             raise AINotAvailableError("Claude CLI transport is not initialized")
 
@@ -252,9 +256,19 @@ class AnthropicProvider(BaseAIProvider):
         ]
         if system:
             cmd.extend(["--append-system-prompt", system])
+        if cli_schema is not None:
+            cmd.extend(["--json-schema", json.dumps(cli_schema.schema)])
+            if cli_schema.schema_name:
+                cmd.extend(["--json-schema-name", cli_schema.schema_name])
+        if (
+            not use_one_shot
+            and self._session_id is not None
+        ):
+            cmd.extend(["--resume", self._session_id])
 
         logger.debug(
             f"Claude CLI request: model={effective_model}, "
+            f"resume={self._session_id is not None and not use_one_shot}, "
             f"prompt_len={len(prompt)}",
         )
 
@@ -273,6 +287,18 @@ class AnthropicProvider(BaseAIProvider):
         )
 
         response = self._cli.parse_stdout(result.stdout)
+        session_id = None
+        try:
+            envelope = json.loads(result.stdout.strip())
+            session_id = envelope.get("session_id")
+        except json.JSONDecodeError:
+            session_id = None
+        if (
+            not use_one_shot
+            and isinstance(session_id, str)
+            and session_id.strip()
+        ):
+            self._session_id = session_id.strip()
         return response
 
     def complete(
@@ -285,6 +311,7 @@ class AnthropicProvider(BaseAIProvider):
         repo_root: str | None = None,
         use_one_shot: bool = False,
         model: str | None = None,
+        cli_schema: CliSchemaRequest | None = None,
     ) -> AIResponse:
         """Generate a completion using Claude (API or CLI).
 
@@ -294,8 +321,9 @@ class AnthropicProvider(BaseAIProvider):
             max_tokens: Maximum tokens to generate (API only).
             timeout: Request timeout in seconds.
             repo_root: Working directory for CLI transport.
-            use_one_shot: Ignored for CLI transport; each call is independent.
+            use_one_shot: When True, avoid resuming CLI sessions.
             model: Optional per-call model override.
+            cli_schema: Optional native CLI JSON schema request.
 
         Returns:
             AIResponse: The model's response with usage metadata.
@@ -309,9 +337,10 @@ class AnthropicProvider(BaseAIProvider):
                 repo_root=repo_root,
                 use_one_shot=use_one_shot,
                 model=model,
+                cli_schema=cli_schema,
             )
 
-        del repo_root, use_one_shot
+        del repo_root, use_one_shot, cli_schema
         client = self._get_client()
         effective_model = model or self._model
         # Per-call cap: the lower of the caller's request and the

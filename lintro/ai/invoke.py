@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING, cast
 
 from lintro.ai.budget import CostBudget
 from lintro.ai.fallback import complete_with_fallback
+from lintro.ai.json_response import CliSchemaRequest
 from lintro.ai.providers.response import AIResponse
 from lintro.ai.retry import with_retry
 
@@ -26,6 +27,7 @@ def call_ai(
     max_tokens: int | None = None,
     repo_root: str | None = None,
     use_one_shot: bool = False,
+    cli_schema: CliSchemaRequest | None = None,
 ) -> AIResponse:
     """Retry, fallback, and budget tracking for all AI products.
 
@@ -38,6 +40,7 @@ def call_ai(
         max_tokens: Per-call token cap; defaults to ``ai_config.max_tokens``.
         repo_root: Optional repository root for CLI providers.
         use_one_shot: When True, avoid durable CLI sessions.
+        cli_schema: Optional native CLI JSON schema request.
 
     Returns:
         The provider response with usage metadata.
@@ -54,6 +57,7 @@ def call_ai(
             timeout=ai_config.api_timeout,
             repo_root=repo_root,
             use_one_shot=use_one_shot,
+            cli_schema=cli_schema,
         )
 
     def _budgeted_call() -> AIResponse:
