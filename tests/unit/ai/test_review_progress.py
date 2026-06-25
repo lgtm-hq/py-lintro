@@ -49,6 +49,24 @@ def test_null_review_progress_full_lifecycle() -> None:
 # -- RichReviewProgress ----------------------------------------------------
 
 
+def test_rich_review_progress_on_error_stops_progress() -> None:
+    """on_error stops the live bar so a later on_complete can print safely."""
+    buf = StringIO()
+    console = Console(file=buf, force_terminal=True, width=120)
+    progress = RichReviewProgress(console=console)
+    progress.on_start(total_chunks=2, depth=1)
+    progress.on_error(
+        chunk_index=1,
+        total_chunks=2,
+        step="reviewing",
+        completed_chunks=1,
+    )
+    progress.on_complete(total_findings=0)
+    output = strip_ansi_codes(buf.getvalue())
+
+    assert_that(output).contains("Review complete")
+
+
 def test_rich_review_progress_full_lifecycle_does_not_crash() -> None:
     """Exercise the full progress lifecycle without raising."""
     console = Console(file=None, force_terminal=False)

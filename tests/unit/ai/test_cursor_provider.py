@@ -40,19 +40,19 @@ def _cli_json(
     output_tokens: int = 50,
     is_error: bool = False,
     subtype: str = "success",
+    session_id: str = "sess-123",
 ) -> str:
-    return json.dumps(
-        {
-            "type": "result",
-            "subtype": subtype,
-            "is_error": is_error,
-            "result": result,
-            "usage": {
-                "inputTokens": input_tokens,
-                "outputTokens": output_tokens,
-            },
+    return json.dumps({
+        "type": "result",
+        "subtype": subtype,
+        "is_error": is_error,
+        "result": result,
+        "session_id": session_id,
+        "usage": {
+            "inputTokens": input_tokens,
+            "outputTokens": output_tokens,
         },
-    )
+    })
 
 
 # -- _find_agent -----------------------------------------------------------
@@ -115,11 +115,50 @@ def test_complete_parses_successful_cli_json(provider):
             stdout=stdout,
             stderr="",
         )
-        resp = provider.complete("Hello")
+        resp = provider.complete("Hello", repo_root="/tmp/repo")
     assert_that(resp.content).is_equal_to("review output")
     assert_that(resp.provider).is_equal_to(AIProvider.CURSOR)
     assert_that(resp.input_tokens).is_equal_to(100)
     assert_that(resp.output_tokens).is_equal_to(50)
+    cmd = mock_run.call_args.args[0]
+    assert_that(cmd).contains("--workspace", "/tmp/repo")
+
+
+def test_complete_durable_session_uses_resume(provider):
+    """Second call in a durable session resumes the CLI session id."""
+    stdout = _cli_json(result="ok")
+    with patch("subprocess.run") as mock_run:
+        mock_run.return_value = subprocess.CompletedProcess(
+            args=[],
+            returncode=0,
+            stdout=stdout,
+            stderr="",
+        )
+        provider.begin_durable_session(repo_root="/tmp/repo")
+        provider.complete("first", repo_root="/tmp/repo")
+        provider.complete("second", repo_root="/tmp/repo")
+        second_cmd = mock_run.call_args_list[1].args[0]
+        assert_that(second_cmd).contains("--resume", "sess-123")
+
+
+def test_complete_one_shot_skips_resume(provider):
+    """One-shot calls do not resume an existing durable session."""
+    stdout = _cli_json(result="ok")
+    with patch("subprocess.run") as mock_run:
+        mock_run.return_value = subprocess.CompletedProcess(
+            args=[],
+            returncode=0,
+            stdout=stdout,
+            stderr="",
+        )
+        provider.begin_durable_session(repo_root="/tmp/repo")
+        provider.complete(
+            "chunk",
+            repo_root="/tmp/repo",
+            use_one_shot=True,
+        )
+        cmd = mock_run.call_args.args[0]
+        assert_that(cmd).does_not_contain("--resume")
 
 
 def test_complete_prepends_system_prompt_via_stdin(provider):
@@ -223,8 +262,8 @@ def test_complete_appends_max_tokens_to_prompt(provider):
         assert_that(input_text).contains("Respond in at most 512 tokens")
 
 
-def test_complete_passes_timeout_to_subprocess(provider):
-    """Pass caller timeout directly to subprocess.run."""
+def test_complete_uses_minimum_timeout_for_agent(provider):
+    """Agent CLI calls enforce a minimum subprocess timeout."""
     stdout = _cli_json(result="ok")
     with patch("subprocess.run") as mock_run:
         mock_run.return_value = subprocess.CompletedProcess(
@@ -234,7 +273,7 @@ def test_complete_passes_timeout_to_subprocess(provider):
             stderr="",
         )
         provider.complete("Hello", timeout=45.0)
-        assert_that(mock_run.call_args.kwargs.get("timeout")).is_equal_to(45.0)
+        assert_that(mock_run.call_args.kwargs.get("timeout")).is_equal_to(300.0)
 
 
 def test_complete_cost_estimate_is_zero(provider):

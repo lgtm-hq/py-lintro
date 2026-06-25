@@ -7,6 +7,8 @@ from unittest.mock import MagicMock, patch
 from assertpy import assert_that
 from click.testing import CliRunner
 
+from lintro.ai.review.exceptions import ReviewExecutionError
+from lintro.ai.review.enums.review_strictness import ReviewStrictness
 from lintro.ai.review.models.review_metadata import ReviewMetadata
 from lintro.ai.review.models.review_result import ReviewResult
 from lintro.cli import cli
@@ -67,11 +69,16 @@ def test_review_exits_zero_without_p1_findings() -> None:
     mock_context = MagicMock()
     mock_context.changed_files = []
     mock_context.unified_diff = ""
+    mock_config = MagicMock(ai=MagicMock(enabled=True))
+    mock_config.review.depth = 1
+    mock_config.review.strictness = ReviewStrictness.BALANCED
+    mock_config.review.sensitivity = MagicMock()
+    mock_config.review.force_semantic_chunking = False
 
     with patch("lintro.cli_utils.commands.review.require_ai"):
         with patch(
             "lintro.cli_utils.commands.review.get_config",
-            return_value=MagicMock(ai=MagicMock(enabled=True)),
+            return_value=mock_config,
         ):
             with patch(
                 "lintro.cli_utils.commands.review.collect_review_context",
@@ -110,3 +117,69 @@ def test_review_exits_zero_without_p1_findings() -> None:
                                             result = runner.invoke(cli, ["review"])
 
     assert_that(result.exit_code).is_equal_to(0)
+
+
+def test_review_failure_renders_friendly_error_without_traceback() -> None:
+    """Mid-review failures show a Rich panel instead of a traceback."""
+    runner = CliRunner()
+    mock_context = MagicMock()
+    mock_context.changed_files = [MagicMock(path="src/a.py")]
+    mock_context.unified_diff = "diff"
+
+    execution_error = ReviewExecutionError(
+        message="Review aborted before all chunks completed.",
+        chunk_index=2,
+        total_chunks=6,
+        step="reviewing",
+        completed_chunks=2,
+        cause_message="Cursor CLI timed out after 300s",
+    )
+    mock_config = MagicMock(ai=MagicMock(enabled=True))
+    mock_config.review.depth = 1
+    mock_config.review.strictness = ReviewStrictness.BALANCED
+    mock_config.review.sensitivity = MagicMock()
+    mock_config.review.force_semantic_chunking = False
+
+    with patch("lintro.cli_utils.commands.review.require_ai"):
+        with patch(
+            "lintro.cli_utils.commands.review.get_config",
+            return_value=mock_config,
+        ):
+            with patch(
+                "lintro.cli_utils.commands.review.collect_review_context",
+                return_value=mock_context,
+            ):
+                with patch(
+                    "lintro.cli_utils.commands.review.classify_changed_files",
+                    return_value=[],
+                ):
+                    with patch(
+                        "lintro.cli_utils.commands.review.get_all_checklist_items",
+                        return_value=[],
+                    ):
+                        with patch(
+                            "lintro.cli_utils.commands.review.select_checklist_items",
+                            return_value=[],
+                        ):
+                            with patch(
+                                "lintro.cli_utils.commands.review.format_checklist_for_prompt",
+                                return_value=("", {}),
+                            ):
+                                with patch(
+                                    "lintro.cli_utils.commands.review.get_provider",
+                                    return_value=MagicMock(
+                                        model_name="auto",
+                                        name="cursor",
+                                    ),
+                                ):
+                                    with patch(
+                                        "lintro.cli_utils.commands.review.run_review",
+                                        side_effect=execution_error,
+                                    ):
+                                        result = runner.invoke(cli, ["review"])
+
+    assert_that(result.exit_code).is_equal_to(1)
+    assert_that(result.output).contains("Review failed")
+    assert_that(result.output).contains("chunk 3/6")
+    assert_that(result.output).contains("api_timeout")
+    assert_that(result.output).does_not_contain("Traceback")
