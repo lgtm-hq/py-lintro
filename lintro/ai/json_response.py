@@ -108,7 +108,10 @@ def parse_summary_response_payload(*, content: str) -> dict[str, Any]:
     Raises:
         ValueError: When JSON is invalid or not an object.
     """
-    return load_json_object(content=content)
+    try:
+        return load_json_object(content=content)
+    except ValueError:
+        raise
 
 
 def parse_fix_response_payload(*, content: str) -> dict[str, Any] | list[Any]:

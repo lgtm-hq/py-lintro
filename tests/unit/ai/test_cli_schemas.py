@@ -26,7 +26,7 @@ def test_cli_schema_for_review_only_when_cli_transport() -> None:
     """Review schema is attached only for CLI transport."""
     assert_that(cli_schema_for_review(transport=AITransport.API)).is_none()
     request = cli_schema_for_review(transport=AITransport.CLI)
-    assert_that(request).is_not_none()
+    assert request is not None
     assert_that(request.schema).is_equal_to(REVIEW_CLI_SCHEMA)
 
 
@@ -34,7 +34,7 @@ def test_cli_schema_for_summary_only_when_cli_transport() -> None:
     """Summary schema is attached only for CLI transport."""
     assert_that(cli_schema_for_summary(transport=AITransport.API)).is_none()
     request = cli_schema_for_summary(transport=AITransport.CLI)
-    assert_that(request).is_not_none()
+    assert request is not None
     assert_that(request.schema).is_equal_to(SUMMARY_CLI_SCHEMA)
 
 
@@ -42,8 +42,8 @@ def test_cli_schema_for_fix_supports_batch_mode() -> None:
     """Fix schema switches between single-object and batch array."""
     single = cli_schema_for_fix(transport=AITransport.CLI, batch=False)
     batch = cli_schema_for_fix(transport=AITransport.CLI, batch=True)
-    assert_that(single).is_not_none()
-    assert_that(batch).is_not_none()
+    assert single is not None
+    assert batch is not None
     assert_that(single.schema["type"]).is_equal_to("object")
     assert_that(batch.schema["type"]).is_equal_to("array")
 

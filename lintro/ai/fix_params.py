@@ -46,6 +46,8 @@ class FixGenParams:
         fallback_models: Ordered fallback model identifiers.
         sanitize_mode: How to handle prompt injection patterns.
         progress_callback: Optional callback after each fix completes.
+        ai_config: Optional AI configuration for ``call_ai`` transport
+            and retry settings.
     """
 
     workspace_root: Path

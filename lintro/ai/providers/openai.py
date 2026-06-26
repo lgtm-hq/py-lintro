@@ -314,6 +314,7 @@ class OpenAIProvider(BaseAIProvider):
             repo_root: Working directory for CLI transport (git repo).
             use_one_shot: Unused for Codex; accepted for API parity.
             model: Optional per-call model override.
+            cli_schema: Optional native CLI JSON schema request.
 
         Returns:
             AIResponse: The model's response with usage metadata.
