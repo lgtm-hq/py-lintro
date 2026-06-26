@@ -18,6 +18,11 @@ from lintro.ai.review import (
     get_all_checklist_items,
     select_checklist_items,
 )
+from lintro.ai.review.checklist_display import (
+    build_prompt_question_map,
+    enrich_review_result,
+    resolve_checklist_display,
+)
 from lintro.ai.review.enums.review_strictness import ReviewStrictness
 from lintro.ai.review.error_display import render_review_error
 from lintro.ai.review.exceptions import ReviewContextError
@@ -80,6 +85,15 @@ from lintro.config.config_loader import get_config
     ),
 )
 @click.option(
+    "--show-checklist",
+    type=click.Choice(["linked", "all"], case_sensitive=False),
+    default=None,
+    help=(
+        "Show structured checklist in output: linked (under findings) or "
+        "all (linked plus cleared/orphan appendices)."
+    ),
+)
+@click.option(
     "--post",
     is_flag=True,
     help="Post findings to GitHub as PR review comments.",
@@ -118,6 +132,7 @@ def review_command(
     depth: int | None,
     strictness: str | None,
     semantic_chunks: bool,
+    show_checklist: str | None,
     post: bool,
     output_format: str,
     with_lint: bool,
@@ -138,16 +153,6 @@ def review_command(
         raise click.UsageError(
             "--pr requires --repo or GITHUB_REPOSITORY environment variable.",
         )
-    if pr is not None and uncommitted:
-        raise click.UsageError(
-            "--pr and --uncommitted cannot be used together.",
-        )
-    if post:
-        resolved_pr = pr or _detect_pr_number_from_env()
-        if resolved_pr is None:
-            raise click.UsageError(
-                "--post requires --pr or a CI pull-request environment.",
-            )
 
     paths = list(path_filter) if path_filter else None
     try:
@@ -169,6 +174,11 @@ def review_command(
     )
     checklist_text, _prompt_mapping = format_checklist_for_prompt(
         items=selected_items,
+    )
+    question_map = build_prompt_question_map(items=selected_items)
+    checklist_display = resolve_checklist_display(
+        cli_value=show_checklist,
+        config_value=lintro_config.review.checklist_display,
     )
 
     lint_digest: str | None = None
@@ -232,9 +242,14 @@ def review_command(
         render_review_error(error=exc, console=console)
         raise SystemExit(1) from exc
 
-    output = render_review_output(result=result, output_format=output_format)
-    if output is not None:
-        click.echo(output)
+    result = enrich_review_result(result=result, question_map=question_map)
+
+    render_review_output(
+        result=result,
+        output_format=output_format,
+        checklist_display=checklist_display,
+        question_map=question_map,
+    )
 
     if post:
         from lintro.ai.review.github import post_review_to_github
@@ -243,6 +258,8 @@ def review_command(
             result=result,
             pr_number=pr or _detect_pr_number_from_env(),
             repo=effective_repo,
+            checklist_display=checklist_display,
+            question_map=question_map,
         )
         if not posted:
             logger.warning("GitHub review posting skipped or failed")

@@ -7,6 +7,7 @@ from unittest.mock import MagicMock, patch
 from assertpy import assert_that
 from click.testing import CliRunner
 
+from lintro.ai.review.enums.checklist_display import ChecklistDisplay
 from lintro.ai.review.enums.review_strictness import ReviewStrictness
 from lintro.ai.review.exceptions import ReviewExecutionError
 from lintro.ai.review.models.review_metadata import ReviewMetadata
@@ -42,6 +43,7 @@ def test_review_help_shows_flags() -> None:
     assert_that(result.output).contains("--base")
     assert_that(result.output).contains("--with-lint")
     assert_that(result.output).contains("--depth")
+    assert_that(result.output).contains("--show-checklist")
 
 
 def test_review_alias_rev_works() -> None:
@@ -74,6 +76,7 @@ def test_review_exits_zero_without_p1_findings() -> None:
     mock_config.review.strictness = ReviewStrictness.BALANCED
     mock_config.review.sensitivity = MagicMock()
     mock_config.review.force_semantic_chunking = False
+    mock_config.review.checklist_display = ChecklistDisplay.OFF
 
     with patch("lintro.cli_utils.commands.review.require_ai"):
         with patch(
@@ -113,10 +116,13 @@ def test_review_exits_zero_without_p1_findings() -> None:
                                     ):
                                         with patch(
                                             "lintro.cli_utils.commands.review.render_review_output",
-                                        ):
+                                        ) as mock_render:
                                             result = runner.invoke(cli, ["review"])
 
     assert_that(result.exit_code).is_equal_to(0)
+    assert_that(mock_render.call_args.kwargs).contains_key(
+        "checklist_display",
+    )
 
 
 def test_review_failure_renders_friendly_error_without_traceback() -> None:
@@ -139,6 +145,7 @@ def test_review_failure_renders_friendly_error_without_traceback() -> None:
     mock_config.review.strictness = ReviewStrictness.BALANCED
     mock_config.review.sensitivity = MagicMock()
     mock_config.review.force_semantic_chunking = False
+    mock_config.review.checklist_display = ChecklistDisplay.OFF
 
     with patch("lintro.cli_utils.commands.review.require_ai"):
         with patch(

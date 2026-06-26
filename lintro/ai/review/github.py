@@ -7,6 +7,13 @@ from typing import Any
 from loguru import logger
 
 from lintro.ai.integrations.github_pr import GitHubPRReporter
+from lintro.ai.review.checklist_display import (
+    cleared_answers,
+    format_review_questions_markdown,
+    orphan_concerns,
+    questions_for_finding,
+)
+from lintro.ai.review.enums.checklist_display import ChecklistDisplay
 from lintro.ai.review.models.review_finding import ReviewFinding
 from lintro.ai.review.models.review_result import ReviewResult
 
@@ -23,6 +30,8 @@ def post_review_to_github(
     pr_number: int | None = None,
     repo: str | None = None,
     reporter: GitHubPRReporter | None = None,
+    checklist_display: ChecklistDisplay = ChecklistDisplay.OFF,
+    question_map: dict[int, str] | None = None,
 ) -> bool:
     """Post review findings as GitHub PR comments.
 
@@ -31,6 +40,8 @@ def post_review_to_github(
         pr_number: Optional PR number override.
         repo: Optional repository override (owner/name).
         reporter: Optional preconfigured GitHub reporter.
+        checklist_display: Structured checklist visibility mode.
+        question_map: Prompt id to question text for linked display.
 
     Returns:
         True when posting succeeded or was skipped cleanly; False on failure.
@@ -40,7 +51,12 @@ def post_review_to_github(
         logger.warning("GitHub PR context not available — skipping review posting")
         return False
 
-    summary_body = format_review_summary(result=result)
+    prompt_questions = question_map or {}
+    summary_body = format_review_summary(
+        result=result,
+        checklist_display=checklist_display,
+        question_map=prompt_questions,
+    )
     inline_findings, fallback_findings = _partition_findings(
         result=result,
         reporter=gh_reporter,
@@ -53,11 +69,17 @@ def post_review_to_github(
     if inline_findings and not _post_inline_findings(
         reporter=gh_reporter,
         findings=inline_findings,
+        checklist_display=checklist_display,
+        question_map=prompt_questions,
     ):
         success = False
 
     for finding in fallback_findings:
-        body = format_finding_comment(finding=finding)
+        body = format_finding_comment(
+            finding=finding,
+            checklist_display=checklist_display,
+            question_map=prompt_questions,
+        )
         location = f"`{finding.file}:{finding.line}`"
         if not gh_reporter._post_issue_comment(f"{location}\n\n{body}"):
             success = False
@@ -65,16 +87,24 @@ def post_review_to_github(
     return success
 
 
-def format_finding_comment(*, finding: ReviewFinding) -> str:
+def format_finding_comment(
+    *,
+    finding: ReviewFinding,
+    checklist_display: ChecklistDisplay = ChecklistDisplay.OFF,
+    question_map: dict[int, str] | None = None,
+) -> str:
     """Format a review finding as a GitHub markdown comment.
 
     Args:
         finding: Review finding to format.
+        checklist_display: Structured checklist visibility mode.
+        question_map: Prompt id to question text for linked display.
 
     Returns:
         Markdown comment body.
     """
-    return (
+    prompt_questions = question_map or {}
+    body = (
         f"**{finding.severity}** | {finding.category} | "
         f"{finding.confidence} confidence\n\n"
         f"### {finding.title}\n\n"
@@ -82,13 +112,27 @@ def format_finding_comment(*, finding: ReviewFinding) -> str:
         f"**Cause:** {finding.cause}\n\n"
         f"**Fix:** {finding.fix}"
     )
+    if checklist_display in {ChecklistDisplay.LINKED, ChecklistDisplay.ALL}:
+        linked = questions_for_finding(
+            finding=finding,
+            question_map=prompt_questions,
+        )
+        body += format_review_questions_markdown(questions=linked)
+    return body
 
 
-def format_review_summary(*, result: ReviewResult) -> str:
+def format_review_summary(
+    *,
+    result: ReviewResult,
+    checklist_display: ChecklistDisplay = ChecklistDisplay.OFF,
+    question_map: dict[int, str] | None = None,
+) -> str:
     """Format the top-level review summary comment.
 
     Args:
         result: Review result to summarize.
+        checklist_display: Structured checklist visibility mode.
+        question_map: Prompt id to question text (unused except for appendix).
 
     Returns:
         Markdown summary comment body.
@@ -100,20 +144,12 @@ def format_review_summary(*, result: ReviewResult) -> str:
         (
             f"**Model:** {metadata.model} | **Depth:** {metadata.depth} | "
             f"**Files:** {metadata.files_reviewed}/{metadata.files_total} | "
-            f"**Checklist:** {metadata.checklist_items} items"
+            f"**Structured checks:** {metadata.checklist_items}"
         ),
         "",
         "### Summary",
         result.summary or "(no summary)",
     ]
-
-    if result.checklist:
-        lines.extend(
-            ["", "### Checklist", "| ID | Answer | Evidence |", "|---|---|---|"],
-        )
-        for answer in result.checklist:
-            evidence = answer.evidence.replace("|", "\\|")
-            lines.append(f"| {answer.id} | {answer.answer} | {evidence} |")
 
     outside_diff = [
         finding for finding in result.findings if not finding.file or finding.line <= 0
@@ -123,7 +159,38 @@ def format_review_summary(*, result: ReviewResult) -> str:
         for finding in outside_diff:
             lines.append(f"- **{finding.severity}** {finding.title} ({finding.file})")
 
+    if checklist_display == ChecklistDisplay.ALL:
+        lines.extend(_format_checklist_appendix_markdown(result=result))
+
     return "\n".join(lines)
+
+
+def _format_checklist_appendix_markdown(*, result: ReviewResult) -> list[str]:
+    """Build cleared/orphan checklist appendix lines for markdown."""
+    cleared = cleared_answers(answers=result.checklist)
+    orphans = orphan_concerns(
+        answers=result.checklist,
+        findings=result.findings,
+    )
+    lines = ["", f"### Cleared checks ({len(cleared)})"]
+    if cleared:
+        for answer in cleared:
+            question = answer.question or f"(checklist item {answer.id})"
+            lines.append(f"- ✓ {question}")
+    else:
+        lines.append("- (none)")
+
+    lines.extend(["", f"### Checklist concerns without findings ({len(orphans)})"])
+    if orphans:
+        for answer in orphans:
+            question = answer.question or f"(checklist item {answer.id})"
+            evidence = answer.evidence.replace("|", "\\|")
+            lines.append(f"- {question}")
+            if evidence.strip():
+                lines.append(f"  - {evidence}")
+    else:
+        lines.append("- (none — good)")
+    return lines
 
 
 def _partition_findings(
@@ -155,6 +222,8 @@ def _post_inline_findings(
     *,
     reporter: GitHubPRReporter,
     findings: list[ReviewFinding],
+    checklist_display: ChecklistDisplay,
+    question_map: dict[int, str],
 ) -> bool:
     """Post inline PR review comments for mappable findings."""
     comments: list[dict[str, Any]] = []
@@ -163,7 +232,11 @@ def _post_inline_findings(
         comments.append(
             {
                 "path": rel,
-                "body": format_finding_comment(finding=finding),
+                "body": format_finding_comment(
+                    finding=finding,
+                    checklist_display=checklist_display,
+                    question_map=question_map,
+                ),
                 "line": finding.line,
                 "side": "RIGHT",
             },

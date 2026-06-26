@@ -169,7 +169,7 @@ def sample_review_result() -> ReviewResult:
             chunks_current=2,
             files_reviewed=3,
             files_total=3,
-            checklist_items=2,
+            checklist_items=3,
             token_usage={"prompt": 1000, "completion": 200, "total": 1200},
             cost_estimate_usd=0.05,
             base_ref="main",
@@ -178,8 +178,24 @@ def sample_review_result() -> ReviewResult:
         ),
         summary="Merge with fixes.",
         checklist=(
-            ChecklistAnswer(id=1, answer="yes", evidence="src/main.py:10"),
-            ChecklistAnswer(id=2, answer="no", evidence="none"),
+            ChecklistAnswer(
+                id=1,
+                answer="yes",
+                evidence="src/main.py:10",
+                question="Does unknown status fail closed?",
+            ),
+            ChecklistAnswer(
+                id=2,
+                answer="no",
+                evidence="none",
+                question="Are access paths covered by tests?",
+            ),
+            ChecklistAnswer(
+                id=3,
+                answer="yes",
+                evidence="docs/README.md:1",
+                question="Is migration documented?",
+            ),
         ),
         findings=(
             ReviewFinding(

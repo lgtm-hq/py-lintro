@@ -21,8 +21,9 @@ def test_review_result_to_dict_includes_metadata_fields(
     assert_that(payload["metadata"]).contains_key("context_window")
     assert_that(payload["metadata"]).contains_key("timestamp")
     assert_that(payload["summary"]).is_equal_to("Merge with fixes.")
-    assert_that(payload["checklist"]).is_length(2)
+    assert_that(payload["checklist"]).is_length(3)
     assert_that(payload["findings"]).is_length(2)
+    assert_that(payload["checklist"][0]).contains_key("question")
 
 
 def test_render_review_json_is_valid_json(
