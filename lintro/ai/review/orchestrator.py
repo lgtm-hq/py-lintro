@@ -111,7 +111,8 @@ def resolve_review_chunks(
         Ordered list of review chunks to process.
     """
     if not force_semantic_chunking and estimate_tokens(context.unified_diff) <= max(
-        diff_budget, 1
+        diff_budget,
+        1,
     ):
         return [_single_chunk_from_context(context=context)]
 
@@ -317,6 +318,9 @@ def run_review(
 
     Returns:
         Complete review result with metadata, checklist, and findings.
+
+    Raises:
+        ValueError: If ``depth`` is outside the supported 1-3 range.
     """
     if depth < 1 or depth > 3:
         raise ValueError(f"depth must be between 1 and 3, got {depth}")

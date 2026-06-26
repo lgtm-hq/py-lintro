@@ -11,10 +11,11 @@ from lintro.ai.review.github import (
     format_review_summary,
     post_review_to_github,
 )
+from lintro.ai.review.models.review_result import ReviewResult
 
 
 def test_format_finding_comment_includes_severity_and_fix(
-    sample_review_result,
+    sample_review_result: ReviewResult,
 ) -> None:
     """Finding comment includes severity badge and fix suggestion."""
     finding = sample_review_result.findings[0]
@@ -25,7 +26,7 @@ def test_format_finding_comment_includes_severity_and_fix(
 
 
 def test_format_review_summary_includes_checklist_table(
-    sample_review_result,
+    sample_review_result: ReviewResult,
 ) -> None:
     """Summary comment includes checklist table rows."""
     summary = format_review_summary(result=sample_review_result)
@@ -35,7 +36,7 @@ def test_format_review_summary_includes_checklist_table(
 
 
 def test_post_review_to_github_returns_false_when_unavailable(
-    sample_review_result,
+    sample_review_result: ReviewResult,
 ) -> None:
     """Posting is skipped cleanly when GitHub context is unavailable."""
     reporter = MagicMock()
@@ -50,7 +51,7 @@ def test_post_review_to_github_returns_false_when_unavailable(
 
 
 def test_post_review_to_github_posts_summary_and_inline(
-    sample_review_result,
+    sample_review_result: ReviewResult,
 ) -> None:
     """Available reporter posts summary and inline review comments."""
     reporter = MagicMock()

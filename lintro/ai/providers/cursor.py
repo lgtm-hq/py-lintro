@@ -51,6 +51,17 @@ class CursorProvider(BaseAIProvider):
         max_tokens: int = DEFAULT_MAX_TOKENS,
         base_url: str | None = None,
     ) -> None:
+        """Initialize the Cursor provider using the ``agent`` CLI.
+
+        Args:
+            model: Optional model override (defaults to provider config).
+            api_key_env: Environment variable name for the API key.
+            max_tokens: Default max tokens for provider configuration.
+            base_url: Unused; kept for provider API parity.
+
+        Raises:
+            AINotAvailableError: When the ``agent`` binary is not on PATH.
+        """
         agent_path = _find_agent()
         if not agent_path:
             raise AINotAvailableError(
@@ -82,6 +93,7 @@ class CursorProvider(BaseAIProvider):
         return None
 
     def is_available(self) -> bool:
+        """Return True when the ``agent`` CLI is discoverable on PATH."""
         return _find_agent() is not None
 
     def begin_durable_session(self, *, repo_root: str) -> None:
@@ -120,6 +132,12 @@ class CursorProvider(BaseAIProvider):
 
         Returns:
             Parsed model response with usage metadata.
+
+        Raises:
+            AIAuthenticationError: When the CLI reports an auth failure.
+            AINotAvailableError: When the ``agent`` binary is missing.
+            AIProviderError: When the CLI exits with an error or returns
+                invalid JSON.
         """
         del max_tokens
         combined_prompt = prompt

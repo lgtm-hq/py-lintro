@@ -32,6 +32,8 @@ class _StubProvider(BaseAIProvider):
         system: str | None = None,
         max_tokens: int = DEFAULT_PER_CALL_MAX_TOKENS,
         timeout: float = DEFAULT_TIMEOUT,
+        repo_root: str | None = None,
+        use_one_shot: bool = False,
     ) -> AIResponse:
         return self._response
 
@@ -136,6 +138,8 @@ def test_base_provider_stream_complete_passes_kwargs() -> None:
             system: str | None = None,
             max_tokens: int = DEFAULT_PER_CALL_MAX_TOKENS,
             timeout: float = DEFAULT_TIMEOUT,
+            repo_root: str | None = None,
+            use_one_shot: bool = False,
         ) -> AIResponse:
             calls.append(
                 {

@@ -10,21 +10,21 @@ class ReviewMetadata:
     """Metadata describing an AI review run.
 
     Attributes:
-        model: Model identifier used for the review.
-        provider: Provider name (anthropic, openai, etc.).
-        context_window: Model context window in tokens.
-        depth: Review depth level (1-3).
-        strictness: Sensitivity preset (focused, balanced, thorough).
-        chunks_total: Total semantic chunks processed.
-        chunks_current: Chunks included in this result view.
-        files_reviewed: Number of changed files included in review.
-        files_total: Total changed files in the diff.
-        checklist_items: Number of checklist items in the prompt.
-        token_usage: Aggregated token usage counters.
-        cost_estimate_usd: Estimated cost in USD.
-        base_ref: Base git ref for the diff.
-        head_ref: Head git ref for the diff.
-        timestamp: ISO 8601 UTC timestamp of the review run.
+        model (str): Model identifier used for the review.
+        provider (str): Provider name (anthropic, openai, etc.).
+        context_window (int): Model context window in tokens.
+        depth (int): Review depth level (1-3).
+        chunks_total (int): Total semantic chunks processed.
+        chunks_current (int): Chunks included in this result view.
+        files_reviewed (int): Number of changed files included in review.
+        files_total (int): Total changed files in the diff.
+        checklist_items (int): Number of checklist items in the prompt.
+        token_usage (dict[str, int]): Aggregated token usage counters.
+        cost_estimate_usd (float): Estimated cost in USD.
+        base_ref (str): Base git ref for the diff.
+        head_ref (str): Head git ref for the diff.
+        timestamp (str): ISO 8601 UTC timestamp of the review run.
+        strictness (str): Sensitivity preset (focused, balanced, thorough).
     """
 
     model: str

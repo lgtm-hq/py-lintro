@@ -199,7 +199,8 @@ def test_collect_pr_context_raises_when_view_fails(
     )
 
     with pytest.raises(
-        ReviewContextError, match="Failed to load pull request metadata"
+        ReviewContextError,
+        match="Failed to load pull request metadata",
     ):
         collect_review_context(pr_number=42)
 
@@ -293,6 +294,7 @@ def test_collect_review_context_raises_on_metadata_diff_desync(
     """Non-empty changed_files with an empty unified diff fail fast."""
     mock_run.side_effect = [
         _completed(stdout=".git\n"),
+        _completed(stdout="/repo/root\n"),
         _completed(stdout="base123\n"),
         _completed(stdout="head456\n"),
         _completed(stdout=""),

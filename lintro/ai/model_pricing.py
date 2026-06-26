@@ -71,6 +71,10 @@ def calculate_available_diff_tokens(
 
     Returns:
         Remaining token budget for diff content (minimum zero).
+
+    Raises:
+        ValueError: If ``context_window`` is not positive or ``prompt_overhead``
+            is negative.
     """
     if context_window <= 0:
         raise ValueError(f"context_window must be positive, got {context_window}")

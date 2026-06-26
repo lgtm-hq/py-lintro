@@ -268,7 +268,10 @@ def test_run_review_parallelizes_multiple_chunks() -> None:
         head_ref="feature",
         changed_files=[
             ChangedFile(
-                path=f"src/file{index}.py", status="modified", additions=1, deletions=0
+                path=f"src/file{index}.py",
+                status="modified",
+                additions=1,
+                deletions=0,
             )
             for index in range(4)
         ],

@@ -290,9 +290,6 @@ def _get_repo_root() -> str:
 
     Returns:
         Absolute repository root path.
-
-    Raises:
-        ReviewContextError: When git cannot resolve the repository root.
     """
     result = _run_git(args=["rev-parse", "--show-toplevel"])
     return result.stdout.strip()

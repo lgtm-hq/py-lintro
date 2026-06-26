@@ -188,6 +188,18 @@ class BaseAIProvider(ABC):
             _on_done=lambda: response,
         )
 
+    def begin_durable_session(self, *, repo_root: str) -> None:
+        """Optional hook for providers that reuse CLI sessions.
+
+        Args:
+            repo_root: Absolute path to the repository under review.
+        """
+        del repo_root
+
+    def end_durable_session(self) -> None:
+        """Optional hook to tear down a durable provider session."""
+        return None
+
     # -- Concrete shared helpers -------------------------------------------
 
     def is_available(self) -> bool:
