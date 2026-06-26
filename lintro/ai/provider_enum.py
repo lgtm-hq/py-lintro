@@ -16,3 +16,4 @@ class AIProvider(StrEnum):
 
     ANTHROPIC = auto()
     OPENAI = auto()
+    CURSOR = auto()

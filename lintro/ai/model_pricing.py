@@ -28,6 +28,7 @@ MODEL_CONTEXT_WINDOWS: dict[str, int] = {
     "gpt-4o-mini": 128_000,
     "gpt-4-turbo": 128_000,
     "o1": 200_000,
+    "auto": 200_000,
     "o1-mini": 128_000,
 }
 
