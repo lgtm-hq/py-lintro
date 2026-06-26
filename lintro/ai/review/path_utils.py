@@ -80,7 +80,7 @@ def matches_test_for_source(
         return False
 
     if name.startswith(f"test_{source_stem}.") or name.startswith(
-        f"{source_stem}_test."
+        f"{source_stem}_test.",
     ):
         return True
 
