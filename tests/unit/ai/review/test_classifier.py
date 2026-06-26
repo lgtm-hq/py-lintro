@@ -15,45 +15,60 @@ from lintro.ai.review.models.changed_file import ChangedFile
     [
         pytest.param(
             "scripts/ci/run.sh",
-            {FileDomain.SHELL.value},
+            {FileDomain.SHELL},
             id="shell_script",
         ),
         pytest.param(
             ".github/workflows/ci.yml",
-            {FileDomain.CI.value},
+            {FileDomain.CI},
             id="workflow",
         ),
         pytest.param(
+            ".github/actions/deploy/action.yml",
+            {FileDomain.CI},
+            id="nested_ci_action",
+        ),
+        pytest.param(
             "src/main.py",
-            {FileDomain.PYTHON.value},
+            {FileDomain.PYTHON},
             id="python_source",
         ),
         pytest.param(
             "tests/test_main.py",
-            {FileDomain.PYTHON.value, FileDomain.TEST.value},
+            {FileDomain.PYTHON, FileDomain.TEST},
             id="python_test",
         ),
         pytest.param(
             "docs/guide.md",
-            {FileDomain.DOCS.value},
+            {FileDomain.DOCS},
             id="docs",
+        ),
+        pytest.param(
+            "docs/nested/guide.md",
+            {FileDomain.DOCS},
+            id="nested_docs",
+        ),
+        pytest.param(
+            "src/api/v2/handlers.py",
+            {FileDomain.PYTHON, FileDomain.API},
+            id="nested_api_module",
         ),
         pytest.param(
             "scripts/security/auth.py",
             {
-                FileDomain.PYTHON.value,
-                FileDomain.SECURITY.value,
+                FileDomain.PYTHON,
+                FileDomain.SECURITY,
             },
             id="security_script",
         ),
         pytest.param(
             "main.py",
-            {FileDomain.PYTHON.value},
+            {FileDomain.PYTHON},
             id="root_python",
         ),
         pytest.param(
             "README.md",
-            {FileDomain.DOCS.value},
+            {FileDomain.DOCS},
             id="root_markdown",
         ),
     ],
@@ -61,7 +76,7 @@ from lintro.ai.review.models.changed_file import ChangedFile
 def test_classify_changed_files_assigns_expected_domains(
     *,
     path: str,
-    expected_domains: set[str],
+    expected_domains: set[FileDomain],
 ) -> None:
     """Changed files match the expected review domains for their paths."""
     files = [

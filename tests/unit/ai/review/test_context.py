@@ -16,6 +16,7 @@ from lintro.ai.review.context import (
     split_unified_diff_by_file,
     validate_review_context_diff,
 )
+from lintro.ai.review.enums.review_context_error_code import ReviewContextErrorCode
 from lintro.ai.review.exceptions import ReviewContextError
 from lintro.ai.review.models.changed_file import ChangedFile
 from lintro.ai.review.models.review_context import ReviewContext
@@ -39,19 +40,19 @@ def test_collect_branch_context_uses_merge_base(
     dispatcher = SubprocessMock()
     dispatcher.queue(["git", "rev-parse", "--git-dir"], stdout=".git\n")
     dispatcher.queue(["git", "merge-base", "main", "HEAD"], stdout="base123\n")
+    dispatcher.queue(["git", "rev-parse", "HEAD"], stdout="head456\n")
     dispatcher.queue(
-        ["git", "diff", "base123...HEAD"],
+        ["git", "diff", "base123...head456"],
         stdout="diff --git a/a.py b/a.py\n",
     )
     dispatcher.queue(
-        ["git", "diff", "--name-status", "base123...HEAD"],
+        ["git", "diff", "--name-status", "base123...head456"],
         stdout="M\ta.py\n",
     )
     dispatcher.queue(
-        ["git", "diff", "--numstat", "base123...HEAD"],
+        ["git", "diff", "--numstat", "base123...head456"],
         stdout="1\t0\ta.py\n",
     )
-    dispatcher.queue(["git", "rev-parse", "HEAD"], stdout="head456\n")
     mock_run.side_effect = dispatcher
 
     context = collect_review_context(base="main")
@@ -67,7 +68,7 @@ def test_collect_branch_context_uses_merge_base(
         for call in mock_run.call_args_list
         if call.args[0][:2] == ["git", "diff"]
     ]
-    assert_that(diff_calls).contains(["git", "diff", "base123...HEAD"])
+    assert_that(diff_calls).contains(["git", "diff", "base123...head456"])
 
 
 @patch("lintro.ai.review.context.subprocess.run")
@@ -80,22 +81,22 @@ def test_collect_uncommitted_context_merges_staged_and_unstaged(
     dispatcher = SubprocessMock()
     dispatcher.queue(["git", "rev-parse", "--git-dir"], stdout=".git\n")
     dispatcher.queue(["git", "ls-files", "--others", "--exclude-standard"], stdout="")
+    dispatcher.queue(["git", "rev-parse", "HEAD"], stdout="head456\n")
     dispatcher.queue(
-        ["git", "diff", "HEAD"],
+        ["git", "diff", "head456"],
         stdout=(
             "diff --git a/unstaged.py b/unstaged.py\n"
             "diff --git a/staged.py b/staged.py\n"
         ),
     )
     dispatcher.queue(
-        ["git", "diff", "HEAD", "--name-status"],
+        ["git", "diff", "head456", "--name-status"],
         stdout="M\tunstaged.py\nA\tstaged.py\n",
     )
     dispatcher.queue(
-        ["git", "diff", "HEAD", "--numstat"],
+        ["git", "diff", "head456", "--numstat"],
         stdout="1\t0\tunstaged.py\n2\t0\tstaged.py\n",
     )
-    dispatcher.queue(["git", "rev-parse", "HEAD"], stdout="head456\n")
     mock_run.side_effect = dispatcher
 
     context = collect_review_context(uncommitted=True)
@@ -110,7 +111,7 @@ def test_collect_uncommitted_context_merges_staged_and_unstaged(
         for call in mock_run.call_args_list
         if call.args[0][:2] == ["git", "diff"]
     ]
-    assert_that(diff_calls).contains(["git", "diff", "HEAD"])
+    assert_that(diff_calls).contains(["git", "diff", "head456"])
 
 
 @patch("lintro.ai.review.context.subprocess.run")
@@ -211,8 +212,9 @@ def test_collect_pr_context_raises_on_malformed_json(
     """Malformed gh JSON surfaces as a review context error."""
     mock_run.return_value = _completed(stdout="{not-json")
 
-    with pytest.raises(ReviewContextError, match="Failed to parse gh pr view JSON"):
+    with pytest.raises(ReviewContextError) as exc_info:
         collect_review_context(pr_number=42)
+    assert_that(exc_info.value.code).is_equal_to(ReviewContextErrorCode.GH_JSON_INVALID)
 
 
 @patch("lintro.ai.review.context.subprocess.run")
@@ -225,6 +227,7 @@ def test_collect_review_context_filters_paths(
     mock_run.side_effect = [
         _completed(stdout=".git\n"),
         _completed(stdout="base123\n"),
+        _completed(stdout="head456\n"),
         _completed(
             stdout=(
                 "diff --git a/a.py b/a.py\n"
@@ -237,7 +240,6 @@ def test_collect_review_context_filters_paths(
         ),
         _completed(stdout="M\ta.py\nM\tpkg/b.py\n"),
         _completed(stdout="1\t0\ta.py\n1\t0\tpkg/b.py\n"),
-        _completed(stdout="head456\n"),
     ]
 
     context = collect_review_context(base="main", paths=["pkg/"])
@@ -250,8 +252,9 @@ def test_collect_review_context_filters_paths(
 @patch("lintro.ai.review.context.shutil.which", return_value=None)
 def test_collect_review_context_requires_git(_mock_which: MagicMock) -> None:
     """Missing git binary raises a clear review context error."""
-    with pytest.raises(ReviewContextError, match="git is not installed"):
+    with pytest.raises(ReviewContextError) as exc_info:
         collect_review_context()
+    assert_that(exc_info.value.code).is_equal_to(ReviewContextErrorCode.GIT_UNAVAILABLE)
 
 
 @patch("lintro.ai.review.context.subprocess.run")
@@ -264,14 +267,15 @@ def test_collect_review_context_raises_on_empty_diff(
     mock_run.side_effect = [
         _completed(stdout=".git\n"),
         _completed(stdout="base123\n"),
-        _completed(stdout=""),
-        _completed(stdout=""),
-        _completed(stdout=""),
         _completed(stdout="head456\n"),
+        _completed(stdout=""),
+        _completed(stdout=""),
+        _completed(stdout=""),
     ]
 
-    with pytest.raises(ReviewContextError, match="No changes found"):
+    with pytest.raises(ReviewContextError) as exc_info:
         collect_review_context(base="main")
+    assert_that(exc_info.value.code).is_equal_to(ReviewContextErrorCode.NO_CHANGES)
 
 
 @patch("lintro.ai.review.context.subprocess.run")
@@ -284,14 +288,15 @@ def test_collect_review_context_raises_on_metadata_diff_desync(
     mock_run.side_effect = [
         _completed(stdout=".git\n"),
         _completed(stdout="base123\n"),
+        _completed(stdout="head456\n"),
         _completed(stdout=""),
         _completed(stdout="M\ta.py\n"),
         _completed(stdout="1\t0\ta.py\n"),
-        _completed(stdout="head456\n"),
     ]
 
-    with pytest.raises(ReviewContextError, match="unified diff is empty"):
+    with pytest.raises(ReviewContextError) as exc_info:
         collect_review_context(base="main")
+    assert_that(exc_info.value.code).is_equal_to(ReviewContextErrorCode.DIFF_DESYNC)
 
 
 @patch("lintro.ai.review.context.subprocess.run")
@@ -321,10 +326,16 @@ def test_resolve_default_base_branch_raises_when_undetectable(
         _completed(returncode=1),
         _completed(returncode=1),
         _completed(returncode=1),
+        _completed(returncode=1),
+        _completed(returncode=1),
+        _completed(returncode=1),
     ]
 
-    with pytest.raises(ReviewContextError, match="Could not determine default branch"):
+    with pytest.raises(ReviewContextError) as exc_info:
         resolve_default_base_branch()
+    assert_that(exc_info.value.code).is_equal_to(
+        ReviewContextErrorCode.DEFAULT_BRANCH_UNKNOWN,
+    )
 
 
 def test_validate_review_context_diff_rejects_unparseable_diff_without_files() -> None:
@@ -337,8 +348,11 @@ def test_validate_review_context_diff_rejects_unparseable_diff_without_files() -
         pr_metadata=None,
     )
 
-    with pytest.raises(ReviewContextError, match="no parseable file sections"):
+    with pytest.raises(ReviewContextError) as exc_info:
         validate_review_context_diff(context=context)
+    assert_that(exc_info.value.code).is_equal_to(
+        ReviewContextErrorCode.NO_PARSEABLE_DIFF,
+    )
 
 
 @pytest.mark.parametrize(
