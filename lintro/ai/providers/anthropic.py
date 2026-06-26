@@ -311,6 +311,7 @@ class AnthropicProvider(BaseAIProvider):
             timeout: Request timeout in seconds.
             repo_root: Working directory for CLI transport.
             use_one_shot: When True, avoid resuming CLI sessions.
+            cli_schema: Optional native CLI JSON schema request.
 
         Returns:
             AIResponse: The model's response with usage metadata.

@@ -5,6 +5,7 @@ from __future__ import annotations
 import pytest
 from assertpy import assert_that
 
+from lintro.ai.json_response import CliSchemaRequest
 from lintro.ai.providers.base import AIResponse, BaseAIProvider
 
 
@@ -58,7 +59,9 @@ def test_base_ai_provider_complete_subclass():
             timeout: float = 60.0,
             repo_root: str | None = None,
             use_one_shot: bool = False,
+            cli_schema: CliSchemaRequest | None = None,
         ) -> AIResponse:
+            del cli_schema
             return AIResponse(
                 content="ok",
                 model="test",

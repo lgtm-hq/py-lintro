@@ -586,7 +586,10 @@ def parse_review_response(*, content: str) -> dict[str, Any]:
     Raises:
         ValueError: When JSON is invalid or missing required keys.
     """
-    return parse_review_response_payload(content=content)
+    try:
+        return parse_review_response_payload(content=content)
+    except ValueError:
+        raise
 
 
 def merge_findings(

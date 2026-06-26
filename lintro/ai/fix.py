@@ -440,6 +440,8 @@ def generate_fixes(
         issues: Sequence of issues to fix.
         provider: AI provider instance.
         tool_name: Name of the tool that produced these issues.
+        ai_config: Optional AI configuration for ``call_ai`` transport
+            and retry settings.
         max_issues: Maximum number of issues to process.
         max_workers: Maximum concurrent API calls.
         workspace_root: Optional root directory limiting AI file access.

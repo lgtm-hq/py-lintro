@@ -171,6 +171,7 @@ def check_command(
         auto_install: bool: Whether to auto-install Node.js deps if missing.
         yes: bool: Skip confirmation prompt and proceed immediately.
         ai_fix: bool: Generate AI fix suggestions with interactive review.
+        transport: str | None: Override AI transport (``api`` or ``cli``).
 
     Raises:
         SystemExit: Process exit with the aggregated exit code from tools.

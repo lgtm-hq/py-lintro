@@ -205,6 +205,7 @@ class CursorProvider(BaseAIProvider):
             timeout: Subprocess timeout in seconds (minimum 600 for agent).
             repo_root: Git repository root for ``--workspace``.
             use_one_shot: When True, do not resume an existing CLI session.
+            cli_schema: Unused; kept for provider API parity.
 
         Returns:
             Parsed model response with usage metadata.

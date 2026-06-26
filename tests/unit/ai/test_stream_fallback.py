@@ -7,6 +7,7 @@ from assertpy import assert_that
 
 from lintro.ai.exceptions import AIProviderError
 from lintro.ai.fallback import stream_complete_with_fallback
+from lintro.ai.json_response import CliSchemaRequest
 from lintro.ai.providers.base import AIResponse, AIStreamResult, BaseAIProvider
 from lintro.ai.providers.constants import DEFAULT_PER_CALL_MAX_TOKENS, DEFAULT_TIMEOUT
 
@@ -47,7 +48,9 @@ class _SuccessProvider(BaseAIProvider):
         timeout: float = DEFAULT_TIMEOUT,
         repo_root: str | None = None,
         use_one_shot: bool = False,
+        cli_schema: CliSchemaRequest | None = None,
     ) -> AIResponse:
+        del cli_schema
         return _make_response(content=f"from-{self._name}", provider=self._name)
 
     def stream_complete(
@@ -89,7 +92,9 @@ class _FailingProvider(BaseAIProvider):
         timeout: float = DEFAULT_TIMEOUT,
         repo_root: str | None = None,
         use_one_shot: bool = False,
+        cli_schema: CliSchemaRequest | None = None,
     ) -> AIResponse:
+        del cli_schema
         raise AIProviderError("provider down")
 
     def stream_complete(

@@ -298,6 +298,8 @@ def generate_summary(
     Args:
         results: Tool results containing parsed issues.
         provider: AI provider instance.
+        ai_config: Optional AI configuration for ``call_ai`` transport
+            and retry settings.
         max_tokens: Maximum tokens for the response.
         workspace_root: Optional root used for provider-safe path redaction.
         timeout: Request timeout in seconds per API call.
@@ -409,6 +411,8 @@ def generate_post_fix_summary(
         rejected: Number of fixes rejected.
         remaining_results: Tool results with remaining issues.
         provider: AI provider instance.
+        ai_config: Optional AI configuration for ``call_ai`` transport
+            and retry settings.
         max_tokens: Maximum tokens for the response.
         workspace_root: Optional root used for provider-safe path redaction.
         timeout: Request timeout in seconds per API call.
