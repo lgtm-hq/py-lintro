@@ -78,19 +78,19 @@ class NullReviewProgress:
     """No-op progress tracker (silent)."""
 
     def on_start(self, *, total_chunks: int, depth: int) -> None:
-        pass
+        """Ignore review start notification."""
 
     def on_chunk_start(self, *, chunk_index: int, files: list[str]) -> None:
-        pass
+        """Ignore chunk start notification."""
 
     def on_step(self, *, chunk_index: int, step: str) -> None:
-        pass
+        """Ignore step notification."""
 
     def on_chunk_done(self, *, chunk_index: int) -> None:
-        pass
+        """Ignore chunk completion notification."""
 
     def on_complete(self, *, total_findings: int) -> None:
-        pass
+        """Ignore review completion notification."""
 
 
 class RichReviewProgress:
@@ -104,6 +104,11 @@ class RichReviewProgress:
     """
 
     def __init__(self, *, console: Console | None = None) -> None:
+        """Initialize the Rich progress display.
+
+        Args:
+            console: Optional Rich console; defaults to stdout.
+        """
         self._console = console or Console()
         self._progress: Progress | None = None
         self._task_id: TaskID | None = None
@@ -111,10 +116,12 @@ class RichReviewProgress:
         self._depth = 1
 
     def on_start(self, *, total_chunks: int, depth: int) -> None:
+        """Start the live progress bar for the review run."""
         passes = _passes_per_chunk(depth)
         depth_label = {1: "standard", 2: "thorough", 3: "deep"}.get(depth, "")
         self._total_chunks = total_chunks
         self._depth = depth
+        pass_word = "passes" if passes > 1 else "pass"
 
         self._progress = Progress(
             SpinnerColumn(),
@@ -127,12 +134,13 @@ class RichReviewProgress:
             transient=True,
         )
         self._task_id = self._progress.add_task(
-            f"Reviewing ({depth_label}, {passes} pass{'es' if passes > 1 else ''}/chunk)",
+            f"Reviewing ({depth_label}, {passes} {pass_word}/chunk)",
             total=total_chunks,
         )
         self._progress.start()
 
     def on_chunk_start(self, *, chunk_index: int, files: list[str]) -> None:
+        """Update the bar description for a new chunk."""
         if self._progress is None or self._task_id is None:
             return
         file_count = len(files)
@@ -143,6 +151,7 @@ class RichReviewProgress:
         )
 
     def on_step(self, *, chunk_index: int, step: str) -> None:
+        """Update the bar description for an in-chunk step."""
         if self._progress is None or self._task_id is None:
             return
         self._progress.update(
@@ -151,11 +160,13 @@ class RichReviewProgress:
         )
 
     def on_chunk_done(self, *, chunk_index: int) -> None:
+        """Advance the bar after a chunk completes."""
         if self._progress is None or self._task_id is None:
             return
         self._progress.update(self._task_id, advance=1)
 
     def on_complete(self, *, total_findings: int) -> None:
+        """Stop the bar and print the completion summary."""
         if self._progress is not None:
             self._progress.stop()
             self._progress = None
