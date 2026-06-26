@@ -47,7 +47,7 @@ def single_issue_result():
 @pytest.fixture
 def check_config():
     """LintroConfig with AI enabled and max_fix_attempts=5."""
-    return LintroConfig(ai=AIConfig(enabled=True, max_fix_attempts=5))
+    return LintroConfig(ai=AIConfig(enabled=True, transport="api", max_fix_attempts=5))  # type: ignore[arg-type]
 
 
 @pytest.fixture
@@ -156,7 +156,7 @@ def test_summary_attachment_summary_attached_to_all_results_with_issues(
             ),
         ],
     )
-    config = LintroConfig(ai=AIConfig(enabled=True))
+    config = LintroConfig(ai=AIConfig(enabled=True, transport="api"))  # type: ignore[arg-type]
     logger = MagicMock()
 
     mock_get_provider.return_value = MockAIProvider()
@@ -269,7 +269,7 @@ def test_integration_orchestrator_end_to_end_check_with_real_summary_generation(
     )
 
     mock_get_provider.return_value = MockAIProvider(responses=[summary_response])
-    config = LintroConfig(ai=AIConfig(enabled=True))
+    config = LintroConfig(ai=AIConfig(enabled=True, transport="api"))  # type: ignore[arg-type]
     logger = MagicMock()
 
     run_ai_enhancement(

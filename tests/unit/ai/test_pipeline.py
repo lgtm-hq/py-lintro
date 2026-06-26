@@ -47,6 +47,7 @@ def _make_suggestion(
 def _default_ai_config(**overrides: object) -> AIConfig:
     defaults: dict[str, object] = {
         "enabled": True,
+        "transport": "api",
         "max_fix_attempts": 20,
     }
     defaults.update(overrides)

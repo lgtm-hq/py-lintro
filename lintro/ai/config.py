@@ -18,7 +18,7 @@ from __future__ import annotations
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from lintro.ai.config_views import AIBudgetConfig, AIOutputConfig, AIProviderConfig
-from lintro.ai.enums import ConfidenceLevel, SanitizeMode
+from lintro.ai.enums import AITransport, ConfidenceLevel, SanitizeMode
 from lintro.ai.registry import AIProvider
 
 __all__ = [
@@ -42,6 +42,13 @@ class AIConfig(BaseModel):
 
     enabled: bool = False
     provider: AIProvider = AIProvider.ANTHROPIC
+    transport: AITransport | None = Field(
+        default=None,
+        description=(
+            "Required when ai.enabled is true. "
+            "How to invoke the provider: 'api' (SDK) or 'cli' (local binary)."
+        ),
+    )
     model: str | None = None
     api_key_env: str | None = None
     api_base_url: str | None = Field(
@@ -156,7 +163,18 @@ class AIConfig(BaseModel):
     )
 
     @model_validator(mode="after")
-    def _check_retry_delays(self) -> AIConfig:
+    def _validate_transport_and_retries(self) -> AIConfig:
+        if self.enabled and self.transport is None:
+            msg = "ai.transport is required when ai.enabled is true (api or cli)"
+            raise ValueError(msg)
+
+        if self.transport == AITransport.API and self.provider == AIProvider.CURSOR:
+            msg = (
+                "cursor provider only supports transport: cli "
+                "(the Cursor agent CLI; API transport is invalid)"
+            )
+            raise ValueError(msg)
+
         if self.retry_max_delay < self.retry_base_delay:
             msg = (
                 f"retry_max_delay ({self.retry_max_delay}) must be >= "
@@ -172,6 +190,7 @@ class AIConfig(BaseModel):
         """Return a frozen snapshot of provider-related settings."""
         return AIProviderConfig(
             provider=self.provider,
+            transport=self.transport,
             model=self.model,
             api_key_env=self.api_key_env,
             api_base_url=self.api_base_url,

@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 import os
-import re
 import shlex
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, replace
@@ -14,7 +13,8 @@ from typing import TYPE_CHECKING, Any
 from loguru import logger
 
 from lintro.ai.budget import CostBudget
-from lintro.ai.fallback import complete_with_fallback
+from lintro.ai.invoke import call_ai
+from lintro.ai.json_response import strip_json_fences
 from lintro.ai.model_pricing import (
     calculate_available_diff_tokens,
     get_context_window,
@@ -71,11 +71,6 @@ __all__ = [
     "run_review",
     "strip_json_fences",
 ]
-
-_JSON_FENCE_PATTERN = re.compile(
-    r"```(?:json)?\s*\n?(.*?)\n?```",
-    re.DOTALL | re.IGNORECASE,
-)
 _PROMPT_OVERHEAD_TOKENS = 12_000
 
 
@@ -577,22 +572,6 @@ def build_git_native_review_prompt(
     return REVIEW_SYSTEM, user_prompt
 
 
-def strip_json_fences(*, content: str) -> str:
-    """Strip markdown JSON code fences from model output.
-
-    Args:
-        content: Raw model response text.
-
-    Returns:
-        JSON string suitable for ``json.loads``.
-    """
-    stripped = content.strip()
-    match = _JSON_FENCE_PATTERN.search(stripped)
-    if match is not None:
-        return match.group(1).strip()
-    return stripped
-
-
 def parse_review_response(*, content: str) -> dict[str, Any]:
     """Parse and validate AI review JSON response.
 
@@ -767,13 +746,13 @@ def _review_chunk(
             extra_checklist=extra_checklist,
             strictness_section=strictness_section,
         )
-    response = _call_provider(
+    response = call_ai(
         provider=provider,
         ai_config=ai_config,
         system_prompt=system_prompt,
         user_prompt=user_prompt,
         budget=budget,
-        repo_root=repo_root,
+        repo_root=repo_root or None,
         use_one_shot=use_one_shot,
     )
     payload = parse_review_response(content=response.content)
@@ -821,14 +800,14 @@ def _generate_extra_checklist(
         diff=chunk.diff,
         changed_files=changed_files,
     )
-    response = _call_provider(
+    response = call_ai(
         provider=provider,
         ai_config=ai_config,
         system_prompt="You generate review checklist questions.",
         user_prompt=prompt,
         budget=budget,
         max_tokens=1024,
-        repo_root=repo_root,
+        repo_root=repo_root or None,
         use_one_shot=use_one_shot,
     )
     try:
@@ -877,13 +856,13 @@ def _run_adversarial_pass(
         prior_findings_json=prior_json,
         diff=chunk.diff,
     )
-    response = _call_provider(
+    response = call_ai(
         provider=provider,
         ai_config=ai_config,
         system_prompt=REVIEW_SYSTEM,
         user_prompt=prompt,
         budget=budget,
-        repo_root=repo_root,
+        repo_root=repo_root or None,
         use_one_shot=use_one_shot,
     )
     try:
@@ -909,33 +888,6 @@ def _run_adversarial_pass(
         output_tokens=response.output_tokens,
         cost_estimate=response.cost_estimate,
     )
-
-
-def _call_provider(
-    *,
-    provider: BaseAIProvider,
-    ai_config: AIConfig,
-    system_prompt: str,
-    user_prompt: str,
-    budget: CostBudget,
-    max_tokens: int | None = None,
-    repo_root: str = "",
-    use_one_shot: bool = False,
-) -> AIResponse:
-    """Call the AI provider with retry/fallback and budget tracking."""
-    tokens = max_tokens if max_tokens is not None else ai_config.max_tokens
-    response = complete_with_fallback(
-        provider,
-        user_prompt,
-        fallback_models=list(ai_config.fallback_models),
-        system=system_prompt,
-        max_tokens=tokens,
-        timeout=ai_config.api_timeout,
-        repo_root=repo_root or None,
-        use_one_shot=use_one_shot,
-    )
-    budget.record(response.cost_estimate)
-    return response
 
 
 def _payload_to_partial(

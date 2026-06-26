@@ -61,6 +61,7 @@ def test_pre_execution_summary_shows_ai_when_enabled(
     output = _render_summary(
         AIConfig(
             enabled=True,
+            transport="api",  # type: ignore[arg-type]
             provider="anthropic",  # type: ignore[arg-type]  # Pydantic coerces str
             max_parallel_calls=3,
         ),

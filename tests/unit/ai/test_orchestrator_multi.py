@@ -65,6 +65,7 @@ def test_run_ai_enhancement_fix_action_noninteractive_applies_safe_then_reviews_
     config = LintroConfig(
         ai=AIConfig(
             enabled=True,
+            transport="api",  # type: ignore[arg-type]
             auto_apply=False,
             auto_apply_safe_fixes=True,
         ),
@@ -152,6 +153,7 @@ def test_run_ai_enhancement_fix_action_json_auto_applies_safe_style_suggestions(
     config = LintroConfig(
         ai=AIConfig(
             enabled=True,
+            transport="api",  # type: ignore[arg-type]
             max_fix_attempts=5,
             auto_apply=False,
             auto_apply_safe_fixes=True,
@@ -241,6 +243,7 @@ def test_run_ai_enhancement_fix_action_json_uses_fresh_rerun_results(
     config = LintroConfig(
         ai=AIConfig(
             enabled=True,
+            transport="api",  # type: ignore[arg-type]
             auto_apply=True,
         ),
     )
