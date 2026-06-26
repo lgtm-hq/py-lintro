@@ -17,6 +17,7 @@ from loguru import logger
 
 from lintro.ai.enums import AITransport
 from lintro.ai.exceptions import (
+    AIAuthenticationError,
     AINotAvailableError,
     AIProviderError,
 )
@@ -208,7 +209,6 @@ class CursorProvider(BaseAIProvider):
 
         Raises:
             AIAuthenticationError: When the CLI reports an auth failure.
-            AINotAvailableError: When the ``agent`` binary is missing.
             AIProviderError: When the CLI exits with an error or returns
                 invalid JSON.
         """
@@ -247,18 +247,23 @@ class CursorProvider(BaseAIProvider):
         )
 
         effective_timeout = max(timeout, CURSOR_MIN_TIMEOUT)
-        result = self._cli.run(
-            cmd,
-            input_text=combined_prompt,
-            timeout=effective_timeout,
-        )
-        self._cli.check_exit_code(
-            result,
-            auth_patterns=("authentication required", "login"),
-            auth_hint="Run 'agent login' or set CURSOR_API_KEY.",
-        )
+        try:
+            result = self._cli.run(
+                cmd,
+                input_text=combined_prompt,
+                timeout=effective_timeout,
+            )
+            self._cli.check_exit_code(
+                result,
+                auth_patterns=("authentication required", "login"),
+                auth_hint="Run 'agent login' or set CURSOR_API_KEY.",
+            )
+            response, session_id = self._cli.parse_stdout(result.stdout)
+        except AIAuthenticationError:
+            raise
+        except AIProviderError:
+            raise
 
-        response, session_id = self._cli.parse_stdout(result.stdout)
         if not use_one_shot and self._durable_repo_root is not None and session_id:
             self._session_id = session_id
         return response

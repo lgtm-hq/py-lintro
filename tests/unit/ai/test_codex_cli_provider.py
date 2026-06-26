@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import subprocess
+from collections.abc import Iterator
 from unittest.mock import patch
 
 import pytest
@@ -16,7 +17,8 @@ from lintro.ai.registry import AIProvider
 
 
 @pytest.fixture()
-def _mock_codex_on_path():
+def _mock_codex_on_path() -> Iterator[None]:
+    """Patch codex binary discovery for CLI transport tests."""
     with patch(
         "lintro.ai.providers.openai._find_codex",
         return_value="/usr/local/bin/codex",
@@ -30,13 +32,13 @@ def _jsonl_response(*, text: str = '{"summary": "ok"}') -> str:
             {
                 "type": "item.completed",
                 "item": {"type": "agent_message", "text": text},
-            }
+            },
         ),
         json.dumps(
             {
                 "type": "turn.completed",
                 "usage": {"input_tokens": 120, "output_tokens": 40},
-            }
+            },
         ),
     ]
     return "\n".join(lines)
@@ -46,13 +48,15 @@ class TestCodexCliInit:
     """Tests for Codex CLI transport initialization."""
 
     def test_raises_when_codex_missing(self) -> None:
+        """Raise when the codex binary is not on PATH."""
         with (
             patch("lintro.ai.providers.openai._find_codex", return_value=None),
             pytest.raises(AINotAvailableError, match="codex"),
         ):
             OpenAIProvider(transport=AITransport.CLI)
 
-    def test_cli_transport_available(self, _mock_codex_on_path) -> None:
+    def test_cli_transport_available(self, _mock_codex_on_path: None) -> None:
+        """Report availability when the codex binary is discoverable."""
         provider = OpenAIProvider(transport=AITransport.CLI)
         assert_that(provider.is_available()).is_true()
 
@@ -60,7 +64,8 @@ class TestCodexCliInit:
 class TestCodexCliComplete:
     """Tests for codex exec completions."""
 
-    def test_success(self, _mock_codex_on_path) -> None:
+    def test_success(self, _mock_codex_on_path: None) -> None:
+        """Parse JSONL output from a successful codex exec invocation."""
         provider = OpenAIProvider(transport=AITransport.CLI)
         stdout = _jsonl_response()
         with patch("subprocess.run") as mock_run:
@@ -77,7 +82,8 @@ class TestCodexCliComplete:
         cmd = mock_run.call_args.args[0]
         assert_that(cmd).contains("exec", "--json", "--sandbox", "read-only")
 
-    def test_auth_error(self, _mock_codex_on_path) -> None:
+    def test_auth_error(self, _mock_codex_on_path: None) -> None:
+        """Surface authentication failures from codex stderr."""
         provider = OpenAIProvider(transport=AITransport.CLI)
         with (
             patch("subprocess.run") as mock_run,
@@ -96,5 +102,6 @@ class TestFindCodex:
     """Tests for codex binary discovery."""
 
     def test_found(self) -> None:
+        """Return the codex path when shutil.which finds it."""
         with patch("shutil.which", return_value="/usr/local/bin/codex"):
             assert_that(_find_codex()).is_equal_to("/usr/local/bin/codex")

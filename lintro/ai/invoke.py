@@ -2,9 +2,15 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 from lintro.ai.budget import CostBudget
+from lintro.ai.exceptions import (
+    AIAuthenticationError,
+    AIError,
+    AIProviderError,
+    AIRateLimitError,
+)
 from lintro.ai.fallback import complete_with_fallback
 from lintro.ai.providers.response import AIResponse
 from lintro.ai.retry import with_retry
@@ -69,12 +75,25 @@ def call_ai(
         )
 
     if budget is not None:
-        budget.check()
+        try:
+            budget.check()
+        except AIError:
+            raise
 
-    response = _call()
+    try:
+        response = cast(AIResponse, _call())
+    except AIAuthenticationError:
+        raise
+    except AIRateLimitError:
+        raise
+    except AIProviderError:
+        raise
 
     if budget is not None:
         budget.record(response.cost_estimate)
-        budget.check()
+        try:
+            budget.check()
+        except AIError:
+            raise
 
     return response

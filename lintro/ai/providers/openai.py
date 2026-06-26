@@ -176,6 +176,10 @@ class OpenAIProvider(BaseAIProvider):
             base_url: Custom API base URL for OpenAI-compatible
                 endpoints (Ollama, vLLM, Azure OpenAI, etc.).
             transport: ``api`` for SDK or ``cli`` for ``codex exec``.
+
+        Raises:
+            AINotAvailableError: When CLI transport is selected but the
+                ``codex`` binary is not on PATH.
         """
         self._transport = transport
         self._cli: _CodexCliTransport | None = None
@@ -233,6 +237,7 @@ class OpenAIProvider(BaseAIProvider):
         return openai.OpenAI(**kwargs)
 
     def is_available(self) -> bool:
+        """Return True when the configured transport is usable."""
         if self._transport == AITransport.CLI:
             return _find_codex() is not None
         return super().is_available()
