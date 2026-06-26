@@ -163,6 +163,13 @@ def review_command(
             )
 
     provider = get_provider(lintro_config.ai)
+
+    progress_tracker = None
+    if output_format == "terminal":
+        from lintro.ai.review.progress import RichReviewProgress
+
+        progress_tracker = RichReviewProgress()
+
     result = run_review(
         context,
         provider=provider,
@@ -173,6 +180,7 @@ def review_command(
         classifications=classifications,
         context_window_override=context_window,
         lint_results=lint_digest,
+        progress=progress_tracker,
     )
 
     output = render_review_output(result=result, output_format=output_format)
