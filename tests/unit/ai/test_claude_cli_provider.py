@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import subprocess
+from collections.abc import Iterator
 from unittest.mock import patch
 
 import pytest
@@ -16,7 +17,8 @@ from lintro.ai.registry import AIProvider
 
 
 @pytest.fixture()
-def _mock_claude_on_path():
+def _mock_claude_on_path() -> Iterator[None]:
+    """Patch claude binary discovery for CLI transport tests."""
     with patch(
         "lintro.ai.providers.anthropic._find_claude",
         return_value="/usr/local/bin/claude",
@@ -39,7 +41,7 @@ def _cli_json(
                 "output_tokens": output_tokens,
             },
             "total_cost_usd": total_cost_usd,
-        }
+        },
     )
 
 
@@ -47,13 +49,15 @@ class TestClaudeCliInit:
     """Tests for CLI transport initialization."""
 
     def test_raises_when_claude_missing(self) -> None:
+        """Raise when the claude binary is not on PATH."""
         with (
             patch("lintro.ai.providers.anthropic._find_claude", return_value=None),
             pytest.raises(AINotAvailableError, match="claude"),
         ):
             AnthropicProvider(transport=AITransport.CLI)
 
-    def test_cli_transport_available(self, _mock_claude_on_path) -> None:
+    def test_cli_transport_available(self, _mock_claude_on_path: None) -> None:
+        """Report availability when the claude binary is discoverable."""
         provider = AnthropicProvider(transport=AITransport.CLI)
         assert_that(provider.is_available()).is_true()
 
@@ -61,7 +65,8 @@ class TestClaudeCliInit:
 class TestClaudeCliComplete:
     """Tests for claude -p completions."""
 
-    def test_success(self, _mock_claude_on_path) -> None:
+    def test_success(self, _mock_claude_on_path: None) -> None:
+        """Parse JSON output from a successful claude -p invocation."""
         provider = AnthropicProvider(transport=AITransport.CLI)
         stdout = _cli_json(result='{"summary": "ok"}')
         with patch("subprocess.run") as mock_run:
@@ -79,7 +84,8 @@ class TestClaudeCliComplete:
         assert_that(cmd).contains("--bare", "-p", "--output-format", "json")
         assert_that(cmd).contains("--append-system-prompt", "Be concise")
 
-    def test_auth_error(self, _mock_claude_on_path) -> None:
+    def test_auth_error(self, _mock_claude_on_path: None) -> None:
+        """Surface authentication failures from claude stderr."""
         provider = AnthropicProvider(transport=AITransport.CLI)
         with (
             patch("subprocess.run") as mock_run,
@@ -98,5 +104,6 @@ class TestFindClaude:
     """Tests for claude binary discovery."""
 
     def test_found(self) -> None:
+        """Return the claude path when shutil.which finds it."""
         with patch("shutil.which", return_value="/usr/local/bin/claude"):
             assert_that(_find_claude()).is_equal_to("/usr/local/bin/claude")

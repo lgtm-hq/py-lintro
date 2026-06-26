@@ -111,7 +111,8 @@ def resolve_review_chunks(
         Ordered list of review chunks to process.
     """
     if not force_semantic_chunking and estimate_tokens(context.unified_diff) <= max(
-        diff_budget, 1
+        diff_budget,
+        1,
     ):
         return [_single_chunk_from_context(context=context)]
 

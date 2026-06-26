@@ -301,6 +301,7 @@ def test_run_ai_enhancement_fix_action_uses_fresh_rerun_results_for_post_summary
     config = LintroConfig(
         ai=AIConfig(
             enabled=True,
+            transport="api",  # type: ignore[arg-type]
             auto_apply=True,
         ),
     )

@@ -116,12 +116,11 @@ def test_run_review_depth1_returns_review_result() -> None:
     provider = _mock_provider(content=_sample_response_json())
 
     with patch(
-        "lintro.ai.review.orchestrator.complete_with_fallback",
-        side_effect=lambda _provider, _prompt, **kwargs: _provider.complete(
-            _prompt,
-            system=kwargs.get("system"),
+        "lintro.ai.review.orchestrator.call_ai",
+        side_effect=lambda *, provider, user_prompt, system_prompt=None, **kwargs: provider.complete(
+            user_prompt,
+            system=system_prompt,
             max_tokens=kwargs.get("max_tokens", 1024),
-            timeout=kwargs.get("timeout", 60.0),
         ),
     ):
         result = run_review(
@@ -203,12 +202,11 @@ def test_run_review_depth2_calls_provider_twice() -> None:
     ]
 
     with patch(
-        "lintro.ai.review.orchestrator.complete_with_fallback",
-        side_effect=lambda _provider, _prompt, **kwargs: _provider.complete(
-            _prompt,
-            system=kwargs.get("system"),
+        "lintro.ai.review.orchestrator.call_ai",
+        side_effect=lambda *, provider, user_prompt, system_prompt=None, **kwargs: provider.complete(
+            user_prompt,
+            system=system_prompt,
             max_tokens=kwargs.get("max_tokens", 1024),
-            timeout=kwargs.get("timeout", 60.0),
         ),
     ):
         result = run_review(
@@ -301,9 +299,8 @@ def test_run_review_parallelizes_multiple_chunks(tmp_path: Path) -> None:
     lock = threading.Lock()
     active = 0
     max_active = 0
-    response = provider.complete.return_value
-
-    def _track_concurrency(*_args, **_kwargs):
+    def _track_concurrency(*, provider, user_prompt, **kwargs):
+        del user_prompt, kwargs
         nonlocal active, max_active
         with lock:
             active += 1
@@ -311,13 +308,17 @@ def test_run_review_parallelizes_multiple_chunks(tmp_path: Path) -> None:
         time.sleep(0.05)
         with lock:
             active -= 1
-        return response
+        return provider.complete("prompt")
 
-    provider.complete.side_effect = _track_concurrency
-
-    with patch(
-        "lintro.ai.review.orchestrator.resolve_review_chunks",
-        return_value=chunks,
+    with (
+        patch(
+            "lintro.ai.review.orchestrator.resolve_review_chunks",
+            return_value=chunks,
+        ),
+        patch(
+            "lintro.ai.review.orchestrator.call_ai",
+            side_effect=_track_concurrency,
+        ),
     ):
         run_review(
             context,

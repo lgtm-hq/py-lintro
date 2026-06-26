@@ -157,6 +157,10 @@ class AnthropicProvider(BaseAIProvider):
             base_url: Custom API base URL for Anthropic-compatible
                 endpoints (proxies, self-hosted, etc.).
             transport: ``api`` for SDK or ``cli`` for ``claude -p``.
+
+        Raises:
+            AINotAvailableError: When CLI transport is selected but the
+                ``claude`` binary is not on PATH.
         """
         self._transport = transport
         self._cli: _AnthropicCliTransport | None = None
@@ -215,6 +219,7 @@ class AnthropicProvider(BaseAIProvider):
         return anthropic.Anthropic(**kwargs)
 
     def is_available(self) -> bool:
+        """Return True when the configured transport is usable."""
         if self._transport == AITransport.CLI:
             return _find_claude() is not None
         return super().is_available()

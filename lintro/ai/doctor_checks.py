@@ -122,7 +122,10 @@ def check_ai_configuration(config: AIConfig) -> list[AICheckResult]:
                 name=f"ai.api.{key_env}",
                 status=ToolStatus.MISSING,
                 message=f"Environment variable {key_env} is not set",
-                hint=f"Export {key_env} or set ai.api_base_url for a compatible endpoint",
+                hint=(
+                    f"Export {key_env} or set ai.api_base_url "
+                    "for a compatible endpoint"
+                ),
             ),
         )
 
