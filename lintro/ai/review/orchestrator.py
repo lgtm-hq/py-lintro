@@ -323,6 +323,7 @@ def run_review(
         progress: Optional progress callback for live status updates.
         sensitivity: Sensitivity preset controlling prompts and finding filters.
         force_semantic_chunking: When True, skip the single-chunk fast path.
+        timeout: Optional per-call timeout override in seconds.
 
     Returns:
         Complete review result with metadata, checklist, and findings.

@@ -180,6 +180,7 @@ class TestComplete:
         assert_that(resp.cost_estimate).is_equal_to(0.0)
 
     def test_timeout_floor_is_six_hundred_seconds(self, provider):
+        """Enforce Cursor CLI minimum timeout of 600 seconds."""
         stdout = _cli_json(result="ok")
         with patch("subprocess.run") as mock_run:
             mock_run.return_value = subprocess.CompletedProcess(
