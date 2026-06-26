@@ -16,11 +16,11 @@ def test_generate_interaction_paths_emits_ci_shell_path() -> None:
     classifications = [
         FileClassification(
             path=".github/workflows/ci.yml",
-            domains=[FileDomain.CI.value],
+            domains=[FileDomain.CI],
         ),
         FileClassification(
             path="scripts/ci/run.sh",
-            domains=[FileDomain.SHELL.value, FileDomain.SECURITY.value],
+            domains=[FileDomain.SHELL, FileDomain.SECURITY],
         ),
     ]
     changed_files = [".github/workflows/ci.yml", "scripts/ci/run.sh"]
@@ -40,11 +40,11 @@ def test_generate_interaction_paths_skips_shell_only_when_ci_present() -> None:
     classifications = [
         FileClassification(
             path=".github/workflows/ci.yml",
-            domains=[FileDomain.CI.value],
+            domains=[FileDomain.CI],
         ),
         FileClassification(
             path="scripts/ci/run.sh",
-            domains=[FileDomain.SHELL.value],
+            domains=[FileDomain.SHELL],
         ),
     ]
 
@@ -62,11 +62,11 @@ def test_generate_interaction_paths_emits_test_vs_production_path() -> None:
     classifications = [
         FileClassification(
             path="tests/test_main.py",
-            domains=[FileDomain.PYTHON.value, FileDomain.TEST.value],
+            domains=[FileDomain.PYTHON, FileDomain.TEST],
         ),
         FileClassification(
             path="src/main.py",
-            domains=[FileDomain.PYTHON.value],
+            domains=[FileDomain.PYTHON],
         ),
     ]
 
@@ -85,9 +85,9 @@ def test_generate_interaction_paths_includes_security_path() -> None:
         FileClassification(
             path="scripts/security/auth.py",
             domains=[
-                FileDomain.PYTHON.value,
-                FileDomain.SHELL.value,
-                FileDomain.SECURITY.value,
+                FileDomain.PYTHON,
+                FileDomain.SHELL,
+                FileDomain.SECURITY,
             ],
         ),
     ]
@@ -114,7 +114,7 @@ def test_generate_interaction_paths_emits_bulk_repetitive_path() -> None:
     """Large diffs emit a bulk repetitive sampling path."""
     changed_files = [f"src/module_{index}.py" for index in range(_REPETITIVE_THRESHOLD)]
     classifications = [
-        FileClassification(path=path, domains=[FileDomain.PYTHON.value])
+        FileClassification(path=path, domains=[FileDomain.PYTHON])
         for path in changed_files
     ]
 
@@ -143,30 +143,30 @@ def test_generate_interaction_paths_caps_at_seven_paths() -> None:
     classifications = [
         FileClassification(
             path=".github/workflows/ci.yml",
-            domains=[FileDomain.CI.value, FileDomain.DOCS.value],
+            domains=[FileDomain.CI, FileDomain.DOCS],
         ),
         FileClassification(
             path="scripts/ci/run.sh",
-            domains=[FileDomain.SHELL.value, FileDomain.SECURITY.value],
+            domains=[FileDomain.SHELL, FileDomain.SECURITY],
         ),
-        FileClassification(path="docs/guide.md", domains=[FileDomain.DOCS.value]),
+        FileClassification(path="docs/guide.md", domains=[FileDomain.DOCS]),
         FileClassification(
             path="tests/test_main.py",
-            domains=[FileDomain.PYTHON.value, FileDomain.TEST.value],
+            domains=[FileDomain.PYTHON, FileDomain.TEST],
         ),
-        FileClassification(path="src/main.py", domains=[FileDomain.PYTHON.value]),
+        FileClassification(path="src/main.py", domains=[FileDomain.PYTHON]),
         FileClassification(
             path="src/auth.rs",
-            domains=[FileDomain.RUST.value, FileDomain.SECURITY.value],
+            domains=[FileDomain.RUST, FileDomain.SECURITY],
         ),
         FileClassification(
             path="src/api.ts",
-            domains=[FileDomain.TYPESCRIPT.value, FileDomain.API.value],
+            domains=[FileDomain.TYPESCRIPT, FileDomain.API],
         ),
-        FileClassification(path="openapi.yaml", domains=[FileDomain.API.value]),
+        FileClassification(path="openapi.yaml", domains=[FileDomain.API]),
         FileClassification(
             path="src/security.py",
-            domains=[FileDomain.PYTHON.value, FileDomain.SECURITY.value],
+            domains=[FileDomain.PYTHON, FileDomain.SECURITY],
         ),
     ]
 
