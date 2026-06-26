@@ -17,6 +17,7 @@ from lintro.ai.review.models.checklist_item import ChecklistItem
 from lintro.ai.review.models.review_chunk import ReviewChunk
 from lintro.ai.review.models.review_context import ReviewContext
 from lintro.ai.review.orchestrator import (
+    build_git_native_review_prompt,
     parse_review_response,
     resolve_review_chunks,
     run_review,
@@ -325,3 +326,54 @@ def test_run_review_parallelizes_multiple_chunks() -> None:
 
     assert_that(max_active).is_greater_than(1)
     assert_that(provider.complete.call_count).is_equal_to(4)
+
+
+def test_build_git_native_review_prompt_embeds_diff_when_requested(
+    sample_review_context: ReviewContext,
+) -> None:
+    """Git-native prompts can inline the diff for budget-fitting chunks."""
+    chunk = ReviewChunk(
+        id=1,
+        files=["src/lib/math.py"],
+        diff="diff --git a/src/lib/math.py b/src/lib/math.py\n+1\n",
+        relationship="single-file",
+        metadata_note=None,
+    )
+
+    _, user_prompt = build_git_native_review_prompt(
+        chunk=chunk,
+        context=sample_review_context,
+        checklist_text="1. [logic-bug] Example?",
+        checklist_count=1,
+        interaction_paths="(none)",
+        embed_diff=True,
+    )
+
+    assert_that(user_prompt).contains("<pull_request_diff>")
+    assert_that(user_prompt).contains("src/lib/math.py")
+    assert_that(user_prompt).does_not_contain("git diff")
+
+
+def test_build_git_native_review_prompt_uses_git_command_when_not_embedded(
+    sample_review_context: ReviewContext,
+) -> None:
+    """Large diffs keep agentic git diff instructions."""
+    chunk = ReviewChunk(
+        id=1,
+        files=["src/lib/math.py"],
+        diff="diff --git a/src/lib/math.py b/src/lib/math.py\n+1\n",
+        relationship="single-file",
+        metadata_note=None,
+    )
+
+    _, user_prompt = build_git_native_review_prompt(
+        chunk=chunk,
+        context=sample_review_context,
+        checklist_text="1. [logic-bug] Example?",
+        checklist_count=1,
+        interaction_paths="(none)",
+        embed_diff=False,
+    )
+
+    assert_that(user_prompt).contains("git diff")
+    assert_that(user_prompt).does_not_contain("<pull_request_diff>")

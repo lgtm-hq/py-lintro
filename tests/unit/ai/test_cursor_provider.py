@@ -13,7 +13,7 @@ from lintro.ai.exceptions import (
     AIAuthenticationError,
     AINotAvailableError,
 )
-from lintro.ai.providers.cursor import CursorProvider, _find_agent
+from lintro.ai.providers.cursor import CURSOR_MIN_TIMEOUT, CursorProvider, _find_agent
 from lintro.ai.registry import AIProvider
 
 
@@ -178,6 +178,21 @@ class TestComplete:
             )
             resp = provider.complete("Hello", repo_root="/tmp/repo")
         assert_that(resp.cost_estimate).is_equal_to(0.0)
+
+    def test_timeout_floor_is_six_hundred_seconds(self, provider):
+        """Enforce Cursor CLI minimum timeout of 600 seconds."""
+        stdout = _cli_json(result="ok")
+        with patch("subprocess.run") as mock_run:
+            mock_run.return_value = subprocess.CompletedProcess(
+                args=[],
+                returncode=0,
+                stdout=stdout,
+                stderr="",
+            )
+            provider.complete("Hello", timeout=120.0, repo_root="/tmp/repo")
+        assert_that(mock_run.call_args.kwargs["timeout"]).is_equal_to(
+            CURSOR_MIN_TIMEOUT,
+        )
 
 
 class TestExtractJsonObject:

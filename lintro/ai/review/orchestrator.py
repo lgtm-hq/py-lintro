@@ -22,6 +22,8 @@ from lintro.ai.model_pricing import (
 from lintro.ai.prompts.review import (
     REVIEW_ADVERSARIAL_SWEEP_TEMPLATE,
     REVIEW_GENERATE_QUESTIONS_TEMPLATE,
+    REVIEW_GIT_NATIVE_DIFF_GIT_COMMAND,
+    REVIEW_GIT_NATIVE_DIFF_INLINE,
     REVIEW_GIT_NATIVE_USER_PROMPT_TEMPLATE,
     REVIEW_OUTPUT_SCHEMA,
     REVIEW_SYSTEM,
@@ -141,6 +143,7 @@ def _review_all_chunks(
     use_one_shot: bool,
     max_parallel_calls: int,
     strictness_section: str,
+    diff_budget: int,
 ) -> list[_ChunkReviewPartial]:
     """Review all chunks sequentially or in parallel."""
     if len(chunks) <= 1:
@@ -162,6 +165,7 @@ def _review_all_chunks(
                 repo_root=repo_root,
                 use_one_shot=use_one_shot,
                 strictness_section=strictness_section,
+                diff_budget=diff_budget,
             ),
         ]
 
@@ -189,6 +193,7 @@ def _review_all_chunks(
                 repo_root=repo_root,
                 use_one_shot=use_one_shot,
                 strictness_section=strictness_section,
+                diff_budget=diff_budget,
             ): chunk_index
             for chunk_index, chunk in enumerate(chunks)
         }
@@ -241,6 +246,7 @@ def _review_chunk_with_progress(
     repo_root: str,
     use_one_shot: bool,
     strictness_section: str = "",
+    diff_budget: int = 0,
 ) -> _ChunkReviewPartial:
     """Review one chunk with progress tracking and error wrapping."""
     budget.check()
@@ -262,6 +268,7 @@ def _review_chunk_with_progress(
             repo_root=repo_root,
             use_one_shot=use_one_shot,
             strictness_section=strictness_section,
+            diff_budget=diff_budget,
         )
     except Exception as exc:
         step_tracker = progress if isinstance(progress, StepTrackingProgress) else None
@@ -299,6 +306,7 @@ def run_review(
     progress: ReviewProgressCallback | None = None,
     sensitivity: ReviewSensitivityPolicy | None = None,
     force_semantic_chunking: bool = False,
+    timeout: float | None = None,
 ) -> ReviewResult:
     """Execute an AI diff review with depth-controlled passes.
 
@@ -315,6 +323,7 @@ def run_review(
         progress: Optional progress callback for live status updates.
         sensitivity: Sensitivity preset controlling prompts and finding filters.
         force_semantic_chunking: When True, skip the single-chunk fast path.
+        timeout: Optional per-call timeout override in seconds.
 
     Returns:
         Complete review result with metadata, checklist, and findings.
@@ -363,6 +372,9 @@ def run_review(
         force_semantic_chunking=force_semantic_chunking,
     )
 
+    effective_ai_config = (
+        replace(ai_config, api_timeout=timeout) if timeout is not None else ai_config
+    )
     tracker = progress or NullReviewProgress()
     budget = CostBudget(max_cost_usd=ai_config.max_cost_usd)
     use_cursor_durable = (
@@ -383,7 +395,7 @@ def run_review(
             chunks=chunks,
             context=context,
             provider=provider,
-            ai_config=ai_config,
+            ai_config=effective_ai_config,
             depth=depth,
             checklist_items=checklist_items,
             checklist_text=checklist_text,
@@ -395,6 +407,7 @@ def run_review(
             use_one_shot=use_one_shot,
             max_parallel_calls=ai_config.max_parallel_calls,
             strictness_section=strictness_section,
+            diff_budget=diff_budget,
         )
     finally:
         if use_cursor_durable and hasattr(provider, "end_durable_session"):
@@ -507,6 +520,7 @@ def build_git_native_review_prompt(
     lint_results: str | None = None,
     extra_checklist: str = "",
     strictness_section: str = "",
+    embed_diff: bool = False,
 ) -> tuple[str, str]:
     """Build git-native prompts for Cursor local agent review.
 
@@ -519,6 +533,7 @@ def build_git_native_review_prompt(
         lint_results: Optional lint digest for prompt injection.
         extra_checklist: Additional generated checklist rows for depth 2.
         strictness_section: Sensitivity instructions for the review pass.
+        embed_diff: When True, inline the diff instead of agentic git commands.
 
     Returns:
         Tuple of (system_prompt, user_prompt).
@@ -534,6 +549,14 @@ def build_git_native_review_prompt(
         )
 
     git_diff_paths = " ".join(shlex.quote(path) for path in chunk.files)
+    if embed_diff:
+        diff_section = REVIEW_GIT_NATIVE_DIFF_INLINE.format(diff=chunk.diff)
+    else:
+        diff_section = REVIEW_GIT_NATIVE_DIFF_GIT_COMMAND.format(
+            base_ref=context.base_ref,
+            head_ref=context.head_ref,
+            git_diff_paths=git_diff_paths,
+        )
     user_prompt = REVIEW_GIT_NATIVE_USER_PROMPT_TEMPLATE.format(
         pr_title=pr_title,
         base_ref=context.base_ref,
@@ -546,7 +569,7 @@ def build_git_native_review_prompt(
         interaction_paths=interaction_paths,
         checklist_count=checklist_count,
         checklist=combined_checklist,
-        git_diff_paths=git_diff_paths,
+        diff_section=diff_section,
         lint_results_section=format_lint_results_section(digest=lint_results),
         strictness_section=strictness_section,
         output_schema=REVIEW_OUTPUT_SCHEMA,
@@ -698,6 +721,7 @@ def _review_chunk(
     repo_root: str = "",
     use_one_shot: bool = False,
     strictness_section: str = "",
+    diff_budget: int = 0,
 ) -> _ChunkReviewPartial:
     """Run depth-controlled review for a single chunk."""
     tracker = progress or NullReviewProgress()
@@ -719,21 +743,30 @@ def _review_chunk(
         )
 
     tracker.on_step(chunk_index=chunk_index, step="reviewing")
-    prompt_builder = (
-        build_git_native_review_prompt
-        if provider.name == AIProvider.CURSOR
-        else build_review_prompt
-    )
-    system_prompt, user_prompt = prompt_builder(
-        chunk=chunk,
-        context=context,
-        checklist_text=checklist_text,
-        checklist_count=checklist_count,
-        interaction_paths=interaction_paths,
-        lint_results=lint_results,
-        extra_checklist=extra_checklist,
-        strictness_section=strictness_section,
-    )
+    if provider.name == AIProvider.CURSOR:
+        embed_diff = estimate_tokens(chunk.diff) <= max(diff_budget, 1)
+        system_prompt, user_prompt = build_git_native_review_prompt(
+            chunk=chunk,
+            context=context,
+            checklist_text=checklist_text,
+            checklist_count=checklist_count,
+            interaction_paths=interaction_paths,
+            lint_results=lint_results,
+            extra_checklist=extra_checklist,
+            strictness_section=strictness_section,
+            embed_diff=embed_diff,
+        )
+    else:
+        system_prompt, user_prompt = build_review_prompt(
+            chunk=chunk,
+            context=context,
+            checklist_text=checklist_text,
+            checklist_count=checklist_count,
+            interaction_paths=interaction_paths,
+            lint_results=lint_results,
+            extra_checklist=extra_checklist,
+            strictness_section=strictness_section,
+        )
     response = _call_provider(
         provider=provider,
         ai_config=ai_config,
