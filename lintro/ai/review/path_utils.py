@@ -79,9 +79,8 @@ def matches_test_for_source(
     if name not in expected_names:
         return False
 
-    if (
-        name.startswith(f"test_{source_stem}.")
-        or name.startswith(f"{source_stem}_test.")
+    if name.startswith(f"test_{source_stem}.") or name.startswith(
+        f"{source_stem}_test."
     ):
         return True
 
