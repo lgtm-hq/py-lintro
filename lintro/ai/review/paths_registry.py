@@ -10,16 +10,16 @@ from lintro.ai.review.models.file_classification import FileClassification
 
 __all__ = ["generate_interaction_paths"]
 
-_PATH_BUILDERS: list[tuple[frozenset[str], Callable[[list[str]], str]]] = [
+_PATH_BUILDERS: list[tuple[frozenset[FileDomain], Callable[[list[str]], str]]] = [
     (
-        frozenset({FileDomain.CI.value, FileDomain.SHELL.value}),
+        frozenset({FileDomain.CI, FileDomain.SHELL}),
         lambda files: (
             "**Path A — CI + shell:** Trace workflow inputs → env vars → "
             f"sourced script behavior → exit codes. Changed: {', '.join(files[:5])}"
         ),
     ),
     (
-        frozenset({FileDomain.SHELL.value}),
+        frozenset({FileDomain.SHELL}),
         lambda files: (
             "**Path A — Shell exit semantics:** Trace exit codes for ALL branches "
             "where error/removal ID vars are non-empty. "
@@ -27,63 +27,63 @@ _PATH_BUILDERS: list[tuple[frozenset[str], Callable[[list[str]], str]]] = [
         ),
     ),
     (
-        frozenset({FileDomain.CI.value, FileDomain.DOCS.value}),
+        frozenset({FileDomain.CI, FileDomain.DOCS}),
         lambda files: (
             "**Path B — CI docs vs presets:** Cross-check workflow docs/presets vs "
             f"script defaults. Changed: {', '.join(files[:5])}"
         ),
     ),
     (
-        frozenset({FileDomain.TEST.value}),
+        frozenset({FileDomain.TEST}),
         lambda files: (
             "**Path C — Test vs production defaults:** Compare test setup/fixture "
             f"defaults vs production/workflow defaults. Changed: {', '.join(files[:5])}"
         ),
     ),
     (
-        frozenset({FileDomain.DOCS.value}),
+        frozenset({FileDomain.DOCS}),
         lambda files: (
             "**Path D — Docs vs code:** Cross-check documented behavior vs "
             f"implementation. Changed: {', '.join(files[:5])}"
         ),
     ),
     (
-        frozenset({FileDomain.SECURITY.value}),
+        frozenset({FileDomain.SECURITY}),
         lambda files: (
             "**Path E — Security exit semantics:** Trace security-sensitive branches "
             f"to exit 0 vs exit 1 / HTTP 403 vs 200. Changed: {', '.join(files[:5])}"
         ),
     ),
     (
-        frozenset({FileDomain.RUST.value, FileDomain.TYPESCRIPT.value}),
+        frozenset({FileDomain.RUST, FileDomain.TYPESCRIPT}),
         lambda files: (
             "**Path F — Server ↔ client:** Trace server route → middleware → DB → "
             f"client API parse → UI component. Changed: {', '.join(files[:5])}"
         ),
     ),
     (
-        frozenset({FileDomain.RUST.value, FileDomain.API.value}),
+        frozenset({FileDomain.RUST, FileDomain.API}),
         lambda files: (
             "**Path G — OpenAPI vs routes:** Cross-check OpenAPI registration vs "
             f"route handlers vs error response shapes. Changed: {', '.join(files[:5])}"
         ),
     ),
     (
-        frozenset({FileDomain.TYPESCRIPT.value, FileDomain.API.value}),
+        frozenset({FileDomain.TYPESCRIPT, FileDomain.API}),
         lambda files: (
             "**Path H — Auth/API → UI:** Trace auth/API payload parsing → UI "
             f"copy/state; runtime validation vs casts. Changed: {', '.join(files[:5])}"
         ),
     ),
     (
-        frozenset({FileDomain.PYTHON.value, FileDomain.TEST.value}),
+        frozenset({FileDomain.PYTHON, FileDomain.TEST}),
         lambda files: (
             "**Path I — Pytest vs production:** Compare pytest fixtures/defaults vs "
             f"production config defaults. Changed: {', '.join(files[:5])}"
         ),
     ),
     (
-        frozenset({FileDomain.PYTHON.value, FileDomain.SECURITY.value}),
+        frozenset({FileDomain.PYTHON, FileDomain.SECURITY}),
         lambda files: (
             "**Path J — Auth guards:** Trace auth decorators/guards on all new/"
             f"changed routes. Changed: {', '.join(files[:5])}"
@@ -123,8 +123,8 @@ def generate_interaction_paths(
         if not required_domains.issubset(domain_set):
             continue
         if (
-            required_domains == frozenset({FileDomain.SHELL.value})
-            and FileDomain.CI.value in domain_set
+            required_domains == frozenset({FileDomain.SHELL})
+            and FileDomain.CI in domain_set
         ):
             continue
         matching_files = _files_for_domains(
@@ -160,9 +160,9 @@ def generate_interaction_paths(
     return "\n\n".join(paths)
 
 
-def _collect_domains(*, classifications: list[FileClassification]) -> set[str]:
+def _collect_domains(*, classifications: list[FileClassification]) -> set[FileDomain]:
     """Collect unique domain labels from classifications."""
-    domains: set[str] = set()
+    domains: set[FileDomain] = set()
     for classification in classifications:
         domains.update(classification.domains)
     return domains
@@ -171,7 +171,7 @@ def _collect_domains(*, classifications: list[FileClassification]) -> set[str]:
 def _files_for_domains(
     *,
     classifications: list[FileClassification],
-    domains: frozenset[str],
+    domains: frozenset[FileDomain],
     changed_files: list[str],
 ) -> list[str]:
     """Return changed files whose classification includes any required domain."""
@@ -199,7 +199,7 @@ def _repetitive_bulk_path(
         domain
         for classification in classifications
         for domain in classification.domains
-        if domain not in {FileDomain.TEST.value, FileDomain.DOCS.value}
+        if domain not in {FileDomain.TEST, FileDomain.DOCS}
     )
     if not domain_counts:
         return None
@@ -218,6 +218,6 @@ def _repetitive_bulk_path(
     sample_text = ", ".join(f"`{path}`" for path in sample)
     return (
         f"**Path — Bulk repetitive changes:** {len(changed_files)} files with "
-        f"similar {dominant_domain} patterns — sample {sample_text} and verify "
+        f"similar {dominant_domain.value} patterns — sample {sample_text} and verify "
         "the pattern holds across all instances."
     )
