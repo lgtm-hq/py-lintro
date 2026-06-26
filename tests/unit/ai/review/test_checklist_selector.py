@@ -81,7 +81,7 @@ def test_select_checklist_items_includes_custom_config_when_trigger_matches() ->
     custom_item = ChecklistItem(
         id=CUSTOM_CHECKLIST_ID_START,
         question="Does any Django view miss @login_required?",
-        triggers=["**/views.py"],
+        triggers=("**/views.py",),
         category=ReviewCategory.SECURITY,
         tier=2,
     )
@@ -134,7 +134,7 @@ def test_select_checklist_items_matches_root_level_files_for_double_star_globs()
     custom_item = ChecklistItem(
         id=CUSTOM_CHECKLIST_ID_START,
         question="Does any Django view miss @login_required?",
-        triggers=["**/views.py"],
+        triggers=("**/views.py",),
         category=ReviewCategory.SECURITY,
         tier=2,
     )

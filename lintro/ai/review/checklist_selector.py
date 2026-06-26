@@ -37,7 +37,7 @@ def select_checklist_items(
     selected: list[ChecklistItem] = []
 
     for item in items:
-        if item.tier == 1 or not item.triggers:
+        if item.tier == 1:
             selected.append(item)
             continue
         if _item_matches_files(
@@ -78,7 +78,7 @@ def format_checklist_for_prompt(
 
 def _item_matches_files(
     *,
-    triggers: list[str],
+    triggers: tuple[str, ...],
     changed_files: list[str],
 ) -> bool:
     """Return True when any changed file matches any trigger pattern.

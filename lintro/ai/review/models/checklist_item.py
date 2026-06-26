@@ -23,6 +23,6 @@ class ChecklistItem:
 
     id: int
     question: str
-    triggers: list[str]
+    triggers: tuple[str, ...]
     category: ReviewCategory
     tier: int

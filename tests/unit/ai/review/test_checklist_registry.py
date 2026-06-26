@@ -50,7 +50,7 @@ def test_get_all_checklist_items_loads_custom_config_items() -> None:
     assert_that(custom_items).is_length(1)
     assert_that(custom_items[0].id).is_equal_to(CUSTOM_CHECKLIST_ID_START)
     assert_that(custom_items[0].tier).is_equal_to(2)
-    assert_that(custom_items[0].triggers).is_equal_to(["**/views.py"])
+    assert_that(custom_items[0].triggers).is_equal_to(("**/views.py",))
 
 
 def test_validate_checklist_items_rejects_duplicate_ids() -> None:
@@ -59,14 +59,14 @@ def test_validate_checklist_items_rejects_duplicate_ids() -> None:
         ChecklistItem(
             id=1,
             question="First",
-            triggers=[],
+            triggers=(),
             category=ReviewCategory.LOGIC_BUG,
             tier=1,
         ),
         ChecklistItem(
             id=1,
             question="Second",
-            triggers=[],
+            triggers=(),
             category=ReviewCategory.LOGIC_BUG,
             tier=1,
         ),
@@ -82,7 +82,7 @@ def test_validate_checklist_items_rejects_empty_questions() -> None:
         ChecklistItem(
             id=1,
             question="   ",
-            triggers=[],
+            triggers=(),
             category=ReviewCategory.LOGIC_BUG,
             tier=1,
         ),

@@ -32,7 +32,6 @@ def get_all_checklist_items(
     """
     items = list(BUILTIN_CHECKLIST_ITEMS)
     if config is None:
-        validate_checklist_items(items=items)
         return items
 
     next_custom_id = CUSTOM_CHECKLIST_ID_START
@@ -41,7 +40,7 @@ def get_all_checklist_items(
             ChecklistItem(
                 id=next_custom_id,
                 question=custom_item.question,
-                triggers=list(custom_item.triggers),
+                triggers=tuple(custom_item.triggers),
                 category=custom_item.category,
                 tier=2,
             ),
@@ -83,3 +82,11 @@ def validate_checklist_items(*, items: list[ChecklistItem]) -> None:
         if item.tier == 2 and not item.triggers:
             msg = f"Tier 2 checklist item {item.id} must have at least one trigger"
             raise ValueError(msg)
+
+
+def _validate_builtin_checklist_items() -> None:
+    """Validate builtin checklist invariants once at import time."""
+    validate_checklist_items(items=list(BUILTIN_CHECKLIST_ITEMS))
+
+
+_validate_builtin_checklist_items()
