@@ -57,6 +57,17 @@ class CursorProvider(BaseAIProvider):
         max_tokens: int = DEFAULT_MAX_TOKENS,
         base_url: str | None = None,
     ) -> None:
+        """Initialize the Cursor provider.
+
+        Args:
+            model: Model identifier override.
+            api_key_env: Environment variable for the API key override.
+            max_tokens: Provider-level cap on generated tokens.
+            base_url: Custom API base URL (unused for CLI).
+
+        Raises:
+            AINotAvailableError: If the ``agent`` CLI is not on PATH.
+        """
         agent_path = _find_agent()
         if not agent_path:
             raise AINotAvailableError(
@@ -90,6 +101,11 @@ class CursorProvider(BaseAIProvider):
         return None
 
     def is_available(self) -> bool:
+        """Check if the ``agent`` CLI is on PATH.
+
+        Returns:
+            True when the ``agent`` binary is discoverable.
+        """
         return _find_agent() is not None
 
     def complete(
