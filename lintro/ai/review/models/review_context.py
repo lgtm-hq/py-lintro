@@ -18,10 +18,12 @@ class ReviewContext:
         changed_files: Parsed changed file entries.
         unified_diff: Full unified diff text for the selected range.
         pr_metadata: Optional PR metadata when reviewing a pull request.
+        repo_root: Absolute path to the git repository root.
     """
 
     base_ref: str
     head_ref: str
     changed_files: list[ChangedFile]
     unified_diff: str
-    pr_metadata: PRMetadata | None = None
+    pr_metadata: PRMetadata | None
+    repo_root: str = ""

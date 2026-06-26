@@ -117,6 +117,8 @@ class AnthropicProvider(BaseAIProvider):
         system: str | None = None,
         max_tokens: int = DEFAULT_PER_CALL_MAX_TOKENS,
         timeout: float = DEFAULT_TIMEOUT,
+        repo_root: str | None = None,
+        use_one_shot: bool = False,
     ) -> AIResponse:
         """Generate a completion using Claude.
 
@@ -125,10 +127,13 @@ class AnthropicProvider(BaseAIProvider):
             system: Optional system prompt.
             max_tokens: Maximum tokens to generate.
             timeout: Request timeout in seconds.
+            repo_root: Unused; accepted for provider API parity.
+            use_one_shot: Unused; accepted for provider API parity.
 
         Returns:
             AIResponse: The model's response with usage metadata.
         """
+        del repo_root, use_one_shot
         client = self._get_client()
         # Per-call cap: the lower of the caller's request and the
         # provider-level cap set at init time.

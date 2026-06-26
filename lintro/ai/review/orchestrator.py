@@ -3,7 +3,10 @@
 from __future__ import annotations
 
 import json
+import os
 import re
+import shlex
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
@@ -19,19 +22,33 @@ from lintro.ai.model_pricing import (
 from lintro.ai.prompts.review import (
     REVIEW_ADVERSARIAL_SWEEP_TEMPLATE,
     REVIEW_GENERATE_QUESTIONS_TEMPLATE,
+    REVIEW_GIT_NATIVE_USER_PROMPT_TEMPLATE,
     REVIEW_OUTPUT_SCHEMA,
     REVIEW_SYSTEM,
     REVIEW_USER_PROMPT_TEMPLATE,
     format_changed_files_for_prompt,
     format_lint_results_section,
 )
+from lintro.ai.registry import AIProvider
 from lintro.ai.review.chunker import chunk_review_context
+from lintro.ai.review.enums.review_strictness import ReviewStrictness
+from lintro.ai.review.exceptions import ReviewExecutionError
 from lintro.ai.review.models.checklist_answer import ChecklistAnswer
+from lintro.ai.review.models.review_chunk import ReviewChunk
 from lintro.ai.review.models.review_finding import ReviewFinding
 from lintro.ai.review.models.review_metadata import ReviewMetadata
 from lintro.ai.review.models.review_result import ReviewResult
 from lintro.ai.review.paths_registry import generate_interaction_paths
-from lintro.ai.review.progress import NullReviewProgress, ReviewProgressCallback
+from lintro.ai.review.progress import (
+    NullReviewProgress,
+    ReviewProgressCallback,
+    StepTrackingProgress,
+)
+from lintro.ai.review.sensitivity import (
+    ReviewSensitivityPolicy,
+    filter_findings_by_policy,
+    format_strictness_prompt_section,
+)
 from lintro.ai.token_budget import estimate_tokens
 
 if TYPE_CHECKING:
@@ -39,15 +56,16 @@ if TYPE_CHECKING:
     from lintro.ai.providers.base import AIResponse, BaseAIProvider
     from lintro.ai.review.models.checklist_item import ChecklistItem
     from lintro.ai.review.models.file_classification import FileClassification
-    from lintro.ai.review.models.review_chunk import ReviewChunk
     from lintro.ai.review.models.review_context import ReviewContext
 
 __all__ = [
+    "build_git_native_review_prompt",
     "build_review_prompt",
     "merge_checklist_answers",
     "merge_findings",
     "merge_review_results",
     "parse_review_response",
+    "resolve_review_chunks",
     "run_review",
     "strip_json_fences",
 ]
@@ -71,6 +89,202 @@ class _ChunkReviewPartial:
     cost_estimate: float
 
 
+def resolve_review_chunks(
+    *,
+    context: ReviewContext,
+    diff_budget: int,
+    classifications: list[FileClassification],
+    force_semantic_chunking: bool = False,
+) -> list[ReviewChunk]:
+    """Resolve review chunks using a budget-gated fast path.
+
+    When the full diff fits within the token budget, return a single chunk
+    without semantic splitting. Otherwise delegate to the semantic chunker.
+
+    Args:
+        context: Collected review diff context.
+        diff_budget: Maximum estimated tokens available for diff content.
+        classifications: Domain classifications for changed files.
+        force_semantic_chunking: When True, skip the single-chunk fast path.
+
+    Returns:
+        Ordered list of review chunks to process.
+    """
+    if not force_semantic_chunking and estimate_tokens(context.unified_diff) <= max(
+        diff_budget,
+        1,
+    ):
+        return [_single_chunk_from_context(context=context)]
+
+    chunking = chunk_review_context(
+        context=context,
+        max_tokens=max(diff_budget, 1),
+        classifications=classifications,
+    )
+    return chunking.chunks or [_single_chunk_from_context(context=context)]
+
+
+def _review_all_chunks(
+    *,
+    chunks: list[ReviewChunk],
+    context: ReviewContext,
+    provider: BaseAIProvider,
+    ai_config: AIConfig,
+    depth: int,
+    checklist_items: list[ChecklistItem],
+    checklist_text: str,
+    classifications: list[FileClassification],
+    lint_results: str | None,
+    budget: CostBudget,
+    progress: ReviewProgressCallback,
+    repo_root: str,
+    use_one_shot: bool,
+    max_parallel_calls: int,
+    strictness_section: str,
+) -> list[_ChunkReviewPartial]:
+    """Review all chunks sequentially or in parallel."""
+    if len(chunks) <= 1:
+        return [
+            _review_chunk_with_progress(
+                chunk_index=0,
+                chunk=chunks[0],
+                context=context,
+                provider=provider,
+                ai_config=ai_config,
+                depth=depth,
+                checklist_text=checklist_text,
+                checklist_count=len(checklist_items),
+                classifications=classifications,
+                lint_results=lint_results,
+                budget=budget,
+                progress=progress,
+                total_chunks=1,
+                repo_root=repo_root,
+                use_one_shot=use_one_shot,
+                strictness_section=strictness_section,
+            ),
+        ]
+
+    partials: list[_ChunkReviewPartial | None] = [None] * len(chunks)
+    max_workers = min(len(chunks), max_parallel_calls)
+    first_error: ReviewExecutionError | None = None
+
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        futures = {
+            executor.submit(
+                _review_chunk_with_progress,
+                chunk_index=chunk_index,
+                chunk=chunk,
+                context=context,
+                provider=provider,
+                ai_config=ai_config,
+                depth=depth,
+                checklist_text=checklist_text,
+                checklist_count=len(checklist_items),
+                classifications=classifications,
+                lint_results=lint_results,
+                budget=budget,
+                progress=StepTrackingProgress(progress),
+                total_chunks=len(chunks),
+                repo_root=repo_root,
+                use_one_shot=use_one_shot,
+                strictness_section=strictness_section,
+            ): chunk_index
+            for chunk_index, chunk in enumerate(chunks)
+        }
+
+        completed = 0
+        for future in as_completed(futures):
+            chunk_index = futures[future]
+            try:
+                partials[chunk_index] = future.result()
+                completed += 1
+            except ReviewExecutionError:
+                for pending in futures:
+                    pending.cancel()
+                raise
+            except Exception as exc:
+                if first_error is None:
+                    first_error = ReviewExecutionError(
+                        message="Review aborted before all chunks completed.",
+                        chunk_index=chunk_index,
+                        total_chunks=len(chunks),
+                        step="reviewing",
+                        completed_chunks=completed,
+                        cause_message=str(exc),
+                    )
+                for pending in futures:
+                    pending.cancel()
+                break
+
+    if first_error is not None:
+        raise first_error
+
+    return [partial for partial in partials if partial is not None]
+
+
+def _review_chunk_with_progress(
+    *,
+    chunk_index: int,
+    chunk: ReviewChunk,
+    context: ReviewContext,
+    provider: BaseAIProvider,
+    ai_config: AIConfig,
+    depth: int,
+    checklist_text: str,
+    checklist_count: int,
+    classifications: list[FileClassification],
+    lint_results: str | None,
+    budget: CostBudget,
+    progress: ReviewProgressCallback,
+    total_chunks: int,
+    repo_root: str,
+    use_one_shot: bool,
+    strictness_section: str = "",
+) -> _ChunkReviewPartial:
+    """Review one chunk with progress tracking and error wrapping."""
+    budget.check()
+    progress.on_chunk_start(chunk_index=chunk_index, files=list(chunk.files))
+    try:
+        partial = _review_chunk(
+            chunk=chunk,
+            context=context,
+            provider=provider,
+            ai_config=ai_config,
+            depth=depth,
+            checklist_text=checklist_text,
+            checklist_count=checklist_count,
+            classifications=classifications,
+            lint_results=lint_results,
+            budget=budget,
+            progress=progress,
+            chunk_index=chunk_index,
+            repo_root=repo_root,
+            use_one_shot=use_one_shot,
+            strictness_section=strictness_section,
+        )
+    except Exception as exc:
+        step_tracker = progress if isinstance(progress, StepTrackingProgress) else None
+        last_step = step_tracker.last_step if step_tracker else "reviewing"
+        progress.on_error(
+            chunk_index=chunk_index,
+            total_chunks=total_chunks,
+            step=last_step,
+            completed_chunks=chunk_index,
+            error=exc,
+        )
+        raise ReviewExecutionError(
+            message="Review aborted before all chunks completed.",
+            chunk_index=chunk_index,
+            total_chunks=total_chunks,
+            step=last_step,
+            completed_chunks=chunk_index,
+            cause_message=str(exc),
+        ) from exc
+    progress.on_chunk_done(chunk_index=chunk_index)
+    return partial
+
+
 def run_review(
     context: ReviewContext,
     *,
@@ -83,6 +297,8 @@ def run_review(
     context_window_override: int | None = None,
     lint_results: str | None = None,
     progress: ReviewProgressCallback | None = None,
+    sensitivity: ReviewSensitivityPolicy | None = None,
+    force_semantic_chunking: bool = False,
 ) -> ReviewResult:
     """Execute an AI diff review with depth-controlled passes.
 
@@ -97,12 +313,25 @@ def run_review(
         context_window_override: Optional explicit context window override.
         lint_results: Optional lint digest for ``--with-lint`` integration.
         progress: Optional progress callback for live status updates.
+        sensitivity: Sensitivity preset controlling prompts and finding filters.
+        force_semantic_chunking: When True, skip the single-chunk fast path.
 
     Returns:
         Complete review result with metadata, checklist, and findings.
+
+    Raises:
+        ValueError: If ``depth`` is outside the supported 1-3 range.
     """
     if depth < 1 or depth > 3:
         raise ValueError(f"depth must be between 1 and 3, got {depth}")
+
+    review_sensitivity = sensitivity or ReviewSensitivityPolicy(
+        strictness=ReviewStrictness.BALANCED,
+        report_migration_notes=True,
+        report_doc_drift=True,
+        report_test_gaps=True,
+    )
+    strictness_section = format_strictness_prompt_section(policy=review_sensitivity)
 
     if not context.changed_files and not context.unified_diff.strip():
         return _empty_review_result(
@@ -127,46 +356,56 @@ def run_review(
         context_window=context_window,
         prompt_overhead=prompt_overhead,
     )
-    chunking = chunk_review_context(
+    chunks = resolve_review_chunks(
         context=context,
-        max_tokens=max(diff_budget, 1),
+        diff_budget=diff_budget,
         classifications=classifications,
+        force_semantic_chunking=force_semantic_chunking,
     )
-    chunks = chunking.chunks or [
-        _single_chunk_from_context(context=context),
-    ]
 
     tracker = progress or NullReviewProgress()
     budget = CostBudget(max_cost_usd=ai_config.max_cost_usd)
-    partials: list[_ChunkReviewPartial] = []
+    use_cursor_durable = (
+        provider.name == AIProvider.CURSOR
+        and len(chunks) == 1
+        and hasattr(provider, "begin_durable_session")
+    )
+    repo_root = context.repo_root or os.getcwd()
+    use_one_shot = provider.name == AIProvider.CURSOR and len(chunks) > 1
+
+    if use_cursor_durable:
+        provider.begin_durable_session(repo_root=repo_root)
 
     tracker.on_start(total_chunks=len(chunks), depth=depth)
 
-    for chunk_index, chunk in enumerate(chunks):
-        budget.check()
-        tracker.on_chunk_start(
-            chunk_index=chunk_index,
-            files=list(chunk.files),
-        )
-        partial = _review_chunk(
-            chunk=chunk,
+    try:
+        partials = _review_all_chunks(
+            chunks=chunks,
             context=context,
             provider=provider,
             ai_config=ai_config,
             depth=depth,
+            checklist_items=checklist_items,
             checklist_text=checklist_text,
-            checklist_count=len(checklist_items),
             classifications=classifications,
             lint_results=lint_results,
             budget=budget,
             progress=tracker,
-            chunk_index=chunk_index,
+            repo_root=repo_root,
+            use_one_shot=use_one_shot,
+            max_parallel_calls=ai_config.max_parallel_calls,
+            strictness_section=strictness_section,
         )
-        partials.append(partial)
-        tracker.on_chunk_done(chunk_index=chunk_index)
+    finally:
+        if use_cursor_durable and hasattr(provider, "end_durable_session"):
+            provider.end_durable_session()
 
     merged = merge_review_results(partials=partials)
-    total_findings = len(merged.findings) if hasattr(merged, "findings") else 0
+    filtered_findings = filter_findings_by_policy(
+        findings=merged.findings,
+        policy=review_sensitivity,
+    )
+    total_findings = len(filtered_findings)
     tracker.on_complete(total_findings=total_findings)
     total_input = sum(partial.input_tokens for partial in partials)
     total_output = sum(partial.output_tokens for partial in partials)
@@ -177,6 +416,7 @@ def run_review(
         provider=provider.name,
         context_window=context_window,
         depth=depth,
+        strictness=review_sensitivity.strictness.value,
         chunks_total=len(chunks),
         chunks_current=len(chunks),
         files_reviewed=len(context.changed_files),
@@ -197,7 +437,7 @@ def run_review(
         metadata=metadata,
         summary=merged.summary,
         checklist=merged.checklist,
-        findings=merged.findings,
+        findings=filtered_findings,
     )
 
 
@@ -210,6 +450,7 @@ def build_review_prompt(
     interaction_paths: str,
     lint_results: str | None = None,
     extra_checklist: str = "",
+    strictness_section: str = "",
 ) -> tuple[str, str]:
     """Build system and user prompts for a review chunk.
 
@@ -221,6 +462,7 @@ def build_review_prompt(
         interaction_paths: Domain-triggered interaction path text.
         lint_results: Optional lint digest for prompt injection.
         extra_checklist: Additional generated checklist rows for depth 2.
+        strictness_section: Sensitivity instructions for the review pass.
 
     Returns:
         Tuple of (system_prompt, user_prompt).
@@ -249,6 +491,64 @@ def build_review_prompt(
         checklist=combined_checklist,
         diff=chunk.diff,
         lint_results_section=format_lint_results_section(digest=lint_results),
+        strictness_section=strictness_section,
+        output_schema=REVIEW_OUTPUT_SCHEMA,
+    )
+    return REVIEW_SYSTEM, user_prompt
+
+
+def build_git_native_review_prompt(
+    *,
+    chunk: ReviewChunk,
+    context: ReviewContext,
+    checklist_text: str,
+    checklist_count: int,
+    interaction_paths: str,
+    lint_results: str | None = None,
+    extra_checklist: str = "",
+    strictness_section: str = "",
+) -> tuple[str, str]:
+    """Build git-native prompts for Cursor local agent review.
+
+    Args:
+        chunk: Semantic diff chunk to review.
+        context: Full review context for PR metadata and file list.
+        checklist_text: Formatted checklist for the prompt.
+        checklist_count: Number of checklist items in the prompt.
+        interaction_paths: Domain-triggered interaction path text.
+        lint_results: Optional lint digest for prompt injection.
+        extra_checklist: Additional generated checklist rows for depth 2.
+        strictness_section: Sensitivity instructions for the review pass.
+
+    Returns:
+        Tuple of (system_prompt, user_prompt).
+    """
+    pr_title = context.pr_metadata.title if context.pr_metadata else "Local changes"
+    pr_summary = context.pr_metadata.body if context.pr_metadata else "(no PR summary)"
+    changed_files = [file for file in context.changed_files if file.path in chunk.files]
+    combined_checklist = checklist_text
+    if extra_checklist.strip():
+        combined_checklist = f"{checklist_text}\n\n{extra_checklist.strip()}"
+        checklist_count += extra_checklist.strip().count("\n") + (
+            1 if extra_checklist.strip() else 0
+        )
+
+    git_diff_paths = " ".join(shlex.quote(path) for path in chunk.files)
+    user_prompt = REVIEW_GIT_NATIVE_USER_PROMPT_TEMPLATE.format(
+        pr_title=pr_title,
+        base_ref=context.base_ref,
+        head_ref=context.head_ref,
+        pr_summary=pr_summary,
+        deferred_scope_section="",
+        external_review_section="",
+        changed_file_count=len(changed_files),
+        changed_files=format_changed_files_for_prompt(files=changed_files),
+        interaction_paths=interaction_paths,
+        checklist_count=checklist_count,
+        checklist=combined_checklist,
+        git_diff_paths=git_diff_paths,
+        lint_results_section=format_lint_results_section(digest=lint_results),
+        strictness_section=strictness_section,
         output_schema=REVIEW_OUTPUT_SCHEMA,
     )
     return REVIEW_SYSTEM, user_prompt
@@ -367,7 +667,7 @@ def merge_review_results(
         )
 
     summaries = [partial.summary for partial in partials if partial.summary.strip()]
-    summary = summaries[0] if len(summaries) == 1 else "\n\n".join(summaries[:3])
+    summary = summaries[0] if len(summaries) == 1 else " ".join(summaries[:3])
 
     return ReviewResult(
         metadata=_placeholder_metadata(),
@@ -395,6 +695,9 @@ def _review_chunk(
     budget: CostBudget,
     progress: ReviewProgressCallback | None = None,
     chunk_index: int = 0,
+    repo_root: str = "",
+    use_one_shot: bool = False,
+    strictness_section: str = "",
 ) -> _ChunkReviewPartial:
     """Run depth-controlled review for a single chunk."""
     tracker = progress or NullReviewProgress()
@@ -411,10 +714,17 @@ def _review_chunk(
             provider=provider,
             ai_config=ai_config,
             budget=budget,
+            repo_root=repo_root,
+            use_one_shot=use_one_shot,
         )
 
     tracker.on_step(chunk_index=chunk_index, step="reviewing")
-    system_prompt, user_prompt = build_review_prompt(
+    prompt_builder = (
+        build_git_native_review_prompt
+        if provider.name == AIProvider.CURSOR
+        else build_review_prompt
+    )
+    system_prompt, user_prompt = prompt_builder(
         chunk=chunk,
         context=context,
         checklist_text=checklist_text,
@@ -422,6 +732,7 @@ def _review_chunk(
         interaction_paths=interaction_paths,
         lint_results=lint_results,
         extra_checklist=extra_checklist,
+        strictness_section=strictness_section,
     )
     response = _call_provider(
         provider=provider,
@@ -429,6 +740,8 @@ def _review_chunk(
         system_prompt=system_prompt,
         user_prompt=user_prompt,
         budget=budget,
+        repo_root=repo_root,
+        use_one_shot=use_one_shot,
     )
     payload = parse_review_response(content=response.content)
     partial = _payload_to_partial(response=response, payload=payload)
@@ -441,6 +754,8 @@ def _review_chunk(
             ai_config=ai_config,
             prior_findings=partial.findings,
             budget=budget,
+            repo_root=repo_root,
+            use_one_shot=use_one_shot,
         )
         partial = replace(
             partial,
@@ -462,6 +777,8 @@ def _generate_extra_checklist(
     provider: BaseAIProvider,
     ai_config: AIConfig,
     budget: CostBudget,
+    repo_root: str = "",
+    use_one_shot: bool = False,
 ) -> str:
     """Generate depth-2 domain-specific checklist questions."""
     changed_files = format_changed_files_for_prompt(
@@ -478,6 +795,8 @@ def _generate_extra_checklist(
         user_prompt=prompt,
         budget=budget,
         max_tokens=1024,
+        repo_root=repo_root,
+        use_one_shot=use_one_shot,
     )
     try:
         payload = json.loads(strip_json_fences(content=response.content))
@@ -506,6 +825,8 @@ def _run_adversarial_pass(
     ai_config: AIConfig,
     prior_findings: tuple[ReviewFinding, ...],
     budget: CostBudget,
+    repo_root: str = "",
+    use_one_shot: bool = False,
 ) -> _ChunkReviewPartial:
     """Run depth-3 adversarial sweep for missed findings."""
     prior_json = json.dumps(
@@ -529,6 +850,8 @@ def _run_adversarial_pass(
         system_prompt=REVIEW_SYSTEM,
         user_prompt=prompt,
         budget=budget,
+        repo_root=repo_root,
+        use_one_shot=use_one_shot,
     )
     try:
         payload = json.loads(strip_json_fences(content=response.content))
@@ -563,6 +886,8 @@ def _call_provider(
     user_prompt: str,
     budget: CostBudget,
     max_tokens: int | None = None,
+    repo_root: str = "",
+    use_one_shot: bool = False,
 ) -> AIResponse:
     """Call the AI provider with retry/fallback and budget tracking."""
     tokens = max_tokens if max_tokens is not None else ai_config.max_tokens
@@ -573,6 +898,8 @@ def _call_provider(
         system=system_prompt,
         max_tokens=tokens,
         timeout=ai_config.api_timeout,
+        repo_root=repo_root or None,
+        use_one_shot=use_one_shot,
     )
     budget.record(response.cost_estimate)
     return response

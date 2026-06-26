@@ -294,4 +294,6 @@ def test_forwards_all_kwargs() -> None:
         system="sys",
         max_tokens=512,
         timeout=30.0,
+        repo_root=None,
+        use_one_shot=False,
     )

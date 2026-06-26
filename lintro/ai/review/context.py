@@ -6,6 +6,7 @@ import json
 import re
 import shutil
 import subprocess
+from dataclasses import replace
 
 from lintro.ai.review.enums.review_context_error_code import ReviewContextErrorCode
 from lintro.ai.review.exceptions import ReviewContextError
@@ -56,6 +57,9 @@ def collect_review_context(
     """
     if pr_number is None:
         _ensure_git_repo()
+        repo_root = _get_repo_root()
+    else:
+        repo_root = ""
 
     if pr_number is not None:
         context = _collect_pr_context(
@@ -79,7 +83,7 @@ def collect_review_context(
 
     validate_review_context_diff(context=context)
 
-    return context
+    return replace(context, repo_root=repo_root)
 
 
 def validate_review_context_diff(*, context: ReviewContext) -> None:
@@ -279,6 +283,16 @@ def _ensure_git_repo() -> None:
             "Not a git repository — lintro review requires a git checkout.",
             code=ReviewContextErrorCode.NOT_GIT_REPO,
         )
+
+
+def _get_repo_root() -> str:
+    """Return the absolute path to the current git repository root.
+
+    Returns:
+        Absolute repository root path.
+    """
+    result = _run_git(args=["rev-parse", "--show-toplevel"])
+    return result.stdout.strip()
 
 
 def _run_git(

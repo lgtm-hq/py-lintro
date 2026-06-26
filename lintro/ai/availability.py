@@ -17,15 +17,19 @@ _AI_AVAILABLE: bool | None = None
 
 
 def is_ai_available() -> bool:
-    """Check if at least one AI provider package is installed.
+    """Check if at least one AI provider is usable.
 
     Returns:
-        bool: True if anthropic or openai is importable.
+        bool: True if anthropic, openai, or the Cursor agent CLI is available.
     """
     global _AI_AVAILABLE
 
     if _AI_AVAILABLE is not None:
         return _AI_AVAILABLE
+
+    if is_provider_available("cursor"):
+        _AI_AVAILABLE = True
+        return True
 
     try:
         import anthropic  # noqa: F401 -- import-only availability check
@@ -83,6 +87,10 @@ def is_provider_available(provider: AIProvider | str) -> bool:
             import openai  # noqa: F401 -- import-only availability check
 
             return True
+        if provider_value == AIProvider.CURSOR.value:
+            from lintro.ai.providers.cursor import _find_agent
+
+            return _find_agent() is not None
     except ImportError:
         pass
     return False

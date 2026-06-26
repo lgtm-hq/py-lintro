@@ -552,6 +552,22 @@ wheels = [
 ]
 
 [[package]]
+name = "cursor-sdk"
+version = "0.1.8"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "httpx" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/d6/23/22aa3ef2f4eef082b145fe1d151e28f23f0d93f0f33051106584d1812e67/cursor_sdk-0.1.8.tar.gz", hash = "sha256:4e3ab986f3cbf9d98e7013a8a30299c077ff423b58c772a40be10222e1b3b898", size = 1175, upload-time = "2026-06-19T17:48:44.135Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/0f/9f/6599a3c6f115a6e4de990e892f6b74827d4151f2ebaffd44246dacabf048/cursor_sdk-0.1.8-py3-none-macosx_11_0_arm64.whl", hash = "sha256:b2cf8b54690421076fc9664f86f76fbb6b0403445a1ca540181129f32bc433e5", size = 47899658, upload-time = "2026-06-19T17:48:30.028Z" },
+    { url = "https://files.pythonhosted.org/packages/63/ea/b54c7b9d28fa0c348c161fdfbfb60a52fc07f3032827672e2c575f73e922/cursor_sdk-0.1.8-py3-none-macosx_11_0_x86_64.whl", hash = "sha256:cbde715958d79f3c71c1ee107819d9f65bd6c8134f1f10b1b7ce4cbdb87486f6", size = 49396854, upload-time = "2026-06-19T17:48:32.915Z" },
+    { url = "https://files.pythonhosted.org/packages/78/d5/01629a189d388c2858fed1381207c7b9adeedcafc59889aba230742de677/cursor_sdk-0.1.8-py3-none-manylinux2014_aarch64.manylinux_2_17_aarch64.whl", hash = "sha256:2d2b95148c19b52a5f30ba5f0632f2b0ed94fc9cd7c4f9e86472eb90939d2b3e", size = 56466607, upload-time = "2026-06-19T17:48:35.925Z" },
+    { url = "https://files.pythonhosted.org/packages/e3/03/3c3d336d4397b094630a43482e18a22ab66ffb142fb29c6392af0c060844/cursor_sdk-0.1.8-py3-none-manylinux2014_x86_64.manylinux_2_17_x86_64.whl", hash = "sha256:df9d91aa17418f8a6f9dbdfd074e00b867c2491addb281c2dd3720cfce4d972a", size = 57115365, upload-time = "2026-06-19T17:48:39.075Z" },
+    { url = "https://files.pythonhosted.org/packages/5d/18/eaaeba4558653e3d743b5736c726e749d935ba5c97b68c4471194427f0d2/cursor_sdk-0.1.8-py3-none-win_amd64.whl", hash = "sha256:b33be04b2106ebc5697413d33ddca22a317a7efc79227a8eb09065fea1e0f031", size = 43888685, upload-time = "2026-06-19T17:48:41.95Z" },
+]
+
+[[package]]
 name = "defusedxml"
 version = "0.7.1"
 source = { registry = "https://pypi.org/simple" }
@@ -1045,6 +1061,7 @@ dependencies = [
     { name = "packaging" },
     { name = "pathspec" },
     { name = "pydantic" },
+    { name = "pyyaml" },
     { name = "rich" },
     { name = "tabulate" },
 ]
@@ -1052,6 +1069,7 @@ dependencies = [
 [package.optional-dependencies]
 ai = [
     { name = "anthropic" },
+    { name = "cursor-sdk" },
     { name = "openai" },
 ]
 dev = [
@@ -1128,6 +1146,7 @@ requires-dist = [
     { name = "black", marker = "extra == 'full'", specifier = ">=26.3.1" },
     { name = "click", specifier = ">=8.1.8" },
     { name = "coverage-badge", marker = "extra == 'dev'", specifier = ">=1.1.2" },
+    { name = "cursor-sdk", marker = "extra == 'ai'", specifier = ">=0.1.8" },
     { name = "defusedxml", specifier = ">=0.7.1" },
     { name = "httpx", specifier = ">=0.28.1" },
     { name = "httpx", marker = "extra == 'dev'", specifier = ">=0.28.1" },
@@ -1148,6 +1167,7 @@ requires-dist = [
     { name = "pytest-sugar", marker = "extra == 'dev'", specifier = ">=1.1.1" },
     { name = "pytest-xdist", marker = "extra == 'dev'", specifier = ">=3.8.0" },
     { name = "pytest-xdist", marker = "extra == 'test'", specifier = ">=3.8.0" },
+    { name = "pyyaml", specifier = ">=6.0" },
     { name = "rich", specifier = ">=14.2.0" },
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.15.9" },
     { name = "ruff", marker = "extra == 'full'", specifier = ">=0.15.9" },

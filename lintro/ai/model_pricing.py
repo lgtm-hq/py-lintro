@@ -29,6 +29,8 @@ MODEL_CONTEXT_WINDOWS: dict[str, int] = {
     "gpt-4-turbo": 128_000,
     "o1": 200_000,
     "auto": 200_000,
+    "composer-2.5-fast": 200_000,
+    "composer-2.5": 200_000,
     "o1-mini": 128_000,
 }
 
@@ -69,6 +71,10 @@ def calculate_available_diff_tokens(
 
     Returns:
         Remaining token budget for diff content (minimum zero).
+
+    Raises:
+        ValueError: If ``context_window`` is not positive or ``prompt_overhead``
+            is negative.
     """
     if context_window <= 0:
         raise ValueError(f"context_window must be positive, got {context_window}")

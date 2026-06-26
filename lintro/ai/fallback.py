@@ -145,6 +145,8 @@ def complete_with_fallback(
     system: str | None = None,
     max_tokens: int = 1024,
     timeout: float = 60.0,
+    repo_root: str | None = None,
+    use_one_shot: bool = False,
 ) -> AIResponse:
     """Call ``provider.complete()`` with automatic model fallback.
 
@@ -165,6 +167,8 @@ def complete_with_fallback(
         system: Optional system prompt.
         max_tokens: Maximum tokens to generate.
         timeout: Request timeout in seconds.
+        repo_root: Git repository root forwarded to the provider.
+        use_one_shot: When True, skip durable session resume on the provider.
 
     Returns:
         The first successful ``AIResponse``.
@@ -181,6 +185,8 @@ def complete_with_fallback(
             system=system,
             max_tokens=max_tokens,
             timeout=timeout,
+            repo_root=repo_root,
+            use_one_shot=use_one_shot,
         )
 
     return _with_fallback(

@@ -6,8 +6,10 @@ import os
 
 import click
 from loguru import logger
+from rich.console import Console
 
 from lintro.ai.availability import require_ai
+from lintro.ai.exceptions import AIError
 from lintro.ai.providers import get_provider
 from lintro.ai.review import (
     classify_changed_files,
@@ -16,9 +18,12 @@ from lintro.ai.review import (
     get_all_checklist_items,
     select_checklist_items,
 )
+from lintro.ai.review.enums.review_strictness import ReviewStrictness
+from lintro.ai.review.error_display import render_review_error
 from lintro.ai.review.exceptions import ReviewContextError
 from lintro.ai.review.orchestrator import run_review
 from lintro.ai.review.output import render_review_output
+from lintro.ai.review.sensitivity import resolve_sensitivity_policy
 from lintro.config.config_loader import get_config
 
 
@@ -48,9 +53,31 @@ from lintro.config.config_loader import get_config
 @click.option(
     "--depth",
     type=click.IntRange(1, 3),
-    default=1,
-    show_default=True,
-    help="Review depth (1=checklist, 2=+generated questions, 3=+adversarial).",
+    default=None,
+    help=(
+        "Review depth (1=checklist, 2=+generated questions, 3=+adversarial). "
+        "Defaults to review.depth in .lintro-config.yaml."
+    ),
+)
+@click.option(
+    "--strictness",
+    type=click.Choice(
+        [level.value for level in ReviewStrictness],
+        case_sensitive=False,
+    ),
+    default=None,
+    help=(
+        "Review sensitivity preset: focused (merge blockers), balanced "
+        "(default), thorough (hunt doc/migration nits in one pass)."
+    ),
+)
+@click.option(
+    "--semantic-chunks",
+    is_flag=True,
+    help=(
+        "Split the diff into semantic chunks (slower; one agent call per chunk). "
+        "Also enabled when review.force_semantic_chunking is true in config."
+    ),
 )
 @click.option(
     "--post",
@@ -88,7 +115,9 @@ def review_command(
     uncommitted: bool,
     pr: int | None,
     repo: str | None,
-    depth: int,
+    depth: int | None,
+    strictness: str | None,
+    semantic_chunks: bool,
     post: bool,
     output_format: str,
     with_lint: bool,
@@ -163,25 +192,45 @@ def review_command(
             )
 
     provider = get_provider(lintro_config.ai)
+    effective_depth = depth if depth is not None else lintro_config.review.depth
+    effective_strictness = ReviewStrictness(
+        (strictness or lintro_config.review.strictness.value).lower(),
+    )
+    sensitivity = resolve_sensitivity_policy(
+        strictness=effective_strictness,
+        overrides=lintro_config.review.sensitivity,
+    )
+    force_semantic_chunking = (
+        semantic_chunks or lintro_config.review.force_semantic_chunking
+    )
 
     progress_tracker = None
+    console = Console()
     if output_format == "terminal":
         from lintro.ai.review.progress import RichReviewProgress
 
-        progress_tracker = RichReviewProgress()
+        progress_tracker = RichReviewProgress(console=console)
 
-    result = run_review(
-        context,
-        provider=provider,
-        ai_config=lintro_config.ai,
-        depth=depth,
-        checklist_items=selected_items,
-        checklist_text=checklist_text,
-        classifications=classifications,
-        context_window_override=context_window,
-        lint_results=lint_digest,
-        progress=progress_tracker,
-    )
+    try:
+        result = run_review(
+            context,
+            provider=provider,
+            ai_config=lintro_config.ai,
+            depth=effective_depth,
+            checklist_items=selected_items,
+            checklist_text=checklist_text,
+            classifications=classifications,
+            context_window_override=context_window,
+            lint_results=lint_digest,
+            progress=progress_tracker,
+            sensitivity=sensitivity,
+            force_semantic_chunking=force_semantic_chunking,
+        )
+    except (AIError, ValueError) as exc:
+        if output_format == "json":
+            raise click.ClickException(str(exc)) from exc
+        render_review_error(error=exc, console=console)
+        raise SystemExit(1) from exc
 
     output = render_review_output(result=result, output_format=output_format)
     if output is not None:

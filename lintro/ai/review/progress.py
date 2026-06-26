@@ -7,7 +7,7 @@ per-step status updates.
 
 from __future__ import annotations
 
-from typing import Protocol
+from typing import Any, Protocol
 
 from rich.console import Console
 from rich.progress import (
@@ -73,24 +73,55 @@ class ReviewProgressCallback(Protocol):
         """
         ...
 
+    def on_error(
+        self,
+        *,
+        chunk_index: int | None = None,
+        total_chunks: int | None = None,
+        step: str | None = None,
+        completed_chunks: int = 0,
+        error: Exception | None = None,
+    ) -> None:
+        """Called when the review aborts due to an error.
+
+        Args:
+            chunk_index: Zero-based index of the failing chunk.
+            total_chunks: Total chunks planned.
+            step: Sub-step active when the error occurred.
+            completed_chunks: Chunks successfully reviewed before failure.
+            error: The underlying exception.
+        """
+        ...
+
 
 class NullReviewProgress:
     """No-op progress tracker (silent)."""
 
     def on_start(self, *, total_chunks: int, depth: int) -> None:
-        pass
+        """Ignore review start notification."""
 
     def on_chunk_start(self, *, chunk_index: int, files: list[str]) -> None:
-        pass
+        """Ignore chunk start notification."""
 
     def on_step(self, *, chunk_index: int, step: str) -> None:
-        pass
+        """Ignore sub-step notification."""
 
     def on_chunk_done(self, *, chunk_index: int) -> None:
-        pass
+        """Ignore chunk completion notification."""
 
     def on_complete(self, *, total_findings: int) -> None:
-        pass
+        """Ignore review completion notification."""
+
+    def on_error(
+        self,
+        *,
+        chunk_index: int | None = None,
+        total_chunks: int | None = None,
+        step: str | None = None,
+        completed_chunks: int = 0,
+        error: Exception | None = None,
+    ) -> None:
+        """Ignore review error notification."""
 
 
 class RichReviewProgress:
@@ -104,6 +135,11 @@ class RichReviewProgress:
     """
 
     def __init__(self, *, console: Console | None = None) -> None:
+        """Initialize Rich progress output.
+
+        Args:
+            console: Optional Rich console (stdout).
+        """
         self._console = console or Console()
         self._progress: Progress | None = None
         self._task_id: TaskID | None = None
@@ -111,6 +147,7 @@ class RichReviewProgress:
         self._depth = 1
 
     def on_start(self, *, total_chunks: int, depth: int) -> None:
+        """Start the live progress bar for a review run."""
         passes = _passes_per_chunk(depth)
         depth_label = {1: "standard", 2: "thorough", 3: "deep"}.get(depth, "")
         self._total_chunks = total_chunks
@@ -127,12 +164,16 @@ class RichReviewProgress:
             transient=True,
         )
         self._task_id = self._progress.add_task(
-            f"Reviewing ({depth_label}, {passes} pass{'es' if passes > 1 else ''}/chunk)",
+            (
+                f"Reviewing ({depth_label}, "
+                f"{passes} pass{'es' if passes > 1 else ''}/chunk)"
+            ),
             total=total_chunks,
         )
         self._progress.start()
 
     def on_chunk_start(self, *, chunk_index: int, files: list[str]) -> None:
+        """Update the progress bar with the active chunk label."""
         if self._progress is None or self._task_id is None:
             return
         file_count = len(files)
@@ -143,6 +184,7 @@ class RichReviewProgress:
         )
 
     def on_step(self, *, chunk_index: int, step: str) -> None:
+        """Update the progress bar with the active sub-step."""
         if self._progress is None or self._task_id is None:
             return
         self._progress.update(
@@ -151,18 +193,35 @@ class RichReviewProgress:
         )
 
     def on_chunk_done(self, *, chunk_index: int) -> None:
+        """Advance the progress bar after a chunk completes."""
         if self._progress is None or self._task_id is None:
             return
         self._progress.update(self._task_id, advance=1)
 
     def on_complete(self, *, total_findings: int) -> None:
-        if self._progress is not None:
-            self._progress.stop()
-            self._progress = None
+        """Stop the progress bar and print the completion summary."""
+        self._stop_progress()
         noun = "finding" if total_findings == 1 else "findings"
         self._console.print(
             f"[bold green]✓[/bold green] Review complete — " f"{total_findings} {noun}",
         )
+
+    def on_error(
+        self,
+        *,
+        chunk_index: int | None = None,
+        total_chunks: int | None = None,
+        step: str | None = None,
+        completed_chunks: int = 0,
+        error: Exception | None = None,
+    ) -> None:
+        """Stop the progress bar when a review aborts."""
+        self._stop_progress()
+
+    def _stop_progress(self) -> None:
+        if self._progress is not None:
+            self._progress.stop()
+            self._progress = None
 
 
 def _passes_per_chunk(depth: int) -> int:
@@ -172,3 +231,25 @@ def _passes_per_chunk(depth: int) -> int:
     if depth >= 2:
         return 2  # questions + review
     return 1  # review only
+
+
+class StepTrackingProgress:
+    """Wraps a progress tracker and records the most recent step name."""
+
+    def __init__(self, inner: ReviewProgressCallback) -> None:
+        """Wrap a progress callback and track the latest step name.
+
+        Args:
+            inner: Progress callback to delegate lifecycle events to.
+        """
+        self._inner = inner
+        self.last_step = "reviewing"
+
+    def __getattr__(self, name: str) -> Any:
+        """Delegate unknown attributes to the wrapped callback."""
+        return getattr(self._inner, name)
+
+    def on_step(self, *, chunk_index: int, step: str) -> None:
+        """Record the step name and forward the event to the inner callback."""
+        self.last_step = step
+        self._inner.on_step(chunk_index=chunk_index, step=step)

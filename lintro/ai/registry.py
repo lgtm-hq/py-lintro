@@ -117,6 +117,7 @@ PROVIDERS = AIProviderRegistry(
         default_api_key_env="CURSOR_API_KEY",
         models={
             "auto": ModelPricing(0.0, 0.0),
+            "gpt-5.3-codex-fast": ModelPricing(0.0, 0.0),
         },
     ),
 )
