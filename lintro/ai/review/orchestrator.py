@@ -97,6 +97,9 @@ def run_review(
 
     Returns:
         Complete review result with metadata, checklist, and findings.
+
+    Raises:
+        ValueError: If ``depth`` is outside the allowed range 1-3.
     """
     if depth < 1 or depth > 3:
         raise ValueError(f"depth must be between 1 and 3, got {depth}")
