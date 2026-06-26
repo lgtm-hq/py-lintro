@@ -194,7 +194,7 @@ def test_chunker_raises_when_diff_unparseable() -> None:
     )
     classifications = classify_changed_files(files=context.changed_files)
 
-    with pytest.raises(ReviewContextError, match="No parseable diff sections"):
+    with pytest.raises(ReviewContextError, match="missing diff sections"):
         chunk_review_context(
             context=context,
             max_tokens=10_000,

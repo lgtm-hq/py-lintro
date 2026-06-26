@@ -26,8 +26,23 @@ def test_release_workflows_use_paired_egress_presets() -> None:
     assert_that(auto_tag["jobs"]["auto-tag"]["with"]["egress-preset"]).is_equal_to(
         "github-tooling",
     )
+    assert_that(auto_tag["jobs"]["auto-tag"]["permissions"]).is_equal_to(
+        {
+            "actions": "read",
+            "contents": "write",
+            "issues": "write",
+        },
+    )
     assert_that(version_pr["jobs"]["version-pr"]["with"]["egress-preset"]).is_equal_to(
         "pypi",
+    )
+    assert_that(version_pr["jobs"]["version-pr"]["permissions"]).is_equal_to(
+        {
+            "actions": "read",
+            "contents": "write",
+            "issues": "write",
+            "pull-requests": "write",
+        },
     )
 
 

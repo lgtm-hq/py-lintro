@@ -20,6 +20,15 @@ _NAME_STATUS_LINE = re.compile(
 _NUMSTAT_LINE = re.compile(r"^(\d+|-)\s+(\d+|-)\s+(.+)$")
 
 
+def _numstat_path_keys(*, path: str) -> tuple[str, ...]:
+    """Return lookup keys for a ``git diff --numstat`` path field."""
+    stripped = path.strip()
+    if " => " in stripped:
+        old_path, new_path = (part.strip() for part in stripped.split(" => ", 1))
+        return (new_path, stripped, old_path)
+    return (stripped,)
+
+
 def collect_review_context(
     *,
     base: str | None = None,
@@ -136,8 +145,8 @@ def resolve_default_base_branch() -> str:
     )
     if result.returncode == 0:
         ref = result.stdout.strip()
-        if ref.startswith("refs/remotes/origin/"):
-            return ref.removeprefix("refs/remotes/origin/")
+        if ref.startswith("refs/remotes/"):
+            return ref.removeprefix("refs/remotes/")
 
     for candidate in ("main", "master", "develop"):
         for ref in (candidate, f"origin/{candidate}"):
@@ -177,7 +186,8 @@ def parse_changed_files(*, name_status: str, numstat: str) -> list[ChangedFile]:
         additions_raw, deletions_raw, path = match.groups()
         additions = 0 if additions_raw == "-" else int(additions_raw)
         deletions = 0 if deletions_raw == "-" else int(deletions_raw)
-        stats[path] = (additions, deletions)
+        for stat_path in _numstat_path_keys(path=path):
+            stats[stat_path] = (additions, deletions)
 
     changed_files: list[ChangedFile] = []
     unparsed_name_status: list[str] = []
@@ -693,7 +703,10 @@ def _normalize_path_prefix(*, path: str) -> str:
     Returns:
         Normalized POSIX-style prefix without leading or trailing slashes.
     """
-    return path.replace("\\", "/").strip("/")
+    normalized = path.replace("\\", "/").strip()
+    if normalized in {".", "./"}:
+        return ""
+    return normalized.strip("/")
 
 
 def _path_matches_any_prefix(*, path: str, prefixes: list[str]) -> bool:
@@ -708,6 +721,12 @@ def _path_matches_any_prefix(*, path: str, prefixes: list[str]) -> bool:
     """
     normalized_path = path.replace("\\", "/").strip("/")
     for prefix in prefixes:
-        if normalized_path == prefix or normalized_path.startswith(f"{prefix}/"):
+        if (
+            prefix == ""
+            or normalized_path == prefix
+            or normalized_path.startswith(
+                f"{prefix}/",
+            )
+        ):
             return True
     return False

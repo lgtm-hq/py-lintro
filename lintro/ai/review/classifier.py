@@ -10,7 +10,7 @@ from lintro.ai.review.models.file_classification import FileClassification
 from lintro.ai.review.path_utils import is_test_path
 
 _DOMAIN_GLOBS: dict[FileDomain, tuple[str, ...]] = {
-    FileDomain.SHELL: ("**/*.sh", "**/*.bash"),
+    FileDomain.SHELL: ("**/*.sh", "**/*.bash", "**/*.bats"),
     FileDomain.CI: (".github/workflows/**", ".github/actions/**"),
     FileDomain.PYTHON: ("**/*.py",),
     FileDomain.RUST: ("**/*.rs",),
@@ -98,7 +98,10 @@ def _matches_security(
         return False
 
     path_lower = path.lower()
-    return any(keyword in path_lower for keyword in _SECURITY_KEYWORDS)
+    segments = {part.lower() for part in PurePosixPath(path).parts}
+    return any(keyword in segments for keyword in _SECURITY_KEYWORDS) or any(
+        f"/{keyword}/" in f"/{path_lower}/" for keyword in _SECURITY_KEYWORDS
+    )
 
 
 def _matches_domain_pattern(

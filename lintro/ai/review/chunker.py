@@ -59,6 +59,16 @@ def chunk_review_context(
         )
 
     per_file_diffs = split_unified_diff_by_file(unified_diff=context.unified_diff)
+    missing_diffs = [
+        changed_file.path
+        for changed_file in context.changed_files
+        if changed_file.path not in per_file_diffs
+    ]
+    if missing_diffs:
+        raise ReviewContextError(
+            "Changed files missing diff sections: " f"{', '.join(missing_diffs)}.",
+            code=ReviewContextErrorCode.DIFF_DESYNC,
+        )
     if not per_file_diffs:
         missing = [file.path for file in context.changed_files]
         if missing:
@@ -185,6 +195,7 @@ def _group_workflow_script_test(
     ]
     groups: list[list[str]] = []
     assigned_scripts: set[str] = set()
+    assigned_tests: set[str] = set()
 
     for workflow in workflows:
         group = [workflow]
@@ -200,7 +211,7 @@ def _group_workflow_script_test(
                 group.append(path)
 
         for path in file_paths:
-            if path in group:
+            if path in group or path in assigned_tests:
                 continue
             script_sources = [
                 member
@@ -209,6 +220,7 @@ def _group_workflow_script_test(
             ]
             if script_sources and _is_test_for_any(path=path, sources=script_sources):
                 group.append(path)
+                assigned_tests.add(path)
 
         if len(group) > 1:
             groups.append(sorted(set(group)))
@@ -238,7 +250,11 @@ def _group_source_test_pairs(
             for candidate in file_paths
             if candidate not in assigned
             and candidate not in assigned_tests
-            and matches_test_for_source(test_path=candidate, source_stem=stem)
+            and matches_test_for_source(
+                test_path=candidate,
+                source_stem=stem,
+                source_path=path,
+            )
         ]
         if related_tests:
             groups.append(sorted({path, *related_tests}))
@@ -409,6 +425,12 @@ def _build_group_chunks(
             chunk_id += 1
             included = []
             included_diff = ""
+
+        solo = _combine_diffs(files=[path], per_file_diffs=per_file_diffs)
+        if estimate_tokens(solo) <= max_tokens:
+            included = [path]
+            included_diff = solo
+            continue
 
         remaining_budget = max_tokens
         truncated_diff, was_truncated = truncate_to_budget(
