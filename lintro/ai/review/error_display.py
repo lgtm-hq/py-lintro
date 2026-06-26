@@ -21,7 +21,11 @@ if TYPE_CHECKING:
 __all__ = ["render_review_error"]
 
 
-def render_review_error(*, error: AIError, console: Console | None = None) -> None:
+def render_review_error(
+    *,
+    error: AIError | ValueError,
+    console: Console | None = None,
+) -> None:
     """Render a review failure without a Python traceback.
 
     Args:
@@ -48,7 +52,7 @@ def render_review_error(*, error: AIError, console: Console | None = None) -> No
     )
 
 
-def _format_error(error: AIError) -> tuple[str, str, list[str]]:
+def _format_error(error: AIError | ValueError) -> tuple[str, str, list[str]]:
     """Build title, body, and suggestion list for an error."""
     if isinstance(error, ReviewExecutionError):
         return _format_execution_error(error)
@@ -66,7 +70,10 @@ def _format_error(error: AIError) -> tuple[str, str, list[str]]:
             "authentication",
             str(error),
             [
-                "For Cursor: set CURSOR_API_KEY or run `agent login` (requires agent CLI on PATH)",
+                (
+                    "For Cursor: set CURSOR_API_KEY or run `agent login` "
+                    "(requires agent CLI on PATH)"
+                ),
                 "For Anthropic/OpenAI: set the provider API key env var",
             ],
         )
@@ -130,11 +137,12 @@ def _provider_hints(message: str) -> list[str]:
     hints: list[str] = []
     if "cursor" in lowered and ("login" in lowered or "authentication" in lowered):
         hints.append(
-            "Set CURSOR_API_KEY (user or service-account key from Cursor dashboard)"
+            "Set CURSOR_API_KEY (user or service-account key from Cursor dashboard)",
         )
     if "cursor-sdk" in lowered or "cursor sdk" in lowered:
         hints.append(
-            "Ensure the agent CLI is installed: curl https://cursor.com/install -fsS | bash"
+            "Ensure the agent CLI is installed: "
+            "curl https://cursor.com/install -fsS | bash",
         )
     if "not found" in lowered and "agent" in lowered:
         hints.append(

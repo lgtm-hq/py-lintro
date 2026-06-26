@@ -139,6 +139,13 @@ class SubprocessMock:
 
         key = tuple(normalized_args)
         if not self._queues[key]:
+            if key == ("git", "rev-parse", "--show-toplevel"):
+                return CompletedProcess(
+                    args=list(args),
+                    returncode=0,
+                    stdout="/repo/root\n",
+                    stderr="",
+                )
             msg = f"unexpected subprocess call: {args!r}"
             raise AssertionError(msg)
         return self._queues[key].pop(0)

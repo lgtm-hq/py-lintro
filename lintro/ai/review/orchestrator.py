@@ -5,8 +5,9 @@ from __future__ import annotations
 import json
 import os
 import re
-from contextlib import suppress
+import shlex
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from contextlib import suppress
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
@@ -31,9 +32,9 @@ from lintro.ai.prompts.review import (
 )
 from lintro.ai.registry import AIProvider
 from lintro.ai.review.chunker import chunk_review_context
-from lintro.ai.review.group_labels import REL_DIRECTORY_PREFIX, REL_SINGLE_FILE
 from lintro.ai.review.enums.review_strictness import ReviewStrictness
 from lintro.ai.review.exceptions import ReviewExecutionError
+from lintro.ai.review.group_labels import REL_DIRECTORY_PREFIX, REL_SINGLE_FILE
 from lintro.ai.review.models.checklist_answer import ChecklistAnswer
 from lintro.ai.review.models.review_chunk import ReviewChunk
 from lintro.ai.review.models.review_finding import ReviewFinding
@@ -112,7 +113,8 @@ def resolve_review_chunks(
         Ordered list of review chunks to process.
     """
     if not force_semantic_chunking and estimate_tokens(context.unified_diff) <= max(
-        diff_budget, 1
+        diff_budget,
+        1,
     ):
         return [_single_chunk_from_context(context=context)]
 

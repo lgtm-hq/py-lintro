@@ -12,6 +12,7 @@ from assertpy import assert_that
 from lintro.ai.exceptions import (
     AIAuthenticationError,
     AINotAvailableError,
+    AIProviderError,
 )
 from lintro.ai.providers.cursor import CursorProvider, _find_agent
 from lintro.ai.registry import AIProvider
@@ -52,7 +53,7 @@ def _cli_json(
                 "inputTokens": input_tokens,
                 "outputTokens": output_tokens,
             },
-        }
+        },
     )
 
 

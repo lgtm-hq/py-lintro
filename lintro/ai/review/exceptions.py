@@ -62,4 +62,5 @@ class ReviewExecutionError(AIError):
     cause_message: str = ""
 
     def __str__(self) -> str:
+        """Return the human-readable failure message."""
         return self.message

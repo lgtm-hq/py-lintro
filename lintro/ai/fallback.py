@@ -167,6 +167,8 @@ def complete_with_fallback(
         system: Optional system prompt.
         max_tokens: Maximum tokens to generate.
         timeout: Request timeout in seconds.
+        repo_root: Git repository root forwarded to the provider.
+        use_one_shot: When True, skip durable session resume on the provider.
 
     Returns:
         The first successful ``AIResponse``.

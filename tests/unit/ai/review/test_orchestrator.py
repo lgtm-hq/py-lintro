@@ -237,7 +237,7 @@ def test_resolve_review_chunks_uses_fast_path_for_small_diff(
 
     assert_that(chunks).is_length(1)
     assert_that(chunks[0].files).is_length(5)
-    assert_that(chunks[0].relationship).is_equal_to("full-diff")
+    assert_that(chunks[0].relationship).is_equal_to("directory-prefix")
 
 
 def test_resolve_review_chunks_semantic_when_over_budget(

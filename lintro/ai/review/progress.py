@@ -128,7 +128,7 @@ class NullReviewProgress:
         completed_chunks: int = 0,
         error: Exception | None = None,
     ) -> None:
-        pass
+        """Ignore review error notification."""
 
 
 class RichReviewProgress:
@@ -224,6 +224,7 @@ class RichReviewProgress:
         completed_chunks: int = 0,
         error: Exception | None = None,
     ) -> None:
+        """Stop the bar when a chunk review fails."""
         self._stop_progress()
 
     def _stop_progress(self) -> None:
@@ -246,12 +247,15 @@ class StepTrackingProgress:
     """Wraps a progress tracker and records the most recent step name."""
 
     def __init__(self, inner: ReviewProgressCallback) -> None:
+        """Wrap ``inner`` and track the latest step name."""
         self._inner = inner
         self.last_step = "reviewing"
 
     def __getattr__(self, name: str):  # noqa: ANN001
+        """Delegate unknown attributes to the wrapped tracker."""
         return getattr(self._inner, name)
 
     def on_step(self, *, chunk_index: int, step: str) -> None:
+        """Record the step before forwarding to the wrapped tracker."""
         self.last_step = step
         self._inner.on_step(chunk_index=chunk_index, step=step)

@@ -45,6 +45,8 @@ class _SuccessProvider(BaseAIProvider):
         system: str | None = None,
         max_tokens: int = DEFAULT_PER_CALL_MAX_TOKENS,
         timeout: float = DEFAULT_TIMEOUT,
+        repo_root: str | None = None,
+        use_one_shot: bool = False,
     ) -> AIResponse:
         return _make_response(content=f"from-{self._name}", provider=self._name)
 
@@ -85,6 +87,8 @@ class _FailingProvider(BaseAIProvider):
         system: str | None = None,
         max_tokens: int = DEFAULT_PER_CALL_MAX_TOKENS,
         timeout: float = DEFAULT_TIMEOUT,
+        repo_root: str | None = None,
+        use_one_shot: bool = False,
     ) -> AIResponse:
         raise AIProviderError("provider down")
 
