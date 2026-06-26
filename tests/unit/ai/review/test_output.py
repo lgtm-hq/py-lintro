@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from assertpy import assert_that
 
+from lintro.ai.review.models.review_result import ReviewResult
 from lintro.ai.review.output import (
     render_review_json,
     review_result_to_dict,
@@ -11,7 +12,7 @@ from lintro.ai.review.output import (
 
 
 def test_review_result_to_dict_includes_metadata_fields(
-    sample_review_result,
+    sample_review_result: ReviewResult,
 ) -> None:
     """JSON dict includes all metadata fields."""
     payload = review_result_to_dict(result=sample_review_result)
@@ -24,7 +25,9 @@ def test_review_result_to_dict_includes_metadata_fields(
     assert_that(payload["findings"]).is_length(2)
 
 
-def test_render_review_json_is_valid_json(sample_review_result) -> None:
+def test_render_review_json_is_valid_json(
+    sample_review_result: ReviewResult,
+) -> None:
     """Rendered JSON can be parsed back into a dictionary."""
     import json
 
