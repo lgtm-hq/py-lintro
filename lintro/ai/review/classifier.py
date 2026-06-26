@@ -54,7 +54,7 @@ def classify_changed_files(files: list[ChangedFile]) -> list[FileClassification]
     ]
 
 
-def _classify_path(*, path: str) -> list[str]:
+def _classify_path(*, path: str) -> list[FileDomain]:
     """Return domain labels for a single path.
 
     Args:
@@ -77,7 +77,7 @@ def _classify_path(*, path: str) -> list[str]:
     if _matches_security(path=normalized, matched_domains=matched_domains):
         matched_domains.append(FileDomain.SECURITY)
 
-    return [domain.value for domain in matched_domains]
+    return matched_domains
 
 
 def _matches_security(
@@ -108,14 +108,29 @@ def _matches_domain_pattern(
 ) -> bool:
     """Return True when a path matches any domain glob pattern.
 
-    ``PurePosixPath.match`` does not match repository-root files for patterns
-    like ``**/*.py``; root-level filenames are checked explicitly.
+    Supports recursive ``**`` segments for nested repository paths.
     """
+    path_str = pure_path.as_posix()
     for pattern in patterns:
-        if pure_path.match(pattern):
+        if _path_matches_glob(path=path_str, pattern=pattern):
             return True
-        if pattern.startswith("**/") and len(pure_path.parts) == 1:
-            suffix = pattern.removeprefix("**/")
-            if suffix.startswith("*.") and pure_path.name.endswith(suffix[1:]):
-                return True
     return False
+
+
+def _path_matches_glob(*, path: str, pattern: str) -> bool:
+    """Match a repository path against a glob pattern."""
+    if "**" not in pattern:
+        return PurePosixPath(path).match(pattern)
+
+    if pattern.startswith("**/") and pattern.endswith("/**") and len(pattern) > 6:
+        middle = pattern[3:-3]
+        return f"/{middle}/" in f"/{path}/"
+
+    if pattern.startswith("**/") and pattern[3:].startswith("*."):
+        return PurePosixPath(path).match(pattern[3:])
+
+    if pattern.endswith("/**"):
+        prefix = pattern[:-3]
+        return path == prefix or path.startswith(f"{prefix}/")
+
+    return PurePosixPath(path).match(pattern)

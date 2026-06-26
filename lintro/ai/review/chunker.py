@@ -25,7 +25,7 @@ from lintro.ai.review.models.review_context import ReviewContext
 from lintro.ai.review.path_utils import is_test_path, matches_test_for_source
 from lintro.ai.token_budget import estimate_tokens, truncate_to_budget
 
-_LOW_PRIORITY_DOMAINS = frozenset({FileDomain.TEST.value, FileDomain.DOCS.value})
+_LOW_PRIORITY_DOMAINS = frozenset({FileDomain.TEST, FileDomain.DOCS})
 _REPETITIVE_FILE_THRESHOLD = 5
 _REPETITIVE_SAMPLE_COUNT = 3
 
@@ -486,9 +486,9 @@ def _file_priority(*, classification: FileClassification | None) -> int:
         return 1
 
     domains = set(classification.domains)
-    if FileDomain.SECURITY.value in domains:
+    if FileDomain.SECURITY in domains:
         return 5
-    if FileDomain.TEST.value in domains:
+    if FileDomain.TEST in domains:
         return 1
     if domains - _LOW_PRIORITY_DOMAINS:
         return 3
@@ -510,13 +510,14 @@ def _hunk_signature(diff_text: str) -> str:
     hunk_lines: list[str] = []
     for line in diff_text.splitlines():
         if line.startswith("@@"):
-            hunk_lines.append(line)
             continue
         if line.startswith(("+", "-", " ")):
             if line.startswith(("+++", "---")):
                 continue
             hunk_lines.append(line)
     normalized = "\n".join(hunk_lines)
+    if not normalized:
+        normalized = diff_text
     return hashlib.sha256(normalized.encode("utf-8")).hexdigest()
 
 

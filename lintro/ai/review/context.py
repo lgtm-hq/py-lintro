@@ -15,7 +15,7 @@ from lintro.ai.review.models.review_context import ReviewContext
 
 _DIFF_FILE_HEADER = re.compile(r"^diff --git a/(.+?) b/(.+?)$", re.MULTILINE)
 _NAME_STATUS_LINE = re.compile(
-    r"^(?P<status>[A-Z][A-Z0-9]*)\t(?P<path>[^\t]+)(?:\t(?P<old_path>[^\t]+))?$",
+    r"^(?P<status>[A-Z][A-Z0-9]*)\t(?P<path>[^\t]+)(?:\t(?P<new_path>[^\t]+))?$",
 )
 _NUMSTAT_LINE = re.compile(r"^(\d+|-)\s+(\d+|-)\s+(.+)$")
 
@@ -140,9 +140,10 @@ def resolve_default_base_branch() -> str:
             return ref.removeprefix("refs/remotes/origin/")
 
     for candidate in ("main", "master", "develop"):
-        verify = _run_git(args=["rev-parse", "--verify", candidate], check=False)
-        if verify.returncode == 0:
-            return candidate
+        for ref in (candidate, f"origin/{candidate}"):
+            verify = _run_git(args=["rev-parse", "--verify", ref], check=False)
+            if verify.returncode == 0:
+                return ref
 
     raise ReviewContextError(
         "Could not determine default branch. Pass --base explicitly.",
@@ -159,6 +160,9 @@ def parse_changed_files(*, name_status: str, numstat: str) -> list[ChangedFile]:
 
     Returns:
         Parsed changed file entries.
+
+    Raises:
+        ReviewContextError: When git diff metadata lines cannot be parsed.
     """
     stats: dict[str, tuple[int, int]] = {}
     unparsed_numstat: list[str] = []
@@ -187,11 +191,11 @@ def parse_changed_files(*, name_status: str, numstat: str) -> list[ChangedFile]:
             continue
         status_code = match.group("status")
         path = match.group("path")
-        old_path = match.group("old_path")
+        new_path = match.group("new_path")
         normalized_status = _normalize_status(status_code=status_code)
         file_path = (
-            old_path
-            if normalized_status in {"renamed", "copied"} and old_path
+            new_path
+            if normalized_status in {"renamed", "copied"} and new_path
             else path
         )
         additions, deletions = stats.get(file_path, stats.get(path, (0, 0)))
@@ -378,13 +382,13 @@ def _collect_branch_context(*, base: str) -> ReviewContext:
             code=ReviewContextErrorCode.MERGE_BASE_FAILED,
         )
 
-    diff_range = f"{merge_base}...HEAD"
+    head_ref = _run_git(args=["rev-parse", "HEAD"]).stdout.strip()
+    diff_range = f"{merge_base}...{head_ref}"
     unified_diff = _run_git(args=["diff", diff_range]).stdout
     changed_files = parse_changed_files(
         name_status=_run_git(args=["diff", "--name-status", diff_range]).stdout,
         numstat=_run_git(args=["diff", "--numstat", diff_range]).stdout,
     )
-    head_ref = _run_git(args=["rev-parse", "HEAD"]).stdout.strip()
 
     return ReviewContext(
         base_ref=merge_base,
@@ -420,12 +424,12 @@ def _collect_uncommitted_context() -> ReviewContext:
             suffix,
         )
 
-    unified_diff = _run_git(args=["diff", "HEAD"]).stdout
-    changed_files = parse_changed_files(
-        name_status=_run_git(args=["diff", "HEAD", "--name-status"]).stdout,
-        numstat=_run_git(args=["diff", "HEAD", "--numstat"]).stdout,
-    )
     head_ref = _run_git(args=["rev-parse", "HEAD"]).stdout.strip()
+    unified_diff = _run_git(args=["diff", head_ref]).stdout
+    changed_files = parse_changed_files(
+        name_status=_run_git(args=["diff", head_ref, "--name-status"]).stdout,
+        numstat=_run_git(args=["diff", head_ref, "--numstat"]).stdout,
+    )
 
     return ReviewContext(
         base_ref="WORKTREE",
@@ -449,6 +453,9 @@ def _collect_pr_context(
 
     Returns:
         Review context including PR metadata.
+
+    Raises:
+        ReviewContextError: When gh metadata or diff retrieval fails.
     """
     diff_args = ["pr", "diff", str(pr_number)]
     view_args = [

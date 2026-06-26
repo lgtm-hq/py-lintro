@@ -13,15 +13,15 @@ def prepare_review_chunks(
     *,
     context: ReviewContext,
     max_tokens: int,
-    allow_omitted_files: bool = False,
+    allow_omitted_files: bool = True,
 ) -> ChunkingResult:
     """Classify changed files and split review context into semantic chunks.
 
     Args:
         context: Collected review diff context.
         max_tokens: Maximum estimated tokens per chunk diff.
-        allow_omitted_files: When False, raise when repetitive-diff sampling omits
-            files instead of returning them in ``skipped_files``.
+        allow_omitted_files: When True, sample repetitive identical diffs and return
+            omitted paths in ``skipped_files``. When False, raise instead.
 
     Returns:
         Chunking result with semantic groups and any truncation metadata.

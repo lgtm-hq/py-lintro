@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from lintro.ai.review.enums.file_domain import FileDomain
+
 
 @dataclass
 class FileClassification:
@@ -15,4 +17,4 @@ class FileClassification:
     """
 
     path: str
-    domains: list[str]
+    domains: list[FileDomain]
