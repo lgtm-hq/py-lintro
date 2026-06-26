@@ -5,6 +5,7 @@ from __future__ import annotations
 import pytest
 from assertpy import assert_that
 
+from lintro.ai.json_response import CliSchemaRequest
 from lintro.ai.providers.base import AIResponse, AIStreamResult, BaseAIProvider
 from lintro.ai.providers.constants import DEFAULT_PER_CALL_MAX_TOKENS, DEFAULT_TIMEOUT
 
@@ -34,7 +35,9 @@ class _StubProvider(BaseAIProvider):
         timeout: float = DEFAULT_TIMEOUT,
         repo_root: str | None = None,
         use_one_shot: bool = False,
+        cli_schema: CliSchemaRequest | None = None,
     ) -> AIResponse:
+        del cli_schema
         return self._response
 
 
@@ -140,7 +143,9 @@ def test_base_provider_stream_complete_passes_kwargs() -> None:
             timeout: float = DEFAULT_TIMEOUT,
             repo_root: str | None = None,
             use_one_shot: bool = False,
+            cli_schema: CliSchemaRequest | None = None,
         ) -> AIResponse:
+            del cli_schema
             calls.append(
                 {
                     "prompt": prompt,

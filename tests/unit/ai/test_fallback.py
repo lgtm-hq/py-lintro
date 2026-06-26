@@ -296,4 +296,5 @@ def test_forwards_all_kwargs() -> None:
         timeout=30.0,
         repo_root=None,
         use_one_shot=False,
+        cli_schema=None,
     )

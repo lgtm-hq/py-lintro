@@ -22,6 +22,7 @@ from lintro.ai.exceptions import (
     AIProviderError,
     AIRateLimitError,
 )
+from lintro.ai.json_response import CliSchemaRequest
 from lintro.ai.providers.base import AIResponse, AIStreamResult, BaseAIProvider
 from lintro.ai.providers.cli_transport import CliTransport
 from lintro.ai.providers.constants import (
@@ -82,7 +83,10 @@ class _AnthropicCliTransport(CliTransport):
             )
 
         content = data.get("result", "")
-        if isinstance(content, dict):
+        structured = data.get("structured_output")
+        if structured is not None:
+            content = json.dumps(structured)
+        elif isinstance(content, dict):
             content = json.dumps(content)
         elif not isinstance(content, str):
             content = str(content)
@@ -232,6 +236,7 @@ class AnthropicProvider(BaseAIProvider):
         timeout: float,
         repo_root: str | None,
         use_one_shot: bool,
+        cli_schema: CliSchemaRequest | None = None,
     ) -> AIResponse:
         if self._cli is None:
             raise AINotAvailableError("Claude CLI transport is not initialized")
@@ -248,6 +253,10 @@ class AnthropicProvider(BaseAIProvider):
         ]
         if system:
             cmd.extend(["--append-system-prompt", system])
+        if cli_schema is not None:
+            cmd.extend(["--json-schema", json.dumps(cli_schema.schema)])
+            if cli_schema.schema_name:
+                cmd.extend(["--json-schema-name", cli_schema.schema_name])
         if not use_one_shot and self._session_id is not None:
             cmd.extend(["--resume", self._session_id])
 
@@ -291,6 +300,7 @@ class AnthropicProvider(BaseAIProvider):
         timeout: float = DEFAULT_TIMEOUT,
         repo_root: str | None = None,
         use_one_shot: bool = False,
+        cli_schema: CliSchemaRequest | None = None,
     ) -> AIResponse:
         """Generate a completion using Claude (API or CLI).
 
@@ -301,6 +311,7 @@ class AnthropicProvider(BaseAIProvider):
             timeout: Request timeout in seconds.
             repo_root: Working directory for CLI transport.
             use_one_shot: When True, avoid resuming CLI sessions.
+            cli_schema: Optional native CLI JSON schema request.
 
         Returns:
             AIResponse: The model's response with usage metadata.
@@ -313,9 +324,10 @@ class AnthropicProvider(BaseAIProvider):
                 timeout=timeout,
                 repo_root=repo_root,
                 use_one_shot=use_one_shot,
+                cli_schema=cli_schema,
             )
 
-        del repo_root, use_one_shot
+        del repo_root, use_one_shot, cli_schema
         client = self._get_client()
         effective_max = min(max_tokens, self._max_tokens)
 

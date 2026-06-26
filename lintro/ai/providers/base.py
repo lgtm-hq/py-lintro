@@ -22,6 +22,7 @@ from lintro.ai.providers.stream_result import AIStreamResult  # noqa: F401
 
 if TYPE_CHECKING:
     from lintro.ai.enums import AITransport
+    from lintro.ai.json_response import CliSchemaRequest
 
 __all__ = ["AIResponse", "AIStreamResult", "BaseAIProvider"]
 
@@ -139,6 +140,7 @@ class BaseAIProvider(ABC):
         timeout: float = DEFAULT_TIMEOUT,
         repo_root: str | None = None,
         use_one_shot: bool = False,
+        cli_schema: CliSchemaRequest | None = None,
     ) -> AIResponse:
         """Generate a completion from the AI model.
 
@@ -149,6 +151,7 @@ class BaseAIProvider(ABC):
             timeout: Request timeout in seconds.
             repo_root: Optional repository root (Cursor provider only).
             use_one_shot: When True, avoid durable sessions (Cursor only).
+            cli_schema: Optional native CLI JSON schema request.
 
         Returns:
             AIResponse: The model's response with usage metadata.

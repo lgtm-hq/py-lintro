@@ -24,6 +24,7 @@ from lintro.ai.paths import resolve_workspace_file, resolve_workspace_root
 from lintro.ai.pipeline import run_fix_pipeline
 from lintro.ai.providers import get_provider
 from lintro.ai.summary import generate_summary
+from lintro.ai.transport import apply_transport_override
 from lintro.enums.action import Action
 from lintro.enums.output_format import OutputFormat
 
@@ -46,6 +47,7 @@ def run_ai_enhancement(
     logger: ThreadSafeConsoleLogger,
     output_format: str,
     ai_fix: bool = False,
+    transport: str | None = None,
 ) -> AIResult:
     """Run AI-powered enhancement for check/fix actions.
 
@@ -56,6 +58,7 @@ def run_ai_enhancement(
         logger: Thread-safe console logger.
         output_format: Output format (e.g. "terminal", "json").
         ai_fix: Whether to generate AI fix suggestions.
+        transport: Optional CLI override for ``ai.transport``.
 
     Returns:
         AIResult with structured outcome data for exit code decisions.
@@ -68,7 +71,7 @@ def run_ai_enhancement(
     try:
         require_ai()
 
-        ai_config = lintro_config.ai
+        ai_config = apply_transport_override(lintro_config.ai, transport)
         workspace_root = resolve_workspace_root(lintro_config.config_path)
         provider = get_provider(ai_config)
         is_json = output_format.lower() == OutputFormat.JSON
@@ -135,6 +138,7 @@ def _run_ai_check(
     summary = generate_summary(
         all_results,
         provider,
+        ai_config=ai_config,
         max_tokens=ai_config.max_tokens,
         workspace_root=workspace_root,
         timeout=ai_config.api_timeout,

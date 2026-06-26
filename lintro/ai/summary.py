@@ -7,7 +7,6 @@ API call for cost efficiency.
 
 from __future__ import annotations
 
-import json
 from collections import defaultdict
 from collections.abc import Sequence
 from pathlib import Path
@@ -15,7 +14,11 @@ from typing import TYPE_CHECKING
 
 from loguru import logger
 
-from lintro.ai.fallback import complete_with_fallback
+from lintro.ai.cli_schemas import cli_schema_for_summary
+from lintro.ai.config import AIConfig
+from lintro.ai.enums import AITransport
+from lintro.ai.invoke import call_ai
+from lintro.ai.json_response import parse_summary_response_payload
 from lintro.ai.models import AISummary
 from lintro.ai.paths import resolve_workspace_root, to_provider_path
 from lintro.ai.prompts import (
@@ -23,18 +26,12 @@ from lintro.ai.prompts import (
     SUMMARY_PROMPT_TEMPLATE,
     SUMMARY_SYSTEM,
 )
-from lintro.ai.retry import (
-    DEFAULT_BACKOFF_FACTOR,
-    DEFAULT_BASE_DELAY,
-    DEFAULT_MAX_DELAY,
-    with_retry,
-)
 from lintro.ai.secrets import redact_secrets
 from lintro.ai.summary_params import SummaryGenParams
 from lintro.ai.token_budget import estimate_tokens
 
 if TYPE_CHECKING:
-    from lintro.ai.providers.base import AIResponse, BaseAIProvider
+    from lintro.ai.providers.base import BaseAIProvider
     from lintro.models.core.tool_result import ToolResult
 
 __all__ = ["SummaryGenParams"]
@@ -173,6 +170,33 @@ def _build_issues_digest(
     return "\n".join(lines)
 
 
+def _build_ai_config_for_summary(
+    *,
+    ai_config: AIConfig | None,
+    max_tokens: int,
+    timeout: float,
+    max_retries: int,
+    base_delay: float | None,
+    max_delay: float | None,
+    backoff_factor: float | None,
+    fallback_models: list[str] | None,
+) -> AIConfig:
+    """Resolve AI config for summary generation."""
+    if ai_config is not None:
+        return ai_config
+    return AIConfig(
+        enabled=True,
+        transport=AITransport.API,
+        max_tokens=max_tokens,
+        max_retries=max_retries,
+        api_timeout=timeout,
+        retry_base_delay=base_delay if base_delay is not None else 1.0,
+        retry_max_delay=max_delay if max_delay is not None else 30.0,
+        retry_backoff_factor=backoff_factor if backoff_factor is not None else 2.0,
+        fallback_models=fallback_models or [],
+    )
+
+
 def _parse_summary_response(
     content: str,
     *,
@@ -194,31 +218,12 @@ def _parse_summary_response(
         Parsed AISummary.
     """
     # Strip markdown code fences that AI models commonly wrap JSON in
-    cleaned = content.strip()
-    if cleaned.startswith("```"):
-        # Remove opening fence (with optional language tag)
-        first_newline = cleaned.find("\n")
-        if first_newline != -1:
-            cleaned = cleaned[first_newline + 1 :]
-        # Remove closing fence
-        if cleaned.rstrip().endswith("```"):
-            cleaned = cleaned.rstrip()[:-3].rstrip()
-
     try:
-        data = json.loads(cleaned)
-    except json.JSONDecodeError:
+        data = parse_summary_response_payload(content=content)
+    except ValueError:
         logger.debug("Failed to parse AI summary response as JSON")
         return AISummary(
             overview=content[:500] if content else "Summary unavailable",
-            input_tokens=input_tokens,
-            output_tokens=output_tokens,
-            cost_estimate=cost_estimate,
-        )
-
-    if not isinstance(data, dict):
-        logger.debug("AI summary response is not a JSON object")
-        return AISummary(
-            overview=str(data)[:500] if data else "Summary unavailable",
             input_tokens=input_tokens,
             output_tokens=output_tokens,
             cost_estimate=cost_estimate,
@@ -244,51 +249,22 @@ def _call_summary_provider(
     prompt: str,
     *,
     provider: BaseAIProvider,
+    ai_config: AIConfig,
     max_tokens: int,
-    timeout: float,
-    max_retries: int,
-    base_delay: float | None,
-    max_delay: float | None,
-    backoff_factor: float | None,
-    fallback_models: list[str] | None,
+    workspace_root: Path | None,
 ) -> AISummary | None:
-    """Shared retry/call/parse helper for summary generation.
-
-    Args:
-        prompt: The formatted prompt to send to the provider.
-        provider: AI provider instance.
-        max_tokens: Maximum tokens for the response.
-        timeout: Request timeout in seconds per API call.
-        max_retries: Maximum retry attempts for transient API failures.
-        base_delay: Initial retry delay in seconds (None = use default).
-        max_delay: Maximum retry delay in seconds (None = use default).
-        backoff_factor: Retry backoff multiplier (None = use default).
-        fallback_models: Ordered list of fallback model identifiers.
-
-    Returns:
-        AISummary, or None if generation fails.
-    """
-
-    @with_retry(
-        max_retries=max_retries,
-        base_delay=base_delay if base_delay is not None else DEFAULT_BASE_DELAY,
-        max_delay=max_delay if max_delay is not None else DEFAULT_MAX_DELAY,
-        backoff_factor=(
-            backoff_factor if backoff_factor is not None else DEFAULT_BACKOFF_FACTOR
-        ),
-    )
-    def _call() -> AIResponse:
-        return complete_with_fallback(
-            provider,
-            prompt,
-            fallback_models=fallback_models,
-            system=SUMMARY_SYSTEM,
-            max_tokens=max_tokens,
-            timeout=timeout,
-        )
-
+    """Shared call/parse helper for summary generation."""
     try:
-        response = _call()
+        response = call_ai(
+            provider=provider,
+            ai_config=ai_config,
+            user_prompt=prompt,
+            system_prompt=SUMMARY_SYSTEM,
+            budget=None,
+            max_tokens=max_tokens,
+            repo_root=str(workspace_root) if workspace_root is not None else None,
+            cli_schema=cli_schema_for_summary(transport=ai_config.transport),
+        )
         return _parse_summary_response(
             response.content,
             input_tokens=response.input_tokens,
@@ -304,6 +280,7 @@ def generate_summary(
     results: Sequence[ToolResult],
     provider: BaseAIProvider,
     *,
+    ai_config: AIConfig | None = None,
     max_tokens: int = 2048,
     workspace_root: Path | None = None,
     timeout: float = 60.0,
@@ -321,6 +298,8 @@ def generate_summary(
     Args:
         results: Tool results containing parsed issues.
         provider: AI provider instance.
+        ai_config: Optional AI configuration for ``call_ai`` transport
+            and retry settings.
         max_tokens: Maximum tokens for the response.
         workspace_root: Optional root used for provider-safe path redaction.
         timeout: Request timeout in seconds per API call.
@@ -353,9 +332,8 @@ def generate_summary(
         issues_digest=digest,
     )
 
-    return _call_summary_provider(
-        prompt,
-        provider=provider,
+    effective_config = _build_ai_config_for_summary(
+        ai_config=ai_config,
         max_tokens=max_tokens,
         timeout=timeout,
         max_retries=max_retries,
@@ -363,6 +341,14 @@ def generate_summary(
         max_delay=max_delay,
         backoff_factor=backoff_factor,
         fallback_models=fallback_models,
+    )
+
+    return _call_summary_provider(
+        prompt,
+        provider=provider,
+        ai_config=effective_config,
+        max_tokens=max_tokens,
+        workspace_root=workspace_root,
     )
 
 
@@ -387,6 +373,7 @@ def generate_summary_from_params(
     return generate_summary(
         results,
         provider,
+        ai_config=params.ai_config,
         max_tokens=params.max_tokens,
         workspace_root=params.workspace_root,
         timeout=params.timeout,
@@ -404,6 +391,7 @@ def generate_post_fix_summary(
     rejected: int,
     remaining_results: Sequence[ToolResult],
     provider: BaseAIProvider,
+    ai_config: AIConfig | None = None,
     max_tokens: int = 1024,
     workspace_root: Path | None = None,
     timeout: float = 60.0,
@@ -423,6 +411,8 @@ def generate_post_fix_summary(
         rejected: Number of fixes rejected.
         remaining_results: Tool results with remaining issues.
         provider: AI provider instance.
+        ai_config: Optional AI configuration for ``call_ai`` transport
+            and retry settings.
         max_tokens: Maximum tokens for the response.
         workspace_root: Optional root used for provider-safe path redaction.
         timeout: Request timeout in seconds per API call.
@@ -462,9 +452,8 @@ def generate_post_fix_summary(
         issues_digest=issues_digest,
     )
 
-    return _call_summary_provider(
-        prompt,
-        provider=provider,
+    effective_config = _build_ai_config_for_summary(
+        ai_config=ai_config,
         max_tokens=max_tokens,
         timeout=timeout,
         max_retries=max_retries,
@@ -472,6 +461,14 @@ def generate_post_fix_summary(
         max_delay=max_delay,
         backoff_factor=backoff_factor,
         fallback_models=fallback_models,
+    )
+
+    return _call_summary_provider(
+        prompt,
+        provider=provider,
+        ai_config=effective_config,
+        max_tokens=max_tokens,
+        workspace_root=workspace_root,
     )
 
 
@@ -503,6 +500,7 @@ def generate_post_fix_summary_from_params(
         rejected=rejected,
         remaining_results=remaining_results,
         provider=provider,
+        ai_config=params.ai_config,
         max_tokens=params.max_tokens,
         workspace_root=params.workspace_root,
         timeout=params.timeout,

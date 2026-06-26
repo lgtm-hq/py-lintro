@@ -13,8 +13,10 @@ from typing import TYPE_CHECKING, Any
 from loguru import logger
 
 from lintro.ai.budget import CostBudget
+from lintro.ai.cli_schemas import cli_schema_for_review
+from lintro.ai.enums import AITransport
 from lintro.ai.invoke import call_ai
-from lintro.ai.json_response import strip_json_fences
+from lintro.ai.json_response import parse_review_response_payload, strip_json_fences
 from lintro.ai.model_pricing import (
     calculate_available_diff_tokens,
     get_context_window,
@@ -517,7 +519,7 @@ def build_git_native_review_prompt(
     strictness_section: str = "",
     embed_diff: bool = False,
 ) -> tuple[str, str]:
-    """Build git-native prompts for Cursor local agent review.
+    """Build git-native prompts for CLI-backed review (all providers).
 
     Args:
         chunk: Semantic diff chunk to review.
@@ -584,20 +586,10 @@ def parse_review_response(*, content: str) -> dict[str, Any]:
     Raises:
         ValueError: When JSON is invalid or missing required keys.
     """
-    json_text = strip_json_fences(content=content)
     try:
-        payload = json.loads(json_text)
-    except json.JSONDecodeError as exc:
-        raise ValueError(f"Invalid review JSON: {exc}") from exc
-
-    if not isinstance(payload, dict):
-        raise ValueError("Review response must be a JSON object")
-
-    for key in ("summary", "checklist", "findings"):
-        if key not in payload:
-            raise ValueError(f"Review response missing required key: {key}")
-
-    return payload
+        return parse_review_response_payload(content=content)
+    except ValueError:
+        raise
 
 
 def merge_findings(
@@ -722,7 +714,8 @@ def _review_chunk(
         )
 
     tracker.on_step(chunk_index=chunk_index, step="reviewing")
-    if provider.name == AIProvider.CURSOR:
+    use_git_native = ai_config.transport == AITransport.CLI
+    if use_git_native:
         embed_diff = estimate_tokens(chunk.diff) <= max(diff_budget, 1)
         system_prompt, user_prompt = build_git_native_review_prompt(
             chunk=chunk,
@@ -754,6 +747,7 @@ def _review_chunk(
         budget=budget,
         repo_root=repo_root or None,
         use_one_shot=use_one_shot,
+        cli_schema=cli_schema_for_review(transport=ai_config.transport),
     )
     payload = parse_review_response(content=response.content)
     partial = _payload_to_partial(response=response, payload=payload)

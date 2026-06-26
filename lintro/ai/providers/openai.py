@@ -23,6 +23,7 @@ from lintro.ai.exceptions import (
     AIProviderError,
     AIRateLimitError,
 )
+from lintro.ai.json_response import CliSchemaRequest
 from lintro.ai.providers.base import AIResponse, AIStreamResult, BaseAIProvider
 from lintro.ai.providers.cli_transport import CliTransport
 from lintro.ai.providers.constants import (
@@ -99,6 +100,9 @@ class _CodexCliTransport(CliTransport):
                 usage = event.get("usage", {})
                 input_tokens = int(usage.get("input_tokens", input_tokens))
                 output_tokens = int(usage.get("output_tokens", output_tokens))
+                structured = event.get("structured_output")
+                if structured is not None:
+                    final_text = json.dumps(structured)
             elif event_type == "error":
                 raise AIProviderError(
                     f"Codex CLI reported error: {event.get('message', stripped)}",
@@ -248,6 +252,7 @@ class OpenAIProvider(BaseAIProvider):
         *,
         timeout: float,
         repo_root: str | None,
+        cli_schema: CliSchemaRequest | None = None,
     ) -> AIResponse:
         if self._cli is None:
             raise AINotAvailableError("Codex CLI transport is not initialized")
@@ -258,8 +263,10 @@ class OpenAIProvider(BaseAIProvider):
             "--json",
             "--sandbox",
             "read-only",
-            prompt,
         ]
+        if cli_schema is not None:
+            cmd.extend(["--output-schema", json.dumps(cli_schema.schema)])
+        cmd.append(prompt)
 
         logger.debug(
             f"Codex CLI request: model={self._model}, prompt_len={len(prompt)}",
@@ -286,6 +293,7 @@ class OpenAIProvider(BaseAIProvider):
         timeout: float = DEFAULT_TIMEOUT,
         repo_root: str | None = None,
         use_one_shot: bool = False,
+        cli_schema: CliSchemaRequest | None = None,
     ) -> AIResponse:
         """Generate a completion using GPT (API or Codex CLI).
 
@@ -296,6 +304,7 @@ class OpenAIProvider(BaseAIProvider):
             timeout: Request timeout in seconds.
             repo_root: Working directory for CLI transport (git repo).
             use_one_shot: Unused for Codex; accepted for API parity.
+            cli_schema: Optional native CLI JSON schema request.
 
         Returns:
             AIResponse: The model's response with usage metadata.
@@ -309,9 +318,10 @@ class OpenAIProvider(BaseAIProvider):
                 combined,
                 timeout=timeout,
                 repo_root=repo_root,
+                cli_schema=cli_schema,
             )
 
-        del repo_root, use_one_shot
+        del repo_root, use_one_shot, cli_schema
         client = self._get_client()
         effective_max = min(max_tokens, self._max_tokens)
 

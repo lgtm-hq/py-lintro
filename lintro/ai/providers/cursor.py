@@ -21,6 +21,7 @@ from lintro.ai.exceptions import (
     AINotAvailableError,
     AIProviderError,
 )
+from lintro.ai.json_response import CliSchemaRequest
 from lintro.ai.providers.base import AIResponse, BaseAIProvider
 from lintro.ai.providers.cli_transport import CliTransport
 from lintro.ai.providers.constants import (
@@ -193,6 +194,7 @@ class CursorProvider(BaseAIProvider):
         timeout: float = DEFAULT_TIMEOUT,
         repo_root: str | None = None,
         use_one_shot: bool = False,
+        cli_schema: CliSchemaRequest | None = None,
     ) -> AIResponse:
         """Run a completion via ``agent --print``.
 
@@ -203,6 +205,7 @@ class CursorProvider(BaseAIProvider):
             timeout: Subprocess timeout in seconds (minimum 600 for agent).
             repo_root: Git repository root for ``--workspace``.
             use_one_shot: When True, do not resume an existing CLI session.
+            cli_schema: Unused; kept for provider API parity.
 
         Returns:
             Parsed model response with usage metadata.
@@ -212,7 +215,7 @@ class CursorProvider(BaseAIProvider):
             AIProviderError: When the CLI exits with an error or returns
                 invalid JSON.
         """
-        del max_tokens
+        del max_tokens, cli_schema
         combined_prompt = prompt
         if system:
             combined_prompt = f"{system}\n\n---\n\n{prompt}"
