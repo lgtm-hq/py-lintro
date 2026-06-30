@@ -4,10 +4,9 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from lintro.ai.review.file_language import languages_for_paths
+from lintro.ai.review.file_language import languages_for_path, languages_for_paths
 
 if TYPE_CHECKING:
-    from lintro.ai.review.enums.file_domain import FileDomain
     from lintro.ai.review.models.checklist_item import ChecklistItem
     from lintro.ai.review.models.file_classification import FileClassification
 
@@ -27,8 +26,9 @@ def select_checklist_items(
     Tier 1 items are always included. A Tier 2 item is included when its role
     domains intersect the domains present in the diff and/or its languages
     intersect the languages present in the diff. When an item defines both
-    axes, both must match. A Tier 2 item with neither axis set is universal
-    and included whenever the diff has at least one file.
+    axes, at least one changed file must satisfy both on that file. A Tier 2
+    item with neither axis set is universal and included whenever the diff
+    has at least one file.
 
     Args:
         classifications: Per-file domain classifications for the review diff.
@@ -39,14 +39,6 @@ def select_checklist_items(
     Returns:
         Selected items sorted by stable checklist id.
     """
-    present_domains = {
-        domain
-        for classification in classifications
-        for domain in classification.domains
-    }
-    present_languages = languages_for_paths(
-        paths=[classification.path for classification in classifications],
-    )
     has_files = bool(classifications)
 
     selected: list[ChecklistItem] = []
@@ -56,8 +48,7 @@ def select_checklist_items(
             continue
         if _item_matches_diff(
             item=item,
-            present_domains=present_domains,
-            present_languages=present_languages,
+            classifications=classifications,
             has_files=has_files,
         ):
             selected.append(item)
@@ -68,16 +59,14 @@ def select_checklist_items(
 def _item_matches_diff(
     *,
     item: ChecklistItem,
-    present_domains: set[FileDomain],
-    present_languages: set[str],
+    classifications: list[FileClassification],
     has_files: bool,
 ) -> bool:
     """Return True when a Tier 2 item activates for the diff.
 
     Args:
         item: Checklist item to evaluate.
-        present_domains: Role domains present across the diff.
-        present_languages: ``identify`` language tags present across the diff.
+        classifications: Per-file domain classifications for the review diff.
         has_files: Whether the diff has at least one changed file.
 
     Returns:
@@ -86,14 +75,47 @@ def _item_matches_diff(
     if not item.domains and not item.languages:
         return has_files
 
-    domain_match = bool(present_domains.intersection(item.domains))
-    language_match = bool(present_languages.intersection(item.languages))
-
     if item.domains and item.languages:
-        return domain_match and language_match
+        return _dual_axis_matches_any_file(
+            item=item,
+            classifications=classifications,
+        )
+
+    present_domains = {
+        domain
+        for classification in classifications
+        for domain in classification.domains
+    }
+    present_languages = languages_for_paths(
+        paths=[classification.path for classification in classifications],
+    )
     if item.domains:
-        return domain_match
-    return language_match
+        return bool(present_domains.intersection(item.domains))
+    return bool(present_languages.intersection(item.languages))
+
+
+def _dual_axis_matches_any_file(
+    *,
+    item: ChecklistItem,
+    classifications: list[FileClassification],
+) -> bool:
+    """Return True when at least one changed file satisfies both axes.
+
+    Args:
+        item: Checklist item with both ``domains`` and ``languages`` set.
+        classifications: Per-file domain classifications for the review diff.
+
+    Returns:
+        True when some file matches both the domain and language axes.
+    """
+    for classification in classifications:
+        file_domains = set(classification.domains)
+        file_languages = languages_for_path(path=classification.path)
+        domain_match = bool(file_domains.intersection(item.domains))
+        language_match = bool(file_languages.intersection(item.languages))
+        if domain_match and language_match:
+            return True
+    return False
 
 
 def format_checklist_for_prompt(

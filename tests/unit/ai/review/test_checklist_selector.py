@@ -117,7 +117,7 @@ def test_select_checklist_items_matches_custom_domain_item() -> None:
         category=ReviewCategory.SECURITY,
         tier=2,
     )
-    items = list(BUILTIN_CHECKLIST_ITEMS) + [custom_item]
+    items = [*BUILTIN_CHECKLIST_ITEMS, custom_item]
 
     matched = select_checklist_items(
         classifications=_classify(["app/api/users.py"]),
@@ -144,7 +144,7 @@ def test_select_checklist_items_matches_custom_language_item() -> None:
         category=ReviewCategory.LOGIC_BUG,
         tier=2,
     )
-    items = list(BUILTIN_CHECKLIST_ITEMS) + [custom_item]
+    items = [*BUILTIN_CHECKLIST_ITEMS, custom_item]
 
     matched = select_checklist_items(
         classifications=_classify(["cmd/server/main.go"]),
@@ -225,7 +225,7 @@ def test_dual_axis_item_requires_both_domain_and_language() -> None:
         category=ReviewCategory.SECURITY,
         tier=2,
     )
-    items = list(BUILTIN_CHECKLIST_ITEMS) + [custom_item]
+    items = [*BUILTIN_CHECKLIST_ITEMS, custom_item]
 
     matched = select_checklist_items(
         classifications=_classify(["project/api/views.py"]),
@@ -239,6 +239,29 @@ def test_dual_axis_item_requires_both_domain_and_language() -> None:
     assert_that(any(item.id == CUSTOM_CHECKLIST_ID_START for item in matched)).is_true()
     assert_that(
         any(item.id == CUSTOM_CHECKLIST_ID_START for item in language_only),
+    ).is_false()
+
+
+def test_dual_axis_item_does_not_match_across_unrelated_files() -> None:
+    """Dual-axis items require both axes on the same changed file."""
+    custom_item = ChecklistItem(
+        id=CUSTOM_CHECKLIST_ID_START,
+        question="Does any API handler skip auth?",
+        domains=(FileDomain.API,),
+        languages=("python",),
+        category=ReviewCategory.SECURITY,
+        tier=2,
+    )
+    items = [*BUILTIN_CHECKLIST_ITEMS, custom_item]
+    cross_file = [
+        *_classify(["api/schema.yaml"]),
+        *_classify(["scripts/migrate.py"]),
+    ]
+
+    selected = select_checklist_items(classifications=cross_file, items=items)
+
+    assert_that(
+        any(item.id == CUSTOM_CHECKLIST_ID_START for item in selected),
     ).is_false()
 
 
