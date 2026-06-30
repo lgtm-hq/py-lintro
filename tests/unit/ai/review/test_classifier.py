@@ -66,8 +66,18 @@ from lintro.ai.review.models.changed_file import ChangedFile
         ),
         pytest.param(
             "types/user.ts",
-            {FileDomain.API, FileDomain.SOURCE},
+            {FileDomain.SOURCE},
             id="root_types_directory",
+        ),
+        pytest.param(
+            "api/types/models.ts",
+            {FileDomain.API, FileDomain.SOURCE},
+            id="api_scoped_types_directory",
+        ),
+        pytest.param(
+            "tests/e2e/login.spec.ts",
+            {FileDomain.TEST, FileDomain.E2E},
+            id="e2e_browser_test",
         ),
         pytest.param(
             "tests/conftest.py",

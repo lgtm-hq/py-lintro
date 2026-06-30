@@ -242,6 +242,26 @@ def test_dual_axis_item_requires_both_domain_and_language() -> None:
     ).is_false()
 
 
+def test_e2e_checklist_items_do_not_match_unit_tests() -> None:
+    """Browser-specific checklist items skip ordinary unit test files."""
+    selected = select_checklist_items(
+        classifications=_classify(["tests/unit/service.test.ts"]),
+        items=list(BUILTIN_CHECKLIST_ITEMS),
+    )
+
+    assert_that({item.id for item in selected}).does_not_contain(110, 111, 128, 129)
+
+
+def test_e2e_checklist_items_match_e2e_paths() -> None:
+    """Browser-specific checklist items activate for E2E test paths."""
+    selected = select_checklist_items(
+        classifications=_classify(["tests/e2e/login.spec.ts"]),
+        items=list(BUILTIN_CHECKLIST_ITEMS),
+    )
+
+    assert_that({item.id for item in selected}).contains(110)
+
+
 def test_dual_axis_item_does_not_match_across_unrelated_files() -> None:
     """Dual-axis items require both axes on the same changed file."""
     custom_item = ChecklistItem(
