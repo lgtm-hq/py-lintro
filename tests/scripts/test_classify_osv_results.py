@@ -63,10 +63,10 @@ def test_classify_error_for_non_object_payload() -> None:
     """Top-level JSON arrays or scalars fail closed as error."""
     module = _load_classify_module()
 
-    assert_that(module.classify_osv_results(payload=[])).is_equal_to(  # type: ignore[arg-type]
+    assert_that(module.classify_osv_results(payload=[])).is_equal_to(
         module.OsvResultClass.ERROR,
     )
-    assert_that(module.classify_osv_results(payload="bad")).is_equal_to(  # type: ignore[arg-type]
+    assert_that(module.classify_osv_results(payload="bad")).is_equal_to(
         module.OsvResultClass.ERROR,
     )
 

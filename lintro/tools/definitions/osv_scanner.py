@@ -279,11 +279,15 @@ class OsvScannerPlugin(BaseToolPlugin):
 
         # Some osv-scanner builds emit log lines before JSON and may exit
         # non-zero even when the parsed results list is empty.
-        if not success and len(issues) == 0:
-            if payload is not None and "results" in payload:
-                results = payload["results"]
-                if isinstance(results, list) and len(results) == 0:
-                    success = True
+        if (
+            not success
+            and len(issues) == 0
+            and payload is not None
+            and "results" in payload
+            and isinstance(payload["results"], list)
+            and len(payload["results"]) == 0
+        ):
+            success = True
 
         # Determine overall success: subprocess must succeed AND no issues
         # found. A non-zero exit with 0 parsed issues indicates an execution

@@ -108,7 +108,13 @@ def _parents_compatible(*, test_path: str, source_path: str) -> bool:
         test_parts = tuple(part for part in mirrored.split("/") if part)
         if not test_parts:
             return False
-        if source_parts and source_parts[0].startswith("src") and source_parts[0] != "src":
+        if len(test_parts) < 2:
+            return False
+        if (
+            source_parts
+            and source_parts[0].startswith("src")
+            and source_parts[0] != "src"
+        ):
             return False
         return source_parts[-len(test_parts) :] == test_parts
 

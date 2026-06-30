@@ -54,7 +54,7 @@ def _classify_single_osv_result(*, result: dict[str, Any]) -> OsvResultClass:
     return OsvResultClass.OK
 
 
-def classify_osv_results(*, payload: dict[str, Any]) -> OsvResultClass:
+def classify_osv_results(*, payload: object) -> OsvResultClass:
     """Return the audit class for a parsed lintro JSON payload."""
     if not isinstance(payload, dict):
         return OsvResultClass.ERROR

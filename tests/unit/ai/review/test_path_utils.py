@@ -80,6 +80,17 @@ def test_matches_test_for_source_rejects_nested_tests_api_src2_collision() -> No
     ).is_true()
 
 
+def test_matches_test_for_source_rejects_nested_tests_lib_suffix_collision() -> None:
+    """Single-segment tests/<dir>/ mirrors src/<dir> only, not lib/<dir>."""
+    assert_that(
+        matches_test_for_source(
+            test_path="tests/api/foo.test.ts",
+            source_stem="foo",
+            source_path="lib/api/foo.ts",
+        ),
+    ).is_false()
+
+
 def test_matches_test_for_source_root_tests_only_pairs_direct_src_layout() -> None:
     """Root tests/ pairs with src/<file> only, not nested src/** modules."""
     assert_that(
