@@ -1,4 +1,19 @@
-"""Review configuration models."""
+"""Review configuration models.
+
+Custom checklist items activate on ``domains`` (role labels such as ``api``,
+``test``, ``ci``) and/or ``languages`` (``identify`` tags such as ``python``,
+``rust``, ``ts``). Example:
+
+.. code-block:: yaml
+
+    review:
+      checklist:
+        items:
+          - question: Does any API handler skip auth?
+            domains: [api]
+            languages: [python]
+            category: security
+"""
 
 from __future__ import annotations
 

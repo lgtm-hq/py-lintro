@@ -362,8 +362,8 @@ def _parse_review_checklist_config(data: Any) -> dict[str, Any]:
         parsed_items: list[dict[str, Any]] = []
         for item in items_data:
             if not isinstance(item, dict):
-                logger.warning("Skipping non-mapping review.checklist.items entry")
-                continue
+                msg = "review.checklist.items entries must be mappings"
+                raise ValueError(msg)
             parsed_items.append(_parse_review_checklist_item_config(item))
         filtered["items"] = parsed_items
     return filtered

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from unittest.mock import patch
 
 import pytest
 from assertpy import assert_that
@@ -122,6 +123,31 @@ def test_load_config_rejects_non_mapping_review_section(
         load_config(config_path=config_file)
 
 
+def test_load_config_rejects_non_mapping_checklist_item(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Malformed checklist item entries fail config load."""
+    config_file = tmp_path / ".lintro-config.yaml"
+    config_file.write_text(
+        """\
+review:
+  checklist:
+    items:
+      - not-a-mapping
+""",
+        encoding="utf-8",
+    )
+    monkeypatch.chdir(tmp_path)
+    clear_config_cache()
+
+    with pytest.raises(
+        ValueError,
+        match="review.checklist.items entries must be mappings",
+    ):
+        load_config(config_path=config_file)
+
+
 def test_load_config_ignores_unknown_checklist_keys(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -129,12 +155,21 @@ def test_load_config_ignores_unknown_checklist_keys(
     """Unknown review.checklist keys warn instead of aborting config load."""
     config_file = tmp_path / ".lintro-config.yaml"
     config_file.write_text(
-        ("review:\n" "  checklist:\n" "    itemz:\n" "      - question: ignored\n"),
+        """\
+review:
+  checklist:
+    itemz:
+      - question: ignored
+""",
         encoding="utf-8",
     )
     monkeypatch.chdir(tmp_path)
     clear_config_cache()
 
-    config = load_config(config_path=config_file)
+    with patch("lintro.config.config_loader.logger.warning") as warning_mock:
+        config = load_config(config_path=config_file)
 
     assert_that(config.review.checklist.items).is_empty()
+    warning_text = " ".join(str(call) for call in warning_mock.call_args_list)
+    assert_that(warning_text).contains("Unknown review.checklist keys ignored")
+    assert_that(warning_text).contains("itemz")
