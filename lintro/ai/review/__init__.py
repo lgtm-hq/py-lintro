@@ -25,7 +25,9 @@ from lintro.ai.review.models import (
 )
 
 if TYPE_CHECKING:
-    from lintro.ai.review.chunker import chunk_review_context as chunk_review_context
+    from lintro.ai.review.chunker.grouping import (
+        chunk_review_context as chunk_review_context,
+    )
     from lintro.ai.review.classifier import (
         classify_changed_files as classify_changed_files,
     )
@@ -44,7 +46,10 @@ if TYPE_CHECKING:
     from lintro.ai.review.pipeline import prepare_review_chunks as prepare_review_chunks
 
 _LAZY_EXPORTS: dict[str, tuple[str, str]] = {
-    "chunk_review_context": ("lintro.ai.review.chunker", "chunk_review_context"),
+    "chunk_review_context": (
+        "lintro.ai.review.chunker.grouping",
+        "chunk_review_context",
+    ),
     "classify_changed_files": (
         "lintro.ai.review.classifier",
         "classify_changed_files",
