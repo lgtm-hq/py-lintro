@@ -9,9 +9,14 @@ from lintro.ai.review.checklist_selector import (
     format_checklist_for_prompt,
     select_checklist_items,
 )
+from lintro.ai.review.classifier import classify_changed_files
 from lintro.ai.review.constants import CUSTOM_CHECKLIST_ID_START
+from lintro.ai.review.enums.changed_file_status import ChangedFileStatus
+from lintro.ai.review.enums.file_domain import FileDomain
 from lintro.ai.review.enums.review_category import ReviewCategory
+from lintro.ai.review.models.changed_file import ChangedFile
 from lintro.ai.review.models.checklist_item import ChecklistItem
+from lintro.ai.review.models.file_classification import FileClassification
 from lintro.config.lintro_config import LintroConfig
 from lintro.config.review_config import (
     ReviewChecklistConfig,
@@ -20,10 +25,24 @@ from lintro.config.review_config import (
 )
 
 
+def _classify(paths: list[str]) -> list[FileClassification]:
+    """Classify repository paths into review domains for selection tests."""
+    changed_files = [
+        ChangedFile(
+            path=path,
+            status=ChangedFileStatus.MODIFIED,
+            additions=1,
+            deletions=0,
+        )
+        for path in paths
+    ]
+    return classify_changed_files(changed_files)
+
+
 def test_select_checklist_items_always_includes_tier1() -> None:
     """Tier 1 items are selected regardless of changed files."""
     selected = select_checklist_items(
-        changed_files=["README.md"],
+        classifications=_classify(["README.md"]),
         items=list(BUILTIN_CHECKLIST_ITEMS),
     )
 
@@ -32,9 +51,9 @@ def test_select_checklist_items_always_includes_tier1() -> None:
 
 
 def test_empty_changed_files_still_returns_tier1() -> None:
-    """Empty changed file lists still include all Tier 1 items."""
+    """Empty changed file lists still include all Tier 1 items only."""
     selected = select_checklist_items(
-        changed_files=[],
+        classifications=[],
         items=list(BUILTIN_CHECKLIST_ITEMS),
     )
 
@@ -44,55 +63,95 @@ def test_empty_changed_files_still_returns_tier1() -> None:
     assert_that(all(item.tier == 1 for item in selected)).is_true()
 
 
-def test_select_checklist_items_includes_tier2_when_globs_match() -> None:
-    """Tier 2 items are included only when trigger globs match changed files."""
+def test_select_checklist_items_includes_source_tier2_for_python() -> None:
+    """Source-domain Tier 2 items are included for Python source, not Rust ones."""
     selected = select_checklist_items(
-        changed_files=["src/main.py"],
+        classifications=_classify(["src/main.py"]),
         items=list(BUILTIN_CHECKLIST_ITEMS),
     )
 
-    assert_that(any(item.id == 101 for item in selected)).is_true()
-    assert_that(any(item.id == 103 for item in selected)).is_false()
+    selected_ids = {item.id for item in selected}
+    assert_that(selected_ids).contains(101)
+    assert_that(selected_ids).does_not_contain(103)
 
 
 def test_select_checklist_items_includes_rust_tier2_for_rs_files() -> None:
-    """Rust-specific Tier 2 items match .rs changed files."""
+    """Rust-language Tier 2 items match .rs changed files."""
     selected = select_checklist_items(
-        changed_files=["src/lib.rs"],
+        classifications=_classify(["src/lib.rs"]),
         items=list(BUILTIN_CHECKLIST_ITEMS),
     )
 
-    assert_that(any(item.id == 103 for item in selected)).is_true()
+    assert_that({item.id for item in selected}).contains(103)
 
 
 def test_select_checklist_items_includes_ci_tier2_for_dotgithub_workflows() -> None:
-    """Dot-prefixed .github paths must match CI Tier 2 checklist triggers."""
+    """CI-domain Tier 2 items match .github workflow paths."""
     selected = select_checklist_items(
-        changed_files=[".github/workflows/ci.yml"],
+        classifications=_classify([".github/workflows/ci.yml"]),
         items=list(BUILTIN_CHECKLIST_ITEMS),
     )
 
-    assert_that(any(item.id == 124 for item in selected)).is_true()
-    assert_that(any(item.id == 150 for item in selected)).is_true()
+    selected_ids = {item.id for item in selected}
+    assert_that(selected_ids).contains(124)
+    assert_that(selected_ids).contains(150)
 
 
-def test_select_checklist_items_includes_custom_config_when_trigger_matches() -> None:
-    """Custom config items follow Tier 2 trigger selection rules."""
+def test_universal_tier2_items_included_for_any_nonempty_diff() -> None:
+    """Tier 2 items with no domains or languages fire on any non-empty diff."""
+    selected = select_checklist_items(
+        classifications=_classify(["README.md"]),
+        items=list(BUILTIN_CHECKLIST_ITEMS),
+    )
+
+    assert_that({item.id for item in selected}).contains(100)
+
+
+def test_select_checklist_items_matches_custom_domain_item() -> None:
+    """Custom items follow Tier 2 domain selection rules."""
     custom_item = ChecklistItem(
         id=CUSTOM_CHECKLIST_ID_START,
-        question="Does any Django view miss @login_required?",
-        triggers=("**/views.py",),
+        question="Does any API handler skip auth?",
+        domains=(FileDomain.API,),
+        languages=(),
         category=ReviewCategory.SECURITY,
         tier=2,
     )
     items = list(BUILTIN_CHECKLIST_ITEMS) + [custom_item]
 
     matched = select_checklist_items(
-        changed_files=["app/views.py"],
+        classifications=_classify(["app/api/users.py"]),
         items=items,
     )
     unmatched = select_checklist_items(
-        changed_files=["app/models.py"],
+        classifications=_classify(["docs/intro.md"]),
+        items=items,
+    )
+
+    assert_that(any(item.id == CUSTOM_CHECKLIST_ID_START for item in matched)).is_true()
+    assert_that(
+        any(item.id == CUSTOM_CHECKLIST_ID_START for item in unmatched),
+    ).is_false()
+
+
+def test_select_checklist_items_matches_custom_language_item() -> None:
+    """Custom items can target a specific language via identify tags."""
+    custom_item = ChecklistItem(
+        id=CUSTOM_CHECKLIST_ID_START,
+        question="Does Go code ignore returned errors?",
+        domains=(),
+        languages=("go",),
+        category=ReviewCategory.LOGIC_BUG,
+        tier=2,
+    )
+    items = list(BUILTIN_CHECKLIST_ITEMS) + [custom_item]
+
+    matched = select_checklist_items(
+        classifications=_classify(["cmd/server/main.go"]),
+        items=items,
+    )
+    unmatched = select_checklist_items(
+        classifications=_classify(["src/main.py"]),
         items=items,
     )
 
@@ -105,7 +164,7 @@ def test_select_checklist_items_includes_custom_config_when_trigger_matches() ->
 def test_select_checklist_items_returns_sorted_by_id() -> None:
     """Selected checklist items are sorted by stable id."""
     selected = select_checklist_items(
-        changed_files=["src/main.py", ".github/workflows/ci.yml"],
+        classifications=_classify(["src/main.py", ".github/workflows/ci.yml"]),
         items=list(BUILTIN_CHECKLIST_ITEMS),
     )
 
@@ -117,7 +176,7 @@ def test_select_checklist_items_returns_sorted_by_id() -> None:
 def test_format_checklist_for_prompt_renumbers_sequentially() -> None:
     """Prompt formatting renumbers checklist items from one."""
     selected = select_checklist_items(
-        changed_files=["src/main.py"],
+        classifications=_classify(["src/main.py"]),
         items=list(BUILTIN_CHECKLIST_ITEMS),
     )
     prompt_text, prompt_mapping = format_checklist_for_prompt(items=selected)
@@ -127,27 +186,14 @@ def test_format_checklist_for_prompt_renumbers_sequentially() -> None:
     assert_that(len(prompt_mapping)).is_equal_to(len(selected))
 
 
-def test_select_checklist_items_matches_root_level_files_for_double_star_globs() -> (
-    None
-):
-    """Root-level files match ``**/`` trigger patterns."""
-    custom_item = ChecklistItem(
-        id=CUSTOM_CHECKLIST_ID_START,
-        question="Does any Django view miss @login_required?",
-        triggers=("**/views.py",),
-        category=ReviewCategory.SECURITY,
-        tier=2,
-    )
-    items = list(BUILTIN_CHECKLIST_ITEMS) + [custom_item]
-
+def test_select_checklist_items_matches_root_level_source_files() -> None:
+    """Root-level source files still resolve a language for selection."""
     selected = select_checklist_items(
-        changed_files=["views.py"],
-        items=items,
+        classifications=_classify(["setup.py"]),
+        items=list(BUILTIN_CHECKLIST_ITEMS),
     )
 
-    assert_that(
-        any(item.id == CUSTOM_CHECKLIST_ID_START for item in selected),
-    ).is_true()
+    assert_that({item.id for item in selected}).contains(151)
 
 
 def test_custom_config_end_to_end_selection() -> None:
@@ -159,8 +205,8 @@ def test_custom_config_end_to_end_selection() -> None:
             checklist=ReviewChecklistConfig(
                 items=[
                     ReviewChecklistItemConfig(
-                        question="Does any Django view miss @login_required?",
-                        triggers=["**/views.py"],
+                        question="Does any API handler skip auth?",
+                        domains=[FileDomain.API],
                         category=ReviewCategory.SECURITY,
                     ),
                 ],
@@ -169,7 +215,7 @@ def test_custom_config_end_to_end_selection() -> None:
     )
     items = get_all_checklist_items(config=config)
     selected = select_checklist_items(
-        changed_files=["project/views.py"],
+        classifications=_classify(["project/api/views.py"]),
         items=items,
     )
 

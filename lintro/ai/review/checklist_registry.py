@@ -40,7 +40,8 @@ def get_all_checklist_items(
             ChecklistItem(
                 id=next_custom_id,
                 question=custom_item.question,
-                triggers=tuple(custom_item.triggers),
+                domains=tuple(custom_item.domains),
+                languages=tuple(custom_item.languages),
                 category=custom_item.category,
                 tier=2,
             ),
@@ -75,12 +76,11 @@ def validate_checklist_items(*, items: list[ChecklistItem]) -> None:
             msg = f"Checklist item {item.id} has invalid tier: {item.tier}"
             raise ValueError(msg)
 
-        if item.tier == 1 and item.triggers:
-            msg = f"Tier 1 checklist item {item.id} must have empty triggers"
-            raise ValueError(msg)
-
-        if item.tier == 2 and not item.triggers:
-            msg = f"Tier 2 checklist item {item.id} must have at least one trigger"
+        if item.tier == 1 and (item.domains or item.languages):
+            msg = (
+                f"Tier 1 checklist item {item.id} must have empty domains "
+                "and languages"
+            )
             raise ValueError(msg)
 
 

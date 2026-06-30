@@ -45,8 +45,10 @@ def test_lazy_export_names_match_runtime_map() -> None:
     """Lazy export names are derived from the runtime lazy-import map."""
     importlib.reload(review_pkg)
     static_exports = {
+        "BUILTIN_CHECKLIST_ITEMS",
         "ChangedFile",
         "ChangedFileStatus",
+        "ChecklistItem",
         "ChunkingResult",
         "FileClassification",
         "FileDomain",
@@ -56,10 +58,14 @@ def test_lazy_export_names_match_runtime_map() -> None:
         "REL_SOURCE_TEST",
         "REL_WORKFLOW_SCRIPT_TEST",
         "RelationshipLabel",
+        "ReviewCategory",
         "ReviewChunk",
         "ReviewContext",
         "ReviewContextError",
         "ReviewContextErrorCode",
+        "format_checklist_for_prompt",
+        "get_all_checklist_items",
+        "select_checklist_items",
     }
     assert_that(set(review_pkg.__all__)).is_equal_to(
         static_exports | set(review_pkg._LAZY_EXPORTS),

@@ -8,6 +8,7 @@ import pytest
 from assertpy import assert_that
 
 from lintro.ai.review.constants import CUSTOM_CHECKLIST_ID_START
+from lintro.ai.review.enums.file_domain import FileDomain
 from lintro.ai.review.enums.review_category import ReviewCategory
 from lintro.config.config_loader import clear_config_cache, load_config
 from lintro.config.review_config import (
@@ -26,9 +27,11 @@ def test_load_config_parses_review_checklist_items(
             "review:\n"
             "  checklist:\n"
             "    items:\n"
-            "      - question: Does any Django view miss @login_required?\n"
-            "        triggers:\n"
-            "          - '**/views.py'\n"
+            "      - question: Does any API handler skip auth?\n"
+            "        domains:\n"
+            "          - api\n"
+            "        languages:\n"
+            "          - python\n"
             "        category: security\n"
         ),
         encoding="utf-8",
@@ -40,8 +43,9 @@ def test_load_config_parses_review_checklist_items(
 
     assert_that(config.review.checklist.items).is_length(1)
     item = config.review.checklist.items[0]
-    assert_that(item.question).contains("@login_required")
-    assert_that(item.triggers).is_equal_to(["**/views.py"])
+    assert_that(item.question).contains("auth")
+    assert_that(item.domains).is_equal_to([FileDomain.API])
+    assert_that(item.languages).is_equal_to(["python"])
     assert_that(item.category).is_equal_to(ReviewCategory.SECURITY)
 
 
@@ -70,16 +74,25 @@ def test_review_checklist_item_rejects_empty_question() -> None:
     with pytest.raises(ValueError, match="must not be empty"):
         ReviewChecklistItemConfig(
             question="   ",
-            triggers=["**/views.py"],
+            domains=[FileDomain.API],
             category=ReviewCategory.SECURITY,
         )
 
 
-def test_review_checklist_item_rejects_empty_triggers() -> None:
-    """Custom checklist items require at least one trigger glob."""
-    with pytest.raises(ValueError, match="at least one glob pattern"):
+def test_review_checklist_item_rejects_no_targets() -> None:
+    """Custom checklist items require at least one domain or language."""
+    with pytest.raises(ValueError, match="at least one of domains or languages"):
         ReviewChecklistItemConfig(
-            question="Does any Django view miss @login_required?",
-            triggers=[],
+            question="Does any API handler skip auth?",
+            category=ReviewCategory.SECURITY,
+        )
+
+
+def test_review_checklist_item_rejects_unknown_language() -> None:
+    """Custom checklist items reject languages that are not identify tags."""
+    with pytest.raises(ValueError, match="known identify tags"):
+        ReviewChecklistItemConfig(
+            question="Does any handler skip auth?",
+            languages=["not-a-real-language"],
             category=ReviewCategory.SECURITY,
         )

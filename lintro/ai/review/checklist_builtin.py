@@ -1,27 +1,18 @@
-"""Built-in review checklist items (Tier 1 and Tier 2)."""
+"""Built-in review checklist items (Tier 1 and Tier 2).
+
+Tier 2 items activate on two axes derived from the changed files: role
+``domains`` owned by the file classifier and ``identify`` ``languages`` tags.
+TypeScript/JavaScript variants are treated as one language family so an item
+need not enumerate every extension.
+"""
 
 from __future__ import annotations
 
+from lintro.ai.review.enums.file_domain import FileDomain
 from lintro.ai.review.enums.review_category import ReviewCategory
 from lintro.ai.review.models.checklist_item import ChecklistItem
 
-_E2E_TEST_GLOBS: tuple[str, ...] = (
-    "**/*.{spec,test}.{ts,js}",
-    "**/e2e/**",
-    "**/playwright-tests/**",
-)
-
-_TEST_GLOBS: tuple[str, ...] = (
-    "**/*.{spec,test}.{ts,js,py}",
-    "**/*.bats",
-    "**/test_*.py",
-    "**/*_test.py",
-    "**/tests/**",
-)
-
-_TYPESCRIPT_GLOBS: tuple[str, ...] = ("**/*.{ts,tsx,js,jsx}",)
-
-_SOURCE_GLOBS: tuple[str, ...] = ("**/*.{py,rs,ts,js,go,java}",)
+_TS_JS_LANGUAGES: tuple[str, ...] = ("javascript", "jsx", "ts", "tsx")
 
 BUILTIN_CHECKLIST_ITEMS: tuple[ChecklistItem, ...] = (
     # Tier 1 — always included (IDs 1-15)
@@ -31,7 +22,8 @@ BUILTIN_CHECKLIST_ITEMS: tuple[ChecklistItem, ...] = (
             "Does any early return skip independent work that could proceed "
             "when an optional step fails?"
         ),
-        triggers=(),
+        domains=(),
+        languages=(),
         category=ReviewCategory.INTEGRATION,
         tier=1,
     ),
@@ -41,7 +33,8 @@ BUILTIN_CHECKLIST_ITEMS: tuple[ChecklistItem, ...] = (
             "Do test setup/fixture defaults match production/workflow/script "
             "defaults?"
         ),
-        triggers=(),
+        domains=(),
+        languages=(),
         category=ReviewCategory.TEST_GAP,
         tier=1,
     ),
@@ -50,7 +43,8 @@ BUILTIN_CHECKLIST_ITEMS: tuple[ChecklistItem, ...] = (
         question=(
             "Does documentation claim behavior the implementation does not provide?"
         ),
-        triggers=(),
+        domains=(),
+        languages=(),
         category=ReviewCategory.CONTRACT_DRIFT,
         tier=1,
     ),
@@ -59,14 +53,16 @@ BUILTIN_CHECKLIST_ITEMS: tuple[ChecklistItem, ...] = (
         question=(
             "Does any error path exit or return success when callers expect failure?"
         ),
-        triggers=(),
+        domains=(),
+        languages=(),
         category=ReviewCategory.SILENT_FAILURE,
         tier=1,
     ),
     ChecklistItem(
         id=5,
         question=("Do new defaults break existing callers without migration guidance?"),
-        triggers=(),
+        domains=(),
+        languages=(),
         category=ReviewCategory.BREAKING_CHANGE,
         tier=1,
     ),
@@ -76,7 +72,8 @@ BUILTIN_CHECKLIST_ITEMS: tuple[ChecklistItem, ...] = (
             "Must two or more files be updated in lockstep for the change to "
             "stay correct?"
         ),
-        triggers=(),
+        domains=(),
+        languages=(),
         category=ReviewCategory.CONTRACT_DRIFT,
         tier=1,
     ),
@@ -86,14 +83,16 @@ BUILTIN_CHECKLIST_ITEMS: tuple[ChecklistItem, ...] = (
             "Does the diff implement behavior that already exists elsewhere "
             "(duplicate logic)?"
         ),
-        triggers=(),
+        domains=(),
+        languages=(),
         category=ReviewCategory.LOGIC_BUG,
         tier=1,
     ),
     ChecklistItem(
         id=8,
         question="Does the diff actually do what the PR description claims?",
-        triggers=(),
+        domains=(),
+        languages=(),
         category=ReviewCategory.LOGIC_BUG,
         tier=1,
     ),
@@ -103,7 +102,8 @@ BUILTIN_CHECKLIST_ITEMS: tuple[ChecklistItem, ...] = (
             "Does any unknown/unparseable enum or status default to permissive "
             "access (fail-open)?"
         ),
-        triggers=(),
+        domains=(),
+        languages=(),
         category=ReviewCategory.SECURITY,
         tier=1,
     ),
@@ -113,7 +113,8 @@ BUILTIN_CHECKLIST_ITEMS: tuple[ChecklistItem, ...] = (
             "Does the client classify server errors using fragile substring "
             "matching on prose messages?"
         ),
-        triggers=(),
+        domains=(),
+        languages=(),
         category=ReviewCategory.CONTRACT_DRIFT,
         tier=1,
     ),
@@ -123,7 +124,8 @@ BUILTIN_CHECKLIST_ITEMS: tuple[ChecklistItem, ...] = (
             "Does the server return prose-only errors without stable "
             "machine-readable error codes?"
         ),
-        triggers=(),
+        domains=(),
+        languages=(),
         category=ReviewCategory.CONTRACT_DRIFT,
         tier=1,
     ),
@@ -133,7 +135,8 @@ BUILTIN_CHECKLIST_ITEMS: tuple[ChecklistItem, ...] = (
             "Are there visibility-only tests without asserting content, state, "
             "or copy?"
         ),
-        triggers=(),
+        domains=(),
+        languages=(),
         category=ReviewCategory.TEST_GAP,
         tier=1,
     ),
@@ -143,7 +146,8 @@ BUILTIN_CHECKLIST_ITEMS: tuple[ChecklistItem, ...] = (
             "Do tests mock internals/private methods such that behavior breaks "
             "could still pass?"
         ),
-        triggers=(),
+        domains=(),
+        languages=(),
         category=ReviewCategory.TEST_GAP,
         tier=1,
     ),
@@ -153,7 +157,8 @@ BUILTIN_CHECKLIST_ITEMS: tuple[ChecklistItem, ...] = (
             "Does the diff implement behavior contradicting explicitly deferred/"
             "out-of-scope items in the PR summary?"
         ),
-        triggers=(),
+        domains=(),
+        languages=(),
         category=ReviewCategory.INTEGRATION,
         tier=1,
     ),
@@ -163,18 +168,20 @@ BUILTIN_CHECKLIST_ITEMS: tuple[ChecklistItem, ...] = (
             "Does API/client code use type casts on responses without runtime "
             "validation?"
         ),
-        triggers=(),
+        domains=(),
+        languages=(),
         category=ReviewCategory.SILENT_FAILURE,
         tier=1,
     ),
-    # Tier 2 — domain-triggered (IDs 100+)
+    # Tier 2 — domain/language-triggered (IDs 100+)
     ChecklistItem(
         id=100,
         question=(
             "Are failures handled consistently across all branches "
             "(no mixed throw/return/silent paths)?"
         ),
-        triggers=("**/*",),
+        domains=(),
+        languages=(),
         category=ReviewCategory.LOGIC_BUG,
         tier=2,
     ),
@@ -184,7 +191,8 @@ BUILTIN_CHECKLIST_ITEMS: tuple[ChecklistItem, ...] = (
             "Are connections, file handles, streams, or other resources closed "
             "on every exit path?"
         ),
-        triggers=_SOURCE_GLOBS,
+        domains=(FileDomain.SOURCE,),
+        languages=(),
         category=ReviewCategory.LOGIC_BUG,
         tier=2,
     ),
@@ -194,7 +202,8 @@ BUILTIN_CHECKLIST_ITEMS: tuple[ChecklistItem, ...] = (
             "Does concurrent or async code have race conditions, deadlocks, "
             "or missing cleanup?"
         ),
-        triggers=("**/*",),
+        domains=(),
+        languages=(),
         category=ReviewCategory.LOGIC_BUG,
         tier=2,
     ),
@@ -204,7 +213,8 @@ BUILTIN_CHECKLIST_ITEMS: tuple[ChecklistItem, ...] = (
             "Does library code use .unwrap() or bare .expect() without a "
             "documented invariant?"
         ),
-        triggers=("**/*.rs",),
+        domains=(),
+        languages=("rust",),
         category=ReviewCategory.LOGIC_BUG,
         tier=2,
     ),
@@ -213,7 +223,8 @@ BUILTIN_CHECKLIST_ITEMS: tuple[ChecklistItem, ...] = (
         question=(
             "Does an unsafe block lack a // SAFETY: justification for soundness?"
         ),
-        triggers=("**/*.rs",),
+        domains=(),
+        languages=("rust",),
         category=ReviewCategory.LOGIC_BUG,
         tier=2,
     ),
@@ -223,14 +234,16 @@ BUILTIN_CHECKLIST_ITEMS: tuple[ChecklistItem, ...] = (
             "Can a caller ignore a return value that must not be ignored "
             "(missing #[must_use] or equivalent)?"
         ),
-        triggers=("**/*.rs",),
+        domains=(),
+        languages=("rust",),
         category=ReviewCategory.LOGIC_BUG,
         tier=2,
     ),
     ChecklistItem(
         id=106,
         question=("Does a catch block use any and fail to narrow before handling?"),
-        triggers=_TYPESCRIPT_GLOBS,
+        domains=(),
+        languages=_TS_JS_LANGUAGES,
         category=ReviewCategory.LOGIC_BUG,
         tier=2,
     ),
@@ -239,7 +252,8 @@ BUILTIN_CHECKLIST_ITEMS: tuple[ChecklistItem, ...] = (
         question=(
             "Does an empty catch block swallow errors without logging or rethrow?"
         ),
-        triggers=_TYPESCRIPT_GLOBS,
+        domains=(),
+        languages=_TS_JS_LANGUAGES,
         category=ReviewCategory.LOGIC_BUG,
         tier=2,
     ),
@@ -249,7 +263,8 @@ BUILTIN_CHECKLIST_ITEMS: tuple[ChecklistItem, ...] = (
             "Are there unreachable branches or dead code paths that suggest "
             "incorrect control flow?"
         ),
-        triggers=("**/*",),
+        domains=(),
+        languages=(),
         category=ReviewCategory.LOGIC_BUG,
         tier=2,
     ),
@@ -259,7 +274,8 @@ BUILTIN_CHECKLIST_ITEMS: tuple[ChecklistItem, ...] = (
             "Does shell script logic lack set -euo pipefail (or equivalent) "
             "where failures should abort?"
         ),
-        triggers=("**/*.{sh,bash}", "scripts/**/*"),
+        domains=(FileDomain.SHELL,),
+        languages=(),
         category=ReviewCategory.LOGIC_BUG,
         tier=2,
     ),
@@ -269,7 +285,8 @@ BUILTIN_CHECKLIST_ITEMS: tuple[ChecklistItem, ...] = (
             "Do E2E tests use fixed waitForTimeout() instead of condition-based "
             "waiting (risk of flaky false passes/fails)?"
         ),
-        triggers=_E2E_TEST_GLOBS,
+        domains=(FileDomain.TEST,),
+        languages=_TS_JS_LANGUAGES,
         category=ReviewCategory.LOGIC_BUG,
         tier=2,
     ),
@@ -279,7 +296,8 @@ BUILTIN_CHECKLIST_ITEMS: tuple[ChecklistItem, ...] = (
             "Do E2E tests read DOM state once without auto-retrying assertions "
             "(timing-dependent false results)?"
         ),
-        triggers=_E2E_TEST_GLOBS,
+        domains=(FileDomain.TEST,),
+        languages=_TS_JS_LANGUAGES,
         category=ReviewCategory.LOGIC_BUG,
         tier=2,
     ),
@@ -288,7 +306,8 @@ BUILTIN_CHECKLIST_ITEMS: tuple[ChecklistItem, ...] = (
         question=(
             "Do shell tests call real network/external commands instead of mocks?"
         ),
-        triggers=("**/*.bats", "tests/bats/**"),
+        domains=(),
+        languages=("bats",),
         category=ReviewCategory.LOGIC_BUG,
         tier=2,
     ),
@@ -297,7 +316,8 @@ BUILTIN_CHECKLIST_ITEMS: tuple[ChecklistItem, ...] = (
         question=(
             "Do shell tests assume Bash 4+ features without skipping on Bash 3.2?"
         ),
-        triggers=("**/*.bats",),
+        domains=(),
+        languages=("bats",),
         category=ReviewCategory.LOGIC_BUG,
         tier=2,
     ),
@@ -307,7 +327,8 @@ BUILTIN_CHECKLIST_ITEMS: tuple[ChecklistItem, ...] = (
             "Are PII, secrets, or tokens logged, returned in errors, or exposed "
             "in API responses?"
         ),
-        triggers=("**/*",),
+        domains=(),
+        languages=(),
         category=ReviewCategory.SECURITY,
         tier=2,
     ),
@@ -317,7 +338,8 @@ BUILTIN_CHECKLIST_ITEMS: tuple[ChecklistItem, ...] = (
             'Does a test assert field == "literal" where that literal is also '
             "defined in production code (wiring test that drifts silently)?"
         ),
-        triggers=("**/test_*.py", "**/*_test.py", "**/tests/**/*.py"),
+        domains=(FileDomain.TEST,),
+        languages=("python",),
         category=ReviewCategory.SILENT_FAILURE,
         tier=2,
     ),
@@ -327,7 +349,8 @@ BUILTIN_CHECKLIST_ITEMS: tuple[ChecklistItem, ...] = (
             "Does a non-strict schema (z.object) silently accept unexpected "
             "API fields?"
         ),
-        triggers=("**/schemas/**", "**/*.{ts,tsx}"),
+        domains=(FileDomain.API,),
+        languages=("ts", "tsx"),
         category=ReviewCategory.SILENT_FAILURE,
         tier=2,
     ),
@@ -337,7 +360,8 @@ BUILTIN_CHECKLIST_ITEMS: tuple[ChecklistItem, ...] = (
             "Are duplicate type definitions maintained separately from "
             "validation schemas (can drift undetected)?"
         ),
-        triggers=("**/schemas/**", "**/types/**", "**/*.{ts,tsx}"),
+        domains=(FileDomain.API,),
+        languages=("ts", "tsx"),
         category=ReviewCategory.SILENT_FAILURE,
         tier=2,
     ),
@@ -347,7 +371,8 @@ BUILTIN_CHECKLIST_ITEMS: tuple[ChecklistItem, ...] = (
             "Does CI verify two hand-maintained files agree instead of running "
             "a generator with --check?"
         ),
-        triggers=(".github/**/*.yml", ".github/**/*.yaml", "scripts/ci/**"),
+        domains=(FileDomain.CI,),
+        languages=(),
         category=ReviewCategory.SILENT_FAILURE,
         tier=2,
     ),
@@ -357,7 +382,8 @@ BUILTIN_CHECKLIST_ITEMS: tuple[ChecklistItem, ...] = (
             "Does an automation hook (e.g. Renovate post-upgrade) silently fail "
             "while CI is supposed to catch drift—is the --check gate still present?"
         ),
-        triggers=(".github/**/*.yml", "scripts/ci/**"),
+        domains=(FileDomain.CI,),
+        languages=(),
         category=ReviewCategory.SILENT_FAILURE,
         tier=2,
     ),
@@ -367,7 +393,8 @@ BUILTIN_CHECKLIST_ITEMS: tuple[ChecklistItem, ...] = (
             "Do bulk/planned-ahead tests assert signatures or data shapes instead "
             "of observable behavior?"
         ),
-        triggers=_TEST_GLOBS,
+        domains=(FileDomain.TEST,),
+        languages=(),
         category=ReviewCategory.SILENT_FAILURE,
         tier=2,
     ),
@@ -377,7 +404,8 @@ BUILTIN_CHECKLIST_ITEMS: tuple[ChecklistItem, ...] = (
             "Would renaming an internal function break tests even though "
             "user-visible behavior is unchanged?"
         ),
-        triggers=_TEST_GLOBS,
+        domains=(FileDomain.TEST,),
+        languages=(),
         category=ReviewCategory.SILENT_FAILURE,
         tier=2,
     ),
@@ -387,7 +415,8 @@ BUILTIN_CHECKLIST_ITEMS: tuple[ChecklistItem, ...] = (
             "Are lint/security suppressions (noqa, type: ignore, allow(dead_code), "
             "# nosec) added without reviewing the underlying risk?"
         ),
-        triggers=("**/*",),
+        domains=(),
+        languages=(),
         category=ReviewCategory.SILENT_FAILURE,
         tier=2,
     ),
@@ -397,7 +426,8 @@ BUILTIN_CHECKLIST_ITEMS: tuple[ChecklistItem, ...] = (
             "Does fixture cleanup swallow delete/teardown errors (.catch(() => {})) "
             "hiding partial test pollution?"
         ),
-        triggers=("**/fixtures/**", "**/*.{spec,test}.{ts,js}"),
+        domains=(FileDomain.TEST,),
+        languages=_TS_JS_LANGUAGES,
         category=ReviewCategory.SILENT_FAILURE,
         tier=2,
     ),
@@ -407,7 +437,8 @@ BUILTIN_CHECKLIST_ITEMS: tuple[ChecklistItem, ...] = (
             "Is substantial shell logic inlined in workflow YAML instead of a "
             "dedicated script file?"
         ),
-        triggers=(".github/workflows/**", ".github/actions/**"),
+        domains=(FileDomain.CI,),
+        languages=(),
         category=ReviewCategory.INTEGRATION,
         tier=2,
     ),
@@ -417,7 +448,8 @@ BUILTIN_CHECKLIST_ITEMS: tuple[ChecklistItem, ...] = (
             "Are CI scripts referenced from workflows missing a shebang or "
             "executable bit?"
         ),
-        triggers=("scripts/**/*.sh", ".github/workflows/**"),
+        domains=(FileDomain.CI, FileDomain.SHELL),
+        languages=(),
         category=ReviewCategory.INTEGRATION,
         tier=2,
     ),
@@ -427,7 +459,8 @@ BUILTIN_CHECKLIST_ITEMS: tuple[ChecklistItem, ...] = (
             "Does HTTP request logic live in fixtures instead of a dedicated "
             "client layer?"
         ),
-        triggers=("**/fixtures/**", "**/clients/**"),
+        domains=(FileDomain.TEST, FileDomain.API),
+        languages=(),
         category=ReviewCategory.INTEGRATION,
         tier=2,
     ),
@@ -436,7 +469,8 @@ BUILTIN_CHECKLIST_ITEMS: tuple[ChecklistItem, ...] = (
         question=(
             "Are API base paths duplicated across clients instead of centralized?"
         ),
-        triggers=("**/clients/**", "**/*.{ts,js}"),
+        domains=(FileDomain.API,),
+        languages=_TS_JS_LANGUAGES,
         category=ReviewCategory.INTEGRATION,
         tier=2,
     ),
@@ -446,7 +480,8 @@ BUILTIN_CHECKLIST_ITEMS: tuple[ChecklistItem, ...] = (
             "Do E2E tests share mutable global state across iterations "
             "(order-dependent failures)?"
         ),
-        triggers=_E2E_TEST_GLOBS,
+        domains=(FileDomain.TEST,),
+        languages=_TS_JS_LANGUAGES,
         category=ReviewCategory.INTEGRATION,
         tier=2,
     ),
@@ -456,7 +491,8 @@ BUILTIN_CHECKLIST_ITEMS: tuple[ChecklistItem, ...] = (
             "Are browser contexts/fixtures left open without teardown "
             "(context.close())?"
         ),
-        triggers=("**/fixtures/**", "**/*.{spec,test}.{ts,js}"),
+        domains=(FileDomain.TEST,),
+        languages=_TS_JS_LANGUAGES,
         category=ReviewCategory.INTEGRATION,
         tier=2,
     ),
@@ -465,7 +501,8 @@ BUILTIN_CHECKLIST_ITEMS: tuple[ChecklistItem, ...] = (
         question=(
             "Do shell tests leave temp files or env changes behind (missing teardown)?"
         ),
-        triggers=("**/*.bats",),
+        domains=(),
+        languages=("bats",),
         category=ReviewCategory.INTEGRATION,
         tier=2,
     ),
@@ -475,7 +512,8 @@ BUILTIN_CHECKLIST_ITEMS: tuple[ChecklistItem, ...] = (
             "Are pure functions unit-tested while the bug-prone call-site wiring "
             "has no integration coverage?"
         ),
-        triggers=("**/*",),
+        domains=(),
+        languages=(),
         category=ReviewCategory.INTEGRATION,
         tier=2,
     ),
@@ -485,7 +523,8 @@ BUILTIN_CHECKLIST_ITEMS: tuple[ChecklistItem, ...] = (
             "Do tests hit the wrong layer (e.g. DB directly instead of the public "
             "API under test)?"
         ),
-        triggers=_TEST_GLOBS,
+        domains=(FileDomain.TEST,),
+        languages=(),
         category=ReviewCategory.INTEGRATION,
         tier=2,
     ),
@@ -495,14 +534,16 @@ BUILTIN_CHECKLIST_ITEMS: tuple[ChecklistItem, ...] = (
             "Does new or changed production code lack corresponding test updates "
             "in the same diff?"
         ),
-        triggers=("**/*.py", "**/*.rs", "**/*.{ts,tsx,js,jsx}"),
+        domains=(),
+        languages=(*_TS_JS_LANGUAGES, "python", "rust"),
         category=ReviewCategory.INTEGRATION,
         tier=2,
     ),
     ChecklistItem(
         id=134,
         question=("Does new or changed logic lack tests covering the modified paths?"),
-        triggers=("**/*.py", "**/*.rs", "**/*.{ts,tsx,js,jsx}", "scripts/**/*"),
+        domains=(FileDomain.SHELL,),
+        languages=(*_TS_JS_LANGUAGES, "python", "rust"),
         category=ReviewCategory.TEST_GAP,
         tier=2,
     ),
@@ -512,7 +553,8 @@ BUILTIN_CHECKLIST_ITEMS: tuple[ChecklistItem, ...] = (
             "Are edge cases and failure modes (empty input, invalid input, "
             "missing files) untested?"
         ),
-        triggers=("**/*",),
+        domains=(),
+        languages=(),
         category=ReviewCategory.TEST_GAP,
         tier=2,
     ),
@@ -522,7 +564,8 @@ BUILTIN_CHECKLIST_ITEMS: tuple[ChecklistItem, ...] = (
             "Are error-response tests missing or only checking one field per "
             "assertion (hiding partial regressions)?"
         ),
-        triggers=("**/*.{spec,test}.{ts,js}",),
+        domains=(FileDomain.TEST,),
+        languages=_TS_JS_LANGUAGES,
         category=ReviewCategory.TEST_GAP,
         tier=2,
     ),
@@ -532,7 +575,8 @@ BUILTIN_CHECKLIST_ITEMS: tuple[ChecklistItem, ...] = (
             "Are security edge cases untested (injection payloads, malformed "
             "input, oversized payloads)?"
         ),
-        triggers=("**/*.{spec,test}.{ts,js,py}", "**/routes/**", "**/api/**"),
+        domains=(FileDomain.TEST, FileDomain.API),
+        languages=(*_TS_JS_LANGUAGES, "python"),
         category=ReviewCategory.TEST_GAP,
         tier=2,
     ),
@@ -542,7 +586,8 @@ BUILTIN_CHECKLIST_ITEMS: tuple[ChecklistItem, ...] = (
             "Are parameterized cases missing where multiple inputs share the "
             "same behavior rule?"
         ),
-        triggers=("**/*.{spec,test}.{ts,js,py}", "**/*.bats"),
+        domains=(FileDomain.TEST,),
+        languages=(*_TS_JS_LANGUAGES, "bats", "python"),
         category=ReviewCategory.TEST_GAP,
         tier=2,
     ),
@@ -552,7 +597,8 @@ BUILTIN_CHECKLIST_ITEMS: tuple[ChecklistItem, ...] = (
             "Are tests non-deterministic (timing, network, shared state, random "
             "without seed)?"
         ),
-        triggers=("**/*.{spec,test}.*", "**/*.bats"),
+        domains=(FileDomain.TEST,),
+        languages=("bats",),
         category=ReviewCategory.TEST_GAP,
         tier=2,
     ),
@@ -562,7 +608,8 @@ BUILTIN_CHECKLIST_ITEMS: tuple[ChecklistItem, ...] = (
             "Does the test name describe something different from what is "
             "actually asserted?"
         ),
-        triggers=("**/*.{spec,test}.{ts,js}",),
+        domains=(FileDomain.TEST,),
+        languages=_TS_JS_LANGUAGES,
         category=ReviewCategory.TEST_GAP,
         tier=2,
     ),
@@ -572,7 +619,8 @@ BUILTIN_CHECKLIST_ITEMS: tuple[ChecklistItem, ...] = (
             "Are expected panics/failures tested with #[should_panic] or "
             "equivalent where invalid input must fail?"
         ),
-        triggers=("**/*.rs", "**/tests/**"),
+        domains=(FileDomain.TEST,),
+        languages=("rust",),
         category=ReviewCategory.TEST_GAP,
         tier=2,
     ),
@@ -581,7 +629,8 @@ BUILTIN_CHECKLIST_ITEMS: tuple[ChecklistItem, ...] = (
         question=(
             "Do exit-code paths in shell scripts lack assert_failure / status checks?"
         ),
-        triggers=("**/*.bats", "scripts/**/*.sh"),
+        domains=(FileDomain.SHELL,),
+        languages=("bats",),
         category=ReviewCategory.TEST_GAP,
         tier=2,
     ),
@@ -591,7 +640,8 @@ BUILTIN_CHECKLIST_ITEMS: tuple[ChecklistItem, ...] = (
             "Do parametrize/test IDs embed mutable version or data values that "
             "will churn on every bump?"
         ),
-        triggers=("**/test_*.py", "**/*_test.py"),
+        domains=(FileDomain.TEST,),
+        languages=("python",),
         category=ReviewCategory.CONTRACT_DRIFT,
         tier=2,
     ),
@@ -601,7 +651,8 @@ BUILTIN_CHECKLIST_ITEMS: tuple[ChecklistItem, ...] = (
             "Are E2E/UI tests hard-coding labels, error strings, or IDs that "
             "should come from shared constants/enums?"
         ),
-        triggers=("**/*.{spec,test}.{ts,js}", "**/enums/**"),
+        domains=(FileDomain.TEST,),
+        languages=_TS_JS_LANGUAGES,
         category=ReviewCategory.CONTRACT_DRIFT,
         tier=2,
     ),
@@ -611,7 +662,8 @@ BUILTIN_CHECKLIST_ITEMS: tuple[ChecklistItem, ...] = (
             "Does a public interface change lack updates to callers, schemas, "
             "or contract tests?"
         ),
-        triggers=("**/*",),
+        domains=(),
+        languages=(),
         category=ReviewCategory.CONTRACT_DRIFT,
         tier=2,
     ),
@@ -620,7 +672,8 @@ BUILTIN_CHECKLIST_ITEMS: tuple[ChecklistItem, ...] = (
         question=(
             "Are credentials, API keys, tokens, or passwords hardcoded in source?"
         ),
-        triggers=("**/*",),
+        domains=(),
+        languages=(),
         category=ReviewCategory.SECURITY,
         tier=2,
     ),
@@ -630,7 +683,8 @@ BUILTIN_CHECKLIST_ITEMS: tuple[ChecklistItem, ...] = (
             "Is user input interpolated into SQL/command strings instead of "
             "parameterized/safe APIs?"
         ),
-        triggers=("**/*.py", "**/*.{ts,js,rs,go,java}"),
+        domains=(),
+        languages=(*_TS_JS_LANGUAGES, "go", "java", "python", "rust"),
         category=ReviewCategory.SECURITY,
         tier=2,
     ),
@@ -640,7 +694,8 @@ BUILTIN_CHECKLIST_ITEMS: tuple[ChecklistItem, ...] = (
             "Is subprocess invoked with shell interpretation enabled "
             "(shell=True or equivalent)?"
         ),
-        triggers=("**/*.py", "**/*.{sh,bash}", "scripts/**"),
+        domains=(FileDomain.SHELL,),
+        languages=("python",),
         category=ReviewCategory.SECURITY,
         tier=2,
     ),
@@ -650,7 +705,8 @@ BUILTIN_CHECKLIST_ITEMS: tuple[ChecklistItem, ...] = (
             "Is input validated and sanitized at system boundaries (HTTP handlers, "
             "CLI args, file uploads)?"
         ),
-        triggers=("**/api/**", "**/routes/**", "**/*.{py,ts,js,rs}"),
+        domains=(FileDomain.API,),
+        languages=(*_TS_JS_LANGUAGES, "python", "rust"),
         category=ReviewCategory.SECURITY,
         tier=2,
     ),
@@ -660,7 +716,8 @@ BUILTIN_CHECKLIST_ITEMS: tuple[ChecklistItem, ...] = (
             "Are GitHub Actions referenced by mutable version tags instead of "
             "pinned commit SHAs?"
         ),
-        triggers=(".github/workflows/**", ".github/actions/**"),
+        domains=(FileDomain.CI,),
+        languages=(),
         category=ReviewCategory.SECURITY,
         tier=2,
     ),
@@ -670,7 +727,8 @@ BUILTIN_CHECKLIST_ITEMS: tuple[ChecklistItem, ...] = (
             "Does a # nosec / security suppression lack an inline justification "
             "on the flagged line?"
         ),
-        triggers=("**/*.py",),
+        domains=(),
+        languages=("python",),
         category=ReviewCategory.SECURITY,
         tier=2,
     ),
@@ -680,7 +738,8 @@ BUILTIN_CHECKLIST_ITEMS: tuple[ChecklistItem, ...] = (
             "Does removing or renaming exported/public symbols lack migration "
             "or caller updates?"
         ),
-        triggers=("**/*.{ts,tsx,js,py,rs}",),
+        domains=(),
+        languages=(*_TS_JS_LANGUAGES, "python", "rust"),
         category=ReviewCategory.BREAKING_CHANGE,
         tier=2,
     ),
@@ -690,7 +749,8 @@ BUILTIN_CHECKLIST_ITEMS: tuple[ChecklistItem, ...] = (
             "Does a schema or API response change break strict contract tests "
             "or downstream parsers?"
         ),
-        triggers=("**/schemas/**", "**/openapi/**", "**/api/**"),
+        domains=(FileDomain.API,),
+        languages=(),
         category=ReviewCategory.BREAKING_CHANGE,
         tier=2,
     ),
@@ -700,7 +760,8 @@ BUILTIN_CHECKLIST_ITEMS: tuple[ChecklistItem, ...] = (
             "Is type safety bypassed with any, unchecked casts, or broad "
             "suppressions on changed lines?"
         ),
-        triggers=("**/*.{ts,tsx,js,jsx}", "**/*.py", "**/*.rs"),
+        domains=(),
+        languages=(*_TS_JS_LANGUAGES, "python", "rust"),
         category=ReviewCategory.CODE_SMELL,
         tier=2,
     ),
@@ -710,7 +771,8 @@ BUILTIN_CHECKLIST_ITEMS: tuple[ChecklistItem, ...] = (
             "Do E2E tests rely on fragile CSS selectors (#id, deep div > button) "
             "likely to break on unrelated UI changes?"
         ),
-        triggers=_E2E_TEST_GLOBS,
+        domains=(FileDomain.TEST,),
+        languages=_TS_JS_LANGUAGES,
         category=ReviewCategory.CODE_SMELL,
         tier=2,
     ),
@@ -720,7 +782,8 @@ BUILTIN_CHECKLIST_ITEMS: tuple[ChecklistItem, ...] = (
             "Is the module interface nearly as complex as its implementation "
             "(shallow module)?"
         ),
-        triggers=("**/*",),
+        domains=(),
+        languages=(),
         category=ReviewCategory.ARCHITECTURE,
         tier=2,
     ),
@@ -730,7 +793,8 @@ BUILTIN_CHECKLIST_ITEMS: tuple[ChecklistItem, ...] = (
             "Are tests written against implementation steps rather than "
             "user-/caller-visible behavior?"
         ),
-        triggers=("**/*.{spec,test}.*",),
+        domains=(FileDomain.TEST,),
+        languages=(),
         category=ReviewCategory.ARCHITECTURE,
         tier=2,
     ),

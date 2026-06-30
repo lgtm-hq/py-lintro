@@ -11,6 +11,7 @@ from lintro.ai.review.checklist_registry import (
     validate_checklist_items,
 )
 from lintro.ai.review.constants import CUSTOM_CHECKLIST_ID_START
+from lintro.ai.review.enums.file_domain import FileDomain
 from lintro.ai.review.enums.review_category import ReviewCategory
 from lintro.ai.review.models.checklist_item import ChecklistItem
 from lintro.config.lintro_config import LintroConfig
@@ -35,8 +36,9 @@ def test_get_all_checklist_items_loads_custom_config_items() -> None:
             checklist=ReviewChecklistConfig(
                 items=[
                     ReviewChecklistItemConfig(
-                        question="Does any Django view miss @login_required?",
-                        triggers=["**/views.py"],
+                        question="Does any API handler skip auth?",
+                        domains=[FileDomain.API],
+                        languages=["python"],
                         category=ReviewCategory.SECURITY,
                     ),
                 ],
@@ -50,7 +52,8 @@ def test_get_all_checklist_items_loads_custom_config_items() -> None:
     assert_that(custom_items).is_length(1)
     assert_that(custom_items[0].id).is_equal_to(CUSTOM_CHECKLIST_ID_START)
     assert_that(custom_items[0].tier).is_equal_to(2)
-    assert_that(custom_items[0].triggers).is_equal_to(("**/views.py",))
+    assert_that(custom_items[0].domains).is_equal_to((FileDomain.API,))
+    assert_that(custom_items[0].languages).is_equal_to(("python",))
 
 
 def test_validate_checklist_items_rejects_duplicate_ids() -> None:
@@ -59,14 +62,16 @@ def test_validate_checklist_items_rejects_duplicate_ids() -> None:
         ChecklistItem(
             id=1,
             question="First",
-            triggers=(),
+            domains=(),
+            languages=(),
             category=ReviewCategory.LOGIC_BUG,
             tier=1,
         ),
         ChecklistItem(
             id=1,
             question="Second",
-            triggers=(),
+            domains=(),
+            languages=(),
             category=ReviewCategory.LOGIC_BUG,
             tier=1,
         ),
@@ -82,11 +87,29 @@ def test_validate_checklist_items_rejects_empty_questions() -> None:
         ChecklistItem(
             id=1,
             question="   ",
-            triggers=(),
+            domains=(),
+            languages=(),
             category=ReviewCategory.LOGIC_BUG,
             tier=1,
         ),
     ]
 
     with pytest.raises(ValueError, match="empty question"):
+        validate_checklist_items(items=items)
+
+
+def test_validate_checklist_items_rejects_tier1_with_targets() -> None:
+    """Tier 1 items must not declare domains or languages."""
+    items = [
+        ChecklistItem(
+            id=1,
+            question="Tier 1 item",
+            domains=(FileDomain.SOURCE,),
+            languages=(),
+            category=ReviewCategory.LOGIC_BUG,
+            tier=1,
+        ),
+    ]
+
+    with pytest.raises(ValueError, match="must have empty domains"):
         validate_checklist_items(items=items)

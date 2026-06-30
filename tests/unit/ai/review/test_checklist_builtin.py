@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from assertpy import assert_that
+from identify.identify import ALL_TAGS
 
 from lintro.ai.review.checklist_builtin import (
     BUILTIN_CHECKLIST_ITEMS,
@@ -16,7 +17,9 @@ def test_tier1_contains_fifteen_always_on_items() -> None:
     """Tier 1 includes exactly 15 universal checklist items."""
     assert_that(TIER1_CHECKLIST_ITEMS).is_length(15)
     assert_that(all(item.tier == 1 for item in TIER1_CHECKLIST_ITEMS)).is_true()
-    assert_that(all(not item.triggers for item in TIER1_CHECKLIST_ITEMS)).is_true()
+    assert_that(
+        all(not item.domains and not item.languages for item in TIER1_CHECKLIST_ITEMS),
+    ).is_true()
 
 
 def test_tier1_ids_are_one_through_fifteen() -> None:
@@ -26,12 +29,20 @@ def test_tier1_ids_are_one_through_fifteen() -> None:
     )
 
 
-def test_tier2_items_have_hundred_plus_ids_and_triggers() -> None:
-    """Tier 2 items use 100+ ids and non-empty trigger globs."""
+def test_tier2_items_have_hundred_plus_ids() -> None:
+    """Tier 2 items use 100+ ids."""
     assert_that(len(TIER2_CHECKLIST_ITEMS)).is_greater_than_or_equal_to(40)
     assert_that(all(item.id >= 100 for item in TIER2_CHECKLIST_ITEMS)).is_true()
     assert_that(all(item.tier == 2 for item in TIER2_CHECKLIST_ITEMS)).is_true()
-    assert_that(all(item.triggers for item in TIER2_CHECKLIST_ITEMS)).is_true()
+
+
+def test_tier2_languages_are_known_identify_tags() -> None:
+    """Every builtin language token is a real identify tag."""
+    languages = {
+        language for item in TIER2_CHECKLIST_ITEMS for language in item.languages
+    }
+    unknown = languages - set(ALL_TAGS)
+    assert_that(unknown).is_empty()
 
 
 def test_builtin_items_have_unique_ids_and_nonempty_questions() -> None:

@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 
 from lintro.ai.review.checklist_builtin import BUILTIN_CHECKLIST_ITEMS
+from lintro.ai.review.checklist_registry import get_all_checklist_items
 from lintro.ai.review.checklist_selector import (
     format_checklist_for_prompt,
     select_checklist_items,
@@ -50,7 +51,6 @@ if TYPE_CHECKING:
         split_unified_diff_by_file as split_unified_diff_by_file,
     )
     from lintro.ai.review.pipeline import prepare_review_chunks as prepare_review_chunks
-    from lintro.config.lintro_config import LintroConfig
 
 _LAZY_EXPORTS: dict[str, tuple[str, str]] = {
     "chunk_review_context": (
@@ -110,28 +110,6 @@ __all__ = [
     "select_checklist_items",
     "split_unified_diff_by_file",
 ]
-
-
-def get_all_checklist_items(
-    *,
-    config: LintroConfig | None = None,
-) -> list[ChecklistItem]:
-    """Load builtin and custom checklist items.
-
-    Delegates to ``checklist_registry`` to avoid config import cycles during
-    package initialization.
-
-    Args:
-        config: Loaded Lintro configuration.
-
-    Returns:
-        Combined checklist items with custom config entries appended.
-    """
-    from lintro.ai.review.checklist_registry import (
-        get_all_checklist_items as _get_all_checklist_items,
-    )
-
-    return _get_all_checklist_items(config=config)
 
 
 def __getattr__(name: str) -> Any:
