@@ -326,7 +326,7 @@ def _parse_review_checklist_item_config(data: Any) -> dict[str, Any]:
     known_fields = set(ReviewChecklistItemConfig.model_fields)
     unknown = set(data) - known_fields
     if unknown:
-        msg = "Unknown review.checklist.items keys: " f"{', '.join(sorted(unknown))}"
+        msg = f"Unknown review.checklist.items keys: {', '.join(sorted(unknown))}"
         raise ValueError(msg)
     return dict(data)
 

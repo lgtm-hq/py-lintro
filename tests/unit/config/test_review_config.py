@@ -189,7 +189,10 @@ review:
     monkeypatch.chdir(tmp_path)
     clear_config_cache()
 
-    with pytest.raises(ValueError, match="Unknown review.checklist.items keys"):
+    with pytest.raises(
+        ValueError,
+        match=escape("Unknown review.checklist.items keys"),
+    ):
         load_config(config_path=config_file)
 
 
