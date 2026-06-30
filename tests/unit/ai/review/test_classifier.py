@@ -61,8 +61,18 @@ from lintro.ai.review.models.changed_file import ChangedFile
         ),
         pytest.param(
             "clients/api.ts",
-            {FileDomain.API, FileDomain.SOURCE},
+            {FileDomain.SOURCE},
             id="root_clients_directory",
+        ),
+        pytest.param(
+            "src/clients/cache.py",
+            {FileDomain.SOURCE},
+            id="non_api_clients_module",
+        ),
+        pytest.param(
+            "api/clients/http.ts",
+            {FileDomain.API, FileDomain.SOURCE},
+            id="api_scoped_clients_directory",
         ),
         pytest.param(
             "types/user.ts",
@@ -81,8 +91,13 @@ from lintro.ai.review.models.changed_file import ChangedFile
         ),
         pytest.param(
             "playwright-tests/global-setup.ts",
-            {FileDomain.E2E, FileDomain.SOURCE},
+            {FileDomain.TEST, FileDomain.E2E},
             id="playwright_tests_directory",
+        ),
+        pytest.param(
+            "e2e/global-setup.ts",
+            {FileDomain.TEST, FileDomain.E2E},
+            id="root_e2e_directory",
         ),
         pytest.param(
             "integrations/playwright/client.ts",

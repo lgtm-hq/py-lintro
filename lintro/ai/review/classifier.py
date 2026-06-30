@@ -37,9 +37,10 @@ _DOMAIN_GLOBS: dict[FileDomain, tuple[str, ...]] = {
 }
 
 _API_PATH_SEGMENTS: frozenset[str] = frozenset(
-    {"api", "clients", "routes", "openapi", "schemas"},
+    {"api", "routes", "openapi", "schemas"},
 )
-_API_TYPES_ANCESTORS: frozenset[str] = frozenset({"api", "openapi", "schemas"})
+_API_SCOPED_SEGMENTS: frozenset[str] = frozenset({"clients", "types"})
+_API_SCOPED_ANCESTORS: frozenset[str] = frozenset({"api", "openapi", "schemas"})
 _SECURITY_KEYWORDS: tuple[str, ...] = ("auth", "security")
 _DOC_FILE_STEMS: frozenset[str] = frozenset(
     {
@@ -176,8 +177,9 @@ def _matches_api(*, path: str) -> bool:
     parent_parts = {part.lower() for part in pure_path.parts[:-1]}
     if parent_parts.intersection(_API_PATH_SEGMENTS):
         return True
-    return "types" in parent_parts and bool(
-        parent_parts.intersection(_API_TYPES_ANCESTORS),
+    return bool(
+        parent_parts.intersection(_API_SCOPED_SEGMENTS)
+        and parent_parts.intersection(_API_SCOPED_ANCESTORS),
     )
 
 
