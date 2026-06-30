@@ -474,7 +474,7 @@ def _convert_pyproject_to_config(data: dict[str, Any]) -> dict[str, Any]:
         elif key_lower == "ai" and isinstance(value, dict):
             # AI configuration section
             result["ai"] = value
-        elif key_lower == "review" and isinstance(value, dict):
+        elif key_lower == "review":
             result["review"] = value
 
     return result

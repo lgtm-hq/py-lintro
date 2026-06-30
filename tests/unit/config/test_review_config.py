@@ -124,6 +124,23 @@ def test_load_config_rejects_non_mapping_review_section(
         load_config(config_path=config_file)
 
 
+def test_load_config_rejects_non_mapping_review_section_from_pyproject(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Malformed pyproject review sections fail fast during config load."""
+    pyproject = tmp_path / "pyproject.toml"
+    pyproject.write_text(
+        "[tool.lintro]\nreview = true\n",
+        encoding="utf-8",
+    )
+    monkeypatch.chdir(tmp_path)
+    clear_config_cache()
+
+    with pytest.raises(ValueError, match="review config must be a mapping"):
+        load_config()
+
+
 def test_load_config_rejects_non_mapping_checklist_item(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
