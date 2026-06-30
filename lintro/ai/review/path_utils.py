@@ -6,7 +6,7 @@ from pathlib import PurePosixPath
 
 _TEST_NAME_MARKERS = (".spec.", ".test.", "_test.")
 _TEST_LAYER_PARTS: frozenset[str] = frozenset({"unit", "integration"})
-_E2E_DIR_NAMES: frozenset[str] = frozenset({"e2e", "playwright"})
+_E2E_DIR_EXACT: frozenset[str] = frozenset({"e2e", "playwright-tests"})
 
 
 def _has_tests_ancestor(path: PurePosixPath) -> bool:
@@ -44,11 +44,28 @@ def is_e2e_test_path(path: str) -> bool:
         E2E-specific filename marker.
     """
     pure_path = PurePosixPath(path.replace("\\", "/"))
-    parent_parts = {part.lower() for part in pure_path.parts[:-1]}
-    if parent_parts.intersection(_E2E_DIR_NAMES):
+    if _path_has_e2e_directory(pure_path=pure_path):
         return True
-    name_lower = pure_path.name.lower()
-    return ".e2e." in name_lower
+    return _has_e2e_name_marker(name_lower=pure_path.name.lower())
+
+
+def _path_has_e2e_directory(*, pure_path: PurePosixPath) -> bool:
+    """Return True when a path sits under a recognized E2E directory segment."""
+    parent_parts = [part.lower() for part in pure_path.parts[:-1]]
+    if not parent_parts:
+        return False
+    if any(part in _E2E_DIR_EXACT for part in parent_parts):
+        return True
+    if "playwright" not in parent_parts:
+        return False
+    return _has_tests_ancestor(pure_path) or pure_path.parts[:1] == ("tests",)
+
+
+def _has_e2e_name_marker(*, name_lower: str) -> bool:
+    """Return True when a basename uses a common E2E filename marker."""
+    if ".e2e." in name_lower or ".e2e-" in name_lower or ".e2e_" in name_lower:
+        return True
+    return name_lower.endswith((".e2e.ts", ".e2e.tsx", ".e2e.js", ".e2e.jsx"))
 
 
 def _test_name_matches_stem(*, name: str, source_stem: str) -> bool:

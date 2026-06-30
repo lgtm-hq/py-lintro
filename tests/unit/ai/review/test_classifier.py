@@ -80,6 +80,21 @@ from lintro.ai.review.models.changed_file import ChangedFile
             id="e2e_browser_test",
         ),
         pytest.param(
+            "playwright-tests/global-setup.ts",
+            {FileDomain.E2E, FileDomain.SOURCE},
+            id="playwright_tests_directory",
+        ),
+        pytest.param(
+            "integrations/playwright/client.ts",
+            {FileDomain.SOURCE},
+            id="playwright_library_source",
+        ),
+        pytest.param(
+            "login.e2e-spec.ts",
+            {FileDomain.E2E, FileDomain.SOURCE},
+            id="e2e_spec_filename",
+        ),
+        pytest.param(
             "tests/conftest.py",
             {FileDomain.TEST},
             id="root_tests_helper",

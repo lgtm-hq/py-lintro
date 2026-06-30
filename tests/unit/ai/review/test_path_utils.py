@@ -4,7 +4,11 @@ from __future__ import annotations
 
 from assertpy import assert_that
 
-from lintro.ai.review.path_utils import is_test_path, matches_test_for_source
+from lintro.ai.review.path_utils import (
+    is_e2e_test_path,
+    is_test_path,
+    matches_test_for_source,
+)
 
 
 def test_is_test_path_recognizes_common_test_layouts() -> None:
@@ -17,6 +21,16 @@ def test_is_test_path_recognizes_common_test_layouts() -> None:
     assert_that(is_test_path("foo_test.js")).is_true()
     assert_that(is_test_path("tests/run.bats")).is_true()
     assert_that(is_test_path("src/button.tsx")).is_false()
+
+
+def test_is_e2e_test_path_recognizes_e2e_directories_and_names() -> None:
+    """E2E detection covers playwright-tests dirs and common filename markers."""
+    assert_that(is_e2e_test_path("tests/e2e/login.spec.ts")).is_true()
+    assert_that(is_e2e_test_path("playwright-tests/global-setup.ts")).is_true()
+    assert_that(is_e2e_test_path("login.e2e-spec.ts")).is_true()
+    assert_that(is_e2e_test_path("checkout.e2e_test.ts")).is_true()
+    assert_that(is_e2e_test_path("tests/unit/service.test.ts")).is_false()
+    assert_that(is_e2e_test_path("integrations/playwright/client.ts")).is_false()
 
 
 def test_matches_test_for_source_pairs_dot_style_tests_across_directories() -> None:
