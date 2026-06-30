@@ -820,6 +820,23 @@ def test_collect_pr_context_fetches_workflow_via_gh_when_git_show_raises(
     )
 
 
+@patch("lintro.ai.review.context.collection._run_git")
+def test_read_workflow_post_image_preserves_empty_file(
+    mock_run_git: MagicMock,
+) -> None:
+    """An emptied workflow at head is preserved as empty, not treated as missing."""
+    from lintro.ai.review.context.collection import _read_workflow_post_image
+
+    mock_run_git.return_value = _completed(stdout="")
+
+    content = _read_workflow_post_image(
+        path=".github/workflows/ci.yml",
+        head_ref="deadbeef",
+    )
+
+    assert_that(content).is_equal_to("")
+
+
 def test_normalize_path_prefix_strips_mixed_root_prefixes() -> None:
     """Path filters normalize mixed / and ./ root-relative prefixes."""
     from lintro.ai.review.context.collection import _normalize_path_prefix

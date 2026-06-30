@@ -424,7 +424,9 @@ def _read_workflow_post_image(
     content: str | None = None
     try:
         result = _run_git(args=["show", f"{head_ref}:{path}"], check=False)
-        if result.returncode == 0 and result.stdout:
+        if result.returncode == 0:
+            # A zero exit means the path exists at head; preserve empty stdout
+            # as a real empty file rather than falling back to stale diff hunks.
             content = result.stdout
     except ReviewContextError:
         content = None
