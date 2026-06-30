@@ -27,7 +27,12 @@ from lintro.ai.review.models.changed_file import ChangedFile
         pytest.param(
             ".github/dependabot.yml",
             {FileDomain.CI},
-            id="github_root_automation_config",
+            id="github_root_automation_config_yml",
+        ),
+        pytest.param(
+            ".github/renovate.yaml",
+            {FileDomain.CI},
+            id="github_root_automation_config_yaml",
         ),
         pytest.param(
             ".github/workflows/auth-gate.yml",
