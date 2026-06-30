@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from re import escape
 from unittest.mock import patch
 
 import pytest
@@ -143,7 +144,7 @@ review:
 
     with pytest.raises(
         ValueError,
-        match="review.checklist.items entries must be mappings",
+        match=escape("review.checklist.items entries must be mappings"),
     ):
         load_config(config_path=config_file)
 
