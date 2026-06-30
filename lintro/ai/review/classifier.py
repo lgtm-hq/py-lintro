@@ -37,7 +37,7 @@ _DOMAIN_GLOBS: dict[FileDomain, tuple[str, ...]] = {
 }
 
 _API_PATH_SEGMENTS: frozenset[str] = frozenset(
-    {"api", "routes", "openapi", "schemas"},
+    {"api", "clients", "routes", "openapi", "schemas", "types"},
 )
 _SECURITY_KEYWORDS: tuple[str, ...] = ("auth", "security")
 _DOC_FILE_STEMS: frozenset[str] = frozenset(

@@ -55,6 +55,26 @@ from lintro.ai.review.models.changed_file import ChangedFile
             id="nested_ci_action",
         ),
         pytest.param(
+            "api/handlers.py",
+            {FileDomain.API, FileDomain.SOURCE},
+            id="root_api_directory",
+        ),
+        pytest.param(
+            "clients/api.ts",
+            {FileDomain.API, FileDomain.SOURCE},
+            id="root_clients_directory",
+        ),
+        pytest.param(
+            "types/user.ts",
+            {FileDomain.API, FileDomain.SOURCE},
+            id="root_types_directory",
+        ),
+        pytest.param(
+            "tests/conftest.py",
+            {FileDomain.TEST},
+            id="root_tests_helper",
+        ),
+        pytest.param(
             "test_samples/tools/python/ruff/ruff_clean.py",
             {FileDomain.SOURCE},
             id="python_source",
