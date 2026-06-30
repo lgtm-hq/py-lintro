@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 from assertpy import assert_that
 
 from lintro.ai.review.file_language import languages_for_path, languages_for_paths
@@ -41,3 +43,26 @@ def test_languages_for_path_tags_extensionless_scripts() -> None:
     """Extensionless scripts under bin/ or scripts/ receive a shell tag."""
     assert_that(languages_for_path(path="bin/lintro")).contains("shell")
     assert_that(languages_for_path(path="scripts/deploy")).contains("shell")
+
+
+def test_languages_for_path_tags_extensionful_scripts_as_shell() -> None:
+    """Script paths keep language tags and also receive shell."""
+    tags = languages_for_path(path="scripts/deploy.py")
+
+    assert_that(tags).contains("python")
+    assert_that(tags).contains("shell")
+
+
+def test_languages_for_path_reads_extensionless_shebang_with_repo_root(
+    tmp_path: Path,
+) -> None:
+    """Extensionless scripts resolve interpreter tags from shebangs."""
+    script = tmp_path / "bin" / "lintro"
+    script.parent.mkdir(parents=True)
+    script.write_text("#!/usr/bin/env python3\nprint('hi')\n", encoding="utf-8")
+    script.chmod(0o755)
+
+    tags = languages_for_path(path="bin/lintro", repo_root=tmp_path)
+
+    assert_that(tags).contains("python")
+    assert_that(tags).contains("shell")
