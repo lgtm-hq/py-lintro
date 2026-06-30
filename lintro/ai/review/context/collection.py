@@ -462,7 +462,7 @@ def _read_workflow_post_image_via_gh(
         )
     except ReviewContextError:
         return None
-    return result.stdout if result.stdout else None
+    return result.stdout
 
 
 def _filter_context_by_paths(

@@ -837,6 +837,27 @@ def test_read_workflow_post_image_preserves_empty_file(
     assert_that(content).is_equal_to("")
 
 
+@patch("lintro.ai.review.context.collection._run_gh")
+@patch("lintro.ai.review.context.collection._run_git")
+def test_read_workflow_post_image_preserves_empty_file_via_gh(
+    mock_run_git: MagicMock,
+    mock_run_gh: MagicMock,
+) -> None:
+    """Gh raw-content fallback preserves an emptied workflow file at head."""
+    from lintro.ai.review.context.collection import _read_workflow_post_image
+
+    mock_run_git.return_value = _completed(returncode=1, stdout="", stderr="bad object")
+    mock_run_gh.return_value = _completed(stdout="")
+
+    content = _read_workflow_post_image(
+        path=".github/workflows/ci.yml",
+        head_ref="deadbeef",
+        repo="lgtm-hq/py-lintro",
+    )
+
+    assert_that(content).is_equal_to("")
+
+
 def test_normalize_path_prefix_strips_mixed_root_prefixes() -> None:
     """Path filters normalize mixed / and ./ root-relative prefixes."""
     from lintro.ai.review.context.collection import _normalize_path_prefix
