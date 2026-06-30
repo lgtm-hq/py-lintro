@@ -6,6 +6,7 @@ from pathlib import PurePosixPath
 
 _TEST_NAME_MARKERS = (".spec.", ".test.", "_test.")
 _TEST_LAYER_PARTS: frozenset[str] = frozenset({"unit", "integration"})
+_E2E_DIR_NAMES: frozenset[str] = frozenset({"e2e", "playwright"})
 
 
 def _has_tests_ancestor(path: PurePosixPath) -> bool:
@@ -30,6 +31,24 @@ def is_test_path(path: str) -> bool:
     return name.startswith("test_") or any(
         marker in name for marker in _TEST_NAME_MARKERS
     )
+
+
+def is_e2e_test_path(path: str) -> bool:
+    """Return True when a path looks like an end-to-end or browser test file.
+
+    Args:
+        path: Repository-relative file path.
+
+    Returns:
+        True when the path sits under a conventional E2E directory or uses an
+        E2E-specific filename marker.
+    """
+    pure_path = PurePosixPath(path.replace("\\", "/"))
+    parent_parts = {part.lower() for part in pure_path.parts[:-1]}
+    if parent_parts.intersection(_E2E_DIR_NAMES):
+        return True
+    name_lower = pure_path.name.lower()
+    return ".e2e." in name_lower
 
 
 def _test_name_matches_stem(*, name: str, source_stem: str) -> bool:

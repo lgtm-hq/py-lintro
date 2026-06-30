@@ -285,7 +285,7 @@ BUILTIN_CHECKLIST_ITEMS: tuple[ChecklistItem, ...] = (
             "Do E2E tests use fixed waitForTimeout() instead of condition-based "
             "waiting (risk of flaky false passes/fails)?"
         ),
-        domains=(FileDomain.TEST,),
+        domains=(FileDomain.E2E,),
         languages=_TS_JS_LANGUAGES,
         category=ReviewCategory.LOGIC_BUG,
         tier=2,
@@ -296,7 +296,7 @@ BUILTIN_CHECKLIST_ITEMS: tuple[ChecklistItem, ...] = (
             "Do E2E tests read DOM state once without auto-retrying assertions "
             "(timing-dependent false results)?"
         ),
-        domains=(FileDomain.TEST,),
+        domains=(FileDomain.E2E,),
         languages=_TS_JS_LANGUAGES,
         category=ReviewCategory.LOGIC_BUG,
         tier=2,
@@ -480,7 +480,7 @@ BUILTIN_CHECKLIST_ITEMS: tuple[ChecklistItem, ...] = (
             "Do E2E tests share mutable global state across iterations "
             "(order-dependent failures)?"
         ),
-        domains=(FileDomain.TEST,),
+        domains=(FileDomain.E2E,),
         languages=_TS_JS_LANGUAGES,
         category=ReviewCategory.INTEGRATION,
         tier=2,
@@ -491,7 +491,7 @@ BUILTIN_CHECKLIST_ITEMS: tuple[ChecklistItem, ...] = (
             "Are browser contexts/fixtures left open without teardown "
             "(context.close())?"
         ),
-        domains=(FileDomain.TEST,),
+        domains=(FileDomain.E2E,),
         languages=_TS_JS_LANGUAGES,
         category=ReviewCategory.INTEGRATION,
         tier=2,
@@ -651,7 +651,7 @@ BUILTIN_CHECKLIST_ITEMS: tuple[ChecklistItem, ...] = (
             "Are E2E/UI tests hard-coding labels, error strings, or IDs that "
             "should come from shared constants/enums?"
         ),
-        domains=(FileDomain.TEST,),
+        domains=(FileDomain.E2E,),
         languages=_TS_JS_LANGUAGES,
         category=ReviewCategory.CONTRACT_DRIFT,
         tier=2,
@@ -771,7 +771,7 @@ BUILTIN_CHECKLIST_ITEMS: tuple[ChecklistItem, ...] = (
             "Do E2E tests rely on fragile CSS selectors (#id, deep div > button) "
             "likely to break on unrelated UI changes?"
         ),
-        domains=(FileDomain.TEST,),
+        domains=(FileDomain.E2E,),
         languages=_TS_JS_LANGUAGES,
         category=ReviewCategory.CODE_SMELL,
         tier=2,
