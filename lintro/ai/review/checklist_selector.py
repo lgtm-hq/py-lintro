@@ -5,7 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from lintro.ai.review.file_language import languages_for_path, languages_for_paths
+from lintro.ai.review.file_language import languages_for_path
 
 if TYPE_CHECKING:
     from lintro.ai.review.enums.file_domain import FileDomain
@@ -50,10 +50,14 @@ def select_checklist_items(
         for classification in classifications
         for domain in classification.domains
     }
-    present_languages = languages_for_paths(
-        paths=[classification.path for classification in classifications],
-        repo_root=repo_root,
-    )
+    language_tags_by_path = {
+        classification.path: languages_for_path(
+            path=classification.path,
+            repo_root=repo_root,
+        )
+        for classification in classifications
+    }
+    present_languages = set().union(*language_tags_by_path.values())
 
     selected: list[ChecklistItem] = []
     for item in items:
@@ -65,8 +69,8 @@ def select_checklist_items(
             classifications=classifications,
             present_domains=present_domains,
             present_languages=present_languages,
+            language_tags_by_path=language_tags_by_path,
             has_files=has_files,
-            repo_root=repo_root,
         ):
             selected.append(item)
 
@@ -79,8 +83,8 @@ def _item_matches_diff(
     classifications: list[FileClassification],
     present_domains: set[FileDomain],
     present_languages: set[str],
+    language_tags_by_path: dict[str, set[str]],
     has_files: bool,
-    repo_root: Path | str | None = None,
 ) -> bool:
     """Return True when a Tier 2 item activates for the diff.
 
@@ -89,9 +93,8 @@ def _item_matches_diff(
         classifications: Per-file domain classifications for the review diff.
         present_domains: Role domains present across the diff.
         present_languages: ``identify`` language tags present across the diff.
+        language_tags_by_path: Cached language tags keyed by changed-file path.
         has_files: Whether the diff has at least one changed file.
-        repo_root: Optional repository root used to resolve extensionless script
-            shebangs for language tagging.
 
     Returns:
         True when the item should be selected.
@@ -103,7 +106,7 @@ def _item_matches_diff(
         return _dual_axis_matches_any_file(
             item=item,
             classifications=classifications,
-            repo_root=repo_root,
+            language_tags_by_path=language_tags_by_path,
         )
 
     if item.domains:
@@ -115,25 +118,21 @@ def _dual_axis_matches_any_file(
     *,
     item: ChecklistItem,
     classifications: list[FileClassification],
-    repo_root: Path | str | None = None,
+    language_tags_by_path: dict[str, set[str]],
 ) -> bool:
     """Return True when at least one changed file satisfies both axes.
 
     Args:
         item: Checklist item with both ``domains`` and ``languages`` set.
         classifications: Per-file domain classifications for the review diff.
-        repo_root: Optional repository root used to resolve extensionless script
-            shebangs for language tagging.
+        language_tags_by_path: Cached language tags keyed by changed-file path.
 
     Returns:
         True when some file matches both the domain and language axes.
     """
     for classification in classifications:
         file_domains = set(classification.domains)
-        file_languages = languages_for_path(
-            path=classification.path,
-            repo_root=repo_root,
-        )
+        file_languages = language_tags_by_path[classification.path]
         domain_match = bool(file_domains.intersection(item.domains))
         language_match = bool(file_languages.intersection(item.languages))
         if domain_match and language_match:
