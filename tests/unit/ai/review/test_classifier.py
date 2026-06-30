@@ -238,6 +238,31 @@ from lintro.ai.review.models.changed_file import ChangedFile
         pytest.param("LICENSE", {FileDomain.DOCS}, id="root_license"),
         pytest.param("asset.unknown", {FileDomain.SOURCE}, id="generic_fallback"),
         pytest.param("data.txt", {FileDomain.SOURCE}, id="non_doc_txt_source"),
+        pytest.param(
+            "package-lock.json",
+            {FileDomain.CONFIG, FileDomain.DEPS},
+            id="root_npm_lockfile",
+        ),
+        pytest.param(
+            "pnpm-lock.yaml",
+            {FileDomain.CONFIG, FileDomain.DEPS},
+            id="root_pnpm_lockfile",
+        ),
+        pytest.param(
+            "bun.lockb",
+            {FileDomain.DEPS},
+            id="root_bun_binary_lockfile",
+        ),
+        pytest.param(
+            "src/readme.py",
+            {FileDomain.SOURCE},
+            id="source_file_named_readme",
+        ),
+        pytest.param(
+            "tools/license.py",
+            {FileDomain.SOURCE},
+            id="source_file_named_license",
+        ),
     ],
 )
 def test_classify_changed_files_assigns_expected_domains(

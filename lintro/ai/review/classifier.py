@@ -83,10 +83,15 @@ _SHELL_SCRIPT_SUFFIXES: frozenset[str] = frozenset({".sh", ".bash", ".bats"})
 _DEPENDENCY_TEXT_PREFIXES: tuple[str, ...] = ("requirements", "constraints")
 _DEPENDENCY_MANIFEST_NAMES: frozenset[str] = frozenset(
     {
+        "bun.lock",
+        "bun.lockb",
         "cargo.toml",
         "composer.json",
         "go.mod",
+        "npm-shrinkwrap.json",
         "package.json",
+        "package-lock.json",
+        "pnpm-lock.yaml",
         "pyproject.toml",
     },
 )
@@ -193,7 +198,9 @@ def _fallback_domain(*, path: str) -> FileDomain:
     stem = pure_path.stem.lower()
     if suffix in _CONFIG_SUFFIXES:
         return FileDomain.CONFIG
-    if suffix in {".md", ".rst"} or stem in _DOC_FILE_STEMS:
+    if suffix in {".md", ".rst"}:
+        return FileDomain.DOCS
+    if suffix == "" and stem in _DOC_FILE_STEMS:
         return FileDomain.DOCS
     return FileDomain.SOURCE
 
