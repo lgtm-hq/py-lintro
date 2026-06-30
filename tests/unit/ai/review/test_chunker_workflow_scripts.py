@@ -611,6 +611,24 @@ CASES: tuple[WorkflowGroupingCase, ...] = (
         contains=("scripts/deploy.sh",),
     ),
     WorkflowGroupingCase(
+        id="groups_workflow_with_sudo_wrapped_script",
+        fixture="chunk_groups_workflow_with_sudo_wrapped_script.diff",
+        files=(".github/workflows/ci.yml", "scripts/deploy.sh"),
+        contains=("scripts/deploy.sh",),
+    ),
+    WorkflowGroupingCase(
+        id="groups_workflow_with_timeout_wrapped_script",
+        fixture="chunk_groups_workflow_with_timeout_wrapped_script.diff",
+        files=(".github/workflows/ci.yml", "scripts/deploy.sh"),
+        contains=("scripts/deploy.sh",),
+    ),
+    WorkflowGroupingCase(
+        id="groups_workflow_with_action_package_manifest",
+        fixture="chunk_groups_workflow_with_action_package_manifest.diff",
+        files=(".github/workflows/ci.yml", ".github/actions/setup/package.json"),
+        contains=(".github/actions/setup/package.json",),
+    ),
+    WorkflowGroupingCase(
         id="groups_workflow_with_env_bash_c_wrapped_script",
         fixture="chunk_groups_workflow_with_env_bash_c_wrapped_script.diff",
         files=(".github/workflows/ci.yml", "scripts/deploy.sh"),

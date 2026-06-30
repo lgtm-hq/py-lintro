@@ -29,6 +29,32 @@ _ENV_OPERAND_FLAGS = frozenset({"-u", "-U", "-C", "-S"})
 _ENV_OPERAND_LONG_OPTIONS = frozenset({"chdir", "split-string"})
 _SHELL_DISPATCH_WRAPPERS = frozenset({"exec", "command"})
 _SHELL_COMPOUND_LEADERS = frozenset({"then", "do", "else", "elif"})
+_COMMAND_DISPATCH_WRAPPERS = frozenset({"sudo", "timeout"})
+_DISPATCH_OPERAND_FLAGS: dict[str, frozenset[str]] = {
+    "sudo": frozenset(
+        {
+            "-u",
+            "-g",
+            "-C",
+            "-p",
+            "-r",
+            "-t",
+            "-U",
+            "-h",
+            "-R",
+            "--user",
+            "--group",
+            "--prompt",
+            "--chdir",
+            "--role",
+            "--type",
+        },
+    ),
+    "timeout": frozenset({"-s", "-k", "--signal", "--kill-after"}),
+}
+# Mandatory positional operands consumed before the wrapped command (for
+# example ``timeout DURATION command``).
+_DISPATCH_POSITIONAL_OPERANDS: dict[str, int] = {"sudo": 0, "timeout": 1}
 _UV_OPTION = (
     r"(?:"
     r"\s+--(?:with|directory|project|package)\s+\S+"
@@ -59,6 +85,18 @@ _ACTION_BUILD_ARTIFACT_DIRS = frozenset(
     {"coverage", "dist", "lib", "node_modules", "out", "vendor"},
 )
 _ACTION_SOURCE_LAYOUT_DIRS = frozenset({"source", "src"})
+# Manifests that define a local action's runtime dependencies or entrypoint, so
+# changes to them are relevant to the workflow that invokes the action.
+_ACTION_MANIFEST_NAMES = frozenset(
+    {
+        "package.json",
+        "package-lock.json",
+        "pnpm-lock.yaml",
+        "bun.lock",
+        "bun.lockb",
+        "yarn.lock",
+    },
+)
 
 
 def _is_workflow_linked_script(*, path: str) -> bool:
@@ -70,6 +108,8 @@ def _is_workflow_linked_script(*, path: str) -> bool:
     if suffix in {".sh", ".bash"}:
         return True
     if path.startswith(".github/actions/") and len(pure_path.parts) >= 3:
+        if pure_path.name in _ACTION_MANIFEST_NAMES:
+            return True
         if suffix in _NON_EXECUTABLE_WORKFLOW_SUFFIXES and pure_path.name not in {
             "action.yml",
             "action.yaml",
@@ -363,6 +403,38 @@ def _strip_shell_dispatch_wrappers(*, segment: str) -> str:
     return remaining
 
 
+def _strip_command_dispatch_prefixes(*, segment: str) -> str:
+    """Skip ``sudo``/``timeout`` wrappers that still execute the wrapped command."""
+    remaining = segment.strip()
+    while True:
+        token = _first_shell_token(segment=remaining)
+        if token is None:
+            break
+        wrapper = token.lower()
+        if wrapper not in _COMMAND_DISPATCH_WRAPPERS:
+            break
+        operand_flags = _DISPATCH_OPERAND_FLAGS.get(wrapper, frozenset())
+        remaining = _rest_after_first_shell_token(segment=remaining)
+        while True:
+            option = _first_shell_token(segment=remaining)
+            if option is None or not option.startswith("-"):
+                break
+            remaining = _rest_after_first_shell_token(segment=remaining)
+            if option == "--":
+                break
+            flag_name = option.split("=", 1)[0]
+            if "=" not in option and flag_name in operand_flags:
+                operand = _first_shell_token(segment=remaining)
+                if operand is not None and not operand.startswith("-"):
+                    remaining = _rest_after_first_shell_token(segment=remaining)
+        for _ in range(_DISPATCH_POSITIONAL_OPERANDS.get(wrapper, 0)):
+            operand = _first_shell_token(segment=remaining)
+            if operand is None or operand.startswith("-"):
+                break
+            remaining = _rest_after_first_shell_token(segment=remaining)
+    return remaining
+
+
 def _strip_shell_compound_leaders(*, segment: str) -> str:
     """Skip compound-command leaders such as ``then`` and ``do``."""
     remaining = segment.strip()
@@ -468,6 +540,7 @@ def _shell_command_string_payload_after_wrappers(*, segment: str) -> str | None:
         payload = _trailing_shell_c_payload(segment=remaining)
         if payload is not None:
             return payload
+        remaining = _strip_command_dispatch_prefixes(segment=remaining)
         remaining = _strip_shell_dispatch_wrappers(segment=remaining)
         remaining = _strip_shell_compound_leaders(segment=remaining)
         if remaining == previous:
@@ -504,6 +577,7 @@ def _normalize_invoked_command_segment(*, segment: str) -> str:
             return remaining
         previous = remaining
         remaining = _strip_leading_shell_prefixes(segment=remaining)
+        remaining = _strip_command_dispatch_prefixes(segment=remaining)
         remaining = _strip_run_command_prefix(segment=remaining)
         remaining = _strip_shell_dispatch_wrappers(segment=remaining)
         remaining = _strip_shell_compound_leaders(segment=remaining)
@@ -792,7 +866,10 @@ def _resolve_github_action_root(*, path: PurePosixPath) -> PurePosixPath | None:
     parts = path.parts
     if len(parts) < 3 or parts[:2] != (".github", "actions"):
         return None
-    if path.name in {"action.yml", "action.yaml"}:
+    if (
+        path.name in {"action.yml", "action.yaml"}
+        or path.name in _ACTION_MANIFEST_NAMES
+    ):
         dir_path = path.parent
     elif path.suffix.lower() in _NON_EXECUTABLE_WORKFLOW_SUFFIXES:
         return None
