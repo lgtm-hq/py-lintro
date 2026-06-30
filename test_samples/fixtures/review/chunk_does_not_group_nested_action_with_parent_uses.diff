@@ -1,0 +1,12 @@
+diff --git a/.github/workflows/ci.yml b/.github/workflows/ci.yml
+--- a/.github/workflows/ci.yml
++++ b/.github/workflows/ci.yml
+@@ -1 +1,2 @@
+ name: CI
++- uses: ./.github/actions/setup
+diff --git a/.github/actions/setup/internal/run b/.github/actions/setup/internal/run
+--- a/.github/actions/setup/internal/run
++++ b/.github/actions/setup/internal/run
+@@ -1 +1,2 @@
+ #!/usr/bin/env bash
++echo internal

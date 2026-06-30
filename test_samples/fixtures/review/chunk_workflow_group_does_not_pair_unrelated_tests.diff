@@ -1,0 +1,18 @@
+diff --git a/.github/workflows/ci.yml b/.github/workflows/ci.yml
+--- a/.github/workflows/ci.yml
++++ b/.github/workflows/ci.yml
+@@ -1 +1,2 @@
+ name: CI
++run: scripts/ci/run.sh
+diff --git a/scripts/ci/run.sh b/scripts/ci/run.sh
+--- a/scripts/ci/run.sh
++++ b/scripts/ci/run.sh
+@@ -1 +1,2 @@
+ #!/usr/bin/env bash
++echo run
+diff --git a/tests/test_ci.py b/tests/test_ci.py
+--- a/tests/test_ci.py
++++ b/tests/test_ci.py
+@@ -1 +1,2 @@
+ def test_ci():
++    assert True

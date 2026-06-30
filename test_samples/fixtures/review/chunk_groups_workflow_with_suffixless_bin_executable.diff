@@ -1,0 +1,12 @@
+diff --git a/.github/workflows/ci.yml b/.github/workflows/ci.yml
+--- a/.github/workflows/ci.yml
++++ b/.github/workflows/ci.yml
+@@ -1 +1,2 @@
+ name: CI
++run: bin/lintro
+diff --git a/bin/lintro b/bin/lintro
+--- a/bin/lintro
++++ b/bin/lintro
+@@ -1 +1,2 @@
+ #!/usr/bin/env bash
++echo lintro

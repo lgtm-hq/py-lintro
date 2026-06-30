@@ -1,0 +1,12 @@
+diff --git a/.github/workflows/ci.yml b/.github/workflows/ci.yml
+--- a/.github/workflows/ci.yml
++++ b/.github/workflows/ci.yml
+@@ -1 +1,2 @@
+ name: CI
++# TODO: migrate from scripts/old-deploy.sh
+diff --git a/scripts/old-deploy.sh b/scripts/old-deploy.sh
+--- a/scripts/old-deploy.sh
++++ b/scripts/old-deploy.sh
+@@ -1 +1,2 @@
+ #!/usr/bin/env bash
++echo old
