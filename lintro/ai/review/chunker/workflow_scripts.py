@@ -856,7 +856,7 @@ def _workflow_post_image_text(*, workflow_diff: str) -> str:
     for line in workflow_diff.splitlines():
         if line.startswith(("+++", "---", "diff --git", "index ", "@@")):
             continue
-        if line.startswith("+") or line.startswith(" "):
+        if line.startswith(("+", " ")):
             lines.append(line[1:])
     return "\n".join(lines)
 

@@ -280,7 +280,6 @@ class OsvScannerPlugin(BaseToolPlugin):
         # Some osv-scanner builds emit log lines before JSON and may exit
         # non-zero even when the parsed results list is empty.
         if not success and len(issues) == 0:
-            payload = extract_osv_scanner_payload(output)
             if payload is not None and "results" in payload:
                 results = payload["results"]
                 if isinstance(results, list) and len(results) == 0:

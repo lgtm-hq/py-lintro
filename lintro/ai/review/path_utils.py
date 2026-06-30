@@ -102,9 +102,15 @@ def _parents_compatible(*, test_path: str, source_path: str) -> bool:
         mirrored = _strip_test_layer(test_parent)
         if not mirrored:
             return source_parent == "src"
+        if source_parent == f"src/{mirrored}":
+            return True
         source_parts = tuple(part for part in source_parent.split("/") if part)
         test_parts = tuple(part for part in mirrored.split("/") if part)
-        return bool(test_parts) and source_parts[-len(test_parts) :] == test_parts
+        if not test_parts:
+            return False
+        if source_parts and source_parts[0].startswith("src") and source_parts[0] != "src":
+            return False
+        return source_parts[-len(test_parts) :] == test_parts
 
     package_match = _package_local_test_mirror_match(
         test_parent=test_parent,

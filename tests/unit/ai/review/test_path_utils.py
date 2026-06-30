@@ -62,6 +62,24 @@ def test_matches_test_for_source_rejects_src_prefix_false_positives() -> None:
     ).is_false()
 
 
+def test_matches_test_for_source_rejects_nested_tests_api_src2_collision() -> None:
+    """Nested tests/api/ pairs with src/api only, not src2/api suffix collisions."""
+    assert_that(
+        matches_test_for_source(
+            test_path="tests/api/foo.test.ts",
+            source_stem="foo",
+            source_path="src2/api/foo.ts",
+        ),
+    ).is_false()
+    assert_that(
+        matches_test_for_source(
+            test_path="tests/api/foo.test.ts",
+            source_stem="foo",
+            source_path="src/api/foo.ts",
+        ),
+    ).is_true()
+
+
 def test_matches_test_for_source_root_tests_only_pairs_direct_src_layout() -> None:
     """Root tests/ pairs with src/<file> only, not nested src/** modules."""
     assert_that(

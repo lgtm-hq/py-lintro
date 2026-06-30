@@ -59,6 +59,18 @@ def test_classify_ok_when_scan_is_clean() -> None:
     )
 
 
+def test_classify_error_for_non_object_payload() -> None:
+    """Top-level JSON arrays or scalars fail closed as error."""
+    module = _load_classify_module()
+
+    assert_that(module.classify_osv_results(payload=[])).is_equal_to(  # type: ignore[arg-type]
+        module.OsvResultClass.ERROR,
+    )
+    assert_that(module.classify_osv_results(payload="bad")).is_equal_to(  # type: ignore[arg-type]
+        module.OsvResultClass.ERROR,
+    )
+
+
 def test_classify_error_when_success_missing() -> None:
     """Missing success is treated as malformed."""
     module = _load_classify_module()
