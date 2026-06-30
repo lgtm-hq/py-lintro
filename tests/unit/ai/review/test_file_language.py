@@ -46,11 +46,20 @@ def test_languages_for_path_tags_extensionless_scripts() -> None:
 
 
 def test_languages_for_path_tags_extensionful_scripts_as_shell() -> None:
-    """Script paths keep language tags and also receive shell."""
-    tags = languages_for_path(path="scripts/deploy.py")
+    """Shell extensions under top-level scripts/ receive a shell tag."""
+    tags = languages_for_path(path="scripts/deploy.sh")
 
-    assert_that(tags).contains("python")
     assert_that(tags).contains("shell")
+
+
+def test_languages_for_path_does_not_tag_nested_or_non_script_paths() -> None:
+    """Nested bin/scripts paths and script-dir docs skip shell tagging."""
+    assert_that(languages_for_path(path="src/bin/parser.py")).does_not_contain("shell")
+    assert_that(languages_for_path(path="src/scripts/helpers.ts")).does_not_contain(
+        "shell",
+    )
+    assert_that(languages_for_path(path="scripts/deploy.py")).does_not_contain("shell")
+    assert_that(languages_for_path(path="scripts/README.md")).does_not_contain("shell")
 
 
 def test_languages_for_path_reads_extensionless_shebang_with_repo_root(
