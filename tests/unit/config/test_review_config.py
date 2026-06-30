@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from pathlib import Path
 from re import escape
-from unittest.mock import patch
 
 import pytest
 from assertpy import assert_that
@@ -196,11 +195,11 @@ review:
         load_config(config_path=config_file)
 
 
-def test_load_config_ignores_unknown_checklist_keys(
+def test_load_config_rejects_unknown_checklist_keys(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Unknown review.checklist keys warn instead of aborting config load."""
+    """Unknown review.checklist keys fail fast during config load."""
     config_file = tmp_path / ".lintro-config.yaml"
     config_file.write_text(
         """\
@@ -214,10 +213,5 @@ review:
     monkeypatch.chdir(tmp_path)
     clear_config_cache()
 
-    with patch("lintro.config.config_loader.logger.warning") as warning_mock:
-        config = load_config(config_path=config_file)
-
-    assert_that(config.review.checklist.items).is_empty()
-    warning_text = " ".join(str(call) for call in warning_mock.call_args_list)
-    assert_that(warning_text).contains("Unknown review.checklist keys ignored")
-    assert_that(warning_text).contains("itemz")
+    with pytest.raises(ValueError, match=escape("Unknown review.checklist keys")):
+        load_config(config_path=config_file)
