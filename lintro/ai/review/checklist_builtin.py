@@ -412,8 +412,8 @@ BUILTIN_CHECKLIST_ITEMS: tuple[ChecklistItem, ...] = (
     ChecklistItem(
         id=122,
         question=(
-            "Are lint/security suppressions (noqa, type: ignore, allow(dead_code), "
-            "# nosec) added without reviewing the underlying risk?"
+            "Are lint suppressions (noqa, type: ignore, allow(dead_code)) "
+            "added without reviewing the underlying risk?"
         ),
         domains=(),
         languages=(),
@@ -534,7 +534,7 @@ BUILTIN_CHECKLIST_ITEMS: tuple[ChecklistItem, ...] = (
             "Does new or changed production code lack corresponding test updates "
             "in the same diff?"
         ),
-        domains=(),
+        domains=(FileDomain.SOURCE,),
         languages=(*_TS_JS_LANGUAGES, "python", "rust"),
         category=ReviewCategory.INTEGRATION,
         tier=2,
@@ -683,7 +683,7 @@ BUILTIN_CHECKLIST_ITEMS: tuple[ChecklistItem, ...] = (
             "Is user input interpolated into SQL/command strings instead of "
             "parameterized/safe APIs?"
         ),
-        domains=(),
+        domains=(FileDomain.SOURCE, FileDomain.API, FileDomain.SHELL),
         languages=(*_TS_JS_LANGUAGES, "go", "java", "python", "rust"),
         category=ReviewCategory.SECURITY,
         tier=2,

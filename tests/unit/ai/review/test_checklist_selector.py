@@ -305,6 +305,26 @@ def test_modified_path_test_gap_item_matches_python_source() -> None:
     assert_that({item.id for item in selected}).contains(134)
 
 
+def test_production_test_update_item_skips_test_only_diffs() -> None:
+    """Item 133 does not fire when the diff only changes test files."""
+    selected = select_checklist_items(
+        classifications=_classify(["tests/test_parser.py"]),
+        items=list(BUILTIN_CHECKLIST_ITEMS),
+    )
+
+    assert_that({item.id for item in selected}).does_not_contain(133)
+
+
+def test_injection_item_skips_test_only_diffs() -> None:
+    """Item 147 requires source, API, or shell domains on changed files."""
+    selected = select_checklist_items(
+        classifications=_classify(["tests/test_parser.py"]),
+        items=list(BUILTIN_CHECKLIST_ITEMS),
+    )
+
+    assert_that({item.id for item in selected}).does_not_contain(147)
+
+
 def test_select_checklist_items_matches_root_level_source_files() -> None:
     """Root-level source files still resolve a language for selection."""
     selected = select_checklist_items(
