@@ -295,6 +295,16 @@ def test_dual_axis_shell_python_item_does_not_match_plain_python() -> None:
     assert_that({item.id for item in selected}).does_not_contain(148)
 
 
+def test_modified_path_test_gap_item_matches_python_source() -> None:
+    """Item 134 targets source files in supported languages, not shell only."""
+    selected = select_checklist_items(
+        classifications=_classify(["src/main.py"]),
+        items=list(BUILTIN_CHECKLIST_ITEMS),
+    )
+
+    assert_that({item.id for item in selected}).contains(134)
+
+
 def test_select_checklist_items_matches_root_level_source_files() -> None:
     """Root-level source files still resolve a language for selection."""
     selected = select_checklist_items(

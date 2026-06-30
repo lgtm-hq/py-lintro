@@ -542,7 +542,7 @@ BUILTIN_CHECKLIST_ITEMS: tuple[ChecklistItem, ...] = (
     ChecklistItem(
         id=134,
         question=("Does new or changed logic lack tests covering the modified paths?"),
-        domains=(FileDomain.SHELL,),
+        domains=(FileDomain.SOURCE,),
         languages=(*_TS_JS_LANGUAGES, "python", "rust"),
         category=ReviewCategory.TEST_GAP,
         tier=2,
