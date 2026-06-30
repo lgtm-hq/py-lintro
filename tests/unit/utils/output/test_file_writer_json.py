@@ -35,7 +35,12 @@ def test_write_json_file_creates_valid_file(
     """
     output_path = tmp_path / "report.json"
     results = [
-        mock_tool_result_factory(name="ruff", issues_count=2, output="found issues"),
+        mock_tool_result_factory(
+            name="ruff",
+            issues_count=2,
+            output="found issues",
+            parse_failures_count=0,
+        ),
     ]
 
     write_output_file(
@@ -56,7 +61,31 @@ def test_write_json_file_creates_valid_file(
     assert_that(content["summary"]["tools_run"]).is_equal_to(1)
     assert_that(content["results"]).is_length(1)
     assert_that(content["results"][0]["tool"]).is_equal_to("ruff")
+    assert_that(content["results"][0]["parse_failures_count"]).is_equal_to(0)
     assert_that(content["timestamp"]).is_not_none()
+
+
+def test_write_json_file_omits_parse_failures_count_when_unset(
+    tmp_path: Path,
+    mock_tool_result_factory: Callable[..., MockToolResult],
+) -> None:
+    """JSON output omits parse_failures_count unless the tool sets it."""
+    output_path = tmp_path / "report.json"
+    results = [
+        mock_tool_result_factory(name="ruff", issues_count=0, output="clean"),
+    ]
+
+    write_output_file(
+        output_path=str(output_path),
+        output_format=OutputFormat.JSON,
+        all_results=results,  # type: ignore[arg-type]
+        action=Action.CHECK,
+        total_issues=0,
+        total_fixed=0,
+    )
+
+    content = json.loads(output_path.read_text())
+    assert_that(content["results"][0]).does_not_contain_key("parse_failures_count")
 
 
 def test_write_json_file_includes_parsed_issues(
