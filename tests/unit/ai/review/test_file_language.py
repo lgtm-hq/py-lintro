@@ -35,3 +35,9 @@ def test_languages_for_paths_unions_tags() -> None:
 def test_languages_for_paths_empty_input_is_empty() -> None:
     """No paths means no language tags."""
     assert_that(languages_for_paths(paths=[])).is_empty()
+
+
+def test_languages_for_path_tags_extensionless_scripts() -> None:
+    """Extensionless scripts under bin/ or scripts/ receive a shell tag."""
+    assert_that(languages_for_path(path="bin/lintro")).contains("shell")
+    assert_that(languages_for_path(path="scripts/deploy")).contains("shell")
