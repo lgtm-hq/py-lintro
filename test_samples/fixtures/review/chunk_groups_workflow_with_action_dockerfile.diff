@@ -1,0 +1,12 @@
+diff --git a/.github/workflows/ci.yml b/.github/workflows/ci.yml
+--- a/.github/workflows/ci.yml
++++ b/.github/workflows/ci.yml
+@@ -1 +1,2 @@
+ name: CI
++- uses: ./.github/actions/build
+diff --git a/.github/actions/build/Dockerfile b/.github/actions/build/Dockerfile
+--- a/.github/actions/build/Dockerfile
++++ b/.github/actions/build/Dockerfile
+@@ -1 +1,2 @@
+ FROM alpine:3.20
++RUN echo build

@@ -262,22 +262,32 @@ class OsvScannerPlugin(BaseToolPlugin):
             )
 
         issues = parse_osv_scanner_output(output)
+        payload = extract_osv_scanner_payload(output)
+        parse_failures_count = 0 if payload is not None else None
+        no_op_success = False
 
         # Treat "no package sources found" as a successful no-op, not an error.
         # osv-scanner returns non-zero when it finds no lockfiles to scan.
-        if not success and len(issues) == 0 and output:
-            no_op_indicators = ["no package sources found", "0 packages"]
-            if any(indicator in output.lower() for indicator in no_op_indicators):
-                success = True
+        if (
+            not success
+            and len(issues) == 0
+            and output
+            and "no package sources found" in output.lower()
+        ):
+            success = True
+            no_op_success = True
 
         # Some osv-scanner builds emit log lines before JSON and may exit
         # non-zero even when the parsed results list is empty.
-        if not success and len(issues) == 0:
-            payload = extract_osv_scanner_payload(output)
-            if payload is not None and "results" in payload:
-                results = payload["results"]
-                if isinstance(results, list) and len(results) == 0:
-                    success = True
+        if (
+            not success
+            and len(issues) == 0
+            and payload is not None
+            and "results" in payload
+            and isinstance(payload["results"], list)
+            and len(payload["results"]) == 0
+        ):
+            success = True
 
         # Determine overall success: subprocess must succeed AND no issues
         # found. A non-zero exit with 0 parsed issues indicates an execution
@@ -295,6 +305,9 @@ class OsvScannerPlugin(BaseToolPlugin):
             options=merged_options,
         )
 
+        if no_op_success and parse_failures_count is None:
+            parse_failures_count = 0
+
         return ToolResult(
             name=self.definition.name,
             success=overall_success,
@@ -302,6 +315,7 @@ class OsvScannerPlugin(BaseToolPlugin):
             issues_count=len(issues),
             issues=issues if issues else None,
             ai_metadata=suppression_metadata,
+            parse_failures_count=parse_failures_count,
         )
 
     def _check_suppression_staleness(

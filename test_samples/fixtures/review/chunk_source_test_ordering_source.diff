@@ -1,0 +1,5 @@
+diff --git a/src/foo.py b/src/foo.py
+--- a/src/foo.py
++++ b/src/foo.py
+@@ -0,0 +1 @@
++implementation

@@ -137,6 +137,51 @@ def test_check_clean_scan_with_log_prefix_and_nonzero_exit(
     assert_that(result.issues_count).is_equal_to(0)
 
 
+def test_check_no_package_sources_sets_parse_failures_count(
+    osv_scanner_plugin: OsvScannerPlugin,
+    tmp_path: Path,
+) -> None:
+    """Plain-text no-op scans report parse_failures_count=0 for CI classification."""
+    lockfile = tmp_path / "requirements.txt"
+    lockfile.write_text("requests==2.32.3\n")
+
+    osv_output = (
+        "Scanned 0 packages and found 0 vulnerabilities\nNo package sources found\n"
+    )
+
+    with patch.object(
+        osv_scanner_plugin,
+        "_run_subprocess",
+        return_value=(False, osv_output),
+    ):
+        result = osv_scanner_plugin.check([str(lockfile)], {})
+
+    assert_that(result.success).is_true()
+    assert_that(result.issues_count).is_equal_to(0)
+    assert_that(result.parse_failures_count).is_equal_to(0)
+
+
+def test_check_zero_packages_without_no_sources_is_not_success(
+    osv_scanner_plugin: OsvScannerPlugin,
+    tmp_path: Path,
+) -> None:
+    """Ambiguous zero-package output without the no-sources signal stays a failure."""
+    lockfile = tmp_path / "requirements.txt"
+    lockfile.write_text("requests==2.32.3\n")
+
+    osv_output = "Scanned 0 packages and found 0 vulnerabilities\n"
+
+    with patch.object(
+        osv_scanner_plugin,
+        "_run_subprocess",
+        return_value=(False, osv_output),
+    ):
+        result = osv_scanner_plugin.check([str(lockfile)], {})
+
+    assert_that(result.success).is_false()
+    assert_that(result.issues_count).is_equal_to(0)
+
+
 def test_check_error_payload_without_results_is_not_success(
     osv_scanner_plugin: OsvScannerPlugin,
     tmp_path: Path,

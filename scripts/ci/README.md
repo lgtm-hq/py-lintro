@@ -12,6 +12,7 @@ scripts/ci/
 ├── maintenance/         # GHCR prune, security audit, egress checks
 ├── testing/             # Test summaries, image pull helpers
 ├── coverage-badge-update.sh  # Wrapper → testing/coverage-badge-update.sh
+├── classify-osv-results.py
 ├── format-security-comment.py
 ├── security-comment.sh
 └── …                    # Tag/version helpers, manifest sync, etc.

@@ -1,18 +1,7 @@
 # OSV-Scanner configuration for the lintro project.
-# Suppressions for known vulnerabilities with no patched version available
-# or where the fix requires a breaking major version upgrade.
-# Review periodically and remove once upstream fixes land.
-
-# --- Transitive npm dependencies (dev-only, not shipped) ---
-# These are pulled in by astro, svelte-check, markdownlint-cli2, etc.
-# and cannot be upgraded independently. Dev-only deps with no runtime exposure.
-
-[[IgnoredVulns]]
-id = "GHSA-737v-mqg7-c878"
-ignoreUntil = 2026-06-25
-reason = "defu@6.1.4 — transitive dev dep via h3→astro, fix in 6.1.5 pending upstream h3 update"
-
-[[IgnoredVulns]]
-id = "GHSA-48c2-rrv3-qjmp"
-ignoreUntil = 2026-06-25
-reason = "yaml@2.7.1 — transitive dev dep, pending upstream update to 2.8.3"
+#
+# Suppressions were removed in this branch after upgrading transitive npm deps
+# (defu@6.1.5, yaml@2.8.3) that previously required GHSA suppressions on main.
+# OSV Scanner still runs in CI via lintro; this file remains as the project hook
+# for future suppressions when no patched version is available yet.
+# Review periodically and add [[IgnoredVulns]] entries only when necessary.

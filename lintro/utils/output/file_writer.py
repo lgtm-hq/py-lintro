@@ -215,8 +215,12 @@ def write_output_file(
                 "tool": result.name,
                 "success": getattr(result, "success", True),
                 "issues_count": len(merged_issues),
+                "skipped": getattr(result, "skipped", False),
+                "skip_reason": getattr(result, "skip_reason", None),
                 "output": getattr(result, "output", ""),
             }
+            if result.parse_failures_count is not None:
+                result_data["parse_failures_count"] = result.parse_failures_count
             ai_metadata = getattr(result, "ai_metadata", None)
             if isinstance(ai_metadata, dict) and ai_metadata:
                 from lintro.ai.metadata import normalize_ai_metadata

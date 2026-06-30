@@ -43,15 +43,15 @@ def create_json_output(
         },
     }
     for result in results:
-        parse_failures = getattr(result, "parse_failures_count", None) or 0
         result_data: dict[str, Any] = {
             "tool": result.name,
             "success": getattr(result, "success", True),
             "issues_count": getattr(result, "issues_count", 0),
             "skipped": getattr(result, "skipped", False),
             "skip_reason": getattr(result, "skip_reason", None),
-            "parse_failures_count": parse_failures,
         }
+        if result.parse_failures_count is not None:
+            result_data["parse_failures_count"] = result.parse_failures_count
         if action_enum == Action.FIX:
             result_data["fixed"] = getattr(result, "fixed_issues_count", 0)
             result_data["remaining"] = getattr(
