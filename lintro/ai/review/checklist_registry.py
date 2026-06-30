@@ -62,11 +62,18 @@ def validate_checklist_items(*, items: list[ChecklistItem]) -> None:
         ValueError: When ids or questions are invalid.
     """
     seen_ids: set[int] = set()
+    seen_questions: set[str] = set()
     for item in items:
         if item.id in seen_ids:
             msg = f"Duplicate checklist id: {item.id}"
             raise ValueError(msg)
         seen_ids.add(item.id)
+
+        normalized_question = " ".join(item.question.split()).casefold()
+        if normalized_question in seen_questions:
+            msg = f"Duplicate checklist question: {item.id}"
+            raise ValueError(msg)
+        seen_questions.add(normalized_question)
 
         if not item.question.strip():
             msg = f"Checklist item {item.id} has an empty question"

@@ -109,8 +109,9 @@ def format_checklist_for_prompt(
 
     for prompt_id, item in enumerate(items, start=1):
         prompt_to_checklist[prompt_id] = item.id
+        normalized_question = " ".join(item.question.split())
         lines.append(
-            f"{prompt_id}. [{item.category.value}] {item.question}",
+            f"{prompt_id}. [{item.category.value}] {normalized_question}",
         )
 
     return "\n".join(lines), prompt_to_checklist

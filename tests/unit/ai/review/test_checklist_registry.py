@@ -113,3 +113,28 @@ def test_validate_checklist_items_rejects_tier1_with_targets() -> None:
 
     with pytest.raises(ValueError, match="must have empty domains"):
         validate_checklist_items(items=items)
+
+
+def test_validate_checklist_items_rejects_duplicate_questions() -> None:
+    """Duplicate checklist question text is rejected."""
+    items = [
+        ChecklistItem(
+            id=10_000,
+            question="Does any API handler skip auth?",
+            domains=(FileDomain.API,),
+            languages=(),
+            category=ReviewCategory.SECURITY,
+            tier=2,
+        ),
+        ChecklistItem(
+            id=10_001,
+            question="  Does any API handler skip auth?  ",
+            domains=(FileDomain.SOURCE,),
+            languages=(),
+            category=ReviewCategory.LOGIC_BUG,
+            tier=2,
+        ),
+    ]
+
+    with pytest.raises(ValueError, match="Duplicate checklist question"):
+        validate_checklist_items(items=items)

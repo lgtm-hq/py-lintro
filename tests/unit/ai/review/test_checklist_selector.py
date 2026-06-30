@@ -186,6 +186,35 @@ def test_format_checklist_for_prompt_renumbers_sequentially() -> None:
     assert_that(len(prompt_mapping)).is_equal_to(len(selected))
 
 
+def test_format_checklist_for_prompt_collapses_internal_whitespace() -> None:
+    """Prompt lines stay single-line even when a question contains extra spaces."""
+    item = ChecklistItem(
+        id=10_000,
+        question="Does  any\nhandler skip   auth?",
+        domains=(),
+        languages=(),
+        category=ReviewCategory.SECURITY,
+        tier=1,
+    )
+
+    prompt_text, prompt_mapping = format_checklist_for_prompt(items=[item])
+
+    assert_that(prompt_text).is_equal_to(
+        "1. [security] Does any handler skip auth?",
+    )
+    assert_that(prompt_mapping).is_equal_to({1: 10_000})
+
+
+def test_select_checklist_items_includes_go_boundary_validation_item() -> None:
+    """Go boundary files activate the input-validation security checklist item."""
+    selected = select_checklist_items(
+        classifications=_classify(["cmd/server/main.go"]),
+        items=list(BUILTIN_CHECKLIST_ITEMS),
+    )
+
+    assert_that({item.id for item in selected}).contains(149)
+
+
 def test_select_checklist_items_matches_root_level_source_files() -> None:
     """Root-level source files still resolve a language for selection."""
     selected = select_checklist_items(

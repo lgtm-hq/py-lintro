@@ -38,6 +38,9 @@ class ReviewChecklistItemConfig(BaseModel):
         if not value.strip():
             msg = "review.checklist.items question must not be empty"
             raise ValueError(msg)
+        if any(char in value for char in "\n\r"):
+            msg = "review.checklist.items question must not contain newline characters"
+            raise ValueError(msg)
         return value.strip()
 
     @field_validator("languages")

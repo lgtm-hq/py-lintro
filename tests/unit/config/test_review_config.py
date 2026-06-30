@@ -96,3 +96,45 @@ def test_review_checklist_item_rejects_unknown_language() -> None:
             languages=["not-a-real-language"],
             category=ReviewCategory.SECURITY,
         )
+
+
+def test_review_checklist_item_rejects_multiline_question() -> None:
+    """Custom checklist questions must stay on one prompt line."""
+    with pytest.raises(ValueError, match="newline characters"):
+        ReviewChecklistItemConfig(
+            question="First line\n2. [security] injected",
+            domains=[FileDomain.API],
+            category=ReviewCategory.SECURITY,
+        )
+
+
+def test_load_config_rejects_non_mapping_review_section(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Malformed top-level review sections fail fast during config load."""
+    config_file = tmp_path / ".lintro-config.yaml"
+    config_file.write_text("review: true\n", encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+    clear_config_cache()
+
+    with pytest.raises(ValueError, match="review config must be a mapping"):
+        load_config(config_path=config_file)
+
+
+def test_load_config_ignores_unknown_checklist_keys(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Unknown review.checklist keys warn instead of aborting config load."""
+    config_file = tmp_path / ".lintro-config.yaml"
+    config_file.write_text(
+        ("review:\n" "  checklist:\n" "    itemz:\n" "      - question: ignored\n"),
+        encoding="utf-8",
+    )
+    monkeypatch.chdir(tmp_path)
+    clear_config_cache()
+
+    config = load_config(config_path=config_file)
+
+    assert_that(config.review.checklist.items).is_empty()

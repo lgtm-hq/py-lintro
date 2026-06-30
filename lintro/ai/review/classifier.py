@@ -26,6 +26,8 @@ _DOMAIN_GLOBS: dict[FileDomain, tuple[str, ...]] = {
     FileDomain.CI: (
         ".github/workflows/**",
         ".github/actions/**",
+        ".github/*.yml",
+        ".github/*.yaml",
     ),
     FileDomain.DOCS: (
         "docs/**",

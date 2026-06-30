@@ -706,7 +706,7 @@ BUILTIN_CHECKLIST_ITEMS: tuple[ChecklistItem, ...] = (
             "CLI args, file uploads)?"
         ),
         domains=(FileDomain.API,),
-        languages=(*_TS_JS_LANGUAGES, "python", "rust"),
+        languages=(*_TS_JS_LANGUAGES, "go", "java", "python", "rust"),
         category=ReviewCategory.SECURITY,
         tier=2,
     ),
