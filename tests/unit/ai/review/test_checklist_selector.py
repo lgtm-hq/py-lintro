@@ -206,13 +206,50 @@ def test_format_checklist_for_prompt_collapses_internal_whitespace() -> None:
 
 
 def test_select_checklist_items_includes_go_boundary_validation_item() -> None:
-    """Go boundary files activate the input-validation security checklist item."""
+    """Go API boundary files activate the input-validation security checklist item."""
     selected = select_checklist_items(
-        classifications=_classify(["cmd/server/main.go"]),
+        classifications=_classify(["api/handlers.go"]),
         items=list(BUILTIN_CHECKLIST_ITEMS),
     )
 
     assert_that({item.id for item in selected}).contains(149)
+
+
+def test_dual_axis_item_requires_both_domain_and_language() -> None:
+    """Items with both axes only match when domain and language intersect."""
+    custom_item = ChecklistItem(
+        id=CUSTOM_CHECKLIST_ID_START,
+        question="Does any API handler skip auth?",
+        domains=(FileDomain.API,),
+        languages=("python",),
+        category=ReviewCategory.SECURITY,
+        tier=2,
+    )
+    items = list(BUILTIN_CHECKLIST_ITEMS) + [custom_item]
+
+    matched = select_checklist_items(
+        classifications=_classify(["project/api/views.py"]),
+        items=items,
+    )
+    language_only = select_checklist_items(
+        classifications=_classify(["scripts/migrate.py"]),
+        items=items,
+    )
+
+    assert_that(any(item.id == CUSTOM_CHECKLIST_ID_START for item in matched)).is_true()
+    assert_that(
+        any(item.id == CUSTOM_CHECKLIST_ID_START for item in language_only),
+    ).is_false()
+
+
+def test_dual_axis_shell_python_item_does_not_match_plain_python() -> None:
+    """Shell+Python items do not fire on ordinary Python source files."""
+    selected = select_checklist_items(
+        classifications=_classify(["src/config.py"]),
+        items=list(BUILTIN_CHECKLIST_ITEMS),
+    )
+
+    assert_that({item.id for item in selected}).does_not_contain(148)
 
 
 def test_select_checklist_items_matches_root_level_source_files() -> None:

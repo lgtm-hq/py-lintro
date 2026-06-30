@@ -25,9 +25,10 @@ def select_checklist_items(
     """Select checklist items for the changed files in a review diff.
 
     Tier 1 items are always included. A Tier 2 item is included when its role
-    domains intersect the domains present in the diff or its languages intersect
-    the languages present in the diff. A Tier 2 item with neither axis set is
-    universal and included whenever the diff has at least one file.
+    domains intersect the domains present in the diff and/or its languages
+    intersect the languages present in the diff. When an item defines both
+    axes, both must match. A Tier 2 item with neither axis set is universal
+    and included whenever the diff has at least one file.
 
     Args:
         classifications: Per-file domain classifications for the review diff.
@@ -84,9 +85,15 @@ def _item_matches_diff(
     """
     if not item.domains and not item.languages:
         return has_files
-    if present_domains.intersection(item.domains):
-        return True
-    return bool(present_languages.intersection(item.languages))
+
+    domain_match = bool(present_domains.intersection(item.domains))
+    language_match = bool(present_languages.intersection(item.languages))
+
+    if item.domains and item.languages:
+        return domain_match and language_match
+    if item.domains:
+        return domain_match
+    return language_match
 
 
 def format_checklist_for_prompt(
