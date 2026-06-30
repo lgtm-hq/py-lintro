@@ -30,6 +30,8 @@ def is_test_path(path: str) -> bool:
         return True
     if _path_has_e2e_directory(pure_path=pure_path):
         return True
+    if _has_e2e_name_marker(name_lower=name.lower()):
+        return True
     return name.startswith("test_") or any(
         marker in name for marker in _TEST_NAME_MARKERS
     )

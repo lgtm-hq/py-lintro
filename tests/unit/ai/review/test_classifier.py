@@ -106,7 +106,7 @@ from lintro.ai.review.models.changed_file import ChangedFile
         ),
         pytest.param(
             "login.e2e-spec.ts",
-            {FileDomain.E2E, FileDomain.SOURCE},
+            {FileDomain.TEST, FileDomain.E2E},
             id="e2e_spec_filename",
         ),
         pytest.param(

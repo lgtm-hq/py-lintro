@@ -22,6 +22,7 @@ def test_is_test_path_recognizes_common_test_layouts() -> None:
     assert_that(is_test_path("tests/run.bats")).is_true()
     assert_that(is_test_path("e2e/global-setup.ts")).is_true()
     assert_that(is_test_path("playwright-tests/global-setup.ts")).is_true()
+    assert_that(is_test_path("login.e2e-spec.ts")).is_true()
     assert_that(is_test_path("src/button.tsx")).is_false()
 
 
