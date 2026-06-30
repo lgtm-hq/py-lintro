@@ -166,6 +166,33 @@ review:
         load_config(config_path=config_file)
 
 
+def test_load_config_rejects_unknown_checklist_item_keys(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Unknown review.checklist.items keys fail fast during config load."""
+    config_file = tmp_path / ".lintro-config.yaml"
+    config_file.write_text(
+        """\
+review:
+  checklist:
+    items:
+      - question: Does any API handler skip auth?
+        domainz:
+          - api
+        languages:
+          - python
+        category: security
+""",
+        encoding="utf-8",
+    )
+    monkeypatch.chdir(tmp_path)
+    clear_config_cache()
+
+    with pytest.raises(ValueError, match="Unknown review.checklist.items keys"):
+        load_config(config_path=config_file)
+
+
 def test_load_config_ignores_unknown_checklist_keys(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
