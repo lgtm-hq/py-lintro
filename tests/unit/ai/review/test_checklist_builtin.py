@@ -10,20 +10,12 @@ from lintro.ai.review.checklist_builtin import (
     TIER1_CHECKLIST_ITEMS,
     TIER2_CHECKLIST_ITEMS,
 )
-from lintro.ai.review.constants import (
-    TIER1_CHECKLIST_COUNT,
-    TIER1_CHECKLIST_ID_END,
-    TIER1_CHECKLIST_ID_START,
-    TIER1_FAIL_OPEN_SECURITY_ITEM_ID,
-    TIER2_CHECKLIST_ID_START,
-    TIER2_CHECKLIST_MIN_COUNT,
-)
 from lintro.ai.review.enums.review_category import ReviewCategory
 
 
 def test_tier1_contains_fifteen_always_on_items() -> None:
     """Tier 1 includes exactly 15 universal checklist items."""
-    assert_that(TIER1_CHECKLIST_ITEMS).is_length(TIER1_CHECKLIST_COUNT)
+    assert_that(TIER1_CHECKLIST_ITEMS).is_length(15)
     assert_that(all(item.tier == 1 for item in TIER1_CHECKLIST_ITEMS)).is_true()
     assert_that(
         all(not item.domains and not item.languages for item in TIER1_CHECKLIST_ITEMS),
@@ -33,18 +25,14 @@ def test_tier1_contains_fifteen_always_on_items() -> None:
 def test_tier1_ids_are_one_through_fifteen() -> None:
     """Tier 1 ids follow the locked 1-15 scheme."""
     assert_that([item.id for item in TIER1_CHECKLIST_ITEMS]).is_equal_to(
-        list(range(TIER1_CHECKLIST_ID_START, TIER1_CHECKLIST_ID_END + 1)),
+        list(range(1, 16)),
     )
 
 
 def test_tier2_items_have_hundred_plus_ids() -> None:
     """Tier 2 items use 100+ ids."""
-    assert_that(len(TIER2_CHECKLIST_ITEMS)).is_greater_than_or_equal_to(
-        TIER2_CHECKLIST_MIN_COUNT,
-    )
-    assert_that(
-        all(item.id >= TIER2_CHECKLIST_ID_START for item in TIER2_CHECKLIST_ITEMS),
-    ).is_true()
+    assert_that(len(TIER2_CHECKLIST_ITEMS)).is_greater_than_or_equal_to(40)
+    assert_that(all(item.id >= 100 for item in TIER2_CHECKLIST_ITEMS)).is_true()
     assert_that(all(item.tier == 2 for item in TIER2_CHECKLIST_ITEMS)).is_true()
 
 
@@ -68,10 +56,6 @@ def test_builtin_items_have_unique_ids_and_nonempty_questions() -> None:
 
 def test_tier1_security_item_covers_fail_open_enums() -> None:
     """Tier 1 includes the universal fail-open security question."""
-    security_item = next(
-        item
-        for item in TIER1_CHECKLIST_ITEMS
-        if item.id == TIER1_FAIL_OPEN_SECURITY_ITEM_ID
-    )
+    security_item = next(item for item in TIER1_CHECKLIST_ITEMS if item.id == 9)
     assert_that(security_item.category).is_equal_to(ReviewCategory.SECURITY)
     assert_that(security_item.question.lower()).contains("fail-open")
