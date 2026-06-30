@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING
 from lintro.ai.review.file_language import languages_for_path, languages_for_paths
 
 if TYPE_CHECKING:
+    from lintro.ai.review.enums.file_domain import FileDomain
     from lintro.ai.review.models.checklist_item import ChecklistItem
     from lintro.ai.review.models.file_classification import FileClassification
 
@@ -40,6 +41,14 @@ def select_checklist_items(
         Selected items sorted by stable checklist id.
     """
     has_files = bool(classifications)
+    present_domains = {
+        domain
+        for classification in classifications
+        for domain in classification.domains
+    }
+    present_languages = languages_for_paths(
+        paths=[classification.path for classification in classifications],
+    )
 
     selected: list[ChecklistItem] = []
     for item in items:
@@ -49,6 +58,8 @@ def select_checklist_items(
         if _item_matches_diff(
             item=item,
             classifications=classifications,
+            present_domains=present_domains,
+            present_languages=present_languages,
             has_files=has_files,
         ):
             selected.append(item)
@@ -60,6 +71,8 @@ def _item_matches_diff(
     *,
     item: ChecklistItem,
     classifications: list[FileClassification],
+    present_domains: set[FileDomain],
+    present_languages: set[str],
     has_files: bool,
 ) -> bool:
     """Return True when a Tier 2 item activates for the diff.
@@ -67,6 +80,8 @@ def _item_matches_diff(
     Args:
         item: Checklist item to evaluate.
         classifications: Per-file domain classifications for the review diff.
+        present_domains: Role domains present across the diff.
+        present_languages: ``identify`` language tags present across the diff.
         has_files: Whether the diff has at least one changed file.
 
     Returns:
@@ -81,14 +96,6 @@ def _item_matches_diff(
             classifications=classifications,
         )
 
-    present_domains = {
-        domain
-        for classification in classifications
-        for domain in classification.domains
-    }
-    present_languages = languages_for_paths(
-        paths=[classification.path for classification in classifications],
-    )
     if item.domains:
         return bool(present_domains.intersection(item.domains))
     return bool(present_languages.intersection(item.languages))
