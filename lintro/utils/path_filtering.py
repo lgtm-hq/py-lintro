@@ -16,16 +16,16 @@ if TYPE_CHECKING:
 
 
 @lru_cache(maxsize=32)
-def _compile_pathspec(patterns_tuple: tuple[str, ...]) -> pathspec.PathSpec:
-    """Compile patterns into a PathSpec object (cached).
+def _compile_pathspec(patterns_tuple: tuple[str, ...]) -> pathspec.GitIgnoreSpec:
+    """Compile patterns into a GitIgnoreSpec object (cached).
 
     Args:
         patterns_tuple: Tuple of gitignore-style patterns to compile.
 
     Returns:
-        pathspec.PathSpec: Compiled pattern matcher.
+        pathspec.GitIgnoreSpec: Compiled pattern matcher.
     """
-    return pathspec.PathSpec.from_lines("gitwildmatch", patterns_tuple)
+    return pathspec.GitIgnoreSpec.from_lines(patterns_tuple)
 
 
 def should_exclude_path(

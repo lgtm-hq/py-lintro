@@ -4,7 +4,11 @@ from __future__ import annotations
 
 from assertpy import assert_that
 
-from lintro.ai.review.path_utils import is_test_path, matches_test_for_source
+from lintro.ai.review.path_utils import (
+    is_e2e_test_path,
+    is_test_path,
+    matches_test_for_source,
+)
 
 
 def test_is_test_path_recognizes_common_test_layouts() -> None:
@@ -16,7 +20,48 @@ def test_is_test_path_recognizes_common_test_layouts() -> None:
     assert_that(is_test_path("test_foo.py")).is_true()
     assert_that(is_test_path("foo_test.js")).is_true()
     assert_that(is_test_path("tests/run.bats")).is_true()
+    assert_that(is_test_path("e2e/global-setup.ts")).is_true()
+    assert_that(is_test_path("playwright-tests/global-setup.ts")).is_true()
+    assert_that(is_test_path("login.e2e-spec.ts")).is_true()
+    assert_that(is_test_path("e2e/README.md")).is_false()
+    assert_that(is_test_path("playwright-tests/fixtures/data.json")).is_false()
+    assert_that(is_test_path("e2e/.env.example")).is_false()
+    assert_that(is_test_path("tests/e2e/README.md")).is_false()
+    assert_that(is_test_path("tests/fixtures/data.json")).is_false()
+    assert_that(is_test_path("tests/README.md")).is_false()
+    assert_that(is_test_path("playwright-tests/fixtures/auth.ts")).is_true()
+    assert_that(is_test_path("e2e/fixtures/login.spec.ts")).is_true()
+    assert_that(is_test_path("e2e/screenshots/login.png")).is_false()
+    assert_that(is_test_path("e2e/videos/login.webm")).is_false()
+    assert_that(is_test_path("tests/__snapshots__/Button.snap")).is_false()
+    assert_that(is_test_path("tests/__snapshots__/fixture.txt")).is_false()
+    assert_that(is_test_path("tests/fixtures/golden.xml")).is_false()
+    assert_that(is_test_path("tests/fixtures/seed.csv")).is_false()
+    assert_that(is_test_path("e2e/traces/run.har")).is_false()
     assert_that(is_test_path("src/button.tsx")).is_false()
+
+
+def test_is_e2e_test_path_skips_non_test_e2e_artifacts() -> None:
+    """E2E directory docs, fixtures, and env samples are not E2E test files."""
+    assert_that(is_e2e_test_path("e2e/global-setup.ts")).is_true()
+    assert_that(is_e2e_test_path("e2e/README.md")).is_false()
+    assert_that(is_e2e_test_path("playwright-tests/fixtures/data.json")).is_false()
+    assert_that(is_e2e_test_path("e2e/.env.example")).is_false()
+    assert_that(is_e2e_test_path("playwright-tests/fixtures/auth.ts")).is_true()
+    assert_that(is_e2e_test_path("e2e/fixtures/login.spec.ts")).is_true()
+    assert_that(is_e2e_test_path("e2e/screenshots/login.png")).is_false()
+    assert_that(is_e2e_test_path("tests/__snapshots__/Button.snap")).is_false()
+    assert_that(is_e2e_test_path("e2e/traces/run.har")).is_false()
+
+
+def test_is_e2e_test_path_recognizes_e2e_directories_and_names() -> None:
+    """E2E detection covers playwright-tests dirs and common filename markers."""
+    assert_that(is_e2e_test_path("tests/e2e/login.spec.ts")).is_true()
+    assert_that(is_e2e_test_path("playwright-tests/global-setup.ts")).is_true()
+    assert_that(is_e2e_test_path("login.e2e-spec.ts")).is_true()
+    assert_that(is_e2e_test_path("checkout.e2e_test.ts")).is_true()
+    assert_that(is_e2e_test_path("tests/unit/service.test.ts")).is_false()
+    assert_that(is_e2e_test_path("integrations/playwright/client.ts")).is_false()
 
 
 def test_matches_test_for_source_pairs_dot_style_tests_across_directories() -> None:

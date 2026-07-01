@@ -19,3 +19,4 @@ class FileDomain(HyphenatedStrEnum):
     SECURITY = auto()
     DEPS = auto()
     CONFIG = auto()
+    E2E = auto()

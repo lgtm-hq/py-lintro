@@ -2,9 +2,15 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
-from lintro.ai.review.enums import FileDomain
+from lintro.ai.review.checklist_builtin import BUILTIN_CHECKLIST_ITEMS
+from lintro.ai.review.checklist_registry import get_all_checklist_items
+from lintro.ai.review.checklist_selector import (
+    format_checklist_for_prompt,
+    select_checklist_items,
+)
+from lintro.ai.review.enums import FileDomain, ReviewCategory
 from lintro.ai.review.enums.changed_file_status import ChangedFileStatus
 from lintro.ai.review.enums.review_context_error_code import ReviewContextErrorCode
 from lintro.ai.review.exceptions import ReviewContextError
@@ -17,6 +23,7 @@ from lintro.ai.review.group_labels import (
 )
 from lintro.ai.review.models import (
     ChangedFile,
+    ChecklistItem,
     ChunkingResult,
     FileClassification,
     PRMetadata,
@@ -74,17 +81,20 @@ _LAZY_EXPORTS: dict[str, tuple[str, str]] = {
 }
 
 __all__ = [
+    "BUILTIN_CHECKLIST_ITEMS",
     "REL_DIRECTORY_PREFIX",
     "REL_SINGLE_FILE",
     "REL_SOURCE_TEST",
     "REL_WORKFLOW_SCRIPT_TEST",
     "ChangedFile",
     "ChangedFileStatus",
+    "ChecklistItem",
     "ChunkingResult",
     "FileClassification",
     "FileDomain",
     "PRMetadata",
     "RelationshipLabel",
+    "ReviewCategory",
     "ReviewChunk",
     "ReviewContext",
     "ReviewContextError",
@@ -92,14 +102,17 @@ __all__ = [
     "chunk_review_context",
     "classify_changed_files",
     "collect_review_context",
+    "format_checklist_for_prompt",
+    "get_all_checklist_items",
     "parse_changed_files",
     "prepare_review_chunks",
     "resolve_default_base_branch",
+    "select_checklist_items",
     "split_unified_diff_by_file",
 ]
 
 
-def __getattr__(name: str) -> object:
+def __getattr__(name: str) -> Any:
     """Lazily import review submodules to avoid eager cross-layer imports."""
     if name not in _LAZY_EXPORTS:
         msg = f"module {__name__!r} has no attribute {name!r}"

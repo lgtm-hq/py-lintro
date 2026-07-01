@@ -25,6 +25,11 @@ from lintro.config.lintro_config import (
     LintroConfig,
     LintroToolConfig,
 )
+from lintro.config.review_config import (
+    ReviewChecklistConfig,
+    ReviewChecklistItemConfig,
+    ReviewConfig,
+)
 from lintro.enums.config_key import ConfigKey
 
 try:
@@ -302,6 +307,98 @@ def _parse_ai_config(data: dict[str, Any]) -> AIConfig:
     return AIConfig(**filtered)
 
 
+def _parse_review_checklist_item_config(data: Any) -> dict[str, Any]:
+    """Filter unknown keys from a single custom checklist item mapping.
+
+    Args:
+        data: Raw checklist item mapping from config.
+
+    Returns:
+        Mapping containing only recognized checklist item fields.
+
+    Raises:
+        ValueError: When the checklist item entry is not a mapping.
+    """
+    if not isinstance(data, dict):
+        msg = "review.checklist.items entries must be mappings"
+        raise ValueError(msg)
+
+    known_fields = set(ReviewChecklistItemConfig.model_fields)
+    unknown = set(data) - known_fields
+    if unknown:
+        msg = f"Unknown review.checklist.items keys: {', '.join(sorted(unknown))}"
+        raise ValueError(msg)
+    return dict(data)
+
+
+def _parse_review_checklist_config(data: Any) -> dict[str, Any]:
+    """Filter unknown keys from the review checklist section.
+
+    Args:
+        data: Raw ``review.checklist`` mapping from config.
+
+    Returns:
+        Mapping containing only recognized checklist fields.
+
+    Raises:
+        ValueError: When the checklist section is not a mapping.
+    """
+    if not isinstance(data, dict):
+        msg = "review.checklist config must be a mapping"
+        raise ValueError(msg)
+
+    known_fields = set(ReviewChecklistConfig.model_fields)
+    unknown = set(data) - known_fields
+    if unknown:
+        msg = f"Unknown review.checklist keys: {', '.join(sorted(unknown))}"
+        raise ValueError(msg)
+    filtered = dict(data)
+    items_data = filtered.get("items")
+    if isinstance(items_data, list):
+        parsed_items: list[dict[str, Any]] = []
+        for item in items_data:
+            if not isinstance(item, dict):
+                msg = "review.checklist.items entries must be mappings"
+                raise ValueError(msg)
+            parsed_items.append(_parse_review_checklist_item_config(item))
+        filtered["items"] = parsed_items
+    return filtered
+
+
+def _parse_review_config(data: Any) -> ReviewConfig:
+    """Parse review configuration section.
+
+    Args:
+        data: Raw ``review`` section from config.
+
+    Returns:
+        ReviewConfig: Parsed review configuration.
+
+    Raises:
+        ValueError: When the review section is not a mapping.
+    """
+    if data is None:
+        return ReviewConfig()
+    if not isinstance(data, dict):
+        msg = f"review config must be a mapping, got {type(data).__name__}"
+        raise ValueError(msg)
+    if not data:
+        return ReviewConfig()
+
+    known_fields = set(ReviewConfig.model_fields)
+    unknown = set(data) - known_fields
+    if unknown:
+        logger.warning(
+            "Unknown review config keys ignored: {}",
+            ", ".join(sorted(unknown)),
+        )
+    filtered = {key: value for key, value in data.items() if key in known_fields}
+    checklist_data = filtered.get("checklist")
+    if checklist_data is not None:
+        filtered["checklist"] = _parse_review_checklist_config(checklist_data)
+    return ReviewConfig(**filtered)
+
+
 def _convert_pyproject_to_config(data: dict[str, Any]) -> dict[str, Any]:
     """Convert pyproject.toml [tool.lintro] format to .lintro-config.yaml format.
 
@@ -320,6 +417,7 @@ def _convert_pyproject_to_config(data: dict[str, Any]) -> dict[str, Any]:
         "defaults": {},
         "tools": {},
         "ai": {},
+        "review": {},
     }
 
     # Inline import: ToolName is a static StrEnum that does not trigger
@@ -372,6 +470,8 @@ def _convert_pyproject_to_config(data: dict[str, Any]) -> dict[str, Any]:
         elif key_lower == "ai" and isinstance(value, dict):
             # AI configuration section
             result["ai"] = value
+        elif key_lower == "review":
+            result["review"] = value
 
     return result
 
@@ -437,6 +537,7 @@ def load_config(
     defaults = _parse_defaults(data.get("defaults", {}))
     tools_config = _parse_tools_config(data.get("tools", {}))
     ai_config = _parse_ai_config(data.get("ai", {}))
+    review_config = _parse_review_config(data.get("review", {}))
 
     return LintroConfig(
         execution=execution_config,
@@ -444,6 +545,7 @@ def load_config(
         defaults=defaults,
         tools=tools_config,
         ai=ai_config,
+        review=review_config,
         config_path=resolved_path,
     )
 

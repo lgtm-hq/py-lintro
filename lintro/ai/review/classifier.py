@@ -15,7 +15,7 @@ from lintro.ai.review.enums.file_domain import FileDomain
 from lintro.ai.review.glob_utils import path_matches_any_glob
 from lintro.ai.review.models.changed_file import ChangedFile
 from lintro.ai.review.models.file_classification import FileClassification
-from lintro.ai.review.path_utils import is_test_path
+from lintro.ai.review.path_utils import is_e2e_test_path, is_test_path
 
 _DOMAIN_GLOBS: dict[FileDomain, tuple[str, ...]] = {
     FileDomain.SHELL: (
@@ -26,6 +26,8 @@ _DOMAIN_GLOBS: dict[FileDomain, tuple[str, ...]] = {
     FileDomain.CI: (
         ".github/workflows/**",
         ".github/actions/**",
+        ".github/*.yml",
+        ".github/*.yaml",
     ),
     FileDomain.DOCS: (
         "docs/**",
@@ -37,6 +39,8 @@ _DOMAIN_GLOBS: dict[FileDomain, tuple[str, ...]] = {
 _API_PATH_SEGMENTS: frozenset[str] = frozenset(
     {"api", "routes", "openapi", "schemas"},
 )
+_API_SCOPED_SEGMENTS: frozenset[str] = frozenset({"clients", "types"})
+_API_SCOPED_ANCESTORS: frozenset[str] = frozenset({"api", "openapi", "schemas"})
 _SECURITY_KEYWORDS: tuple[str, ...] = ("auth", "security")
 _DOC_FILE_STEMS: frozenset[str] = frozenset(
     {
@@ -149,6 +153,9 @@ def _classify_path(*, path: str) -> list[FileDomain]:
     if is_test_path(normalized):
         matched_domains.append(FileDomain.TEST)
 
+    if is_e2e_test_path(normalized):
+        matched_domains.append(FileDomain.E2E)
+
     if _should_tag_source(
         path=normalized,
         matched_domains=matched_domains,
@@ -166,8 +173,14 @@ def _classify_path(*, path: str) -> list[FileDomain]:
 
 def _matches_api(*, path: str) -> bool:
     """Return True when a path sits under a conventional API directory segment."""
-    parts = {part.lower() for part in PurePosixPath(path).parts[:-1]}
-    return bool(parts.intersection(_API_PATH_SEGMENTS))
+    pure_path = PurePosixPath(path)
+    parent_parts = {part.lower() for part in pure_path.parts[:-1]}
+    if parent_parts.intersection(_API_PATH_SEGMENTS):
+        return True
+    return bool(
+        parent_parts.intersection(_API_SCOPED_SEGMENTS)
+        and parent_parts.intersection(_API_SCOPED_ANCESTORS),
+    )
 
 
 def _matches_deps(*, path: str) -> bool:

@@ -25,6 +25,16 @@ from lintro.ai.review.models.changed_file import ChangedFile
             id="workflow",
         ),
         pytest.param(
+            ".github/dependabot.yml",
+            {FileDomain.CI},
+            id="github_root_automation_config_yml",
+        ),
+        pytest.param(
+            ".github/renovate.yaml",
+            {FileDomain.CI},
+            id="github_root_automation_config_yaml",
+        ),
+        pytest.param(
             ".github/workflows/auth-gate.yml",
             {FileDomain.CI, FileDomain.SECURITY},
             id="security_workflow",
@@ -43,6 +53,76 @@ from lintro.ai.review.models.changed_file import ChangedFile
             ".github/actions/deploy/action.yml",
             {FileDomain.CI},
             id="nested_ci_action",
+        ),
+        pytest.param(
+            "api/handlers.py",
+            {FileDomain.API, FileDomain.SOURCE},
+            id="root_api_directory",
+        ),
+        pytest.param(
+            "clients/api.ts",
+            {FileDomain.SOURCE},
+            id="root_clients_directory",
+        ),
+        pytest.param(
+            "src/clients/cache.py",
+            {FileDomain.SOURCE},
+            id="non_api_clients_module",
+        ),
+        pytest.param(
+            "api/clients/http.ts",
+            {FileDomain.API, FileDomain.SOURCE},
+            id="api_scoped_clients_directory",
+        ),
+        pytest.param(
+            "types/user.ts",
+            {FileDomain.SOURCE},
+            id="root_types_directory",
+        ),
+        pytest.param(
+            "api/types/models.ts",
+            {FileDomain.API, FileDomain.SOURCE},
+            id="api_scoped_types_directory",
+        ),
+        pytest.param(
+            "tests/e2e/login.spec.ts",
+            {FileDomain.TEST, FileDomain.E2E},
+            id="e2e_browser_test",
+        ),
+        pytest.param(
+            "playwright-tests/global-setup.ts",
+            {FileDomain.TEST, FileDomain.E2E},
+            id="playwright_tests_directory",
+        ),
+        pytest.param(
+            "e2e/global-setup.ts",
+            {FileDomain.TEST, FileDomain.E2E},
+            id="root_e2e_directory",
+        ),
+        pytest.param(
+            "e2e/README.md",
+            {FileDomain.DOCS},
+            id="e2e_directory_readme",
+        ),
+        pytest.param(
+            "playwright-tests/fixtures/data.json",
+            {FileDomain.CONFIG},
+            id="playwright_tests_fixture_data",
+        ),
+        pytest.param(
+            "integrations/playwright/client.ts",
+            {FileDomain.SOURCE},
+            id="playwright_library_source",
+        ),
+        pytest.param(
+            "login.e2e-spec.ts",
+            {FileDomain.TEST, FileDomain.E2E},
+            id="e2e_spec_filename",
+        ),
+        pytest.param(
+            "tests/conftest.py",
+            {FileDomain.TEST},
+            id="root_tests_helper",
         ),
         pytest.param(
             "test_samples/tools/python/ruff/ruff_clean.py",
