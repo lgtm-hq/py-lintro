@@ -138,3 +138,37 @@ def test_validate_checklist_items_rejects_duplicate_questions() -> None:
 
     with pytest.raises(ValueError, match="Duplicate checklist question"):
         validate_checklist_items(items=items)
+
+
+def test_validate_checklist_items_rejects_out_of_band_tier1_id() -> None:
+    """Tier 1 items must use ids in the documented 1-15 band."""
+    items = [
+        ChecklistItem(
+            id=16,
+            question="Out of band tier 1 item",
+            domains=(),
+            languages=(),
+            category=ReviewCategory.LOGIC_BUG,
+            tier=1,
+        ),
+    ]
+
+    with pytest.raises(ValueError, match="Tier 1 checklist item 16"):
+        validate_checklist_items(items=items)
+
+
+def test_validate_checklist_items_rejects_out_of_band_tier2_id() -> None:
+    """Tier 2 items must use ids in the documented 100+ band."""
+    items = [
+        ChecklistItem(
+            id=16,
+            question="Out of band tier 2 item",
+            domains=(FileDomain.SOURCE,),
+            languages=(),
+            category=ReviewCategory.LOGIC_BUG,
+            tier=2,
+        ),
+    ]
+
+    with pytest.raises(ValueError, match="Tier 2 checklist item 16"):
+        validate_checklist_items(items=items)

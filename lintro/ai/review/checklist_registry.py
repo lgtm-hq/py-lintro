@@ -5,7 +5,12 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from lintro.ai.review.checklist_builtin import BUILTIN_CHECKLIST_ITEMS
-from lintro.ai.review.constants import CUSTOM_CHECKLIST_ID_START
+from lintro.ai.review.constants import (
+    CUSTOM_CHECKLIST_ID_START,
+    TIER1_CHECKLIST_ID_END,
+    TIER1_CHECKLIST_ID_START,
+    TIER2_CHECKLIST_ID_START,
+)
 from lintro.ai.review.models.checklist_item import ChecklistItem
 
 if TYPE_CHECKING:
@@ -81,6 +86,22 @@ def validate_checklist_items(*, items: list[ChecklistItem]) -> None:
 
         if item.tier not in {1, 2}:
             msg = f"Checklist item {item.id} has invalid tier: {item.tier}"
+            raise ValueError(msg)
+
+        if item.tier == 1 and not (
+            TIER1_CHECKLIST_ID_START <= item.id <= TIER1_CHECKLIST_ID_END
+        ):
+            msg = (
+                f"Tier 1 checklist item {item.id} must use id "
+                f"{TIER1_CHECKLIST_ID_START}-{TIER1_CHECKLIST_ID_END}"
+            )
+            raise ValueError(msg)
+
+        if item.tier == 2 and item.id < TIER2_CHECKLIST_ID_START:
+            msg = (
+                f"Tier 2 checklist item {item.id} must use id "
+                f">= {TIER2_CHECKLIST_ID_START}"
+            )
             raise ValueError(msg)
 
         if item.tier == 1 and (item.domains or item.languages):

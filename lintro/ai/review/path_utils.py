@@ -19,8 +19,19 @@ _NON_TEST_ARTIFACT_SUFFIXES: frozenset[str] = frozenset(
         ".ini",
         ".example",
         ".env",
+        ".png",
+        ".jpg",
+        ".jpeg",
+        ".gif",
+        ".webp",
+        ".svg",
+        ".webm",
+        ".mp4",
+        ".snap",
+        ".xml",
     },
 )
+_ARTIFACT_DIR_PARTS: frozenset[str] = frozenset({"__snapshots__"})
 
 
 def _has_tests_ancestor(path: PurePosixPath) -> bool:
@@ -40,7 +51,10 @@ def _is_non_test_artifact(*, pure_path: PurePosixPath) -> bool:
         return True
     if suffix == "" and pure_path.stem.lower() == "readme":
         return True
-    return name_lower.startswith(".env")
+    if name_lower.startswith(".env"):
+        return True
+    parent_parts = [part.lower() for part in pure_path.parts[:-1]]
+    return any(part in _ARTIFACT_DIR_PARTS for part in parent_parts)
 
 
 def is_test_path(path: str) -> bool:
