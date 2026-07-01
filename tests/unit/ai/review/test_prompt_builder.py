@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import importlib
 from unittest.mock import patch
 
 from assertpy import assert_that
@@ -10,6 +9,7 @@ from assertpy import assert_that
 from lintro.ai.review.checklist_registry import get_all_checklist_items
 from lintro.ai.review.checklist_selector import select_checklist_items
 from lintro.ai.review.models.review_context import ReviewContext
+from lintro.ai.review.pipeline import prepare_review_user_prompt
 from lintro.ai.review.prompt_builder import build_review_user_prompt
 
 
@@ -47,25 +47,18 @@ def test_prepare_review_user_prompt_wires_paths_registry(
     sample_review_context: ReviewContext,
 ) -> None:
     """Pipeline prompt preparation calls the interaction path registry."""
-    import lintro.ai.review.pipeline as pipeline_module
-
-    importlib.reload(pipeline_module)
-
     checklist_items = select_checklist_items(
         classifications=[],
         items=get_all_checklist_items()[:1],
     )
 
-    with patch.object(
-        pipeline_module.prompt_builder,
-        "build_review_user_prompt",
+    with patch(
+        "lintro.ai.review.pipeline.prompt_builder.build_review_user_prompt",
         wraps=build_review_user_prompt,
     ) as build_mock:
-        prompt, classifications, prompt_mapping = (
-            pipeline_module.prepare_review_user_prompt(
-                context=sample_review_context,
-                checklist_items=checklist_items,
-            )
+        prompt, classifications, prompt_mapping = prepare_review_user_prompt(
+            context=sample_review_context,
+            checklist_items=checklist_items,
         )
 
     build_mock.assert_called_once()
