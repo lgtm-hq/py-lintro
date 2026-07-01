@@ -62,11 +62,11 @@ def test_generate_interaction_paths_emits_test_vs_production_path() -> None:
     classifications = [
         FileClassification(
             path="tests/test_main.py",
-            domains=[FileDomain.PYTHON, FileDomain.TEST],
+            domains=[FileDomain.SOURCE, FileDomain.TEST],
         ),
         FileClassification(
             path="src/main.py",
-            domains=[FileDomain.PYTHON],
+            domains=[FileDomain.SOURCE],
         ),
     ]
 
@@ -85,7 +85,7 @@ def test_generate_interaction_paths_includes_security_path() -> None:
         FileClassification(
             path="scripts/security/auth.py",
             domains=[
-                FileDomain.PYTHON,
+                FileDomain.SOURCE,
                 FileDomain.SHELL,
                 FileDomain.SECURITY,
             ],
@@ -114,7 +114,7 @@ def test_generate_interaction_paths_emits_bulk_repetitive_path() -> None:
     """Large diffs emit a bulk repetitive sampling path."""
     changed_files = [f"src/module_{index}.py" for index in range(_REPETITIVE_THRESHOLD)]
     classifications = [
-        FileClassification(path=path, domains=[FileDomain.PYTHON])
+        FileClassification(path=path, domains=[FileDomain.SOURCE])
         for path in changed_files
     ]
 
@@ -125,6 +125,27 @@ def test_generate_interaction_paths_emits_bulk_repetitive_path() -> None:
 
     assert_that(paths).contains("Bulk repetitive changes")
     assert_that(paths).contains("34 files")
+
+
+def test_generate_interaction_paths_emits_server_client_path() -> None:
+    """Rust and TypeScript source files trigger server-client interaction path."""
+    classifications = [
+        FileClassification(
+            path="src/auth.rs",
+            domains=[FileDomain.SOURCE, FileDomain.SECURITY],
+        ),
+        FileClassification(
+            path="src/api.ts",
+            domains=[FileDomain.SOURCE, FileDomain.API],
+        ),
+    ]
+
+    paths = generate_interaction_paths(
+        classifications=classifications,
+        changed_files=["src/auth.rs", "src/api.ts"],
+    )
+
+    assert_that(paths).contains("Server ↔ client")
 
 
 def test_generate_interaction_paths_caps_at_seven_paths() -> None:
@@ -152,21 +173,21 @@ def test_generate_interaction_paths_caps_at_seven_paths() -> None:
         FileClassification(path="docs/guide.md", domains=[FileDomain.DOCS]),
         FileClassification(
             path="tests/test_main.py",
-            domains=[FileDomain.PYTHON, FileDomain.TEST],
+            domains=[FileDomain.SOURCE, FileDomain.TEST],
         ),
-        FileClassification(path="src/main.py", domains=[FileDomain.PYTHON]),
+        FileClassification(path="src/main.py", domains=[FileDomain.SOURCE]),
         FileClassification(
             path="src/auth.rs",
-            domains=[FileDomain.RUST, FileDomain.SECURITY],
+            domains=[FileDomain.SOURCE, FileDomain.SECURITY],
         ),
         FileClassification(
             path="src/api.ts",
-            domains=[FileDomain.TYPESCRIPT, FileDomain.API],
+            domains=[FileDomain.SOURCE, FileDomain.API],
         ),
         FileClassification(path="openapi.yaml", domains=[FileDomain.API]),
         FileClassification(
             path="src/security.py",
-            domains=[FileDomain.PYTHON, FileDomain.SECURITY],
+            domains=[FileDomain.SOURCE, FileDomain.SECURITY],
         ),
     ]
 

@@ -51,7 +51,8 @@ def test_format_checklist_table_for_prompt_produces_markdown_table() -> None:
         ChecklistItem(
             id=1,
             question="Does any early return skip required cleanup?",
-            triggers=[],
+            domains=(),
+            languages=(),
             category=ReviewCategory.LOGIC_BUG,
             tier=1,
         ),
