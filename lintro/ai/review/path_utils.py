@@ -70,8 +70,9 @@ def is_test_path(path: str) -> bool:
     name = pure_path.name
     if name.endswith(".bats"):
         return True
-    if _path_has_e2e_directory(pure_path=pure_path):
-        return not _is_non_test_artifact(pure_path=pure_path)
+    e2e_directory_match = _is_test_file_in_e2e_directory(pure_path=pure_path)
+    if e2e_directory_match is not None:
+        return e2e_directory_match
     if _is_under_tests_directory(pure_path=pure_path):
         return not _is_non_test_artifact(pure_path=pure_path)
     if _has_e2e_name_marker(name_lower=name.lower()):
@@ -92,8 +93,9 @@ def is_e2e_test_path(path: str) -> bool:
         E2E-specific filename marker.
     """
     pure_path = PurePosixPath(path.replace("\\", "/"))
-    if _path_has_e2e_directory(pure_path=pure_path):
-        return not _is_non_test_artifact(pure_path=pure_path)
+    e2e_directory_match = _is_test_file_in_e2e_directory(pure_path=pure_path)
+    if e2e_directory_match is not None:
+        return e2e_directory_match
     return _has_e2e_name_marker(name_lower=pure_path.name.lower())
 
 
@@ -107,6 +109,13 @@ def _path_has_e2e_directory(*, pure_path: PurePosixPath) -> bool:
     if "playwright" not in parent_parts:
         return False
     return _has_tests_ancestor(pure_path) or pure_path.parts[:1] == ("tests",)
+
+
+def _is_test_file_in_e2e_directory(*, pure_path: PurePosixPath) -> bool | None:
+    """Return whether an E2E-directory path is test code, or None if outside one."""
+    if not _path_has_e2e_directory(pure_path=pure_path):
+        return None
+    return not _is_non_test_artifact(pure_path=pure_path)
 
 
 def _has_e2e_name_marker(*, name_lower: str) -> bool:
