@@ -100,6 +100,16 @@ from lintro.ai.review.models.changed_file import ChangedFile
             id="root_e2e_directory",
         ),
         pytest.param(
+            "e2e/README.md",
+            {FileDomain.DOCS},
+            id="e2e_directory_readme",
+        ),
+        pytest.param(
+            "playwright-tests/fixtures/data.json",
+            {FileDomain.CONFIG},
+            id="playwright_tests_fixture_data",
+        ),
+        pytest.param(
             "integrations/playwright/client.ts",
             {FileDomain.SOURCE},
             id="playwright_library_source",

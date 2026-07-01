@@ -7,10 +7,38 @@ from pathlib import PurePosixPath
 _TEST_NAME_MARKERS = (".spec.", ".test.", "_test.")
 _TEST_LAYER_PARTS: frozenset[str] = frozenset({"unit", "integration"})
 _E2E_DIR_EXACT: frozenset[str] = frozenset({"e2e", "playwright-tests"})
+_NON_TEST_ARTIFACT_SUFFIXES: frozenset[str] = frozenset(
+    {
+        ".md",
+        ".rst",
+        ".json",
+        ".yaml",
+        ".yml",
+        ".toml",
+        ".cfg",
+        ".ini",
+        ".example",
+        ".env",
+    },
+)
 
 
 def _has_tests_ancestor(path: PurePosixPath) -> bool:
     return any(part in ("tests", "__tests__") for part in path.parts[:-1])
+
+
+def _is_non_test_artifact(*, pure_path: PurePosixPath) -> bool:
+    """Return True when a path under a test tree is docs, config, or fixture data."""
+    suffix = pure_path.suffix.lower()
+    name_lower = pure_path.name.lower()
+    if suffix in _NON_TEST_ARTIFACT_SUFFIXES:
+        return True
+    if suffix == "" and pure_path.stem.lower() == "readme":
+        return True
+    if name_lower.startswith(".env"):
+        return True
+    parent_parts = [part.lower() for part in pure_path.parts[:-1]]
+    return "fixtures" in parent_parts
 
 
 def is_test_path(path: str) -> bool:
@@ -29,7 +57,7 @@ def is_test_path(path: str) -> bool:
     if _has_tests_ancestor(pure_path) or pure_path.parts[:1] == ("tests",):
         return True
     if _path_has_e2e_directory(pure_path=pure_path):
-        return True
+        return not _is_non_test_artifact(pure_path=pure_path)
     if _has_e2e_name_marker(name_lower=name.lower()):
         return True
     return name.startswith("test_") or any(
@@ -49,7 +77,7 @@ def is_e2e_test_path(path: str) -> bool:
     """
     pure_path = PurePosixPath(path.replace("\\", "/"))
     if _path_has_e2e_directory(pure_path=pure_path):
-        return True
+        return not _is_non_test_artifact(pure_path=pure_path)
     return _has_e2e_name_marker(name_lower=pure_path.name.lower())
 
 

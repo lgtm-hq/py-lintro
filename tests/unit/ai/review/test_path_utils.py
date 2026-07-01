@@ -23,7 +23,18 @@ def test_is_test_path_recognizes_common_test_layouts() -> None:
     assert_that(is_test_path("e2e/global-setup.ts")).is_true()
     assert_that(is_test_path("playwright-tests/global-setup.ts")).is_true()
     assert_that(is_test_path("login.e2e-spec.ts")).is_true()
+    assert_that(is_test_path("e2e/README.md")).is_false()
+    assert_that(is_test_path("playwright-tests/fixtures/data.json")).is_false()
+    assert_that(is_test_path("e2e/.env.example")).is_false()
     assert_that(is_test_path("src/button.tsx")).is_false()
+
+
+def test_is_e2e_test_path_skips_non_test_e2e_artifacts() -> None:
+    """E2E directory docs, fixtures, and env samples are not E2E test files."""
+    assert_that(is_e2e_test_path("e2e/global-setup.ts")).is_true()
+    assert_that(is_e2e_test_path("e2e/README.md")).is_false()
+    assert_that(is_e2e_test_path("playwright-tests/fixtures/data.json")).is_false()
+    assert_that(is_e2e_test_path("e2e/.env.example")).is_false()
 
 
 def test_is_e2e_test_path_recognizes_e2e_directories_and_names() -> None:
