@@ -49,7 +49,7 @@ def test_format_checklist_table_for_prompt_produces_markdown_table() -> None:
     """Checklist table formatter produces valid markdown table headers."""
     items = [
         ChecklistItem(
-            id=1,
+            id=42,
             question="Does any early return skip required cleanup?",
             domains=(),
             languages=(),
@@ -60,7 +60,7 @@ def test_format_checklist_table_for_prompt_produces_markdown_table() -> None:
     table = format_checklist_table_for_prompt(items=items)
 
     assert_that(table).contains("| # | Category | Question |")
-    assert_that(table).contains("| 1 | logic-bug |")
+    assert_that(table).contains("| 42 | logic-bug |")
 
 
 def test_format_changed_files_for_prompt_lists_files_with_status() -> None:
@@ -112,6 +112,22 @@ def test_optional_sections_render_empty_by_default() -> None:
     """Optional prompt sections default to empty strings."""
     assert_that(format_deferred_scope_section(text=None)).is_empty()
     assert_that(format_external_review_section(flags=None)).is_empty()
+
+
+def test_deferred_scope_section_renders_trimmed_text() -> None:
+    """Deferred scope section includes the prefix and trimmed body."""
+    rendered = format_deferred_scope_section(text="  follow-up in #995  ")
+
+    assert_that(rendered).is_equal_to("**Deferred:** follow-up in #995")
+
+
+def test_external_review_section_renders_joined_flags() -> None:
+    """External review section joins flags with the expected prefix."""
+    rendered = format_external_review_section(flags=["semgrep", "codeql"])
+
+    assert_that(rendered).is_equal_to(
+        "**External tools flagged:** semgrep, codeql — verify against current code.",
+    )
 
 
 def test_review_system_is_nonempty() -> None:

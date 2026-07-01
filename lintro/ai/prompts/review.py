@@ -185,9 +185,9 @@ def format_checklist_table_for_prompt(*, items: list[ChecklistItem]) -> str:
         "| # | Category | Question |",
         "|---|----------|----------|",
     ]
-    for prompt_id, item in enumerate(items, start=1):
+    for item in items:
         lines.append(
-            f"| {prompt_id} | {item.category.value} | {item.question} |",
+            f"| {item.id} | {item.category.value} | {item.question} |",
         )
     return "\n".join(lines)
 

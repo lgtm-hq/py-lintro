@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from lintro.ai.review import prompt_builder
 from lintro.ai.review.chunker import chunk_review_context
 from lintro.ai.review.classifier import classify_changed_files
 from lintro.ai.review.context import validate_review_context_diff
@@ -11,7 +12,6 @@ from lintro.ai.review.models.checklist_item import ChecklistItem
 from lintro.ai.review.models.chunking_result import ChunkingResult
 from lintro.ai.review.models.file_classification import FileClassification
 from lintro.ai.review.models.review_context import ReviewContext
-from lintro.ai.review.prompt_builder import build_review_user_prompt
 
 __all__ = [
     "prepare_review_chunks",
@@ -73,7 +73,7 @@ def prepare_review_user_prompt(
     """
     validate_review_context_diff(context=context)
     classifications = classify_changed_files(files=context.changed_files)
-    prompt, prompt_mapping = build_review_user_prompt(
+    prompt, prompt_mapping = prompt_builder.build_review_user_prompt(
         context=context,
         classifications=classifications,
         checklist_items=checklist_items,

@@ -274,14 +274,12 @@ def _repetitive_bulk_path(
         return None
 
     dominant_domain = domain_counts.most_common(1)[0][0]
+    classification_map = {item.path: item for item in classifications}
     domain_files = [
         path
         for path in changed_files
-        if any(
-            dominant_domain in classification.domains
-            for classification in classifications
-            if classification.path == path
-        )
+        if (classification := classification_map.get(path)) is not None
+        and dominant_domain in classification.domains
     ]
     sample = domain_files[:3] if domain_files else changed_files[:3]
     sample_text = ", ".join(f"`{path}`" for path in sample)

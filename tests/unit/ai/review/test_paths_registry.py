@@ -197,3 +197,4 @@ def test_generate_interaction_paths_caps_at_seven_paths() -> None:
     )
 
     assert_that(paths.count("**Path ")).is_less_than_or_equal_to(7)
+    assert_that(paths).contains("OpenAPI vs routes")
