@@ -32,6 +32,60 @@ _NON_TEST_ARTIFACT_SUFFIXES: frozenset[str] = frozenset(
     },
 )
 _ARTIFACT_DIR_PARTS: frozenset[str] = frozenset({"__snapshots__"})
+_TEST_SOURCE_SUFFIXES: frozenset[str] = frozenset(
+    {
+        ".astro",
+        ".bats",
+        ".c",
+        ".cc",
+        ".clj",
+        ".cljc",
+        ".cljs",
+        ".cpp",
+        ".cr",
+        ".cs",
+        ".css",
+        ".cxx",
+        ".dart",
+        ".ex",
+        ".exs",
+        ".fs",
+        ".fsx",
+        ".go",
+        ".h",
+        ".hpp",
+        ".hs",
+        ".java",
+        ".js",
+        ".jsx",
+        ".kt",
+        ".kts",
+        ".lhs",
+        ".lua",
+        ".mjs",
+        ".ml",
+        ".mli",
+        ".php",
+        ".pl",
+        ".pm",
+        ".py",
+        ".pyi",
+        ".pyw",
+        ".r",
+        ".rb",
+        ".rs",
+        ".scala",
+        ".scss",
+        ".sh",
+        ".svelte",
+        ".swift",
+        ".ts",
+        ".tsx",
+        ".vb",
+        ".vue",
+        ".zsh",
+    },
+)
 
 
 def _has_tests_ancestor(path: PurePosixPath) -> bool:
@@ -57,6 +111,30 @@ def _is_non_test_artifact(*, pure_path: PurePosixPath) -> bool:
     return any(part in _ARTIFACT_DIR_PARTS for part in parent_parts)
 
 
+def _looks_like_test_code(*, pure_path: PurePosixPath) -> bool:
+    """Return True when a basename looks like executable test or helper code."""
+    name = pure_path.name
+    name_lower = name.lower()
+    if name.endswith(".bats"):
+        return True
+    if name.startswith("test_") or any(marker in name for marker in _TEST_NAME_MARKERS):
+        return True
+    if _has_e2e_name_marker(name_lower=name_lower):
+        return True
+    return pure_path.suffix.lower() in _TEST_SOURCE_SUFFIXES
+
+
+def _classify_path_under_test_tree(*, pure_path: PurePosixPath) -> bool | None:
+    """Return whether a test-tree path is test code, or None if outside one."""
+    under_e2e = _path_has_e2e_directory(pure_path=pure_path)
+    under_tests = _is_under_tests_directory(pure_path=pure_path)
+    if not (under_e2e or under_tests):
+        return None
+    if _is_non_test_artifact(pure_path=pure_path):
+        return False
+    return _looks_like_test_code(pure_path=pure_path)
+
+
 def is_test_path(path: str) -> bool:
     """Return True when a path looks like a test file.
 
@@ -70,11 +148,9 @@ def is_test_path(path: str) -> bool:
     name = pure_path.name
     if name.endswith(".bats"):
         return True
-    e2e_directory_match = _is_test_file_in_e2e_directory(pure_path=pure_path)
-    if e2e_directory_match is not None:
-        return e2e_directory_match
-    if _is_under_tests_directory(pure_path=pure_path):
-        return not _is_non_test_artifact(pure_path=pure_path)
+    test_tree_match = _classify_path_under_test_tree(pure_path=pure_path)
+    if test_tree_match is not None:
+        return test_tree_match
     if _has_e2e_name_marker(name_lower=name.lower()):
         return True
     return name.startswith("test_") or any(
@@ -115,7 +191,9 @@ def _is_test_file_in_e2e_directory(*, pure_path: PurePosixPath) -> bool | None:
     """Return whether an E2E-directory path is test code, or None if outside one."""
     if not _path_has_e2e_directory(pure_path=pure_path):
         return None
-    return not _is_non_test_artifact(pure_path=pure_path)
+    if _is_non_test_artifact(pure_path=pure_path):
+        return False
+    return _looks_like_test_code(pure_path=pure_path)
 
 
 def _has_e2e_name_marker(*, name_lower: str) -> bool:

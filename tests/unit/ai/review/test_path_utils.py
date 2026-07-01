@@ -36,6 +36,8 @@ def test_is_test_path_recognizes_common_test_layouts() -> None:
     assert_that(is_test_path("tests/__snapshots__/Button.snap")).is_false()
     assert_that(is_test_path("tests/__snapshots__/fixture.txt")).is_false()
     assert_that(is_test_path("tests/fixtures/golden.xml")).is_false()
+    assert_that(is_test_path("tests/fixtures/seed.csv")).is_false()
+    assert_that(is_test_path("e2e/traces/run.har")).is_false()
     assert_that(is_test_path("src/button.tsx")).is_false()
 
 
@@ -49,6 +51,7 @@ def test_is_e2e_test_path_skips_non_test_e2e_artifacts() -> None:
     assert_that(is_e2e_test_path("e2e/fixtures/login.spec.ts")).is_true()
     assert_that(is_e2e_test_path("e2e/screenshots/login.png")).is_false()
     assert_that(is_e2e_test_path("tests/__snapshots__/Button.snap")).is_false()
+    assert_that(is_e2e_test_path("e2e/traces/run.har")).is_false()
 
 
 def test_is_e2e_test_path_recognizes_e2e_directories_and_names() -> None:
