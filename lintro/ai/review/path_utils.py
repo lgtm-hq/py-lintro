@@ -27,6 +27,11 @@ def _has_tests_ancestor(path: PurePosixPath) -> bool:
     return any(part in ("tests", "__tests__") for part in path.parts[:-1])
 
 
+def _is_under_tests_directory(*, pure_path: PurePosixPath) -> bool:
+    """Return True when a path sits under tests/ or __tests__."""
+    return _has_tests_ancestor(pure_path) or pure_path.parts[:1] == ("tests",)
+
+
 def _is_non_test_artifact(*, pure_path: PurePosixPath) -> bool:
     """Return True when a path under a test tree is docs, config, or fixture data."""
     suffix = pure_path.suffix.lower()
@@ -35,10 +40,7 @@ def _is_non_test_artifact(*, pure_path: PurePosixPath) -> bool:
         return True
     if suffix == "" and pure_path.stem.lower() == "readme":
         return True
-    if name_lower.startswith(".env"):
-        return True
-    parent_parts = [part.lower() for part in pure_path.parts[:-1]]
-    return "fixtures" in parent_parts
+    return name_lower.startswith(".env")
 
 
 def is_test_path(path: str) -> bool:
@@ -54,9 +56,9 @@ def is_test_path(path: str) -> bool:
     name = pure_path.name
     if name.endswith(".bats"):
         return True
-    if _has_tests_ancestor(pure_path) or pure_path.parts[:1] == ("tests",):
-        return True
     if _path_has_e2e_directory(pure_path=pure_path):
+        return not _is_non_test_artifact(pure_path=pure_path)
+    if _is_under_tests_directory(pure_path=pure_path):
         return not _is_non_test_artifact(pure_path=pure_path)
     if _has_e2e_name_marker(name_lower=name.lower()):
         return True
