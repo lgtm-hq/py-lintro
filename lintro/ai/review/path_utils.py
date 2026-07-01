@@ -4,86 +4,36 @@ from __future__ import annotations
 
 from pathlib import PurePosixPath
 
+from identify import identify
+
 _TEST_NAME_MARKERS = (".spec.", ".test.", "_test.")
 _TEST_LAYER_PARTS: frozenset[str] = frozenset({"unit", "integration"})
 _E2E_DIR_EXACT: frozenset[str] = frozenset({"e2e", "playwright-tests"})
-_NON_TEST_ARTIFACT_SUFFIXES: frozenset[str] = frozenset(
-    {
-        ".md",
-        ".rst",
-        ".json",
-        ".yaml",
-        ".yml",
-        ".toml",
-        ".cfg",
-        ".ini",
-        ".example",
-        ".env",
-        ".png",
-        ".jpg",
-        ".jpeg",
-        ".gif",
-        ".webp",
-        ".svg",
-        ".webm",
-        ".mp4",
-        ".snap",
-        ".xml",
-    },
-)
 _ARTIFACT_DIR_PARTS: frozenset[str] = frozenset({"__snapshots__"})
-_TEST_SOURCE_SUFFIXES: frozenset[str] = frozenset(
+# Generic wrappers that accompany nearly every identify result.
+_GENERIC_IDENTIFY_TAGS: frozenset[str] = frozenset({"plain-text", "text"})
+# Small denylist of identify tags for docs, config, data, and media. Extension
+# coverage lives in identify's maintained map — not a local suffix table.
+_NON_SOURCE_IDENTIFY_TAGS: frozenset[str] = frozenset(
     {
-        ".astro",
-        ".bats",
-        ".c",
-        ".cc",
-        ".clj",
-        ".cljc",
-        ".cljs",
-        ".cpp",
-        ".cr",
-        ".cs",
-        ".css",
-        ".cxx",
-        ".dart",
-        ".ex",
-        ".exs",
-        ".fs",
-        ".fsx",
-        ".go",
-        ".h",
-        ".hpp",
-        ".hs",
-        ".java",
-        ".js",
-        ".jsx",
-        ".kt",
-        ".kts",
-        ".lhs",
-        ".lua",
-        ".mjs",
-        ".ml",
-        ".mli",
-        ".php",
-        ".pl",
-        ".pm",
-        ".py",
-        ".pyi",
-        ".pyw",
-        ".r",
-        ".rb",
-        ".rs",
-        ".scala",
-        ".scss",
-        ".sh",
-        ".svelte",
-        ".swift",
-        ".ts",
-        ".tsx",
-        ".vb",
-        ".vue",
-        ".zsh",
+        "audio",
+        "binary",
+        "csv",
+        "dotenv",
+        "gif",
+        "go-sum",
+        "image",
+        "ini",
+        "jpeg",
+        "json",
+        "markdown",
+        "png",
+        "rst",
+        "svg",
+        "toml",
+        "webp",
+        "xml",
+        "yaml",
     },
 )
 
@@ -101,14 +51,18 @@ def _is_non_test_artifact(*, pure_path: PurePosixPath) -> bool:
     """Return True when a path under a test tree is docs, config, or fixture data."""
     suffix = pure_path.suffix.lower()
     name_lower = pure_path.name.lower()
-    if suffix in _NON_TEST_ARTIFACT_SUFFIXES:
-        return True
     if suffix == "" and pure_path.stem.lower() == "readme":
         return True
     if name_lower.startswith(".env"):
         return True
     parent_parts = [part.lower() for part in pure_path.parts[:-1]]
     return any(part in _ARTIFACT_DIR_PARTS for part in parent_parts)
+
+
+def _meaningful_source_identify_tags(*, name: str) -> set[str]:
+    """Return identify language/source tags after stripping generic and data tags."""
+    tags = set(identify.tags_from_filename(name))
+    return tags - _GENERIC_IDENTIFY_TAGS - _NON_SOURCE_IDENTIFY_TAGS
 
 
 def _looks_like_test_code(*, pure_path: PurePosixPath) -> bool:
@@ -121,7 +75,7 @@ def _looks_like_test_code(*, pure_path: PurePosixPath) -> bool:
         return True
     if _has_e2e_name_marker(name_lower=name_lower):
         return True
-    return pure_path.suffix.lower() in _TEST_SOURCE_SUFFIXES
+    return bool(_meaningful_source_identify_tags(name=name))
 
 
 def _classify_path_under_test_tree(*, pure_path: PurePosixPath) -> bool | None:
