@@ -2,23 +2,14 @@
 # For license details, see the repository root LICENSE file.
 ---
 name: Reporting - Scheduled Lintro Analysis
-# Runs comprehensive lintro analysis weekly on schedule or manual dispatch.
-# Uses pre-built Docker image from GHCR (no local tool installation).
-# Generates detailed markdown report and uploads as workflow artifact.
+# Runs comprehensive lintro analysis weekly, after CI - Docker publish on main,
+# or on manual dispatch. Uses the immutable sha-<commit> GHCR tag from publish.
 
 'on':
-  push:
+  workflow_run:
+    workflows: [CI - Docker]
+    types: [completed]
     branches: [main]
-    paths:
-      - '**.py'
-      - '**.yml'
-      - '**.yaml'
-      - '**.json'
-      - '**.md'
-      - '**.sh'
-      - Dockerfile
-      - pyproject.toml
-      - .github/workflows/lintro-report-scheduled.yml
   schedule:
     # Run weekly on Sunday at 00:00 UTC
     - cron: '0 0 * * 0'
@@ -28,6 +19,9 @@ permissions: {}
 
 jobs:
   lintro-report:
+    if: >-
+      github.event_name != 'workflow_run' ||
+      github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-24.04
     permissions:
       contents: read
@@ -54,9 +48,22 @@ jobs:
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
         with:
+          ref: >-
+            ${{
+              github.event_name == 'workflow_run'
+              && github.event.workflow_run.head_sha
+              || github.ref
+            }}
           token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Pull lintro Docker image
+        env:
+          LINTRO_SHA: >-
+            ${{
+              github.event_name == 'workflow_run'
+              && github.event.workflow_run.head_sha
+              || ''
+            }}
         run: scripts/ci/testing/pull-lintro-image.sh
 
       - name: Run Lintro on codebase
