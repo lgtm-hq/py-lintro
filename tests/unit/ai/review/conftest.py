@@ -12,7 +12,11 @@ import pytest
 
 from lintro.ai.review.enums.changed_file_status import ChangedFileStatus
 from lintro.ai.review.models.changed_file import ChangedFile
+from lintro.ai.review.models.checklist_answer import ChecklistAnswer
 from lintro.ai.review.models.review_context import ReviewContext
+from lintro.ai.review.models.review_finding import ReviewFinding
+from lintro.ai.review.models.review_metadata import ReviewMetadata
+from lintro.ai.review.models.review_result import ReviewResult
 from tests.unit.ai.review.review_fixtures import load_review_fixture
 
 _REPO_ROOT = Path(__file__).resolve().parents[4]
@@ -219,3 +223,57 @@ index 1111111..2222222 100644
 +value = 2
 """
     return "".join(hunk.format(idx=index) for index in range(6))
+
+
+@pytest.fixture
+def sample_review_result() -> ReviewResult:
+    """Build a representative review result for display/output tests."""
+    return ReviewResult(
+        metadata=ReviewMetadata(
+            model="claude-sonnet-4-20250514",
+            provider="anthropic",
+            context_window=200_000,
+            depth=2,
+            chunks_total=2,
+            chunks_current=2,
+            files_reviewed=3,
+            files_total=3,
+            checklist_items=2,
+            token_usage={"prompt": 1000, "completion": 200, "total": 1200},
+            cost_estimate_usd=0.05,
+            base_ref="main",
+            head_ref="feature",
+            timestamp="2026-06-24T10:00:00+00:00",
+        ),
+        summary="Merge with fixes.",
+        checklist=(
+            ChecklistAnswer(id=1, answer="yes", evidence="src/main.py:10"),
+            ChecklistAnswer(id=2, answer="no", evidence="none"),
+        ),
+        findings=(
+            ReviewFinding(
+                severity="P1",
+                category="security",
+                file="src/main.py",
+                line=10,
+                title="Fail-open default",
+                description="Unknown status grants access",
+                cause="else branch returns Active",
+                fix="Default to Expired",
+                confidence="high",
+                checklist_ids=(1,),
+            ),
+            ReviewFinding(
+                severity="P2",
+                category="test-gap",
+                file="tests/test_main.py",
+                line=5,
+                title="Missing access test",
+                description="No test for unknown status",
+                cause="Test gap",
+                fix="Add unit test",
+                confidence="medium",
+                checklist_ids=(2,),
+            ),
+        ),
+    )
