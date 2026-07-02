@@ -150,6 +150,9 @@ def run_review(
             depth=depth,
             checklist_text=checklist_text,
             checklist_count=len(checklist_items),
+            generated_checklist_base_id=_max_checklist_id(
+                checklist_items=checklist_items,
+            ),
             classifications=classifications,
             lint_results=lint_results,
             budget=budget,
@@ -381,6 +384,7 @@ def _review_chunk(
     depth: int,
     checklist_text: str,
     checklist_count: int,
+    generated_checklist_base_id: int,
     classifications: list[FileClassification],
     lint_results: str | None,
     budget: CostBudget,
@@ -398,6 +402,7 @@ def _review_chunk(
             provider=provider,
             ai_config=ai_config,
             budget=budget,
+            generated_checklist_base_id=generated_checklist_base_id,
         )
 
     system_prompt, user_prompt = build_review_prompt(
@@ -447,6 +452,7 @@ def _generate_extra_checklist(
     provider: BaseAIProvider,
     ai_config: AIConfig,
     budget: CostBudget,
+    generated_checklist_base_id: int,
 ) -> str:
     """Generate depth-2 domain-specific checklist questions."""
     changed_files = format_changed_files_for_prompt(
@@ -484,7 +490,8 @@ def _generate_extra_checklist(
             continue
         question = item.get("question")
         if isinstance(question, str) and question.strip():
-            lines.append(f"{-index}. [generated] {question.strip()}")
+            generated_id = generated_checklist_base_id + index
+            lines.append(f"{generated_id}. [generated] {question.strip()}")
     return "\n".join(lines)
 
 
@@ -689,7 +696,14 @@ def _estimate_prompt_overhead(
         ],
     )
     estimated = estimate_tokens(overhead_text)
-    return max(estimated, _PROMPT_OVERHEAD_TOKENS)
+    return int(max(estimated, _PROMPT_OVERHEAD_TOKENS))
+
+
+def _max_checklist_id(*, checklist_items: list[ChecklistItem]) -> int:
+    """Return the highest checklist item id in the selected set."""
+    if not checklist_items:
+        return 0
+    return int(max(item.id for item in checklist_items))
 
 
 def _normalize_checklist_answer_value(*, answer: str) -> str:
