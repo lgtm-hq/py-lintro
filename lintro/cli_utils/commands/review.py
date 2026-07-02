@@ -113,6 +113,7 @@ def review_command(
         raise click.UsageError(
             "--pr and --uncommitted cannot be used together.",
         )
+    resolved_pr: int | None = None
     if post:
         resolved_pr = pr or _detect_pr_number_from_env()
         if resolved_pr is None:
@@ -184,7 +185,7 @@ def review_command(
 
         posted = post_review_to_github(
             result=result,
-            pr_number=pr or _detect_pr_number_from_env(),
+            pr_number=resolved_pr,
             repo=effective_repo,
         )
         if not posted:
