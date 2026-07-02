@@ -26,7 +26,9 @@ from lintro.ai.prompts.review import (
     format_lint_results_section,
 )
 from lintro.ai.review.chunker import chunk_review_context
+from lintro.ai.review.group_labels import REL_DIRECTORY_PREFIX, REL_SINGLE_FILE
 from lintro.ai.review.models.checklist_answer import ChecklistAnswer
+from lintro.ai.review.models.review_chunk import ReviewChunk
 from lintro.ai.review.models.review_finding import ReviewFinding
 from lintro.ai.review.models.review_metadata import ReviewMetadata
 from lintro.ai.review.models.review_result import ReviewResult
@@ -38,7 +40,6 @@ if TYPE_CHECKING:
     from lintro.ai.providers.base import AIResponse, BaseAIProvider
     from lintro.ai.review.models.checklist_item import ChecklistItem
     from lintro.ai.review.models.file_classification import FileClassification
-    from lintro.ai.review.models.review_chunk import ReviewChunk
     from lintro.ai.review.models.review_context import ReviewContext
 
 __all__ = [
@@ -329,8 +330,10 @@ def merge_checklist_answers(
             if existing is None:
                 by_id[answer.id] = answer
                 continue
-            if answer.answer.lower() == "yes" or existing.answer.lower() != "yes":
-                by_id[answer.id] = answer
+            by_id[answer.id] = _pick_preferred_checklist_answer(
+                candidate=answer,
+                existing=existing,
+            )
     return tuple(sorted(by_id.values(), key=lambda item: item.id))
 
 
@@ -355,7 +358,7 @@ def merge_review_results(
         )
 
     summaries = [partial.summary for partial in partials if partial.summary.strip()]
-    summary = summaries[0] if len(summaries) == 1 else "\n\n".join(summaries[:3])
+    summary = summaries[0] if len(summaries) == 1 else "\n\n".join(summaries)
 
     return ReviewResult(
         metadata=_placeholder_metadata(),
@@ -467,6 +470,10 @@ def _generate_extra_checklist(
         logger.warning("Failed to parse generated questions; skipping depth-2 extras")
         return ""
 
+    if not isinstance(payload, dict):
+        logger.warning("Generated questions payload was not an object; skipping extras")
+        return ""
+
     questions = payload.get("generated_questions", [])
     if not isinstance(questions, list):
         return ""
@@ -477,7 +484,7 @@ def _generate_extra_checklist(
             continue
         question = item.get("question")
         if isinstance(question, str) and question.strip():
-            lines.append(f"G{index}. [generated] {question.strip()}")
+            lines.append(f"{-index}. [generated] {question.strip()}")
     return "\n".join(lines)
 
 
@@ -516,6 +523,17 @@ def _run_adversarial_pass(
         payload = json.loads(strip_json_fences(content=response.content))
     except (json.JSONDecodeError, ValueError):
         logger.warning("Failed to parse adversarial sweep response")
+        return _ChunkReviewPartial(
+            summary="",
+            checklist=(),
+            findings=(),
+            input_tokens=response.input_tokens,
+            output_tokens=response.output_tokens,
+            cost_estimate=response.cost_estimate,
+        )
+
+    if not isinstance(payload, dict):
+        logger.warning("Adversarial sweep payload was not an object")
         return _ChunkReviewPartial(
             summary="",
             checklist=(),
@@ -603,8 +621,8 @@ def _parse_checklist(*, raw_checklist: object) -> tuple[ChecklistAnswer, ...]:
         answers.append(
             ChecklistAnswer(
                 id=answer_id,
-                answer=answer.lower(),
-                evidence=evidence,
+                answer=_normalize_checklist_answer_value(answer=answer),
+                evidence=evidence.strip(),
             ),
         )
     return tuple(answers)
@@ -674,13 +692,47 @@ def _estimate_prompt_overhead(
     return max(estimated, _PROMPT_OVERHEAD_TOKENS)
 
 
+def _normalize_checklist_answer_value(*, answer: str) -> str:
+    """Normalize checklist answers to the yes/no contract."""
+    normalized = answer.strip().lower()
+    if normalized not in {"yes", "no"}:
+        return "no"
+    return normalized
+
+
+def _pick_preferred_checklist_answer(
+    *,
+    candidate: ChecklistAnswer,
+    existing: ChecklistAnswer,
+) -> ChecklistAnswer:
+    """Pick the stronger checklist answer when merging chunk results."""
+    candidate_answer = candidate.answer
+    existing_answer = existing.answer
+    candidate_has_evidence = bool(candidate.evidence.strip())
+    existing_has_evidence = bool(existing.evidence.strip())
+
+    if candidate_answer == "yes" and candidate_has_evidence:
+        return candidate
+    if existing_answer == "yes" and existing_has_evidence:
+        return existing
+    if candidate_answer == "yes" and existing_answer == "no" and existing_has_evidence:
+        return existing
+    if candidate_answer == "yes":
+        return candidate
+    if existing_answer == "yes":
+        return existing
+    return candidate
+
+
 def _single_chunk_from_context(*, context: ReviewContext) -> ReviewChunk:
     """Build a single chunk when chunker returns no groups."""
+    files = [file.path for file in context.changed_files]
+    relationship = REL_SINGLE_FILE if len(files) == 1 else REL_DIRECTORY_PREFIX
     return ReviewChunk(
         id=1,
-        files=[file.path for file in context.changed_files],
+        files=files,
         diff=context.unified_diff,
-        relationship="full-diff",
+        relationship=relationship,
     )
 
 

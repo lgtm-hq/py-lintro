@@ -42,3 +42,17 @@ def test_merge_checklist_answers_prefers_yes_over_no() -> None:
     assert_that(merged).is_length(1)
     assert_that(merged[0].answer).is_equal_to("yes")
     assert_that(merged[0].evidence).contains("src/main.py")
+
+
+def test_merge_checklist_answers_requires_evidence_for_yes() -> None:
+    """Unsupported yes answers do not override evidence-backed no answers."""
+    supported_no = ChecklistAnswer(id=1, answer="no", evidence="src/main.py:10")
+    unsupported_yes = ChecklistAnswer(id=1, answer="yes", evidence="")
+
+    merged = merge_checklist_answers(
+        checklist_groups=[(supported_no,), (unsupported_yes,)],
+    )
+
+    assert_that(merged).is_length(1)
+    assert_that(merged[0].answer).is_equal_to("no")
+    assert_that(merged[0].evidence).contains("src/main.py")
