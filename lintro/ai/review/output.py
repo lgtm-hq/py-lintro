@@ -9,6 +9,7 @@ from typing import Any
 from lintro.ai.review.models.review_result import ReviewResult
 
 __all__ = [
+    "render_review_json",
     "render_review_output",
     "review_result_to_dict",
     "review_result_to_json",
@@ -45,6 +46,18 @@ def review_result_to_json(*, result: ReviewResult) -> str:
     return json.dumps(review_result_to_dict(result=result), indent=2)
 
 
+def render_review_json(*, result: ReviewResult) -> str:
+    """Render review result as JSON text.
+
+    Args:
+        result: Review result to render.
+
+    Returns:
+        Pretty-printed JSON string.
+    """
+    return review_result_to_json(result=result)
+
+
 def render_review_output(
     *,
     result: ReviewResult,
@@ -60,7 +73,7 @@ def render_review_output(
         JSON string when ``output_format`` is ``json``; otherwise ``None``.
     """
     if output_format.lower() == "json":
-        return review_result_to_json(result=result)
+        return render_review_json(result=result)
 
     from lintro.ai.review.display import render_review_terminal
 
