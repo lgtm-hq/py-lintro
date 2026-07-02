@@ -59,20 +59,20 @@ def run_lint_on_changed_files(
         except (KeyError, ValueError):
             continue
 
-        configure_tool_for_execution(
-            tool=tool,
-            tool_name=tool_name,
-            config_manager=config_manager,
-            tool_option_dict={},
-            exclude=None,
-            include_venv=False,
-            incremental=False,
-            action=Action.CHECK,
-            post_tools=set(),
-            auto_install=False,
-            lintro_config=lintro_config,
-        )
         try:
+            configure_tool_for_execution(
+                tool=tool,
+                tool_name=tool_name,
+                config_manager=config_manager,
+                tool_option_dict={},
+                exclude=None,
+                include_venv=False,
+                incremental=False,
+                action=Action.CHECK,
+                post_tools=set(),
+                auto_install=False,
+                lintro_config=lintro_config,
+            )
             result = tool.check(paths=changed_files, options={})
         except (
             Exception
