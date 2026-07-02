@@ -70,7 +70,7 @@ jobs:
             files.pythonhosted.org:443
 
       - name: Checkout
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
 
       - name: Egress audit (allowlist verification)
         env:
@@ -85,7 +85,7 @@ jobs:
         run: scripts/ci/maintenance/egress-audit-lite.sh "true"
 
       - name: Cache uv dependencies
-        uses: actions/cache@668228422ae6a00e4ad889ee87cd7109ec5666a7 # v5
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
         with:
           path: ~/.cache/uv
           key: uv-${{ runner.os }}-${{ hashFiles('pyproject.toml') }}
