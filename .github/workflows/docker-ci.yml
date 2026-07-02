@@ -52,7 +52,7 @@ jobs:
             astral.sh:443
             releases.astral.sh:443
       - name: Checkout
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           persist-credentials: false
       - name: Environment setup
@@ -114,7 +114,7 @@ jobs:
             semgrep.dev:443
             metrics.semgrep.dev:443
       - name: Checkout
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           persist-credentials: false
       - name: Check if fork PR
@@ -129,17 +129,17 @@ jobs:
       - name: Set up Docker Buildx (fork)
         if: steps.fork-check.outputs.is-fork == 'true'
         # yamllint disable-line rule:line-length
-        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+        uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4
         with:
           driver: docker
       - name: Set up Docker Buildx
         if: steps.fork-check.outputs.is-fork != 'true'
         # yamllint disable-line rule:line-length
-        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+        uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4
       - name: Log in to GitHub Container Registry
         if: steps.fork-check.outputs.is-fork != 'true'
         # yamllint disable-line rule:line-length
-        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3.7.0
+        uses: docker/login-action@c99871dec2022cc055c062a10cc1a1310835ceb4 # v4.3.0
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
@@ -147,7 +147,7 @@ jobs:
       - name: Build Docker image (fork)
         if: steps.fork-check.outputs.is-fork == 'true'
         # yamllint disable-line rule:line-length
-        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7
         with:
           context: .
           target: full
@@ -159,7 +159,7 @@ jobs:
       - name: Build and push Docker image (GHCR CI tag)
         if: steps.fork-check.outputs.is-fork != 'true'
         # yamllint disable-line rule:line-length
-        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7
         with:
           context: .
           target: full
@@ -174,7 +174,7 @@ jobs:
       - name: Build Base Docker image (fork)
         if: steps.fork-check.outputs.is-fork == 'true'
         # yamllint disable-line rule:line-length
-        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7
         with:
           context: .
           target: base
@@ -186,7 +186,7 @@ jobs:
       - name: Build and push Base Docker image (GHCR CI tag)
         if: steps.fork-check.outputs.is-fork != 'true'
         # yamllint disable-line rule:line-length
-        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7
         with:
           context: .
           target: base
@@ -203,7 +203,7 @@ jobs:
         run: scripts/docker/save-ci-images-tarball.sh
       - name: Upload Docker images artifact (fork fallback)
         if: steps.fork-check.outputs.is-fork == 'true'
-        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: docker-images
           path: /tmp/py-lintro-images.tar
@@ -322,13 +322,13 @@ jobs:
             api.osv.dev:443
             api.deps.dev:443
       - name: Checkout
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           persist-credentials: false
       - name: Log in to GHCR
         if: needs.docker-build.outputs.is-fork != 'true'
         # yamllint disable-line rule:line-length
-        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3.7.0
+        uses: docker/login-action@c99871dec2022cc055c062a10cc1a1310835ceb4 # v4.3.0
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
@@ -341,7 +341,7 @@ jobs:
       - name: Download Docker images artifact (fork fallback)
         if: needs.docker-build.outputs.is-fork == 'true'
         # yamllint disable-line rule:line-length
-        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
         with:
           name: docker-images
           path: /tmp
@@ -413,13 +413,13 @@ jobs:
             api.osv.dev:443
             api.deps.dev:443
       - name: Checkout
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           persist-credentials: false
       - name: Log in to GHCR
         if: needs.docker-build.outputs.is-fork != 'true'
         # yamllint disable-line rule:line-length
-        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3.7.0
+        uses: docker/login-action@c99871dec2022cc055c062a10cc1a1310835ceb4 # v4.3.0
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
@@ -432,7 +432,7 @@ jobs:
       - name: Download Docker images artifact (fork fallback)
         if: needs.docker-build.outputs.is-fork == 'true'
         # yamllint disable-line rule:line-length
-        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
         with:
           name: docker-images
           path: /tmp
@@ -452,7 +452,7 @@ jobs:
           test-output.log test-summary.json || true
       - name: Upload test summary artifact
         if: always()
-        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: test-summary
           path: test-summary.json
@@ -505,7 +505,7 @@ jobs:
             semgrep.dev:443
             metrics.semgrep.dev:443
       - name: Checkout
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           fetch-depth: 0
           fetch-tags: true
@@ -520,7 +520,7 @@ jobs:
           driver: docker-container
       - name: Extract metadata
         id: meta
-        uses: docker/metadata-action@c299e40c65443455700f0fdfc63efafe5b349051 # v5
+        uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6
         with:
           images: ghcr.io/lgtm-hq/py-lintro
           tags: |
@@ -532,7 +532,7 @@ jobs:
             type=raw,value=latest,enable={{is_default_branch}}
       - name: Extract metadata (base)
         id: meta-base
-        uses: docker/metadata-action@c299e40c65443455700f0fdfc63efafe5b349051 # v5
+        uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6
         with:
           images: ghcr.io/lgtm-hq/py-lintro-base
           tags: |
@@ -544,7 +544,7 @@ jobs:
             type=raw,value=latest,enable={{is_default_branch}}
       - name: Build and push Docker image
         # yamllint disable-line rule:line-length
-        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7
         with:
           context: .
           target: full
@@ -559,7 +559,7 @@ jobs:
           sbom: false
       - name: Build and push Base Docker image
         # yamllint disable-line rule:line-length
-        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7
         with:
           context: .
           target: base
@@ -594,7 +594,7 @@ jobs:
             github.com:443
             api.github.com:443
       - name: Checkout
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           persist-credentials: false
       - name: Delete CI-tagged images
