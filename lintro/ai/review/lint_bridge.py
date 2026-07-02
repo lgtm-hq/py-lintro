@@ -74,7 +74,9 @@ def run_lint_on_changed_files(
         )
         try:
             result = tool.check(paths=changed_files, options={})
-        except Exception:
+        except (
+            Exception
+        ):  # noqa: BLE001 - one tool failure must not abort scoped lint run
             logger.warning(
                 "Lint bridge skipped {} after check failure",
                 tool_name,
