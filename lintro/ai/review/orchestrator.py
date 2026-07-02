@@ -399,8 +399,13 @@ def _review_chunk(
         changed_files=chunk.files,
     )
     extra_checklist = ""
+    extra_checklist_usage: _ChunkReviewPartial | None = None
     if depth >= 2:
-        extra_checklist, next_generated_checklist_id = _generate_extra_checklist(
+        (
+            extra_checklist,
+            next_generated_checklist_id,
+            extra_checklist_usage,
+        ) = _generate_extra_checklist(
             chunk=chunk,
             context=context,
             provider=provider,
@@ -427,6 +432,14 @@ def _review_chunk(
     )
     payload = parse_review_response(content=response.content)
     partial = _payload_to_partial(response=response, payload=payload)
+
+    if extra_checklist_usage is not None:
+        partial = replace(
+            partial,
+            input_tokens=partial.input_tokens + extra_checklist_usage.input_tokens,
+            output_tokens=partial.output_tokens + extra_checklist_usage.output_tokens,
+            cost_estimate=partial.cost_estimate + extra_checklist_usage.cost_estimate,
+        )
 
     if depth >= 3:
         adversarial = _run_adversarial_pass(
@@ -457,7 +470,7 @@ def _generate_extra_checklist(
     ai_config: AIConfig,
     budget: CostBudget,
     next_generated_checklist_id: int,
-) -> tuple[str, int]:
+) -> tuple[str, int, _ChunkReviewPartial]:
     """Generate depth-2 domain-specific checklist questions."""
     changed_files = format_changed_files_for_prompt(
         files=[file for file in context.changed_files if file.path in chunk.files],
@@ -474,19 +487,27 @@ def _generate_extra_checklist(
         budget=budget,
         max_tokens=1024,
     )
+    usage = _ChunkReviewPartial(
+        summary="",
+        checklist=(),
+        findings=(),
+        input_tokens=response.input_tokens,
+        output_tokens=response.output_tokens,
+        cost_estimate=response.cost_estimate,
+    )
     try:
         payload = json.loads(strip_json_fences(content=response.content))
     except (json.JSONDecodeError, ValueError):
         logger.warning("Failed to parse generated questions; skipping depth-2 extras")
-        return "", next_generated_checklist_id
+        return "", next_generated_checklist_id, usage
 
     if not isinstance(payload, dict):
         logger.warning("Generated questions payload was not an object; skipping extras")
-        return "", next_generated_checklist_id
+        return "", next_generated_checklist_id, usage
 
     questions = payload.get("generated_questions", [])
     if not isinstance(questions, list):
-        return "", next_generated_checklist_id
+        return "", next_generated_checklist_id, usage
 
     lines: list[str] = []
     next_id = next_generated_checklist_id
@@ -497,7 +518,7 @@ def _generate_extra_checklist(
         if isinstance(question, str) and question.strip():
             lines.append(f"{next_id}. [generated] {question.strip()}")
             next_id += 1
-    return "\n".join(lines), next_id
+    return "\n".join(lines), next_id, usage
 
 
 def _run_adversarial_pass(

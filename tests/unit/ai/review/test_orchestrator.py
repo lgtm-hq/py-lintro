@@ -202,7 +202,7 @@ def test_run_review_depth2_calls_provider_twice() -> None:
             timeout=kwargs.get("timeout", 60.0),
         ),
     ):
-        run_review(
+        result = run_review(
             context,
             provider=provider,
             ai_config=AIConfig(enabled=True),
@@ -213,3 +213,6 @@ def test_run_review_depth2_calls_provider_twice() -> None:
         )
 
     assert_that(provider.complete.call_count).is_equal_to(2)
+    assert_that(result.metadata.token_usage["prompt"]).is_equal_to(150)
+    assert_that(result.metadata.token_usage["completion"]).is_equal_to(70)
+    assert_that(result.metadata.cost_estimate_usd).is_equal_to(0.015)
