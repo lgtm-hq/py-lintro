@@ -139,10 +139,16 @@ def run_review(
 
     budget = CostBudget(max_cost_usd=ai_config.max_cost_usd)
     partials: list[_ChunkReviewPartial] = []
+    next_generated_checklist_id = (
+        _max_checklist_id(
+            checklist_items=checklist_items,
+        )
+        + 1
+    )
 
     for chunk in chunks:
         budget.check()
-        partial = _review_chunk(
+        partial, next_generated_checklist_id = _review_chunk(
             chunk=chunk,
             context=context,
             provider=provider,
@@ -150,9 +156,7 @@ def run_review(
             depth=depth,
             checklist_text=checklist_text,
             checklist_count=len(checklist_items),
-            generated_checklist_base_id=_max_checklist_id(
-                checklist_items=checklist_items,
-            ),
+            next_generated_checklist_id=next_generated_checklist_id,
             classifications=classifications,
             lint_results=lint_results,
             budget=budget,
@@ -384,11 +388,11 @@ def _review_chunk(
     depth: int,
     checklist_text: str,
     checklist_count: int,
-    generated_checklist_base_id: int,
+    next_generated_checklist_id: int,
     classifications: list[FileClassification],
     lint_results: str | None,
     budget: CostBudget,
-) -> _ChunkReviewPartial:
+) -> tuple[_ChunkReviewPartial, int]:
     """Run depth-controlled review for a single chunk."""
     interaction_paths = generate_interaction_paths(
         classifications=classifications,
@@ -396,13 +400,13 @@ def _review_chunk(
     )
     extra_checklist = ""
     if depth >= 2:
-        extra_checklist = _generate_extra_checklist(
+        extra_checklist, next_generated_checklist_id = _generate_extra_checklist(
             chunk=chunk,
             context=context,
             provider=provider,
             ai_config=ai_config,
             budget=budget,
-            generated_checklist_base_id=generated_checklist_base_id,
+            next_generated_checklist_id=next_generated_checklist_id,
         )
 
     system_prompt, user_prompt = build_review_prompt(
@@ -442,7 +446,7 @@ def _review_chunk(
             cost_estimate=partial.cost_estimate + adversarial.cost_estimate,
         )
 
-    return partial
+    return partial, next_generated_checklist_id
 
 
 def _generate_extra_checklist(
@@ -452,8 +456,8 @@ def _generate_extra_checklist(
     provider: BaseAIProvider,
     ai_config: AIConfig,
     budget: CostBudget,
-    generated_checklist_base_id: int,
-) -> str:
+    next_generated_checklist_id: int,
+) -> tuple[str, int]:
     """Generate depth-2 domain-specific checklist questions."""
     changed_files = format_changed_files_for_prompt(
         files=[file for file in context.changed_files if file.path in chunk.files],
@@ -474,25 +478,26 @@ def _generate_extra_checklist(
         payload = json.loads(strip_json_fences(content=response.content))
     except (json.JSONDecodeError, ValueError):
         logger.warning("Failed to parse generated questions; skipping depth-2 extras")
-        return ""
+        return "", next_generated_checklist_id
 
     if not isinstance(payload, dict):
         logger.warning("Generated questions payload was not an object; skipping extras")
-        return ""
+        return "", next_generated_checklist_id
 
     questions = payload.get("generated_questions", [])
     if not isinstance(questions, list):
-        return ""
+        return "", next_generated_checklist_id
 
     lines: list[str] = []
-    for index, item in enumerate(questions, start=1):
+    next_id = next_generated_checklist_id
+    for item in questions:
         if not isinstance(item, dict):
             continue
         question = item.get("question")
         if isinstance(question, str) and question.strip():
-            generated_id = generated_checklist_base_id + index
-            lines.append(f"{generated_id}. [generated] {question.strip()}")
-    return "\n".join(lines)
+            lines.append(f"{next_id}. [generated] {question.strip()}")
+            next_id += 1
+    return "\n".join(lines), next_id
 
 
 def _run_adversarial_pass(
