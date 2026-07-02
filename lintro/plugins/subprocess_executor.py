@@ -137,6 +137,7 @@ def run_subprocess(
     timeout: float,
     cwd: str | None = None,
     env: dict[str, str] | None = None,
+    stdin: int | None = None,
 ) -> tuple[bool, str]:
     """Run a subprocess command safely.
 
@@ -146,6 +147,9 @@ def run_subprocess(
         cwd: Working directory for command execution.
         env: Environment variables for the subprocess. These are merged with
             os.environ to preserve PATH and other essential variables.
+        stdin: Optional stdin handle for the subprocess. Defaults to ``None``
+            (inherit). Pass ``subprocess.DEVNULL`` to prevent tools that prompt
+            interactively from blocking when no TTY is attached.
 
     Returns:
         Tuple of (success, output) where success indicates return code 0.
@@ -173,6 +177,7 @@ def run_subprocess(
             timeout=timeout,
             cwd=cwd,
             env=effective_env,
+            stdin=stdin,
         )
 
         combined = (result.stdout or "") + (result.stderr or "")
