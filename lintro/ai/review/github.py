@@ -33,7 +33,8 @@ def post_review_to_github(
         reporter: Optional preconfigured GitHub reporter.
 
     Returns:
-        True when posting succeeded or was skipped cleanly; False on failure.
+        True when posting succeeded; False on failure or when GitHub context is
+        unavailable.
     """
     gh_reporter = reporter or GitHubPRReporter(pr_number=pr_number, repo=repo)
     if not gh_reporter.is_available():
@@ -58,8 +59,9 @@ def post_review_to_github(
 
     for finding in fallback_findings:
         body = format_finding_comment(finding=finding)
-        location = f"`{finding.file}:{finding.line}`"
-        if not gh_reporter._post_issue_comment(f"{location}\n\n{body}"):
+        location = _format_fallback_location(finding=finding)
+        comment = f"{location}\n\n{body}" if location else body
+        if not gh_reporter._post_issue_comment(comment):
             success = False
 
     return success
@@ -112,18 +114,23 @@ def format_review_summary(*, result: ReviewResult) -> str:
             ["", "### Checklist", "| ID | Answer | Evidence |", "|---|---|---|"],
         )
         for answer in result.checklist:
-            evidence = answer.evidence.replace("|", "\\|")
+            evidence = (
+                answer.evidence.replace("|", "\\|")
+                .replace("\n", " ")
+                .replace("\r", " ")
+            )
             lines.append(f"| {answer.id} | {answer.answer} | {evidence} |")
 
-    outside_diff = [
-        finding for finding in result.findings if not finding.file or finding.line <= 0
-    ]
-    if outside_diff:
-        lines.extend(["", "### Findings outside diff"])
-        for finding in outside_diff:
-            lines.append(f"- **{finding.severity}** {finding.title} ({finding.file})")
-
     return "\n".join(lines)
+
+
+def _format_fallback_location(*, finding: ReviewFinding) -> str:
+    """Format the location header for a fallback issue comment."""
+    if not finding.file:
+        return ""
+    if finding.line > 0:
+        return f"`{finding.file}:{finding.line}`"
+    return f"`{finding.file}`"
 
 
 def _partition_findings(
