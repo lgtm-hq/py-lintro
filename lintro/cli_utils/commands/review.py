@@ -135,7 +135,7 @@ def review_command(
     classifications = classify_changed_files(context.changed_files)
     checklist_items = get_all_checklist_items(config=lintro_config)
     selected_items = select_checklist_items(
-        changed_files=[file.path for file in context.changed_files],
+        classifications=classifications,
         items=checklist_items,
     )
     checklist_text, _prompt_mapping = format_checklist_for_prompt(
