@@ -700,28 +700,25 @@ def _normalize_checklist_answer_value(*, answer: str) -> str:
     return normalized
 
 
+def _checklist_answer_strength(*, answer: ChecklistAnswer) -> int:
+    """Score checklist answers for merge precedence."""
+    has_evidence = bool(answer.evidence.strip())
+    if answer.answer == "yes":
+        return 4 if has_evidence else 2
+    return 3 if has_evidence else 1
+
+
 def _pick_preferred_checklist_answer(
     *,
     candidate: ChecklistAnswer,
     existing: ChecklistAnswer,
 ) -> ChecklistAnswer:
     """Pick the stronger checklist answer when merging chunk results."""
-    candidate_answer = candidate.answer
-    existing_answer = existing.answer
-    candidate_has_evidence = bool(candidate.evidence.strip())
-    existing_has_evidence = bool(existing.evidence.strip())
-
-    if candidate_answer == "yes" and candidate_has_evidence:
+    candidate_strength = _checklist_answer_strength(answer=candidate)
+    existing_strength = _checklist_answer_strength(answer=existing)
+    if candidate_strength >= existing_strength:
         return candidate
-    if existing_answer == "yes" and existing_has_evidence:
-        return existing
-    if candidate_answer == "yes" and existing_answer == "no" and existing_has_evidence:
-        return existing
-    if candidate_answer == "yes":
-        return candidate
-    if existing_answer == "yes":
-        return existing
-    return candidate
+    return existing
 
 
 def _single_chunk_from_context(*, context: ReviewContext) -> ReviewChunk:
