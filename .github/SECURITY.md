@@ -4,18 +4,45 @@
 
 | Version | Supported          |
 | ------- | ------------------ |
-| 0.22.x  | :white_check_mark: |
-| < 0.22  | :x:                |
+| 0.64.x  | :white_check_mark: |
+| < 0.64  | :x:                |
 
 ## Reporting a Vulnerability
 
-If you discover a security vulnerability in lintro, please report it by:
+If you discover a security vulnerability in lintro, please report it responsibly.
 
-1. **Do NOT open a public GitHub issue**
-2. Report via
-   [GitHub's private vulnerability reporting](https://github.com/lgtm-hq/py-lintro/security/advisories/new)
-3. Include detailed steps to reproduce the vulnerability
-4. Allow reasonable time for the issue to be addressed before public disclosure
+> **Do NOT open a public GitHub issue for security vulnerabilities.** All vulnerability
+> reports must be submitted privately through one of the channels below.
+
+### How to Report
+
+Choose one of the following channels to disclose a vulnerability:
+
+1. **GitHub Security Advisories** (preferred): Use
+   [GitHub Security Advisories](https://github.com/lgtm-hq/py-lintro/security/advisories/new)
+   to privately report and disclose the vulnerability
+2. **Email**: Send a vulnerability report to `turbocoder13@gmail.com` with "SECURITY:
+   Lintro" in the subject line
+
+### What to Include
+
+Regardless of the reporting channel, please include the following in your vulnerability
+disclosure:
+
+- Detailed steps to reproduce the vulnerability
+- Affected version(s) and environment details
+- Potential impact or severity assessment, if known
+
+### Vulnerability Disclosure Timeline
+
+- **Acknowledgment**: Within 48 hours of receiving your report
+- **Investigation & Fix**: Within 30 days, we will assess severity and develop a fix
+- **Release**: Critical vulnerabilities are patched as soon as possible; other fixes are
+  released within 90 days
+- **Public Disclosure**: Coordinated with the reporter after a fix is available
+
+We appreciate responsible disclosure and will credit reporters (unless anonymity is
+requested) in our security advisories and release notes.
 
 ## Repository Secrets
 
