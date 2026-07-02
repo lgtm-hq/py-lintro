@@ -13,7 +13,7 @@
 # -----------------------------------------------------------------------------
 FROM python:3.14-slim@sha256:7a500125bc50693f2214e842a621440a1b1b9cbb2188f74ab045d29ed2ea5856 AS tools
 
-ARG BUN_VERSION=1.3.11
+ARG BUN_VERSION=1.3.14
 ARG UV_VERSION=0.11.10
 
 LABEL maintainer="lgtm-hq"
