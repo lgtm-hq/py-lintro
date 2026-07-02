@@ -623,13 +623,17 @@ def _parse_checklist(*, raw_checklist: object) -> tuple[ChecklistAnswer, ...]:
             continue
         answer_id = item.get("id")
         answer = item.get("answer", "no")
-        evidence = item.get("evidence", "")
+        evidence_raw = item.get("evidence", "")
         if not isinstance(answer_id, int):
             continue
         if not isinstance(answer, str):
             answer = str(answer)
-        if not isinstance(evidence, str):
-            evidence = str(evidence)
+        if evidence_raw is None:
+            evidence = ""
+        elif isinstance(evidence_raw, str):
+            evidence = evidence_raw
+        else:
+            evidence = str(evidence_raw)
         answers.append(
             ChecklistAnswer(
                 id=answer_id,
