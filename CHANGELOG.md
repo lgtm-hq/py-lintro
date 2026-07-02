@@ -21,6 +21,19 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.65.0] - 2026-07-02
+
+### Added
+
+- **ai/review**: add GitHub PR review posting (#1037) (091df5d)
+- **ai/review**: add terminal and JSON output formatters (#1036) (3761712)
+- **cli**: add lintro review command (#1035) (b1b0b09)
+- **ai/review**: add review orchestrator with depth and chunking (#1034) (45cbbd1)
+- **ai/review**: add review prompt templates (#1011) (8e16733)
+- **ai/review**: add checklist registry with file-glob triggers (#1003) (05f60c5)
+- **ai/review**: add diff collection, classifier, and chunker (#1000) (4ae62b3)
+- **ci**: migrate thin reusables to lgtm-ci v0.46.0 (#990) (b13f92d)
+
 ## [0.64.5] - 2026-06-19
 
 ### Changed
