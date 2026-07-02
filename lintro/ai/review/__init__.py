@@ -50,7 +50,12 @@ if TYPE_CHECKING:
     from lintro.ai.review.context import (
         split_unified_diff_by_file as split_unified_diff_by_file,
     )
-    from lintro.ai.review.pipeline import prepare_review_chunks as prepare_review_chunks
+    from lintro.ai.review.pipeline import (
+        prepare_review_chunks as prepare_review_chunks,
+    )
+    from lintro.ai.review.pipeline import (
+        prepare_review_user_prompt as prepare_review_user_prompt,
+    )
 
 _LAZY_EXPORTS: dict[str, tuple[str, str]] = {
     "chunk_review_context": (
@@ -70,6 +75,10 @@ _LAZY_EXPORTS: dict[str, tuple[str, str]] = {
         "parse_changed_files",
     ),
     "prepare_review_chunks": ("lintro.ai.review.pipeline", "prepare_review_chunks"),
+    "prepare_review_user_prompt": (
+        "lintro.ai.review.pipeline",
+        "prepare_review_user_prompt",
+    ),
     "resolve_default_base_branch": (
         "lintro.ai.review.context.collection",
         "resolve_default_base_branch",
@@ -106,6 +115,7 @@ __all__ = [
     "get_all_checklist_items",
     "parse_changed_files",
     "prepare_review_chunks",
+    "prepare_review_user_prompt",
     "resolve_default_base_branch",
     "select_checklist_items",
     "split_unified_diff_by_file",
