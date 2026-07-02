@@ -98,7 +98,8 @@ def test_run_review_depth1_returns_review_result() -> None:
         ChecklistItem(
             id=1,
             question="Example?",
-            triggers=[],
+            domains=(),
+            languages=(),
             category=ReviewCategory.LOGIC_BUG,
             tier=1,
         ),
