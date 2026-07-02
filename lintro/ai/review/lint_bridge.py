@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from loguru import logger
+
 from lintro.ai.prompts.review import format_lint_results_section
 from lintro.enums.action import Action
 from lintro.models.core.tool_result import ToolResult
@@ -37,11 +39,14 @@ def run_lint_on_changed_files(
     Returns:
         Raw tool results from applicable linters.
     """
-    del lintro_config  # Config is read via get_tools_to_run/get_config internally.
     if not changed_files:
         return []
 
-    selection = get_tools_to_run(tools="all", action=Action.CHECK)
+    selection = get_tools_to_run(
+        tools="all",
+        action=Action.CHECK,
+        lintro_config=lintro_config,
+    )
     if not selection.to_run:
         return []
 
@@ -65,8 +70,17 @@ def run_lint_on_changed_files(
             action=Action.CHECK,
             post_tools=set(),
             auto_install=False,
+            lintro_config=lintro_config,
         )
-        result = tool.check(paths=changed_files, options={})
+        try:
+            result = tool.check(paths=changed_files, options={})
+        except Exception:
+            logger.warning(
+                "Lint bridge skipped {} after check failure",
+                tool_name,
+                exc_info=True,
+            )
+            continue
         results.append(result)
 
     return results
@@ -81,7 +95,7 @@ def format_lint_results_for_prompt(
 
     Args:
         results: Tool results from ``run_lint_on_changed_files``.
-        max_entries: Maximum number of issue lines to include.
+        max_entries: Maximum number of issue entries to include.
 
     Returns:
         Lint digest wrapped in ``<lint_results>`` tags, or empty string.

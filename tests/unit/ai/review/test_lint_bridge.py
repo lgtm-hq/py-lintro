@@ -66,9 +66,14 @@ def test_run_lint_on_changed_files_invokes_tool_check() -> None:
         "lintro.ai.review.lint_bridge.get_tools_to_run",
     ) as mock_get_tools:
         mock_get_tools.return_value.to_run = ["ruff"]
-        with patch(
-            "lintro.ai.review.lint_bridge.tool_manager.get_tool",
-            return_value=mock_tool,
+        with (
+            patch(
+                "lintro.ai.review.lint_bridge.tool_manager.get_tool",
+                return_value=mock_tool,
+            ),
+            patch(
+                "lintro.ai.review.lint_bridge.configure_tool_for_execution",
+            ),
         ):
             results = run_lint_on_changed_files(
                 changed_files=["src/main.py"],
