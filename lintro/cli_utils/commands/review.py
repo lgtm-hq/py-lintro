@@ -120,6 +120,10 @@ def review_command(
             raise click.UsageError(
                 "--post requires --pr or a CI pull-request environment.",
             )
+        if not effective_repo:
+            raise click.UsageError(
+                "--post requires --repo or GITHUB_REPOSITORY environment variable.",
+            )
 
     paths = list(path_filter) if path_filter else None
     try:
