@@ -102,7 +102,7 @@ def _with_fallback(
                         idx + 1,
                         len(models_to_try),
                     )
-                return attempt_fn(prompt, system, max_tokens, timeout)
+                    return attempt_fn(prompt, system, max_tokens, timeout)
             except AIAuthenticationError:
                 # Never retry auth errors — restore and propagate.
                 raise
