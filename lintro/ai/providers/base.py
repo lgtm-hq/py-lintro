@@ -103,6 +103,9 @@ class BaseAIProvider(ABC):
                 f"environment variable.",
             )
 
+        if not api_key and self._base_url:
+            api_key = "not-needed"
+
         self._client = self._create_client(api_key=api_key)
         return self._client
 
