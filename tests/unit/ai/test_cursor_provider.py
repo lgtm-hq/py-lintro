@@ -145,45 +145,39 @@ class TestComplete:
 
     def test_auth_error(self, provider):
         """Raise AIAuthenticationError on auth failure stderr."""
-        with (
-            patch("subprocess.run") as mock_run,
-            pytest.raises(AIAuthenticationError, match="login"),
-        ):
+        with patch("subprocess.run") as mock_run:
             mock_run.return_value = subprocess.CompletedProcess(
                 args=[],
                 returncode=1,
                 stdout="",
                 stderr="Authentication required. Run 'agent login' first.",
             )
-            provider.complete("Hello")
+            with pytest.raises(AIAuthenticationError, match="login"):
+                provider.complete("Hello")
 
     def test_nonzero_exit(self, provider):
         """Raise AIProviderError on non-zero CLI exit code."""
-        with (
-            patch("subprocess.run") as mock_run,
-            pytest.raises(AIProviderError, match="exited with code 2"),
-        ):
+        with patch("subprocess.run") as mock_run:
             mock_run.return_value = subprocess.CompletedProcess(
                 args=[],
                 returncode=2,
                 stdout="",
                 stderr="something broke",
             )
-            provider.complete("Hello")
+            with pytest.raises(AIProviderError, match="exited with code 2"):
+                provider.complete("Hello")
 
     def test_invalid_json_stdout(self, provider):
         """Raise AIProviderError when stdout is not valid JSON."""
-        with (
-            patch("subprocess.run") as mock_run,
-            pytest.raises(AIProviderError, match="invalid JSON"),
-        ):
+        with patch("subprocess.run") as mock_run:
             mock_run.return_value = subprocess.CompletedProcess(
                 args=[],
                 returncode=0,
                 stdout="not json at all",
                 stderr="",
             )
-            provider.complete("Hello")
+            with pytest.raises(AIProviderError, match="invalid JSON"):
+                provider.complete("Hello")
 
     def test_cli_error_in_response(self, provider):
         """Raise AIProviderError when JSON reports is_error."""
@@ -192,17 +186,42 @@ class TestComplete:
             is_error=True,
             subtype="error",
         )
-        with (
-            patch("subprocess.run") as mock_run,
-            pytest.raises(AIProviderError, match="reported error"),
-        ):
+        with patch("subprocess.run") as mock_run:
             mock_run.return_value = subprocess.CompletedProcess(
                 args=[],
                 returncode=0,
                 stdout=stdout,
                 stderr="",
             )
-            provider.complete("Hello")
+            with pytest.raises(AIProviderError, match="reported error"):
+                provider.complete("Hello")
+
+    def test_max_tokens_appended_to_prompt(self, provider):
+        """Append token budget constraint to the CLI stdin prompt."""
+        stdout = _cli_json(result="ok")
+        with patch("subprocess.run") as mock_run:
+            mock_run.return_value = subprocess.CompletedProcess(
+                args=[],
+                returncode=0,
+                stdout=stdout,
+                stderr="",
+            )
+            provider.complete("Hello", max_tokens=512)
+            input_text = mock_run.call_args.kwargs.get("input", "")
+            assert_that(input_text).contains("Respond in at most 512 tokens")
+
+    def test_timeout_passed_to_subprocess(self, provider):
+        """Pass caller timeout directly to subprocess.run."""
+        stdout = _cli_json(result="ok")
+        with patch("subprocess.run") as mock_run:
+            mock_run.return_value = subprocess.CompletedProcess(
+                args=[],
+                returncode=0,
+                stdout=stdout,
+                stderr="",
+            )
+            provider.complete("Hello", timeout=45.0)
+            assert_that(mock_run.call_args.kwargs.get("timeout")).is_equal_to(45.0)
 
     def test_cost_estimate_zero(self, provider):
         """Cursor subscription — per-token cost is always zero."""

@@ -121,9 +121,13 @@ class CursorProvider(BaseAIProvider):
         The system prompt is prepended to the user prompt since the
         CLI does not have a dedicated system-prompt flag.
         """
+        effective_max = min(max_tokens, self._max_tokens)
         combined_prompt = prompt
         if system:
             combined_prompt = f"{system}\n\n---\n\n{prompt}"
+        combined_prompt = (
+            f"{combined_prompt}\n\n" f"[Respond in at most {effective_max} tokens.]"
+        )
 
         cmd = [
             self._agent_path,
@@ -139,6 +143,7 @@ class CursorProvider(BaseAIProvider):
 
         logger.debug(
             f"Cursor CLI request: model={self._model}, "
+            f"max_tokens={effective_max}, "
             f"prompt_len={len(combined_prompt)}",
         )
 
@@ -149,7 +154,7 @@ class CursorProvider(BaseAIProvider):
                 input=combined_prompt,
                 capture_output=True,
                 text=True,
-                timeout=max(timeout, 300.0),
+                timeout=timeout,
                 check=False,
             )
         except subprocess.TimeoutExpired as e:
@@ -240,6 +245,7 @@ class CursorProvider(BaseAIProvider):
         content = self._extract_json_object(content)
 
         usage = data.get("usage", {})
+        # agent --output-format json does not expose token counts; default to 0.
         input_tokens = usage.get("inputTokens", 0)
         output_tokens = usage.get("outputTokens", 0)
 
