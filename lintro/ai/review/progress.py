@@ -197,8 +197,9 @@ class RichReviewProgress:
             description=(f"Chunk {chunk_index + 1}/{self._total_chunks}: {step}"),
         )
 
-    def on_chunk_done(self, *, chunk_index: int) -> None:  # noqa: ARG002
+    def on_chunk_done(self, *, chunk_index: int) -> None:
         """Advance the bar after a chunk completes."""
+        del chunk_index  # Protocol requires index; bar tracks count via advance().
         if self._progress is None or self._task_id is None:
             return
         self._progress.update(self._task_id, advance=1)
@@ -251,11 +252,45 @@ class StepTrackingProgress:
         self._inner = inner
         self.last_step = "reviewing"
 
-    def __getattr__(self, name: str):  # noqa: ANN001
-        """Delegate unknown attributes to the wrapped tracker."""
-        return getattr(self._inner, name)
+    def on_start(self, *, total_chunks: int, depth: int) -> None:
+        """Forward review start to the wrapped tracker."""
+        self._inner.on_start(total_chunks=total_chunks, depth=depth)
+
+    def on_chunk_start(self, *, chunk_index: int, files: list[str]) -> None:
+        """Forward chunk start to the wrapped tracker."""
+        self._inner.on_chunk_start(chunk_index=chunk_index, files=files)
 
     def on_step(self, *, chunk_index: int, step: str) -> None:
         """Record the step before forwarding to the wrapped tracker."""
         self.last_step = step
         self._inner.on_step(chunk_index=chunk_index, step=step)
+
+    def on_chunk_done(self, *, chunk_index: int) -> None:
+        """Forward chunk completion to the wrapped tracker."""
+        self._inner.on_chunk_done(chunk_index=chunk_index)
+
+    def on_complete(self, *, total_findings: int) -> None:
+        """Forward review completion to the wrapped tracker."""
+        self._inner.on_complete(total_findings=total_findings)
+
+    def on_abort(self) -> None:
+        """Forward review abort to the wrapped tracker."""
+        self._inner.on_abort()
+
+    def on_error(
+        self,
+        *,
+        chunk_index: int | None = None,
+        total_chunks: int | None = None,
+        step: str | None = None,
+        completed_chunks: int = 0,
+        error: Exception | None = None,
+    ) -> None:
+        """Forward review error to the wrapped tracker."""
+        self._inner.on_error(
+            chunk_index=chunk_index,
+            total_chunks=total_chunks,
+            step=step,
+            completed_chunks=completed_chunks,
+            error=error,
+        )

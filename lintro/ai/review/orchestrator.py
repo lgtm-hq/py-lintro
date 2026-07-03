@@ -169,7 +169,7 @@ def _review_all_chunks(
         ]
 
     if depth >= 2:
-        partials: list[_ChunkReviewPartial] = []
+        sequential_partials: list[_ChunkReviewPartial] = []
         next_id = next_generated_checklist_id
         for chunk_index, chunk in enumerate(chunks):
             budget.check()
@@ -212,9 +212,9 @@ def _review_all_chunks(
                     completed_chunks=chunk_index,
                     cause_message=str(exc),
                 ) from exc
-            partials.append(partial)
+            sequential_partials.append(partial)
             progress.on_chunk_done(chunk_index=chunk_index)
-        return partials
+        return sequential_partials
 
     partials: list[_ChunkReviewPartial | None] = [None] * len(chunks)
     effective_parallel = 1 if budget.max_cost_usd is not None else max_parallel_calls
