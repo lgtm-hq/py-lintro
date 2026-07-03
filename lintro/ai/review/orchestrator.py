@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import re
+from contextlib import suppress
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
@@ -33,6 +34,7 @@ from lintro.ai.review.models.review_finding import ReviewFinding
 from lintro.ai.review.models.review_metadata import ReviewMetadata
 from lintro.ai.review.models.review_result import ReviewResult
 from lintro.ai.review.paths_registry import generate_interaction_paths
+from lintro.ai.review.progress import NullReviewProgress, ReviewProgressCallback
 from lintro.ai.token_budget import estimate_tokens
 
 if TYPE_CHECKING:
@@ -82,6 +84,7 @@ def run_review(
     classifications: list[FileClassification],
     context_window_override: int | None = None,
     lint_results: str | None = None,
+    progress: ReviewProgressCallback | None = None,
 ) -> ReviewResult:
     """Execute an AI diff review with depth-controlled passes.
 
@@ -95,6 +98,7 @@ def run_review(
         classifications: Domain classifications for changed files.
         context_window_override: Optional explicit context window override.
         lint_results: Optional lint digest for ``--with-lint`` integration.
+        progress: Optional progress callback for live status updates.
 
     Returns:
         Complete review result with metadata, checklist, and findings.
@@ -137,6 +141,7 @@ def run_review(
         _single_chunk_from_context(context=context),
     ]
 
+    tracker = progress or NullReviewProgress()
     budget = CostBudget(max_cost_usd=ai_config.max_cost_usd)
     partials: list[_ChunkReviewPartial] = []
     next_generated_checklist_id = (
@@ -146,24 +151,43 @@ def run_review(
         + 1
     )
 
-    for chunk in chunks:
-        budget.check()
-        partial, next_generated_checklist_id = _review_chunk(
-            chunk=chunk,
-            context=context,
-            provider=provider,
-            ai_config=ai_config,
-            depth=depth,
-            checklist_text=checklist_text,
-            checklist_count=len(checklist_items),
-            next_generated_checklist_id=next_generated_checklist_id,
-            classifications=classifications,
-            lint_results=lint_results,
-            budget=budget,
-        )
-        partials.append(partial)
+    tracker.on_start(total_chunks=len(chunks), depth=depth)
+    total_findings = 0
+    completed = False
+    try:
+        for chunk_index, chunk in enumerate(chunks):
+            budget.check()
+            tracker.on_chunk_start(
+                chunk_index=chunk_index,
+                files=list(chunk.files),
+            )
+            partial, next_generated_checklist_id = _review_chunk(
+                chunk=chunk,
+                context=context,
+                provider=provider,
+                ai_config=ai_config,
+                depth=depth,
+                checklist_text=checklist_text,
+                checklist_count=len(checklist_items),
+                next_generated_checklist_id=next_generated_checklist_id,
+                classifications=classifications,
+                lint_results=lint_results,
+                budget=budget,
+                progress=tracker,
+                chunk_index=chunk_index,
+            )
+            partials.append(partial)
+            tracker.on_chunk_done(chunk_index=chunk_index)
 
-    merged = merge_review_results(partials=partials)
+        merged = merge_review_results(partials=partials)
+        total_findings = len(merged.findings)
+        completed = True
+    finally:
+        with suppress(Exception):
+            if completed:
+                tracker.on_complete(total_findings=total_findings)
+            else:
+                tracker.on_abort()
     total_input = sum(partial.input_tokens for partial in partials)
     total_output = sum(partial.output_tokens for partial in partials)
     total_cost = sum(partial.cost_estimate for partial in partials)
@@ -392,8 +416,11 @@ def _review_chunk(
     classifications: list[FileClassification],
     lint_results: str | None,
     budget: CostBudget,
+    progress: ReviewProgressCallback | None = None,
+    chunk_index: int = 0,
 ) -> tuple[_ChunkReviewPartial, int]:
     """Run depth-controlled review for a single chunk."""
+    tracker = progress or NullReviewProgress()
     interaction_paths = generate_interaction_paths(
         classifications=classifications,
         changed_files=chunk.files,
@@ -401,6 +428,7 @@ def _review_chunk(
     extra_checklist = ""
     extra_checklist_usage: _ChunkReviewPartial | None = None
     if depth >= 2:
+        tracker.on_step(chunk_index=chunk_index, step="generating questions")
         (
             extra_checklist,
             next_generated_checklist_id,
@@ -414,6 +442,7 @@ def _review_chunk(
             next_generated_checklist_id=next_generated_checklist_id,
         )
 
+    tracker.on_step(chunk_index=chunk_index, step="reviewing")
     system_prompt, user_prompt = build_review_prompt(
         chunk=chunk,
         context=context,
@@ -442,6 +471,7 @@ def _review_chunk(
         )
 
     if depth >= 3:
+        tracker.on_step(chunk_index=chunk_index, step="adversarial sweep")
         adversarial = _run_adversarial_pass(
             chunk=chunk,
             provider=provider,

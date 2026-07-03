@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 from unittest.mock import MagicMock, patch
 
+import pytest
 from assertpy import assert_that
 
 from lintro.ai.config import AIConfig
@@ -18,6 +19,7 @@ from lintro.ai.review.orchestrator import (
     run_review,
     strip_json_fences,
 )
+from lintro.ai.review.progress import ReviewProgressCallback
 
 
 def _sample_response_json(*, include_finding: bool = True) -> str:
@@ -216,3 +218,142 @@ def test_run_review_depth2_calls_provider_twice() -> None:
     assert_that(result.metadata.token_usage["prompt"]).is_equal_to(150)
     assert_that(result.metadata.token_usage["completion"]).is_equal_to(70)
     assert_that(result.metadata.cost_estimate_usd).is_equal_to(0.015)
+
+
+def test_run_review_aborts_progress_when_chunk_review_fails() -> None:
+    """Progress tracker receives on_abort when a chunk review raises."""
+    context = ReviewContext(
+        base_ref="main",
+        head_ref="feature",
+        changed_files=[
+            ChangedFile(
+                path="src/main.py",
+                status="modified",
+                additions=1,
+                deletions=0,
+            ),
+        ],
+        unified_diff="diff --git a/src/main.py b/src/main.py\n+change",
+        pr_metadata=None,
+    )
+    provider = _mock_provider(content=_sample_response_json())
+    progress = MagicMock(spec=ReviewProgressCallback)
+
+    with (
+        patch(
+            "lintro.ai.review.orchestrator.complete_with_fallback",
+            side_effect=RuntimeError("provider failed"),
+        ),
+        pytest.raises(RuntimeError, match="provider failed"),
+    ):
+        run_review(
+            context,
+            provider=provider,
+            ai_config=AIConfig(enabled=True),
+            depth=1,
+            checklist_items=[],
+            checklist_text="1. [logic-bug] Example?",
+            classifications=[],
+            progress=progress,
+        )
+
+    progress.on_start.assert_called_once()
+    progress.on_abort.assert_called_once()
+    progress.on_complete.assert_not_called()
+
+
+def test_run_review_propagates_chunk_error_when_progress_abort_raises() -> None:
+    """Progress cleanup errors must not mask the original chunk review failure."""
+    context = ReviewContext(
+        base_ref="main",
+        head_ref="feature",
+        changed_files=[
+            ChangedFile(
+                path="src/main.py",
+                status="modified",
+                additions=1,
+                deletions=0,
+            ),
+        ],
+        unified_diff="diff --git a/src/main.py b/src/main.py\n+change",
+        pr_metadata=None,
+    )
+    provider = _mock_provider(content=_sample_response_json())
+    progress = MagicMock(spec=ReviewProgressCallback)
+    progress.on_abort.side_effect = BrokenPipeError()
+
+    with (
+        patch(
+            "lintro.ai.review.orchestrator.complete_with_fallback",
+            side_effect=RuntimeError("provider failed"),
+        ),
+        pytest.raises(RuntimeError, match="provider failed"),
+    ):
+        run_review(
+            context,
+            provider=provider,
+            ai_config=AIConfig(enabled=True),
+            depth=1,
+            checklist_items=[],
+            checklist_text="1. [logic-bug] Example?",
+            classifications=[],
+            progress=progress,
+        )
+
+    progress.on_start.assert_called_once()
+    progress.on_abort.assert_called_once()
+    progress.on_complete.assert_not_called()
+
+
+def test_run_review_returns_result_when_progress_complete_raises() -> None:
+    """Progress cleanup errors must not discard a successful review result."""
+    context = ReviewContext(
+        base_ref="main",
+        head_ref="feature",
+        changed_files=[
+            ChangedFile(
+                path="src/main.py",
+                status="modified",
+                additions=1,
+                deletions=0,
+            ),
+        ],
+        unified_diff="diff --git a/src/main.py b/src/main.py\n+change",
+        pr_metadata=None,
+    )
+    checklist_items = [
+        ChecklistItem(
+            id=1,
+            question="Example?",
+            domains=(),
+            languages=(),
+            category=ReviewCategory.LOGIC_BUG,
+            tier=1,
+        ),
+    ]
+    provider = _mock_provider(content=_sample_response_json())
+    progress = MagicMock(spec=ReviewProgressCallback)
+    progress.on_complete.side_effect = BrokenPipeError()
+
+    with patch(
+        "lintro.ai.review.orchestrator.complete_with_fallback",
+        side_effect=lambda _provider, _prompt, **kwargs: _provider.complete(
+            _prompt,
+            system=kwargs.get("system"),
+            max_tokens=kwargs.get("max_tokens", 1024),
+            timeout=kwargs.get("timeout", 60.0),
+        ),
+    ):
+        result = run_review(
+            context,
+            provider=provider,
+            ai_config=AIConfig(enabled=True),
+            depth=1,
+            checklist_items=checklist_items,
+            checklist_text="1. [logic-bug] Example?",
+            classifications=[],
+            progress=progress,
+        )
+
+    assert_that(result.summary).contains("Merge")
+    progress.on_complete.assert_called_once_with(total_findings=1)
