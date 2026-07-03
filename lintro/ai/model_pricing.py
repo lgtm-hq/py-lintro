@@ -31,6 +31,7 @@ MODEL_CONTEXT_WINDOWS: dict[str, int] = {
     "auto": 200_000,
     "composer-2.5-fast": 200_000,
     "composer-2.5": 200_000,
+    "gpt-5.3-codex-fast": 200_000,
     "o1-mini": 128_000,
 }
 

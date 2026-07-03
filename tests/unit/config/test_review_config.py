@@ -114,7 +114,7 @@ def test_review_config_rejects_invalid_depth() -> None:
     """Review depth must be between 1 and 3."""
     from lintro.config.review_config import ReviewConfig
 
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="greater than or equal to 1"):
         ReviewConfig(depth=0)
 
 

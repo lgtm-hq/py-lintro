@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import threading
 import time
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -268,7 +269,7 @@ def test_resolve_review_chunks_skips_fast_path_when_forced(
     assert_that(len(chunks)).is_greater_than(1)
 
 
-def test_run_review_parallelizes_multiple_chunks() -> None:
+def test_run_review_parallelizes_multiple_chunks(tmp_path: Path) -> None:
     """Multiple chunks run concurrently up to max_parallel_calls."""
     context = ReviewContext(
         base_ref="main",
@@ -284,7 +285,7 @@ def test_run_review_parallelizes_multiple_chunks() -> None:
         ],
         unified_diff="diff",
         pr_metadata=None,
-        repo_root="/tmp/repo",
+        repo_root=str(tmp_path),
     )
     chunks = [
         ReviewChunk(

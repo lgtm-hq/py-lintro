@@ -136,6 +136,12 @@ class CursorProvider(BaseAIProvider):
 
         Returns:
             Parsed model response with usage metadata.
+
+        Raises:
+            AIProviderError: If the CLI times out, exits non-zero, or returns
+                invalid output.
+            AIAuthenticationError: If the CLI reports missing authentication.
+            AINotAvailableError: If the ``agent`` binary is not on PATH.
         """
         effective_max = min(max_tokens, self._max_tokens)
         combined_prompt = prompt
