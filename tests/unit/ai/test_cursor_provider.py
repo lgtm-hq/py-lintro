@@ -55,224 +55,240 @@ def _cli_json(
     )
 
 
-class TestFindAgent:
-    """Tests for agent binary discovery."""
-
-    def test_found(self):
-        """Return agent path when binary is on PATH."""
-        with patch("shutil.which", return_value="/usr/local/bin/agent"):
-            assert_that(_find_agent()).is_equal_to("/usr/local/bin/agent")
-
-    def test_not_found(self):
-        """Return None when agent binary is missing."""
-        with patch("shutil.which", return_value=None):
-            assert_that(_find_agent()).is_none()
+# -- _find_agent -----------------------------------------------------------
 
 
-class TestCursorProviderInit:
-    """Tests for CursorProvider initialization."""
-
-    def test_raises_when_agent_missing(self):
-        """Raise AINotAvailableError when agent CLI is missing."""
-        with (
-            patch(
-                "lintro.ai.providers.cursor._find_agent",
-                return_value=None,
-            ),
-            pytest.raises(AINotAvailableError, match="agent"),
-        ):
-            CursorProvider()
-
-    def test_default_model(self, provider):
-        """Use auto as the default model."""
-        assert_that(provider.model_name).is_equal_to("auto")
-
-    def test_custom_model(self, _mock_agent_on_path):
-        """Accept a custom model override."""
-        p = CursorProvider(model="claude-opus-4-8-thinking-high")
-        assert_that(p.model_name).is_equal_to("claude-opus-4-8-thinking-high")
-
-    def test_is_available(self, provider):
-        """Report available when agent binary is present."""
-        assert_that(provider.is_available()).is_true()
+def test_find_agent_returns_path_when_on_path():
+    """Return agent path when binary is on PATH."""
+    with patch("shutil.which", return_value="/usr/local/bin/agent"):
+        assert_that(_find_agent()).is_equal_to("/usr/local/bin/agent")
 
 
-class TestComplete:
-    """Tests for CursorProvider.complete()."""
+def test_find_agent_returns_none_when_missing():
+    """Return None when agent binary is missing."""
+    with patch("shutil.which", return_value=None):
+        assert_that(_find_agent()).is_none()
 
-    def test_success(self, provider):
-        """Parse successful CLI JSON into AIResponse."""
-        stdout = _cli_json(result="review output")
-        with patch("subprocess.run") as mock_run:
-            mock_run.return_value = subprocess.CompletedProcess(
-                args=[],
-                returncode=0,
-                stdout=stdout,
-                stderr="",
-            )
-            resp = provider.complete("Hello")
-        assert_that(resp.content).is_equal_to("review output")
-        assert_that(resp.provider).is_equal_to(AIProvider.CURSOR)
-        assert_that(resp.input_tokens).is_equal_to(100)
-        assert_that(resp.output_tokens).is_equal_to(50)
 
-    def test_system_prompt_prepended(self, provider):
-        """Prepend system prompt to user message via stdin."""
-        stdout = _cli_json(result="ok")
-        with patch("subprocess.run") as mock_run:
-            mock_run.return_value = subprocess.CompletedProcess(
-                args=[],
-                returncode=0,
-                stdout=stdout,
-                stderr="",
-            )
-            provider.complete("user msg", system="sys prompt")
-            call_kwargs = mock_run.call_args
-            input_text = call_kwargs.kwargs.get("input", "")
-            assert_that(input_text).contains("sys prompt")
-            assert_that(input_text).contains("user msg")
+# -- CursorProvider.__init__ -----------------------------------------------
 
-    def test_timeout_raises(self, provider):
-        """Raise AIProviderError when CLI times out."""
-        with (
-            patch(
-                "subprocess.run",
-                side_effect=subprocess.TimeoutExpired(cmd="agent", timeout=60),
-            ),
-            pytest.raises(AIProviderError, match="timed out"),
-        ):
+
+def test_cursor_provider_raises_when_agent_missing():
+    """Raise AINotAvailableError when agent CLI is missing."""
+    with (
+        patch(
+            "lintro.ai.providers.cursor._find_agent",
+            return_value=None,
+        ),
+        pytest.raises(AINotAvailableError, match="agent"),
+    ):
+        CursorProvider()
+
+
+def test_cursor_provider_default_model(provider):
+    """Use auto as the default model."""
+    assert_that(provider.model_name).is_equal_to("auto")
+
+
+def test_cursor_provider_custom_model(_mock_agent_on_path):
+    """Accept a custom model override."""
+    p = CursorProvider(model="claude-opus-4-8-thinking-high")
+    assert_that(p.model_name).is_equal_to("claude-opus-4-8-thinking-high")
+
+
+def test_cursor_provider_is_available(provider):
+    """Report available when agent binary is present."""
+    assert_that(provider.is_available()).is_true()
+
+
+# -- CursorProvider.complete() ---------------------------------------------
+
+
+def test_complete_parses_successful_cli_json(provider):
+    """Parse successful CLI JSON into AIResponse."""
+    stdout = _cli_json(result="review output")
+    with patch("subprocess.run") as mock_run:
+        mock_run.return_value = subprocess.CompletedProcess(
+            args=[],
+            returncode=0,
+            stdout=stdout,
+            stderr="",
+        )
+        resp = provider.complete("Hello")
+    assert_that(resp.content).is_equal_to("review output")
+    assert_that(resp.provider).is_equal_to(AIProvider.CURSOR)
+    assert_that(resp.input_tokens).is_equal_to(100)
+    assert_that(resp.output_tokens).is_equal_to(50)
+
+
+def test_complete_prepends_system_prompt_via_stdin(provider):
+    """Prepend system prompt to user message via stdin."""
+    stdout = _cli_json(result="ok")
+    with patch("subprocess.run") as mock_run:
+        mock_run.return_value = subprocess.CompletedProcess(
+            args=[],
+            returncode=0,
+            stdout=stdout,
+            stderr="",
+        )
+        provider.complete("user msg", system="sys prompt")
+        call_kwargs = mock_run.call_args
+        input_text = call_kwargs.kwargs.get("input", "")
+        assert_that(input_text).contains("sys prompt")
+        assert_that(input_text).contains("user msg")
+
+
+def test_complete_raises_on_subprocess_timeout(provider):
+    """Raise AIProviderError when CLI times out."""
+    with patch(
+        "subprocess.run",
+        side_effect=subprocess.TimeoutExpired(cmd="agent", timeout=60),
+    ):
+        with pytest.raises(AIProviderError, match="timed out"):
             provider.complete("Hello")
 
-    def test_auth_error(self, provider):
-        """Raise AIAuthenticationError on auth failure stderr."""
-        with patch("subprocess.run") as mock_run:
-            mock_run.return_value = subprocess.CompletedProcess(
-                args=[],
-                returncode=1,
-                stdout="",
-                stderr="Authentication required. Run 'agent login' first.",
-            )
-            with pytest.raises(AIAuthenticationError, match="login"):
-                provider.complete("Hello")
 
-    def test_nonzero_exit(self, provider):
-        """Raise AIProviderError on non-zero CLI exit code."""
-        with patch("subprocess.run") as mock_run:
-            mock_run.return_value = subprocess.CompletedProcess(
-                args=[],
-                returncode=2,
-                stdout="",
-                stderr="something broke",
-            )
-            with pytest.raises(AIProviderError, match="exited with code 2"):
-                provider.complete("Hello")
-
-    def test_invalid_json_stdout(self, provider):
-        """Raise AIProviderError when stdout is not valid JSON."""
-        with patch("subprocess.run") as mock_run:
-            mock_run.return_value = subprocess.CompletedProcess(
-                args=[],
-                returncode=0,
-                stdout="not json at all",
-                stderr="",
-            )
-            with pytest.raises(AIProviderError, match="invalid JSON"):
-                provider.complete("Hello")
-
-    def test_cli_error_in_response(self, provider):
-        """Raise AIProviderError when JSON reports is_error."""
-        stdout = _cli_json(
-            result="something failed",
-            is_error=True,
-            subtype="error",
+def test_complete_raises_auth_error(provider):
+    """Raise AIAuthenticationError on auth failure stderr."""
+    with patch("subprocess.run") as mock_run:
+        mock_run.return_value = subprocess.CompletedProcess(
+            args=[],
+            returncode=1,
+            stdout="",
+            stderr="Authentication required. Run 'agent login' first.",
         )
-        with patch("subprocess.run") as mock_run:
-            mock_run.return_value = subprocess.CompletedProcess(
-                args=[],
-                returncode=0,
-                stdout=stdout,
-                stderr="",
-            )
-            with pytest.raises(AIProviderError, match="reported error"):
-                provider.complete("Hello")
-
-    def test_max_tokens_appended_to_prompt(self, provider):
-        """Append token budget constraint to the CLI stdin prompt."""
-        stdout = _cli_json(result="ok")
-        with patch("subprocess.run") as mock_run:
-            mock_run.return_value = subprocess.CompletedProcess(
-                args=[],
-                returncode=0,
-                stdout=stdout,
-                stderr="",
-            )
-            provider.complete("Hello", max_tokens=512)
-            input_text = mock_run.call_args.kwargs.get("input", "")
-            assert_that(input_text).contains("Respond in at most 512 tokens")
-
-    def test_timeout_passed_to_subprocess(self, provider):
-        """Pass caller timeout directly to subprocess.run."""
-        stdout = _cli_json(result="ok")
-        with patch("subprocess.run") as mock_run:
-            mock_run.return_value = subprocess.CompletedProcess(
-                args=[],
-                returncode=0,
-                stdout=stdout,
-                stderr="",
-            )
-            provider.complete("Hello", timeout=45.0)
-            assert_that(mock_run.call_args.kwargs.get("timeout")).is_equal_to(45.0)
-
-    def test_cost_estimate_zero(self, provider):
-        """Cursor subscription — per-token cost is always zero."""
-        stdout = _cli_json(result="ok", input_tokens=5000, output_tokens=2000)
-        with patch("subprocess.run") as mock_run:
-            mock_run.return_value = subprocess.CompletedProcess(
-                args=[],
-                returncode=0,
-                stdout=stdout,
-                stderr="",
-            )
-            resp = provider.complete("Hello")
-        assert_that(resp.cost_estimate).is_equal_to(0.0)
+        with pytest.raises(AIAuthenticationError, match="login"):
+            provider.complete("Hello")
 
 
-class TestExtractJsonObject:
-    """Tests for the JSON extraction helper."""
+def test_complete_raises_on_nonzero_exit(provider):
+    """Raise AIProviderError on non-zero CLI exit code."""
+    with patch("subprocess.run") as mock_run:
+        mock_run.return_value = subprocess.CompletedProcess(
+            args=[],
+            returncode=2,
+            stdout="",
+            stderr="something broke",
+        )
+        with pytest.raises(AIProviderError, match="exited with code 2"):
+            provider.complete("Hello")
 
-    def test_clean_json(self):
-        """Return clean JSON unchanged."""
-        obj = '{"a": 1}'
-        assert_that(CursorProvider._extract_json_object(obj)).is_equal_to(obj)
 
-    def test_prose_before_json(self):
-        """Extract JSON object after leading prose."""
-        text = 'Some preamble text.\n{"summary": "ok", "findings": []}'
-        assert_that(
-            CursorProvider._extract_json_object(text),
-        ).is_equal_to('{"summary": "ok", "findings": []}')
+def test_complete_raises_on_invalid_json_stdout(provider):
+    """Raise AIProviderError when stdout is not valid JSON."""
+    with patch("subprocess.run") as mock_run:
+        mock_run.return_value = subprocess.CompletedProcess(
+            args=[],
+            returncode=0,
+            stdout="not json at all",
+            stderr="",
+        )
+        with pytest.raises(AIProviderError, match="invalid JSON"):
+            provider.complete("Hello")
 
-    def test_nested_braces(self):
-        """Handle nested JSON objects correctly."""
-        text = 'Preamble\n{"a": {"b": 1}, "c": 2}'
-        assert_that(
-            CursorProvider._extract_json_object(text),
-        ).is_equal_to('{"a": {"b": 1}, "c": 2}')
 
-    def test_braces_in_strings(self):
-        """Ignore braces inside JSON string values."""
-        text = '{"key": "value with { brace }"}'
-        assert_that(
-            CursorProvider._extract_json_object(text),
-        ).is_equal_to(text)
+def test_complete_raises_on_cli_error_in_response(provider):
+    """Raise AIProviderError when JSON reports is_error."""
+    stdout = _cli_json(
+        result="something failed",
+        is_error=True,
+        subtype="error",
+    )
+    with patch("subprocess.run") as mock_run:
+        mock_run.return_value = subprocess.CompletedProcess(
+            args=[],
+            returncode=0,
+            stdout=stdout,
+            stderr="",
+        )
+        with pytest.raises(AIProviderError, match="reported error"):
+            provider.complete("Hello")
 
-    def test_no_json(self):
-        """Return original text when no JSON is present."""
-        text = "no json here"
-        assert_that(
-            CursorProvider._extract_json_object(text),
-        ).is_equal_to(text)
 
-    def test_empty_string(self):
-        """Return empty string unchanged."""
-        assert_that(CursorProvider._extract_json_object("")).is_equal_to("")
+def test_complete_appends_max_tokens_to_prompt(provider):
+    """Append token budget constraint to the CLI stdin prompt."""
+    stdout = _cli_json(result="ok")
+    with patch("subprocess.run") as mock_run:
+        mock_run.return_value = subprocess.CompletedProcess(
+            args=[],
+            returncode=0,
+            stdout=stdout,
+            stderr="",
+        )
+        provider.complete("Hello", max_tokens=512)
+        input_text = mock_run.call_args.kwargs.get("input", "")
+        assert_that(input_text).contains("Respond in at most 512 tokens")
+
+
+def test_complete_passes_timeout_to_subprocess(provider):
+    """Pass caller timeout directly to subprocess.run."""
+    stdout = _cli_json(result="ok")
+    with patch("subprocess.run") as mock_run:
+        mock_run.return_value = subprocess.CompletedProcess(
+            args=[],
+            returncode=0,
+            stdout=stdout,
+            stderr="",
+        )
+        provider.complete("Hello", timeout=45.0)
+        assert_that(mock_run.call_args.kwargs.get("timeout")).is_equal_to(45.0)
+
+
+def test_complete_cost_estimate_is_zero(provider):
+    """Cursor subscription — per-token cost is always zero."""
+    stdout = _cli_json(result="ok", input_tokens=5000, output_tokens=2000)
+    with patch("subprocess.run") as mock_run:
+        mock_run.return_value = subprocess.CompletedProcess(
+            args=[],
+            returncode=0,
+            stdout=stdout,
+            stderr="",
+        )
+        resp = provider.complete("Hello")
+    assert_that(resp.cost_estimate).is_equal_to(0.0)
+
+
+# -- CursorProvider._extract_json_object() ---------------------------------
+
+
+def test_extract_json_object_returns_clean_json_unchanged():
+    """Return clean JSON unchanged."""
+    obj = '{"a": 1}'
+    assert_that(CursorProvider._extract_json_object(obj)).is_equal_to(obj)
+
+
+def test_extract_json_object_strips_leading_prose():
+    """Extract JSON object after leading prose."""
+    text = 'Some preamble text.\n{"summary": "ok", "findings": []}'
+    assert_that(
+        CursorProvider._extract_json_object(text),
+    ).is_equal_to('{"summary": "ok", "findings": []}')
+
+
+def test_extract_json_object_handles_nested_braces():
+    """Handle nested JSON objects correctly."""
+    text = 'Preamble\n{"a": {"b": 1}, "c": 2}'
+    assert_that(
+        CursorProvider._extract_json_object(text),
+    ).is_equal_to('{"a": {"b": 1}, "c": 2}')
+
+
+def test_extract_json_object_ignores_braces_in_strings():
+    """Ignore braces inside JSON string values."""
+    text = '{"key": "value with { brace }"}'
+    assert_that(
+        CursorProvider._extract_json_object(text),
+    ).is_equal_to(text)
+
+
+def test_extract_json_object_returns_original_when_no_json():
+    """Return original text when no JSON is present."""
+    text = "no json here"
+    assert_that(
+        CursorProvider._extract_json_object(text),
+    ).is_equal_to(text)
+
+
+def test_extract_json_object_returns_empty_string_unchanged():
+    """Return empty string unchanged."""
+    assert_that(CursorProvider._extract_json_object("")).is_equal_to("")
