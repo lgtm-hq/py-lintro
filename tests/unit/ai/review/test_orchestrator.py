@@ -299,6 +299,7 @@ def test_run_review_parallelizes_multiple_chunks() -> None:
     lock = threading.Lock()
     active = 0
     max_active = 0
+    response = provider.complete.return_value
 
     def _track_concurrency(*_args, **_kwargs):
         nonlocal active, max_active
@@ -308,17 +309,13 @@ def test_run_review_parallelizes_multiple_chunks() -> None:
         time.sleep(0.05)
         with lock:
             active -= 1
-        return provider.complete("prompt")
+        return response
 
-    with (
-        patch(
-            "lintro.ai.review.orchestrator.resolve_review_chunks",
-            return_value=chunks,
-        ),
-        patch(
-            "lintro.ai.review.orchestrator.complete_with_fallback",
-            side_effect=_track_concurrency,
-        ),
+    provider.complete.side_effect = _track_concurrency
+
+    with patch(
+        "lintro.ai.review.orchestrator.resolve_review_chunks",
+        return_value=chunks,
     ):
         run_review(
             context,

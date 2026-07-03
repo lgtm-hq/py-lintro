@@ -76,6 +76,7 @@ def build_review_user_prompt(
         checklist=checklist_text,
         diff=diff if diff is not None else context.unified_diff,
         lint_results_section=format_lint_results_section(digest=lint_digest),
+        strictness_section="",
         output_schema=REVIEW_OUTPUT_SCHEMA,
     )
     return prompt, prompt_mapping

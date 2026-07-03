@@ -159,13 +159,9 @@ Answer every item. Any **yes** → add a finding. Any **no** → record in `chec
 
 ---
 
-### Diff to review
-
-Run this command in the repository root and review the output:
-
-```
-git diff {base_ref}...{head_ref} -- {git_diff_paths}
-```
+<pull_request_diff>
+{diff}
+</pull_request_diff>
 
 {lint_results_section}
 

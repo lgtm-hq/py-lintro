@@ -5,7 +5,6 @@ from __future__ import annotations
 import json
 import os
 import re
-import shlex
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from contextlib import suppress
 from dataclasses import dataclass, replace
@@ -218,7 +217,8 @@ def _review_all_chunks(
         return partials
 
     partials: list[_ChunkReviewPartial | None] = [None] * len(chunks)
-    max_workers = min(len(chunks), max_parallel_calls)
+    effective_parallel = 1 if budget.max_cost_usd is not None else max_parallel_calls
+    max_workers = min(len(chunks), effective_parallel)
     first_error: ReviewExecutionError | None = None
 
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
@@ -598,7 +598,6 @@ def build_git_native_review_prompt(
             1 if extra_checklist.strip() else 0
         )
 
-    git_diff_paths = " ".join(shlex.quote(path) for path in chunk.files)
     user_prompt = REVIEW_GIT_NATIVE_USER_PROMPT_TEMPLATE.format(
         pr_title=pr_title,
         base_ref=context.base_ref,
@@ -611,7 +610,7 @@ def build_git_native_review_prompt(
         interaction_paths=interaction_paths,
         checklist_count=checklist_count,
         checklist=combined_checklist,
-        git_diff_paths=git_diff_paths,
+        diff=chunk.diff,
         lint_results_section=format_lint_results_section(digest=lint_results),
         strictness_section=strictness_section,
         output_schema=REVIEW_OUTPUT_SCHEMA,
