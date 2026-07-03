@@ -90,7 +90,8 @@ def test_cursor_provider_default_model(provider):
     assert_that(provider.model_name).is_equal_to("auto")
 
 
-def test_cursor_provider_custom_model(_mock_agent_on_path):
+@pytest.mark.usefixtures("_mock_agent_on_path")
+def test_cursor_provider_custom_model():
     """Accept a custom model override."""
     p = CursorProvider(model="claude-opus-4-8-thinking-high")
     assert_that(p.model_name).is_equal_to("claude-opus-4-8-thinking-high")
@@ -140,12 +141,14 @@ def test_complete_prepends_system_prompt_via_stdin(provider):
 
 def test_complete_raises_on_subprocess_timeout(provider):
     """Raise AIProviderError when CLI times out."""
-    with patch(
-        "subprocess.run",
-        side_effect=subprocess.TimeoutExpired(cmd="agent", timeout=60),
+    with (
+        patch(
+            "subprocess.run",
+            side_effect=subprocess.TimeoutExpired(cmd="agent", timeout=60),
+        ),
+        pytest.raises(AIProviderError, match="timed out"),
     ):
-        with pytest.raises(AIProviderError, match="timed out"):
-            provider.complete("Hello")
+        provider.complete("Hello")
 
 
 def test_complete_raises_auth_error(provider):
