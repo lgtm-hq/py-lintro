@@ -240,13 +240,20 @@ class CursorProvider(BaseAIProvider):
                 f"Full response: {json.dumps(data)[:1000]}",
             )
 
-        # The agent CLI may prefix JSON with prose. Only extract when the
-        # result is not already valid JSON, so plain-text answers with
-        # incidental braces are not silently truncated.
+        # The agent CLI may prefix JSON with prose. Only substitute extracted
+        # content when it parses as JSON; otherwise keep plain-text answers
+        # with incidental braces intact.
         try:
             json.loads(content)
         except json.JSONDecodeError:
-            content = self._extract_json_object(content)
+            extracted = self._extract_json_object(content)
+            if extracted != content:
+                try:
+                    json.loads(extracted)
+                except json.JSONDecodeError:
+                    pass
+                else:
+                    content = extracted
 
         usage = data.get("usage", {})
         # agent --output-format json does not expose token counts; default to 0.
