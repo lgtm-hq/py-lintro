@@ -292,3 +292,18 @@ def test_extract_json_object_returns_original_when_no_json():
 def test_extract_json_object_returns_empty_string_unchanged():
     """Return empty string unchanged."""
     assert_that(CursorProvider._extract_json_object("")).is_equal_to("")
+
+
+def test_complete_preserves_plain_text_with_braces(provider):
+    """Do not truncate plain-text answers that contain balanced braces."""
+    result_text = "Use destructuring like { userId } in your handler."
+    stdout = _cli_json(result=result_text)
+    with patch("subprocess.run") as mock_run:
+        mock_run.return_value = subprocess.CompletedProcess(
+            args=[],
+            returncode=0,
+            stdout=stdout,
+            stderr="",
+        )
+        resp = provider.complete("Hello")
+    assert_that(resp.content).is_equal_to(result_text)
