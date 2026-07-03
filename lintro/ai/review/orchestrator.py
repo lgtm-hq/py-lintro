@@ -179,7 +179,7 @@ def run_review(
             tracker.on_chunk_done(chunk_index=chunk_index)
 
         merged = merge_review_results(partials=partials)
-        total_findings = len(merged.findings) if hasattr(merged, "findings") else 0
+        total_findings = len(merged.findings)
         completed = True
     finally:
         if completed:

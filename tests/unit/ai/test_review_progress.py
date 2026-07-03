@@ -91,8 +91,8 @@ def test_rich_review_progress_abort_stops_without_completion_message() -> None:
     assert_that(output).does_not_contain("Review complete")
 
 
-def test_rich_review_progress_single_file_shows_filename() -> None:
-    """Single-file chunks render the plural findings label."""
+def test_rich_review_progress_zero_findings_plural_label() -> None:
+    """Completion summary uses the plural findings label for zero findings."""
     buf = StringIO()
     console = Console(file=buf, force_terminal=True, width=120)
     progress = RichReviewProgress(console=console)

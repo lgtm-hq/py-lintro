@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 from unittest.mock import MagicMock, patch
 
+import pytest
 from assertpy import assert_that
 
 from lintro.ai.config import AIConfig
@@ -18,6 +19,7 @@ from lintro.ai.review.orchestrator import (
     run_review,
     strip_json_fences,
 )
+from lintro.ai.review.progress import ReviewProgressCallback
 
 
 def _sample_response_json(*, include_finding: bool = True) -> str:
@@ -235,25 +237,25 @@ def test_run_review_aborts_progress_when_chunk_review_fails() -> None:
         pr_metadata=None,
     )
     provider = _mock_provider(content=_sample_response_json())
-    progress = MagicMock()
+    progress = MagicMock(spec=ReviewProgressCallback)
 
-    with patch(
-        "lintro.ai.review.orchestrator.complete_with_fallback",
-        side_effect=RuntimeError("provider failed"),
+    with (
+        patch(
+            "lintro.ai.review.orchestrator.complete_with_fallback",
+            side_effect=RuntimeError("provider failed"),
+        ),
+        pytest.raises(RuntimeError, match="provider failed"),
     ):
-        try:
-            run_review(
-                context,
-                provider=provider,
-                ai_config=AIConfig(enabled=True),
-                depth=1,
-                checklist_items=[],
-                checklist_text="1. [logic-bug] Example?",
-                classifications=[],
-                progress=progress,
-            )
-        except RuntimeError:
-            pass
+        run_review(
+            context,
+            provider=provider,
+            ai_config=AIConfig(enabled=True),
+            depth=1,
+            checklist_items=[],
+            checklist_text="1. [logic-bug] Example?",
+            classifications=[],
+            progress=progress,
+        )
 
     progress.on_start.assert_called_once()
     progress.on_abort.assert_called_once()
