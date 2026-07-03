@@ -216,3 +216,45 @@ def test_run_review_depth2_calls_provider_twice() -> None:
     assert_that(result.metadata.token_usage["prompt"]).is_equal_to(150)
     assert_that(result.metadata.token_usage["completion"]).is_equal_to(70)
     assert_that(result.metadata.cost_estimate_usd).is_equal_to(0.015)
+
+
+def test_run_review_aborts_progress_when_chunk_review_fails() -> None:
+    """Progress tracker receives on_abort when a chunk review raises."""
+    context = ReviewContext(
+        base_ref="main",
+        head_ref="feature",
+        changed_files=[
+            ChangedFile(
+                path="src/main.py",
+                status="modified",
+                additions=1,
+                deletions=0,
+            ),
+        ],
+        unified_diff="diff --git a/src/main.py b/src/main.py\n+change",
+        pr_metadata=None,
+    )
+    provider = _mock_provider(content=_sample_response_json())
+    progress = MagicMock()
+
+    with patch(
+        "lintro.ai.review.orchestrator.complete_with_fallback",
+        side_effect=RuntimeError("provider failed"),
+    ):
+        try:
+            run_review(
+                context,
+                provider=provider,
+                ai_config=AIConfig(enabled=True),
+                depth=1,
+                checklist_items=[],
+                checklist_text="1. [logic-bug] Example?",
+                classifications=[],
+                progress=progress,
+            )
+        except RuntimeError:
+            pass
+
+    progress.on_start.assert_called_once()
+    progress.on_abort.assert_called_once()
+    progress.on_complete.assert_not_called()

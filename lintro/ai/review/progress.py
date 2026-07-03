@@ -73,6 +73,10 @@ class ReviewProgressCallback(Protocol):
         """
         ...
 
+    def on_abort(self) -> None:
+        """Called when the review stops before completing successfully."""
+        ...
+
 
 class NullReviewProgress:
     """No-op progress tracker (silent)."""
@@ -91,6 +95,9 @@ class NullReviewProgress:
 
     def on_complete(self, *, total_findings: int) -> None:
         """Ignore review completion notification."""
+
+    def on_abort(self) -> None:
+        """Ignore review abort notification."""
 
 
 class RichReviewProgress:
@@ -159,7 +166,7 @@ class RichReviewProgress:
             description=(f"Chunk {chunk_index + 1}/{self._total_chunks}: {step}"),
         )
 
-    def on_chunk_done(self, *, chunk_index: int) -> None:
+    def on_chunk_done(self, *, chunk_index: int) -> None:  # noqa: ARG002
         """Advance the bar after a chunk completes."""
         if self._progress is None or self._task_id is None:
             return
@@ -167,13 +174,21 @@ class RichReviewProgress:
 
     def on_complete(self, *, total_findings: int) -> None:
         """Stop the bar and print the completion summary."""
+        self._stop_progress()
+        noun = "finding" if total_findings == 1 else "findings"
+        self._console.print(
+            f"[bold green]✓[/bold green] Review complete — {total_findings} {noun}",
+        )
+
+    def on_abort(self) -> None:
+        """Stop the bar without printing a completion summary."""
+        self._stop_progress()
+
+    def _stop_progress(self) -> None:
+        """Stop the live progress display if it is running."""
         if self._progress is not None:
             self._progress.stop()
             self._progress = None
-        noun = "finding" if total_findings == 1 else "findings"
-        self._console.print(
-            f"[bold green]✓[/bold green] Review complete — " f"{total_findings} {noun}",
-        )
 
 
 def _passes_per_chunk(depth: int) -> int:

@@ -151,34 +151,41 @@ def run_review(
     )
 
     tracker.on_start(total_chunks=len(chunks), depth=depth)
+    total_findings = 0
+    completed = False
+    try:
+        for chunk_index, chunk in enumerate(chunks):
+            budget.check()
+            tracker.on_chunk_start(
+                chunk_index=chunk_index,
+                files=list(chunk.files),
+            )
+            partial, next_generated_checklist_id = _review_chunk(
+                chunk=chunk,
+                context=context,
+                provider=provider,
+                ai_config=ai_config,
+                depth=depth,
+                checklist_text=checklist_text,
+                checklist_count=len(checklist_items),
+                next_generated_checklist_id=next_generated_checklist_id,
+                classifications=classifications,
+                lint_results=lint_results,
+                budget=budget,
+                progress=tracker,
+                chunk_index=chunk_index,
+            )
+            partials.append(partial)
+            tracker.on_chunk_done(chunk_index=chunk_index)
 
-    for chunk_index, chunk in enumerate(chunks):
-        budget.check()
-        tracker.on_chunk_start(
-            chunk_index=chunk_index,
-            files=list(chunk.files),
-        )
-        partial, next_generated_checklist_id = _review_chunk(
-            chunk=chunk,
-            context=context,
-            provider=provider,
-            ai_config=ai_config,
-            depth=depth,
-            checklist_text=checklist_text,
-            checklist_count=len(checklist_items),
-            next_generated_checklist_id=next_generated_checklist_id,
-            classifications=classifications,
-            lint_results=lint_results,
-            budget=budget,
-            progress=tracker,
-            chunk_index=chunk_index,
-        )
-        partials.append(partial)
-        tracker.on_chunk_done(chunk_index=chunk_index)
-
-    merged = merge_review_results(partials=partials)
-    total_findings = len(merged.findings) if hasattr(merged, "findings") else 0
-    tracker.on_complete(total_findings=total_findings)
+        merged = merge_review_results(partials=partials)
+        total_findings = len(merged.findings) if hasattr(merged, "findings") else 0
+        completed = True
+    finally:
+        if completed:
+            tracker.on_complete(total_findings=total_findings)
+        else:
+            tracker.on_abort()
     total_input = sum(partial.input_tokens for partial in partials)
     total_output = sum(partial.output_tokens for partial in partials)
     total_cost = sum(partial.cost_estimate for partial in partials)
