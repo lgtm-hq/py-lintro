@@ -211,6 +211,7 @@ def get_tools_to_run(
     action: str | Action,
     *,
     ignore_conflicts: bool = False,
+    lintro_config: LintroConfig | None = None,
 ) -> ToolsToRunResult:
     """Get the list of tools to run based on the tools string and action.
 
@@ -218,6 +219,7 @@ def get_tools_to_run(
         tools: Comma-separated tool names, "all", or None.
         action: "check", "fmt", or "test".
         ignore_conflicts: If True, skip conflict checking between tools.
+        lintro_config: Optional config override; uses global config when omitted.
 
     Returns:
         ToolsToRunResult with tools to run and skipped tools with reasons.
@@ -240,16 +242,16 @@ def get_tools_to_run(
         if not tool_manager.is_tool_registered("pytest"):
             raise ValueError("pytest tool is not available")
         # Respect enabled/disabled config for pytest
-        lintro_config = get_config()
-        if not lintro_config.is_tool_enabled("pytest"):
-            reason = _get_disabled_reason(lintro_config, "pytest")
+        config = lintro_config or get_config()
+        if not config.is_tool_enabled("pytest"):
+            reason = _get_disabled_reason(config, "pytest")
             return ToolsToRunResult(
                 skipped=[SkippedTool(name="pytest", reason=reason)],
             )
         return ToolsToRunResult(to_run=["pytest"])
 
     # Get lintro config for enabled/disabled tool checking
-    lintro_config = get_config()
+    config = lintro_config or get_config()
 
     if (
         tools is None
@@ -267,8 +269,8 @@ def get_tools_to_run(
         for name in available_tools:
             if name.lower() == "pytest":
                 continue
-            if not lintro_config.is_tool_enabled(name):
-                reason = _get_disabled_reason(lintro_config, name)
+            if not config.is_tool_enabled(name):
+                reason = _get_disabled_reason(config, name)
                 skipped.append(SkippedTool(name=name, reason=reason))
             else:
                 to_run.append(name)
@@ -302,8 +304,8 @@ def get_tools_to_run(
                 f"Unknown tool '{name}'. Available tools: {available_names}",
             )
         # Track disabled tools with reason
-        if not lintro_config.is_tool_enabled(name):
-            reason = _get_disabled_reason(lintro_config, name)
+        if not config.is_tool_enabled(name):
+            reason = _get_disabled_reason(config, name)
             skipped.append(SkippedTool(name=name, reason=reason))
             continue
         # Verify the tool supports the requested action
