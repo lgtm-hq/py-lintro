@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import re
+from contextlib import suppress
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
@@ -182,10 +183,11 @@ def run_review(
         total_findings = len(merged.findings)
         completed = True
     finally:
-        if completed:
-            tracker.on_complete(total_findings=total_findings)
-        else:
-            tracker.on_abort()
+        with suppress(Exception):
+            if completed:
+                tracker.on_complete(total_findings=total_findings)
+            else:
+                tracker.on_abort()
     total_input = sum(partial.input_tokens for partial in partials)
     total_output = sum(partial.output_tokens for partial in partials)
     total_cost = sum(partial.cost_estimate for partial in partials)
