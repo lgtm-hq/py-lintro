@@ -119,6 +119,7 @@ class AnthropicProvider(BaseAIProvider):
         timeout: float = DEFAULT_TIMEOUT,
         repo_root: str | None = None,
         use_one_shot: bool = False,
+        model: str | None = None,
     ) -> AIResponse:
         """Generate a completion using Claude.
 
@@ -129,19 +130,21 @@ class AnthropicProvider(BaseAIProvider):
             timeout: Request timeout in seconds.
             repo_root: Unused; accepted for provider API parity.
             use_one_shot: Unused; accepted for provider API parity.
+            model: Optional per-call model override.
 
         Returns:
             AIResponse: The model's response with usage metadata.
         """
         del repo_root, use_one_shot
         client = self._get_client()
+        effective_model = model or self._model
         # Per-call cap: the lower of the caller's request and the
         # provider-level cap set at init time.
         effective_max = min(max_tokens, self._max_tokens)
 
         with self._map_errors():
             kwargs: dict[str, Any] = {
-                "model": self._model,
+                "model": effective_model,
                 "max_tokens": effective_max,
                 "messages": [{"role": "user", "content": prompt}],
                 "timeout": timeout,
@@ -158,11 +161,11 @@ class AnthropicProvider(BaseAIProvider):
 
             input_tokens = response.usage.input_tokens
             output_tokens = response.usage.output_tokens
-            cost = estimate_cost(self._model, input_tokens, output_tokens)
+            cost = estimate_cost(effective_model, input_tokens, output_tokens)
 
             return AIResponse(
                 content=content,
-                model=self._model,
+                model=effective_model,
                 input_tokens=input_tokens,
                 output_tokens=output_tokens,
                 cost_estimate=cost,
@@ -176,6 +179,7 @@ class AnthropicProvider(BaseAIProvider):
         system: str | None = None,
         max_tokens: int = DEFAULT_PER_CALL_MAX_TOKENS,
         timeout: float = DEFAULT_TIMEOUT,
+        model: str | None = None,
     ) -> AIStreamResult:
         """Stream a completion from the Anthropic API token-by-token.
 
@@ -184,15 +188,17 @@ class AnthropicProvider(BaseAIProvider):
             system: Optional system prompt.
             max_tokens: Maximum tokens to generate.
             timeout: Request timeout in seconds.
+            model: Optional per-call model override.
 
         Returns:
             An AIStreamResult wrapping the token stream.
         """
         client = self._get_client()
         effective_max = min(max_tokens, self._max_tokens)
+        effective_model = model or self._model
 
         kwargs: dict[str, Any] = {
-            "model": self._model,
+            "model": effective_model,
             "max_tokens": effective_max,
             "messages": [{"role": "user", "content": prompt}],
             "timeout": timeout,
@@ -201,7 +207,7 @@ class AnthropicProvider(BaseAIProvider):
             kwargs["system"] = system
 
         logger.debug(
-            f"Anthropic stream request: model={self._model}, "
+            f"Anthropic stream request: model={effective_model}, "
             f"max_tokens={effective_max}",
         )
 
@@ -219,11 +225,11 @@ class AnthropicProvider(BaseAIProvider):
 
                 input_tokens = final_message.usage.input_tokens
                 output_tokens = final_message.usage.output_tokens
-                cost = estimate_cost(self._model, input_tokens, output_tokens)
+                cost = estimate_cost(effective_model, input_tokens, output_tokens)
                 final_response.append(
                     AIResponse(
                         content="",
-                        model=self._model,
+                        model=effective_model,
                         input_tokens=input_tokens,
                         output_tokens=output_tokens,
                         cost_estimate=cost,

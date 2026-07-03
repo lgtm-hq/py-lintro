@@ -61,6 +61,10 @@ class ReviewExecutionError(AIError):
     completed_chunks: int = 0
     cause_message: str = ""
 
+    def __post_init__(self) -> None:
+        """Initialize the base exception args from the message field."""
+        super().__init__(self.message)
+
     def __str__(self) -> str:
         """Return the human-readable failure message."""
         return self.message

@@ -119,6 +119,7 @@ class OpenAIProvider(BaseAIProvider):
         timeout: float = DEFAULT_TIMEOUT,
         repo_root: str | None = None,
         use_one_shot: bool = False,
+        model: str | None = None,
     ) -> AIResponse:
         """Generate a completion using GPT.
 
@@ -129,12 +130,14 @@ class OpenAIProvider(BaseAIProvider):
             timeout: Request timeout in seconds.
             repo_root: Unused; accepted for provider API parity.
             use_one_shot: Unused; accepted for provider API parity.
+            model: Optional per-call model override.
 
         Returns:
             AIResponse: The model's response with usage metadata.
         """
         del repo_root, use_one_shot
         client = self._get_client()
+        effective_model = model or self._model
         # Per-call cap: the lower of the caller's request and the
         # provider-level cap set at init time.
         effective_max = min(max_tokens, self._max_tokens)
@@ -146,7 +149,7 @@ class OpenAIProvider(BaseAIProvider):
             messages.append({"role": "user", "content": prompt})
 
             response = client.chat.completions.create(
-                model=self._model,
+                model=effective_model,
                 messages=messages,
                 max_tokens=effective_max,
                 timeout=timeout,
@@ -160,11 +163,11 @@ class OpenAIProvider(BaseAIProvider):
                 input_tokens = response.usage.prompt_tokens
                 output_tokens = response.usage.completion_tokens
 
-            cost = estimate_cost(self._model, input_tokens, output_tokens)
+            cost = estimate_cost(effective_model, input_tokens, output_tokens)
 
             return AIResponse(
                 content=content,
-                model=self._model,
+                model=effective_model,
                 input_tokens=input_tokens,
                 output_tokens=output_tokens,
                 cost_estimate=cost,
@@ -178,6 +181,7 @@ class OpenAIProvider(BaseAIProvider):
         system: str | None = None,
         max_tokens: int = DEFAULT_PER_CALL_MAX_TOKENS,
         timeout: float = DEFAULT_TIMEOUT,
+        model: str | None = None,
     ) -> AIStreamResult:
         """Stream a completion from the OpenAI API token-by-token.
 
@@ -186,12 +190,14 @@ class OpenAIProvider(BaseAIProvider):
             system: Optional system prompt.
             max_tokens: Maximum tokens to generate.
             timeout: Request timeout in seconds.
+            model: Optional per-call model override.
 
         Returns:
             An AIStreamResult wrapping the token stream.
         """
         client = self._get_client()
         effective_max = min(max_tokens, self._max_tokens)
+        effective_model = model or self._model
 
         messages: list[dict[str, str]] = []
         if system:
@@ -199,7 +205,7 @@ class OpenAIProvider(BaseAIProvider):
         messages.append({"role": "user", "content": prompt})
 
         logger.debug(
-            f"OpenAI stream request: model={self._model}, "
+            f"OpenAI stream request: model={effective_model}, "
             f"max_tokens={effective_max}",
         )
 
@@ -209,7 +215,7 @@ class OpenAIProvider(BaseAIProvider):
         def _generate() -> Iterator[str]:
             with self._map_errors():
                 stream = client.chat.completions.create(
-                    model=self._model,
+                    model=effective_model,
                     messages=messages,
                     max_tokens=effective_max,
                     timeout=timeout,
@@ -229,11 +235,11 @@ class OpenAIProvider(BaseAIProvider):
                         input_tokens = chunk.usage.prompt_tokens
                         output_tokens = chunk.usage.completion_tokens
 
-                cost = estimate_cost(self._model, input_tokens, output_tokens)
+                cost = estimate_cost(effective_model, input_tokens, output_tokens)
                 final_response.append(
                     AIResponse(
                         content="".join(accumulated_text),
-                        model=self._model,
+                        model=effective_model,
                         input_tokens=input_tokens,
                         output_tokens=output_tokens,
                         cost_estimate=cost,

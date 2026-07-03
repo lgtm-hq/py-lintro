@@ -123,6 +123,7 @@ class CursorProvider(BaseAIProvider):
         timeout: float = DEFAULT_TIMEOUT,
         repo_root: str | None = None,
         use_one_shot: bool = False,
+        model: str | None = None,
     ) -> AIResponse:
         """Run a completion via ``agent --print``.
 
@@ -133,6 +134,7 @@ class CursorProvider(BaseAIProvider):
             timeout: Subprocess timeout in seconds (minimum 300 for agent).
             repo_root: Git repository root for ``--workspace``.
             use_one_shot: When True, do not resume an existing CLI session.
+            model: Optional per-call model override.
 
         Returns:
             Parsed model response with usage metadata.
@@ -143,6 +145,7 @@ class CursorProvider(BaseAIProvider):
             AIAuthenticationError: If the CLI reports missing authentication.
             AINotAvailableError: If the ``agent`` binary is not on PATH.
         """
+        effective_model = model or self._model
         effective_max = min(max_tokens, self._max_tokens)
         combined_prompt = prompt
         if system:
@@ -167,7 +170,7 @@ class CursorProvider(BaseAIProvider):
             "--mode",
             "ask",
             "--model",
-            self._model,
+            effective_model,
             "--workspace",
             effective_root,
         ]
@@ -175,7 +178,7 @@ class CursorProvider(BaseAIProvider):
             cmd.extend(["--resume", self._session_id])
 
         logger.debug(
-            f"Cursor CLI request: model={self._model}, "
+            f"Cursor CLI request: model={effective_model}, "
             f"max_tokens={effective_max}, "
             f"workspace={effective_root}, resume={resume_session}, "
             f"prompt_len={len(combined_prompt)}",

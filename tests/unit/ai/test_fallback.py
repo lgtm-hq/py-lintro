@@ -138,16 +138,16 @@ def test_tries_multiple_fallbacks_in_order() -> None:
 
 
 def test_model_is_swapped_for_each_fallback() -> None:
-    """Verify the provider's model_name is set to each fallback in turn."""
+    """Verify each fallback attempt passes the expected model override."""
     provider = _make_provider("primary")
     models_seen: list[str] = []
 
     def capture_model(*args, **kwargs):
-        """Record the current model and fail until the third call."""
-        models_seen.append(provider.model_name)
+        """Record the per-call model and fail until the third call."""
+        models_seen.append(kwargs["model"])
         if len(models_seen) < 3:
             raise AIProviderError("fail")
-        return _ok_response(provider.model_name)
+        return _ok_response(kwargs["model"])
 
     provider.complete.side_effect = capture_model
 
@@ -158,7 +158,7 @@ def test_model_is_swapped_for_each_fallback() -> None:
     )
 
     assert_that(models_seen).is_equal_to(["primary", "fb-1", "fb-2"])
-    assert_that(provider.model_name).is_equal_to("primary")  # restored
+    assert_that(provider.model_name).is_equal_to("primary")
 
 
 # -- TestCompleteWithFallbackAllFail: All models fail -- last error is raised.
@@ -296,4 +296,5 @@ def test_forwards_all_kwargs() -> None:
         timeout=30.0,
         repo_root=None,
         use_one_shot=False,
+        model="primary-model",
     )
