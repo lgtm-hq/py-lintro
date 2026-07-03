@@ -126,7 +126,7 @@ class CursorProvider(BaseAIProvider):
         if system:
             combined_prompt = f"{system}\n\n---\n\n{prompt}"
         combined_prompt = (
-            f"{combined_prompt}\n\n" f"[Respond in at most {effective_max} tokens.]"
+            f"{combined_prompt}\n\n[Respond in at most {effective_max} tokens.]"
         )
 
         cmd = [
