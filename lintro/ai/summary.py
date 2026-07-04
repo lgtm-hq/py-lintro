@@ -217,7 +217,7 @@ def _parse_summary_response(
     Returns:
         Parsed AISummary.
     """
-    # Strip markdown code fences that AI models commonly wrap JSON in
+    # parse_summary_response_payload handles fence stripping and JSON validation
     try:
         data = parse_summary_response_payload(content=content)
     except ValueError:

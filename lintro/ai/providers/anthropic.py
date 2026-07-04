@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import os
+import threading
 from collections.abc import Iterator
 from contextlib import contextmanager
 from typing import Any
@@ -67,7 +68,7 @@ class _AnthropicCliTransport(CliTransport):
         )
         self._model = model
 
-    def parse_stdout(self, stdout: str) -> AIResponse:
+    def parse_stdout(self, stdout: str) -> tuple[AIResponse, str | None]:
         """Parse JSON envelope from ``claude --output-format json``."""
         try:
             data = json.loads(stdout.strip())
@@ -104,13 +105,22 @@ class _AnthropicCliTransport(CliTransport):
         else:
             cost = float(cost)
 
-        return AIResponse(
-            content=self.substitute_parsed_json(content),
-            model=self._model,
-            input_tokens=input_tokens,
-            output_tokens=output_tokens,
-            cost_estimate=cost,
-            provider=AIProvider.ANTHROPIC,
+        session_id = data.get("session_id")
+        if isinstance(session_id, str) and session_id.strip():
+            session_id = session_id.strip()
+        else:
+            session_id = None
+
+        return (
+            AIResponse(
+                content=self.substitute_parsed_json(content),
+                model=self._model,
+                input_tokens=input_tokens,
+                output_tokens=output_tokens,
+                cost_estimate=cost,
+                provider=AIProvider.ANTHROPIC,
+            ),
+            session_id,
         )
 
 
@@ -193,6 +203,7 @@ class AnthropicProvider(BaseAIProvider):
                 model=self._model,
             )
             self._session_id: str | None = None
+            self._session_lock = threading.Lock()
             return
 
         super().__init__(
@@ -261,12 +272,14 @@ class AnthropicProvider(BaseAIProvider):
             cmd.extend(["--json-schema", json.dumps(cli_schema.schema)])
             if cli_schema.schema_name:
                 cmd.extend(["--json-schema-name", cli_schema.schema_name])
-        if not use_one_shot and self._session_id is not None:
-            cmd.extend(["--resume", self._session_id])
+        with self._session_lock:
+            resume_session_id = None if use_one_shot else self._session_id
+        if resume_session_id is not None:
+            cmd.extend(["--resume", resume_session_id])
 
         logger.debug(
             f"Claude CLI request: model={effective_model}, "
-            f"resume={self._session_id is not None and not use_one_shot}, "
+            f"resume={resume_session_id is not None}, "
             f"prompt_len={len(prompt)}",
         )
 
@@ -284,15 +297,10 @@ class AnthropicProvider(BaseAIProvider):
             ),
         )
 
-        response = self._cli.parse_stdout(result.stdout)
-        session_id = None
-        try:
-            envelope = json.loads(result.stdout.strip())
-            session_id = envelope.get("session_id")
-        except json.JSONDecodeError:
-            session_id = None
-        if not use_one_shot and isinstance(session_id, str) and session_id.strip():
-            self._session_id = session_id.strip()
+        response, session_id = self._cli.parse_stdout(result.stdout)
+        if not use_one_shot and session_id is not None:
+            with self._session_lock:
+                self._session_id = session_id
         return response
 
     def complete(

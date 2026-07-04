@@ -40,6 +40,7 @@ def test_cli_schema_for_summary_only_when_cli_transport() -> None:
 
 def test_cli_schema_for_fix_supports_batch_mode() -> None:
     """Fix schema switches between single-object and batch array."""
+    assert_that(cli_schema_for_fix(transport=AITransport.API)).is_none()
     single = cli_schema_for_fix(transport=AITransport.CLI, batch=False)
     batch = cli_schema_for_fix(transport=AITransport.CLI, batch=True)
     assert single is not None

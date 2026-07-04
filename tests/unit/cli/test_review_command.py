@@ -82,50 +82,52 @@ def test_review_json_output_echoes_payload() -> None:
     mock_config.review.force_semantic_chunking = False
     mock_config.review.checklist_display = ChecklistDisplay.OFF
 
-    with patch("lintro.cli_utils.commands.review.require_ai"):
-        with patch(
+    with (
+        patch("lintro.cli_utils.commands.review.require_ai"),
+        patch(
             "lintro.cli_utils.commands.review.get_config",
             return_value=mock_config,
-        ):
-            with patch(
-                "lintro.cli_utils.commands.review.collect_review_context",
-                return_value=mock_context,
-            ):
-                with patch(
-                    "lintro.cli_utils.commands.review.classify_changed_files",
-                    return_value=[],
-                ):
-                    with patch(
-                        "lintro.cli_utils.commands.review.get_all_checklist_items",
-                        return_value=[],
-                    ):
-                        with patch(
-                            "lintro.cli_utils.commands.review.select_checklist_items",
-                            return_value=[],
-                        ):
-                            with patch(
-                                "lintro.cli_utils.commands.review.format_checklist_for_prompt",
-                                return_value=("", {}),
-                            ):
-                                with patch(
-                                    "lintro.cli_utils.commands.review.get_provider",
-                                    return_value=MagicMock(
-                                        model_name="gpt-4o",
-                                        name="openai",
-                                    ),
-                                ):
-                                    with patch(
-                                        "lintro.cli_utils.commands.review.run_review",
-                                        return_value=_empty_result(),
-                                    ):
-                                        with patch(
-                                            "lintro.cli_utils.commands.review.render_review_output",
-                                            return_value='{"summary": "ok"}',
-                                        ) as mock_render:
-                                            result = runner.invoke(
-                                                cli,
-                                                ["review", "--output", "json"],
-                                            )
+        ),
+        patch(
+            "lintro.cli_utils.commands.review.collect_review_context",
+            return_value=mock_context,
+        ),
+        patch(
+            "lintro.cli_utils.commands.review.classify_changed_files",
+            return_value=[],
+        ),
+        patch(
+            "lintro.cli_utils.commands.review.get_all_checklist_items",
+            return_value=[],
+        ),
+        patch(
+            "lintro.cli_utils.commands.review.select_checklist_items",
+            return_value=[],
+        ),
+        patch(
+            "lintro.cli_utils.commands.review.format_checklist_for_prompt",
+            return_value=("", {}),
+        ),
+        patch(
+            "lintro.cli_utils.commands.review.get_provider",
+            return_value=MagicMock(
+                model_name="gpt-4o",
+                name="openai",
+            ),
+        ),
+        patch(
+            "lintro.cli_utils.commands.review.run_review",
+            return_value=_empty_result(),
+        ),
+        patch(
+            "lintro.cli_utils.commands.review.render_review_output",
+            return_value='{"summary": "ok"}',
+        ) as mock_render,
+    ):
+        result = runner.invoke(
+            cli,
+            ["review", "--output", "json"],
+        )
 
     assert_that(result.exit_code).is_equal_to(0)
     assert_that(result.output).contains('"summary": "ok"')
@@ -149,49 +151,49 @@ def test_review_passes_transport_override_to_provider() -> None:
     mock_config.review.force_semantic_chunking = False
     mock_config.review.checklist_display = ChecklistDisplay.OFF
 
-    with patch("lintro.cli_utils.commands.review.require_ai"):
-        with patch(
+    with (
+        patch("lintro.cli_utils.commands.review.require_ai"),
+        patch(
             "lintro.cli_utils.commands.review.get_config",
             return_value=mock_config,
-        ):
-            with patch(
-                "lintro.cli_utils.commands.review.collect_review_context",
-                return_value=mock_context,
-            ):
-                with patch(
-                    "lintro.cli_utils.commands.review.classify_changed_files",
-                    return_value=[],
-                ):
-                    with patch(
-                        "lintro.cli_utils.commands.review.get_all_checklist_items",
-                        return_value=[],
-                    ):
-                        with patch(
-                            "lintro.cli_utils.commands.review.select_checklist_items",
-                            return_value=[],
-                        ):
-                            with patch(
-                                "lintro.cli_utils.commands.review.format_checklist_for_prompt",
-                                return_value=("", {}),
-                            ):
-                                with patch(
-                                    "lintro.cli_utils.commands.review.get_provider",
-                                ) as mock_get_provider:
-                                    mock_get_provider.return_value = MagicMock(
-                                        model_name="gpt-4o",
-                                        name="openai",
-                                    )
-                                    with patch(
-                                        "lintro.cli_utils.commands.review.run_review",
-                                        return_value=_empty_result(),
-                                    ):
-                                        with patch(
-                                            "lintro.cli_utils.commands.review.render_review_output",
-                                        ):
-                                            result = runner.invoke(
-                                                cli,
-                                                ["review", "--transport", "cli"],
-                                            )
+        ),
+        patch(
+            "lintro.cli_utils.commands.review.collect_review_context",
+            return_value=mock_context,
+        ),
+        patch(
+            "lintro.cli_utils.commands.review.classify_changed_files",
+            return_value=[],
+        ),
+        patch(
+            "lintro.cli_utils.commands.review.get_all_checklist_items",
+            return_value=[],
+        ),
+        patch(
+            "lintro.cli_utils.commands.review.select_checklist_items",
+            return_value=[],
+        ),
+        patch(
+            "lintro.cli_utils.commands.review.format_checklist_for_prompt",
+            return_value=("", {}),
+        ),
+        patch(
+            "lintro.cli_utils.commands.review.get_provider",
+        ) as mock_get_provider,
+        patch(
+            "lintro.cli_utils.commands.review.run_review",
+            return_value=_empty_result(),
+        ),
+        patch("lintro.cli_utils.commands.review.render_review_output"),
+    ):
+        mock_get_provider.return_value = MagicMock(
+            model_name="gpt-4o",
+            name="openai",
+        )
+        result = runner.invoke(
+            cli,
+            ["review", "--transport", "cli"],
+        )
 
     assert_that(result.exit_code).is_equal_to(0)
     provider_config = mock_get_provider.call_args.args[0]
@@ -211,46 +213,48 @@ def test_review_exits_zero_without_p1_findings() -> None:
     mock_config.review.force_semantic_chunking = False
     mock_config.review.checklist_display = ChecklistDisplay.OFF
 
-    with patch("lintro.cli_utils.commands.review.require_ai"):
-        with patch(
+    with (
+        patch("lintro.cli_utils.commands.review.require_ai"),
+        patch(
             "lintro.cli_utils.commands.review.get_config",
             return_value=mock_config,
-        ):
-            with patch(
-                "lintro.cli_utils.commands.review.collect_review_context",
-                return_value=mock_context,
-            ):
-                with patch(
-                    "lintro.cli_utils.commands.review.classify_changed_files",
-                    return_value=[],
-                ):
-                    with patch(
-                        "lintro.cli_utils.commands.review.get_all_checklist_items",
-                        return_value=[],
-                    ):
-                        with patch(
-                            "lintro.cli_utils.commands.review.select_checklist_items",
-                            return_value=[],
-                        ):
-                            with patch(
-                                "lintro.cli_utils.commands.review.format_checklist_for_prompt",
-                                return_value=("", {}),
-                            ):
-                                with patch(
-                                    "lintro.cli_utils.commands.review.get_provider",
-                                    return_value=MagicMock(
-                                        model_name="gpt-4o",
-                                        name="openai",
-                                    ),
-                                ):
-                                    with patch(
-                                        "lintro.cli_utils.commands.review.run_review",
-                                        return_value=_empty_result(),
-                                    ):
-                                        with patch(
-                                            "lintro.cli_utils.commands.review.render_review_output",
-                                        ) as mock_render:
-                                            result = runner.invoke(cli, ["review"])
+        ),
+        patch(
+            "lintro.cli_utils.commands.review.collect_review_context",
+            return_value=mock_context,
+        ),
+        patch(
+            "lintro.cli_utils.commands.review.classify_changed_files",
+            return_value=[],
+        ),
+        patch(
+            "lintro.cli_utils.commands.review.get_all_checklist_items",
+            return_value=[],
+        ),
+        patch(
+            "lintro.cli_utils.commands.review.select_checklist_items",
+            return_value=[],
+        ),
+        patch(
+            "lintro.cli_utils.commands.review.format_checklist_for_prompt",
+            return_value=("", {}),
+        ),
+        patch(
+            "lintro.cli_utils.commands.review.get_provider",
+            return_value=MagicMock(
+                model_name="gpt-4o",
+                name="openai",
+            ),
+        ),
+        patch(
+            "lintro.cli_utils.commands.review.run_review",
+            return_value=_empty_result(),
+        ),
+        patch(
+            "lintro.cli_utils.commands.review.render_review_output",
+        ) as mock_render,
+    ):
+        result = runner.invoke(cli, ["review"])
 
     assert_that(result.exit_code).is_equal_to(0)
     assert_that(mock_render.call_args.kwargs).contains_key(

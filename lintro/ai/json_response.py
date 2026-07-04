@@ -75,6 +75,30 @@ def load_json_object(*, content: str) -> dict[str, Any]:
     return payload
 
 
+def load_json_value(*, content: str) -> dict[str, Any] | list[Any]:
+    """Parse fenced or raw JSON into an object or array.
+
+    Args:
+        content: Raw or fenced JSON model response.
+
+    Returns:
+        Parsed JSON object or array.
+
+    Raises:
+        ValueError: When JSON is invalid or not an object/array.
+    """
+    json_text = strip_json_fences(content=content)
+    try:
+        payload = json.loads(json_text)
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"Invalid JSON: {exc}") from exc
+
+    if not isinstance(payload, (dict, list)):
+        raise ValueError("JSON response must be an object or array")
+
+    return payload
+
+
 def parse_review_response_payload(*, content: str) -> dict[str, Any]:
     """Parse and validate AI review JSON response.
 
@@ -104,14 +128,8 @@ def parse_summary_response_payload(*, content: str) -> dict[str, Any]:
 
     Returns:
         Parsed summary payload dictionary.
-
-    Raises:
-        ValueError: When JSON is invalid or not an object.
     """
-    try:
-        return load_json_object(content=content)
-    except ValueError:
-        raise
+    return load_json_object(content=content)
 
 
 def parse_fix_response_payload(*, content: str) -> dict[str, Any] | list[Any]:
@@ -122,17 +140,5 @@ def parse_fix_response_payload(*, content: str) -> dict[str, Any] | list[Any]:
 
     Returns:
         Parsed fix payload as an object or array.
-
-    Raises:
-        ValueError: When JSON is invalid.
     """
-    json_text = strip_json_fences(content=content)
-    try:
-        payload = json.loads(json_text)
-    except json.JSONDecodeError as exc:
-        raise ValueError(f"Invalid JSON: {exc}") from exc
-
-    if not isinstance(payload, (dict, list)):
-        raise ValueError("Fix response must be a JSON object or array")
-
-    return payload
+    return load_json_value(content=content)
