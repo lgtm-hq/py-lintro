@@ -37,6 +37,7 @@ def test_review_user_prompt_template_renders_all_placeholders() -> None:
         checklist="1. [logic-bug] Example question?",
         diff="diff --git a/src/main.py",
         lint_results_section="",
+        strictness_section="",
         output_schema=REVIEW_OUTPUT_SCHEMA,
     )
 

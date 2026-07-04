@@ -56,6 +56,9 @@ def test_base_ai_provider_complete_subclass():
             system: str | None = None,
             max_tokens: int = 1024,
             timeout: float = 60.0,
+            repo_root: str | None = None,
+            use_one_shot: bool = False,
+            model: str | None = None,
         ) -> AIResponse:
             return AIResponse(
                 content="ok",

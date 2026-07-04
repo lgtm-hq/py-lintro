@@ -8,6 +8,7 @@ from lintro.ai.review.models.checklist_item import ChecklistItem
 __all__ = [
     "REVIEW_ADVERSARIAL_SWEEP_TEMPLATE",
     "REVIEW_GENERATE_QUESTIONS_TEMPLATE",
+    "REVIEW_GIT_NATIVE_USER_PROMPT_TEMPLATE",
     "REVIEW_OUTPUT_SCHEMA",
     "REVIEW_SYSTEM",
     "REVIEW_USER_PROMPT_TEMPLATE",
@@ -107,6 +108,64 @@ Answer every item. Any **yes** → add a finding. Any **no** → record in `chec
 </pull_request_diff>
 
 {lint_results_section}
+
+{strictness_section}
+
+---
+
+### Required JSON output
+
+{output_schema}
+
+**Rules:**
+
+- Include all **{checklist_count}** checklist entries in `checklist` (even if answer is "no").
+- Every checklist **yes** must have a corresponding finding (link via `checklist_ids`).
+- Do not duplicate findings — merge related checklist items when they share a root cause.
+- Prioritize cross-file integration bugs over isolated nits."""
+
+REVIEW_GIT_NATIVE_USER_PROMPT_TEMPLATE = """\
+Review this code change for actionable findings.
+
+**PR:** {pr_title}
+
+**Base → Head:** `{base_ref}`...`{head_ref}`
+
+**Summary:**
+
+{pr_summary}
+
+{deferred_scope_section}
+
+{external_review_section}
+
+**Changed files ({changed_file_count}):**
+
+{changed_files}
+
+---
+
+### Interaction paths (trace each explicitly)
+
+{interaction_paths}
+
+---
+
+### Mandatory checklist (complete all {checklist_count} before finalizing)
+
+Answer every item. Any **yes** → add a finding. Any **no** → record in `checklist` with brief evidence (file:line).
+
+{checklist}
+
+---
+
+<pull_request_diff>
+{diff}
+</pull_request_diff>
+
+{lint_results_section}
+
+{strictness_section}
 
 ---
 

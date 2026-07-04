@@ -3,6 +3,9 @@
 from __future__ import annotations
 
 import json
+import threading
+import time
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -11,11 +14,14 @@ from assertpy import assert_that
 from lintro.ai.config import AIConfig
 from lintro.ai.providers.response import AIResponse
 from lintro.ai.review.enums.review_category import ReviewCategory
+from lintro.ai.review.exceptions import ReviewExecutionError
 from lintro.ai.review.models.changed_file import ChangedFile
 from lintro.ai.review.models.checklist_item import ChecklistItem
+from lintro.ai.review.models.review_chunk import ReviewChunk
 from lintro.ai.review.models.review_context import ReviewContext
 from lintro.ai.review.orchestrator import (
     parse_review_response,
+    resolve_review_chunks,
     run_review,
     strip_json_fences,
 )
@@ -220,6 +226,112 @@ def test_run_review_depth2_calls_provider_twice() -> None:
     assert_that(result.metadata.cost_estimate_usd).is_equal_to(0.015)
 
 
+def test_resolve_review_chunks_uses_fast_path_for_small_diff(
+    sample_review_context: ReviewContext,
+) -> None:
+    """Small diffs within budget collapse to a single chunk."""
+    chunks = resolve_review_chunks(
+        context=sample_review_context,
+        diff_budget=10_000,
+        classifications=[],
+    )
+
+    assert_that(chunks).is_length(1)
+    assert_that(chunks[0].files).is_length(5)
+    assert_that(chunks[0].relationship).is_equal_to("directory-prefix")
+
+
+def test_resolve_review_chunks_semantic_when_over_budget(
+    sample_review_context: ReviewContext,
+) -> None:
+    """Oversized diffs still use semantic chunking."""
+    chunks = resolve_review_chunks(
+        context=sample_review_context,
+        diff_budget=50,
+        classifications=[],
+    )
+
+    assert_that(chunks).is_not_empty()
+    assert_that(len(chunks)).is_greater_than(1)
+
+
+def test_resolve_review_chunks_skips_fast_path_when_forced(
+    sample_review_context: ReviewContext,
+) -> None:
+    """Thorough strictness can force semantic chunking even for small diffs."""
+    chunks = resolve_review_chunks(
+        context=sample_review_context,
+        diff_budget=10_000,
+        classifications=[],
+        force_semantic_chunking=True,
+    )
+
+    assert_that(len(chunks)).is_greater_than(1)
+
+
+def test_run_review_parallelizes_multiple_chunks(tmp_path: Path) -> None:
+    """Multiple chunks run concurrently up to max_parallel_calls."""
+    context = ReviewContext(
+        base_ref="main",
+        head_ref="feature",
+        changed_files=[
+            ChangedFile(
+                path=f"src/file{index}.py",
+                status="modified",
+                additions=1,
+                deletions=0,
+            )
+            for index in range(4)
+        ],
+        unified_diff="diff",
+        pr_metadata=None,
+        repo_root=str(tmp_path),
+    )
+    chunks = [
+        ReviewChunk(
+            id=index + 1,
+            files=[f"src/file{index}.py"],
+            diff=f"+line{index}",
+            relationship="single-file",
+        )
+        for index in range(4)
+    ]
+    provider = _mock_provider(content=_sample_response_json(include_finding=False))
+    lock = threading.Lock()
+    active = 0
+    max_active = 0
+    response = provider.complete.return_value
+
+    def _track_concurrency(*_args, **_kwargs):
+        nonlocal active, max_active
+        with lock:
+            active += 1
+            max_active = max(max_active, active)
+        time.sleep(0.05)
+        with lock:
+            active -= 1
+        return response
+
+    provider.complete.side_effect = _track_concurrency
+
+    with patch(
+        "lintro.ai.review.orchestrator.resolve_review_chunks",
+        return_value=chunks,
+    ):
+        run_review(
+            context,
+            provider=provider,
+            ai_config=AIConfig(enabled=True, max_parallel_calls=4),
+            depth=1,
+            checklist_items=[],
+            checklist_text="1. [logic-bug] Example?",
+            classifications=[],
+        )
+
+    assert_that(max_active).is_greater_than(1)
+    assert_that(provider.complete.call_count).is_equal_to(4)
+
+
 def test_run_review_aborts_progress_when_chunk_review_fails() -> None:
     """Progress tracker receives on_abort when a chunk review raises."""
     context = ReviewContext(
@@ -244,7 +356,7 @@ def test_run_review_aborts_progress_when_chunk_review_fails() -> None:
             "lintro.ai.review.orchestrator.complete_with_fallback",
             side_effect=RuntimeError("provider failed"),
         ),
-        pytest.raises(RuntimeError, match="provider failed"),
+        pytest.raises(ReviewExecutionError),
     ):
         run_review(
             context,
@@ -258,6 +370,7 @@ def test_run_review_aborts_progress_when_chunk_review_fails() -> None:
         )
 
     progress.on_start.assert_called_once()
+    progress.on_error.assert_called_once()
     progress.on_abort.assert_called_once()
     progress.on_complete.assert_not_called()
 
@@ -287,7 +400,7 @@ def test_run_review_propagates_chunk_error_when_progress_abort_raises() -> None:
             "lintro.ai.review.orchestrator.complete_with_fallback",
             side_effect=RuntimeError("provider failed"),
         ),
-        pytest.raises(RuntimeError, match="provider failed"),
+        pytest.raises(ReviewExecutionError) as exc_info,
     ):
         run_review(
             context,
@@ -300,6 +413,7 @@ def test_run_review_propagates_chunk_error_when_progress_abort_raises() -> None:
             progress=progress,
         )
 
+    assert_that(exc_info.value.cause_message).contains("provider failed")
     progress.on_start.assert_called_once()
     progress.on_abort.assert_called_once()
     progress.on_complete.assert_not_called()
