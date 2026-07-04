@@ -80,10 +80,6 @@ class CliTransport(ABC):
             AINotAvailableError: When the binary disappears from ``PATH``.
         """
         env = os.environ.copy()
-        if self._api_key_env:
-            api_key = os.environ.get(self._api_key_env)
-            if api_key:
-                env[self._api_key_env] = api_key
 
         logger.debug(
             f"{self._binary_name} CLI: cmd={' '.join(cmd[:4])}..., "

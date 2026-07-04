@@ -267,8 +267,8 @@ class AnthropicProvider(BaseAIProvider):
             result,
             auth_patterns=("authentication", "login", "not logged in"),
             auth_hint=(
-                "Run 'claude login' or set ANTHROPIC_API_KEY "
-                "(API key billing overrides subscription credits)."
+                "Set ANTHROPIC_API_KEY or configure apiKeyHelper "
+                "(--bare mode does not use OAuth login)."
             ),
         )
 

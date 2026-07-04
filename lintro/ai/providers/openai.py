@@ -109,6 +109,10 @@ class _CodexCliTransport(CliTransport):
             try:
                 data = json.loads(stdout.strip())
                 final_text = data.get("result", data.get("output", ""))
+                if isinstance(final_text, dict):
+                    final_text = json.dumps(final_text)
+                elif not isinstance(final_text, str):
+                    final_text = str(final_text)
                 usage = data.get("usage", {})
                 input_tokens = int(usage.get("input_tokens", input_tokens))
                 output_tokens = int(usage.get("output_tokens", output_tokens))
