@@ -16,7 +16,7 @@ if TYPE_CHECKING:
 __all__ = ["call_ai"]
 
 
-def call_ai(  # noqa: DOC502
+def call_ai(
     *,
     provider: BaseAIProvider,
     ai_config: AIConfig,
@@ -41,12 +41,6 @@ def call_ai(  # noqa: DOC502
 
     Returns:
         The provider response with usage metadata.
-
-    Raises:
-        AIAuthenticationError: On permanent auth failure (not retried).
-        AIProviderError: When all retries and fallbacks are exhausted.
-        AIRateLimitError: When rate limits persist after retries.
-        AIError: When the cost budget is exceeded.
     """
     tokens = max_tokens if max_tokens is not None else ai_config.max_tokens
 

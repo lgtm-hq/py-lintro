@@ -201,7 +201,7 @@ class CursorProvider(BaseAIProvider):
         self._session_id = None
         self._durable_repo_root = None
 
-    def complete(  # noqa: DOC502
+    def complete(
         self,
         prompt: str,
         *,
@@ -225,11 +225,6 @@ class CursorProvider(BaseAIProvider):
 
         Returns:
             Parsed model response with usage metadata.
-
-        Raises:
-            AIAuthenticationError: When the CLI reports an auth failure.
-            AIProviderError: When the CLI exits with an error or returns
-                invalid JSON.
         """
         effective_model = model or self._model
         effective_max = min(max_tokens, self._max_tokens)
