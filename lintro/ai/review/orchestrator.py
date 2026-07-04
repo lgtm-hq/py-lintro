@@ -25,6 +25,7 @@ from lintro.ai.prompts.review import (
     REVIEW_GENERATE_QUESTIONS_TEMPLATE,
     REVIEW_GIT_NATIVE_DIFF_GIT_COMMAND,
     REVIEW_GIT_NATIVE_DIFF_INLINE,
+    REVIEW_GIT_NATIVE_DIFF_WORKTREE_COMMAND,
     REVIEW_GIT_NATIVE_USER_PROMPT_TEMPLATE,
     REVIEW_OUTPUT_SCHEMA,
     REVIEW_SYSTEM,
@@ -429,7 +430,9 @@ def run_review(
     )
 
     effective_ai_config = (
-        replace(ai_config, api_timeout=timeout) if timeout is not None else ai_config
+        ai_config.model_copy(update={"api_timeout": timeout})
+        if timeout is not None
+        else ai_config
     )
     tracker = progress or NullReviewProgress()
     budget = CostBudget(max_cost_usd=ai_config.max_cost_usd)
@@ -618,6 +621,11 @@ def build_git_native_review_prompt(
     git_diff_paths = " ".join(shlex.quote(path) for path in chunk.files)
     if embed_diff:
         diff_section = REVIEW_GIT_NATIVE_DIFF_INLINE.format(diff=chunk.diff)
+    elif context.head_ref == "WORKTREE":
+        diff_section = REVIEW_GIT_NATIVE_DIFF_WORKTREE_COMMAND.format(
+            base_ref=context.base_ref,
+            git_diff_paths=git_diff_paths,
+        )
     else:
         diff_section = REVIEW_GIT_NATIVE_DIFF_GIT_COMMAND.format(
             base_ref=context.base_ref,

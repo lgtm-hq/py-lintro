@@ -10,6 +10,7 @@ __all__ = [
     "REVIEW_GENERATE_QUESTIONS_TEMPLATE",
     "REVIEW_GIT_NATIVE_DIFF_GIT_COMMAND",
     "REVIEW_GIT_NATIVE_DIFF_INLINE",
+    "REVIEW_GIT_NATIVE_DIFF_WORKTREE_COMMAND",
     "REVIEW_GIT_NATIVE_USER_PROMPT_TEMPLATE",
     "REVIEW_OUTPUT_SCHEMA",
     "REVIEW_SYSTEM",
@@ -194,6 +195,13 @@ Run this command in the repository root and review the output:
 
 ```
 git diff {base_ref}...{head_ref} -- {git_diff_paths}
+```"""
+
+REVIEW_GIT_NATIVE_DIFF_WORKTREE_COMMAND = """\
+Run this command in the repository root and review the output:
+
+```
+git diff {base_ref} -- {git_diff_paths}
 ```"""
 
 REVIEW_OUTPUT_SCHEMA = """\
