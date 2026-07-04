@@ -86,6 +86,8 @@
         ],
         "fileFilters": [
           "lintro/_tool_versions.py",
+          "lintro/_generated_versions.py",
+          "lintro/tools/manifest.json",
           "package.json",
           "pyproject.toml",
           "Dockerfile"
