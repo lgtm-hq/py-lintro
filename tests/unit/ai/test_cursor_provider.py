@@ -290,7 +290,9 @@ def test_complete_uses_minimum_timeout_for_agent(provider):
             stderr="",
         )
         provider.complete("Hello", timeout=45.0)
-        assert_that(mock_run.call_args.kwargs.get("timeout")).is_equal_to(300.0)
+        assert_that(mock_run.call_args.kwargs.get("timeout")).is_equal_to(
+            CURSOR_MIN_TIMEOUT,
+        )
 
 
 def test_complete_cost_estimate_is_zero(provider):

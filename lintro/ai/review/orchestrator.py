@@ -53,6 +53,7 @@ from lintro.ai.review.sensitivity import (
     filter_findings_by_policy,
     format_strictness_prompt_section,
 )
+from lintro.ai.token_budget import estimate_tokens
 
 if TYPE_CHECKING:
     from lintro.ai.config import AIConfig
