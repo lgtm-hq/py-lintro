@@ -164,7 +164,6 @@ class AnthropicProvider(BaseAIProvider):
         """
         self._transport = transport
         self._cli: _AnthropicCliTransport | None = None
-        self._session_id: str | None = None
 
         if transport == AITransport.CLI:
             claude_path = _find_claude()
@@ -234,6 +233,7 @@ class AnthropicProvider(BaseAIProvider):
         use_one_shot: bool,
         model: str | None = None,
     ) -> AIResponse:
+        del use_one_shot
         if self._cli is None:
             raise AINotAvailableError("Claude CLI transport is not initialized")
 
@@ -252,12 +252,9 @@ class AnthropicProvider(BaseAIProvider):
         ]
         if system:
             cmd.extend(["--append-system-prompt", system])
-        if not use_one_shot and self._session_id is not None:
-            cmd.extend(["--resume", self._session_id])
 
         logger.debug(
             f"Claude CLI request: model={effective_model}, "
-            f"resume={self._session_id is not None and not use_one_shot}, "
             f"prompt_len={len(prompt)}",
         )
 
@@ -276,14 +273,6 @@ class AnthropicProvider(BaseAIProvider):
         )
 
         response = self._cli.parse_stdout(result.stdout)
-        session_id = None
-        try:
-            envelope = json.loads(result.stdout.strip())
-            session_id = envelope.get("session_id")
-        except json.JSONDecodeError:
-            session_id = None
-        if not use_one_shot and isinstance(session_id, str) and session_id.strip():
-            self._session_id = session_id.strip()
         return response
 
     def complete(
@@ -305,7 +294,7 @@ class AnthropicProvider(BaseAIProvider):
             max_tokens: Maximum tokens to generate (API only).
             timeout: Request timeout in seconds.
             repo_root: Working directory for CLI transport.
-            use_one_shot: When True, avoid resuming CLI sessions.
+            use_one_shot: Ignored for CLI transport; each call is independent.
             model: Optional per-call model override.
 
         Returns:
