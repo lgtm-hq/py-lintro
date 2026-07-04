@@ -27,14 +27,16 @@ def test_build_prompt_question_map_uses_prompt_order() -> None:
         ChecklistItem(
             id=100,
             question="First question?",
-            triggers=[],
+            domains=(),
+            languages=(),
             category=ReviewCategory.SECURITY,
             tier=1,
         ),
         ChecklistItem(
             id=200,
             question="Second question?",
-            triggers=[],
+            domains=(),
+            languages=(),
             category=ReviewCategory.TEST_GAP,
             tier=1,
         ),
