@@ -189,12 +189,13 @@ def review_command(
             )
 
     paths = list(path_filter) if path_filter else None
-    context_repo = effective_repo if pr is not None else None
+    context_pr = resolved_pr if post else pr
+    context_repo = effective_repo if context_pr is not None else None
     try:
         context = collect_review_context(
             base=base,
             uncommitted=uncommitted,
-            pr_number=pr,
+            pr_number=context_pr,
             repo=context_repo,
             paths=paths,
         )

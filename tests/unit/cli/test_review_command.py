@@ -519,6 +519,15 @@ def test_review_post_with_repo_without_pr() -> None:
     assert_that(result.output).does_not_contain(
         "--repo can only be used with --pr.",
     )
+    assert_that(mock_collect.call_args.kwargs).is_equal_to(
+        {
+            "base": None,
+            "uncommitted": False,
+            "pr_number": 42,
+            "repo": "owner/repo",
+            "paths": None,
+        },
+    )
 
 
 def test_review_failure_renders_friendly_error_without_traceback() -> None:
