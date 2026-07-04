@@ -290,7 +290,7 @@ def _mock_review_pipeline(
         )
     )
 
-    patches = {
+    return {
         "require_ai": patch("lintro.cli_utils.commands.review.require_ai"),
         "get_config": patch(
             "lintro.cli_utils.commands.review.get_config",
@@ -328,7 +328,6 @@ def _mock_review_pipeline(
             "lintro.cli_utils.commands.review.render_review_output",
         ),
     }
-    return patches
 
 
 def test_review_uncommitted_mode() -> None:
@@ -469,6 +468,24 @@ def test_review_plain_with_github_repository_env() -> None:
         "Cannot provide repo without pr_number",
     )
     assert_that(mock_collect.call_args.kwargs["repo"]).is_none()
+
+
+def test_review_repo_without_pr_fails() -> None:
+    """Explicit --repo without --pr fails fast instead of reviewing locally."""
+    runner = CliRunner()
+    mock_config = MagicMock(ai=MagicMock(enabled=True))
+
+    with (
+        patch("lintro.cli_utils.commands.review.require_ai"),
+        patch(
+            "lintro.cli_utils.commands.review.get_config",
+            return_value=mock_config,
+        ),
+    ):
+        result = runner.invoke(cli, ["review", "--repo", "owner/repo"])
+
+    assert_that(result.exit_code).is_not_equal_to(0)
+    assert_that(result.output).contains("--repo can only be used with --pr.")
 
 
 def test_review_failure_renders_friendly_error_without_traceback() -> None:

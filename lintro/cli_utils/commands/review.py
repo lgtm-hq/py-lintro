@@ -174,6 +174,8 @@ def review_command(
         raise click.UsageError(
             "--pr and --uncommitted cannot be used together.",
         )
+    if pr is None and repo is not None:
+        raise click.UsageError("--repo can only be used with --pr.")
     resolved_pr: int | None = None
     if post:
         resolved_pr = pr or _detect_pr_number_from_env()
