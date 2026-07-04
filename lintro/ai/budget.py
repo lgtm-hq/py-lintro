@@ -66,6 +66,4 @@ class CostBudget:
                 self._raise_exceeded()
             result = fn()
             self._spent += cost_of(result)
-            if self.max_cost_usd is not None and self._spent >= self.max_cost_usd:
-                self._raise_exceeded()
             return result

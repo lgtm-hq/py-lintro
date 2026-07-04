@@ -76,8 +76,8 @@ def test_call_ai_retries_on_provider_error() -> None:
     assert_that(provider.complete.call_count).is_equal_to(2)
 
 
-def test_call_ai_raises_when_budget_exceeded() -> None:
-    """Budget check runs before and after the provider call."""
+def test_call_ai_returns_response_when_single_call_exceeds_budget() -> None:
+    """A completed call is returned even when it pushes spent over the limit."""
     provider = MagicMock()
     provider.complete.return_value = _response(cost=0.50)
     config = AIConfig(
@@ -86,6 +86,30 @@ def test_call_ai_raises_when_budget_exceeded() -> None:
         max_retries=0,
     )
     budget = CostBudget(max_cost_usd=0.10)
+
+    response = call_ai(
+        provider=provider,
+        ai_config=config,
+        user_prompt="hello",
+        system_prompt=None,
+        budget=budget,
+    )
+
+    assert_that(response.cost_estimate).is_equal_to(0.50)
+    assert_that(budget.spent).is_equal_to(0.50)
+
+
+def test_call_ai_raises_when_budget_already_exceeded() -> None:
+    """Subsequent calls fail once the budget ceiling has been reached."""
+    provider = MagicMock()
+    provider.complete.return_value = _response(cost=0.50)
+    config = AIConfig(
+        enabled=True,
+        transport="api",  # type: ignore[arg-type]
+        max_retries=0,
+    )
+    budget = CostBudget(max_cost_usd=0.10)
+    budget.record(0.10)
 
     with pytest.raises(AIError, match="budget exceeded"):
         call_ai(
