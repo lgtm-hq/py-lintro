@@ -67,7 +67,21 @@ class _CursorCliTransport(CliTransport):
                 f"Full response: {json.dumps(data)[:1000]}",
             )
 
-        content = self.extract_json_object(content)
+        # The agent CLI may prefix JSON with prose. Only substitute extracted
+        # content when it parses as JSON; otherwise keep plain-text answers
+        # with incidental braces intact.
+        try:
+            json.loads(content)
+        except json.JSONDecodeError:
+            extracted = self.extract_json_object(content)
+            if extracted != content:
+                try:
+                    json.loads(extracted)
+                except json.JSONDecodeError:
+                    pass
+                else:
+                    content = extracted
+
         usage = data.get("usage", {})
         session_id = data.get("session_id")
         if isinstance(session_id, str) and session_id.strip():
