@@ -86,11 +86,11 @@ from lintro.config.config_loader import get_config
 )
 @click.option(
     "--show-checklist",
-    type=click.Choice(["linked", "all"], case_sensitive=False),
+    type=click.Choice(["off", "linked", "all"], case_sensitive=False),
     default=None,
     help=(
-        "Show structured checklist in output: linked (under findings) or "
-        "all (linked plus cleared/orphan appendices)."
+        "Show structured checklist in output: linked (under findings), "
+        "all (linked plus cleared/orphan appendices), or off to disable."
     ),
 )
 @click.option(

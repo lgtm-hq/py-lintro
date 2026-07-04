@@ -29,7 +29,8 @@ def resolve_checklist_display(
     """Resolve effective checklist display mode from CLI and config.
 
     Args:
-        cli_value: Optional ``--show-checklist`` value (``linked`` or ``all``).
+        cli_value: Optional ``--show-checklist`` value (``off``, ``linked``,
+            or ``all``).
         config_value: Default from ``review.checklist_display``.
 
     Returns:

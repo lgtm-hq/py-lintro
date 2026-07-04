@@ -198,7 +198,8 @@ def _format_checklist_appendix_markdown(*, result: ReviewResult) -> list[str]:
             evidence = answer.evidence.replace("|", "\\|")
             lines.append(f"- {question}")
             if evidence.strip():
-                lines.append(f"  - {evidence}")
+                truncated = evidence if len(evidence) <= 120 else f"{evidence[:117]}..."
+                lines.append(f"  - {truncated}")
     else:
         lines.append("- (none — good)")
     return lines
