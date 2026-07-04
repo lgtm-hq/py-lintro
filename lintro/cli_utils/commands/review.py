@@ -259,12 +259,14 @@ def review_command(
 
     result = enrich_review_result(result=result, question_map=question_map)
 
-    render_review_output(
+    output = render_review_output(
         result=result,
         output_format=output_format,
         checklist_display=checklist_display,
         question_map=question_map,
     )
+    if output is not None:
+        click.echo(output)
 
     if post:
         from lintro.ai.review.github import post_review_to_github

@@ -65,6 +65,71 @@ def test_review_requires_ai_packages() -> None:
     assert_that(result.exit_code).is_not_equal_to(0)
 
 
+def test_review_json_output_echoes_payload() -> None:
+    """Review command echoes JSON when --output json is used."""
+    runner = CliRunner()
+    mock_context = MagicMock()
+    mock_context.changed_files = []
+    mock_context.unified_diff = ""
+    mock_config = MagicMock(ai=MagicMock(enabled=True))
+    mock_config.review.depth = 1
+    mock_config.review.strictness = ReviewStrictness.BALANCED
+    mock_config.review.sensitivity = MagicMock()
+    mock_config.review.force_semantic_chunking = False
+    mock_config.review.checklist_display = ChecklistDisplay.OFF
+
+    with patch("lintro.cli_utils.commands.review.require_ai"):
+        with patch(
+            "lintro.cli_utils.commands.review.get_config",
+            return_value=mock_config,
+        ):
+            with patch(
+                "lintro.cli_utils.commands.review.collect_review_context",
+                return_value=mock_context,
+            ):
+                with patch(
+                    "lintro.cli_utils.commands.review.classify_changed_files",
+                    return_value=[],
+                ):
+                    with patch(
+                        "lintro.cli_utils.commands.review.get_all_checklist_items",
+                        return_value=[],
+                    ):
+                        with patch(
+                            "lintro.cli_utils.commands.review.select_checklist_items",
+                            return_value=[],
+                        ):
+                            with patch(
+                                "lintro.cli_utils.commands.review.format_checklist_for_prompt",
+                                return_value=("", {}),
+                            ):
+                                with patch(
+                                    "lintro.cli_utils.commands.review.get_provider",
+                                    return_value=MagicMock(
+                                        model_name="gpt-4o",
+                                        name="openai",
+                                    ),
+                                ):
+                                    with patch(
+                                        "lintro.cli_utils.commands.review.run_review",
+                                        return_value=_empty_result(),
+                                    ):
+                                        with patch(
+                                            "lintro.cli_utils.commands.review.render_review_output",
+                                            return_value='{"summary": "ok"}',
+                                        ) as mock_render:
+                                            result = runner.invoke(
+                                                cli,
+                                                ["review", "--output", "json"],
+                                            )
+
+    assert_that(result.exit_code).is_equal_to(0)
+    assert_that(result.output).contains('"summary": "ok"')
+    assert_that(mock_render.call_args.kwargs).contains_key(
+        "checklist_display",
+    )
+
+
 def test_review_exits_zero_without_p1_findings() -> None:
     """Review command exits 0 when no P1 findings exist."""
     runner = CliRunner()
