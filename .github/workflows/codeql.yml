@@ -11,6 +11,7 @@ name: Security - CodeQL Code Scanning
     branches: [main]
     paths: ['**.py', 'pyproject.toml', '.github/**']
   merge_group:
+    types: [checks_requested]
   schedule:
     - cron: '0 5 * * 1'
   workflow_dispatch:

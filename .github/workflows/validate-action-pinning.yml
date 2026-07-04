@@ -10,6 +10,7 @@ name: Quality Check - Action Pinning Validation
       - '.github/workflows/**'
       - '.github/actions/**'
   merge_group:
+    types: [checks_requested]
   workflow_dispatch:
 
 permissions: {}
