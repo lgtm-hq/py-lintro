@@ -56,13 +56,7 @@ def call_ai(
     """
     tokens = max_tokens if max_tokens is not None else ai_config.max_tokens
 
-    @with_retry(
-        max_retries=ai_config.max_retries,
-        base_delay=ai_config.retry_base_delay,
-        max_delay=ai_config.retry_max_delay,
-        backoff_factor=ai_config.retry_backoff_factor,
-    )
-    def _call() -> AIResponse:
+    def _call_once() -> AIResponse:
         return complete_with_fallback(
             provider,
             user_prompt,
@@ -74,15 +68,32 @@ def call_ai(
             use_one_shot=use_one_shot,
         )
 
-    try:
-        if budget is not None:
-            return cast(
-                AIResponse,
-                budget.execute(
-                    _call,
-                    cost_of=lambda response: response.cost_estimate,
-                ),
+    if budget is not None:
+
+        @with_retry(
+            max_retries=ai_config.max_retries,
+            base_delay=ai_config.retry_base_delay,
+            max_delay=ai_config.retry_max_delay,
+            backoff_factor=ai_config.retry_backoff_factor,
+        )
+        def _call() -> AIResponse:
+            return budget.execute(
+                _call_once,
+                cost_of=lambda response: response.cost_estimate,
             )
+
+    else:
+
+        @with_retry(
+            max_retries=ai_config.max_retries,
+            base_delay=ai_config.retry_base_delay,
+            max_delay=ai_config.retry_max_delay,
+            backoff_factor=ai_config.retry_backoff_factor,
+        )
+        def _call() -> AIResponse:
+            return _call_once()
+
+    try:
         return cast(AIResponse, _call())
     except AIAuthenticationError:
         raise
