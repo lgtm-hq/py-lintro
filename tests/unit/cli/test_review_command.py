@@ -488,6 +488,39 @@ def test_review_repo_without_pr_fails() -> None:
     assert_that(result.output).contains("--repo can only be used with --pr.")
 
 
+def test_review_post_with_repo_without_pr() -> None:
+    """--post with explicit --repo does not require a redundant --pr flag."""
+    runner = CliRunner()
+    mock_collect = MagicMock(
+        return_value=MagicMock(changed_files=[], unified_diff=""),
+    )
+    patches = _mock_review_pipeline(mock_collect=mock_collect)
+
+    with (
+        patches["require_ai"],
+        patches["get_config"],
+        patches["collect_review_context"],
+        patches["classify_changed_files"],
+        patches["get_all_checklist_items"],
+        patches["select_checklist_items"],
+        patches["format_checklist_for_prompt"],
+        patches["get_provider"],
+        patches["run_review"],
+        patches["render_review_output"],
+        patch(
+            "lintro.cli_utils.commands.review._detect_pr_number_from_env",
+            return_value=42,
+        ),
+        patch("lintro.ai.review.github.post_review_to_github", return_value=True),
+    ):
+        result = runner.invoke(cli, ["review", "--post", "--repo", "owner/repo"])
+
+    assert_that(result.exit_code).is_equal_to(0)
+    assert_that(result.output).does_not_contain(
+        "--repo can only be used with --pr.",
+    )
+
+
 def test_review_failure_renders_friendly_error_without_traceback() -> None:
     """Mid-review failures show a Rich panel instead of a traceback."""
     runner = CliRunner()
