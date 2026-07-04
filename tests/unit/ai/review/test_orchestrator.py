@@ -299,6 +299,7 @@ def test_run_review_parallelizes_multiple_chunks(tmp_path: Path) -> None:
     lock = threading.Lock()
     active = 0
     max_active = 0
+
     def _track_concurrency(*, provider, user_prompt, **kwargs):
         del user_prompt, kwargs
         nonlocal active, max_active

@@ -425,13 +425,9 @@ def run_review(
     )
 
     effective_ai_config = (
-<<<<<<< HEAD
         ai_config.model_copy(update={"api_timeout": timeout})
         if timeout is not None
         else ai_config
-=======
-        replace(ai_config, api_timeout=timeout) if timeout is not None else ai_config
->>>>>>> 6b71e3da (style: apply lintro fmt fixes for #1009)
     )
     tracker = progress or NullReviewProgress()
     budget = CostBudget(max_cost_usd=ai_config.max_cost_usd)
