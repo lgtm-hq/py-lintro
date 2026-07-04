@@ -36,9 +36,11 @@ from lintro.config.config_loader import get_config
 @click.command("review")
 @click.option(
     "--base",
-    default="main",
-    show_default=True,
-    help="Base branch for diff comparison.",
+    default=None,
+    help=(
+        "Base branch for diff comparison. When omitted, uses the repository "
+        "default branch (origin/HEAD)."
+    ),
 )
 @click.option(
     "--uncommitted",
@@ -138,7 +140,7 @@ from lintro.config.config_loader import get_config
 )
 def review_command(
     *,
-    base: str,
+    base: str | None,
     uncommitted: bool,
     pr: int | None,
     repo: str | None,
@@ -185,12 +187,13 @@ def review_command(
             )
 
     paths = list(path_filter) if path_filter else None
+    context_repo = effective_repo if pr is not None else None
     try:
         context = collect_review_context(
             base=base,
             uncommitted=uncommitted,
             pr_number=pr,
-            repo=effective_repo,
+            repo=context_repo,
             paths=paths,
         )
     except ReviewContextError as exc:
