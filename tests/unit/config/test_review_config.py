@@ -9,6 +9,7 @@ import pytest
 from assertpy import assert_that
 
 from lintro.ai.review.constants import CUSTOM_CHECKLIST_ID_START
+from lintro.ai.review.enums.checklist_display import ChecklistDisplay
 from lintro.ai.review.enums.file_domain import FileDomain
 from lintro.ai.review.enums.review_category import ReviewCategory
 from lintro.ai.review.enums.review_strictness import ReviewStrictness
@@ -108,6 +109,46 @@ def test_load_config_parses_review_depth_and_semantic_chunking(
 
     assert_that(config.review.depth).is_equal_to(2)
     assert_that(config.review.force_semantic_chunking).is_true()
+
+
+def test_load_config_parses_checklist_display(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """YAML review.checklist_display is loaded."""
+    config_file = tmp_path / ".lintro-config.yaml"
+    config_file.write_text(
+        "review:\n  checklist_display: linked\n",
+        encoding="utf-8",
+    )
+    monkeypatch.chdir(tmp_path)
+    clear_config_cache()
+
+    config = load_config(config_path=config_file)
+
+    assert_that(config.review.checklist_display).is_equal_to(
+        ChecklistDisplay.LINKED,
+    )
+
+
+def test_load_config_parses_quoted_off_checklist_display(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """YAML review.checklist_display: 'off' (quoted) is loaded correctly."""
+    config_file = tmp_path / ".lintro-config.yaml"
+    config_file.write_text(
+        "review:\n  checklist_display: 'off'\n",
+        encoding="utf-8",
+    )
+    monkeypatch.chdir(tmp_path)
+    clear_config_cache()
+
+    config = load_config(config_path=config_file)
+
+    assert_that(config.review.checklist_display).is_equal_to(
+        ChecklistDisplay.OFF,
+    )
 
 
 def test_review_config_rejects_invalid_depth() -> None:

@@ -18,6 +18,11 @@ from lintro.ai.review import (
     get_all_checklist_items,
     select_checklist_items,
 )
+from lintro.ai.review.checklist_display import (
+    build_prompt_question_map,
+    enrich_review_result,
+    resolve_checklist_display,
+)
 from lintro.ai.review.enums.review_strictness import ReviewStrictness
 from lintro.ai.review.error_display import render_review_error
 from lintro.ai.review.exceptions import ReviewContextError
@@ -80,6 +85,15 @@ from lintro.config.config_loader import get_config
     ),
 )
 @click.option(
+    "--show-checklist",
+    type=click.Choice(["off", "linked", "all"], case_sensitive=False),
+    default=None,
+    help=(
+        "Show structured checklist in output: linked (under findings), "
+        "all (linked plus cleared/orphan appendices), or off to disable."
+    ),
+)
+@click.option(
     "--post",
     is_flag=True,
     help="Post findings to GitHub as PR review comments.",
@@ -118,6 +132,7 @@ def review_command(
     depth: int | None,
     strictness: str | None,
     semantic_chunks: bool,
+    show_checklist: str | None,
     post: bool,
     output_format: str,
     with_lint: bool,
@@ -174,6 +189,11 @@ def review_command(
     )
     checklist_text, _prompt_mapping = format_checklist_for_prompt(
         items=selected_items,
+    )
+    question_map = build_prompt_question_map(items=selected_items)
+    checklist_display = resolve_checklist_display(
+        cli_value=show_checklist,
+        config_value=lintro_config.review.checklist_display,
     )
 
     lint_digest: str | None = None
@@ -237,7 +257,14 @@ def review_command(
         render_review_error(error=exc, console=console)
         raise SystemExit(1) from exc
 
-    output = render_review_output(result=result, output_format=output_format)
+    result = enrich_review_result(result=result, question_map=question_map)
+
+    output = render_review_output(
+        result=result,
+        output_format=output_format,
+        checklist_display=checklist_display,
+        question_map=question_map,
+    )
     if output is not None:
         click.echo(output)
 
@@ -248,6 +275,8 @@ def review_command(
             result=result,
             pr_number=resolved_pr,
             repo=effective_repo,
+            checklist_display=checklist_display,
+            question_map=question_map,
         )
         if not posted:
             logger.warning("GitHub review posting skipped or failed")

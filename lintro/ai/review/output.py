@@ -6,6 +6,7 @@ import json
 from dataclasses import asdict
 from typing import Any
 
+from lintro.ai.review.enums.checklist_display import ChecklistDisplay
 from lintro.ai.review.models.review_result import ReviewResult
 
 __all__ = [
@@ -62,12 +63,16 @@ def render_review_output(
     *,
     result: ReviewResult,
     output_format: str = "terminal",
+    checklist_display: ChecklistDisplay = ChecklistDisplay.OFF,
+    question_map: dict[int, str] | None = None,
 ) -> str | None:
     """Dispatch review output rendering by format.
 
     Args:
         result: Review result to render.
         output_format: ``terminal`` or ``json``.
+        checklist_display: Structured checklist visibility for terminal output.
+        question_map: Prompt id to question text for linked terminal display.
 
     Returns:
         JSON string when ``output_format`` is ``json``; otherwise ``None``.
@@ -77,5 +82,9 @@ def render_review_output(
 
     from lintro.ai.review.display import render_review_terminal
 
-    render_review_terminal(result=result)
+    render_review_terminal(
+        result=result,
+        checklist_display=checklist_display,
+        question_map=question_map,
+    )
     return None

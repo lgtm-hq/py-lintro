@@ -6,6 +6,7 @@ from unittest.mock import MagicMock, patch
 
 from assertpy import assert_that
 
+from lintro.ai.review.enums.checklist_display import ChecklistDisplay
 from lintro.ai.review.github import (
     format_finding_comment,
     format_review_summary,
@@ -26,15 +27,45 @@ def test_format_finding_comment_includes_severity_and_fix(
     assert_that(comment).contains("Default to Expired")
 
 
-def test_format_review_summary_includes_checklist_table(
+def test_format_finding_comment_linked_includes_review_questions(
     sample_review_result: ReviewResult,
 ) -> None:
-    """Summary comment includes checklist table rows."""
+    """Linked mode appends review question bullets to finding comments."""
+    finding = sample_review_result.findings[0]
+    comment = format_finding_comment(
+        finding=finding,
+        checklist_display=ChecklistDisplay.LINKED,
+        question_map={1: "Does unknown status fail closed?"},
+    )
+
+    assert_that(comment).contains("**Review questions:**")
+    assert_that(comment).contains("Does unknown status fail closed?")
+
+
+def test_format_review_summary_uses_structured_checks_header(
+    sample_review_result: ReviewResult,
+) -> None:
+    """Summary comment uses structured checks header without checklist table."""
     summary = format_review_summary(result=sample_review_result)
 
     assert_that(summary).contains("## Lintro Review")
-    assert_that(summary).contains("| 1 | yes |")
-    assert_that(summary).does_not_contain("Findings outside diff")
+    assert_that(summary).contains("**Structured checks:** 3")
+    assert_that(summary).does_not_contain("| 1 | yes |")
+
+
+def test_format_review_summary_all_includes_appendix(
+    sample_review_result: ReviewResult,
+) -> None:
+    """All mode appends cleared and orphan sections to the summary."""
+    summary = format_review_summary(
+        result=sample_review_result,
+        checklist_display=ChecklistDisplay.ALL,
+    )
+
+    assert_that(summary).contains("### Cleared checks (1)")
+    assert_that(summary).contains("Are access paths covered by tests?")
+    assert_that(summary).contains("### Checklist concerns without findings (1)")
+    assert_that(summary).contains("Is migration documented?")
 
 
 def test_post_review_to_github_posts_fallback_without_line_number(
@@ -112,6 +143,8 @@ def test_post_review_to_github_posts_summary_and_inline(
         posted = post_review_to_github(
             result=sample_review_result,
             reporter=reporter,
+            checklist_display=ChecklistDisplay.LINKED,
+            question_map={1: "Does unknown status fail closed?"},
         )
 
     assert_that(posted).is_true()
