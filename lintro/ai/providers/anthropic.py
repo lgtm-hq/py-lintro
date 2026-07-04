@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import os
+import threading
 from collections.abc import Iterator
 from contextlib import contextmanager
 from typing import Any
@@ -22,6 +23,7 @@ from lintro.ai.exceptions import (
     AIProviderError,
     AIRateLimitError,
 )
+from lintro.ai.json_response import CliSchemaRequest
 from lintro.ai.providers.base import AIResponse, AIStreamResult, BaseAIProvider
 from lintro.ai.providers.cli_transport import CliTransport
 from lintro.ai.providers.constants import (
@@ -66,7 +68,7 @@ class _AnthropicCliTransport(CliTransport):
         )
         self._model = model
 
-    def parse_stdout(self, stdout: str) -> AIResponse:
+    def parse_stdout(self, stdout: str) -> tuple[AIResponse, str | None]:
         """Parse JSON envelope from ``claude --output-format json``."""
         try:
             data = json.loads(stdout.strip())
@@ -82,7 +84,10 @@ class _AnthropicCliTransport(CliTransport):
             )
 
         content = data.get("result", "")
-        if isinstance(content, dict):
+        structured = data.get("structured_output")
+        if structured is not None:
+            content = json.dumps(structured)
+        elif isinstance(content, dict):
             content = json.dumps(content)
         elif not isinstance(content, str):
             content = str(content)
@@ -100,13 +105,22 @@ class _AnthropicCliTransport(CliTransport):
         else:
             cost = float(cost)
 
-        return AIResponse(
-            content=self.substitute_parsed_json(content),
-            model=self._model,
-            input_tokens=input_tokens,
-            output_tokens=output_tokens,
-            cost_estimate=cost,
-            provider=AIProvider.ANTHROPIC,
+        session_id = data.get("session_id")
+        if isinstance(session_id, str) and session_id.strip():
+            session_id = session_id.strip()
+        else:
+            session_id = None
+
+        return (
+            AIResponse(
+                content=self.substitute_parsed_json(content),
+                model=self._model,
+                input_tokens=input_tokens,
+                output_tokens=output_tokens,
+                cost_estimate=cost,
+                provider=AIProvider.ANTHROPIC,
+            ),
+            session_id,
         )
 
 
@@ -188,6 +202,8 @@ class AnthropicProvider(BaseAIProvider):
                 binary_path=claude_path,
                 model=self._model,
             )
+            self._session_id: str | None = None
+            self._session_lock = threading.Lock()
             return
 
         super().__init__(
@@ -232,8 +248,8 @@ class AnthropicProvider(BaseAIProvider):
         repo_root: str | None,
         use_one_shot: bool,
         model: str | None = None,
+        cli_schema: CliSchemaRequest | None = None,
     ) -> AIResponse:
-        del use_one_shot
         if self._cli is None:
             raise AINotAvailableError("Claude CLI transport is not initialized")
 
@@ -252,9 +268,18 @@ class AnthropicProvider(BaseAIProvider):
         ]
         if system:
             cmd.extend(["--append-system-prompt", system])
+        if cli_schema is not None:
+            cmd.extend(["--json-schema", json.dumps(cli_schema.schema)])
+            if cli_schema.schema_name:
+                cmd.extend(["--json-schema-name", cli_schema.schema_name])
+        with self._session_lock:
+            resume_session_id = None if use_one_shot else self._session_id
+        if resume_session_id is not None:
+            cmd.extend(["--resume", resume_session_id])
 
         logger.debug(
             f"Claude CLI request: model={effective_model}, "
+            f"resume={resume_session_id is not None}, "
             f"prompt_len={len(prompt)}",
         )
 
@@ -272,7 +297,10 @@ class AnthropicProvider(BaseAIProvider):
             ),
         )
 
-        response = self._cli.parse_stdout(result.stdout)
+        response, session_id = self._cli.parse_stdout(result.stdout)
+        if not use_one_shot and session_id is not None:
+            with self._session_lock:
+                self._session_id = session_id
         return response
 
     def complete(
@@ -285,6 +313,7 @@ class AnthropicProvider(BaseAIProvider):
         repo_root: str | None = None,
         use_one_shot: bool = False,
         model: str | None = None,
+        cli_schema: CliSchemaRequest | None = None,
     ) -> AIResponse:
         """Generate a completion using Claude (API or CLI).
 
@@ -294,8 +323,9 @@ class AnthropicProvider(BaseAIProvider):
             max_tokens: Maximum tokens to generate (API only).
             timeout: Request timeout in seconds.
             repo_root: Working directory for CLI transport.
-            use_one_shot: Ignored for CLI transport; each call is independent.
+            use_one_shot: When True, avoid resuming CLI sessions.
             model: Optional per-call model override.
+            cli_schema: Optional native CLI JSON schema request.
 
         Returns:
             AIResponse: The model's response with usage metadata.
@@ -309,9 +339,10 @@ class AnthropicProvider(BaseAIProvider):
                 repo_root=repo_root,
                 use_one_shot=use_one_shot,
                 model=model,
+                cli_schema=cli_schema,
             )
 
-        del repo_root, use_one_shot
+        del repo_root, use_one_shot, cli_schema
         client = self._get_client()
         effective_model = model or self._model
         # Per-call cap: the lower of the caller's request and the

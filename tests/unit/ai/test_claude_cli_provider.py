@@ -88,6 +88,34 @@ class TestClaudeCliComplete:
         assert_that(cmd).contains("--append-system-prompt", "Be concise")
         assert_that(cmd).contains("--model", "claude-sonnet-4-6")
 
+    def test_cli_schema_flag_when_requested(self, _mock_claude_on_path: None) -> None:
+        """Pass --json-schema when cli_schema is provided."""
+        from lintro.ai.json_response import CliSchemaRequest
+
+        provider = AnthropicProvider(transport=AITransport.CLI)
+        schema = CliSchemaRequest(
+            schema={"type": "object"},
+            schema_name="lintro_review",
+        )
+        stdout = _cli_json(result='{"summary": "ok"}')
+        with patch("subprocess.run") as mock_run:
+            mock_run.return_value = subprocess.CompletedProcess(
+                args=[],
+                returncode=0,
+                stdout=stdout,
+                stderr="",
+            )
+            provider.complete(
+                "Review this diff",
+                system="Be concise",
+                cli_schema=schema,
+            )
+
+        cmd = mock_run.call_args.args[0]
+        assert_that(cmd).contains("--json-schema")
+        schema_arg = cmd[cmd.index("--json-schema") + 1]
+        assert_that(schema_arg).contains('"type"')
+
     def test_auth_error(self, _mock_claude_on_path: None) -> None:
         """Surface authentication failures from claude stderr."""
         provider = AnthropicProvider(transport=AITransport.CLI)

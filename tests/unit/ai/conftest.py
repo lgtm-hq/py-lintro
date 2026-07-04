@@ -58,6 +58,7 @@ class MockAIProvider(BaseAIProvider):
         repo_root: str | None = None,
         use_one_shot: bool = False,
         model: str | None = None,
+        cli_schema: object | None = None,
     ) -> AIResponse:
         """Return the next queued response or a default."""
         with self._lock:

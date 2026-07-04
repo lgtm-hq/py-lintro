@@ -297,4 +297,5 @@ def test_forwards_all_kwargs() -> None:
         repo_root=None,
         use_one_shot=False,
         model="primary-model",
+        cli_schema=None,
     )

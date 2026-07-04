@@ -10,6 +10,9 @@ from typing import Any
 __all__ = [
     "CliSchemaRequest",
     "load_json_object",
+    "parse_fix_response_payload",
+    "parse_review_response_payload",
+    "parse_summary_response_payload",
     "strip_json_fences",
 ]
 
@@ -70,3 +73,72 @@ def load_json_object(*, content: str) -> dict[str, Any]:
         raise ValueError("JSON response must be an object")
 
     return payload
+
+
+def load_json_value(*, content: str) -> dict[str, Any] | list[Any]:
+    """Parse fenced or raw JSON into an object or array.
+
+    Args:
+        content: Raw or fenced JSON model response.
+
+    Returns:
+        Parsed JSON object or array.
+
+    Raises:
+        ValueError: When JSON is invalid or not an object/array.
+    """
+    json_text = strip_json_fences(content=content)
+    try:
+        payload = json.loads(json_text)
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"Invalid JSON: {exc}") from exc
+
+    if not isinstance(payload, (dict, list)):
+        raise ValueError("JSON response must be an object or array")
+
+    return payload
+
+
+def parse_review_response_payload(*, content: str) -> dict[str, Any]:
+    """Parse and validate AI review JSON response.
+
+    Args:
+        content: Raw or fenced JSON model response.
+
+    Returns:
+        Parsed review response dictionary.
+
+    Raises:
+        ValueError: When JSON is invalid or missing required keys.
+    """
+    payload = load_json_object(content=content)
+
+    for key in ("summary", "checklist", "findings"):
+        if key not in payload:
+            raise ValueError(f"Review response missing required key: {key}")
+
+    return payload
+
+
+def parse_summary_response_payload(*, content: str) -> dict[str, Any]:
+    """Parse AI summary JSON response.
+
+    Args:
+        content: Raw or fenced JSON model response.
+
+    Returns:
+        Parsed summary payload dictionary.
+    """
+    return load_json_object(content=content)
+
+
+def parse_fix_response_payload(*, content: str) -> dict[str, Any] | list[Any]:
+    """Parse AI fix JSON response (single object or batch array).
+
+    Args:
+        content: Raw or fenced JSON model response.
+
+    Returns:
+        Parsed fix payload as an object or array.
+    """
+    return load_json_value(content=content)

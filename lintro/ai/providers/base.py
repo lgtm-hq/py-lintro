@@ -22,6 +22,7 @@ from lintro.ai.providers.stream_result import AIStreamResult  # noqa: F401
 
 if TYPE_CHECKING:
     from lintro.ai.enums import AITransport
+    from lintro.ai.json_response import CliSchemaRequest
 
 __all__ = ["AIResponse", "AIStreamResult", "BaseAIProvider"]
 
@@ -140,6 +141,7 @@ class BaseAIProvider(ABC):
         repo_root: str | None = None,
         use_one_shot: bool = False,
         model: str | None = None,
+        cli_schema: CliSchemaRequest | None = None,
     ) -> AIResponse:
         """Generate a completion from the AI model.
 
@@ -152,6 +154,7 @@ class BaseAIProvider(ABC):
             use_one_shot: When True, avoid durable sessions (Cursor only).
             model: Optional per-call model override without mutating
                 ``model_name``.
+            cli_schema: Optional native CLI JSON schema request.
 
         Returns:
             AIResponse: The model's response with usage metadata.

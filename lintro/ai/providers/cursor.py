@@ -20,6 +20,7 @@ from lintro.ai.exceptions import (
     AINotAvailableError,
     AIProviderError,
 )
+from lintro.ai.json_response import CliSchemaRequest
 from lintro.ai.providers.base import AIResponse, BaseAIProvider
 from lintro.ai.providers.cli_transport import CliTransport
 from lintro.ai.providers.constants import (
@@ -211,6 +212,7 @@ class CursorProvider(BaseAIProvider):
         repo_root: str | None = None,
         use_one_shot: bool = False,
         model: str | None = None,
+        cli_schema: CliSchemaRequest | None = None,
     ) -> AIResponse:
         """Run a completion via ``agent --print``.
 
@@ -222,12 +224,14 @@ class CursorProvider(BaseAIProvider):
             repo_root: Git repository root for ``--workspace``.
             use_one_shot: When True, do not resume an existing CLI session.
             model: Optional per-call model override.
+            cli_schema: Unused; accepted for provider API parity.
 
         Returns:
             Parsed model response with usage metadata.
         """
         effective_model = model or self._model
         effective_max = min(max_tokens, self._max_tokens)
+        del cli_schema
         combined_prompt = prompt
         if system:
             combined_prompt = f"{system}\n\n---\n\n{prompt}"

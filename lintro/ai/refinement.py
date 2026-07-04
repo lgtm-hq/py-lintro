@@ -9,7 +9,6 @@ re-validation.
 
 from __future__ import annotations
 
-import functools
 import re
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -17,12 +16,11 @@ from typing import TYPE_CHECKING
 from loguru import logger
 
 from lintro.ai.apply import apply_fixes
-from lintro.ai.fix import _call_provider
+from lintro.ai.fix import _call_fix_ai
 from lintro.ai.fix_context import extract_context, read_file_safely
 from lintro.ai.fix_parsing import parse_fix_response
 from lintro.ai.paths import resolve_workspace_file, to_provider_path
-from lintro.ai.prompts import FIX_SYSTEM, REFINEMENT_PROMPT_TEMPLATE
-from lintro.ai.retry import with_retry
+from lintro.ai.prompts import REFINEMENT_PROMPT_TEMPLATE
 from lintro.ai.sanitize import make_boundary_marker, sanitize_code_content
 from lintro.ai.secrets import redact_secrets
 
@@ -116,17 +114,6 @@ def refine_unverified_fixes(
     if not unverified_keys:
         return [], 0.0
 
-    bound_call = functools.partial(
-        _call_provider,
-        fallback_models=ai_config.fallback_models or [],
-    )
-    retrying_call = with_retry(
-        max_retries=ai_config.max_retries,
-        base_delay=ai_config.retry_base_delay,
-        max_delay=ai_config.retry_max_delay,
-        backoff_factor=ai_config.retry_backoff_factor,
-    )(bound_call)
-
     refined: list[AIFixSuggestion] = []
     total_cost = 0.0
 
@@ -213,12 +200,12 @@ def refine_unverified_fixes(
 
         # Step 3: Generate refined fix
         try:
-            response = retrying_call(
-                provider,
-                prompt,
-                FIX_SYSTEM,
-                ai_config.max_tokens,
-                ai_config.api_timeout,
+            response = _call_fix_ai(
+                provider=provider,
+                ai_config=ai_config,
+                prompt=prompt,
+                max_tokens=ai_config.max_tokens,
+                workspace_root=workspace_root,
             )
 
             refined_suggestion = parse_fix_response(
