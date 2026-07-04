@@ -248,21 +248,25 @@ class OpenAIProvider(BaseAIProvider):
         *,
         timeout: float,
         repo_root: str | None,
+        model: str | None = None,
     ) -> AIResponse:
         if self._cli is None:
             raise AINotAvailableError("Codex CLI transport is not initialized")
 
+        effective_model = model or self._model
         cmd = [
             self._cli._binary_path,
             "exec",
             "--json",
             "--sandbox",
             "read-only",
+            "--model",
+            effective_model,
             prompt,
         ]
 
         logger.debug(
-            f"Codex CLI request: model={self._model}, prompt_len={len(prompt)}",
+            f"Codex CLI request: model={effective_model}, prompt_len={len(prompt)}",
         )
 
         result = self._cli.run(
@@ -311,6 +315,7 @@ class OpenAIProvider(BaseAIProvider):
                 combined,
                 timeout=timeout,
                 repo_root=repo_root,
+                model=model,
             )
 
         del repo_root, use_one_shot

@@ -164,10 +164,6 @@ class AIConfig(BaseModel):
 
     @model_validator(mode="after")
     def _validate_transport_and_retries(self) -> AIConfig:
-        if self.enabled and self.transport is None:
-            msg = "ai.transport is required when ai.enabled is true (api or cli)"
-            raise ValueError(msg)
-
         if self.transport == AITransport.API and self.provider == AIProvider.CURSOR:
             msg = (
                 "cursor provider only supports transport: cli "

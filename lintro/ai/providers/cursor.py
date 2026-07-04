@@ -217,7 +217,6 @@ class CursorProvider(BaseAIProvider):
             AIAuthenticationError: When the CLI reports an auth failure.
             AIProviderError: When the CLI exits with an error or returns
                 invalid JSON.
-            AINotAvailableError: If the ``agent`` binary is not on PATH.
         """
         effective_model = model or self._model
         effective_max = min(max_tokens, self._max_tokens)

@@ -66,7 +66,7 @@ class TestCodexCliComplete:
 
     def test_success(self, _mock_codex_on_path: None) -> None:
         """Parse JSONL output from a successful codex exec invocation."""
-        provider = OpenAIProvider(transport=AITransport.CLI)
+        provider = OpenAIProvider(model="gpt-5.2-codex", transport=AITransport.CLI)
         stdout = _jsonl_response()
         with patch("subprocess.run") as mock_run:
             mock_run.return_value = subprocess.CompletedProcess(
@@ -81,6 +81,7 @@ class TestCodexCliComplete:
         assert_that(response.provider).is_equal_to(AIProvider.OPENAI)
         cmd = mock_run.call_args.args[0]
         assert_that(cmd).contains("exec", "--json", "--sandbox", "read-only")
+        assert_that(cmd).contains("--model", "gpt-5.2-codex")
 
     def test_auth_error(self, _mock_codex_on_path: None) -> None:
         """Surface authentication failures from codex stderr."""

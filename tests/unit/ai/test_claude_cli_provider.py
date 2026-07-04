@@ -67,7 +67,10 @@ class TestClaudeCliComplete:
 
     def test_success(self, _mock_claude_on_path: None) -> None:
         """Parse JSON output from a successful claude -p invocation."""
-        provider = AnthropicProvider(transport=AITransport.CLI)
+        provider = AnthropicProvider(
+            model="claude-sonnet-4-6",
+            transport=AITransport.CLI,
+        )
         stdout = _cli_json(result='{"summary": "ok"}')
         with patch("subprocess.run") as mock_run:
             mock_run.return_value = subprocess.CompletedProcess(
@@ -83,6 +86,7 @@ class TestClaudeCliComplete:
         cmd = mock_run.call_args.args[0]
         assert_that(cmd).contains("--bare", "-p", "--output-format", "json")
         assert_that(cmd).contains("--append-system-prompt", "Be concise")
+        assert_that(cmd).contains("--model", "claude-sonnet-4-6")
 
     def test_auth_error(self, _mock_claude_on_path: None) -> None:
         """Surface authentication failures from claude stderr."""

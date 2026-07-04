@@ -74,26 +74,21 @@ def call_ai(
             use_one_shot=use_one_shot,
         )
 
-    if budget is not None:
-        try:
-            budget.check()
-        except AIError:
-            raise
-
     try:
-        response = cast(AIResponse, _call())
+        if budget is not None:
+            return cast(
+                AIResponse,
+                budget.execute(
+                    _call,
+                    cost_of=lambda response: response.cost_estimate,
+                ),
+            )
+        return cast(AIResponse, _call())
     except AIAuthenticationError:
         raise
     except AIRateLimitError:
         raise
     except AIProviderError:
         raise
-
-    if budget is not None:
-        budget.record(response.cost_estimate)
-        try:
-            budget.check()
-        except AIError:
-            raise
-
-    return response
+    except AIError:
+        raise

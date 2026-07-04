@@ -232,10 +232,12 @@ class AnthropicProvider(BaseAIProvider):
         timeout: float,
         repo_root: str | None,
         use_one_shot: bool,
+        model: str | None = None,
     ) -> AIResponse:
         if self._cli is None:
             raise AINotAvailableError("Claude CLI transport is not initialized")
 
+        effective_model = model or self._model
         cmd = [
             self._cli._binary_path,
             "--bare",
@@ -245,6 +247,8 @@ class AnthropicProvider(BaseAIProvider):
             "json",
             "--permission-mode",
             "dontAsk",
+            "--model",
+            effective_model,
         ]
         if system:
             cmd.extend(["--append-system-prompt", system])
@@ -252,7 +256,7 @@ class AnthropicProvider(BaseAIProvider):
             cmd.extend(["--resume", self._session_id])
 
         logger.debug(
-            f"Claude CLI request: model={self._model}, "
+            f"Claude CLI request: model={effective_model}, "
             f"resume={self._session_id is not None and not use_one_shot}, "
             f"prompt_len={len(prompt)}",
         )
@@ -315,6 +319,7 @@ class AnthropicProvider(BaseAIProvider):
                 timeout=timeout,
                 repo_root=repo_root,
                 use_one_shot=use_one_shot,
+                model=model,
             )
 
         del repo_root, use_one_shot

@@ -356,7 +356,7 @@ def test_run_review_aborts_progress_when_chunk_review_fails() -> None:
 
     with (
         patch(
-            "lintro.ai.review.orchestrator.complete_with_fallback",
+            "lintro.ai.review.orchestrator.call_ai",
             side_effect=RuntimeError("provider failed"),
         ),
         pytest.raises(ReviewExecutionError),
@@ -364,7 +364,7 @@ def test_run_review_aborts_progress_when_chunk_review_fails() -> None:
         run_review(
             context,
             provider=provider,
-            ai_config=AIConfig(enabled=True),
+            ai_config=AIConfig(enabled=True, transport="api"),  # type: ignore[arg-type]
             depth=1,
             checklist_items=[],
             checklist_text="1. [logic-bug] Example?",
@@ -400,7 +400,7 @@ def test_run_review_propagates_chunk_error_when_progress_abort_raises() -> None:
 
     with (
         patch(
-            "lintro.ai.review.orchestrator.complete_with_fallback",
+            "lintro.ai.review.orchestrator.call_ai",
             side_effect=RuntimeError("provider failed"),
         ),
         pytest.raises(ReviewExecutionError) as exc_info,
@@ -408,7 +408,7 @@ def test_run_review_propagates_chunk_error_when_progress_abort_raises() -> None:
         run_review(
             context,
             provider=provider,
-            ai_config=AIConfig(enabled=True),
+            ai_config=AIConfig(enabled=True, transport="api"),  # type: ignore[arg-type]
             depth=1,
             checklist_items=[],
             checklist_text="1. [logic-bug] Example?",
@@ -453,10 +453,10 @@ def test_run_review_returns_result_when_progress_complete_raises() -> None:
     progress.on_complete.side_effect = BrokenPipeError()
 
     with patch(
-        "lintro.ai.review.orchestrator.complete_with_fallback",
-        side_effect=lambda _provider, _prompt, **kwargs: _provider.complete(
-            _prompt,
-            system=kwargs.get("system"),
+        "lintro.ai.review.orchestrator.call_ai",
+        side_effect=lambda *, provider, user_prompt, **kwargs: provider.complete(
+            user_prompt,
+            system=kwargs.get("system_prompt"),
             max_tokens=kwargs.get("max_tokens", 1024),
             timeout=kwargs.get("timeout", 60.0),
         ),
@@ -464,7 +464,7 @@ def test_run_review_returns_result_when_progress_complete_raises() -> None:
         result = run_review(
             context,
             provider=provider,
-            ai_config=AIConfig(enabled=True),
+            ai_config=AIConfig(enabled=True, transport="api"),  # type: ignore[arg-type]
             depth=1,
             checklist_items=checklist_items,
             checklist_text="1. [logic-bug] Example?",

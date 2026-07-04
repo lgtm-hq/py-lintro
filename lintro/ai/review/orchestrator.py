@@ -437,7 +437,7 @@ def run_review(
         and hasattr(provider, "begin_durable_session")
     )
     repo_root = context.repo_root or os.getcwd()
-    use_one_shot = provider.name == AIProvider.CURSOR and len(chunks) > 1
+    use_one_shot = len(chunks) > 1
 
     if use_cursor_durable:
         provider.begin_durable_session(repo_root=repo_root)

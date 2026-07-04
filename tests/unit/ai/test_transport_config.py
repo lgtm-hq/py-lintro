@@ -7,7 +7,9 @@ from assertpy import assert_that
 from pydantic import ValidationError
 
 from lintro.ai.config import AIConfig
+from lintro.ai.doctor_checks import check_ai_configuration
 from lintro.ai.enums import AITransport
+from lintro.enums.tool_status import ToolStatus
 
 
 def test_transport_optional_when_ai_disabled() -> None:
@@ -16,10 +18,18 @@ def test_transport_optional_when_ai_disabled() -> None:
     assert_that(config.transport).is_none()
 
 
-def test_transport_required_when_ai_enabled() -> None:
-    """Enabled AI config requires explicit transport."""
-    with pytest.raises(ValidationError, match="ai.transport is required"):
-        AIConfig(enabled=True)
+def test_transport_deferred_to_doctor_when_ai_enabled() -> None:
+    """Enabled AI config may omit transport until doctor validates it."""
+    config = AIConfig(enabled=True)
+    assert_that(config.transport).is_none()
+
+
+def test_doctor_reports_missing_transport_when_ai_enabled() -> None:
+    """Doctor surfaces missing transport instead of raw config validation."""
+    results = check_ai_configuration(AIConfig(enabled=True))
+    assert_that(results).is_length(1)
+    assert_that(results[0].name).is_equal_to("ai.transport")
+    assert_that(results[0].status).is_equal_to(ToolStatus.INCOMPATIBLE)
 
 
 def test_cursor_api_combo_rejected() -> None:
