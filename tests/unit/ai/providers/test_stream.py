@@ -34,7 +34,9 @@ class _StubProvider(BaseAIProvider):
         timeout: float = DEFAULT_TIMEOUT,
         repo_root: str | None = None,
         use_one_shot: bool = False,
+        model: str | None = None,
     ) -> AIResponse:
+        del model
         return self._response
 
 
@@ -140,6 +142,7 @@ def test_base_provider_stream_complete_passes_kwargs() -> None:
             timeout: float = DEFAULT_TIMEOUT,
             repo_root: str | None = None,
             use_one_shot: bool = False,
+            model: str | None = None,
         ) -> AIResponse:
             calls.append(
                 {
@@ -147,6 +150,7 @@ def test_base_provider_stream_complete_passes_kwargs() -> None:
                     "system": system,
                     "max_tokens": max_tokens,
                     "timeout": timeout,
+                    "model": model,
                 },
             )
             return _make_response()
