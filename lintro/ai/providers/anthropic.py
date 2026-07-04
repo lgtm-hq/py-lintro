@@ -192,6 +192,7 @@ class AnthropicProvider(BaseAIProvider):
                 binary_path=claude_path,
                 model=self._model,
             )
+            self._session_id: str | None = None
             return
 
         super().__init__(
