@@ -10,6 +10,7 @@ import os
 import subprocess  # nosec B404 - subprocess used safely with shell=False
 import sys
 import threading
+import time
 from typing import TYPE_CHECKING
 
 from loguru import logger
@@ -295,7 +296,12 @@ def run_subprocess_streaming(
                     if line_handler:
                         line_handler(stripped)
 
-        # Use a thread to read output so we can enforce timeout
+        # Use a thread to read output so we can enforce timeout.
+        # Track elapsed wall time so the reader join and the subsequent
+        # process.wait() share a single timeout budget rather than each
+        # receiving the full timeout (which could allow ~2x the configured
+        # limit). See issue #1047.
+        start_time = time.monotonic()
         reader_thread = threading.Thread(target=read_output, daemon=True)
         reader_thread.start()
         reader_thread.join(timeout=timeout)
@@ -315,9 +321,12 @@ def run_subprocess_streaming(
                 output="\n".join(output_lines),
             )
 
-        # Reading completed, now wait for process to finish
+        # Reading completed, now wait for process to finish using only the
+        # remaining slice of the timeout budget.
+        elapsed = time.monotonic() - start_time
+        remaining_timeout = max(0.0, timeout - elapsed)
         try:
-            returncode = process.wait(timeout=timeout)
+            returncode = process.wait(timeout=remaining_timeout)
         except subprocess.TimeoutExpired as e:
             logger.warning(
                 f"Subprocess {cmd[0]} timed out after {timeout}s (during wait)",
