@@ -15,12 +15,12 @@ from lintro.enums.output_format import OutputFormat
 from lintro.utils.output.file_writer import write_output_file
 
 if TYPE_CHECKING:
-    from .conftest import MockToolResult
+    from lintro.models.core.tool_result import ToolResult
 
 
 def test_write_csv_file_creates_valid_file_with_headers(
     tmp_path: Path,
-    sample_results_empty: list[MockToolResult],
+    sample_results_empty: list[ToolResult],
 ) -> None:
     """Verify CSV file contains proper header row with all required columns.
 
@@ -33,7 +33,7 @@ def test_write_csv_file_creates_valid_file_with_headers(
     write_output_file(
         output_path=str(output_path),
         output_format=OutputFormat.CSV,
-        all_results=sample_results_empty,  # type: ignore[arg-type]
+        all_results=sample_results_empty,
         action=Action.CHECK,
         total_issues=0,
         total_fixed=0,
@@ -55,7 +55,7 @@ def test_write_csv_file_creates_valid_file_with_headers(
 
 def test_write_csv_file_includes_issue_data(
     tmp_path: Path,
-    sample_results_with_issues: list[MockToolResult],
+    sample_results_with_issues: list[ToolResult],
 ) -> None:
     """Verify CSV output includes issue details in data rows.
 
@@ -68,7 +68,7 @@ def test_write_csv_file_includes_issue_data(
     write_output_file(
         output_path=str(output_path),
         output_format=OutputFormat.CSV,
-        all_results=sample_results_with_issues,  # type: ignore[arg-type]
+        all_results=sample_results_with_issues,
         action=Action.CHECK,
         total_issues=1,
         total_fixed=0,

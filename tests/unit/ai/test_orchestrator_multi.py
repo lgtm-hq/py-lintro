@@ -9,6 +9,7 @@ from unittest.mock import MagicMock, patch
 from assertpy import assert_that
 
 from lintro.ai.config import AIConfig
+from lintro.ai.enums import AITransport
 from lintro.ai.models import AIFixSuggestion
 from lintro.ai.orchestrator import run_ai_enhancement
 from lintro.ai.rerun import _rerun_cwd_lock, paths_for_context, rerun_tools
@@ -16,6 +17,7 @@ from lintro.ai.validation import ValidationResult
 from lintro.config.lintro_config import LintroConfig
 from lintro.enums.action import Action
 from lintro.models.core.tool_result import ToolResult
+from lintro.parsers.base_issue import BaseIssue
 from tests.unit.ai.conftest import MockAIProvider, MockIssue
 
 # ---------------------------------------------------------------------------
@@ -65,7 +67,7 @@ def test_run_ai_enhancement_fix_action_noninteractive_applies_safe_then_reviews_
     config = LintroConfig(
         ai=AIConfig(
             enabled=True,
-            transport="api",  # type: ignore[arg-type]
+            transport=AITransport.API,
             auto_apply=False,
             auto_apply_safe_fixes=True,
         ),
@@ -153,7 +155,7 @@ def test_run_ai_enhancement_fix_action_json_auto_applies_safe_style_suggestions(
     config = LintroConfig(
         ai=AIConfig(
             enabled=True,
-            transport="api",  # type: ignore[arg-type]
+            transport=AITransport.API,
             max_fix_attempts=5,
             auto_apply=False,
             auto_apply_safe_fixes=True,
@@ -243,7 +245,7 @@ def test_run_ai_enhancement_fix_action_json_uses_fresh_rerun_results(
     config = LintroConfig(
         ai=AIConfig(
             enabled=True,
-            transport="api",  # type: ignore[arg-type]
+            transport=AITransport.API,
             auto_apply=True,
         ),
     )
@@ -317,7 +319,9 @@ def test_rerun_context_rerun_uses_original_tool_cwd(mock_get_tool, tmp_path):
         remaining_issues_count=1,
         cwd=str(tool_cwd),
     )
-    by_tool = {"ruff": (original_result, [issue])}
+    by_tool: dict[str, tuple[ToolResult, list[BaseIssue]]] = {
+        "ruff": (original_result, [issue]),
+    }
 
     captured: dict[str, object] = {}
 
@@ -335,7 +339,7 @@ def test_rerun_context_rerun_uses_original_tool_cwd(mock_get_tool, tmp_path):
             )
 
     mock_get_tool.return_value = _FakeTool()
-    rerun_results = rerun_tools(by_tool)  # type: ignore[arg-type]  # test uses simplified mock data
+    rerun_results = rerun_tools(by_tool)
 
     assert_that(rerun_results).is_length(1)
     assert_that(captured.get("cwd")).is_equal_to(str(tool_cwd))
@@ -396,11 +400,11 @@ def test_rerun_context_rerun_continues_on_tool_failure(mock_get_tool, tmp_path):
 
     mock_get_tool.side_effect = _side_effect
 
-    by_tool = {
+    by_tool: dict[str, tuple[ToolResult, list[BaseIssue]]] = {
         "failing-tool": (result_a, [issue_a]),
         "passing-tool": (result_b, [issue_b]),
     }
-    rerun_results = rerun_tools(by_tool)  # type: ignore[arg-type]  # test uses simplified mock data
+    rerun_results = rerun_tools(by_tool)
 
     assert_that(call_count["failing"]).is_equal_to(1)
     assert_that(call_count["passing"]).is_equal_to(1)

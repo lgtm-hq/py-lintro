@@ -12,6 +12,7 @@ import pytest
 from assertpy import assert_that
 
 from lintro.ai.config import AIConfig
+from lintro.ai.enums import AITransport
 from lintro.ai.providers.response import AIResponse
 from lintro.ai.review.enums.review_category import ReviewCategory
 from lintro.ai.review.exceptions import ReviewExecutionError
@@ -126,7 +127,7 @@ def test_run_review_depth1_returns_review_result() -> None:
         result = run_review(
             context,
             provider=provider,
-            ai_config=AIConfig(enabled=True, transport="api"),  # type: ignore[arg-type]
+            ai_config=AIConfig(enabled=True, transport=AITransport.API),
             depth=1,
             checklist_items=checklist_items,
             checklist_text="1. [logic-bug] Example?",
@@ -152,7 +153,7 @@ def test_run_review_empty_diff_returns_empty_result() -> None:
     result = run_review(
         context,
         provider=provider,
-        ai_config=AIConfig(enabled=True, transport="api"),  # type: ignore[arg-type]
+        ai_config=AIConfig(enabled=True, transport=AITransport.API),
         depth=1,
         checklist_items=[],
         checklist_text="",
@@ -212,7 +213,7 @@ def test_run_review_depth2_calls_provider_twice() -> None:
         result = run_review(
             context,
             provider=provider,
-            ai_config=AIConfig(enabled=True, transport="api"),  # type: ignore[arg-type]
+            ai_config=AIConfig(enabled=True, transport=AITransport.API),
             depth=2,
             checklist_items=[],
             checklist_text="1. [logic-bug] Example?",
@@ -324,7 +325,11 @@ def test_run_review_parallelizes_multiple_chunks(tmp_path: Path) -> None:
         run_review(
             context,
             provider=provider,
-            ai_config=AIConfig(enabled=True, transport="api", max_parallel_calls=4),  # type: ignore[arg-type]
+            ai_config=AIConfig(
+                enabled=True,
+                transport=AITransport.API,
+                max_parallel_calls=4,
+            ),
             depth=1,
             checklist_items=[],
             checklist_text="1. [logic-bug] Example?",
@@ -364,7 +369,7 @@ def test_run_review_aborts_progress_when_chunk_review_fails() -> None:
         run_review(
             context,
             provider=provider,
-            ai_config=AIConfig(enabled=True, transport="api"),  # type: ignore[arg-type]
+            ai_config=AIConfig(enabled=True, transport=AITransport.API),
             depth=1,
             checklist_items=[],
             checklist_text="1. [logic-bug] Example?",
@@ -408,7 +413,7 @@ def test_run_review_propagates_chunk_error_when_progress_abort_raises() -> None:
         run_review(
             context,
             provider=provider,
-            ai_config=AIConfig(enabled=True, transport="api"),  # type: ignore[arg-type]
+            ai_config=AIConfig(enabled=True, transport=AITransport.API),
             depth=1,
             checklist_items=[],
             checklist_text="1. [logic-bug] Example?",
@@ -464,7 +469,7 @@ def test_run_review_returns_result_when_progress_complete_raises() -> None:
         result = run_review(
             context,
             provider=provider,
-            ai_config=AIConfig(enabled=True, transport="api"),  # type: ignore[arg-type]
+            ai_config=AIConfig(enabled=True, transport=AITransport.API),
             depth=1,
             checklist_items=checklist_items,
             checklist_text="1. [logic-bug] Example?",

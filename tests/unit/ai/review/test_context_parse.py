@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Any, cast
+
 import pytest
 from assertpy import assert_that
 
@@ -404,7 +406,7 @@ def test_review_context_error_coerces_string_code() -> None:
 def test_review_context_error_rejects_invalid_code_type() -> None:
     """Non-string, non-enum codes raise TypeError."""
     with pytest.raises(TypeError, match="ReviewContextErrorCode"):
-        ReviewContextError("bad code", code=123)  # type: ignore[arg-type]
+        ReviewContextError("bad code", code=cast(Any, 123))
 
 
 def test_parse_changed_files_supports_newlines_in_numstat_z_paths() -> None:

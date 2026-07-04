@@ -13,6 +13,7 @@ from unittest.mock import MagicMock, patch
 from assertpy import assert_that
 
 from lintro.ai.config import AIConfig
+from lintro.ai.enums import AITransport
 from lintro.ai.models import AIFixSuggestion
 from lintro.ai.pipeline import run_fix_pipeline
 from lintro.ai.validation import ValidationResult
@@ -71,7 +72,7 @@ def test_context_lines_flows_to_generate_fixes(
     fix_issues, _result, _issue = _make_fix_issues()
     mock_generate_fixes.return_value = []
 
-    ai_config = AIConfig(enabled=True, transport="api", context_lines=42)  # type: ignore[arg-type]
+    ai_config = AIConfig(enabled=True, transport=AITransport.API, context_lines=42)
 
     run_fix_pipeline(
         fix_issues=fix_issues,
@@ -114,7 +115,7 @@ def test_fix_search_radius_flows_to_apply_fixes(
 
     ai_config = AIConfig(
         enabled=True,
-        transport="api",  # type: ignore[arg-type]
+        transport=AITransport.API,
         auto_apply=True,
         fix_search_radius=25,
     )
@@ -157,7 +158,7 @@ def test_retry_delays_flow_to_generate_fixes(
 
     ai_config = AIConfig(
         enabled=True,
-        transport="api",  # type: ignore[arg-type]
+        transport=AITransport.API,
         retry_base_delay=0.5,
         retry_max_delay=10.0,
         retry_backoff_factor=3.0,
@@ -212,7 +213,7 @@ def test_timeout_and_retries_flow_to_post_fix_summary(
 
     ai_config = AIConfig(
         enabled=True,
-        transport="api",  # type: ignore[arg-type]
+        transport=AITransport.API,
         auto_apply=True,
         api_timeout=120.0,
         max_retries=5,
@@ -262,7 +263,7 @@ def test_timeout_and_retries_flow_to_generate_summary(
     config = LintroConfig(
         ai=AIConfig(
             enabled=True,
-            transport="api",  # type: ignore[arg-type]
+            transport=AITransport.API,
             api_timeout=90.0,
             max_retries=4,
             retry_base_delay=1.5,

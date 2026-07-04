@@ -17,12 +17,12 @@ from lintro.utils.output.file_writer import write_output_file
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-    from .conftest import MockToolResult
+    from lintro.models.core.tool_result import ToolResult
 
 
 def test_write_plain_file_creates_valid_structure(
     tmp_path: Path,
-    mock_tool_result_factory: Callable[..., MockToolResult],
+    mock_tool_result_factory: Callable[..., ToolResult],
 ) -> None:
     """Verify plain text file contains report header and summary totals.
 
@@ -36,7 +36,7 @@ def test_write_plain_file_creates_valid_structure(
     write_output_file(
         output_path=str(output_path),
         output_format=OutputFormat.PLAIN,
-        all_results=results,  # type: ignore[arg-type]
+        all_results=results,
         action=Action.CHECK,
         total_issues=5,
         total_fixed=0,
@@ -53,7 +53,7 @@ def test_write_plain_file_creates_valid_structure(
 
 def test_write_plain_file_shows_fixed_count_for_fix_action(
     tmp_path: Path,
-    sample_results_empty: list[MockToolResult],
+    sample_results_empty: list[ToolResult],
 ) -> None:
     """Verify fix action report includes 'Total Fixed' instead of just issues.
 
@@ -66,7 +66,7 @@ def test_write_plain_file_shows_fixed_count_for_fix_action(
     write_output_file(
         output_path=str(output_path),
         output_format=OutputFormat.PLAIN,
-        all_results=sample_results_empty,  # type: ignore[arg-type]
+        all_results=sample_results_empty,
         action=Action.FIX,
         total_issues=0,
         total_fixed=5,
@@ -80,7 +80,7 @@ def test_write_plain_file_shows_fixed_count_for_fix_action(
 
 def test_write_plain_fix_mode_shows_detected_and_remaining(
     tmp_path: Path,
-    mock_tool_result_factory: Callable[..., MockToolResult],
+    mock_tool_result_factory: Callable[..., ToolResult],
 ) -> None:
     """Fix-mode plain output renders Detected and Remaining tables.
 
@@ -130,7 +130,7 @@ def test_write_plain_fix_mode_shows_detected_and_remaining(
     write_output_file(
         output_path=str(output_path),
         output_format=OutputFormat.PLAIN,
-        all_results=results,  # type: ignore[arg-type]
+        all_results=results,
         action=Action.FIX,
         total_issues=1,
         total_fixed=1,

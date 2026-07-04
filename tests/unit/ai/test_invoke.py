@@ -9,6 +9,7 @@ from assertpy import assert_that
 
 from lintro.ai.budget import CostBudget
 from lintro.ai.config import AIConfig
+from lintro.ai.enums import AITransport
 from lintro.ai.exceptions import AIError, AIProviderError
 from lintro.ai.invoke import call_ai
 from lintro.ai.providers.response import AIResponse
@@ -31,7 +32,7 @@ def test_call_ai_returns_response_and_records_budget() -> None:
     provider.complete.return_value = _response(cost=0.02)
     config = AIConfig(
         enabled=True,
-        transport="api",  # type: ignore[arg-type]
+        transport=AITransport.API,
         max_retries=0,
     )
     budget = CostBudget(max_cost_usd=1.0)
@@ -57,7 +58,7 @@ def test_call_ai_retries_on_provider_error() -> None:
     ]
     config = AIConfig(
         enabled=True,
-        transport="api",  # type: ignore[arg-type]
+        transport=AITransport.API,
         max_retries=1,
         retry_base_delay=0.1,
         retry_max_delay=1.0,
@@ -82,7 +83,7 @@ def test_call_ai_returns_response_when_single_call_exceeds_budget() -> None:
     provider.complete.return_value = _response(cost=0.50)
     config = AIConfig(
         enabled=True,
-        transport="api",  # type: ignore[arg-type]
+        transport=AITransport.API,
         max_retries=0,
     )
     budget = CostBudget(max_cost_usd=0.10)
@@ -105,7 +106,7 @@ def test_call_ai_raises_when_budget_already_exceeded() -> None:
     provider.complete.return_value = _response(cost=0.50)
     config = AIConfig(
         enabled=True,
-        transport="api",  # type: ignore[arg-type]
+        transport=AITransport.API,
         max_retries=0,
     )
     budget = CostBudget(max_cost_usd=0.10)

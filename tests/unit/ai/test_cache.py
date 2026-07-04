@@ -18,17 +18,24 @@ from lintro.ai.cache import (
 from lintro.ai.models import AIFixSuggestion
 
 
-def _make_suggestion(**kwargs: object) -> AIFixSuggestion:
+def _make_suggestion(
+    *,
+    file: str = "test.py",
+    line: int = 1,
+    code: str = "E001",
+    original_code: str = "x",
+    suggested_code: str = "y",
+    **kwargs: str | int | float,
+) -> AIFixSuggestion:
     """Create a minimal AIFixSuggestion for tests."""
-    defaults = {
-        "file": "test.py",
-        "line": 1,
-        "code": "E001",
-        "original_code": "x",
-        "suggested_code": "y",
-    }
-    defaults.update(kwargs)
-    return AIFixSuggestion(**defaults)  # type: ignore[arg-type]
+    return AIFixSuggestion(
+        file=file,
+        line=line,
+        code=code,
+        original_code=original_code,
+        suggested_code=suggested_code,
+        **kwargs,
+    )
 
 
 # -- _cache_key --------------------------------------------------------------

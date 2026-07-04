@@ -9,8 +9,10 @@ from typing import Any
 import pytest
 
 from lintro.ai.config import AIConfig
+from lintro.ai.enums import AITransport
 from lintro.ai.models import AIFixSuggestion
 from lintro.ai.providers.base import AIResponse, BaseAIProvider
+from lintro.ai.registry import AIProvider
 from lintro.parsers.base_issue import BaseIssue
 
 
@@ -108,8 +110,8 @@ def ai_config() -> AIConfig:
     """Create a default AI config for testing."""
     return AIConfig(
         enabled=True,
-        provider="anthropic",  # type: ignore[arg-type]
-        transport="api",  # type: ignore[arg-type]
+        provider=AIProvider.ANTHROPIC,
+        transport=AITransport.API,
     )
 
 
