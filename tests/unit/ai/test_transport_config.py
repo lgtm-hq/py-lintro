@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import pytest
 from assertpy import assert_that
-from pydantic import ValidationError
 
 from lintro.ai.config import AIConfig
 from lintro.ai.doctor_checks import check_ai_configuration
@@ -33,14 +32,18 @@ def test_doctor_reports_missing_transport_when_ai_enabled() -> None:
     assert_that(results[0].status).is_equal_to(ToolStatus.INCOMPATIBLE)
 
 
-def test_cursor_api_combo_rejected_when_enabled() -> None:
-    """Cursor + api is invalid when AI is enabled."""
-    with pytest.raises(ValidationError, match="cursor provider only supports"):
+def test_doctor_reports_cursor_api_combo_when_enabled() -> None:
+    """Doctor surfaces invalid cursor+api instead of raw config validation."""
+    results = check_ai_configuration(
         AIConfig(
             enabled=True,
             provider=AIProvider.CURSOR,
             transport=AITransport.API,
-        )
+        ),
+    )
+    assert_that(results).is_length(1)
+    assert_that(results[0].name).is_equal_to("ai.provider+transport")
+    assert_that(results[0].status).is_equal_to(ToolStatus.INCOMPATIBLE)
 
 
 def test_cursor_api_combo_allowed_when_disabled() -> None:
