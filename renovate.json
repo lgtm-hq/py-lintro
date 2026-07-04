@@ -78,7 +78,8 @@
       "matchManagers": ["custom.regex"],
       "matchFileNames": [
         "Dockerfile",
-        "lintro/_tool_versions.py"
+        "lintro/_tool_versions.py",
+        "lintro/tools/manifest.json"
       ],
       "postUpgradeTasks": {
         "commands": [
