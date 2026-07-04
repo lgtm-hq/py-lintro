@@ -8,6 +8,7 @@ from dataclasses import dataclass
 
 from lintro.ai.availability import (
     codex_auth_configured,
+    is_provider_available,
     provider_api_key_env,
     provider_cli_binary,
 )
@@ -107,6 +108,19 @@ def check_ai_configuration(config: AIConfig) -> list[AICheckResult]:
         return results
 
     # API transport
+    if not is_provider_available(provider, transport=AITransport.API):
+        results.append(
+            AICheckResult(
+                name=f"ai.api.sdk.{provider.value}",
+                status=ToolStatus.MISSING,
+                message=(
+                    f"Provider SDK for {provider.value} API transport is not installed"
+                ),
+                hint="Install with: uv pip install 'lintro[ai]'",
+            ),
+        )
+        return results
+
     key_env = config.api_key_env or provider_api_key_env(provider)
     if config.api_base_url or os.environ.get(key_env):
         results.append(

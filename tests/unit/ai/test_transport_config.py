@@ -9,6 +9,7 @@ from pydantic import ValidationError
 from lintro.ai.config import AIConfig
 from lintro.ai.doctor_checks import check_ai_configuration
 from lintro.ai.enums import AITransport
+from lintro.ai.registry import AIProvider
 from lintro.enums.tool_status import ToolStatus
 
 
@@ -32,34 +33,44 @@ def test_doctor_reports_missing_transport_when_ai_enabled() -> None:
     assert_that(results[0].status).is_equal_to(ToolStatus.INCOMPATIBLE)
 
 
-def test_cursor_api_combo_rejected() -> None:
-    """Cursor + api is an invalid provider/transport combination."""
+def test_cursor_api_combo_rejected_when_enabled() -> None:
+    """Cursor + api is invalid when AI is enabled."""
     with pytest.raises(ValidationError, match="cursor provider only supports"):
         AIConfig(
             enabled=True,
-            provider="cursor",  # type: ignore[arg-type]
+            provider=AIProvider.CURSOR,
             transport=AITransport.API,
         )
+
+
+def test_cursor_api_combo_allowed_when_disabled() -> None:
+    """Disabled configs may keep stale cursor/api settings for doctor."""
+    config = AIConfig(
+        enabled=False,
+        provider=AIProvider.CURSOR,
+        transport=AITransport.API,
+    )
+    assert_that(config.transport).is_equal_to(AITransport.API)
 
 
 @pytest.mark.parametrize(
     ("provider", "transport"),
     [
-        ("anthropic", AITransport.API),
-        ("anthropic", AITransport.CLI),
-        ("openai", AITransport.API),
-        ("openai", AITransport.CLI),
-        ("cursor", AITransport.CLI),
+        (AIProvider.ANTHROPIC, AITransport.API),
+        (AIProvider.ANTHROPIC, AITransport.CLI),
+        (AIProvider.OPENAI, AITransport.API),
+        (AIProvider.OPENAI, AITransport.CLI),
+        (AIProvider.CURSOR, AITransport.CLI),
     ],
 )
 def test_valid_provider_transport_matrix(
-    provider: str,
+    provider: AIProvider,
     transport: AITransport,
 ) -> None:
     """Valid provider and transport pairs are accepted."""
     config = AIConfig(
         enabled=True,
-        provider=provider,  # type: ignore[arg-type]
+        provider=provider,
         transport=transport,
     )
     assert_that(config.transport).is_equal_to(transport)
@@ -67,8 +78,5 @@ def test_valid_provider_transport_matrix(
 
 def test_transport_yaml_string_coercion() -> None:
     """Transport accepts hyphenated string values from YAML."""
-    config = AIConfig(
-        enabled=True,
-        transport="cli",  # type: ignore[arg-type]
-    )
+    config = AIConfig.model_validate({"enabled": True, "transport": "cli"})
     assert_that(config.transport).is_equal_to(AITransport.CLI)

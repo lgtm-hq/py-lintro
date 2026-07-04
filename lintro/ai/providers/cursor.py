@@ -17,7 +17,6 @@ from loguru import logger
 
 from lintro.ai.enums import AITransport
 from lintro.ai.exceptions import (
-    AIAuthenticationError,
     AINotAvailableError,
     AIProviderError,
 )
@@ -202,7 +201,7 @@ class CursorProvider(BaseAIProvider):
         self._session_id = None
         self._durable_repo_root = None
 
-    def complete(
+    def complete(  # noqa: DOC502
         self,
         prompt: str,
         *,
@@ -272,22 +271,17 @@ class CursorProvider(BaseAIProvider):
         )
 
         effective_timeout = max(timeout, CURSOR_MIN_TIMEOUT)
-        try:
-            result = self._cli.run(
-                cmd,
-                input_text=combined_prompt,
-                timeout=effective_timeout,
-            )
-            self._cli.check_exit_code(
-                result,
-                auth_patterns=("authentication required", "login"),
-                auth_hint="Run 'agent login' or set CURSOR_API_KEY.",
-            )
-            response, session_id = self._cli.parse_stdout(result.stdout)
-        except AIAuthenticationError:
-            raise
-        except AIProviderError:
-            raise
+        result = self._cli.run(
+            cmd,
+            input_text=combined_prompt,
+            timeout=effective_timeout,
+        )
+        self._cli.check_exit_code(
+            result,
+            auth_patterns=("authentication required", "login"),
+            auth_hint="Run 'agent login' or set CURSOR_API_KEY.",
+        )
+        response, session_id = self._cli.parse_stdout(result.stdout)
 
         if not use_one_shot and self._durable_repo_root is not None and session_id:
             self._session_id = session_id

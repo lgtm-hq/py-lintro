@@ -5,12 +5,6 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, cast
 
 from lintro.ai.budget import CostBudget
-from lintro.ai.exceptions import (
-    AIAuthenticationError,
-    AIError,
-    AIProviderError,
-    AIRateLimitError,
-)
 from lintro.ai.fallback import complete_with_fallback
 from lintro.ai.providers.response import AIResponse
 from lintro.ai.retry import with_retry
@@ -22,7 +16,7 @@ if TYPE_CHECKING:
 __all__ = ["call_ai"]
 
 
-def call_ai(
+def call_ai(  # noqa: DOC502
     *,
     provider: BaseAIProvider,
     ai_config: AIConfig,
@@ -68,38 +62,22 @@ def call_ai(
             use_one_shot=use_one_shot,
         )
 
-    if budget is not None:
-
-        @with_retry(
-            max_retries=ai_config.max_retries,
-            base_delay=ai_config.retry_base_delay,
-            max_delay=ai_config.retry_max_delay,
-            backoff_factor=ai_config.retry_backoff_factor,
-        )
-        def _call() -> AIResponse:
+    def _budgeted_call() -> AIResponse:
+        if budget is not None and budget.max_cost_usd is not None:
             return budget.execute(
                 _call_once,
                 cost_of=lambda response: response.cost_estimate,
             )
+        response = _call_once()
+        if budget is not None:
+            budget.record(response.cost_estimate)
+        return response
 
-    else:
+    call_with_retry = with_retry(
+        max_retries=ai_config.max_retries,
+        base_delay=ai_config.retry_base_delay,
+        max_delay=ai_config.retry_max_delay,
+        backoff_factor=ai_config.retry_backoff_factor,
+    )(_budgeted_call)
 
-        @with_retry(
-            max_retries=ai_config.max_retries,
-            base_delay=ai_config.retry_base_delay,
-            max_delay=ai_config.retry_max_delay,
-            backoff_factor=ai_config.retry_backoff_factor,
-        )
-        def _call() -> AIResponse:
-            return _call_once()
-
-    try:
-        return cast(AIResponse, _call())
-    except AIAuthenticationError:
-        raise
-    except AIRateLimitError:
-        raise
-    except AIProviderError:
-        raise
-    except AIError:
-        raise
+    return cast(AIResponse, call_with_retry())
