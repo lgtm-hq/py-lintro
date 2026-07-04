@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import threading
+import time
 
 import pytest
 from assertpy import assert_that
@@ -117,3 +118,32 @@ def test_thread_safety_concurrent_records() -> None:
 
     expected = num_threads * increments_per_thread * cost_per_increment
     assert_that(budget.spent).is_close_to(expected, tolerance=1e-9)
+
+
+def test_execute_serializes_budgeted_calls() -> None:
+    """execute() holds the budget lock for the full call to avoid races."""
+    budget = CostBudget(max_cost_usd=10.0)
+    active_lock = threading.Lock()
+    active = 0
+    max_active = 0
+
+    def tracked_call() -> float:
+        nonlocal active, max_active
+        with active_lock:
+            active += 1
+            max_active = max(max_active, active)
+        time.sleep(0.05)
+        with active_lock:
+            active -= 1
+        return 0.01
+
+    def worker() -> None:
+        budget.execute(tracked_call, cost_of=lambda cost: cost)
+
+    threads = [threading.Thread(target=worker) for _ in range(4)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+
+    assert_that(max_active).is_equal_to(1)

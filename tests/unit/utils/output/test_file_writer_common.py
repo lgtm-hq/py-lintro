@@ -17,12 +17,12 @@ from lintro.utils.output.file_writer import write_output_file
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-    from .conftest import MockToolResult
+    from lintro.models.core.tool_result import ToolResult
 
 
 def test_write_output_file_creates_parent_directories(
     tmp_path: Path,
-    mock_tool_result_factory: Callable[..., MockToolResult],
+    mock_tool_result_factory: Callable[..., ToolResult],
 ) -> None:
     """Verify parent directories are created when they don't exist.
 
@@ -36,7 +36,7 @@ def test_write_output_file_creates_parent_directories(
     write_output_file(
         output_path=str(output_path),
         output_format=OutputFormat.PLAIN,
-        all_results=results,  # type: ignore[arg-type]
+        all_results=results,
         action=Action.CHECK,
         total_issues=0,
         total_fixed=0,

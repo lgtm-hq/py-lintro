@@ -18,12 +18,14 @@ from lintro.utils.output.file_writer import write_output_file
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-    from .conftest import MockIssue, MockToolResult
+    from lintro.models.core.tool_result import ToolResult
+
+    from .conftest import MockIssue
 
 
 def test_write_json_file_creates_valid_file(
     tmp_path: Path,
-    mock_tool_result_factory: Callable[..., MockToolResult],
+    mock_tool_result_factory: Callable[..., ToolResult],
 ) -> None:
     """Verify JSON file is created with correct structure and metadata.
 
@@ -46,7 +48,7 @@ def test_write_json_file_creates_valid_file(
     write_output_file(
         output_path=str(output_path),
         output_format=OutputFormat.JSON,
-        all_results=results,  # type: ignore[arg-type]
+        all_results=results,
         action=Action.CHECK,
         total_issues=2,
         total_fixed=0,
@@ -67,7 +69,7 @@ def test_write_json_file_creates_valid_file(
 
 def test_write_json_file_omits_parse_failures_count_when_unset(
     tmp_path: Path,
-    mock_tool_result_factory: Callable[..., MockToolResult],
+    mock_tool_result_factory: Callable[..., ToolResult],
 ) -> None:
     """JSON output omits parse_failures_count unless the tool sets it."""
     output_path = tmp_path / "report.json"
@@ -78,7 +80,7 @@ def test_write_json_file_omits_parse_failures_count_when_unset(
     write_output_file(
         output_path=str(output_path),
         output_format=OutputFormat.JSON,
-        all_results=results,  # type: ignore[arg-type]
+        all_results=results,
         action=Action.CHECK,
         total_issues=0,
         total_fixed=0,
@@ -90,7 +92,7 @@ def test_write_json_file_omits_parse_failures_count_when_unset(
 
 def test_write_json_file_includes_parsed_issues(
     tmp_path: Path,
-    sample_results_with_issues: list[MockToolResult],
+    sample_results_with_issues: list[ToolResult],
 ) -> None:
     """Verify parsed issues are properly serialized in JSON output with all fields.
 
@@ -105,7 +107,7 @@ def test_write_json_file_includes_parsed_issues(
     write_output_file(
         output_path=str(output_path),
         output_format=OutputFormat.JSON,
-        all_results=sample_results_with_issues,  # type: ignore[arg-type]
+        all_results=sample_results_with_issues,
         action=Action.CHECK,
         total_issues=1,
         total_fixed=0,
@@ -123,7 +125,7 @@ def test_write_json_file_includes_parsed_issues(
 
 def test_write_json_file_merges_fix_mode_issues(
     tmp_path: Path,
-    mock_tool_result_factory: Callable[..., MockToolResult],
+    mock_tool_result_factory: Callable[..., ToolResult],
     mock_issue_factory: Callable[..., MockIssue],
 ) -> None:
     """JSON output merges pre-fix and remaining issues with deduplication.
@@ -160,7 +162,7 @@ def test_write_json_file_merges_fix_mode_issues(
     write_output_file(
         output_path=str(output_path),
         output_format=OutputFormat.JSON,
-        all_results=results,  # type: ignore[arg-type]
+        all_results=results,
         action=Action.FIX,
         total_issues=1,
         total_fixed=1,

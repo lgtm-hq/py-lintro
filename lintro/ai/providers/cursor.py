@@ -1,7 +1,7 @@
 """Cursor AI provider implementation.
 
 Invokes the ``agent`` CLI (Cursor's headless agent) for completions. The
-``cursor-sdk`` CreateAgent API is not used because it currently returns
+Cursor CreateAgent HTTP API is not used because it currently returns
 internal errors in environments where the ``agent`` binary works reliably.
 
 Authentication is handled by the CLI: ``CURSOR_API_KEY`` or ``agent login``.
@@ -11,18 +11,17 @@ from __future__ import annotations
 
 import json
 import os
-import shutil
-import subprocess
 from typing import Any
 
 from loguru import logger
 
+from lintro.ai.enums import AITransport
 from lintro.ai.exceptions import (
-    AIAuthenticationError,
     AINotAvailableError,
     AIProviderError,
 )
 from lintro.ai.providers.base import AIResponse, BaseAIProvider
+from lintro.ai.providers.cli_transport import CliTransport
 from lintro.ai.providers.constants import (
     DEFAULT_MAX_TOKENS,
     DEFAULT_PER_CALL_MAX_TOKENS,
@@ -39,7 +38,81 @@ DEFAULT_API_KEY_ENV = PROVIDERS.cursor.default_api_key_env
 
 def _find_agent() -> str | None:
     """Return the full path to the ``agent`` binary, or None."""
-    return shutil.which(_AGENT_BIN)
+    return CliTransport.find_binary(_AGENT_BIN)
+
+
+class _CursorCliTransport(CliTransport):
+    """Cursor ``agent --print`` subprocess transport."""
+
+    def parse_stdout(self, stdout: str) -> tuple[AIResponse, str | None]:
+        """Parse the JSON envelope from ``agent --output-format json``."""
+        try:
+            data = json.loads(stdout.strip())
+        except json.JSONDecodeError as exc:
+            raise AIProviderError(
+                f"Cursor CLI returned invalid JSON: {exc}\n"
+                f"Raw output: {stdout[:500]}",
+            ) from exc
+
+        if data.get("is_error") or data.get("subtype") == "error":
+            raise AIProviderError(
+                f"Cursor CLI reported error: {data.get('result', stdout[:500])}",
+            )
+
+        content = data.get("result", "")
+        if not content:
+            logger.warning(
+                f"Cursor CLI returned empty result. "
+                f"Full response: {json.dumps(data)[:1000]}",
+            )
+
+        # The agent CLI may prefix JSON with prose. Only substitute extracted
+        # content when it parses as JSON; otherwise keep plain-text answers
+        # with incidental braces intact.
+        try:
+            json.loads(content)
+        except json.JSONDecodeError:
+            extracted = self.extract_json_object(content)
+            if extracted != content:
+                try:
+                    json.loads(extracted)
+                except json.JSONDecodeError:
+                    pass
+                else:
+                    content = extracted
+
+        usage = data.get("usage", {})
+        session_id = data.get("session_id")
+        if isinstance(session_id, str) and session_id.strip():
+            session_id = session_id.strip()
+        else:
+            session_id = None
+
+        return (
+            AIResponse(
+                content=content,
+                model=self._model,
+                input_tokens=usage.get("inputTokens", 0),
+                output_tokens=usage.get("outputTokens", 0),
+                cost_estimate=0.0,
+                provider=AIProvider.CURSOR,
+            ),
+            session_id,
+        )
+
+    def __init__(
+        self,
+        *,
+        binary_path: str,
+        model: str,
+    ) -> None:
+        super().__init__(
+            binary_path=binary_path,
+            binary_name="Cursor agent",
+            install_hint="Install with: curl https://cursor.com/install -fsS | bash",
+            api_key_env=DEFAULT_API_KEY_ENV,
+        )
+        self._model = model
 
 
 class CursorProvider(BaseAIProvider):
@@ -52,18 +125,25 @@ class CursorProvider(BaseAIProvider):
         api_key_env: str | None = None,
         max_tokens: int = DEFAULT_MAX_TOKENS,
         base_url: str | None = None,
+        transport: AITransport = AITransport.CLI,
     ) -> None:
         """Initialize the Cursor provider.
 
         Args:
-            model: Model identifier override.
-            api_key_env: Environment variable for the API key override.
-            max_tokens: Provider-level cap on generated tokens.
-            base_url: Custom API base URL (unused for CLI).
+            model: Optional model override (defaults to provider config).
+            api_key_env: Environment variable name for the API key.
+            max_tokens: Default max tokens for provider configuration.
+            base_url: Unused; kept for provider API parity.
+            transport: AI transport mode (CLI only for Cursor).
 
         Raises:
-            AINotAvailableError: If the ``agent`` CLI is not on PATH.
+            AINotAvailableError: When transport is not CLI or the ``agent``
+                binary is not on PATH.
         """
+        if transport != AITransport.CLI:
+            msg = "cursor provider only supports transport: cli"
+            raise AINotAvailableError(msg)
+
         agent_path = _find_agent()
         if not agent_path:
             raise AINotAvailableError(
@@ -81,13 +161,18 @@ class CursorProvider(BaseAIProvider):
             api_key_env=api_key_env,
             max_tokens=max_tokens,
             base_url=base_url,
+            transport=transport,
         )
-        self._agent_path = agent_path
+        self._cli = _CursorCliTransport(
+            binary_path=agent_path,
+            model=self._model,
+        )
         self._session_id: str | None = None
         self._durable_repo_root: str | None = None
 
     def _create_client(self, *, api_key: str) -> Any:
         """No persistent client -- each call spawns a subprocess."""
+        del api_key
         return None
 
     def _get_client(self) -> Any:
@@ -140,12 +225,6 @@ class CursorProvider(BaseAIProvider):
 
         Returns:
             Parsed model response with usage metadata.
-
-        Raises:
-            AIProviderError: If the CLI times out, exits non-zero, or returns
-                invalid output.
-            AIAuthenticationError: If the CLI reports missing authentication.
-            AINotAvailableError: If the ``agent`` binary is not on PATH.
         """
         effective_model = model or self._model
         effective_max = min(max_tokens, self._max_tokens)
@@ -164,7 +243,7 @@ class CursorProvider(BaseAIProvider):
         )
 
         cmd = [
-            self._agent_path,
+            self._cli._binary_path,
             "--print",
             "--output-format",
             "json",
@@ -187,43 +266,18 @@ class CursorProvider(BaseAIProvider):
         )
 
         effective_timeout = max(timeout, CURSOR_MIN_TIMEOUT)
-        env = os.environ.copy()
-        api_key = os.environ.get(self._api_key_env)
-        if api_key:
-            env[self._api_key_env] = api_key
+        result = self._cli.run(
+            cmd,
+            input_text=combined_prompt,
+            timeout=effective_timeout,
+        )
+        self._cli.check_exit_code(
+            result,
+            auth_patterns=("authentication required", "login"),
+            auth_hint="Run 'agent login' or set CURSOR_API_KEY.",
+        )
+        response, session_id = self._cli.parse_stdout(result.stdout)
 
-        try:
-            result = subprocess.run(
-                cmd,
-                input=combined_prompt,
-                capture_output=True,
-                text=True,
-                timeout=effective_timeout,
-                check=False,
-                env=env,
-            )
-        except subprocess.TimeoutExpired as exc:
-            raise AIProviderError(
-                f"Cursor CLI timed out after {effective_timeout:.0f}s",
-            ) from exc
-        except FileNotFoundError as exc:
-            raise AINotAvailableError(
-                "Cursor 'agent' CLI not found on PATH. "
-                "Install with: curl https://cursor.com/install -fsS | bash",
-            ) from exc
-
-        if result.returncode != 0:
-            stderr = result.stderr.strip()
-            if "Authentication required" in stderr or "login" in stderr.lower():
-                raise AIAuthenticationError(
-                    "Cursor CLI authentication required. "
-                    "Run 'agent login' or set CURSOR_API_KEY.",
-                )
-            raise AIProviderError(
-                f"Cursor CLI exited with code {result.returncode}: {stderr}",
-            )
-
-        response, session_id = self._parse_json_output(result.stdout)
         if not use_one_shot and self._durable_repo_root is not None and session_id:
             self._session_id = session_id
         return response
@@ -231,86 +285,4 @@ class CursorProvider(BaseAIProvider):
     @staticmethod
     def _extract_json_object(text: str) -> str:
         """Extract the outermost JSON object ``{...}`` from text."""
-        start = text.find("{")
-        if start == -1:
-            return text
-
-        depth = 0
-        in_string = False
-        escape_next = False
-        for index, char in enumerate(text[start:], start=start):
-            if escape_next:
-                escape_next = False
-                continue
-            if char == "\\":
-                if in_string:
-                    escape_next = True
-                continue
-            if char == '"':
-                in_string = not in_string
-                continue
-            if in_string:
-                continue
-            if char == "{":
-                depth += 1
-            elif char == "}":
-                depth -= 1
-                if depth == 0:
-                    return text[start : index + 1]
-        return text
-
-    def _parse_json_output(self, stdout: str) -> tuple[AIResponse, str | None]:
-        """Parse the JSON envelope from ``agent --output-format json``."""
-        try:
-            data = json.loads(stdout.strip())
-        except json.JSONDecodeError as exc:
-            raise AIProviderError(
-                f"Cursor CLI returned invalid JSON: {exc}\n"
-                f"Raw output: {stdout[:500]}",
-            ) from exc
-
-        if data.get("is_error") or data.get("subtype") == "error":
-            raise AIProviderError(
-                f"Cursor CLI reported error: {data.get('result', stdout[:500])}",
-            )
-
-        content = data.get("result", "")
-        if not content:
-            logger.warning(
-                f"Cursor CLI returned empty result. "
-                f"Full response: {json.dumps(data)[:1000]}",
-            )
-
-        # The agent CLI may prefix JSON with prose. Only substitute extracted
-        # content when it parses as JSON; otherwise keep plain-text answers
-        # with incidental braces intact.
-        try:
-            json.loads(content)
-        except json.JSONDecodeError:
-            extracted = self._extract_json_object(content)
-            if extracted != content:
-                try:
-                    json.loads(extracted)
-                except json.JSONDecodeError:
-                    pass
-                else:
-                    content = extracted
-
-        usage = data.get("usage", {})
-        session_id = data.get("session_id")
-        if isinstance(session_id, str) and session_id.strip():
-            session_id = session_id.strip()
-        else:
-            session_id = None
-
-        return (
-            AIResponse(
-                content=content,
-                model=self._model,
-                input_tokens=usage.get("inputTokens", 0),
-                output_tokens=usage.get("outputTokens", 0),
-                cost_estimate=0.0,
-                provider=AIProvider.CURSOR,
-            ),
-            session_id,
-        )
+        return CliTransport.extract_json_object(text)

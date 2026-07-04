@@ -17,12 +17,14 @@ from lintro.utils.output.file_writer import write_output_file
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-    from .conftest import MockIssue, MockToolResult
+    from lintro.models.core.tool_result import ToolResult
+
+    from .conftest import MockIssue
 
 
 def test_write_markdown_file_creates_valid_structure(
     tmp_path: Path,
-    sample_results_empty: list[MockToolResult],
+    sample_results_empty: list[ToolResult],
 ) -> None:
     """Verify Markdown file contains proper heading structure and summary table.
 
@@ -35,7 +37,7 @@ def test_write_markdown_file_creates_valid_structure(
     write_output_file(
         output_path=str(output_path),
         output_format=OutputFormat.MARKDOWN,
-        all_results=sample_results_empty,  # type: ignore[arg-type]
+        all_results=sample_results_empty,
         action=Action.CHECK,
         total_issues=0,
         total_fixed=0,
@@ -52,7 +54,7 @@ def test_write_markdown_file_creates_valid_structure(
 
 def test_write_markdown_file_includes_issue_table(
     tmp_path: Path,
-    sample_results_with_issues: list[MockToolResult],
+    sample_results_with_issues: list[ToolResult],
 ) -> None:
     """Verify Markdown output includes issues in table format with proper headers.
 
@@ -65,7 +67,7 @@ def test_write_markdown_file_includes_issue_table(
     write_output_file(
         output_path=str(output_path),
         output_format=OutputFormat.MARKDOWN,
-        all_results=sample_results_with_issues,  # type: ignore[arg-type]
+        all_results=sample_results_with_issues,
         action=Action.CHECK,
         total_issues=1,
         total_fixed=0,
@@ -82,7 +84,7 @@ def test_write_markdown_file_includes_issue_table(
 
 def test_write_markdown_file_escapes_pipe_characters(
     tmp_path: Path,
-    mock_tool_result_factory: Callable[..., MockToolResult],
+    mock_tool_result_factory: Callable[..., ToolResult],
     mock_issue_factory: Callable[..., MockIssue],
 ) -> None:
     """Verify pipe characters in messages are escaped to preserve table formatting.
@@ -104,7 +106,7 @@ def test_write_markdown_file_escapes_pipe_characters(
     write_output_file(
         output_path=str(output_path),
         output_format=OutputFormat.MARKDOWN,
-        all_results=results,  # type: ignore[arg-type]
+        all_results=results,
         action=Action.CHECK,
         total_issues=1,
         total_fixed=0,
@@ -117,7 +119,7 @@ def test_write_markdown_file_escapes_pipe_characters(
 
 def test_write_markdown_fix_mode_shows_detected_and_remaining(
     tmp_path: Path,
-    mock_tool_result_factory: Callable[..., MockToolResult],
+    mock_tool_result_factory: Callable[..., ToolResult],
     mock_issue_factory: Callable[..., MockIssue],
 ) -> None:
     """Fix-mode markdown output renders Detected and Remaining tables.
@@ -143,7 +145,7 @@ def test_write_markdown_fix_mode_shows_detected_and_remaining(
     write_output_file(
         output_path=str(output_path),
         output_format=OutputFormat.MARKDOWN,
-        all_results=results,  # type: ignore[arg-type]
+        all_results=results,
         action=Action.FIX,
         total_issues=1,
         total_fixed=1,
@@ -158,7 +160,7 @@ def test_write_markdown_fix_mode_shows_detected_and_remaining(
 
 def test_write_markdown_fix_mode_all_fixed(
     tmp_path: Path,
-    mock_tool_result_factory: Callable[..., MockToolResult],
+    mock_tool_result_factory: Callable[..., ToolResult],
     mock_issue_factory: Callable[..., MockIssue],
 ) -> None:
     """When all issues were fixed, shows 'All issues were auto-fixed'.
@@ -181,7 +183,7 @@ def test_write_markdown_fix_mode_all_fixed(
     write_output_file(
         output_path=str(output_path),
         output_format=OutputFormat.MARKDOWN,
-        all_results=results,  # type: ignore[arg-type]
+        all_results=results,
         action=Action.FIX,
         total_issues=0,
         total_fixed=1,
