@@ -101,7 +101,7 @@ class _AnthropicCliTransport(CliTransport):
             cost = float(cost)
 
         return AIResponse(
-            content=self.extract_json_object(content),
+            content=self.substitute_parsed_json(content),
             model=self._model,
             input_tokens=input_tokens,
             output_tokens=output_tokens,

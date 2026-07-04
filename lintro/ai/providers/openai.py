@@ -120,7 +120,7 @@ class _CodexCliTransport(CliTransport):
 
         cost = estimate_cost(self._model, input_tokens, output_tokens)
         return AIResponse(
-            content=self.extract_json_object(final_text),
+            content=self.substitute_parsed_json(final_text),
             model=self._model,
             input_tokens=input_tokens,
             output_tokens=output_tokens,

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 import shutil
 import subprocess
@@ -180,6 +181,22 @@ class CliTransport(ABC):
                 if depth == 0:
                     return text[start : index + 1]
         return text
+
+    @classmethod
+    def substitute_parsed_json(cls, content: str) -> str:
+        """Return extracted JSON only when it parses; else keep original text."""
+        try:
+            json.loads(content)
+        except json.JSONDecodeError:
+            extracted = cls.extract_json_object(content)
+            if extracted != content:
+                try:
+                    json.loads(extracted)
+                except json.JSONDecodeError:
+                    pass
+                else:
+                    return extracted
+        return content
 
     @abstractmethod
     def parse_stdout(self, stdout: str) -> Any:
