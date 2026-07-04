@@ -408,6 +408,7 @@ def run_lint_tools_simple(
     yes: bool = False,
     ai_fix: bool = False,
     ignore_conflicts: bool = False,
+    transport: str | None = None,
 ) -> int:
     """Simplified runner using Loguru-based logging with rich formatting.
 
@@ -437,6 +438,7 @@ def run_lint_tools_simple(
         yes: Skip confirmation prompt and proceed immediately.
         ai_fix: Enable AI fix suggestions with interactive review (check only).
         ignore_conflicts: Whether to ignore tool configuration conflicts.
+        transport: Optional CLI override for ``ai.transport`` when AI runs.
 
     Returns:
         Exit code (0 for success, 1 for failures).
@@ -800,7 +802,11 @@ def run_lint_tools_simple(
 
     from lintro.ai.hook import AIPostExecutionHook
 
-    ai_hook = AIPostExecutionHook(lintro_config, ai_fix=effective_ai_fix)
+    ai_hook = AIPostExecutionHook(
+        lintro_config,
+        ai_fix=effective_ai_fix,
+        transport=transport,
+    )
     ai_result = None
     if ai_hook.should_run(action):
         try:

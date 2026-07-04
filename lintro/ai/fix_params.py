@@ -10,9 +10,13 @@ from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from lintro.ai.enums.sanitize_mode import SanitizeMode
 from lintro.ai.fix_context import CONTEXT_LINES
+
+if TYPE_CHECKING:
+    from lintro.ai.config import AIConfig
 
 
 @dataclass(frozen=True)
@@ -42,6 +46,8 @@ class FixGenParams:
         fallback_models: Ordered fallback model identifiers.
         sanitize_mode: How to handle prompt injection patterns.
         progress_callback: Optional callback after each fix completes.
+        ai_config: Optional AI configuration for ``call_ai`` transport
+            and retry settings.
     """
 
     workspace_root: Path
@@ -62,3 +68,4 @@ class FixGenParams:
     fallback_models: list[str] = field(default_factory=list)
     sanitize_mode: SanitizeMode = SanitizeMode.WARN
     progress_callback: Callable[[int, int], None] | None = None
+    ai_config: AIConfig | None = None

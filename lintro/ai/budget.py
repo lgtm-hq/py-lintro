@@ -3,7 +3,11 @@
 from __future__ import annotations
 
 import threading
+from collections.abc import Callable
 from dataclasses import dataclass, field
+from typing import TypeVar
+
+_T = TypeVar("_T")
 
 
 @dataclass
@@ -43,10 +47,23 @@ class CostBudget:
 
     def check(self) -> None:
         """Raise AIError if the budget has been exceeded."""
-        if self.max_cost_usd is not None and self.spent >= self.max_cost_usd:
-            from lintro.ai.exceptions import AIError
+        with self._lock:
+            if self.max_cost_usd is not None and self._spent >= self.max_cost_usd:
+                self._raise_exceeded()
 
-            raise AIError(
-                f"AI cost budget exceeded: ${self.spent:.4f} spent, "
-                f"limit is ${self.max_cost_usd:.2f}",
-            )
+    def _raise_exceeded(self) -> None:
+        from lintro.ai.exceptions import AIError
+
+        raise AIError(
+            f"AI cost budget exceeded: ${self._spent:.4f} spent, "
+            f"limit is ${self.max_cost_usd:.2f}",
+        )
+
+    def execute(self, fn: Callable[[], _T], *, cost_of: Callable[[_T], float]) -> _T:
+        """Run ``fn`` under the budget lock to prevent parallel overspend."""
+        with self._lock:
+            if self.max_cost_usd is not None and self._spent >= self.max_cost_usd:
+                self._raise_exceeded()
+            result = fn()
+            self._spent += cost_of(result)
+            return result

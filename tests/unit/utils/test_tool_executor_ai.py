@@ -9,6 +9,7 @@ from assertpy import assert_that
 
 import lintro.utils.tool_executor as te
 from lintro.ai.config import AIConfig
+from lintro.ai.enums import AITransport
 from lintro.config.execution_config import ExecutionConfig
 from lintro.config.lintro_config import LintroConfig
 from lintro.enums.action import Action
@@ -131,6 +132,7 @@ def test_fix_recomputes_totals_after_ai_changes(monkeypatch, fake_logger):
         execution=ExecutionConfig(parallel=False),
         ai=AIConfig(
             enabled=True,
+            transport=AITransport.API,
             auto_apply=True,
         ),
     )
@@ -210,7 +212,7 @@ def test_fix_recomputes_totals_after_ai_changes(monkeypatch, fake_logger):
     monkeypatch.setattr(
         hook_module,
         "AIPostExecutionHook",
-        lambda lintro_config, ai_fix=False: _FakeHook(),
+        lambda lintro_config, ai_fix=False, transport=None: _FakeHook(),
     )
 
     captured: dict[str, int] = {}

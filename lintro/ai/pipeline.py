@@ -105,6 +105,7 @@ def _generate_all_suggestions(
             progress_callback=_progress_callback,
             fallback_models=ai_config.fallback_models,
             sanitize_mode=ai_config.sanitize_mode,
+            ai_config=ai_config,
         )
         suggestions = generate_fixes_from_params(issues, provider, fix_params)
         for suggestion in suggestions:
@@ -483,6 +484,7 @@ def run_fix_pipeline(
                 rejected=rejected,
                 remaining_results=unique_results,
                 provider=provider,
+                ai_config=ai_config,
                 max_tokens=ai_config.max_tokens,
                 workspace_root=workspace_root,
                 timeout=ai_config.api_timeout,

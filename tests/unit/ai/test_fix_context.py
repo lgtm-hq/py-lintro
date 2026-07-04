@@ -9,12 +9,9 @@ import threading
 
 from assertpy import assert_that
 
-from lintro.ai.fix import (
-    _call_provider,
-    _generate_single_fix,
-    generate_fixes,
-)
-from lintro.ai.retry import with_retry
+from lintro.ai.config import AIConfig
+from lintro.ai.enums import AITransport
+from lintro.ai.fix import _generate_single_fix, generate_fixes
 from tests.unit.ai.conftest import MockAIProvider, MockIssue
 
 # ---------------------------------------------------------------------------
@@ -64,7 +61,7 @@ def test_full_file_skipped_when_file_exceeds_threshold(tmp_path):
     )
 
     provider = MockAIProvider()
-    retrying_call = with_retry(max_retries=0)(_call_provider)
+    ai_config = AIConfig(enabled=True, transport=AITransport.API, max_retries=0)
 
     _generate_single_fix(
         issue,
@@ -74,7 +71,7 @@ def test_full_file_skipped_when_file_exceeds_threshold(tmp_path):
         threading.Lock(),
         tmp_path,
         2048,
-        retrying_call,
+        ai_config,
         full_file_threshold=5,  # File has 50 lines, above threshold
     )
 
@@ -102,7 +99,7 @@ def test_full_file_skipped_when_over_token_budget(tmp_path):
     )
 
     provider = MockAIProvider()
-    retrying_call = with_retry(max_retries=0)(_call_provider)
+    ai_config = AIConfig(enabled=True, transport=AITransport.API, max_retries=0)
 
     _generate_single_fix(
         issue,
@@ -112,7 +109,7 @@ def test_full_file_skipped_when_over_token_budget(tmp_path):
         threading.Lock(),
         tmp_path,
         2048,
-        retrying_call,
+        ai_config,
         max_prompt_tokens=10,  # Very tight budget, full file won't fit
     )
 

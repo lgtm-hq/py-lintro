@@ -127,6 +127,7 @@ def test_collect_branch_context_uses_merge_base(
     """Branch review mode uses merge-base...HEAD diff commands."""
     dispatcher = SubprocessMock()
     dispatcher.queue(["git", "rev-parse", "--git-dir"], stdout=".git\n")
+    dispatcher.queue(["git", "rev-parse", "--show-toplevel"], stdout="/repo/root\n")
     dispatcher.queue(["git", "merge-base", "main", "HEAD"], stdout="base123\n")
     dispatcher.queue(["git", "rev-parse", "HEAD"], stdout="head456\n")
     queue_diff_snapshot(
@@ -142,6 +143,7 @@ def test_collect_branch_context_uses_merge_base(
 
     assert_that(context.base_ref).is_equal_to("base123")
     assert_that(context.head_ref).is_equal_to("head456")
+    assert_that(context.repo_root).is_equal_to("/repo/root")
     assert_that(context.changed_files).is_length(1)
     assert_that(context.changed_files[0]).is_equal_to(
         ChangedFile(

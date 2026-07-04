@@ -64,10 +64,14 @@ def test_cost_large_token_count():
 
 
 @pytest.mark.parametrize("model", list(PROVIDERS.model_pricing.keys()))
-def test_cost_all_known_models_have_pricing(model):
-    """Verify every registered model produces a positive cost estimate."""
+def test_cost_all_known_models_have_pricing(model: str) -> None:
+    """Verify every registered model produces a known cost estimate."""
+    pricing = PROVIDERS.model_pricing[model]
     cost = estimate_cost(model, 1000, 1000)
-    assert_that(cost).is_greater_than(0)
+    if pricing.input_per_million == 0 and pricing.output_per_million == 0:
+        assert_that(cost).is_equal_to(0.0)
+    else:
+        assert_that(cost).is_greater_than(0)
 
 
 def test_cost_format_small():

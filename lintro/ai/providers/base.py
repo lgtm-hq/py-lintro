@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import os
 from abc import ABC, abstractmethod
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from lintro.ai.exceptions import AIAuthenticationError, AINotAvailableError
 from lintro.ai.providers.constants import (
@@ -19,6 +19,10 @@ from lintro.ai.providers.constants import (
 )
 from lintro.ai.providers.response import AIResponse  # noqa: F401
 from lintro.ai.providers.stream_result import AIStreamResult  # noqa: F401
+
+if TYPE_CHECKING:
+    from lintro.ai.enums import AITransport
+    from lintro.ai.json_response import CliSchemaRequest
 
 __all__ = ["AIResponse", "AIStreamResult", "BaseAIProvider"]
 
@@ -47,6 +51,7 @@ class BaseAIProvider(ABC):
         api_key_env: str | None = None,
         max_tokens: int = DEFAULT_MAX_TOKENS,
         base_url: str | None = None,
+        transport: AITransport | None = None,
     ) -> None:
         """Initialise the provider with shared parameters.
 
@@ -63,6 +68,7 @@ class BaseAIProvider(ABC):
                 ``AIAuthenticationError`` on first API call.
             max_tokens: Provider-level cap on generated tokens.
             base_url: Custom API base URL.
+            transport: Optional transport label for availability checks.
 
         Raises:
             AINotAvailableError: If the SDK is not installed.
@@ -80,6 +86,7 @@ class BaseAIProvider(ABC):
         self._api_key_env = api_key_env or default_api_key_env
         self._max_tokens = max_tokens
         self._base_url = base_url
+        self._transport = transport
         self._client: Any = None
 
     # -- Client management -------------------------------------------------
@@ -102,6 +109,9 @@ class BaseAIProvider(ABC):
                 f"No API key found. Set the {self._api_key_env} "
                 f"environment variable.",
             )
+
+        if not api_key and self._base_url:
+            api_key = "not-needed"
 
         self._client = self._create_client(api_key=api_key)
         return self._client
@@ -128,6 +138,10 @@ class BaseAIProvider(ABC):
         system: str | None = None,
         max_tokens: int = DEFAULT_PER_CALL_MAX_TOKENS,
         timeout: float = DEFAULT_TIMEOUT,
+        repo_root: str | None = None,
+        use_one_shot: bool = False,
+        model: str | None = None,
+        cli_schema: CliSchemaRequest | None = None,
     ) -> AIResponse:
         """Generate a completion from the AI model.
 
@@ -136,6 +150,11 @@ class BaseAIProvider(ABC):
             system: Optional system prompt to set context.
             max_tokens: Maximum number of tokens to generate.
             timeout: Request timeout in seconds.
+            repo_root: Optional repository root (Cursor provider only).
+            use_one_shot: When True, avoid durable sessions (Cursor only).
+            model: Optional per-call model override without mutating
+                ``model_name``.
+            cli_schema: Optional native CLI JSON schema request.
 
         Returns:
             AIResponse: The model's response with usage metadata.
@@ -156,6 +175,7 @@ class BaseAIProvider(ABC):
         system: str | None = None,
         max_tokens: int = DEFAULT_PER_CALL_MAX_TOKENS,
         timeout: float = DEFAULT_TIMEOUT,
+        model: str | None = None,
     ) -> AIStreamResult:
         """Stream a completion. Default: delegates to complete().
 
@@ -166,6 +186,7 @@ class BaseAIProvider(ABC):
             system: Optional system prompt.
             max_tokens: Maximum tokens to generate.
             timeout: Request timeout in seconds.
+            model: Optional per-call model override.
 
         Returns:
             An AIStreamResult wrapping the token stream.
@@ -175,11 +196,24 @@ class BaseAIProvider(ABC):
             system=system,
             max_tokens=max_tokens,
             timeout=timeout,
+            model=model,
         )
         return AIStreamResult(
             _chunks=iter([response.content]),
             _on_done=lambda: response,
         )
+
+    def begin_durable_session(self, *, repo_root: str) -> None:
+        """Optional hook for providers that reuse CLI sessions.
+
+        Args:
+            repo_root: Absolute path to the repository under review.
+        """
+        del repo_root
+
+    def end_durable_session(self) -> None:
+        """Optional hook to tear down a durable provider session."""
+        return None
 
     # -- Concrete shared helpers -------------------------------------------
 

@@ -8,6 +8,7 @@ from unittest.mock import MagicMock, patch
 from assertpy import assert_that
 
 from lintro.ai.config import AIConfig
+from lintro.ai.enums import AITransport
 from lintro.ai.models import AIFixSuggestion
 from lintro.ai.orchestrator import run_ai_enhancement
 from lintro.ai.validation import ValidationResult
@@ -55,6 +56,7 @@ def test_run_ai_enhancement_fix_action_generates_fix_metadata(
     config = LintroConfig(
         ai=AIConfig(
             enabled=True,
+            transport=AITransport.API,
             max_fix_attempts=5,
             auto_apply=True,
         ),
@@ -131,6 +133,7 @@ def test_run_ai_enhancement_fix_action_passes_validate_mode_to_interactive_revie
     config = LintroConfig(
         ai=AIConfig(
             enabled=True,
+            transport=AITransport.API,
             max_fix_attempts=5,
             validate_after_group=True,
         ),
@@ -194,7 +197,9 @@ def test_run_ai_enhancement_fix_action_uses_only_remaining_issue_tail(
         issues=[fixed_issue, remaining_issue],
         remaining_issues_count=1,
     )
-    config = LintroConfig(ai=AIConfig(enabled=True, max_fix_attempts=5))
+    config = LintroConfig(
+        ai=AIConfig(enabled=True, transport=AITransport.API, max_fix_attempts=5),
+    )
     logger = MagicMock()
 
     mock_get_provider.return_value = MockAIProvider()
@@ -240,7 +245,9 @@ def test_run_ai_enhancement_fix_action_skips_tools_with_zero_remaining_issues(
         ],
         remaining_issues_count=0,
     )
-    config = LintroConfig(ai=AIConfig(enabled=True, max_fix_attempts=5))
+    config = LintroConfig(
+        ai=AIConfig(enabled=True, transport=AITransport.API, max_fix_attempts=5),
+    )
     logger = MagicMock()
 
     mock_get_provider.return_value = MockAIProvider()
@@ -299,6 +306,7 @@ def test_run_ai_enhancement_fix_action_uses_fresh_rerun_results_for_post_summary
     config = LintroConfig(
         ai=AIConfig(
             enabled=True,
+            transport=AITransport.API,
             auto_apply=True,
         ),
     )

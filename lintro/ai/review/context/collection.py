@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 from pathlib import Path
 from urllib.parse import quote
 
@@ -65,6 +66,9 @@ def collect_review_context(
     if pr_number is None:
         _ensure_bash()
         _ensure_git_repo()
+        repo_root = _run_git(args=["rev-parse", "--show-toplevel"]).stdout.strip()
+    else:
+        repo_root = ""
 
     if pr_number is not None:
         context = _collect_pr_context(
@@ -90,7 +94,7 @@ def collect_review_context(
 
     validate_review_context_diff(context=context)
 
-    return context
+    return replace(context, repo_root=repo_root)
 
 
 def validate_review_context_diff(*, context: ReviewContext) -> None:
