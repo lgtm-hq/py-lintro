@@ -14,7 +14,7 @@ from lintro.ai.exceptions import (
     AINotAvailableError,
     AIProviderError,
 )
-from lintro.ai.providers.cursor import CursorProvider, _find_agent
+from lintro.ai.providers.cursor import CURSOR_MIN_TIMEOUT, CursorProvider, _find_agent
 from lintro.ai.registry import AIProvider
 
 
@@ -163,6 +163,22 @@ def test_complete_one_shot_skips_resume(provider):
         assert_that(cmd).does_not_contain("--resume")
 
 
+def test_timeout_floor_is_six_hundred_seconds(provider):
+    """Enforce Cursor CLI minimum timeout of 600 seconds."""
+    stdout = _cli_json(result="ok")
+    with patch("subprocess.run") as mock_run:
+        mock_run.return_value = subprocess.CompletedProcess(
+            args=[],
+            returncode=0,
+            stdout=stdout,
+            stderr="",
+        )
+        provider.complete("Hello", timeout=120.0, repo_root="/tmp/repo")
+    assert_that(mock_run.call_args.kwargs["timeout"]).is_equal_to(
+        CURSOR_MIN_TIMEOUT,
+    )
+
+
 def test_complete_prepends_system_prompt_via_stdin(provider):
     """Prepend system prompt to user message via stdin."""
     stdout = _cli_json(result="ok")
@@ -275,7 +291,9 @@ def test_complete_uses_minimum_timeout_for_agent(provider):
             stderr="",
         )
         provider.complete("Hello", timeout=45.0)
-        assert_that(mock_run.call_args.kwargs.get("timeout")).is_equal_to(300.0)
+        assert_that(mock_run.call_args.kwargs.get("timeout")).is_equal_to(
+            CURSOR_MIN_TIMEOUT,
+        )
 
 
 def test_complete_cost_estimate_is_zero(provider):

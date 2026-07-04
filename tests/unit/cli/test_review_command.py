@@ -44,6 +44,7 @@ def test_review_help_shows_flags() -> None:
     assert_that(result.output).contains("--with-lint")
     assert_that(result.output).contains("--depth")
     assert_that(result.output).contains("--show-checklist")
+    assert_that(result.output).contains("--timeout")
 
 
 def test_review_alias_rev_works() -> None:

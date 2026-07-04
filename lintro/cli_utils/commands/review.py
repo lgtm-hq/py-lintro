@@ -118,6 +118,12 @@ from lintro.config.config_loader import get_config
     help="Override model context window size in tokens.",
 )
 @click.option(
+    "--timeout",
+    type=float,
+    default=None,
+    help="Override ai.api_timeout for this review (seconds).",
+)
+@click.option(
     "--path",
     "path_filter",
     multiple=True,
@@ -137,6 +143,7 @@ def review_command(
     output_format: str,
     with_lint: bool,
     context_window: int | None,
+    timeout: float | None,
     path_filter: tuple[str, ...],
 ) -> None:
     """Run AI-powered diff-based code review."""
@@ -250,6 +257,7 @@ def review_command(
             progress=progress_tracker,
             sensitivity=sensitivity,
             force_semantic_chunking=force_semantic_chunking,
+            timeout=timeout,
         )
     except (AIError, ValueError) as exc:
         if output_format == "json":
