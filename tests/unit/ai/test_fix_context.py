@@ -10,6 +10,7 @@ import threading
 from assertpy import assert_that
 
 from lintro.ai.config import AIConfig
+from lintro.ai.enums import AITransport
 from lintro.ai.fix import _generate_single_fix, generate_fixes
 from tests.unit.ai.conftest import MockAIProvider, MockIssue
 
@@ -60,7 +61,7 @@ def test_full_file_skipped_when_file_exceeds_threshold(tmp_path):
     )
 
     provider = MockAIProvider()
-    ai_config = AIConfig(enabled=True, transport="api", max_retries=0)  # type: ignore[arg-type]
+    ai_config = AIConfig(enabled=True, transport=AITransport.API, max_retries=0)
 
     _generate_single_fix(
         issue,
@@ -98,7 +99,7 @@ def test_full_file_skipped_when_over_token_budget(tmp_path):
     )
 
     provider = MockAIProvider()
-    ai_config = AIConfig(enabled=True, transport="api", max_retries=0)  # type: ignore[arg-type]
+    ai_config = AIConfig(enabled=True, transport=AITransport.API, max_retries=0)
 
     _generate_single_fix(
         issue,

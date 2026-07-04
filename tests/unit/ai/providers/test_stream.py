@@ -147,7 +147,7 @@ def test_base_provider_stream_complete_passes_kwargs() -> None:
             model: str | None = None,
             cli_schema: CliSchemaRequest | None = None,
         ) -> AIResponse:
-            del model, cli_schema
+            del cli_schema
             calls.append(
                 {
                     "prompt": prompt,
