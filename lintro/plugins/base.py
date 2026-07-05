@@ -24,7 +24,7 @@ from __future__ import annotations
 import copy
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Self
 
 import click
 from loguru import logger
@@ -182,7 +182,7 @@ class BaseToolPlugin(ABC):
         self.include_venv = False
         self._setup_defaults()
 
-    def copy_for_execution(self) -> BaseToolPlugin:
+    def copy_for_execution(self) -> Self:
         """Return an isolated copy of this plugin for a single invocation.
 
         The returned instance shares no mutable option state with this
@@ -196,6 +196,12 @@ class BaseToolPlugin(ABC):
         so read-mostly caches remain shared for efficiency without affecting
         per-call option isolation.
 
+        Subclasses that own additional *mutable* option state (config objects
+        that :meth:`set_options` mutates) must isolate it too, otherwise it
+        stays shared between the registry singleton and every execution copy
+        and concurrent invocations race on it. Such subclasses override
+        :meth:`_isolate_execution_state` rather than this method.
+
         Returns:
             A new plugin instance with independent option state.
         """
@@ -203,7 +209,26 @@ class BaseToolPlugin(ABC):
         clone.options = dict(self.options)
         clone.exclude_patterns = list(self.exclude_patterns)
         clone.include_venv = self.include_venv
+        clone._isolate_execution_state()
         return clone
+
+    def _isolate_execution_state(self) -> None:
+        """Deep-copy subclass-owned mutable option state on this copy.
+
+        Called on the freshly created execution copy by
+        :meth:`copy_for_execution` after the base option attributes
+        (``options``, ``exclude_patterns``, ``include_venv``) have already
+        been isolated. The base implementation is a no-op because the base
+        class owns no further mutable option state.
+
+        Subclasses that hold mutable config objects which :meth:`set_options`
+        mutates (e.g. a dataclass of tool-specific options) must override this
+        to replace those objects with independent copies on ``self`` and
+        re-wire any collaborators that reference them, so concurrent
+        invocations never share mutable option state. Read-mostly caches
+        should be left shared for efficiency.
+        """
+        return None
 
     def set_options(self, **kwargs: Any) -> None:
         """Set tool-specific options.

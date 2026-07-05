@@ -11,7 +11,7 @@ from __future__ import annotations
 import time
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 from assertpy import assert_that
 
@@ -20,6 +20,10 @@ from lintro.plugins.base import BaseToolPlugin
 from lintro.plugins.protocol import ToolDefinition
 
 if TYPE_CHECKING:
+    from lintro.tools.implementations.pytest.pytest_executor import PytestExecutor
+    from lintro.tools.implementations.pytest.pytest_result_processor import (
+        PytestResultProcessor,
+    )
     from tests.unit.plugins.conftest import FakeToolPlugin
 
 
@@ -114,7 +118,7 @@ def test_concurrent_invocations_do_not_clobber_options() -> None:
     # No invocation observed a clobbered (interleaved) marker.
     assert_that([r.issues_count for r in results]).does_not_contain(1)
     # Each invocation observed exactly its own marker.
-    assert_that(sorted(r.output for r in results)).is_equal_to(sorted(markers))
+    assert_that(sorted(str(r.output) for r in results)).is_equal_to(sorted(markers))
 
 
 def test_copy_for_execution_shares_readonly_caches() -> None:
@@ -128,6 +132,64 @@ def test_copy_for_execution_shares_readonly_caches() -> None:
     assert_that(clone._rule_name_cache).is_same_as(template._rule_name_cache)
     # Option state is independent, however.
     assert_that(clone.options).is_not_same_as(template.options)
+
+
+def test_copy_for_execution_isolates_pytest_config() -> None:
+    """PytestPlugin deep-copies its mutable ``pytest_config`` on each copy.
+
+    The registry singleton holds a ``pytest_config`` dataclass that
+    ``set_options`` mutates. A per-invocation copy must own an independent
+    config (and re-wired collaborators) so configuring one copy never leaks
+    into the template or its collaborators.
+    """
+    from lintro.tools.definitions.pytest import PytestPlugin
+
+    template = PytestPlugin()
+    clone = template.copy_for_execution()
+
+    # Config object and the collaborators referencing it are independent.
+    assert_that(clone.pytest_config).is_not_same_as(template.pytest_config)
+    assert_that(clone.executor).is_not_none()
+    assert_that(clone.result_processor).is_not_none()
+    executor = cast("PytestExecutor", clone.executor)
+    result_processor = cast("PytestResultProcessor", clone.result_processor)
+    assert_that(executor.config).is_same_as(clone.pytest_config)
+    assert_that(executor.tool).is_same_as(clone)
+    assert_that(result_processor.config).is_same_as(clone.pytest_config)
+
+    clone.set_options(maxfail=5)
+
+    assert_that(clone.pytest_config.maxfail).is_equal_to(5)
+    assert_that(template.pytest_config.maxfail).is_none()
+
+
+def test_concurrent_pytest_invocations_do_not_clobber_config() -> None:
+    """Concurrent PytestPlugin copies each see only their own config value.
+
+    Simulates the executor pattern for the real plugin: a shared singleton is
+    copied per invocation, each copy is configured with a distinct value that
+    lands in the mutable ``pytest_config``, and all run concurrently. Each
+    copy must read back exactly its own value.
+    """
+    from lintro.tools.definitions.pytest import PytestPlugin
+
+    template = PytestPlugin()
+
+    def run(maxfail: int) -> int:
+        tool = template.copy_for_execution()
+        tool.set_options(maxfail=maxfail)
+        # Yield the GIL so a shared config would be observably clobbered.
+        time.sleep(0.01)
+        observed = tool.pytest_config.maxfail
+        return observed if observed is not None else -1
+
+    values = list(range(1, 9))
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        results = list(pool.map(run, values))
+
+    assert_that(sorted(results)).is_equal_to(values)
+    # Template's config was never mutated by any invocation.
+    assert_that(template.pytest_config.maxfail).is_none()
 
 
 def test_reset_options_still_works_on_copy(

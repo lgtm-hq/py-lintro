@@ -7,6 +7,7 @@ and provides extensive plugin support for customization.
 
 from __future__ import annotations
 
+import copy
 import subprocess  # nosec B404 - used safely with shell disabled
 from dataclasses import dataclass, field
 from typing import Any
@@ -163,6 +164,30 @@ class PytestPlugin(BaseToolPlugin):
         # Set pytest options on the parent class (for backward compatibility)
         options_dict = self.pytest_config.get_options_dict()
         super().set_options(**options_dict)
+
+    def _isolate_execution_state(self) -> None:
+        """Isolate pytest-specific mutable option state on this copy.
+
+        ``pytest_config`` is a mutable dataclass that :meth:`set_options`
+        mutates. The shallow copy produced by
+        :meth:`~lintro.plugins.base.BaseToolPlugin.copy_for_execution` leaves
+        it (and the collaborators that reference it) shared with the registry
+        singleton, so concurrent invocations would race on it. Replace it with
+        an independent deep copy and re-wire the executor and result processor
+        that hold references to it (and to this plugin).
+        """
+        super()._isolate_execution_state()
+
+        self.pytest_config = copy.deepcopy(self.pytest_config)
+
+        if self.executor is not None:
+            self.executor = copy.copy(self.executor)
+            self.executor.config = self.pytest_config
+            self.executor.tool = self
+        if self.result_processor is not None:
+            self.result_processor = copy.copy(self.result_processor)
+            self.result_processor.config = self.pytest_config
+        # error_handler holds only the immutable tool name; safe to share.
 
     def _parse_output(
         self,
