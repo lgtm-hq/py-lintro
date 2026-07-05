@@ -618,8 +618,16 @@ def build_git_native_review_prompt(
     extra_checklist: str = "",
     strictness_section: str = "",
     embed_diff: bool = False,
+    allow_unredacted_git_native: bool = False,
 ) -> tuple[str, str]:
     """Build git-native prompts for CLI-backed review (all providers).
+
+    Redaction is a security invariant and wins by default. When ``embed_diff``
+    is False the builder would normally emit a delegated ``git diff`` command,
+    which lets the provider produce the diff itself and thus bypasses lintro's
+    secret-redaction choke point. Unless ``allow_unredacted_git_native`` is
+    explicitly True, the builder instead falls back to embedding the redacted
+    diff so no unredacted diff can reach the provider.
 
     Args:
         chunk: Semantic diff chunk to review.
@@ -631,10 +639,18 @@ def build_git_native_review_prompt(
         extra_checklist: Additional generated checklist rows for depth 2.
         strictness_section: Sensitivity instructions for the review pass.
         embed_diff: When True, inline the diff instead of agentic git commands.
+        allow_unredacted_git_native: Explicit opt-out permitting the delegated
+            ``git diff`` command path (which bypasses secret redaction) when
+            ``embed_diff`` is False. Defaults to False so redaction always
+            wins and the diff is embedded and redacted instead.
 
     Returns:
         Tuple of (system_prompt, user_prompt).
     """
+    # Redaction wins by default: never delegate diff retrieval to the provider
+    # unless the caller has explicitly opted out of the redaction guarantee.
+    if not embed_diff and not allow_unredacted_git_native:
+        embed_diff = True
     pr_title = context.pr_metadata.title if context.pr_metadata else "Local changes"
     pr_title = _redact_prompt_text(text=pr_title, source="PR title")
     pr_summary = context.pr_metadata.body if context.pr_metadata else "(no PR summary)"
@@ -848,6 +864,7 @@ def _review_chunk(
             extra_checklist=extra_checklist,
             strictness_section=strictness_section,
             embed_diff=embed_diff,
+            allow_unredacted_git_native=ai_config.review_allow_unredacted_git_native,
         )
     else:
         system_prompt, user_prompt = build_review_prompt(

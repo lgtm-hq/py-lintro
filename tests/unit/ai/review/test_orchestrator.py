@@ -676,7 +676,12 @@ def test_build_git_native_review_prompt_embeds_diff_when_requested(
 def test_build_git_native_review_prompt_uses_git_command_when_not_embedded(
     sample_review_context: ReviewContext,
 ) -> None:
-    """Large diffs keep agentic git diff instructions."""
+    """Large diffs keep agentic git diff instructions under the opt-out.
+
+    The delegated ``git diff`` command bypasses secret redaction, so it is
+    only emitted when the caller explicitly opts out of the redaction
+    guarantee via ``allow_unredacted_git_native``.
+    """
     chunk = ReviewChunk(
         id=1,
         files=["src/lib/math.py"],
@@ -692,6 +697,7 @@ def test_build_git_native_review_prompt_uses_git_command_when_not_embedded(
         checklist_count=1,
         interaction_paths="(none)",
         embed_diff=False,
+        allow_unredacted_git_native=True,
     )
 
     assert_that(user_prompt).contains("git diff")
