@@ -36,8 +36,8 @@ jobs:
     # SECURITY: even for same-repo PRs, this job checks out and installs PR
     # code with the ANTHROPIC_API_KEY secret in scope, so PR authors with write
     # access could exfiltrate it. This residual same-repo risk is tracked in a
-    # follow-up issue (trusted-install re-architecture); see follow-up issue.
-    # The ANTHROPIC_API_KEY secret MUST NOT be enabled until that lands.
+    # follow-up issue (trusted-install re-architecture); see #1073.
+    # The ANTHROPIC_API_KEY secret MUST NOT be enabled until #1073 lands.
     if: >-
       github.event.pull_request.draft == false
       && github.event.pull_request.head.repo.full_name == github.repository
