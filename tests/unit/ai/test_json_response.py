@@ -89,3 +89,21 @@ def test_strip_json_fences_brace_matching_ignores_braces_in_strings() -> None:
     stripped = strip_json_fences(content=content)
 
     assert_that(stripped).is_equal_to('{"text": "a } b", "n": 1}')
+
+
+def test_strip_json_fences_skips_decoy_array_before_object() -> None:
+    """A decoy array span before the real object is not returned as payload."""
+    content = 'Checklist [1]\n{"summary": "real", "findings": []}'
+
+    stripped = strip_json_fences(content=content, expect_object=True)
+
+    assert_that(stripped).is_equal_to('{"summary": "real", "findings": []}')
+
+
+def test_load_json_object_skips_decoy_array_before_object() -> None:
+    """load_json_object recovers the real object past an earlier decoy array."""
+    payload = load_json_object(
+        content='Checklist [1]\n{"summary": "real", "findings": []}',
+    )
+
+    assert_that(payload).is_equal_to({"summary": "real", "findings": []})

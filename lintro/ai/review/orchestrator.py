@@ -575,6 +575,7 @@ def build_review_prompt(
         Tuple of (system_prompt, user_prompt).
     """
     pr_title = context.pr_metadata.title if context.pr_metadata else "Local changes"
+    pr_title = _redact_prompt_text(text=pr_title, source="PR title")
     pr_summary = context.pr_metadata.body if context.pr_metadata else "(no PR summary)"
     pr_summary = _redact_prompt_text(text=pr_summary, source="PR metadata")
     redacted_diff = _redact_prompt_text(text=chunk.diff, source="diff")
@@ -635,6 +636,7 @@ def build_git_native_review_prompt(
         Tuple of (system_prompt, user_prompt).
     """
     pr_title = context.pr_metadata.title if context.pr_metadata else "Local changes"
+    pr_title = _redact_prompt_text(text=pr_title, source="PR title")
     pr_summary = context.pr_metadata.body if context.pr_metadata else "(no PR summary)"
     pr_summary = _redact_prompt_text(text=pr_summary, source="PR metadata")
     changed_files = [file for file in context.changed_files if file.path in chunk.files]
@@ -1159,29 +1161,64 @@ def _max_checklist_id(*, checklist_items: list[ChecklistItem]) -> int:
     return int(max(item.id for item in checklist_items))
 
 
+_SEVERITY_SYNONYMS: dict[str, Severity] = {
+    "CRITICAL": Severity.P1,
+    "BLOCKER": Severity.P1,
+    "BLOCKING": Severity.P1,
+    "HIGH": Severity.P1,
+    "SEVERE": Severity.P1,
+    "ERROR": Severity.P1,
+    "MAJOR": Severity.P2,
+    "MEDIUM": Severity.P2,
+    "MODERATE": Severity.P2,
+    "WARNING": Severity.P2,
+    "WARN": Severity.P2,
+    "MINOR": Severity.P3,
+    "LOW": Severity.P3,
+    "TRIVIAL": Severity.P3,
+    "INFO": Severity.P3,
+    "NOTE": Severity.P3,
+}
+
+
 def _normalize_severity(*, raw: object) -> Severity:
     """Normalize an unvalidated model severity value to a ``Severity`` member.
 
     Strips surrounding whitespace and uppercases the value before matching
-    against the canonical ``P1``/``P2``/``P3`` labels. Any unrecognized value
-    (case variants aside) is mapped to ``Severity.P3`` and logged so a
-    malformed severity can never silently bypass the P1 exit gate.
+    against the canonical ``P1``/``P2``/``P3`` labels. When the value is not a
+    canonical label, it is matched against a table of common synonyms so that
+    blocking words like ``critical`` map to ``P1`` rather than being downgraded.
+    A truly unknown value defaults to ``Severity.P2`` (not ``P3``) and is logged,
+    so an unrecognized-but-possibly-serious label is never silently dropped
+    below the visible, blocking threshold.
+
+    Synonym mapping:
+        P1: critical, blocker, blocking, high, severe, error.
+        P2: major, medium, moderate, warning, warn.
+        P3: minor, low, trivial, info, note.
 
     Args:
         raw: Raw severity value from a parsed model response.
 
     Returns:
-        The matching ``Severity`` member, or ``Severity.P3`` when unknown.
+        The matching ``Severity`` member, a synonym-mapped member, or
+        ``Severity.P2`` when the value is unrecognized.
     """
     normalized = str(raw).strip().upper()
     try:
         return Severity(normalized)
     except ValueError:
-        logger.warning(
-            "Unknown finding severity {raw!r}; defaulting to P3.",
-            raw=raw,
-        )
-        return Severity.P3
+        pass
+
+    synonym = _SEVERITY_SYNONYMS.get(normalized)
+    if synonym is not None:
+        return synonym
+
+    logger.warning(
+        "Unknown finding severity {raw!r}; defaulting to P2.",
+        raw=raw,
+    )
+    return Severity.P2
 
 
 def _normalize_checklist_answer_value(*, answer: str) -> str:
