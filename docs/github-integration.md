@@ -48,6 +48,29 @@ docker-ci).
 If you want to publish the weekly report to Pages, prefer using a dedicated
 `deploy-pages` job gated on the report workflow.
 
+### 4b. AI Review (Dogfood) Workflow
+
+**File:** `.github/workflows/ai-review.yml`
+
+py-lintro dogfoods its own `lintro review` command on pull requests that touch
+`lintro/**`. The workflow runs an AI diff review and prints the JSON result to the job
+log.
+
+**Features:**
+
+- 🤖 **AI diff review** via `lintro review --pr <n> --depth 1 --output json`
+- 🔑 **Bring-your-own key** — reads the `ANTHROPIC_API_KEY` repository secret
+- 💸 **Bounded spend** — caps cost via `ai.max_cost_usd`
+- 🟢 **Non-blocking / informational** — runs with `continue-on-error` and always exits
+  0, so it can never fail a pull request. It is intentionally not a required check.
+- ⏭️ **Graceful skip** — when `ANTHROPIC_API_KEY` is absent (secret not configured yet,
+  or a fork PR that cannot read secrets) and for draft PRs, the review is skipped
+  without error.
+
+To activate it, add an `ANTHROPIC_API_KEY` secret to the repository (**Settings →
+Secrets and variables → Actions**). Until that secret exists the workflow runs but skips
+gracefully, so merging it never breaks CI.
+
 ### 5. Docker Image Publishing
 
 **File:** `.github/workflows/docker-build-publish.yml`
