@@ -253,6 +253,106 @@ def test_check_error_payload_without_results_is_not_success(
     assert_that(result.issues_count).is_equal_to(0)
 
 
+def test_check_exit_zero_error_payload_fails_closed(
+    osv_scanner_plugin: OsvScannerPlugin,
+    tmp_path: Path,
+) -> None:
+    """Exit-0 with an error-shaped payload is a scan failure, not a clean pass.
+
+    osv-scanner can exit 0 while emitting ``{"error": ...}``. Reporting that as
+    a clean scan would be a silent false-negative in a security gate (#1028).
+
+    Args:
+        osv_scanner_plugin: The OsvScannerPlugin instance to test.
+        tmp_path: Temporary directory path for test files.
+    """
+    lockfile = tmp_path / "requirements.txt"
+    lockfile.write_text("setuptools==80.9.0\n")
+
+    osv_output = '{"error": "failed to load config"}\n'
+
+    with patch.object(
+        osv_scanner_plugin,
+        "_run_subprocess_result",
+        return_value=_proc(success=True, stdout=osv_output),
+    ):
+        result = osv_scanner_plugin.check([str(lockfile)], {})
+
+    assert_that(result.success).is_false()
+    assert_that(result.issues_count).is_equal_to(0)
+    assert_that(result.parse_failures_count).is_equal_to(1)
+
+
+def test_check_exit_zero_results_not_a_list_fails_closed(
+    osv_scanner_plugin: OsvScannerPlugin,
+    tmp_path: Path,
+) -> None:
+    """Exit-0 with a non-list ``results`` value fails closed (#1028).
+
+    Args:
+        osv_scanner_plugin: The OsvScannerPlugin instance to test.
+        tmp_path: Temporary directory path for test files.
+    """
+    lockfile = tmp_path / "requirements.txt"
+    lockfile.write_text("setuptools==80.9.0\n")
+
+    osv_output = '{"results": "not-a-list"}\n'
+
+    with patch.object(
+        osv_scanner_plugin,
+        "_run_subprocess_result",
+        return_value=_proc(success=True, stdout=osv_output),
+    ):
+        result = osv_scanner_plugin.check([str(lockfile)], {})
+
+    assert_that(result.success).is_false()
+    assert_that(result.issues_count).is_equal_to(0)
+    assert_that(result.parse_failures_count).is_equal_to(1)
+
+
+def test_check_exit_zero_empty_results_is_clean(
+    osv_scanner_plugin: OsvScannerPlugin,
+    tmp_path: Path,
+) -> None:
+    """Exit-0 with an empty results list is a legitimate clean scan (#1028).
+
+    Args:
+        osv_scanner_plugin: The OsvScannerPlugin instance to test.
+        tmp_path: Temporary directory path for test files.
+    """
+    lockfile = tmp_path / "requirements.txt"
+    lockfile.write_text("setuptools==80.9.0\n")
+
+    osv_output = '{"results": []}\n'
+
+    with patch.object(
+        osv_scanner_plugin,
+        "_run_subprocess_result",
+        return_value=_proc(success=True, stdout=osv_output),
+    ):
+        result = osv_scanner_plugin.check([str(lockfile)], {})
+
+    assert_that(result.success).is_true()
+    assert_that(result.issues_count).is_equal_to(0)
+    assert_that(result.parse_failures_count).is_equal_to(0)
+
+
+def test_payload_has_valid_results_discriminates_shapes() -> None:
+    """The results-shape guard accepts only dicts with a list ``results``."""
+    assert_that(
+        OsvScannerPlugin._payload_has_valid_results({"results": []}),
+    ).is_true()
+    assert_that(
+        OsvScannerPlugin._payload_has_valid_results({"results": [{"x": 1}]}),
+    ).is_true()
+    assert_that(
+        OsvScannerPlugin._payload_has_valid_results({"error": "boom"}),
+    ).is_false()
+    assert_that(
+        OsvScannerPlugin._payload_has_valid_results({"results": "nope"}),
+    ).is_false()
+
+
 def test_check_with_vulnerabilities(
     osv_scanner_plugin: OsvScannerPlugin,
     tmp_path: Path,

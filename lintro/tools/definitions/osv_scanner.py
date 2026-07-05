@@ -149,6 +149,27 @@ class OsvScannerPlugin(BaseToolPlugin):
         ]
 
     @staticmethod
+    def _payload_has_valid_results(payload: dict[str, Any]) -> bool:
+        """Return whether an osv-scanner payload is a valid scan report.
+
+        A well-formed osv-scanner JSON report is an object whose ``results``
+        key holds a list (possibly empty). Error-shaped payloads such as
+        ``{"error": ...}`` — or payloads whose ``results`` is missing or not a
+        list — are not valid scan reports. For a security gate such a payload
+        must be treated as a scan failure rather than a clean pass (see #1028).
+
+        Args:
+            payload: Parsed JSON object extracted from osv-scanner stdout.
+
+        Returns:
+            True when ``payload`` is a dict whose ``results`` value is a list.
+        """
+        return isinstance(payload, dict) and isinstance(
+            payload.get("results"),
+            list,
+        )
+
+    @staticmethod
     def _find_config_file(scan_root: Path) -> Path | None:
         """Find .osv-scanner.toml by walking up from the scan root.
 
@@ -288,8 +309,7 @@ class OsvScannerPlugin(BaseToolPlugin):
             not success
             and len(issues) == 0
             and payload is not None
-            and "results" in payload
-            and isinstance(payload["results"], list)
+            and self._payload_has_valid_results(payload)
             and len(payload["results"]) == 0
         ):
             success = True
@@ -302,6 +322,15 @@ class OsvScannerPlugin(BaseToolPlugin):
             payload is None and bool(proc.stdout.strip()) and not no_op_success
         )
         if parse_failure:
+            success = False
+            parse_failures_count = 1
+
+        # Fail closed on malformed exit-0 payloads. osv-scanner may exit 0 while
+        # emitting an error-shaped object (``{"error": ...}``) or a payload whose
+        # ``results`` key is missing or not a list. Such a payload parses as JSON
+        # but is not a real scan report, so its true result is unknown. A security
+        # gate must treat this as a failure, never a clean pass (see #1028).
+        if payload is not None and not self._payload_has_valid_results(payload):
             success = False
             parse_failures_count = 1
 
