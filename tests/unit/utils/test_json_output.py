@@ -59,6 +59,22 @@ def fix_result_with_split() -> ToolResult:
     )
 
 
+def test_serialize_tool_result_fix_mode_defaults_unset_counts_to_zero() -> None:
+    """FIX serialization emits integers when split counts are unset."""
+    result = ToolResult(
+        name="ruff",
+        success=False,
+        issues_count=1,
+        output="ruff raw output",
+        issues=[_StubIssue()],
+    )
+
+    data = serialize_tool_result(result, action=Action.FIX)
+
+    assert_that(data["fixed"]).is_equal_to(0)
+    assert_that(data["remaining"]).is_equal_to(0)
+
+
 def test_serialize_tool_result_includes_output_and_issues(
     check_result_with_issue: ToolResult,
 ) -> None:

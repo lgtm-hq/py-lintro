@@ -148,13 +148,28 @@ _HTML_ISSUES_HEADER = (
 )
 
 
-def _merged_issue_count(result: ToolResult) -> int:
-    """Return the deduplicated issue count for a result.
+def _merged_issues(result: ToolResult) -> list[BaseIssue]:
+    """Return the deduplicated issue list for a result.
 
-    Uses ``len(merge_detected_and_remaining(...))`` so every output format
-    reports the same count the JSON writer does. In check mode
+    Uses ``merge_detected_and_remaining(...)`` so every output format
+    reports the same issues the JSON writer does. In check mode
     ``initial_issues`` is None and the merged list equals ``result.issues``;
     in fix mode the merge deduplicates pre-fix and remaining issues.
+
+    Args:
+        result: Tool result to collect issues for.
+
+    Returns:
+        The merged/deduplicated issue list.
+    """
+    return merge_detected_and_remaining(
+        getattr(result, "initial_issues", None),
+        getattr(result, "issues", None),
+    )
+
+
+def _merged_issue_count(result: ToolResult) -> int:
+    """Return the deduplicated issue count for a result.
 
     Args:
         result: Tool result to count issues for.
@@ -162,11 +177,7 @@ def _merged_issue_count(result: ToolResult) -> int:
     Returns:
         The merged/deduplicated issue count.
     """
-    merged_issues = merge_detected_and_remaining(
-        getattr(result, "initial_issues", None),
-        getattr(result, "issues", None),
-    )
-    return len(merged_issues)
+    return len(_merged_issues(result))
 
 
 def write_output_file(
@@ -227,9 +238,10 @@ def write_output_file(
             "doc_url",
         ]
         for result in all_results:
-            merged_count = _merged_issue_count(result)
-            if hasattr(result, "issues") and result.issues:
-                for issue in result.issues:
+            merged_issues = _merged_issues(result)
+            merged_count = len(merged_issues)
+            if merged_issues:
+                for issue in merged_issues:
                     rows.append(
                         [
                             sanitize_csv_value(result.name),

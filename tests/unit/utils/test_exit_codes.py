@@ -61,7 +61,7 @@ def test_aggregate_excludes_skipped_tools() -> None:
         ToolResult(name="black", skipped=True, skip_reason="missing", issues_count=0),
     ]
 
-    total_issues, total_fixed, total_remaining = aggregate_tool_results(
+    total_issues, _total_fixed, total_remaining = aggregate_tool_results(
         results,
         Action.CHECK,
     )

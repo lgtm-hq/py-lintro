@@ -127,7 +127,11 @@ def test_write_csv_uses_merged_issue_count_not_stale_value(
     )
 
     content = output_path.read_text()
+    lines = content.strip().split("\n")
     # Merged/deduped count is 2 (detected [E001, E002] + remaining [E002]).
     assert_that(content).does_not_contain("99")
-    data_row = content.strip().split("\n")[1]
-    assert_that(data_row.split(",")[1]).is_equal_to("2")
+    assert_that(lines).is_length(3)  # header + 2 merged issue rows
+    assert_that(content).contains("E001")
+    assert_that(content).contains("E002")
+    for data_row in lines[1:]:
+        assert_that(data_row.split(",")[1]).is_equal_to("2")

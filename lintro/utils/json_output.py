@@ -88,8 +88,10 @@ def serialize_tool_result(
     if result.parse_failures_count is not None:
         data["parse_failures_count"] = result.parse_failures_count
     if action == Action.FIX:
-        data["fixed"] = getattr(result, "fixed_issues_count", 0)
-        data["remaining"] = getattr(result, "remaining_issues_count", 0)
+        fixed = getattr(result, "fixed_issues_count", None)
+        remaining = getattr(result, "remaining_issues_count", None)
+        data["fixed"] = fixed if fixed is not None else 0
+        data["remaining"] = remaining if remaining is not None else 0
     ai_metadata = getattr(result, "ai_metadata", None)
     if isinstance(ai_metadata, dict) and ai_metadata:
         normalized_ai_metadata = normalize_ai_metadata(ai_metadata)
