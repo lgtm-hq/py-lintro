@@ -1188,9 +1188,11 @@ def _normalize_severity(*, raw: object) -> Severity:
     against the canonical ``P1``/``P2``/``P3`` labels. When the value is not a
     canonical label, it is matched against a table of common synonyms so that
     blocking words like ``critical`` map to ``P1`` rather than being downgraded.
-    A truly unknown value defaults to ``Severity.P2`` (not ``P3``) and is logged,
-    so an unrecognized-but-possibly-serious label is never silently dropped
-    below the visible, blocking threshold.
+    A truly unknown value fails closed to ``Severity.P1`` and is logged: since
+    the exit gate only trips on ``P1``, an unrecognized label (e.g. ``fatal``)
+    must be treated as blocking so malformed model output can never silently
+    pass the gate. The synonym table already captures the benign labels, so the
+    fallback is deliberately conservative.
 
     Synonym mapping:
         P1: critical, blocker, blocking, high, severe, error.
@@ -1202,7 +1204,7 @@ def _normalize_severity(*, raw: object) -> Severity:
 
     Returns:
         The matching ``Severity`` member, a synonym-mapped member, or
-        ``Severity.P2`` when the value is unrecognized.
+        ``Severity.P1`` (fail-closed) when the value is unrecognized.
     """
     normalized = str(raw).strip().upper()
     try:
@@ -1215,10 +1217,10 @@ def _normalize_severity(*, raw: object) -> Severity:
         return synonym
 
     logger.warning(
-        "Unknown finding severity {raw!r}; defaulting to P2.",
+        "Unknown finding severity {raw!r}; failing closed to P1.",
         raw=raw,
     )
-    return Severity.P2
+    return Severity.P1
 
 
 def _normalize_checklist_answer_value(*, answer: str) -> str:

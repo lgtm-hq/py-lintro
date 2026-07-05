@@ -223,9 +223,9 @@ def test_normalize_severity_critical_maps_to_p1() -> None:
     assert_that(_normalize_severity(raw="critical")).is_equal_to(Severity.P1)
 
 
-def test_normalize_severity_gibberish_maps_to_p2() -> None:
-    """A truly unknown label defaults to Severity.P2, never below the gate."""
-    assert_that(_normalize_severity(raw="banana")).is_equal_to(Severity.P2)
+def test_normalize_severity_gibberish_fails_closed_to_p1() -> None:
+    """A truly unknown label fails closed to Severity.P1 so it can't bypass the gate."""
+    assert_that(_normalize_severity(raw="banana")).is_equal_to(Severity.P1)
 
 
 def test_normalize_severity_warning_maps_to_p2() -> None:
@@ -270,8 +270,8 @@ def test_has_p1_findings_true_for_blocking_synonym() -> None:
     assert_that(result.has_p1_findings).is_true()
 
 
-def test_has_p1_findings_false_for_gibberish_severity() -> None:
-    """A truly unknown severity defaults to P2 and does not trip the gate."""
+def test_has_p1_findings_true_for_gibberish_severity() -> None:
+    """A truly unknown severity fails closed to P1 and trips the exit gate."""
     findings = _parse_findings(
         raw_findings=[{"severity": "banana", "title": "Bug"}],
     )
@@ -282,4 +282,4 @@ def test_has_p1_findings_false_for_gibberish_severity() -> None:
         findings=findings,
     )
 
-    assert_that(result.has_p1_findings).is_false()
+    assert_that(result.has_p1_findings).is_true()
