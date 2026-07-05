@@ -229,6 +229,48 @@ def test_workflow_job_is_same_repo_only() -> None:
     )
 
 
+def test_workflow_installs_from_base_ref_not_pr_head() -> None:
+    """Lintro is installed from the trusted base ref, never the PR head.
+
+    The checkout used for the keyed install must pin ``ref`` to the PR's base
+    SHA so PR-controlled code never executes with the ANTHROPIC_API_KEY in
+    scope. The PR itself is still reviewed via ``gh`` (diff fetched over the
+    API), independent of the checked-out tree.
+    """
+    loaded = yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))
+
+    steps = loaded["jobs"]["ai-review"]["steps"]
+    checkout_steps = [
+        step
+        for step in steps
+        if isinstance(step.get("uses"), str)
+        and step["uses"].startswith("actions/checkout@")
+    ]
+    assert_that(checkout_steps).is_length(1)
+
+    checkout = checkout_steps[0]
+    assert_that(checkout).contains_key("with")
+    assert_that(checkout["with"]["ref"]).is_equal_to(
+        "${{ github.event.pull_request.base.sha }}",
+    )
+    # The PR head is never checked out for the keyed install.
+    workflow_text = WORKFLOW.read_text(encoding="utf-8")
+    assert_that(workflow_text).does_not_contain("pull_request.head.sha")
+    assert_that(workflow_text).does_not_contain("pull_request.head.ref")
+
+
+def test_workflow_reviews_pr_via_gh_not_working_tree() -> None:
+    """The review targets the PR by number, fetching its diff via ``gh``.
+
+    ``lintro review --pr`` collects the PR diff through the GitHub API, so the
+    PR's changes are reviewed as data even though the checked-out tree is the
+    base ref.
+    """
+    review_script = SHELL_SCRIPT.read_text(encoding="utf-8")
+
+    assert_that(review_script).contains("lintro review --pr")
+
+
 @pytest.mark.parametrize(
     "action_ref",
     [
