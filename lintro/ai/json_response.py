@@ -35,8 +35,83 @@ class CliSchemaRequest:
     schema_name: str | None = None
 
 
+def _is_parseable_json(text: str) -> bool:
+    """Return True when ``text`` parses as JSON.
+
+    Args:
+        text: Candidate JSON string.
+
+    Returns:
+        True if ``json.loads`` succeeds, else False.
+    """
+    try:
+        json.loads(text)
+    except (json.JSONDecodeError, ValueError):
+        return False
+    return True
+
+
+def _extract_json_span(text: str) -> str | None:
+    """Extract the outermost balanced JSON object or array span from text.
+
+    Mirrors the brace-matching approach used by the CLI transport: finds the
+    earliest ``{`` or ``[``, then scans for its matching close bracket while
+    respecting string literals and escapes.
+
+    Args:
+        text: Raw text that may embed a JSON object or array in prose.
+
+    Returns:
+        The extracted JSON substring, or ``None`` when no balanced span is
+        found.
+    """
+    open_to_close = {"{": "}", "[": "]"}
+    start = -1
+    opener = ""
+    for index, char in enumerate(text):
+        if char in open_to_close:
+            start = index
+            opener = char
+            break
+    if start == -1:
+        return None
+
+    closer = open_to_close[opener]
+    depth = 0
+    in_string = False
+    escape_next = False
+    for index in range(start, len(text)):
+        char = text[index]
+        if escape_next:
+            escape_next = False
+            continue
+        if char == "\\":
+            if in_string:
+                escape_next = True
+            continue
+        if char == '"':
+            in_string = not in_string
+            continue
+        if in_string:
+            continue
+        if char == opener:
+            depth += 1
+        elif char == closer:
+            depth -= 1
+            if depth == 0:
+                return text[start : index + 1]
+    return None
+
+
 def strip_json_fences(*, content: str) -> str:
     """Strip markdown JSON code fences from model output.
+
+    Robust against responses that prepend prose containing a decoy fenced
+    block before the real JSON payload: all fenced blocks are considered and
+    the last one that parses as valid JSON wins (models place their final
+    answer last). When no fenced block parses, the last fenced block is
+    returned. When there are no fences at all, falls back to brace/bracket
+    matched extraction before returning the raw stripped content.
 
     Args:
         content: Raw model response text.
@@ -45,9 +120,18 @@ def strip_json_fences(*, content: str) -> str:
         JSON string suitable for ``json.loads``.
     """
     stripped = content.strip()
-    match = _JSON_FENCE_PATTERN.search(stripped)
-    if match is not None:
-        return match.group(1).strip()
+    blocks: list[str] = _JSON_FENCE_PATTERN.findall(stripped)
+    if blocks:
+        for block in reversed(blocks):
+            candidate = block.strip()
+            if _is_parseable_json(candidate):
+                return candidate
+        return blocks[-1].strip()
+
+    if not _is_parseable_json(stripped):
+        extracted = _extract_json_span(stripped)
+        if extracted is not None and _is_parseable_json(extracted):
+            return extracted
     return stripped
 
 

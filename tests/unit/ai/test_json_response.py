@@ -36,3 +36,56 @@ def test_load_json_object_rejects_non_object() -> None:
     """Array JSON raises ValueError."""
     with pytest.raises(ValueError, match="must be an object"):
         load_json_object(content="[1, 2, 3]")
+
+
+def test_strip_json_fences_prefers_last_parseable_block() -> None:
+    """Prose with a decoy fenced block before real JSON extracts the payload."""
+    content = (
+        "Here is an example of the shape:\n"
+        "```json\n"
+        '{"summary": "decoy"}\n'
+        "```\n"
+        "And here is my actual review:\n"
+        "```json\n"
+        '{"summary": "real", "findings": []}\n'
+        "```\n"
+    )
+
+    stripped = strip_json_fences(content=content)
+
+    assert_that(stripped).is_equal_to('{"summary": "real", "findings": []}')
+
+
+def test_strip_json_fences_skips_non_json_decoy_fence() -> None:
+    """A non-JSON fenced snippet before the payload is ignored."""
+    content = (
+        "First run this:\n"
+        "```bash\n"
+        "git diff HEAD~1\n"
+        "```\n"
+        "```json\n"
+        '{"summary": "ok"}\n'
+        "```\n"
+    )
+
+    stripped = strip_json_fences(content=content)
+
+    assert_that(stripped).is_equal_to('{"summary": "ok"}')
+
+
+def test_strip_json_fences_falls_back_to_brace_matching() -> None:
+    """Unfenced prose wrapping a JSON object extracts via brace matching."""
+    content = 'Sure! Here is the result: {"summary": "ok", "findings": []} Done.'
+
+    stripped = strip_json_fences(content=content)
+
+    assert_that(stripped).is_equal_to('{"summary": "ok", "findings": []}')
+
+
+def test_strip_json_fences_brace_matching_ignores_braces_in_strings() -> None:
+    """Brace matching respects braces embedded in string literals."""
+    content = 'prefix {"text": "a } b", "n": 1} suffix'
+
+    stripped = strip_json_fences(content=content)
+
+    assert_that(stripped).is_equal_to('{"text": "a } b", "n": 1}')
