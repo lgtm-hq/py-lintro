@@ -153,13 +153,15 @@ def test_collect_branch_context_uses_merge_base(
             deletions=0,
         ),
     )
-    bash_calls = [
+    diff_calls = [
         call.args[0]
         for call in mock_run.call_args_list
-        if [Path(call.args[0][0]).name, *call.args[0][1:2]] == ["bash", "-c"]
+        if Path(call.args[0][0]).name == "git" and "diff" in call.args[0]
     ]
-    assert_that(bash_calls).is_length(1)
-    assert_that(bash_calls[0][2]).contains("base123...head456")
+    # Three separate git diff variants: unified, name-status, numstat.
+    assert_that(diff_calls).is_length(3)
+    for diff_call in diff_calls:
+        assert_that(diff_call).contains("base123...head456")
 
 
 @patch("lintro.ai.review.context.git_ops.subprocess.run")
@@ -171,7 +173,7 @@ def test_collect_uncommitted_context_merges_staged_and_unstaged(
     _mock_which: MagicMock,
     mock_run: MagicMock,
 ) -> None:
-    """Uncommitted mode uses a single git diff HEAD for index and working tree."""
+    """Uncommitted mode diffs HEAD for the index and working tree."""
     dispatcher = SubprocessMock()
     dispatcher.queue(["git", "rev-parse", "--git-dir"], stdout=".git\n")
     dispatcher.queue(["git", "ls-files", "--others", "--exclude-standard"], stdout="")
@@ -196,13 +198,15 @@ def test_collect_uncommitted_context_merges_staged_and_unstaged(
     assert_that({file.path for file in context.changed_files}).is_equal_to(
         {"unstaged.py", "staged.py"},
     )
-    bash_calls = [
+    diff_calls = [
         call.args[0]
         for call in mock_run.call_args_list
-        if [Path(call.args[0][0]).name, *call.args[0][1:2]] == ["bash", "-c"]
+        if Path(call.args[0][0]).name == "git" and "diff" in call.args[0]
     ]
-    assert_that(bash_calls).is_length(1)
-    assert_that(bash_calls[0][2]).contains("head456")
+    # Three separate git diff variants: unified, name-status, numstat.
+    assert_that(diff_calls).is_length(3)
+    for diff_call in diff_calls:
+        assert_that(diff_call).contains("head456")
 
 
 @patch("lintro.ai.review.context.git_ops.subprocess.run")
@@ -374,24 +378,6 @@ def test_collect_review_context_rejects_repo_without_pr_number() -> None:
     assert_that(exc_info.value.code).is_equal_to(
         ReviewContextErrorCode.INVALID_REVIEW_MODE,
     )
-
-
-@patch("lintro.ai.review.context.git_ops.subprocess.run")
-@patch(
-    "lintro.ai.review.context.git_ops.shutil.which",
-    side_effect=lambda cmd: None if cmd == "bash" else "/usr/bin/git",
-)
-def test_collect_review_context_requires_bash_for_git_modes(
-    _mock_which: MagicMock,
-    mock_run: MagicMock,
-) -> None:
-    """Branch and uncommitted collection require bash for combined diff output."""
-    with pytest.raises(ReviewContextError) as exc_info:
-        collect_review_context(base="main")
-    assert_that(exc_info.value.code).is_equal_to(
-        ReviewContextErrorCode.BASH_UNAVAILABLE,
-    )
-    mock_run.assert_not_called()
 
 
 @patch("lintro.ai.review.context.git_ops.subprocess.run")

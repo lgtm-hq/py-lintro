@@ -26,11 +26,11 @@ def test_streaming_successful_command() -> None:
         mock_process.wait.return_value = 0
         mock_popen.return_value = mock_process
 
-        success, output = run_subprocess_streaming(["echo", "hello"], timeout=30)
+        result = run_subprocess_streaming(["echo", "hello"], timeout=30)
 
-        assert_that(success).is_true()
-        assert_that(output).contains("line1")
-        assert_that(output).contains("line2")
+        assert_that(result.success).is_true()
+        assert_that(result.output).contains("line1")
+        assert_that(result.output).contains("line2")
 
 
 def test_streaming_failed_command_nonzero_exit() -> None:
@@ -41,10 +41,10 @@ def test_streaming_failed_command_nonzero_exit() -> None:
         mock_process.wait.return_value = 1
         mock_popen.return_value = mock_process
 
-        success, output = run_subprocess_streaming(["false"], timeout=30)
+        result = run_subprocess_streaming(["false"], timeout=30)
 
-        assert_that(success).is_false()
-        assert_that(output).contains("error output")
+        assert_that(result.success).is_false()
+        assert_that(result.output).contains("error output")
 
 
 def test_streaming_with_line_handler() -> None:
@@ -188,10 +188,10 @@ def test_streaming_empty_output() -> None:
         mock_process.wait.return_value = 0
         mock_popen.return_value = mock_process
 
-        success, output = run_subprocess_streaming(["true"], timeout=30)
+        result = run_subprocess_streaming(["true"], timeout=30)
 
-        assert_that(success).is_true()
-        assert_that(output).is_equal_to("")
+        assert_that(result.success).is_true()
+        assert_that(result.output).is_equal_to("")
 
 
 def test_streaming_with_cwd_and_env() -> None:

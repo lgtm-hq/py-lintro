@@ -248,7 +248,7 @@ class OsvScannerPlugin(BaseToolPlugin):
 
         try:
             # osv-scanner returns non-zero when vulnerabilities exist
-            success, output = self._run_subprocess(
+            proc = self._run_subprocess_result(
                 cmd,
                 timeout=timeout,
                 cwd=str(scan_root),
@@ -261,8 +261,13 @@ class OsvScannerPlugin(BaseToolPlugin):
                 issues_count=0,
             )
 
-        issues = parse_osv_scanner_output(output)
-        payload = extract_osv_scanner_payload(output)
+        success = proc.success
+        # Parse the JSON report from stdout only; stderr may carry human-readable
+        # log lines that must not corrupt JSON parsing (see #1043). ``output``
+        # (combined) is retained for display and plain-text signal detection.
+        output = proc.output
+        issues = parse_osv_scanner_output(proc.stdout)
+        payload = extract_osv_scanner_payload(proc.stdout)
         parse_failures_count = 0 if payload is not None else None
         no_op_success = False
 
@@ -355,7 +360,7 @@ class OsvScannerPlugin(BaseToolPlugin):
         # Run osv-scanner without suppressions to see all vulnerabilities
         probe_cmd = self._build_probe_command(scan_root)
         try:
-            _probe_success, probe_output = self._run_subprocess(
+            probe = self._run_subprocess_result(
                 probe_cmd,
                 timeout=timeout,
                 cwd=str(scan_root),
@@ -364,11 +369,11 @@ class OsvScannerPlugin(BaseToolPlugin):
             logger.debug("[osv-scanner] Probe scan timed out, skipping staleness check")
             return None
 
-        probe_issues = parse_osv_scanner_output(probe_output)
+        probe_issues = parse_osv_scanner_output(probe.stdout)
 
         # If probe failed and returned no parseable issues, skip classification
         # to avoid incorrectly marking all suppressions as stale.
-        if not _probe_success and not probe_issues:
+        if not probe.success and not probe_issues:
             logger.debug(
                 "[osv-scanner] Probe scan failed with no parseable output, "
                 "skipping staleness check",
