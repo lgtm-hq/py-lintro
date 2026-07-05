@@ -11,16 +11,20 @@ from unittest.mock import MagicMock, patch
 import pytest
 from assertpy import assert_that
 
+from lintro.ai.budget import CostBudget
 from lintro.ai.config import AIConfig
 from lintro.ai.enums import AITransport
+from lintro.ai.exceptions import AIError
 from lintro.ai.providers.response import AIResponse
 from lintro.ai.review.enums.review_category import ReviewCategory
 from lintro.ai.review.exceptions import ReviewExecutionError
+from lintro.ai.review.group_labels import REL_SINGLE_FILE
 from lintro.ai.review.models.changed_file import ChangedFile
 from lintro.ai.review.models.checklist_item import ChecklistItem
 from lintro.ai.review.models.review_chunk import ReviewChunk
 from lintro.ai.review.models.review_context import ReviewContext
 from lintro.ai.review.orchestrator import (
+    _review_chunk,
     build_git_native_review_prompt,
     parse_review_response,
     resolve_review_chunks,
@@ -224,6 +228,128 @@ def test_run_review_depth2_calls_provider_twice() -> None:
     assert_that(result.metadata.token_usage["prompt"]).is_equal_to(150)
     assert_that(result.metadata.token_usage["completion"]).is_equal_to(70)
     assert_that(result.metadata.cost_estimate_usd).is_equal_to(0.015)
+
+
+def _single_chunk() -> ReviewChunk:
+    """Build a one-file review chunk for direct ``_review_chunk`` tests."""
+    return ReviewChunk(
+        id=1,
+        files=["src/main.py"],
+        diff="diff --git a/src/main.py b/src/main.py\n+change",
+        relationship=REL_SINGLE_FILE,
+    )
+
+
+def _single_file_context() -> ReviewContext:
+    """Build a minimal review context for direct ``_review_chunk`` tests."""
+    return ReviewContext(
+        base_ref="main",
+        head_ref="feature",
+        changed_files=[
+            ChangedFile(
+                path="src/main.py",
+                status="modified",
+                additions=1,
+                deletions=0,
+            ),
+        ],
+        unified_diff="diff --git a/src/main.py b/src/main.py\n+change",
+        pr_metadata=None,
+    )
+
+
+def test_review_chunk_checks_budget_before_each_provider_call() -> None:
+    """Depth-3 review checks the budget before every intra-chunk call."""
+    events: list[str] = []
+    budget = CostBudget(max_cost_usd=None)
+    original_check = budget.check
+
+    def _record_check() -> None:
+        events.append("check")
+        original_check()
+
+    def _fake_call_ai(*, budget: CostBudget, **kwargs: object) -> AIResponse:
+        del budget, kwargs
+        events.append("call")
+        return AIResponse(
+            content=_sample_response_json(include_finding=False),
+            model="auto",
+            input_tokens=100,
+            output_tokens=50,
+            cost_estimate=0.01,
+            provider="cursor",
+        )
+
+    with (
+        patch.object(budget, "check", side_effect=_record_check),
+        patch(
+            "lintro.ai.review.orchestrator.call_ai",
+            side_effect=_fake_call_ai,
+        ),
+    ):
+        _review_chunk(
+            chunk=_single_chunk(),
+            context=_single_file_context(),
+            provider=MagicMock(),
+            ai_config=AIConfig(enabled=True, transport=AITransport.API),
+            depth=3,
+            checklist_text="1. [logic-bug] Example?",
+            checklist_count=1,
+            next_generated_checklist_id=100,
+            classifications=[],
+            lint_results=None,
+            budget=budget,
+        )
+
+    # Three provider calls (extra checklist, main review, adversarial), each
+    # preceded by a budget check.
+    assert_that(events.count("call")).is_equal_to(3)
+    for index, event in enumerate(events):
+        if event == "call":
+            assert_that(events[index - 1]).is_equal_to("check")
+
+
+def test_review_chunk_budget_stops_runaway_calls() -> None:
+    """An exhausted budget halts the chunk before overspending on more calls."""
+    calls: list[str] = []
+    budget = CostBudget(max_cost_usd=0.01)
+
+    def _fake_call_ai(*, budget: CostBudget, **kwargs: object) -> AIResponse:
+        del kwargs
+        calls.append("call")
+        response = AIResponse(
+            content=_sample_response_json(include_finding=False),
+            model="auto",
+            input_tokens=100,
+            output_tokens=50,
+            cost_estimate=0.02,
+            provider="cursor",
+        )
+        budget.record(response.cost_estimate)
+        return response
+
+    with patch(
+        "lintro.ai.review.orchestrator.call_ai",
+        side_effect=_fake_call_ai,
+    ):
+        with pytest.raises(AIError):
+            _review_chunk(
+                chunk=_single_chunk(),
+                context=_single_file_context(),
+                provider=MagicMock(),
+                ai_config=AIConfig(enabled=True, transport=AITransport.API),
+                depth=3,
+                checklist_text="1. [logic-bug] Example?",
+                checklist_count=1,
+                next_generated_checklist_id=100,
+                classifications=[],
+                lint_results=None,
+                budget=budget,
+            )
+
+    # The first depth-2 call overspends the $0.01 cap; the budget check gates
+    # the next call before a runaway depth-3 sweep can fire.
+    assert_that(len(calls)).is_less_than(3)
 
 
 def test_resolve_review_chunks_uses_fast_path_for_small_diff(
