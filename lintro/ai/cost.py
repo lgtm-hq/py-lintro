@@ -62,7 +62,7 @@ def estimate_cost_with_floor(
     """
     pricing = PROVIDERS.model_pricing.get(model)
     if pricing is None or (
-        pricing.input_per_million == 0.0 and pricing.output_per_million == 0.0
+        pricing.input_per_million == 0.0 or pricing.output_per_million == 0.0
     ):
         pricing = DEFAULT_PRICING
 
