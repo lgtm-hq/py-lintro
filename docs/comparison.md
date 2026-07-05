@@ -10,10 +10,12 @@ We would rather lose an evaluation on the merits than win one on a claim that do
 survive a `--help`. If you find something here that is out of date, please
 [open an issue](https://github.com/lgtm-hq/py-lintro/issues).
 
-> **On accuracy:** competitor products change quickly. Feature and pricing claims below
-> were checked against public documentation at the time of writing; where a capability
-> could not be confidently verified it is marked accordingly. Always confirm against
-> each project's current docs before making a decision.
+> **On accuracy:** competitor products change quickly. Feature, catalog-size, and
+> licensing claims below reflect each project's public documentation as of **July 2026**
+> (see [Sources](#sources)); where a capability could not be confidently verified it is
+> marked _Unverified_. These figures will drift — always confirm against each project's
+> current docs before deciding. If anything here is wrong or out of date, please
+> [open an issue](https://github.com/lgtm-hq/py-lintro/issues) and we will correct it.
 
 ## The short version
 
@@ -47,7 +49,6 @@ could not be confirmed from public docs.
 | Hold-the-line / baseline              | Roadmap [^ln-baseline]                               | Yes — hold-the-line baseline                        | Partial — changed-files mode, no persistent baseline [^ml-diff] | No baseline — runs on staged files             | Partial [^qlty-newissues]                          |
 | Diff-aware / changed-files-only runs  | Roadmap for lint [^ln-diff]                          | Yes                                                 | Yes — `VALIDATE_ALL_CODEBASE=false`                             | Yes — staged files by default                  | Yes — `--upstream` diff                            |
 | Tool catalog size                     | ~30 (28 today)                                       | 100+                                                | 100+                                                            | Unbounded — any hook repo                      | 70+                                                |
-| AI code review                        | Yes — BYO-key `lintro review --with-lint`            | Not a documented core capability [^ai]              | No                                                              | No                                             | No                                                 |
 | License / pricing                     | MIT — free, open source                              | Proprietary CLI; free tier + paid Team / Enterprise | AGPL-3.0 — free, open source                                    | MIT — free, open source                        | Fair Source (BSL 1.1 → open); CLI free, paid Cloud |
 | Install methods                       | pip / uv (PyPI), Docker (GHCR)                       | Shell installer, npm launcher                       | Docker image, CI action                                         | pip / uv                                       | Shell installer (macOS / Linux / Windows)          |
 
@@ -76,9 +77,10 @@ could not be confirmed from public docs.
     qlty surfaces new-versus-existing issues in its pull-request / Cloud workflow.
     Verify the current behavior for your setup.
 
-[^ai]:
-    AI-assisted code review was not a documented core capability of the other tools at
-    the time of writing. Vendors add features quickly; verify against current docs.
+**Beyond the matrix:** Lintro also ships an optional, bring-your-own-key AI code review
+(`lintro review`). We deliberately leave it out of the grid rather than scoring the
+other tools against a category built around a Lintro feature — see
+[When to choose Lintro](#when-to-choose-lintro) for what it does, and does not, do.
 
 ## When to choose them instead
 
@@ -168,6 +170,21 @@ set, with grounded BYO-key AI review, Lintro is built for you. If you need basel
 the biggest catalog, IDE integration, pure hook management, or maintainability metrics
 _today_, one of the alternatives above is the honest recommendation — and in several
 cases you can run Lintro alongside it.
+
+## Sources
+
+Competitor capabilities, catalog sizes, and licensing above were taken from each
+project's public documentation as of **July 2026**. They change often — please verify
+against the current docs, and
+[open an issue](https://github.com/lgtm-hq/py-lintro/issues) if anything here is
+inaccurate.
+
+- trunk — <https://trunk.io/>
+- MegaLinter — <https://megalinter.io/>
+- pre-commit — <https://pre-commit.com/>
+- qlty — <https://qlty.sh/>
+
+Lintro's own entries were verified against this repository's source at the same date.
 
 [trunk]: https://trunk.io/
 [megalinter]: https://megalinter.io/
