@@ -125,6 +125,10 @@ def _git_diff_triple_snapshot(*, diff_args: list[str]) -> tuple[str, str, str]:
     Each ``git diff`` runs via :func:`_run_git`, which raises
     ``ReviewContextError`` on failure.
 
+    The three calls run back-to-back without yielding; callers must not
+    mutate the worktree concurrently during collection (same assumption as the
+    prior single-shell snapshot this replaced).
+
     Args:
         diff_args: Arguments passed to ``git diff`` (for example ``HEAD`` or
             ``merge-base...HEAD``).

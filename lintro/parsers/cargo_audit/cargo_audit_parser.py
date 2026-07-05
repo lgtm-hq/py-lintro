@@ -111,16 +111,19 @@ def _normalize_severity(severity: str | None) -> str:
 
 def parse_cargo_audit_output(
     output: str | None,
+    data: dict[str, Any] | None = None,
 ) -> list[CargoAuditIssue]:
     """Parse cargo-audit JSON output into CargoAuditIssue objects.
 
     Args:
         output: Raw JSON output from cargo-audit --json command.
+        data: Pre-parsed JSON payload when already extracted from ``output``.
 
     Returns:
         List of parsed security vulnerability issues.
     """
-    data = extract_cargo_audit_payload(output)
+    if data is None:
+        data = extract_cargo_audit_payload(output)
     if data is None:
         return []
 

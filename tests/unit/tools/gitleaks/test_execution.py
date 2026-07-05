@@ -112,6 +112,31 @@ def test_check_with_mocked_subprocess_secrets_found(
     assert_that(result.issues).is_length(1)
 
 
+def test_check_empty_report_with_zero_exit_is_not_clean(
+    gitleaks_plugin: GitleaksPlugin,
+    tmp_path: Path,
+) -> None:
+    """An empty report with a zero exit must not report a clean scan (#1044).
+
+    Args:
+        gitleaks_plugin: The GitleaksPlugin instance to test.
+        tmp_path: Temporary directory path for test files.
+    """
+    test_file = tmp_path / "test_module.py"
+    test_file.write_text('"""Module."""\n')
+
+    with patch.object(
+        gitleaks_plugin,
+        "_run_subprocess",
+        side_effect=_mock_subprocess_factory(""),
+    ):
+        result = gitleaks_plugin.check([str(test_file)], {})
+
+    assert_that(result.success).is_false()
+    assert_that(result.issues_count).is_equal_to(0)
+    assert_that(result.parse_failures_count).is_equal_to(1)
+
+
 def test_check_garbage_report_with_zero_exit_is_not_clean(
     gitleaks_plugin: GitleaksPlugin,
     tmp_path: Path,

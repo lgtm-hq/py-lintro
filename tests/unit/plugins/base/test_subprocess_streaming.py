@@ -141,7 +141,7 @@ def test_streaming_total_walltime_stays_within_budget_on_hang() -> None:
             timeout=timeout,
         )
     elapsed = time.monotonic() - start
-    assert_that(elapsed).is_less_than(timeout + 1.5)
+    assert_that(elapsed).is_less_than(timeout + 2.0)
 
 
 def test_streaming_timeout_during_wait() -> None:

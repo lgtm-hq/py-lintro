@@ -478,7 +478,7 @@ class BanditPlugin(BaseToolPlugin):
             return ToolResult(
                 name=self.definition.name,
                 success=False,
-                output=(output or f"Failed to parse bandit output: {str(e)}"),
+                output=(output or f"Failed to parse bandit output: {e!s}"),
                 issues_count=0,
                 parse_failures_count=1,
             )

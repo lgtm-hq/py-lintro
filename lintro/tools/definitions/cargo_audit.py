@@ -172,7 +172,7 @@ class CargoAuditPlugin(BaseToolPlugin):
         # (combined) is retained for display.
         output = proc.output
         payload = extract_cargo_audit_payload(proc.stdout)
-        issues = parse_cargo_audit_output(proc.stdout)
+        issues = parse_cargo_audit_output(proc.stdout, data=payload)
 
         # Fail closed on unparseable output. cargo-audit is a security scanner,
         # so a payload we cannot parse (yet non-empty stdout) must never be
