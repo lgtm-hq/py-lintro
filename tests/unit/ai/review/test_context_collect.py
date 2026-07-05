@@ -224,7 +224,6 @@ def test_collect_pr_context_uses_gh(
             stdout=(
                 '{"title":"Fix bug","body":"Details","number":42,'
                 '"baseRefOid":"abc123","headRefOid":"deadbeef",'
-                '"baseRepository":{"nameWithOwner":"fork-owner/fork-repo"},'
                 '"headRepository":{"nameWithOwner":"lgtm-hq/py-lintro"}}'
             ),
         ),
@@ -256,6 +255,76 @@ def test_collect_pr_context_uses_gh(
     assert_that(context.base_ref).is_equal_to("abc123")
     assert_that(context.head_ref).is_equal_to("deadbeef")
     assert_that(context.changed_files).extracting("path").contains("a.py")
+
+
+# Known-valid ``gh pr view --json`` fields used by PR-mode metadata collection.
+# ``baseRepository`` is intentionally absent: it is NOT a valid gh field and its
+# presence crashed ``lintro review --pr`` in the live dogfood on #1080. This
+# allowlist locks the request to fields gh actually accepts.
+_VALID_GH_PR_VIEW_FIELDS = frozenset(
+    {
+        "title",
+        "body",
+        "number",
+        "baseRefOid",
+        "headRefOid",
+        "headRepository",
+    },
+)
+
+
+@patch("lintro.ai.review.context.git_ops.subprocess.run")
+@patch(
+    "lintro.ai.review.context.git_ops.shutil.which",
+    side_effect=_which_for_review_tools,
+)
+def test_collect_pr_context_requests_only_valid_gh_pr_view_fields(
+    _mock_which: MagicMock,
+    mock_run: MagicMock,
+) -> None:
+    """The ``gh pr view --json`` argv must never request invalid gh fields.
+
+    Regression guard for the live-dogfood P1: ``baseRepository`` is not a valid
+    ``gh pr view --json`` field, and requesting it crashed every ``--pr`` review
+    with ``Unknown JSON field: "baseRepository"``. Mocked gh calls could not
+    catch this, so the field list itself is asserted against a known-valid
+    allowlist.
+    """
+    mock_run.side_effect = [
+        _completed(
+            stdout=(
+                '{"title":"Fix bug","body":"Details","number":42,'
+                '"baseRefOid":"abc123","headRefOid":"deadbeef",'
+                '"headRepository":{"nameWithOwner":"lgtm-hq/py-lintro"}}'
+            ),
+        ),
+        _completed(
+            stdout=(
+                "diff --git a/a.py b/a.py\n"
+                "--- a/a.py\n"
+                "+++ b/a.py\n"
+                "@@ -1 +1 @@\n"
+                "-old\n"
+                "+new\n"
+            ),
+        ),
+    ]
+
+    collect_review_context(pr_number=42, repo="lgtm-hq/py-lintro")
+
+    view_calls = [
+        call.args[0]
+        for call in mock_run.call_args_list
+        if Path(call.args[0][0]).name == "gh" and "view" in call.args[0]
+    ]
+    assert_that(view_calls).is_length(1)
+    argv = view_calls[0]
+    json_index = argv.index("--json")
+    requested_fields = argv[json_index + 1].split(",")
+
+    assert_that(requested_fields).does_not_contain("baseRepository")
+    for field in requested_fields:
+        assert_that(_VALID_GH_PR_VIEW_FIELDS).contains(field)
 
 
 @patch("lintro.ai.review.context.git_ops.subprocess.run")
@@ -638,7 +707,6 @@ def test_collect_pr_context_accepts_repo_override_when_head_repository_null(
             stdout=(
                 '{"title":"Fix bug","body":"Details","number":42,'
                 '"baseRefOid":"abc123","headRefOid":"deadbeef",'
-                '"baseRepository":{"nameWithOwner":"fork-owner/fork-repo"},'
                 '"headRepository":null}'
             ),
         ),
@@ -727,7 +795,6 @@ def test_collect_pr_context_uses_head_repository_for_workflow_fetch(
             stdout=(
                 '{"title":"Fork PR","body":"","number":9,'
                 '"baseRefOid":"abc123","headRefOid":"forksha",'
-                '"baseRepository":{"nameWithOwner":"lgtm-hq/py-lintro"},'
                 '"headRepository":{"nameWithOwner":"fork-owner/py-lintro"}}'
             ),
         ),
@@ -746,7 +813,7 @@ def test_collect_pr_context_uses_head_repository_for_workflow_fetch(
         _completed(stdout="name: CI\nenv:\n  CI: true\nrun: scripts/deploy.sh\n"),
     ]
 
-    context = collect_review_context(pr_number=9)
+    context = collect_review_context(pr_number=9, repo="lgtm-hq/py-lintro")
 
     metadata = context.pr_metadata
     assert metadata is not None
