@@ -7,11 +7,15 @@ import json
 from assertpy import assert_that
 
 from lintro.ai.models import AISummary
+from lintro.ai.output.sarif import StandardIssue, to_sarif
 from lintro.ai.output.sarif_bridge import (
+    standard_issues_from_results,
     suggestions_from_results,
     summary_from_results,
 )
+from lintro.enums.severity_level import SeverityLevel
 from lintro.models.core.tool_result import ToolResult
+from lintro.parsers.ruff.ruff_issue import RuffIssue
 
 
 def test_suggestions_from_results_with_metadata() -> None:
@@ -186,3 +190,168 @@ def test_sarif_format_end_to_end() -> None:
     assert_that(run["properties"]["aiSummary"]["overview"]).is_equal_to(
         "Found 1 issue.",
     )
+
+
+def test_standard_issues_from_results_extracts_fields() -> None:
+    """Normalize BaseIssue objects from result.issues without AI metadata."""
+    result = ToolResult(
+        name="ruff",
+        success=False,
+        issues=[
+            RuffIssue(
+                file="src/main.py",
+                line=10,
+                column=5,
+                code="F401",
+                message="imported but unused",
+                doc_url="https://docs.astral.sh/ruff/rules/F401",
+            ),
+        ],
+    )
+
+    standard = standard_issues_from_results([result])
+
+    assert_that(standard).is_length(1)
+    issue = standard[0]
+    assert_that(issue).is_instance_of(StandardIssue)
+    assert_that(issue.tool_name).is_equal_to("ruff")
+    assert_that(issue.file).is_equal_to("src/main.py")
+    assert_that(issue.line).is_equal_to(10)
+    assert_that(issue.column).is_equal_to(5)
+    assert_that(issue.code).is_equal_to("F401")
+    assert_that(issue.message).is_equal_to("imported but unused")
+    assert_that(issue.doc_url).is_equal_to("https://docs.astral.sh/ruff/rules/F401")
+
+
+def test_standard_issues_from_results_no_issues() -> None:
+    """Return empty list when results carry no issues."""
+    result = ToolResult(name="ruff", success=True, issues=[])
+
+    assert_that(standard_issues_from_results([result])).is_empty()
+
+
+def test_standard_sarif_without_ai_has_result_per_issue() -> None:
+    """SARIF emits a standard result per issue with no AI metadata present."""
+    result = ToolResult(
+        name="ruff",
+        success=False,
+        issues=[
+            RuffIssue(
+                file="a.py",
+                line=3,
+                column=1,
+                code="E501",
+                message="line too long",
+                doc_url="https://docs.astral.sh/ruff/rules/E501",
+            ),
+            RuffIssue(
+                file="b.py",
+                line=7,
+                column=0,
+                code="F811",
+                message="redefinition",
+            ),
+        ],
+    )
+
+    standard = standard_issues_from_results([result])
+    sarif = to_sarif([], None, standard_issues=standard)
+
+    assert_that(sarif["version"]).is_equal_to("2.1.0")
+    assert_that(sarif).contains_key("$schema")
+    assert_that(sarif["runs"]).is_length(1)
+
+    run = sarif["runs"][0]
+    results = run["results"]
+    assert_that(results).is_length(2)
+
+    first = results[0]
+    assert_that(first["ruleId"]).is_equal_to("ruff/E501")
+    assert_that(first["message"]["text"]).is_equal_to("line too long")
+    location = first["locations"][0]["physicalLocation"]
+    assert_that(location["artifactLocation"]["uri"]).is_equal_to("a.py")
+    assert_that(location["region"]["startLine"]).is_equal_to(3)
+    assert_that(location["region"]["startColumn"]).is_equal_to(1)
+
+    second = results[1]
+    assert_that(second["ruleId"]).is_equal_to("ruff/F811")
+    assert_that(
+        second["locations"][0]["physicalLocation"]["artifactLocation"]["uri"],
+    ).is_equal_to("b.py")
+
+    rules = run["tool"]["driver"]["rules"]
+    rule_ids = [r["id"] for r in rules]
+    assert_that(rule_ids).contains("ruff/E501", "ruff/F811")
+    e501_rule = next(r for r in rules if r["id"] == "ruff/E501")
+    assert_that(e501_rule["helpUri"]).is_equal_to(
+        "https://docs.astral.sh/ruff/rules/E501",
+    )
+
+
+def test_standard_and_ai_results_are_additive() -> None:
+    """Standard issues and AI suggestions coexist in the same SARIF run."""
+    result = ToolResult(
+        name="ruff",
+        success=False,
+        issues=[
+            RuffIssue(file="a.py", line=1, code="F401", message="unused"),
+        ],
+        ai_metadata={
+            "fix_suggestions": [
+                {
+                    "file": "a.py",
+                    "line": 1,
+                    "code": "F401",
+                    "tool_name": "ruff",
+                    "suggested_code": "",
+                    "explanation": "Remove import",
+                    "confidence": "high",
+                    "risk_level": "safe-style",
+                },
+            ],
+        },
+    )
+
+    suggestions = suggestions_from_results([result])
+    standard = standard_issues_from_results([result])
+    sarif = to_sarif(suggestions, None, standard_issues=standard)
+
+    results = sarif["runs"][0]["results"]
+    assert_that(results).is_length(2)
+    messages = [r["message"]["text"] for r in results]
+    assert_that(messages).contains("unused", "Remove import")
+
+
+def test_standard_issue_severity_maps_to_sarif_level() -> None:
+    """Severity levels map to SARIF error/warning/note levels."""
+    issues = [
+        StandardIssue(
+            tool_name="t",
+            file="x.py",
+            line=1,
+            code="A",
+            message="err",
+            severity=SeverityLevel.ERROR,
+        ),
+        StandardIssue(
+            tool_name="t",
+            file="x.py",
+            line=2,
+            code="B",
+            message="warn",
+            severity=SeverityLevel.WARNING,
+        ),
+        StandardIssue(
+            tool_name="t",
+            file="x.py",
+            line=3,
+            code="C",
+            message="info",
+            severity=SeverityLevel.INFO,
+        ),
+    ]
+
+    sarif = to_sarif([], None, standard_issues=issues)
+    levels = [r["level"] for r in sarif["runs"][0]["results"]]
+
+    assert_that(levels).is_equal_to(["error", "warning", "note"])
