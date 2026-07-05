@@ -144,9 +144,6 @@ class TscPlugin(BaseToolPlugin):
                 instead of lintro's file targeting. Default is False, meaning lintro
                 respects your file selection even when tsconfig.json exists.
             **kwargs: Other tool options.
-
-        Raises:
-            ValueError: If any provided option is of an unexpected type.
         """
         options: dict[str, object] = {
             "project": project,

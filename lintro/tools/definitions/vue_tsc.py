@@ -119,9 +119,6 @@ class VueTscPlugin(BaseToolPlugin):
             use_project_files: When True, use tsconfig.json's include/files patterns
                 instead of lintro's file targeting. Default is False.
             **kwargs: Other tool options.
-
-        Raises:
-            ValueError: If any provided option is of an unexpected type.
         """
         options: dict[str, object] = {
             "project": project,

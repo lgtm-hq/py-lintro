@@ -99,9 +99,6 @@ class AstroCheckPlugin(BaseToolPlugin):
         Args:
             root: Root directory for the Astro project.
             **kwargs: Other tool options.
-
-        Raises:
-            ValueError: If any provided option is of an unexpected type.
         """
         options: dict[str, object] = {"root": root}
         validate_option_types(options, ASTRO_CHECK_OPTION_TYPES)

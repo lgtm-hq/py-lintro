@@ -152,9 +152,6 @@ class MypyPlugin(BaseToolPlugin):
             config_file: Path to mypy config file.
             cache_dir: Path to mypy cache directory.
             **kwargs: Other tool options.
-
-        Raises:
-            ValueError: If any provided option is of an unexpected type.
         """
         options: dict[str, object] = {
             "strict": strict,
