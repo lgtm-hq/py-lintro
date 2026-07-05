@@ -67,6 +67,17 @@ class FakeTool:
         """Reset options to defaults (stub for testing)."""
         self.options = {}
 
+    def copy_for_execution(self) -> FakeTool:
+        """Return self as the per-invocation copy.
+
+        Single-threaded stub with no shared-state race; returns itself so
+        tests assert on the same instance the runner configures and runs.
+
+        Returns:
+            This stub instance.
+        """
+        return self
+
     def set_options(self, **kwargs: Any) -> None:
         """Record option values provided to the tool stub.
 

@@ -21,6 +21,7 @@ Example:
 
 from __future__ import annotations
 
+import copy
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
@@ -114,6 +115,18 @@ class BaseToolPlugin(ABC):
     - fix() method: Fix issues (only if definition.can_fix=True)
     - set_options() method: Custom option validation
 
+    Thread-safety:
+        Plugin instances returned by :class:`~lintro.plugins.registry.ToolRegistry`
+        are process-wide singletons and their option state (``options``,
+        ``exclude_patterns``, ``include_venv``) is mutable. A single
+        ``set_options()`` + ``check()``/``fix()`` sequence on one instance is
+        the supported contract for direct, sequential use. Concurrent logical
+        invocations must NOT share one instance: each configure-then-run
+        sequence races on that shared state. Callers that execute tools
+        concurrently (e.g. the parallel executor) must operate on a private
+        per-invocation copy obtained via :meth:`copy_for_execution` rather
+        than mutating the shared singleton.
+
     Attributes:
         options: Current tool options (merged from defaults and runtime).
         exclude_patterns: Patterns to exclude from file discovery.
@@ -168,6 +181,29 @@ class BaseToolPlugin(ABC):
         self.exclude_patterns = []
         self.include_venv = False
         self._setup_defaults()
+
+    def copy_for_execution(self) -> BaseToolPlugin:
+        """Return an isolated copy of this plugin for a single invocation.
+
+        The returned instance shares no mutable option state with this
+        instance: its ``options`` and ``exclude_patterns`` are independent
+        copies. This lets concurrent logical invocations each configure and
+        run their own copy without clobbering one another's option state on
+        the shared registry singleton (see the class-level thread-safety
+        note).
+
+        Non-option attributes (e.g. resolution caches) are shallow-copied,
+        so read-mostly caches remain shared for efficiency without affecting
+        per-call option isolation.
+
+        Returns:
+            A new plugin instance with independent option state.
+        """
+        clone = copy.copy(self)
+        clone.options = dict(self.options)
+        clone.exclude_patterns = list(self.exclude_patterns)
+        clone.include_venv = self.include_venv
+        return clone
 
     def set_options(self, **kwargs: Any) -> None:
         """Set tool-specific options.

@@ -694,8 +694,9 @@ def run_lint_tools_simple(
                 # Print tool header before execution
                 logger.print_tool_header(tool_name=display_name, action=action)
 
-                # Configure tool using shared helper
-                configure_tool_for_execution(
+                # Configure tool using shared helper (returns a private
+                # per-invocation copy; execute against it).
+                tool = configure_tool_for_execution(
                     tool=tool,
                     tool_name=tool_name,
                     config_manager=config_manager,
