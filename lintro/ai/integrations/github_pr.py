@@ -354,6 +354,10 @@ def _parse_patch_lines(patch: str) -> set[int]:
         if hunk_match:
             current_line = int(hunk_match.group(1))
             continue
+        if raw_line.startswith("\\"):
+            # "\ No newline at end of file" marker — not a real line, so it
+            # must not advance the right-side counter.
+            continue
         if raw_line.startswith("-"):
             # Deleted line — doesn't advance right-side counter
             continue

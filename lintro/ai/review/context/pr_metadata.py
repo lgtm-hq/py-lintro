@@ -105,10 +105,13 @@ def _parse_pr_view_json(
                 "'headRepository'.",
                 code=ReviewContextErrorCode.GH_METADATA_INVALID,
             )
-        raise ReviewContextError(
-            "Could not determine repository for pull request review.",
-            code=ReviewContextErrorCode.GH_METADATA_INVALID,
-        )
+        if parsed_head_repo is not None:
+            repo_name = parsed_head_repo
+        else:
+            raise ReviewContextError(
+                "Could not determine repository for pull request review.",
+                code=ReviewContextErrorCode.GH_METADATA_INVALID,
+            )
 
     body = data.get("body")
     body_text = body if isinstance(body, str) else ""

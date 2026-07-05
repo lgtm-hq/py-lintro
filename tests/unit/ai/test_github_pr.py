@@ -14,6 +14,7 @@ from lintro.ai.integrations.github_pr import (
     _detect_pr_number,
     _format_inline_comment,
     _format_summary_comment,
+    _parse_patch_lines,
 )
 from lintro.ai.models import AIFixSuggestion, AISummary
 
@@ -405,3 +406,52 @@ def test_post_review_skips_out_of_workspace_suggestions(test_token: str) -> None
         reporter._post_review(suggestions)
         # Out-of-workspace suggestion should be filtered; no API call made
         mock_api.assert_not_called()
+
+
+def test_parse_patch_lines_skips_no_newline_marker() -> None:
+    r"""Ensure the "\\ No newline at end of file" marker does not shift lines.
+
+    The marker begins with a backslash rather than ``+``/``-`` and must not
+    advance the right-side line counter; otherwise added lines after it map
+    one line off.
+    """
+    patch = "\n".join(
+        [
+            "@@ -1,2 +1,3 @@",
+            " context1",
+            "-removed old",
+            "\\ No newline at end of file",
+            "+added new",
+            "+added final",
+        ],
+    )
+
+    result = _parse_patch_lines(patch)
+
+    assert_that(sorted(result)).is_equal_to([2, 3])
+
+
+def test_parse_patch_lines_no_newline_comment_mapping() -> None:
+    """Ensure a line targeted after a no-newline marker maps correctly.
+
+    A right-side line following the marker must retain its true position so
+    inline comments are not demoted to fallback issue comments.
+    """
+    patch = "\n".join(
+        [
+            "@@ -1,3 +1,4 @@",
+            " context1",
+            " context2",
+            "-old third",
+            "\\ No newline at end of file",
+            "+new third",
+            "+new fourth",
+        ],
+    )
+
+    result = _parse_patch_lines(patch)
+
+    # The added lines occupy right-side positions 3 and 4; the off-by-one
+    # positions 4 and 5 must not appear.
+    assert_that(sorted(result)).is_equal_to([3, 4])
+    assert_that(result).does_not_contain(5)
