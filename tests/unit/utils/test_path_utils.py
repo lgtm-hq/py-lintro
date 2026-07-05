@@ -4,16 +4,128 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 from assertpy import assert_that
 
 from lintro.utils.path_utils import (
+    find_file_upward,
     find_lintro_ignore,
     load_lintro_ignore,
     normalize_file_path_for_display,
 )
+
+# =============================================================================
+# Tests for find_file_upward
+# =============================================================================
+
+
+def test_find_file_upward_found_at_start(tmp_path: Path) -> None:
+    """Return the candidate when it exists in the starting directory.
+
+    Args:
+        tmp_path: Temporary directory path for test files.
+    """
+    target = tmp_path / ".config"
+    target.write_text("x\n")
+
+    result = find_file_upward(tmp_path, [".config"])
+
+    assert_that(result).is_equal_to(target)
+
+
+def test_find_file_upward_found_in_ancestor(tmp_path: Path) -> None:
+    """Return the candidate when it exists in an ancestor directory.
+
+    Args:
+        tmp_path: Temporary directory path for test files.
+    """
+    target = tmp_path / ".config"
+    target.write_text("x\n")
+    nested = tmp_path / "a" / "b" / "c"
+    nested.mkdir(parents=True)
+
+    result = find_file_upward(nested, [".config"])
+
+    assert_that(result).is_equal_to(target)
+
+
+def test_find_file_upward_not_found(tmp_path: Path) -> None:
+    """Return None when no candidate exists up to the filesystem root.
+
+    Args:
+        tmp_path: Temporary directory path for test files.
+    """
+    nested = tmp_path / "a" / "b"
+    nested.mkdir(parents=True)
+
+    result = find_file_upward(nested, [".does-not-exist"])
+
+    assert_that(result).is_none()
+
+
+def test_find_file_upward_respects_filename_precedence(tmp_path: Path) -> None:
+    """Return the first matching filename in the order provided.
+
+    Args:
+        tmp_path: Temporary directory path for test files.
+    """
+    first = tmp_path / ".first"
+    second = tmp_path / ".second"
+    first.write_text("x\n")
+    second.write_text("y\n")
+
+    result = find_file_upward(tmp_path, [".first", ".second"])
+
+    assert_that(result).is_equal_to(first)
+
+
+def test_find_file_upward_nearer_ancestor_wins_over_precedence(
+    tmp_path: Path,
+) -> None:
+    """Prefer a nearer directory even for a lower-precedence filename.
+
+    A candidate found in the starting directory takes priority over a
+    higher-precedence candidate that only exists in an ancestor, because the
+    walk checks each directory fully before moving up.
+
+    Args:
+        tmp_path: Temporary directory path for test files.
+    """
+    (tmp_path / ".high").write_text("x\n")
+    nested = tmp_path / "child"
+    nested.mkdir()
+    near = nested / ".low"
+    near.write_text("y\n")
+
+    result = find_file_upward(nested, [".high", ".low"])
+
+    assert_that(result).is_equal_to(near)
+
+
+def test_find_file_upward_respects_max_depth(tmp_path: Path) -> None:
+    """Do not inspect ancestors beyond ``max_depth`` directories.
+
+    A candidate that only exists more than ``max_depth`` directories above the
+    starting point must not be returned, while an unbounded search finds it.
+
+    Args:
+        tmp_path: Temporary directory path for test files.
+    """
+    target = tmp_path / ".config"
+    target.write_text("x\n")
+    nested = tmp_path
+    for index in range(5):
+        nested = nested / f"level{index}"
+    nested.mkdir(parents=True)
+
+    bounded = find_file_upward(nested, [".config"], max_depth=3)
+    unbounded = find_file_upward(nested, [".config"])
+
+    assert_that(bounded).is_none()
+    assert_that(unbounded).is_equal_to(target)
+
 
 # =============================================================================
 # Tests for find_lintro_ignore
@@ -82,19 +194,39 @@ def test_find_lintro_ignore_returns_none_when_nothing_found(tmp_path: Path) -> N
     deep_dir = tmp_path / "a" / "b" / "c"
     deep_dir.mkdir(parents=True)
 
-    # Mock Path.cwd() to return the deep directory
-    # and also mock parent traversal to eventually reach tmp_path's parent
+    # Walk upward from the marker-free deep directory. No .lintro-ignore or
+    # pyproject.toml exists between it and the filesystem root, so the search
+    # terminates at root and returns None without looping forever.
     with patch("lintro.utils.path_utils.Path") as mock_path:
-        # Create a path that has no .lintro-ignore or pyproject.toml
-        mock_cwd = MagicMock()
-        mock_path.cwd.return_value = mock_cwd
+        mock_path.cwd.return_value = deep_dir
 
-        # Mock the traversal to return paths without markers
-        mock_cwd.__truediv__ = MagicMock(
-            return_value=MagicMock(exists=MagicMock(return_value=False)),
-        )
-        mock_cwd.parent = mock_cwd  # Simulate reaching root
+        result = find_lintro_ignore()
 
+    assert_that(result).is_none()
+
+
+def test_find_lintro_ignore_ignores_far_ancestor(tmp_path: Path) -> None:
+    """Do not load a .lintro-ignore from a far filesystem ancestor.
+
+    An unrelated ``.lintro-ignore`` sitting many directories above the current
+    working directory must not be picked up, because the upward walk is bounded
+    to keep the search project-scoped.
+
+    Args:
+        tmp_path: Temporary directory path for test files.
+    """
+    far_ignore = tmp_path / ".lintro-ignore"
+    far_ignore.write_text("*.pyc\n")
+
+    # Nest well beyond the bounded search depth so the far-ancestor ignore file
+    # is out of scope for the current run.
+    deep_dir = tmp_path
+    for index in range(25):
+        deep_dir = deep_dir / f"level{index}"
+    deep_dir.mkdir(parents=True)
+
+    with patch("lintro.utils.path_utils.Path") as mock_path:
+        mock_path.cwd.return_value = deep_dir
         result = find_lintro_ignore()
 
     assert_that(result).is_none()
