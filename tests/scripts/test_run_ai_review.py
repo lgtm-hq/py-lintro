@@ -250,25 +250,34 @@ def test_workflow_installs_from_base_ref_not_pr_head() -> None:
 
     checkout = checkout_steps[0]
     assert_that(checkout).contains_key("with")
+    # Structurally assert the checkout pins to the trusted base ref. A harmless
+    # head-ref mention in a comment/log elsewhere in the file must not false-fail
+    # this, so we assert on the parsed step rather than banning text file-wide.
     assert_that(checkout["with"]["ref"]).is_equal_to(
         "${{ github.event.pull_request.base.sha }}",
     )
-    # The PR head is never checked out for the keyed install.
-    workflow_text = WORKFLOW.read_text(encoding="utf-8")
-    assert_that(workflow_text).does_not_contain("pull_request.head.sha")
-    assert_that(workflow_text).does_not_contain("pull_request.head.ref")
 
 
 def test_workflow_reviews_pr_via_gh_not_working_tree() -> None:
-    """The review targets the PR by number, fetching its diff via ``gh``.
+    """The executable review command targets the PR and emits JSON.
 
     ``lintro review --pr`` collects the PR diff through the GitHub API, so the
     PR's changes are reviewed as data even though the checked-out tree is the
-    base ref.
+    base ref. Assert on the actual executable invocation line (skipping comment
+    lines) so a stray comment mention can never satisfy the check on its own.
     """
-    review_script = SHELL_SCRIPT.read_text(encoding="utf-8")
+    lines = SHELL_SCRIPT.read_text(encoding="utf-8").splitlines()
+    command_lines = [
+        line
+        for line in lines
+        if "uv run lintro review" in line and not line.lstrip().startswith("#")
+    ]
+    assert_that(command_lines).is_length(1)
 
-    assert_that(review_script).contains("lintro review --pr")
+    command = command_lines[0]
+    assert_that(command).contains("--pr")
+    assert_that(command).contains("--depth 1")
+    assert_that(command).contains("--output json")
 
 
 @pytest.mark.parametrize(
