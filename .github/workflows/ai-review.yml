@@ -26,8 +26,21 @@ jobs:
   ai-review:
     name: AI Review
     runs-on: ubuntu-24.04
-    # Skip draft PRs; only review PRs that are ready.
-    if: github.event.pull_request.draft == false
+    # Fully informational: any failure (setup, egress, checkout, or the review
+    # step itself) is non-blocking and never fails the PR.
+    continue-on-error: true
+    # Skip draft PRs and never run for fork PRs. Fork PRs already cannot read
+    # secrets, but requiring head.repo == the base repo makes it explicit that
+    # the keyed job only runs for same-repository pull requests.
+    #
+    # SECURITY: even for same-repo PRs, this job checks out and installs PR
+    # code with the ANTHROPIC_API_KEY secret in scope, so PR authors with write
+    # access could exfiltrate it. This residual same-repo risk is tracked in a
+    # follow-up issue (trusted-install re-architecture); see follow-up issue.
+    # The ANTHROPIC_API_KEY secret MUST NOT be enabled until that lands.
+    if: >-
+      github.event.pull_request.draft == false
+      && github.event.pull_request.head.repo.full_name == github.repository
     permissions:
       contents: read
       pull-requests: read

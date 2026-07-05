@@ -201,6 +201,34 @@ def test_workflow_yaml_parses() -> None:
     assert_that(trigger).contains_key("pull_request")
 
 
+def test_workflow_job_is_non_blocking() -> None:
+    """The review job is non-blocking at the job level.
+
+    Job-level ``continue-on-error`` keeps setup failures (uv sync, egress,
+    checkout) from turning the PR check red, matching the informational intent.
+    """
+    loaded = yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))
+
+    job = loaded["jobs"]["ai-review"]
+    assert_that(job).contains_key("continue-on-error")
+    assert_that(job["continue-on-error"]).is_true()
+
+
+def test_workflow_job_is_same_repo_only() -> None:
+    """The keyed job only runs for same-repository (non-fork) PRs.
+
+    The job ``if`` guard combines the draft check with a head-repo equality
+    check so fork PRs never attempt the job that has the secret in scope.
+    """
+    loaded = yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))
+
+    guard = loaded["jobs"]["ai-review"]["if"]
+    assert_that(guard).contains("github.event.pull_request.draft == false")
+    assert_that(guard).contains(
+        "github.event.pull_request.head.repo.full_name == github.repository",
+    )
+
+
 @pytest.mark.parametrize(
     "action_ref",
     [
