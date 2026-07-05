@@ -14,10 +14,8 @@ from lintro.plugins.registry import ToolRegistry
 from lintro.tools import tool_manager
 from lintro.utils.config import load_module_size_config, load_post_checks_config
 from lintro.utils.module_size import (
-    DEFAULT_MODULE_SIZE_BASELINE,
-    DEFAULT_MODULE_SIZE_EXCLUDES,
-    DEFAULT_MODULE_SIZE_THRESHOLD,
     find_oversized_modules,
+    resolve_module_size_settings,
 )
 from lintro.utils.output import format_tool_output
 from lintro.utils.unified_config import UnifiedConfigManager
@@ -52,11 +50,8 @@ def _run_module_size_gate(
     if not bool(cfg.get("enabled", True)):
         return
 
-    threshold = int(cfg.get("threshold", DEFAULT_MODULE_SIZE_THRESHOLD))
-    baseline = tuple(cfg.get("baseline", DEFAULT_MODULE_SIZE_BASELINE))
-    exclude_patterns: list[str] = list(
-        cfg.get("exclude", DEFAULT_MODULE_SIZE_EXCLUDES),
-    )
+    threshold, baseline, base_excludes = resolve_module_size_settings(config=cfg)
+    exclude_patterns: list[str] = list(base_excludes)
     if exclude:
         exclude_patterns.extend(p.strip() for p in exclude.split(",") if p.strip())
 

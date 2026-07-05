@@ -27,6 +27,7 @@ Ratchet-down plan:
 from __future__ import annotations
 
 import os
+from collections.abc import Mapping
 from dataclasses import dataclass
 
 from lintro.utils.path_filtering import walk_files_with_excludes
@@ -60,6 +61,85 @@ DEFAULT_MODULE_SIZE_BASELINE: tuple[str, ...] = (
     "lintro/tools/definitions/tsc.py",
     "lintro/ai/review/checklist_builtin.py",
 )
+
+
+def _coerce_threshold(
+    *,
+    value: object,
+) -> int:
+    """Coerce a raw ``threshold`` config value into a positive integer.
+
+    Booleans are rejected (``True``/``False`` are not meaningful line counts)
+    and non-numeric values fall back to the default rather than raising.
+
+    Args:
+        value: Raw ``threshold`` value from configuration.
+
+    Returns:
+        int: The parsed threshold, or ``DEFAULT_MODULE_SIZE_THRESHOLD`` when the
+        value is missing, non-numeric, or not strictly positive.
+    """
+    if isinstance(value, bool) or not isinstance(value, (int, float, str)):
+        return DEFAULT_MODULE_SIZE_THRESHOLD
+    try:
+        threshold = int(value)
+    except (TypeError, ValueError):
+        return DEFAULT_MODULE_SIZE_THRESHOLD
+    return threshold if threshold > 0 else DEFAULT_MODULE_SIZE_THRESHOLD
+
+
+def _coerce_str_tuple(
+    *,
+    value: object,
+    default: tuple[str, ...],
+) -> tuple[str, ...]:
+    """Coerce a raw config value into a tuple of strings.
+
+    Scalar strings are intentionally rejected (rather than iterated into
+    individual characters) so a mistyped ``baseline``/``exclude`` value falls
+    back to the provided default instead of silently misbehaving.
+
+    Args:
+        value: Raw config value, expected to be a list or tuple of strings.
+        default: Fallback tuple used when ``value`` is not a valid sequence.
+
+    Returns:
+        tuple[str, ...]: The coerced string tuple, or ``default`` when the
+        value is missing or not a list/tuple.
+    """
+    if isinstance(value, (list, tuple)):
+        return tuple(str(item) for item in value)
+    return default
+
+
+def resolve_module_size_settings(
+    *,
+    config: Mapping[str, object],
+) -> tuple[int, tuple[str, ...], tuple[str, ...]]:
+    """Resolve raw module-size config into validated settings.
+
+    Coerces the optional ``[tool.lintro.module_size]`` values into concrete
+    types, falling back to the module defaults for any missing or malformed
+    entry. This keeps a mistyped config (e.g. a non-numeric ``threshold`` or a
+    scalar ``baseline``/``exclude``) from crashing the warn-level gate.
+
+    Args:
+        config: Raw module-size configuration mapping.
+
+    Returns:
+        tuple[int, tuple[str, ...], tuple[str, ...]]: The resolved
+        ``(threshold, baseline, exclude_patterns)``.
+    """
+    threshold = _coerce_threshold(value=config.get("threshold"))
+    baseline = _coerce_str_tuple(
+        value=config.get("baseline"),
+        default=DEFAULT_MODULE_SIZE_BASELINE,
+    )
+    exclude_patterns = _coerce_str_tuple(
+        value=config.get("exclude"),
+        default=DEFAULT_MODULE_SIZE_EXCLUDES,
+    )
+    return threshold, baseline, exclude_patterns
 
 
 @dataclass(frozen=True)
