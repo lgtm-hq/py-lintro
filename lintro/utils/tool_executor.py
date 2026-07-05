@@ -459,10 +459,16 @@ def run_lint_tools_simple(
 
     setup_execution_logging(output_manager.run_dir, debug=debug)
 
-    # Create simplified logger with rich formatting
+    # Create simplified logger with rich formatting. For machine-readable
+    # output (JSON/SARIF) route all decorative console output to stderr so
+    # stdout carries only the final parseable document.
     from lintro.utils.console import create_logger
 
-    logger = create_logger(run_dir=output_manager.run_dir)
+    machine_readable_output = output_format.lower() in ("json", "sarif")
+    logger = create_logger(
+        run_dir=output_manager.run_dir,
+        route_stderr=machine_readable_output,
+    )
 
     # Get tools to run (now returns ToolsToRunResult with skip info)
     try:

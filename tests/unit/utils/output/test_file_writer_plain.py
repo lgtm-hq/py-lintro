@@ -19,19 +19,35 @@ if TYPE_CHECKING:
 
     from lintro.models.core.tool_result import ToolResult
 
+    from .conftest import MockIssue
+
 
 def test_write_plain_file_creates_valid_structure(
     tmp_path: Path,
     mock_tool_result_factory: Callable[..., ToolResult],
+    mock_issue_factory: Callable[..., MockIssue],
 ) -> None:
     """Verify plain text file contains report header and summary totals.
+
+    The per-tool count is derived from the merged/deduped issue list (as the
+    JSON writer does) so every format agrees; the result therefore carries
+    matching issue objects.
 
     Args:
         tmp_path: Temporary directory path for test output.
         mock_tool_result_factory: Factory for creating mock tool results.
+        mock_issue_factory: Factory for creating mock issue objects.
     """
     output_path = tmp_path / "report.txt"
-    results = [mock_tool_result_factory(name="ruff", issues_count=5, output="5 issues")]
+    issues = [mock_issue_factory(line=n) for n in range(1, 6)]
+    results = [
+        mock_tool_result_factory(
+            name="ruff",
+            issues_count=5,
+            output="5 issues",
+            issues=issues,
+        ),
+    ]
 
     write_output_file(
         output_path=str(output_path),
