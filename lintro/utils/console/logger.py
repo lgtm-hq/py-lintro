@@ -39,13 +39,23 @@ class ThreadSafeConsoleLogger:
     thread synchronization for parallel tool execution.
     """
 
-    def __init__(self, run_dir: Path | None = None) -> None:
+    def __init__(
+        self,
+        run_dir: Path | None = None,
+        *,
+        route_stderr: bool = False,
+    ) -> None:
         """Initialize the ThreadSafeConsoleLogger.
 
         Args:
             run_dir: Optional run directory path for output location display.
+            route_stderr: When True, all decorative console output is written
+                to stderr instead of stdout. Used for machine-readable output
+                formats (JSON/SARIF) so stdout carries only the final
+                parseable document.
         """
         self.run_dir = run_dir
+        self.route_stderr = route_stderr
         self._messages: list[str] = []
         self._lock = threading.Lock()
 
@@ -54,14 +64,17 @@ class ThreadSafeConsoleLogger:
 
         Thread-safe: Uses lock when appending to message list.
 
+        When ``route_stderr`` is set the text is written to stderr so stdout
+        stays a single parseable document for machine-readable formats.
+
         Args:
             text: Text to display.
             color: Optional color for the text.
         """
         if color:
-            click.echo(click.style(text, fg=color))
+            click.echo(click.style(text, fg=color), err=self.route_stderr)
         else:
-            click.echo(text)
+            click.echo(text, err=self.route_stderr)
 
         # Track for console.log (thread-safe)
         with self._lock:
@@ -114,7 +127,10 @@ class ThreadSafeConsoleLogger:
             **kwargs: Additional keyword arguments for logger formatting.
         """
         error_text = f"ERROR: {message}"
-        click.echo(click.style(error_text, fg="red", bold=True))
+        click.echo(
+            click.style(error_text, fg="red", bold=True),
+            err=self.route_stderr,
+        )
         with self._lock:
             self._messages.append(error_text)
         logger.error(message, **kwargs)

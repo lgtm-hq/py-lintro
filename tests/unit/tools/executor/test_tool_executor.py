@@ -309,6 +309,53 @@ def test_executor_json_output(
     assert_that("summary" in data).is_true()
 
 
+def test_executor_json_stdout_is_clean_and_banners_go_to_stderr(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Route decorative banners to stderr so stdout is a single JSON document.
+
+    Regression test for #1045: with ``--output-format json`` the real console
+    logger must emit banners/progress to stderr, leaving stdout parseable.
+
+    Args:
+        monkeypatch: Pytest monkeypatch fixture.
+        capsys: Pytest capture fixture for stdout/stderr.
+    """
+    # Intentionally do NOT stub the logger so real banner routing is exercised.
+    result = ToolResult(name="ruff", success=False, output="raw", issues_count=2)
+    _setup_tool_manager(
+        monkeypatch,
+        {"ruff": FakeTool("ruff", can_fix=True, result=result)},
+    )
+    code = run_lint_tools_simple(
+        action="check",
+        paths=["."],
+        tools="all",
+        tool_options=None,
+        exclude=None,
+        include_venv=False,
+        group_by="auto",
+        output_format="json",
+        verbose=False,
+        raw_output=False,
+    )
+    assert_that(code).is_equal_to(1)
+
+    captured = capsys.readouterr()
+    # stdout must be a single parseable JSON document.
+    data = json.loads(captured.out)
+    assert_that(data).contains_key("results")
+    assert_that(data).contains_key("summary")
+    # Check-mode remaining mirrors total_issues rather than a constant 0.
+    assert_that(data["summary"]["total_remaining"]).is_equal_to(
+        data["summary"]["total_issues"],
+    )
+    # The banner must not pollute stdout, but must appear on stderr.
+    assert_that(captured.out).does_not_contain("[LINTRO]")
+    assert_that(captured.err).contains("[LINTRO]")
+
+
 def test_executor_handles_tool_failure_with_output(
     monkeypatch: pytest.MonkeyPatch,
     fake_logger: Any,
