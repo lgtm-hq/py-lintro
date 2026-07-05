@@ -51,6 +51,34 @@ def _extract_cargo_audit_json(raw_text: str) -> dict[str, Any]:
     return parsed
 
 
+def extract_cargo_audit_payload(output: str | None) -> dict[str, Any] | None:
+    """Extract the parsed JSON object from cargo-audit output.
+
+    Args:
+        output: Raw stdout from ``cargo audit --json``.
+
+    Returns:
+        The parsed JSON object, or ``None`` when the output is empty or cannot
+        be parsed as a JSON object. A ``None`` result on non-empty output
+        indicates a parse failure that security callers must treat as a
+        non-clean scan (see #1044).
+    """
+    if not output or not output.strip():
+        return None
+
+    try:
+        data = _extract_cargo_audit_json(output)
+    except (json.JSONDecodeError, ValueError) as e:
+        logger.warning(f"Failed to parse cargo-audit JSON output: {e}")
+        return None
+
+    if not isinstance(data, dict):
+        logger.warning("cargo-audit output is not a dictionary")
+        return None
+
+    return data
+
+
 def _normalize_severity(severity: str | None) -> str:
     """Normalize severity level to uppercase standard format.
 
@@ -92,17 +120,8 @@ def parse_cargo_audit_output(
     Returns:
         List of parsed security vulnerability issues.
     """
-    if not output:
-        return []
-
-    try:
-        data = _extract_cargo_audit_json(output)
-    except (json.JSONDecodeError, ValueError) as e:
-        logger.warning(f"Failed to parse cargo-audit JSON output: {e}")
-        return []
-
-    if not isinstance(data, dict):
-        logger.warning("cargo-audit output is not a dictionary")
+    data = extract_cargo_audit_payload(output)
+    if data is None:
         return []
 
     # Extract vulnerabilities from the nested structure

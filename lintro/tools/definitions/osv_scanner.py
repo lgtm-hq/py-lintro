@@ -294,6 +294,17 @@ class OsvScannerPlugin(BaseToolPlugin):
         ):
             success = True
 
+        # Fail closed on unparseable output. If osv-scanner produced stdout that
+        # we could not parse as JSON — and it is not a recognized no-op — the
+        # scan result is unknown. For a security scanner an unknown result must
+        # never be reported as a clean pass (see #1044).
+        parse_failure = (
+            payload is None and bool(proc.stdout.strip()) and not no_op_success
+        )
+        if parse_failure:
+            success = False
+            parse_failures_count = 1
+
         # Determine overall success: subprocess must succeed AND no issues
         # found. A non-zero exit with 0 parsed issues indicates an execution
         # error (e.g. network failure), not a clean scan.

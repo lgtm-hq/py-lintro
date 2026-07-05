@@ -468,15 +468,19 @@ class BanditPlugin(BaseToolPlugin):
                 output=output if execution_failure else None,
                 issues_count=issues_count,
                 issues=issues,
+                parse_failures_count=0,
             )
 
         except (json.JSONDecodeError, ValueError) as e:
+            # Bandit is a security scanner: unparseable output must never be
+            # reported as a clean pass (see #1044).
             logger.error(f"Failed to parse bandit output: {e}")
             return ToolResult(
                 name=self.definition.name,
                 success=False,
                 output=(output or f"Failed to parse bandit output: {str(e)}"),
                 issues_count=0,
+                parse_failures_count=1,
             )
 
     def fix(self, paths: list[str], options: dict[str, object]) -> ToolResult:

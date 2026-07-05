@@ -210,6 +210,28 @@ def test_check_zero_packages_without_no_sources_is_not_success(
     assert_that(result.issues_count).is_equal_to(0)
 
 
+def test_check_garbage_stdout_with_zero_exit_is_not_clean(
+    osv_scanner_plugin: OsvScannerPlugin,
+    tmp_path: Path,
+) -> None:
+    """Unparseable stdout with a zero exit must not report a clean scan (#1044)."""
+    lockfile = tmp_path / "requirements.txt"
+    lockfile.write_text("requests==2.32.3\n")
+
+    garbage = "}{ this is not valid json at all"
+
+    with patch.object(
+        osv_scanner_plugin,
+        "_run_subprocess_result",
+        return_value=_proc(success=True, stdout=garbage),
+    ):
+        result = osv_scanner_plugin.check([str(lockfile)], {})
+
+    assert_that(result.success).is_false()
+    assert_that(result.issues_count).is_equal_to(0)
+    assert_that(result.parse_failures_count).is_equal_to(1)
+
+
 def test_check_error_payload_without_results_is_not_success(
     osv_scanner_plugin: OsvScannerPlugin,
     tmp_path: Path,

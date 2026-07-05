@@ -302,3 +302,29 @@ def test_check_timeout(
 
     assert_that(result.success).is_false()
     assert_that(result.output).contains("timed out")
+
+
+def test_check_garbage_output_with_zero_exit_is_not_clean(
+    cargo_audit_plugin: CargoAuditPlugin,
+    tmp_path: Path,
+) -> None:
+    """Unparseable output with a zero exit must not report a clean scan (#1044)."""
+    cargo_lock = tmp_path / "Cargo.lock"
+    cargo_lock.write_text('[[package]]\nname = "test"\nversion = "1.0.0"')
+
+    garbage = "this is not json {["
+
+    with patch(
+        "lintro.plugins.execution_preparation.verify_tool_version",
+        return_value=None,
+    ):
+        with patch.object(
+            cargo_audit_plugin,
+            "_run_subprocess_result",
+            return_value=_proc(success=True, stdout=garbage),
+        ):
+            result = cargo_audit_plugin.check([str(cargo_lock)], {})
+
+    assert_that(result.success).is_false()
+    assert_that(result.issues_count).is_equal_to(0)
+    assert_that(result.parse_failures_count).is_equal_to(1)
