@@ -334,7 +334,7 @@ def _collect_pr_context(
         "view",
         str(pr_number),
         "--json",
-        "title,body,number,baseRefOid,headRefOid,baseRepository,headRepository",
+        "title,body,number,baseRefOid,headRefOid,headRepository",
     ]
     if repo is not None:
         diff_args.extend(["--repo", repo])

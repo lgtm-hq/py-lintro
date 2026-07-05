@@ -3,9 +3,54 @@
 Small helpers to normalize paths for display consistency and path safety validation.
 """
 
+from collections.abc import Iterable, Sequence
+from itertools import islice
 from pathlib import Path
 
 from loguru import logger
+
+# Bound the upward search for ``.lintro-ignore`` so it stays project-scoped and
+# never loads an ignore file from a far filesystem ancestor. This preserves the
+# historical ~20-directory limit that guarded the walk.
+_IGNORE_SEARCH_MAX_DEPTH = 20
+
+
+def find_file_upward(
+    start: Path,
+    filenames: Sequence[str],
+    *,
+    max_depth: int | None = None,
+) -> Path | None:
+    """Walk up from start to filesystem root, return first matching file.
+
+    Starting at ``start``, each directory up to the filesystem root is
+    checked for the candidate ``filenames`` in the order given. The first
+    existing candidate encountered wins. The walk is bounded by
+    ``Path.parents``, which terminates at the filesystem root, so no manual
+    depth guard is required.
+
+    Args:
+        start: Directory to begin searching from.
+        filenames: Candidate filenames to look for in each directory,
+            checked in order.
+        max_depth: Maximum number of directories to inspect, counting
+            ``start`` itself. ``None`` (the default) searches all the way up
+            to the filesystem root. Pass a positive integer to keep the walk
+            project-scoped and avoid picking up config from far ancestors.
+
+    Returns:
+        Path to the first matching file found, or None if none exists
+        anywhere within the searched directories.
+    """
+    directories: Iterable[Path] = (start, *start.parents)
+    if max_depth is not None:
+        directories = islice(directories, max_depth)
+    for directory in directories:
+        for name in filenames:
+            candidate = directory / name
+            if candidate.exists():
+                return candidate
+    return None
 
 
 def validate_safe_path(path: str | Path, base_dir: Path | None = None) -> bool:
@@ -49,40 +94,25 @@ def find_lintro_ignore() -> Path | None:
     """Find .lintro-ignore file by searching upward from current directory.
 
     Searches upward from the current working directory to find the project root
-    by looking for .lintro-ignore or pyproject.toml files.
+    by looking for .lintro-ignore or pyproject.toml files. The walk is bounded
+    to ``_IGNORE_SEARCH_MAX_DEPTH`` directories so an unrelated ``.lintro-ignore``
+    from a far filesystem ancestor is never picked up for the current run.
 
     Returns:
         Path | None: Path to .lintro-ignore file if found, None otherwise.
     """
-    current_dir = Path.cwd()
-    # Limit search to prevent infinite loops (e.g., if we're in /)
-    max_depth = 20
-    depth = 0
-
-    while depth < max_depth:
-        lintro_ignore_path = current_dir / ".lintro-ignore"
-        if lintro_ignore_path.exists():
-            return lintro_ignore_path
-
-        # Also check for pyproject.toml as project root indicator
-        pyproject_path = current_dir / "pyproject.toml"
-        if pyproject_path.exists():
-            # If pyproject.toml exists, check for .lintro-ignore in same directory
-            lintro_ignore_path = current_dir / ".lintro-ignore"
-            if lintro_ignore_path.exists():
-                return lintro_ignore_path
-            # Even if .lintro-ignore doesn't exist, we found project root
-            # Return None to indicate no .lintro-ignore found
-            return None
-
-        # Move up one directory
-        parent_dir = current_dir.parent
-        if parent_dir == current_dir:
-            # Reached filesystem root
-            break
-        current_dir = parent_dir
-        depth += 1
-
+    # Walk upward looking for either marker. Within a directory ``.lintro-ignore``
+    # takes precedence over ``pyproject.toml``. Finding ``pyproject.toml`` first
+    # marks the project root and short-circuits the search: return None because
+    # no closer ``.lintro-ignore`` exists. The search is depth-bounded to keep it
+    # project-scoped rather than walking all the way to the filesystem root.
+    found = find_file_upward(
+        Path.cwd(),
+        [".lintro-ignore", "pyproject.toml"],
+        max_depth=_IGNORE_SEARCH_MAX_DEPTH,
+    )
+    if found is not None and found.name == ".lintro-ignore":
+        return found
     return None
 
 
