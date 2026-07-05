@@ -23,6 +23,7 @@ name: Testing - Built Package Validation
       - MANIFEST.in
       - scripts/ci/test-*.sh
   merge_group:
+    types: [checks_requested]
   workflow_dispatch:
 
 permissions: {}

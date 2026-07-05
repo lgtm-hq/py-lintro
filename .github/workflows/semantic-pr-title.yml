@@ -7,6 +7,7 @@ name: Quality Check - PR Title Validation
   pull_request:
     types: [opened, edited, synchronize, reopened, ready_for_review]
   merge_group:
+    types: [checks_requested]
 
 permissions: {}
 
