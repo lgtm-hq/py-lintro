@@ -104,6 +104,29 @@ def test_find_file_upward_nearer_ancestor_wins_over_precedence(
     assert_that(result).is_equal_to(near)
 
 
+def test_find_file_upward_respects_max_depth(tmp_path: Path) -> None:
+    """Do not inspect ancestors beyond ``max_depth`` directories.
+
+    A candidate that only exists more than ``max_depth`` directories above the
+    starting point must not be returned, while an unbounded search finds it.
+
+    Args:
+        tmp_path: Temporary directory path for test files.
+    """
+    target = tmp_path / ".config"
+    target.write_text("x\n")
+    nested = tmp_path
+    for index in range(5):
+        nested = nested / f"level{index}"
+    nested.mkdir(parents=True)
+
+    bounded = find_file_upward(nested, [".config"], max_depth=3)
+    unbounded = find_file_upward(nested, [".config"])
+
+    assert_that(bounded).is_none()
+    assert_that(unbounded).is_equal_to(target)
+
+
 # =============================================================================
 # Tests for find_lintro_ignore
 # =============================================================================
@@ -177,6 +200,33 @@ def test_find_lintro_ignore_returns_none_when_nothing_found(tmp_path: Path) -> N
     with patch("lintro.utils.path_utils.Path") as mock_path:
         mock_path.cwd.return_value = deep_dir
 
+        result = find_lintro_ignore()
+
+    assert_that(result).is_none()
+
+
+def test_find_lintro_ignore_ignores_far_ancestor(tmp_path: Path) -> None:
+    """Do not load a .lintro-ignore from a far filesystem ancestor.
+
+    An unrelated ``.lintro-ignore`` sitting many directories above the current
+    working directory must not be picked up, because the upward walk is bounded
+    to keep the search project-scoped.
+
+    Args:
+        tmp_path: Temporary directory path for test files.
+    """
+    far_ignore = tmp_path / ".lintro-ignore"
+    far_ignore.write_text("*.pyc\n")
+
+    # Nest well beyond the bounded search depth so the far-ancestor ignore file
+    # is out of scope for the current run.
+    deep_dir = tmp_path
+    for index in range(25):
+        deep_dir = deep_dir / f"level{index}"
+    deep_dir.mkdir(parents=True)
+
+    with patch("lintro.utils.path_utils.Path") as mock_path:
+        mock_path.cwd.return_value = deep_dir
         result = find_lintro_ignore()
 
     assert_that(result).is_none()
