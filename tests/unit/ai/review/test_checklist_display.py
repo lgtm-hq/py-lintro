@@ -16,7 +16,7 @@ from lintro.ai.review.enums.checklist_display import ChecklistDisplay
 from lintro.ai.review.enums.review_category import ReviewCategory
 from lintro.ai.review.models.checklist_answer import ChecklistAnswer
 from lintro.ai.review.models.checklist_item import ChecklistItem
-from lintro.ai.review.models.review_finding import ReviewFinding
+from lintro.ai.review.models.review_finding import ReviewFinding, Severity
 from lintro.ai.review.models.review_metadata import ReviewMetadata
 from lintro.ai.review.models.review_result import ReviewResult
 
@@ -89,7 +89,7 @@ def test_enrich_review_result_attaches_questions() -> None:
 def test_questions_for_finding_returns_linked_prompt_questions() -> None:
     """Finding checklist_ids resolve to question strings in order."""
     finding = ReviewFinding(
-        severity="P1",
+        severity=Severity.P1,
         category="security",
         file="a.py",
         line=1,
@@ -131,7 +131,7 @@ def test_orphan_concerns_returns_unlinked_yes_rows() -> None:
     )
     findings = (
         ReviewFinding(
-            severity="P1",
+            severity=Severity.P1,
             category="security",
             file="a.py",
             line=1,

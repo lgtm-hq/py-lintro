@@ -42,7 +42,7 @@ from lintro.ai.review.exceptions import ReviewExecutionError
 from lintro.ai.review.group_labels import REL_DIRECTORY_PREFIX, REL_SINGLE_FILE
 from lintro.ai.review.models.checklist_answer import ChecklistAnswer
 from lintro.ai.review.models.review_chunk import ReviewChunk
-from lintro.ai.review.models.review_finding import ReviewFinding
+from lintro.ai.review.models.review_finding import ReviewFinding, Severity
 from lintro.ai.review.models.review_metadata import ReviewMetadata
 from lintro.ai.review.models.review_result import ReviewResult
 from lintro.ai.review.paths_registry import generate_interaction_paths
@@ -56,6 +56,7 @@ from lintro.ai.review.sensitivity import (
     filter_findings_by_policy,
     format_strictness_prompt_section,
 )
+from lintro.ai.secrets import redact_secrets, scan_for_secrets
 from lintro.ai.token_budget import estimate_tokens
 
 if TYPE_CHECKING:
@@ -77,6 +78,32 @@ __all__ = [
     "strip_json_fences",
 ]
 _PROMPT_OVERHEAD_TOKENS = 12_000
+
+
+def _redact_prompt_text(*, text: str, source: str) -> str:
+    """Redact detected secrets from prompt text before provider dispatch.
+
+    This is the single redaction choke point for every review prompt path
+    (base review, git-native, depth-2 question generation, and depth-3
+    adversarial sweep). Any diff or PR metadata destined for an external AI
+    provider must pass through here so credentials never leave the machine.
+
+    Args:
+        text: Raw text destined for an AI provider prompt.
+        source: Human-readable label for the text origin, used in log lines.
+
+    Returns:
+        The text with any detected secrets replaced by ``[REDACTED]``.
+    """
+    detected = scan_for_secrets(text)
+    if detected:
+        logger.warning(
+            "Redacted {count} potential secret(s) from review {source} "
+            "before sending to the AI provider.",
+            count=len(detected),
+            source=source,
+        )
+    return redact_secrets(text)
 
 
 @dataclass(frozen=True, slots=True)
@@ -548,7 +575,10 @@ def build_review_prompt(
         Tuple of (system_prompt, user_prompt).
     """
     pr_title = context.pr_metadata.title if context.pr_metadata else "Local changes"
+    pr_title = _redact_prompt_text(text=pr_title, source="PR title")
     pr_summary = context.pr_metadata.body if context.pr_metadata else "(no PR summary)"
+    pr_summary = _redact_prompt_text(text=pr_summary, source="PR metadata")
+    redacted_diff = _redact_prompt_text(text=chunk.diff, source="diff")
     changed_files = [file for file in context.changed_files if file.path in chunk.files]
     combined_checklist = checklist_text
     if extra_checklist.strip():
@@ -569,7 +599,7 @@ def build_review_prompt(
         interaction_paths=interaction_paths,
         checklist_count=checklist_count,
         checklist=combined_checklist,
-        diff=chunk.diff,
+        diff=redacted_diff,
         lint_results_section=format_lint_results_section(digest=lint_results),
         strictness_section=strictness_section,
         output_schema=REVIEW_OUTPUT_SCHEMA,
@@ -606,7 +636,9 @@ def build_git_native_review_prompt(
         Tuple of (system_prompt, user_prompt).
     """
     pr_title = context.pr_metadata.title if context.pr_metadata else "Local changes"
+    pr_title = _redact_prompt_text(text=pr_title, source="PR title")
     pr_summary = context.pr_metadata.body if context.pr_metadata else "(no PR summary)"
+    pr_summary = _redact_prompt_text(text=pr_summary, source="PR metadata")
     changed_files = [file for file in context.changed_files if file.path in chunk.files]
     combined_checklist = checklist_text
     if extra_checklist.strip():
@@ -617,7 +649,9 @@ def build_git_native_review_prompt(
 
     git_diff_paths = " ".join(shlex.quote(path) for path in chunk.files)
     if embed_diff:
-        diff_section = REVIEW_GIT_NATIVE_DIFF_INLINE.format(diff=chunk.diff)
+        diff_section = REVIEW_GIT_NATIVE_DIFF_INLINE.format(
+            diff=_redact_prompt_text(text=chunk.diff, source="diff"),
+        )
     elif context.head_ref == "WORKTREE":
         diff_section = REVIEW_GIT_NATIVE_DIFF_WORKTREE_COMMAND.format(
             base_ref=context.base_ref,
@@ -798,6 +832,9 @@ def _review_chunk(
         )
 
     tracker.on_step(chunk_index=chunk_index, step="reviewing")
+    # Gate before the main provider call so intra-chunk (depth-2/3) work
+    # cannot overshoot the budget between the per-chunk checks.
+    budget.check()
     use_git_native = ai_config.transport == AITransport.CLI
     if use_git_native:
         embed_diff = estimate_tokens(chunk.diff) <= max(diff_budget, 1)
@@ -884,9 +921,10 @@ def _generate_extra_checklist(
         files=[file for file in context.changed_files if file.path in chunk.files],
     )
     prompt = REVIEW_GENERATE_QUESTIONS_TEMPLATE.format(
-        diff=chunk.diff,
+        diff=_redact_prompt_text(text=chunk.diff, source="diff"),
         changed_files=changed_files,
     )
+    budget.check()
     response = call_ai(
         provider=provider,
         ai_config=ai_config,
@@ -955,8 +993,9 @@ def _run_adversarial_pass(
     )
     prompt = REVIEW_ADVERSARIAL_SWEEP_TEMPLATE.format(
         prior_findings_json=prior_json,
-        diff=chunk.diff,
+        diff=_redact_prompt_text(text=chunk.diff, source="diff"),
     )
+    budget.check()
     response = call_ai(
         provider=provider,
         ai_config=ai_config,
@@ -1080,7 +1119,7 @@ def _parse_findings(*, raw_findings: object) -> tuple[ReviewFinding, ...]:
             )
         findings.append(
             ReviewFinding(
-                severity=str(item.get("severity", "P3")),
+                severity=_normalize_severity(raw=item.get("severity", "P3")),
                 category=str(item.get("category", "logic-bug")),
                 file=str(item.get("file", "")),
                 line=line,
@@ -1127,6 +1166,68 @@ def _max_checklist_id(*, checklist_items: list[ChecklistItem]) -> int:
     return int(max(item.id for item in checklist_items))
 
 
+_SEVERITY_SYNONYMS: dict[str, Severity] = {
+    "CRITICAL": Severity.P1,
+    "BLOCKER": Severity.P1,
+    "BLOCKING": Severity.P1,
+    "HIGH": Severity.P1,
+    "SEVERE": Severity.P1,
+    "ERROR": Severity.P1,
+    "MAJOR": Severity.P2,
+    "MEDIUM": Severity.P2,
+    "MODERATE": Severity.P2,
+    "WARNING": Severity.P2,
+    "WARN": Severity.P2,
+    "MINOR": Severity.P3,
+    "LOW": Severity.P3,
+    "TRIVIAL": Severity.P3,
+    "INFO": Severity.P3,
+    "NOTE": Severity.P3,
+}
+
+
+def _normalize_severity(*, raw: object) -> Severity:
+    """Normalize an unvalidated model severity value to a ``Severity`` member.
+
+    Strips surrounding whitespace and uppercases the value before matching
+    against the canonical ``P1``/``P2``/``P3`` labels. When the value is not a
+    canonical label, it is matched against a table of common synonyms so that
+    blocking words like ``critical`` map to ``P1`` rather than being downgraded.
+    A truly unknown value fails closed to ``Severity.P1`` and is logged: since
+    the exit gate only trips on ``P1``, an unrecognized label (e.g. ``fatal``)
+    must be treated as blocking so malformed model output can never silently
+    pass the gate. The synonym table already captures the benign labels, so the
+    fallback is deliberately conservative.
+
+    Synonym mapping:
+        P1: critical, blocker, blocking, high, severe, error.
+        P2: major, medium, moderate, warning, warn.
+        P3: minor, low, trivial, info, note.
+
+    Args:
+        raw: Raw severity value from a parsed model response.
+
+    Returns:
+        The matching ``Severity`` member, a synonym-mapped member, or
+        ``Severity.P1`` (fail-closed) when the value is unrecognized.
+    """
+    normalized = str(raw).strip().upper()
+    try:
+        return Severity(normalized)
+    except ValueError:
+        pass
+
+    synonym = _SEVERITY_SYNONYMS.get(normalized)
+    if synonym is not None:
+        return synonym
+
+    logger.warning(
+        "Unknown finding severity {raw!r}; failing closed to P1.",
+        raw=raw,
+    )
+    return Severity.P1
+
+
 def _normalize_checklist_answer_value(*, answer: str) -> str:
     """Normalize checklist answers to the yes/no contract."""
     normalized = answer.strip().lower()
@@ -1136,11 +1237,24 @@ def _normalize_checklist_answer_value(*, answer: str) -> str:
 
 
 def _checklist_answer_strength(*, answer: ChecklistAnswer) -> int:
-    """Score checklist answers for merge precedence."""
+    """Score checklist answers for merge precedence.
+
+    Per epic #991's v3.1 contract, every ``yes`` must map to a finding, so a
+    ``yes`` from any chunk strictly wins over a ``no`` regardless of evidence.
+    Evidence only breaks ties between two answers of the same polarity. This
+    prevents an evidence-backed ``no`` from one chunk silently overturning a
+    bare ``yes`` from another and dropping the finding non-deterministically.
+
+    Args:
+        answer: Checklist answer to score.
+
+    Returns:
+        Strength score: yes-with-evidence 4, yes 3, no-with-evidence 2, no 1.
+    """
     has_evidence = bool(answer.evidence.strip())
     if answer.answer == "yes":
-        return 4 if has_evidence else 2
-    return 3 if has_evidence else 1
+        return 4 if has_evidence else 3
+    return 2 if has_evidence else 1
 
 
 def _pick_preferred_checklist_answer(

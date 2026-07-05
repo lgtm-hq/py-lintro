@@ -3,6 +3,28 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from enum import StrEnum
+
+__all__ = ["ReviewFinding", "Severity"]
+
+
+class Severity(StrEnum):
+    """Canonical severity levels for review findings.
+
+    Members carry the uppercase labels emitted in review output and used by
+    the P1 exit gate. Explicit ``P*`` values are used (instead of
+    ``auto()``) because the canonical labels are uppercase and are compared
+    and displayed verbatim across the review pipeline.
+
+    Attributes:
+        P1: Blocking severity that fails the review exit gate.
+        P2: Important but non-blocking severity.
+        P3: Minor or informational severity.
+    """
+
+    P1 = "P1"
+    P2 = "P2"
+    P3 = "P3"
 
 
 @dataclass(frozen=True, slots=True)
@@ -22,7 +44,7 @@ class ReviewFinding:
         checklist_ids: Prompt checklist ids linked to this finding.
     """
 
-    severity: str
+    severity: Severity
     category: str
     file: str
     line: int

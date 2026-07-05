@@ -162,7 +162,7 @@ def test_post_review_comments_posts_summary(test_token: str) -> None:
     )
     summary = AISummary(overview="Test overview", key_patterns=["pattern1"])
 
-    with patch.object(reporter, "_post_issue_comment", return_value=True) as mock:
+    with patch.object(reporter, "post_issue_comment", return_value=True) as mock:
         result = reporter.post_review_comments([], summary=summary)
         assert_that(result).is_true()
         mock.assert_called_once()
@@ -209,7 +209,7 @@ def test_api_request_constructs_correct_request(test_token: str) -> None:
     mock_response.__exit__ = MagicMock(return_value=False)
 
     with patch("urllib.request.urlopen", return_value=mock_response) as mock_open:
-        result = reporter._api_request(
+        result = reporter.api_request(
             "POST",
             "https://api.github.com/test",
             {"key": "value"},
@@ -368,8 +368,8 @@ def test_post_review_uses_workspace_relative_paths(test_token: str) -> None:
 
     diff = {"src/main.py": {10}}
     with (
-        patch.object(reporter, "_fetch_pr_diff_lines", return_value=diff),
-        patch.object(reporter, "_api_request", return_value=True) as mock_api,
+        patch.object(reporter, "fetch_pr_diff_lines", return_value=diff),
+        patch.object(reporter, "api_request", return_value=True) as mock_api,
     ):
         reporter._post_review(suggestions)
         payload = mock_api.call_args[0][2]
@@ -400,8 +400,8 @@ def test_post_review_skips_out_of_workspace_suggestions(test_token: str) -> None
 
     diff = {"some/other/file.py": {1, 2, 3}}
     with (
-        patch.object(reporter, "_fetch_pr_diff_lines", return_value=diff),
-        patch.object(reporter, "_api_request", return_value=True) as mock_api,
+        patch.object(reporter, "fetch_pr_diff_lines", return_value=diff),
+        patch.object(reporter, "api_request", return_value=True) as mock_api,
     ):
         reporter._post_review(suggestions)
         # Out-of-workspace suggestion should be filtered; no API call made
@@ -455,3 +455,61 @@ def test_parse_patch_lines_no_newline_comment_mapping() -> None:
     # positions 4 and 5 must not appear.
     assert_that(sorted(result)).is_equal_to([3, 4])
     assert_that(result).does_not_contain(5)
+
+
+# -- Deprecation aliases: public API promotion (#1050C). ---------------------
+
+
+def test_deprecated_post_issue_comment_alias_delegates(test_token: str) -> None:
+    """The private _post_issue_comment alias delegates to the public method."""
+    reporter = GitHubPRReporter(
+        token=test_token,
+        repo="owner/repo",
+        pr_number=5,
+    )
+
+    with (
+        patch.object(reporter, "post_issue_comment", return_value=True) as mock,
+        pytest.warns(DeprecationWarning),
+    ):
+        result = reporter._post_issue_comment("body")
+
+    assert_that(result).is_true()
+    mock.assert_called_once_with("body")
+
+
+def test_deprecated_fetch_pr_diff_lines_alias_delegates(test_token: str) -> None:
+    """The private _fetch_pr_diff_lines alias delegates to the public method."""
+    reporter = GitHubPRReporter(
+        token=test_token,
+        repo="owner/repo",
+        pr_number=5,
+    )
+    diff = {"src/main.py": {10}}
+
+    with (
+        patch.object(reporter, "fetch_pr_diff_lines", return_value=diff) as mock,
+        pytest.warns(DeprecationWarning),
+    ):
+        result = reporter._fetch_pr_diff_lines()
+
+    assert_that(result).is_equal_to(diff)
+    mock.assert_called_once_with()
+
+
+def test_deprecated_api_request_alias_delegates(test_token: str) -> None:
+    """The private _api_request alias delegates to the public method."""
+    reporter = GitHubPRReporter(
+        token=test_token,
+        repo="owner/repo",
+        pr_number=5,
+    )
+
+    with (
+        patch.object(reporter, "api_request", return_value=True) as mock,
+        pytest.warns(DeprecationWarning),
+    ):
+        result = reporter._api_request("POST", "https://api.github.com/x", {"a": 1})
+
+    assert_that(result).is_true()
+    mock.assert_called_once_with("POST", "https://api.github.com/x", {"a": 1})

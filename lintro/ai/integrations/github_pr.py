@@ -11,6 +11,7 @@ import os
 import urllib.error
 import urllib.parse
 import urllib.request
+import warnings
 from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
@@ -103,7 +104,7 @@ class GitHubPRReporter:
 
         if summary and summary.overview:
             body = _format_summary_comment(summary)
-            if not self._post_issue_comment(body):
+            if not self.post_issue_comment(body):
                 success = False
 
         if suggestions and not self._post_review(suggestions):
@@ -126,7 +127,7 @@ class GitHubPRReporter:
         Returns:
             True if all comments were posted successfully.
         """
-        diff_lines = self._fetch_pr_diff_lines()
+        diff_lines = self.fetch_pr_diff_lines()
         comments: list[dict[str, Any]] = []
         fallback_suggestions: list[AIFixSuggestion] = []
 
@@ -172,19 +173,19 @@ class GitHubPRReporter:
                 "comments": comments,
             }
             url = f"{self.api_base}/repos/{self.repo}/pulls/{self.pr_number}/reviews"
-            if not self._api_request("POST", url, payload):
+            if not self.api_request("POST", url, payload):
                 success = False
 
         # Post unmappable suggestions as standalone issue comments
         for s in fallback_suggestions:
             body = _format_inline_comment(s)
             location = f"`{s.file}:{s.line}`" if s.line else f"`{s.file}`"
-            if not self._post_issue_comment(f"{location}\n\n{body}"):
+            if not self.post_issue_comment(f"{location}\n\n{body}"):
                 success = False
 
         return success
 
-    def _fetch_pr_diff_lines(self) -> dict[str, set[int]] | None:
+    def fetch_pr_diff_lines(self) -> dict[str, set[int]] | None:
         """Fetch changed lines per file from the PR diff.
 
         Paginates through all pages of the ``GET /pulls/{pr}/files``
@@ -240,7 +241,7 @@ class GitHubPRReporter:
             result[filename] = _parse_patch_lines(patch)
         return result
 
-    def _post_issue_comment(self, body: str) -> bool:
+    def post_issue_comment(self, body: str) -> bool:
         """Post a top-level issue comment on the PR.
 
         Args:
@@ -250,9 +251,9 @@ class GitHubPRReporter:
             True if posted successfully.
         """
         url = f"{self.api_base}/repos/{self.repo}/issues/{self.pr_number}/comments"
-        return self._api_request("POST", url, {"body": body})
+        return self.api_request("POST", url, {"body": body})
 
-    def _api_request(
+    def api_request(
         self,
         method: str,
         url: str,
@@ -308,6 +309,60 @@ class GitHubPRReporter:
         except urllib.error.URLError as e:
             logger.warning("GitHub API request error: {}", e.reason)
             return False
+
+    def _fetch_pr_diff_lines(self) -> dict[str, set[int]] | None:
+        """Deprecated alias for :meth:`fetch_pr_diff_lines`.
+
+        Returns:
+            Result of :meth:`fetch_pr_diff_lines`.
+        """
+        warnings.warn(
+            "GitHubPRReporter._fetch_pr_diff_lines is deprecated; "
+            "use fetch_pr_diff_lines.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        return self.fetch_pr_diff_lines()
+
+    def _post_issue_comment(self, body: str) -> bool:
+        """Deprecated alias for :meth:`post_issue_comment`.
+
+        Args:
+            body: Comment body in Markdown.
+
+        Returns:
+            Result of :meth:`post_issue_comment`.
+        """
+        warnings.warn(
+            "GitHubPRReporter._post_issue_comment is deprecated; "
+            "use post_issue_comment.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        return self.post_issue_comment(body)
+
+    def _api_request(
+        self,
+        method: str,
+        url: str,
+        payload: dict[str, Any],
+    ) -> bool:
+        """Deprecated alias for :meth:`api_request`.
+
+        Args:
+            method: HTTP method.
+            url: Full API URL.
+            payload: JSON payload.
+
+        Returns:
+            Result of :meth:`api_request`.
+        """
+        warnings.warn(
+            "GitHubPRReporter._api_request is deprecated; use api_request.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        return self.api_request(method, url, payload)
 
 
 def _detect_repo_root() -> Path | None:

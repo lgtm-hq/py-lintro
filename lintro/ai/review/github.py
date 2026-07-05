@@ -64,7 +64,7 @@ def post_review_to_github(
     )
 
     success = True
-    if summary_body and not gh_reporter._post_issue_comment(summary_body):
+    if summary_body and not gh_reporter.post_issue_comment(summary_body):
         success = False
 
     if inline_findings and not _post_inline_findings(
@@ -83,7 +83,7 @@ def post_review_to_github(
         )
         location = _format_fallback_location(finding=finding)
         comment = f"{location}\n\n{body}" if location else body
-        if not gh_reporter._post_issue_comment(comment):
+        if not gh_reporter.post_issue_comment(comment):
             success = False
 
     return success
@@ -211,7 +211,7 @@ def _partition_findings(
     reporter: GitHubPRReporter,
 ) -> tuple[list[ReviewFinding], list[ReviewFinding]]:
     """Split findings into inline-capable and fallback groups."""
-    diff_lines = reporter._fetch_pr_diff_lines()
+    diff_lines = reporter.fetch_pr_diff_lines()
     inline: list[ReviewFinding] = []
     fallback: list[ReviewFinding] = []
 
@@ -266,4 +266,4 @@ def _post_inline_findings(
         f"{reporter.api_base}/repos/{reporter.repo}/pulls/"
         f"{reporter.pr_number}/reviews"
     )
-    return reporter._api_request("POST", url, payload)
+    return reporter.api_request("POST", url, payload)
