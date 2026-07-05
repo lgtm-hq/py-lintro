@@ -162,6 +162,56 @@ def test_build_git_native_review_prompt_redacts_secrets_in_pr_title() -> None:
     assert_that(user_prompt).contains("[REDACTED]")
 
 
+def test_git_native_default_embeds_redacted_diff_not_git_command() -> None:
+    """By default the git-native builder embeds the redacted diff.
+
+    When ``embed_diff`` is False and the redaction opt-out is not set, the
+    builder must fall back to embedding the redacted diff rather than emitting
+    a delegated ``git diff`` command that would bypass secret redaction.
+    """
+    chunk = _make_chunk(diff=f"+api_key = '{_LEAKED_KEY}'\n")
+    context = _make_context(body="Routine change.")
+
+    _system, user_prompt = build_git_native_review_prompt(
+        chunk=chunk,
+        context=context,
+        checklist_text="1. [logic-bug] Example?",
+        checklist_count=1,
+        interaction_paths="(none)",
+        embed_diff=False,
+    )
+
+    assert_that(user_prompt).does_not_contain(_LEAKED_KEY)
+    assert_that(user_prompt).contains("[REDACTED]")
+    assert_that(user_prompt).does_not_contain("git diff")
+    assert_that(user_prompt).contains("<pull_request_diff>")
+
+
+def test_git_native_opt_out_uses_delegated_git_command() -> None:
+    """With the explicit opt-out enabled the delegated git command is emitted.
+
+    A user who knowingly accepts the loss of redaction for efficiency on very
+    large diffs can opt out; then the builder emits the delegated ``git diff``
+    command and does not embed the diff.
+    """
+    chunk = _make_chunk(diff=f"+api_key = '{_LEAKED_KEY}'\n")
+    context = _make_context(body="Routine change.")
+
+    _system, user_prompt = build_git_native_review_prompt(
+        chunk=chunk,
+        context=context,
+        checklist_text="1. [logic-bug] Example?",
+        checklist_count=1,
+        interaction_paths="(none)",
+        embed_diff=False,
+        allow_unredacted_git_native=True,
+    )
+
+    assert_that(user_prompt).contains("git diff")
+    assert_that(user_prompt).does_not_contain("<pull_request_diff>")
+    assert_that(user_prompt).does_not_contain(_LEAKED_KEY)
+
+
 def test_build_review_prompt_logs_secret_warning() -> None:
     """Detected secrets emit a warning before the prompt is dispatched."""
     chunk = _make_chunk(diff=f"+token = {_LEAKED_KEY}\n")

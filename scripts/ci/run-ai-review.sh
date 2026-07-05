@@ -7,6 +7,12 @@ set -euo pipefail
 # review over the PR and prints the JSON result to the log. Informational only:
 # this script always exits 0 so it can never fail a pull request check.
 #
+# Trusted install: the workflow checks out the PR's BASE ref (main) before
+# invoking this script, so the lintro that runs with ANTHROPIC_API_KEY is
+# trusted code — never the PR head. The PR diff is fetched independently by
+# `lintro review --pr` via `gh` (GitHub API), so the PR's changes are reviewed
+# as data and never executed with the key.
+#
 # It gracefully skips (logs a message and exits 0) when ANTHROPIC_API_KEY is
 # empty. That covers both "the repo secret is not configured yet" and fork PRs
 # (which cannot access repository secrets), so merging the workflow never
@@ -55,9 +61,11 @@ fi
 
 echo "Running AI review on PR #${pr_number} (informational, non-blocking)..."
 
-# Enable AI review in the ephemeral CI checkout's config. `lintro review` reads
-# ai.enabled and ai.max_cost_usd only from .lintro-config.yaml, so patch it here
-# rather than passing non-existent flags. Transport/provider are pinned too.
+# Enable AI review in the base-ref (trusted) checkout's config. `lintro review`
+# reads ai.enabled and ai.max_cost_usd only from .lintro-config.yaml, so patch
+# it here rather than passing non-existent flags. The config comes from the base
+# ref, not the PR, so a PR cannot loosen the cost cap. Transport/provider are
+# pinned too.
 uv run python "${script_dir}/enable_review_config.py"
 
 # Never let a P1 finding (exit 1) or any review error fail the PR check.
