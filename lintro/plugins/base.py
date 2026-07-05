@@ -52,6 +52,7 @@ from lintro.plugins.file_discovery import (
 )
 from lintro.plugins.protocol import ToolDefinition
 from lintro.plugins.subprocess_executor import (
+    SubprocessResult,
     run_subprocess,
     run_subprocess_streaming,
     validate_subprocess_command,
@@ -289,6 +290,31 @@ class BaseToolPlugin(ABC):
             show_progress=show_progress,
         )
 
+    def _run_subprocess_result(
+        self,
+        cmd: list[str],
+        timeout: int | float | None = None,
+        cwd: str | None = None,
+        env: dict[str, str] | None = None,
+    ) -> SubprocessResult:
+        """Run a subprocess command, returning separated output streams.
+
+        Prefer this over :meth:`_run_subprocess` when the tool needs to parse
+        stdout independently of stderr (e.g. JSON output that must not be
+        corrupted by stderr warnings). See issue #1043.
+
+        Args:
+            cmd: Command and arguments to run.
+            timeout: Timeout in seconds (defaults to tool's timeout).
+            cwd: Working directory for command execution.
+            env: Environment variables for the subprocess.
+
+        Returns:
+            SubprocessResult with the return code and separated stdout/stderr.
+        """
+        effective_timeout = self._get_effective_timeout(timeout)
+        return run_subprocess(cmd, effective_timeout, cwd, env)
+
     def _run_subprocess(
         self,
         cmd: list[str],
@@ -297,6 +323,10 @@ class BaseToolPlugin(ABC):
         env: dict[str, str] | None = None,
     ) -> tuple[bool, str]:
         """Run a subprocess command safely.
+
+        Backward-compatible wrapper around :meth:`_run_subprocess_result` that
+        returns the legacy ``(success, output)`` tuple with the combined
+        display output.
 
         Args:
             cmd: Command and arguments to run.
@@ -307,8 +337,30 @@ class BaseToolPlugin(ABC):
         Returns:
             Tuple of (success, output) where success indicates return code 0.
         """
+        return self._run_subprocess_result(cmd, timeout, cwd, env).as_tuple()
+
+    def _run_subprocess_streaming_result(
+        self,
+        cmd: list[str],
+        timeout: int | float | None = None,
+        cwd: str | None = None,
+        env: dict[str, str] | None = None,
+        line_handler: Callable[[str], None] | None = None,
+    ) -> SubprocessResult:
+        """Run a streaming subprocess, returning the full result object.
+
+        Args:
+            cmd: Command and arguments to run.
+            timeout: Timeout in seconds (defaults to tool's timeout).
+            cwd: Working directory for command execution.
+            env: Environment variables for the subprocess.
+            line_handler: Optional callback called for each line of output.
+
+        Returns:
+            SubprocessResult with the return code and captured output.
+        """
         effective_timeout = self._get_effective_timeout(timeout)
-        return run_subprocess(cmd, effective_timeout, cwd, env)
+        return run_subprocess_streaming(cmd, effective_timeout, cwd, env, line_handler)
 
     def _run_subprocess_streaming(
         self,
@@ -320,8 +372,9 @@ class BaseToolPlugin(ABC):
     ) -> tuple[bool, str]:
         """Run a subprocess command with optional line-by-line streaming.
 
-        This method allows real-time output processing by calling the line_handler
-        callback for each line of output as it is produced by the subprocess.
+        Backward-compatible wrapper around
+        :meth:`_run_subprocess_streaming_result` returning the legacy
+        ``(success, output)`` tuple.
 
         Args:
             cmd: Command and arguments to run.
@@ -333,8 +386,13 @@ class BaseToolPlugin(ABC):
         Returns:
             Tuple of (success, output) where success indicates return code 0.
         """
-        effective_timeout = self._get_effective_timeout(timeout)
-        return run_subprocess_streaming(cmd, effective_timeout, cwd, env, line_handler)
+        return self._run_subprocess_streaming_result(
+            cmd,
+            timeout,
+            cwd,
+            env,
+            line_handler,
+        ).as_tuple()
 
     def _get_effective_timeout(self, timeout: int | float | None = None) -> float:
         """Get the effective timeout value.
