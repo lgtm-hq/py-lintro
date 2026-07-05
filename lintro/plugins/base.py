@@ -175,12 +175,32 @@ class BaseToolPlugin(ABC):
 
         Clears accumulated state from prior ``set_options()`` calls so
         the same plugin instance can be reused across runs without
-        leaking mutated configuration.
+        leaking mutated configuration. Subclasses that own additional
+        mutable option state reset it by overriding
+        :meth:`_reset_execution_state`.
         """
         self.options = dict(self.definition.default_options)
         self.exclude_patterns = []
         self.include_venv = False
         self._setup_defaults()
+        self._reset_execution_state()
+
+    def _reset_execution_state(self) -> None:
+        """Reset subclass-owned mutable option state back to defaults.
+
+        Called at the end of :meth:`reset_options` after the base option
+        attributes (``options``, ``exclude_patterns``, ``include_venv``)
+        have been reset. The base implementation is a no-op because the
+        base class owns no further mutable option state.
+
+        Subclasses that hold mutable config objects which :meth:`set_options`
+        mutates (e.g. a dataclass of tool-specific options) must override this
+        to restore those objects to their default values and re-wire any
+        collaborators that reference them. Otherwise a stale value carried on
+        the template (or a prior run) survives the defensive reset performed
+        before each invocation is configured.
+        """
+        return None
 
     def copy_for_execution(self) -> Self:
         """Return an isolated copy of this plugin for a single invocation.

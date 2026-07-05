@@ -189,6 +189,27 @@ class PytestPlugin(BaseToolPlugin):
             self.result_processor.config = self.pytest_config
         # error_handler holds only the immutable tool name; safe to share.
 
+    def _reset_execution_state(self) -> None:
+        """Reset pytest-specific mutable option state back to defaults.
+
+        ``reset_options`` restores the base option attributes, but the mutable
+        ``pytest_config`` dataclass is owned by this subclass. Without this
+        override a value mutated on the template (e.g. ``maxfail`` or
+        ``collect_only``) would survive into a freshly configured execution
+        copy, so pytest could stop early or only collect tests even though the
+        caller never requested it. Replace the config with a default instance
+        and re-point the collaborators that reference it.
+        """
+        super()._reset_execution_state()
+
+        self.pytest_config = PytestConfiguration()
+
+        if self.executor is not None:
+            self.executor.config = self.pytest_config
+        if self.result_processor is not None:
+            self.result_processor.config = self.pytest_config
+        # error_handler holds only the immutable tool name; safe to share.
+
     def _parse_output(
         self,
         output: str,

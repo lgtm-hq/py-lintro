@@ -204,3 +204,30 @@ def test_reset_options_still_works_on_copy(
     assert_that(clone.exclude_patterns).does_not_contain("temp_*")
     # Template untouched throughout.
     assert_that(fake_tool_plugin.exclude_patterns).does_not_contain("temp_*")
+
+
+def test_reset_options_clears_stale_pytest_config() -> None:
+    """``reset_options`` restores pytest config defaults on an execution copy.
+
+    Simulates the configuration path: a template whose ``pytest_config`` was
+    mutated is copied, then defensively reset before being reconfigured. The
+    reset must clear the inherited pytest-specific state (and re-point the
+    collaborators) so a stale ``maxfail`` cannot leak into the invocation.
+    """
+    from lintro.tools.definitions.pytest import PytestPlugin
+
+    template = PytestPlugin()
+    template.set_options(maxfail=5)
+
+    clone = template.copy_for_execution()
+    assert_that(clone.pytest_config.maxfail).is_equal_to(5)
+
+    clone.reset_options()
+
+    assert_that(clone.pytest_config.maxfail).is_none()
+    executor = cast("PytestExecutor", clone.executor)
+    result_processor = cast("PytestResultProcessor", clone.result_processor)
+    assert_that(executor.config).is_same_as(clone.pytest_config)
+    assert_that(result_processor.config).is_same_as(clone.pytest_config)
+    # Template retains its own mutated value; reset only touched the copy.
+    assert_that(template.pytest_config.maxfail).is_equal_to(5)
