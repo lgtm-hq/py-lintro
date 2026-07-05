@@ -12,7 +12,7 @@ from lintro.ai.review.github import (
     format_review_summary,
     post_review_to_github,
 )
-from lintro.ai.review.models.review_finding import ReviewFinding
+from lintro.ai.review.models.review_finding import ReviewFinding, Severity
 from lintro.ai.review.models.review_result import ReviewResult
 
 
@@ -73,7 +73,7 @@ def test_post_review_to_github_posts_fallback_without_line_number(
 ) -> None:
     """Fallback comments omit invalid line numbers from the location header."""
     outside_diff_finding = ReviewFinding(
-        severity="P2",
+        severity=Severity.P2,
         category="architecture",
         file="docs/design.md",
         line=0,
@@ -92,8 +92,8 @@ def test_post_review_to_github_posts_fallback_without_line_number(
     )
     reporter = MagicMock()
     reporter.is_available.return_value = True
-    reporter._fetch_pr_diff_lines.return_value = {"src/main.py": {10}}
-    reporter._post_issue_comment.return_value = True
+    reporter.fetch_pr_diff_lines.return_value = {"src/main.py": {10}}
+    reporter.post_issue_comment.return_value = True
 
     with patch(
         "lintro.ai.review.github._post_inline_findings",
@@ -103,7 +103,7 @@ def test_post_review_to_github_posts_fallback_without_line_number(
 
     fallback_calls = [
         call.args[0]
-        for call in reporter._post_issue_comment.call_args_list
+        for call in reporter.post_issue_comment.call_args_list
         if call.args[0].startswith("`docs/design.md`")
     ]
     assert_that(fallback_calls).is_length(1)
@@ -123,7 +123,7 @@ def test_post_review_to_github_returns_false_when_unavailable(
     )
 
     assert_that(posted).is_false()
-    reporter._post_issue_comment.assert_not_called()
+    reporter.post_issue_comment.assert_not_called()
 
 
 def test_post_review_to_github_posts_summary_and_inline(
@@ -132,9 +132,9 @@ def test_post_review_to_github_posts_summary_and_inline(
     """Available reporter posts summary and inline review comments."""
     reporter = MagicMock()
     reporter.is_available.return_value = True
-    reporter._fetch_pr_diff_lines.return_value = {"src/main.py": {10}}
-    reporter._post_issue_comment.return_value = True
-    reporter._api_request.return_value = True
+    reporter.fetch_pr_diff_lines.return_value = {"src/main.py": {10}}
+    reporter.post_issue_comment.return_value = True
+    reporter.api_request.return_value = True
 
     with patch(
         "lintro.ai.review.github._post_inline_findings",
@@ -148,5 +148,5 @@ def test_post_review_to_github_posts_summary_and_inline(
         )
 
     assert_that(posted).is_true()
-    assert_that(reporter._post_issue_comment.called).is_true()
+    assert_that(reporter.post_issue_comment.called).is_true()
     assert_that(mock_inline.called).is_true()

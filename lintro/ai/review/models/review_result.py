@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 from lintro.ai.review.models.checklist_answer import ChecklistAnswer
-from lintro.ai.review.models.review_finding import ReviewFinding
+from lintro.ai.review.models.review_finding import ReviewFinding, Severity
 from lintro.ai.review.models.review_metadata import ReviewMetadata
 
 
@@ -28,4 +28,4 @@ class ReviewResult:
     @property
     def has_p1_findings(self) -> bool:
         """Return True when any P1 finding exists."""
-        return any(finding.severity == "P1" for finding in self.findings)
+        return any(finding.severity == Severity.P1 for finding in self.findings)

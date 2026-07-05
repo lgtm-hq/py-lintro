@@ -12,7 +12,7 @@ from lintro.ai.review.enums.changed_file_status import ChangedFileStatus
 from lintro.ai.review.models.changed_file import ChangedFile
 from lintro.ai.review.models.checklist_answer import ChecklistAnswer
 from lintro.ai.review.models.review_context import ReviewContext
-from lintro.ai.review.models.review_finding import ReviewFinding
+from lintro.ai.review.models.review_finding import ReviewFinding, Severity
 from lintro.ai.review.models.review_metadata import ReviewMetadata
 from lintro.ai.review.models.review_result import ReviewResult
 from tests.unit.ai.review.review_fixtures import load_review_fixture
@@ -244,7 +244,7 @@ def sample_review_result() -> ReviewResult:
         ),
         findings=(
             ReviewFinding(
-                severity="P1",
+                severity=Severity.P1,
                 category="security",
                 file="src/main.py",
                 line=10,
@@ -256,7 +256,7 @@ def sample_review_result() -> ReviewResult:
                 checklist_ids=(1,),
             ),
             ReviewFinding(
-                severity="P2",
+                severity=Severity.P2,
                 category="test-gap",
                 file="tests/test_main.py",
                 line=5,

@@ -6,7 +6,7 @@ from assertpy import assert_that
 
 from lintro.ai.review.enums.review_category import ReviewCategory
 from lintro.ai.review.enums.review_strictness import ReviewStrictness
-from lintro.ai.review.models.review_finding import ReviewFinding
+from lintro.ai.review.models.review_finding import ReviewFinding, Severity
 from lintro.ai.review.sensitivity import (
     filter_findings_by_policy,
     format_strictness_prompt_section,
@@ -17,7 +17,7 @@ from lintro.config.review_config import ReviewSensitivityOverrides
 
 def _finding(
     *,
-    severity: str = "P3",
+    severity: Severity = Severity.P3,
     category: str = ReviewCategory.BREAKING_CHANGE.value,
     file: str = "docs/architecture.md",
     title: str = "No CI script migration note",
@@ -93,7 +93,7 @@ def test_filter_findings_focused_keeps_p2_integration() -> None:
     policy = resolve_sensitivity_policy(strictness=ReviewStrictness.FOCUSED)
     findings = (
         _finding(
-            severity="P2",
+            severity=Severity.P2,
             category=ReviewCategory.INTEGRATION.value,
             file=".github/workflows/test-core.yml",
             title="CI runs auth-setup twice",
