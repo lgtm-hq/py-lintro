@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from typing import cast
 from unittest.mock import patch
 
 import pytest
@@ -62,3 +63,42 @@ def test_get_provider_passes_model():
         assert_that(provider.model_name).is_equal_to(
             "claude-opus-4-20250514",
         )
+
+
+def test_get_provider_cursor_trust_defaults_off():
+    """Cursor provider does not trust the workspace unless opted in."""
+    from lintro.ai.enums import AITransport
+    from lintro.ai.providers.cursor import CursorProvider
+
+    config = AIConfig(
+        provider="cursor",  # type: ignore[arg-type]  # Pydantic coerces str
+        transport=AITransport.CLI,
+    )
+    with patch(
+        "lintro.ai.providers.cursor._find_agent",
+        return_value="/usr/local/bin/agent",
+    ):
+        provider = get_provider(config)
+    assert_that(isinstance(provider, CursorProvider)).is_true()
+    cursor = cast(CursorProvider, provider)
+    assert_that(cursor._trust_workspace).is_false()
+
+
+def test_get_provider_cursor_trust_threaded_when_enabled():
+    """get_provider threads cursor_trust_workspace into the provider."""
+    from lintro.ai.enums import AITransport
+    from lintro.ai.providers.cursor import CursorProvider
+
+    config = AIConfig(
+        provider="cursor",  # type: ignore[arg-type]  # Pydantic coerces str
+        transport=AITransport.CLI,
+        cursor_trust_workspace=True,
+    )
+    with patch(
+        "lintro.ai.providers.cursor._find_agent",
+        return_value="/usr/local/bin/agent",
+    ):
+        provider = get_provider(config)
+    assert_that(isinstance(provider, CursorProvider)).is_true()
+    cursor = cast(CursorProvider, provider)
+    assert_that(cursor._trust_workspace).is_true()

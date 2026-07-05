@@ -798,6 +798,9 @@ def _review_chunk(
         )
 
     tracker.on_step(chunk_index=chunk_index, step="reviewing")
+    # Gate before the main provider call so intra-chunk (depth-2/3) work
+    # cannot overshoot the budget between the per-chunk checks.
+    budget.check()
     use_git_native = ai_config.transport == AITransport.CLI
     if use_git_native:
         embed_diff = estimate_tokens(chunk.diff) <= max(diff_budget, 1)
@@ -887,6 +890,7 @@ def _generate_extra_checklist(
         diff=chunk.diff,
         changed_files=changed_files,
     )
+    budget.check()
     response = call_ai(
         provider=provider,
         ai_config=ai_config,
@@ -957,6 +961,7 @@ def _run_adversarial_pass(
         prior_findings_json=prior_json,
         diff=chunk.diff,
     )
+    budget.check()
     response = call_ai(
         provider=provider,
         ai_config=ai_config,

@@ -11,10 +11,12 @@ from __future__ import annotations
 
 import json
 import os
+from dataclasses import replace
 from typing import Any
 
 from loguru import logger
 
+from lintro.ai.cost import estimate_cost_with_floor
 from lintro.ai.enums import AITransport
 from lintro.ai.exceptions import (
     AINotAvailableError,
@@ -29,6 +31,7 @@ from lintro.ai.providers.constants import (
     DEFAULT_TIMEOUT,
 )
 from lintro.ai.registry import PROVIDERS, AIProvider
+from lintro.ai.token_budget import estimate_tokens
 
 CURSOR_MIN_TIMEOUT = 600.0
 
@@ -127,6 +130,7 @@ class CursorProvider(BaseAIProvider):
         max_tokens: int = DEFAULT_MAX_TOKENS,
         base_url: str | None = None,
         transport: AITransport = AITransport.CLI,
+        cursor_trust_workspace: bool = False,
     ) -> None:
         """Initialize the Cursor provider.
 
@@ -136,6 +140,13 @@ class CursorProvider(BaseAIProvider):
             max_tokens: Default max tokens for provider configuration.
             base_url: Unused; kept for provider API parity.
             transport: AI transport mode (CLI only for Cursor).
+            cursor_trust_workspace: When True, pass ``--trust`` to the
+                ``agent`` CLI, granting Cursor workspace trust. Defaults to
+                False. Enabling it is a security risk: the provider is fed
+                untrusted, prompt-injectable content (``lintro review --pr N``
+                embeds diffs from arbitrary fork PRs), so combining workspace
+                trust with such input could let an injected diff drive an
+                agent operating with full workspace trust.
 
         Raises:
             AINotAvailableError: When transport is not CLI or the ``agent``
@@ -168,6 +179,7 @@ class CursorProvider(BaseAIProvider):
             binary_path=agent_path,
             model=self._model,
         )
+        self._trust_workspace = cursor_trust_workspace
         self._session_id: str | None = None
         self._durable_repo_root: str | None = None
 
@@ -251,14 +263,19 @@ class CursorProvider(BaseAIProvider):
             "--print",
             "--output-format",
             "json",
-            "--trust",
-            "--mode",
-            "ask",
-            "--model",
-            effective_model,
-            "--workspace",
-            effective_root,
         ]
+        if self._trust_workspace:
+            cmd.append("--trust")
+        cmd.extend(
+            [
+                "--mode",
+                "ask",
+                "--model",
+                effective_model,
+                "--workspace",
+                effective_root,
+            ],
+        )
         if resume_session and self._session_id is not None:
             cmd.extend(["--resume", self._session_id])
 
@@ -281,10 +298,50 @@ class CursorProvider(BaseAIProvider):
             auth_hint="Run 'agent login' or set CURSOR_API_KEY.",
         )
         response, session_id = self._cli.parse_stdout(result.stdout)
+        response = self._estimate_usage(
+            prompt=combined_prompt,
+            model=effective_model,
+            response=response,
+        )
 
         if not use_one_shot and self._durable_repo_root is not None and session_id:
             self._session_id = session_id
         return response
+
+    @staticmethod
+    def _estimate_usage(
+        *,
+        prompt: str,
+        model: str,
+        response: AIResponse,
+    ) -> AIResponse:
+        """Fill in local token estimates and a budget-safe cost estimate.
+
+        The Cursor ``agent`` CLI does not reliably expose token usage, and
+        its subscription pricing is zero in the model registry, so every
+        call would otherwise record zero cost and bypass the session budget.
+        This estimates tokens from the prompt and response text (when the CLI
+        omits them) and prices them with a non-zero floor so
+        :class:`~lintro.ai.budget.CostBudget` accrues a meaningful figure and
+        ``ai.max_cost_usd`` acts as a real safety cap.
+
+        Args:
+            prompt: The combined prompt sent to the CLI (system + user).
+            model: The effective model identifier used for the call.
+            response: The parsed provider response to augment.
+
+        Returns:
+            AIResponse: A copy with non-zero token counts and cost estimate.
+        """
+        input_tokens = response.input_tokens or estimate_tokens(prompt)
+        output_tokens = response.output_tokens or estimate_tokens(response.content)
+        cost = estimate_cost_with_floor(model, input_tokens, output_tokens)
+        return replace(
+            response,
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
+            cost_estimate=cost,
+        )
 
     @staticmethod
     def _extract_json_object(text: str) -> str:
