@@ -22,6 +22,10 @@ from lintro.parsers.mypy.mypy_parser import parse_mypy_output
 from lintro.plugins.base import BaseToolPlugin
 from lintro.plugins.protocol import ToolDefinition
 from lintro.plugins.registry import register_tool
+from lintro.tools.core.option_validators import (
+    OptionSchema,
+    validate_option_types,
+)
 from lintro.tools.core.timeout_utils import create_timeout_result
 from lintro.utils.config import load_mypy_config
 
@@ -39,6 +43,15 @@ MYPY_DEFAULT_EXCLUDE_PATTERNS: list[str] = [
     "dist/**",
     "build/**",
 ]
+
+# Expected types for mypy-specific options, validated in set_options().
+MYPY_OPTION_TYPES: OptionSchema = {
+    "strict": bool,
+    "ignore_missing_imports": bool,
+    "python_version": str,
+    "config_file": (str, "string path"),
+    "cache_dir": (str, "string path"),
+}
 
 
 def _split_config_values(raw_value: str) -> list[str]:
@@ -143,20 +156,6 @@ class MypyPlugin(BaseToolPlugin):
         Raises:
             ValueError: If any provided option is of an unexpected type.
         """
-        if strict is not None and not isinstance(strict, bool):
-            raise ValueError("strict must be a boolean")
-        if ignore_missing_imports is not None and not isinstance(
-            ignore_missing_imports,
-            bool,
-        ):
-            raise ValueError("ignore_missing_imports must be a boolean")
-        if python_version is not None and not isinstance(python_version, str):
-            raise ValueError("python_version must be a string")
-        if config_file is not None and not isinstance(config_file, str):
-            raise ValueError("config_file must be a string path")
-        if cache_dir is not None and not isinstance(cache_dir, str):
-            raise ValueError("cache_dir must be a string path")
-
         options: dict[str, object] = {
             "strict": strict,
             "ignore_missing_imports": ignore_missing_imports,
@@ -164,6 +163,7 @@ class MypyPlugin(BaseToolPlugin):
             "config_file": config_file,
             "cache_dir": cache_dir,
         }
+        validate_option_types(options, MYPY_OPTION_TYPES)
         options = {k: v for k, v in options.items() if v is not None}
         super().set_options(**options, **kwargs)
 
