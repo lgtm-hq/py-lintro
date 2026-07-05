@@ -74,7 +74,9 @@ def _to_standard_issue(
         code=str(row.get("code", "") or ""),
         message=str(row.get("message", "") or ""),
         severity=severity,
-        doc_url=str(getattr(issue, "doc_url", "") or ""),
+        doc_url=str(
+            getattr(issue, "doc_url", "") or getattr(issue, "url", "") or "",
+        ),
     )
 
 

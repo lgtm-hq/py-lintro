@@ -223,6 +223,31 @@ def test_standard_issues_from_results_extracts_fields() -> None:
     assert_that(issue.doc_url).is_equal_to("https://docs.astral.sh/ruff/rules/F401")
 
 
+def test_standard_issues_from_results_falls_back_to_url() -> None:
+    """Use the issue ``url`` field for ``doc_url`` when ``doc_url`` is empty."""
+    result = ToolResult(
+        name="ruff",
+        success=False,
+        issues=[
+            RuffIssue(
+                file="src/main.py",
+                line=10,
+                column=5,
+                code="F401",
+                message="imported but unused",
+                url="https://docs.astral.sh/ruff/rules/F401",
+            ),
+        ],
+    )
+
+    standard = standard_issues_from_results([result])
+
+    assert_that(standard).is_length(1)
+    assert_that(standard[0].doc_url).is_equal_to(
+        "https://docs.astral.sh/ruff/rules/F401",
+    )
+
+
 def test_standard_issues_from_results_no_issues() -> None:
     """Return empty list when results carry no issues."""
     result = ToolResult(name="ruff", success=True, issues=[])
