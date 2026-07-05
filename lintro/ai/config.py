@@ -174,6 +174,22 @@ class AIConfig(BaseModel):
         ),
     )
 
+    review_allow_unredacted_git_native: bool = Field(
+        default=False,
+        description=(
+            "Allow the git-native (CLI transport) review path to delegate "
+            "diff retrieval to the provider by emitting a 'git diff' command "
+            "instead of embedding the diff. Security risk: a delegated diff "
+            "is produced by the provider itself and never passes through "
+            "lintro's secret-redaction choke point, so secrets present in "
+            "the diff can reach the provider's backend unredacted. Defaults "
+            "to False so redaction always wins: lintro embeds the redacted "
+            "diff in the prompt even for large diffs. Only enable this for "
+            "trusted diffs with no secrets concern when the efficiency of "
+            "delegated git retrieval on very large diffs is required."
+        ),
+    )
+
     @model_validator(mode="after")
     def _validate_transport_and_retries(self) -> AIConfig:
         if self.retry_max_delay < self.retry_base_delay:

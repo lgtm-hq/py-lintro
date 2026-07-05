@@ -6,7 +6,8 @@ exposes no CLI flag or environment override for ``ai.enabled`` or
 ``ai.max_cost_usd``. The dogfood workflow therefore patches the checked-out
 (ephemeral) config in place before invoking the review command: it turns AI on,
 pins the API transport and the Anthropic provider, and bounds spend with
-``ai.max_cost_usd``.
+``ai.max_cost_usd``. The checkout is the PR's trusted base ref (main), not the
+PR head, so the patched config is trusted and a PR cannot raise the cost cap.
 
 Only ``ai.enabled``, ``ai.transport``, ``ai.provider``, and ``ai.max_cost_usd``
 are touched; every other configured value is preserved. This script never edits
