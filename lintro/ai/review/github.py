@@ -244,8 +244,10 @@ def _suggestion_block(*, finding: ReviewFinding) -> str:
     code = finding.suggested_code
     if not code or not code.strip():
         return ""
-    # Neutralize any fence break-out in untrusted model code.
+    # Neutralize fence break-out and @mentions in untrusted model code. The
+    # suggestion body renders as Markdown, so an unescaped `@user` still pings.
     safe = code.replace("```", "``​`")
+    safe = _MENTION_RE.sub("@​", safe)
     return "```suggestion\n" + safe + "\n```"
 
 
@@ -416,12 +418,16 @@ def build_sticky_comment(
 
     body = "\n\n".join(sections)
     body = _cap_body(body=body)
-    state_block = (
+    return body + _render_state_block(runs=all_runs)
+
+
+def _render_state_block(*, runs: list[dict[str, Any]]) -> str:
+    """Render the hidden machine-readable run-state block."""
+    return (
         f"\n\n{STATE_MARKER_PREFIX} "
-        + json.dumps({"version": STATE_VERSION, "runs": all_runs})
+        + json.dumps({"version": STATE_VERSION, "runs": runs})
         + f" {STATE_MARKER_SUFFIX}"
     )
-    return body + state_block
 
 
 def _run_record(*, result: ReviewResult) -> dict[str, Any]:
@@ -534,6 +540,7 @@ def format_error_comment(
     *,
     error: Exception,
     metadata: ReviewMetadata | None = None,
+    prior_runs: list[dict[str, Any]] | None = None,
 ) -> str:
     """Format a provider/API error as a clear PR comment.
 
@@ -543,6 +550,8 @@ def format_error_comment(
     Args:
         error: The exception raised during review.
         metadata: Optional review metadata for a mechanics footer.
+        prior_runs: Run records recovered from the previous sticky comment.
+            Re-emitted so a transient error does not reset cumulative telemetry.
 
     Returns:
         Markdown comment body describing the failure and next steps.
@@ -559,7 +568,10 @@ def format_error_comment(
     if metadata is not None and metadata.model:
         lines.extend(["", "<sub>" + format_run_mechanics(metadata=metadata) + "</sub>"])
     lines.extend(["", _FOOTER])
-    return "\n".join(lines)
+    body = "\n".join(lines)
+    if prior_runs:
+        body += _render_state_block(runs=list(prior_runs))
+    return body
 
 
 def _classify_error(*, error: Exception) -> tuple[str, str]:
@@ -684,8 +696,12 @@ def post_review_error_to_github(
     if not gh_reporter.is_available():
         logger.warning("GitHub PR context not available — skipping error posting")
         return False
-    body = format_error_comment(error=error, metadata=metadata)
-    comment_id, _prior = _load_prior_runs(reporter=gh_reporter)
+    comment_id, prior_runs = _load_prior_runs(reporter=gh_reporter)
+    body = format_error_comment(
+        error=error,
+        metadata=metadata,
+        prior_runs=prior_runs,
+    )
     return _upsert_sticky(reporter=gh_reporter, body=body, comment_id=comment_id)
 
 

@@ -212,6 +212,20 @@ def test_finding_mentions_are_neutralized_in_comment() -> None:
     assert_that(comment).does_not_contain("@everyone")
 
 
+def test_suggestion_block_neutralizes_mentions(
+    sample_review_result: ReviewResult,
+) -> None:
+    """Mentions inside model-supplied suggested code cannot ping users."""
+    finding = replace(
+        sample_review_result.findings[0],
+        suggested_code="# ping @team\nreturn Status.EXPIRED",
+    )
+    comment = format_finding_comment(finding=finding)
+
+    assert_that(comment).contains("```suggestion")
+    assert_that(comment).does_not_contain("@team")
+
+
 # --- sticky comment + cumulative aggregation --------------------------------
 
 
@@ -377,3 +391,47 @@ def test_post_error_comment_updates_sticky(
 
     assert_that(posted).is_true()
     reporter.update_issue_comment.assert_called_once()
+
+
+def test_error_comment_preserves_prior_run_state() -> None:
+    """A transient error re-emits prior run state so telemetry survives."""
+    prior = [
+        {
+            "timestamp": "2026-01-01T00:00:00+00:00",
+            "model": "claude-sonnet-4-20250514",
+            "provider": "anthropic",
+            "total": 5000,
+            "cost": 0.02,
+            "estimated": False,
+            "depth": 1,
+            "p1": 0,
+            "p2": 1,
+            "p3": 0,
+        },
+    ]
+    body = format_error_comment(
+        error=AIAuthenticationError("bad key"),
+        prior_runs=prior,
+    )
+
+    assert_that(body).contains(STATE_MARKER_PREFIX)
+    recovered = parse_review_state(body=body)
+    assert_that(recovered).is_length(1)
+    assert_that(recovered[0]["total"]).is_equal_to(5000)
+
+
+def test_post_error_comment_recovers_prior_state(
+    sample_review_result: ReviewResult,
+) -> None:
+    """post_review_error_to_github reloads prior runs and keeps their state."""
+    reporter = _fresh_reporter()
+    prior_body = build_sticky_comment(result=sample_review_result)
+    reporter.find_issue_comment.return_value = (9, prior_body)
+
+    post_review_error_to_github(
+        error=AIRateLimitError("429"),
+        reporter=reporter,
+    )
+
+    posted_body = reporter.update_issue_comment.call_args.kwargs["body"]
+    assert_that(parse_review_state(body=posted_body)).is_length(1)
