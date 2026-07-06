@@ -281,6 +281,32 @@ def _runtime_short_option_needs_operand(*, runtime: str, option_char: str) -> bo
     return bool(runtime.startswith("node") and option_char == "r")
 
 
+def _runtime_command_string_option(*, runtime: str, token: str) -> bool:
+    """Return True when a runtime flag introduces an inline-code operand.
+
+    ``python``/``python3`` treat ``-c`` as a command string, and ``node``/``bun``
+    treat ``-e``/``--eval`` as inline source to evaluate. In these forms the token
+    following the option is code, not a script-file path, so it must not be
+    matched as a workflow script reference. ``bash``/``sh`` ``-c`` is deliberately
+    excluded here because its payload can itself execute a real script path and is
+    handled separately.
+
+    Args:
+        runtime: Lowercased interpreter name (for example ``python3``).
+        token: Candidate option token, including leading dashes.
+
+    Returns:
+        True when ``token`` selects command-string / eval mode for ``runtime``.
+    """
+    if runtime.startswith("python"):
+        return bool(re.match(r"^-c", token))
+    if runtime.startswith("node") or runtime == "bun":
+        if token.startswith("--"):
+            return token[2:].split("=", 1)[0] == "eval"
+        return bool(re.match(r"^-e", token))
+    return False
+
+
 def _runtime_option_is_terminating(*, runtime: str, token: str) -> bool:
     """Return True when a Node/Bun flag ends execution before any script."""
     if not (runtime.startswith("node") or runtime == "bun"):
@@ -339,6 +365,8 @@ def _strip_shell_interpreter_prefix(*, segment: str) -> str:
             continue
         if _runtime_option_is_terminating(runtime=runtime, token=token):
             return ""
+        if _runtime_command_string_option(runtime=runtime, token=token):
+            break
         if re.match(r"(?i)^-c", token) or re.match(r"(?i)^-s", token):
             break
         if not token.startswith("-"):
@@ -548,6 +576,67 @@ def _shell_command_string_payload_after_wrappers(*, segment: str) -> str | None:
     return None
 
 
+def _strip_wrappers_before_interpreter(*, segment: str) -> str:
+    """Strip non-executing wrappers while keeping the leading interpreter.
+
+    Removes ``env``/``VAR=value`` assignments, ``sudo``/``timeout`` dispatch
+    prefixes, ``exec``/``command`` wrappers, compound leaders (``then``/``do``),
+    and ``uv run`` plus its CLI options -- but stops at the interpreter token so
+    its command-string mode can be inspected (including ``uv run python -c ...``).
+
+    Args:
+        segment: Shell command segment to normalize.
+
+    Returns:
+        The segment with leading non-interpreter wrappers removed.
+    """
+    remaining = segment.strip()
+    while True:
+        previous = remaining
+        remaining = _strip_leading_shell_prefixes(segment=remaining)
+        remaining = _strip_command_dispatch_prefixes(segment=remaining)
+        remaining = _strip_shell_dispatch_wrappers(segment=remaining)
+        remaining = _strip_shell_compound_leaders(segment=remaining)
+        if re.match(r"(?i)^uv\s+run\b", remaining):
+            remaining = re.sub(r"(?i)^uv\s+run\b", "", remaining, count=1).lstrip()
+            remaining = _strip_uv_cli_options(segment=remaining)
+        if remaining == previous:
+            break
+    return remaining
+
+
+def _interpreter_command_string_segment(*, segment: str) -> bool:
+    """Return True when the leading interpreter runs an inline-code operand.
+
+    Strips non-executing wrappers, then determines whether the leading
+    ``python``/``node``/``bun`` interpreter runs in command-string mode
+    (``python -c``, ``node -e``/``--eval``, ``bun -e``/``--eval``). ``bash``/``sh``
+    are excluded because their ``-c`` payload may execute a real script path and
+    is handled by :func:`_shell_command_string_payload_after_wrappers`.
+
+    Args:
+        segment: Shell command segment to inspect.
+
+    Returns:
+        True when the interpreter's operand is inline code rather than a script.
+    """
+    exposed = _strip_wrappers_before_interpreter(segment=segment)
+    runtime_match = re.match(
+        rf"(?i)^(?P<runtime>{_WORKFLOW_SCRIPT_RUNTIMES})\b",
+        exposed,
+    )
+    if runtime_match is None:
+        return False
+    runtime = runtime_match.group("runtime").lower()
+    if runtime in {"bash", "sh"}:
+        return False
+    stripped = _strip_shell_interpreter_prefix(segment=exposed)
+    token = _first_shell_token(segment=stripped)
+    if token is None:
+        return False
+    return _runtime_command_string_option(runtime=runtime, token=token)
+
+
 def _first_shell_token(*, segment: str) -> str | None:
     """Return the first token from a shell segment."""
     token_match = re.match(r'\s*"((?:\\.|[^"\\])*)"|\'([^\']*)\'|(\S+)', segment)
@@ -617,6 +706,8 @@ def _segment_executes_reference_path(*, segment: str, path: str, cwd: str) -> bo
     if not stripped or _NON_EXECUTION_COMMAND.match(stripped):
         return False
     if _bash_stdin_invocation(segment=stripped):
+        return False
+    if _interpreter_command_string_segment(segment=stripped):
         return False
     payload = _shell_command_string_payload_after_wrappers(segment=stripped)
     if payload is not None:
@@ -710,7 +801,10 @@ def _run_line_reference_surface(*, line: str) -> str:
     command = _single_run_command_text(match=single_run)
     if command is None:
         return line
-    if _shell_command_string_payload_after_wrappers(segment=command) is not None:
+    shell_payload = _shell_command_string_payload_after_wrappers(segment=command)
+    if shell_payload is not None or _interpreter_command_string_segment(
+        segment=command,
+    ):
         return line[: single_run.start(1)]
     return line
 
