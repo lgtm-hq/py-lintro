@@ -73,6 +73,7 @@ def test_run_lint_on_changed_files_invokes_tool_check() -> None:
             ),
             patch(
                 "lintro.ai.review.lint_bridge.configure_tool_for_execution",
+                side_effect=lambda *, tool, **kwargs: tool,
             ),
         ):
             results = run_lint_on_changed_files(

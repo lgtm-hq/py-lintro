@@ -108,14 +108,21 @@ def configure_tool_for_execution(
     post_tools: set[str],
     auto_install: bool = False,
     lintro_config: LintroConfig | None = None,
-) -> None:
+) -> BaseToolPlugin:
     """Configure a tool for execution.
 
     Applies CLI overrides, unified config, and common options.
     This eliminates duplication between parallel and sequential execution paths.
 
+    Configuration is applied to a private per-invocation copy of ``tool``
+    rather than to the shared registry singleton, so concurrent logical
+    invocations do not clobber one another's option state. The passed-in
+    ``tool`` instance is left untouched; callers must execute against the
+    returned instance.
+
     Args:
-        tool: The tool plugin instance to configure.
+        tool: The tool plugin instance to configure (used as a template; not
+            mutated).
         tool_name: Name of the tool.
         config_manager: Unified config manager.
         tool_option_dict: Parsed tool options from CLI.
@@ -126,8 +133,16 @@ def configure_tool_for_execution(
         post_tools: Set of post-check tool names.
         auto_install: Whether to auto-install Node.js deps if missing (global default).
         lintro_config: Optional LintroConfig to reuse; fetched via get_config() if None.
+
+    Returns:
+        The configured per-invocation tool copy to run.
     """
-    # Reset accumulated state from prior runs (singleton instances)
+    # Operate on an isolated per-invocation copy so parallel executions do
+    # not race on the shared singleton's option state.
+    tool = tool.copy_for_execution()
+
+    # Reset accumulated state from prior runs (defensive; the copy already
+    # reflects the template's baseline state).
     tool.reset_options()
 
     # Build CLI overrides from --tool-options
@@ -180,6 +195,8 @@ def configure_tool_for_execution(
                 and "format_check" not in lintro_tool_cfg
             ):
                 tool.set_options(format_check=False)
+
+    return tool
 
 
 def get_tool_display_name(tool_name: str) -> str:

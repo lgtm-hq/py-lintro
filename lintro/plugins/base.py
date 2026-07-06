@@ -21,9 +21,10 @@ Example:
 
 from __future__ import annotations
 
+import copy
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Self
 
 import click
 from loguru import logger
@@ -114,6 +115,18 @@ class BaseToolPlugin(ABC):
     - fix() method: Fix issues (only if definition.can_fix=True)
     - set_options() method: Custom option validation
 
+    Thread-safety:
+        Plugin instances returned by :class:`~lintro.plugins.registry.ToolRegistry`
+        are process-wide singletons and their option state (``options``,
+        ``exclude_patterns``, ``include_venv``) is mutable. A single
+        ``set_options()`` + ``check()``/``fix()`` sequence on one instance is
+        the supported contract for direct, sequential use. Concurrent logical
+        invocations must NOT share one instance: each configure-then-run
+        sequence races on that shared state. Callers that execute tools
+        concurrently (e.g. the parallel executor) must operate on a private
+        per-invocation copy obtained via :meth:`copy_for_execution` rather
+        than mutating the shared singleton.
+
     Attributes:
         options: Current tool options (merged from defaults and runtime).
         exclude_patterns: Patterns to exclude from file discovery.
@@ -162,12 +175,80 @@ class BaseToolPlugin(ABC):
 
         Clears accumulated state from prior ``set_options()`` calls so
         the same plugin instance can be reused across runs without
-        leaking mutated configuration.
+        leaking mutated configuration. Subclasses that own additional
+        mutable option state reset it by overriding
+        :meth:`_reset_execution_state`.
         """
         self.options = dict(self.definition.default_options)
         self.exclude_patterns = []
         self.include_venv = False
         self._setup_defaults()
+        self._reset_execution_state()
+
+    def _reset_execution_state(self) -> None:
+        """Reset subclass-owned mutable option state back to defaults.
+
+        Called at the end of :meth:`reset_options` after the base option
+        attributes (``options``, ``exclude_patterns``, ``include_venv``)
+        have been reset. The base implementation is a no-op because the
+        base class owns no further mutable option state.
+
+        Subclasses that hold mutable config objects which :meth:`set_options`
+        mutates (e.g. a dataclass of tool-specific options) must override this
+        to restore those objects to their default values and re-wire any
+        collaborators that reference them. Otherwise a stale value carried on
+        the template (or a prior run) survives the defensive reset performed
+        before each invocation is configured.
+        """
+        return None
+
+    def copy_for_execution(self) -> Self:
+        """Return an isolated copy of this plugin for a single invocation.
+
+        The returned instance shares no mutable option state with this
+        instance: its ``options`` and ``exclude_patterns`` are independent
+        copies. This lets concurrent logical invocations each configure and
+        run their own copy without clobbering one another's option state on
+        the shared registry singleton (see the class-level thread-safety
+        note).
+
+        Non-option attributes (e.g. resolution caches) are shallow-copied,
+        so read-mostly caches remain shared for efficiency without affecting
+        per-call option isolation.
+
+        Subclasses that own additional *mutable* option state (config objects
+        that :meth:`set_options` mutates) must isolate it too, otherwise it
+        stays shared between the registry singleton and every execution copy
+        and concurrent invocations race on it. Such subclasses override
+        :meth:`_isolate_execution_state` rather than this method.
+
+        Returns:
+            A new plugin instance with independent option state.
+        """
+        clone = copy.copy(self)
+        clone.options = dict(self.options)
+        clone.exclude_patterns = list(self.exclude_patterns)
+        clone.include_venv = self.include_venv
+        clone._isolate_execution_state()
+        return clone
+
+    def _isolate_execution_state(self) -> None:
+        """Deep-copy subclass-owned mutable option state on this copy.
+
+        Called on the freshly created execution copy by
+        :meth:`copy_for_execution` after the base option attributes
+        (``options``, ``exclude_patterns``, ``include_venv``) have already
+        been isolated. The base implementation is a no-op because the base
+        class owns no further mutable option state.
+
+        Subclasses that hold mutable config objects which :meth:`set_options`
+        mutates (e.g. a dataclass of tool-specific options) must override this
+        to replace those objects with independent copies on ``self`` and
+        re-wire any collaborators that reference them, so concurrent
+        invocations never share mutable option state. Read-mostly caches
+        should be left shared for efficiency.
+        """
+        return None
 
     def set_options(self, **kwargs: Any) -> None:
         """Set tool-specific options.
