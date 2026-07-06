@@ -28,7 +28,7 @@ from lintro.tools.definitions.vue_tsc import VueTscPlugin
 
 def _run_check(
     *,
-    plugin: TscPlugin | VueTscPlugin,
+    plugin: TypeScriptCheckerPlugin,
     paths: list[str],
     subprocess_return: tuple[bool, str],
 ) -> ToolResult:
