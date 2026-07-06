@@ -265,6 +265,19 @@
       "tags": ["linter"]
     },
     {
+      "name": "pip_audit",
+      "version": "2.10.1",
+      "install": {
+        "type": "pip",
+        "package": "pip-audit"
+      },
+      "tier": "tools",
+      "category": "bundled",
+      "version_command": ["pip-audit", "--version"],
+      "languages": ["python"],
+      "tags": ["security"]
+    },
+    {
       "name": "prettier",
       "version": "3.9.4",
       "install": {

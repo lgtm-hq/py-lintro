@@ -169,7 +169,7 @@ should_install() {
 SUPPORTED_TOOLS=(
 	"actionlint" "astro" "bandit" "black" "cargo-audit" "cargo-deny"
 	"clippy" "commitlint" "dotenv-linter" "gitleaks" "hadolint" "markdownlint" "markdownlint-cli2" "mypy" "osv-scanner"
-	"oxfmt" "oxlint" "prettier" "pydoclint" "ruff" "rustfmt" "semgrep"
+	"oxfmt" "oxlint" "pip-audit" "prettier" "pydoclint" "ruff" "rustfmt" "semgrep"
 	"shellcheck" "shfmt" "sqlfluff" "stylelint" "svelte-check" "taplo" "tsc"
 	"vale" "vue-tsc" "yamllint"
 )
@@ -1198,6 +1198,20 @@ main() {
 		fi
 	fi # semgrep
 
+	if should_install "pip-audit"; then
+		# Install pip-audit (Python dependency vulnerability scanner)
+		echo -e "${BLUE}Installing pip-audit...${NC}"
+		PIP_AUDIT_VERSION=$(get_tool_version "pip-audit") || exit 1
+		if [ $DRY_RUN -eq 1 ]; then
+			log_info "[DRY-RUN] Would install pip-audit==${PIP_AUDIT_VERSION}"
+		elif install_python_package "pip-audit" "$PIP_AUDIT_VERSION"; then
+			echo -e "${GREEN}✓ pip-audit installed successfully${NC}"
+		else
+			echo -e "${RED}✗ Failed to install pip-audit${NC}"
+			exit 1
+		fi
+	fi # pip-audit
+
 	if should_install "shellcheck"; then
 		# Install shellcheck (shell script linter)
 		echo -e "${BLUE}Installing shellcheck...${NC}"
@@ -1617,6 +1631,7 @@ main() {
 		["osv-scanner"]="Multi-ecosystem vulnerability scanning"
 		["oxfmt"]="JavaScript/TypeScript formatting"
 		["oxlint"]="JavaScript/TypeScript linting"
+		["pip-audit"]="Python dependency vulnerability scanning"
 		["prettier"]="JavaScript/JSON formatting"
 		["pydoclint"]="Python docstring validation"
 		["ruff"]="Python linting and formatting"
@@ -1643,7 +1658,7 @@ main() {
 	# Verify installations
 	echo -e "${YELLOW}Verifying installations...${NC}"
 
-	tools_to_verify=("actionlint" "astro" "bandit" "black" "cargo-audit" "cargo-deny" "clippy" "commitlint" "dotenv-linter" "gitleaks" "hadolint" "markdownlint-cli2" "mypy" "osv-scanner" "oxfmt" "oxlint" "prettier" "pydoclint" "ruff" "rustfmt" "semgrep" "shellcheck" "shfmt" "sqlfluff" "stylelint" "svelte-check" "taplo" "tsc" "vale" "vue-tsc" "yamllint")
+	tools_to_verify=("actionlint" "astro" "bandit" "black" "cargo-audit" "cargo-deny" "clippy" "commitlint" "dotenv-linter" "gitleaks" "hadolint" "markdownlint-cli2" "mypy" "osv-scanner" "oxfmt" "oxlint" "pip-audit" "prettier" "pydoclint" "ruff" "rustfmt" "semgrep" "shellcheck" "shfmt" "sqlfluff" "stylelint" "svelte-check" "taplo" "tsc" "vale" "vue-tsc" "yamllint")
 
 	# Filter verification list when --tools is set.
 	# Map aliases so e.g. --tools markdownlint verifies markdownlint-cli2.

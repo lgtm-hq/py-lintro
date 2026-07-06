@@ -1,0 +1,6 @@
+# Sample requirements file pinning packages with known vulnerabilities.
+# Used for manual testing and integration checks (requires network access to
+# the PyPI Advisory Database / OSV).
+# See: lintro check test_samples/ --tools pip_audit
+jinja2==2.4.1
+requests==2.19.0
