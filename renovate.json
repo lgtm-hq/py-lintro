@@ -237,6 +237,19 @@
       "extractVersionTemplate": "^v(?<version>.*)$"
     },
     {
+      "description": "Update dotenv-linter version in _tool_versions.py",
+      "customType": "regex",
+      "managerFilePatterns": [
+        "lintro/_tool_versions\\.py"
+      ],
+      "matchStrings": [
+        "ToolName\\.DOTENV_LINTER:\\s*\"(?<currentValue>[0-9]+\\.[0-9]+\\.[0-9]+)\""
+      ],
+      "datasourceTemplate": "github-releases",
+      "packageNameTemplate": "dotenv-linter/dotenv-linter",
+      "extractVersionTemplate": "^v(?<version>.*)$"
+    },
+    {
       "description": "Update taplo version in _tool_versions.py",
       "customType": "regex",
       "managerFilePatterns": [

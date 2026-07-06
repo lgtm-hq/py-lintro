@@ -111,6 +111,7 @@ RUN echo "=== Verifying all tools ===" && \
     oxfmt --version && oxlint --version && prettier --version && \
     pydoclint --version && ruff --version && semgrep --version && \
     shellcheck --version && shfmt --version && sqlfluff --version && \
+    dotenv-linter --version && \
     taplo --version && tsc --version && astro --version && \
     svelte-check --version && vue-tsc --version && yamllint --version && \
     echo "=== All tools verified! ==="
@@ -160,6 +161,7 @@ RUN echo "Verifying tools..." && \
     cargo deny --version && semgrep --version && ruff --version && \
     black --version && hadolint --version && actionlint --version && \
     shellcheck --version && shfmt --version && taplo --version && \
+    dotenv-linter --version && \
     gitleaks version && osv-scanner --version && prettier --version && \
     markdownlint-cli2 --version && tsc --version && astro --version && \
     vue-tsc --version && oxlint --version && oxfmt --version && \
@@ -184,6 +186,7 @@ RUN echo "Verifying tools as non-root user..." && \
     gosu lintro cargo deny --version && \
     gosu lintro osv-scanner --version && \
     gosu lintro semgrep --version && \
+    gosu lintro dotenv-linter --version && \
     echo "All tools verified for non-root user!"
 
 USER lintro
