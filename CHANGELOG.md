@@ -44,26 +44,33 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Changed
 
-- **site**: add honest comparison page vs trunk, MegaLinter, pre-commit, qlty (#1058) (9eab1b3)
+- **site**: add honest comparison page vs trunk, MegaLinter, pre-commit, qlty (#1058)
+  (9eab1b3)
 - **config**: enforce module size limit via lint gate (#1078) (276929e)
-- **output**: SARIF output should emit standard lint results, not only AI metadata (#1079) (4a423f1)
-- **utils**: extract shared find_file_upward helper for duplicated config-walk logic (#1077) (8d983ca)
+- **output**: SARIF output should emit standard lint results, not only AI metadata
+  (#1079) (4a423f1)
+- **utils**: extract shared find_file_upward helper for duplicated config-walk logic
+  (#1077) (8d983ca)
 - pin merge_group activity type to checks_requested (#1059) (5f8edcd)
-- **plugins**: separate stdout/stderr from subprocess and harden parsers (#1061) (23f6f09)
+- **plugins**: separate stdout/stderr from subprocess and harden parsers (#1061)
+  (23f6f09)
 - **deps**: update actions/attest-build-provenance to v4.1.1 (#874) (d839d3d)
 - **deps**: update python digest (#968) (eb2de3f)
 - **deps**: update svelte to 5.56.4 (minor) (#969) (70d9001)
 
 ### Fixed
 
-- **ai/review**: lintro review --pr crashes on invalid gh baseRepository field (#1084) (819040f)
+- **ai/review**: lintro review --pr crashes on invalid gh baseRepository field (#1084)
+  (819040f)
 - **ai/review**: guarantee secret redaction in git-native review mode (#1075) (a92fd93)
 - **ci**: run dogfood review with trusted base-ref lintro, not PR code (#1074) (488c9b1)
 - **ai/review**: correct patch line mapping and head-repo fallback (#1067) (6a07761)
-- **ai/review**: harden review AI — secret redaction, severity normalization, response robustness (#1069) (7b0afe0)
+- **ai/review**: harden review AI — secret redaction, severity normalization, response
+  robustness (#1069) (7b0afe0)
 - **ai**: Cursor provider cost accounting and opt-in --trust (#1068) (0a3af28)
 - **output**: unify report counts and clean JSON stdout (#1060) (5111d6c)
-- **ai/review**: CLI mode wiring broken — --uncommitted, --pr, and CI runs always fail (#1056) (4d0ccce)
+- **ai/review**: CLI mode wiring broken — --uncommitted, --pr, and CI runs always fail
+  (#1056) (4d0ccce)
 - **ci**: unblock Renovate PRs blocked by mypy and artifact updates (#1057) (9159290)
 - **deps**: update sqlfluff to 4.2.0 (minor) (#927) (efe3ea2)
 - **ai/review**: Cursor review timeout reliability (#1021) (4cd3c7c)
