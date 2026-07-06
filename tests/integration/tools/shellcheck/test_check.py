@@ -6,7 +6,7 @@ These tests verify the check command works correctly on various inputs.
 from __future__ import annotations
 
 import shutil
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -14,6 +14,7 @@ import pytest
 from assertpy import assert_that
 
 if TYPE_CHECKING:
+    from lintro.parsers.base_issue import BaseIssue
     from lintro.plugins.base import BaseToolPlugin
 
 pytestmark = pytest.mark.skipif(
@@ -133,3 +134,85 @@ def test_check_exclude_filters_issues(
     assert_that(result_with_exclude.issues_count).is_less_than_or_equal_to(
         result_without_exclude.issues_count,
     )
+
+
+def _write_script_dir_sourcing_sample(tmp_path: Path) -> str:
+    """Create a script that sources a repo-local helper via SCRIPT_DIR.
+
+    Mirrors the runtime-safe sourcing pattern from issue #928, where a script
+    computes its own directory and sources a sibling helper by relative path.
+
+    Args:
+        tmp_path: Pytest-provided temporary directory root.
+
+    Returns:
+        str: Path to the entrypoint script that performs the sourcing.
+    """
+    lib_dir = tmp_path / "scripts" / "lib"
+    ci_dir = tmp_path / "scripts" / "ci"
+    lib_dir.mkdir(parents=True)
+    ci_dir.mkdir(parents=True)
+
+    (lib_dir / "common.sh").write_text(
+        "#!/usr/bin/env bash\ncommon_helper() {\n  echo 'hello'\n}\n",
+    )
+    entry = ci_dir / "run.sh"
+    entry.write_text(
+        "#!/usr/bin/env bash\n"
+        'SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"\n'
+        'source "$SCRIPT_DIR/../lib/common.sh"\n'
+        "common_helper\n",
+    )
+    return str(entry)
+
+
+def _sc1091_count(issues: Sequence[BaseIssue] | None) -> int:
+    """Count SC1091 ('not following source') issues in a result set.
+
+    Args:
+        issues: Parsed issue objects from a ShellCheck run.
+
+    Returns:
+        int: Number of issues whose code is SC1091.
+    """
+    return sum(
+        1 for issue in (issues or []) if str(getattr(issue, "code", "")) == "SC1091"
+    )
+
+
+def test_check_reports_sc1091_without_source_following(
+    get_plugin: Callable[[str], BaseToolPlugin],
+    tmp_path: Path,
+) -> None:
+    """Baseline: sourcing a repo-local helper emits SC1091 when not opted in.
+
+    Args:
+        get_plugin: Fixture factory to get plugin instances.
+        tmp_path: Pytest fixture providing a temporary directory.
+    """
+    entry = _write_script_dir_sourcing_sample(tmp_path)
+    shellcheck_plugin = get_plugin("shellcheck")
+    result = shellcheck_plugin.check([entry], {})
+
+    assert_that(_sc1091_count(result.issues)).is_greater_than(0)
+
+
+def test_check_source_following_resolves_sc1091(
+    get_plugin: Callable[[str], BaseToolPlugin],
+    tmp_path: Path,
+) -> None:
+    """external_sources + SCRIPTDIR source-path clears SC1091 for the pattern.
+
+    Args:
+        get_plugin: Fixture factory to get plugin instances.
+        tmp_path: Pytest fixture providing a temporary directory.
+    """
+    entry = _write_script_dir_sourcing_sample(tmp_path)
+    shellcheck_plugin = get_plugin("shellcheck")
+    shellcheck_plugin.set_options(
+        external_sources=True,
+        source_paths=["SCRIPTDIR"],
+    )
+    result = shellcheck_plugin.check([entry], {})
+
+    assert_that(_sc1091_count(result.issues)).is_equal_to(0)
