@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-import subprocess
+import subprocess  # nosec B404 - subprocess is used to drive the tool/CLI under test; invocations use shell=False
 from pathlib import Path
 
 import pytest
@@ -22,7 +22,7 @@ def actionlint_available() -> bool:
         bool: True when `actionlint -version` succeeds, False otherwise.
     """
     try:
-        proc = subprocess.run(
+        proc = subprocess.run(  # nosec B603 B607 - fixed argv run against a real binary in a controlled test; binary name resolved from PATH, not attacker-controlled; shell=False, no user shell input
             ["actionlint", "-version"],
             capture_output=True,
             text=True,
@@ -59,7 +59,7 @@ def test_actionlint_reports_violations(tmp_path: Path) -> None:
     wf_dir.mkdir(parents=True, exist_ok=True)
     wf = wf_dir / "workflow_bad.yml"
     wf.write_text(SAMPLE_BAD.read_text())
-    proc = subprocess.run(["actionlint", str(wf)], capture_output=True, text=True)
+    proc = subprocess.run(["actionlint", str(wf)], capture_output=True, text=True)  # nosec B603 B607 - fixed argv run against a real binary in a controlled test; binary name resolved from PATH, not attacker-controlled; shell=False, no user shell input
     direct_out = proc.stdout + proc.stderr
     logger.info(f"[LOG] actionlint stdout+stderr:\n{direct_out}")
 

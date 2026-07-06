@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from subprocess import TimeoutExpired
+from subprocess import TimeoutExpired  # nosec B404 - subprocess is used to drive the tool/CLI under test; invocations use shell=False
 from unittest.mock import patch
 
 import pytest

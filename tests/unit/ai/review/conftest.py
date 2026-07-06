@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections import defaultdict
 from pathlib import Path
-from subprocess import CompletedProcess
+from subprocess import CompletedProcess  # nosec B404 - subprocess is used to drive the tool/CLI under test; invocations use shell=False
 
 import pytest
 
