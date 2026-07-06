@@ -59,21 +59,30 @@ describe('resolveBinary', () => {
     );
   });
 
+  const moduleNotFoundRequire = () => {
+    const err = new Error('Cannot find module');
+    err.code = 'MODULE_NOT_FOUND';
+    throw err;
+  };
+
   it('throws when the platform package is not installed', () => {
-    const failingRequire = () => {
-      throw new Error('Cannot find module');
-    };
-    expect(() => resolveBinary(failingRequire, 'darwin', 'arm64')).toThrow(
+    expect(() => resolveBinary(moduleNotFoundRequire, 'darwin', 'arm64')).toThrow(
       /platform package "@lgtm-hq\/lintro-darwin-arm64" is not installed/
     );
   });
 
   it('mentions the cross-platform lockfile pitfall when not installed', () => {
-    const failingRequire = () => {
-      throw new Error('Cannot find module');
-    };
-    expect(() => resolveBinary(failingRequire, 'linux', 'x64')).toThrow(
+    expect(() => resolveBinary(moduleNotFoundRequire, 'linux', 'x64')).toThrow(
       /lockfile was generated on a different OS/
+    );
+  });
+
+  it('rethrows non-MODULE_NOT_FOUND errors unchanged', () => {
+    const brokenPackageRequire = () => {
+      throw new Error('boom from inside the platform package');
+    };
+    expect(() => resolveBinary(brokenPackageRequire, 'linux', 'x64')).toThrow(
+      /boom from inside the platform package/
     );
   });
 

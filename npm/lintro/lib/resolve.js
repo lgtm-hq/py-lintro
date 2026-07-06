@@ -75,6 +75,9 @@ function resolveBinary(requireFn, platform, arch) {
   try {
     mod = req(pkg);
   } catch (err) {
+    if (err && err.code !== 'MODULE_NOT_FOUND') {
+      throw err;
+    }
     throw new Error(
       `lintro: the platform package "${pkg}" is not installed. ` +
         'This usually means optional dependencies were skipped during ' +
