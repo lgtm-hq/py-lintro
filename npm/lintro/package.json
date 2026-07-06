@@ -30,10 +30,10 @@
     "lib/resolve.js"
   ],
   "optionalDependencies": {
-    "@lintro/darwin-arm64": "0.0.0-dev",
-    "@lintro/darwin-x64": "0.0.0-dev",
-    "@lintro/linux-arm64": "0.0.0-dev",
-    "@lintro/linux-x64": "0.0.0-dev"
+    "@lgtm-hq/lintro-darwin-arm64": "0.0.0-dev",
+    "@lgtm-hq/lintro-darwin-x64": "0.0.0-dev",
+    "@lgtm-hq/lintro-linux-arm64": "0.0.0-dev",
+    "@lgtm-hq/lintro-linux-x64": "0.0.0-dev"
   },
   "engines": {
     "node": ">=18"

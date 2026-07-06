@@ -75,10 +75,10 @@ def _detect_install_context() -> InstallContext:
     install_path = os.path.realpath(__file__)
 
     # npm binary: the launcher resolves the platform package, so the running
-    # executable lives under node_modules/@lintro/<platform>/. Check before
+    # executable lives under node_modules/@lgtm-hq/lintro-<platform>/. Check before
     # Homebrew because npm installs on macOS can otherwise resemble one.
     if any(
-        "/node_modules/@lintro/" in path for path in (exe_path, install_path)
+        "/node_modules/@lgtm-hq/lintro-" in path for path in (exe_path, install_path)
     ):
         return InstallContext.NPM_BIN
 

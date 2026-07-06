@@ -1,5 +1,5 @@
 {
-  "name": "@lintro/linux-x64",
+  "name": "@lgtm-hq/lintro-linux-x64",
   "version": "0.0.0-dev",
   "description": "Linux x86_64 binary for lintro. Installed automatically by the `lintro` package.",
   "homepage": "https://github.com/lgtm-hq/py-lintro#readme",

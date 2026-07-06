@@ -12,10 +12,10 @@ The `npm/` directory holds five packages:
 | Package | npm name | Contents |
 | --- | --- | --- |
 | Meta | `lintro` | `bin/lintro` launcher + `optionalDependencies` |
-| Platform | `@lintro/darwin-arm64` | macOS Apple Silicon binary |
-| Platform | `@lintro/darwin-x64` | macOS Intel binary |
-| Platform | `@lintro/linux-arm64` | Linux ARM64 binary |
-| Platform | `@lintro/linux-x64` | Linux x86_64 binary |
+| Platform | `@lgtm-hq/lintro-darwin-arm64` | macOS Apple Silicon binary |
+| Platform | `@lgtm-hq/lintro-darwin-x64` | macOS Intel binary |
+| Platform | `@lgtm-hq/lintro-linux-arm64` | Linux ARM64 binary |
+| Platform | `@lgtm-hq/lintro-linux-x64` | Linux x86_64 binary |
 
 Each platform package declares `os` and `cpu` fields, so npm and bun download
 only the binary matching the host. The meta-package lists all four as
@@ -41,7 +41,7 @@ are built natively on their respective runners. The `build-linux` job in
 
 In-repo manifests carry a `0.0.0-dev` placeholder. At publish time,
 `scripts/ci/npm/sync_npm_version.py --version <tag>` injects the release version
-into every manifest and into the meta-package's `@lintro/*` pins. The same
+into every manifest and into the meta-package's `@lgtm-hq/lintro-*` pins. The same
 script's `--check` mode guards internal consistency in CI.
 
 ## Publishing
@@ -50,10 +50,10 @@ script's `--check` mode guards internal consistency in CI.
 release binaries, stages them into the npm tree, injects the version, runs a
 smoke test, and calls `scripts/ci/npm/publish_packages.sh`, which always passes
 `--dry-run` unless `LIVE=1` is set. Going live is a deliberate follow-up that
-also requires a `NODE_AUTH_TOKEN` secret and the `@lintro` npm org.
+also requires a `NODE_AUTH_TOKEN` secret and the `@lgtm-hq` npm org.
 
 ## Install context
 
 `InstallContext.NPM_BIN` is detected when the running executable resolves under
-`node_modules/@lintro/`, so install-aware commands can recognize npm-installed
+`node_modules/@lgtm-hq/lintro-`, so install-aware commands can recognize npm-installed
 binaries.

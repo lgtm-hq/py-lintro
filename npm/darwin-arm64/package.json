@@ -1,5 +1,5 @@
 {
-  "name": "@lintro/darwin-arm64",
+  "name": "@lgtm-hq/lintro-darwin-arm64",
   "version": "0.0.0-dev",
   "description": "macOS Apple Silicon binary for lintro. Installed automatically by the `lintro` package.",
   "homepage": "https://github.com/lgtm-hq/py-lintro#readme",

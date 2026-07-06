@@ -62,14 +62,14 @@ def _make_npm_tree(root: Path, version: str) -> Path:
             "name": "lintro",
             "version": version,
             "optionalDependencies": {
-                f"@lintro/{plat}": version for plat in mod.PLATFORM_PACKAGES
+                f"@lgtm-hq/lintro-{plat}": version for plat in mod.PLATFORM_PACKAGES
             },
         },
     )
     for plat in mod.PLATFORM_PACKAGES:
         _write_manifest(
             npm_dir / plat / "package.json",
-            {"name": f"@lintro/{plat}", "version": version},
+            {"name": f"@lgtm-hq/lintro-{plat}", "version": version},
         )
     return npm_dir
 

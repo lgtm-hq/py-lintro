@@ -1,5 +1,5 @@
 {
-  "name": "@lintro/darwin-x64",
+  "name": "@lgtm-hq/lintro-darwin-x64",
   "version": "0.0.0-dev",
   "description": "macOS Intel binary for lintro. Installed automatically by the `lintro` package.",
   "homepage": "https://github.com/lgtm-hq/py-lintro#readme",

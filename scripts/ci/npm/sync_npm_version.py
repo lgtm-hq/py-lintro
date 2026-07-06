@@ -4,7 +4,7 @@
 The npm distribution ships a meta-package (``npm/lintro``) plus four
 platform packages (``npm/<platform>``). Every ``package.json`` carries a
 ``"version"`` field, and the meta-package additionally pins each
-``@lintro/<platform>`` optional dependency to the same version. This script
+``@lgtm-hq/lintro-<platform>`` optional dependency to the same version. This script
 keeps all of them in lock-step with the canonical project version declared
 in ``lintro/__init__.py``.
 
@@ -157,7 +157,7 @@ def check_versions(version: str, *, npm_dir: Path = NPM_DIR) -> list[VersionMism
             )
         opt_deps = data.get("optionalDependencies", {})
         for dep_name, dep_version in opt_deps.items():
-            if dep_name.startswith("@lintro/") and dep_version != version:
+            if dep_name.startswith("@lgtm-hq/lintro-") and dep_version != version:
                 mismatches.append(
                     VersionMismatch(
                         manifest=rel,
@@ -173,7 +173,7 @@ def sync_versions(version: str, *, npm_dir: Path = NPM_DIR) -> list[Path]:
     """Rewrite every manifest so its version fields equal ``version``.
 
     Both top-level ``version`` fields and the meta-package's
-    ``@lintro/*`` optional-dependency pins are updated. Files are written
+    ``@lgtm-hq/lintro-*`` optional-dependency pins are updated. Files are written
     only when their content actually changes.
 
     Args:
@@ -191,7 +191,7 @@ def sync_versions(version: str, *, npm_dir: Path = NPM_DIR) -> list[Path]:
         opt_deps = data.get("optionalDependencies")
         if isinstance(opt_deps, dict):
             for dep_name in opt_deps:
-                if dep_name.startswith("@lintro/"):
+                if dep_name.startswith("@lgtm-hq/lintro-"):
                     opt_deps[dep_name] = version
         updated = json.dumps(data, indent=2, ensure_ascii=False) + "\n"
         if updated != original:

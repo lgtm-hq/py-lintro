@@ -10,10 +10,10 @@ const {
 
 describe("packageForPlatform", () => {
   it("maps every supported platform to its scoped package", () => {
-    expect(packageForPlatform("darwin", "arm64")).toBe("@lintro/darwin-arm64");
-    expect(packageForPlatform("darwin", "x64")).toBe("@lintro/darwin-x64");
-    expect(packageForPlatform("linux", "arm64")).toBe("@lintro/linux-arm64");
-    expect(packageForPlatform("linux", "x64")).toBe("@lintro/linux-x64");
+    expect(packageForPlatform("darwin", "arm64")).toBe("@lgtm-hq/lintro-darwin-arm64");
+    expect(packageForPlatform("darwin", "x64")).toBe("@lgtm-hq/lintro-darwin-x64");
+    expect(packageForPlatform("linux", "arm64")).toBe("@lgtm-hq/lintro-linux-arm64");
+    expect(packageForPlatform("linux", "x64")).toBe("@lgtm-hq/lintro-linux-x64");
   });
 
   it("returns null for unsupported platforms", () => {
@@ -48,12 +48,12 @@ describe("supportedPlatforms", () => {
 describe("resolveBinary", () => {
   it("returns the path exported by the resolved platform package", () => {
     const fakeRequire = (name) => {
-      expect(name).toBe("@lintro/linux-x64");
-      return { path: "/somewhere/node_modules/@lintro/linux-x64/bin/lintro" };
+      expect(name).toBe("@lgtm-hq/lintro-linux-x64");
+      return { path: "/somewhere/node_modules/@lgtm-hq/lintro-linux-x64/bin/lintro" };
     };
     const result = resolveBinary(fakeRequire, "linux", "x64");
     expect(result).toBe(
-      "/somewhere/node_modules/@lintro/linux-x64/bin/lintro",
+      "/somewhere/node_modules/@lgtm-hq/lintro-linux-x64/bin/lintro",
     );
   });
 
@@ -68,7 +68,7 @@ describe("resolveBinary", () => {
       throw new Error("Cannot find module");
     };
     expect(() => resolveBinary(failingRequire, "darwin", "arm64")).toThrow(
-      /platform package "@lintro\/darwin-arm64" is not installed/,
+      /platform package "@lgtm-hq\/lintro-darwin-arm64" is not installed/,
     );
   });
 

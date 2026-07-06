@@ -229,12 +229,12 @@ def test_detect_homebrew_install_context(
     ("install_file", "executable"),
     [
         (
-            "/proj/node_modules/@lintro/darwin-arm64/bin/lintro",
+            "/proj/node_modules/@lgtm-hq/lintro-darwin-arm64/bin/lintro",
             "/usr/bin/node",
         ),
         (
             "/proj/lintro/tools/core/install_context.py",
-            "/proj/node_modules/@lintro/linux-x64/bin/lintro",
+            "/proj/node_modules/@lgtm-hq/lintro-linux-x64/bin/lintro",
         ),
     ],
 )
@@ -243,7 +243,7 @@ def test_detect_npm_bin_install_context(
     executable: str,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Detect NPM_BIN when the resolved path is under node_modules/@lintro/.
+    """Detect NPM_BIN when the resolved path is under node_modules/@lgtm-hq/lintro-.
 
     Args:
         install_file: Simulated module ``__file__``.

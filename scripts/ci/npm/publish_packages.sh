@@ -21,7 +21,7 @@ Environment:
   LIVE=1              Perform a real publish. Default (unset) is --dry-run.
   NPM_PROVENANCE=0    Disable --provenance (default: enabled).
 
-Publishes @lintro/<platform> packages first, then the root meta-package,
+Publishes @lgtm-hq/lintro-<platform> packages first, then the root meta-package,
 so consumers never resolve a meta-package whose optional deps are missing.
 EOF
 	exit 0

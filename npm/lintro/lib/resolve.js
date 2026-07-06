@@ -4,7 +4,7 @@
  * Platform resolution for the lintro meta-package.
  *
  * Maps a Node `process.platform`/`process.arch` pair to the scoped
- * `@lintro/<platform>` package that ships the matching self-contained
+ * `@lgtm-hq/lintro-<platform>` package that ships the matching self-contained
  * binary. The resolution logic is kept pure and side-effect free so it
  * can be unit-tested without a binary present on disk.
  */
@@ -17,10 +17,10 @@
  * @type {Readonly<Record<string, string>>}
  */
 const PLATFORM_PACKAGES = Object.freeze({
-  "darwin-arm64": "@lintro/darwin-arm64",
-  "darwin-x64": "@lintro/darwin-x64",
-  "linux-arm64": "@lintro/linux-arm64",
-  "linux-x64": "@lintro/linux-x64",
+  "darwin-arm64": "@lgtm-hq/lintro-darwin-arm64",
+  "darwin-x64": "@lgtm-hq/lintro-darwin-x64",
+  "linux-arm64": "@lgtm-hq/lintro-linux-arm64",
+  "linux-x64": "@lgtm-hq/lintro-linux-x64",
 });
 
 /**

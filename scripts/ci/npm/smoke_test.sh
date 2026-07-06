@@ -17,7 +17,7 @@ Smoke-test the lintro npm meta-package launcher.
 Usage: smoke_test.sh
 
 Detects the host platform, packs the meta-package and the matching
-@lintro/<platform> package, installs them into a scratch project, and runs
+@lgtm-hq/lintro-<platform> package, installs them into a scratch project, and runs
 `lintro --version`, asserting a zero exit code. Requires the platform binary
 to already be staged into npm/<platform>/bin/lintro.
 EOF

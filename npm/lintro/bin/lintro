@@ -5,7 +5,7 @@
  * Launcher for the lintro meta-package.
  *
  * Resolves the self-contained binary shipped by the matching
- * `@lintro/<platform>` optional dependency and forwards all arguments and
+ * `@lgtm-hq/lintro-<platform>` optional dependency and forwards all arguments and
  * stdio to it. Exits with the binary's own exit code.
  */
 
