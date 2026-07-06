@@ -34,6 +34,13 @@ MYPY_DEFAULT_TIMEOUT: int = 60
 MYPY_DEFAULT_PRIORITY: int = 82
 MYPY_FILE_PATTERNS: list[str] = ["*.py", "*.pyi"]
 
+# mypy prints this diagnostic (to stderr, not as JSON) and exits non-zero when
+# the resolved scope contains no Python sources, e.g. running the full tool set
+# against a non-Python repository. It surfaces in every execution path, both the
+# local CLI and the Docker image used by lgtm-ci reusable workflows, so we detect
+# it and skip cleanly like other language tools do on an empty scope.
+MYPY_NO_FILES_MARKER: str = "no .py[i] files"
+
 MYPY_DEFAULT_EXCLUDE_PATTERNS: list[str] = [
     "test_samples/*",
     "test_samples/**",
@@ -70,6 +77,19 @@ def _split_config_values(raw_value: str) -> list[str]:
         if value:
             entries.append(value)
     return entries
+
+
+def _has_no_python_files_error(output: str) -> bool:
+    """Detect mypy's "no Python files in scope" diagnostic.
+
+    Args:
+        output: Combined stdout/stderr captured from the mypy subprocess.
+
+    Returns:
+        bool: True when mypy reported that no ``.py``/``.pyi`` files were found
+        in the resolved scope, meaning there is nothing to type-check.
+    """
+    return MYPY_NO_FILES_MARKER in output.lower()
 
 
 def _regex_to_glob(pattern: str) -> str:
@@ -472,6 +492,23 @@ class MypyPlugin(BaseToolPlugin):
 
         issues = parse_mypy_output(output=output)
         issues_count = len(issues)
+
+        # Defensive secondary guard: when mypy resolves a scope with no Python
+        # sources it errors out (exit 2) with a non-JSON "no .py[i] files"
+        # diagnostic. This path is reached when mypy performs its own directory
+        # discovery (e.g. the Docker/reusable-workflow path), where lintro's
+        # pre-flight file discovery cannot pre-empt it. Treat it as a clean skip
+        # so non-Python repositories pass like they do for other language tools.
+        # Only skip when no structured issues were parsed, so a run that both
+        # reports type errors and mentions the marker still surfaces the errors.
+        if issues_count == 0 and _has_no_python_files_error(output):
+            logger.debug("[mypy] No .py/.pyi files in scope; skipping cleanly")
+            return ToolResult(
+                name=self.definition.name,
+                success=True,
+                output="No .py/.pyi files found to check.",
+                issues_count=0,
+            )
 
         if not success and issues_count == 0:
             # Execution failed but no structured issues were parsed; surface diagnostics
