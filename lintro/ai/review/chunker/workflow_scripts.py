@@ -11,92 +11,39 @@ from __future__ import annotations
 import re
 from pathlib import PurePosixPath
 
+from lintro.ai.review.chunker.patterns import (
+    _ASSIGNMENT_PREFIX,
+    _FAIL_FAST_OR_TAIL,
+    _GITHUB_WORKSPACE_PREFIX,
+    _NON_EXECUTION_COMMAND,
+    _QUOTED_RUN_PATH,
+    _RUN_COMMAND_PREFIX,
+    _RUN_STEP,
+    _USES_STEP,
+    _WORKFLOW_SCRIPT_RUNTIMES,
+    _YAML_STEP_PREFIX,
+)
+from lintro.ai.review.chunker.vocabulary import (
+    _ACTION_BUILD_ARTIFACT_DIRS,
+    _ACTION_MANIFEST_NAMES,
+    _ACTION_SOURCE_LAYOUT_DIRS,
+    _BUN_LONG_OPERAND_OPTIONS,
+    _BUN_SUBCOMMANDS,
+    _COMMAND_DISPATCH_WRAPPERS,
+    _DISPATCH_OPERAND_FLAGS,
+    _DISPATCH_POSITIONAL_OPERANDS,
+    _ENV_OPERAND_FLAGS,
+    _ENV_OPERAND_LONG_OPTIONS,
+    _NODE_LONG_OPERAND_OPTIONS,
+    _NON_EXECUTABLE_WORKFLOW_SUFFIXES,
+    _RUNTIME_TERMINATING_LONG_OPTIONS,
+    _RUNTIME_TERMINATING_SHORT_OPTIONS,
+    _SHELL_COMPOUND_LEADERS,
+    _SHELL_DISPATCH_WRAPPERS,
+    _UV_ARG_OPTIONS,
+    _UV_SHORT_OPERAND_OPTIONS,
+)
 from lintro.ai.review.path_utils import is_test_path
-
-_GITHUB_WORKSPACE_PREFIX = r"\$\{\{\s*github\.workspace\s*\}\}/"
-_SHELL_FLAG = r"(?:\s+-[\w-]+(?:=\S+)?)*"
-_WORKFLOW_SCRIPT_RUNTIMES = r"(?:bash|sh|python3?|node|bun)"
-_RUN_INTERPRETER = rf"{_WORKFLOW_SCRIPT_RUNTIMES}{_SHELL_FLAG}\s+"
-_UV_ARG_OPTIONS = frozenset({"with", "directory", "project", "package", "python"})
-_UV_SHORT_OPERAND_OPTIONS = frozenset({"p", "w"})
-_BUN_SUBCOMMANDS = frozenset({"run"})
-_NODE_LONG_OPERAND_OPTIONS = frozenset({"import", "loader", "require"})
-_BUN_LONG_OPERAND_OPTIONS = frozenset({"env-file", "preload", "require"})
-_NODE_SHORT_OPERAND_OPTIONS = frozenset({"r"})
-_RUNTIME_TERMINATING_LONG_OPTIONS = frozenset({"help", "version"})
-_RUNTIME_TERMINATING_SHORT_OPTIONS = frozenset({"h", "v"})
-_ENV_OPERAND_FLAGS = frozenset({"-u", "-U", "-C", "-S"})
-_ENV_OPERAND_LONG_OPTIONS = frozenset({"chdir", "split-string"})
-_SHELL_DISPATCH_WRAPPERS = frozenset({"exec", "command"})
-_SHELL_COMPOUND_LEADERS = frozenset({"then", "do", "else", "elif"})
-_COMMAND_DISPATCH_WRAPPERS = frozenset({"sudo", "timeout"})
-_DISPATCH_OPERAND_FLAGS: dict[str, frozenset[str]] = {
-    "sudo": frozenset(
-        {
-            "-u",
-            "-g",
-            "-C",
-            "-p",
-            "-r",
-            "-t",
-            "-U",
-            "-h",
-            "-R",
-            "--user",
-            "--group",
-            "--prompt",
-            "--chdir",
-            "--role",
-            "--type",
-        },
-    ),
-    "timeout": frozenset({"-s", "-k", "--signal", "--kill-after"}),
-}
-# Mandatory positional operands consumed before the wrapped command (for
-# example ``timeout DURATION command``).
-_DISPATCH_POSITIONAL_OPERANDS: dict[str, int] = {"sudo": 0, "timeout": 1}
-_UV_OPTION = (
-    r"(?:"
-    r"\s+--(?:with|directory|project|package)\s+\S+"
-    r"|\s+--[\w-]+(?:=(?:[^\s\"']+|\"[^\"]*\"|'[^']*'))?"
-    r")*"
-)
-_UV_RUN_WRAPPER = (
-    rf"uv\s+run{_UV_OPTION}(?:\s+{_WORKFLOW_SCRIPT_RUNTIMES}){_SHELL_FLAG}\s+"
-)
-_RUN_COMMAND_PREFIX = rf"(?:{_RUN_INTERPRETER}|{_UV_RUN_WRAPPER}|uv\s+run\s+)"
-_YAML_STEP_PREFIX = r"^[ \t]*(?:-\s+)?"
-_RUN_STEP = rf"{_YAML_STEP_PREFIX}run:"
-_USES_STEP = rf"{_YAML_STEP_PREFIX}uses:\s*"
-_FAIL_FAST_OR_TAIL = re.compile(
-    r"(?i)^(?:exit(?:\s+\d+)?|false|return(?:\s+\d+)?|:)\b",
-)
-_QUOTED_RUN_PATH = r'["\'](?:\./)?'
-_NON_EXECUTION_COMMAND = re.compile(
-    r"(?i)^(?:grep|cat|head|tail|less|more|sed|awk|sort|uniq|wc|find|ls|stat|"
-    r"read|diff|cmp|strings|od|xxd|echo|printf|chmod|chown|chgrp|cp|mv|install|"
-    r"ln|rsync|scp|touch|rm)\b",
-)
-_ASSIGNMENT_PREFIX = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=")
-_NON_EXECUTABLE_WORKFLOW_SUFFIXES = frozenset(
-    {".cfg", ".ini", ".json", ".md", ".rst", ".toml", ".txt", ".yaml", ".yml"},
-)
-_ACTION_BUILD_ARTIFACT_DIRS = frozenset(
-    {"coverage", "dist", "lib", "node_modules", "out", "vendor"},
-)
-_ACTION_SOURCE_LAYOUT_DIRS = frozenset({"source", "src"})
-# Manifests that define a local action's runtime dependencies or entrypoint, so
-# changes to them are relevant to the workflow that invokes the action.
-_ACTION_MANIFEST_NAMES = frozenset(
-    {
-        "package.json",
-        "package-lock.json",
-        "pnpm-lock.yaml",
-        "bun.lock",
-        "bun.lockb",
-        "yarn.lock",
-    },
-)
 
 
 def _is_workflow_linked_script(*, path: str) -> bool:
