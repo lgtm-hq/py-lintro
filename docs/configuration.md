@@ -1626,13 +1626,13 @@ lintro check --tools shellcheck \
 
 **Available Options:**
 
-| Option             | Type        | Description                                                                          |
-| ------------------ | ----------- | ------------------------------------------------------------------------------------ |
-| `severity`         | str         | Minimum severity: error, warning, info, style                                        |
-| `exclude`          | list\[str\] | List of codes to exclude (e.g., SC2086, SC2046)                                      |
-| `shell`            | str         | Force shell dialect: bash, sh, dash, ksh, zsh                                        |
-| `external_sources` | bool        | Follow `source`d files external to the script (`-x`). Default `False`                |
-| `source_paths`     | list\[str\] | Search paths for sourced files (`--source-path=...`); supports the `SCRIPTDIR` token |
+| Option             | Type        | Description                                                                                                                                                   |
+| ------------------ | ----------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `severity`         | str         | Minimum severity: error, warning, info, style                                                                                                                 |
+| `exclude`          | list\[str\] | List of codes to exclude (e.g., SC2086, SC2046)                                                                                                               |
+| `shell`            | str         | Force shell dialect: bash, sh, dash, ksh, zsh                                                                                                                 |
+| `external_sources` | bool        | Follow `source`d files external to the script (`-x`). Default `False`                                                                                         |
+| `source_paths`     | list\[str\] | Search paths for sourced files (`--source-path=...`); supports the `SCRIPTDIR` token. Setting this implies `external_sources` (`-x` is enabled automatically) |
 
 **Source-following (SC1091):**
 
@@ -1646,15 +1646,19 @@ source "$SCRIPT_DIR/../lib/common.sh"
 ```
 
 Opt in to source-following (off by default, so existing projects are unaffected) by
-enabling `external_sources` and pointing `source_paths` at the directories ShellCheck
-should search. ShellCheck's literal `SCRIPTDIR` token resolves relative to each script's
-own directory, which matches the pattern above without hard-coding repo paths.
+pointing `source_paths` at the directories ShellCheck should search. ShellCheck's
+literal `SCRIPTDIR` token resolves relative to each script's own directory, which
+matches the pattern above without hard-coding repo paths. Because ShellCheck ignores
+`--source-path` unless `-x` is active, setting `source_paths` **automatically enables**
+`external_sources`, so you do not need to set both — configuring paths is enough. (You
+may still set `external_sources = true` on its own to follow sources found on the
+default search path.)
 
 `pyproject.toml`:
 
 ```toml
 [tool.lintro.shellcheck]
-external_sources = true
+# source_paths implies external_sources; -x is added automatically.
 source_paths = ["SCRIPTDIR", "scripts/lib"]
 ```
 

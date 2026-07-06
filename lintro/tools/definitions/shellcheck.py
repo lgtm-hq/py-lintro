@@ -147,7 +147,10 @@ class ShellcheckPlugin(BaseToolPlugin):
                 Supports ShellCheck's literal ``SCRIPTDIR`` token, which
                 resolves relative to each script's own directory and covers the
                 runtime-safe ``SCRIPT_DIR="$(cd ... && pwd)"`` sourcing pattern.
-                Only takes effect together with ``external_sources``.
+                Setting this implies ``external_sources`` (ShellCheck ignores
+                source paths unless ``-x`` is active), so ``--external-sources``
+                is emitted automatically even when ``external_sources`` is left
+                at its default.
             **kwargs: Other tool options.
         """
         if severity is not None:
@@ -210,16 +213,24 @@ class ShellcheckPlugin(BaseToolPlugin):
         if shell_opt is not None:
             cmd.extend(["--shell", str(shell_opt)])
 
-        # Follow external sourced files (repo-local includes)
-        if self.options.get("external_sources"):
-            cmd.append("--external-sources")
-
         # Search paths for resolving sourced files. Supports ShellCheck's
         # literal ``SCRIPTDIR`` token (resolves relative to each script).
         source_paths_opt = self.options.get("source_paths")
-        if source_paths_opt is not None and isinstance(source_paths_opt, list):
-            for path in source_paths_opt:
-                cmd.append(f"--source-path={path}")
+        source_paths: list[Any] = (
+            source_paths_opt if isinstance(source_paths_opt, list) else []
+        )
+
+        # Follow external sourced files (repo-local includes). Setting
+        # ``source_paths`` implies source-following: ShellCheck ignores
+        # ``--source-path`` unless ``-x`` is active, so configuring paths is an
+        # unambiguous signal of intent. Emit ``--external-sources`` when either
+        # the flag is set explicitly or source paths are configured, so the
+        # command is never silently half-configured.
+        if self.options.get("external_sources") or source_paths:
+            cmd.append("--external-sources")
+
+        for path in source_paths:
+            cmd.append(f"--source-path={path}")
 
         return cmd
 

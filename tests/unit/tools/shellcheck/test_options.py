@@ -301,6 +301,37 @@ def test_build_command_with_source_paths(
     assert_that(cmd).contains("--source-path=scripts/lib")
 
 
+def test_build_command_source_paths_imply_external_sources(
+    shellcheck_plugin: ShellcheckPlugin,
+) -> None:
+    """Setting source_paths auto-enables -x even without external_sources.
+
+    ShellCheck ignores --source-path unless -x is active, so configuring
+    paths is treated as an unambiguous request to follow sources.
+
+    Args:
+        shellcheck_plugin: The ShellcheckPlugin instance to test.
+    """
+    shellcheck_plugin.set_options(source_paths=["SCRIPTDIR"])
+    cmd = shellcheck_plugin._build_command()
+    assert_that(cmd).contains("--external-sources")
+    assert_that(cmd).contains("--source-path=SCRIPTDIR")
+
+
+def test_build_command_empty_source_paths_omits_flags(
+    shellcheck_plugin: ShellcheckPlugin,
+) -> None:
+    """An empty source_paths list adds neither -x nor --source-path.
+
+    Args:
+        shellcheck_plugin: The ShellcheckPlugin instance to test.
+    """
+    shellcheck_plugin.set_options(source_paths=[])
+    cmd = shellcheck_plugin._build_command()
+    assert_that(cmd).does_not_contain("--external-sources")
+    assert_that(any(arg.startswith("--source-path=") for arg in cmd)).is_false()
+
+
 def test_build_command_with_all_options(shellcheck_plugin: ShellcheckPlugin) -> None:
     """Build command with all options set.
 

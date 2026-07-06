@@ -216,3 +216,22 @@ def test_check_source_following_resolves_sc1091(
     result = shellcheck_plugin.check([entry], {})
 
     assert_that(_sc1091_count(result.issues)).is_equal_to(0)
+
+
+def test_check_source_paths_alone_resolves_sc1091(
+    get_plugin: Callable[[str], BaseToolPlugin],
+    tmp_path: Path,
+) -> None:
+    """source_paths alone clears SC1091: it auto-enables -x for ShellCheck.
+
+    Args:
+        get_plugin: Fixture factory to get plugin instances.
+        tmp_path: Pytest fixture providing a temporary directory.
+    """
+    entry = _write_script_dir_sourcing_sample(tmp_path)
+    shellcheck_plugin = get_plugin("shellcheck")
+    # Deliberately omit external_sources; setting source_paths must imply it.
+    shellcheck_plugin.set_options(source_paths=["SCRIPTDIR"])
+    result = shellcheck_plugin.check([entry], {})
+
+    assert_that(_sc1091_count(result.issues)).is_equal_to(0)
