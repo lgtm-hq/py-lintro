@@ -1,0 +1,97 @@
+---
+name: Publish - npm (dry-run)
+
+# Distributes lintro as an npm package via platform-specific Nuitka binaries
+# (the esbuild/biome model). This workflow is DRY-RUN ONLY: every `npm
+# publish` runs with `--dry-run`. Going live is a deliberate follow-up that
+# requires wiring NODE_AUTH_TOKEN and flipping LIVE=1 in publish_packages.sh.
+
+'on':
+  workflow_call:
+    inputs:
+      release_tag:
+        description: 'Release tag whose binaries to package'
+        required: true
+        type: string
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: 'Release tag whose binaries to package'
+        required: true
+        type: string
+
+permissions: {}
+
+concurrency:
+  group: publish-npm-${{ github.event.inputs.release_tag || inputs.release_tag }}
+  cancel-in-progress: false
+
+jobs:
+  publish-dry-run:
+    name: Package and dry-run publish
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      # id-token is required for `npm publish --provenance`; harmless in
+      # dry-run and pre-wired for a future live publish.
+      id-token: write
+
+    steps:
+      - name: Harden Runner
+        # yamllint disable-line rule:line-length
+        uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
+        with:
+          egress-policy: 'block'
+          allowed-endpoints: >
+            github.com:443
+            api.github.com:443
+            codeload.github.com:443
+            objects.githubusercontent.com:443
+            uploads.github.com:443
+            registry.npmjs.org:443
+
+      - name: Checkout code
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        with:
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: '3.11'
+
+      - name: Download release binaries
+        run: >-
+          scripts/ci/npm/download_release_binaries.sh
+          "$RELEASE_TAG"
+          "${{ runner.temp }}/npm-binaries"
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_TAG: ${{ inputs.release_tag }}
+
+      - name: Stage binaries into npm packages
+        run: >-
+          python scripts/ci/npm/stage_binaries.py
+          --artifacts-dir "${{ runner.temp }}/npm-binaries"
+
+      - name: Inject release version into manifests
+        env:
+          RELEASE_TAG: ${{ inputs.release_tag }}
+        run: >-
+          python scripts/ci/npm/sync_npm_version.py
+          --version "$RELEASE_TAG"
+
+      - name: Verify manifests are in sync
+        env:
+          RELEASE_TAG: ${{ inputs.release_tag }}
+        run: >-
+          python scripts/ci/npm/sync_npm_version.py
+          --check --version "$RELEASE_TAG"
+
+      - name: Smoke test launcher (Linux x64)
+        run: scripts/ci/npm/smoke_test.sh
+
+      - name: Publish (dry-run)
+        # LIVE is intentionally unset: this always runs `npm publish
+        # --dry-run`. Do not set LIVE=1 here.
+        run: scripts/ci/npm/publish_packages.sh
