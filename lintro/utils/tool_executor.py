@@ -879,13 +879,21 @@ def run_lint_tools_simple(
         elif output_format.lower() == "sarif":
             from lintro.ai.output.sarif import render_fixes_sarif
             from lintro.ai.output.sarif_bridge import (
+                standard_issues_from_results,
                 suggestions_from_results,
                 summary_from_results,
             )
+            from lintro.utils.output.file_writer import build_doc_url_map
 
             suggestions = suggestions_from_results(all_results)
             summary = summary_from_results(all_results)
-            sarif_json = render_fixes_sarif(suggestions, summary)
+            standard_issues = standard_issues_from_results(all_results)
+            sarif_json = render_fixes_sarif(
+                suggestions,
+                summary,
+                doc_urls=build_doc_url_map(all_results) or None,
+                standard_issues=standard_issues,
+            )
             print(sarif_json)
         else:
             logger.print_execution_summary(action, all_results)
@@ -943,6 +951,7 @@ def run_lint_tools_simple(
 
                     from lintro.ai.output.sarif import write_sarif
                     from lintro.ai.output.sarif_bridge import (
+                        standard_issues_from_results,
                         suggestions_from_results,
                         summary_from_results,
                     )
@@ -950,11 +959,13 @@ def run_lint_tools_simple(
 
                     suggestions = suggestions_from_results(all_results)
                     summary = summary_from_results(all_results)
+                    standard_issues = standard_issues_from_results(all_results)
                     write_sarif(
                         suggestions,
                         summary,
                         output_path=Path(output_file),
                         doc_urls=build_doc_url_map(all_results) or None,
+                        standard_issues=standard_issues,
                     )
                 else:
                     write_output_file(

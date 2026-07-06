@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "lintro"
-version = "0.64.5"
+version = "0.65.0"
 description = "A unified CLI tool for code formatting, linting, and quality assurance"
 keywords = [
   "linting",
@@ -250,6 +250,34 @@ tool_order = "priority"
 enabled = true
 tools = ["black"]
 enforce_failure = true
+
+# Warn-level module-size gate (issue #1052). Guards against the recurring
+# oversized-module pattern. Non-blocking today: existing violators are
+# baselined so the gate is green on merge. Ratchet plan: refactor the baselined
+# modules below the threshold, remove them from `baseline`, then lower
+# `threshold` in steps (800 -> 700 -> 600). See lintro/utils/module_size.py.
+[tool.lintro.module_size]
+enabled = true
+threshold = 800
+baseline = [
+  "lintro/ai/review/orchestrator.py",
+  "lintro/utils/tool_executor.py",
+  "lintro/ai/review/chunker/workflow_scripts.py",
+  "lintro/cli_utils/commands/doctor.py",
+  "lintro/tools/definitions/tsc.py",
+  "lintro/ai/review/checklist_builtin.py",
+]
+exclude = [
+  "test_samples/",
+  "node_modules/",
+  ".venv/",
+  "venv/",
+  "dist/",
+  "build/",
+  "__pycache__/",
+  ".lintro/",
+  "tests/",
+]
 
 [tool.lintro.ruff]
 
