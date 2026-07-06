@@ -131,6 +131,56 @@ CASES: tuple[WorkflowGroupingCase, ...] = (
         check_warnings=False,
     ),
     WorkflowGroupingCase(
+        id="does_not_group_python_c_command_string_operand",
+        fixture="chunk_does_not_group_python_c_command_string.diff",
+        files=(".github/workflows/ci.yml", "scripts/review.py"),
+        not_contains=("scripts/review.py",),
+        grouped_separately="scripts/review.py",
+        warning=(
+            "Script scripts/review.py changed alongside workflows but is not "
+            "referenced in any changed workflow diff; grouped separately."
+        ),
+    ),
+    WorkflowGroupingCase(
+        id="does_not_group_node_e_command_string_operand",
+        fixture="chunk_does_not_group_node_e_command_string.diff",
+        files=(".github/workflows/ci.yml", "scripts/build.js"),
+        not_contains=("scripts/build.js",),
+        grouped_separately="scripts/build.js",
+        warning=(
+            "Script scripts/build.js changed alongside workflows but is not "
+            "referenced in any changed workflow diff; grouped separately."
+        ),
+    ),
+    WorkflowGroupingCase(
+        id="does_not_group_node_eval_command_string_operand",
+        fixture="chunk_does_not_group_node_eval_command_string.diff",
+        files=(".github/workflows/ci.yml", "scripts/build.js"),
+        not_contains=("scripts/build.js",),
+        grouped_separately="scripts/build.js",
+        warning=(
+            "Script scripts/build.js changed alongside workflows but is not "
+            "referenced in any changed workflow diff; grouped separately."
+        ),
+    ),
+    WorkflowGroupingCase(
+        id="does_not_group_bun_e_command_string_operand",
+        fixture="chunk_does_not_group_bun_e_command_string.diff",
+        files=(".github/workflows/ci.yml", "scripts/review.ts"),
+        not_contains=("scripts/review.ts",),
+        grouped_separately="scripts/review.ts",
+        warning=(
+            "Script scripts/review.ts changed alongside workflows but is not "
+            "referenced in any changed workflow diff; grouped separately."
+        ),
+    ),
+    WorkflowGroupingCase(
+        id="groups_workflow_with_python_script",
+        fixture="chunk_groups_workflow_with_python_script.diff",
+        files=(".github/workflows/ci.yml", "scripts/review.py"),
+        contains=("scripts/review.py",),
+    ),
+    WorkflowGroupingCase(
         id="groups_workflow_with_uv_run_with_editable_script",
         fixture="chunk_groups_workflow_with_uv_run_with_editable_script.diff",
         files=(".github/workflows/ci.yml", "scripts/review.py"),
