@@ -40,8 +40,10 @@ def _find_binary(artifacts_dir: Path, artifact_name: str) -> Path | None:
     """Locate the binary file for a given artifact.
 
     Looks first for ``<artifacts_dir>/<artifact_name>/<artifact_name>`` and
-    falls back to any file matching the artifact name anywhere beneath the
-    artifacts directory.
+    falls back to a file matching the artifact name beneath the artifacts
+    directory, but only when exactly one such file exists — multiple
+    candidates (e.g. leftovers from an earlier run) are ambiguous and must
+    fail rather than risk staging a stale binary.
 
     Args:
         artifacts_dir: Root directory holding downloaded artifacts.
@@ -49,11 +51,22 @@ def _find_binary(artifacts_dir: Path, artifact_name: str) -> Path | None:
 
     Returns:
         The resolved binary path, or ``None`` when not found.
+
+    Raises:
+        RuntimeError: When multiple candidate files match the artifact name.
     """
     direct = artifacts_dir / artifact_name / artifact_name
     if direct.is_file():
         return direct
-    matches = [p for p in artifacts_dir.rglob(artifact_name) if p.is_file()]
+    matches = sorted(p for p in artifacts_dir.rglob(artifact_name) if p.is_file())
+    if len(matches) > 1:
+        listing = ", ".join(str(p) for p in matches)
+        msg = (
+            f"Ambiguous binary artifact '{artifact_name}': multiple candidate "
+            f"files found under {artifacts_dir} ({listing}). Refusing to pick "
+            "one; clean the artifacts directory and retry."
+        )
+        raise RuntimeError(msg)
     return matches[0] if matches else None
 
 
@@ -69,6 +82,7 @@ def stage_binaries(artifacts_dir: Path, *, npm_dir: Path = NPM_DIR) -> list[str]
 
     Raises:
         FileNotFoundError: When an expected binary artifact is missing.
+        RuntimeError: When an artifact name matches multiple candidate files.
     """
     staged: list[str] = []
     for artifact_name, platform_key in BINARY_MAP.items():
@@ -84,7 +98,11 @@ def stage_binaries(artifacts_dir: Path, *, npm_dir: Path = NPM_DIR) -> list[str]
         dest.parent.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(source, dest)
         dest.chmod(dest.stat().st_mode | stat.S_IEXEC | stat.S_IXGRP | stat.S_IXOTH)
-        print(f"Staged {source} -> {dest.relative_to(PROJECT_ROOT)}")
+        try:
+            shown = dest.relative_to(PROJECT_ROOT)
+        except ValueError:
+            shown = dest
+        print(f"Staged {source} -> {shown}")
         staged.append(platform_key)
     return staged
 
@@ -96,7 +114,8 @@ def main(argv: list[str] | None = None) -> int:
         argv: Optional argument vector.
 
     Returns:
-        Process exit code (0 on success, 1 on missing artifacts).
+        Process exit code (0 on success, 1 on missing or ambiguous
+        artifacts).
     """
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
@@ -109,7 +128,7 @@ def main(argv: list[str] | None = None) -> int:
 
     try:
         staged = stage_binaries(args.artifacts_dir.resolve())
-    except FileNotFoundError as exc:
+    except (FileNotFoundError, RuntimeError) as exc:
         print(str(exc), file=sys.stderr)
         return 1
 
