@@ -166,7 +166,7 @@ should_install() {
 # Kept in sync with the should_install blocks and tools_to_verify array.
 SUPPORTED_TOOLS=(
 	"actionlint" "astro" "bandit" "black" "cargo-audit" "cargo-deny"
-	"clippy" "gitleaks" "hadolint" "markdownlint" "markdownlint-cli2" "mypy" "osv-scanner"
+	"clippy" "commitlint" "gitleaks" "hadolint" "markdownlint" "markdownlint-cli2" "mypy" "osv-scanner"
 	"oxfmt" "oxlint" "prettier" "pydoclint" "ruff" "rustfmt" "semgrep"
 	"shellcheck" "shfmt" "sqlfluff" "svelte-check" "taplo" "tsc"
 	"vue-tsc" "yamllint"
@@ -1033,6 +1033,32 @@ main() {
 		fi
 	fi # mypy
 
+	if should_install "commitlint"; then
+		# Install commitlint via bun (Conventional Commits message linting).
+		# The shared config package is installed alongside so user configs that
+		# extend @commitlint/config-conventional resolve.
+		echo -e "${BLUE}Installing commitlint...${NC}"
+
+		# Ensure bun is available
+		if ! ensure_bun_installed; then
+			exit 1
+		fi
+
+		# Read versions from _tool_versions.py (single source of truth).
+		# Package alias: "@commitlint/cli" -> ToolName.COMMITLINT
+		COMMITLINT_VERSION=$(get_tool_version "@commitlint/cli") || exit 1
+		COMMITLINT_CONFIG_VERSION=$(get_tool_version "@commitlint/config-conventional") || exit 1
+
+		if [ $DRY_RUN -eq 1 ]; then
+			log_info "[DRY-RUN] Would install @commitlint/cli@${COMMITLINT_VERSION} and @commitlint/config-conventional@${COMMITLINT_CONFIG_VERSION} globally via bun"
+		elif bun add -g "@commitlint/cli@${COMMITLINT_VERSION}" "@commitlint/config-conventional@${COMMITLINT_CONFIG_VERSION}"; then
+			echo -e "${GREEN}✓ commitlint@${COMMITLINT_VERSION} installed successfully${NC}"
+		else
+			echo -e "${RED}✗ Failed to install commitlint${NC}"
+			exit 1
+		fi
+	fi # commitlint
+
 	if should_install "prettier"; then
 		# Install prettier via bun (JavaScript/JSON formatting)
 		echo -e "${BLUE}Installing prettier...${NC}"
@@ -1450,7 +1476,7 @@ main() {
 	# Verify installations
 	echo -e "${YELLOW}Verifying installations...${NC}"
 
-	tools_to_verify=("actionlint" "astro" "bandit" "black" "cargo-audit" "cargo-deny" "clippy" "rustfmt" "gitleaks" "hadolint" "markdownlint-cli2" "mypy" "osv-scanner" "oxfmt" "oxlint" "prettier" "pydoclint" "ruff" "semgrep" "shellcheck" "shfmt" "sqlfluff" "svelte-check" "taplo" "tsc" "vue-tsc" "yamllint")
+	tools_to_verify=("actionlint" "astro" "bandit" "black" "cargo-audit" "cargo-deny" "clippy" "commitlint" "rustfmt" "gitleaks" "hadolint" "markdownlint-cli2" "mypy" "osv-scanner" "oxfmt" "oxlint" "prettier" "pydoclint" "ruff" "semgrep" "shellcheck" "shfmt" "sqlfluff" "svelte-check" "taplo" "tsc" "vue-tsc" "yamllint")
 
 	# Filter verification list when --tools is set.
 	# Map aliases so e.g. --tools markdownlint verifies markdownlint-cli2.
