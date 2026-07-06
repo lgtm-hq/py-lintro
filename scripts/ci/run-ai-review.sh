@@ -4,8 +4,9 @@ set -euo pipefail
 # run-ai-review.sh
 #
 # Dogfood `lintro review` on py-lintro's own pull requests. Runs an AI diff
-# review over the PR and prints the JSON result to the log. Informational only:
-# this script always exits 0 so it can never fail a pull request check.
+# review over the PR, posts a rich sticky comment (and inline findings) to the
+# PR via `--post`, and prints the JSON result to the log. Non-blocking: this
+# script always exits 0 so it can never fail a pull request check.
 #
 # Trusted install: the workflow checks out the PR's BASE ref (main) before
 # invoking this script, so the lintro that runs with ANTHROPIC_API_KEY is
@@ -27,6 +28,7 @@ set -euo pipefail
 #   ANTHROPIC_API_KEY       Anthropic API key. Empty => graceful skip.
 #   PR_NUMBER               Pull request number (alternative to the argument).
 #   GH_TOKEN                Token used by `gh` to fetch the PR diff.
+#   GITHUB_TOKEN            Token used by lintro's `--post` to write comments.
 #   GITHUB_REPOSITORY       owner/name; supplies --repo for `lintro review`.
 #   AI_REVIEW_MAX_COST_USD  Optional spend cap (defaults handled downstream).
 
@@ -59,7 +61,7 @@ if [[ -z "$pr_number" ]]; then
 	exit 0
 fi
 
-echo "Running AI review on PR #${pr_number} (informational, non-blocking)..."
+echo "Running AI review on PR #${pr_number} (posts comment, non-blocking)..."
 
 # Enable AI review in the base-ref (trusted) checkout's config. `lintro review`
 # reads ai.enabled and ai.max_cost_usd only from .lintro-config.yaml, so patch
@@ -68,9 +70,16 @@ echo "Running AI review on PR #${pr_number} (informational, non-blocking)..."
 # pinned too.
 uv run python "${script_dir}/enable_review_config.py"
 
+# `--post` maintains the sticky review comment (and inline findings) on the PR.
+# It needs GITHUB_TOKEN (write) and the repo; the diff is still fetched via `gh`.
+repo_arg=()
+if [[ -n "${GITHUB_REPOSITORY:-}" ]]; then
+	repo_arg=(--repo "${GITHUB_REPOSITORY}")
+fi
+
 # Never let a P1 finding (exit 1) or any review error fail the PR check.
 set +e
-review_output="$(uv run lintro review --pr "${pr_number}" --depth 1 --output json 2>&1)"
+review_output="$(uv run lintro review --pr "${pr_number}" "${repo_arg[@]}" --depth 1 --post --output json 2>&1)"
 review_status=$?
 set -e
 

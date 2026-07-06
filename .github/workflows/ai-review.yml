@@ -11,10 +11,13 @@ name: AI Review - Dogfood
 # through `gh` (GitHub API), so the PR's lintro/** changes are reviewed as data,
 # never run with the key. See the security note on the job below.
 #
-# Informational only: the review runs with continue-on-error and the script
-# always exits 0, so it can never fail a PR. When the ANTHROPIC_API_KEY secret
-# is absent (not configured yet, or a fork PR that cannot read secrets) the
-# script skips gracefully. This is intentionally NOT a required check.
+# Posts a review comment: the review runs with `--post`, so lintro maintains a
+# single sticky comment on the PR (rich findings + cumulative telemetry) and
+# posts inline review comments for diff-mappable findings. It runs with
+# continue-on-error and the script always exits 0, so it can never fail a PR.
+# When the ANTHROPIC_API_KEY secret is absent (not configured yet, or a fork PR
+# that cannot read secrets) the script skips gracefully. This is intentionally
+# NOT a required check.
 
 'on':
   pull_request:
@@ -53,7 +56,9 @@ jobs:
       && github.event.pull_request.head.repo.full_name == github.repository
     permissions:
       contents: read
-      pull-requests: read
+      # `--post` maintains the sticky review comment and posts inline review
+      # comments, both of which require write access to pull requests.
+      pull-requests: write
     timeout-minutes: 15
 
     steps:
@@ -97,11 +102,13 @@ jobs:
       - name: Install dependencies
         run: uv sync --extra ai
 
-      - name: Run AI review (informational, non-blocking)
+      - name: Run AI review (posts comment, non-blocking)
         continue-on-error: true
         run: scripts/ci/run-ai-review.sh
         env:
           PR_NUMBER: ${{ github.event.number }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           AI_REVIEW_MAX_COST_USD: '0.50'

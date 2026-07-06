@@ -224,6 +224,7 @@ REVIEW_OUTPUT_SCHEMA = """\
       "description": "What is wrong and why it matters in production",
       "cause": "Root cause — trace the code path",
       "fix": "Concise fix suggestion",
+      "suggested_code": "Exact replacement for the flagged line(s) when a mechanical fix applies (one-click GitHub suggestion); else empty string",
       "confidence": "high|medium|low",
       "checklist_ids": [1, 2]
     }
