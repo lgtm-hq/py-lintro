@@ -188,3 +188,37 @@ def test_check_python_file_with_issue_still_fails(
 
     assert_that(result.success).is_false()
     assert_that(result.issues_count).is_equal_to(1)
+
+
+def test_check_marker_text_with_issue_does_not_suppress(
+    mypy_plugin: MypyPlugin,
+    tmp_path: Path,
+) -> None:
+    """The skip guard never suppresses real issues in mixed output.
+
+    Even if the ``no .py[i] files`` marker text appears alongside parsed
+    issues, the run must still report the issues rather than skip.
+
+    Args:
+        mypy_plugin: The MypyPlugin instance to test.
+        tmp_path: Temporary directory path for test files.
+    """
+    (tmp_path / "module.py").write_text('"""Module."""\n')
+    payload = (
+        '[{"path": "module.py", "line": 1, "column": 0, '
+        '"severity": "error", "message": "no .py[i] files", "code": "misc"}]'
+    )
+
+    with patch(
+        "lintro.plugins.execution_preparation.verify_tool_version",
+        return_value=None,
+    ):
+        with patch.object(
+            mypy_plugin,
+            "_run_subprocess",
+            return_value=(False, payload),
+        ):
+            result = mypy_plugin.check([str(tmp_path)], {})
+
+    assert_that(result.success).is_false()
+    assert_that(result.issues_count).is_equal_to(1)

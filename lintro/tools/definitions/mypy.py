@@ -490,13 +490,18 @@ class MypyPlugin(BaseToolPlugin):
                 issues_count=0,
             )
 
+        issues = parse_mypy_output(output=output)
+        issues_count = len(issues)
+
         # Defensive secondary guard: when mypy resolves a scope with no Python
         # sources it errors out (exit 2) with a non-JSON "no .py[i] files"
         # diagnostic. This path is reached when mypy performs its own directory
         # discovery (e.g. the Docker/reusable-workflow path), where lintro's
         # pre-flight file discovery cannot pre-empt it. Treat it as a clean skip
         # so non-Python repositories pass like they do for other language tools.
-        if _has_no_python_files_error(output):
+        # Only skip when no structured issues were parsed, so a run that both
+        # reports type errors and mentions the marker still surfaces the errors.
+        if issues_count == 0 and _has_no_python_files_error(output):
             logger.debug("[mypy] No .py/.pyi files in scope; skipping cleanly")
             return ToolResult(
                 name=self.definition.name,
@@ -504,9 +509,6 @@ class MypyPlugin(BaseToolPlugin):
                 output="No .py/.pyi files found to check.",
                 issues_count=0,
             )
-
-        issues = parse_mypy_output(output=output)
-        issues_count = len(issues)
 
         if not success and issues_count == 0:
             # Execution failed but no structured issues were parsed; surface diagnostics
