@@ -3,6 +3,12 @@
 ---
 name: Release - Version PR
 
+# Surface trigger context in the Actions history so post-merge release failures
+# are traceable at a glance (event + branch), not just via the default commit
+# subject. Guarded by test_release_workflows_define_traceable_run_names.
+run-name: >-
+  Release - Version PR (${{ github.event_name }} on ${{ github.ref_name }})
+
 'on':
   push:
     branches: [main]

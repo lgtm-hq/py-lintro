@@ -27,6 +27,12 @@ trailing `# vX.Y.Z` comments so Renovate can track digest updates. Policy is enf
   `reusable-release-auto-tag.yml` (`create-release: false`; GitHub Release is created by
   publish workflow)
 
+Both callers set a dynamic `run-name` (event + branch) so post-merge release failures
+are traceable from the Actions list rather than the default commit subject. Failure
+visibility itself lives upstream: the reusables run a `report-release-failure` job that
+writes trigger context to the step summary and opens/updates a deduplicated GitHub issue
+on `main` failures — hence the `actions: read` + `issues: write` job permissions.
+
 ## Publish
 
 - **publish-pypi-on-tag.yml** — Production tag publish: `reusable-sbom` →
