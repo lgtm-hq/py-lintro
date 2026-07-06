@@ -39,11 +39,11 @@ BINARY_MAP: dict[str, str] = {
 def _find_binary(artifacts_dir: Path, artifact_name: str) -> Path | None:
     """Locate the binary file for a given artifact.
 
-    Looks first for ``<artifacts_dir>/<artifact_name>/<artifact_name>`` and
-    falls back to a file matching the artifact name beneath the artifacts
-    directory, but only when exactly one such file exists — multiple
-    candidates (e.g. leftovers from an earlier run) are ambiguous and must
-    fail rather than risk staging a stale binary.
+    Only the direct ``<artifacts_dir>/<artifact_name>/<artifact_name>``
+    layout produced by actions/download-artifact is accepted. There is
+    deliberately no glob fallback: a looser search could stage a stale or
+    duplicate binary from a reused artifacts directory into the wrong
+    platform package, and the smoke test only exercises the host platform.
 
     Args:
         artifacts_dir: Root directory holding downloaded artifacts.
@@ -51,23 +51,9 @@ def _find_binary(artifacts_dir: Path, artifact_name: str) -> Path | None:
 
     Returns:
         The resolved binary path, or ``None`` when not found.
-
-    Raises:
-        RuntimeError: When multiple candidate files match the artifact name.
     """
     direct = artifacts_dir / artifact_name / artifact_name
-    if direct.is_file():
-        return direct
-    matches = sorted(p for p in artifacts_dir.rglob(artifact_name) if p.is_file())
-    if len(matches) > 1:
-        listing = ", ".join(str(p) for p in matches)
-        msg = (
-            f"Ambiguous binary artifact '{artifact_name}': multiple candidate "
-            f"files found under {artifacts_dir} ({listing}). Refusing to pick "
-            "one; clean the artifacts directory and retry."
-        )
-        raise RuntimeError(msg)
-    return matches[0] if matches else None
+    return direct if direct.is_file() else None
 
 
 def stage_binaries(artifacts_dir: Path, *, npm_dir: Path = NPM_DIR) -> list[str]:
@@ -113,8 +99,7 @@ def main(argv: list[str] | None = None) -> int:
         argv: Optional argument vector.
 
     Returns:
-        Process exit code (0 on success, 1 on missing or ambiguous
-        artifacts).
+        Process exit code (0 on success, 1 on missing artifacts).
     """
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
@@ -127,7 +112,7 @@ def main(argv: list[str] | None = None) -> int:
 
     try:
         staged = stage_binaries(args.artifacts_dir.resolve())
-    except (FileNotFoundError, RuntimeError) as exc:
+    except FileNotFoundError as exc:
         print(str(exc), file=sys.stderr)
         return 1
 

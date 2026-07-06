@@ -1,7 +1,7 @@
 """Tests for the npm binary staging script.
 
-Covers direct-layout resolution, the single-match fallback, ambiguity
-rejection, and the full staging pass against a temporary artifacts tree.
+Covers direct-layout resolution, rejection of files outside that layout,
+and the full staging pass against a temporary artifacts tree.
 """
 
 from __future__ import annotations
@@ -44,39 +44,25 @@ def _write_binary(path: Path, content: bytes = b"#!/bin/sh\n") -> None:
     path.write_bytes(content)
 
 
-def test_find_binary_prefers_direct_layout(tmp_path: Path) -> None:
-    """Direct <artifact>/<artifact> layout wins over fallback matches."""
+def test_find_binary_accepts_direct_layout(tmp_path: Path) -> None:
+    """The <artifact>/<artifact> layout resolves to the binary."""
     mod = _load_module()
     direct = tmp_path / "lintro-linux-x64" / "lintro-linux-x64"
     _write_binary(direct)
-    _write_binary(tmp_path / "stale" / "lintro-linux-x64")
 
     found = mod._find_binary(tmp_path, "lintro-linux-x64")
 
     assert_that(str(found)).is_equal_to(str(direct))
 
 
-def test_find_binary_fallback_single_match(tmp_path: Path) -> None:
-    """A single fallback match anywhere in the tree is accepted."""
+def test_find_binary_ignores_files_outside_direct_layout(tmp_path: Path) -> None:
+    """A matching filename elsewhere in the tree is not accepted."""
     mod = _load_module()
-    nested = tmp_path / "merged" / "lintro-macos-arm64"
-    _write_binary(nested)
+    _write_binary(tmp_path / "stray" / "lintro-macos-arm64")
 
     found = mod._find_binary(tmp_path, "lintro-macos-arm64")
 
-    assert_that(str(found)).is_equal_to(str(nested))
-
-
-def test_find_binary_fallback_rejects_ambiguous_matches(tmp_path: Path) -> None:
-    """Multiple fallback candidates raise instead of picking one."""
-    mod = _load_module()
-    _write_binary(tmp_path / "run-1" / "lintro-linux-arm64")
-    _write_binary(tmp_path / "run-2" / "lintro-linux-arm64")
-
-    with pytest.raises(RuntimeError) as exc_info:
-        mod._find_binary(tmp_path, "lintro-linux-arm64")
-
-    assert_that(str(exc_info.value)).contains("Ambiguous binary artifact")
+    assert_that(found).is_none()
 
 
 def test_find_binary_returns_none_when_missing(tmp_path: Path) -> None:
@@ -116,16 +102,15 @@ def test_stage_binaries_missing_artifact_raises(tmp_path: Path) -> None:
     assert_that(str(exc_info.value)).contains("Missing binary artifact")
 
 
-def test_main_reports_ambiguity_as_failure(tmp_path: Path) -> None:
-    """The CLI exits non-zero when an artifact name is ambiguous."""
+def test_main_reports_missing_artifact_as_failure(tmp_path: Path) -> None:
+    """The CLI exits non-zero when an artifact only exists off-layout."""
     mod = _load_module()
     artifacts = tmp_path / "artifacts"
     for artifact_name in mod.BINARY_MAP:
         _write_binary(artifacts / artifact_name / artifact_name)
-    _write_binary(artifacts / "duplicate" / "lintro-macos-arm64")
-    # Remove the direct layout so the ambiguous fallback path is exercised.
+    # Move one binary out of the direct layout; it must not be picked up.
     (artifacts / "lintro-macos-arm64" / "lintro-macos-arm64").unlink()
-    _write_binary(artifacts / "another" / "lintro-macos-arm64")
+    _write_binary(artifacts / "elsewhere" / "lintro-macos-arm64")
 
     exit_code = mod.main(["--artifacts-dir", str(artifacts)])
 
