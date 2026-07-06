@@ -72,6 +72,15 @@ describe("resolveBinary", () => {
     );
   });
 
+  it("mentions the cross-platform lockfile pitfall when not installed", () => {
+    const failingRequire = () => {
+      throw new Error("Cannot find module");
+    };
+    expect(() => resolveBinary(failingRequire, "linux", "x64")).toThrow(
+      /lockfile was generated on a different OS/,
+    );
+  });
+
   it("throws when the platform package exports no path", () => {
     const badRequire = () => ({});
     expect(() => resolveBinary(badRequire, "darwin", "x64")).toThrow(

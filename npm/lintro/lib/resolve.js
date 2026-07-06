@@ -78,8 +78,11 @@ function resolveBinary(requireFn, platform, arch) {
     throw new Error(
       `lintro: the platform package "${pkg}" is not installed. ` +
         "This usually means optional dependencies were skipped during " +
-        "install. Reinstall with optional dependencies enabled " +
-        `(e.g. \`npm install lintro\` or \`bun add lintro\`). Cause: ${err.message}`,
+        "install, or the lockfile was generated on a different OS and " +
+        "omits this platform's package (see npm/cli#4828). Reinstall with " +
+        "optional dependencies enabled (e.g. `npm install lintro` or " +
+        "`bun add lintro`), or refresh the lockfile on this platform " +
+        `(e.g. \`npm install --force\`). Cause: ${err.message}`,
     );
   }
 
