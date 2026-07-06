@@ -59,13 +59,7 @@ jobs:
       extra-args: '-x --ignore=tests/integration'
       coverage: true
       coverage-threshold: 80
-      # Coverage still runs and gates at 80%; only the GitHub Pages *deploy* of
-      # the HTML report is disabled. The Pages deployment has been failing
-      # intermittently at the GitHub service level ("Deployment failed, try
-      # again later"), reddening CI - Tests on main. Keep main green by not
-      # coupling it to that external deploy. Re-enable once Pages is repaired
-      # (see #1106).
-      upload-coverage: false
+      upload-coverage: true
       draft-pr-skip: true
       job-name: Python Coverage
       runner-image: ubuntu-24.04
