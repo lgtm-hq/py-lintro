@@ -1,39 +1,99 @@
 # Creating Lintro Plugins
 
-This guide explains how to create external plugins for Lintro.
+This guide explains how to create **third-party tool plugins** for Lintro. A plugin
+is a normal Python package published to PyPI (or installed from anywhere) that adds
+one or more tools to Lintro without any change to the Lintro core repository.
 
 ## Overview
 
-Lintro uses a plugin architecture that allows you to add support for new linting and
-formatting tools. Plugins are discovered automatically via Python entry points.
+Lintro uses a plugin architecture that lets you add support for new linting and
+formatting tools. Built-in tools live in `lintro/tools/definitions/`; external tools
+ship in their own distributions and are discovered automatically at startup via
+Python entry points in the **`lintro.tools`** group.
+
+An external plugin gets the exact same lifecycle as a built-in tool: config
+injection, file discovery, subprocess execution, output normalization, and
+per-invocation execution isolation.
+
+> **Security note:** Installing a Lintro plugin means running its code. A plugin is
+> ordinary Python and executes with your privileges the moment it is discovered.
+> This is the same trust model as installing any `pip` package — only install plugins
+> from sources you trust.
 
 ## Entry Point Registration
 
-Register your plugin in `pyproject.toml`:
+Register your plugin in the installing package's `pyproject.toml`. The entry-point
+**name** is only a label; the actual tool name comes from the plugin's
+`ToolDefinition.name`.
 
 ```toml
-[project.entry-points."lintro.plugins"]
+[project.entry-points."lintro.tools"]
 my-tool = "my_package.plugin:MyToolPlugin"
 ```
+
+The value points to the plugin **class** (`module:ClassName`).
+
+## Plugin API Version
+
+The plugin-facing contract is versioned so that core refactors never silently break
+— or crash — an installed plugin. The current version is exposed as
+`lintro.plugins.LINTRO_PLUGIN_API_VERSION`.
+
+Declare the version your plugin targets as a class attribute:
+
+```python
+from lintro.plugins import LINTRO_PLUGIN_API_VERSION
+
+
+class MyToolPlugin(BaseToolPlugin):
+    LINTRO_PLUGIN_API_VERSION = LINTRO_PLUGIN_API_VERSION
+    ...
+```
+
+At load time Lintro compares this against its own version. A plugin built for an
+incompatible major version is **logged and skipped**, never loaded. Declaring the
+attribute is optional (an undeclared plugin is assumed compatible) but strongly
+recommended for forward safety.
+
+## Failure Isolation
+
+Discovery is fully fault-tolerant. A plugin that fails to import, is malformed
+(missing the required methods), declares an incompatible API version, collides with
+a built-in tool name, or raises on construction is **logged as a warning and
+skipped**. One broken plugin never crashes Lintro and never blocks discovery of the
+other plugins. Built-in tools always win a name collision, so an external plugin can
+never silently shadow a curated core tool.
+
+## Seeing Where a Tool Came From
+
+Run `lintro list-tools` to see every registered tool with an **Origin** column:
+`builtin` for core tools, or the distribution/package name for a third-party plugin.
+The same field is present in `lintro list-tools --json` as `"origin"`.
 
 ## Plugin Implementation
 
 Create a plugin class that inherits from `BaseToolPlugin`:
+
+> **Do not use `@register_tool` in a third-party plugin.** That decorator is for
+> built-in tools, which are imported eagerly. External plugins are registered by the
+> entry-point loader — decorating would attempt a second (duplicate) registration.
 
 ```python
 from dataclasses import dataclass
 
 from lintro.enums.tool_type import ToolType
 from lintro.models.core.tool_result import ToolResult
+from lintro.plugins import LINTRO_PLUGIN_API_VERSION
 from lintro.plugins.base import BaseToolPlugin
 from lintro.plugins.protocol import ToolDefinition
-from lintro.plugins.registry import register_tool
 
 
-@register_tool
 @dataclass
 class MyToolPlugin(BaseToolPlugin):
     """My custom linting tool plugin."""
+
+    # Declare the plugin API version this plugin was built against.
+    LINTRO_PLUGIN_API_VERSION = LINTRO_PLUGIN_API_VERSION
 
     @property
     def definition(self) -> ToolDefinition:
@@ -144,6 +204,19 @@ The `BaseToolPlugin` base class provides useful methods:
 - `_get_executable_command(tool_name)` - Get command with proper path
 - `_discover_files(paths, patterns)` - Find files matching patterns
 
+### Execution Isolation (important for correctness)
+
+Registered plugin instances are process-wide singletons with mutable option state.
+Lintro's parallel executor never mutates that singleton directly — it takes a
+private per-invocation copy via `copy_for_execution()` so concurrent runs cannot
+clobber each other's options. Subclassing `BaseToolPlugin` gives you this for free.
+
+If your plugin adds its **own** mutable option state (for example a config dataclass
+that `set_options()` mutates), you must isolate it too by overriding
+`_isolate_execution_state()` (deep-copy it onto the execution copy) and
+`_reset_execution_state()` (restore defaults). Otherwise concurrent invocations will
+race on that shared state. Read-mostly caches may stay shared.
+
 ## Creating a Parser
 
 Create a parser module to convert tool output into structured issues:
@@ -204,11 +277,21 @@ def parse_my_tool_output(output: str) -> list[MyToolIssue]:
     return issues
 ```
 
+## Packaging Checklist
+
+A minimal third-party plugin distribution contains:
+
+- `my_package/plugin.py` — a `BaseToolPlugin` subclass (see above).
+- `my_package/parser.py` — an output parser (see below).
+- `pyproject.toml` — with a `[project.entry-points."lintro.tools"]` entry pointing
+  at your plugin class, and `lintro` as a dependency.
+
 ## Testing Your Plugin
 
-1. Install your plugin package
-2. Run `lintro tools` to verify your tool is discovered
-3. Run `lintro check --tool my-tool path/to/files` to test
+1. Install your plugin package (`pip install .` / `uv pip install .`).
+2. Run `lintro list-tools` and confirm your tool appears with your package name in
+   the **Origin** column.
+3. Run `lintro check --tools my-tool path/to/files` to test.
 
 ## Example Plugins
 
