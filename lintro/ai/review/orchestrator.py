@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import shlex
+import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from contextlib import suppress
 from dataclasses import dataclass, replace
@@ -16,6 +17,7 @@ from loguru import logger
 from lintro.ai.budget import CostBudget
 from lintro.ai.cli_schemas import cli_schema_for_review
 from lintro.ai.enums import AITransport
+from lintro.ai.exceptions import AIError
 from lintro.ai.invoke import call_ai
 from lintro.ai.json_response import parse_review_response_payload, strip_json_fences
 from lintro.ai.model_pricing import (
@@ -172,31 +174,40 @@ def _review_all_chunks(
     strictness_section: str,
     next_generated_checklist_id: int = 1,
     diff_budget: int,
+    completed_sink: list[_ChunkReviewPartial] | None = None,
 ) -> list[_ChunkReviewPartial]:
-    """Review all chunks sequentially or in parallel."""
+    """Review all chunks sequentially or in parallel.
+
+    When ``completed_sink`` is provided, each successfully reviewed chunk's
+    partial is appended to it as soon as it completes. This lets the caller
+    recover the chunks reviewed so far if the run aborts mid-way (e.g. the cost
+    cap is reached), enabling a graceful partial review instead of discarding
+    all completed work.
+    """
     if len(chunks) <= 1:
-        return [
-            _review_chunk_with_progress(
-                chunk_index=0,
-                chunk=chunks[0],
-                context=context,
-                provider=provider,
-                ai_config=ai_config,
-                depth=depth,
-                checklist_text=checklist_text,
-                checklist_count=len(checklist_items),
-                classifications=classifications,
-                lint_results=lint_results,
-                budget=budget,
-                progress=progress,
-                total_chunks=1,
-                repo_root=repo_root,
-                use_one_shot=use_one_shot,
-                strictness_section=strictness_section,
-                next_generated_checklist_id=next_generated_checklist_id,
-                diff_budget=diff_budget,
-            ),
-        ]
+        single = _review_chunk_with_progress(
+            chunk_index=0,
+            chunk=chunks[0],
+            context=context,
+            provider=provider,
+            ai_config=ai_config,
+            depth=depth,
+            checklist_text=checklist_text,
+            checklist_count=len(checklist_items),
+            classifications=classifications,
+            lint_results=lint_results,
+            budget=budget,
+            progress=progress,
+            total_chunks=1,
+            repo_root=repo_root,
+            use_one_shot=use_one_shot,
+            strictness_section=strictness_section,
+            next_generated_checklist_id=next_generated_checklist_id,
+            diff_budget=diff_budget,
+        )
+        if completed_sink is not None:
+            completed_sink.append(single)
+        return [single]
 
     if depth >= 2:
         sequential_partials: list[_ChunkReviewPartial] = []
@@ -244,6 +255,8 @@ def _review_all_chunks(
                     cause_message=str(exc),
                 ) from exc
             sequential_partials.append(partial)
+            if completed_sink is not None:
+                completed_sink.append(partial)
             progress.on_chunk_done(chunk_index=chunk_index)
         return sequential_partials
 
@@ -281,7 +294,10 @@ def _review_all_chunks(
         for future in as_completed(futures):
             chunk_index = futures[future]
             try:
-                partials[chunk_index] = future.result()
+                chunk_partial = future.result()
+                partials[chunk_index] = chunk_partial
+                if completed_sink is not None:
+                    completed_sink.append(chunk_partial)
                 completed += 1
             except ReviewExecutionError:
                 for pending in futures:
@@ -411,6 +427,11 @@ def run_review(
 
     Raises:
         ValueError: If ``depth`` is outside the allowed range 1-3.
+        AIError: When the review fails for a non-recoverable reason (e.g.
+            provider authentication or a genuine provider error). A cost-cap
+            stop is handled internally and returned as a partial result instead.
+        ReviewExecutionError: When a chunk fails mid-run for a reason other than
+            the cost cap.
     """
     if depth < 1 or depth > 3:
         raise ValueError(f"depth must be between 1 and 3, got {depth}")
@@ -474,9 +495,13 @@ def run_review(
     tracker.on_start(total_chunks=len(chunks), depth=depth)
     total_findings = 0
     completed = False
+    partial = False
+    stopped_reason = ""
+    collected: list[_ChunkReviewPartial] = []
     partials: list[_ChunkReviewPartial] = []
     merged = merge_review_results(partials=partials)
     filtered_findings: tuple[ReviewFinding, ...] = ()
+    started_at = time.monotonic()
     try:
         partials = _review_all_chunks(
             chunks=chunks,
@@ -498,14 +523,39 @@ def run_review(
                 _max_checklist_id(checklist_items=checklist_items) + 1
             ),
             diff_budget=diff_budget,
+            completed_sink=collected,
         )
-        merged = merge_review_results(partials=partials)
-        filtered_findings = filter_findings_by_policy(
-            findings=merged.findings,
+        merged, filtered_findings, total_findings = _finalize_partials(
+            partials=partials,
             policy=review_sensitivity,
         )
-        total_findings = len(filtered_findings)
         completed = True
+    except (AIError, ReviewExecutionError) as exc:
+        # A graceful partial review: the cost cap was reached mid-run. Keep the
+        # chunks reviewed so far instead of discarding all completed work (see
+        # issue #1094). Any other failure (auth, provider, parser) has no usable
+        # partial and must propagate so callers surface a real error.
+        cap = budget.max_cost_usd
+        cost_capped = cap is not None and (budget.remaining or 0.0) <= 0.0
+        if not (cost_capped and collected):
+            raise
+        partials = list(collected)
+        partial = True
+        stopped_reason = "cost cap"
+        merged, filtered_findings, total_findings = _finalize_partials(
+            partials=partials,
+            policy=review_sensitivity,
+        )
+        completed = True
+        logger.warning(
+            "Review stopped early — cost cap (${cap:.2f}) reached after "
+            "reviewing {n} of {m} chunks. Raise ai.max_cost_usd or narrow "
+            "--path to review the rest.",
+            cap=cap,
+            n=len(partials),
+            m=len(chunks),
+            cause=str(exc),
+        )
     finally:
         if use_cursor_durable and hasattr(provider, "end_durable_session"):
             provider.end_durable_session()
@@ -514,9 +564,13 @@ def run_review(
                 tracker.on_complete(total_findings=total_findings)
             else:
                 tracker.on_abort()
-    total_input = sum(partial.input_tokens for partial in partials)
-    total_output = sum(partial.output_tokens for partial in partials)
-    total_cost = sum(partial.cost_estimate for partial in partials)
+
+    duration_seconds = time.monotonic() - started_at
+
+    total_input = sum(item.input_tokens for item in partials)
+    total_output = sum(item.output_tokens for item in partials)
+    total_cost = sum(item.cost_estimate for item in partials)
+    chunks_reviewed = len(partials)
 
     metadata = ReviewMetadata(
         model=provider.model_name,
@@ -525,7 +579,7 @@ def run_review(
         depth=depth,
         strictness=review_sensitivity.strictness.value,
         chunks_total=len(chunks),
-        chunks_current=len(chunks),
+        chunks_current=chunks_reviewed,
         files_reviewed=len(context.changed_files),
         files_total=len(context.changed_files),
         checklist_items=len(checklist_items),
@@ -538,6 +592,11 @@ def run_review(
         base_ref=context.base_ref,
         head_ref=context.head_ref,
         timestamp=datetime.now(tz=UTC).isoformat(),
+        token_usage_estimated=ai_config.transport == AITransport.CLI,
+        partial=partial,
+        chunks_reviewed=chunks_reviewed,
+        stopped_reason=stopped_reason,
+        duration_seconds=duration_seconds,
     )
 
     return ReviewResult(
@@ -546,6 +605,25 @@ def run_review(
         checklist=merged.checklist,
         findings=filtered_findings,
     )
+
+
+def _finalize_partials(
+    *,
+    partials: list[_ChunkReviewPartial],
+    policy: ReviewSensitivityPolicy,
+) -> tuple[ReviewResult, tuple[ReviewFinding, ...], int]:
+    """Merge partials and apply the sensitivity policy.
+
+    Args:
+        partials: Completed chunk partials to merge.
+        policy: Sensitivity policy used to filter findings.
+
+    Returns:
+        Tuple of ``(merged_result, filtered_findings, finding_count)``.
+    """
+    merged = merge_review_results(partials=partials)
+    filtered = filter_findings_by_policy(findings=merged.findings, policy=policy)
+    return merged, filtered, len(filtered)
 
 
 def build_review_prompt(
@@ -1146,6 +1224,7 @@ def _parse_findings(*, raw_findings: object) -> tuple[ReviewFinding, ...]:
                 fix=str(item.get("fix", "")),
                 confidence=str(item.get("confidence", "medium")),
                 checklist_ids=checklist_ids,
+                suggested_code=str(item.get("suggested_code", "")),
             ),
         )
     return tuple(findings)

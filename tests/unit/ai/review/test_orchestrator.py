@@ -92,6 +92,118 @@ def test_parse_review_response_validates_required_keys() -> None:
     assert_that(payload["checklist"]).is_length(1)
 
 
+def _one_file_context() -> ReviewContext:
+    """Build a single-file review context."""
+    return ReviewContext(
+        base_ref="main",
+        head_ref="feature",
+        changed_files=[
+            ChangedFile(
+                path="src/main.py",
+                status="modified",
+                additions=1,
+                deletions=0,
+            ),
+        ],
+        unified_diff="diff --git a/src/main.py b/src/main.py\n+change",
+        pr_metadata=None,
+    )
+
+
+def test_run_review_marks_cli_transport_tokens_estimated() -> None:
+    """CLI transport flags token usage as locally estimated in metadata."""
+    provider = _mock_provider(content=_sample_response_json())
+
+    with patch(
+        "lintro.ai.review.orchestrator.call_ai",
+        side_effect=lambda *, provider, user_prompt, system_prompt=None, **kwargs: provider.complete(
+            user_prompt,
+            system=system_prompt,
+            max_tokens=kwargs.get("max_tokens", 1024),
+        ),
+    ):
+        result = run_review(
+            _one_file_context(),
+            provider=provider,
+            ai_config=AIConfig(enabled=True, transport=AITransport.CLI),
+            depth=1,
+            checklist_items=[],
+            checklist_text="1. [logic-bug] Example?",
+            classifications=[],
+        )
+
+    assert_that(result.metadata.token_usage_estimated).is_true()
+    assert_that(result.metadata.partial).is_false()
+    assert_that(result.metadata.chunks_reviewed).is_equal_to(
+        result.metadata.chunks_total,
+    )
+
+
+def test_run_review_returns_partial_on_cost_cap() -> None:
+    """Cost cap mid-run finalizes a partial review instead of erroring."""
+    provider = _mock_provider(content=_sample_response_json())
+    chunks = [
+        ReviewChunk(
+            id=1,
+            files=["a.py"],
+            diff="diff --git a/a.py b/a.py\n+x",
+            relationship=REL_SINGLE_FILE,
+        ),
+        ReviewChunk(
+            id=2,
+            files=["b.py"],
+            diff="diff --git a/b.py b/b.py\n+y",
+            relationship=REL_SINGLE_FILE,
+        ),
+    ]
+
+    def _recording_call_ai(
+        *,
+        provider,
+        user_prompt,
+        budget=None,
+        **kwargs,
+    ):  # noqa: ANN001, ANN202
+        response = provider.complete(
+            user_prompt,
+            system=kwargs.get("system_prompt"),
+            max_tokens=kwargs.get("max_tokens", 1024),
+        )
+        if budget is not None:
+            budget.record(response.cost_estimate)
+        return response
+
+    with (
+        patch(
+            "lintro.ai.review.orchestrator.resolve_review_chunks",
+            return_value=chunks,
+        ),
+        patch(
+            "lintro.ai.review.orchestrator.call_ai",
+            side_effect=_recording_call_ai,
+        ),
+    ):
+        result = run_review(
+            _one_file_context(),
+            provider=provider,
+            ai_config=AIConfig(
+                enabled=True,
+                transport=AITransport.API,
+                max_cost_usd=0.01,
+            ),
+            depth=1,
+            checklist_items=[],
+            checklist_text="1. [logic-bug] Example?",
+            classifications=[],
+        )
+
+    assert_that(result.metadata.partial).is_true()
+    assert_that(result.metadata.stopped_reason).is_equal_to("cost cap")
+    assert_that(result.metadata.chunks_reviewed).is_equal_to(1)
+    assert_that(result.metadata.chunks_total).is_equal_to(2)
+    assert_that(result.findings).is_not_empty()
+
+
 def test_run_review_depth1_returns_review_result() -> None:
     """Depth 1 review produces findings from mocked provider response."""
     context = ReviewContext(

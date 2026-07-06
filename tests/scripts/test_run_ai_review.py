@@ -229,6 +229,19 @@ def test_workflow_job_is_same_repo_only() -> None:
     )
 
 
+def test_workflow_job_can_write_pull_requests() -> None:
+    """The review job has pull-requests: write so --post can publish comments.
+
+    Contents stays read-only (the diff is fetched via ``gh``), but posting the
+    sticky comment and inline review comments requires write access to PRs.
+    """
+    loaded = yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))
+
+    perms = loaded["jobs"]["ai-review"]["permissions"]
+    assert_that(perms["pull-requests"]).is_equal_to("write")
+    assert_that(perms["contents"]).is_equal_to("read")
+
+
 def test_workflow_installs_from_base_ref_not_pr_head() -> None:
     """Lintro is installed from the trusted base ref, never the PR head.
 
@@ -278,6 +291,8 @@ def test_workflow_reviews_pr_via_gh_not_working_tree() -> None:
     assert_that(command).contains("--pr")
     assert_that(command).contains("--depth 1")
     assert_that(command).contains("--output json")
+    # --post publishes the sticky review comment (and inline findings) on the PR.
+    assert_that(command).contains("--post")
 
 
 @pytest.mark.parametrize(

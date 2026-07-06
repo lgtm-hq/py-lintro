@@ -241,6 +241,71 @@ class GitHubPRReporter:
             result[filename] = _parse_patch_lines(patch)
         return result
 
+    def find_issue_comment(self, *, marker: str) -> tuple[int, str] | None:
+        """Find an existing issue comment containing a hidden marker.
+
+        Paginates through the PR's issue comments and returns the first one
+        whose body contains ``marker`` (an HTML comment used to identify a
+        sticky comment maintained across runs).
+
+        Args:
+            marker: Substring to search for (e.g. ``<!-- lintro-ai-review -->``).
+
+        Returns:
+            Tuple of ``(comment_id, body)`` for the matching comment, or
+            ``None`` when no match is found or the listing fails.
+        """
+        base_url = f"{self.api_base}/repos/{self.repo}/issues/{self.pr_number}/comments"
+        parsed = urllib.parse.urlparse(base_url)
+        if parsed.scheme != "https":
+            return None
+
+        page = 1
+        while True:
+            url = f"{base_url}?per_page=100&page={page}"
+            req = urllib.request.Request(
+                url,
+                method="GET",
+                headers={
+                    "Authorization": f"Bearer {self.token}",
+                    "Accept": "application/vnd.github+json",
+                    "X-GitHub-Api-Version": "2022-11-28",
+                },
+            )
+            try:
+                with urllib.request.urlopen(  # noqa: S310 — HTTPS-only validated above  # nosemgrep: dynamic-urllib-use-detected  # nosec B310
+                    req,
+                    timeout=30,
+                ) as resp:
+                    comments_page = json.loads(resp.read().decode())
+            except (urllib.error.URLError, json.JSONDecodeError, OSError):
+                logger.debug("Failed to list PR comments; cannot find sticky comment")
+                return None
+
+            if not comments_page:
+                return None
+            for comment in comments_page:
+                body = comment.get("body", "")
+                comment_id = comment.get("id")
+                if isinstance(comment_id, int) and marker in body:
+                    return comment_id, body
+            if len(comments_page) < 100:
+                return None
+            page += 1
+
+    def update_issue_comment(self, *, comment_id: int, body: str) -> bool:
+        """Update an existing issue comment in place.
+
+        Args:
+            comment_id: Numeric id of the comment to edit.
+            body: New Markdown body.
+
+        Returns:
+            True if the update succeeded.
+        """
+        url = f"{self.api_base}/repos/{self.repo}/issues/comments/{comment_id}"
+        return self.api_request("PATCH", url, {"body": body})
+
     def post_issue_comment(self, body: str) -> bool:
         """Post a top-level issue comment on the PR.
 

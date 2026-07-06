@@ -222,6 +222,60 @@ def test_api_request_constructs_correct_request(test_token: str) -> None:
         assert_that(json.loads(req.data)).is_equal_to({"key": "value"})
 
 
+def test_find_issue_comment_matches_marker(test_token: str) -> None:
+    """find_issue_comment returns the id/body of the marker-bearing comment."""
+    reporter = GitHubPRReporter(token=test_token, repo="owner/repo", pr_number=5)
+
+    page = [
+        {"id": 1, "body": "unrelated"},
+        {"id": 2, "body": "hello <!-- lintro-ai-review --> world"},
+    ]
+    mock_response = MagicMock()
+    mock_response.read.return_value = json.dumps(page).encode()
+    mock_response.__enter__ = MagicMock(return_value=mock_response)
+    mock_response.__exit__ = MagicMock(return_value=False)
+
+    with patch("urllib.request.urlopen", return_value=mock_response):
+        found = reporter.find_issue_comment(marker="<!-- lintro-ai-review -->")
+
+    assert_that(found).is_not_none()
+    found_id, _body = found or (0, "")
+    assert_that(found_id).is_equal_to(2)
+
+
+def test_find_issue_comment_returns_none_without_match(test_token: str) -> None:
+    """find_issue_comment returns None when no comment carries the marker."""
+    reporter = GitHubPRReporter(token=test_token, repo="owner/repo", pr_number=5)
+
+    mock_response = MagicMock()
+    mock_response.read.return_value = json.dumps([{"id": 1, "body": "x"}]).encode()
+    mock_response.__enter__ = MagicMock(return_value=mock_response)
+    mock_response.__exit__ = MagicMock(return_value=False)
+
+    with patch("urllib.request.urlopen", return_value=mock_response):
+        found = reporter.find_issue_comment(marker="<!-- lintro-ai-review -->")
+
+    assert_that(found).is_none()
+
+
+def test_update_issue_comment_patches(test_token: str) -> None:
+    """update_issue_comment issues a PATCH to the comment endpoint."""
+    reporter = GitHubPRReporter(token=test_token, repo="owner/repo", pr_number=5)
+
+    mock_response = MagicMock()
+    mock_response.status = 200
+    mock_response.__enter__ = MagicMock(return_value=mock_response)
+    mock_response.__exit__ = MagicMock(return_value=False)
+
+    with patch("urllib.request.urlopen", return_value=mock_response) as mock_open:
+        result = reporter.update_issue_comment(comment_id=42, body="new")
+
+    assert_that(result).is_true()
+    req = mock_open.call_args[0][0]
+    assert_that(req.get_method()).is_equal_to("PATCH")
+    assert_that(req.full_url).contains("/issues/comments/42")
+
+
 # -- TestFormatSummaryComment: Tests for summary comment formatting. ---------
 
 

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+from contextlib import suppress
 
 import click
 from loguru import logger
@@ -279,6 +280,15 @@ def review_command(
             force_semantic_chunking=force_semantic_chunking,
         )
     except (AIError, ValueError) as exc:
+        if post and resolved_pr is not None and effective_repo:
+            from lintro.ai.review.github import post_review_error_to_github
+
+            with suppress(Exception):
+                post_review_error_to_github(
+                    error=exc,
+                    pr_number=resolved_pr,
+                    repo=effective_repo,
+                )
         if output_format == "json":
             raise click.ClickException(str(exc)) from exc
         render_review_error(error=exc, console=console)
