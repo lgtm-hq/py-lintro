@@ -91,6 +91,7 @@ Scripts for GitHub Actions workflows and continuous integration.
 | `enable_review_config.py`            | Enable AI review + cost cap in `.lintro-config.yaml` for a CI run     | `python3 scripts/ci/enable_review_config.py --help`                                |
 | `classify-osv-results.py`            | Classify osv_scanner JSON as ok, vulns, or error for CI status        | `python3 scripts/ci/classify-osv-results.py osv-results.json`                      |
 | `format-security-comment.py`         | Format lintro osv_scanner JSON as security PR comment markdown        | `python3 scripts/ci/format-security-comment.py osv-results.json`                   |
+| `format-changelog.py`                | Reflow generated `CHANGELOG.md` to lintro 88-col markdown             | `python3 scripts/ci/format-changelog.py CHANGELOG.md`                              |
 | `test-install-package.sh`            | Install and verify built package in isolated venv                     | `./scripts/ci/test-install-package.sh wheel`                                       |
 | `test-built-package-integration.sh`  | Run integration tests for built package in isolated venv              | `./scripts/ci/test-built-package-integration.sh`                                   |
 | `test-venv-setup.sh`                 | Create isolated Python 3.13 virtual environment                       | `./scripts/ci/test-venv-setup.sh`                                                  |
