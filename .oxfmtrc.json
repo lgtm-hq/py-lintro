@@ -6,11 +6,5 @@
   "printWidth": 100,
   "trailingComma": "es5",
   "sortPackageJson": false,
-  "ignorePatterns": [
-    "build",
-    "dist",
-    "node_modules",
-    ".venv",
-    ".lintro"
-  ]
+  "ignorePatterns": ["build", "dist", "node_modules", ".venv", ".lintro"]
 }
