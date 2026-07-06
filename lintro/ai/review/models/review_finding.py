@@ -42,6 +42,10 @@ class ReviewFinding:
         fix: Concise fix suggestion.
         confidence: Model confidence (high, medium, low).
         checklist_ids: Prompt checklist ids linked to this finding.
+        suggested_code: Exact replacement code for the flagged line(s) when a
+            mechanical fix applies. Rendered as a GitHub ``suggestion`` block on
+            inline comments so reviewers can commit it in one click. Empty when
+            no concrete code replacement is available.
     """
 
     severity: Severity
@@ -54,3 +58,4 @@ class ReviewFinding:
     fix: str
     confidence: str
     checklist_ids: tuple[int, ...] = field(default_factory=tuple)
+    suggested_code: str = ""
