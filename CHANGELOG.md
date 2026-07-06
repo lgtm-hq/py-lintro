@@ -21,6 +21,27 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.66.0] - 2026-07-06
+
+### Added
+
+- **ai/review**: post rich, telemetry-informative review comments (--post) (#1097) (2c9e3f6)
+- **output**: show auto-fixable indicator in check output (#1093) (41c4d7a)
+
+### Changed
+
+- **changelog**: wrap release-note lines to satisfy lint gate (#1088) (1180000)
+- **tools**: deduplicate tsc and vue_tsc definitions (76% identical) (#1092) (e13bb69)
+- **tools**: replace repetitive tool-option type validation with schema-based checks (#1076) (caa0540)
+
+### Fixed
+
+- **ai/review**: provider-aware error taxonomy — surface real cause (not generic 'aborted') (#1102) (08867ca)
+- **ai/review**: exclude interpreter command-string operands from workflow script matching (#1090) (be07eeb)
+- **mypy**: treat no Python files as a clean skip (#1089) (6164283)
+- **osv_scanner**: treat malformed exit-0 payload as scan error, not clean (#1085) (e544d09)
+- **plugins**: tool option mutation is not safe under parallel/thread execution (#1080) (6fe24b6)
+
 ## [0.65.0] - 2026-07-06
 
 ### Added
