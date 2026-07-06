@@ -209,6 +209,47 @@ All contributions go through code review:
 
 ---
 
+## Merge Discipline
+
+Passing CI and clean reviews are enforced, not merely encouraged. The following norms
+are mandatory for every PR merged to `main`.
+
+### All required checks must be green
+
+- Every required status check (for example: `dogfooding-lint`, the test gate,
+  `CI-Docker`, SBOM, CodeQL, and the semantic PR-title check) must pass before merge.
+- **Never merge red.** A failing or in-progress required check blocks the merge. Do not
+  merge past a failure "to fix it in a follow-up" — fix it first, or revert.
+- Admin bypass of a failing check is not a normal workflow. If an override is ever
+  unavoidable, it must be explicit and logged, with the reason recorded on the PR.
+
+### All review threads must be resolved
+
+- Every review conversation must be **resolved** before merge, not just replied to.
+  Replying to a comment is not the same as resolving it.
+- Resolve a thread only when the underlying concern is actually addressed (code changed,
+  or the reviewer agrees no change is needed). Leave the resolution to reflect real
+  agreement, not to clear the merge button.
+- If a comment surfaces follow-up work that is genuinely out of scope, open a tracked
+  issue and link it in the thread before resolving.
+
+### No papering over linters
+
+Do not weaken a gate to make a linter pass. Specifically, **without a written
+justification in the diff** (a code comment or the PR description explaining why), do
+not:
+
+- Add `.lintro-ignore` entries (or equivalent per-tool ignore/suppression rules).
+- Raise or add module-size baselines to absorb a new violation.
+- Downgrade a quality gate — lower a severity threshold, disable a check, or loosen a
+  failure condition — to get a green run.
+
+The default is to fix the underlying issue. Suppressions and baseline bumps are a last
+resort that must be visible and explained in the same change that introduces them, so a
+reviewer can weigh the trade-off deliberately.
+
+---
+
 ## Local Development Commands
 
 > See [Quick Start](#quick-start) above for initial setup. This section covers
