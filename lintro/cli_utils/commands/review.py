@@ -286,6 +286,7 @@ def review_command(
             with suppress(Exception):
                 post_review_error_to_github(
                     error=exc,
+                    provider=str(provider.name),
                     pr_number=resolved_pr,
                     repo=effective_repo,
                 )

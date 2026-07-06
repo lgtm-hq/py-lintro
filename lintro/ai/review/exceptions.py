@@ -3,9 +3,13 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
 from lintro.ai.exceptions import AIError
 from lintro.ai.review.enums.review_context_error_code import ReviewContextErrorCode
+
+if TYPE_CHECKING:
+    from lintro.ai.review.errors_taxonomy import ReviewErrorKind
 
 
 class ReviewContextError(AIError):
@@ -52,6 +56,8 @@ class ReviewExecutionError(AIError):
         step: Sub-step within the chunk (e.g. "reviewing").
         completed_chunks: Number of chunks successfully reviewed before failure.
         cause_message: Original provider or parser error text.
+        error_kind: Canonical classification of the underlying cause, resolved
+            provider-aware at the raise site. ``None`` when not yet classified.
     """
 
     message: str
@@ -60,6 +66,7 @@ class ReviewExecutionError(AIError):
     step: str | None = None
     completed_chunks: int = 0
     cause_message: str = ""
+    error_kind: ReviewErrorKind | None = None
 
     def __post_init__(self) -> None:
         """Initialize the base exception args from the message field."""
