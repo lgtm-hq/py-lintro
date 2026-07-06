@@ -22,6 +22,10 @@ name: Publish - npm (dry-run)
 
 permissions: {}
 
+concurrency:
+  group: publish-npm-${{ github.event.inputs.release_tag || inputs.release_tag }}
+  cancel-in-progress: false
+
 jobs:
   publish-dry-run:
     name: Package and dry-run publish
@@ -48,6 +52,8 @@ jobs:
 
       - name: Checkout code
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        with:
+          persist-credentials: false
 
       - name: Set up Python
         uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
@@ -57,10 +63,11 @@ jobs:
       - name: Download release binaries
         run: >-
           scripts/ci/npm/download_release_binaries.sh
-          "${{ inputs.release_tag }}"
+          "$RELEASE_TAG"
           "${{ runner.temp }}/npm-binaries"
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_TAG: ${{ inputs.release_tag }}
 
       - name: Stage binaries into npm packages
         run: >-
@@ -68,14 +75,18 @@ jobs:
           --artifacts-dir "${{ runner.temp }}/npm-binaries"
 
       - name: Inject release version into manifests
+        env:
+          RELEASE_TAG: ${{ inputs.release_tag }}
         run: >-
           python scripts/ci/npm/sync_npm_version.py
-          --version "${{ inputs.release_tag }}"
+          --version "$RELEASE_TAG"
 
       - name: Verify manifests are in sync
+        env:
+          RELEASE_TAG: ${{ inputs.release_tag }}
         run: >-
           python scripts/ci/npm/sync_npm_version.py
-          --check --version "${{ inputs.release_tag }}"
+          --check --version "$RELEASE_TAG"
 
       - name: Smoke test launcher (Linux x64)
         run: scripts/ci/npm/smoke_test.sh
