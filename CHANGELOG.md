@@ -21,6 +21,19 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.65.1] - 2026-07-06
+
+### Changed
+
+- **changelog**: wrap release-note lines to satisfy lint gate (#1088) (1180000)
+- **tools**: replace repetitive tool-option type validation with schema-based checks (#1076) (caa0540)
+
+### Fixed
+
+- **mypy**: treat no Python files as a clean skip (#1089) (6164283)
+- **osv_scanner**: treat malformed exit-0 payload as scan error, not clean (#1085) (e544d09)
+- **plugins**: tool option mutation is not safe under parallel/thread execution (#1080) (6fe24b6)
+
 ## [0.65.0] - 2026-07-06
 
 ### Added
