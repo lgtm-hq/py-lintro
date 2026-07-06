@@ -300,7 +300,9 @@ def _runtime_option_is_command_string(*, runtime: str, token: str) -> bool:
 
     Detects ``python``/``python3 -c`` and ``node``/``bun -e``/``--eval`` where the
     following operand is an inline program string rather than a script path, so it
-    must not be matched as an executed file. ``bash``/``sh -c`` payloads are handled
+    must not be matched as an executed file. Attached short-option forms such as
+    ``-c'code'`` or ``-escript`` are covered too, because the runtime still treats
+    the glued operand as inline code. ``bash``/``sh -c`` payloads are handled
     separately because their operand may itself invoke a script path.
 
     Args:
@@ -311,11 +313,11 @@ def _runtime_option_is_command_string(*, runtime: str, token: str) -> bool:
         True when the token switches the runtime into command-string/eval mode.
     """
     if runtime.startswith("python"):
-        return bool(re.fullmatch(r"(?i)-c", token))
+        return bool(re.match(r"(?i)^-c", token))
     if runtime.startswith("node") or runtime == "bun":
         if token.startswith("--"):
             return token[2:].split("=", 1)[0] == "eval"
-        return bool(re.fullmatch(r"(?i)-e", token))
+        return bool(re.match(r"(?i)^-e", token))
     return False
 
 
