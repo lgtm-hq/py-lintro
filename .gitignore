@@ -340,3 +340,5 @@ coverage.json
 
 # act secrets file (DO NOT COMMIT)
 .secrets
+__pycache__/
+*.pyc
