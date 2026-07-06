@@ -83,6 +83,8 @@ jobs:
             objects.githubusercontent.com:443
             pypi.org:443
             files.pythonhosted.org:443
+            raw.githubusercontent.com:443
+            release-assets.githubusercontent.com:443
             uploads.github.com:443
             nuitka.net:443
 
@@ -187,6 +189,8 @@ jobs:
             objects.githubusercontent.com:443
             pypi.org:443
             files.pythonhosted.org:443
+            raw.githubusercontent.com:443
+            release-assets.githubusercontent.com:443
             uploads.github.com:443
             nuitka.net:443
 
