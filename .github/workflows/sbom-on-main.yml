@@ -23,10 +23,6 @@ jobs:
       target-type: dir
       sbom-format: cyclonedx-json
       scan-vulnerabilities: true
-      # Only fail the build on high/critical vulns. Left unset, the reusable
-      # passes an empty fail-on to grype, which then flags "negligible or
-      # higher" — noisy warnings on advisories we can't action.
-      fail-on-severity: high
       create-attestation: true
       tooling-ref: '4aaefe64763b7841b6d92d94dc47185083d34c9a' # v0.46.0
       egress-policy: block
