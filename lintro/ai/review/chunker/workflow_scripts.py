@@ -295,6 +295,30 @@ def _runtime_option_is_terminating(*, runtime: str, token: str) -> bool:
     )
 
 
+def _runtime_option_is_command_string(*, runtime: str, token: str) -> bool:
+    """Return True when a flag makes the runtime treat its operand as inline code.
+
+    Detects ``python``/``python3 -c`` and ``node``/``bun -e``/``--eval`` where the
+    following operand is an inline program string rather than a script path, so it
+    must not be matched as an executed file. ``bash``/``sh -c`` payloads are handled
+    separately because their operand may itself invoke a script path.
+
+    Args:
+        runtime: Lower-cased interpreter name (for example ``python3``).
+        token: The shell token under inspection.
+
+    Returns:
+        True when the token switches the runtime into command-string/eval mode.
+    """
+    if runtime.startswith("python"):
+        return bool(re.fullmatch(r"(?i)-c", token))
+    if runtime.startswith("node") or runtime == "bun":
+        if token.startswith("--"):
+            return token[2:].split("=", 1)[0] == "eval"
+        return bool(re.fullmatch(r"(?i)-e", token))
+    return False
+
+
 def _clustered_runtime_option_needs_next_operand(*, runtime: str, token: str) -> bool:
     """Return True when a clustered short option still needs the next shell token."""
     option_body = token[1:]
@@ -313,15 +337,25 @@ def _clustered_runtime_option_needs_next_operand(*, runtime: str, token: str) ->
     return False
 
 
-def _strip_shell_interpreter_prefix(*, segment: str) -> str:
-    """Skip a leading workflow script runtime and its flags."""
+def _shell_interpreter_scan(*, segment: str) -> tuple[str, bool]:
+    """Scan a leading workflow runtime, returning its tail and command-string mode.
+
+    Args:
+        segment: A shell command segment that may begin with an interpreter.
+
+    Returns:
+        A ``(remaining, is_command_string)`` pair. ``remaining`` is the segment
+        text after the interpreter and its consumed flags; ``is_command_string``
+        is True when a ``-c``/``-e``/``--eval`` inline-code flag was reached, in
+        which case the operand must not be treated as a script path.
+    """
     remaining = segment.strip()
     runtime_match = re.match(
         rf"(?i)^(?P<runtime>{_WORKFLOW_SCRIPT_RUNTIMES})\b",
         remaining,
     )
     if runtime_match is None:
-        return remaining
+        return remaining, False
     runtime = runtime_match.group("runtime").lower()
     remaining = remaining[runtime_match.end() :].lstrip()
     if runtime == "bun":
@@ -338,7 +372,9 @@ def _strip_shell_interpreter_prefix(*, segment: str) -> str:
             pending_operand = False
             continue
         if _runtime_option_is_terminating(runtime=runtime, token=token):
-            return ""
+            return "", False
+        if _runtime_option_is_command_string(runtime=runtime, token=token):
+            return _rest_after_first_shell_token(segment=remaining), True
         if re.match(r"(?i)^-c", token) or re.match(r"(?i)^-s", token):
             break
         if not token.startswith("-"):
@@ -370,6 +406,18 @@ def _strip_shell_interpreter_prefix(*, segment: str) -> str:
         if _clustered_runtime_option_needs_next_operand(runtime=runtime, token=token):
             pending_operand = True
             continue
+    return remaining, False
+
+
+def _strip_shell_interpreter_prefix(*, segment: str) -> str:
+    """Skip a leading workflow script runtime and its flags.
+
+    Returns an empty string when the runtime enters command-string/eval mode so
+    the inline-code operand is never exposed as an executable script path.
+    """
+    remaining, is_command_string = _shell_interpreter_scan(segment=segment)
+    if is_command_string:
+        return ""
     return remaining
 
 
@@ -510,6 +558,38 @@ def _bash_stdin_invocation(*, segment: str) -> bool:
         return False
 
 
+def _interpreter_command_string_invocation(*, segment: str) -> bool:
+    """Return True when a segment runs interpreter inline code, not a script path.
+
+    Detects ``python``/``python3 -c`` and ``node``/``bun -e``/``--eval`` after any
+    ``env``/``VAR=``, ``sudo``/``timeout``, ``uv run``, ``exec``/``command`` and
+    compound-leader wrappers, mirroring the ``bash``/``sh -c`` payload and ``-s``
+    stdin short-circuits. The operand is inline code, so the segment executes no
+    file and must be excluded from workflow script matching.
+
+    Args:
+        segment: A single shell command segment.
+
+    Returns:
+        True when the leading interpreter consumes its operand as inline code.
+    """
+    remaining = segment.strip()
+    while remaining:
+        if _shell_interpreter_scan(segment=remaining)[1]:
+            return True
+        previous = remaining
+        remaining = _strip_leading_shell_prefixes(segment=remaining)
+        remaining = _strip_command_dispatch_prefixes(segment=remaining)
+        if re.match(r"(?i)^uv\s+run\b", remaining):
+            remaining = re.sub(r"(?i)^uv\s+run\b", "", remaining, count=1).lstrip()
+            remaining = _strip_uv_cli_options(segment=remaining)
+        remaining = _strip_shell_dispatch_wrappers(segment=remaining)
+        remaining = _strip_shell_compound_leaders(segment=remaining)
+        if remaining == previous:
+            break
+    return False
+
+
 def _shell_command_string_payload(*, segment: str) -> str | None:
     """Return ``bash``/``sh`` ``-c`` payloads that may execute a script path."""
     stripped = segment.strip()
@@ -618,6 +698,8 @@ def _segment_executes_reference_path(*, segment: str, path: str, cwd: str) -> bo
         return False
     if _bash_stdin_invocation(segment=stripped):
         return False
+    if _interpreter_command_string_invocation(segment=stripped):
+        return False
     payload = _shell_command_string_payload_after_wrappers(segment=stripped)
     if payload is not None:
         return _line_references_path(line=payload, path=path, cwd=cwd)
@@ -703,7 +785,7 @@ def _run_reference_patterns(*, path: str) -> tuple[re.Pattern[str], ...]:
 
 
 def _run_line_reference_surface(*, line: str) -> str:
-    """Return a run line safe for regex matching (hide ``-c`` payload text)."""
+    """Return a run line safe for regex matching (hide inline-code payload text)."""
     single_run = _single_run_command(line=line)
     if single_run is None:
         return line
@@ -711,6 +793,8 @@ def _run_line_reference_surface(*, line: str) -> str:
     if command is None:
         return line
     if _shell_command_string_payload_after_wrappers(segment=command) is not None:
+        return line[: single_run.start(1)]
+    if _interpreter_command_string_invocation(segment=command):
         return line[: single_run.start(1)]
     return line
 
@@ -732,7 +816,14 @@ def _line_starts_multiline_run_block(*, line: str) -> bool:
 
 
 def _runtime_command_executes_script(*, command: str) -> bool:
-    """Return False when a runtime flag terminates before executing a script."""
+    """Return False when a runtime flag terminates before executing a script.
+
+    Command-string/eval invocations (``python -c``, ``node -e``) do execute code,
+    so they are reported as executing here; per-segment matching still excludes the
+    inline-code operand from being grouped as a referenced script.
+    """
+    if _interpreter_command_string_invocation(segment=command.strip()):
+        return True
     remaining = _strip_run_command_prefix(segment=command.strip())
     return bool(remaining.strip())
 
