@@ -12,13 +12,73 @@ from lintro.enums.group_by import normalize_group_by
 from lintro.enums.output_format import OutputFormat, normalize_output_format
 from lintro.plugins.registry import ToolRegistry
 from lintro.tools import tool_manager
-from lintro.utils.config import load_post_checks_config
+from lintro.utils.config import load_module_size_config, load_post_checks_config
+from lintro.utils.module_size import (
+    find_oversized_modules,
+    resolve_module_size_settings,
+)
 from lintro.utils.output import format_tool_output
 from lintro.utils.unified_config import UnifiedConfigManager
 
 if TYPE_CHECKING:
     from lintro.models.core.tool_result import ToolResult
     from lintro.utils.console import ThreadSafeConsoleLogger
+
+
+def _run_module_size_gate(
+    *,
+    paths: list[str],
+    exclude: str | None,
+    include_venv: bool,
+    json_output_mode: bool,
+    logger: ThreadSafeConsoleLogger,
+) -> None:
+    """Run the warn-level module-size gate over the scanned paths.
+
+    This gate never fails the build. It emits a warning for any Python module
+    that exceeds the configured threshold and is not baselined. See
+    ``lintro/utils/module_size.py`` for the ratchet-down plan.
+
+    Args:
+        paths: Paths being linted.
+        exclude: Additional comma-separated exclude patterns from the CLI.
+        include_venv: Whether virtual-environment directories are included.
+        json_output_mode: Whether output is JSON (suppresses console warnings).
+        logger: Logger instance for console output.
+    """
+    cfg = load_module_size_config()
+    if not bool(cfg.get("enabled", True)):
+        return
+
+    threshold, baseline, base_excludes = resolve_module_size_settings(config=cfg)
+    exclude_patterns: list[str] = list(base_excludes)
+    if exclude:
+        exclude_patterns.extend(p.strip() for p in exclude.split(",") if p.strip())
+
+    violations = find_oversized_modules(
+        paths=paths,
+        threshold=threshold,
+        baseline=baseline,
+        exclude_patterns=tuple(exclude_patterns),
+        include_venv=include_venv,
+    )
+
+    if not violations or json_output_mode:
+        return
+
+    logger.console_output(
+        text=(
+            f"Warning: {len(violations)} module(s) exceed the "
+            f"{threshold}-line size limit (warn-level, non-blocking):"
+        ),
+        color="yellow",
+    )
+    for module in violations:
+        logger.console_output(
+            text=f"  {module.path} ({module.line_count} lines)",
+            color="yellow",
+        )
+    logger.console_output(text="")
 
 
 def execute_post_checks(
@@ -208,5 +268,15 @@ def execute_post_checks(
                             issues_count=1,
                         ),
                     )
+
+    # Warn-level module-size gate (issue #1052). Runs independently of the
+    # configured post-check tools and never contributes to failure counts.
+    _run_module_size_gate(
+        paths=paths,
+        exclude=exclude,
+        include_venv=include_venv,
+        json_output_mode=json_output_mode,
+        logger=logger,
+    )
 
     return total_issues, total_fixed, total_remaining
