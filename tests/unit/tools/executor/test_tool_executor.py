@@ -652,3 +652,174 @@ def test_executor_fmt_without_dry_run_invokes_fix(
     assert_that(tool.checked).is_false()
     texts = _console_texts(fake_logger)
     assert_that(texts).does_not_contain("Dry run - no files modified")
+
+
+def test_executor_dry_run_excludes_non_fixable_issues(
+    monkeypatch: pytest.MonkeyPatch,
+    fake_logger: Any,
+) -> None:
+    """Dry-run counts only auto-fixable issues, not all check diagnostics.
+
+    A check-mode result carrying one fixable and one non-fixable issue must
+    report a single would-fix issue and exit 1.
+
+    Args:
+        monkeypatch: Pytest monkeypatch fixture.
+        fake_logger: FakeLogger fixture.
+    """
+    from lintro.parsers.ruff.ruff_issue import RuffIssue
+
+    fixable = RuffIssue(
+        file="a.py",
+        line=1,
+        column=8,
+        message="`os` imported but unused",
+        code="F401",
+        fixable=True,
+    )
+    non_fixable = RuffIssue(
+        file="a.py",
+        line=2,
+        column=1,
+        message="ambiguous variable name",
+        code="E741",
+        fixable=False,
+    )
+    _stub_logger(monkeypatch, fake_logger)
+    # Ruff reports success=False when it finds any diagnostics; dry-run must
+    # not let that alone force a failure exit.
+    result = ToolResult(
+        name="ruff",
+        success=False,
+        output="x",
+        issues_count=2,
+        issues=[fixable, non_fixable],
+    )
+    _setup_tool_manager(
+        monkeypatch,
+        {"ruff": CallTrackingTool("ruff", can_fix=True, result=result)},
+    )
+
+    code = run_lint_tools_simple(
+        action="fmt",
+        paths=["."],
+        tools="all",
+        tool_options=None,
+        exclude=None,
+        include_venv=False,
+        group_by="auto",
+        output_format="grid",
+        verbose=False,
+        raw_output=False,
+        dry_run=True,
+    )
+
+    assert_that(code).is_equal_to(1)
+    texts = _console_texts(fake_logger)
+    assert_that(texts).contains("Would fix 1 issue in")
+
+
+def test_executor_dry_run_only_non_fixable_exits_zero(
+    monkeypatch: pytest.MonkeyPatch,
+    fake_logger: Any,
+) -> None:
+    """Dry-run with only non-fixable issues reports nothing and exits 0.
+
+    Even though the tool returns ``success=False`` (it found a diagnostic),
+    dry-run must exit 0 because a real fmt run would change nothing.
+
+    Args:
+        monkeypatch: Pytest monkeypatch fixture.
+        fake_logger: FakeLogger fixture.
+    """
+    from lintro.parsers.ruff.ruff_issue import RuffIssue
+
+    non_fixable = RuffIssue(
+        file="a.py",
+        line=1,
+        column=1,
+        message="ambiguous variable name",
+        code="E741",
+        fixable=False,
+    )
+    _stub_logger(monkeypatch, fake_logger)
+    result = ToolResult(
+        name="ruff",
+        success=False,
+        output="x",
+        issues_count=1,
+        issues=[non_fixable],
+    )
+    _setup_tool_manager(
+        monkeypatch,
+        {"ruff": CallTrackingTool("ruff", can_fix=True, result=result)},
+    )
+
+    code = run_lint_tools_simple(
+        action="fmt",
+        paths=["."],
+        tools="all",
+        tool_options=None,
+        exclude=None,
+        include_venv=False,
+        group_by="auto",
+        output_format="grid",
+        verbose=False,
+        raw_output=False,
+        dry_run=True,
+    )
+
+    assert_that(code).is_equal_to(0)
+    texts = _console_texts(fake_logger)
+    assert_that(texts).contains("Nothing to fix")
+    assert_that(texts).does_not_contain("Would fix")
+
+
+def test_executor_dry_run_treats_formatter_issues_without_flag_as_fixable(
+    monkeypatch: pytest.MonkeyPatch,
+    fake_logger: Any,
+) -> None:
+    """Formatter issues lacking a ``fixable`` attribute count as would-fix.
+
+    Pure-formatter parsers (e.g. prettier) do not define a ``fixable`` field.
+    Every diagnostic such a tool emits in check mode is a reformat that fmt
+    would apply, so it must be counted.
+
+    Args:
+        monkeypatch: Pytest monkeypatch fixture.
+        fake_logger: FakeLogger fixture.
+    """
+    from lintro.parsers.prettier.prettier_issue import PrettierIssue
+
+    issue = PrettierIssue(file="a.js", line=1, column=1, message="Would reformat")
+    assert_that(hasattr(issue, "fixable")).is_false()
+    _stub_logger(monkeypatch, fake_logger)
+    result = ToolResult(
+        name="prettier",
+        success=False,
+        output="x",
+        issues_count=1,
+        issues=[issue],
+    )
+    _setup_tool_manager(
+        monkeypatch,
+        {"prettier": CallTrackingTool("prettier", can_fix=True, result=result)},
+    )
+
+    code = run_lint_tools_simple(
+        action="fmt",
+        paths=["."],
+        tools="all",
+        tool_options=None,
+        exclude=None,
+        include_venv=False,
+        group_by="auto",
+        output_format="grid",
+        verbose=False,
+        raw_output=False,
+        dry_run=True,
+    )
+
+    assert_that(code).is_equal_to(1)
+    texts = _console_texts(fake_logger)
+    assert_that(texts).contains("Would fix 1 issue in")
