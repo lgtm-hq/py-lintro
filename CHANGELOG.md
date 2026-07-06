@@ -21,6 +21,12 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.69.0] - 2026-07-06
+
+### Added
+
+- **install**: distribute lintro as npm package via platform binaries (#1141) (15078fb)
+
 ## [0.68.0] - 2026-07-06
 
 ### Added
