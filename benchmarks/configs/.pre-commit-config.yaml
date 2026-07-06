@@ -1,0 +1,15 @@
+# Pinned pre-commit configuration used for the comparative benchmark.
+#
+# The hooks intentionally mirror the sequential-native and lintro scenarios
+# (ruff check + ruff format) so the comparison isolates orchestration overhead
+# rather than differing tool selection. Versions are pinned for reproducibility;
+# bump them deliberately and re-run the benchmark when you do.
+minimum_pre_commit_version: "4.0.0"
+repos:
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.15.9
+    hooks:
+      - id: ruff
+        args: ["check"]
+      - id: ruff-format
+        args: ["--check"]
