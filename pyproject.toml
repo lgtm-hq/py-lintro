@@ -262,7 +262,6 @@ threshold = 800
 baseline = [
   "lintro/ai/review/orchestrator.py",
   "lintro/utils/tool_executor.py",
-  "lintro/ai/review/chunker/workflow_scripts.py",
   "lintro/cli_utils/commands/doctor.py",
   "lintro/tools/definitions/tsc.py",
   "lintro/ai/review/checklist_builtin.py",
