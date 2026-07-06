@@ -370,15 +370,17 @@ def classify_provider_error(*, provider: str, error: Exception) -> ReviewErrorKi
     if isinstance(cause_exc, AIRateLimitError):
         return ReviewErrorKind.RATE_LIMITED
 
+    # A bare ``ValueError`` cause is a lintro-side parse/validation failure of
+    # the model response, not a provider transport error — surface it as such
+    # rather than misdirecting the user to check provider status. This runs
+    # before the shared text-signature heuristics so an incidental provider-ish
+    # word in the parse message (e.g. "timed out", "429") cannot misclassify it.
+    if isinstance(cause_exc, ValueError):
+        return ReviewErrorKind.INVALID_RESPONSE
+
     for kind in _KIND_PRIORITY:
         matcher = _SHARED_SIGNATURES.get(kind)
         if matcher is not None and matcher.matches(status=status, text=text):
             return kind
-
-    # A bare ``ValueError`` cause is a lintro-side parse/validation failure of
-    # the model response, not a provider transport error — surface it as such
-    # rather than misdirecting the user to check provider status.
-    if isinstance(cause_exc, ValueError):
-        return ReviewErrorKind.INVALID_RESPONSE
 
     return ReviewErrorKind.UNKNOWN
