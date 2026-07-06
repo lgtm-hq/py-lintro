@@ -130,6 +130,7 @@ packages = [
   "lintro.ai.prompts",
   "lintro.ai.providers",
   "lintro.ai.review",
+  "lintro.ai.review.checklist",
   "lintro.ai.review.chunker",
   "lintro.ai.review.context",
   "lintro.ai.review.enums",
@@ -190,6 +191,7 @@ packages = [
 
 [tool.setuptools.package-data]
 lintro = ["tools/*.json"]
+"lintro.ai.review.checklist" = ["corpus/*.yaml"]
 
 [tool.ruff]
 line-length = 88

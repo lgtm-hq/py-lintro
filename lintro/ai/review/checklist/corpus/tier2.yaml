@@ -1,0 +1,351 @@
+# Tier 2 built-in review checklist corpus.
+# Domain/language-triggered items (IDs 100+).
+# One row per ChecklistItem; loaded by lintro.ai.review.checklist.loader.
+- id: 100
+  tier: 2
+  category: logic-bug
+  domains: []
+  languages: []
+  question: "Are failures handled consistently across all branches (no mixed throw/return/silent paths)?"
+- id: 101
+  tier: 2
+  category: logic-bug
+  domains: [source]
+  languages: []
+  question: "Are connections, file handles, streams, or other resources closed on every exit path?"
+- id: 102
+  tier: 2
+  category: logic-bug
+  domains: []
+  languages: []
+  question: "Does concurrent or async code have race conditions, deadlocks, or missing cleanup?"
+- id: 103
+  tier: 2
+  category: logic-bug
+  domains: []
+  languages: [rust]
+  question: "Does library code use .unwrap() or bare .expect() without a documented invariant?"
+- id: 104
+  tier: 2
+  category: logic-bug
+  domains: []
+  languages: [rust]
+  question: "Does an unsafe block lack a // SAFETY: justification for soundness?"
+- id: 105
+  tier: 2
+  category: logic-bug
+  domains: []
+  languages: [rust]
+  question: "Can a caller ignore a return value that must not be ignored (missing #[must_use] or equivalent)?"
+- id: 106
+  tier: 2
+  category: logic-bug
+  domains: []
+  languages: [javascript, jsx, ts, tsx]
+  question: "Does a catch block use any and fail to narrow before handling?"
+- id: 107
+  tier: 2
+  category: logic-bug
+  domains: []
+  languages: [javascript, jsx, ts, tsx]
+  question: "Does an empty catch block swallow errors without logging or rethrow?"
+- id: 108
+  tier: 2
+  category: logic-bug
+  domains: []
+  languages: []
+  question: "Are there unreachable branches or dead code paths that suggest incorrect control flow?"
+- id: 109
+  tier: 2
+  category: logic-bug
+  domains: [shell]
+  languages: []
+  question: "Does shell script logic lack set -euo pipefail (or equivalent) where failures should abort?"
+- id: 110
+  tier: 2
+  category: logic-bug
+  domains: [e2e]
+  languages: [javascript, jsx, ts, tsx]
+  question: "Do E2E tests use fixed waitForTimeout() instead of condition-based waiting (risk of flaky false passes/fails)?"
+- id: 111
+  tier: 2
+  category: logic-bug
+  domains: [e2e]
+  languages: [javascript, jsx, ts, tsx]
+  question: "Do E2E tests read DOM state once without auto-retrying assertions (timing-dependent false results)?"
+- id: 112
+  tier: 2
+  category: logic-bug
+  domains: []
+  languages: [bats]
+  question: "Do shell tests call real network/external commands instead of mocks?"
+- id: 113
+  tier: 2
+  category: logic-bug
+  domains: []
+  languages: [bats]
+  question: "Do shell tests assume Bash 4+ features without skipping on Bash 3.2?"
+- id: 114
+  tier: 2
+  category: security
+  domains: []
+  languages: []
+  question: "Are PII, secrets, or tokens logged, returned in errors, or exposed in API responses?"
+- id: 115
+  tier: 2
+  category: silent-failure
+  domains: [test]
+  languages: [python]
+  question: "Does a test assert field == \"literal\" where that literal is also defined in production code (wiring test that drifts silently)?"
+- id: 116
+  tier: 2
+  category: silent-failure
+  domains: [api]
+  languages: [ts, tsx]
+  question: "Does a non-strict schema (z.object) silently accept unexpected API fields?"
+- id: 117
+  tier: 2
+  category: silent-failure
+  domains: [api]
+  languages: [ts, tsx]
+  question: "Are duplicate type definitions maintained separately from validation schemas (can drift undetected)?"
+- id: 118
+  tier: 2
+  category: silent-failure
+  domains: [ci]
+  languages: []
+  question: "Does CI verify two hand-maintained files agree instead of running a generator with --check?"
+- id: 119
+  tier: 2
+  category: silent-failure
+  domains: [ci]
+  languages: []
+  question: "Does an automation hook (e.g. Renovate post-upgrade) silently fail while CI is supposed to catch drift—is the --check gate still present?"
+- id: 120
+  tier: 2
+  category: silent-failure
+  domains: [test]
+  languages: []
+  question: "Do bulk/planned-ahead tests assert signatures or data shapes instead of observable behavior?"
+- id: 121
+  tier: 2
+  category: silent-failure
+  domains: [test]
+  languages: []
+  question: "Would renaming an internal function break tests even though user-visible behavior is unchanged?"
+- id: 122
+  tier: 2
+  category: silent-failure
+  domains: []
+  languages: []
+  question: "Are lint suppressions (noqa, type: ignore, allow(dead_code)) added without reviewing the underlying risk?"
+- id: 123
+  tier: 2
+  category: silent-failure
+  domains: [test]
+  languages: [javascript, jsx, ts, tsx]
+  question: "Does fixture cleanup swallow delete/teardown errors (.catch(() => {})) hiding partial test pollution?"
+- id: 124
+  tier: 2
+  category: integration
+  domains: [ci]
+  languages: []
+  question: "Is substantial shell logic inlined in workflow YAML instead of a dedicated script file?"
+- id: 125
+  tier: 2
+  category: integration
+  domains: [ci, shell]
+  languages: []
+  question: "Are CI scripts referenced from workflows missing a shebang or executable bit?"
+- id: 126
+  tier: 2
+  category: integration
+  domains: [test, api]
+  languages: []
+  question: "Does HTTP request logic live in fixtures instead of a dedicated client layer?"
+- id: 127
+  tier: 2
+  category: integration
+  domains: [api]
+  languages: [javascript, jsx, ts, tsx]
+  question: "Are API base paths duplicated across clients instead of centralized?"
+- id: 128
+  tier: 2
+  category: integration
+  domains: [e2e]
+  languages: [javascript, jsx, ts, tsx]
+  question: "Do E2E tests share mutable global state across iterations (order-dependent failures)?"
+- id: 129
+  tier: 2
+  category: integration
+  domains: [e2e]
+  languages: [javascript, jsx, ts, tsx]
+  question: "Are browser contexts/fixtures left open without teardown (context.close())?"
+- id: 130
+  tier: 2
+  category: integration
+  domains: []
+  languages: [bats]
+  question: "Do shell tests leave temp files or env changes behind (missing teardown)?"
+- id: 131
+  tier: 2
+  category: integration
+  domains: []
+  languages: []
+  question: "Are pure functions unit-tested while the bug-prone call-site wiring has no integration coverage?"
+- id: 132
+  tier: 2
+  category: integration
+  domains: [test]
+  languages: []
+  question: "Do tests hit the wrong layer (e.g. DB directly instead of the public API under test)?"
+- id: 133
+  tier: 2
+  category: integration
+  domains: [source]
+  languages: [javascript, jsx, ts, tsx, python, rust]
+  question: "Does new or changed production code lack corresponding test updates in the same diff?"
+- id: 134
+  tier: 2
+  category: test-gap
+  domains: [source]
+  languages: [javascript, jsx, ts, tsx, python, rust]
+  question: "Does new or changed logic lack tests covering the modified paths?"
+- id: 135
+  tier: 2
+  category: test-gap
+  domains: []
+  languages: []
+  question: "Are edge cases and failure modes (empty input, invalid input, missing files) untested?"
+- id: 136
+  tier: 2
+  category: test-gap
+  domains: [test]
+  languages: [javascript, jsx, ts, tsx]
+  question: "Are error-response tests missing or only checking one field per assertion (hiding partial regressions)?"
+- id: 137
+  tier: 2
+  category: test-gap
+  domains: [test, api]
+  languages: [javascript, jsx, ts, tsx, python]
+  question: "Are security edge cases untested (injection payloads, malformed input, oversized payloads)?"
+- id: 138
+  tier: 2
+  category: test-gap
+  domains: [test]
+  languages: [javascript, jsx, ts, tsx, bats, python]
+  question: "Are parameterized cases missing where multiple inputs share the same behavior rule?"
+- id: 139
+  tier: 2
+  category: test-gap
+  domains: [test]
+  languages: [bats]
+  question: "Are tests non-deterministic (timing, network, shared state, random without seed)?"
+- id: 140
+  tier: 2
+  category: test-gap
+  domains: [test]
+  languages: [javascript, jsx, ts, tsx]
+  question: "Does the test name describe something different from what is actually asserted?"
+- id: 141
+  tier: 2
+  category: test-gap
+  domains: [test]
+  languages: [rust]
+  question: "Are expected panics/failures tested with #[should_panic] or equivalent where invalid input must fail?"
+- id: 142
+  tier: 2
+  category: test-gap
+  domains: [shell]
+  languages: [bats]
+  question: "Do exit-code paths in shell scripts lack assert_failure / status checks?"
+- id: 143
+  tier: 2
+  category: contract-drift
+  domains: [test]
+  languages: [python]
+  question: "Do parametrize/test IDs embed mutable version or data values that will churn on every bump?"
+- id: 144
+  tier: 2
+  category: contract-drift
+  domains: [e2e]
+  languages: [javascript, jsx, ts, tsx]
+  question: "Are E2E/UI tests hard-coding labels, error strings, or IDs that should come from shared constants/enums?"
+- id: 145
+  tier: 2
+  category: contract-drift
+  domains: []
+  languages: []
+  question: "Does a public interface change lack updates to callers, schemas, or contract tests?"
+- id: 146
+  tier: 2
+  category: security
+  domains: []
+  languages: []
+  question: "Are credentials, API keys, tokens, or passwords hardcoded in source?"
+- id: 147
+  tier: 2
+  category: security
+  domains: [source, api, shell]
+  languages: [javascript, jsx, ts, tsx, go, java, python, rust]
+  question: "Is user input interpolated into SQL/command strings instead of parameterized/safe APIs?"
+- id: 148
+  tier: 2
+  category: security
+  domains: [shell]
+  languages: [python]
+  question: "Is subprocess invoked with shell interpretation enabled (shell=True or equivalent)?"
+- id: 149
+  tier: 2
+  category: security
+  domains: [api]
+  languages: [javascript, jsx, ts, tsx, go, java, python, rust]
+  question: "Is input validated and sanitized at system boundaries (HTTP handlers, CLI args, file uploads)?"
+- id: 150
+  tier: 2
+  category: security
+  domains: [ci]
+  languages: []
+  question: "Are GitHub Actions referenced by mutable version tags instead of pinned commit SHAs?"
+- id: 151
+  tier: 2
+  category: security
+  domains: []
+  languages: [python]
+  question: "Does a # nosec / security suppression lack an inline justification on the flagged line?"
+- id: 152
+  tier: 2
+  category: breaking-change
+  domains: []
+  languages: [javascript, jsx, ts, tsx, python, rust]
+  question: "Does removing or renaming exported/public symbols lack migration or caller updates?"
+- id: 153
+  tier: 2
+  category: breaking-change
+  domains: [api]
+  languages: []
+  question: "Does a schema or API response change break strict contract tests or downstream parsers?"
+- id: 154
+  tier: 2
+  category: code-smell
+  domains: []
+  languages: [javascript, jsx, ts, tsx, python, rust]
+  question: "Is type safety bypassed with any, unchecked casts, or broad suppressions on changed lines?"
+- id: 155
+  tier: 2
+  category: code-smell
+  domains: [e2e]
+  languages: [javascript, jsx, ts, tsx]
+  question: "Do E2E tests rely on fragile CSS selectors (#id, deep div > button) likely to break on unrelated UI changes?"
+- id: 156
+  tier: 2
+  category: architecture
+  domains: []
+  languages: []
+  question: "Is the module interface nearly as complex as its implementation (shallow module)?"
+- id: 157
+  tier: 2
+  category: architecture
+  domains: [test]
+  languages: []
+  question: "Are tests written against implementation steps rather than user-/caller-visible behavior?"
