@@ -1,4 +1,4 @@
-"use strict";
+'use strict';
 
 /**
  * Exports the absolute path to the platform-specific lintro binary.
@@ -8,6 +8,6 @@
  * on this package directly; install the `lintro` meta-package instead.
  */
 
-const path = require("path");
+const path = require('path');
 
-module.exports.path = path.join(__dirname, "bin", "lintro");
+module.exports.path = path.join(__dirname, 'bin', 'lintro');
