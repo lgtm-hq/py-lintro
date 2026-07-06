@@ -205,7 +205,10 @@ class ThreadSafeConsoleLogger:
         self._print_summary_table(action=action, tool_results=tool_results)
 
         # Totals line and ASCII art
-        from lintro.utils.summary_tables import count_affected_files
+        from lintro.utils.summary_tables import (
+            count_affected_files,
+            count_fixable_issues,
+        )
 
         affected_files = count_affected_files(tool_results)
 
@@ -296,6 +299,7 @@ class ThreadSafeConsoleLogger:
                 severity_errors=sev_errors,
                 severity_warnings=sev_warnings,
                 severity_info=sev_info,
+                total_fixable=count_fixable_issues(tool_results),
             )
             self._print_ascii_art(total_issues=total_for_art)
             logger.debug(
@@ -335,6 +339,7 @@ class ThreadSafeConsoleLogger:
         severity_info: int = 0,
         total_ai_applied: int = 0,
         total_ai_verified: int = 0,
+        total_fixable: int = 0,
     ) -> None:
         """Print the totals summary table for the run.
 
@@ -349,6 +354,7 @@ class ThreadSafeConsoleLogger:
             severity_info: Number of issues at INFO severity.
             total_ai_applied: Total number of AI-applied fixes (FIX mode).
             total_ai_verified: Total number of AI-resolved fixes (FIX mode).
+            total_fixable: Number of issues flagged as auto-fixable (CHECK mode).
         """
         from lintro.utils.summary_tables import print_totals_table
 
@@ -364,6 +370,7 @@ class ThreadSafeConsoleLogger:
             severity_info=severity_info,
             total_ai_applied=total_ai_applied,
             total_ai_verified=total_ai_verified,
+            total_fixable=total_fixable,
         )
 
     def _print_final_status(
