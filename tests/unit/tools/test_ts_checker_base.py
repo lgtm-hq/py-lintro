@@ -164,6 +164,157 @@ def test_find_tsconfig_tsc_ignores_app_config(tmp_path: Path) -> None:
 
 
 # =============================================================================
+# Config preference on the check() path (issue #1112)
+# =============================================================================
+
+
+def _project_paths_from_check(
+    *,
+    plugin: TypeScriptCheckerPlugin,
+    paths: list[str],
+) -> list[str]:
+    """Run ``check`` and return the ``--project`` path from every checker call.
+
+    The checker subprocess is mocked to always succeed while recording the
+    commands it is asked to run, so the tsconfig each invocation targets can
+    be observed without executing a real compiler.
+
+    Args:
+        plugin: The checker plugin under test.
+        paths: Paths to pass to ``check``.
+
+    Returns:
+        The ``--project`` argument from each recorded subprocess command,
+        in call order.
+    """
+    calls: list[list[str]] = []
+
+    def _record(*, cmd: list[str], timeout: int, cwd: str) -> tuple[bool, str]:
+        calls.append(cmd)
+        return (True, "")
+
+    with patch(
+        "lintro.plugins.execution_preparation.verify_tool_version",
+        return_value=None,
+    ):
+        with patch.object(plugin, "_run_subprocess", side_effect=_record):
+            plugin.check(paths, {})
+
+    return [
+        cmd[cmd.index("--project") + 1] for cmd in calls if "--project" in cmd
+    ]
+
+
+@pytest.fixture
+def both_configs_project(tmp_path: Path) -> Path:
+    """A project directory containing both tsconfig.json and tsconfig.app.json.
+
+    Mirrors a Vite Vue layout: vue-tsc should prefer ``tsconfig.app.json``
+    while tsc uses ``tsconfig.json``. Both configs carry explicit ``include``
+    scoping so the checker runs ``-p`` against the config directly (no temp
+    tsconfig), making the selected config observable in the command.
+
+    Args:
+        tmp_path: Temporary directory for the fixture project.
+
+    Returns:
+        Path to the project root containing both configs and source files.
+    """
+    (tmp_path / "tsconfig.json").write_text('{"include": ["*.ts"]}')
+    (tmp_path / "tsconfig.app.json").write_text('{"include": ["*.vue", "*.ts"]}')
+    (tmp_path / "main.ts").write_text("export const x: number = 1;\n")
+    (tmp_path / "App.vue").write_text("<template><div/></template>\n")
+    return tmp_path
+
+
+def test_check_vue_tsc_prefers_app_config_over_generic_discovery(
+    both_configs_project: Path,
+) -> None:
+    """vue-tsc's ``check()`` selects tsconfig.app.json when both configs exist.
+
+    Regression test for issue #1112: generic discovery previously bypassed
+    the VueTscPlugin ``tsconfig.app.json`` preference on the check() path.
+
+    Args:
+        both_configs_project: Fixture project with both tsconfigs present.
+    """
+    project_paths = _project_paths_from_check(
+        plugin=VueTscPlugin(),
+        paths=[str(both_configs_project)],
+    )
+
+    expected = (both_configs_project / "tsconfig.app.json").resolve()
+    assert_that(project_paths).is_length(1)
+    assert_that(Path(project_paths[0]).resolve()).is_equal_to(expected)
+
+
+def test_check_tsc_uses_plain_config_when_both_present(
+    both_configs_project: Path,
+) -> None:
+    """tsc's ``check()`` selects tsconfig.json even when tsconfig.app.json exists.
+
+    tsc declares only ``tsconfig.json`` as a candidate, so the #1112 fix must
+    not change its selection.
+
+    Args:
+        both_configs_project: Fixture project with both tsconfigs present.
+    """
+    project_paths = _project_paths_from_check(
+        plugin=TscPlugin(),
+        paths=[str(both_configs_project)],
+    )
+
+    expected = (both_configs_project / "tsconfig.json").resolve()
+    assert_that(project_paths).is_length(1)
+    assert_that(Path(project_paths[0]).resolve()).is_equal_to(expected)
+
+
+def test_preferred_candidate_tsconfig_vue_selects_app_config(
+    tmp_path: Path,
+) -> None:
+    """vue-tsc resolves tsconfig.app.json as its preferred candidate.
+
+    Args:
+        tmp_path: Temporary directory holding both configs.
+    """
+    (tmp_path / "tsconfig.json").write_text("{}")
+    (tmp_path / "tsconfig.app.json").write_text("{}")
+
+    result = VueTscPlugin()._preferred_candidate_tsconfig(tmp_path)
+
+    assert_that(result).is_equal_to((tmp_path / "tsconfig.app.json").resolve())
+
+
+def test_preferred_candidate_tsconfig_vue_none_without_app_config(
+    tmp_path: Path,
+) -> None:
+    """vue-tsc defers to generic discovery when only tsconfig.json exists.
+
+    Args:
+        tmp_path: Temporary directory holding only tsconfig.json.
+    """
+    (tmp_path / "tsconfig.json").write_text("{}")
+
+    result = VueTscPlugin()._preferred_candidate_tsconfig(tmp_path)
+
+    assert_that(result).is_none()
+
+
+def test_preferred_candidate_tsconfig_tsc_always_none(tmp_path: Path) -> None:
+    """tsc never short-circuits discovery, even with tsconfig.app.json present.
+
+    Args:
+        tmp_path: Temporary directory holding both configs.
+    """
+    (tmp_path / "tsconfig.json").write_text("{}")
+    (tmp_path / "tsconfig.app.json").write_text("{}")
+
+    result = TscPlugin()._preferred_candidate_tsconfig(tmp_path)
+
+    assert_that(result).is_none()
+
+
+# =============================================================================
 # Framework detection (tsc-only delta)
 # =============================================================================
 

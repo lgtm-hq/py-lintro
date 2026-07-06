@@ -171,6 +171,36 @@ class TypeScriptCheckerPlugin(BaseToolPlugin):
                 return tsconfig
         return None
 
+    def _preferred_candidate_tsconfig(self, discovery_root: Path) -> Path | None:
+        """Find a subclass-preferred tsconfig ahead of generic discovery.
+
+        Iterates ``_tsconfig_candidates`` in declared order and returns the
+        first candidate that exists directly in *discovery_root* and is listed
+        ahead of the generic ``tsconfig.json`` default. This lets a subclass
+        such as :class:`~lintro.tools.definitions.vue_tsc.VueTscPlugin` — which
+        prefers ``tsconfig.app.json`` for Vite Vue projects — win over generic
+        multi-project discovery on the ``check()`` path (issue #1112).
+
+        Candidates from ``tsconfig.json`` onward are intentionally ignored so
+        that generic discovery (``references``, monorepo directory walking)
+        stays in charge of the default config. Tools whose only candidate is
+        ``tsconfig.json`` (e.g. ``tsc``) therefore never short-circuit here,
+        keeping their behavior unchanged.
+
+        Args:
+            discovery_root: Directory scanned for a preferred tsconfig.
+
+        Returns:
+            Path to the preferred tsconfig if one exists, otherwise ``None``.
+        """
+        for candidate in self._tsconfig_candidates:
+            if candidate == "tsconfig.json":
+                break
+            candidate_path = discovery_root / candidate
+            if candidate_path.exists():
+                return candidate_path.resolve()
+        return None
+
     def _create_temp_tsconfig(
         self,
         base_tsconfig: Path,
@@ -389,6 +419,28 @@ class TypeScriptCheckerPlugin(BaseToolPlugin):
         # Compute the discovery root (per-tool: cwd by default, common
         # ancestor of input paths for tsc's multi-package support).
         discovery_root = self._compute_discovery_root(cwd_path, paths)
+
+        # Respect the subclass's preferred tsconfig ordering before generic
+        # discovery. A subclass (e.g. VueTscPlugin) may declare a
+        # framework-specific config such as ``tsconfig.app.json`` ahead of
+        # ``tsconfig.json``; when that preferred config is present in the
+        # discovery root it must win over generic discovery, which would
+        # otherwise select ``tsconfig.json`` and bypass the Vue preference
+        # (issue #1112). ``tsc`` — whose sole candidate is ``tsconfig.json`` —
+        # is unaffected, so plain projects and monorepos are unchanged.
+        preferred_tsconfig = self._preferred_candidate_tsconfig(discovery_root)
+        if preferred_tsconfig is not None:
+            logger.debug(
+                "[{}] Using preferred tsconfig ahead of discovery: {}",
+                self._tool_label,
+                preferred_tsconfig,
+            )
+            return self._check_single_project(
+                ctx,
+                cwd_path,
+                merged_options,
+                discovered_tsconfig=preferred_tsconfig,
+            )
 
         # Discover tsconfigs for multi-project support
         tsconfigs = discover_tsconfigs(discovery_root, self.exclude_patterns)
