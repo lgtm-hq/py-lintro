@@ -20,6 +20,7 @@ from unittest.mock import patch
 import pytest
 from assertpy import assert_that
 
+from lintro.models.core.tool_result import ToolResult
 from lintro.tools.definitions._ts_checker_base import TypeScriptCheckerPlugin
 from lintro.tools.definitions.tsc import TscPlugin
 from lintro.tools.definitions.vue_tsc import VueTscPlugin
@@ -30,7 +31,7 @@ def _run_check(
     plugin: TscPlugin | VueTscPlugin,
     paths: list[str],
     subprocess_return: tuple[bool, str],
-) -> object:
+) -> ToolResult:
     """Run a plugin ``check`` with the subprocess and version check mocked.
 
     Args:
