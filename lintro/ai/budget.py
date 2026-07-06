@@ -46,15 +46,15 @@ class CostBudget:
         return max(0.0, self.max_cost_usd - self.spent)
 
     def check(self) -> None:
-        """Raise AIError if the budget has been exceeded."""
+        """Raise ``AICostBudgetExceededError`` if the budget has been exceeded."""
         with self._lock:
             if self.max_cost_usd is not None and self._spent >= self.max_cost_usd:
                 self._raise_exceeded()
 
     def _raise_exceeded(self) -> None:
-        from lintro.ai.exceptions import AIError
+        from lintro.ai.exceptions import AICostBudgetExceededError
 
-        raise AIError(
+        raise AICostBudgetExceededError(
             f"AI cost budget exceeded: ${self._spent:.4f} spent, "
             f"limit is ${self.max_cost_usd:.2f}",
         )
