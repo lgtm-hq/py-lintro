@@ -441,33 +441,38 @@ def _format_findings_section(
     lines = ["", f"### Findings ({len(findings)})"]
     used = 0
     for index, finding in enumerate(ordered):
-        mappable = _is_diff_mappable(finding=finding, diff_lines=diff_lines)
         block = _finding_block(
             finding=finding,
             checklist_display=checklist_display,
             question_map=question_map,
         )
         block_len = len("\n".join(block))
-        # Only diff-mappable findings may be budget-truncated: they also post as
-        # inline comments, so the "see inline comments" marker is accurate for
-        # them. Fallback (non-diff-mappable) findings have no other surface and
-        # are always rendered. Since fallback findings sort first (and every
-        # prior finding was rendered — truncation breaks the loop), anything
-        # dropped here is guaranteed diff-mappable. ``index > 0`` always renders
-        # at least one finding so a single oversized first block is not dropped.
-        if (
-            char_budget is not None
-            and mappable
-            and index > 0
-            and used + block_len > char_budget
-        ):
-            dropped = len(ordered) - index
+        # The budget is enforced on *every* finding so the section always fits
+        # inside the caller's char_budget — otherwise ``_cap_body`` would later
+        # trim the sticky from the tail and could silently drop findings.
+        # Fallback (non-diff-mappable) findings sort first, so they are only ever
+        # dropped when fallback content alone exceeds GitHub's hard comment limit
+        # (unavoidable). The marker text adapts: if any dropped finding is a
+        # fallback (no inline surface), it points to the workflow logs rather
+        # than to inline comments that do not exist for it. ``index > 0`` always
+        # renders at least one finding so a single oversized block is not lost.
+        if char_budget is not None and index > 0 and used + block_len > char_budget:
+            remaining = ordered[index:]
+            dropped = len(remaining)
+            any_fallback = any(
+                not _is_diff_mappable(finding=item, diff_lines=diff_lines)
+                for item in remaining
+            )
+            where = (
+                "the workflow logs"
+                if any_fallback
+                else "the inline comments and workflow logs"
+            )
             lines.extend(
                 [
                     "",
                     f"> ✂️ **{dropped} more finding(s) truncated** to fit "
-                    "GitHub's size limit — see the inline comments and workflow "
-                    "logs.",
+                    f"GitHub's size limit — see {where} for the full list.",
                 ],
             )
             break

@@ -582,12 +582,13 @@ def test_sticky_truncation_keeps_fallback_and_marks_dropped(
     assert_that(body).contains("more finding(s) truncated")
 
 
-def test_findings_section_never_budget_truncates_fallback() -> None:
-    """All-fallback overflow keeps every fallback finding, no inline-ref marker.
+def test_all_fallback_overflow_truncates_to_logs_not_inline() -> None:
+    """All-fallback overflow drops via an explicit *workflow-logs* marker.
 
     When ``diff_lines`` is ``None`` every finding is fallback (no inline
-    surface), so the budget must not drop any of them behind a marker that
-    points to inline comments that do not exist.
+    surface). If they exceed GitHub's hard comment limit, truncation is
+    unavoidable — but it must be explicit and must NOT point readers to inline
+    comments that do not exist for fallback findings.
     """
     findings = tuple(
         _bulky_finding(
@@ -604,13 +605,17 @@ def test_findings_section_never_budget_truncates_fallback() -> None:
         checklist_display=ChecklistDisplay.OFF,
         question_map={},
         diff_lines=None,
-        char_budget=200,  # far below the block sizes: would truncate if applied
+        char_budget=200,  # forces overflow so the marker path is exercised
     )
     body = "\n".join(lines)
 
-    for index in range(5):
-        assert_that(body).contains(f"FallbackFinding{index}")
-    assert_that(body).does_not_contain("more finding(s) truncated")
+    # At least the first fallback finding is always rendered.
+    assert_that(body).contains("FallbackFinding0")
+    # Overflow is explicit, and points at the logs — never at (nonexistent)
+    # inline comments for fallback findings.
+    assert_that(body).contains("more finding(s) truncated")
+    assert_that(body).contains("workflow logs")
+    assert_that(body).does_not_contain("inline comments")
 
 
 def test_sticky_state_round_trips_after_truncation(
