@@ -1,0 +1,41 @@
+{
+  "name": "lintro",
+  "version": "0.0.0-dev",
+  "description": "A unified CLI for code formatting, linting, and quality assurance. Ships self-contained platform binaries — no Python required.",
+  "keywords": [
+    "lint",
+    "linter",
+    "formatter",
+    "ruff",
+    "black",
+    "mypy",
+    "prettier",
+    "cli"
+  ],
+  "homepage": "https://github.com/lgtm-hq/py-lintro#readme",
+  "bugs": {
+    "url": "https://github.com/lgtm-hq/py-lintro/issues"
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/lgtm-hq/py-lintro.git",
+    "directory": "npm/lintro"
+  },
+  "bin": {
+    "lintro": "bin/lintro"
+  },
+  "files": [
+    "bin/lintro",
+    "lib/resolve.js"
+  ],
+  "optionalDependencies": {
+    "@lintro/darwin-arm64": "0.0.0-dev",
+    "@lintro/darwin-x64": "0.0.0-dev",
+    "@lintro/linux-arm64": "0.0.0-dev",
+    "@lintro/linux-x64": "0.0.0-dev"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

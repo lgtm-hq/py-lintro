@@ -58,6 +58,20 @@ Scripts for building standalone binaries and distribution packages.
 | Script           | Purpose                                  | Usage                                        |
 | ---------------- | ---------------------------------------- | -------------------------------------------- |
 | `build_macos.py` | Build macOS binary using Nuitka compiler | `uv run python scripts/build/build_macos.py` |
+| `build_linux.py` | Build Linux binary using Nuitka compiler | `uv run python scripts/build/build_linux.py` |
+
+### 📦 npm Distribution Scripts (`ci/npm/`)
+
+Scripts that package the platform binaries into the npm meta-package + per-platform
+packages and (dry-run) publish them. See the [npm distribution design](../docs/npm-distribution.md).
+
+| Script                        | Purpose                                                 | Usage                                                                 |
+| ----------------------------- | ------------------------------------------------------- | -------------------------------------------------------------------- |
+| `sync_npm_version.py`         | Sync/check versions across all `npm/*/package.json`     | `python scripts/ci/npm/sync_npm_version.py --version 1.2.3`           |
+| `stage_binaries.py`           | Copy downloaded platform binaries into the npm tree     | `python scripts/ci/npm/stage_binaries.py --artifacts-dir <dir>`      |
+| `download_release_binaries.sh`| Download release binaries for staging                   | `./scripts/ci/npm/download_release_binaries.sh v1.2.3 <dir>`          |
+| `smoke_test.sh`               | Pack + install the meta-package and run `lintro --version` | `./scripts/ci/npm/smoke_test.sh`                                   |
+| `publish_packages.sh`         | Publish npm packages (dry-run unless `LIVE=1`)          | `./scripts/ci/npm/publish_packages.sh`                               |
 
 ### 🍺 Homebrew Formulas (`ci/homebrew/`)
 
