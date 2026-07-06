@@ -309,6 +309,30 @@ def test_summary_renders_partial_state(
     assert_that(summary).contains("2 of 5 chunks")
 
 
+def test_summary_renders_partial_state_before_any_chunk(
+    sample_review_result: ReviewResult,
+) -> None:
+    """A cost cap tripping before any chunk renders an actionable note."""
+    metadata = replace(
+        sample_review_result.metadata,
+        partial=True,
+        stopped_reason="cost cap ($0.50) reached",
+        chunks_reviewed=0,
+        chunks_total=4,
+    )
+    result = ReviewResult(
+        metadata=metadata,
+        summary=sample_review_result.summary,
+        checklist=sample_review_result.checklist,
+        findings=(),
+    )
+    summary = format_review_summary(result=result)
+
+    assert_that(summary).contains("Partial review")
+    assert_that(summary).contains("before reviewing any of 4 chunks")
+    assert_that(summary).contains("ai.max_cost_usd")
+
+
 # --- posting: create, update, inline ----------------------------------------
 
 

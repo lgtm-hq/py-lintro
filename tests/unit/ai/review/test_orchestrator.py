@@ -163,7 +163,7 @@ def test_run_review_returns_partial_on_cost_cap() -> None:
         user_prompt,
         budget=None,
         **kwargs,
-    ):  # noqa: ANN001, ANN202
+    ):  # noqa: ANN001, ANN003, ANN202
         response = provider.complete(
             user_prompt,
             system=kwargs.get("system_prompt"),
@@ -198,10 +198,116 @@ def test_run_review_returns_partial_on_cost_cap() -> None:
         )
 
     assert_that(result.metadata.partial).is_true()
-    assert_that(result.metadata.stopped_reason).is_equal_to("cost cap")
+    assert_that(result.metadata.stopped_reason).is_equal_to("cost cap ($0.01) reached")
     assert_that(result.metadata.chunks_reviewed).is_equal_to(1)
     assert_that(result.metadata.chunks_total).is_equal_to(2)
     assert_that(result.findings).is_not_empty()
+
+
+def test_run_review_partial_when_cost_cap_before_any_chunk() -> None:
+    """Cap tripping before any chunk completes returns an actionable partial.
+
+    A depth-2 chunk overspends the cap on its question-generation call, so the
+    main review budget check raises before the chunk produces a partial. The
+    result must be a clean, empty partial (``partial=True``, zero chunks
+    reviewed) rather than the generic abort error.
+    """
+    provider = _mock_provider(content=_sample_response_json())
+
+    def _recording_call_ai(
+        *,
+        provider,
+        budget=None,
+        **kwargs,
+    ):  # noqa: ANN001, ANN003, ANN202
+        response = provider.complete(
+            kwargs.get("user_prompt", ""),
+            system=kwargs.get("system_prompt"),
+            max_tokens=kwargs.get("max_tokens", 1024),
+        )
+        if budget is not None:
+            budget.record(response.cost_estimate)
+        return response
+
+    with patch(
+        "lintro.ai.review.orchestrator.call_ai",
+        side_effect=_recording_call_ai,
+    ):
+        result = run_review(
+            _one_file_context(),
+            provider=provider,
+            ai_config=AIConfig(
+                enabled=True,
+                transport=AITransport.API,
+                max_cost_usd=0.005,
+            ),
+            depth=2,
+            checklist_items=[],
+            checklist_text="1. [logic-bug] Example?",
+            classifications=[],
+        )
+
+    assert_that(result.metadata.partial).is_true()
+    assert_that(result.metadata.chunks_reviewed).is_equal_to(0)
+    assert_that(result.metadata.stopped_reason).contains("cost cap")
+    assert_that(result.findings).is_empty()
+
+
+def test_run_review_raises_on_genuine_provider_error_mid_review() -> None:
+    """A real provider error mid-review still raises, never a silent partial."""
+    provider = _mock_provider(content=_sample_response_json())
+    chunks = [
+        ReviewChunk(
+            id=1,
+            files=["a.py"],
+            diff="diff --git a/a.py b/a.py\n+x",
+            relationship=REL_SINGLE_FILE,
+        ),
+        ReviewChunk(
+            id=2,
+            files=["b.py"],
+            diff="diff --git a/b.py b/b.py\n+y",
+            relationship=REL_SINGLE_FILE,
+        ),
+    ]
+    seen: list[str] = []
+
+    def _flaky_call_ai(
+        *,
+        provider,
+        budget=None,
+        **kwargs,
+    ):  # noqa: ANN001, ANN003, ANN202
+        del budget
+        seen.append("call")
+        if len(seen) >= 2:
+            raise AIError("anthropic: overloaded_error")
+        return provider.complete(
+            kwargs.get("user_prompt", ""),
+            system=kwargs.get("system_prompt"),
+            max_tokens=kwargs.get("max_tokens", 1024),
+        )
+
+    with (
+        patch(
+            "lintro.ai.review.orchestrator.resolve_review_chunks",
+            return_value=chunks,
+        ),
+        patch(
+            "lintro.ai.review.orchestrator.call_ai",
+            side_effect=_flaky_call_ai,
+        ),
+        pytest.raises(AIError),
+    ):
+        run_review(
+            _one_file_context(),
+            provider=provider,
+            ai_config=AIConfig(enabled=True, transport=AITransport.API),
+            depth=1,
+            checklist_items=[],
+            checklist_text="1. [logic-bug] Example?",
+            classifications=[],
+        )
 
 
 def test_run_review_depth1_returns_review_result() -> None:

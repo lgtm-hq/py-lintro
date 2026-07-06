@@ -290,16 +290,21 @@ def format_review_summary(
             metadata.stopped_reason or "incomplete",
             limit=60,
         )
-        lines.extend(
-            [
-                "",
-                (
-                    f"> ⚠️ **Partial review** — stopped at {reason} after "
-                    f"{metadata.chunks_reviewed} of {metadata.chunks_total} "
-                    "chunks. Findings below cover only the reviewed portion."
-                ),
-            ],
-        )
+        if metadata.chunks_reviewed <= 0:
+            note = (
+                f"> ⚠️ **Partial review** — stopped at {reason} before "
+                f"reviewing any of {metadata.chunks_total} chunks. No findings "
+                "were produced. Raise `ai.max_cost_usd` or narrow `--path`, then "
+                "re-run."
+            )
+        else:
+            note = (
+                f"> ⚠️ **Partial review** — stopped at {reason} after "
+                f"{metadata.chunks_reviewed} of {metadata.chunks_total} "
+                "chunks. Findings below cover only the reviewed portion. Raise "
+                "`ai.max_cost_usd` or narrow `--path` to review the rest."
+            )
+        lines.extend(["", note])
 
     lines.extend(["", *_count_row(counts=counts)])
 

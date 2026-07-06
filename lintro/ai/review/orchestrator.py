@@ -17,7 +17,7 @@ from loguru import logger
 from lintro.ai.budget import CostBudget
 from lintro.ai.cli_schemas import cli_schema_for_review
 from lintro.ai.enums import AITransport
-from lintro.ai.exceptions import AIError
+from lintro.ai.exceptions import AICostBudgetExceededError, AIError
 from lintro.ai.invoke import call_ai
 from lintro.ai.json_response import parse_review_response_payload, strip_json_fences
 from lintro.ai.model_pricing import (
@@ -160,6 +160,45 @@ def _aborted_before_completion(
     )
 
 
+def _is_cost_cap_stop(*, exc: BaseException) -> bool:
+    """Return whether an exception represents a graceful cost-cap stop.
+
+    The cost cap can surface either as a raw
+    :class:`~lintro.ai.exceptions.AICostBudgetExceededError` (when the
+    top-of-loop ``budget.check()`` raises) or wrapped inside a
+    :class:`~lintro.ai.review.exceptions.ReviewExecutionError` (when an
+    intra-chunk check raises and the chunk failure is wrapped). Both cases are
+    detected by walking the ``__cause__`` chain so a cost-cap stop is never
+    misclassified as a genuine provider error, and vice versa.
+
+    Args:
+        exc: The exception raised while reviewing chunks.
+
+    Returns:
+        True when the underlying cause is a cost-cap exhaustion.
+    """
+    current: BaseException | None = exc
+    while current is not None:
+        if isinstance(current, AICostBudgetExceededError):
+            return True
+        current = current.__cause__
+    return False
+
+
+def _cost_cap_reason(*, cap: float | None) -> str:
+    """Build the human-readable ``stopped_reason`` for a cost-cap stop.
+
+    Args:
+        cap: The configured ``ai.max_cost_usd`` ceiling, if any.
+
+    Returns:
+        A message such as ``"cost cap ($0.50) reached"``.
+    """
+    if cap is None:
+        return "cost cap reached"
+    return f"cost cap (${cap:.2f}) reached"
+
+
 @dataclass(frozen=True, slots=True)
 class _ChunkReviewPartial:
     """Intermediate review result for one chunk."""
@@ -291,6 +330,11 @@ def _review_all_chunks(
                     diff_budget=diff_budget,
                 )
             except Exception as exc:
+                # A cost-cap stop is an expected graceful halt, not a chunk
+                # failure: re-raise it raw (no error-level "aborted" log, no
+                # on_error) so run_review can finalize a partial cleanly.
+                if _is_cost_cap_stop(exc=exc):
+                    raise
                 progress.on_error(
                     chunk_index=chunk_index,
                     total_chunks=len(chunks),
@@ -352,6 +396,13 @@ def _review_all_chunks(
                     completed_sink.append(chunk_partial)
                 completed += 1
             except ReviewExecutionError:
+                for pending in futures:
+                    pending.cancel()
+                raise
+            except AICostBudgetExceededError:
+                # Expected graceful stop from a top-of-chunk budget check:
+                # cancel remaining work and re-raise raw so run_review finalizes
+                # a partial rather than treating it as an aborting error.
                 for pending in futures:
                     pending.cancel()
                 raise
@@ -420,6 +471,10 @@ def _review_chunk_with_progress(
             diff_budget=diff_budget,
         )
     except Exception as exc:
+        # A cost-cap stop is an expected graceful halt, not a chunk failure:
+        # re-raise it raw so run_review can finalize a partial cleanly.
+        if _is_cost_cap_stop(exc=exc):
+            raise
         step_tracker = progress if isinstance(progress, StepTrackingProgress) else None
         last_step = step_tracker.last_step if step_tracker else "reviewing"
         progress.on_error(
@@ -585,25 +640,28 @@ def run_review(
     except (AIError, ReviewExecutionError) as exc:
         # A graceful partial review: the cost cap was reached mid-run. Keep the
         # chunks reviewed so far instead of discarding all completed work (see
-        # issue #1094). Any other failure (auth, provider, parser) has no usable
-        # partial and must propagate so callers surface a real error.
-        cap = budget.max_cost_usd
-        cost_capped = cap is not None and (budget.remaining or 0.0) <= 0.0
-        if not (cost_capped and collected):
+        # issue #1094). This is an EXPECTED stop, not a failure — it is detected
+        # from the actual raised exception (a cost-cap exception, possibly
+        # wrapped in a ReviewExecutionError), never inferred from residual budget
+        # state. Any other failure (auth, provider, parser) must propagate so
+        # callers surface a real error via the #1101 taxonomy. When the cap trips
+        # before ANY chunk completes, ``collected`` is empty and the partial is
+        # empty-but-actionable rather than a generic abort.
+        if not _is_cost_cap_stop(exc=exc):
             raise
+        cap = budget.max_cost_usd
         partials = list(collected)
         partial = True
-        stopped_reason = "cost cap"
+        stopped_reason = _cost_cap_reason(cap=cap)
         merged, filtered_findings, total_findings = _finalize_partials(
             partials=partials,
             policy=review_sensitivity,
         )
         completed = True
         logger.warning(
-            "Review stopped early — cost cap (${cap:.2f}) reached after "
-            "reviewing {n} of {m} chunks. Raise ai.max_cost_usd or narrow "
-            "--path to review the rest.",
-            cap=cap,
+            "Review stopped early — {reason} after reviewing {n} of {m} "
+            "chunks. Raise ai.max_cost_usd or narrow --path to review the rest.",
+            reason=stopped_reason,
             n=len(partials),
             m=len(chunks),
             cause=str(exc),
