@@ -21,6 +21,53 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.65.0] - 2026-07-06
+
+### Added
+
+- **ci**: dogfood lintro review on py-lintro pull requests (#1072) (f2406a9)
+- **ai**: wire review, summary, and fix to unified transport (#1023) (252d7e8)
+- **ai**: unified AI transport foundation (#1022) (7a24fb3)
+- **ai/review**: finding-centric checklist display (#1020) (9b99cef)
+- **ai/review**: speed up review and add strictness tuning (#1019) (166d0b4)
+- **ai/review**: add live progress bar for review operations (#1018) (e747d6f)
+- **ai**: add Cursor provider via agent CLI (#1017) (35de0e7)
+- **ai/review**: add --with-lint to feed tool results into review (#1038) (d0bea2b)
+- **ai/review**: add GitHub PR review posting (#1037) (091df5d)
+- **ai/review**: add terminal and JSON output formatters (#1036) (3761712)
+- **cli**: add lintro review command (#1035) (b1b0b09)
+- **ai/review**: add review orchestrator with depth and chunking (#1034) (45cbbd1)
+- **ai/review**: add review prompt templates (#1011) (8e16733)
+- **ai/review**: add checklist registry with file-glob triggers (#1003) (05f60c5)
+- **ai/review**: add diff collection, classifier, and chunker (#1000) (4ae62b3)
+- **ci**: migrate thin reusables to lgtm-ci v0.46.0 (#990) (b13f92d)
+
+### Changed
+
+- **site**: add honest comparison page vs trunk, MegaLinter, pre-commit, qlty (#1058) (9eab1b3)
+- **config**: enforce module size limit via lint gate (#1078) (276929e)
+- **output**: SARIF output should emit standard lint results, not only AI metadata (#1079) (4a423f1)
+- **utils**: extract shared find_file_upward helper for duplicated config-walk logic (#1077) (8d983ca)
+- pin merge_group activity type to checks_requested (#1059) (5f8edcd)
+- **plugins**: separate stdout/stderr from subprocess and harden parsers (#1061) (23f6f09)
+- **deps**: update actions/attest-build-provenance to v4.1.1 (#874) (d839d3d)
+- **deps**: update python digest (#968) (eb2de3f)
+- **deps**: update svelte to 5.56.4 (minor) (#969) (70d9001)
+
+### Fixed
+
+- **ai/review**: lintro review --pr crashes on invalid gh baseRepository field (#1084) (819040f)
+- **ai/review**: guarantee secret redaction in git-native review mode (#1075) (a92fd93)
+- **ci**: run dogfood review with trusted base-ref lintro, not PR code (#1074) (488c9b1)
+- **ai/review**: correct patch line mapping and head-repo fallback (#1067) (6a07761)
+- **ai/review**: harden review AI — secret redaction, severity normalization, response robustness (#1069) (7b0afe0)
+- **ai**: Cursor provider cost accounting and opt-in --trust (#1068) (0a3af28)
+- **output**: unify report counts and clean JSON stdout (#1060) (5111d6c)
+- **ai/review**: CLI mode wiring broken — --uncommitted, --pr, and CI runs always fail (#1056) (4d0ccce)
+- **ci**: unblock Renovate PRs blocked by mypy and artifact updates (#1057) (9159290)
+- **deps**: update sqlfluff to 4.2.0 (minor) (#927) (efe3ea2)
+- **ai/review**: Cursor review timeout reliability (#1021) (4cd3c7c)
+
 ## [0.64.5] - 2026-06-19
 
 ### Changed
