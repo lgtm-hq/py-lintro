@@ -40,6 +40,10 @@ from lintro.ai.prompts.review import (
 from lintro.ai.registry import AIProvider
 from lintro.ai.review.chunker import chunk_review_context
 from lintro.ai.review.enums.review_strictness import ReviewStrictness
+from lintro.ai.review.errors_taxonomy import (
+    classify_provider_error,
+    resolve_cause_text,
+)
 from lintro.ai.review.exceptions import ReviewExecutionError
 from lintro.ai.review.group_labels import REL_DIRECTORY_PREFIX, REL_SINGLE_FILE
 from lintro.ai.review.models.checklist_answer import ChecklistAnswer
@@ -106,6 +110,54 @@ def _redact_prompt_text(*, text: str, source: str) -> str:
             source=source,
         )
     return redact_secrets(text)
+
+
+def _aborted_before_completion(
+    *,
+    cause: Exception,
+    provider: BaseAIProvider,
+    chunk_index: int,
+    total_chunks: int,
+    step: str,
+    completed_chunks: int,
+) -> ReviewExecutionError:
+    """Wrap a mid-run chunk failure, preserving and surfacing the real cause.
+
+    Classifies the underlying provider exception into a canonical
+    :class:`~lintro.ai.review.errors_taxonomy.ReviewErrorKind` and logs the real
+    cause text so the true failure (e.g. depleted credits) is never lost behind
+    the generic "aborted" wrapper.
+
+    Args:
+        cause: The underlying provider or parser exception.
+        provider: Configured provider, used to resolve provider-aware kinds.
+        chunk_index: Zero-based index of the failing chunk.
+        total_chunks: Total chunks planned for the review.
+        step: Sub-step within the chunk where the failure occurred.
+        completed_chunks: Number of chunks completed before the failure.
+
+    Returns:
+        A ``ReviewExecutionError`` carrying the resolved kind and cause message.
+    """
+    kind = classify_provider_error(provider=str(provider.name), error=cause)
+    cause_message = resolve_cause_text(error=cause)
+    logger.error(
+        "Review aborted before all chunks completed on chunk {chunk} during "
+        "{step} — kind={kind}, cause: {cause}",
+        chunk=chunk_index,
+        step=step,
+        kind=kind.value,
+        cause=cause_message,
+    )
+    return ReviewExecutionError(
+        message="Review aborted before all chunks completed.",
+        chunk_index=chunk_index,
+        total_chunks=total_chunks,
+        step=step,
+        completed_chunks=completed_chunks,
+        cause_message=cause_message,
+        error_kind=kind,
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -246,13 +298,13 @@ def _review_all_chunks(
                     completed_chunks=chunk_index,
                     error=exc,
                 )
-                raise ReviewExecutionError(
-                    message="Review aborted before all chunks completed.",
+                raise _aborted_before_completion(
+                    cause=exc,
+                    provider=provider,
                     chunk_index=chunk_index,
                     total_chunks=len(chunks),
                     step="reviewing",
                     completed_chunks=chunk_index,
-                    cause_message=str(exc),
                 ) from exc
             sequential_partials.append(partial)
             if completed_sink is not None:
@@ -305,13 +357,13 @@ def _review_all_chunks(
                 raise
             except Exception as exc:
                 if first_error is None:
-                    first_error = ReviewExecutionError(
-                        message="Review aborted before all chunks completed.",
+                    first_error = _aborted_before_completion(
+                        cause=exc,
+                        provider=provider,
                         chunk_index=chunk_index,
                         total_chunks=len(chunks),
                         step="reviewing",
                         completed_chunks=completed,
-                        cause_message=str(exc),
                     )
                 for pending in futures:
                     pending.cancel()
@@ -377,13 +429,13 @@ def _review_chunk_with_progress(
             completed_chunks=chunk_index,
             error=exc,
         )
-        raise ReviewExecutionError(
-            message="Review aborted before all chunks completed.",
+        raise _aborted_before_completion(
+            cause=exc,
+            provider=provider,
             chunk_index=chunk_index,
             total_chunks=total_chunks,
             step=last_step,
             completed_chunks=chunk_index,
-            cause_message=str(exc),
         ) from exc
     progress.on_chunk_done(chunk_index=chunk_index)
     return partial

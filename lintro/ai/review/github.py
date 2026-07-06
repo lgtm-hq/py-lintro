@@ -17,12 +17,6 @@ from typing import Any
 
 from loguru import logger
 
-from lintro.ai.exceptions import (
-    AIAuthenticationError,
-    AIError,
-    AIProviderError,
-    AIRateLimitError,
-)
 from lintro.ai.integrations.github_pr import GitHubPRReporter
 from lintro.ai.review.checklist_display import (
     cleared_answers,
@@ -31,6 +25,12 @@ from lintro.ai.review.checklist_display import (
     questions_for_finding,
 )
 from lintro.ai.review.enums.checklist_display import ChecklistDisplay
+from lintro.ai.review.errors_taxonomy import (
+    KIND_COPY,
+    ReviewErrorKind,
+    classify_provider_error,
+    resolve_cause_text,
+)
 from lintro.ai.review.models.review_finding import ReviewFinding, Severity
 from lintro.ai.review.models.review_metadata import ReviewMetadata
 from lintro.ai.review.models.review_result import ReviewResult
@@ -539,16 +539,23 @@ def parse_review_state(*, body: str) -> list[dict[str, Any]]:
 def format_error_comment(
     *,
     error: Exception,
+    provider: str | None = None,
     metadata: ReviewMetadata | None = None,
     prior_runs: list[dict[str, Any]] | None = None,
 ) -> str:
     """Format a provider/API error as a clear PR comment.
 
-    Maps lintro's AI exception hierarchy (and common error text) to a specific,
-    human-readable message instead of a bare failure.
+    Classifies the error provider-aware, against the underlying provider cause
+    (unwrapping any orchestrator wrapper), into a canonical
+    :class:`~lintro.ai.review.errors_taxonomy.ReviewErrorKind` and renders the
+    specific sticky for that kind — for example, depleted credits render as a
+    clear "top up or lower ai.max_cost_usd" message rather than a generic
+    "review aborted". The real underlying cause text is always surfaced.
 
     Args:
         error: The exception raised during review.
+        provider: Provider identifier used for provider-aware classification.
+            Falls back to ``metadata.provider`` when omitted.
         metadata: Optional review metadata for a mechanics footer.
         prior_runs: Run records recovered from the previous sticky comment.
             Re-emitted so a transient error does not reset cumulative telemetry.
@@ -556,7 +563,13 @@ def format_error_comment(
     Returns:
         Markdown comment body describing the failure and next steps.
     """
-    detail, guidance = _classify_error(error=error)
+    resolved_provider = provider or (metadata.provider if metadata else "") or ""
+    kind = classify_provider_error(provider=resolved_provider, error=error)
+    detail, guidance = _render_error_copy(
+        kind=kind,
+        error=error,
+        provider=resolved_provider,
+    )
     lines = [
         STICKY_MARKER,
         "## 🔎 Lintro Review",
@@ -574,44 +587,39 @@ def format_error_comment(
     return body
 
 
-def _classify_error(*, error: Exception) -> tuple[str, str]:
-    """Return a (detail, guidance) pair for a review error."""
-    message = sanitize_comment_text(str(error), limit=500)
-    lowered = message.lower()
+def _render_error_copy(
+    *,
+    kind: ReviewErrorKind,
+    error: Exception,
+    provider: str,
+) -> tuple[str, str]:
+    """Build the (detail, guidance) pair for a classified review error.
 
-    if isinstance(error, AIAuthenticationError) or "401" in lowered:
-        return (
-            "authentication failed (invalid or missing API key)",
-            "Check the provider API key configured for this workflow (e.g. the "
-            "`ANTHROPIC_API_KEY` secret).",
-        )
-    if (
-        isinstance(error, AIRateLimitError)
-        or "429" in lowered
-        or "rate limit" in lowered
-    ):
-        return (
-            "the provider rate-limited the request (429)",
-            "Retry later, lower review depth, or switch provider/model.",
-        )
-    if any(term in lowered for term in ("quota", "credit", "insufficient", "billing")):
-        return (
-            "the provider reported no available quota or credits",
-            "Top up the provider account or raise the plan limit, then re-run.",
-        )
-    if any(term in lowered for term in ("timeout", "timed out")):
-        return (
-            "the request timed out",
-            "Retry, raise `ai.api_timeout`, or narrow `--path` to a smaller diff.",
-        )
-    if any(term in lowered for term in ("500", "502", "503", "504", "server error")):
-        return (
-            "the provider returned a server error (5xx)",
-            "This is usually transient — retry shortly.",
-        )
-    if isinstance(error, (AIProviderError, AIError)):
-        return (f"provider error: {message}", "Retry, or check provider status.")
-    return (f"unexpected error: {message}", "See the workflow logs for details.")
+    The detail is prefixed with the provider label when known and always
+    carries the surfaced underlying cause text. For an unknown kind the cause
+    text is the primary signal; for known kinds it is appended so the real
+    provider message is never lost.
+
+    Args:
+        kind: Resolved canonical error kind.
+        error: The original exception (possibly a wrapper).
+        provider: Provider identifier, used only as a display label.
+
+    Returns:
+        Tuple of ``(detail, guidance)`` markdown strings.
+    """
+    message, guidance = KIND_COPY[kind]
+    cause = sanitize_comment_text(resolve_cause_text(error=error), limit=500)
+    label = f"`{sanitize_comment_text(provider, limit=40)}` " if provider else ""
+
+    if kind is ReviewErrorKind.UNKNOWN:
+        detail = f"{label}{message}: {cause}" if cause else f"{label}{message}"
+        return detail, guidance
+
+    detail = f"{label}{message}"
+    if cause:
+        detail += f" (provider reported: {cause})"
+    return detail, guidance
 
 
 def post_review_to_github(
@@ -675,6 +683,7 @@ def post_review_to_github(
 def post_review_error_to_github(
     *,
     error: Exception,
+    provider: str | None = None,
     metadata: ReviewMetadata | None = None,
     pr_number: int | None = None,
     repo: str | None = None,
@@ -684,6 +693,7 @@ def post_review_error_to_github(
 
     Args:
         error: The exception raised during review.
+        provider: Provider identifier used for provider-aware classification.
         metadata: Optional metadata for a mechanics footer.
         pr_number: Optional PR number override.
         repo: Optional repository override (owner/name).
@@ -699,6 +709,7 @@ def post_review_error_to_github(
     comment_id, prior_runs = _load_prior_runs(reporter=gh_reporter)
     body = format_error_comment(
         error=error,
+        provider=provider,
         metadata=metadata,
         prior_runs=prior_runs,
     )
