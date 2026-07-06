@@ -440,7 +440,6 @@ def _format_findings_section(
     )
     lines = ["", f"### Findings ({len(findings)})"]
     used = 0
-    rendered = 0
     for index, finding in enumerate(ordered):
         mappable = _is_diff_mappable(finding=finding, diff_lines=diff_lines)
         block = _finding_block(
@@ -452,13 +451,14 @@ def _format_findings_section(
         # Only diff-mappable findings may be budget-truncated: they also post as
         # inline comments, so the "see inline comments" marker is accurate for
         # them. Fallback (non-diff-mappable) findings have no other surface and
-        # are always rendered. Since fallback findings sort first, anything
-        # dropped here is guaranteed diff-mappable. Always render at least one
-        # finding so a single oversized first block is not itself dropped.
+        # are always rendered. Since fallback findings sort first (and every
+        # prior finding was rendered — truncation breaks the loop), anything
+        # dropped here is guaranteed diff-mappable. ``index > 0`` always renders
+        # at least one finding so a single oversized first block is not dropped.
         if (
             char_budget is not None
             and mappable
-            and rendered > 0
+            and index > 0
             and used + block_len > char_budget
         ):
             dropped = len(ordered) - index
@@ -473,7 +473,6 @@ def _format_findings_section(
             break
         lines.extend(block)
         used += block_len
-        rendered += 1
     return lines
 
 
