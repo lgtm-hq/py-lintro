@@ -58,6 +58,7 @@
         "markdownlint-cli2",
         "oxlint",
         "oxfmt",
+        "stylelint",
         "gitleaks",
         "gitleaks/gitleaks",
         "shellcheck",

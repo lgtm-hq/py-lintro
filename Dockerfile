@@ -111,6 +111,7 @@ RUN echo "=== Verifying all tools ===" && \
     oxfmt --version && oxlint --version && prettier --version && \
     pydoclint --version && ruff --version && semgrep --version && \
     shellcheck --version && shfmt --version && sqlfluff --version && \
+    stylelint --version && \
     taplo --version && tsc --version && astro --version && \
     svelte-check --version && vue-tsc --version && yamllint --version && \
     echo "=== All tools verified! ==="
@@ -164,7 +165,7 @@ RUN echo "Verifying tools..." && \
     markdownlint-cli2 --version && tsc --version && astro --version && \
     vue-tsc --version && oxlint --version && oxfmt --version && \
     bandit --version && mypy --version && pydoclint --version && \
-    yamllint --version && sqlfluff --version && \
+    yamllint --version && sqlfluff --version && stylelint --version && \
     echo "All tools verified!"
 
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
@@ -178,6 +179,7 @@ RUN echo "Verifying tools as non-root user..." && \
     gosu lintro vue-tsc --version && \
     gosu lintro oxlint --version && \
     gosu lintro oxfmt --version && \
+    gosu lintro stylelint --version && \
     gosu lintro rustfmt --version && \
     gosu lintro cargo clippy --version && \
     gosu lintro cargo audit --version && \

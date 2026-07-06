@@ -50,6 +50,7 @@ TOOLS_WITH_SIMPLE_VERSION_PATTERN: set[ToolName] = {
     ToolName.SHELLCHECK,
     ToolName.SHFMT,
     ToolName.SQLFLUFF,
+    ToolName.STYLELINT,
     ToolName.SVELTE_CHECK,
     ToolName.TAPLO,
     ToolName.VUE_TSC,

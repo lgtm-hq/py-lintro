@@ -15,6 +15,7 @@ NPM_VERSIONS: dict[str, str] = {
     "oxfmt": "0.43.0",
     "oxlint": "1.58.0",
     "prettier": "3.8.1",
+    "stylelint": "17.14.0",
     "svelte-check": "4.4.6",
     "typescript": "5.9.3",
     "vue-tsc": "3.2.6",

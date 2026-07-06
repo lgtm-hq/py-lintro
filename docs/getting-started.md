@@ -94,6 +94,8 @@ Some tools require separate installation. Their minimum versions are also manage
 - `shellcheck` - Shell script analyzer (`brew install shellcheck` or GitHub releases)
 - `shfmt` - Shell script formatter (`brew install shfmt` or GitHub releases)
 - `sqlfluff` - SQL linter and formatter (`pip install sqlfluff`)
+- `stylelint` - CSS/SCSS/Sass/Less linter and fixer (`bun add -g stylelint` or
+  `npm install -g stylelint`); requires a stylelint config in the project
 - `taplo` - TOML linter and formatter (`brew install taplo` or GitHub releases)
 - `cargo-audit` - Rust dependency vulnerability scanner (`cargo install cargo-audit`)
 - `cargo-deny` - Rust dependency license/advisory checker (`cargo install cargo-deny`)
