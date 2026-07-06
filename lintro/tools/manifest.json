@@ -42,7 +42,7 @@
     "shell": ["shellcheck", "shfmt"],
     "docker": ["hadolint"],
     "yaml": ["yamllint"],
-    "markdown": ["markdownlint"],
+    "markdown": ["markdownlint", "vale"],
     "toml": ["taplo"],
     "github_actions": ["actionlint"],
     "security": ["gitleaks", "osv_scanner", "semgrep"],
@@ -397,6 +397,18 @@
       "version_command": ["tsc", "--version"],
       "languages": ["typescript"],
       "tags": ["linter", "type_checker"]
+    },
+    {
+      "name": "vale",
+      "version": "3.15.1",
+      "install": {
+        "type": "binary"
+      },
+      "tier": "tools",
+      "category": "external",
+      "version_command": ["vale", "--version"],
+      "languages": ["markdown"],
+      "tags": ["linter", "documentation"]
     },
     {
       "name": "vue_tsc",
