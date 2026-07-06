@@ -419,7 +419,9 @@ def _format_findings_section(
         diff_lines: Diff line map used to order fallback findings first. ``None``
             treats every finding as fallback (preserving severity ordering).
         char_budget: Optional soft character budget for the finding blocks. When
-            exceeded, remaining findings are replaced by a truncation marker.
+            exceeded, remaining *diff-mappable* findings are replaced by a
+            truncation marker (they still exist as inline comments). Fallback
+            findings are never budget-truncated — they have no other surface.
 
     Returns:
         Markdown lines for the findings section.
@@ -438,27 +440,40 @@ def _format_findings_section(
     )
     lines = ["", f"### Findings ({len(findings)})"]
     used = 0
+    rendered = 0
     for index, finding in enumerate(ordered):
+        mappable = _is_diff_mappable(finding=finding, diff_lines=diff_lines)
         block = _finding_block(
             finding=finding,
             checklist_display=checklist_display,
             question_map=question_map,
         )
         block_len = len("\n".join(block))
-        # Always render at least one finding; only truncate once the budget is
-        # actually exceeded so a single oversized finding is not itself dropped.
-        if char_budget is not None and index > 0 and used + block_len > char_budget:
+        # Only diff-mappable findings may be budget-truncated: they also post as
+        # inline comments, so the "see inline comments" marker is accurate for
+        # them. Fallback (non-diff-mappable) findings have no other surface and
+        # are always rendered. Since fallback findings sort first, anything
+        # dropped here is guaranteed diff-mappable. Always render at least one
+        # finding so a single oversized first block is not itself dropped.
+        if (
+            char_budget is not None
+            and mappable
+            and rendered > 0
+            and used + block_len > char_budget
+        ):
             dropped = len(ordered) - index
             lines.extend(
                 [
                     "",
                     f"> ✂️ **{dropped} more finding(s) truncated** to fit "
-                    "GitHub's size limit — see inline comments and workflow logs.",
+                    "GitHub's size limit — see the inline comments and workflow "
+                    "logs.",
                 ],
             )
             break
         lines.extend(block)
         used += block_len
+        rendered += 1
     return lines
 
 

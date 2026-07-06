@@ -17,6 +17,7 @@ from lintro.ai.review.github import (
     MAX_COMMENT_CHARS,
     STATE_MARKER_PREFIX,
     STICKY_MARKER,
+    _format_findings_section,
     build_sticky_comment,
     format_error_comment,
     format_finding_comment,
@@ -579,6 +580,37 @@ def test_sticky_truncation_keeps_fallback_and_marks_dropped(
     assert_that(body).contains("FallbackOnlyFinding")
     # Truncation is explicit, not silent.
     assert_that(body).contains("more finding(s) truncated")
+
+
+def test_findings_section_never_budget_truncates_fallback() -> None:
+    """All-fallback overflow keeps every fallback finding, no inline-ref marker.
+
+    When ``diff_lines`` is ``None`` every finding is fallback (no inline
+    surface), so the budget must not drop any of them behind a marker that
+    points to inline comments that do not exist.
+    """
+    findings = tuple(
+        _bulky_finding(
+            severity=Severity.P2,
+            file=f"src/unmapped{index}.py",
+            line=900 + index,
+            title=f"FallbackFinding{index}",
+        )
+        for index in range(5)
+    )
+
+    lines = _format_findings_section(
+        findings=findings,
+        checklist_display=ChecklistDisplay.OFF,
+        question_map={},
+        diff_lines=None,
+        char_budget=200,  # far below the block sizes: would truncate if applied
+    )
+    body = "\n".join(lines)
+
+    for index in range(5):
+        assert_that(body).contains(f"FallbackFinding{index}")
+    assert_that(body).does_not_contain("more finding(s) truncated")
 
 
 def test_sticky_state_round_trips_after_truncation(
