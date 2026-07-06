@@ -165,6 +165,40 @@ def test_format_command_with_output_format(mock_run: MagicMock) -> None:
 
 
 @patch("lintro.cli_utils.commands.format.run_lint_tools_simple")
+def test_format_command_dry_run_flag_passed(mock_run: MagicMock) -> None:
+    """format_command forwards --dry-run as dry_run=True.
+
+    Args:
+        mock_run: Mock for run_lint_tools_simple.
+    """
+    mock_run.return_value = 0
+    runner = CliRunner()
+
+    result = runner.invoke(format_command, ["--dry-run"])
+
+    assert_that(result.exit_code).is_equal_to(0)
+    call_kwargs = mock_run.call_args.kwargs
+    assert_that(call_kwargs["dry_run"]).is_true()
+
+
+@patch("lintro.cli_utils.commands.format.run_lint_tools_simple")
+def test_format_command_dry_run_defaults_false(mock_run: MagicMock) -> None:
+    """format_command defaults dry_run to False when flag absent.
+
+    Args:
+        mock_run: Mock for run_lint_tools_simple.
+    """
+    mock_run.return_value = 0
+    runner = CliRunner()
+
+    result = runner.invoke(format_command, [])
+
+    assert_that(result.exit_code).is_equal_to(0)
+    call_kwargs = mock_run.call_args.kwargs
+    assert_that(call_kwargs["dry_run"]).is_false()
+
+
+@patch("lintro.cli_utils.commands.format.run_lint_tools_simple")
 def test_format_command_returns_tool_exit_code(mock_run: MagicMock) -> None:
     """format_command returns exit code from tool execution.
 

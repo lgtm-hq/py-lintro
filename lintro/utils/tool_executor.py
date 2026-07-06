@@ -409,6 +409,7 @@ def run_lint_tools_simple(
     ai_fix: bool = False,
     ignore_conflicts: bool = False,
     transport: str | None = None,
+    dry_run: bool = False,
 ) -> int:
     """Simplified runner using Loguru-based logging with rich formatting.
 
@@ -439,6 +440,11 @@ def run_lint_tools_simple(
         ai_fix: Enable AI fix suggestions with interactive review (check only).
         ignore_conflicts: Whether to ignore tool configuration conflicts.
         transport: Optional CLI override for ``ai.transport`` when AI runs.
+        dry_run: Preview what ``fmt`` would fix without modifying files. When
+            set with a ``fmt`` action, tools run in read-only check mode using
+            the fixable tool set; the reported issues are exactly what a real
+            ``fmt`` run would address. Exit code mirrors check semantics: 0 when
+            nothing would be fixed, 1 when fixes are available.
 
     Returns:
         Exit code (0 for success, 1 for failures).
@@ -450,6 +456,16 @@ def run_lint_tools_simple(
     """
     # Normalize action to enum
     action = normalize_action(action)
+
+    # Dry-run preview: show what `fmt` WOULD fix without writing. Select the
+    # fixable tool set (via the original fmt action) but execute, aggregate,
+    # and compute the exit code in read-only check mode, so no files are
+    # modified and the reported issues are exactly what a real fmt run would
+    # address.
+    selection_action = action
+    dry_run_preview = dry_run and action == Action.FIX
+    if dry_run_preview:
+        action = Action.CHECK
 
     # Initialize output manager for this run
     output_manager = OutputManager()
@@ -474,7 +490,7 @@ def run_lint_tools_simple(
     try:
         tools_result = get_tools_to_run(
             tools,
-            action,
+            selection_action,
             ignore_conflicts=ignore_conflicts,
         )
     except ValueError as e:
@@ -546,6 +562,13 @@ def run_lint_tools_simple(
 
     # Print main header with output directory information
     logger.print_lintro_header()
+
+    # Announce dry-run mode so users know no files will be modified.
+    if dry_run_preview and output_format.lower() not in {"json", "sarif"}:
+        logger.console_output(
+            text="Dry run - no files modified",
+            color="yellow",
+        )
 
     # Show incremental mode message
     if incremental:
@@ -897,6 +920,26 @@ def run_lint_tools_simple(
             print(sarif_json)
         else:
             logger.print_execution_summary(action, all_results)
+
+            # Dry-run summary: state clearly what a real fmt run would fix.
+            if dry_run_preview:
+                from lintro.utils.summary_tables import count_affected_files
+
+                file_count = count_affected_files(all_results)
+                if total_issues > 0:
+                    logger.console_output(
+                        text=(
+                            f"Would fix {total_issues} "
+                            f"issue{'s' if total_issues != 1 else ''} in "
+                            f"{file_count} file{'s' if file_count != 1 else ''}"
+                        ),
+                        color="cyan",
+                    )
+                else:
+                    logger.console_output(
+                        text="Nothing to fix - all files already formatted",
+                        color="green",
+                    )
 
         # Route warnings to stderr (loguru) for machine-readable formats so
         # plain-text messages don't corrupt JSON/SARIF output on stdout.
