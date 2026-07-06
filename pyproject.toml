@@ -200,6 +200,7 @@ packages = [
   "lintro.parsers.svelte_check",
   "lintro.parsers.taplo",
   "lintro.parsers.trufflehog",
+  "lintro.parsers.typos",
   "lintro.parsers.pydoclint",
   "lintro.parsers.tsc",
   "lintro.parsers.vale",

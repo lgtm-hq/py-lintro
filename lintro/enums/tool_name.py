@@ -46,6 +46,7 @@ class ToolName(StrEnum):
     TAPLO = auto()
     TRUFFLEHOG = auto()
     TSC = auto()
+    TYPOS = auto()
     VALE = auto()
     VUE_TSC = auto()
     YAMLLINT = auto()

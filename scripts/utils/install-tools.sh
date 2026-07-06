@@ -171,8 +171,8 @@ SUPPORTED_TOOLS=(
 	"clippy" "commitlint" "dotenv-linter" "gitleaks" "golangci-lint" "hadolint" "html-validate" "markdownlint" "markdownlint-cli2" "mypy" "osv-scanner"
 	"oxfmt" "oxlint" "pip-audit" "prettier" "pydoclint" "ruff" "rustfmt" "semgrep"
 	"shellcheck" "shfmt" "sqlfluff" "stylelint" "svelte-check" "taplo"
-	"trufflehog" "tsc"
-	"vale" "vue-tsc" "yamllint"
+	"trufflehog" "tsc" "typos"
+	"vale" "vue-tsc" "yamllint" 
 )
 
 # Validate --tools filter against known tool names (fail-fast on typos).
@@ -1201,6 +1201,57 @@ main() {
 		fi
 	fi # cargo-deny
 
+	if should_install "typos"; then
+		# Install typos (source-code spell checker; crate "typos-cli", binary "typos")
+		# Prefer pre-built binary from cargo-quickinstall to avoid long compile times
+		echo -e "${BLUE}Installing typos...${NC}"
+		TYPOS_VERSION=$(get_tool_version "typos") || exit 1
+		if [ $DRY_RUN -eq 1 ]; then
+			log_info "[DRY-RUN] Would install typos-cli==${TYPOS_VERSION}"
+		elif command -v typos &>/dev/null; then
+			echo -e "${GREEN}✓ typos already installed${NC}"
+		else
+			typos_installed=false
+			# Try pre-built binary from cargo-quickinstall first (much faster than cargo install)
+			tmpdir=$(mktemp -d)
+			os=$(uname -s | tr '[:upper:]' '[:lower:]')
+			arch=$(uname -m)
+			case "$arch" in
+			x86_64 | amd64) target="x86_64-unknown-linux-gnu" ;;
+			aarch64 | arm64) target="aarch64-unknown-linux-gnu" ;;
+			*) target="" ;;
+			esac
+			# cargo-quickinstall only provides linux binaries
+			if [[ "$os" == "linux" ]] && [[ -n "$target" ]]; then
+				tgz_url="https://github.com/cargo-bins/cargo-quickinstall/releases/download/typos-cli-${TYPOS_VERSION}/typos-cli-${TYPOS_VERSION}-${target}.tar.gz"
+				echo -e "${YELLOW}Trying pre-built binary from cargo-quickinstall...${NC}"
+				if download_with_retries "$tgz_url" "$tmpdir/typos.tar.gz" 3; then
+					tar -xzf "$tmpdir/typos.tar.gz" -C "$tmpdir"
+					if [ -f "$tmpdir/typos" ]; then
+						cp "$tmpdir/typos" "$BIN_DIR/typos"
+						chmod +x "$BIN_DIR/typos"
+						echo -e "${GREEN}✓ typos installed from pre-built binary${NC}"
+						typos_installed=true
+					fi
+				fi
+			fi
+			rm -rf "$tmpdir"
+
+			# Fallback to cargo install if pre-built binary not available
+			if [ "$typos_installed" = false ] && command -v cargo &>/dev/null; then
+				echo -e "${YELLOW}Pre-built binary not available, falling back to cargo install...${NC}"
+				if cargo install typos-cli --locked --version "$TYPOS_VERSION"; then
+					echo -e "${GREEN}✓ typos installed via cargo${NC}"
+					typos_installed=true
+				fi
+			fi
+
+			if [ "$typos_installed" = false ]; then
+				echo -e "${YELLOW}⚠ Failed to install typos (optional tool)${NC}"
+			fi
+		fi
+	fi # typos
+
 	if should_install "ruff"; then
 		# Install ruff (Python linting and formatting)
 		echo -e "${BLUE}Installing ruff...${NC}"
@@ -1824,6 +1875,7 @@ main() {
 		["svelte-check"]="Svelte type checking"
 		["taplo"]="TOML linting and formatting"
 		["trufflehog"]="Secret detection with verification"
+		["typos"]="Source-code spell checking"
 		["tsc"]="TypeScript type checking"
 		["vue-tsc"]="Vue TypeScript type checking"
 		["yamllint"]="YAML linting"
@@ -1839,7 +1891,7 @@ main() {
 	# Verify installations
 	echo -e "${YELLOW}Verifying installations...${NC}"
 
-	tools_to_verify=("actionlint" "astro" "bandit" "black" "cargo-audit" "cargo-deny" "clippy" "commitlint" "dotenv-linter" "gitleaks" "golangci-lint" "hadolint" "html-validate" "markdownlint-cli2" "mypy" "osv-scanner" "oxfmt" "oxlint" "pip-audit" "prettier" "pydoclint" "ruff" "rustfmt" "semgrep" "shellcheck" "shfmt" "sqlfluff" "stylelint" "svelte-check" "taplo" "trufflehog" "tsc" "vale" "vue-tsc" "yamllint")
+	tools_to_verify=("actionlint" "astro" "bandit" "black" "cargo-audit" "cargo-deny" "clippy" "commitlint" "dotenv-linter" "gitleaks" "golangci-lint" "hadolint" "html-validate" "markdownlint-cli2" "mypy" "osv-scanner" "oxfmt" "oxlint" "pip-audit" "prettier" "pydoclint" "ruff" "rustfmt" "semgrep" "shellcheck" "shfmt" "sqlfluff" "stylelint" "svelte-check" "taplo" "trufflehog" "tsc" "typos" "vale" "vue-tsc" "yamllint")
 
 	# Filter verification list when --tools is set.
 	# Map aliases so e.g. --tools markdownlint verifies markdownlint-cli2.
