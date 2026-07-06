@@ -44,6 +44,10 @@ from lintro.parsers.tsc.tsc_parser import (
 from lintro.plugins.base import BaseToolPlugin, ExecutionContext
 from lintro.plugins.protocol import ToolDefinition
 from lintro.plugins.registry import register_tool
+from lintro.tools.core.option_validators import (
+    OptionSchema,
+    validate_option_types,
+)
 from lintro.tools.core.timeout_utils import create_timeout_result
 from lintro.utils.tsconfig import (
     create_temp_tsconfig,
@@ -74,6 +78,14 @@ FRAMEWORK_CONFIGS: dict[str, tuple[str, list[str]]] = {
         "svelte-check",
         ["svelte.config.js", "svelte.config.ts"],
     ),
+}
+
+# Expected types for tsc-specific options, validated in set_options().
+TSC_OPTION_TYPES: OptionSchema = {
+    "project": (str, "string path"),
+    "strict": bool,
+    "skip_lib_check": bool,
+    "use_project_files": bool,
 }
 
 
@@ -132,25 +144,14 @@ class TscPlugin(BaseToolPlugin):
                 instead of lintro's file targeting. Default is False, meaning lintro
                 respects your file selection even when tsconfig.json exists.
             **kwargs: Other tool options.
-
-        Raises:
-            ValueError: If any provided option is of an unexpected type.
         """
-        if project is not None and not isinstance(project, str):
-            raise ValueError("project must be a string path")
-        if strict is not None and not isinstance(strict, bool):
-            raise ValueError("strict must be a boolean")
-        if skip_lib_check is not None and not isinstance(skip_lib_check, bool):
-            raise ValueError("skip_lib_check must be a boolean")
-        if use_project_files is not None and not isinstance(use_project_files, bool):
-            raise ValueError("use_project_files must be a boolean")
-
         options: dict[str, object] = {
             "project": project,
             "strict": strict,
             "skip_lib_check": skip_lib_check,
             "use_project_files": use_project_files,
         }
+        validate_option_types(options, TSC_OPTION_TYPES)
         options = {k: v for k, v in options.items() if v is not None}
         super().set_options(**options, **kwargs)
 
