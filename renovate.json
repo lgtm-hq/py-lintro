@@ -274,6 +274,18 @@
       "packageNameTemplate": "cargo-deny"
     },
     {
+      "description": "Update typos version in _tool_versions.py",
+      "customType": "regex",
+      "managerFilePatterns": [
+        "lintro/_tool_versions\\.py"
+      ],
+      "matchStrings": [
+        "ToolName\\.TYPOS:\\s*\"(?<currentValue>[0-9]+\\.[0-9]+\\.[0-9]+)\""
+      ],
+      "datasourceTemplate": "crate",
+      "packageNameTemplate": "typos-cli"
+    },
+    {
       "description": "Update rustc in _tool_versions.py (manifest follows via generator)",
       "customType": "regex",
       "managerFilePatterns": [

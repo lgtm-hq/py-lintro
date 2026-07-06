@@ -95,6 +95,8 @@ Some tools require separate installation. Their minimum versions are also manage
 - `shfmt` - Shell script formatter (`brew install shfmt` or GitHub releases)
 - `sqlfluff` - SQL linter and formatter (`pip install sqlfluff`)
 - `taplo` - TOML linter and formatter (`brew install taplo` or GitHub releases)
+- `typos` - Source-code spell checker with auto-fix (`brew install typos-cli` or
+  `cargo install typos-cli`)
 - `cargo-audit` - Rust dependency vulnerability scanner (`cargo install cargo-audit`)
 - `cargo-deny` - Rust dependency license/advisory checker (`cargo install cargo-deny`)
 - `osv-scanner` - Multi-ecosystem vulnerability scanner using the OSV database

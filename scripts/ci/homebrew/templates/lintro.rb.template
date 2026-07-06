@@ -38,6 +38,7 @@ class Lintro < Formula
   depends_on "shfmt"
   depends_on "sqlfluff"
   depends_on "taplo"
+  depends_on "typos-cli"
   depends_on "yamllint"
 
   # Pure Python library dependencies
@@ -79,6 +80,7 @@ class Lintro < Formula
       Security:         gitleaks, semgrep
       Rust:             clippy, rustfmt (via rust)
       SQL:              sqlfluff
+      Spelling:         typos
 
       Not installed automatically (install if needed):
         cargo install cargo-audit cargo-deny   # Rust dependency auditing

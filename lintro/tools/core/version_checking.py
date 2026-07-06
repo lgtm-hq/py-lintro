@@ -203,6 +203,9 @@ def get_install_hints() -> dict[str, str]:
             "Install via: cargo install taplo-cli "
             "or download from https://github.com/tamasfe/taplo/releases (v{version}+)"
         ),
+        "typos": (
+            "Install via: cargo install typos-cli or brew install typos-cli (v{version}+)"
+        ),
         "astro_check": (
             "Install via: bun add astro@>={version} or npm install astro@>={version}"
         ),

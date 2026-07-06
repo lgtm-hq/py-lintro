@@ -38,6 +38,7 @@ class ToolName(StrEnum):
     SVELTE_CHECK = auto()
     TAPLO = auto()
     TSC = auto()
+    TYPOS = auto()
     VUE_TSC = auto()
     YAMLLINT = auto()
 

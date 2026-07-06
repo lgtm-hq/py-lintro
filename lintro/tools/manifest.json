@@ -399,6 +399,19 @@
       "tags": ["linter", "type_checker"]
     },
     {
+      "name": "typos",
+      "version": "1.48.0",
+      "install": {
+        "type": "cargo",
+        "package": "typos-cli"
+      },
+      "tier": "tools",
+      "category": "external",
+      "version_command": ["typos", "--version"],
+      "languages": ["text"],
+      "tags": ["linter"]
+    },
+    {
       "name": "vue_tsc",
       "version": "3.2.6",
       "install": {
