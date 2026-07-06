@@ -35,6 +35,9 @@ class ReviewErrorKind(StrEnum):
         CONTEXT_LENGTH: The prompt exceeded the model's maximum context window.
         SERVER_ERROR: The provider returned a 5xx / overloaded response.
         TIMEOUT: The request timed out before a response was returned.
+        INVALID_RESPONSE: The model returned a malformed/unparseable response
+            (a lintro-side parse/validation failure, not a provider transport
+            error).
         UNKNOWN: No signature matched; the surfaced cause text is shown as-is.
     """
 
@@ -45,6 +48,7 @@ class ReviewErrorKind(StrEnum):
     CONTEXT_LENGTH = auto()
     SERVER_ERROR = auto()
     TIMEOUT = auto()
+    INVALID_RESPONSE = auto()
     UNKNOWN = auto()
 
 
@@ -260,9 +264,14 @@ KIND_COPY: dict[ReviewErrorKind, tuple[str, str]] = {
         "the request timed out",
         "Retry, raise `ai.api_timeout`, or narrow `--path` to a smaller diff.",
     ),
+    ReviewErrorKind.INVALID_RESPONSE: (
+        "the model returned a malformed or unparseable response",
+        "Retry the review — model output may have been malformed — or try a "
+        "different model via `ai.model`.",
+    ),
     ReviewErrorKind.UNKNOWN: (
-        "provider error",
-        "Retry, or check provider status and the workflow logs.",
+        "the review could not be completed",
+        "See the cause above and the workflow logs; retry if it looks transient.",
     ),
 }
 
@@ -365,5 +374,11 @@ def classify_provider_error(*, provider: str, error: Exception) -> ReviewErrorKi
         matcher = _SHARED_SIGNATURES.get(kind)
         if matcher is not None and matcher.matches(status=status, text=text):
             return kind
+
+    # A bare ``ValueError`` cause is a lintro-side parse/validation failure of
+    # the model response, not a provider transport error — surface it as such
+    # rather than misdirecting the user to check provider status.
+    if isinstance(cause_exc, ValueError):
+        return ReviewErrorKind.INVALID_RESPONSE
 
     return ReviewErrorKind.UNKNOWN

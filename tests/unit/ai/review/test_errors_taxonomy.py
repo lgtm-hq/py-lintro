@@ -157,6 +157,42 @@ def test_classify_unknown_falls_back() -> None:
     assert_that(kind).is_equal_to(ReviewErrorKind.UNKNOWN)
 
 
+def test_value_error_classifies_as_invalid_response() -> None:
+    """A parse ValueError is an invalid-response failure, not a provider error."""
+    error = ValueError("could not parse model response as JSON")
+    kind = classify_provider_error(provider="anthropic", error=error)
+
+    assert_that(kind).is_equal_to(ReviewErrorKind.INVALID_RESPONSE)
+
+
+def test_invalid_response_via_wrapped_value_error() -> None:
+    """A ValueError chained under the wrapper still resolves to INVALID_RESPONSE."""
+    cause = ValueError("malformed model output")
+    wrapper = ReviewExecutionError(
+        message="Review aborted before all chunks completed.",
+    )
+    wrapper.__cause__ = cause
+    kind = classify_provider_error(provider="anthropic", error=wrapper)
+
+    assert_that(kind).is_equal_to(ReviewErrorKind.INVALID_RESPONSE)
+
+
+def test_invalid_response_copy_points_at_model_output() -> None:
+    """INVALID_RESPONSE copy blames model output, not provider status."""
+    message, guidance = KIND_COPY[ReviewErrorKind.INVALID_RESPONSE]
+
+    assert_that(message).contains("malformed")
+    assert_that(guidance.lower()).does_not_contain("provider status")
+
+
+def test_unknown_copy_does_not_assert_provider_error() -> None:
+    """UNKNOWN copy stays neutral — it must not claim a provider fault."""
+    message, guidance = KIND_COPY[ReviewErrorKind.UNKNOWN]
+
+    assert_that(message).does_not_contain("provider error")
+    assert_that(guidance.lower()).does_not_contain("provider status")
+
+
 def test_resolve_cause_text_prefers_cause_message() -> None:
     """resolve_cause_text surfaces the wrapper's cause_message over the wrapper."""
     wrapper = ReviewExecutionError(
