@@ -163,7 +163,7 @@ def test_run_review_returns_partial_on_cost_cap() -> None:
         user_prompt,
         budget=None,
         **kwargs,
-    ):  # noqa: ANN001, ANN202
+    ):  # noqa: ANN001, ANN003, ANN202
         response = provider.complete(
             user_prompt,
             system=kwargs.get("system_prompt"),
@@ -214,7 +214,9 @@ def test_run_review_partial_when_cost_cap_before_any_chunk() -> None:
     """
     provider = _mock_provider(content=_sample_response_json())
 
-    def _recording_call_ai(*, provider, budget=None, **kwargs):  # noqa: ANN001, ANN202
+    def _recording_call_ai(
+        *, provider, budget=None, **kwargs
+    ):  # noqa: ANN001, ANN003, ANN202
         response = provider.complete(
             kwargs.get("user_prompt", ""),
             system=kwargs.get("system_prompt"),
@@ -267,7 +269,9 @@ def test_run_review_raises_on_genuine_provider_error_mid_review() -> None:
     ]
     seen: list[str] = []
 
-    def _flaky_call_ai(*, provider, budget=None, **kwargs):  # noqa: ANN001, ANN202
+    def _flaky_call_ai(
+        *, provider, budget=None, **kwargs
+    ):  # noqa: ANN001, ANN003, ANN202
         del budget
         seen.append("call")
         if len(seen) >= 2:
