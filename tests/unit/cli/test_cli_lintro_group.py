@@ -126,6 +126,7 @@ def test_invoke_with_comma_separated_commands() -> None:
             no_log=False,
             auto_install=False,
             yes=False,
+            dry_run=False,
         )
 
 

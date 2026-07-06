@@ -387,6 +387,72 @@ def _enrich_issues_with_doc_urls(
     _enrich(result.initial_issues)
 
 
+def _issue_would_be_fixed(issue: BaseIssue) -> bool:
+    """Return whether a check-mode issue is one that ``fmt`` would auto-fix.
+
+    Resolves the issue's fixability via ``DISPLAY_FIELD_MAP`` (some tools store
+    the flag under a different attribute). Tools that carry a per-issue
+    fixability signal are honored — only truthy-fixable issues count. For
+    example, ruff sets ``fixable`` from ruff's own ``fix`` field, so its
+    non-``--fix``-able lint diagnostics are excluded.
+
+    Issue types that expose no ``fixable`` attribute at all (the pure-formatter
+    parsers such as prettier, oxfmt, taplo, sqlfluff) carry no fixability
+    distinction. Because dry-run only runs fix-capable (formatter) tools, every
+    diagnostic such a tool reports in check mode represents a reformat that a
+    real ``fmt`` run would apply, so it is treated as fixable.
+
+    Args:
+        issue: The parsed issue to classify.
+
+    Returns:
+        bool: True if the issue would be fixed by a real ``fmt`` run.
+    """
+    field_map = getattr(issue, "DISPLAY_FIELD_MAP", {})
+    fixable_attr = field_map.get("fixable", "fixable")
+    if not hasattr(issue, fixable_attr):
+        return True
+    return bool(getattr(issue, fixable_attr, False))
+
+
+def _filter_result_to_fixable(result: ToolResult) -> ToolResult:
+    """Return a copy of a dry-run check result limited to would-fix issues.
+
+    Filters ``issues`` down to the auto-fixable subset (see
+    :func:`_issue_would_be_fixed`) and updates ``issues_count`` to match, so
+    dry-run counts, the summary line, and the exit code reflect only what a
+    real ``fmt`` run would actually change rather than every check-mode
+    diagnostic.
+
+    A check-mode tool sets ``success=False`` when it merely *finds* issues, but
+    in dry-run those diagnostics are informational: the exit code must derive
+    purely from the fixable issue count, not from the tool having found
+    (possibly non-fixable) issues. So any result that parsed issues is marked
+    ``success=True`` here — it ran fine. Results without parsed issues are
+    returned unchanged: a genuine execution failure carries no parsed issues
+    and must still fail the run, and dry-run only runs fix-capable tools, so a
+    reported change without structured issues is treated as fixable.
+
+    Args:
+        result: The check-mode result to filter.
+
+    Returns:
+        ToolResult: A filtered copy, or the original when there are no parsed
+        issues.
+    """
+    import dataclasses
+
+    if not result.issues:
+        return result
+    fixable = [issue for issue in result.issues if _issue_would_be_fixed(issue)]
+    return dataclasses.replace(
+        result,
+        issues=fixable,
+        issues_count=len(fixable),
+        success=True,
+    )
+
+
 def run_lint_tools_simple(
     *,
     action: str | Action,
@@ -409,6 +475,7 @@ def run_lint_tools_simple(
     ai_fix: bool = False,
     ignore_conflicts: bool = False,
     transport: str | None = None,
+    dry_run: bool = False,
 ) -> int:
     """Simplified runner using Loguru-based logging with rich formatting.
 
@@ -439,6 +506,11 @@ def run_lint_tools_simple(
         ai_fix: Enable AI fix suggestions with interactive review (check only).
         ignore_conflicts: Whether to ignore tool configuration conflicts.
         transport: Optional CLI override for ``ai.transport`` when AI runs.
+        dry_run: Preview what ``fmt`` would fix without modifying files. When
+            set with a ``fmt`` action, tools run in read-only check mode using
+            the fixable tool set; the reported issues are exactly what a real
+            ``fmt`` run would address. Exit code mirrors check semantics: 0 when
+            nothing would be fixed, 1 when fixes are available.
 
     Returns:
         Exit code (0 for success, 1 for failures).
@@ -450,6 +522,16 @@ def run_lint_tools_simple(
     """
     # Normalize action to enum
     action = normalize_action(action)
+
+    # Dry-run preview: show what `fmt` WOULD fix without writing. Select the
+    # fixable tool set (via the original fmt action) but execute, aggregate,
+    # and compute the exit code in read-only check mode, so no files are
+    # modified and the reported issues are exactly what a real fmt run would
+    # address.
+    selection_action = action
+    dry_run_preview = dry_run and action == Action.FIX
+    if dry_run_preview:
+        action = Action.CHECK
 
     # Initialize output manager for this run
     output_manager = OutputManager()
@@ -474,7 +556,7 @@ def run_lint_tools_simple(
     try:
         tools_result = get_tools_to_run(
             tools,
-            action,
+            selection_action,
             ignore_conflicts=ignore_conflicts,
         )
     except ValueError as e:
@@ -546,6 +628,13 @@ def run_lint_tools_simple(
 
     # Print main header with output directory information
     logger.print_lintro_header()
+
+    # Announce dry-run mode so users know no files will be modified.
+    if dry_run_preview and output_format.lower() not in {"json", "sarif"}:
+        logger.console_output(
+            text="Dry run - no files modified",
+            color="yellow",
+        )
 
     # Show incremental mode message
     if incremental:
@@ -664,6 +753,11 @@ def run_lint_tools_simple(
             except (KeyError, ValueError):
                 pass  # Tool not found — skip enrichment
 
+        # Dry-run: restrict each result to would-fix issues before totals and
+        # display so non-auto-fixable diagnostics don't inflate the count.
+        if dry_run_preview:
+            all_results = [_filter_result_to_fixable(r) for r in all_results]
+
         # Calculate totals from parallel results using helper
         total_issues, total_fixed, total_remaining = aggregate_tool_results(
             all_results,
@@ -723,6 +817,13 @@ def run_lint_tools_simple(
 
                 # Populate doc_url on each issue from the plugin
                 _enrich_issues_with_doc_urls(tool, result)
+
+                # Dry-run: restrict to issues a real fmt would actually fix so
+                # the displayed tables, counts, and exit code exclude
+                # non-auto-fixable check-mode diagnostics (e.g. ruff lint rules
+                # that are not --fix-able).
+                if dry_run_preview:
+                    result = _filter_result_to_fixable(result)
 
                 all_results.append(result)
 
@@ -796,6 +897,19 @@ def run_lint_tools_simple(
         total_fixed=total_fixed,
         total_remaining=total_remaining,
     )
+
+    # Dry-run: post-checks may append additional check-mode results. Restrict
+    # every result to its would-fix subset and re-derive the totals so the
+    # summary and exit code count only auto-fixable issues.
+    if dry_run_preview:
+        all_results[:] = [
+            r if getattr(r, "skipped", False) else _filter_result_to_fixable(r)
+            for r in all_results
+        ]
+        total_issues, total_fixed, total_remaining = aggregate_tool_results(
+            all_results,
+            action,
+        )
 
     # AI enhancement via hook pattern
     effective_ai_fix = ai_fix or lintro_config.ai.default_fix
@@ -897,6 +1011,26 @@ def run_lint_tools_simple(
             print(sarif_json)
         else:
             logger.print_execution_summary(action, all_results)
+
+            # Dry-run summary: state clearly what a real fmt run would fix.
+            if dry_run_preview:
+                from lintro.utils.summary_tables import count_affected_files
+
+                file_count = count_affected_files(all_results)
+                if total_issues > 0:
+                    logger.console_output(
+                        text=(
+                            f"Would fix {total_issues} "
+                            f"issue{'s' if total_issues != 1 else ''} in "
+                            f"{file_count} file{'s' if file_count != 1 else ''}"
+                        ),
+                        color="cyan",
+                    )
+                else:
+                    logger.console_output(
+                        text="Nothing to fix - no auto-fixable issues found",
+                        color="green",
+                    )
 
         # Route warnings to stderr (loguru) for machine-readable formats so
         # plain-text messages don't corrupt JSON/SARIF output on stdout.

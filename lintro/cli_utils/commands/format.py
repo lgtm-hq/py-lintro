@@ -92,6 +92,16 @@ DEFAULT_ACTION: str = "fmt"
     is_flag=True,
     help="Skip confirmation prompt and proceed immediately",
 )
+@click.option(
+    "--dry-run",
+    is_flag=True,
+    default=False,
+    help=(
+        "Preview what would be fixed without modifying any files. Lists the "
+        "issues each tool would fix and a summary count. Exits 0 when nothing "
+        "would be fixed and 1 when fixes are available (useful for CI checks)."
+    ),
+)
 def format_command(
     ctx: click.Context,
     paths: tuple[str, ...],
@@ -109,6 +119,7 @@ def format_command(
     debug: bool,
     auto_install: bool,
     yes: bool,
+    dry_run: bool,
 ) -> None:
     """Format code using configured formatting tools.
 
@@ -133,6 +144,7 @@ def format_command(
         debug: bool: Whether to enable debug output on console.
         auto_install: bool: Whether to auto-install Node.js deps if missing.
         yes: bool: Skip confirmation prompt and proceed immediately.
+        dry_run: bool: Preview would-be fixes without modifying any files.
     """
     # Default to current directory if no paths provided
     normalized_paths: list[str] = list(paths) if paths else list(DEFAULT_PATHS)
@@ -155,11 +167,14 @@ def format_command(
         no_log=no_log,
         auto_install=auto_install,
         yes=yes,
+        dry_run=dry_run,
     )
 
-    # Exit with code from tool execution
-    # For fmt action, exit_code is 1 only if there were execution errors
-    # (not if issues were found and fixed - that's success)
+    # Exit with code from tool execution.
+    # For a normal fmt action, exit_code is 1 only if there were execution
+    # errors (not if issues were found and fixed - that's success). In
+    # --dry-run mode nothing is written and exit_code follows check semantics:
+    # 0 when nothing would be fixed, 1 when fixes are available.
     ctx.exit(exit_code)
 
 
