@@ -196,6 +196,101 @@ def test_check_empty_directory(
     assert_that(result).is_not_none()
 
 
+# --- Regression tests for #1081: missing-dep false positives under strict ---
+
+
+@pytest.fixture
+def temp_project_with_uninstalled_dep(tmp_path: Path) -> str:
+    """Create a project that subclasses/decorates an uninstalled dependency.
+
+    Simulates the #1081 scenario where a scanned project's runtime deps are not
+    installed in the environment lintro runs mypy from: the third-party imports
+    resolve to ``Any``. Under ``--strict`` this used to raise false positives
+    for ``disallow_subclassing_any`` and ``disallow_untyped_decorators``.
+
+    Args:
+        tmp_path: Pytest fixture providing a temporary directory.
+
+    Returns:
+        Path to the created file as a string.
+    """
+    file_path = tmp_path / "app.py"
+    file_path.write_text(
+        """\
+from definitely_not_installed_pkg import Base, router
+
+
+class Model(Base):
+    pass
+
+
+@router.get("/health")
+def health() -> str:
+    return "ok"
+""",
+    )
+    return str(file_path)
+
+
+def test_check_uninstalled_dep_no_false_positive(
+    get_plugin: Callable[[str], BaseToolPlugin],
+    temp_project_with_uninstalled_dep: str,
+) -> None:
+    """Verify strict mypy does not flag Any from uninstalled deps.
+
+    With missing imports ignored (the default), subclassing and decorating
+    ``Any``-resolved third-party symbols must not produce errors.
+
+    Args:
+        get_plugin: Fixture factory to get plugin instances.
+        temp_project_with_uninstalled_dep: Path to the reproduction file.
+    """
+    mypy_plugin = get_plugin("mypy")
+    result = mypy_plugin.check([temp_project_with_uninstalled_dep], {})
+
+    assert_that(result).is_not_none()
+    assert_that(result.name).is_equal_to("mypy")
+    assert_that(result.issues_count).is_equal_to(0)
+    assert_that(result.success).is_true()
+
+
+def test_check_uninstalled_dep_strict_still_catches_real_errors(
+    get_plugin: Callable[[str], BaseToolPlugin],
+    tmp_path: Path,
+) -> None:
+    """Verify the missing-dep relaxation does not weaken other strict checks.
+
+    An untyped function must still be reported under strict mode even though
+    the ``--allow-*`` flags are active.
+
+    Args:
+        get_plugin: Fixture factory to get plugin instances.
+        tmp_path: Pytest fixture providing a temporary directory.
+    """
+    file_path = tmp_path / "untyped.py"
+    file_path.write_text(
+        """\
+from definitely_not_installed_pkg import Base
+
+
+class Model(Base):
+    pass
+
+
+def missing_annotations(value):
+    return value
+""",
+    )
+
+    mypy_plugin = get_plugin("mypy")
+    result = mypy_plugin.check([str(file_path)], {})
+
+    assert_that(result.issues_count).is_greater_than(0)
+    codes = {issue.code for issue in result.issues}
+    assert_that(codes).contains("no-untyped-def")
+    assert_that(codes).does_not_contain("misc")
+
+
 # --- Tests for MypyPlugin.set_options method ---
 
 
