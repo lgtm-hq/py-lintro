@@ -240,8 +240,10 @@ jobs:
           retention-days: 7
 
       - name: Save SHA256 to file
+        env:
+          SHA256: ${{ steps.sha256.outputs.sha256 }}
         run: |
-          echo "${{ steps.sha256.outputs.sha256 }}" > sha256-linux-${{ matrix.arch }}.txt
+          echo "$SHA256" > sha256-linux-${{ matrix.arch }}.txt
 
       - name: Upload SHA256 file
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6

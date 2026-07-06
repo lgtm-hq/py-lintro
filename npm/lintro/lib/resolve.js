@@ -1,4 +1,4 @@
-"use strict";
+'use strict';
 
 /**
  * Platform resolution for the lintro meta-package.
@@ -17,10 +17,10 @@
  * @type {Readonly<Record<string, string>>}
  */
 const PLATFORM_PACKAGES = Object.freeze({
-  "darwin-arm64": "@lgtm-hq/lintro-darwin-arm64",
-  "darwin-x64": "@lgtm-hq/lintro-darwin-x64",
-  "linux-arm64": "@lgtm-hq/lintro-linux-arm64",
-  "linux-x64": "@lgtm-hq/lintro-linux-x64",
+  'darwin-arm64': '@lgtm-hq/lintro-darwin-arm64',
+  'darwin-x64': '@lgtm-hq/lintro-darwin-x64',
+  'linux-arm64': '@lgtm-hq/lintro-linux-arm64',
+  'linux-x64': '@lgtm-hq/lintro-linux-x64',
 });
 
 /**
@@ -67,7 +67,7 @@ function resolveBinary(requireFn, platform, arch) {
   if (!pkg) {
     throw new Error(
       `lintro: unsupported platform ${plat}-${cpu}. ` +
-        `Supported platforms: ${supportedPlatforms().join(", ")}.`,
+        `Supported platforms: ${supportedPlatforms().join(', ')}.`
     );
   }
 
@@ -77,19 +77,17 @@ function resolveBinary(requireFn, platform, arch) {
   } catch (err) {
     throw new Error(
       `lintro: the platform package "${pkg}" is not installed. ` +
-        "This usually means optional dependencies were skipped during " +
-        "install, or the lockfile was generated on a different OS and " +
+        'This usually means optional dependencies were skipped during ' +
+        'install, or the lockfile was generated on a different OS and ' +
         "omits this platform's package (see npm/cli#4828). Reinstall with " +
-        "optional dependencies enabled (e.g. `npm install lintro` or " +
-        "`bun add lintro`), or refresh the lockfile on this platform " +
-        `(e.g. \`npm install --force\`). Cause: ${err.message}`,
+        'optional dependencies enabled (e.g. `npm install lintro` or ' +
+        '`bun add lintro`), or refresh the lockfile on this platform ' +
+        `(e.g. \`npm install --force\`). Cause: ${err.message}`
     );
   }
 
-  if (!mod || typeof mod.path !== "string") {
-    throw new Error(
-      `lintro: platform package "${pkg}" did not export a binary path.`,
-    );
+  if (!mod || typeof mod.path !== 'string') {
+    throw new Error(`lintro: platform package "${pkg}" did not export a binary path.`);
   }
   return mod.path;
 }

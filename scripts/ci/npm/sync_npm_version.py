@@ -246,9 +246,7 @@ def main(argv: list[str] | None = None) -> int:
         # In-repo manifests carry a placeholder version, so default checks use
         # the meta-package as the source of truth rather than pyproject.
         version = (
-            _normalise_version(args.version)
-            if args.version
-            else read_meta_version()
+            _normalise_version(args.version) if args.version else read_meta_version()
         )
         mismatches = check_versions(version)
         if mismatches:

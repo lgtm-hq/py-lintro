@@ -82,7 +82,6 @@ def stage_binaries(artifacts_dir: Path, *, npm_dir: Path = NPM_DIR) -> list[str]
 
     Raises:
         FileNotFoundError: When an expected binary artifact is missing.
-        RuntimeError: When an artifact name matches multiple candidate files.
     """
     staged: list[str] = []
     for artifact_name, platform_key in BINARY_MAP.items():
