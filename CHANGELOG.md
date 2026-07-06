@@ -21,6 +21,18 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.66.1] - 2026-07-06
+
+### Changed
+
+- **sbom**: set fail-on-severity=high to stop 'negligible or higher' warnings (#1108) (30c715e)
+- ignore auto-generated CHANGELOG.md + resync uv.lock to 0.66.0 (#1104) (6173f73)
+
+### Fixed
+
+- **ci**: keep main green — revert SBOM hard-fail + decouple flaky Pages deploy (#1111) (2208ef3)
+- **ai/review**: graceful partial when cost cap trips before any chunk (#1103) (d7d733c)
+
 ## [0.66.0] - 2026-07-06
 
 ### Added
