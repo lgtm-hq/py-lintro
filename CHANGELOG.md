@@ -21,6 +21,12 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.68.0] - 2026-07-06
+
+### Added
+
+- **shellcheck**: support source-following for repo-local includes (#1110) (3db899c)
+
 ## [0.67.0] - 2026-07-06
 
 ### Added
