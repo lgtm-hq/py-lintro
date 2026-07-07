@@ -36,6 +36,8 @@
     "javascript": ["oxlint", "oxfmt", "prettier"],
     "typescript": ["oxlint", "oxfmt", "prettier", "tsc"],
     "rust": ["clippy", "rustfmt", "rustc", "cargo_audit", "cargo_deny"],
+    "c": ["cppcheck"],
+    "cpp": ["cppcheck"],
     "go": ["golangci_lint", "semgrep"],
     "ruby": ["semgrep"],
     "sql": ["sqlfluff"],
@@ -164,7 +166,19 @@
       "languages": ["git"],
       "tags": ["linter"]
     },
-    {
+        {
+      "name": "cppcheck",
+      "version": "2.21.0",
+      "install": {
+        "type": "binary"
+      },
+      "tier": "tools",
+      "category": "external",
+      "version_command": ["cppcheck", "--version"],
+      "languages": ["c", "cpp"],
+      "tags": ["linter", "security"]
+    },
+{
       "name": "dotenv_linter",
       "version": "4.0.0",
       "install": {
