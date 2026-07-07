@@ -92,6 +92,7 @@ def _extract_json(response: str) -> dict[str, Any] | None:
     if start != -1 and end != -1 and end > start:
         candidates.append(response[start : end + 1])
 
+    parsed_dicts: list[dict[str, Any]] = []
     for candidate in candidates:
         text = candidate.strip()
         if not text:
@@ -101,9 +102,15 @@ def _extract_json(response: str) -> dict[str, Any] | None:
         except (json.JSONDecodeError, ValueError):
             continue
         if isinstance(parsed, dict):
-            return parsed
+            parsed_dicts.append(parsed)
 
-    return None
+    # Prefer the payload the prompts actually request: an explanatory fenced
+    # object (e.g. {"example": true}) before the real report must not win
+    # just because it appears first.
+    for parsed in parsed_dicts:
+        if "findings" in parsed or "duplicate_groups" in parsed:
+            return parsed
+    return parsed_dicts[0] if parsed_dicts else None
 
 
 class IdiomReviewParser:
