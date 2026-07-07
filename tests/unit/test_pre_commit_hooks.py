@@ -25,7 +25,25 @@ VALID_LANGUAGES = {"python", "system", "script", "docker", "docker_image"}
 # Keys every hook definition must declare for pre-commit to load it.
 REQUIRED_KEYS = {"id", "name", "entry", "language"}
 
-EXPECTED_HOOK_IDS = {"lintro-check", "lintro-format"}
+# Default hooks run the system-installed lintro (full tool set, native
+# binaries included); the -python variants run in a pre-commit-managed
+# isolated env (Python-based tools only).
+EXPECTED_HOOK_IDS = {
+    "lintro-check",
+    "lintro-format",
+    "lintro-check-python",
+    "lintro-format-python",
+}
+
+# Hook id -> required language: default hooks must stay `system` so the
+# native (non-Python) tools remain available; the -python variants must
+# stay `python` so pre-commit provisions the isolated env.
+EXPECTED_HOOK_LANGUAGES = {
+    "lintro-check": "system",
+    "lintro-format": "system",
+    "lintro-check-python": "python",
+    "lintro-format-python": "python",
+}
 
 
 @pytest.fixture
@@ -53,7 +71,7 @@ def test_hooks_file_parses_to_list(hooks: list[dict]) -> None:
 
 
 def test_expected_hook_ids_present(hooks: list[dict]) -> None:
-    """Both the check and format hooks must be defined."""
+    """The system-default and isolated-python hook variants must be defined."""
     ids = {hook["id"] for hook in hooks}
     assert_that(ids).is_equal_to(EXPECTED_HOOK_IDS)
 
@@ -74,6 +92,18 @@ def test_hook_languages_are_valid(hooks: list[dict]) -> None:
     """Each hook must use a language pre-commit understands."""
     for hook in hooks:
         assert_that(VALID_LANGUAGES).contains(hook["language"])
+
+
+def test_hook_languages_match_variant(hooks: list[dict]) -> None:
+    """Default hooks stay ``system``; ``-python`` variants stay ``python``.
+
+    The system default keeps lintro's native (non-Python) tools available;
+    flipping a language silently changes which tools run for consumers.
+    """
+    for hook in hooks:
+        assert_that(hook["language"]).is_equal_to(
+            EXPECTED_HOOK_LANGUAGES[hook["id"]],
+        )
 
 
 def test_hook_entries_resolve_to_real_cli_commands(hooks: list[dict]) -> None:

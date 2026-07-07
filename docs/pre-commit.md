@@ -7,16 +7,29 @@ every commit in **your own** repository.
 > This is opt-in. Adding lintro to your `.pre-commit-config.yaml` is entirely up
 > to you — py-lintro itself does not enforce pre-commit.
 
+The default hooks use your **system-installed lintro** (`language: system`).
+Lintro is written in Python but it's not a Python-only tool: it drives native
+binaries such as `hadolint` and `shellcheck` that a pip-isolated hook
+environment cannot provide, so a system install gives you the full tool set.
+
 ## Quick Start
 
-1. Install the pre-commit framework (once, per machine):
+1. Install lintro so it is on your `PATH` (once, per machine):
+
+   ```bash
+   uv tool install lintro
+   # or: brew tap lgtm-hq/tap && brew install lintro
+   # or: npm install -g lintro
+   ```
+
+2. Install the pre-commit framework (once, per machine):
 
    ```bash
    pip install pre-commit
    # or: uv tool install pre-commit
    ```
 
-2. Add lintro to your project's `.pre-commit-config.yaml`:
+3. Add lintro to your project's `.pre-commit-config.yaml`:
 
    ```yaml
    repos:
@@ -26,7 +39,7 @@ every commit in **your own** repository.
          - id: lintro-check
    ```
 
-3. Install the git hook and run it:
+4. Install the git hook and run it:
 
    ```bash
    pre-commit install       # wire lintro into your git commit flow
@@ -38,12 +51,14 @@ blocks the commit if any issues are found.
 
 ## Available Hooks
 
-| Hook ID          | Runs             | Use it for                                    |
-| ---------------- | ---------------- | --------------------------------------------- |
-| `lintro-check`   | `lintro check`   | Fail the commit when quality issues are found |
-| `lintro-format`  | `lintro format`  | Auto-fix formatting; re-stage and re-commit   |
+| Hook ID                | Runs            | Environment                                   |
+| ---------------------- | --------------- | --------------------------------------------- |
+| `lintro-check`         | `lintro check`  | System lintro (full tool set) — **default**   |
+| `lintro-format`        | `lintro format` | System lintro (full tool set) — **default**   |
+| `lintro-check-python`  | `lintro check`  | Isolated Python env (Python-based tools only) |
+| `lintro-format-python` | `lintro format` | Isolated Python env (Python-based tools only) |
 
-Both hooks pass the staged filenames to lintro, so only the files you are
+All hooks pass the staged filenames to lintro, so only the files you are
 committing are inspected. lintro applies each underlying tool only to the file
 types it supports, so a mixed set of staged files is fine.
 
@@ -84,34 +99,40 @@ repos:
         files: ^src/
 ```
 
-## How it works
+## Alternative: isolated Python environment
 
-The hooks use `language: python`, so pre-commit builds an **isolated virtual
-environment** and installs lintro from the pinned `rev`. This keeps lintro (and
-its Python-based tools) independent of whatever is installed globally on the
-machine.
-
-Note that native, non-Python tools (for example `hadolint` or `shellcheck`)
-are not installed into that isolated environment. lintro gracefully skips any
-tool that is not available, so those checks simply do not run under the isolated
-hook. If you rely on native tools in the hook, install lintro on the system and
-override the hook to use it, for example:
+If you prefer that pre-commit manage the lintro installation itself — no system
+install required — use the `-python` hook variants:
 
 ```yaml
 repos:
-  - repo: local
+  - repo: https://github.com/lgtm-hq/py-lintro
+    rev: v0.69.0
     hooks:
-      - id: lintro-check
-        name: lintro check
-        entry: lintro check
-        language: system
-        types: [file]
-        require_serial: true
+      - id: lintro-check-python
 ```
+
+These use `language: python`, so pre-commit builds an isolated virtual
+environment and installs lintro from the pinned `rev`. This is hermetic and
+reproducible, but comes with an important limitation:
+
+> **Native tools do not run in the isolated env.** Only lintro's Python-based
+> tools (ruff, yamllint, ...) are available there. Native binaries such as
+> `hadolint`, `shellcheck`, or `prettier` are not installed into the hook
+> environment, and lintro will skip them. If you rely on those checks, use the
+> default system hooks instead.
+
+The first run of a `-python` hook is also slower because pre-commit provisions
+the environment (installing lintro and its dependencies from the repo);
+subsequent runs are cached.
 
 ## Notes
 
+- The default (`system`) hooks require lintro on `PATH`; pre-commit fails with
+  an "Executable `lintro` not found" error otherwise — install it first (see
+  Quick Start step 1).
 - Always pin `rev:` to a released tag (not a branch) so hook runs are
   reproducible; `pre-commit autoupdate` can bump it for you.
-- The first run is slower because pre-commit provisions the isolated
-  environment; subsequent runs are cached.
+- With `language: system`, the `rev:` selects which hook _definitions_ are
+  used; the lintro _version_ that runs is whatever is installed on the machine.
+  With the `-python` variants, `rev:` also pins the lintro version itself.
