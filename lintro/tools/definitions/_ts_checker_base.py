@@ -420,14 +420,24 @@ class TypeScriptCheckerPlugin(BaseToolPlugin):
         # ancestor of input paths for tsc's multi-package support).
         discovery_root = self._compute_discovery_root(cwd_path, paths)
 
-        # Respect the subclass's preferred tsconfig ordering before generic
-        # discovery. A subclass (e.g. VueTscPlugin) may declare a
+        # Discover tsconfigs for multi-project support. When the discovered
+        # configs span several directories the inputs cover multiple packages,
+        # and multi-project partitioning must keep precedence: each file is
+        # checked against its nearest package config, so a root-level
+        # preferred config must not short-circuit and route child-package
+        # files through the root app config.
+        tsconfigs = discover_tsconfigs(discovery_root, self.exclude_patterns)
+        distinct_dirs = {info.path.parent.resolve() for info in tsconfigs}
+        if len(distinct_dirs) > 1:
+            return self._check_multi_project(ctx, cwd_path, tsconfigs, merged_options)
+
+        # Single project directory: respect the subclass's preferred tsconfig
+        # ordering. A subclass (e.g. VueTscPlugin) may declare a
         # framework-specific config such as ``tsconfig.app.json`` ahead of
-        # ``tsconfig.json``; when that preferred config is present in the
-        # discovery root it must win over generic discovery, which would
-        # otherwise select ``tsconfig.json`` and bypass the Vue preference
-        # (issue #1112). ``tsc`` — whose sole candidate is ``tsconfig.json`` —
-        # is unaffected, so plain projects and monorepos are unchanged.
+        # ``tsconfig.json``; when that preferred config is present it must win
+        # over generic discovery, which would otherwise select
+        # ``tsconfig.json`` and bypass the Vue preference (issue #1112).
+        # ``tsc`` — whose sole candidate is ``tsconfig.json`` — is unaffected.
         preferred_tsconfig = self._preferred_candidate_tsconfig(discovery_root)
         if preferred_tsconfig is not None:
             logger.debug(
@@ -441,9 +451,6 @@ class TypeScriptCheckerPlugin(BaseToolPlugin):
                 merged_options,
                 discovered_tsconfig=preferred_tsconfig,
             )
-
-        # Discover tsconfigs for multi-project support
-        tsconfigs = discover_tsconfigs(discovery_root, self.exclude_patterns)
 
         if len(tsconfigs) > 1:
             return self._check_multi_project(ctx, cwd_path, tsconfigs, merged_options)
@@ -703,8 +710,7 @@ class TypeScriptCheckerPlugin(BaseToolPlugin):
                     rel_project = project_dir
                 count = len(issues)
                 section = (
-                    f"── {rel_project} "
-                    f"({count} issue{'s' if count != 1 else ''}) ──"
+                    f"── {rel_project} ({count} issue{'s' if count != 1 else ''}) ──"
                 )
                 output_sections.append(section)
 
