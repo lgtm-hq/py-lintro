@@ -16,11 +16,11 @@ cd "${ROOT}"
 
 if command -v uv >/dev/null 2>&1; then
 	if [[ -n "${CI:-}" || -n "${GITHUB_ACTIONS:-}" ]]; then
-		uv sync --group test --frozen
+		uv sync --extra test --frozen
 	else
-		uv sync --group test --frozen 2>/dev/null || uv sync --group test
+		uv sync --extra test --frozen 2>/dev/null || uv sync --extra test
 	fi
-	uv run --group test pytest tests/scripts/ci -q
+	uv run --extra test pytest tests/scripts/ci -q
 	exit 0
 fi
 
