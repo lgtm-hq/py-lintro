@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from assertpy import assert_that
 
 ROOT = Path(__file__).resolve().parents[3]
 MIGRATE_SCRIPT = ROOT / "scripts" / "ci" / "site" / "migrate-docs-content.py"
@@ -37,9 +38,11 @@ def isolated_docs(
         encoding="utf-8",
     )
     site_content = tmp_path / "apps" / "site" / "src" / "content" / "docs"
+    route_map = tmp_path / "apps" / "site" / "src" / "generated" / "docs-route-map.ts"
     monkeypatch.setattr(migrate, "ROOT", tmp_path)
     monkeypatch.setattr(migrate, "DOCS_SRC", docs_src)
     monkeypatch.setattr(migrate, "DOCS_DEST", site_content)
+    monkeypatch.setattr(migrate, "ROUTE_MAP_DEST", route_map)
     return migrate, site_content
 
 
@@ -53,6 +56,19 @@ def test_main_writes_frontmatter(isolated_docs: tuple[Any, Path]) -> None:
     assert text.startswith("---\n")
     assert "category: getting-started" in text
     assert "# Getting Started" in text
+
+
+def test_main_writes_route_map(isolated_docs: tuple[Any, Path]) -> None:
+    """Migration should emit a source→doc route map for the site link layer."""
+    migrate, site_content = isolated_docs
+    migrate.main()
+    route_map = (site_content.parents[1] / "generated" / "docs-route-map.ts").read_text(
+        encoding="utf-8"
+    )
+    assert_that(route_map).contains("export const sourceToDoc")
+    assert_that(route_map).contains(
+        '"getting-started.md": "getting-started/getting-started",',
+    )
 
 
 def test_docs_paths_use_repo_layout() -> None:
@@ -84,9 +100,11 @@ def test_tool_migration_uses_short_titles_and_groups(
         encoding="utf-8",
     )
     site_content = tmp_path / "apps" / "site" / "src" / "content" / "docs"
+    route_map = tmp_path / "apps" / "site" / "src" / "generated" / "docs-route-map.ts"
     monkeypatch.setattr(migrate, "ROOT", tmp_path)
     monkeypatch.setattr(migrate, "DOCS_SRC", docs_root)
     monkeypatch.setattr(migrate, "DOCS_DEST", site_content)
+    monkeypatch.setattr(migrate, "ROUTE_MAP_DEST", route_map)
 
     migrate.main()
 

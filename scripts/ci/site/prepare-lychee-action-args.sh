@@ -39,6 +39,13 @@ for token in "${tokens[@]}"; do
 done
 filtered+=(--root-dir "${ROOT_DIR}")
 
+# The site footer links to /coverage/, which is injected at deploy time by
+# deploy-pages.yml (pages-bundle-manifest.json bundles the Python coverage
+# HTML there). The standalone site-quality build never contains it, so
+# checking it here would test the wrong artifact — exclude it. All other
+# internal links must still resolve inside dist/.
+filtered+=(--exclude '/coverage/?$')
+
 delimiter="lychee_action_args_$(openssl rand -hex 16)"
 {
 	echo "args<<${delimiter}"

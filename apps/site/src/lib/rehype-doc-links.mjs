@@ -1,5 +1,15 @@
 import { posix } from "node:path";
-import { docIdFromVFilePath, isCrossPageLink } from "./doc-link-target.mjs";
+import {
+  docIdFromVFilePath,
+  isCrossPageLink,
+  shouldSkipResourceHref,
+} from "./doc-link-target.mjs";
+
+/**
+ * Repo-root README links have no equivalent page on the site; GitHub renders
+ * the README (with heading anchors) on the repository home page instead.
+ */
+const REPO_URL = "https://github.com/lgtm-hq/py-lintro";
 
 /** @typedef {import('hast').Root} Root */
 /** @typedef {import('hast').Element} Element */
@@ -98,6 +108,15 @@ export function rehypeDocLinks(basePath) {
 
       const href = node.properties?.href;
       if (typeof href !== "string") {
+        return;
+      }
+
+      if (shouldSkipResourceHref(href)) {
+        const hashIndex = href.indexOf("#");
+        const hash = hashIndex === -1 ? "" : href.slice(hashIndex);
+        node.properties.href = `${REPO_URL}${hash}`;
+        node.properties.target = "_blank";
+        node.properties.rel = "noopener noreferrer";
         return;
       }
 

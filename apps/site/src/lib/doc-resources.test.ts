@@ -37,7 +37,7 @@ describe("collectDocResources", () => {
     });
 
     expect(resources).toEqual([
-      { label: "Configuration", href: "configuration.md" },
+      { label: "Configuration", href: "docs/usage/configuration/" },
       { label: "gosu", href: "https://github.com/tianon/gosu" },
     ]);
   });
@@ -80,9 +80,18 @@ describe("collectDocResources", () => {
     });
 
     expect(resources).toEqual([
-      { label: "Quick Start", href: "docker.md#quick-start" },
-      { label: "Troubleshooting", href: "getting-started.md#troubleshooting" },
+      { label: "Quick Start", href: "docs/usage/docker/#quick-start" },
+      { label: "Troubleshooting", href: "docs/getting-started/getting-started/#troubleshooting" },
     ]);
+  });
+
+  it("drops markdown links whose targets were not migrated", () => {
+    const resources = collectDocResources({
+      markdown: ["See [Comparison](comparison.md) and [Docker](docker.md)."],
+      currentDocId: "getting-started/hub",
+    });
+
+    expect(resources).toEqual([{ label: "Docker", href: "docs/usage/docker/" }]);
   });
 
   it("enriches generic table labels from href targets", () => {
@@ -97,8 +106,8 @@ describe("collectDocResources", () => {
     });
 
     expect(resources).toEqual([
-      { label: "Ruff Config", href: "configuration.md#ruff-configuration" },
-      { label: "Pydoclint Analysis", href: "tool-analysis/pydoclint-analysis.md" },
+      { label: "Ruff Config", href: "docs/usage/configuration/#ruff-configuration" },
+      { label: "Pydoclint Analysis", href: "docs/tools/pydoclint/" },
     ]);
   });
 });

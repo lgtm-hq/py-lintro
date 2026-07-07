@@ -38,6 +38,18 @@ describe("rehypeDocLinks", () => {
     expect(output).toContain('href="/Rustume/docs/getting-started/quickstart/"');
   });
 
+  it("rewrites repo-root README links to the GitHub repository", async () => {
+    const output = await transform(
+      '<p><a href="../README.md#installation">Main README → Installation</a></p>',
+    );
+
+    expect(output).toContain('href="https://github.com/lgtm-hq/py-lintro#installation"');
+    expect(output).toContain('target="_blank"');
+
+    const bare = await transform('<p><a href="../README.md">main README</a></p>');
+    expect(bare).toContain('href="https://github.com/lgtm-hq/py-lintro"');
+  });
+
   it("leaves localhost links unchanged", async () => {
     const output = await transform('<p><a href="http://localhost:5173">editor</a></p>');
 

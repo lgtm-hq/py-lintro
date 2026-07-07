@@ -1,7 +1,8 @@
 import rehypeParse from "rehype-parse";
 import remarkParse from "remark-parse";
 import { unified } from "unified";
-import { isCrossPageLink, shouldSkipResourceHref } from "./doc-link-target.mjs";
+import { isCrossPageLink, isExternalHref, shouldSkipResourceHref } from "./doc-link-target.mjs";
+import { routeForDocHref } from "./doc-route-map";
 import { hrefFromProperties } from "./description-links";
 
 export interface DocResource {
@@ -129,9 +130,25 @@ function createResource(label: string, href: string, currentDocId?: string): Doc
     return null;
   }
 
+  // Authored cross-links point at the original docs/ tree; the migration
+  // renames those files, so resolve `.md` links and relative directory links
+  // (which target a README by markdown convention) to final `docs/<id>/`
+  // routes. Links to docs that were not migrated would 404 — drop them.
+  let resolvedHref = cleanHref;
+  const pathOnly = cleanHref.split("#")[0] ?? "";
+  const isMarkdownLink = /\.md$/i.test(pathOnly);
+  const isRelativeDirLink = pathOnly.endsWith("/") && !pathOnly.startsWith("/");
+  if (currentDocId && (isMarkdownLink || isRelativeDirLink) && !isExternalHref(cleanHref)) {
+    const route = routeForDocHref(cleanHref, currentDocId);
+    if (!route) {
+      return null;
+    }
+    resolvedHref = route;
+  }
+
   return {
     label: cleanLabel,
-    href: cleanHref,
+    href: resolvedHref,
   };
 }
 
