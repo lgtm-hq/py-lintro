@@ -170,7 +170,7 @@ SUPPORTED_TOOLS=(
 	"actionlint" "astro" "bandit" "black" "cargo-audit" "cargo-deny"
 	"clippy" "commitlint" "dotenv-linter" "gitleaks" "golangci-lint" "hadolint" "html-validate" "markdownlint" "markdownlint-cli2" "mypy" "osv-scanner"
 	"oxfmt" "oxlint" "pip-audit" "prettier" "pydoclint" "ruff" "rustfmt" "semgrep"
-	"shellcheck" "shfmt" "sqlfluff" "stylelint" "svelte-check" "taplo"
+	"shellcheck" "shfmt" "spectral" "sqlfluff" "stylelint" "svelte-check" "taplo"
 	"trufflehog" "tsc"
 	"vale" "vue-tsc" "yamllint"
 )
@@ -1363,6 +1363,29 @@ main() {
 		fi
 	fi # html-validate
 
+	if should_install "spectral"; then
+		# Install spectral via bun (OpenAPI/AsyncAPI/JSON Schema linting)
+		echo -e "${BLUE}Installing spectral...${NC}"
+
+		# Ensure bun is available (should already be installed for prettier)
+		if ! ensure_bun_installed; then
+			exit 1
+		fi
+
+		# Read spectral version from _tool_versions.py (single source of truth)
+		# Uses package alias: "@stoplight/spectral-cli" -> ToolName.SPECTRAL
+		SPECTRAL_VERSION=$(get_tool_version "@stoplight/spectral-cli") || exit 1
+
+		if [ $DRY_RUN -eq 1 ]; then
+			log_info "[DRY-RUN] Would install @stoplight/spectral-cli@${SPECTRAL_VERSION} globally via bun"
+		elif bun add -g "@stoplight/spectral-cli@${SPECTRAL_VERSION}"; then
+			echo -e "${GREEN}✓ @stoplight/spectral-cli@${SPECTRAL_VERSION} installed successfully${NC}"
+		else
+			echo -e "${RED}✗ Failed to install spectral${NC}"
+			exit 1
+		fi
+	fi # spectral
+
 	if should_install "semgrep"; then
 		# Install semgrep (security scanner)
 		echo -e "${BLUE}Installing semgrep...${NC}"
@@ -1819,6 +1842,7 @@ main() {
 		["semgrep"]="Security scanning"
 		["shellcheck"]="Shell script linting"
 		["shfmt"]="Shell script formatting"
+		["spectral"]="OpenAPI/AsyncAPI/JSON Schema linting"
 		["sqlfluff"]="SQL linting and formatting"
 		["stylelint"]="CSS/SCSS/Less linting"
 		["svelte-check"]="Svelte type checking"
@@ -1839,7 +1863,7 @@ main() {
 	# Verify installations
 	echo -e "${YELLOW}Verifying installations...${NC}"
 
-	tools_to_verify=("actionlint" "astro" "bandit" "black" "cargo-audit" "cargo-deny" "clippy" "commitlint" "dotenv-linter" "gitleaks" "golangci-lint" "hadolint" "html-validate" "markdownlint-cli2" "mypy" "osv-scanner" "oxfmt" "oxlint" "pip-audit" "prettier" "pydoclint" "ruff" "rustfmt" "semgrep" "shellcheck" "shfmt" "sqlfluff" "stylelint" "svelte-check" "taplo" "trufflehog" "tsc" "vale" "vue-tsc" "yamllint")
+	tools_to_verify=("actionlint" "astro" "bandit" "black" "cargo-audit" "cargo-deny" "clippy" "commitlint" "dotenv-linter" "gitleaks" "golangci-lint" "hadolint" "html-validate" "markdownlint-cli2" "mypy" "osv-scanner" "oxfmt" "oxlint" "pip-audit" "prettier" "pydoclint" "ruff" "rustfmt" "semgrep" "shellcheck" "shfmt" "spectral" "sqlfluff" "stylelint" "svelte-check" "taplo" "trufflehog" "tsc" "vale" "vue-tsc" "yamllint")
 
 	# Filter verification list when --tools is set.
 	# Map aliases so e.g. --tools markdownlint verifies markdownlint-cli2.

@@ -78,6 +78,7 @@
         "oxlint",
         "oxfmt",
         "stylelint",
+        "@stoplight/spectral-cli",
         "gitleaks",
         "gitleaks/gitleaks",
         "shellcheck",
