@@ -21,6 +21,17 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.69.1] - 2026-07-07
+
+### Changed
+
+- **contributing**: document merge-discipline and no-paper-over norms (#1121) (edba1ac)
+- **build**: allow setup-uv endpoints in binary build egress policy (#1152) (969d8ac)
+
+### Fixed
+
+- **ai/review**: classify ValueError as INVALID_RESPONSE before shared severity signatures (#1122) (14b618f)
+
 ## [0.69.0] - 2026-07-06
 
 ### Added
