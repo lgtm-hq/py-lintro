@@ -97,6 +97,36 @@ commits before merge.
    ./scripts/local/local-lintro.sh check --output-format grid
    ```
 
+## Common tasks with `just`
+
+Common development tasks are wrapped as [`just`](https://github.com/casey/just)
+recipes in the repository `justfile`. Install `just` once:
+
+```bash
+# macOS
+brew install just
+
+# Linux
+cargo install just
+# or: curl --proto '=https' --tlsv1.2 -sSf https://just.systems/install.sh | bash
+```
+
+Then list and run recipes:
+
+```bash
+just --list            # Show all available recipes
+just setup             # Set up the dev environment (uv sync + editable install)
+just lint              # Run lintro check (runs mypy first)
+just format            # Format the codebase with lintro
+just test              # Run the full test suite with coverage
+just test-unit -v      # Run unit tests only, forwarding extra pytest args
+just clean             # Remove build/test artifacts
+```
+
+Each recipe delegates to the existing `uv`/`scripts/` commands, so you can always
+run those directly if you prefer not to install `just`. Backwards-compatible aliases
+`just chk` and `just fmt` map to `lint` and `format`.
+
 ## More Information
 
 Release automation:
