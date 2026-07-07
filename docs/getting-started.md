@@ -98,6 +98,8 @@ install mode.
 - `actionlint` - GitHub Actions linter (download from GitHub releases)
 - `semgrep` - Security scanner and code analyzer (`pipx install semgrep`,
   `pip install semgrep`, or `brew install semgrep`)
+- `checkov` - Infrastructure-as-Code security scanner for Terraform
+  (`uv tool install checkov`, `pip install checkov`, or `brew install checkov`)
 - `gitleaks` - Secret detection in git repos (`brew install gitleaks` or GitHub
   releases)
 - `trufflehog` - Secret detection with 800+ credential detectors, verification disabled
