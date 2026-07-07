@@ -18,9 +18,7 @@ WARNINGS_JSON = (
     '"rule":"color-hex-length","severity":"error",'
     '"text":"Expected \\"#FFFFFF\\" to be \\"#FFF\\" (color-hex-length)"}]}]'
 )
-CLEAN_JSON = (
-    '[{"source":"/tmp/a.css","errored":false,"warnings":[]}]'
-)
+CLEAN_JSON = '[{"source":"/tmp/a.css","errored":false,"warnings":[]}]'
 NO_CONFIG = "ConfigurationError: No configuration provided for /tmp/a.css"
 
 
@@ -186,3 +184,66 @@ def test_check_skips_when_ctx_should_skip(
         result = stylelint_plugin.check([str(tmp_path)], {})
 
     assert_that(result).is_same_as(early)
+
+
+def test_check_runtime_error_is_not_clean(
+    stylelint_plugin: StylelintPlugin,
+    tmp_path: Path,
+) -> None:
+    """A non-zero exit with nothing parsed fails instead of passing."""
+    (tmp_path / "a.css").write_text("a { color: #fff; }\n")
+
+    with (
+        patch.object(stylelint_plugin, "_prepare_execution") as prep,
+        patch.object(
+            stylelint_plugin,
+            "_run_subprocess",
+            return_value=(False, "Error: Cannot find module 'postcss'"),
+        ),
+        patch.object(
+            stylelint_plugin,
+            "_get_executable_command",
+            return_value=["stylelint"],
+        ),
+    ):
+        prep.return_value = make_ctx(tmp_path, ["a.css"])
+        result = stylelint_plugin.check([str(tmp_path / "a.css")], {})
+
+    assert_that(result.success).is_false()
+    assert_that(result.issues_count).is_equal_to(0)
+    assert_that(result.output).contains("postcss")
+
+
+def test_check_per_call_config_reaches_command(
+    stylelint_plugin: StylelintPlugin,
+    tmp_path: Path,
+) -> None:
+    """A config passed per-call (not via set_options) lands on the command."""
+    (tmp_path / "a.css").write_text("a { color: #fff; }\n")
+    seen_cmds: list[list[str]] = []
+
+    def _capture(cmd: list[str], **kwargs: object) -> tuple[bool, str]:
+        seen_cmds.append(cmd)
+        return (True, CLEAN_JSON)
+
+    with (
+        patch.object(stylelint_plugin, "_prepare_execution") as prep,
+        patch.object(
+            stylelint_plugin,
+            "_run_subprocess",
+            side_effect=_capture,
+        ),
+        patch.object(
+            stylelint_plugin,
+            "_get_executable_command",
+            return_value=["stylelint"],
+        ),
+    ):
+        prep.return_value = make_ctx(tmp_path, ["a.css"])
+        stylelint_plugin.check(
+            [str(tmp_path / "a.css")],
+            {"config": "custom/.stylelintrc.json"},
+        )
+
+    assert_that(seen_cmds).is_length(1)
+    assert_that(seen_cmds[0]).contains("--config", "custom/.stylelintrc.json")

@@ -7,7 +7,9 @@ skip automatically when stylelint is not resolvable in the environment.
 
 from __future__ import annotations
 
+import shutil
 import subprocess
+import tempfile
 from pathlib import Path
 
 import pytest
@@ -15,10 +17,8 @@ from assertpy import assert_that
 
 from lintro.tools.definitions.stylelint import StylelintPlugin
 
-STYLELINT_CONFIG = (
-    '{ "rules": { "color-hex-length": "short", "block-no-empty": true, '
-    '"declaration-block-no-duplicate-properties": true } }'
-)
+# Shared fixtures: single source of truth for stylelint sample content.
+FIXTURES = Path("test_samples/tools/web/stylelint").resolve()
 
 
 def _stylelint_available() -> bool:
@@ -28,14 +28,18 @@ def _stylelint_available() -> bool:
         True if ``stylelint --version`` succeeds via the resolved command.
     """
     plugin = StylelintPlugin()
-    cmd = plugin._get_executable_command(tool_name="stylelint") + ["--version"]
+    cmd = [*plugin._get_executable_command(tool_name="stylelint"), "--version"]
     try:
+        # Probe from a neutral cwd: bunx/npx resolution can succeed from the
+        # repo root (whose node_modules satisfy the CLI) while failing in the
+        # tmp directories the tests actually lint from.
         proc = subprocess.run(  # noqa: S603
             cmd,
             capture_output=True,
             text=True,
             timeout=30,
             check=False,
+            cwd=tempfile.gettempdir(),
         )
     except (OSError, subprocess.SubprocessError):
         return False
@@ -58,14 +62,14 @@ def styled_project(tmp_path: Path) -> Path:
     Returns:
         Path: The project directory containing ``.stylelintrc.json``.
     """
-    (tmp_path / ".stylelintrc.json").write_text(STYLELINT_CONFIG)
+    shutil.copy(FIXTURES / ".stylelintrc.json", tmp_path / ".stylelintrc.json")
     return tmp_path
 
 
 def test_check_reports_css_violations(styled_project: Path) -> None:
     """Check surfaces real violations in a CSS fixture."""
     target = styled_project / "bad.css"
-    target.write_text("a {\n  color: #FFFFFF;\n  color: #FFFFFF;\n}\n")
+    shutil.copy(FIXTURES / "stylelint_violations.css", target)
 
     plugin = StylelintPlugin()
     result = plugin.check([str(target)], {})
@@ -79,9 +83,7 @@ def test_check_reports_css_violations(styled_project: Path) -> None:
 def test_check_reports_scss_violations(styled_project: Path) -> None:
     """Check handles nested SCSS syntax and reports violations."""
     target = styled_project / "bad.scss"
-    target.write_text(
-        ".card {\n  color: #AABBCC;\n\n  .title {\n    color: #AABBCC;\n  }\n}\n",
-    )
+    shutil.copy(FIXTURES / "stylelint_violations.scss", target)
 
     plugin = StylelintPlugin()
     result = plugin.check([str(target)], {})
@@ -94,7 +96,7 @@ def test_check_reports_scss_violations(styled_project: Path) -> None:
 def test_check_passes_clean_css(styled_project: Path) -> None:
     """A clean CSS file produces no issues."""
     target = styled_project / "clean.css"
-    target.write_text("a {\n  color: #fff;\n}\n")
+    shutil.copy(FIXTURES / "stylelint_clean.css", target)
 
     plugin = StylelintPlugin()
     result = plugin.check([str(target)], {})

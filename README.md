@@ -180,7 +180,7 @@ system.
 </tr>
 <tr>
 <td><a href="https://stylelint.io/"><img src="https://img.shields.io/badge/Stylelint-263238?logo=stylelint&logoColor=white" alt="Stylelint"></a></td>
-<td>🎨 CSS/SCSS/Less</td>
+<td>🎨 CSS/SCSS/Sass/Less</td>
 <td>✅</td>
 <td><code>bun add -g stylelint</code><br><code>npm install -g stylelint</code></td>
 </tr>

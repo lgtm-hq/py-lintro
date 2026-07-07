@@ -47,6 +47,7 @@
     "css": ["stylelint"],
     "scss": ["stylelint"],
     "less": ["stylelint"],
+    "sass": ["stylelint"],
     "github_actions": ["actionlint"],
     "security": ["gitleaks", "osv_scanner", "semgrep"],
     "astro": ["astro_check", "prettier"],
@@ -372,7 +373,7 @@
       "tier": "tools",
       "category": "npm",
       "version_command": ["stylelint", "--version"],
-      "languages": ["css", "scss", "less"],
+      "languages": ["css", "scss", "sass", "less"],
       "tags": ["linter", "formatter"]
     },
     {

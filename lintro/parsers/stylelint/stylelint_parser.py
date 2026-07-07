@@ -29,11 +29,19 @@ def _extract_json_array(output: str) -> str | None:
     Returns:
         The JSON array substring, or None if no array delimiters are found.
     """
-    start = output.find("[")
-    end = output.rfind("]")
-    if start == -1 or end == -1 or end < start:
-        return None
-    return output[start : end + 1]
+    # Try each "[" as a potential array start and return the first slice
+    # that decodes as valid JSON: a bracketed log line (e.g. "[Warning] ...")
+    # before the payload must not defeat extraction.
+    decoder = json.JSONDecoder()
+    idx = output.find("[")
+    while idx != -1:
+        try:
+            _, end = decoder.raw_decode(output, idx)
+        except (json.JSONDecodeError, ValueError):
+            idx = output.find("[", idx + 1)
+            continue
+        return output[idx:end]
+    return None
 
 
 def parse_stylelint_output(output: str | None) -> list[StylelintIssue]:
@@ -100,6 +108,19 @@ def _parse_source_result(
     if isinstance(parse_errors, list):
         for parse_error in parse_errors:
             issue = _parse_warning(parse_error, source, default_rule="parseError")
+            if issue is not None:
+                issues.append(issue)
+
+    # Invalid rule options are configuration errors stylelint reports per
+    # file; dropping them would silently skip the affected rules.
+    invalid_options = source_result.get("invalidOptionWarnings", [])
+    if isinstance(invalid_options, list):
+        for invalid_option in invalid_options:
+            issue = _parse_warning(
+                invalid_option,
+                source,
+                default_rule="invalidOption",
+            )
             if issue is not None:
                 issues.append(issue)
 

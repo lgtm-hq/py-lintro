@@ -147,9 +147,7 @@ def test_parse_warning_missing_text_is_skipped() -> None:
 
 def test_parse_multiple_sources() -> None:
     """Warnings across multiple source files are all collected."""
-    output = (
-        "[" + SINGLE_WARNING[1:-1] + "," + MULTI_SCSS[1:-1] + "]"
-    )
+    output = "[" + SINGLE_WARNING[1:-1] + "," + MULTI_SCSS[1:-1] + "]"
     issues = parse_stylelint_output(output)
     assert_that(issues).is_length(5)
     assert_that({i.file for i in issues}).is_equal_to(
@@ -183,3 +181,28 @@ def test_issue_display_row_severity_and_doc_key() -> None:
     assert_that(row["severity"]).is_equal_to("WARNING")
     assert_that(row["code"]).is_equal_to("color-hex-length")
     assert_that(row["fixable"]).is_equal_to("")
+
+
+def test_invalid_option_warnings_are_reported() -> None:
+    """Entries in invalidOptionWarnings surface as issues, not silence."""
+    output = (
+        '[{"source":"/tmp/a.css","warnings":[],'
+        '"invalidOptionWarnings":[{"text":'
+        '"Invalid option value \\"tabs\\" for rule \\"indentation\\""}]}]'
+    )
+    issues = parse_stylelint_output(output=output)
+    assert_that(issues).is_length(1)
+    assert_that(issues[0].code).is_equal_to("invalidOption")
+    assert_that(issues[0].message).contains("Invalid option")
+
+
+def test_bracketed_log_line_before_json_is_tolerated() -> None:
+    """A bracketed warning line before the payload does not defeat parsing."""
+    output = (
+        "[Warning] something noisy\n"
+        '[{"source":"/tmp/a.css","warnings":[{"line":1,"column":1,'
+        '"rule":"block-no-empty","severity":"error","text":"empty"}]}]'
+    )
+    issues = parse_stylelint_output(output=output)
+    assert_that(issues).is_length(1)
+    assert_that(issues[0].code).is_equal_to("block-no-empty")

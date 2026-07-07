@@ -36,7 +36,7 @@ STYLELINT_DEFAULT_PRIORITY: int = 50
 STYLELINT_FILE_PATTERNS: list[str] = ["*.css", "*.scss", "*.sass", "*.less"]
 # Rule codes that are not real stylelint rules (no documentation page).
 STYLELINT_PSEUDO_RULES: frozenset[str] = frozenset(
-    {"CssSyntaxError", "parseError"},
+    {"CssSyntaxError", "parseError", "invalidOption", "TIMEOUT"},
 )
 STYLELINT_CONFIG_FILENAMES: tuple[str, ...] = (
     ".stylelintrc",
@@ -162,7 +162,11 @@ class StylelintPlugin(BaseToolPlugin):
             cwd=cwd,
         )
 
-    def _create_timeout_result(self, timeout_val: int, cwd: str | None = None) -> ToolResult:
+    def _create_timeout_result(
+        self,
+        timeout_val: int,
+        cwd: str | None = None,
+    ) -> ToolResult:
         """Create a ToolResult for timeout scenarios.
 
         Args:
@@ -210,17 +214,26 @@ class StylelintPlugin(BaseToolPlugin):
             return None
         return DocUrlTemplate.STYLELINT.format(code=code)
 
-    def _base_command(self) -> list[str]:
+    def _base_command(
+        self,
+        merged_options: dict[str, object] | None = None,
+    ) -> list[str]:
         """Build the base stylelint command, honoring an explicit config.
 
         Config discovery is otherwise delegated to stylelint itself, which
         resolves configuration per linted file (walking up from each file).
 
+        Args:
+            merged_options: Per-call options merged over the instance
+                defaults; falls back to ``self.options`` when omitted so a
+                caller-supplied ``config`` is not silently ignored.
+
         Returns:
             The base command list.
         """
-        cmd = self._get_executable_command(tool_name="stylelint")
-        explicit = self.options.get("config")
+        cmd = [*self._get_executable_command(tool_name="stylelint")]
+        opts = merged_options if merged_options is not None else self.options
+        explicit = opts.get("config")
         if explicit:
             cmd.extend(["--config", str(explicit)])
         return cmd
@@ -246,11 +259,16 @@ class StylelintPlugin(BaseToolPlugin):
         if ctx.should_skip:
             return ctx.early_result  # type: ignore[return-value]
 
-        cmd = self._base_command() + ["--formatter", "json", *ctx.rel_files]
+        cmd = [
+            *self._base_command(merged_options),
+            "--formatter",
+            "json",
+            *ctx.rel_files,
+        ]
         logger.debug(f"[StylelintPlugin] Running: {' '.join(cmd)} (cwd={ctx.cwd})")
 
         try:
-            _success, output = self._run_subprocess(
+            run_success, output = self._run_subprocess(
                 cmd=cmd,
                 timeout=ctx.timeout,
                 cwd=ctx.cwd,
@@ -261,6 +279,17 @@ class StylelintPlugin(BaseToolPlugin):
         issues = parse_stylelint_output(output=output)
         if not issues and self._is_no_config_error(output):
             return self._create_no_config_result(cwd=ctx.cwd)
+        # Stylelint exits 2 when violations exist (parsed above); any other
+        # failure with nothing parsed (crash, invalid flag or config) must
+        # not read as a clean run.
+        if not issues and not run_success:
+            return ToolResult(
+                name=self.definition.name,
+                success=False,
+                output=output or "Stylelint exited with an error and no results.",
+                issues_count=0,
+                cwd=ctx.cwd,
+            )
         issues_count = len(issues)
         success = issues_count == 0
 
@@ -294,12 +323,12 @@ class StylelintPlugin(BaseToolPlugin):
         if ctx.should_skip:
             return ctx.early_result  # type: ignore[return-value]
 
-        base_cmd = self._base_command()
-        check_cmd = base_cmd + ["--formatter", "json", *ctx.rel_files]
+        base_cmd = self._base_command(merged_options)
+        check_cmd = [*base_cmd, "--formatter", "json", *ctx.rel_files]
 
         # Count initial issues.
         try:
-            _s, check_output = self._run_subprocess(
+            initial_success, check_output = self._run_subprocess(
                 cmd=check_cmd,
                 timeout=ctx.timeout,
                 cwd=ctx.cwd,
@@ -311,12 +340,24 @@ class StylelintPlugin(BaseToolPlugin):
         initial_count = len(initial_issues)
         if not initial_issues and self._is_no_config_error(check_output):
             return self._create_no_config_result(cwd=ctx.cwd)
+        # A failing initial check with nothing parsed is a crash/config
+        # error, not a fixable state.
+        if not initial_issues and not initial_success:
+            return ToolResult(
+                name=self.definition.name,
+                success=False,
+                output=(
+                    check_output or "Stylelint exited with an error and no results."
+                ),
+                issues_count=0,
+                cwd=ctx.cwd,
+            )
 
         # Apply fixes.
-        fix_cmd = base_cmd + ["--fix", "--formatter", "json", *ctx.rel_files]
+        fix_cmd = [*base_cmd, "--fix", "--formatter", "json", *ctx.rel_files]
         logger.debug(f"[StylelintPlugin] Fixing: {' '.join(fix_cmd)} (cwd={ctx.cwd})")
         try:
-            _s, fix_output = self._run_subprocess(
+            fix_success, fix_output = self._run_subprocess(
                 cmd=fix_cmd,
                 timeout=ctx.timeout,
                 cwd=ctx.cwd,
@@ -324,9 +365,24 @@ class StylelintPlugin(BaseToolPlugin):
         except subprocess.TimeoutExpired:
             return self._create_timeout_result(timeout_val=ctx.timeout, cwd=ctx.cwd)
 
+        # A crashed --fix run (nothing parseable) must surface, not flow into
+        # a re-check that would misattribute the failure.
+        if not fix_success and not parse_stylelint_output(output=fix_output):
+            return ToolResult(
+                name=self.definition.name,
+                success=False,
+                output=fix_output or "Stylelint --fix exited with an error.",
+                issues_count=initial_count,
+                issues=initial_issues,
+                initial_issues_count=initial_count,
+                fixed_issues_count=0,
+                remaining_issues_count=initial_count,
+                cwd=ctx.cwd,
+            )
+
         # Re-check for remaining issues.
         try:
-            _s, final_output = self._run_subprocess(
+            final_success, final_output = self._run_subprocess(
                 cmd=check_cmd,
                 timeout=ctx.timeout,
                 cwd=ctx.cwd,
@@ -335,6 +391,20 @@ class StylelintPlugin(BaseToolPlugin):
             return self._create_timeout_result(timeout_val=ctx.timeout, cwd=ctx.cwd)
 
         remaining_issues = parse_stylelint_output(output=final_output)
+        # A failed verification with nothing parsed must not read as
+        # "all fixed" — keep the initial issues as remaining.
+        if not remaining_issues and not final_success:
+            return ToolResult(
+                name=self.definition.name,
+                success=False,
+                output=(final_output or "Stylelint re-check exited with an error."),
+                issues_count=initial_count,
+                issues=initial_issues,
+                initial_issues_count=initial_count,
+                fixed_issues_count=0,
+                remaining_issues_count=initial_count,
+                cwd=ctx.cwd,
+            )
         remaining_count = len(remaining_issues)
         fixed_count = max(0, initial_count - remaining_count)
 
@@ -345,8 +415,9 @@ class StylelintPlugin(BaseToolPlugin):
             output_lines.append(
                 f"Found {remaining_count} issue(s) that cannot be auto-fixed",
             )
-            for issue in remaining_issues[:5]:
-                output_lines.append(f"  {issue.file} - {issue.message}")
+            output_lines.extend(
+                f"  {issue.file} - {issue.message}" for issue in remaining_issues[:5]
+            )
             if len(remaining_issues) > 5:
                 output_lines.append(f"  ... and {len(remaining_issues) - 5} more")
         elif remaining_count == 0 and fixed_count > 0:
