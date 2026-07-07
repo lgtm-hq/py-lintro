@@ -35,7 +35,7 @@ permissions: {}
 jobs:
   prune-untagged:
     # yamllint disable-line rule:line-length
-    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-ghcr-cleanup.yml@4aaefe64763b7841b6d92d94dc47185083d34c9a # v0.46.0
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-ghcr-cleanup.yml@3d3e577c8e50e11ead6bd36cb559361d33796a9d # v0.47.1
     permissions:
       contents: read # checkout repo and lgtm-ci tooling sparse checkout
       packages: write # delete untagged GHCR package versions via Packages API
@@ -44,7 +44,7 @@ jobs:
       min-age-days: >-
         ${{ github.event_name != 'workflow_dispatch' && 7 || inputs.min_age_days }}
       dry-run: ${{ inputs.dry_run == true }}
-      tooling-ref: '4aaefe64763b7841b6d92d94dc47185083d34c9a' # v0.46.0
+      tooling-ref: '3d3e577c8e50e11ead6bd36cb559361d33796a9d' # v0.47.1
       egress-policy: block
       egress-preset: github-tooling
       allowed-endpoints-mode: append
@@ -57,7 +57,7 @@ jobs:
 
   prune-untagged-base:
     # yamllint disable-line rule:line-length
-    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-ghcr-cleanup.yml@4aaefe64763b7841b6d92d94dc47185083d34c9a # v0.46.0
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-ghcr-cleanup.yml@3d3e577c8e50e11ead6bd36cb559361d33796a9d # v0.47.1
     permissions:
       contents: read # checkout repo and lgtm-ci tooling sparse checkout
       packages: write # delete untagged GHCR package versions via Packages API
@@ -66,7 +66,7 @@ jobs:
       min-age-days: >-
         ${{ github.event_name != 'workflow_dispatch' && 7 || inputs.min_age_days }}
       dry-run: ${{ inputs.dry_run == true }}
-      tooling-ref: '4aaefe64763b7841b6d92d94dc47185083d34c9a' # v0.46.0
+      tooling-ref: '3d3e577c8e50e11ead6bd36cb559361d33796a9d' # v0.47.1
       egress-policy: block
       egress-preset: github-tooling
       allowed-endpoints-mode: append
