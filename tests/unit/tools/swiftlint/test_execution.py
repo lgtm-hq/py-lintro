@@ -12,6 +12,26 @@ from lintro.tools.definitions.swiftlint import SwiftlintPlugin
 from tests.unit.tools.swiftlint.conftest import SAMPLE_JSON
 
 
+def _sp(success: bool, output: str):
+    """Build a SubprocessResult from a legacy (success, output) pair.
+
+    Args:
+        success: Whether the simulated process exited 0.
+        output: Simulated stdout (also used as combined output).
+
+    Returns:
+        SubprocessResult with the JSON payload on stdout.
+    """
+    from lintro.plugins.subprocess_executor import SubprocessResult
+
+    return SubprocessResult(
+        returncode=0 if success else 1,
+        stdout=output,
+        stderr="",
+        output=output,
+    )
+
+
 def test_definition_metadata(swiftlint_plugin: SwiftlintPlugin) -> None:
     """The tool definition advertises the expected capabilities.
 
@@ -67,8 +87,8 @@ def test_check_clean_file_success(
     ):
         with patch.object(
             swiftlint_plugin,
-            "_run_subprocess",
-            return_value=(True, "[\n\n]"),
+            "_run_subprocess_result",
+            return_value=_sp(True, "[\n\n]"),
         ):
             result = swiftlint_plugin.check([str(test_file)], {})
 
@@ -98,8 +118,8 @@ def test_check_reports_issues(
     ):
         with patch.object(
             swiftlint_plugin,
-            "_run_subprocess",
-            return_value=(False, SAMPLE_JSON),
+            "_run_subprocess_result",
+            return_value=_sp(False, SAMPLE_JSON),
         ):
             result = swiftlint_plugin.check([str(test_file)], {})
 
@@ -148,8 +168,8 @@ def test_check_nonzero_exit_without_issues_fails(
     ):
         with patch.object(
             swiftlint_plugin,
-            "_run_subprocess",
-            return_value=(False, "error: unable to parse"),
+            "_run_subprocess_result",
+            return_value=_sp(False, "error: unable to parse"),
         ):
             result = swiftlint_plugin.check([str(test_file)], {})
 
