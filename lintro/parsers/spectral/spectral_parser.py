@@ -38,19 +38,21 @@ def parse_spectral_output(output: str | None) -> list[SpectralIssue]:
     if not output or not output.strip():
         return issues
 
-    try:
-        # Spectral may emit non-JSON preamble (e.g. a missing-ruleset warning)
-        # before the JSON array; slice from the first bracket to be safe.
-        json_start = output.find("[")
-        json_end = output.rfind("]") + 1
-        if json_start == -1 or json_end == 0:
-            return issues
-        data: Any = json.loads(output[json_start:json_end])
-    except json.JSONDecodeError as e:
-        logger.debug(f"Failed to parse Spectral JSON output: {e}")
-        return issues
-    except (ValueError, TypeError) as e:
-        logger.debug(f"Error processing Spectral output: {e}")
+    # Spectral may emit non-JSON preamble (e.g. a missing-ruleset warning or
+    # a bracketed "[Warning] ..." stderr line merged into the stream) before
+    # the JSON array. Try each "[" as a potential array start and take the
+    # first position that decodes as valid JSON.
+    data: Any = None
+    idx = output.find("[")
+    decoder = json.JSONDecoder()
+    while idx != -1:
+        try:
+            data, _ = decoder.raw_decode(output, idx)
+            break
+        except (json.JSONDecodeError, ValueError):
+            idx = output.find("[", idx + 1)
+    if idx == -1 or data is None:
+        logger.debug("No valid JSON array found in Spectral output")
         return issues
 
     if not isinstance(data, list):
@@ -80,9 +82,11 @@ def _parse_entry(entry: dict[str, Any]) -> SpectralIssue | None:
     Returns:
         SpectralIssue if parsing succeeds, otherwise None.
     """
-    code = str(entry.get("code", ""))
-    message = str(entry.get("message", ""))
-    file_path = str(entry.get("source", ""))
+    # ``or ""`` guards explicit JSON nulls: str(None) would fabricate the
+    # literal string "None" as a filename, rule code, or message.
+    code = str(entry.get("code") or "")
+    message = str(entry.get("message") or "")
+    file_path = str(entry.get("source") or "")
 
     # Severity: integer diagnostic level mapped to a lintro severity string.
     raw_severity = entry.get("severity", 1)

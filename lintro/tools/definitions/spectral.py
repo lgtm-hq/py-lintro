@@ -253,6 +253,19 @@ class SpectralPlugin(BaseToolPlugin):
             )
 
         issues = parse_spectral_output(output=output)
+
+        # Spectral exits 1 when findings exist (which produce parseable JSON).
+        # A non-zero exit with nothing parsed is a runtime failure (invalid
+        # ruleset, missing runtime) — never report that as a clean pass.
+        if not success and not issues:
+            return ToolResult(
+                name=self.definition.name,
+                success=False,
+                output=output or "Spectral exited with an error and no results.",
+                issues_count=0,
+                cwd=ctx.cwd,
+            )
+
         for issue in issues:
             issue.doc_url = self.doc_url(issue.code) or ""
         issues_count: int = len(issues)

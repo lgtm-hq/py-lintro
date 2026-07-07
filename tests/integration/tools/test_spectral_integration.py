@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import shutil
 import subprocess
+import tempfile
 from pathlib import Path
 
 import pytest
@@ -62,31 +63,41 @@ paths:
 
 
 def spectral_command() -> list[str] | None:
-    """Resolve a runnable spectral command.
+    """Resolve the command the plugin itself would run, if it works.
+
+    Mirrors ``SpectralPlugin._get_spectral_command`` resolution order exactly:
+    probing a different invocation than the plugin uses (e.g. npx when the
+    plugin would pick bunx) can validate a working CLI while the plugin's own
+    invocation is broken, letting the tests run against a failing tool.
 
     Returns:
-        A command prefix list if spectral can run, otherwise None.
+        The plugin's command prefix if it runs, otherwise None.
     """
-    candidates: list[list[str]] = []
+    cmd: list[str] | None = None
     if shutil.which("spectral"):
-        candidates.append(["spectral"])
-    if shutil.which("bunx"):
-        candidates.append(["bunx", "spectral"])
-    if shutil.which("npx"):
-        candidates.append(["npx", "--yes", "@stoplight/spectral-cli"])
-    for cmd in candidates:
-        try:
-            result = subprocess.run(
-                [*cmd, "--version"],
-                capture_output=True,
-                timeout=60,
-                check=False,
-            )
-            if result.returncode == 0:
-                return cmd
-        except (subprocess.TimeoutExpired, OSError):
-            continue
-    return None
+        cmd = ["spectral"]
+    elif shutil.which("bunx"):
+        cmd = ["bunx", "@stoplight/spectral-cli"]
+    elif shutil.which("npx"):
+        cmd = ["npx", "--yes", "@stoplight/spectral-cli"]
+    if cmd is None:
+        return None
+    try:
+        # Probe from a neutral cwd: the tests run the plugin against tmp
+        # directories, and bunx/npx resolution can differ between the repo
+        # root (whose node_modules may satisfy the CLI's dependencies) and
+        # anywhere else. Probing from the repo would validate an invocation
+        # that then fails inside the tests.
+        result = subprocess.run(
+            [*cmd, "--version"],
+            capture_output=True,
+            timeout=60,
+            check=False,
+            cwd=tempfile.gettempdir(),
+        )
+    except (subprocess.TimeoutExpired, OSError):
+        return None
+    return cmd if result.returncode == 0 else None
 
 
 pytestmark = pytest.mark.skipif(
