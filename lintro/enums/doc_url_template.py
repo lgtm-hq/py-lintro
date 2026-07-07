@@ -34,6 +34,7 @@ class DocUrlTemplate(StrEnum):
     MYPY = "https://mypy.readthedocs.io/en/stable/error_code_list.html"
     OSV = "https://osv.dev/vulnerability/{code}"
     OXLINT = "https://oxc.rs/docs/guide/usage/linter/rules/{code}"
+    PHPSTAN = "https://phpstan.org/error-identifiers/{code}"
     PYDOCLINT = "https://jsh9.github.io/pydoclint/how_to_config.html"
     RUFF = "https://docs.astral.sh/ruff/rules/{code}/"
     SEMGREP = "https://semgrep.dev/r/{code}"

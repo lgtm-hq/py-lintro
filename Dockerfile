@@ -43,6 +43,7 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     git \
     libssl-dev \
     pkg-config \
+    php-cli \
     unzip \
     jq && \
     apt-get clean && \
@@ -108,7 +109,8 @@ RUN echo "=== Verifying all tools ===" && \
     cargo deny --version && actionlint --version && bandit --version && \
     black --version && gitleaks version && hadolint --version && \
     markdownlint-cli2 --version && mypy --version && osv-scanner --version && \
-    oxfmt --version && oxlint --version && prettier --version && \
+    oxfmt --version && oxlint --version && php --version && \
+    phpstan --version && prettier --version && \
     pydoclint --version && ruff --version && semgrep --version && \
     shellcheck --version && shfmt --version && sqlfluff --version && \
     taplo --version && tsc --version && astro --version && \
@@ -164,6 +166,7 @@ RUN echo "Verifying tools..." && \
     markdownlint-cli2 --version && tsc --version && astro --version && \
     vue-tsc --version && oxlint --version && oxfmt --version && \
     bandit --version && mypy --version && pydoclint --version && \
+    php --version && phpstan --version && \
     yamllint --version && sqlfluff --version && \
     echo "All tools verified!"
 

@@ -111,6 +111,12 @@ system.
 <td><code>bun add -g oxlint</code><br><code>npm install -g oxlint</code></td>
 </tr>
 <tr>
+<td><a href="https://phpstan.org/"><img src="https://img.shields.io/badge/PHPStan-777BB4?logo=php&logoColor=white" alt="PHPStan"></a></td>
+<td>🐘 PHP</td>
+<td>-</td>
+<td><code>brew install phpstan</code><br><code>composer require --dev phpstan/phpstan</code></td>
+</tr>
+<tr>
 <td><a href="https://github.com/jsh9/pydoclint"><img src="https://img.shields.io/badge/pydoclint-3776AB?logo=python&logoColor=white" alt="pydoclint"></a></td>
 <td>🐍 Python</td>
 <td>-</td>

@@ -1778,6 +1778,59 @@ lintro format --tools shfmt
 lintro check scripts/ --tools shfmt
 ```
 
+### PHP Tools
+
+#### PHPStan Configuration
+
+[PHPStan](https://phpstan.org/) is a static analysis tool for PHP that finds bugs
+without running the code. It is check-only (no auto-fix) and reports issues at a
+configurable strictness `level` (0-9).
+
+**Installation:**
+
+```bash
+# macOS (installs the PHP runtime too)
+brew install php phpstan
+
+# Per-project (recommended for real projects)
+composer require --dev phpstan/phpstan
+```
+
+**File:** `phpstan.neon` (also `phpstan.neon.dist`, `phpstan.dist.neon`)
+
+```neon
+parameters:
+    level: 6
+    paths:
+        - src
+```
+
+When a `phpstan.neon` config is present, PHPStan reads the analysis level from it and
+lintro does not inject a `--level`. When no config exists, lintro runs with `--level=0`
+(the most conservative level, minimizing false positives on files without an
+autoloader).
+
+**Lintro options via `--tool-options`:**
+
+```bash
+# Raise the analysis level (0-9); ignored when phpstan.neon sets the level
+lintro check --tools phpstan --tool-options "phpstan:level=6"
+
+# Point at an explicit configuration file
+lintro check --tools phpstan --tool-options "phpstan:configuration=phpstan.neon"
+
+# Increase PHPStan's memory limit for large codebases
+lintro check --tools phpstan --tool-options "phpstan:memory_limit=1G"
+```
+
+**Available Options:**
+
+| Option          | Type | Description                                                      |
+| --------------- | ---- | ---------------------------------------------------------------- |
+| `level`         | int  | Analysis strictness 0-9 (default 0; ignored when config sets it) |
+| `configuration` | str  | Path to a PHPStan configuration file                             |
+| `memory_limit`  | str  | Memory limit passed to PHPStan (e.g. `512M`, `1G`)               |
+
 ### TOML Tools
 
 #### Taplo Configuration

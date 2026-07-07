@@ -29,6 +29,7 @@ class Lintro < Formula
   depends_on "mypy"
   depends_on "oxfmt"
   depends_on "oxlint"
+  depends_on "phpstan" # pulls in php runtime
   depends_on "prettier"
   depends_on "python@3.13"
   depends_on "ruff"
@@ -79,6 +80,7 @@ class Lintro < Formula
       Security:         gitleaks, semgrep
       Rust:             clippy, rustfmt (via rust)
       SQL:              sqlfluff
+      PHP:              phpstan (via php)
 
       Not installed automatically (install if needed):
         cargo install cargo-audit cargo-deny   # Rust dependency auditing

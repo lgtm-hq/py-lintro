@@ -164,6 +164,7 @@ packages = [
   "lintro.parsers.osv_scanner",
   "lintro.parsers.oxfmt",
   "lintro.parsers.oxlint",
+  "lintro.parsers.phpstan",
   "lintro.parsers.prettier",
   "lintro.parsers.shellcheck",
   "lintro.parsers.shfmt",

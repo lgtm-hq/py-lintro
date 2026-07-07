@@ -167,7 +167,7 @@ should_install() {
 SUPPORTED_TOOLS=(
 	"actionlint" "astro" "bandit" "black" "cargo-audit" "cargo-deny"
 	"clippy" "gitleaks" "hadolint" "markdownlint" "markdownlint-cli2" "mypy" "osv-scanner"
-	"oxfmt" "oxlint" "prettier" "pydoclint" "ruff" "rustfmt" "semgrep"
+	"oxfmt" "oxlint" "phpstan" "prettier" "pydoclint" "ruff" "rustfmt" "semgrep"
 	"shellcheck" "shfmt" "sqlfluff" "svelte-check" "taplo" "tsc"
 	"vue-tsc" "yamllint"
 )
@@ -749,6 +749,29 @@ main() {
 			fi
 		fi
 	fi # shfmt
+
+	if should_install "phpstan"; then
+		# Install PHPStan (PHP static analysis) as a standalone PHAR.
+		# PHPStan requires a PHP runtime at execution time; PHP itself is
+		# provided by the system package manager (apt php-cli in Docker,
+		# `brew install php` locally).
+		echo -e "${BLUE}Installing phpstan...${NC}"
+		PHPSTAN_VERSION=$(get_tool_version "phpstan") || exit 1
+		if [ $DRY_RUN -eq 1 ]; then
+			log_info "[DRY-RUN] Would install phpstan v${PHPSTAN_VERSION}"
+		elif command -v phpstan &>/dev/null; then
+			echo -e "${GREEN}✓ phpstan already installed${NC}"
+		else
+			phar_url="https://github.com/phpstan/phpstan/releases/download/${PHPSTAN_VERSION}/phpstan.phar"
+			if download_with_retries "$phar_url" "$BIN_DIR/phpstan" 3; then
+				chmod +x "$BIN_DIR/phpstan"
+				echo -e "${GREEN}✓ phpstan installed successfully${NC}"
+			else
+				echo -e "${RED}✗ Failed to download phpstan${NC}"
+				exit 1
+			fi
+		fi
+	fi # phpstan
 
 	# Shared helper: ensure Rust toolchain is installed with the required component.
 	# Called by both the rustfmt and clippy blocks to avoid duplicating toolchain setup.
@@ -1425,6 +1448,7 @@ main() {
 		["osv-scanner"]="Multi-ecosystem vulnerability scanning"
 		["oxfmt"]="JavaScript/TypeScript formatting"
 		["oxlint"]="JavaScript/TypeScript linting"
+		["phpstan"]="PHP static analysis"
 		["prettier"]="JavaScript/JSON formatting"
 		["pydoclint"]="Python docstring validation"
 		["ruff"]="Python linting and formatting"
@@ -1450,7 +1474,7 @@ main() {
 	# Verify installations
 	echo -e "${YELLOW}Verifying installations...${NC}"
 
-	tools_to_verify=("actionlint" "astro" "bandit" "black" "cargo-audit" "cargo-deny" "clippy" "rustfmt" "gitleaks" "hadolint" "markdownlint-cli2" "mypy" "osv-scanner" "oxfmt" "oxlint" "prettier" "pydoclint" "ruff" "semgrep" "shellcheck" "shfmt" "sqlfluff" "svelte-check" "taplo" "tsc" "vue-tsc" "yamllint")
+	tools_to_verify=("actionlint" "astro" "bandit" "black" "cargo-audit" "cargo-deny" "clippy" "rustfmt" "gitleaks" "hadolint" "markdownlint-cli2" "mypy" "osv-scanner" "oxfmt" "oxlint" "phpstan" "prettier" "pydoclint" "ruff" "semgrep" "shellcheck" "shfmt" "sqlfluff" "svelte-check" "taplo" "tsc" "vue-tsc" "yamllint")
 
 	# Filter verification list when --tools is set.
 	# Map aliases so e.g. --tools markdownlint verifies markdownlint-cli2.
