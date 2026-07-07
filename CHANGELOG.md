@@ -21,6 +21,52 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.69.2] - 2026-07-07
+
+### Fixed
+
+- **output**: suppress 'run lintro fmt' hint in test mode (#1123) (94cd961)
+
+## [0.69.1] - 2026-07-07
+
+### Changed
+
+- **contributing**: document merge-discipline and no-paper-over norms (#1121) (edba1ac)
+- **build**: allow setup-uv endpoints in binary build egress policy (#1152) (969d8ac)
+
+### Fixed
+
+- **ai/review**: classify ValueError as INVALID_RESPONSE before shared severity signatures (#1122) (14b618f)
+
+## [0.69.0] - 2026-07-06
+
+### Added
+
+- **install**: distribute lintro as npm package via platform binaries (#1141) (15078fb)
+
+## [0.68.0] - 2026-07-06
+
+### Added
+
+- **shellcheck**: support source-following for repo-local includes (#1110) (3db899c)
+
+## [0.67.0] - 2026-07-06
+
+### Added
+
+- **cli**: add fmt --dry-run mode to preview fixes without writing (#1109) (a53b686)
+
+### Changed
+
+- **sbom**: set fail-on-severity=high to stop 'negligible or higher' warnings (#1108) (30c715e)
+- ignore auto-generated CHANGELOG.md + resync uv.lock to 0.66.0 (#1104) (6173f73)
+
+### Fixed
+
+- **ai/review**: prioritize non-diff-mappable findings before sticky-comment truncation (#1107) (8f343e1)
+- **ci**: keep main green — revert SBOM hard-fail + decouple flaky Pages deploy (#1111) (2208ef3)
+- **ai/review**: graceful partial when cost cap trips before any chunk (#1103) (d7d733c)
+
 ## [0.66.0] - 2026-07-06
 
 ### Added

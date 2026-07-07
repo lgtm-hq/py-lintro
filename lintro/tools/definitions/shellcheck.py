@@ -22,6 +22,8 @@ from lintro.plugins.protocol import ToolDefinition
 from lintro.plugins.registry import register_tool
 from lintro.tools.core.option_validators import (
     filter_none_options,
+    normalize_str_or_list,
+    validate_bool,
     validate_list,
     validate_str,
 )
@@ -113,6 +115,8 @@ class ShellcheckPlugin(BaseToolPlugin):
                 "severity": SHELLCHECK_DEFAULT_SEVERITY,
                 "exclude": None,
                 "shell": None,
+                "external_sources": False,
+                "source_paths": None,
             },
             default_timeout=SHELLCHECK_DEFAULT_TIMEOUT,
         )
@@ -122,6 +126,8 @@ class ShellcheckPlugin(BaseToolPlugin):
         severity: str | None = None,
         exclude: list[str] | None = None,
         shell: str | None = None,
+        external_sources: bool | None = None,
+        source_paths: list[str] | str | None = None,
         **kwargs: Any,
     ) -> None:
         """Set Shellcheck-specific options.
@@ -130,6 +136,21 @@ class ShellcheckPlugin(BaseToolPlugin):
             severity: Minimum severity to report (error, warning, info, style).
             exclude: List of codes to exclude (e.g., ["SC2086", "SC2046"]).
             shell: Force shell dialect (bash, sh, dash, ksh).
+            external_sources: Follow ``source``d files that are external to the
+                script being checked (maps to ShellCheck's ``-x`` /
+                ``--external-sources``). Defaults to ``False`` to preserve the
+                conservative, opt-in behavior. Enable this so scripts that
+                source repo-local helpers stop emitting ``SC1091``.
+            source_paths: Directory or list of directories ShellCheck searches
+                when resolving ``source``d files (maps to ``--source-path=...``,
+                one flag per entry; a bare string is treated as a single path).
+                Supports ShellCheck's literal ``SCRIPTDIR`` token, which
+                resolves relative to each script's own directory and covers the
+                runtime-safe ``SCRIPT_DIR="$(cd ... && pwd)"`` sourcing pattern.
+                Setting this implies ``external_sources`` (ShellCheck ignores
+                source paths unless ``-x`` is active), so ``--external-sources``
+                is emitted automatically even when ``external_sources`` is left
+                at its default.
             **kwargs: Other tool options.
         """
         if severity is not None:
@@ -141,11 +162,15 @@ class ShellcheckPlugin(BaseToolPlugin):
         validate_list(exclude, "exclude")
         validate_str(severity, "severity")
         validate_str(shell, "shell")
+        validate_bool(external_sources, "external_sources")
+        source_paths = normalize_str_or_list(source_paths, "source_paths")
 
         options = filter_none_options(
             severity=severity,
             exclude=exclude,
             shell=shell,  # nosec B604 - shell is dialect, not subprocess shell=True
+            external_sources=external_sources,
+            source_paths=source_paths,
         )
         super().set_options(**options, **kwargs)
 
@@ -187,6 +212,25 @@ class ShellcheckPlugin(BaseToolPlugin):
         shell_opt = self.options.get("shell")
         if shell_opt is not None:
             cmd.extend(["--shell", str(shell_opt)])
+
+        # Search paths for resolving sourced files. Supports ShellCheck's
+        # literal ``SCRIPTDIR`` token (resolves relative to each script).
+        source_paths_opt = self.options.get("source_paths")
+        source_paths: list[Any] = (
+            source_paths_opt if isinstance(source_paths_opt, list) else []
+        )
+
+        # Follow external sourced files (repo-local includes). Setting
+        # ``source_paths`` implies source-following: ShellCheck ignores
+        # ``--source-path`` unless ``-x`` is active, so configuring paths is an
+        # unambiguous signal of intent. Emit ``--external-sources`` when either
+        # the flag is set explicitly or source paths are configured, so the
+        # command is never silently half-configured.
+        if self.options.get("external_sources") or source_paths:
+            cmd.append("--external-sources")
+
+        for path in source_paths:
+            cmd.append(f"--source-path={path}")
 
         return cmd
 
