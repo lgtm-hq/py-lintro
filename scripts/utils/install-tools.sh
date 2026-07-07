@@ -168,7 +168,7 @@ SUPPORTED_TOOLS=(
 	"actionlint" "astro" "bandit" "black" "cargo-audit" "cargo-deny"
 	"clippy" "gitleaks" "hadolint" "markdownlint" "markdownlint-cli2" "mypy" "osv-scanner"
 	"oxfmt" "oxlint" "prettier" "pydoclint" "ruff" "rustfmt" "semgrep"
-	"shellcheck" "shfmt" "sqlfluff" "svelte-check" "taplo" "tsc"
+	"shellcheck" "shfmt" "spectral" "sqlfluff" "svelte-check" "taplo" "tsc"
 	"vue-tsc" "yamllint"
 )
 
@@ -1077,6 +1077,29 @@ main() {
 			exit 1
 		fi
 	fi # markdownlint
+
+	if should_install "spectral"; then
+		# Install spectral via bun (OpenAPI/AsyncAPI/JSON Schema linting)
+		echo -e "${BLUE}Installing spectral...${NC}"
+
+		# Ensure bun is available (should already be installed for prettier)
+		if ! ensure_bun_installed; then
+			exit 1
+		fi
+
+		# Read spectral version from _tool_versions.py (single source of truth)
+		# Uses package alias: "@stoplight/spectral-cli" -> ToolName.SPECTRAL
+		SPECTRAL_VERSION=$(get_tool_version "@stoplight/spectral-cli") || exit 1
+
+		if [ $DRY_RUN -eq 1 ]; then
+			log_info "[DRY-RUN] Would install @stoplight/spectral-cli@${SPECTRAL_VERSION} globally via bun"
+		elif bun add -g "@stoplight/spectral-cli@${SPECTRAL_VERSION}"; then
+			echo -e "${GREEN}✓ @stoplight/spectral-cli@${SPECTRAL_VERSION} installed successfully${NC}"
+		else
+			echo -e "${RED}✗ Failed to install spectral${NC}"
+			exit 1
+		fi
+	fi # spectral
 
 	if should_install "semgrep"; then
 		# Install semgrep (security scanner)

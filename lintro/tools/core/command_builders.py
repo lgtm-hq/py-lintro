@@ -421,6 +421,7 @@ class NodeJSBuilder(CommandBuilder):
                 ToolName.MARKDOWNLINT: "markdownlint-cli2",
                 ToolName.OXFMT: "oxfmt",
                 ToolName.OXLINT: "oxlint",
+                ToolName.SPECTRAL: "@stoplight/spectral-cli",
                 ToolName.SVELTE_CHECK: "svelte-check",
                 ToolName.TSC: "typescript",
                 ToolName.VUE_TSC: "vue-tsc",

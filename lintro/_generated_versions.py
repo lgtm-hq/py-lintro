@@ -10,6 +10,7 @@ Sources:
 
 NPM_VERSIONS: dict[str, str] = {
     "@astrojs/check": "0.9.8",
+    "@stoplight/spectral-cli": "6.16.1",
     "astro": "6.4.8",
     "markdownlint-cli2": "0.22.1",
     "oxfmt": "0.43.0",

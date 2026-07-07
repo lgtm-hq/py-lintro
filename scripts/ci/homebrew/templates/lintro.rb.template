@@ -83,6 +83,7 @@ class Lintro < Formula
       Not installed automatically (install if needed):
         cargo install cargo-audit cargo-deny   # Rust dependency auditing
         npm install -g astro svelte-check vue-tsc  # Framework type-checkers
+        npm install -g @stoplight/spectral-cli     # OpenAPI/AsyncAPI linting
 
       Run 'lintro doctor' to check tool status and get install hints.
 

@@ -38,6 +38,7 @@ class DocUrlTemplate(StrEnum):
     RUFF = "https://docs.astral.sh/ruff/rules/{code}/"
     SEMGREP = "https://semgrep.dev/r/{code}"
     SHELLCHECK = "https://www.shellcheck.net/wiki/{code}"
+    SPECTRAL = "https://docs.stoplight.io/docs/spectral/docs/reference/openapi-rules.md"
     SQLFLUFF = "https://docs.sqlfluff.com/en/stable/rules.html#{code}"
     TAPLO = "https://taplo.tamasfe.dev/"
     TSC = "https://typescript.tv/errors/#ts{code}"

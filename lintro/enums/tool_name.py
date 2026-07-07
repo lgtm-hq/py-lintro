@@ -34,6 +34,7 @@ class ToolName(StrEnum):
     SEMGREP = auto()
     SHELLCHECK = auto()
     SHFMT = auto()
+    SPECTRAL = auto()
     SQLFLUFF = auto()
     SVELTE_CHECK = auto()
     TAPLO = auto()

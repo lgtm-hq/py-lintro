@@ -58,6 +58,7 @@
         "markdownlint-cli2",
         "oxlint",
         "oxfmt",
+        "@stoplight/spectral-cli",
         "gitleaks",
         "gitleaks/gitleaks",
         "shellcheck",

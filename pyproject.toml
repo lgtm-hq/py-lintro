@@ -167,6 +167,7 @@ packages = [
   "lintro.parsers.prettier",
   "lintro.parsers.shellcheck",
   "lintro.parsers.shfmt",
+  "lintro.parsers.spectral",
   "lintro.parsers.sqlfluff",
   "lintro.parsers.svelte_check",
   "lintro.parsers.taplo",

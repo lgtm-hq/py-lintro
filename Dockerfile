@@ -110,9 +110,10 @@ RUN echo "=== Verifying all tools ===" && \
     markdownlint-cli2 --version && mypy --version && osv-scanner --version && \
     oxfmt --version && oxlint --version && prettier --version && \
     pydoclint --version && ruff --version && semgrep --version && \
-    shellcheck --version && shfmt --version && sqlfluff --version && \
-    taplo --version && tsc --version && astro --version && \
-    svelte-check --version && vue-tsc --version && yamllint --version && \
+    shellcheck --version && shfmt --version && spectral --version && \
+    sqlfluff --version && taplo --version && tsc --version && \
+    astro --version && svelte-check --version && vue-tsc --version && \
+    yamllint --version && \
     echo "=== All tools verified! ==="
 
 # -----------------------------------------------------------------------------
@@ -164,7 +165,7 @@ RUN echo "Verifying tools..." && \
     markdownlint-cli2 --version && tsc --version && astro --version && \
     vue-tsc --version && oxlint --version && oxfmt --version && \
     bandit --version && mypy --version && pydoclint --version && \
-    yamllint --version && sqlfluff --version && \
+    yamllint --version && sqlfluff --version && spectral --version && \
     echo "All tools verified!"
 
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
@@ -184,6 +185,7 @@ RUN echo "Verifying tools as non-root user..." && \
     gosu lintro cargo deny --version && \
     gosu lintro osv-scanner --version && \
     gosu lintro semgrep --version && \
+    gosu lintro spectral --version && \
     echo "All tools verified for non-root user!"
 
 USER lintro

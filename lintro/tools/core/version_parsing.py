@@ -49,6 +49,7 @@ TOOLS_WITH_SIMPLE_VERSION_PATTERN: set[ToolName] = {
     ToolName.SEMGREP,
     ToolName.SHELLCHECK,
     ToolName.SHFMT,
+    ToolName.SPECTRAL,
     ToolName.SQLFLUFF,
     ToolName.SVELTE_CHECK,
     ToolName.TAPLO,
