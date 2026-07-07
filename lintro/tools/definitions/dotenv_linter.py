@@ -400,7 +400,11 @@ class DotenvLinterPlugin(BaseToolPlugin):
         # Count what the post-fix re-check actually reported rather than the
         # arithmetic remainder: a fix can change the issue set (new findings
         # surfacing after rewrites), and issues_count must match ``issues``.
+        # When the re-check reports more than the initial pass saw, grow the
+        # initial total so initial = fixed + remaining stays valid.
         remaining_issues = len(all_remaining_issues)
+        if fixed_issues_total + remaining_issues > initial_issues_total:
+            initial_issues_total = fixed_issues_total + remaining_issues
 
         summary_parts: list[str] = []
         if fixed_issues_total > 0:
