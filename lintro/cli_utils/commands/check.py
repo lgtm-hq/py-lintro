@@ -127,6 +127,11 @@ DEFAULT_ACTION: str = "check"
     default=None,
     help="Override ai.transport for this AI invocation.",
 )
+@click.option(
+    "--profile",
+    is_flag=True,
+    help="Show a per-tool performance profile (timing table + suggestions)",
+)
 def check_command(
     paths: tuple[str, ...],
     tools: str | None,
@@ -148,6 +153,7 @@ def check_command(
     yes: bool,
     ai_fix: bool,
     transport: str | None,
+    profile: bool,
 ) -> None:
     """Check files for issues using the specified tools.
 
@@ -172,6 +178,7 @@ def check_command(
         yes: bool: Skip confirmation prompt and proceed immediately.
         ai_fix: bool: Generate AI fix suggestions with interactive review.
         transport: str | None: Override AI transport (``api`` or ``cli``).
+        profile: bool: Whether to emit a per-tool performance profile.
 
     Raises:
         SystemExit: Process exit with the aggregated exit code from tools.
@@ -216,6 +223,7 @@ def check_command(
         ai_fix=ai_fix,
         ignore_conflicts=ignore_conflicts,
         transport=transport,
+        profile=profile,
     )
 
     # Exit with code only; CLI uses this as process exit code and avoids any

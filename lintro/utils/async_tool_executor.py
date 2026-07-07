@@ -103,26 +103,33 @@ class AsyncToolExecutor:
         loop = asyncio.get_running_loop()
         opts = options or {}
 
-        if action == Action.FIX:
-            from lintro.utils.tool_executor import _run_fix_with_retry
+        # Capture per-tool wall-clock time so the optional --profile report can
+        # attribute duration per tool even under parallel execution (each tool
+        # is timed around its own check/fix call).
+        from lintro.profiling.timer import Timer
 
-            logger.debug(f"Starting async execution of {tool.definition.name}")
-            result = await loop.run_in_executor(
-                self._executor,
-                _run_fix_with_retry,
-                tool,
-                paths,
-                opts,
-                max_fix_retries,
-            )
-        else:
-            logger.debug(f"Starting async execution of {tool.definition.name}")
-            result = await loop.run_in_executor(
-                self._executor,
-                tool.check,
-                paths,
-                opts,
-            )
+        with Timer() as timer:
+            if action == Action.FIX:
+                from lintro.utils.tool_executor import _run_fix_with_retry
+
+                logger.debug(f"Starting async execution of {tool.definition.name}")
+                result = await loop.run_in_executor(
+                    self._executor,
+                    _run_fix_with_retry,
+                    tool,
+                    paths,
+                    opts,
+                    max_fix_retries,
+                )
+            else:
+                logger.debug(f"Starting async execution of {tool.definition.name}")
+                result = await loop.run_in_executor(
+                    self._executor,
+                    tool.check,
+                    paths,
+                    opts,
+                )
+        result.duration = timer.duration
         logger.debug(f"Completed async execution of {tool.definition.name}")
 
         return result

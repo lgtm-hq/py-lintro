@@ -476,6 +476,7 @@ def run_lint_tools_simple(
     ignore_conflicts: bool = False,
     transport: str | None = None,
     dry_run: bool = False,
+    profile: bool = False,
 ) -> int:
     """Simplified runner using Loguru-based logging with rich formatting.
 
@@ -511,6 +512,10 @@ def run_lint_tools_simple(
             the fixable tool set; the reported issues are exactly what a real
             ``fmt`` run would address. Exit code mirrors check semantics: 0 when
             nothing would be fixed, 1 when fixes are available.
+        profile: Emit a per-tool performance profile. When set, wall-clock
+            timing captured around each tool is rendered as a timing table
+            (non-machine formats) and added under a ``profile`` key in JSON
+            output. Off by default and does not affect the exit code.
 
     Returns:
         Exit code (0 for success, 1 for failures).
@@ -621,8 +626,7 @@ def run_lint_tools_simple(
     if main_phase_empty_due_to_filter:
         logger.console_output(
             text=(
-                "All selected tools are configured as post-checks - "
-                "skipping main phase"
+                "All selected tools are configured as post-checks - skipping main phase"
             ),
         )
 
@@ -804,16 +808,21 @@ def run_lint_tools_simple(
                     lintro_config=lintro_config,
                 )
 
-                # Execute the tool
-                if action == Action.FIX:
-                    result = _run_fix_with_retry(
-                        tool=tool,
-                        paths=paths,
-                        options={},
-                        max_retries=lintro_config.execution.max_fix_retries,
-                    )
-                else:
-                    result = tool.check(paths, {})
+                # Execute the tool, capturing per-tool wall-clock time so the
+                # optional --profile report can attribute duration accurately.
+                from lintro.profiling.timer import Timer
+
+                with Timer() as _timer:
+                    if action == Action.FIX:
+                        result = _run_fix_with_retry(
+                            tool=tool,
+                            paths=paths,
+                            options={},
+                            max_retries=lintro_config.execution.max_fix_retries,
+                        )
+                    else:
+                        result = tool.check(paths, {})
+                result.duration = _timer.duration
 
                 # Populate doc_url on each issue from the plugin
                 _enrich_issues_with_doc_urls(tool, result)
@@ -989,6 +998,12 @@ def run_lint_tools_simple(
                 total_remaining=total_remaining,
                 exit_code=final_exit_code,
             )
+            # Attach the performance profile additively so the existing JSON
+            # schema (results/summary) is unchanged when --profile is off.
+            if profile:
+                from lintro.profiling.report import build_profile_data
+
+                json_data["profile"] = build_profile_data(all_results)
             print(json.dumps(json_data, indent=2))
         elif output_format.lower() == "sarif":
             from lintro.ai.output.sarif import render_fixes_sarif
@@ -1011,6 +1026,16 @@ def run_lint_tools_simple(
             print(sarif_json)
         else:
             logger.print_execution_summary(action, all_results)
+
+            # Performance profile: render the per-tool timing table after the
+            # execution summary. Only emitted when --profile is requested.
+            if profile:
+                from lintro.profiling.report import render_profile_report
+
+                profile_report = render_profile_report(all_results)
+                if profile_report:
+                    logger.console_output(text="")
+                    logger.console_output(text=profile_report)
 
             # Dry-run summary: state clearly what a real fmt run would fix.
             if dry_run_preview:
