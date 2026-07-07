@@ -158,6 +158,8 @@ packages = [
   "lintro.mcp.enums",
   "lintro.mcp.toolkits",
   "lintro.config",
+  "lintro.deps",
+  "lintro.deps.parsers",
   "lintro.enums",
   "lintro.exceptions",
   "lintro.formatters",
