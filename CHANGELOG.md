@@ -21,6 +21,35 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.69.0] - 2026-07-06
+
+### Added
+
+- **install**: distribute lintro as npm package via platform binaries (#1141) (15078fb)
+
+## [0.68.0] - 2026-07-06
+
+### Added
+
+- **shellcheck**: support source-following for repo-local includes (#1110) (3db899c)
+
+## [0.67.0] - 2026-07-06
+
+### Added
+
+- **cli**: add fmt --dry-run mode to preview fixes without writing (#1109) (a53b686)
+
+### Changed
+
+- **sbom**: set fail-on-severity=high to stop 'negligible or higher' warnings (#1108) (30c715e)
+- ignore auto-generated CHANGELOG.md + resync uv.lock to 0.66.0 (#1104) (6173f73)
+
+### Fixed
+
+- **ai/review**: prioritize non-diff-mappable findings before sticky-comment truncation (#1107) (8f343e1)
+- **ci**: keep main green — revert SBOM hard-fail + decouple flaky Pages deploy (#1111) (2208ef3)
+- **ai/review**: graceful partial when cost cap trips before any chunk (#1103) (d7d733c)
+
 ## [0.66.0] - 2026-07-06
 
 ### Added
