@@ -162,15 +162,35 @@ class TyposPlugin(BaseToolPlugin):
         initial_issues = parse_typos_output(output=initial_output)
         initial_count = len(initial_issues)
 
-        # Apply corrections in place.
+        # Apply corrections in place. typos exits non-zero when it reports
+        # typos (including ones it just fixed), so only a failure with no
+        # parseable report signals a real write/tool error.
         fix_cmd = ["typos", "--write-changes", *ctx.rel_files]
         try:
-            self._run_subprocess(cmd=fix_cmd, timeout=ctx.timeout, cwd=ctx.cwd)
+            fix_success, fix_output = self._run_subprocess(
+                cmd=fix_cmd,
+                timeout=ctx.timeout,
+                cwd=ctx.cwd,
+            )
         except subprocess.TimeoutExpired:
             return ToolResult(
                 name=self.definition.name,
                 success=False,
                 output=f"typos timed out after {ctx.timeout}s",
+                issues_count=initial_count,
+                issues=initial_issues,
+                initial_issues_count=initial_count,
+                fixed_issues_count=0,
+                remaining_issues_count=initial_count,
+                initial_issues=initial_issues or None,
+                cwd=ctx.cwd,
+            )
+
+        if not fix_success and not parse_typos_output(output=fix_output):
+            return ToolResult(
+                name=self.definition.name,
+                success=False,
+                output=(fix_output or "typos --write-changes exited with an error."),
                 issues_count=initial_count,
                 issues=initial_issues,
                 initial_issues_count=initial_count,
@@ -217,14 +237,15 @@ class TyposPlugin(BaseToolPlugin):
         else:
             summary = "No typos found."
 
-        all_issues = list(initial_issues) + list(remaining_issues)
-
         return ToolResult(
             name=self.definition.name,
             success=remaining_count == 0,
             output=summary,
+            # Only the surviving typos are reported as issues: unfixed typos
+            # appear in both the initial and post-fix reports, so combining
+            # the lists would double-count them.
             issues_count=remaining_count,
-            issues=all_issues,
+            issues=remaining_issues,
             initial_issues_count=initial_count,
             fixed_issues_count=fixed_count,
             remaining_issues_count=remaining_count,

@@ -1009,8 +1009,21 @@ main() {
 				fi
 			fi
 
+			# Homebrew fallback for macOS hosts without a Rust toolchain.
+			if [ "$typos_installed" = false ] && command -v brew &>/dev/null; then
+				echo -e "${YELLOW}Falling back to Homebrew...${NC}"
+				if brew install typos-cli; then
+					echo -e "${GREEN}✓ typos installed via Homebrew${NC}"
+					typos_installed=true
+				fi
+			fi
+
 			if [ "$typos_installed" = false ]; then
-				echo -e "${YELLOW}⚠ Failed to install typos (optional tool)${NC}"
+				# typos is part of the default toolset; a silent miss would
+				# leave every subsequent lintro run degraded and the
+				# verification step reporting a missing tool.
+				echo -e "${RED}✗ Failed to install typos (pre-built binary, cargo, and brew all unavailable)${NC}"
+				exit 1
 			fi
 		fi
 	fi # typos
