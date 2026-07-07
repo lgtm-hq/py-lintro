@@ -246,6 +246,12 @@ system.
 <td>-</td>
 <td><code>pipx install semgrep</code><br><code>pip install semgrep</code><br><code>brew install semgrep</code></td>
 </tr>
+<tr>
+<td><a href="https://trivy.dev/"><img src="https://img.shields.io/badge/Trivy-1904da?logo=aquasecurity&logoColor=white" alt="Trivy"></a></td>
+<td>🔒 Dependency CVEs</td>
+<td>-</td>
+<td><code>brew install trivy</code><br><a href="https://github.com/aquasecurity/trivy/releases">GitHub Releases</a></td>
+</tr>
 </tbody>
 </table>
 

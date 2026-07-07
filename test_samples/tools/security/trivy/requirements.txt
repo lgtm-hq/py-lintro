@@ -1,0 +1,6 @@
+# Intentionally vulnerable pins used to exercise trivy dependency scanning.
+# Do NOT install these — they are fixtures for lintro's trivy integration test.
+Django==2.2.0
+Jinja2==2.10
+requests==2.19.0
+PyYAML==5.1

@@ -63,6 +63,14 @@ TOOL_SPECS = [
         False,
     ),
     (ToolName.BANDIT, "lintro.tools.definitions.bandit", "BanditPlugin", 30, 90, False),
+    (
+        ToolName.TRIVY,
+        "lintro.tools.definitions.trivy",
+        "TrivyPlugin",
+        300,
+        87,
+        False,
+    ),
 ]
 
 

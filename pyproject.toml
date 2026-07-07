@@ -170,6 +170,7 @@ packages = [
   "lintro.parsers.sqlfluff",
   "lintro.parsers.svelte_check",
   "lintro.parsers.taplo",
+  "lintro.parsers.trivy",
   "lintro.parsers.pydoclint",
   "lintro.parsers.tsc",
   "lintro.parsers.vue_tsc",

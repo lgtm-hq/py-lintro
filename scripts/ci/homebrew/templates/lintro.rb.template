@@ -38,6 +38,7 @@ class Lintro < Formula
   depends_on "shfmt"
   depends_on "sqlfluff"
   depends_on "taplo"
+  depends_on "trivy" # dependency-vulnerability scanner (needs a local vuln DB)
   depends_on "yamllint"
 
   # Pure Python library dependencies
@@ -76,7 +77,7 @@ class Lintro < Formula
       JS / TS:          oxlint, oxfmt, prettier
       Dockerfiles:      hadolint
       GitHub Actions:   actionlint
-      Security:         gitleaks, semgrep
+      Security:         gitleaks, semgrep, trivy (dependency CVEs)
       Rust:             clippy, rustfmt (via rust)
       SQL:              sqlfluff
 

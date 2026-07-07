@@ -203,6 +203,10 @@ def get_install_hints() -> dict[str, str]:
             "Install via: cargo install taplo-cli "
             "or download from https://github.com/tamasfe/taplo/releases (v{version}+)"
         ),
+        "trivy": (
+            "Install via: brew install trivy or "
+            "https://github.com/aquasecurity/trivy/releases (v{version}+)"
+        ),
         "astro_check": (
             "Install via: bun add astro@>={version} or npm install astro@>={version}"
         ),

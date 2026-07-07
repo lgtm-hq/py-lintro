@@ -71,6 +71,7 @@ TOOL_VERSIONS: dict[ToolName | str, str] = {
     ToolName.SHELLCHECK: "0.11.0",
     ToolName.SHFMT: "3.13.0",
     ToolName.TAPLO: "0.10.0",
+    ToolName.TRIVY: "0.72.0",
 }
 
 _NPM_PACKAGE_TO_TOOL: dict[str, ToolName] = {
