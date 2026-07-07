@@ -759,7 +759,7 @@ main() {
 		PHPSTAN_VERSION=$(get_tool_version "phpstan") || exit 1
 		if [ $DRY_RUN -eq 1 ]; then
 			log_info "[DRY-RUN] Would install phpstan v${PHPSTAN_VERSION}"
-		elif command -v phpstan &>/dev/null; then
+		elif command -v phpstan &>/dev/null && command -v php &>/dev/null; then
 			echo -e "${GREEN}✓ phpstan already installed${NC}"
 		elif ! command -v php &>/dev/null; then
 			# The PHAR cannot run (or be verified) without a PHP interpreter;
