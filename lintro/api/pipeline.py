@@ -168,6 +168,7 @@ def run_lint_artifact(
     fail_under: float | None = None,
     diff_base: str | None = None,
     no_art: bool = False,
+    profile: bool = False,
     ai_enabled: bool = True,
 ) -> RunArtifact:
     """Execute a run, apply AI enhancement, render it, and return the artifact.
@@ -221,6 +222,7 @@ def run_lint_artifact(
         debug=debug,
         no_art=no_art,
         dry_run=dry_run,
+        profile=profile,
     )
     _capture_fmt_checkpoint(ctx=ctx, paths=paths)
     artifact = execute_run(
@@ -306,6 +308,7 @@ def run_lint_with_ai(
     fail_under: float | None = None,
     diff_base: str | None = None,
     no_art: bool = False,
+    profile: bool = False,
     ai_enabled: bool = True,
 ) -> int:
     """Run the full AI-aware pipeline and return only the process exit code.
@@ -373,5 +376,6 @@ def run_lint_with_ai(
         fail_under=fail_under,
         diff_base=diff_base,
         no_art=no_art,
+        profile=profile,
         ai_enabled=ai_enabled,
     ).exit_code

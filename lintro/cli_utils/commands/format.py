@@ -123,6 +123,11 @@ DEFAULT_ACTION: str = "fmt"
     is_flag=True,
     help="Suppress the decorative ASCII art printed after the run.",
 )
+@click.option(
+    "--profile",
+    is_flag=True,
+    help="Show a per-tool performance profile (timing table + suggestions)",
+)
 def format_command(
     ctx: click.Context,
     paths: tuple[str, ...],
@@ -143,6 +148,7 @@ def format_command(
     yes: bool,
     dry_run: bool,
     no_art: bool,
+    profile: bool,
 ) -> None:
     """Format code using configured formatting tools.
 
@@ -174,6 +180,7 @@ def format_command(
         yes: bool: Skip confirmation prompt and proceed immediately.
         dry_run: bool: Preview would-be fixes without modifying any files.
         no_art: bool: Suppress the decorative ASCII art printed after the run.
+        profile: bool: Whether to emit a per-tool performance profile.
     """
     validate_diff_base_ref(diff_base=diff_base)
 
@@ -201,6 +208,7 @@ def format_command(
         yes=yes,
         dry_run=dry_run,
         no_art=no_art,
+        profile=profile,
     )
 
     # Exit with code from tool execution.

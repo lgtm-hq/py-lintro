@@ -363,6 +363,10 @@ def _render_stdout_document(
             exit_code=artifact.exit_code,
             health_score=artifact.health.to_dict() if artifact.health else None,
         )
+        if ctx.profile:
+            from lintro.profiling.report import build_profile_data
+
+            json_data["profile"] = build_profile_data(all_results)
         print(json.dumps(json_data, indent=2))
         return
 
@@ -413,6 +417,14 @@ def _render_console_summary(artifact: RunArtifact, *, ctx: RunContext) -> None:
     """
     logger = ctx.logger
     logger.print_execution_summary(artifact.action, artifact.tool_results)
+
+    if ctx.profile:
+        from lintro.profiling.report import render_profile_report
+
+        profile_report = render_profile_report(artifact.tool_results)
+        if profile_report:
+            logger.console_output(text="")
+            logger.console_output(text=profile_report)
 
     # Dry-run summary: state clearly what a real fmt run would fix.
     if artifact.dry_run_preview:

@@ -279,6 +279,42 @@ def test_check_command_raw_output_flag(
     assert_that(call_kwargs["raw_output"]).is_true()
 
 
+def test_check_command_profile_flag(
+    cli_runner: CliRunner,
+    mock_run_lint_tools_check: MagicMock,
+) -> None:
+    """Verify --profile flag forwards profile=True.
+
+    Args:
+        cli_runner: The Click CLI test runner.
+        mock_run_lint_tools_check: Mock for the run_lint_tools_check function.
+    """
+    with cli_runner.isolated_filesystem():
+        cli_runner.invoke(check_command, ["--profile"])
+
+    mock_run_lint_tools_check.assert_called_once()
+    call_kwargs = mock_run_lint_tools_check.call_args.kwargs
+    assert_that(call_kwargs["profile"]).is_true()
+
+
+def test_check_command_profile_defaults_false(
+    cli_runner: CliRunner,
+    mock_run_lint_tools_check: MagicMock,
+) -> None:
+    """Verify profile defaults to False when --profile is absent.
+
+    Args:
+        cli_runner: The Click CLI test runner.
+        mock_run_lint_tools_check: Mock for the run_lint_tools_check function.
+    """
+    with cli_runner.isolated_filesystem():
+        cli_runner.invoke(check_command, [])
+
+    mock_run_lint_tools_check.assert_called_once()
+    call_kwargs = mock_run_lint_tools_check.call_args.kwargs
+    assert_that(call_kwargs["profile"]).is_false()
+
+
 def test_check_command_tool_options(
     cli_runner: CliRunner,
     mock_run_lint_tools_check: MagicMock,

@@ -94,6 +94,7 @@ def build_run_context(
     debug: bool = False,
     no_art: bool = False,
     dry_run: bool = False,
+    profile: bool = False,
 ) -> RunContext:
     """Create the run-scoped state shared by the execute and render phases.
 
@@ -165,6 +166,7 @@ def build_run_context(
         lintro_config=lintro_config,
         clean_stdout_output=clean_stdout_output,
         score_only=score_only,
+        profile=profile,
     )
 
 
@@ -687,6 +689,7 @@ def run_lint_tools_simple(
     fail_under: float | None = None,
     diff_base: str | None = None,
     no_art: bool = False,
+    profile: bool = False,
 ) -> int:
     """Run tools and render their output, returning the process exit code.
 
