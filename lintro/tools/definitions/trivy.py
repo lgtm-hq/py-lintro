@@ -274,7 +274,8 @@ class TrivyPlugin(BaseToolPlugin):
                         "'trivy fs --download-db-only', or increase the timeout "
                         "via --tool-options trivy:timeout=N."
                     ),
-                    issues_count=0,
+                    issues_count=len(all_issues),
+                    issues=all_issues,
                 )
             except (OSError, ValueError, RuntimeError) as exc:
                 logger.error(f"Failed to run Trivy: {exc}")
@@ -282,7 +283,8 @@ class TrivyPlugin(BaseToolPlugin):
                     name=self.definition.name,
                     success=False,
                     output=f"Trivy failed: {exc}",
-                    issues_count=0,
+                    issues_count=len(all_issues),
+                    issues=all_issues,
                 )
 
             stdout = (completed.stdout or "").strip()
