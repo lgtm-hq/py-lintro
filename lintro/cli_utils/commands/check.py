@@ -127,6 +127,17 @@ DEFAULT_ACTION: str = "check"
     default=None,
     help="Override ai.transport for this AI invocation.",
 )
+@click.option(
+    "--score",
+    is_flag=True,
+    help="Print only the 0-100 health score (suppresses the normal summary).",
+)
+@click.option(
+    "--fail-under",
+    type=click.FloatRange(0, 100),
+    default=None,
+    help="Exit 1 if the health score is below this threshold (0-100).",
+)
 def check_command(
     paths: tuple[str, ...],
     tools: str | None,
@@ -148,6 +159,8 @@ def check_command(
     yes: bool,
     ai_fix: bool,
     transport: str | None,
+    score: bool,
+    fail_under: float | None,
 ) -> None:
     """Check files for issues using the specified tools.
 
@@ -172,6 +185,8 @@ def check_command(
         yes: bool: Skip confirmation prompt and proceed immediately.
         ai_fix: bool: Generate AI fix suggestions with interactive review.
         transport: str | None: Override AI transport (``api`` or ``cli``).
+        score: bool: Print only the health score, suppressing the summary.
+        fail_under: float | None: Exit 1 if the health score is below this value.
 
     Raises:
         SystemExit: Process exit with the aggregated exit code from tools.
@@ -216,6 +231,8 @@ def check_command(
         ai_fix=ai_fix,
         ignore_conflicts=ignore_conflicts,
         transport=transport,
+        score=score,
+        fail_under=fail_under,
     )
 
     # Exit with code only; CLI uses this as process exit code and avoids any

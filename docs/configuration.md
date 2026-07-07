@@ -146,6 +146,89 @@ The config command shows:
 - **Per-tool configuration**: Whether enabled, native config found
 - **Defaults applied**: Which tools are using fallback defaults
 
+### Health Score
+
+`lintro check` computes a single, deterministic **0-100 health score** that
+aggregates every issue across every tool into one trackable, CI-gateable,
+shareable number.
+
+```bash
+lintro check                  # normal output + health score line at the end
+lintro check --score          # print ONLY the score (for scripts/badges)
+lintro check --fail-under 75  # exit 1 if the score is below 75
+lintro check --output-format json   # score included under summary.health_score
+```
+
+#### Scoring model
+
+Every issue is normalised to one of three severities (`ERROR`, `WARNING`,
+`INFO`) and weighted, then mapped onto 0-100 with a smoothly saturating
+penalty:
+
+```text
+weighted  = error_weight   * n_errors
+          + warning_weight * n_warnings
+          + info_weight    * n_info
+
+score     = floor( 100 * scale / (scale + weighted) )
+```
+
+With the default weights (`ERROR=10`, `WARNING=3`, `INFO=1`) and
+`scale=100`, this has the following guaranteed properties:
+
+- **Zero issues → exactly 100.** A clean run is unambiguous.
+- **Any issue → strictly below 100** (`floor` keeps it at most 99).
+- **Monotonic.** Adding an issue, or raising its severity, never raises the
+  score.
+- **Bounded** to `[0, 100]` and **deterministic** — the result depends only on
+  the severity counts and the configured weights/scale, never on ordering or
+  timing.
+
+The score hits 50 when the total weighted penalty equals `scale` (e.g. ten
+`ERROR` issues, or ~33 `WARNING` issues, with the defaults).
+
+#### Score tiers
+
+| Score  | Tier         |
+| ------ | ------------ |
+| 75-100 | `great`      |
+| 50-74  | `needs-work` |
+| 0-49   | `critical`   |
+
+#### Configuring the weights
+
+Weights and the smoothing scale are tunable via the `score` section:
+
+```yaml
+# .lintro-config.yaml
+score:
+  error_weight: 10 # penalty per ERROR issue
+  warning_weight: 3 # penalty per WARNING issue
+  info_weight: 1 # penalty per INFO issue
+  scale: 100 # larger = the score decays more slowly
+```
+
+#### JSON output
+
+In `--output-format json` the score is added **additively** under
+`summary.health_score`, leaving all existing keys untouched:
+
+```json
+{
+  "summary": {
+    "total_issues": 3,
+    "total_fixed": 0,
+    "total_remaining": 3,
+    "health_score": {
+      "score": 88,
+      "tier": "great",
+      "severity_counts": { "error": 1, "warning": 0, "info": 0 },
+      "weighted_penalty": 10.0
+    }
+  }
+}
+```
+
 ### Command-Line Options
 
 #### Global Options

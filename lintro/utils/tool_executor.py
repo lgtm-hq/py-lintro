@@ -476,6 +476,8 @@ def run_lint_tools_simple(
     ignore_conflicts: bool = False,
     transport: str | None = None,
     dry_run: bool = False,
+    score: bool = False,
+    fail_under: float | None = None,
 ) -> int:
     """Simplified runner using Loguru-based logging with rich formatting.
 
@@ -511,6 +513,10 @@ def run_lint_tools_simple(
             the fixable tool set; the reported issues are exactly what a real
             ``fmt`` run would address. Exit code mirrors check semantics: 0 when
             nothing would be fixed, 1 when fixes are available.
+        score: When True with human-readable output, print only the 0-100
+            health score line and suppress the normal execution summary.
+        fail_under: When set, exit with code 1 if the computed health score is
+            strictly below this threshold (CI gate).
 
     Returns:
         Exit code (0 for success, 1 for failures).
@@ -547,9 +553,12 @@ def run_lint_tools_simple(
     from lintro.utils.console import create_logger
 
     machine_readable_output = output_format.lower() in ("json", "sarif")
+    # In score-only mode, route all decorative/live output to stderr so stdout
+    # carries only the final numeric score.
+    score_only = score and not machine_readable_output
     logger = create_logger(
         run_dir=output_manager.run_dir,
-        route_stderr=machine_readable_output,
+        route_stderr=machine_readable_output or score_only,
     )
 
     # Get tools to run (now returns ToolsToRunResult with skip info)
@@ -674,9 +683,11 @@ def run_lint_tools_simple(
     else:
         effective_auto_install = is_container
 
-    # Pre-execution config summary (suppress in JSON mode)
-    if output_format.lower() not in {"json", "sarif"} and (
-        tools_to_run or skipped_tools
+    # Pre-execution config summary (suppress in JSON/SARIF and score-only mode)
+    if (
+        output_format.lower() not in {"json", "sarif"}
+        and not score_only
+        and (tools_to_run or skipped_tools)
     ):
         from lintro.utils.console.pre_execution_summary import (
             print_pre_execution_summary,
@@ -973,6 +984,18 @@ def run_lint_tools_simple(
         if ai_config.fail_on_ai_error and ai_result.error:
             final_exit_code = 1
 
+    # Compute the deterministic 0-100 health score from the aggregated results.
+    from lintro.utils.health_score import health_score_for_results
+
+    health = health_score_for_results(
+        all_results,
+        getattr(lintro_config, "score", None),
+    )
+
+    # CI gate: fail the run when the score falls below the requested threshold.
+    if fail_under is not None and health.score < fail_under:
+        final_exit_code = 1
+
     # Display results
     if all_results:
         if output_format.lower() == "json":
@@ -988,6 +1011,7 @@ def run_lint_tools_simple(
                 total_fixed=total_fixed,
                 total_remaining=total_remaining,
                 exit_code=final_exit_code,
+                health_score=health.to_dict(),
             )
             print(json.dumps(json_data, indent=2))
         elif output_format.lower() == "sarif":
@@ -1009,6 +1033,10 @@ def run_lint_tools_simple(
                 standard_issues=standard_issues,
             )
             print(sarif_json)
+        elif score_only:
+            # Score-only mode: emit just the numeric health score to stdout;
+            # all decorative output was routed to stderr above.
+            print(health.score)
         else:
             logger.print_execution_summary(action, all_results)
 
@@ -1031,6 +1059,19 @@ def run_lint_tools_simple(
                         text="Nothing to fix - no auto-fixable issues found",
                         color="green",
                     )
+
+            # Always-on health score line at the end of a check run.
+            if action == Action.CHECK:
+                _tier_color = {
+                    "great": "green",
+                    "needs-work": "yellow",
+                    "critical": "red",
+                }.get(health.tier.label, "cyan")
+                _tier_label = health.tier.label
+                logger.console_output(
+                    text=f"Health score: {health.score}/100 ({_tier_label})",
+                    color=_tier_color,
+                )
 
         # Route warnings to stderr (loguru) for machine-readable formats so
         # plain-text messages don't corrupt JSON/SARIF output on stdout.
