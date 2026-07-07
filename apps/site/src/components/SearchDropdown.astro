@@ -40,8 +40,8 @@ const baseUrl = import.meta.env.BASE_URL.replace(/\/$/, '');
     var shortcutMod = searchBar.querySelector('.search-bar-shortcut-mod');
 
     if (shortcutMod) {
-      var isMac = /Mac|iPhone|iPod|iPad/i.test(navigator.platform) ||
-        (navigator.userAgentData && navigator.userAgentData.platform === 'macOS');
+      var isMac = (navigator.userAgentData && navigator.userAgentData.platform === 'macOS') ||
+        /Mac|iPhone|iPod|iPad/i.test(navigator.userAgent);
       shortcutMod.setAttribute('data-mod', isMac ? '⌘' : 'Ctrl');
     }
 

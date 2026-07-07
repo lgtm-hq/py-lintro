@@ -55,7 +55,6 @@ const remoteIcon = remoteFaviconUrl(url);
       height="16"
       loading="lazy"
       decoding="async"
-      onerror="this.onerror=null;this.src=this.dataset.fallback||'';"
     />
   )
 }{
@@ -63,3 +62,32 @@ const remoteIcon = remoteFaviconUrl(url);
     <span class="smart-link-icon smart-link-icon-glyph" aria-hidden="true"></span>
   )
 }<span class="smart-link-label">{name}</span>{showArrow && <span class="smart-link-arrow" aria-hidden="true">↗</span>}</a>
+
+<script>
+  function swapToFallback(img: HTMLImageElement): void {
+    const fallback = img.dataset.fallback;
+    if (fallback && img.src !== fallback) {
+      img.src = fallback;
+    }
+  }
+
+  // Error events do not bubble; catch failed favicon loads in capture phase
+  // and swap to the bundled fallback icon.
+  document.addEventListener(
+    "error",
+    (event) => {
+      const target = event.target;
+      if (target instanceof HTMLImageElement && target.classList.contains("smart-link-icon")) {
+        swapToFallback(target);
+      }
+    },
+    true,
+  );
+
+  // Icons that already failed before this script ran.
+  for (const img of document.querySelectorAll<HTMLImageElement>("img.smart-link-icon")) {
+    if (img.complete && img.naturalWidth === 0) {
+      swapToFallback(img);
+    }
+  }
+</script>

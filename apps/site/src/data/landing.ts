@@ -1,9 +1,9 @@
-import { finalizeDescriptionLinks, formatDescriptionLinks } from "../lib/description-links";
-import { sanitizeDescriptionHtml } from "../lib/description-html";
+import { finalizeDescriptionLinks, formatDescriptionLinks } from '../lib/description-links';
+import { sanitizeDescriptionHtml } from '../lib/description-html';
 
 export function joinBase(base: string, suffix: string): string {
-  const normalizedBase = base.endsWith("/") ? base : `${base}/`;
-  return `${normalizedBase}${suffix.replace(/^\//, "")}`;
+  const normalizedBase = base.endsWith('/') ? base : `${base}/`;
+  return `${normalizedBase}${suffix.replace(/^\//, '')}`;
 }
 
 export function asset(base: string, path: string): string {
@@ -16,7 +16,7 @@ export function publicAsset(base: string, path: string): string {
 
 /** Strip HTML tags for meta descriptions and plain-text fallbacks. */
 export function stripHtml(html: string): string {
-  return html.replace(/<[^>]*>/g, "");
+  return html.replace(/<[^>]*>/g, '');
 }
 
 /** Prefix internal links and preserve normal inline-reading treatment in descriptions. */

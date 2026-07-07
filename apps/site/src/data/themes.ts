@@ -1,4 +1,4 @@
-import { flavors } from "@lgtm-hq/turbo-themes/tokens";
+import { flavors } from '@lgtm-hq/turbo-themes/tokens';
 
 export interface ThemeOption {
   id: string;
@@ -6,7 +6,7 @@ export interface ThemeOption {
 }
 
 /** Site-native Terminal Brutalist styling — no per-theme CSS file. */
-export const NATIVE_THEME = "terminal";
+export const NATIVE_THEME = 'terminal';
 
 export const DEFAULT_THEME = NATIVE_THEME;
 
@@ -16,7 +16,7 @@ export const turboThemeOptions: ThemeOption[] = flavors.map((theme) => ({
 }));
 
 export const themeOptions: ThemeOption[] = [
-  { id: NATIVE_THEME, label: "Terminal (default)" },
+  { id: NATIVE_THEME, label: 'Terminal (default)' },
   ...turboThemeOptions,
 ];
 
@@ -27,8 +27,8 @@ export function isNativeTheme(id: string): boolean {
   return id === NATIVE_THEME;
 }
 
-export const themeAppearances: Record<string, "light" | "dark"> = {
-  [NATIVE_THEME]: "dark",
+export const themeAppearances: Record<string, 'light' | 'dark'> = {
+  [NATIVE_THEME]: 'dark',
   ...Object.fromEntries(flavors.map((theme) => [theme.id, theme.appearance])),
 };
 
@@ -36,7 +36,7 @@ export interface ThemeMenuItem {
   id: string;
   label: string;
   swatch: string;
-  appearance: "light" | "dark";
+  appearance: 'light' | 'dark';
 }
 
 export interface ThemeMenuGroup {
@@ -45,34 +45,34 @@ export interface ThemeMenuGroup {
   themes: ThemeMenuItem[];
 }
 
-const TERMINAL_SWATCH = "#39ff14";
+const TERMINAL_SWATCH = '#39ff14';
 
 const VENDOR_LABELS: Record<string, string> = {
-  bulma: "Bulma",
-  catppuccin: "Catppuccin",
-  dracula: "Dracula",
-  github: "GitHub",
-  gruvbox: "Gruvbox",
-  nord: "Nord",
-  "rose-pine": "Rosé Pine",
-  solarized: "Solarized",
-  "tokyo-night": "Tokyo Night",
+  bulma: 'Bulma',
+  catppuccin: 'Catppuccin',
+  dracula: 'Dracula',
+  github: 'GitHub',
+  gruvbox: 'Gruvbox',
+  nord: 'Nord',
+  'rose-pine': 'Rosé Pine',
+  solarized: 'Solarized',
+  'tokyo-night': 'Tokyo Night',
 };
 
 const VENDOR_ORDER = [
-  "catppuccin",
-  "dracula",
-  "gruvbox",
-  "github",
-  "bulma",
-  "nord",
-  "solarized",
-  "rose-pine",
-  "tokyo-night",
+  'catppuccin',
+  'dracula',
+  'gruvbox',
+  'github',
+  'bulma',
+  'nord',
+  'solarized',
+  'rose-pine',
+  'tokyo-night',
 ] as const;
 
 function shortThemeLabel(fullLabel: string, groupLabel: string): string {
-  const normalizedGroup = groupLabel.replace(/\s*\(synced\)\s*/i, "").trim();
+  const normalizedGroup = groupLabel.replace(/\s*\(synced\)\s*/i, '').trim();
   if (fullLabel.toLowerCase().startsWith(normalizedGroup.toLowerCase())) {
     const stripped = fullLabel.slice(normalizedGroup.length).trim();
     return stripped || fullLabel;
@@ -96,14 +96,14 @@ export function buildThemeMenuGroups(): ThemeMenuGroup[] {
   }
 
   const siteGroup: ThemeMenuGroup = {
-    id: "site",
-    label: "Lintro",
+    id: 'site',
+    label: 'Lintro',
     themes: [
       {
         id: NATIVE_THEME,
-        label: "Terminal",
+        label: 'Terminal',
         swatch: TERMINAL_SWATCH,
-        appearance: "dark",
+        appearance: 'dark',
       },
     ],
   };
@@ -127,9 +127,9 @@ export const themeMenuGroups = buildThemeMenuGroups();
 export const themeMenuItems = themeMenuGroups.flatMap((group) => group.themes);
 
 export const themeSwatches: Record<string, string> = Object.fromEntries(
-  themeMenuItems.map((item) => [item.id, item.swatch]),
+  themeMenuItems.map((item) => [item.id, item.swatch])
 );
 
 export const themeTriggerLabels: Record<string, string> = Object.fromEntries(
-  themeMenuItems.map((item) => [item.id, item.label]),
+  themeMenuItems.map((item) => [item.id, item.label])
 );

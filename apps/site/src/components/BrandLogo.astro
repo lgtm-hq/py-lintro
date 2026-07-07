@@ -4,7 +4,7 @@ interface Props {
   as?: 'span' | 'strong';
 }
 
-const { class: className, as: Element = 'span' } = Astro.props;
+const { class: className, as: Element = 'span' }: Props = Astro.props;
 ---
 
 <Element class:list={['brand-logo', className]}>
