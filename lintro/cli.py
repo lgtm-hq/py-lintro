@@ -30,6 +30,7 @@ from lintro.cli_utils.commands.review import review_command  # noqa: E402
 from lintro.cli_utils.commands.setup import setup_command  # noqa: E402
 from lintro.cli_utils.commands.test import test_command  # noqa: E402
 from lintro.cli_utils.commands.versions import versions_command  # noqa: E402
+from lintro.cli_utils.commands.watch import watch_command  # noqa: E402
 from lintro.tools.core.runtime_discovery import clear_discovery_cache  # noqa: E402
 from lintro.utils.config import clear_pyproject_cache  # noqa: E402
 
@@ -200,6 +201,7 @@ cast(Any, test_command)._canonical_name = "test"
 cast(Any, list_tools_command)._canonical_name = "list-tools"
 cast(Any, review_command)._canonical_name = "review"
 cast(Any, versions_command)._canonical_name = "versions"
+cast(Any, watch_command)._canonical_name = "watch"
 
 cli.add_command(check_command, name="check")
 cli.add_command(config_command, name="config")
@@ -212,6 +214,7 @@ cli.add_command(test_command, name="test")
 cli.add_command(list_tools_command, name="list-tools")
 cli.add_command(review_command, name="review")
 cli.add_command(versions_command, name="versions")
+cli.add_command(watch_command, name="watch")
 
 # Register aliases
 cli.add_command(check_command, name="chk")
@@ -227,6 +230,7 @@ cli.add_command(setup_command, name="su")
 cli.add_command(review_command, name="rev")
 cli.add_command(versions_command, name="ver")
 cli.add_command(versions_command, name="version")
+cli.add_command(watch_command, name="w")
 
 
 def main() -> None:

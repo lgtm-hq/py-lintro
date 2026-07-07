@@ -30,6 +30,7 @@ from lintro.config.review_config import (
     ReviewChecklistItemConfig,
     ReviewConfig,
 )
+from lintro.config.watch_config import WatchConfig
 from lintro.enums.config_key import ConfigKey
 from lintro.utils.path_utils import find_file_upward
 
@@ -386,6 +387,37 @@ def _parse_review_config(data: Any) -> ReviewConfig:
     return ReviewConfig(**filtered)
 
 
+def _parse_watch_config(data: Any) -> WatchConfig:
+    """Parse the ``watch`` configuration section.
+
+    Args:
+        data: Raw ``watch`` section from config.
+
+    Returns:
+        WatchConfig: Parsed watch configuration.
+
+    Raises:
+        ValueError: When the watch section is not a mapping.
+    """
+    if data is None:
+        return WatchConfig()
+    if not isinstance(data, dict):
+        msg = f"watch config must be a mapping, got {type(data).__name__}"
+        raise ValueError(msg)
+    if not data:
+        return WatchConfig()
+
+    known_fields = set(WatchConfig.model_fields)
+    unknown = set(data) - known_fields
+    if unknown:
+        logger.warning(
+            "Unknown watch config keys ignored: {}",
+            ", ".join(sorted(unknown)),
+        )
+    filtered = {key: value for key, value in data.items() if key in known_fields}
+    return WatchConfig(**filtered)
+
+
 def _convert_pyproject_to_config(data: dict[str, Any]) -> dict[str, Any]:
     """Convert pyproject.toml [tool.lintro] format to .lintro-config.yaml format.
 
@@ -405,6 +437,7 @@ def _convert_pyproject_to_config(data: dict[str, Any]) -> dict[str, Any]:
         "tools": {},
         "ai": {},
         "review": {},
+        "watch": {},
     }
 
     # Inline import: ToolName is a static StrEnum that does not trigger
@@ -459,6 +492,8 @@ def _convert_pyproject_to_config(data: dict[str, Any]) -> dict[str, Any]:
             result["ai"] = value
         elif key_lower == "review":
             result["review"] = value
+        elif key_lower == "watch" and isinstance(value, dict):
+            result["watch"] = value
 
     return result
 
@@ -525,6 +560,7 @@ def load_config(
     tools_config = _parse_tools_config(data.get("tools", {}))
     ai_config = _parse_ai_config(data.get("ai", {}))
     review_config = _parse_review_config(data.get("review", {}))
+    watch_config = _parse_watch_config(data.get("watch", {}))
 
     return LintroConfig(
         execution=execution_config,
@@ -533,6 +569,7 @@ def load_config(
         tools=tools_config,
         ai=ai_config,
         review=review_config,
+        watch=watch_config,
         config_path=resolved_path,
     )
 
