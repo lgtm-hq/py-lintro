@@ -18,6 +18,9 @@ def _load_module() -> ModuleType:
 
     Returns:
         ModuleType: The loaded module.
+
+    Raises:
+        RuntimeError: If the module spec or loader cannot be resolved.
     """
     spec = importlib.util.spec_from_file_location("format_changelog", _SCRIPT_PATH)
     if spec is None or spec.loader is None:
