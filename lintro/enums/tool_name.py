@@ -28,6 +28,7 @@ class ToolName(StrEnum):
     PRETTIER = auto()
     PYDOCLINT = auto()
     PYTEST = auto()
+    RUBOCOP = auto()
     RUFF = auto()
     RUSTC = auto()
     RUSTFMT = auto()

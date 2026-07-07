@@ -44,6 +44,7 @@ TOOLS_WITH_SIMPLE_VERSION_PATTERN: set[ToolName] = {
     ToolName.OXLINT,
     ToolName.PRETTIER,
     ToolName.PYDOCLINT,
+    ToolName.RUBOCOP,
     ToolName.RUSTC,
     ToolName.RUSTFMT,
     ToolName.SEMGREP,

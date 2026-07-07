@@ -117,6 +117,12 @@ system.
 <td>📦</td>
 </tr>
 <tr>
+<td><a href="https://rubocop.org/"><img src="https://img.shields.io/badge/RuboCop-CC342D?logo=ruby&logoColor=white" alt="RuboCop"></a></td>
+<td>💎 Ruby</td>
+<td>✅</td>
+<td><code>gem install rubocop</code></td>
+</tr>
+<tr>
 <td><a href="https://www.shellcheck.net/"><img src="https://img.shields.io/badge/ShellCheck-4EAA25?logo=gnubash&logoColor=white" alt="ShellCheck"></a></td>
 <td>🐚 Shell Scripts</td>
 <td>-</td>

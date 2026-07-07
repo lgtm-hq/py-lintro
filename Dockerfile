@@ -44,6 +44,8 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     libssl-dev \
     pkg-config \
     unzip \
+    ruby \
+    ruby-dev \
     jq && \
     apt-get clean && \
     rm -rf /var/lib/apt/lists/*
@@ -109,7 +111,8 @@ RUN echo "=== Verifying all tools ===" && \
     black --version && gitleaks version && hadolint --version && \
     markdownlint-cli2 --version && mypy --version && osv-scanner --version && \
     oxfmt --version && oxlint --version && prettier --version && \
-    pydoclint --version && ruff --version && semgrep --version && \
+    pydoclint --version && rubocop --version && ruff --version && \
+    semgrep --version && \
     shellcheck --version && shfmt --version && sqlfluff --version && \
     taplo --version && tsc --version && astro --version && \
     svelte-check --version && vue-tsc --version && yamllint --version && \
@@ -164,6 +167,7 @@ RUN echo "Verifying tools..." && \
     markdownlint-cli2 --version && tsc --version && astro --version && \
     vue-tsc --version && oxlint --version && oxfmt --version && \
     bandit --version && mypy --version && pydoclint --version && \
+    rubocop --version && \
     yamllint --version && sqlfluff --version && \
     echo "All tools verified!"
 

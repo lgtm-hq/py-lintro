@@ -60,6 +60,7 @@
         "oxfmt",
         "gitleaks",
         "gitleaks/gitleaks",
+        "rubocop",
         "shellcheck",
         "koalaman/shellcheck",
         "shfmt",
@@ -209,6 +210,18 @@
       "datasourceTemplate": "github-releases",
       "packageNameTemplate": "google/osv-scanner",
       "extractVersionTemplate": "^v(?<version>.*)$"
+    },
+    {
+      "description": "Update rubocop version in _tool_versions.py",
+      "customType": "regex",
+      "managerFilePatterns": [
+        "lintro/_tool_versions\\.py"
+      ],
+      "matchStrings": [
+        "ToolName\\.RUBOCOP:\\s*\"(?<currentValue>[0-9]+\\.[0-9]+\\.[0-9]+)\""
+      ],
+      "datasourceTemplate": "rubygems",
+      "packageNameTemplate": "rubocop"
     },
     {
       "description": "Update shellcheck version in _tool_versions.py",
