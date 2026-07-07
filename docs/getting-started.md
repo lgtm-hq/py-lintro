@@ -104,6 +104,8 @@ install mode.
   by default (`brew install trufflehog` or GitHub releases)
 - `golangci-lint` - Go meta-linter running 100+ linters (`brew install golangci-lint` or
   <https://golangci-lint.run/welcome/install/>; requires the Go toolchain)
+- `ktlint` - Kotlin linter and formatter (`brew install ktlint` or GitHub releases;
+  requires a JVM)
 - `shellcheck` - Shell script analyzer (`brew install shellcheck` or GitHub releases)
 - `shfmt` - Shell script formatter (`brew install shfmt` or GitHub releases)
 - `dotenv-linter` - `.env` file linter and fixer (`brew install dotenv-linter`,
