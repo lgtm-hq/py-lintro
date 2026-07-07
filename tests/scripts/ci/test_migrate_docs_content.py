@@ -63,11 +63,42 @@ def test_main_writes_route_map(isolated_docs: tuple[Any, Path]) -> None:
     migrate, site_content = isolated_docs
     migrate.main()
     route_map = (site_content.parents[1] / "generated" / "docs-route-map.ts").read_text(
-        encoding="utf-8"
+        encoding="utf-8",
     )
     assert_that(route_map).contains("export const sourceToDoc")
     assert_that(route_map).contains(
         '"getting-started.md": "getting-started/getting-started",',
+    )
+
+
+def test_rewrite_root_readme_links_targets_github() -> None:
+    """Links escaping docs/ to the repo README should point at GitHub."""
+    migrate = _load_migrate_module()
+    hub_body = (
+        "See [main README](../README.md) and [install](../README.md#installation)."
+    )
+    rewritten = migrate.rewrite_root_readme_links(hub_body, "")
+    assert_that(rewritten).contains("(https://github.com/lgtm-hq/py-lintro)")
+    assert_that(rewritten).contains(
+        "(https://github.com/lgtm-hq/py-lintro#installation)",
+    )
+    assert_that(rewritten).does_not_contain("README.md")
+
+
+def test_rewrite_root_readme_links_keeps_docs_internal_links() -> None:
+    """A ../README.md link from a nested dir targets the docs hub, not GitHub."""
+    migrate = _load_migrate_module()
+    nested_body = "Back to the [docs hub](../README.md)."
+    assert_that(
+        migrate.rewrite_root_readme_links(nested_body, "architecture"),
+    ).is_equal_to(
+        nested_body,
+    )
+    escaping_body = "See the [main README](../../README.md#quick-start)."
+    assert_that(
+        migrate.rewrite_root_readme_links(escaping_body, "architecture"),
+    ).contains(
+        "(https://github.com/lgtm-hq/py-lintro#quick-start)",
     )
 
 

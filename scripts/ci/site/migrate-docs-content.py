@@ -93,6 +93,39 @@ DOC_NAV: dict[str, tuple[str, str | None]] = {
 }
 
 
+ROOT_README_URL = "https://github.com/lgtm-hq/py-lintro"
+ROOT_README_LINK = re.compile(
+    r"\((?P<ups>(?:\.\./)+)README\.md(?P<hash>#[A-Za-z0-9._-]*)?\)",
+)
+
+
+def rewrite_root_readme_links(body: str, src_dir: str) -> str:
+    """Point links that resolve to the repo-root README at the GitHub repo.
+
+    The repo-root README has no equivalent page on the site; GitHub renders it
+    (with heading anchors) on the repository home page instead. Only links
+    whose ``../`` chain escapes ``docs/`` are rewritten — e.g. ``../README.md``
+    from ``docs/README.md`` targets the repo root, while the same link from
+    ``docs/architecture/`` targets the docs hub and is left alone.
+
+    Args:
+        body: Markdown source being migrated.
+        src_dir: Source directory relative to ``docs/`` ("" for the root).
+
+    Returns:
+        The body with repo-root README links rewritten.
+    """
+    depth = len([part for part in src_dir.split("/") if part])
+
+    def _replace(match: re.Match[str]) -> str:
+        ups = match.group("ups").count("../")
+        if ups != depth + 1:
+            return match.group(0)
+        return f"({ROOT_README_URL}{match.group('hash') or ''})"
+
+    return ROOT_README_LINK.sub(_replace, body)
+
+
 def title_from_markdown(text: str, fallback: str) -> str:
     """Extract the first markdown H1 title or return ``fallback``."""
     for line in text.splitlines():
@@ -233,7 +266,7 @@ def main() -> None:
         src = DOCS_SRC / filename
         if not src.exists():
             continue
-        body = src.read_text(encoding="utf-8")
+        body = rewrite_root_readme_links(src.read_text(encoding="utf-8"), "")
         slug = slug_name(src)
         fallback = title_from_markdown(body, slug.replace("-", " ").title())
         write_doc_with_nav(f"{category}/{slug}.md", category, order, body, fallback)
@@ -242,7 +275,10 @@ def main() -> None:
     arch_dir = DOCS_SRC / "architecture"
     if arch_dir.is_dir():
         for src in sorted(arch_dir.glob("*.md")):
-            body = src.read_text(encoding="utf-8")
+            body = rewrite_root_readme_links(
+                src.read_text(encoding="utf-8"),
+                "architecture",
+            )
             slug = slug_name(src)
             if slug == "readme":
                 slug = "overview"
@@ -260,7 +296,7 @@ def main() -> None:
     usage_dir = DOCS_SRC / "usage"
     if usage_dir.is_dir():
         for src in sorted(usage_dir.glob("*.md")):
-            body = src.read_text(encoding="utf-8")
+            body = rewrite_root_readme_links(src.read_text(encoding="utf-8"), "usage")
             slug = "index" if src.name == "README.md" else slug_name(src)
             order = USAGE_OVERVIEW_ORDER.get(src.name, 100)
             fallback = title_from_markdown(body, slug.replace("-", " ").title())
@@ -270,7 +306,9 @@ def main() -> None:
     sec_dir = DOCS_SRC / "security"
     if sec_dir.is_dir():
         for src in sorted(sec_dir.glob("*.md")):
-            body = src.read_text(encoding="utf-8")
+            body = rewrite_root_readme_links(
+                src.read_text(encoding="utf-8"), "security",
+            )
             slug = slug_name(src)
             if slug == "readme":
                 slug = "index"
@@ -284,7 +322,10 @@ def main() -> None:
         order = 20
         for src in sorted(tools_dir.glob("*.md")):
             if src.name == "README.md":
-                body = src.read_text(encoding="utf-8")
+                body = rewrite_root_readme_links(
+                    src.read_text(encoding="utf-8"),
+                    "tool-analysis",
+                )
                 write_doc_with_nav(
                     "tools/index.md",
                     "tools",
@@ -294,7 +335,10 @@ def main() -> None:
                 )
                 route_map["tool-analysis/README.md"] = "tools/index"
                 continue
-            body = src.read_text(encoding="utf-8")
+            body = rewrite_root_readme_links(
+                src.read_text(encoding="utf-8"),
+                "tool-analysis",
+            )
             slug = re.sub(r"-analysis$", "", slug_name(src))
             fallback = slug
             write_doc_with_nav(f"tools/{slug}.md", "tools", order, body, fallback)
@@ -303,7 +347,7 @@ def main() -> None:
 
     hub = DOCS_SRC / "README.md"
     if hub.exists():
-        body = hub.read_text(encoding="utf-8")
+        body = rewrite_root_readme_links(hub.read_text(encoding="utf-8"), "")
         write_doc_with_nav(
             "getting-started/hub.md",
             "getting-started",
