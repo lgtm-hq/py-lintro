@@ -6,6 +6,7 @@ direct binary). They exercise the plugin end-to-end against a real HTML fixture.
 
 import shutil
 import subprocess
+import tempfile
 from pathlib import Path
 
 import pytest
@@ -42,12 +43,17 @@ def _html_validate_runnable() -> bool:
     if cmd_base is None:
         return False
     try:
+        # Probe from a neutral cwd: the tests lint files in tmp directories,
+        # and bunx/npx resolution can succeed from the repo root (whose
+        # node_modules satisfy the CLI's dependencies) while failing anywhere
+        # else. Probing from the repo would let the tests run a broken tool.
         result = subprocess.run(
             [*cmd_base, "--version"],
             capture_output=True,
             text=True,
             check=False,
             timeout=60,
+            cwd=tempfile.gettempdir(),
         )
     except (subprocess.TimeoutExpired, FileNotFoundError):
         return False
@@ -93,19 +99,21 @@ def test_html_validate_detects_violations() -> None:
 
 
 @pytest.mark.html_validate
-def test_html_validate_clean_file_passes() -> None:
-    """A valid HTML fragment yields no issues under default (no-config) rules."""
+def test_html_validate_clean_file_passes(tmp_path: Path) -> None:
+    """A valid HTML fragment yields no issues under default (no-config) rules.
+
+    Args:
+        tmp_path: Pytest-managed temporary directory (keeps the transient
+            fixture out of the versioned ``test_samples`` tree, which other
+            tests may scan concurrently).
+    """
     if not _html_validate_runnable():
         pytest.skip("html-validate not available")
 
-    tmp_dir = Path("test_samples/tools/web/html_validate")
-    clean_file = tmp_dir / "clean_fragment.html"
+    clean_file = tmp_path / "clean_fragment.html"
     clean_file.write_text("<p>Hello world</p>\n", encoding="utf-8")
-    try:
-        tool = ToolRegistry.get("html_validate")
-        tool.exclude_patterns = []
-        result = tool.check([str(clean_file)], {})
-        assert_that(result.issues_count).is_equal_to(0)
-        assert_that(result.success).is_true()
-    finally:
-        clean_file.unlink(missing_ok=True)
+    tool = ToolRegistry.get("html_validate")
+    tool.exclude_patterns = []
+    result = tool.check([str(clean_file)], {})
+    assert_that(result.issues_count).is_equal_to(0)
+    assert_that(result.success).is_true()
