@@ -14,8 +14,10 @@ from lintro.ai.exceptions import (
 )
 from lintro.ai.review.enums.checklist_display import ChecklistDisplay
 from lintro.ai.review.github import (
+    MAX_COMMENT_CHARS,
     STATE_MARKER_PREFIX,
     STICKY_MARKER,
+    _format_findings_section,
     build_sticky_comment,
     format_error_comment,
     format_finding_comment,
@@ -459,3 +461,186 @@ def test_post_error_comment_recovers_prior_state(
 
     posted_body = reporter.update_issue_comment.call_args.kwargs["body"]
     assert_that(parse_review_state(body=posted_body)).is_length(1)
+
+
+# --- truncation safety for non-diff-mappable findings (#1099) ----------------
+
+
+def _bulky_finding(
+    *,
+    severity: Severity,
+    file: str,
+    line: int,
+    title: str,
+) -> ReviewFinding:
+    """Build a large finding whose rendered block eats into the comment cap."""
+    filler = "detail " * 260
+    return ReviewFinding(
+        severity=severity,
+        category="security",
+        file=file,
+        line=line,
+        title=title,
+        description=filler,
+        cause=filler,
+        fix=filler,
+        confidence="high",
+    )
+
+
+def _result_with_findings(
+    *,
+    base: ReviewResult,
+    findings: tuple[ReviewFinding, ...],
+) -> ReviewResult:
+    """Clone a review result with a replacement findings tuple."""
+    return ReviewResult(
+        metadata=base.metadata,
+        summary=base.summary,
+        checklist=base.checklist,
+        findings=findings,
+    )
+
+
+def test_findings_section_orders_fallback_before_diff_mappable(
+    sample_review_result: ReviewResult,
+) -> None:
+    """Non-diff-mappable findings render ahead of diff-mappable ones."""
+    diff_lines = {"src/mapped.py": {10}}
+    mapped = ReviewFinding(
+        severity=Severity.P1,
+        category="security",
+        file="src/mapped.py",
+        line=10,
+        title="MappedInlineFinding",
+        description="d",
+        cause="c",
+        fix="f",
+        confidence="high",
+    )
+    fallback = ReviewFinding(
+        severity=Severity.P3,
+        category="style",
+        file="src/unmapped.py",
+        line=999,
+        title="FallbackOnlyFinding",
+        description="d",
+        cause="c",
+        fix="f",
+        confidence="low",
+    )
+    result = _result_with_findings(
+        base=sample_review_result,
+        findings=(mapped, fallback),
+    )
+
+    summary = format_review_summary(result=result, diff_lines=diff_lines)
+
+    fallback_at = summary.find("FallbackOnlyFinding")
+    mapped_at = summary.find("MappedInlineFinding")
+    assert_that(fallback_at).is_greater_than(-1)
+    # Fallback (P3) precedes the diff-mappable P1 despite lower severity.
+    assert_that(fallback_at).is_less_than(mapped_at)
+
+
+def test_sticky_truncation_keeps_fallback_and_marks_dropped(
+    sample_review_result: ReviewResult,
+) -> None:
+    """Over-cap sticky keeps the fallback finding and names the dropped count."""
+    diff_lines = {"src/mapped.py": set(range(1, 41))}
+    mapped = tuple(
+        _bulky_finding(
+            severity=Severity.P1,
+            file="src/mapped.py",
+            line=index,
+            title=f"MappedFinding{index}",
+        )
+        for index in range(1, 41)
+    )
+    fallback = _bulky_finding(
+        severity=Severity.P3,
+        file="src/unmapped.py",
+        line=999,
+        title="FallbackOnlyFinding",
+    )
+    result = _result_with_findings(
+        base=sample_review_result,
+        findings=(*mapped, fallback),
+    )
+
+    # Without budgeting the assembled body would blow past the cap.
+    unbudgeted = format_review_summary(result=result, diff_lines=diff_lines)
+    assert_that(len(unbudgeted)).is_greater_than(MAX_COMMENT_CHARS)
+
+    body = build_sticky_comment(result=result, diff_lines=diff_lines)
+
+    # The final body stays within the cap (plus the appended state block).
+    assert_that(len(body)).is_less_than_or_equal_to(MAX_COMMENT_CHARS + 1000)
+    # The fallback finding — with no inline surface — must survive truncation.
+    assert_that(body).contains("FallbackOnlyFinding")
+    # Truncation is explicit, not silent.
+    assert_that(body).contains("more finding(s) truncated")
+
+
+def test_all_fallback_overflow_truncates_to_logs_not_inline() -> None:
+    """All-fallback overflow drops via an explicit *workflow-logs* marker.
+
+    When ``diff_lines`` is ``None`` every finding is fallback (no inline
+    surface). If they exceed GitHub's hard comment limit, truncation is
+    unavoidable — but it must be explicit and must NOT point readers to inline
+    comments that do not exist for fallback findings.
+    """
+    findings = tuple(
+        _bulky_finding(
+            severity=Severity.P2,
+            file=f"src/unmapped{index}.py",
+            line=900 + index,
+            title=f"FallbackFinding{index}",
+        )
+        for index in range(5)
+    )
+
+    lines = _format_findings_section(
+        findings=findings,
+        checklist_display=ChecklistDisplay.OFF,
+        question_map={},
+        diff_lines=None,
+        char_budget=200,  # forces overflow so the marker path is exercised
+    )
+    body = "\n".join(lines)
+
+    # At least the first fallback finding is always rendered.
+    assert_that(body).contains("FallbackFinding0")
+    # Overflow is explicit, and points at the logs — never at (nonexistent)
+    # inline comments for fallback findings.
+    assert_that(body).contains("more finding(s) truncated")
+    assert_that(body).contains("workflow logs")
+    assert_that(body).does_not_contain("inline comments")
+
+
+def test_sticky_state_round_trips_after_truncation(
+    sample_review_result: ReviewResult,
+) -> None:
+    """The state block and cumulative header survive a truncated body."""
+    diff_lines = {"src/mapped.py": set(range(1, 41))}
+    findings = tuple(
+        _bulky_finding(
+            severity=Severity.P1,
+            file="src/mapped.py",
+            line=index,
+            title=f"MappedFinding{index}",
+        )
+        for index in range(1, 41)
+    )
+    result = _result_with_findings(
+        base=sample_review_result,
+        findings=findings,
+    )
+
+    body = build_sticky_comment(result=result, diff_lines=diff_lines)
+
+    assert_that(body).contains("**Cumulative (this PR):**")
+    assert_that(body).contains(STATE_MARKER_PREFIX)
+    runs = parse_review_state(body=body)
+    assert_that(runs).is_length(1)
+    assert_that(runs[0]["model"]).is_equal_to("claude-sonnet-4-20250514")
