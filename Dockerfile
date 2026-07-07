@@ -111,6 +111,7 @@ RUN echo "=== Verifying all tools ===" && \
     oxfmt --version && oxlint --version && prettier --version && \
     pydoclint --version && ruff --version && semgrep --version && \
     shellcheck --version && shfmt --version && sqlfluff --version && \
+    swiftlint version && \
     taplo --version && tsc --version && astro --version && \
     svelte-check --version && vue-tsc --version && yamllint --version && \
     echo "=== All tools verified! ==="
@@ -160,6 +161,7 @@ RUN echo "Verifying tools..." && \
     cargo deny --version && semgrep --version && ruff --version && \
     black --version && hadolint --version && actionlint --version && \
     shellcheck --version && shfmt --version && taplo --version && \
+    swiftlint version && \
     gitleaks version && osv-scanner --version && prettier --version && \
     markdownlint-cli2 --version && tsc --version && astro --version && \
     vue-tsc --version && oxlint --version && oxfmt --version && \

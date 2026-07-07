@@ -169,6 +169,7 @@ packages = [
   "lintro.parsers.shfmt",
   "lintro.parsers.sqlfluff",
   "lintro.parsers.svelte_check",
+  "lintro.parsers.swiftlint",
   "lintro.parsers.taplo",
   "lintro.parsers.pydoclint",
   "lintro.parsers.tsc",

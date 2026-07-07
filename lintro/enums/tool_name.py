@@ -36,6 +36,7 @@ class ToolName(StrEnum):
     SHFMT = auto()
     SQLFLUFF = auto()
     SVELTE_CHECK = auto()
+    SWIFTLINT = auto()
     TAPLO = auto()
     TSC = auto()
     VUE_TSC = auto()

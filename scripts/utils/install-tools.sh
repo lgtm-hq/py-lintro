@@ -82,6 +82,7 @@ This script installs:
   - ShellCheck (Shell script linter)
   - shfmt (Shell script formatter)
   - SQLFluff (SQL linter and formatter)
+  - SwiftLint (Swift linter)
   - Taplo (TOML linter and formatter)
   - TypeScript (TypeScript compiler and type checker)
   - Astro Check (Astro component type checker)
@@ -168,7 +169,7 @@ SUPPORTED_TOOLS=(
 	"actionlint" "astro" "bandit" "black" "cargo-audit" "cargo-deny"
 	"clippy" "gitleaks" "hadolint" "markdownlint" "markdownlint-cli2" "mypy" "osv-scanner"
 	"oxfmt" "oxlint" "prettier" "pydoclint" "ruff" "rustfmt" "semgrep"
-	"shellcheck" "shfmt" "sqlfluff" "svelte-check" "taplo" "tsc"
+	"shellcheck" "shfmt" "sqlfluff" "svelte-check" "swiftlint" "taplo" "tsc"
 	"vue-tsc" "yamllint"
 )
 
@@ -749,6 +750,49 @@ main() {
 			fi
 		fi
 	fi # shfmt
+
+	if should_install "swiftlint"; then
+		# Install SwiftLint (Swift linter).
+		# Linux uses the fully static binary shipped in the release zip
+		# (swiftlint-static), which needs no Swift runtime. macOS uses Homebrew,
+		# which provides the Swift runtime already present on the platform.
+		echo -e "${BLUE}Installing swiftlint...${NC}"
+		SWIFTLINT_VERSION=$(get_tool_version "swiftlint") || exit 1
+		if [ $DRY_RUN -eq 1 ]; then
+			log_info "[DRY-RUN] Would install swiftlint v${SWIFTLINT_VERSION}"
+		elif command -v swiftlint &>/dev/null; then
+			echo -e "${GREEN}✓ swiftlint already installed${NC}"
+		else
+			os=$(uname -s | tr '[:upper:]' '[:lower:]')
+			if [ "$os" = "darwin" ]; then
+				if command -v brew &>/dev/null && brew install swiftlint; then
+					echo -e "${GREEN}✓ swiftlint installed successfully via Homebrew${NC}"
+				else
+					echo -e "${YELLOW}⚠ Could not install swiftlint automatically; install manually: brew install swiftlint${NC}"
+				fi
+			else
+				arch=$(uname -m)
+				case "$arch" in
+				x86_64 | amd64) arch="amd64" ;;
+				aarch64 | arm64) arch="arm64" ;;
+				esac
+				swiftlint_tmp=$(mktemp -d)
+				swiftlint_zip="${swiftlint_tmp}/swiftlint.zip"
+				binary_url="https://github.com/realm/SwiftLint/releases/download/${SWIFTLINT_VERSION}/swiftlint_linux_${arch}.zip"
+				if download_with_retries "$binary_url" "$swiftlint_zip" 3 &&
+					unzip -q -o "$swiftlint_zip" -d "$swiftlint_tmp"; then
+					mv "${swiftlint_tmp}/swiftlint-static" "$BIN_DIR/swiftlint"
+					chmod +x "$BIN_DIR/swiftlint"
+					echo -e "${GREEN}✓ swiftlint installed successfully${NC}"
+				else
+					echo -e "${RED}✗ Failed to download swiftlint${NC}"
+					rm -rf "$swiftlint_tmp"
+					exit 1
+				fi
+				rm -rf "$swiftlint_tmp"
+			fi
+		fi
+	fi # swiftlint
 
 	# Shared helper: ensure Rust toolchain is installed with the required component.
 	# Called by both the rustfmt and clippy blocks to avoid duplicating toolchain setup.
@@ -1434,6 +1478,7 @@ main() {
 		["shfmt"]="Shell script formatting"
 		["sqlfluff"]="SQL linting and formatting"
 		["svelte-check"]="Svelte type checking"
+		["swiftlint"]="Swift linting"
 		["taplo"]="TOML linting and formatting"
 		["tsc"]="TypeScript type checking"
 		["vue-tsc"]="Vue TypeScript type checking"
@@ -1450,7 +1495,7 @@ main() {
 	# Verify installations
 	echo -e "${YELLOW}Verifying installations...${NC}"
 
-	tools_to_verify=("actionlint" "astro" "bandit" "black" "cargo-audit" "cargo-deny" "clippy" "rustfmt" "gitleaks" "hadolint" "markdownlint-cli2" "mypy" "osv-scanner" "oxfmt" "oxlint" "prettier" "pydoclint" "ruff" "semgrep" "shellcheck" "shfmt" "sqlfluff" "svelte-check" "taplo" "tsc" "vue-tsc" "yamllint")
+	tools_to_verify=("actionlint" "astro" "bandit" "black" "cargo-audit" "cargo-deny" "clippy" "rustfmt" "gitleaks" "hadolint" "markdownlint-cli2" "mypy" "osv-scanner" "oxfmt" "oxlint" "prettier" "pydoclint" "ruff" "semgrep" "shellcheck" "shfmt" "sqlfluff" "svelte-check" "swiftlint" "taplo" "tsc" "vue-tsc" "yamllint")
 
 	# Filter verification list when --tools is set.
 	# Map aliases so e.g. --tools markdownlint verifies markdownlint-cli2.

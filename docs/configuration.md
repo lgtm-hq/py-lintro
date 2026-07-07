@@ -1360,6 +1360,58 @@ lintro check --tools sqlfluff --tool-options sqlfluff:exclude_rules=L010,L014
 lintro check --tools sqlfluff --tool-options sqlfluff:templater=jinja
 ```
 
+### Swift Tools
+
+#### SwiftLint Configuration
+
+SwiftLint runs with its built-in defaults and honors a project-level
+`.swiftlint.yml` (or `.swiftlint.yaml`) discovered from the working directory.
+lintro does not impose or override any rule set.
+
+**File:** `.swiftlint.yml`
+
+```yaml
+disabled_rules:
+  - trailing_whitespace
+
+opt_in_rules:
+  - empty_count
+
+line_length:
+  warning: 120
+  error: 200
+
+identifier_name:
+  min_length: 2
+```
+
+**Installation:**
+
+- macOS: `brew install swiftlint`
+- Linux: download the static binary from the
+  [release archive](https://github.com/realm/SwiftLint/releases)
+  (`swiftlint_linux_<amd64|arm64>.zip` ships a self-contained `swiftlint-static`
+  executable that needs no Swift runtime)
+
+**Available Options:**
+
+| Option    | Type | Description                        |
+| --------- | ---- | ---------------------------------- |
+| `timeout` | int  | Per-file command timeout (seconds) |
+
+> All rule configuration is expressed through the native `.swiftlint.yml` file
+> rather than lintro `--tool-options`.
+
+**Usage Examples:**
+
+```bash
+# Lint Swift sources
+lintro check --tools swiftlint Sources/
+
+# Auto-correct fixable violations
+lintro format --tools swiftlint Sources/
+```
+
 ### YAML Tools
 
 #### Yamllint Configuration

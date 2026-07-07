@@ -39,6 +39,7 @@ class DocUrlTemplate(StrEnum):
     SEMGREP = "https://semgrep.dev/r/{code}"
     SHELLCHECK = "https://www.shellcheck.net/wiki/{code}"
     SQLFLUFF = "https://docs.sqlfluff.com/en/stable/rules.html#{code}"
+    SWIFTLINT = "https://realm.github.io/SwiftLint/{code}.html"
     TAPLO = "https://taplo.tamasfe.dev/"
     TSC = "https://typescript.tv/errors/#ts{code}"
     YAMLLINT = "https://yamllint.readthedocs.io/en/stable/rules.html#{code}"
