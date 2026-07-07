@@ -83,8 +83,9 @@ function resolveBinary(requireFn, platform, arch) {
         'This usually means optional dependencies were skipped during ' +
         'install, or the lockfile was generated on a different OS and ' +
         "omits this platform's package (see npm/cli#4828). Reinstall with " +
-        'optional dependencies enabled (e.g. `npm install lintro` or ' +
-        '`bun add lintro`), or refresh the lockfile on this platform ' +
+        'optional dependencies enabled (e.g. `npm install @lgtm-hq/lintro` ' +
+        'or `bun add @lgtm-hq/lintro`), or refresh the lockfile on this ' +
+        'platform ' +
         `(e.g. \`npm install --force\`). Cause: ${err.message}`
     );
   }
