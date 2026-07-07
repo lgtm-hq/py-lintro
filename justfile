@@ -94,9 +94,6 @@ clean:
 watch-test *ARGS:
     watchexec -e py -r -- just test-unit {{ARGS}}
 
-# Run pre-commit checks (lint + test)
-pre-commit: lint test
-
 # Show lintro version and available tools
 info:
     @uv run lintro --version
