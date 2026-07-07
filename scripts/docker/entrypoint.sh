@@ -10,6 +10,15 @@
 
 set -e
 
+# Verbose diagnostics for volume/permission debugging. Enable with
+# LINTRO_VERBOSE=1 (issue #822, item 6). All output goes to stderr so it never
+# pollutes lintro's machine-readable stdout.
+log_verbose() {
+	if [ "${LINTRO_VERBOSE:-0}" = "1" ]; then
+		echo "[lintro][verbose] $*" >&2
+	fi
+}
+
 # Auto-detect volume owner and drop root privileges.
 # When running as root (the default after removing USER from the Dockerfile),
 # detect the UID/GID that owns /code and re-exec as that user via gosu.
@@ -30,9 +39,12 @@ if [ "$(id -u)" = '0' ]; then
 	CUR_UID=$(id -u)
 	CUR_GID=$(id -g)
 	if [ "$CODE_UID" != "$CUR_UID" ] || [ "$CODE_GID" != "$CUR_GID" ]; then
+		log_verbose "dropping root: re-exec via gosu as ${CODE_UID}:${CODE_GID}"
 		exec gosu "$CODE_UID:$CODE_GID" "$0" "$@"
 	fi
 fi
+
+log_verbose "running as UID:GID $(id -u):$(id -g) ($(id -un 2>/dev/null || echo unknown))"
 
 # Ensure writable directories for mapped users (e.g., --user "$(id -u):$(id -g)")
 # When Docker runs with a mapped host user, tool-specific directories may not be
@@ -47,6 +59,7 @@ fi
 # Keep original bin dir in PATH so cargo/clippy/rustfmt binaries are still found
 if [ -n "${CARGO_HOME:-}" ] && [ ! -w "${CARGO_HOME}" ]; then
 	CARGO_BIN="${CARGO_HOME}/bin"
+	log_verbose "CARGO_HOME '${CARGO_HOME}' not writable; redirecting to /tmp/.cargo"
 	export CARGO_HOME="/tmp/.cargo"
 	mkdir -p "${CARGO_HOME}/bin"
 	# Preserve access to pre-installed cargo binaries and new CARGO_HOME/bin
@@ -61,6 +74,7 @@ fi
 # Keep original bin dir in PATH so pre-installed bun binaries are still found
 if [ -n "${BUN_INSTALL:-}" ] && [ ! -w "${BUN_INSTALL}" ]; then
 	BUN_BIN="${BUN_INSTALL}/bin"
+	log_verbose "BUN_INSTALL '${BUN_INSTALL}' not writable; redirecting to /tmp/.bun"
 	export BUN_INSTALL="/tmp/.bun"
 	mkdir -p "${BUN_INSTALL}/bin"
 	if [ -d "$BUN_BIN" ]; then
@@ -109,14 +123,19 @@ fi
 if [ "${LINTRO_AUTO_INSTALL_DEPS:-0}" = "1" ] && [ -f "package.json" ] && [ ! -d "node_modules" ]; then
 	echo "[lintro] Installing Node.js dependencies (LINTRO_AUTO_INSTALL_DEPS=1)..."
 	install_success=false
+	install_output=""
 	if command -v bun &>/dev/null; then
 		# Use --frozen-lockfile for reproducibility, --ignore-scripts for security
-		if bun install --frozen-lockfile --ignore-scripts 2>/dev/null || bun install --ignore-scripts 2>/dev/null; then
+		log_verbose "install command: bun install --frozen-lockfile --ignore-scripts"
+		if install_output=$(bun install --frozen-lockfile --ignore-scripts 2>&1) ||
+			install_output=$(bun install --ignore-scripts 2>&1); then
 			install_success=true
 		fi
 	elif command -v npm &>/dev/null; then
 		# Use npm ci for reproducibility (requires package-lock.json), --ignore-scripts for security
-		if npm ci --ignore-scripts 2>/dev/null || npm install --ignore-scripts 2>/dev/null; then
+		log_verbose "install command: npm ci --ignore-scripts"
+		if install_output=$(npm ci --ignore-scripts 2>&1) ||
+			install_output=$(npm install --ignore-scripts 2>&1); then
 			install_success=true
 		fi
 	else
@@ -126,6 +145,8 @@ if [ "${LINTRO_AUTO_INSTALL_DEPS:-0}" = "1" ] && [ -f "package.json" ] && [ ! -d
 		echo "[lintro] Node.js dependencies installed."
 	else
 		echo "[lintro] Warning: Failed to install Node.js dependencies (may be read-only mount)"
+		log_verbose "install output:"
+		log_verbose "${install_output}"
 	fi
 fi
 

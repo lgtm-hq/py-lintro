@@ -92,7 +92,9 @@ Scripts for GitHub Actions workflows and continuous integration.
 | `post-pr-delete-previous.sh`         | Delete previous PR comments by marker                                 | `./scripts/ci/post-pr-delete-previous.sh --help`                                   |
 | `lintro-report-generate.sh`          | Generate comprehensive Lintro reports                                 | `./scripts/ci/lintro-report-generate.sh`                                           |
 | `pull-lintro-image.sh`               | Pull lintro Docker image from GHCR and log digest                     | `./scripts/ci/testing/pull-lintro-image.sh`                                        |
-| `maintenance/delete-ci-ghcr-tags.sh` | Delete ephemeral CI GHCR tags after PR merge or close                 | `./scripts/ci/maintenance/delete-ci-ghcr-tags.sh`                                  |
+| `maintenance/delete-ci-ghcr-tags.sh` | Delete a specific ephemeral CI GHCR tag (manual/one-off use)          | `CI_TAG=ci-123 ./scripts/ci/maintenance/delete-ci-ghcr-tags.sh`                    |
+| `maintenance/sweep-ci-ghcr-tags.sh`  | Age-based scheduled sweep of ephemeral `ci-*` GHCR tags (#1138)       | `GH_TOKEN=… ./scripts/ci/maintenance/sweep-ci-ghcr-tags.sh --help`                 |
+| `verify-tools.sh`                    | Single-source verification that all bundled lintro tools run          | `./scripts/ci/verify-tools.sh --label root`                                        |
 | `coverage-badge-update.sh`           | Generate and update coverage badge                                    | `./scripts/ci/coverage-badge-update.sh --help`                                     |
 | `sbom-generate.sh`                   | Generate and export SBOMs via bomctl                                  | `./scripts/ci/sbom-generate.sh --help`                                             |
 | `egress-audit-lite.sh`               | Audit reachability of allowed endpoints                               | `./scripts/ci/egress-audit-lite.sh --help`                                         |

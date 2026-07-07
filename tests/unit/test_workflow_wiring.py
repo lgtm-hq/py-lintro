@@ -387,6 +387,66 @@ def test_docker_ci_comment_condition_semantics(
     ).is_equal_to(expected)
 
 
+def test_docker_ci_defers_ci_tag_cleanup_for_partial_reruns() -> None:
+    """docker-ci must not delete run-scoped CI tags on run completion (#1138).
+
+    Deleting ``ci-<run_id>`` when the run finishes broke "Re-run failed jobs":
+    docker-build does not rebuild on a partial rerun, so downstream jobs pulled a
+    tag that was already gone ("manifest unknown"). The fix removes the immediate
+    cleanup job; an age-based scheduled sweep reclaims the tags instead.
+    """
+    docker_ci = _load_workflow(name="docker-ci.yml")
+    jobs = docker_ci["jobs"]
+
+    # No immediate per-run cleanup job may exist.
+    assert_that(jobs).does_not_contain_key("cleanup-ci-images")
+    for job_name, job in jobs.items():
+        steps = job.get("steps", []) if isinstance(job, dict) else []
+        for step in steps:
+            run = step.get("run", "") if isinstance(step, dict) else ""
+            assert_that(run).described_as(
+                f"{job_name} must not delete CI tags inline",
+            ).does_not_contain("delete-ci-ghcr-tags.sh")
+
+    # The run-scoped tag stays keyed to run_id so reruns reuse the same tag.
+    build_steps = jobs["docker-build"]["steps"]
+    push_tags = [
+        step["with"]["tags"]
+        for step in build_steps
+        if isinstance(step, dict)
+        and isinstance(step.get("with"), dict)
+        and "ci-" in str(step["with"].get("tags", ""))
+    ]
+    assert_that(push_tags).is_not_empty()
+    for tags in push_tags:
+        assert_that(tags).contains("ci-${{ github.run_id }}")
+
+
+def test_ghcr_cleanup_sweeps_ephemeral_ci_tags() -> None:
+    """Scheduled maintenance owns CI-tag cleanup via the age-based sweep (#1138)."""
+    cleanup = _load_workflow(name="ghcr-cleanup.yml")
+    sweep = cleanup["jobs"]["sweep-ci-tags"]
+
+    assert_that(sweep["permissions"]).is_equal_to(
+        {
+            "contents": "read",
+            "packages": "write",
+        },
+    )
+    # Runs on the same weekly schedule + manual dispatch as the untagged prune.
+    triggers = cleanup.get("on", cleanup.get(True))
+    assert_that(triggers).contains_key("schedule")
+    # The sweep is driven by a dedicated script, never inline shell.
+    run_steps = [
+        step.get("run", "")
+        for step in sweep["steps"]
+        if isinstance(step, dict) and step.get("run")
+    ]
+    assert_that(run_steps).contains(
+        "scripts/ci/maintenance/sweep-ci-ghcr-tags.sh",
+    )
+
+
 def test_docker_ci_lintro_code_quality_wires_upstream_jobs() -> None:
     """Required check propagates docker-build failure even when lint is skipped."""
     docker_ci = _load_workflow(name="docker-ci.yml")

@@ -102,25 +102,20 @@ RUN chgrp -R tools /opt/cargo /opt/rustup /opt/bun && \
     chmod -R g+rwX /opt/cargo /opt/rustup /opt/bun && \
     chmod -R a+rX /opt/cargo /opt/rustup /opt/bun
 
-RUN echo "=== Verifying all tools ===" && \
-    bun --version && uv --version && cargo --version && rustc --version && \
-    rustfmt --version && cargo clippy --version && cargo audit --version && \
-    cargo deny --version && actionlint --version && bandit --version && \
-    black --version && gitleaks version && hadolint --version && \
-    markdownlint-cli2 --version && mypy --version && osv-scanner --version && \
-    oxfmt --version && oxlint --version && prettier --version && \
-    pydoclint --version && ruff --version && semgrep --version && \
-    shellcheck --version && shfmt --version && sqlfluff --version && \
-    taplo --version && tsc --version && astro --version && \
-    svelte-check --version && vue-tsc --version && yamllint --version && \
-    echo "=== All tools verified! ==="
+# Verify all bundled tools via the single source of truth (scripts/ci/verify-tools.sh).
+RUN /app/scripts/ci/verify-tools.sh --label tools-root
 
 # -----------------------------------------------------------------------------
 # Stage: full — lintro application (default target)
 # -----------------------------------------------------------------------------
 FROM tools AS full
 
+# Git commit SHA for image traceability (issue #822, item 5). Passed as a build
+# arg by CI (build-args: GIT_SHA=${{ github.sha }}); defaults to empty locally.
+ARG GIT_SHA=""
+
 LABEL org.opencontainers.image.description="Making Linters Play Nice... Mostly."
+LABEL org.opencontainers.image.revision="${GIT_SHA}"
 
 ENV PYTHONPATH=/app \
     RUFF_CACHE_DIR=/tmp/.ruff_cache \
@@ -155,36 +150,12 @@ RUN getent group tools >/dev/null || groupadd -r tools && \
     mkdir -p /code && \
     chown -R lintro:lintro /app /code
 
-RUN echo "Verifying tools..." && \
-    rustfmt --version && cargo clippy --version && cargo audit --version && \
-    cargo deny --version && semgrep --version && ruff --version && \
-    black --version && hadolint --version && actionlint --version && \
-    shellcheck --version && shfmt --version && taplo --version && \
-    gitleaks version && osv-scanner --version && prettier --version && \
-    markdownlint-cli2 --version && tsc --version && astro --version && \
-    vue-tsc --version && oxlint --version && oxfmt --version && \
-    bandit --version && mypy --version && pydoclint --version && \
-    yamllint --version && sqlfluff --version && \
-    echo "All tools verified!"
+RUN /app/scripts/ci/verify-tools.sh --label full-root
 
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
     CMD /app/.venv/bin/python -m lintro --version || exit 1
 
-RUN echo "Verifying tools as non-root user..." && \
-    gosu lintro prettier --version && \
-    gosu lintro markdownlint-cli2 --version && \
-    gosu lintro tsc --version && \
-    gosu lintro astro --version && \
-    gosu lintro vue-tsc --version && \
-    gosu lintro oxlint --version && \
-    gosu lintro oxfmt --version && \
-    gosu lintro rustfmt --version && \
-    gosu lintro cargo clippy --version && \
-    gosu lintro cargo audit --version && \
-    gosu lintro cargo deny --version && \
-    gosu lintro osv-scanner --version && \
-    gosu lintro semgrep --version && \
-    echo "All tools verified for non-root user!"
+RUN gosu lintro /app/scripts/ci/verify-tools.sh --label non-root
 
 USER lintro
 
@@ -196,7 +167,11 @@ CMD ["--help"]
 # -----------------------------------------------------------------------------
 FROM python:3.14-slim@sha256:b877e50bd90de10af8d82c57a022fc2e0dc731c5320d762a27986facfc3355c1 AS base
 
+# Git commit SHA for image traceability (issue #822, item 5).
+ARG GIT_SHA=""
+
 LABEL org.opencontainers.image.description="Lintro base image (no external tools); GHCR package py-lintro-base"
+LABEL org.opencontainers.image.revision="${GIT_SHA}"
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \

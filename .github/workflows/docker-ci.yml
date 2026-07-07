@@ -166,6 +166,8 @@ jobs:
           target: full
           push: true
           tags: ghcr.io/lgtm-hq/py-lintro:ci-${{ github.run_id }}
+          build-args: |
+            GIT_SHA=${{ github.sha }}
           cache-from: |
             type=gha
             type=registry,ref=ghcr.io/lgtm-hq/py-lintro:cache
@@ -193,6 +195,8 @@ jobs:
           target: base
           push: true
           tags: ghcr.io/lgtm-hq/py-lintro-base:ci-${{ github.run_id }}
+          build-args: |
+            GIT_SHA=${{ github.sha }}
           cache-from: |
             type=gha
             type=registry,ref=ghcr.io/lgtm-hq/py-lintro-base:cache
@@ -552,6 +556,8 @@ jobs:
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            GIT_SHA=${{ github.sha }}
           cache-from: |
             type=registry,ref=ghcr.io/lgtm-hq/py-lintro:cache
           cache-to: >-
@@ -567,39 +573,11 @@ jobs:
           push: true
           tags: ${{ steps.meta-base.outputs.tags }}
           labels: ${{ steps.meta-base.outputs.labels }}
+          build-args: |
+            GIT_SHA=${{ github.sha }}
           cache-from: |
             type=registry,ref=ghcr.io/lgtm-hq/py-lintro-base:cache
           cache-to: >-
             type=registry,ref=ghcr.io/lgtm-hq/py-lintro-base:cache,${{ env.CACHE_OPTS }}
           provenance: false
           sbom: false
-
-  cleanup-ci-images:
-    name: 🧹 Cleanup CI Images
-    needs: [docker-build, dogfooding-lint, security-audit, integration-test, publish]
-    if: >-
-      always() &&
-      needs.docker-build.outputs.is-fork != 'true'
-    runs-on: ubuntu-24.04
-    permissions:
-      contents: read # checkout delete-ci-ghcr-tags.sh
-      packages: write # delete ephemeral CI tags from GHCR
-    timeout-minutes: 5
-    steps:
-      - name: Harden Runner
-        # yamllint disable-line rule:line-length
-        uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
-        with:
-          egress-policy: 'block'
-          allowed-endpoints: >
-            github.com:443
-            api.github.com:443
-      - name: Checkout
-        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
-        with:
-          persist-credentials: false
-      - name: Delete CI-tagged images
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          CI_TAG: ci-${{ github.run_id }}
-        run: scripts/ci/maintenance/delete-ci-ghcr-tags.sh
