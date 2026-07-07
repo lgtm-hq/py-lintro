@@ -151,6 +151,7 @@ packages = [
   "lintro.parsers.black",
   "lintro.parsers.cargo_audit",
   "lintro.parsers.cargo_deny",
+  "lintro.parsers.checkov",
   "lintro.parsers.clippy",
   "lintro.parsers.gitleaks",
   "lintro.parsers.hadolint",

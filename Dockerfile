@@ -106,6 +106,7 @@ RUN echo "=== Verifying all tools ===" && \
     bun --version && uv --version && cargo --version && rustc --version && \
     rustfmt --version && cargo clippy --version && cargo audit --version && \
     cargo deny --version && actionlint --version && bandit --version && \
+    checkov --version && \
     black --version && gitleaks version && hadolint --version && \
     markdownlint-cli2 --version && mypy --version && osv-scanner --version && \
     oxfmt --version && oxlint --version && prettier --version && \
@@ -158,6 +159,7 @@ RUN getent group tools >/dev/null || groupadd -r tools && \
 RUN echo "Verifying tools..." && \
     rustfmt --version && cargo clippy --version && cargo audit --version && \
     cargo deny --version && semgrep --version && ruff --version && \
+    checkov --version && \
     black --version && hadolint --version && actionlint --version && \
     shellcheck --version && shfmt --version && taplo --version && \
     gitleaks version && osv-scanner --version && prettier --version && \
@@ -184,6 +186,7 @@ RUN echo "Verifying tools as non-root user..." && \
     gosu lintro cargo deny --version && \
     gosu lintro osv-scanner --version && \
     gosu lintro semgrep --version && \
+    gosu lintro checkov --version && \
     echo "All tools verified for non-root user!"
 
 USER lintro

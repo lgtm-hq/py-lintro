@@ -17,6 +17,7 @@ class ToolName(StrEnum):
     BLACK = auto()
     CARGO_AUDIT = auto()
     CARGO_DENY = auto()
+    CHECKOV = auto()
     CLIPPY = auto()
     GITLEAKS = auto()
     HADOLINT = auto()

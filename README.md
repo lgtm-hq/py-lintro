@@ -217,6 +217,12 @@ system.
 <td>📦</td>
 </tr>
 <tr>
+<td><a href="https://www.checkov.io/"><img src="https://img.shields.io/badge/Checkov-6f42c1?logo=terraform&logoColor=white" alt="Checkov"></a></td>
+<td>🏗️ Terraform (IaC)</td>
+<td>-</td>
+<td><code>uv tool install checkov</code><br><code>pip install checkov</code><br><code>brew install checkov</code></td>
+</tr>
+<tr>
 <td><a href="https://gitleaks.io/"><img src="https://img.shields.io/badge/Gitleaks-dc2626?logo=git&logoColor=white" alt="Gitleaks"></a></td>
 <td>🔐 Secret Detection</td>
 <td>-</td>

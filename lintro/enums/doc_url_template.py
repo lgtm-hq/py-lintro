@@ -28,6 +28,7 @@ class DocUrlTemplate(StrEnum):
     BANDIT = "https://bandit.readthedocs.io/en/latest/plugins/index.html"
     CARGO_AUDIT = "https://rustsec.org/advisories/{code}"
     CARGO_DENY = "https://embarkstudios.github.io/cargo-deny/"
+    CHECKOV = "https://www.checkov.io/5.Policy%20Index/all.html"
     CLIPPY = "https://rust-lang.github.io/rust-clippy/master/index.html#{code}"
     HADOLINT = "https://github.com/hadolint/hadolint/wiki/{code}"
     MARKDOWNLINT = "https://github.com/DavidAnson/markdownlint/blob/main/doc/{code}.md"

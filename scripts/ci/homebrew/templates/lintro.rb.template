@@ -22,6 +22,7 @@ class Lintro < Formula
   depends_on "actionlint"
   depends_on "bandit"
   depends_on "black"
+  depends_on "checkov"
   depends_on "gitleaks"
   depends_on "hadolint"
   depends_on "libyaml"
@@ -75,8 +76,9 @@ class Lintro < Formula
       Markdown:         markdownlint-cli2
       JS / TS:          oxlint, oxfmt, prettier
       Dockerfiles:      hadolint
+      Terraform (IaC):  checkov
       GitHub Actions:   actionlint
-      Security:         gitleaks, semgrep
+      Security:         gitleaks, semgrep, checkov
       Rust:             clippy, rustfmt (via rust)
       SQL:              sqlfluff
 

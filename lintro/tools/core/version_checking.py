@@ -182,6 +182,10 @@ def get_install_hints() -> dict[str, str]:
         "rustfmt": "Install via: rustup component add rustfmt (v{version}+)",
         "cargo_audit": "Install via: cargo install cargo-audit (v{version}+)",
         "cargo_deny": "Install via: cargo install cargo-deny (v{version}+)",
+        "checkov": (
+            "Install via: uv tool install checkov=={version} or "
+            "pip install checkov=={version}"
+        ),
         "biome": "Install via: bun add -d @biomejs/biome@>={version}",
         "semgrep": (
             "Install via: pip install semgrep>={version} or brew install semgrep"

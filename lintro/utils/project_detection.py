@@ -131,6 +131,16 @@ def detect_project_languages() -> list[str]:
     ):
         langs.add("sql")
 
+    # Terraform (HCL sources anywhere in the tree, skipping vendored dirs)
+    if (
+        next(
+            (p for p in cwd.glob("**/*.tf") if not _skip_dirs.intersection(p.parts)),
+            None,
+        )
+        is not None
+    ):
+        langs.add("terraform")
+
     # YAML (beyond config files — actual YAML content)
     config_names = {
         ".lintro-config.yaml",

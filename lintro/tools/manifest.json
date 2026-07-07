@@ -41,11 +41,12 @@
     "sql": ["sqlfluff"],
     "shell": ["shellcheck", "shfmt"],
     "docker": ["hadolint"],
+    "terraform": ["checkov"],
     "yaml": ["yamllint"],
     "markdown": ["markdownlint"],
     "toml": ["taplo"],
     "github_actions": ["actionlint"],
-    "security": ["gitleaks", "osv_scanner", "semgrep"],
+    "security": ["gitleaks", "osv_scanner", "semgrep", "checkov"],
     "astro": ["astro_check", "prettier"],
     "svelte": ["svelte_check", "prettier"],
     "vue": ["vue_tsc", "prettier"]
@@ -128,6 +129,18 @@
       "version_command": ["cargo", "deny", "--version"],
       "languages": ["rust"],
       "tags": ["linter", "security"]
+    },
+    {
+      "name": "checkov",
+      "version": "3.3.6",
+      "install": {
+        "type": "binary"
+      },
+      "tier": "tools",
+      "category": "external",
+      "version_command": ["checkov", "--version"],
+      "languages": ["terraform", "security"],
+      "tags": ["security"]
     },
     {
       "name": "clippy",
