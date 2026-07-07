@@ -30,7 +30,7 @@ jobs:
     name: Generate and verify SBOM
     if: ${{ !startsWith(github.ref_name, 'actions-v') }}
     # yamllint disable-line rule:line-length
-    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-sbom.yml@4aaefe64763b7841b6d92d94dc47185083d34c9a # v0.46.0
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-sbom.yml@3d3e577c8e50e11ead6bd36cb559361d33796a9d # v0.47.1
     with:
       target: .
       target-type: dir
@@ -57,7 +57,7 @@ jobs:
       github.ref_type == 'tag' &&
       !startsWith(github.ref_name, 'actions-v')
     # yamllint disable-line rule:line-length
-    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-build-python-dist.yml@4aaefe64763b7841b6d92d94dc47185083d34c9a # v0.46.0
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-build-python-dist.yml@3d3e577c8e50e11ead6bd36cb559361d33796a9d # v0.47.1
     permissions:
       # read: checkout and build sdist/wheel (reusable-build-python-dist)
       contents: read
@@ -116,7 +116,7 @@ jobs:
       - name: Prepare PyPI upload
         id: prepare
         # yamllint disable-line rule:line-length
-        uses: lgtm-hq/lgtm-ci/.github/actions/prepare-pypi-upload@4aaefe64763b7841b6d92d94dc47185083d34c9a # v0.46.0
+        uses: lgtm-hq/lgtm-ci/.github/actions/prepare-pypi-upload@3d3e577c8e50e11ead6bd36cb559361d33796a9d # v0.47.1
         with:
           artifact-name: python-dist
           python-version: '3.14'
@@ -139,7 +139,7 @@ jobs:
     needs: [pypi-upload]
     if: ${{ !startsWith(github.ref_name, 'actions-v') }}
     # yamllint disable-line rule:line-length
-    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-github-release.yml@4aaefe64763b7841b6d92d94dc47185083d34c9a # v0.46.0
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-github-release.yml@3d3e577c8e50e11ead6bd36cb559361d33796a9d # v0.47.1
     permissions:
       # write: create GitHub Release and upload dist assets
       contents: write

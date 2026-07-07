@@ -23,7 +23,7 @@ jobs:
   # Compat mode: multi-runtime matrix, no coverage or PR comments
   test-compat:
     # yamllint disable-line rule:line-length
-    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-test-python.yml@4aaefe64763b7841b6d92d94dc47185083d34c9a # v0.46.0
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-test-python.yml@3d3e577c8e50e11ead6bd36cb559361d33796a9d # v0.47.1
     with:
       publish-test-summary: false
       python-versions: '3.11,3.14'
@@ -50,7 +50,7 @@ jobs:
   # Coverage mode: single runtime with coverage reporting
   test-coverage:
     # yamllint disable-line rule:line-length
-    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-test-python.yml@4aaefe64763b7841b6d92d94dc47185083d34c9a # v0.46.0
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-test-python.yml@3d3e577c8e50e11ead6bd36cb559361d33796a9d # v0.47.1
     with:
       publish-test-summary: true
       python-version: '3.14'
@@ -112,7 +112,7 @@ jobs:
     needs: test-gate
     if: always()
     # yamllint disable-line rule:line-length
-    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-required-check.yml@4aaefe64763b7841b6d92d94dc47185083d34c9a # v0.46.0
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-required-check.yml@3d3e577c8e50e11ead6bd36cb559361d33796a9d # v0.47.1
     permissions:
       contents: read
     with:
@@ -132,7 +132,7 @@ jobs:
       github.event_name == 'push' &&
       needs.test-coverage.outputs.passed == 'true'
     # yamllint disable-line rule:line-length
-    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-test-python-publish.yml@4aaefe64763b7841b6d92d94dc47185083d34c9a # v0.46.0
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-test-python-publish.yml@3d3e577c8e50e11ead6bd36cb559361d33796a9d # v0.47.1
     with:
       coverage-percent: ${{ needs.test-coverage.outputs.coverage-percent }}
       upload-coverage: true
