@@ -207,6 +207,19 @@ class ValePlugin(BaseToolPlugin):
         if not issues and self._is_no_config_error(output):
             return self._create_no_config_result()
 
+        # Vale exits 0 on a clean run and 1 when alerts are found; any other
+        # non-zero exit with no parseable alerts is a runtime problem (invalid
+        # config, missing styles package, bad flag). Surface that as a failure
+        # instead of reporting a clean pass from a run that produced nothing.
+        if not issues and not _success:
+            return ToolResult(
+                name=self.definition.name,
+                success=False,
+                output=(output or "Vale exited with an error and produced no results."),
+                issues_count=0,
+                parse_failures_count=1,
+            )
+
         issues_count = len(issues)
         success = issues_count == 0
 

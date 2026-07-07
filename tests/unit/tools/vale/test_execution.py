@@ -150,3 +150,33 @@ def test_fix_raises_not_implemented(vale_plugin: ValePlugin) -> None:
     """
     with pytest.raises(NotImplementedError):
         vale_plugin.fix(["doc.md"], {})
+
+
+def test_check_runtime_error_is_not_clean(
+    vale_plugin: ValePlugin,
+    tmp_path: Path,
+) -> None:
+    """A non-zero exit with no parseable alerts fails instead of passing.
+
+    Args:
+        vale_plugin: The ValePlugin instance under test.
+        tmp_path: Temporary directory path.
+    """
+    md = _write_md(tmp_path)
+    runtime_error = "E201 [styles path does not exist] Runtime error"
+
+    with (
+        patch.object(vale_plugin, "_prepare_execution") as mock_prepare,
+        patch.object(
+            vale_plugin,
+            "_run_subprocess",
+            return_value=(False, runtime_error),
+        ),
+    ):
+        mock_prepare.return_value = make_ctx(str(tmp_path), [md])
+
+        result = vale_plugin.check([md], {})
+
+    assert_that(result.success).is_false()
+    assert_that(result.issues_count).is_equal_to(0)
+    assert_that(result.output).contains("E201")

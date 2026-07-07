@@ -48,7 +48,10 @@
     "security": ["gitleaks", "osv_scanner", "semgrep"],
     "astro": ["astro_check", "prettier"],
     "svelte": ["svelte_check", "prettier"],
-    "vue": ["vue_tsc", "prettier"]
+    "vue": ["vue_tsc", "prettier"],
+    "restructuredtext": ["vale"],
+    "asciidoc": ["vale"],
+    "plaintext": ["vale"]
   },
   "tools": [
     {
@@ -407,7 +410,7 @@
       "tier": "tools",
       "category": "external",
       "version_command": ["vale", "--version"],
-      "languages": ["markdown"],
+      "languages": ["markdown", "restructuredtext", "asciidoc", "plaintext"],
       "tags": ["linter", "documentation"]
     },
     {
