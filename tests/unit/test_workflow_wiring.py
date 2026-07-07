@@ -407,3 +407,83 @@ def test_docker_ci_lintro_code_quality_wires_upstream_jobs() -> None:
             "|| needs.dogfooding-lint.result }}",
         ),
     )
+
+
+_SHA_PINNED_USES = re.compile(r"^[^@\s]+@[0-9a-f]{40}(\s+#.*)?$")
+
+
+def test_pypi_upload_attests_build_provenance() -> None:
+    """The PyPI upload job attests dist provenance with the right permissions."""
+    workflow = _load_workflow(name="publish-pypi-on-tag.yml")
+    job = workflow["jobs"]["pypi-upload"]
+
+    # attestations: write is required for the GitHub Attestations API record.
+    assert_that(job["permissions"]).contains_entry({"attestations": "write"})
+    assert_that(job["permissions"]).contains_entry({"id-token": "write"})
+
+    attest_steps = [
+        step
+        for step in job["steps"]
+        if str(step.get("uses", "")).startswith("actions/attest-build-provenance@")
+    ]
+    assert_that(attest_steps).is_length(1)
+    assert_that(_SHA_PINNED_USES.match(attest_steps[0]["uses"])).is_not_none()
+
+
+def test_sign_artifacts_job_is_scoped_and_pinned() -> None:
+    """Sigstore signing runs only on tag events with least-privilege perms."""
+    workflow = _load_workflow(name="publish-pypi-on-tag.yml")
+    job = workflow["jobs"]["sign-artifacts"]
+
+    # Signing must be gated to release (tag) events only, never branch runs.
+    assert_that(job["if"]).contains("github.ref_type == 'tag'")
+    assert_that(job["if"]).contains("!startsWith(github.ref_name, 'actions-v')")
+    assert_that(job["needs"]).contains("pypi-upload")
+
+    # Keyless Sigstore needs an OIDC token but nothing more than read on contents.
+    assert_that(job["permissions"]).is_equal_to(
+        {
+            "contents": "read",
+            "id-token": "write",
+        },
+    )
+
+    # Every third-party action in the job must be SHA-pinned.
+    used = [step["uses"] for step in job["steps"] if "uses" in step]
+    for uses in used:
+        assert_that(_SHA_PINNED_USES.match(uses)).described_as(uses).is_not_none()
+
+    # The job hardens the runner and drives the dedicated signing script.
+    step_names = [str(step.get("name", "")) for step in job["steps"]]
+    assert_that(step_names).contains("Harden runner")
+    run_steps = [str(step.get("run", "")) for step in job["steps"] if "run" in step]
+    assert_that(run_steps).contains("./scripts/ci/sign-dist-sigstore.sh")
+
+
+def test_sign_artifacts_harden_runner_allows_sigstore_endpoints() -> None:
+    """Signing job egress allowlist covers Fulcio, Rekor, and TUF endpoints."""
+    workflow = _load_workflow(name="publish-pypi-on-tag.yml")
+    job = workflow["jobs"]["sign-artifacts"]
+
+    harden = next(
+        step
+        for step in job["steps"]
+        if str(step.get("uses", "")).startswith("step-security/harden-runner@")
+    )
+    allowed = harden["with"]["allowed-endpoints"]
+    for endpoint in (
+        "fulcio.sigstore.dev:443",
+        "rekor.sigstore.dev:443",
+        "tuf-repo-cdn.sigstore.dev:443",
+        "oauth2.sigstore.dev:443",
+    ):
+        assert_that(allowed).contains(endpoint)
+
+
+def test_github_release_publishes_signed_artifact() -> None:
+    """The release job attaches the signed artifact (dist + .sigstore bundles)."""
+    workflow = _load_workflow(name="publish-pypi-on-tag.yml")
+    job = workflow["jobs"]["github-release"]
+
+    assert_that(job["needs"]).contains("sign-artifacts")
+    assert_that(job["with"]["artifact-name"]).is_equal_to("python-dist-signed")
