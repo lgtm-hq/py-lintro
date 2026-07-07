@@ -237,11 +237,18 @@ def main(argv: list[str] | None = None) -> int:
 
     report.write_json(args.output)
     markdown = render_markdown_table(report)
+    exit_notes = _exit_code_notes(results)
+    if metadata.notes:
+        # Surface skips and non-zero exits in the rendered report itself —
+        # a reader of latest.md must not mistake a crashed runner's timing
+        # for a comparable result.
+        notes_md = "\n".join(f"- {note}" for note in metadata.notes)
+        markdown = f"{markdown}\n\n**Notes:**\n\n{notes_md}"
     args.markdown.parent.mkdir(parents=True, exist_ok=True)
     args.markdown.write_text(markdown + "\n", encoding="utf-8")
 
     print(markdown)
-    for note in _exit_code_notes(results):
+    for note in exit_notes:
         print(f"[bench] warning: {note}", file=sys.stderr)
     print(f"\nJSON report:     {args.output}", file=sys.stderr)
     print(f"Markdown report: {args.markdown}", file=sys.stderr)
