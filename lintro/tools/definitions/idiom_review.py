@@ -193,11 +193,39 @@ class IdiomReviewPlugin(BaseToolPlugin):
         )
 
         mode = str(options.get("mode", IdiomReviewMode.PER_FILE.value))
+        valid_modes = {m.value for m in IdiomReviewMode}
+        if mode not in valid_modes:
+            # An unknown mode must fail loudly: silently running neither
+            # review would report success while doing nothing.
+            message = (
+                f"idiom-review: invalid mode {mode!r}; "
+                f"expected one of {sorted(valid_modes)}."
+            )
+            return ToolResult(
+                name=IDIOM_REVIEW_TOOL_NAME,
+                success=False,
+                output=message,
+            )
+
         language = str(options.get("language", "python"))
         min_conf = str(options.get("min_confidence", ConfidenceLevel.MEDIUM.value))
-        max_files = int(
-            cast("int", options.get("max_files", IDIOM_REVIEW_DEFAULT_MAX_FILES)),
-        )
+        raw_max_files = options.get("max_files", IDIOM_REVIEW_DEFAULT_MAX_FILES)
+        try:
+            max_files = int(cast("int", raw_max_files))
+        except (TypeError, ValueError):
+            max_files = -1
+        if max_files < 1:
+            # A cost cap of zero/negative (or a non-numeric value) is a
+            # configuration error, not a request to review everything.
+            message = (
+                f"idiom-review: invalid max_files {raw_max_files!r}; "
+                "expected a positive integer."
+            )
+            return ToolResult(
+                name=IDIOM_REVIEW_TOOL_NAME,
+                success=False,
+                output=message,
+            )
 
         run_per_file = mode in (
             IdiomReviewMode.PER_FILE.value,
@@ -208,7 +236,7 @@ class IdiomReviewPlugin(BaseToolPlugin):
             IdiomReviewMode.BOTH.value,
         )
 
-        scoped = files[:max_files] if max_files > 0 else files
+        scoped = files[:max_files]
         issues: list[IdiomReviewIssue] = []
         signatures: list[Signature] = []
 

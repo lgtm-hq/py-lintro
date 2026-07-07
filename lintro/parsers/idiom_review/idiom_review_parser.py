@@ -79,8 +79,9 @@ def _extract_json(response: str) -> dict[str, Any] | None:
 
     candidates: list[str] = []
 
-    fence_match = _FENCE_RE.search(response)
-    if fence_match:
+    # Consider every fenced block, not just the first: models sometimes emit
+    # an explanatory fenced snippet before the requested JSON block.
+    for fence_match in _FENCE_RE.finditer(response):
         candidates.append(fence_match.group("body"))
 
     candidates.append(response)

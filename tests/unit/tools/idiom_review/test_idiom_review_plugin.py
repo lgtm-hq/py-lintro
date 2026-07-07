@@ -172,3 +172,53 @@ def test_fix_raises_not_implemented() -> None:
         [],
         {},
     )
+
+
+def test_invalid_mode_fails_loudly(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A typo'd mode fails with a clear message instead of silent success."""
+    _patch_engine(monkeypatch)
+
+    result = IdiomReviewPlugin().check(
+        [_write_py(tmp_path)],
+        {"enabled": True, "mode": "bothh"},
+    )
+
+    assert_that(result.success).is_false()
+    assert_that(result.skipped).is_false()
+    assert_that(result.output).contains("invalid mode")
+    assert_that(result.output).contains("bothh")
+
+
+def test_invalid_max_files_string_fails_loudly(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A non-numeric max_files fails cleanly instead of crashing the run."""
+    _patch_engine(monkeypatch)
+
+    result = IdiomReviewPlugin().check(
+        [_write_py(tmp_path)],
+        {"enabled": True, "max_files": "abc"},
+    )
+
+    assert_that(result.success).is_false()
+    assert_that(result.output).contains("invalid max_files")
+
+
+def test_zero_max_files_rejected_not_unlimited(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """max_files=0 is a config error, not a request to review every file."""
+    _patch_engine(monkeypatch)
+
+    result = IdiomReviewPlugin().check(
+        [_write_py(tmp_path)],
+        {"enabled": True, "max_files": 0},
+    )
+
+    assert_that(result.success).is_false()
+    assert_that(result.output).contains("invalid max_files")

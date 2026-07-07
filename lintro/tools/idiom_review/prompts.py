@@ -13,6 +13,8 @@ DATA and to respond with structured JSON matching the fields the parser in
 
 from __future__ import annotations
 
+import hashlib
+
 FILE_REVIEW_SYSTEM = (
     "You are a senior Python engineer reviewing code for IDIOMATIC MISSES: "
     "code that is technically correct but reimplements, verbosely, a pattern "
@@ -119,6 +121,25 @@ Return an empty duplicate_groups array if nothing is genuinely duplicated.
 _BOUNDARY = "UNTRUSTED_SOURCE"
 
 
+def _boundary_for(payload: str) -> str:
+    """Derive an unforgeable delimiter tag for untrusted payload.
+
+    The tag embeds a hash of the payload itself, so the payload cannot
+    contain its own closing delimiter (a fixed tag like
+    ``</UNTRUSTED_SOURCE>`` is predictable and could be injected by
+    repository content to escape the untrusted block). Deriving the tag
+    from the content keeps prompts deterministic for response caching.
+
+    Args:
+        payload: The untrusted text that will be wrapped.
+
+    Returns:
+        The boundary tag name to use for this payload.
+    """
+    digest = hashlib.sha256(payload.encode("utf-8")).hexdigest()[:16]
+    return f"{_BOUNDARY}_{digest}"
+
+
 def _number_source(source: str) -> str:
     """Return ``source`` with 1-based line-number prefixes.
 
@@ -153,7 +174,7 @@ def build_file_review_prompt(
         file=file_path,
         checklist=PYTHON_IDIOM_CHECKLIST,
         exclusions=FILE_REVIEW_EXCLUSIONS,
-        boundary=_BOUNDARY,
+        boundary=_boundary_for(source),
         numbered_source=_number_source(source),
     )
     return FILE_REVIEW_SYSTEM, user
@@ -169,7 +190,7 @@ def build_duplication_prompt(signature_map: str) -> tuple[str, str]:
         A ``(system_prompt, user_prompt)`` tuple.
     """
     user = DUPLICATION_TEMPLATE.format(
-        boundary=_BOUNDARY,
+        boundary=_boundary_for(signature_map),
         signature_map=signature_map,
     )
     return DUPLICATION_SYSTEM, user

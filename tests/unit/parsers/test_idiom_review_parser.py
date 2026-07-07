@@ -191,3 +191,31 @@ def test_parse_duplication_review_skips_bad_locations() -> None:
 
     assert_that(issues).is_length(1)
     assert_that(issues[0].file).is_equal_to("c.py")
+
+
+def test_parse_file_review_uses_json_after_explanatory_fence() -> None:
+    """A prose fenced block before the JSON block does not break parsing."""
+    payload = json.dumps(
+        {
+            "findings": [
+                {
+                    "code": "idiom/python/any-loop",
+                    "line": 3,
+                    "end_line": 5,
+                    "message": "Use any() instead of a manual loop.",
+                    "confidence": "high",
+                    "suggested_idiom": "any(x for x in items)",
+                },
+            ],
+        },
+    )
+    response = (
+        "Here is an example of the verbose pattern:\n"
+        "```python\nfor x in items:\n    if x:\n        found = True\n```\n"
+        f"And the findings:\n```json\n{payload}\n```\n"
+    )
+
+    issues = IdiomReviewParser().parse_file_review(response, "pkg/mod.py")
+
+    assert_that(issues).is_length(1)
+    assert_that(issues[0].code).is_equal_to("idiom/python/any-loop")
