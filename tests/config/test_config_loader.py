@@ -46,7 +46,7 @@ def test_string_enabled_tools() -> None:
 
 def test_tool_config_empty_data() -> None:
     """Should return default ToolConfig."""
-    config = _parse_tool_config({})
+    config = _parse_tool_config("ruff", {})
 
     assert_that(config.enabled).is_true()
     assert_that(config.config_source).is_none()
@@ -56,7 +56,7 @@ def test_disabled_tool() -> None:
     """Should parse enabled=False."""
     data = {"enabled": False}
 
-    config = _parse_tool_config(data)
+    config = _parse_tool_config("ruff", data)
 
     assert_that(config.enabled).is_false()
 
