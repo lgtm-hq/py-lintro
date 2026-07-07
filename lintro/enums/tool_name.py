@@ -15,6 +15,7 @@ class ToolName(StrEnum):
     ASTRO_CHECK = auto()
     BANDIT = auto()
     BLACK = auto()
+    BUF = auto()
     CARGO_AUDIT = auto()
     CARGO_DENY = auto()
     CLIPPY = auto()

@@ -41,6 +41,7 @@ TOOLS_WITH_SIMPLE_VERSION_PATTERN: set[ToolName] = {
     ToolName.ACTIONLINT,
     ToolName.ASTRO_CHECK,
     ToolName.BANDIT,
+    ToolName.BUF,
     ToolName.CARGO_AUDIT,
     ToolName.CARGO_DENY,
     ToolName.COMMITLINT,
