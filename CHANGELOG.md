@@ -21,6 +21,16 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.69.5] - 2026-07-07
+
+### Changed
+
+- **ci**: bump lgtm-ci reusables to v0.47.1 (#1191) (7b34b01)
+
+### Fixed
+
+- **release**: surface release automation failures on main via run-name (#1133) (c964659)
+
 ## [0.69.4] - 2026-07-07
 
 ### Fixed
