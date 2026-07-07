@@ -1,0 +1,15 @@
+syntax = "proto3";
+
+package MyPackage;
+
+message foo {
+  string BadField = 1;
+}
+
+enum myEnum {
+  UNKNOWN = 0;
+}
+
+service badService {
+  rpc doThing(foo) returns (foo);
+}
