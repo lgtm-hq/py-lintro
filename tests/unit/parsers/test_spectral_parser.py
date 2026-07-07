@@ -190,3 +190,22 @@ def test_display_row_exposes_code_and_severity() -> None:
     row = issue.to_display_row()
     assert_that(row["code"]).is_equal_to("oas3-api-servers")
     assert_that(row["severity"]).is_equal_to(str(SeverityLevel.WARNING))
+
+
+def test_bracketed_stderr_preamble_is_tolerated() -> None:
+    """A bracketed warning line before the array does not defeat parsing."""
+    output = "[Warning] ruleset resolution was slow\n" + REAL_OUTPUT
+    assert_that(parse_spectral_output(output)).is_length(2)
+
+
+def test_null_fields_do_not_become_literal_none() -> None:
+    """JSON nulls map to empty strings, not the string 'None'."""
+    output = (
+        '[{"code": null, "message": null, "source": null,'
+        ' "severity": 1, "range": {"start": {"line": 0, "character": 0}}}]'
+    )
+    issues = parse_spectral_output(output)
+    assert_that(issues).is_length(1)
+    assert_that(issues[0].code).is_empty()
+    assert_that(issues[0].message).is_empty()
+    assert_that(issues[0].file).is_empty()

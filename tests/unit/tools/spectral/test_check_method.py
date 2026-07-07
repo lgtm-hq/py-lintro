@@ -189,3 +189,42 @@ def test_check_handles_timeout(
 
     assert_that(result.name).is_equal_to("spectral")
     assert_that(result.success).is_false()
+
+
+def test_check_runtime_error_is_not_clean(
+    spectral_plugin: SpectralPlugin,
+    tmp_path: Path,
+) -> None:
+    """A non-zero exit with no parseable findings fails instead of passing.
+
+    Args:
+        spectral_plugin: The SpectralPlugin instance under test.
+        tmp_path: Temporary directory path for test files.
+    """
+    (tmp_path / "openapi.yaml").write_text("openapi: 3.0.0\n")
+    runtime_error = "Error: Cannot find module 'tslib'\n"
+
+    with (
+        patch.object(spectral_plugin, "_prepare_execution") as mock_prepare,
+        patch.object(
+            spectral_plugin,
+            "_find_ruleset",
+            return_value=str(tmp_path / ".spectral.yaml"),
+        ),
+        patch.object(
+            spectral_plugin,
+            "_run_subprocess",
+            return_value=(False, runtime_error),
+        ),
+        patch.object(
+            spectral_plugin,
+            "_get_spectral_command",
+            return_value=["spectral"],
+        ),
+    ):
+        mock_prepare.return_value = _mock_ctx(tmp_path)
+        result = spectral_plugin.check([str(tmp_path / "openapi.yaml")], {})
+
+    assert_that(result.success).is_false()
+    assert_that(result.issues_count).is_equal_to(0)
+    assert_that(result.output).contains("tslib")
