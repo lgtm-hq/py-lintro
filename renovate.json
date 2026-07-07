@@ -309,6 +309,18 @@
       "packageNameTemplate": "golang"
     },
     {
+      "description": "sigstore-python CLI used to sign release dists (uvx has no lockfile, so the exact pin lives in the script)",
+      "customType": "regex",
+      "managerFilePatterns": [
+        "/^scripts/ci/sign-dist-sigstore\\.sh$/"
+      ],
+      "matchStrings": [
+        "SIGSTORE_VERSION=(?<currentValue>[0-9]+\\.[0-9]+\\.[0-9]+)"
+      ],
+      "datasourceTemplate": "pypi",
+      "depNameTemplate": "sigstore"
+    },
+    {
       "customType": "regex",
       "managerFilePatterns": [
         "/^\\.github/workflows/sbom-on-main\\.yml$/"

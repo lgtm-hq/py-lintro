@@ -80,8 +80,9 @@ on `main` failures — hence the `actions: read` + `issues: write` job permissio
 
 - **publish-pypi-on-tag.yml** — Production tag publish: `reusable-sbom` →
   `reusable-build-python-dist` → caller `pypi-upload` job (`prepare-pypi-upload` →
-  `pypa/gh-action-pypi-publish` → `attest-build-provenance`) →
-  `reusable-github-release`, then Homebrew (`build-binary.yml`) and Docker
+  `pypa/gh-action-pypi-publish` → `attest-build-provenance`) → caller `sign-artifacts`
+  job (`scripts/ci/sign-dist-sigstore.sh`, keyless Sigstore, emits `python-dist-signed`)
+  → `reusable-github-release`, then Homebrew (`build-binary.yml`) and Docker
   (`docker-build-publish.yml`). Upload via `pypa/gh-action-pypi-publish` (OIDC trusted
   publishing) runs in this workflow file, not in lgtm-ci reusables. Lint runs on `main`
   via `docker-ci` only (no duplicate quality on tag).
