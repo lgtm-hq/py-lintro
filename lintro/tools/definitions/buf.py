@@ -238,6 +238,22 @@ class BufPlugin(BaseToolPlugin):
         if lint_result.stdout and lint_result.stdout.strip():
             all_outputs.append(lint_result.stdout)
 
+        # buf lint exits non-zero for violations (which land on stdout as
+        # JSON) but also for config/module/permission errors written only to
+        # stderr. A failing exit with nothing parsed must not read as clean.
+        if not lint_result.success and not lint_issues:
+            return ToolResult(
+                name=self.definition.name,
+                success=False,
+                output=(
+                    lint_result.stderr.strip()
+                    or lint_result.stdout.strip()
+                    or "buf lint exited with an error and no results."
+                ),
+                issues_count=0,
+                cwd=ctx.cwd,
+            )
+
         # buf format --diff --exit-code — unified diff of unformatted files.
         fmt_cmd = buf_cmd + ["format", *common_args, "--diff", "--exit-code"]
         logger.debug(
@@ -256,6 +272,23 @@ class BufPlugin(BaseToolPlugin):
         all_issues.extend(fmt_issues)
         if fmt_result.stdout and fmt_result.stdout.strip():
             all_outputs.append(fmt_result.stdout)
+
+        # buf format --exit-code exits 1 when a diff exists (parsed above);
+        # any other failure with no diff is a runtime error (unreadable module
+        # root, invalid config) that must not read as clean.
+        if not fmt_result.success and not fmt_issues:
+            return ToolResult(
+                name=self.definition.name,
+                success=False,
+                output=(
+                    fmt_result.stderr.strip()
+                    or fmt_result.stdout.strip()
+                    or "buf format exited with an error and no diff."
+                ),
+                issues_count=len(all_issues),
+                issues=all_issues,
+                cwd=ctx.cwd,
+            )
 
         count = len(all_issues)
         output = "\n".join(all_outputs) if all_outputs else None
@@ -328,7 +361,7 @@ class BufPlugin(BaseToolPlugin):
         fix_cmd = buf_cmd + ["format", *common_args, "--write"]
         logger.debug(f"[BufPlugin] Fixing: {' '.join(fix_cmd)} (cwd={ctx.cwd})")
         try:
-            self._run_subprocess_result(
+            write_result = self._run_subprocess_result(
                 cmd=fix_cmd,
                 timeout=ctx.timeout,
                 cwd=ctx.cwd,
@@ -338,6 +371,26 @@ class BufPlugin(BaseToolPlugin):
                 timeout_val=ctx.timeout,
                 initial_count=initial_count,
                 initial_issues=initial_issues,
+            )
+
+        # A failed --write (permission error, invalid config) must surface:
+        # silently rechecking would report the write failure only as
+        # mysteriously-remaining issues, hiding the actual cause.
+        if not write_result.success:
+            return ToolResult(
+                name=self.definition.name,
+                success=False,
+                output=(
+                    write_result.stderr.strip()
+                    or write_result.stdout.strip()
+                    or "buf format --write exited with an error."
+                ),
+                issues_count=initial_count,
+                issues=initial_issues,
+                initial_issues_count=initial_count,
+                fixed_issues_count=0,
+                remaining_issues_count=initial_count,
+                cwd=ctx.cwd,
             )
 
         # Re-check remaining formatting + lint issues.
