@@ -104,6 +104,16 @@ jobs:
           RAW_ARGS: ${{ steps.lychee-args.outputs.args }}
         run: ./scripts/ci/site/prepare-lychee-action-args.sh
 
+      # Upload before the link check so the built site is inspectable even
+      # when link checking fails.
+      - name: Upload site artifact
+        # yamllint disable-line rule:line-length
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: site-dist
+          path: apps/site/dist
+          retention-days: 1
+
       - name: Check links
         # yamllint disable-line rule:line-length
         uses: lycheeverse/lychee-action@8646ba30535128ac92d33dfc9133794bfdd9b411 # v2.8.0
@@ -113,14 +123,6 @@ jobs:
           output: lychee-report.md
           token: ${{ github.token }}
           fail: true
-
-      - name: Upload site artifact
-        # yamllint disable-line rule:line-length
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: site-dist
-          path: apps/site/dist
-          retention-days: 1
 
   test:
     name: Test documentation site
