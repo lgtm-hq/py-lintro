@@ -216,9 +216,9 @@ are mandatory for every PR merged to `main`.
 
 ### All required checks must be green
 
-- Every status check marked as required by branch protection or repository rulesets
-  must pass before merge. Use the exact check-run names reported by GitHub when
-  configuring or auditing the required-check list.
+- Every status check marked as required by branch protection or repository rulesets must
+  pass before merge. Use the exact check-run names reported by GitHub when configuring
+  or auditing the required-check list.
 - **Never merge red.** A failing or in-progress required check blocks the merge. Do not
   merge past a failure "to fix it in a follow-up" — fix it first, or revert.
 - Admin bypass of a failing check is not a normal workflow. If an override is ever
