@@ -186,6 +186,51 @@ def test_release_workflows_use_paired_egress_presets() -> None:
     )
 
 
+@pytest.mark.parametrize(
+    ("workflow_name", "identity"),
+    [
+        ("release-auto-tag.yml", "Release - Auto Tag"),
+        ("release-version-pr.yml", "Release - Version PR"),
+    ],
+)
+def test_release_workflows_define_traceable_run_names(
+    *,
+    workflow_name: str,
+    identity: str,
+) -> None:
+    """Release callers set a run-name carrying workflow identity, event, and branch.
+
+    A dynamic ``run-name`` surfaces post-merge release failures in the Actions
+    history (event + branch) instead of the default commit subject, which can
+    look healthy even when a release job fails.
+    """
+    workflow = _load_workflow(name=workflow_name)
+    run_name = workflow["run-name"]
+
+    assert_that(run_name).is_instance_of(str)
+    assert_that(run_name).contains(identity)
+    assert_that(run_name).contains("${{ github.event_name }}")
+    assert_that(run_name).contains("${{ github.ref_name }}")
+
+
+def test_release_workflows_grant_failure_reporting_permissions() -> None:
+    """Both release callers grant the upstream report-release-failure job access.
+
+    The lgtm-ci reusables open/update a deduplicated failure issue on ``main``
+    release failures, which requires reading workflow/run metadata and writing
+    issues. Guarding the permissions keeps that visibility path wired.
+    """
+    for workflow_name, job_name in (
+        ("release-auto-tag.yml", "auto-tag"),
+        ("release-version-pr.yml", "version-pr"),
+    ):
+        permissions = _load_workflow(name=workflow_name)["jobs"][job_name][
+            "permissions"
+        ]
+        assert_that(permissions).contains_entry({"actions": "read"})
+        assert_that(permissions).contains_entry({"issues": "write"})
+
+
 def test_semantic_pr_title_can_write_failure_comments() -> None:
     """Semantic PR title workflow can upsert failure comments on PRs."""
     workflow = _load_workflow(name="semantic-pr-title.yml")
