@@ -1,0 +1,90 @@
+# SPDX-License-Identifier: MIT
+# For license details, see the repository root LICENSE file.
+---
+name: Release - Mirror Version Bump
+
+# On each published py-lintro release, bump the lintro pin in the
+# lgtm-hq/lintro-pre-commit mirror, merge the version-bump PR, and tag the
+# mirror with the matching version so pre-commit consumers install the new
+# wheel. See docs/pre-commit.md and issue #1171.
+
+'on':
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: 'Release tag to mirror (e.g. v0.69.0)'
+        required: true
+        type: string
+
+permissions: {}
+
+concurrency:
+  group: mirror-release-${{ github.event.release.tag_name || inputs.release_tag }}
+  cancel-in-progress: false
+
+jobs:
+  mirror-bump:
+    name: Bump lintro-pre-commit mirror
+    runs-on: ubuntu-24.04
+    permissions:
+      # read: checkout py-lintro CI scripts (mirror writes use MIRROR_REPO_TOKEN)
+      contents: read
+    env:
+      RELEASE_TAG: ${{ github.event.release.tag_name || inputs.release_tag }}
+
+    steps:
+      - name: Harden Runner
+        # yamllint disable-line rule:line-length
+        uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
+        with:
+          egress-policy: 'block'
+          allowed-endpoints: >
+            github.com:443
+            api.github.com:443
+            codeload.github.com:443
+            objects.githubusercontent.com:443
+            uploads.github.com:443
+            pypi.org:443
+            files.pythonhosted.org:443
+
+      - name: Checkout lintro scripts
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        with:
+          sparse-checkout: scripts
+          persist-credentials: false
+          path: lintro
+
+      - name: Resolve release version
+        id: resolve
+        run: lintro/scripts/ci/mirror/resolve-version.sh
+
+      - name: Wait for PyPI availability
+        if: ${{ steps.resolve.outputs.is_prerelease == 'false' }}
+        # yamllint disable-line rule:line-length
+        run: lintro/scripts/ci/homebrew/wait-for-pypi.sh lintro "${{ steps.resolve.outputs.version }}"
+
+      - name: Set up Python
+        if: ${{ steps.resolve.outputs.is_prerelease == 'false' }}
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: '3.14'
+
+      - name: Checkout lintro-pre-commit mirror
+        if: ${{ steps.resolve.outputs.is_prerelease == 'false' }}
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        with:
+          repository: lgtm-hq/lintro-pre-commit
+          token: ${{ secrets.MIRROR_REPO_TOKEN }}
+          path: mirror
+
+      - name: Publish mirror release
+        if: ${{ steps.resolve.outputs.is_prerelease == 'false' }}
+        env:
+          GH_TOKEN: ${{ secrets.MIRROR_REPO_TOKEN }}
+          MIRROR_DIR: mirror
+          BUMP_SCRIPT: >-
+            ${{ github.workspace }}/lintro/scripts/ci/mirror/bump_pin.py
+        # yamllint disable-line rule:line-length
+        run: lintro/scripts/ci/mirror/publish-mirror-release.sh "${{ steps.resolve.outputs.version }}"
