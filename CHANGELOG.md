@@ -21,6 +21,12 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.69.2] - 2026-07-07
+
+### Fixed
+
+- **output**: suppress 'run lintro fmt' hint in test mode (#1123) (94cd961)
+
 ## [0.69.1] - 2026-07-07
 
 ### Changed
