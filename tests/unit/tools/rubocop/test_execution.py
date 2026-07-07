@@ -7,6 +7,7 @@ from unittest.mock import patch
 
 from assertpy import assert_that
 
+from lintro.plugins.subprocess_executor import SubprocessResult
 from lintro.tools.definitions.rubocop import RubocopPlugin
 
 from .conftest import make_ctx, make_result, offense, rubocop_json
@@ -160,3 +161,68 @@ def test_check_skips_when_no_files(
     with patch.object(rubocop_plugin, "_prepare_execution", return_value=ctx):
         result = rubocop_plugin.check(["app.rb"], {})
     assert_that(result).is_same_as(early)
+
+
+def test_check_runtime_error_is_not_clean(
+    rubocop_plugin: RubocopPlugin,
+    tmp_path: Path,
+) -> None:
+    """A config/runtime error with no JSON report fails instead of passing.
+
+    Args:
+        rubocop_plugin: The plugin under test.
+        tmp_path: Temporary directory fixture.
+    """
+    error = SubprocessResult(
+        returncode=2,
+        stdout="",
+        stderr="Error: .rubocop.yml is invalid",
+        output="Error: .rubocop.yml is invalid",
+    )
+    with (
+        patch.object(rubocop_plugin, "_prepare_execution") as mock_prep,
+        patch.object(
+            rubocop_plugin,
+            "_run_subprocess_result",
+            return_value=error,
+        ),
+    ):
+        mock_prep.return_value = make_ctx(tmp_path, ["app.rb"])
+        result = rubocop_plugin.check(["app.rb"], {})
+
+    assert_that(result.success).is_false()
+    assert_that(result.issues_count).is_equal_to(0)
+    assert_that(result.output).contains(".rubocop.yml is invalid")
+
+
+def test_fix_autocorrect_crash_surfaces_error(
+    rubocop_plugin: RubocopPlugin,
+    tmp_path: Path,
+) -> None:
+    """A crashed autocorrect run reports the cause instead of fix counts.
+
+    Args:
+        rubocop_plugin: The plugin under test.
+        tmp_path: Temporary directory fixture.
+    """
+    initial = make_result(rubocop_json([offense()]), returncode=1)
+    crash = SubprocessResult(
+        returncode=2,
+        stdout="",
+        stderr="Error: undefined cop Layout/Bogus",
+        output="Error: undefined cop Layout/Bogus",
+    )
+    with (
+        patch.object(rubocop_plugin, "_prepare_execution") as mock_prep,
+        patch.object(
+            rubocop_plugin,
+            "_run_subprocess_result",
+            side_effect=[initial, crash],
+        ),
+    ):
+        mock_prep.return_value = make_ctx(tmp_path, ["app.rb"])
+        result = rubocop_plugin.fix(["app.rb"], {})
+
+    assert_that(result.success).is_false()
+    assert_that(result.output).contains("undefined cop")
+    assert_that(result.fixed_issues_count).is_equal_to(0)

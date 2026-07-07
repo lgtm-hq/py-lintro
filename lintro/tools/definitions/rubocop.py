@@ -191,6 +191,22 @@ class RubocopPlugin(BaseToolPlugin):
         issues = parse_rubocop_output(output=result.stdout)
         count = len(issues)
 
+        # RuboCop exits 1 for offenses (parsed above from the JSON report);
+        # any other failure with nothing parsed is a config/runtime error
+        # that must not read as a clean pass.
+        if not result.success and count == 0:
+            return ToolResult(
+                name=self.definition.name,
+                success=False,
+                output=(
+                    result.stderr.strip()
+                    or result.stdout.strip()
+                    or "RuboCop exited with an error and no results."
+                ),
+                issues_count=0,
+                cwd=ctx.cwd,
+            )
+
         return ToolResult(
             name=self.definition.name,
             success=count == 0,
@@ -238,13 +254,36 @@ class RubocopPlugin(BaseToolPlugin):
         fix_cmd = self._build_fix_command(ctx.rel_files)
         logger.debug(f"[RubocopPlugin] Fixing: {' '.join(fix_cmd)} (cwd={ctx.cwd})")
         try:
-            self._run_subprocess_result(
+            fix_result = self._run_subprocess_result(
                 cmd=fix_cmd,
                 timeout=ctx.timeout,
                 cwd=ctx.cwd,
             )
         except subprocess.TimeoutExpired:
             return self._fix_timeout_result(ctx.timeout, ctx.cwd, initial_count)
+
+        # --autocorrect exits 1 when offenses remain after correction (its
+        # JSON report parses below via the re-check); anything else with no
+        # parseable report is a crash that must surface, not read as a fix
+        # pass with leftovers.
+        if not fix_result.success and not parse_rubocop_output(
+            output=fix_result.stdout,
+        ):
+            return ToolResult(
+                name=self.definition.name,
+                success=False,
+                output=(
+                    fix_result.stderr.strip()
+                    or fix_result.stdout.strip()
+                    or "RuboCop autocorrect exited with an error."
+                ),
+                issues_count=initial_count,
+                issues=initial_issues,
+                initial_issues_count=initial_count,
+                fixed_issues_count=0,
+                remaining_issues_count=initial_count,
+                cwd=ctx.cwd,
+            )
 
         try:
             remaining_result = self._run_subprocess_result(
