@@ -46,6 +46,7 @@ TOOLS_WITH_SIMPLE_VERSION_PATTERN: set[ToolName] = {
     ToolName.OSV_SCANNER,
     ToolName.OXFMT,
     ToolName.OXLINT,
+    ToolName.PHPSTAN,
     ToolName.PIP_AUDIT,
     ToolName.PRETTIER,
     ToolName.PYDOCLINT,
