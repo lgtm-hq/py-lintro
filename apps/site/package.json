@@ -17,22 +17,25 @@
     "astro": "astro"
   },
   "dependencies": {
-    "@astrojs/sitemap": "^3.7.2",
+    "@astrojs/sitemap": "^3.7.3",
     "@lgtm-hq/turbo-themes": "^0.21.0",
-    "astro": "^6.3.1",
-    "sanitize-html": "^2.17.4"
+    "astro": "^6.4.8",
+    "sanitize-html": "^2.17.5"
   },
   "devDependencies": {
     "@astrojs/check": "^0.9.9",
     "@pagefind/default-ui": "^1.5.2",
     "pagefind": "1.5.2",
     "@types/sanitize-html": "^2.16.1",
-    "@vitest/coverage-v8": "^4.1.7",
+    "@vitest/coverage-v8": "^4.1.10",
     "typescript": "^6.0.3",
-    "vitest": "^4.1.7",
-    "yaml": "^2.8.3"
+    "vitest": "^4.1.10",
+    "yaml": "^2.9.0"
   },
   "overrides": {
-    "yaml": "^2.8.3"
+    "yaml": "^2.9.0",
+    "vite": "^7.3.5",
+    "js-yaml": "^4.2.0",
+    "esbuild": "^0.28.1"
   }
 }
