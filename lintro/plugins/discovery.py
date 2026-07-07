@@ -46,6 +46,10 @@ BUILTIN_DEFINITIONS_PATH = Path(__file__).parent.parent / "tools" / "definitions
 # Entry point group third-party packages use to register tool plugins.
 ENTRY_POINT_GROUP = "lintro.tools"
 
+# Previously documented group name, still honored so plugins packaged against
+# the old docs keep working after an upgrade. Deprecated: emits a warning.
+LEGACY_ENTRY_POINT_GROUP = "lintro.plugins"
+
 # Attributes a plugin class must expose to satisfy the LintroPlugin contract.
 _REQUIRED_PLUGIN_ATTRS = ("definition", "check", "fix", "set_options")
 
@@ -175,6 +179,11 @@ def discover_external_plugins() -> int:
         [project.entry-points."lintro.tools"]
         my-tool = "my_package.plugin:MyToolPlugin"
 
+    The legacy ``lintro.plugins`` group (documented before this group was
+    renamed) is still scanned so already-installed plugins keep working; a
+    deprecation warning is logged for each plugin found there. An entry point
+    advertised under both groups is loaded once.
+
     Each entry point is loaded, validated against the public plugin contract,
     checked for API compatibility, and registered. Failure is fully isolated:
     a plugin that fails to import, is malformed, declares an incompatible API
@@ -186,49 +195,77 @@ def discover_external_plugins() -> int:
     """
     loaded_count = 0
 
-    try:
-        entry_points = importlib.metadata.entry_points(group=ENTRY_POINT_GROUP)
-    except (TypeError, AttributeError, KeyError) as e:
-        logger.debug(f"No entry points found or error accessing them: {e}")
-        return loaded_count
-
-    for ep in entry_points:
+    grouped: list[tuple[str, tuple[EntryPoint, ...]]] = []
+    for group in (ENTRY_POINT_GROUP, LEGACY_ENTRY_POINT_GROUP):
         try:
-            plugin_class = ep.load()
-
-            if not _validate_plugin_class(ep, plugin_class):
-                continue
-
-            plugin_type = cast("type[BaseToolPlugin]", plugin_class)
-
-            # Instantiate once to resolve the definition name. This doubles as
-            # the probe that surfaces any error raised on construction, keeping
-            # a broken plugin from taking down discovery.
-            instance = plugin_type()
-            name = instance.definition.name.lower()
-
-            # Builtins are discovered first and always win a name collision so a
-            # third-party plugin can never silently shadow a curated core tool.
-            if ToolRegistry.is_registered(name):
-                logger.warning(
-                    f"Plugin {ep.name!r} defines tool {name!r}, which is already "
-                    f"registered (origin: {ToolRegistry.get_origin(name)}); "
-                    "skipping the external plugin to avoid shadowing it",
-                )
-                continue
-
-            origin = _entry_point_origin(ep)
-            ToolRegistry.register(plugin_type, origin=origin, instance=instance)
-            logger.info(f"Loaded external plugin: {name} (from {origin})")
-            loaded_count += 1
-
-        except Exception as e:  # noqa: BLE001 - isolate any misbehaving plugin
-            logger.warning(
-                f"Failed to load plugin {ep.name!r}: {type(e).__name__}: {e}",
+            grouped.append(
+                (group, tuple(importlib.metadata.entry_points(group=group))),
             )
+        except (TypeError, AttributeError, KeyError) as e:
+            logger.debug(f"No entry points found or error accessing them: {e}")
+
+    seen: set[tuple[str, str]] = set()
+    for group, entry_points in grouped:
+        for ep in entry_points:
+            key = (str(ep.name), str(getattr(ep, "value", "") or ""))
+            if key in seen:
+                continue
+            seen.add(key)
+            if group == LEGACY_ENTRY_POINT_GROUP:
+                logger.warning(
+                    f"Plugin {ep.name!r} registers via the deprecated "
+                    f"{LEGACY_ENTRY_POINT_GROUP!r} entry-point group; update the "
+                    f"package to use {ENTRY_POINT_GROUP!r}.",
+                )
+            loaded_count += _load_external_entry_point(ep=ep)
 
     logger.debug(f"Loaded {loaded_count} external plugins")
     return loaded_count
+
+
+def _load_external_entry_point(*, ep: EntryPoint) -> int:
+    """Load, validate, and register a single external plugin entry point.
+
+    Args:
+        ep: The entry point to load.
+
+    Returns:
+        ``1`` when the plugin was registered, ``0`` when it was skipped.
+    """
+    try:
+        plugin_class = ep.load()
+
+        if not _validate_plugin_class(ep, plugin_class):
+            return 0
+
+        plugin_type = cast("type[BaseToolPlugin]", plugin_class)
+
+        # Instantiate once to resolve the definition name. This doubles as
+        # the probe that surfaces any error raised on construction, keeping
+        # a broken plugin from taking down discovery.
+        instance = plugin_type()
+        name = instance.definition.name.lower()
+
+        # Builtins are discovered first and always win a name collision so a
+        # third-party plugin can never silently shadow a curated core tool.
+        if ToolRegistry.is_registered(name):
+            logger.warning(
+                f"Plugin {ep.name!r} defines tool {name!r}, which is already "
+                f"registered (origin: {ToolRegistry.get_origin(name)}); "
+                "skipping the external plugin to avoid shadowing it",
+            )
+            return 0
+
+        origin = _entry_point_origin(ep)
+        ToolRegistry.register(plugin_type, origin=origin, instance=instance)
+        logger.info(f"Loaded external plugin: {name} (from {origin})")
+        return 1
+
+    except Exception as e:  # noqa: BLE001 - isolate any misbehaving plugin
+        logger.warning(
+            f"Failed to load plugin {ep.name!r}: {type(e).__name__}: {e}",
+        )
+        return 0
 
 
 def discover_all_tools(force: bool = False) -> int:

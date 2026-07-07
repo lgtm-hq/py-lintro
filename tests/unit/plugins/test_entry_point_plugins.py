@@ -17,7 +17,12 @@ from assertpy import assert_that
 
 from lintro.models.core.tool_result import ToolResult
 from lintro.plugins.base import BaseToolPlugin
-from lintro.plugins.discovery import discover_external_plugins, reset_discovery
+from lintro.plugins.discovery import (
+    ENTRY_POINT_GROUP,
+    LEGACY_ENTRY_POINT_GROUP,
+    discover_external_plugins,
+    reset_discovery,
+)
 from lintro.plugins.protocol import (
     LINTRO_PLUGIN_API_VERSION,
     ToolDefinition,
@@ -180,18 +185,29 @@ def preserve_registry() -> Iterator[None]:
         reset_discovery()
 
 
-def _patch_entry_points(entry_points: list[_FakeEntryPoint]):
-    """Patch ``importlib.metadata.entry_points`` to return fakes.
+def _patch_entry_points(
+    entry_points: list[_FakeEntryPoint],
+    *,
+    group: str = ENTRY_POINT_GROUP,
+):
+    """Patch ``importlib.metadata.entry_points`` to return fakes for one group.
 
     Args:
-        entry_points: Fake entry points to expose for the ``lintro.tools`` group.
+        entry_points: Fake entry points to expose.
+        group: Entry-point group the fakes belong to; other groups return
+            no entry points.
 
     Returns:
         A ``patch`` context manager.
     """
+    target_group = group
+
+    def _entry_points(*, group: str = "", **_: object) -> list[_FakeEntryPoint]:
+        return entry_points if group == target_group else []
+
     return patch(
         "importlib.metadata.entry_points",
-        return_value=entry_points,
+        side_effect=_entry_points,
     )
 
 
@@ -397,3 +413,50 @@ def test_external_plugin_honors_copy_for_execution() -> None:
     assert_that(shared.exclude_patterns).does_not_contain("only_on_clone")
     assert_that(shared.options["flavor"]).is_equal_to("vanilla")
     assert_that(clone.options["flavor"]).is_equal_to("chocolate")
+
+
+# =============================================================================
+# Legacy entry-point group compatibility
+# =============================================================================
+
+
+def test_legacy_group_plugin_is_discovered() -> None:
+    """A plugin registered under the deprecated group is still loaded."""
+    ep = _FakeEntryPoint(
+        name="ext-legacy",
+        loaded=_make_good_plugin(tool_name="ext-legacy"),
+        dist_name="lintro-ext-legacy",
+    )
+    with _patch_entry_points([ep], group=LEGACY_ENTRY_POINT_GROUP):
+        loaded = discover_external_plugins()
+
+    assert_that(loaded).is_equal_to(1)
+    assert_that(ToolRegistry.is_registered("ext-legacy")).is_true()
+
+
+def test_plugin_in_both_groups_loads_once() -> None:
+    """An entry point advertised in both groups registers exactly once."""
+    plugin = _make_good_plugin(tool_name="ext-both")
+    primary = _FakeEntryPoint(
+        name="ext-both",
+        loaded=plugin,
+        value="both_pkg.plugin:Plugin",
+    )
+    legacy = _FakeEntryPoint(
+        name="ext-both",
+        loaded=plugin,
+        value="both_pkg.plugin:Plugin",
+    )
+
+    def _entry_points(*, group: str = "", **_: object) -> list[_FakeEntryPoint]:
+        if group == ENTRY_POINT_GROUP:
+            return [primary]
+        if group == LEGACY_ENTRY_POINT_GROUP:
+            return [legacy]
+        return []
+
+    with patch("importlib.metadata.entry_points", side_effect=_entry_points):
+        loaded = discover_external_plugins()
+
+    assert_that(loaded).is_equal_to(1)
+    assert_that(ToolRegistry.is_registered("ext-both")).is_true()

@@ -33,6 +33,10 @@ my-tool = "my_package.plugin:MyToolPlugin"
 
 The value points to the plugin **class** (`module:ClassName`).
 
+Plugins packaged against the previously documented `lintro.plugins` group are
+still discovered for backward compatibility, with a deprecation warning logged
+at startup. Update existing packages to the `lintro.tools` group.
+
 ## Plugin API Version
 
 The plugin-facing contract is versioned so that core refactors never silently break
