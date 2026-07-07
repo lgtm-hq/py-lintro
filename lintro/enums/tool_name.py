@@ -20,6 +20,7 @@ class ToolName(StrEnum):
     CARGO_DENY = auto()
     CLIPPY = auto()
     COMMITLINT = auto()
+    CPPCHECK = auto()
     DOTENV_LINTER = auto()
     GITLEAKS = auto()
     GOLANGCI_LINT = auto()

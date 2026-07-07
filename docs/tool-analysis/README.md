@@ -58,6 +58,14 @@ implementations with the core tools themselves.
 
 ### [Hadolint Analysis](./hadolint-analysis.md)
 
+### [Cppcheck Analysis](./cppcheck-analysis.md)
+
+**C/C++ Static Analyzer**
+
+- ✅ **Preserved**: Six-level severity, CWE ids, inconclusive flag via native XML
+- ⚠️ **Defaults**: Check-only; `warning,style,performance,portability` enabled
+- 🚀 **Notes**: Native XML parser (SARIF is lossy for cppcheck); fails closed
+
 ### [Bandit Analysis](./bandit-analysis.md)
 
 **Python Security Linter**

@@ -57,6 +57,7 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     curl \
     ca-certificates \
     build-essential \
+    cppcheck \
     git \
     libssl-dev \
     pkg-config \
@@ -162,7 +163,8 @@ RUN echo "=== Verifying all tools ===" && \
     cargo --version && rustc --version && \
     rustfmt --version && cargo clippy --version && cargo audit --version && \
     cargo deny --version && actionlint --version && bandit --version && \
-    black --version && buf --version && commitlint --version && gitleaks version && \
+    black --version && buf --version && commitlint --version && \
+    cppcheck --version && gitleaks version && \
     golangci-lint version && \
     hadolint --version && \
     markdownlint-cli2 --version && mypy --version && osv-scanner --version && \
