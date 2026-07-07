@@ -71,6 +71,7 @@ This script installs:
   - Actionlint (GitHub Actions workflow linter)
   - Bandit (Python security linter)
   - Mypy (Python static type checker)
+  - Cppcheck (C/C++ static analysis)
   - Clippy (Rust linter; requires Rust toolchain)
   - Rustfmt (Rust formatter; requires Rust toolchain)
   - Cargo-audit (Rust dependency vulnerability scanner; requires Rust toolchain)
@@ -166,7 +167,7 @@ should_install() {
 # Kept in sync with the should_install blocks and tools_to_verify array.
 SUPPORTED_TOOLS=(
 	"actionlint" "astro" "bandit" "black" "cargo-audit" "cargo-deny"
-	"clippy" "gitleaks" "hadolint" "markdownlint" "markdownlint-cli2" "mypy" "osv-scanner"
+	"clippy" "cppcheck" "gitleaks" "hadolint" "markdownlint" "markdownlint-cli2" "mypy" "osv-scanner"
 	"oxfmt" "oxlint" "prettier" "pydoclint" "ruff" "rustfmt" "semgrep"
 	"shellcheck" "shfmt" "sqlfluff" "svelte-check" "taplo" "tsc"
 	"vue-tsc" "yamllint"
@@ -1092,6 +1093,46 @@ main() {
 		fi
 	fi # semgrep
 
+	# Install cppcheck (C/C++ static analysis) via system package manager.
+	# cppcheck ships no portable single binary; it is provided by Homebrew
+	# (macOS) and apt (Debian/Ubuntu). In Docker it is pre-installed via the
+	# Dockerfile apt layer, so the command check below short-circuits.
+	if should_install "cppcheck"; then
+		echo -e "${BLUE}Installing cppcheck...${NC}"
+		CPPCHECK_VERSION=$(get_tool_version "cppcheck") || exit 1
+		if [ $DRY_RUN -eq 1 ]; then
+			log_info "[DRY-RUN] Would install cppcheck v${CPPCHECK_VERSION}"
+		elif command -v cppcheck &>/dev/null; then
+			echo -e "${GREEN}✓ cppcheck already installed${NC}"
+		elif command -v brew &>/dev/null; then
+			if brew install cppcheck; then
+				echo -e "${GREEN}✓ cppcheck installed successfully via Homebrew${NC}"
+			else
+				echo -e "${RED}✗ Failed to install cppcheck via Homebrew${NC}"
+				exit 1
+			fi
+		elif command -v apt-get &>/dev/null; then
+			cppcheck_apt="apt-get"
+			if [ "$(id -u)" -ne 0 ]; then
+				if command -v sudo &>/dev/null; then
+					cppcheck_apt="sudo apt-get"
+				else
+					echo -e "${RED}✗ cppcheck needs apt-get but sudo is unavailable${NC}"
+					exit 1
+				fi
+			fi
+			if $cppcheck_apt update && $cppcheck_apt install -y --no-install-recommends cppcheck; then
+				echo -e "${GREEN}✓ cppcheck installed successfully via apt${NC}"
+			else
+				echo -e "${RED}✗ Failed to install cppcheck via apt${NC}"
+				exit 1
+			fi
+		else
+			echo -e "${RED}✗ Cannot install cppcheck automatically; install via your package manager.${NC}"
+			exit 1
+		fi
+	fi # cppcheck
+
 	if should_install "shellcheck"; then
 		# Install shellcheck (shell script linter)
 		echo -e "${BLUE}Installing shellcheck...${NC}"
@@ -1418,6 +1459,7 @@ main() {
 		["cargo-audit"]="Rust dependency vulnerability scanning"
 		["cargo-deny"]="Rust dependency license/advisory checking"
 		["clippy"]="Rust linting"
+		["cppcheck"]="C/C++ static analysis"
 		["gitleaks"]="Secret detection"
 		["hadolint"]="Docker linting"
 		["markdownlint"]="Markdown linting"
@@ -1450,7 +1492,7 @@ main() {
 	# Verify installations
 	echo -e "${YELLOW}Verifying installations...${NC}"
 
-	tools_to_verify=("actionlint" "astro" "bandit" "black" "cargo-audit" "cargo-deny" "clippy" "rustfmt" "gitleaks" "hadolint" "markdownlint-cli2" "mypy" "osv-scanner" "oxfmt" "oxlint" "prettier" "pydoclint" "ruff" "semgrep" "shellcheck" "shfmt" "sqlfluff" "svelte-check" "taplo" "tsc" "vue-tsc" "yamllint")
+	tools_to_verify=("actionlint" "astro" "bandit" "black" "cargo-audit" "cargo-deny" "clippy" "cppcheck" "rustfmt" "gitleaks" "hadolint" "markdownlint-cli2" "mypy" "osv-scanner" "oxfmt" "oxlint" "prettier" "pydoclint" "ruff" "semgrep" "shellcheck" "shfmt" "sqlfluff" "svelte-check" "taplo" "tsc" "vue-tsc" "yamllint")
 
 	# Filter verification list when --tools is set.
 	# Map aliases so e.g. --tools markdownlint verifies markdownlint-cli2.

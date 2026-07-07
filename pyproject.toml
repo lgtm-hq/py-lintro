@@ -152,6 +152,7 @@ packages = [
   "lintro.parsers.cargo_audit",
   "lintro.parsers.cargo_deny",
   "lintro.parsers.clippy",
+  "lintro.parsers.cppcheck",
   "lintro.parsers.gitleaks",
   "lintro.parsers.hadolint",
   "lintro.parsers.markdownlint",

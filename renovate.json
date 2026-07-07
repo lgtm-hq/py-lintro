@@ -60,6 +60,8 @@
         "oxfmt",
         "gitleaks",
         "gitleaks/gitleaks",
+        "cppcheck",
+        "danmar/cppcheck",
         "shellcheck",
         "koalaman/shellcheck",
         "shfmt",
@@ -157,6 +159,18 @@
       "datasourceTemplate": "github-releases",
       "packageNameTemplate": "bomctl/bomctl",
       "extractVersionTemplate": "^v(?<version>.*)$"
+    },
+    {
+      "description": "Update cppcheck version in _tool_versions.py",
+      "customType": "regex",
+      "managerFilePatterns": [
+        "lintro/_tool_versions\\.py"
+      ],
+      "matchStrings": [
+        "ToolName\\.CPPCHECK:\\s*\"(?<currentValue>[0-9]+\\.[0-9]+\\.[0-9]+)\""
+      ],
+      "datasourceTemplate": "github-releases",
+      "packageNameTemplate": "danmar/cppcheck"
     },
     {
       "description": "Update hadolint version in _tool_versions.py",

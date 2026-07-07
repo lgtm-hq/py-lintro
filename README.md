@@ -93,6 +93,12 @@ system.
 <td><code>rustup component add clippy</code></td>
 </tr>
 <tr>
+<td><a href="https://cppcheck.sourceforge.io/"><img src="https://img.shields.io/badge/Cppcheck-00599C?logo=cplusplus&logoColor=white" alt="Cppcheck"></a></td>
+<td>🔧 C/C++</td>
+<td>-</td>
+<td><code>brew install cppcheck</code><br><code>apt-get install cppcheck</code></td>
+</tr>
+<tr>
 <td><a href="https://github.com/hadolint/hadolint"><img src="https://img.shields.io/badge/Hadolint-2496ED?logo=docker&logoColor=white" alt="Hadolint"></a></td>
 <td>🐳 Dockerfile</td>
 <td>-</td>

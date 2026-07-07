@@ -34,6 +34,10 @@ _SEVERITY_ALIASES: dict[str, SeverityLevel] = {
     "HINT": SeverityLevel.INFO,
     "STYLE": SeverityLevel.INFO,
     "HELP": SeverityLevel.INFO,
+    # Cppcheck advisory severities → INFO (below error/warning)
+    "PERFORMANCE": SeverityLevel.INFO,
+    "PORTABILITY": SeverityLevel.INFO,
+    "INFORMATION": SeverityLevel.INFO,
     # Bandit / cargo-audit severity levels
     "HIGH": SeverityLevel.ERROR,
     "CRITICAL": SeverityLevel.ERROR,

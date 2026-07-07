@@ -40,6 +40,7 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     curl \
     ca-certificates \
     build-essential \
+    cppcheck \
     git \
     libssl-dev \
     pkg-config \
@@ -106,7 +107,8 @@ RUN echo "=== Verifying all tools ===" && \
     bun --version && uv --version && cargo --version && rustc --version && \
     rustfmt --version && cargo clippy --version && cargo audit --version && \
     cargo deny --version && actionlint --version && bandit --version && \
-    black --version && gitleaks version && hadolint --version && \
+    black --version && cppcheck --version && gitleaks version && \
+    hadolint --version && \
     markdownlint-cli2 --version && mypy --version && osv-scanner --version && \
     oxfmt --version && oxlint --version && prettier --version && \
     pydoclint --version && ruff --version && semgrep --version && \
@@ -158,7 +160,8 @@ RUN getent group tools >/dev/null || groupadd -r tools && \
 RUN echo "Verifying tools..." && \
     rustfmt --version && cargo clippy --version && cargo audit --version && \
     cargo deny --version && semgrep --version && ruff --version && \
-    black --version && hadolint --version && actionlint --version && \
+    black --version && cppcheck --version && hadolint --version && \
+    actionlint --version && \
     shellcheck --version && shfmt --version && taplo --version && \
     gitleaks version && osv-scanner --version && prettier --version && \
     markdownlint-cli2 --version && tsc --version && astro --version && \
