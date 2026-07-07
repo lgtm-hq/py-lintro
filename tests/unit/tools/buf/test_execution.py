@@ -14,9 +14,7 @@ _LINT_ISSUE = (
     '{"path":"a.proto","start_line":2,"start_column":1,"end_line":2,'
     '"end_column":11,"type":"PACKAGE_LOWER_SNAKE_CASE","message":"m"}'
 )
-_FORMAT_DIFF = (
-    "--- a.proto.orig\t2026-07-07\n+++ a.proto\t2026-07-07\n@@ -1 +1 @@\n"
-)
+_FORMAT_DIFF = "--- a.proto.orig\t2026-07-07\n+++ a.proto\t2026-07-07\n@@ -1 +1 @@\n"
 
 
 def _result(returncode: int, stdout: str = "") -> SubprocessResult:
@@ -70,7 +68,7 @@ def test_check_reports_lint_issues(buf_plugin: BufPlugin, tmp_path: Path) -> Non
         tmp_path: Temporary directory for the proto file.
     """
     proto = tmp_path / "a.proto"
-    proto.write_text("syntax = \"proto3\";\npackage a;\n")
+    proto.write_text('syntax = "proto3";\npackage a;\n')
 
     with patch(
         "lintro.plugins.execution_preparation.verify_tool_version",
@@ -219,3 +217,114 @@ def test_fix_no_proto_files(buf_plugin: BufPlugin, tmp_path: Path) -> None:
 
     assert_that(result.success).is_true()
     assert_that(result.output).contains("No .proto files")
+
+
+def _err_result(returncode: int, stderr: str) -> SubprocessResult:
+    """Build a SubprocessResult with stderr-only failure output.
+
+    Args:
+        returncode: The simulated process exit code.
+        stderr: The simulated standard error.
+
+    Returns:
+        A SubprocessResult with empty stdout.
+    """
+    return SubprocessResult(
+        returncode=returncode,
+        stdout="",
+        stderr=stderr,
+        output=stderr,
+    )
+
+
+def test_check_lint_runtime_error_is_not_clean(
+    buf_plugin: BufPlugin,
+    tmp_path: Path,
+) -> None:
+    """A buf lint failure with stderr-only output fails the check.
+
+    Args:
+        buf_plugin: The plugin under test.
+        tmp_path: Temporary directory for the proto file.
+    """
+    proto = tmp_path / "a.proto"
+    proto.write_text('syntax = "proto3";\n')
+
+    with patch(
+        "lintro.plugins.execution_preparation.verify_tool_version",
+        return_value=None,
+    ):
+        with patch.object(
+            buf_plugin,
+            "_run_subprocess_result",
+            side_effect=[_err_result(1, "Failure: invalid buf.yaml")],
+        ):
+            result = buf_plugin.check([str(proto)], {})
+
+    assert_that(result.success).is_false()
+    assert_that(result.issues_count).is_equal_to(0)
+    assert_that(result.output).contains("invalid buf.yaml")
+
+
+def test_check_format_runtime_error_is_not_clean(
+    buf_plugin: BufPlugin,
+    tmp_path: Path,
+) -> None:
+    """A buf format failure with no diff fails the check.
+
+    Args:
+        buf_plugin: The plugin under test.
+        tmp_path: Temporary directory for the proto file.
+    """
+    proto = tmp_path / "a.proto"
+    proto.write_text('syntax = "proto3";\n')
+
+    with patch(
+        "lintro.plugins.execution_preparation.verify_tool_version",
+        return_value=None,
+    ):
+        with patch.object(
+            buf_plugin,
+            "_run_subprocess_result",
+            side_effect=[
+                _result(0, ""),
+                _err_result(2, "Failure: unreadable module root"),
+            ],
+        ):
+            result = buf_plugin.check([str(proto)], {})
+
+    assert_that(result.success).is_false()
+    assert_that(result.output).contains("unreadable module root")
+
+
+def test_fix_write_failure_surfaces_error(
+    buf_plugin: BufPlugin,
+    tmp_path: Path,
+) -> None:
+    """A failed buf format --write reports the cause, not just counts.
+
+    Args:
+        buf_plugin: The plugin under test.
+        tmp_path: Temporary directory for the proto file.
+    """
+    proto = tmp_path / "a.proto"
+    proto.write_text('syntax = "proto3";\n')
+
+    with patch(
+        "lintro.plugins.execution_preparation.verify_tool_version",
+        return_value=None,
+    ):
+        with patch.object(
+            buf_plugin,
+            "_run_subprocess_result",
+            side_effect=[
+                _result(1, _FORMAT_DIFF),
+                _result(1, _LINT_ISSUE),
+                _err_result(1, "Failure: permission denied"),
+            ],
+        ):
+            result = buf_plugin.fix([str(proto)], {})
+
+    assert_that(result.success).is_false()
+    assert_that(result.output).contains("permission denied")
+    assert_that(result.fixed_issues_count).is_equal_to(0)
