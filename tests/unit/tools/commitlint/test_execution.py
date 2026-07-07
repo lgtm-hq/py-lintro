@@ -190,3 +190,27 @@ def test_fix_raises_not_implemented(commitlint_plugin: CommitlintPlugin) -> None
     """Commitlint cannot fix commit messages."""
     with pytest.raises(NotImplementedError):
         commitlint_plugin.fix(["."], {})
+
+
+def test_check_phrase_in_commit_message_does_not_mask_violations(
+    commitlint_plugin: CommitlintPlugin,
+    tmp_path: Path,
+) -> None:
+    """A commit message containing 'Please add rules' is not a config skip."""
+    report = (
+        "⧗   --- input ---\n"
+        "docs: Please add rules to the style guide\n"
+        "✖   subject must not be sentence-case [subject-case]\n"
+        "\n"
+        "✖   found 1 problems, 0 warnings\n"
+    )
+    with patch.object(
+        commitlint_plugin,
+        "_run_subprocess_result",
+        return_value=_result(1, report),
+    ):
+        result = commitlint_plugin.check(_paths(tmp_path), {})
+
+    assert_that(result.skipped).is_false()
+    assert_that(result.success).is_false()
+    assert_that(result.issues_count).is_equal_to(1)

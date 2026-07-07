@@ -64,9 +64,7 @@ class CommitlintPlugin(BaseToolPlugin):
         """
         return ToolDefinition(
             name="commitlint",
-            description=(
-                "Conventional Commits linter for git commit messages"
-            ),
+            description=("Conventional Commits linter for git commit messages"),
             can_fix=False,
             tool_type=ToolType.LINTER,
             file_patterns=COMMITLINT_FILE_PATTERNS,
@@ -187,9 +185,17 @@ class CommitlintPlugin(BaseToolPlugin):
 
         combined_output = result.output or ""
 
+        # Prefer stdout (the report), falling back to the combined stream.
+        report = result.stdout if result.stdout.strip() else combined_output
+        issues = parse_commitlint_output(output=report)
+
         # No commitlint config present: skip as a non-error rather than fail.
+        # The "Please add rules" fallback only applies when no violations were
+        # parsed — the report echoes the commit message under "--- input ---",
+        # so a commit that merely contains the phrase must not mask a real
+        # violation run as a missing-config skip.
         if result.returncode == COMMITLINT_CONFIG_MISSING_EXIT or (
-            "Please add rules" in combined_output
+            not issues and "Please add rules" in combined_output
         ):
             skip_message = (
                 "Skipping commitlint: no commitlint config found. Add a "
@@ -207,9 +213,6 @@ class CommitlintPlugin(BaseToolPlugin):
                 skip_reason=skip_message,
             )
 
-        # Prefer stdout (the report), falling back to the combined stream.
-        report = result.stdout if result.stdout.strip() else combined_output
-        issues = parse_commitlint_output(output=report)
         issues_count: int = len(issues)
         success_flag: bool = result.success and issues_count == 0
 
