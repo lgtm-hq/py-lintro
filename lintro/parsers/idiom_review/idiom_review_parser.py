@@ -61,7 +61,11 @@ def _normalize_confidence(value: Any) -> str:
     return "medium"
 
 
-def _extract_json(response: str) -> dict[str, Any] | None:
+def _extract_json(
+    response: str,
+    *,
+    expected_key: str | None = None,
+) -> dict[str, Any] | None:
     """Extract a JSON object from a raw AI response.
 
     Handles bare JSON, JSON wrapped in a Markdown code fence, and JSON
@@ -70,6 +74,8 @@ def _extract_json(response: str) -> dict[str, Any] | None:
 
     Args:
         response: Raw AI response text.
+        expected_key: Key the caller's payload must carry; candidates
+            containing it are preferred over positional order.
 
     Returns:
         The parsed JSON object, or ``None`` on failure.
@@ -104,12 +110,13 @@ def _extract_json(response: str) -> dict[str, Any] | None:
         if isinstance(parsed, dict):
             parsed_dicts.append(parsed)
 
-    # Prefer the payload the prompts actually request: an explanatory fenced
-    # object (e.g. {"example": true}) before the real report must not win
-    # just because it appears first.
-    for parsed in parsed_dicts:
-        if "findings" in parsed or "duplicate_groups" in parsed:
-            return parsed
+    # Prefer the payload the caller actually requested: an explanatory
+    # fenced object (or the other mode's payload) before the real report
+    # must not win just because it appears first.
+    if expected_key is not None:
+        for parsed in parsed_dicts:
+            if expected_key in parsed:
+                return parsed
     return parsed_dicts[0] if parsed_dicts else None
 
 
@@ -133,7 +140,7 @@ class IdiomReviewParser:
         Returns:
             A list of parsed issues, empty on malformed/empty input.
         """
-        data = _extract_json(response)
+        data = _extract_json(response, expected_key="findings")
         if data is None:
             logger.warning(
                 "[idiom-review] Could not parse file-review response for {}",
@@ -186,7 +193,7 @@ class IdiomReviewParser:
         Returns:
             A list of parsed issues, empty on malformed/empty input.
         """
-        data = _extract_json(response)
+        data = _extract_json(response, expected_key="duplicate_groups")
         if data is None:
             logger.warning(
                 "[idiom-review] Could not parse duplication response",
