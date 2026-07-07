@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import re
 import subprocess  # nosec B404 - used safely with shell disabled
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING, Any
 
 from lintro._tool_versions import get_min_version
@@ -296,9 +296,13 @@ class DotenvLinterPlugin(BaseToolPlugin):
                 initial_issues=initial_issues,
             )
 
-        # Re-check to determine which issues remain after fixing.
+        # Re-check to determine which issues remain after fixing. Issues that
+        # survived an attempted fix are marked non-fixable so downstream
+        # consumers do not offer an auto-fix that was already tried.
         recheck = self._process_single_file(file_path, timeout)
-        remaining_issues: list[DotenvLinterIssue] = list(recheck.issues)
+        remaining_issues: list[DotenvLinterIssue] = [
+            replace(issue, fixable=False) for issue in recheck.issues
+        ]
         fixed_count = max(len(initial_issues) - len(remaining_issues), 0)
 
         return FileFixResult(
@@ -393,7 +397,10 @@ class DotenvLinterPlugin(BaseToolPlugin):
             label="Fixing files",
         )
 
-        remaining_issues = initial_issues_total - fixed_issues_total
+        # Count what the post-fix re-check actually reported rather than the
+        # arithmetic remainder: a fix can change the issue set (new findings
+        # surfacing after rewrites), and issues_count must match ``issues``.
+        remaining_issues = len(all_remaining_issues)
 
         summary_parts: list[str] = []
         if fixed_issues_total > 0:

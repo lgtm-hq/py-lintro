@@ -11,7 +11,6 @@ import subprocess
 from pathlib import Path
 from unittest.mock import patch
 
-import pytest
 from assertpy import assert_that
 
 from lintro.enums.tool_type import ToolType
@@ -89,7 +88,7 @@ def test_check_success_on_clean_file(
     dotenv_linter_plugin: DotenvLinterPlugin,
     tmp_path: Path,
 ) -> None:
-    """check reports success when dotenv-linter finds no problems."""
+    """Check reports success when dotenv-linter finds no problems."""
     env_file = tmp_path / ".env"
     env_file.write_text("ABC=1\n")
 
@@ -114,7 +113,7 @@ def test_check_reports_issues(
     dotenv_linter_plugin: DotenvLinterPlugin,
     tmp_path: Path,
 ) -> None:
-    """check surfaces parsed issues when dotenv-linter finds problems."""
+    """Check surfaces parsed issues when dotenv-linter finds problems."""
     env_file = tmp_path / ".env"
     env_file.write_text("foo=bar\n")
 
@@ -139,7 +138,7 @@ def test_check_timeout_returns_failure(
     dotenv_linter_plugin: DotenvLinterPlugin,
     tmp_path: Path,
 ) -> None:
-    """check handles a subprocess timeout without raising."""
+    """Check handles a subprocess timeout without raising."""
     env_file = tmp_path / ".env"
     env_file.write_text("ABC=1\n")
 
@@ -188,7 +187,7 @@ def test_fix_preserves_issue_count_invariant(
     dotenv_linter_plugin: DotenvLinterPlugin,
     tmp_path: Path,
 ) -> None:
-    """fix satisfies initial == fixed + remaining after auto-fixing."""
+    """Fix satisfies initial == fixed + remaining after auto-fixing."""
     env_file = tmp_path / ".env"
     env_file.write_text("foo=bar\n")
 
@@ -225,7 +224,7 @@ def test_fix_reports_remaining_when_not_all_fixed(
     dotenv_linter_plugin: DotenvLinterPlugin,
     tmp_path: Path,
 ) -> None:
-    """fix counts issues that remain after the fix pass."""
+    """Fix counts issues that remain after the fix pass."""
     env_file = tmp_path / ".env"
     env_file.write_text("foo=bar\n")
 
@@ -258,3 +257,42 @@ def test_fix_reports_remaining_when_not_all_fixed(
     assert_that(result.fixed_issues_count).is_equal_to(1)
     assert_that(result.remaining_issues_count).is_equal_to(1)
     assert_that(result.success).is_false()
+
+
+def test_fix_marks_surviving_issues_not_fixable(
+    dotenv_linter_plugin: DotenvLinterPlugin,
+    tmp_path: Path,
+) -> None:
+    """Issues that survive an attempted fix are reported as non-fixable."""
+    env_file = tmp_path / ".env"
+    env_file.write_text("foo=bar\n")
+
+    remaining_output = (
+        "Checking .env\n"
+        ".env:2 LowercaseKey: The foo key should be in uppercase\n"
+        "\n"
+        "Found 1 problems\n"
+    )
+    subprocess_returns = [
+        (False, CHECK_OUTPUT_WITH_ISSUES),
+        (True, "Fixing .env\n"),
+        (False, remaining_output),
+    ]
+
+    with (
+        patch(
+            "lintro.plugins.execution_preparation.verify_tool_version",
+            return_value=None,
+        ),
+        patch.object(
+            dotenv_linter_plugin,
+            "_run_subprocess",
+            side_effect=subprocess_returns,
+        ),
+    ):
+        result = dotenv_linter_plugin.fix([str(env_file)], {})
+
+    assert_that(result.issues).is_not_empty()
+    assert_that([issue.fixable for issue in result.issues]).contains_only(False)
+    # issues_count reflects what the re-check reported, matching ``issues``.
+    assert_that(result.issues_count).is_equal_to(len(result.issues))
