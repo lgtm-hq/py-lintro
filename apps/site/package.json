@@ -8,11 +8,12 @@
     "node": ">=22.12.0"
   },
   "scripts": {
-    "dev": "astro dev",
-    "build": "node scripts/copy-assets.mjs && astro build && bun x pagefind --site dist --glob '**/*.html' --exclude-selectors '[data-pagefind-ignore]' --exclude-selectors 'nav' --exclude-selectors 'footer'",
+    "migrate": "python3 ../../scripts/ci/site/migrate-docs-content.py",
+    "dev": "bun run migrate && astro dev",
+    "build": "bun run migrate && node scripts/copy-assets.mjs && astro build && bun x pagefind --site dist --glob '**/*.html' --exclude-selectors '[data-pagefind-ignore]' --exclude-selectors 'nav' --exclude-selectors 'footer'",
     "preview": "bash ../../scripts/ci/site/preview-serve.sh",
-    "test": "vitest run --coverage",
-    "check": "astro check",
+    "test": "bun run migrate && vitest run --coverage",
+    "check": "bun run migrate && astro check",
     "astro": "astro"
   },
   "dependencies": {

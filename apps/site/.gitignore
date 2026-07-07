@@ -4,6 +4,12 @@ dist/
 coverage/
 public/assets/css/
 
+# Docs content and the route map are generated from the repo-root docs/ tree
+# by scripts/ci/site/migrate-docs-content.py (chained into the dev/build/
+# check/test package scripts). docs/ is the single source of truth.
+src/content/docs/
+src/generated/
+
 # The repo-root .gitignore ignores 'lib/' (a Python build-artifact pattern),
 # which unintentionally excludes this site's TypeScript/MJS source under
 # src/lib/. Re-include it so the Astro config and components can be built.
