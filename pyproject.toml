@@ -137,6 +137,8 @@ packages = [
   "lintro.cli_utils",
   "lintro.cli_utils.commands",
   "lintro.config",
+  "lintro.deps",
+  "lintro.deps.parsers",
   "lintro.enums",
   "lintro.exceptions",
   "lintro.formatters",

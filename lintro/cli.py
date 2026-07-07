@@ -21,6 +21,7 @@ setup_cli_logging()
 # otherwise log messages during import get silently dropped or misconfigured.
 from lintro.cli_utils.commands.check import check_command  # noqa: E402
 from lintro.cli_utils.commands.config import config_command  # noqa: E402
+from lintro.cli_utils.commands.deps import deps_command  # noqa: E402
 from lintro.cli_utils.commands.doctor import doctor_command  # noqa: E402
 from lintro.cli_utils.commands.format import format_command  # noqa: E402
 from lintro.cli_utils.commands.init import init_command  # noqa: E402
@@ -191,6 +192,7 @@ def cli() -> None:
 # Register canonical commands and set _canonical_name for help
 cast(Any, check_command)._canonical_name = "check"
 cast(Any, config_command)._canonical_name = "config"
+cast(Any, deps_command)._canonical_name = "deps"
 cast(Any, doctor_command)._canonical_name = "doctor"
 cast(Any, format_command)._canonical_name = "format"
 cast(Any, init_command)._canonical_name = "init"
@@ -203,6 +205,7 @@ cast(Any, versions_command)._canonical_name = "versions"
 
 cli.add_command(check_command, name="check")
 cli.add_command(config_command, name="config")
+cli.add_command(deps_command, name="deps")
 cli.add_command(doctor_command, name="doctor")
 cli.add_command(format_command, name="format")
 cli.add_command(init_command, name="init")

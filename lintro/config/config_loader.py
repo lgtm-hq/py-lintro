@@ -19,6 +19,7 @@ from typing import Any
 from loguru import logger
 
 from lintro.ai.config import AIConfig
+from lintro.config.deps_config import DepsConfig
 from lintro.config.lintro_config import (
     EnforceConfig,
     ExecutionConfig,
@@ -386,6 +387,37 @@ def _parse_review_config(data: Any) -> ReviewConfig:
     return ReviewConfig(**filtered)
 
 
+def _parse_deps_config(data: Any) -> DepsConfig:
+    """Parse the ``deps`` configuration section.
+
+    Args:
+        data: Raw ``deps`` section from config.
+
+    Returns:
+        DepsConfig: Parsed dependency policy configuration.
+
+    Raises:
+        ValueError: When the deps section is not a mapping.
+    """
+    if data is None:
+        return DepsConfig()
+    if not isinstance(data, dict):
+        msg = f"deps config must be a mapping, got {type(data).__name__}"
+        raise ValueError(msg)
+    if not data:
+        return DepsConfig()
+
+    known_fields = set(DepsConfig.model_fields)
+    unknown = set(data) - known_fields
+    if unknown:
+        logger.warning(
+            "Unknown deps config keys ignored: {}",
+            ", ".join(sorted(unknown)),
+        )
+    filtered = {key: value for key, value in data.items() if key in known_fields}
+    return DepsConfig(**filtered)
+
+
 def _convert_pyproject_to_config(data: dict[str, Any]) -> dict[str, Any]:
     """Convert pyproject.toml [tool.lintro] format to .lintro-config.yaml format.
 
@@ -405,6 +437,7 @@ def _convert_pyproject_to_config(data: dict[str, Any]) -> dict[str, Any]:
         "tools": {},
         "ai": {},
         "review": {},
+        "deps": {},
     }
 
     # Inline import: ToolName is a static StrEnum that does not trigger
@@ -459,6 +492,8 @@ def _convert_pyproject_to_config(data: dict[str, Any]) -> dict[str, Any]:
             result["ai"] = value
         elif key_lower == "review":
             result["review"] = value
+        elif key_lower == "deps" and isinstance(value, dict):
+            result["deps"] = value
 
     return result
 
@@ -525,6 +560,7 @@ def load_config(
     tools_config = _parse_tools_config(data.get("tools", {}))
     ai_config = _parse_ai_config(data.get("ai", {}))
     review_config = _parse_review_config(data.get("review", {}))
+    deps_config = _parse_deps_config(data.get("deps", {}))
 
     return LintroConfig(
         execution=execution_config,
@@ -533,6 +569,7 @@ def load_config(
         tools=tools_config,
         ai=ai_config,
         review=review_config,
+        deps=deps_config,
         config_path=resolved_path,
     )
 
