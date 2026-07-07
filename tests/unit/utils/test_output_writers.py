@@ -565,3 +565,55 @@ def test_empty_doc_url_is_empty_string_in_csv(tmp_path: Path) -> None:
     content = csv_path.read_text()
     assert_that(content).contains("doc_url")
     assert_that(content).does_not_contain("None")
+
+
+def test_write_json_output_includes_profile_when_provided(
+    tmp_path: Path,
+    sample_results: list[ToolResult],
+) -> None:
+    """The JSON file artifact carries the profile payload when provided.
+
+    Args:
+        tmp_path: Temporary directory path for testing.
+        sample_results: Sample tool results for testing.
+    """
+    output_path = tmp_path / "report.json"
+
+    write_output_file(
+        output_path=str(output_path),
+        output_format=OutputFormat.JSON,
+        all_results=sample_results,
+        action=Action.CHECK,
+        total_issues=1,
+        total_fixed=0,
+        profile_data={"total_duration": 1.23, "tools": []},
+    )
+
+    content = json.loads(output_path.read_text())
+    assert_that(content).contains_key("profile")
+    assert_that(content["profile"]["total_duration"]).is_equal_to(1.23)
+
+
+def test_write_json_output_omits_profile_by_default(
+    tmp_path: Path,
+    sample_results: list[ToolResult],
+) -> None:
+    """Without profile data the JSON file schema is unchanged.
+
+    Args:
+        tmp_path: Temporary directory path for testing.
+        sample_results: Sample tool results for testing.
+    """
+    output_path = tmp_path / "report.json"
+
+    write_output_file(
+        output_path=str(output_path),
+        output_format=OutputFormat.JSON,
+        all_results=sample_results,
+        action=Action.CHECK,
+        total_issues=1,
+        total_fixed=0,
+    )
+
+    content = json.loads(output_path.read_text())
+    assert_that(content).does_not_contain_key("profile")

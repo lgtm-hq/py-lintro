@@ -1127,6 +1127,11 @@ def run_lint_tools_simple(
                         standard_issues=standard_issues,
                     )
                 else:
+                    file_profile = None
+                    if profile and fmt == OutputFormat.JSON:
+                        from lintro.profiling.report import build_profile_data
+
+                        file_profile = build_profile_data(all_results)
                     write_output_file(
                         output_path=output_file,
                         output_format=fmt,
@@ -1134,6 +1139,7 @@ def run_lint_tools_simple(
                         action=action,
                         total_issues=total_issues,
                         total_fixed=total_fixed,
+                        profile_data=file_profile,
                     )
             except (OSError, ValueError, TypeError) as e:
                 _warn(f"Warning: Failed to write output file: {e}")

@@ -188,6 +188,7 @@ def write_output_file(
     action: Action,
     total_issues: int,
     total_fixed: int,
+    profile_data: dict[str, Any] | None = None,
 ) -> None:
     """Write results to user-specified output file.
 
@@ -198,6 +199,9 @@ def write_output_file(
         action: Action: The action performed (check, fmt, test).
         total_issues: int: Total number of issues found.
         total_fixed: int: Total number of issues fixed.
+        profile_data: Optional performance profile payload; attached to the
+            JSON artifact under ``profile`` so the file output matches the
+            stdout payload when ``--profile`` is on.
     """
     output_file = Path(output_path)
     output_file.parent.mkdir(parents=True, exist_ok=True)
@@ -220,6 +224,8 @@ def write_output_file(
             json_data["results"].append(
                 serialize_tool_result(result, action=action),
             )
+        if profile_data is not None:
+            json_data["profile"] = profile_data
         output_file.write_text(
             json.dumps(json_data, indent=2, ensure_ascii=False),
             encoding="utf-8",
@@ -331,8 +337,7 @@ def write_output_file(
         for result in all_results:
             safe_name = html.escape(result.name)
             html_lines.append(
-                f"<tr><td>{safe_name}</td>"
-                f"<td>{_merged_issue_count(result)}</td></tr>",
+                f"<tr><td>{safe_name}</td><td>{_merged_issue_count(result)}</td></tr>",
             )
         html_lines.append("</table>")
         for result in all_results:
