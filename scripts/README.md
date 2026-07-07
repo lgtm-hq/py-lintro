@@ -130,6 +130,7 @@ Scripts for generating and updating Homebrew formulas.
 | `create-lintro-tap-pr.sh`    | Create/update lintro's generated formula PR        | `./scripts/ci/homebrew/create-lintro-tap-pr.sh 1.0.0 --skip-if-empty`                                           |
 | `generate-pypi-formula.sh`   | Generate lintro.rb formula from PyPI               | `./scripts/ci/homebrew/generate-pypi-formula.sh 1.0.0 out`                                                      |
 | `generate-binary-formula.sh` | Generate `Formula/lintro.rb` for binary releases   | `./scripts/ci/homebrew/generate-binary-formula.sh ...`                                                          |
+| `audit-formulas.sh`          | Render both formulas and run `brew style`/`brew audit` | `./scripts/ci/homebrew/audit-formulas.sh`                                                                    |
 | `pypi_utils.py`              | Shared PyPI API utilities module                   | Imported by other Python scripts                                                                                |
 | `fetch_package_info.py`      | Fetch package tarball info from PyPI               | `python3 scripts/ci/homebrew/fetch_package_info.py lintro 1.0.0`                                                |
 | `fetch_wheel_info.py`        | Fetch wheel info and generate resource stanzas     | `python3 scripts/ci/homebrew/fetch_wheel_info.py pydoclint --type universal`                                    |

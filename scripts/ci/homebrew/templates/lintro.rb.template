@@ -12,6 +12,12 @@ class Lintro < Formula
   url "{{TARBALL_URL}}"
   sha256 "{{TARBALL_SHA}}"
   license "MIT"
+  head "https://github.com/lgtm-hq/py-lintro.git", branch: "main"
+
+  # No bottle block is declared here: bottles are pre-compiled binary packages
+  # whose SHA256 checksums are produced by the tap's brew test-bot after this
+  # formula is merged. They cannot be hardcoded in the source template, so the
+  # tap CI injects the `bottle do ... end` stanza when it builds bottles.
 
   livecheck do
     url :stable
@@ -39,6 +45,9 @@ class Lintro < Formula
   depends_on "sqlfluff"
   depends_on "taplo"
   depends_on "yamllint"
+
+  # Shares the "lintro" binary with the lightweight binary formula.
+  conflicts_with "lintro", because: "both provide the lintro binary"
 
   # Pure Python library dependencies
 {{POET_RESOURCES}}
@@ -94,6 +103,10 @@ class Lintro < Formula
   end
 
   test do
-    assert_match version.to_s, shell_output("\#{bin}/lintro --version")
+    assert_match version.to_s, shell_output("#{bin}/lintro --version")
+    assert_match "Usage:", shell_output("#{bin}/lintro --help")
+    # `lintro doctor` exits non-zero when optional tools are missing (expected
+    # inside the sandboxed test environment), so accept exit status 1.
+    assert_match "Lintro Doctor", shell_output("#{bin}/lintro doctor", 1)
   end
 end

@@ -1,0 +1,61 @@
+# SPDX-License-Identifier: MIT
+# For license details, see the repository root LICENSE file.
+---
+name: CI - Homebrew Formula Lint
+
+'on':
+  push:
+    branches: [main]
+    paths:
+      - 'scripts/ci/homebrew/**'
+      - '.github/workflows/homebrew-formula-lint.yml'
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened, ready_for_review]
+    paths:
+      - 'scripts/ci/homebrew/**'
+      - '.github/workflows/homebrew-formula-lint.yml'
+  merge_group:
+    types: [checks_requested]
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: homebrew-formula-lint-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+jobs:
+  homebrew-lint:
+    name: Audit and style Homebrew formulas
+    runs-on: macos-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Harden Runner
+        # yamllint disable-line rule:line-length
+        uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
+        with:
+          egress-policy: 'block'
+          # brew audit/style loads the Homebrew formulae API and may fetch
+          # portable-ruby / vendored gems and tap contents from GitHub.
+          allowed-endpoints: >
+            github.com:443
+            api.github.com:443
+            codeload.github.com:443
+            objects.githubusercontent.com:443
+            raw.githubusercontent.com:443
+            formulae.brew.sh:443
+            ghcr.io:443
+            pkg-containers.githubusercontent.com:443
+
+      - name: Checkout code
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        with:
+          persist-credentials: false
+
+      - name: Audit and style Homebrew formulas
+        run: scripts/ci/homebrew/audit-formulas.sh
+        env:
+          HOMEBREW_NO_AUTO_UPDATE: '1'
+          HOMEBREW_NO_ANALYTICS: '1'

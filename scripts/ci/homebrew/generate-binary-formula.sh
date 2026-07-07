@@ -36,7 +36,7 @@ log_info "ARM64 SHA256: ${ARM64_SHA}"
 log_info "x86_64 SHA256: ${X86_SHA}"
 
 cat >"$OUTPUT_FILE" <<EOF
-# typed: false
+# typed: strict
 # frozen_string_literal: true
 
 # Homebrew formula for lintro binary distribution
@@ -46,6 +46,13 @@ class Lintro < Formula
   homepage "https://github.com/lgtm-hq/py-lintro"
   version "${VERSION}"
   license "MIT"
+
+  # Detect new releases from the GitHub Releases page (the stable URL points at
+  # a versioned release asset), keeping this formula in sync with upstream.
+  livecheck do
+    url :stable
+    strategy :github_latest
+  end
 
   RELEASE_BASE = "https://github.com/lgtm-hq/py-lintro/releases"
 
@@ -59,6 +66,9 @@ class Lintro < Formula
       sha256 "${X86_SHA}"
     end
   end
+
+  # Shares the "lintro" binary with the PyPI-based full formula.
+  conflicts_with "lintro-full", because: "both provide the lintro binary"
 
   def install
     if Hardware::CPU.arm?
@@ -83,6 +93,10 @@ class Lintro < Formula
 
   test do
     assert_match version.to_s, shell_output("#{bin}/lintro --version")
+    assert_match "Usage:", shell_output("#{bin}/lintro --help")
+    # \`lintro doctor\` exits non-zero when optional tools are missing (expected
+    # inside the sandboxed test environment), so accept exit status 1.
+    assert_match "Lintro Doctor", shell_output("#{bin}/lintro doctor", 1)
   end
 end
 EOF
