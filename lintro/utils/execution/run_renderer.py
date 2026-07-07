@@ -537,6 +537,11 @@ def _write_run_files(
                     ai_summary=enrichment.summary,
                 )
             else:
+                file_profile = None
+                if ctx.profile and fmt == OutputFormat.JSON:
+                    from lintro.profiling.report import build_profile_data
+
+                    file_profile = build_profile_data(all_results)
                 write_output_file(
                     output_path=output_file,
                     output_format=fmt,
@@ -544,6 +549,7 @@ def _write_run_files(
                     action=artifact.action,
                     total_issues=artifact.total_issues,
                     total_fixed=artifact.total_fixed,
+                    profile_data=file_profile,
                 )
         except (OSError, ValueError, TypeError) as e:
             warn_func(f"Warning: Failed to write output file: {e}")
