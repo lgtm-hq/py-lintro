@@ -163,7 +163,10 @@ def detect_project_languages() -> list[str]:
     )
     if has_rst:
         langs.add("restructuredtext")
-    if any(cwd.glob("*.adoc")):
+    has_adoc = any(cwd.glob("*.adoc")) or (
+        docs_dir.is_dir() and any(docs_dir.glob("**/*.adoc"))
+    )
+    if has_adoc:
         langs.add("asciidoc")
 
     return sorted(langs)
