@@ -12,6 +12,7 @@ import sys
 import click
 from click.testing import CliRunner
 
+from lintro.utils.git_diff import DIFF_DEFAULT_SENTINEL
 from lintro.utils.tool_executor import run_lint_tools_simple
 
 # Constants
@@ -94,6 +95,20 @@ DEFAULT_ACTION: str = "check"
     help="Clear incremental cache before running (forces full check)",
 )
 @click.option(
+    "--diff",
+    "diff_base",
+    is_flag=False,
+    flag_value=DIFF_DEFAULT_SENTINEL,
+    default=None,
+    metavar="[BASE]",
+    help=(
+        "Only check files changed vs a git base ref. With no value, diffs "
+        "against the repository default branch (origin/HEAD); pass a ref like "
+        "'main' or 'origin/dev' to override. Falls back to a full scan outside "
+        "a git repository."
+    ),
+)
+@click.option(
     "--stream/--no-stream",
     default=False,
     hidden=True,
@@ -142,6 +157,7 @@ def check_command(
     raw_output: bool,
     incremental: bool,
     no_cache: bool,
+    diff_base: str | None,
     stream: bool,
     debug: bool,
     auto_install: bool,
@@ -166,6 +182,9 @@ def check_command(
         raw_output: bool: Whether to show raw tool output instead of formatted output.
         incremental: bool: Whether to only check files changed since last run.
         no_cache: bool: Whether to clear the incremental cache before running.
+        diff_base: str | None: Git base ref for ``--diff`` scanning. ``None``
+            scans all files; the default sentinel resolves the repo default
+            branch; any other value is used as the base ref.
         stream: bool: Whether to stream tool output in real-time.
         debug: bool: Whether to enable debug output on console.
         auto_install: bool: Whether to auto-install Node.js deps if missing.
@@ -208,6 +227,7 @@ def check_command(
         raw_output=raw_output,
         output_file=output,
         incremental=incremental,
+        diff_base=diff_base,
         debug=debug,
         stream=stream,
         no_log=no_log,

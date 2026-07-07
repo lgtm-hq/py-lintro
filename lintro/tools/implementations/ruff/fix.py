@@ -110,6 +110,11 @@ def execute_ruff_fix(
         include_venv=tool.include_venv,
         incremental=bool(tool.options.get("incremental", False)),
         tool_name="ruff",
+        diff_base=(
+            tool.options.get("diff_base")
+            if isinstance(tool.options.get("diff_base"), str)
+            else None
+        ),
     )
 
     if not python_files:
