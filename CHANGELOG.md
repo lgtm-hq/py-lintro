@@ -21,6 +21,12 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.69.4] - 2026-07-07
+
+### Fixed
+
+- **security**: remediate high-severity dependency vulnerabilities (#1126) (c674b5e)
+
 ## [0.69.3] - 2026-07-07
 
 ### Fixed
