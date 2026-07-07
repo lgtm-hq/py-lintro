@@ -21,6 +21,12 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.69.3] - 2026-07-07
+
+### Fixed
+
+- **execution**: route all execution paths through per-execution isolated tool copies (#1124) (691bd54)
+
 ## [0.69.2] - 2026-07-07
 
 ### Fixed
