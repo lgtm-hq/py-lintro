@@ -186,8 +186,10 @@ RUN echo "Verifying tools as non-root user..." && \
     gosu lintro semgrep --version && \
     echo "All tools verified for non-root user!"
 
-USER lintro
-
+# No USER directive: the container starts as root so entrypoint.sh can detect
+# the UID/GID that owns the mounted /code volume and drop privileges to it via
+# gosu. This lets auto-install write node_modules into the volume without
+# consumers passing --user. See scripts/docker/entrypoint.sh.
 ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
 CMD ["--help"]
 
@@ -233,7 +235,8 @@ RUN useradd -m lintro && \
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
     CMD /app/.venv/bin/python -m lintro --version || exit 1
 
-USER lintro
-
+# No USER directive: the container starts as root so entrypoint.sh can detect
+# the UID/GID that owns the mounted /code volume and drop privileges to it via
+# gosu (installed above). See scripts/docker/entrypoint.sh.
 ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
 CMD ["--help"]
