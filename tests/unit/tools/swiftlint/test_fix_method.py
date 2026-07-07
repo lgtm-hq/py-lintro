@@ -11,6 +11,26 @@ from lintro.tools.definitions.swiftlint import SwiftlintPlugin
 from tests.unit.tools.swiftlint.conftest import FIXABLE_JSON, SAMPLE_JSON
 
 
+def _sp(success: bool, output: str):
+    """Build a SubprocessResult from a legacy (success, output) pair.
+
+    Args:
+        success: Whether the simulated process exited 0.
+        output: Simulated stdout (also used as combined output).
+
+    Returns:
+        SubprocessResult with the JSON payload on stdout.
+    """
+    from lintro.plugins.subprocess_executor import SubprocessResult
+
+    return SubprocessResult(
+        returncode=0 if success else 1,
+        stdout=output,
+        stderr="",
+        output=output,
+    )
+
+
 def test_fix_corrects_fixable_issue(
     swiftlint_plugin: SwiftlintPlugin,
     tmp_path: Path,
@@ -38,18 +58,22 @@ def test_fix_corrects_fixable_issue(
         """
         calls.append(cmd)
         if "--fix" in cmd:
-            return (True, "")
+            return _sp(True, "")
         # First lint call reports the issue; the re-check reports none.
         lint_calls = [c for c in calls if "lint" in c]
         if len(lint_calls) == 1:
-            return (False, FIXABLE_JSON)
-        return (True, "[\n\n]")
+            return _sp(False, FIXABLE_JSON)
+        return _sp(True, "[\n\n]")
 
     with patch(
         "lintro.plugins.execution_preparation.verify_tool_version",
         return_value=None,
     ):
-        with patch.object(swiftlint_plugin, "_run_subprocess", side_effect=mock_run):
+        with patch.object(
+            swiftlint_plugin,
+            "_run_subprocess_result",
+            side_effect=mock_run,
+        ):
             result = swiftlint_plugin.fix([str(test_file)], {})
 
     assert_that(result.success).is_true()
@@ -86,14 +110,18 @@ def test_fix_leaves_unfixable_issue(
             Tuple of (success, output).
         """
         if "--fix" in cmd:
-            return (True, "")
-        return (False, SAMPLE_JSON)
+            return _sp(True, "")
+        return _sp(False, SAMPLE_JSON)
 
     with patch(
         "lintro.plugins.execution_preparation.verify_tool_version",
         return_value=None,
     ):
-        with patch.object(swiftlint_plugin, "_run_subprocess", side_effect=mock_run):
+        with patch.object(
+            swiftlint_plugin,
+            "_run_subprocess_result",
+            side_effect=mock_run,
+        ):
             result = swiftlint_plugin.fix([str(test_file)], {})
 
     assert_that(result.success).is_false()
@@ -134,14 +162,18 @@ def test_fix_nothing_to_fix(
         nonlocal fix_invoked
         if "--fix" in cmd:
             fix_invoked = True
-            return (True, "")
-        return (True, "[\n\n]")
+            return _sp(True, "")
+        return _sp(True, "[\n\n]")
 
     with patch(
         "lintro.plugins.execution_preparation.verify_tool_version",
         return_value=None,
     ):
-        with patch.object(swiftlint_plugin, "_run_subprocess", side_effect=mock_run):
+        with patch.object(
+            swiftlint_plugin,
+            "_run_subprocess_result",
+            side_effect=mock_run,
+        ):
             result = swiftlint_plugin.fix([str(test_file)], {})
 
     assert_that(result.success).is_true()

@@ -155,7 +155,11 @@ class SwiftlintPlugin(BaseToolPlugin):
         """
         cmd = self._build_check_command(file_path)
         try:
-            success, output = self._run_subprocess(cmd=cmd, timeout=timeout)
+            # Parse stdout only: SwiftLint writes its JSON report to stdout,
+            # and a stderr warning merged into the stream would corrupt
+            # json.loads and turn real findings into a generic failure.
+            proc = self._run_subprocess_result(cmd=cmd, timeout=timeout)
+            success, output = proc.success, proc.stdout
             issues = parse_swiftlint_output(output=output)
             # SwiftLint exits non-zero when it reports violations. Treat a
             # non-zero exit with no parsed issues as a genuine failure so the
@@ -205,11 +209,11 @@ class SwiftlintPlugin(BaseToolPlugin):
         """
         # Initial check to count issues before fixing.
         try:
-            check_success, check_output = self._run_subprocess(
+            check_proc = self._run_subprocess_result(
                 cmd=self._build_check_command(file_path),
                 timeout=timeout,
             )
-            initial_issues = parse_swiftlint_output(output=check_output)
+            initial_issues = parse_swiftlint_output(output=check_proc.stdout)
         except subprocess.TimeoutExpired:
             return FileFixResult(
                 file_result=FileProcessingResult(
@@ -238,11 +242,11 @@ class SwiftlintPlugin(BaseToolPlugin):
         # Non-zero exit with no parsed issues means the invocation itself
         # failed (e.g., a compile/config error) — surface it rather than
         # reporting a clean file.
-        if not check_success and not initial_issues:
+        if not check_proc.success and not initial_issues:
             return FileFixResult(
                 file_result=FileProcessingResult(
                     success=False,
-                    output=check_output,
+                    output=check_proc.output,
                     issues=[],
                     error="swiftlint check failed before fix",
                 ),
@@ -265,7 +269,7 @@ class SwiftlintPlugin(BaseToolPlugin):
 
         # Apply auto-corrections.
         try:
-            self._run_subprocess(
+            self._run_subprocess_result(
                 cmd=self._build_fix_command(file_path),
                 timeout=timeout,
             )
@@ -294,13 +298,26 @@ class SwiftlintPlugin(BaseToolPlugin):
                 initial_issues=initial_issues,
             )
 
-        # Re-check to determine remaining issues.
+        # Re-check to determine remaining issues. A failed verification with
+        # nothing parsed must not read as "all fixed": conservatively keep the
+        # initial issues as remaining and surface the failure.
         try:
-            _, after_output = self._run_subprocess(
+            after_proc = self._run_subprocess_result(
                 cmd=self._build_check_command(file_path),
                 timeout=timeout,
             )
-            remaining_issues = parse_swiftlint_output(output=after_output)
+            remaining_issues = parse_swiftlint_output(output=after_proc.stdout)
+            if not after_proc.success and not remaining_issues:
+                return FileFixResult(
+                    file_result=FileProcessingResult(
+                        success=False,
+                        output=after_proc.output,
+                        issues=initial_issues,
+                    ),
+                    initial_count=len(initial_issues),
+                    fixed_count=0,
+                    initial_issues=initial_issues,
+                )
         except (subprocess.TimeoutExpired, OSError, ValueError, RuntimeError):
             # If the re-check cannot run, conservatively report all initial
             # issues as remaining to preserve the fix invariant.

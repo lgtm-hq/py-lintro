@@ -768,13 +768,18 @@ main() {
 				if command -v brew &>/dev/null && brew install swiftlint; then
 					echo -e "${GREEN}✓ swiftlint installed successfully via Homebrew${NC}"
 				else
-					echo -e "${YELLOW}⚠ Could not install swiftlint automatically; install manually: brew install swiftlint${NC}"
+					echo -e "${RED}✗ Failed to install swiftlint (requires Homebrew: brew install swiftlint)${NC}"
+					exit 1
 				fi
 			else
 				arch=$(uname -m)
 				case "$arch" in
 				x86_64 | amd64) arch="amd64" ;;
 				aarch64 | arm64) arch="arm64" ;;
+				*)
+					echo -e "${RED}✗ swiftlint: unsupported architecture '$arch' (release binaries cover amd64/arm64)${NC}"
+					exit 1
+					;;
 				esac
 				swiftlint_tmp=$(mktemp -d)
 				swiftlint_zip="${swiftlint_tmp}/swiftlint.zip"
