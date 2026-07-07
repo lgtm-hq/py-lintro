@@ -200,9 +200,7 @@ def _project_paths_from_check(
         with patch.object(plugin, "_run_subprocess", side_effect=_record):
             plugin.check(paths, {})
 
-    return [
-        cmd[cmd.index("--project") + 1] for cmd in calls if "--project" in cmd
-    ]
+    return [cmd[cmd.index("--project") + 1] for cmd in calls if "--project" in cmd]
 
 
 @pytest.fixture
@@ -251,7 +249,7 @@ def test_check_vue_tsc_prefers_app_config_over_generic_discovery(
 def test_check_tsc_uses_plain_config_when_both_present(
     both_configs_project: Path,
 ) -> None:
-    """tsc's ``check()`` selects tsconfig.json even when tsconfig.app.json exists.
+    """Tsc's ``check()`` selects tsconfig.json even when tsconfig.app.json exists.
 
     tsc declares only ``tsconfig.json`` as a candidate, so the #1112 fix must
     not change its selection.
@@ -301,7 +299,7 @@ def test_preferred_candidate_tsconfig_vue_none_without_app_config(
 
 
 def test_preferred_candidate_tsconfig_tsc_always_none(tmp_path: Path) -> None:
-    """tsc never short-circuits discovery, even with tsconfig.app.json present.
+    """Tsc never short-circuits discovery, even with tsconfig.app.json present.
 
     Args:
         tmp_path: Temporary directory holding both configs.
