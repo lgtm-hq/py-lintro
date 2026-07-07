@@ -72,9 +72,9 @@ def test_build_command_is_hermetic(checkov_plugin: CheckovPlugin) -> None:
     assert_that(cmd).contains("--download-external-modules", "False")
     assert_that(cmd).contains("--compact")
     assert_that(" ".join(cmd)).does_not_contain("--bc-api-key")
-    # Files are passed after a single -f flag.
-    dash_f = cmd.index("-f")
-    assert_that(cmd[dash_f + 1 :]).is_equal_to(["a.tf", "b.tf"])
+    # Each file gets its own -f flag: checkov's --file appends one path per
+    # occurrence, so a shared flag would drop every file after the first.
+    assert_that(cmd[-4:]).is_equal_to(["-f", "a.tf", "-f", "b.tf"])
 
 
 def test_build_command_includes_skip_and_check_filters() -> None:

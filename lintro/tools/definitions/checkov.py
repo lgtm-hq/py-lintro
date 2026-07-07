@@ -176,8 +176,11 @@ class CheckovPlugin(BaseToolPlugin):
         if isinstance(skip_opt, list) and skip_opt:
             cmd.extend(["--skip-check", ",".join(str(c) for c in skip_opt)])
 
-        cmd.append("-f")
-        cmd.extend(files)
+        # checkov's -f/--file appends a single path per flag; passing several
+        # paths after one -f leaves the rest unattached (scanned never or
+        # errored). Repeat the flag per file.
+        for file_path in files:
+            cmd.extend(["-f", file_path])
         return cmd
 
     def doc_url(self, code: str) -> str | None:
