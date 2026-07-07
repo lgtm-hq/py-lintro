@@ -171,6 +171,11 @@ def _parse_result(
         logger.debug("Skipping SARIF result without a physical location")
         return None
 
+    # PoC limitation: ``artifactLocation.uriBaseId`` is not resolved against
+    # ``run.originalUriBaseIds``, so a relative ``uri`` is taken as-is. Tools
+    # lintro runs from the project root emit workspace-relative URIs, which
+    # matches lintro's file/path model; a production parser must resolve
+    # ``uriBaseId`` first (tracked in the evaluation doc's risk table).
     artifact = physical.get("artifactLocation") or {}
     file_path = _uri_to_path(str(artifact.get("uri", "")))
 
