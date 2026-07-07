@@ -227,7 +227,7 @@ jobs:
       contents: read
       packages: read # pull lintro-image from GHCR in reusable-quality-lint
     with:
-      tooling-ref: '4aaefe64763b7841b6d92d94dc47185083d34c9a' # v0.46.0
+      tooling-ref: '3d3e577c8e50e11ead6bd36cb559361d33796a9d' # v0.47.1
       job-name: '🛠️ Dogfooding Lint'
       lintro-tool-options: >-
         pydoclint:timeout=120,osv_scanner:check_suppressions=false
@@ -264,7 +264,7 @@ jobs:
       pull-requests: write # post lintro results as PR comment
     with:
       exit-code: ${{ needs.dogfooding-lint.outputs.exit-code }}
-      tooling-ref: '4aaefe64763b7841b6d92d94dc47185083d34c9a' # v0.46.0
+      tooling-ref: '3d3e577c8e50e11ead6bd36cb559361d33796a9d' # v0.47.1
       job-name: '🛠️ Dogfooding Lint PR Comment'
       egress-policy: block
 
@@ -283,7 +283,7 @@ jobs:
     permissions:
       contents: read
     with:
-      tooling-ref: '4aaefe64763b7841b6d92d94dc47185083d34c9a' # v0.46.0
+      tooling-ref: '3d3e577c8e50e11ead6bd36cb559361d33796a9d' # v0.47.1
       job-name: '🛠️ Lintro Code Quality'
       runner-image: ubuntu-24.04
       upstream-result: >-

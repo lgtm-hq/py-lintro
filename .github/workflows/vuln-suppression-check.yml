@@ -24,7 +24,7 @@ jobs:
       pull-requests: write # open PRs for stale/expired suppressions
     with:
       job-name: '🔍 Check Vulnerability Suppressions'
-      tooling-ref: '4aaefe64763b7841b6d92d94dc47185083d34c9a' # v0.46.0
+      tooling-ref: '3d3e577c8e50e11ead6bd36cb559361d33796a9d' # v0.47.1
       workflow-file: vuln-suppression-check.yml
       runner-image: ubuntu-24.04
       egress-policy: block

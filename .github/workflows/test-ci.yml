@@ -34,7 +34,7 @@ jobs:
       draft-pr-skip: true
       job-name: Python Compatibility
       runner-image: ubuntu-24.04
-      tooling-ref: '4aaefe64763b7841b6d92d94dc47185083d34c9a' # v0.46.0
+      tooling-ref: '3d3e577c8e50e11ead6bd36cb559361d33796a9d' # v0.47.1
       egress-policy: block
       egress-preset: pypi
       allowed-endpoints-mode: append
@@ -63,7 +63,7 @@ jobs:
       draft-pr-skip: true
       job-name: Python Coverage
       runner-image: ubuntu-24.04
-      tooling-ref: '4aaefe64763b7841b6d92d94dc47185083d34c9a' # v0.46.0
+      tooling-ref: '3d3e577c8e50e11ead6bd36cb559361d33796a9d' # v0.47.1
       egress-policy: block
       egress-preset: pypi
       allowed-endpoints-mode: append
@@ -116,7 +116,7 @@ jobs:
     permissions:
       contents: read
     with:
-      tooling-ref: '4aaefe64763b7841b6d92d94dc47185083d34c9a' # v0.46.0
+      tooling-ref: '3d3e577c8e50e11ead6bd36cb559361d33796a9d' # v0.47.1
       job-name: '🧪 Test Suite & Coverage'
       runner-image: ubuntu-24.04
       upstream-result: ${{ needs.test-gate.outputs.result }}
@@ -138,7 +138,7 @@ jobs:
       upload-coverage: true
       job-name: Deploy Coverage to Pages
       runner-image: ubuntu-24.04
-      tooling-ref: '4aaefe64763b7841b6d92d94dc47185083d34c9a' # v0.46.0
+      tooling-ref: '3d3e577c8e50e11ead6bd36cb559361d33796a9d' # v0.47.1
       egress-policy: block
       egress-preset: github-pages
     permissions:
