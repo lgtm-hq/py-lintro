@@ -164,6 +164,30 @@ def count_affected_files(tool_results: Sequence[object]) -> int:
     return len(files)
 
 
+def count_fixable_issues(tool_results: Sequence[object]) -> int:
+    """Count issues that the reporting tool marks as auto-fixable.
+
+    Only issues whose ``fixable`` attribute is truthy are counted. Tools
+    that do not report fixability leave the attribute falsy, so they never
+    inflate the count (no fixability is fabricated).
+
+    Args:
+        tool_results: Sequence of tool results to inspect.
+
+    Returns:
+        Number of issues flagged as auto-fixable across all results.
+    """
+    count = 0
+    for result in tool_results:
+        issues = getattr(result, "issues", None)
+        if not issues:
+            continue
+        for issue in issues:
+            if getattr(issue, "fixable", False):
+                count += 1
+    return count
+
+
 def print_summary_table(
     console_output_func: Callable[..., None],
     action: Action,
@@ -532,6 +556,7 @@ def print_totals_table(
     severity_info: int = 0,
     total_ai_applied: int = 0,
     total_ai_verified: int = 0,
+    total_fixable: int = 0,
 ) -> None:
     """Print a totals summary table for the run.
 
@@ -547,6 +572,9 @@ def print_totals_table(
         severity_info: Number of issues at INFO severity.
         total_ai_applied: Total number of AI-applied fixes (FIX mode).
         total_ai_verified: Total number of AI-verified fixes (FIX mode).
+        total_fixable: Number of issues the tools flagged as auto-fixable
+            (CHECK mode). When greater than zero, an "Auto-fixable" row and a
+            hint to run ``lintro fmt`` are shown.
     """
     try:
         import click
@@ -573,6 +601,7 @@ def print_totals_table(
                 rows.append(["  Errors", severity_errors])
                 rows.append(["  Warnings", severity_warnings])
                 rows.append(["  Info", severity_info])
+                rows.append(["  Auto-fixable", total_fixable])
             rows.append(["Affected Files", affected_files])
 
         headers: list[str] = ["Metric", "Count"]
@@ -585,6 +614,20 @@ def print_totals_table(
         )
         console_output_func(text=table)
         console_output_func(text="")
+
+        # In check/test mode, nudge the user toward auto-fixing when the
+        # tools report fixable issues. Only shown when at least one issue is
+        # actually flagged fixable, so tools that do not report fixability
+        # stay silent.
+        if action != Action.FIX and total_fixable > 0:
+            noun = "issue" if total_fixable == 1 else "issues"
+            console_output_func(
+                text=(
+                    f"{_GREEN}{total_fixable} auto-fixable {noun}{_RESET} — "
+                    f"run `lintro fmt` to fix automatically"
+                ),
+            )
+            console_output_func(text="")
 
     except ImportError:
         # Fallback if tabulate not available

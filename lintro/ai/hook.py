@@ -28,15 +28,18 @@ class AIPostExecutionHook:
         lintro_config: LintroConfig,
         *,
         ai_fix: bool = False,
+        transport: str | None = None,
     ) -> None:
         """Initialize the hook.
 
         Args:
             lintro_config: Full Lintro configuration.
             ai_fix: Whether AI fix suggestions were requested.
+            transport: Optional CLI override for ``ai.transport``.
         """
         self._lintro_config = lintro_config
         self._ai_fix = ai_fix
+        self._transport = transport
 
     def should_run(self, action: Action) -> bool:
         """Check whether AI enhancement should run for this action.
@@ -84,6 +87,7 @@ class AIPostExecutionHook:
                 logger=console_logger,
                 output_format=output_format,
                 ai_fix=self._ai_fix,
+                transport=self._transport,
             )
         except Exception as e:
             logger.opt(exception=True).debug(f"AI post-execution hook failed: {e}")

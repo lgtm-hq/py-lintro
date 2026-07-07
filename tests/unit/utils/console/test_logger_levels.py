@@ -73,7 +73,7 @@ def test_error_outputs_red_text(logger: ThreadSafeConsoleLogger) -> None:
         mock_style.return_value = "styled"
         logger.error("error message")
         mock_style.assert_called_once_with("ERROR: error message", fg="red", bold=True)
-        mock_echo.assert_called_once_with("styled")
+        mock_echo.assert_called_once_with("styled", err=False)
         assert_that(logger._messages).contains("ERROR: error message")
 
 

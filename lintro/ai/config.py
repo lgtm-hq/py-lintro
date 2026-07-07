@@ -18,7 +18,7 @@ from __future__ import annotations
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from lintro.ai.config_views import AIBudgetConfig, AIOutputConfig, AIProviderConfig
-from lintro.ai.enums import ConfidenceLevel, SanitizeMode
+from lintro.ai.enums import AITransport, ConfidenceLevel, SanitizeMode
 from lintro.ai.registry import AIProvider
 
 __all__ = [
@@ -42,6 +42,13 @@ class AIConfig(BaseModel):
 
     enabled: bool = False
     provider: AIProvider = AIProvider.ANTHROPIC
+    transport: AITransport | None = Field(
+        default=None,
+        description=(
+            "Required when ai.enabled is true. "
+            "How to invoke the provider: 'api' (SDK) or 'cli' (local binary)."
+        ),
+    )
     model: str | None = None
     api_key_env: str | None = None
     api_base_url: str | None = Field(
@@ -154,9 +161,37 @@ class AIConfig(BaseModel):
             "'off' disables detection."
         ),
     )
+    cursor_trust_workspace: bool = Field(
+        default=False,
+        description=(
+            "Pass '--trust' to the Cursor 'agent' CLI, granting it workspace "
+            "trust. Security risk: the Cursor provider is fed untrusted, "
+            "prompt-injectable content (e.g. 'lintro review --pr N' embeds "
+            "diffs from arbitrary fork PRs). Combining workspace trust with "
+            "such input could let an injected diff drive an agent operating "
+            "with full workspace trust, so this defaults to False and should "
+            "only be enabled for fully trusted local workspaces."
+        ),
+    )
+
+    review_allow_unredacted_git_native: bool = Field(
+        default=False,
+        description=(
+            "Allow the git-native (CLI transport) review path to delegate "
+            "diff retrieval to the provider by emitting a 'git diff' command "
+            "instead of embedding the diff. Security risk: a delegated diff "
+            "is produced by the provider itself and never passes through "
+            "lintro's secret-redaction choke point, so secrets present in "
+            "the diff can reach the provider's backend unredacted. Defaults "
+            "to False so redaction always wins: lintro embeds the redacted "
+            "diff in the prompt even for large diffs. Only enable this for "
+            "trusted diffs with no secrets concern when the efficiency of "
+            "delegated git retrieval on very large diffs is required."
+        ),
+    )
 
     @model_validator(mode="after")
-    def _check_retry_delays(self) -> AIConfig:
+    def _validate_transport_and_retries(self) -> AIConfig:
         if self.retry_max_delay < self.retry_base_delay:
             msg = (
                 f"retry_max_delay ({self.retry_max_delay}) must be >= "
@@ -172,6 +207,7 @@ class AIConfig(BaseModel):
         """Return a frozen snapshot of provider-related settings."""
         return AIProviderConfig(
             provider=self.provider,
+            transport=self.transport,
             model=self.model,
             api_key_env=self.api_key_env,
             api_base_url=self.api_base_url,

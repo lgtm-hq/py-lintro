@@ -7,13 +7,13 @@ from unittest.mock import patch
 from assertpy import assert_that
 from click.testing import CliRunner
 
-from lintro.cli_utils.commands.test import test_command
+from lintro.cli_utils.commands.test import test_command as pytest_cli_command
 
 
 def test_test_command_help() -> None:
     """Test that test command shows help."""
     runner = CliRunner()
-    result = runner.invoke(test_command, ["--help"])
+    result = runner.invoke(pytest_cli_command, ["--help"])
     assert_that(result.exit_code).is_equal_to(0)
     assert_that(result.output).contains("Run tests using pytest")
 
@@ -23,7 +23,7 @@ def test_test_command_default_paths() -> None:
     runner = CliRunner()
     with patch("lintro.cli_utils.commands.test.run_lint_tools_simple") as mock_run:
         mock_run.return_value = 0
-        runner.invoke(test_command, [])
+        runner.invoke(pytest_cli_command, [])
         assert_that(mock_run.called).is_true()
         call_args = mock_run.call_args
         assert_that(call_args.kwargs["paths"]).is_equal_to(["."])
@@ -39,7 +39,7 @@ def test_test_command_explicit_paths() -> None:
         with patch("lintro.cli_utils.commands.test.run_lint_tools_simple") as mock_run:
             mock_run.return_value = 0
             runner.invoke(
-                test_command,
+                pytest_cli_command,
                 [str(test_dir / "test_file.py")],
             )
             call_args = mock_run.call_args
@@ -54,7 +54,7 @@ def test_test_command_exclude_patterns() -> None:
     with patch("lintro.cli_utils.commands.test.run_lint_tools_simple") as mock_run:
         mock_run.return_value = 0
         runner.invoke(
-            test_command,
+            pytest_cli_command,
             ["--exclude", "*.venv,__pycache__"],
         )
         call_args = mock_run.call_args
@@ -66,7 +66,7 @@ def test_test_command_include_venv() -> None:
     runner = CliRunner()
     with patch("lintro.cli_utils.commands.test.run_lint_tools_simple") as mock_run:
         mock_run.return_value = 0
-        runner.invoke(test_command, ["--include-venv"])
+        runner.invoke(pytest_cli_command, ["--include-venv"])
         call_args = mock_run.call_args
         assert_that(call_args.kwargs["include_venv"]).is_true()
 
@@ -77,7 +77,7 @@ def test_test_command_output_format() -> None:
     with patch("lintro.cli_utils.commands.test.run_lint_tools_simple") as mock_run:
         mock_run.return_value = 0
         runner.invoke(
-            test_command,
+            pytest_cli_command,
             ["--output-format", "json"],
         )
         call_args = mock_run.call_args
@@ -89,7 +89,7 @@ def test_test_command_group_by() -> None:
     runner = CliRunner()
     with patch("lintro.cli_utils.commands.test.run_lint_tools_simple") as mock_run:
         mock_run.return_value = 0
-        runner.invoke(test_command, ["--group-by", "code"])
+        runner.invoke(pytest_cli_command, ["--group-by", "code"])
         call_args = mock_run.call_args
         assert_that(call_args.kwargs["group_by"]).is_equal_to("code")
 
@@ -99,7 +99,7 @@ def test_test_command_verbose() -> None:
     runner = CliRunner()
     with patch("lintro.cli_utils.commands.test.run_lint_tools_simple") as mock_run:
         mock_run.return_value = 0
-        runner.invoke(test_command, ["--verbose"])
+        runner.invoke(pytest_cli_command, ["--verbose"])
         call_args = mock_run.call_args
         assert_that(call_args.kwargs["verbose"]).is_true()
 
@@ -109,7 +109,7 @@ def test_test_command_raw_output() -> None:
     runner = CliRunner()
     with patch("lintro.cli_utils.commands.test.run_lint_tools_simple") as mock_run:
         mock_run.return_value = 0
-        runner.invoke(test_command, ["--raw-output"])
+        runner.invoke(pytest_cli_command, ["--raw-output"])
         call_args = mock_run.call_args
         assert_that(call_args.kwargs["raw_output"]).is_true()
 
@@ -119,7 +119,7 @@ def test_test_command_list_plugins() -> None:
     runner = CliRunner()
     with patch("lintro.cli_utils.commands.test.run_lint_tools_simple") as mock_run:
         mock_run.return_value = 0
-        runner.invoke(test_command, ["--list-plugins"])
+        runner.invoke(pytest_cli_command, ["--list-plugins"])
         call_args = mock_run.call_args
         assert_that(call_args.kwargs["tool_options"]).contains(
             "pytest:list_plugins=True",
@@ -132,7 +132,7 @@ def test_test_command_check_plugins() -> None:
     with patch("lintro.cli_utils.commands.test.run_lint_tools_simple") as mock_run:
         mock_run.return_value = 0
         runner.invoke(
-            test_command,
+            pytest_cli_command,
             [
                 "--check-plugins",
                 "--tool-options",

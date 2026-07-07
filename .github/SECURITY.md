@@ -98,12 +98,12 @@ Workflows follow the principle of least privilege:
 
 ```yaml
 permissions:
-  contents: read  # Default: read-only
+  contents: read # Default: read-only
 
 # Only escalate when necessary
 permissions:
-  contents: write  # For releases
-  id-token: write  # For OIDC
+  contents: write # For releases
+  id-token: write # For OIDC
 ```
 
 ## Permission Scopes by Workflow

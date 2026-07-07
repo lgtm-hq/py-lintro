@@ -3,6 +3,9 @@
   "extends": [
     "local>lgtm-hq/.github:renovate-config"
   ],
+  "allowedCommands": [
+    "python3 scripts/ci/generate-tool-versions.py"
+  ],
   "packageRules": [
     {
       "matchDatasources": ["docker"],
@@ -75,7 +78,8 @@
       "matchManagers": ["custom.regex"],
       "matchFileNames": [
         "Dockerfile",
-        "lintro/_tool_versions.py"
+        "lintro/_tool_versions.py",
+        "lintro/tools/manifest.json"
       ],
       "postUpgradeTasks": {
         "commands": [
@@ -83,6 +87,8 @@
         ],
         "fileFilters": [
           "lintro/_tool_versions.py",
+          "lintro/_generated_versions.py",
+          "lintro/tools/manifest.json",
           "package.json",
           "pyproject.toml",
           "Dockerfile"

@@ -23,7 +23,7 @@ jobs:
   docker-full:
     name: 🐳 Docker Full Image
     # yamllint disable-line rule:line-length
-    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-docker.yml@f469f4d5c187f0700ccec4c023152fb68ee3dc89 # v0.32.3
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-docker.yml@4aaefe64763b7841b6d92d94dc47185083d34c9a # v0.46.0
     permissions:
       contents: read
       packages: write
@@ -53,7 +53,7 @@ jobs:
       no-cache: ${{ startsWith(github.ref, 'refs/tags/') }}
       provenance: false
       sbom: false
-      tooling-ref: 'f469f4d5c187f0700ccec4c023152fb68ee3dc89' # v0.32.3
+      tooling-ref: '4aaefe64763b7841b6d92d94dc47185083d34c9a' # v0.46.0
       egress-policy: block
       egress-preset: docker
       allowed-endpoints-mode: append
@@ -65,7 +65,7 @@ jobs:
     name: 🐳 Docker Base Image
     needs: docker-full
     # yamllint disable-line rule:line-length
-    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-docker.yml@f469f4d5c187f0700ccec4c023152fb68ee3dc89 # v0.32.3
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-docker.yml@4aaefe64763b7841b6d92d94dc47185083d34c9a # v0.46.0
     permissions:
       contents: read
       packages: write
@@ -95,7 +95,7 @@ jobs:
       no-cache: ${{ startsWith(github.ref, 'refs/tags/') }}
       provenance: false
       sbom: false
-      tooling-ref: 'f469f4d5c187f0700ccec4c023152fb68ee3dc89' # v0.32.3
+      tooling-ref: '4aaefe64763b7841b6d92d94dc47185083d34c9a' # v0.46.0
       egress-policy: block
       egress-preset: docker
       allowed-endpoints-mode: append

@@ -149,6 +149,27 @@ class OsvScannerPlugin(BaseToolPlugin):
         ]
 
     @staticmethod
+    def _payload_has_valid_results(payload: dict[str, Any]) -> bool:
+        """Return whether an osv-scanner payload is a valid scan report.
+
+        A well-formed osv-scanner JSON report is an object whose ``results``
+        key holds a list (possibly empty). Error-shaped payloads such as
+        ``{"error": ...}`` — or payloads whose ``results`` is missing or not a
+        list — are not valid scan reports. For a security gate such a payload
+        must be treated as a scan failure rather than a clean pass (see #1028).
+
+        Args:
+            payload: Parsed JSON object extracted from osv-scanner stdout.
+
+        Returns:
+            True when ``payload`` is a dict whose ``results`` value is a list.
+        """
+        return isinstance(payload, dict) and isinstance(
+            payload.get("results"),
+            list,
+        )
+
+    @staticmethod
     def _find_config_file(scan_root: Path) -> Path | None:
         """Find .osv-scanner.toml by walking up from the scan root.
 
@@ -248,7 +269,7 @@ class OsvScannerPlugin(BaseToolPlugin):
 
         try:
             # osv-scanner returns non-zero when vulnerabilities exist
-            success, output = self._run_subprocess(
+            proc = self._run_subprocess_result(
                 cmd,
                 timeout=timeout,
                 cwd=str(scan_root),
@@ -261,23 +282,57 @@ class OsvScannerPlugin(BaseToolPlugin):
                 issues_count=0,
             )
 
-        issues = parse_osv_scanner_output(output)
+        success = proc.success
+        # Parse the JSON report from stdout only; stderr may carry human-readable
+        # log lines that must not corrupt JSON parsing (see #1043). ``output``
+        # (combined) is retained for display and plain-text signal detection.
+        output = proc.output
+        issues = parse_osv_scanner_output(proc.stdout)
+        payload = extract_osv_scanner_payload(proc.stdout)
+        parse_failures_count = 0 if payload is not None else None
+        no_op_success = False
 
         # Treat "no package sources found" as a successful no-op, not an error.
         # osv-scanner returns non-zero when it finds no lockfiles to scan.
-        if not success and len(issues) == 0 and output:
-            no_op_indicators = ["no package sources found", "0 packages"]
-            if any(indicator in output.lower() for indicator in no_op_indicators):
-                success = True
+        if (
+            not success
+            and len(issues) == 0
+            and output
+            and "no package sources found" in output.lower()
+        ):
+            success = True
+            no_op_success = True
 
         # Some osv-scanner builds emit log lines before JSON and may exit
         # non-zero even when the parsed results list is empty.
-        if not success and len(issues) == 0:
-            payload = extract_osv_scanner_payload(output)
-            if payload is not None and "results" in payload:
-                results = payload["results"]
-                if isinstance(results, list) and len(results) == 0:
-                    success = True
+        if (
+            not success
+            and len(issues) == 0
+            and payload is not None
+            and self._payload_has_valid_results(payload)
+            and len(payload["results"]) == 0
+        ):
+            success = True
+
+        # Fail closed on unparseable output. If osv-scanner produced stdout that
+        # we could not parse as JSON — and it is not a recognized no-op — the
+        # scan result is unknown. For a security scanner an unknown result must
+        # never be reported as a clean pass (see #1044).
+        parse_failure = (
+            payload is None and bool(proc.stdout.strip()) and not no_op_success
+        )
+        if parse_failure:
+            success = False
+            parse_failures_count = 1
+
+        # Fail closed on malformed exit-0 payloads. osv-scanner may exit 0 while
+        # emitting an error-shaped object (``{"error": ...}``) or a payload whose
+        # ``results`` key is missing or not a list. Such a payload parses as JSON
+        # but is not a real scan report, so its true result is unknown. A security
+        # gate must treat this as a failure, never a clean pass (see #1028).
+        if payload is not None and not self._payload_has_valid_results(payload):
+            success = False
+            parse_failures_count = 1
 
         # Determine overall success: subprocess must succeed AND no issues
         # found. A non-zero exit with 0 parsed issues indicates an execution
@@ -295,6 +350,9 @@ class OsvScannerPlugin(BaseToolPlugin):
             options=merged_options,
         )
 
+        if no_op_success and parse_failures_count is None:
+            parse_failures_count = 0
+
         return ToolResult(
             name=self.definition.name,
             success=overall_success,
@@ -302,6 +360,7 @@ class OsvScannerPlugin(BaseToolPlugin):
             issues_count=len(issues),
             issues=issues if issues else None,
             ai_metadata=suppression_metadata,
+            parse_failures_count=parse_failures_count,
         )
 
     def _check_suppression_staleness(
@@ -341,7 +400,7 @@ class OsvScannerPlugin(BaseToolPlugin):
         # Run osv-scanner without suppressions to see all vulnerabilities
         probe_cmd = self._build_probe_command(scan_root)
         try:
-            _probe_success, probe_output = self._run_subprocess(
+            probe = self._run_subprocess_result(
                 probe_cmd,
                 timeout=timeout,
                 cwd=str(scan_root),
@@ -350,11 +409,11 @@ class OsvScannerPlugin(BaseToolPlugin):
             logger.debug("[osv-scanner] Probe scan timed out, skipping staleness check")
             return None
 
-        probe_issues = parse_osv_scanner_output(probe_output)
+        probe_issues = parse_osv_scanner_output(probe.stdout)
 
         # If probe failed and returned no parseable issues, skip classification
         # to avoid incorrectly marking all suppressions as stale.
-        if not _probe_success and not probe_issues:
+        if not probe.success and not probe_issues:
             logger.debug(
                 "[osv-scanner] Probe scan failed with no parseable output, "
                 "skipping staleness check",

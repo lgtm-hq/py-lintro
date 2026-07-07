@@ -9,6 +9,7 @@ import pytest
 from assertpy import assert_that
 
 from lintro.ai.config import AIConfig
+from lintro.ai.enums import AITransport
 from lintro.ai.models import AIFixSuggestion, AIResult, AISummary
 from lintro.ai.orchestrator import run_ai_enhancement
 from lintro.ai.validation import ValidationResult
@@ -44,7 +45,7 @@ def test_ai_result_default_no_error(
             ),
         ],
     )
-    config = LintroConfig(ai=AIConfig(enabled=True))
+    config = LintroConfig(ai=AIConfig(enabled=True, transport=AITransport.API))
     logger = MagicMock()
 
     mock_get_provider.return_value = MockAIProvider()
@@ -96,7 +97,7 @@ def test_ai_result_unfixed_issues_when_fixes_fail(
         ],
     )
     config = LintroConfig(
-        ai=AIConfig(enabled=True, max_fix_attempts=5, fail_on_unfixed=True),
+        ai=AIConfig(enabled=True, transport=AITransport.API, fail_on_unfixed=True),
     )
     logger = MagicMock()
 
@@ -120,7 +121,7 @@ def test_ai_result_unfixed_issues_when_fixes_fail(
 
 def test_ai_result_error_on_exception():
     """AIResult.error is True when AI enhancement raises an exception."""
-    config = LintroConfig(ai=AIConfig(enabled=True))
+    config = LintroConfig(ai=AIConfig(enabled=True, transport=AITransport.API))
     logger = MagicMock()
 
     with patch(
@@ -141,7 +142,9 @@ def test_ai_result_error_on_exception():
 
 def test_ai_result_error_propagates_when_fail_on_ai_error():
     """Exceptions propagate when fail_on_ai_error=True."""
-    config = LintroConfig(ai=AIConfig(enabled=True, fail_on_ai_error=True))
+    config = LintroConfig(
+        ai=AIConfig(enabled=True, transport=AITransport.API, fail_on_ai_error=True),
+    )
     logger = MagicMock()
 
     with (
@@ -213,7 +216,7 @@ def test_ai_result_tracks_applied_fixes(
         tool_name="ruff",
     )
     config = LintroConfig(
-        ai=AIConfig(enabled=True, auto_apply=True),
+        ai=AIConfig(enabled=True, transport=AITransport.API, auto_apply=True),
     )
     logger = MagicMock()
 

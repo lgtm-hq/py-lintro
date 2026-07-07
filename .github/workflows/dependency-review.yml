@@ -7,6 +7,7 @@ name: Security - Dependency Review
   pull_request:
     branches: [main]
   merge_group:
+    types: [checks_requested]
 
 permissions: {}
 
@@ -17,10 +18,10 @@ concurrency:
 jobs:
   dependency-review:
     # yamllint disable-line rule:line-length
-    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-dependency-review.yml@f469f4d5c187f0700ccec4c023152fb68ee3dc89 # v0.32.3
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-dependency-review.yml@4aaefe64763b7841b6d92d94dc47185083d34c9a # v0.46.0
     with:
       fail-on-severity: high
-      tooling-ref: 'f469f4d5c187f0700ccec4c023152fb68ee3dc89' # v0.32.3
+      tooling-ref: '4aaefe64763b7841b6d92d94dc47185083d34c9a' # v0.46.0
       egress-policy: block
       egress-preset: scorecard
       allowed-endpoints-mode: append

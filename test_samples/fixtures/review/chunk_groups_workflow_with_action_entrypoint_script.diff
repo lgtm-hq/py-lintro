@@ -1,0 +1,25 @@
+diff --git a/.github/workflows/ci.yml b/.github/workflows/ci.yml
+--- a/.github/workflows/ci.yml
++++ b/.github/workflows/ci.yml
+@@ -1 +1,2 @@
+ name: CI
++- uses: ./.github/actions/setup
+diff --git a/.github/actions/setup/action.yml b/.github/actions/setup/action.yml
+new file mode 100644
+index 0000000..1111111
+--- /dev/null
++++ b/.github/actions/setup/action.yml
+@@ -0,0 +1,7 @@
++name: Setup
++description: Run the setup entrypoint script
++runs:
++  using: composite
++  steps:
++    - run: ${{ github.action_path }}/run
++      shell: sh
+diff --git a/.github/actions/setup/run b/.github/actions/setup/run
+--- a/.github/actions/setup/run
++++ b/.github/actions/setup/run
+@@ -1 +1,2 @@
+ #!/bin/sh
++echo setup

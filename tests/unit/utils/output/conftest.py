@@ -1,22 +1,21 @@
-"""Shared fixtures and test data for file writer tests.
-
-Provides MockIssue and MockToolResult dataclasses along with factories
-for creating test data across multiple file writer test modules.
-"""
+"""Shared fixtures and test data for file writer tests."""
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 import pytest
+
+from lintro.models.core.tool_result import ToolResult
+from lintro.parsers.base_issue import BaseIssue
 
 if TYPE_CHECKING:
     from collections.abc import Callable
 
 
 @dataclass
-class MockIssue:
+class MockIssue(BaseIssue):
     """Mock issue for testing file writer functionality."""
 
     file: str = "src/main.py"
@@ -25,39 +24,19 @@ class MockIssue:
     message: str = "Test error"
 
 
-@dataclass
-class MockToolResult:
-    """Mock tool result for testing file writer functionality."""
-
-    name: str = "test-tool"
-    success: bool = True
-    issues_count: int = 0
-    output: str = ""
-    issues: list[MockIssue] = field(default_factory=list)
-    initial_issues: list[MockIssue] | None = None
-
-
 @pytest.fixture
-def mock_tool_result_factory() -> Callable[..., MockToolResult]:
-    """Provide a factory for creating MockToolResult instances with custom attributes.
+def mock_tool_result_factory() -> Callable[..., ToolResult]:
+    """Provide a factory for creating ToolResult instances."""
 
-    Returns:
-        Factory function that creates MockToolResult instances.
-    """
-
-    def _create(**kwargs: Any) -> MockToolResult:
-        return MockToolResult(**kwargs)
+    def _create(**kwargs: Any) -> ToolResult:
+        return ToolResult(**kwargs)
 
     return _create
 
 
 @pytest.fixture
 def mock_issue_factory() -> Callable[..., MockIssue]:
-    """Provide a factory for creating MockIssue instances with custom attributes.
-
-    Returns:
-        Factory function that creates MockIssue instances.
-    """
+    """Provide a factory for creating MockIssue instances."""
 
     def _create(**kwargs: Any) -> MockIssue:
         return MockIssue(**kwargs)
@@ -67,18 +46,10 @@ def mock_issue_factory() -> Callable[..., MockIssue]:
 
 @pytest.fixture
 def sample_results_with_issues(
-    mock_tool_result_factory: Callable[..., MockToolResult],
+    mock_tool_result_factory: Callable[..., ToolResult],
     mock_issue_factory: Callable[..., MockIssue],
-) -> list[MockToolResult]:
-    """Provide sample tool results with issues for testing output formats.
-
-    Args:
-        mock_tool_result_factory: Factory for creating mock tool results.
-        mock_issue_factory: Factory for creating mock issues.
-
-    Returns:
-        List containing a single MockToolResult with one issue.
-    """
+) -> list[ToolResult]:
+    """Sample tool results with one issue."""
     return [
         mock_tool_result_factory(
             name="ruff",
@@ -90,14 +61,7 @@ def sample_results_with_issues(
 
 @pytest.fixture
 def sample_results_empty(
-    mock_tool_result_factory: Callable[..., MockToolResult],
-) -> list[MockToolResult]:
-    """Provide sample tool results with no issues for testing output formats.
-
-    Args:
-        mock_tool_result_factory: Factory for creating mock tool results.
-
-    Returns:
-        List containing a single MockToolResult with zero issues.
-    """
+    mock_tool_result_factory: Callable[..., ToolResult],
+) -> list[ToolResult]:
+    """Sample tool results with no issues."""
     return [mock_tool_result_factory(name="ruff", issues_count=0)]

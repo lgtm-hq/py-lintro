@@ -7,6 +7,7 @@ name: Quality Check - PR Title Validation
   pull_request:
     types: [opened, edited, synchronize, reopened, ready_for_review]
   merge_group:
+    types: [checks_requested]
 
 permissions: {}
 
@@ -17,13 +18,12 @@ concurrency:
 jobs:
   semantic-title:
     # yamllint disable-line rule:line-length
-    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-semantic-pr-title.yml@f469f4d5c187f0700ccec4c023152fb68ee3dc89 # v0.32.3
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-semantic-pr-title.yml@4aaefe64763b7841b6d92d94dc47185083d34c9a # v0.46.0
     with:
-      tooling-ref: 'f469f4d5c187f0700ccec4c023152fb68ee3dc89' # v0.32.3
+      tooling-ref: '4aaefe64763b7841b6d92d94dc47185083d34c9a' # v0.46.0
       egress-policy: block
       egress-preset: github-tooling
     permissions:
       contents: read
-      # lgtm-ci reusable-semantic-pr-title → amannn/action-semantic-pull-request:
-      # read PR title/metadata only (read-only; satisfies least-privilege audits).
-      pull-requests: read
+      # post-failure-comment (default: true) upserts failure comments on the PR
+      pull-requests: write

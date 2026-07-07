@@ -1,0 +1,12 @@
+diff --git a/.github/workflows/ci.yml b/.github/workflows/ci.yml
+--- a/.github/workflows/ci.yml
++++ b/.github/workflows/ci.yml
+@@ -1 +1,2 @@
+ name: CI
++run: scripts/deploy.sh
+diff --git a/scripts/deploy.sh-old b/scripts/deploy.sh-old
+--- a/scripts/deploy.sh-old
++++ b/scripts/deploy.sh-old
+@@ -1 +1,2 @@
+ echo old
++echo backup

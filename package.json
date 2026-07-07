@@ -17,20 +17,26 @@
   },
   "devDependencies": {
     "@astrojs/check": "0.9.8",
-    "astro": "6.1.10",
-    "markdownlint-cli2": "0.22.0",
+    "astro": "6.4.8",
+    "markdownlint-cli2": "0.22.1",
     "oxfmt": "0.43.0",
     "oxlint": "1.58.0",
     "prettier": "3.8.1",
     "prettier-plugin-astro": "0.14.1",
-    "svelte": "5.55.7",
+    "svelte": "5.56.4",
     "svelte-check": "4.4.6",
     "typescript": "^5.9.3",
     "vue-tsc": "3.2.6"
   },
   "overrides": {
+    "defu": "6.1.5",
     "devalue": "5.8.1",
+    "esbuild": "^0.28.1",
     "fast-uri": "3.1.2",
-    "postcss": "^8.5.10"
+    "js-yaml": "^4.2.0",
+    "markdown-it": "^14.2.0",
+    "postcss": "^8.5.10",
+    "vite": "^8.0.16",
+    "yaml": "2.8.3"
   }
 }

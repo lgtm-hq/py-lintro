@@ -3,7 +3,7 @@
 This repository uses GitHub Actions for quality gates, release automation, and
 publishing. Shared workflows are thin callers to
 [lgtm-ci](https://github.com/lgtm-hq/lgtm-ci) reusable workflows pinned at
-`f469f4d5c187f0700ccec4c023152fb68ee3dc89` (**v0.32.3**). All workflow SHA pins include
+`4aaefe64763b7841b6d92d94dc47185083d34c9a` (**v0.46.0**). All workflow SHA pins include
 trailing `# vX.Y.Z` comments so Renovate can track digest updates. Policy is enforced by
 [lgtm-ci validate-action-pinning](https://github.com/lgtm-hq/lgtm-ci/pull/221) (via
 `validate-action-pinning.yml`) and automated by the
@@ -41,10 +41,16 @@ trailing `# vX.Y.Z` comments so Renovate can track digest updates. Policy is enf
 - **docker-build-publish.yml** — Multi-arch GHCR publish via `reusable-docker.yml`
   (full + base images, registry cache at `:cache`, no-cache on version tags)
 
-## Security & maintenance (bespoke)
+## Security & maintenance
 
-- **vuln-suppression-check.yml**, **lintro-report-scheduled.yml**,
-  **pr-comment-cleanup.yml**, **test-built-package.yml**, **build-binary.yml**
+- **ghcr-cleanup.yml** — Scheduled GHCR cleanup via `reusable-ghcr-cleanup.yml`
+  (`py-lintro`, `py-lintro-base`)
+- **vuln-suppression-check.yml** — Weekly OSV suppression staleness via
+  `reusable-vuln-suppression-check.yml`
+- **renovate.yml** — Daily dependency updates (lgtm-ci `harden-runner` +
+  `secure-checkout`)
+- **lintro-report-scheduled.yml**, **pr-comment-cleanup.yml**,
+  **test-built-package.yml**, **build-binary.yml**
 
 ## Token patterns
 

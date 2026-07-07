@@ -1,0 +1,12 @@
+diff --git a/.github/workflows/ci.yml b/.github/workflows/ci.yml
+--- a/.github/workflows/ci.yml
++++ b/.github/workflows/ci.yml
+@@ -1 +1,2 @@
+ name: CI
++- uses: ./.github/actions/setup
+diff --git a/.github/actions/setup/dist/action.yml b/.github/actions/setup/dist/action.yml
+--- a/.github/actions/setup/dist/action.yml
++++ b/.github/actions/setup/dist/action.yml
+@@ -1 +1,2 @@
+ runs:
++  using: node20

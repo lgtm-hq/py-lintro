@@ -17,9 +17,9 @@ concurrency:
 jobs:
   scorecards:
     # yamllint disable-line rule:line-length
-    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-scorecards.yml@f469f4d5c187f0700ccec4c023152fb68ee3dc89 # v0.32.3
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-scorecards.yml@4aaefe64763b7841b6d92d94dc47185083d34c9a # v0.46.0
     with:
-      tooling-ref: 'f469f4d5c187f0700ccec4c023152fb68ee3dc89' # v0.32.3
+      tooling-ref: '4aaefe64763b7841b6d92d94dc47185083d34c9a' # v0.46.0
       egress-policy: block
       egress-preset: scorecard
       allowed-endpoints-mode: append
