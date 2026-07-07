@@ -125,25 +125,38 @@ class PhpstanPlugin(BaseToolPlugin):
         )
         super().set_options(**options, **kwargs)
 
-    def _has_native_config(self) -> bool:
+    def _has_native_config(self, run_cwd: str | None = None) -> bool:
         """Check whether a PHPStan configuration file is discoverable.
 
         PHPStan auto-discovers ``phpstan.neon`` / ``phpstan.neon.dist`` /
-        ``phpstan.dist.neon`` from the current working directory. When one is
+        ``phpstan.dist.neon`` from the directory it runs in. When one is
         present it defines the analysis level, so lintro must not also pass
-        ``--level`` (which would either be redundant or conflict).
+        ``--level`` (which would either be redundant or conflict). The check
+        must look at the same directory the subprocess will run from, not
+        lintro's own cwd — otherwise a repo-root config can suppress --level
+        while the subprocess never discovers that config.
+
+        Args:
+            run_cwd: Directory the PHPStan subprocess will execute from;
+                defaults to the current working directory.
 
         Returns:
-            True when a native config file exists in the current directory.
+            True when a native config file exists in the run directory.
         """
-        cwd = Path.cwd()
+        cwd = Path(run_cwd) if run_cwd else Path.cwd()
         return any((cwd / name).is_file() for name in PHPSTAN_NATIVE_CONFIGS)
 
-    def _build_command(self, files: list[str]) -> list[str]:
+    def _build_command(
+        self,
+        files: list[str],
+        run_cwd: str | None = None,
+    ) -> list[str]:
         """Build the PHPStan invocation command.
 
         Args:
             files: Relative file paths that should be analysed by PHPStan.
+            run_cwd: Directory the subprocess will execute from (used for
+                native-config discovery).
 
         Returns:
             A list of command arguments ready to be executed.
@@ -161,7 +174,7 @@ class PhpstanPlugin(BaseToolPlugin):
 
         # Only pass --level when the project provides no native config that
         # already defines it (config-defined level wins, like ruff/mypy).
-        if not has_explicit_config and not self._has_native_config():
+        if not has_explicit_config and not self._has_native_config(run_cwd):
             level = self.options.get("level", PHPSTAN_DEFAULT_LEVEL)
             cmd.extend(["--level", str(level)])
 
@@ -199,7 +212,7 @@ class PhpstanPlugin(BaseToolPlugin):
         if ctx.should_skip:
             return ctx.early_result  # type: ignore[return-value]
 
-        cmd = self._build_command(files=ctx.rel_files)
+        cmd = self._build_command(files=ctx.rel_files, run_cwd=ctx.cwd)
         logger.debug(f"[phpstan] Running: {' '.join(cmd[:12])}... (cwd={ctx.cwd})")
 
         try:
@@ -252,7 +265,11 @@ class PhpstanPlugin(BaseToolPlugin):
 
         # No JSON on stdout while the process failed means a hard execution
         # error (bad config, missing runtime); surface the diagnostics.
-        if issues_count == 0 and not stdout and proc.returncode != 0:
+        # PHPStan exits 1 with a JSON report when errors are found (parsed
+        # above). A non-zero exit with zero parsed issues — whether stdout was
+        # empty, partial JSON, or a PHP fatal error — is a crashed analysis
+        # and must never pass as a clean run.
+        if issues_count == 0 and proc.returncode != 0:
             return ToolResult(
                 name=self.definition.name,
                 success=False,
