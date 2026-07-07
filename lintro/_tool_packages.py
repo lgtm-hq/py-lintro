@@ -28,6 +28,7 @@ from lintro.enums.tool_name import ToolName
 
 NPM_PACKAGE_OWNERS: dict[str, ToolName | None] = {
     "astro": ToolName.ASTRO_CHECK,
+    "html-validate": ToolName.HTML_VALIDATE,
     "svelte-check": ToolName.SVELTE_CHECK,
     "typescript": ToolName.TSC,
     "vue-tsc": ToolName.VUE_TSC,

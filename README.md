@@ -99,6 +99,12 @@ system.
 <td><a href="https://github.com/hadolint/hadolint/releases">GitHub Releases</a></td>
 </tr>
 <tr>
+<td><a href="https://html-validate.org/"><img src="https://img.shields.io/badge/html--validate-e34f26?logo=html5&logoColor=white" alt="html-validate"></a></td>
+<td>🌐 HTML</td>
+<td>-</td>
+<td><code>bun add -g html-validate</code><br><code>npm install -g html-validate</code></td>
+</tr>
+<tr>
 <td><a href="https://github.com/DavidAnson/markdownlint-cli2"><img src="https://img.shields.io/badge/Markdownlint--cli2-000000?logo=markdown&logoColor=white" alt="Markdownlint"></a></td>
 <td>📝 Markdown</td>
 <td>-</td>

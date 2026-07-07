@@ -166,7 +166,7 @@ should_install() {
 # Kept in sync with the should_install blocks and tools_to_verify array.
 SUPPORTED_TOOLS=(
 	"actionlint" "astro" "bandit" "black" "cargo-audit" "cargo-deny"
-	"clippy" "gitleaks" "hadolint" "markdownlint" "markdownlint-cli2" "mypy" "osv-scanner"
+	"clippy" "gitleaks" "hadolint" "html-validate" "markdownlint" "markdownlint-cli2" "mypy" "osv-scanner"
 	"oxfmt" "oxlint" "prettier" "pydoclint" "ruff" "rustfmt" "semgrep"
 	"shellcheck" "shfmt" "sqlfluff" "svelte-check" "taplo" "tsc"
 	"vue-tsc" "yamllint"
@@ -1078,6 +1078,28 @@ main() {
 		fi
 	fi # markdownlint
 
+	if should_install "html-validate"; then
+		# Install html-validate via bun (offline HTML validation)
+		echo -e "${BLUE}Installing html-validate...${NC}"
+
+		# Ensure bun is available (should already be installed for prettier)
+		if ! ensure_bun_installed; then
+			exit 1
+		fi
+
+		# Read html-validate version from _tool_versions.py (single source of truth)
+		HTML_VALIDATE_VERSION=$(get_tool_version "html-validate") || exit 1
+
+		if [ $DRY_RUN -eq 1 ]; then
+			log_info "[DRY-RUN] Would install html-validate@${HTML_VALIDATE_VERSION} globally via bun"
+		elif bun add -g "html-validate@${HTML_VALIDATE_VERSION}"; then
+			echo -e "${GREEN}✓ html-validate@${HTML_VALIDATE_VERSION} installed successfully${NC}"
+		else
+			echo -e "${RED}✗ Failed to install html-validate${NC}"
+			exit 1
+		fi
+	fi # html-validate
+
 	if should_install "semgrep"; then
 		# Install semgrep (security scanner)
 		echo -e "${BLUE}Installing semgrep...${NC}"
@@ -1450,7 +1472,7 @@ main() {
 	# Verify installations
 	echo -e "${YELLOW}Verifying installations...${NC}"
 
-	tools_to_verify=("actionlint" "astro" "bandit" "black" "cargo-audit" "cargo-deny" "clippy" "rustfmt" "gitleaks" "hadolint" "markdownlint-cli2" "mypy" "osv-scanner" "oxfmt" "oxlint" "prettier" "pydoclint" "ruff" "semgrep" "shellcheck" "shfmt" "sqlfluff" "svelte-check" "taplo" "tsc" "vue-tsc" "yamllint")
+	tools_to_verify=("actionlint" "astro" "bandit" "black" "cargo-audit" "cargo-deny" "clippy" "rustfmt" "gitleaks" "hadolint" "html-validate" "markdownlint-cli2" "mypy" "osv-scanner" "oxfmt" "oxlint" "prettier" "pydoclint" "ruff" "semgrep" "shellcheck" "shfmt" "sqlfluff" "svelte-check" "taplo" "tsc" "vue-tsc" "yamllint")
 
 	# Filter verification list when --tools is set.
 	# Map aliases so e.g. --tools markdownlint verifies markdownlint-cli2.

@@ -11,6 +11,7 @@ Sources:
 NPM_VERSIONS: dict[str, str] = {
     "@astrojs/check": "0.9.8",
     "astro": "6.4.8",
+    "html-validate": "11.5.5",
     "markdownlint-cli2": "0.22.1",
     "oxfmt": "0.43.0",
     "oxlint": "1.58.0",

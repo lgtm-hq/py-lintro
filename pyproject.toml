@@ -154,6 +154,7 @@ packages = [
   "lintro.parsers.clippy",
   "lintro.parsers.gitleaks",
   "lintro.parsers.hadolint",
+  "lintro.parsers.html_validate",
   "lintro.parsers.markdownlint",
   "lintro.parsers.pytest",
   "lintro.parsers.ruff",

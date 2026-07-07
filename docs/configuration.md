@@ -447,18 +447,19 @@ tool_priorities = { ruff = 5, black = 10, prettier = 1 }
 
 **Default Tool Priorities:**
 
-| Tool         | Priority | Type             |
-| ------------ | -------- | ---------------- |
-| prettier     | 10       | Formatter        |
-| black        | 15       | Formatter        |
-| ruff         | 20       | Linter/Formatter |
-| markdownlint | 30       | Linter           |
-| yamllint     | 35       | Linter           |
-| pydoclint    | 40       | Linter           |
-| bandit       | 45       | Security         |
-| hadolint     | 50       | Infrastructure   |
-| actionlint   | 55       | Infrastructure   |
-| pytest       | 100      | Test Runner      |
+| Tool          | Priority | Type             |
+| ------------- | -------- | ---------------- |
+| prettier      | 10       | Formatter        |
+| black         | 15       | Formatter        |
+| ruff          | 20       | Linter/Formatter |
+| markdownlint  | 30       | Linter           |
+| html_validate | 30       | Linter           |
+| yamllint      | 35       | Linter           |
+| pydoclint     | 40       | Linter           |
+| bandit        | 45       | Security         |
+| hadolint      | 50       | Infrastructure   |
+| actionlint    | 55       | Infrastructure   |
+| pytest        | 100      | Test Runner      |
 
 Lower priority values run first. This ensures formatters run before linters, avoiding
 false positives from linters detecting issues that formatters would fix.

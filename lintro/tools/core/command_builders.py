@@ -418,6 +418,7 @@ class NodeJSBuilder(CommandBuilder):
 
             self._package_names = {
                 ToolName.ASTRO_CHECK: "astro",
+                ToolName.HTML_VALIDATE: "html-validate",
                 ToolName.MARKDOWNLINT: "markdownlint-cli2",
                 ToolName.OXFMT: "oxfmt",
                 ToolName.OXLINT: "oxlint",

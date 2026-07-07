@@ -155,6 +155,8 @@ def get_install_hints() -> dict[str, str]:
         "pytest": (
             "Install via: pip install pytest>={version} or uv add pytest>={version}"
         ),
+        "html_validate": "Install via: bun add -d html-validate@>={version}",
+        "html-validate": "Install via: bun add -d html-validate@>={version}",
         "markdownlint": "Install via: bun add -d markdownlint-cli2@>={version}",
         "markdownlint-cli2": "Install via: bun add -d markdownlint-cli2@>={version}",
         "oxfmt": "Install via: bun add -d oxfmt@>={version}",

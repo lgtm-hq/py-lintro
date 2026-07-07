@@ -167,6 +167,19 @@
       "tags": ["linter"]
     },
     {
+      "name": "html_validate",
+      "version": "11.5.5",
+      "install": {
+        "type": "npm",
+        "package": "html-validate"
+      },
+      "tier": "tools",
+      "category": "npm",
+      "version_command": ["html-validate", "--version"],
+      "languages": ["html"],
+      "tags": ["linter"]
+    },
+    {
       "name": "markdownlint",
       "version": "0.22.1",
       "install": {

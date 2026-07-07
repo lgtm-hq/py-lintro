@@ -56,6 +56,7 @@
         "rhysd/actionlint",
         "prettier",
         "markdownlint-cli2",
+        "html-validate",
         "oxlint",
         "oxfmt",
         "gitleaks",

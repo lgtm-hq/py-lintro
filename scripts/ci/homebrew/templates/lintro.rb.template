@@ -74,6 +74,7 @@ class Lintro < Formula
       Shell:            shellcheck, shfmt
       Markdown:         markdownlint-cli2
       JS / TS:          oxlint, oxfmt, prettier
+      HTML:             html-validate (via npm, see below)
       Dockerfiles:      hadolint
       GitHub Actions:   actionlint
       Security:         gitleaks, semgrep
@@ -83,6 +84,7 @@ class Lintro < Formula
       Not installed automatically (install if needed):
         cargo install cargo-audit cargo-deny   # Rust dependency auditing
         npm install -g astro svelte-check vue-tsc  # Framework type-checkers
+        npm install -g html-validate               # HTML validation
 
       Run 'lintro doctor' to check tool status and get install hints.
 
