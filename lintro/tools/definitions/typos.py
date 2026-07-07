@@ -165,7 +165,10 @@ class TyposPlugin(BaseToolPlugin):
         # Apply corrections in place. typos exits non-zero when it reports
         # typos (including ones it just fixed), so only a failure with no
         # parseable report signals a real write/tool error.
-        fix_cmd = ["typos", "--write-changes", *ctx.rel_files]
+        # JSON format so the failure guard below can distinguish "reported
+        # typos" (parseable findings, normal non-zero exit) from a real
+        # write/tool error (nothing parseable).
+        fix_cmd = [*self._build_command(), "--write-changes", *ctx.rel_files]
         try:
             fix_success, fix_output = self._run_subprocess(
                 cmd=fix_cmd,
