@@ -422,7 +422,32 @@ class BufPlugin(BaseToolPlugin):
                 initial_issues=initial_issues,
             )
 
-        remaining_issues.extend(parse_buf_output(final_lint.stdout))
+        final_lint_issues = parse_buf_output(final_lint.stdout)
+        remaining_issues.extend(final_lint_issues)
+
+        # A failed verification pass (format re-check or lint) that produced
+        # nothing parseable must not read as "all fixed" — surface the
+        # stderr-only failure with the initial issues kept as remaining.
+        verification_failed = (not final_lint.success and not final_lint_issues) or (
+            not final_fmt.success and not parse_buf_format_output(final_fmt.stdout)
+        )
+        if verification_failed and not remaining_issues:
+            return ToolResult(
+                name=self.definition.name,
+                success=False,
+                output=(
+                    final_lint.stderr.strip()
+                    or final_fmt.stderr.strip()
+                    or "buf verification exited with an error after fixing."
+                ),
+                issues_count=initial_count,
+                issues=initial_issues,
+                initial_issues_count=initial_count,
+                fixed_issues_count=0,
+                remaining_issues_count=initial_count,
+                cwd=ctx.cwd,
+            )
+
         remaining_count = len(remaining_issues)
         fixed_count = max(0, initial_count - remaining_count)
 
