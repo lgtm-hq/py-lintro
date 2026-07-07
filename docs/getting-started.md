@@ -91,6 +91,8 @@ Some tools require separate installation. Their minimum versions are also manage
   `pip install semgrep`, or `brew install semgrep`)
 - `gitleaks` - Secret detection in git repos (`brew install gitleaks` or GitHub
   releases)
+- `ktlint` - Kotlin linter and formatter (`brew install ktlint` or GitHub releases;
+  requires a JVM)
 - `shellcheck` - Shell script analyzer (`brew install shellcheck` or GitHub releases)
 - `shfmt` - Shell script formatter (`brew install shfmt` or GitHub releases)
 - `sqlfluff` - SQL linter and formatter (`pip install sqlfluff`)

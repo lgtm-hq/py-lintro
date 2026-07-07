@@ -161,6 +161,12 @@ system.
 </tr>
 <tr><th colspan="4">Lint + Format</th></tr>
 <tr>
+<td><a href="https://pinterest.github.io/ktlint/"><img src="https://img.shields.io/badge/ktlint-7F52FF?logo=kotlin&logoColor=white" alt="ktlint"></a></td>
+<td>🟪 Kotlin</td>
+<td>✅</td>
+<td><code>brew install ktlint</code><br><a href="https://github.com/pinterest/ktlint/releases">GitHub Releases</a></td>
+</tr>
+<tr>
 <td><a href="https://github.com/astral-sh/ruff"><img src="https://img.shields.io/badge/Ruff-000?logo=ruff&logoColor=white" alt="Ruff"></a></td>
 <td>🐍 Python</td>
 <td>✅</td>

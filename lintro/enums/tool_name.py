@@ -20,6 +20,7 @@ class ToolName(StrEnum):
     CLIPPY = auto()
     GITLEAKS = auto()
     HADOLINT = auto()
+    KTLINT = auto()
     MARKDOWNLINT = auto()
     MYPY = auto()
     OSV_SCANNER = auto()

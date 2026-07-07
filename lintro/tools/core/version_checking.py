@@ -171,6 +171,11 @@ def get_install_hints() -> dict[str, str]:
         "hadolint": (
             "Install via: https://github.com/hadolint/hadolint/releases (v{version}+)"
         ),
+        "ktlint": (
+            "Install via: brew install ktlint or "
+            "https://github.com/pinterest/ktlint/releases (v{version}+); "
+            "requires a JVM (Java 8+)"
+        ),
         "actionlint": (
             "Install via: https://github.com/rhysd/actionlint/releases (v{version}+)"
         ),

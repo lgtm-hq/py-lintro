@@ -40,6 +40,7 @@
     "ruby": ["semgrep"],
     "sql": ["sqlfluff"],
     "shell": ["shellcheck", "shfmt"],
+    "kotlin": ["ktlint"],
     "docker": ["hadolint"],
     "yaml": ["yamllint"],
     "markdown": ["markdownlint"],
@@ -165,6 +166,18 @@
       "version_command": ["hadolint", "--version"],
       "languages": ["docker"],
       "tags": ["linter"]
+    },
+    {
+      "name": "ktlint",
+      "version": "1.8.0",
+      "install": {
+        "type": "binary"
+      },
+      "tier": "tools",
+      "category": "external",
+      "version_command": ["ktlint", "--version"],
+      "languages": ["kotlin"],
+      "tags": ["linter", "formatter"]
     },
     {
       "name": "markdownlint",
