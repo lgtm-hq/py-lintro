@@ -1,0 +1,37 @@
+#!/usr/bin/env node
+"use strict";
+
+/**
+ * Launcher for the lintro meta-package.
+ *
+ * Resolves the self-contained binary shipped by the matching
+ * `@lgtm-hq/lintro-<platform>` optional dependency and forwards all arguments and
+ * stdio to it. Exits with the binary's own exit code.
+ */
+
+const { execFileSync } = require("child_process");
+const { resolveBinary } = require("../lib/resolve.js");
+
+function main() {
+  let binaryPath;
+  try {
+    binaryPath = resolveBinary();
+  } catch (err) {
+    process.stderr.write(`${err.message}\n`);
+    process.exit(1);
+  }
+
+  try {
+    execFileSync(binaryPath, process.argv.slice(2), { stdio: "inherit" });
+  } catch (err) {
+    // execFileSync throws for non-zero exit codes; propagate the child's
+    // status so callers observe the real result.
+    if (typeof err.status === "number") {
+      process.exit(err.status);
+    }
+    process.stderr.write(`lintro: failed to launch binary: ${err.message}\n`);
+    process.exit(1);
+  }
+}
+
+main();

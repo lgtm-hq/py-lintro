@@ -1618,15 +1618,52 @@ lintro check --tools shellcheck --tool-options "shellcheck:shell=bash"
 
 # Exclude specific codes
 lintro check --tools shellcheck --tool-options "shellcheck:exclude=SC2086|SC2046"
+
+# Follow repo-local sourced files (resolves SC1091 for SCRIPT_DIR sourcing)
+lintro check --tools shellcheck \
+  --tool-options "shellcheck:external_sources=True,shellcheck:source_paths=SCRIPTDIR"
 ```
 
 **Available Options:**
 
-| Option     | Type        | Description                                     |
-| ---------- | ----------- | ----------------------------------------------- |
-| `severity` | str         | Minimum severity: error, warning, info, style   |
-| `exclude`  | list\[str\] | List of codes to exclude (e.g., SC2086, SC2046) |
-| `shell`    | str         | Force shell dialect: bash, sh, dash, ksh, zsh   |
+| Option             | Type        | Description                                                                                                                                                   |
+| ------------------ | ----------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `severity`         | str         | Minimum severity: error, warning, info, style                                                                                                                 |
+| `exclude`          | list\[str\] | List of codes to exclude (e.g., SC2086, SC2046)                                                                                                               |
+| `shell`            | str         | Force shell dialect: bash, sh, dash, ksh, zsh                                                                                                                 |
+| `external_sources` | bool        | Follow `source`d files external to the script (`-x`). Default `False`                                                                                         |
+| `source_paths`     | list\[str\] | Search paths for sourced files (`--source-path=...`); supports the `SCRIPTDIR` token. Setting this implies `external_sources` (`-x` is enabled automatically) |
+
+**Source-following (SC1091):**
+
+Scripts that source repo-local helpers with the runtime-safe pattern below emit `SC1091`
+("Not following ...") by default, because ShellCheck cannot statically resolve the
+dynamic path:
+
+```bash
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$SCRIPT_DIR/../lib/common.sh"
+```
+
+Opt in to source-following (off by default, so existing projects are unaffected) by
+pointing `source_paths` at the directories ShellCheck should search. ShellCheck's
+literal `SCRIPTDIR` token resolves relative to each script's own directory, which
+matches the pattern above without hard-coding repo paths. Because ShellCheck ignores
+`--source-path` unless `-x` is active, setting `source_paths` **automatically enables**
+`external_sources`, so you do not need to set both — configuring paths is enough. (You
+may still set `external_sources = true` on its own to follow sources found on the
+default search path.)
+
+`pyproject.toml`:
+
+```toml
+[tool.lintro.shellcheck]
+# source_paths implies external_sources; -x is added automatically.
+source_paths = ["SCRIPTDIR", "scripts/lib"]
+```
+
+With this enabled, the SC1091 above is resolved without per-line
+`# shellcheck disable=SC1091` or `# shellcheck source=...` suppressions.
 
 **Common ShellCheck Codes:**
 

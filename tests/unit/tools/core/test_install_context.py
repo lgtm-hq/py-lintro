@@ -225,6 +225,58 @@ def test_detect_homebrew_install_context(
     assert_that(result).is_equal_to(expected)
 
 
+@pytest.mark.parametrize(
+    ("install_file", "executable"),
+    [
+        (
+            "/proj/node_modules/@lgtm-hq/lintro-darwin-arm64/bin/lintro",
+            "/usr/bin/node",
+        ),
+        (
+            "/proj/lintro/tools/core/install_context.py",
+            "/proj/node_modules/@lgtm-hq/lintro-linux-x64/bin/lintro",
+        ),
+    ],
+)
+def test_detect_npm_bin_install_context(
+    install_file: str,
+    executable: str,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Detect NPM_BIN when the resolved path is under node_modules/@lgtm-hq/lintro-.
+
+    Args:
+        install_file: Simulated module ``__file__``.
+        executable: Simulated ``sys.executable``.
+        monkeypatch: Pytest monkeypatch fixture.
+    """
+    monkeypatch.delenv("LINTRO_DOCKER", raising=False)
+    monkeypatch.delenv("CONTAINER", raising=False)
+
+    with (
+        patch(
+            "lintro.tools.core.install_context.os.path.exists",
+            return_value=False,
+        ),
+        patch(
+            "lintro.tools.core.install_context.__file__",
+            install_file,
+            create=True,
+        ),
+        patch(
+            "lintro.tools.core.install_context.sys.executable",
+            executable,
+        ),
+        patch(
+            "lintro.tools.core.install_context.os.path.realpath",
+            side_effect=lambda path: path,
+        ),
+    ):
+        result = _detect_install_context()
+
+    assert_that(result).is_equal_to(InstallContext.NPM_BIN)
+
+
 # ---------------------------------------------------------------------------
 # CI detection
 # ---------------------------------------------------------------------------
