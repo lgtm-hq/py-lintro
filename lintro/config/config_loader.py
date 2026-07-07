@@ -18,6 +18,7 @@ from typing import Any
 
 from loguru import logger
 
+from lintro.config.deps_config import DepsConfig
 from lintro.config.lintro_config import (
     EnforceConfig,
     ExecutionConfig,
@@ -436,6 +437,36 @@ def _parse_score_config(data: Any) -> ScoreConfig:
     filtered = {key: value for key, value in data.items() if key in known_fields}
     return ScoreConfig(**filtered)
 
+def _parse_deps_config(data: Any) -> DepsConfig:
+    """Parse the ``deps`` configuration section.
+
+    Args:
+        data: Raw ``deps`` section from config.
+
+    Returns:
+        DepsConfig: Parsed dependency policy configuration.
+
+    Raises:
+        ValueError: When the deps section is not a mapping.
+    """
+    if data is None:
+        return DepsConfig()
+    if not isinstance(data, dict):
+        msg = f"deps config must be a mapping, got {type(data).__name__}"
+        raise ValueError(msg)
+    if not data:
+        return DepsConfig()
+
+    known_fields = set(DepsConfig.model_fields)
+    unknown = set(data) - known_fields
+    if unknown:
+        logger.warning(
+            "Unknown deps config keys ignored: {}",
+            ", ".join(sorted(unknown)),
+        )
+    filtered = {key: value for key, value in data.items() if key in known_fields}
+    return DepsConfig(**filtered)
+
 
 def _convert_pyproject_to_config(data: dict[str, Any]) -> dict[str, Any]:
     """Convert pyproject.toml [tool.lintro] format to .lintro-config.yaml format.
@@ -458,6 +489,7 @@ def _convert_pyproject_to_config(data: dict[str, Any]) -> dict[str, Any]:
         "review": {},
         "score": {},
         "output": {},
+        "deps": {},
     }
 
     # Inline imports: ToolName is a static StrEnum that does not trigger
@@ -511,6 +543,7 @@ def _convert_pyproject_to_config(data: dict[str, Any]) -> dict[str, Any]:
         | {
             "ai",
             "defaults",
+            "deps",
             "output",
             "review",
             "score",
@@ -584,6 +617,8 @@ def _convert_pyproject_to_config(data: dict[str, Any]) -> dict[str, Any]:
             result["score"] = value
         elif key_lower == "output" and isinstance(value, dict):
             result["output"] = value
+        elif key_lower == "deps" and isinstance(value, dict):
+            result["deps"] = value
         elif key_lower in externally_handled_sections:
             # Parsed elsewhere; nothing to convert here.
             pass
@@ -666,6 +701,7 @@ def load_config(
     review_config = _parse_review_config(data.get("review", {}))
     score_config = _parse_score_config(data.get("score", {}))
     output_config = _parse_output_config(data.get("output", {}))
+    deps_config = _parse_deps_config(data.get("deps", {}))
 
     return LintroConfig(
         execution=execution_config,
@@ -676,6 +712,7 @@ def load_config(
         review=review_config,
         score=score_config,
         output=output_config,
+        deps=deps_config,
         config_path=resolved_path,
     )
 
