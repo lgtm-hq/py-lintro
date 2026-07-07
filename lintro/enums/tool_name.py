@@ -43,6 +43,7 @@ class ToolName(StrEnum):
     SQLFLUFF = auto()
     STYLELINT = auto()
     SVELTE_CHECK = auto()
+    SWIFTLINT = auto()
     TAPLO = auto()
     TRUFFLEHOG = auto()
     TSC = auto()
