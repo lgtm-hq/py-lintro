@@ -1,15 +1,11 @@
-import { posix } from "node:path";
-import {
-  docIdFromVFilePath,
-  isCrossPageLink,
-  shouldSkipResourceHref,
-} from "./doc-link-target.mjs";
+import { posix } from 'node:path';
+import { docIdFromVFilePath, isCrossPageLink, shouldSkipResourceHref } from './doc-link-target.mjs';
 
 /**
  * Repo-root README links have no equivalent page on the site; GitHub renders
  * the README (with heading anchors) on the repository home page instead.
  */
-const REPO_URL = "https://github.com/lgtm-hq/py-lintro";
+const REPO_URL = 'https://github.com/lgtm-hq/py-lintro';
 
 /** @typedef {import('hast').Root} Root */
 /** @typedef {import('hast').Element} Element */
@@ -23,7 +19,7 @@ const REPO_URL = "https://github.com/lgtm-hq/py-lintro";
 export function rehypeUnwrapHeadingLinks() {
   return (tree) => {
     walk(tree, [], (node) => {
-      if (node.type !== "element" || !/^h[1-6]$/.test(node.tagName)) {
+      if (node.type !== 'element' || !/^h[1-6]$/.test(node.tagName)) {
         return;
       }
 
@@ -48,17 +44,17 @@ export function rehypeUnwrapHeadingLinks() {
  */
 export function rehypeUnwrapCrossPageLinks() {
   return (tree, file) => {
-    const docId = docIdFromVFilePath(file.history?.[0] ?? "");
+    const docId = docIdFromVFilePath(file.history?.[0] ?? '');
     if (!docId) {
       return;
     }
 
     walk(tree, [], (node, ancestors) => {
-      if (node.type !== "element" || node.tagName !== "a") {
+      if (node.type !== 'element' || node.tagName !== 'a') {
         return;
       }
 
-      if (ancestors.some((ancestor) => ancestor.tagName === "pre")) {
+      if (ancestors.some((ancestor) => ancestor.tagName === 'pre')) {
         return;
       }
 
@@ -67,7 +63,7 @@ export function rehypeUnwrapCrossPageLinks() {
       }
 
       const href = node.properties?.href;
-      if (typeof href !== "string" || !isCrossPageLink(href, docId)) {
+      if (typeof href !== 'string' || !isCrossPageLink(href, docId)) {
         return;
       }
 
@@ -83,22 +79,22 @@ export function rehypeUnwrapCrossPageLinks() {
         return;
       }
 
-      siblings[index] = { type: "text", value: text };
+      siblings[index] = { type: 'text', value: text };
     });
   };
 }
 
 export function rehypeDocLinks(basePath) {
-  const base = basePath.endsWith("/") ? basePath : `${basePath}/`;
-  const baseNoSlash = base.endsWith("/") ? base.slice(0, -1) : base;
+  const base = basePath.endsWith('/') ? basePath : `${basePath}/`;
+  const baseNoSlash = base.endsWith('/') ? base.slice(0, -1) : base;
 
   return (tree) => {
     walk(tree, [], (node, ancestors) => {
-      if (node.type !== "element" || node.tagName !== "a") {
+      if (node.type !== 'element' || node.tagName !== 'a') {
         return;
       }
 
-      if (ancestors.some((ancestor) => ancestor.tagName === "pre")) {
+      if (ancestors.some((ancestor) => ancestor.tagName === 'pre')) {
         return;
       }
 
@@ -107,22 +103,22 @@ export function rehypeDocLinks(basePath) {
       }
 
       const href = node.properties?.href;
-      if (typeof href !== "string") {
+      if (typeof href !== 'string') {
         return;
       }
 
       if (shouldSkipResourceHref(href)) {
-        const hashIndex = href.indexOf("#");
-        const hash = hashIndex === -1 ? "" : href.slice(hashIndex);
+        const hashIndex = href.indexOf('#');
+        const hash = hashIndex === -1 ? '' : href.slice(hashIndex);
         node.properties.href = `${REPO_URL}${hash}`;
-        node.properties.target = "_blank";
-        node.properties.rel = "noopener noreferrer";
+        node.properties.target = '_blank';
+        node.properties.rel = 'noopener noreferrer';
         return;
       }
 
       if (isExternal(href)) {
-        node.properties.target = "_blank";
-        node.properties.rel = "noopener noreferrer";
+        node.properties.target = '_blank';
+        node.properties.rel = 'noopener noreferrer';
         return;
       }
 
@@ -138,17 +134,17 @@ export function rehypeDocLinks(basePath) {
  * @returns {boolean}
  */
 function isExternal(href) {
-  if (href.startsWith("//")) {
+  if (href.startsWith('//')) {
     return true;
   }
 
-  if (!href.startsWith("http://") && !href.startsWith("https://")) {
+  if (!href.startsWith('http://') && !href.startsWith('https://')) {
     return false;
   }
 
   try {
     const { hostname } = new URL(href);
-    return hostname !== "localhost" && hostname !== "127.0.0.1" && hostname !== "[::1]";
+    return hostname !== 'localhost' && hostname !== '127.0.0.1' && hostname !== '[::1]';
   } catch {
     return false;
   }
@@ -161,19 +157,19 @@ function isExternal(href) {
  */
 function isInternal(href, baseNoSlash) {
   if (
-    href.startsWith("//") ||
-    href.startsWith("#") ||
-    href.startsWith("mailto:") ||
-    href.startsWith("tel:")
+    href.startsWith('//') ||
+    href.startsWith('#') ||
+    href.startsWith('mailto:') ||
+    href.startsWith('tel:')
   ) {
     return false;
   }
 
-  if (href.startsWith("/")) {
+  if (href.startsWith('/')) {
     return !href.startsWith(`${baseNoSlash}/assets/`);
   }
 
-  return !href.includes("://");
+  return !href.includes('://');
 }
 
 /**
@@ -186,20 +182,20 @@ function withBase(href, baseNoSlash) {
     return href;
   }
 
-  const joined = href.startsWith("/")
+  const joined = href.startsWith('/')
     ? posix.join(baseNoSlash, href)
-    : posix.join(baseNoSlash, href.replace(/^\//, ""));
+    : posix.join(baseNoSlash, href.replace(/^\//, ''));
 
   const normalized = posix.normalize(joined);
   if (normalized === baseNoSlash || normalized.startsWith(`${baseNoSlash}/`)) {
     return normalized;
   }
 
-  if (href.startsWith("/")) {
+  if (href.startsWith('/')) {
     return `${baseNoSlash}${href}`;
   }
 
-  return `${baseNoSlash}/${href.replace(/^\//, "")}`;
+  return `${baseNoSlash}/${href.replace(/^\//, '')}`;
 }
 
 /**
@@ -211,15 +207,15 @@ function unwrapAnchorChildren(nodes) {
   const result = [];
 
   for (const node of nodes) {
-    if (node.type === "element" && node.tagName === "a") {
+    if (node.type === 'element' && node.tagName === 'a') {
       const text = linkText(node);
       if (text) {
-        result.push({ type: "text", value: text });
+        result.push({ type: 'text', value: text });
       }
       continue;
     }
 
-    if (node.type === "element") {
+    if (node.type === 'element') {
       result.push({
         ...node,
         children: unwrapAnchorChildren(node.children ?? []),
@@ -227,7 +223,7 @@ function unwrapAnchorChildren(nodes) {
       continue;
     }
 
-    if (node.type === "text") {
+    if (node.type === 'text') {
       result.push(node);
     }
   }
@@ -250,17 +246,17 @@ function linkText(node) {
 function collectText(nodes) {
   return nodes
     .map((node) => {
-      if (node.type === "text") {
+      if (node.type === 'text') {
         return node.value;
       }
 
-      if (node.type === "element") {
+      if (node.type === 'element') {
         return collectText(node.children ?? []);
       }
 
-      return "";
+      return '';
     })
-    .join("");
+    .join('');
 }
 
 /**
@@ -269,12 +265,12 @@ function collectText(nodes) {
  * @param {(node: Element, ancestors: Element[]) => void} visit
  */
 function walk(node, ancestors, visit) {
-  if (node.type === "element") {
+  if (node.type === 'element') {
     visit(node, ancestors);
   }
 
-  if ("children" in node && Array.isArray(node.children)) {
-    const nextAncestors = node.type === "element" ? [...ancestors, node] : ancestors;
+  if ('children' in node && Array.isArray(node.children)) {
+    const nextAncestors = node.type === 'element' ? [...ancestors, node] : ancestors;
 
     for (const child of node.children) {
       walk(child, nextAncestors, visit);

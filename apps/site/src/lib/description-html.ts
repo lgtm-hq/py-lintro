@@ -1,4 +1,4 @@
-import sanitizeHtml from "sanitize-html";
+import sanitizeHtml from 'sanitize-html';
 
 function relForBlankTarget(rel: string | undefined): string {
   const tokens = new Set<string>();
@@ -8,33 +8,33 @@ function relForBlankTarget(rel: string | undefined): string {
       .filter(Boolean)
       .forEach((token) => tokens.add(token));
   }
-  tokens.add("noopener");
-  tokens.add("noreferrer");
-  return [...tokens].join(" ");
+  tokens.add('noopener');
+  tokens.add('noreferrer');
+  return [...tokens].join(' ');
 }
 
 /** Options for doc frontmatter description HTML rendered via set:html. */
 export const DESCRIPTION_HTML_OPTIONS: sanitizeHtml.IOptions = {
-  allowedTags: ["a", "code"],
+  allowedTags: ['a', 'code'],
   allowedAttributes: {
-    a: ["href", "class", "target", "rel"],
+    a: ['href', 'class', 'target', 'rel'],
     code: [],
   },
-  allowedSchemes: ["http", "https", "mailto"],
+  allowedSchemes: ['http', 'https', 'mailto'],
   allowProtocolRelative: false,
-  disallowedTagsMode: "discard",
+  disallowedTagsMode: 'discard',
   transformTags: {
     a: (_tagName, attribs) => {
-      if (attribs.target === "_blank") {
+      if (attribs.target === '_blank') {
         return {
-          tagName: "a",
+          tagName: 'a',
           attribs: {
             ...attribs,
             rel: relForBlankTarget(attribs.rel),
           },
         };
       }
-      return { tagName: "a", attribs };
+      return { tagName: 'a', attribs };
     },
   },
 };

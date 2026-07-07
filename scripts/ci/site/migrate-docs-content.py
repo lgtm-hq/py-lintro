@@ -307,7 +307,8 @@ def main() -> None:
     if sec_dir.is_dir():
         for src in sorted(sec_dir.glob("*.md")):
             body = rewrite_root_readme_links(
-                src.read_text(encoding="utf-8"), "security",
+                src.read_text(encoding="utf-8"),
+                "security",
             )
             slug = slug_name(src)
             if slug == "readme":

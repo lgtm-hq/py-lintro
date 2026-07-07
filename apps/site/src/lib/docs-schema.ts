@@ -1,11 +1,11 @@
-import { z } from "astro/zod";
-import { DOC_CATEGORIES } from "../data/docs-nav";
+import { z } from 'astro/zod';
+import { DOC_CATEGORIES } from '../data/docs-nav';
 
 export { DOC_CATEGORIES };
 
 export const docsFrontmatterSchema = z.object({
   title: z.string().min(1),
-  description: z.string().default(""),
+  description: z.string().default(''),
   category: z.enum(DOC_CATEGORIES),
   order: z.number().default(100),
   navTitle: z.string().optional(),

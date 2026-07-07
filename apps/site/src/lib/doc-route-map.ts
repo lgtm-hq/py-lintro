@@ -1,5 +1,5 @@
-import { isExternalHref, normalizeDocPath } from "./doc-link-target.mjs";
-import { sourceToDoc } from "../generated/docs-route-map";
+import { isExternalHref, normalizeDocPath } from './doc-link-target.mjs';
+import { sourceToDoc } from '../generated/docs-route-map';
 
 /**
  * Authored docs cross-link resolution.
@@ -20,7 +20,7 @@ function invertMap(map: Record<string, string>): Record<string, string> {
 /** The docs/-relative source path a migrated doc id was generated from. */
 export function sourceForDocId(
   docId: string,
-  map: Record<string, string> = sourceToDoc,
+  map: Record<string, string> = sourceToDoc
 ): string | undefined {
   const docToSource = map === sourceToDoc ? defaultDocToSource : invertMap(map);
   return docToSource[docId];
@@ -38,32 +38,32 @@ export function sourceForDocId(
 export function routeForDocHref(
   href: string,
   currentDocId: string,
-  map: Record<string, string> = sourceToDoc,
+  map: Record<string, string> = sourceToDoc
 ): string | null {
   const trimmed = href.trim();
   if (!trimmed || isExternalHref(trimmed)) {
     return null;
   }
 
-  const hashIndex = trimmed.indexOf("#");
+  const hashIndex = trimmed.indexOf('#');
   const pathPart = hashIndex === -1 ? trimmed : trimmed.slice(0, hashIndex);
-  const hash = hashIndex === -1 ? "" : trimmed.slice(hashIndex);
+  const hash = hashIndex === -1 ? '' : trimmed.slice(hashIndex);
 
   const isMarkdownLink = /\.md$/i.test(pathPart);
-  const isDirectoryLink = pathPart.endsWith("/");
+  const isDirectoryLink = pathPart.endsWith('/');
   if (!isMarkdownLink && !isDirectoryLink) {
     return null;
   }
 
   let sourceRel: string;
-  if (pathPart.startsWith("/")) {
+  if (pathPart.startsWith('/')) {
     sourceRel = normalizeDocPath(pathPart);
   } else {
     const source = sourceForDocId(currentDocId, map);
     if (!source) {
       return null;
     }
-    const dir = source.includes("/") ? source.slice(0, source.lastIndexOf("/")) : "";
+    const dir = source.includes('/') ? source.slice(0, source.lastIndexOf('/')) : '';
     sourceRel = normalizeDocPath(dir ? `${dir}/${pathPart}` : pathPart);
   }
   if (!sourceRel) {
@@ -76,6 +76,6 @@ export function routeForDocHref(
   }
 
   // Astro serves `<section>/index` ids at the parent route (`docs/<section>/`).
-  const routeId = docId.endsWith("/index") ? docId.slice(0, -"/index".length) : docId;
+  const routeId = docId.endsWith('/index') ? docId.slice(0, -'/index'.length) : docId;
   return `docs/${routeId}/${hash}`;
 }

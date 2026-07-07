@@ -1,5 +1,5 @@
-import { visit } from "unist-util-visit";
-import { docIdFromVFilePath, isCrossPageLink, markdownLinkText } from "./doc-link-target.mjs";
+import { visit } from 'unist-util-visit';
+import { docIdFromVFilePath, isCrossPageLink, markdownLinkText } from './doc-link-target.mjs';
 
 /**
  * Cross-page markdown links become plain text in prose; they surface as SmartLinks in
@@ -9,13 +9,13 @@ import { docIdFromVFilePath, isCrossPageLink, markdownLinkText } from "./doc-lin
  */
 export function remarkUnwrapCrossPageLinks() {
   return (tree, file) => {
-    const docId = docIdFromVFilePath(file.history?.[0] ?? "");
+    const docId = docIdFromVFilePath(file.history?.[0] ?? '');
     if (!docId) {
       return;
     }
 
-    visit(tree, "link", (node, index, parent) => {
-      if (!parent || index === undefined || typeof node.url !== "string") {
+    visit(tree, 'link', (node, index, parent) => {
+      if (!parent || index === undefined || typeof node.url !== 'string') {
         return;
       }
 
@@ -24,7 +24,7 @@ export function remarkUnwrapCrossPageLinks() {
       }
 
       parent.children[index] = {
-        type: "text",
+        type: 'text',
         value: markdownLinkText(node),
       };
     });

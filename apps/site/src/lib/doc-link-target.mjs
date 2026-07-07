@@ -5,12 +5,12 @@ const README_HREF = /(?:^|\/)(?:\.\.\/)*README\.md(?:#|$)/i;
  * @returns {string | undefined}
  */
 export function docIdFromVFilePath(path) {
-  if (!path || typeof path !== "string") {
+  if (!path || typeof path !== 'string') {
     return undefined;
   }
 
-  const normalized = path.replace(/\\/g, "/");
-  const marker = "/content/docs/";
+  const normalized = path.replace(/\\/g, '/');
+  const marker = '/content/docs/';
   const idx = normalized.indexOf(marker);
   if (idx === -1) {
     return undefined;
@@ -18,8 +18,8 @@ export function docIdFromVFilePath(path) {
 
   return normalized
     .slice(idx + marker.length)
-    .replace(/\.mdx?$/i, "")
-    .replace(/\/index$/i, "");
+    .replace(/\.mdx?$/i, '')
+    .replace(/\/index$/i, '');
 }
 
 /**
@@ -27,8 +27,8 @@ export function docIdFromVFilePath(path) {
  * @returns {string}
  */
 export function docDirectory(docId) {
-  if (docId.includes("/")) {
-    return docId.slice(0, docId.lastIndexOf("/"));
+  if (docId.includes('/')) {
+    return docId.slice(0, docId.lastIndexOf('/'));
   }
 
   return docId;
@@ -39,16 +39,16 @@ export function docDirectory(docId) {
  * @returns {string}
  */
 export function normalizeDocPath(path) {
-  const parts = path.split("/").filter(Boolean);
+  const parts = path.split('/').filter(Boolean);
   /** @type {string[]} */
   const stack = [];
 
   for (const part of parts) {
-    if (part === ".") {
+    if (part === '.') {
       continue;
     }
 
-    if (part === "..") {
+    if (part === '..') {
       stack.pop();
       continue;
     }
@@ -56,7 +56,7 @@ export function normalizeDocPath(path) {
     stack.push(part);
   }
 
-  return stack.join("/");
+  return stack.join('/');
 }
 
 /**
@@ -64,17 +64,17 @@ export function normalizeDocPath(path) {
  * @returns {boolean}
  */
 export function isExternalHref(href) {
-  if (href.startsWith("//")) {
+  if (href.startsWith('//')) {
     return true;
   }
 
-  if (!href.startsWith("http://") && !href.startsWith("https://")) {
+  if (!href.startsWith('http://') && !href.startsWith('https://')) {
     return false;
   }
 
   try {
     const { hostname } = new URL(href);
-    return hostname !== "localhost" && hostname !== "127.0.0.1" && hostname !== "[::1]";
+    return hostname !== 'localhost' && hostname !== '127.0.0.1' && hostname !== '[::1]';
   } catch {
     return false;
   }
@@ -95,35 +95,35 @@ export function shouldSkipResourceHref(href) {
  */
 export function resolveTargetDocId(href, currentDocId) {
   const trimmed = href.trim();
-  if (!trimmed || trimmed.startsWith("#")) {
+  if (!trimmed || trimmed.startsWith('#')) {
     return currentDocId;
   }
 
-  const hashIndex = trimmed.indexOf("#");
+  const hashIndex = trimmed.indexOf('#');
   const pathPart = hashIndex === -1 ? trimmed : trimmed.slice(0, hashIndex);
   if (!pathPart) {
     return currentDocId;
   }
 
   if (isExternalHref(pathPart)) {
-    return "external";
+    return 'external';
   }
 
-  if (pathPart.startsWith("mailto:") || pathPart.startsWith("tel:")) {
+  if (pathPart.startsWith('mailto:') || pathPart.startsWith('tel:')) {
     return currentDocId;
   }
 
   let resolved = pathPart;
-  if (!pathPart.startsWith("/") && !pathPart.includes("://")) {
+  if (!pathPart.startsWith('/') && !pathPart.includes('://')) {
     resolved = normalizeDocPath(`${docDirectory(currentDocId)}/${pathPart}`);
-  } else if (pathPart.startsWith("/")) {
-    resolved = pathPart.replace(/^\//, "");
+  } else if (pathPart.startsWith('/')) {
+    resolved = pathPart.replace(/^\//, '');
   }
 
   return resolved
-    .replace(/\.md$/i, "")
-    .replace(/\/index$/i, "")
-    .replace(/\/$/, "");
+    .replace(/\.md$/i, '')
+    .replace(/\/index$/i, '')
+    .replace(/\/$/, '');
 }
 
 /**
@@ -132,12 +132,12 @@ export function resolveTargetDocId(href, currentDocId) {
  * @returns {boolean}
  */
 export function isCrossPageLink(href, currentDocId) {
-  if (!href?.trim() || href.startsWith("#") || shouldSkipResourceHref(href)) {
+  if (!href?.trim() || href.startsWith('#') || shouldSkipResourceHref(href)) {
     return false;
   }
 
   const target = resolveTargetDocId(href, currentDocId);
-  if (target === "external") {
+  if (target === 'external') {
     return true;
   }
 
@@ -149,17 +149,17 @@ export function isCrossPageLink(href, currentDocId) {
  * @returns {string}
  */
 export function markdownLinkText(node) {
-  if (!node || typeof node !== "object") {
-    return "";
+  if (!node || typeof node !== 'object') {
+    return '';
   }
 
-  if ("value" in node && typeof node.value === "string") {
+  if ('value' in node && typeof node.value === 'string') {
     return node.value;
   }
 
-  if ("children" in node && Array.isArray(node.children)) {
-    return node.children.map(markdownLinkText).join("");
+  if ('children' in node && Array.isArray(node.children)) {
+    return node.children.map(markdownLinkText).join('');
   }
 
-  return "";
+  return '';
 }
