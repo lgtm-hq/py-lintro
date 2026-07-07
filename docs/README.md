@@ -153,6 +153,7 @@ lintro check --fix
 | **Markdownlint-cli2** | Markdown         | Style Checking          | [Config Guide](configuration.md#markdownlint-cli2-configuration) |
 | **Actionlint**        | GitHub Workflows | Workflow Linting        | [Analysis](tool-analysis/actionlint-analysis.md)                 |
 | **Hadolint**          | Dockerfile       | Best Practices          | [Config Guide](configuration.md#hadolint-configuration)          |
+| **buf**               | Protobuf         | Lint & Format           | [Analysis](tool-analysis/buf-analysis.md)                        |
 
 ## 📋 Command Reference
 

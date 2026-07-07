@@ -104,6 +104,18 @@
       "tags": ["formatter"]
     },
     {
+      "name": "buf",
+      "version": "1.71.0",
+      "install": {
+        "type": "binary"
+      },
+      "tier": "tools",
+      "category": "external",
+      "version_command": ["buf", "--version"],
+      "languages": ["protobuf"],
+      "tags": ["linter", "formatter"]
+    },
+    {
       "name": "cargo_audit",
       "version": "0.22.0",
       "install": {

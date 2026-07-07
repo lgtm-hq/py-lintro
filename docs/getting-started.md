@@ -86,6 +86,8 @@ Some tools require separate installation. Their minimum versions are also manage
 
 - `prettier` - JavaScript/TypeScript formatter (install via npm)
 - `hadolint` - Dockerfile linter (download from GitHub releases)
+- `buf` - Protocol Buffer linter and formatter (`brew install bufbuild/buf/buf` or
+  GitHub releases)
 - `actionlint` - GitHub Actions linter (download from GitHub releases)
 - `semgrep` - Security scanner and code analyzer (`pipx install semgrep`,
   `pip install semgrep`, or `brew install semgrep`)
