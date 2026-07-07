@@ -189,10 +189,18 @@ class PipAuditPlugin(BaseToolPlugin):
 
         for target in targets:
             source = _target_source(target)
+            # Run from the target's own directory: requirements files may
+            # reference relative paths (editable installs, -r includes) that
+            # must resolve against the file's location, not lintro's cwd.
+            source_path = Path(source).resolve()
+            target_cwd = str(
+                source_path if source_path.is_dir() else source_path.parent,
+            )
             try:
                 proc = self._run_subprocess_result(
                     base_cmd + target,
                     timeout=ctx.timeout,
+                    cwd=target_cwd,
                 )
             except subprocess.TimeoutExpired:
                 return ToolResult(
@@ -209,10 +217,12 @@ class PipAuditPlugin(BaseToolPlugin):
                 parse_pip_audit_output(proc.stdout, source=source, data=payload),
             )
 
-            # Fail closed on unparseable output. pip-audit is a security
-            # scanner, so non-empty stdout we cannot parse must never be
-            # reported as a clean pass (see #1044).
-            if payload is None and bool(proc.stdout.strip()):
+            # Fail closed on missing or unparseable output. pip-audit is a
+            # security scanner: with --format json a successful run always
+            # writes a JSON report, so no payload — whether stdout held
+            # garbage or nothing at all — must never be reported as a clean
+            # pass (see #1044).
+            if payload is None:
                 all_success = False
                 parse_failures_count += 1
 

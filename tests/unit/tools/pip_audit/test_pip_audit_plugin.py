@@ -312,3 +312,67 @@ def test_check_timeout(
 
     assert_that(result.success).is_false()
     assert_that(result.output).contains("timed out")
+
+
+def test_check_empty_stdout_on_success_fails_closed(
+    pip_audit_plugin: PipAuditPlugin,
+    tmp_path: Path,
+) -> None:
+    """Exit 0 with no JSON report is a failure, not a clean pass.
+
+    Args:
+        pip_audit_plugin: The plugin instance.
+        tmp_path: Temporary directory path.
+    """
+    req = tmp_path / "requirements.txt"
+    req.write_text("packaging==25.0\n")
+
+    with patch(
+        "lintro.plugins.execution_preparation.verify_tool_version",
+        return_value=None,
+    ):
+        with patch.object(
+            pip_audit_plugin,
+            "_run_subprocess_result",
+            return_value=_proc(success=True, stdout=""),
+        ):
+            result = pip_audit_plugin.check([str(req)], {})
+
+    assert_that(result.success).is_false()
+    assert_that(result.parse_failures_count).is_equal_to(1)
+
+
+def test_check_runs_from_requirements_directory(
+    pip_audit_plugin: PipAuditPlugin,
+    tmp_path: Path,
+) -> None:
+    """The audit runs with cwd at the requirements file's directory.
+
+    Args:
+        pip_audit_plugin: The plugin instance.
+        tmp_path: Temporary directory path.
+    """
+    sub = tmp_path / "svc"
+    sub.mkdir()
+    req = sub / "requirements.txt"
+    req.write_text("packaging==25.0\n")
+
+    seen_cwd: list[str | None] = []
+
+    def _capture(cmd: list[str], **kwargs: object) -> SubprocessResult:
+        seen_cwd.append(kwargs.get("cwd"))  # type: ignore[arg-type]
+        return _proc(success=True, stdout=_CLEAN_OUTPUT)
+
+    with patch(
+        "lintro.plugins.execution_preparation.verify_tool_version",
+        return_value=None,
+    ):
+        with patch.object(
+            pip_audit_plugin,
+            "_run_subprocess_result",
+            side_effect=_capture,
+        ):
+            pip_audit_plugin.check([str(req)], {})
+
+    assert_that(seen_cwd).is_length(1)
+    assert_that(str(seen_cwd[0])).is_equal_to(str(sub.resolve()))

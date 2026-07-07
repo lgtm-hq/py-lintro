@@ -32,7 +32,7 @@
     }
   },
   "language_map": {
-    "python": ["ruff", "black", "mypy", "bandit", "pydoclint", "semgrep"],
+    "python": ["ruff", "black", "mypy", "bandit", "pydoclint", "semgrep", "pip_audit"],
     "javascript": ["oxlint", "oxfmt", "prettier"],
     "typescript": ["oxlint", "oxfmt", "prettier", "tsc"],
     "rust": ["clippy", "rustfmt", "rustc", "cargo_audit", "cargo_deny"],
