@@ -4,6 +4,7 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from lintro.config.deps_config import DepsConfig
 from lintro.config.enforce_config import EnforceConfig
 from lintro.config.execution_config import ExecutionConfig
 from lintro.config.output_config import OutputConfig
@@ -13,6 +14,7 @@ from lintro.config.tool_config import LintroToolConfig
 from lintro.config.watch_config import WatchConfig
 
 __all__ = [
+    "DepsConfig",
     "EnforceConfig",
     "ExecutionConfig",
     "LintroConfig",
@@ -67,6 +69,7 @@ class LintroConfig(BaseModel):
         score: Health score weights and scale (0-100 metric).
         output: Console output presentation settings (e.g. ASCII art toggle).
         watch: Watch-mode (``lintro watch``) defaults.
+        deps: Dependency version policy configuration.
         config_path: Path to the config file (set by loader).
     """
 
@@ -81,6 +84,7 @@ class LintroConfig(BaseModel):
     score: ScoreConfig = Field(default_factory=ScoreConfig)
     output: OutputConfig = Field(default_factory=OutputConfig)
     watch: WatchConfig = Field(default_factory=WatchConfig)
+    deps: DepsConfig = Field(default_factory=DepsConfig)
     config_path: str | None = None
 
     def get_tool_config(self, tool_name: str) -> LintroToolConfig:
