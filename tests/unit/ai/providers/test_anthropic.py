@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -10,9 +11,75 @@ from assertpy import assert_that
 from lintro.ai.exceptions import (
     AIAuthenticationError,
     AINotAvailableError,
+    AIProviderError,
+    AIRateLimitError,
 )
 from lintro.ai.providers import anthropic as mod
 from lintro.ai.providers.anthropic import AnthropicProvider
+
+
+class _FakeAnthropicError(Exception):
+    """Stand-in for the SDK base ``anthropic.AnthropicError``."""
+
+
+class _FakeAuthError(_FakeAnthropicError):
+    """Stand-in for ``anthropic.AuthenticationError``."""
+
+
+class _FakeRateLimitError(_FakeAnthropicError):
+    """Stand-in for ``anthropic.RateLimitError``."""
+
+
+class _FakeTimeoutError(_FakeAnthropicError):
+    """Stand-in for ``anthropic.APITimeoutError``."""
+
+
+@pytest.fixture
+def fake_anthropic_sdk():
+    """Patch the module's ``anthropic`` reference with fake error classes."""
+    fake = SimpleNamespace(
+        AnthropicError=_FakeAnthropicError,
+        AuthenticationError=_FakeAuthError,
+        RateLimitError=_FakeRateLimitError,
+        APITimeoutError=_FakeTimeoutError,
+    )
+    with patch.object(mod, "anthropic", fake, create=True):
+        yield fake
+
+
+def test_map_errors_authentication(fake_anthropic_sdk) -> None:
+    """SDK AuthenticationError maps to AIAuthenticationError."""
+    with pytest.raises(AIAuthenticationError):
+        with AnthropicProvider._map_errors():
+            raise _FakeAuthError("bad key")
+
+
+def test_map_errors_rate_limit(fake_anthropic_sdk) -> None:
+    """SDK RateLimitError maps to AIRateLimitError."""
+    with pytest.raises(AIRateLimitError):
+        with AnthropicProvider._map_errors():
+            raise _FakeRateLimitError("slow down")
+
+
+def test_map_errors_timeout(fake_anthropic_sdk) -> None:
+    """SDK APITimeoutError maps to the generic AIProviderError."""
+    with pytest.raises(AIProviderError):
+        with AnthropicProvider._map_errors():
+            raise _FakeTimeoutError("timed out")
+
+
+def test_map_errors_generic_api_error(fake_anthropic_sdk) -> None:
+    """A generic SDK AnthropicError maps to AIProviderError."""
+    with pytest.raises(AIProviderError):
+        with AnthropicProvider._map_errors():
+            raise _FakeAnthropicError("boom")
+
+
+def test_map_errors_passes_through_on_success(fake_anthropic_sdk) -> None:
+    """The context manager is transparent when no error is raised."""
+    with AnthropicProvider._map_errors():
+        value = 21 * 2
+    assert_that(value).is_equal_to(42)
 
 
 def test_anthropic_provider_raises_when_sdk_missing():
