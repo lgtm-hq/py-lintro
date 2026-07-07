@@ -717,6 +717,7 @@ tool_priorities = { ruff = 5, black = 10, prettier = 1 }
 | hadolint      | 50       | Infrastructure   |
 | vale          | 50       | Linter (docs)    |
 | actionlint    | 55       | Infrastructure   |
+| rubocop       | 55       | Linter/Formatter |
 | pytest        | 100      | Test Runner      |
 
 Lower priority values run first. This ensures formatters run before linters, avoiding
@@ -2216,7 +2217,60 @@ lintro check my-crate/ --tools cargo_deny
 lintro check . --tools cargo_deny --tool-options "cargo_deny:timeout=120"
 ```
 
-### Shell Tools
+### Ruby Tools
+
+#### RuboCop Configuration
+
+RuboCop is a Ruby static code analyzer (linter) and formatter based on the community
+Ruby style guide. It groups its rules ("cops") into departments (Layout, Lint, Metrics,
+Naming, Security, Style) and can autocorrect many offenses. RuboCop runs with sensible
+defaults when no `.rubocop.yml` is present.
+
+**Installation:**
+
+```bash
+# RubyGems (any platform)
+gem install rubocop
+
+# Bundler (project-local)
+bundle add rubocop --group development
+```
+
+**File:** `.rubocop.yml` (or `.rubocop.yaml`)
+
+```yaml
+AllCops:
+  NewCops: enable
+  TargetRubyVersion: 3.3
+
+Style/StringLiterals:
+  EnforcedStyle: single_quotes
+
+Layout/LineLength:
+  Max: 120
+```
+
+**Lintro options via `--tool-options`:**
+
+```bash
+# Default: safe autocorrect only (rubocop --autocorrect)
+lintro fmt --tools rubocop
+
+# Opt in to unsafe autocorrect (rubocop --autocorrect-all), which may change
+# program semantics — review the diff afterwards.
+lintro fmt --tools rubocop --tool-options "rubocop:unsafe_fixes=True"
+```
+
+**Available Options:**
+
+| Option         | Type | Description                                                                                                 |
+| -------------- | ---- | ----------------------------------------------------------------------------------------------------------- |
+| `unsafe_fixes` | bool | Use `--autocorrect-all` (includes unsafe cops) instead of the default safe `--autocorrect`. Default `False` |
+| `timeout`      | int  | Per-invocation timeout in seconds. Default `60`                                                             |
+
+RuboCop's per-cop configuration (which cops are enabled, their styles, exclusions) is
+driven by its native `.rubocop.yml` rather than lintro `--tool-options`, so existing
+Ruby project conventions are respected automatically.
 
 #### ShellCheck Configuration
 
@@ -2420,6 +2474,8 @@ lintro format --tools shfmt
 # Check specific shell directories
 lintro check scripts/ --tools shfmt
 ```
+
+### Shell Tools
 
 ### Dotenv Tools
 
