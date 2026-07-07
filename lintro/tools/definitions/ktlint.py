@@ -300,15 +300,35 @@ class KtlintPlugin(BaseToolPlugin):
                     issues_count=1,
                 )
 
-            # 2. Apply auto-corrections in place.
-            self._run_ktlint(
+            # 2. Apply auto-corrections in place. ktlint --format exits
+            # non-zero when unfixable findings remain (counted by the
+            # re-check below), so only a failure with no parseable report
+            # signals a real formatter crash that must surface.
+            format_result = self._run_ktlint(
                 files=ctx.rel_files,
                 timeout=ctx.timeout,
                 cwd=ctx.cwd,
                 fix=True,
             )
+            if format_result.returncode != 0 and not parse_ktlint_output(
+                format_result.stdout,
+            ):
+                return ToolResult(
+                    name=self.definition.name,
+                    success=False,
+                    output=(
+                        format_result.output or "ktlint --format exited with an error."
+                    ),
+                    issues_count=len(initial_issues),
+                    issues=initial_issues,
+                    initial_issues_count=len(initial_issues),
+                    fixed_issues_count=0,
+                    remaining_issues_count=len(initial_issues),
+                )
 
             # 3. Re-check to count remaining (non-auto-correctable) issues.
+            # A failed re-check with no parseable report must not read as
+            # "everything fixed" — surface the verification failure instead.
             remaining_result = self._run_ktlint(
                 files=ctx.rel_files,
                 timeout=ctx.timeout,
@@ -318,6 +338,20 @@ class KtlintPlugin(BaseToolPlugin):
             remaining_issues: list[BaseIssue] = list(
                 parse_ktlint_output(remaining_result.stdout),
             )
+            if remaining_result.returncode != 0 and not remaining_issues:
+                return ToolResult(
+                    name=self.definition.name,
+                    success=False,
+                    output=(
+                        remaining_result.output
+                        or "ktlint re-check exited with an error."
+                    ),
+                    issues_count=len(initial_issues),
+                    issues=initial_issues,
+                    initial_issues_count=len(initial_issues),
+                    fixed_issues_count=0,
+                    remaining_issues_count=len(initial_issues),
+                )
         except subprocess.TimeoutExpired:
             return ToolResult(
                 name=self.definition.name,
@@ -328,6 +362,12 @@ class KtlintPlugin(BaseToolPlugin):
 
         initial_count = len(initial_issues)
         remaining_count = len(remaining_issues)
+        # Formatting can expose findings the initial check did not report
+        # (e.g. rules that only fire on the rewritten layout). Keep the
+        # invariant initial = fixed + remaining consistent by growing the
+        # initial count rather than letting remaining exceed it.
+        if remaining_count > initial_count:
+            initial_count = remaining_count
         fixed_count = max(0, initial_count - remaining_count)
 
         summary_parts: list[str] = []

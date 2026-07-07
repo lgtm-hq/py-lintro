@@ -204,3 +204,107 @@ def test_fix_preserves_invariant_partial_fix(
     assert_that(
         result.initial_issues_count,
     ).is_equal_to(result.fixed_issues_count + result.remaining_issues_count)
+
+
+def test_fix_format_crash_surfaces_error(
+    ktlint_plugin: KtlintPlugin,
+    tmp_path: Path,
+) -> None:
+    """A crashed --format run reports the cause, not derived fix counts.
+
+    Args:
+        ktlint_plugin: The plugin under test.
+        tmp_path: Temporary directory path.
+    """
+    kt_file = _write_kt(tmp_path)
+    initial = [
+        {"file": str(kt_file), "errors": [error("standard:colon-spacing")]},
+    ]
+
+    with patch.object(
+        ktlint_plugin,
+        "_run_subprocess_result",
+        side_effect=[
+            make_result(initial),
+            make_result(None),  # --format crashes with no report
+        ],
+    ):
+        result = ktlint_plugin.fix([str(kt_file)], {})
+
+    assert_that(result.success).is_false()
+    assert_that(result.output).contains("JAVA_HOME")
+    assert_that(result.fixed_issues_count).is_equal_to(0)
+    assert_that(result.remaining_issues_count).is_equal_to(1)
+
+
+def test_fix_recheck_crash_is_not_all_fixed(
+    ktlint_plugin: KtlintPlugin,
+    tmp_path: Path,
+) -> None:
+    """A failed re-check with no report must not read as everything fixed.
+
+    Args:
+        ktlint_plugin: The plugin under test.
+        tmp_path: Temporary directory path.
+    """
+    kt_file = _write_kt(tmp_path)
+    initial = [
+        {"file": str(kt_file), "errors": [error("standard:colon-spacing")]},
+    ]
+
+    with patch.object(
+        ktlint_plugin,
+        "_run_subprocess_result",
+        side_effect=[
+            make_result(initial),
+            make_result([]),  # format succeeds
+            make_result(None),  # re-check crashes with no report
+        ],
+    ):
+        result = ktlint_plugin.fix([str(kt_file)], {})
+
+    assert_that(result.success).is_false()
+    assert_that(result.fixed_issues_count).is_equal_to(0)
+    assert_that(result.remaining_issues_count).is_equal_to(1)
+
+
+def test_fix_new_findings_after_format_keep_counts_consistent(
+    ktlint_plugin: KtlintPlugin,
+    tmp_path: Path,
+) -> None:
+    """Formatting exposing extra findings keeps initial = fixed + remaining.
+
+    Args:
+        ktlint_plugin: The plugin under test.
+        tmp_path: Temporary directory path.
+    """
+    kt_file = _write_kt(tmp_path)
+    initial = [
+        {"file": str(kt_file), "errors": [error("standard:colon-spacing")]},
+    ]
+    after = [
+        {
+            "file": str(kt_file),
+            "errors": [
+                error("standard:colon-spacing"),
+                error("standard:max-line-length"),
+            ],
+        },
+    ]
+
+    with patch.object(
+        ktlint_plugin,
+        "_run_subprocess_result",
+        side_effect=[
+            make_result(initial),
+            make_result([]),
+            make_result(after),
+        ],
+    ):
+        result = ktlint_plugin.fix([str(kt_file)], {})
+
+    assert_that(result.success).is_false()
+    assert_that(result.remaining_issues_count).is_equal_to(2)
+    assert_that(
+        result.initial_issues_count,
+    ).is_equal_to(result.fixed_issues_count + result.remaining_issues_count)
