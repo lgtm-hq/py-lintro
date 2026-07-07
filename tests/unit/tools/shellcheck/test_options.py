@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from unittest.mock import patch
+
 import pytest
 from assertpy import assert_that
 
@@ -13,6 +15,7 @@ from lintro.tools.definitions.shellcheck import (
     SHELLCHECK_SHELL_DIALECTS,
     ShellcheckPlugin,
 )
+from lintro.utils.tool_options import parse_tool_options
 
 # Tests for default option values
 
@@ -24,12 +27,16 @@ from lintro.tools.definitions.shellcheck import (
         ("severity", SHELLCHECK_DEFAULT_SEVERITY),
         ("exclude", None),
         ("shell", None),
+        ("external_sources", False),
+        ("source_paths", None),
     ],
     ids=[
         "timeout_equals_default",
         "severity_equals_default",
         "exclude_is_none",
         "shell_is_none",
+        "external_sources_is_false",
+        "source_paths_is_none",
     ],
 )
 def test_default_options_values(
@@ -64,6 +71,10 @@ def test_default_options_values(
         ("shell", "sh"),
         ("shell", "dash"),
         ("shell", "ksh"),
+        ("external_sources", True),
+        ("external_sources", False),
+        ("source_paths", ["scripts/lib", "scripts/ci"]),
+        ("source_paths", ["SCRIPTDIR"]),
     ],
     ids=[
         "severity_error",
@@ -75,6 +86,10 @@ def test_default_options_values(
         "shell_sh",
         "shell_dash",
         "shell_ksh",
+        "external_sources_true",
+        "external_sources_false",
+        "source_paths_list",
+        "source_paths_scriptdir",
     ],
 )
 def test_set_options_valid(
@@ -130,6 +145,10 @@ def test_set_options_shell_case_insensitive(
         ("shell", "powershell", "Invalid shell dialect"),
         ("exclude", "SC2086", "exclude must be a list"),
         ("exclude", 123, "exclude must be a list"),
+        ("external_sources", "yes", "external_sources must be a boolean"),
+        ("external_sources", 1, "external_sources must be a boolean"),
+        ("source_paths", 123, "source_paths must be a string or list"),
+        ("source_paths", [1, 2], "source_paths must be a string or list"),
     ],
     ids=[
         "invalid_severity_critical",
@@ -138,6 +157,10 @@ def test_set_options_shell_case_insensitive(
         "invalid_shell_powershell",
         "invalid_exclude_string",
         "invalid_exclude_integer",
+        "invalid_external_sources_string",
+        "invalid_external_sources_integer",
+        "invalid_source_paths_integer",
+        "invalid_source_paths_list_of_ints",
     ],
 )
 def test_set_options_invalid_type(
@@ -222,6 +245,93 @@ def test_build_command_with_shell_dialect(shellcheck_plugin: ShellcheckPlugin) -
     assert_that(cmd[shell_idx + 1]).is_equal_to("bash")
 
 
+def test_build_command_no_source_following_by_default(
+    shellcheck_plugin: ShellcheckPlugin,
+) -> None:
+    """Source-following flags are absent unless explicitly enabled.
+
+    This guards backward compatibility for projects that do not opt in.
+
+    Args:
+        shellcheck_plugin: The ShellcheckPlugin instance to test.
+    """
+    cmd = shellcheck_plugin._build_command()
+    assert_that(cmd).does_not_contain("--external-sources")
+    assert_that(cmd).does_not_contain("-x")
+    assert_that(any(arg.startswith("--source-path=") for arg in cmd)).is_false()
+
+
+def test_build_command_with_external_sources(
+    shellcheck_plugin: ShellcheckPlugin,
+) -> None:
+    """Build command with external_sources enables the -x flag.
+
+    Args:
+        shellcheck_plugin: The ShellcheckPlugin instance to test.
+    """
+    shellcheck_plugin.set_options(external_sources=True)
+    cmd = shellcheck_plugin._build_command()
+    assert_that(cmd).contains("--external-sources")
+
+
+def test_build_command_external_sources_false_omits_flag(
+    shellcheck_plugin: ShellcheckPlugin,
+) -> None:
+    """external_sources=False does not add the -x flag.
+
+    Args:
+        shellcheck_plugin: The ShellcheckPlugin instance to test.
+    """
+    shellcheck_plugin.set_options(external_sources=False)
+    cmd = shellcheck_plugin._build_command()
+    assert_that(cmd).does_not_contain("--external-sources")
+
+
+def test_build_command_with_source_paths(
+    shellcheck_plugin: ShellcheckPlugin,
+) -> None:
+    """Build command emits one --source-path=... per configured path.
+
+    Args:
+        shellcheck_plugin: The ShellcheckPlugin instance to test.
+    """
+    shellcheck_plugin.set_options(source_paths=["SCRIPTDIR", "scripts/lib"])
+    cmd = shellcheck_plugin._build_command()
+    assert_that(cmd).contains("--source-path=SCRIPTDIR")
+    assert_that(cmd).contains("--source-path=scripts/lib")
+
+
+def test_build_command_source_paths_imply_external_sources(
+    shellcheck_plugin: ShellcheckPlugin,
+) -> None:
+    """Setting source_paths auto-enables -x even without external_sources.
+
+    ShellCheck ignores --source-path unless -x is active, so configuring
+    paths is treated as an unambiguous request to follow sources.
+
+    Args:
+        shellcheck_plugin: The ShellcheckPlugin instance to test.
+    """
+    shellcheck_plugin.set_options(source_paths=["SCRIPTDIR"])
+    cmd = shellcheck_plugin._build_command()
+    assert_that(cmd).contains("--external-sources")
+    assert_that(cmd).contains("--source-path=SCRIPTDIR")
+
+
+def test_build_command_empty_source_paths_omits_flags(
+    shellcheck_plugin: ShellcheckPlugin,
+) -> None:
+    """An empty source_paths list adds neither -x nor --source-path.
+
+    Args:
+        shellcheck_plugin: The ShellcheckPlugin instance to test.
+    """
+    shellcheck_plugin.set_options(source_paths=[])
+    cmd = shellcheck_plugin._build_command()
+    assert_that(cmd).does_not_contain("--external-sources")
+    assert_that(any(arg.startswith("--source-path=") for arg in cmd)).is_false()
+
+
 def test_build_command_with_all_options(shellcheck_plugin: ShellcheckPlugin) -> None:
     """Build command with all options set.
 
@@ -283,3 +393,51 @@ def test_default_format_constant() -> None:
 def test_default_severity_constant() -> None:
     """Verify SHELLCHECK_DEFAULT_SEVERITY is style."""
     assert_that(SHELLCHECK_DEFAULT_SEVERITY).is_equal_to("style")
+
+
+# Tests for parsing source-following options from CLI --tool-options
+
+
+def test_set_options_source_paths_string_normalized_to_list(
+    shellcheck_plugin: ShellcheckPlugin,
+) -> None:
+    """A single string source_paths is normalized to a one-element list.
+
+    Args:
+        shellcheck_plugin: The ShellcheckPlugin instance to test.
+    """
+    shellcheck_plugin.set_options(source_paths="SCRIPTDIR")
+    assert_that(shellcheck_plugin.options.get("source_paths")).is_equal_to(
+        ["SCRIPTDIR"],
+    )
+
+
+def test_parse_external_sources_from_cli() -> None:
+    """external_sources is coerced to a bool from CLI --tool-options."""
+    parsed = parse_tool_options("shellcheck:external_sources=True")
+    assert_that(parsed).contains_key("shellcheck")
+    assert_that(parsed["shellcheck"].get("external_sources")).is_equal_to(True)
+
+
+def test_parse_source_paths_from_cli() -> None:
+    """source_paths is coerced to a list from pipe-delimited --tool-options."""
+    parsed = parse_tool_options("shellcheck:source_paths=SCRIPTDIR|scripts/lib")
+    assert_that(parsed["shellcheck"].get("source_paths")).is_equal_to(
+        ["SCRIPTDIR", "scripts/lib"],
+    )
+
+
+def test_parse_source_following_options_flow_into_command() -> None:
+    """CLI-parsed options wire through set_options into the built command."""
+    parsed = parse_tool_options(
+        "shellcheck:external_sources=True,shellcheck:source_paths=SCRIPTDIR",
+    )
+    with patch(
+        "lintro.plugins.execution_preparation.verify_tool_version",
+        return_value=None,
+    ):
+        plugin = ShellcheckPlugin()
+    plugin.set_options(**parsed["shellcheck"])  # type: ignore[arg-type]
+    cmd = plugin._build_command()
+    assert_that(cmd).contains("--external-sources")
+    assert_that(cmd).contains("--source-path=SCRIPTDIR")
