@@ -176,3 +176,23 @@ def test_phpstan_fix_raises() -> None:
     tool = ToolRegistry.get("phpstan")
     with pytest.raises(NotImplementedError):
         tool.fix(["a.php"], {})
+
+
+def test_phpstan_crash_with_fatal_error_output_fails(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """A non-zero exit with unparseable stdout is a failure, not a pass."""
+    php = tmp_path / "app.php"
+    php.write_text("<?php\necho 1;\n")
+    monkeypatch.setattr(
+        "subprocess.run",
+        _fake_run_factory(
+            "PHP Fatal error: Allowed memory size exhausted",
+            analyse_rc=255,
+        ),
+    )
+    tool = ToolRegistry.get("phpstan")
+    result: ToolResult = tool.check([str(php)], {})
+    assert_that(result.success).is_false()
+    assert_that(result.issues_count).is_equal_to(0)
