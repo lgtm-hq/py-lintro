@@ -27,7 +27,7 @@ jobs:
     steps:
       - name: Harden Runner
         # yamllint disable-line rule:line-length
-        uses: lgtm-hq/lgtm-ci/.github/actions/harden-runner@3d3e577c8e50e11ead6bd36cb559361d33796a9d # v0.47.1
+        uses: lgtm-hq/lgtm-ci/.github/actions/harden-runner@1014e3d7d5441a63215d2096545a46cff6de101c # v0.48.0
         with:
           egress-policy: block
           allowed-endpoints: >
@@ -44,7 +44,7 @@ jobs:
 
       - name: Checkout
         # yamllint disable-line rule:line-length
-        uses: lgtm-hq/lgtm-ci/.github/actions/secure-checkout@3d3e577c8e50e11ead6bd36cb559361d33796a9d # v0.47.1
+        uses: lgtm-hq/lgtm-ci/.github/actions/secure-checkout@1014e3d7d5441a63215d2096545a46cff6de101c # v0.48.0
         with:
           fetch-depth: 1
           persist-credentials: true

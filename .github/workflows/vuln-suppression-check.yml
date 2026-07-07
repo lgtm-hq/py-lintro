@@ -18,13 +18,13 @@ concurrency:
 jobs:
   check-suppressions:
     # yamllint disable-line rule:line-length
-    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-vuln-suppression-check.yml@3d3e577c8e50e11ead6bd36cb559361d33796a9d # v0.47.1
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-vuln-suppression-check.yml@1014e3d7d5441a63215d2096545a46cff6de101c # v0.48.0
     permissions:
       contents: write # commit auto-remediation suppressions on default branch
       pull-requests: write # open PRs for stale/expired suppressions
     with:
       job-name: '🔍 Check Vulnerability Suppressions'
-      tooling-ref: '3d3e577c8e50e11ead6bd36cb559361d33796a9d' # v0.47.1
+      tooling-ref: '1014e3d7d5441a63215d2096545a46cff6de101c' # v0.48.0
       workflow-file: vuln-suppression-check.yml
       runner-image: ubuntu-24.04
       egress-policy: block
