@@ -15,9 +15,10 @@ singleton's options remain unchanged afterward.
 from __future__ import annotations
 
 import time
+from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
-from typing import Any, Callable
+from typing import Any, cast
 
 import pytest
 from assertpy import assert_that
@@ -27,7 +28,9 @@ from lintro.enums.action import Action
 from lintro.models.core.tool_result import ToolResult
 from lintro.plugins.base import BaseToolPlugin
 from lintro.plugins.protocol import ToolDefinition
+from lintro.plugins.registry import ToolRegistry
 from lintro.tools import tool_manager
+from lintro.utils.console.logger import ThreadSafeConsoleLogger
 
 
 @dataclass
@@ -144,7 +147,7 @@ def observing_singleton(
         raising=True,
     )
     monkeypatch.setattr(
-        pc.ToolRegistry,
+        ToolRegistry,
         "is_registered",
         staticmethod(lambda name: True),
         raising=True,
@@ -188,7 +191,7 @@ def _run_post_check(*, include_venv: bool, exclude: str) -> ToolResult:
         output_format="grid",
         verbose=False,
         raw_output=False,
-        logger=_SilentLogger(),
+        logger=cast("ThreadSafeConsoleLogger", _SilentLogger()),
         all_results=results,
         total_issues=0,
         total_fixed=0,
@@ -231,9 +234,7 @@ def test_concurrent_post_checks_do_not_bleed(
     shared singleton's options must be unchanged afterward.
     """
     baseline_excludes = list(observing_singleton.exclude_patterns)
-    cases = [
-        {"include_venv": bool(i % 2), "exclude": f"case{i}_*"} for i in range(8)
-    ]
+    cases = [{"include_venv": bool(i % 2), "exclude": f"case{i}_*"} for i in range(8)]
 
     with ThreadPoolExecutor(max_workers=8) as pool:
         results = list(
@@ -250,7 +251,7 @@ def test_concurrent_post_checks_do_not_bleed(
     assert_that([r.issues_count for r in results]).does_not_contain(1)
 
     # Each invocation observed exactly its own options (venv flag + marker).
-    observed = sorted(r.output for r in results)
+    observed = sorted(r.output or "" for r in results)
     expected = sorted(f"{c['include_venv']}:{c['exclude']}" for c in cases)
     assert_that(observed).is_equal_to(expected)
 
