@@ -136,7 +136,6 @@ Scripts for building, testing, and deploying the Astro documentation site at
 | `prepare-lychee-action-args.sh`   | Prepare lychee-action args for post-build link checking    | `./scripts/ci/site/prepare-lychee-action-args.sh --help`   |
 | `migrate-docs-content.py`         | Copy `docs/` into `apps/site/src/content/docs/`            | `uv run python scripts/ci/site/migrate-docs-content.py`    |
 | `fix-markdown-docs.py`            | Fix markdownlint issues in migrated Astro docs content     | `uv run python scripts/ci/site/fix-markdown-docs.py`       |
-| `generate-template-thumbnails.sh` | Optional template PNG generator (legacy helper)            | `./scripts/ci/site/generate-template-thumbnails.sh --help` |
 
 #### Homebrew Scripts (`ci/homebrew/`)
 

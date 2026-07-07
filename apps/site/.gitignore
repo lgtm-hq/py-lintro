@@ -3,7 +3,6 @@ dist/
 .astro/
 coverage/
 public/assets/css/
-public/assets/rustume.png
 
 # The repo-root .gitignore ignores 'lib/' (a Python build-artifact pattern),
 # which unintentionally excludes this site's TypeScript/MJS source under
