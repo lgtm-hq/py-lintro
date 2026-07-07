@@ -131,6 +131,32 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
     return parser.parse_args(argv)
 
 
+def _exit_code_notes(results: list[ScenarioResult]) -> list[str]:
+    """Build notes for runs that exited non-zero.
+
+    A non-zero exit does not necessarily invalidate a timing (linters exit
+    non-zero on findings), but it must never be silent: a crashed or
+    misconfigured runner would otherwise present a meaningless duration as a
+    comparable result. The observed codes travel with the report so readers
+    can judge comparability.
+
+    Args:
+        results: Measured scenario results.
+
+    Returns:
+        list[str]: One note per result with any non-zero exit code.
+    """
+    notes: list[str] = []
+    for result in results:
+        nonzero = [code for code in result.exit_codes if code != 0]
+        if nonzero:
+            notes.append(
+                f"non-zero exit codes for {result.label} on "
+                f"{result.fixture}/{result.scenario}: {result.exit_codes}",
+            )
+    return notes
+
+
 def _skipped_notes() -> list[str]:
     """Build human-readable notes for skipped competitors.
 
@@ -205,7 +231,7 @@ def main(argv: list[str] | None = None) -> int:
         python_version=platform.python_version(),
         cpu_count=os.cpu_count() or 0,
         runs=args.runs,
-        notes=_skipped_notes(),
+        notes=_skipped_notes() + _exit_code_notes(results),
     )
     report = BenchmarkReport(metadata=metadata, results=results)
 
@@ -215,6 +241,8 @@ def main(argv: list[str] | None = None) -> int:
     args.markdown.write_text(markdown + "\n", encoding="utf-8")
 
     print(markdown)
+    for note in _exit_code_notes(results):
+        print(f"[bench] warning: {note}", file=sys.stderr)
     print(f"\nJSON report:     {args.output}", file=sys.stderr)
     print(f"Markdown report: {args.markdown}", file=sys.stderr)
     return 0

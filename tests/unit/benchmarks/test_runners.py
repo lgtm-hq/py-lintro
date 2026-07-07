@@ -107,6 +107,28 @@ def test_lintro_runner_command_targets_fixture(tmp_path: Path) -> None:
     lintro_runner = next(r for r in built if r.tool == CompetitorTool.LINTRO)
 
     assert_that(lintro_runner.command).contains("lintro", "chk", str(fixture))
+    # Apples-to-apples contract: lintro runs the same tool set (ruff) as the
+    # sequential-native and pre-commit competitors.
+    assert_that(lintro_runner.command).contains("--tools", "ruff")
+
+
+def test_sequential_runner_propagates_worst_exit_code(tmp_path: Path) -> None:
+    """The sequential command runs both tools and surfaces the worst status."""
+    fixture = tmp_path / "fixture"
+    fixture.mkdir()
+
+    built = build_runners(
+        fixture,
+        config_dir=tmp_path / "configs",
+        include=[CompetitorTool.SEQUENTIAL],
+    )
+    sequential = next(r for r in built if r.tool == CompetitorTool.SEQUENTIAL)
+    script = sequential.command[-1]
+
+    assert_that(sequential.command[:2]).is_equal_to(["bash", "-c"])
+    assert_that(script).contains("ruff check")
+    assert_that(script).contains("ruff format --check")
+    assert_that(script).contains("exit $(( c1 > c2 ? c1 : c2 ))")
 
 
 def test_megalinter_uses_docker_when_wrapper_absent(

@@ -59,7 +59,11 @@ class Runner:
 
 
 def _lintro_command(fixture_dir: Path) -> list[str]:
-    """Build the lintro full-check command for a fixture.
+    """Build the lintro check command for a fixture.
+
+    Restricted to the same underlying tool set the competitors run (ruff),
+    so the comparison isolates orchestration overhead rather than differing
+    tool sets — the apples-to-apples contract documented in the README.
 
     Args:
         fixture_dir: Directory of the fixture project to check.
@@ -67,7 +71,7 @@ def _lintro_command(fixture_dir: Path) -> list[str]:
     Returns:
         list[str]: Argv for the lintro check.
     """
-    return ["uv", "run", "lintro", "chk", str(fixture_dir)]
+    return ["uv", "run", "lintro", "chk", "--tools", "ruff", str(fixture_dir)]
 
 
 def _sequential_command(fixture_dir: Path) -> list[str]:
@@ -76,8 +80,10 @@ def _sequential_command(fixture_dir: Path) -> list[str]:
     This approximates the "run each tool by hand, one after another" workflow
     that lintro replaces. It intentionally uses the same underlying tools lintro
     orchestrates so the comparison isolates orchestration overhead rather than
-    tool selection. The commands are chained with ``;`` inside ``bash -c`` so a
-    single measured process captures the full sequence.
+    tool selection. Both commands always run inside a single measured
+    ``bash -c`` process (a human runs each tool regardless of the previous
+    one's findings), and the worst exit code is propagated so a failing
+    ``ruff check`` is never masked by a passing format check.
 
     Args:
         fixture_dir: Directory of the fixture project to check.
@@ -86,7 +92,11 @@ def _sequential_command(fixture_dir: Path) -> list[str]:
         list[str]: Argv for the sequential native invocation.
     """
     target = str(fixture_dir)
-    sequence = f"uv run ruff check {target} ; uv run ruff format --check {target}"
+    sequence = (
+        f"uv run ruff check {target}; c1=$?; "
+        f"uv run ruff format --check {target}; c2=$?; "
+        "exit $(( c1 > c2 ? c1 : c2 ))"
+    )
     return ["bash", "-c", sequence]
 
 
