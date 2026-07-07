@@ -110,6 +110,8 @@ order and for what changed.
   releases)
 - `trufflehog` - Secret detection with 800+ credential detectors, verification disabled
   by default (`brew install trufflehog` or GitHub releases)
+- `cppcheck` - C/C++ static analyzer (`brew install cppcheck` or
+  `apt-get install cppcheck`)
 - `golangci-lint` - Go meta-linter running 100+ linters (`brew install golangci-lint` or
   <https://golangci-lint.run/welcome/install/>; requires the Go toolchain)
 - `shellcheck` - Shell script analyzer (`brew install shellcheck` or GitHub releases)
