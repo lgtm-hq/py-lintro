@@ -86,7 +86,7 @@ def test_build_command_is_hermetic(trivy_plugin: TrivyPlugin) -> None:
 
 
 def test_build_command_threads_severity_and_unfixed() -> None:
-    """severity / ignore_unfixed options are threaded into the command."""
+    """Severity / ignore_unfixed options are threaded into the command."""
     plugin = TrivyPlugin()
     plugin.set_options(severity=["CRITICAL", "HIGH"], ignore_unfixed=True)
 
@@ -240,3 +240,44 @@ def test_fix_raises_not_implemented(trivy_plugin: TrivyPlugin) -> None:
         ["requirements.txt"],
         {},
     )
+
+
+def test_check_mid_scan_db_loss_keeps_collected_findings(
+    trivy_plugin: TrivyPlugin,
+    tmp_path: Path,
+) -> None:
+    """A DB failure after findings were collected does not hide them.
+
+    Args:
+        trivy_plugin: The plugin under test.
+        tmp_path: Temporary directory path.
+    """
+    req_a = tmp_path / "a" / "requirements.txt"
+    req_b = tmp_path / "b" / "requirements.txt"
+    req_a.parent.mkdir()
+    req_b.parent.mkdir()
+    req_a.write_text("Django==2.2.0\n")
+    req_b.write_text("Django==2.2.0\n")
+
+    with_findings = CompletedProcess(
+        args=["trivy"],
+        returncode=0,
+        stdout=_report([_VULN]),
+        stderr="",
+    )
+    db_missing = CompletedProcess(
+        args=["trivy"],
+        returncode=1,
+        stdout="",
+        stderr="FATAL vulnerability DB needs to be updated; run trivy",
+    )
+
+    with (
+        patch(_VERIFY_VERSION, return_value=None),
+        patch(_SUBPROCESS_RUN, side_effect=[with_findings, db_missing]),
+    ):
+        result = trivy_plugin.check([str(req_a), str(req_b)], {})
+
+    assert_that(result.success).is_false()
+    assert_that(result.issues_count).is_equal_to(1)
+    assert_that(result.output).contains("part-way")

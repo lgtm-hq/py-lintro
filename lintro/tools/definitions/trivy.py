@@ -291,14 +291,29 @@ class TrivyPlugin(BaseToolPlugin):
             if completed.returncode != 0:
                 # A missing DB is an environment condition, not a scan failure:
                 # report a clear, non-blocking skip instead of failing closed.
+                # But never let a mid-loop skip hide vulnerabilities already
+                # collected from earlier lockfiles.
                 if self._is_db_missing_error(stderr):
-                    return self._db_missing_result()
+                    if not all_issues:
+                        return self._db_missing_result()
+                    return ToolResult(
+                        name=self.definition.name,
+                        success=False,
+                        output=(
+                            "Trivy vulnerability DB became unavailable part-way "
+                            "through the scan; reporting the findings collected "
+                            "before the failure."
+                        ),
+                        issues_count=len(all_issues),
+                        issues=all_issues,
+                    )
                 logger.error(f"Trivy failed on {file}: {stderr}")
                 return ToolResult(
                     name=self.definition.name,
                     success=False,
                     output=stderr or "Trivy failed with non-zero exit code",
-                    issues_count=0,
+                    issues_count=len(all_issues),
+                    issues=all_issues,
                 )
 
             if not stdout:
