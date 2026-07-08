@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # publish_packages.sh
 # Publish the lintro npm packages (platform packages first, then the
-# meta-package). Publishing is DRY-RUN ONLY unless LIVE=1 is set explicitly,
-# which is intentionally never wired into any workflow in this repo — going
-# live is a deliberate, separate follow-up that also requires NODE_AUTH_TOKEN.
+# meta-package). Publishing is DRY-RUN unless LIVE=1 is set. The tag pipeline
+# (publish-npm.yml, gated by the `npm` environment) sets LIVE=1; authentication
+# is via npm trusted publishing (OIDC), so no NODE_AUTH_TOKEN is required.
 
 set -euo pipefail
 
