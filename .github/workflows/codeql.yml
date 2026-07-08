@@ -9,7 +9,11 @@ name: Security - CodeQL Code Scanning
     paths: ['**.py', 'pyproject.toml', '.github/**']
   pull_request:
     branches: [main]
-    paths: ['**.py', 'pyproject.toml', '.github/**']
+    # No paths filter: `codeql / CodeQL` is a required status check, and a
+    # path-filtered workflow that does not run leaves that context absent
+    # (not skipped), which permanently blocks the merge queue for PRs that
+    # touch only non-matching files (docs, npm/, etc.). Always run on PRs so
+    # the required check always reports.
   merge_group:
     types: [checks_requested]
   schedule:
