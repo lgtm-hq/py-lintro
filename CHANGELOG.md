@@ -21,6 +21,24 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.70.0] - 2026-07-08
+
+### Added
+
+- **npm**: publish via OIDC trusted publishing on release tags (#1194) (84b032e)
+
+### Changed
+
+- **deps**: update astral-sh/uv to 0.11.28 (#911) (63dfa6c)
+- **deps**: update oven-sh/bun to 1.3.14 (#914) (936b078)
+- **release**: version 0.69.6 (#1197) (1d42fa3)
+- **docker**: bump lgtm-ci to v0.48.0 and add historical backfill dispatch (#1193) (1174f17)
+
+### Fixed
+
+- **npm**: scope meta-package as @lgtm-hq/lintro (#1182) (ca3a270)
+- **ci**: always run CodeQL on PRs so its required check reports (#1196) (9d34024)
+
 ## [0.69.6] - 2026-07-08
 
 ### Changed
