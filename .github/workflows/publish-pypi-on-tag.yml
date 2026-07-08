@@ -189,7 +189,9 @@ jobs:
       id-token: write
     with:
       release_tag: ${{ github.ref_name }}
-    secrets: inherit
+    # No secrets: inherit — publishing is OIDC-only (id-token), and the
+    # reusable workflow's GITHUB_TOKEN for release-asset download is provided
+    # automatically. Avoids exposing all org/repo secrets to the call.
 
   docker-publish:
     name: Publish Docker Images to GHCR
