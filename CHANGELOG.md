@@ -21,6 +21,16 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.69.6] - 2026-07-08
+
+### Changed
+
+- **docker**: bump lgtm-ci to v0.48.0 and add historical backfill dispatch (#1193) (1174f17)
+
+### Fixed
+
+- **ci**: always run CodeQL on PRs so its required check reports (#1196) (9d34024)
+
 ## [0.69.5] - 2026-07-07
 
 ### Changed
