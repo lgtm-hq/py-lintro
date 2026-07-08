@@ -50,6 +50,19 @@ fi
 
 for pkg in "${PACKAGES[@]}"; do
 	pkg_dir="$NPM_DIR/$pkg"
+	# Idempotency: if this exact name@version is already on the registry
+	# (e.g. a rerun after a mid-loop failure published some packages), skip
+	# it. Without this a retry would fail on the already-published versions
+	# and leave the release partially published. Only meaningful for a real
+	# publish; dry-runs always run to exercise the tarball.
+	if [[ "${LIVE:-0}" == "1" ]]; then
+		pkg_name="$(node -p "require('$pkg_dir/package.json').name")"
+		pkg_version="$(node -p "require('$pkg_dir/package.json').version")"
+		if npm view "$pkg_name@$pkg_version" version >/dev/null 2>&1; then
+			echo "==> Skipping $pkg_name@$pkg_version (already published)"
+			continue
+		fi
+	fi
 	echo "==> Publishing $pkg (${publish_flags[*]})"
 	(cd "$pkg_dir" && npm publish "${publish_flags[@]}")
 done
