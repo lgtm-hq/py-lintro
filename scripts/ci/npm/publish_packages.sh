@@ -58,9 +58,19 @@ for pkg in "${PACKAGES[@]}"; do
 	if [[ "${LIVE:-0}" == "1" ]]; then
 		pkg_name="$(node -p "require('$pkg_dir/package.json').name")"
 		pkg_version="$(node -p "require('$pkg_dir/package.json').version")"
-		if npm view "$pkg_name@$pkg_version" version >/dev/null 2>&1; then
+		# Distinguish "version not published" (npm E404) from a lookup that
+		# failed for another reason (network, rate-limit, auth). Only a real
+		# 404 means "safe to publish". Any other failure must abort rather
+		# than fall through to a publish that would error on a duplicate and
+		# leave the release partially published.
+		view_err="$(npm view "$pkg_name@$pkg_version" version 2>&1 >/dev/null)" && view_ok=1 || view_ok=0
+		if [[ "$view_ok" == "1" ]]; then
 			echo "==> Skipping $pkg_name@$pkg_version (already published)"
 			continue
+		elif ! grep -qi 'E404\|404 Not Found\|is not in this registry' <<<"$view_err"; then
+			echo "ERROR: could not verify $pkg_name@$pkg_version on the registry" >&2
+			echo "$view_err" >&2
+			exit 1
 		fi
 	fi
 	echo "==> Publishing $pkg (${publish_flags[*]})"
