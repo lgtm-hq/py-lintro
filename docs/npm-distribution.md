@@ -46,11 +46,18 @@ every manifest and into the meta-package's `@lgtm-hq/lintro-*` pins. The same sc
 
 ## Publishing
 
-`.github/workflows/publish-npm.yml` is **dry-run only**. It downloads the release
-binaries, stages them into the npm tree, injects the version, runs a smoke test, and
-calls `scripts/ci/npm/publish_packages.sh`, which always passes `--dry-run` unless
-`LIVE=1` is set. Going live is a deliberate follow-up that also requires a
-`NODE_AUTH_TOKEN` secret and the `@lgtm-hq` npm org.
+`.github/workflows/publish-npm.yml` downloads the release binaries, stages them into the
+npm tree, injects the version, runs a smoke test, and calls
+`scripts/ci/npm/publish_packages.sh` with `LIVE=1`. It is invoked from the tag pipeline
+(`publish-pypi-on-tag.yml`) after `build-binary.yml` uploads the platform binaries to
+the GitHub release.
+
+Publishing uses npm **trusted publishing (OIDC)**: no `NODE_AUTH_TOKEN` secret is
+required. Each package on npmjs is configured with a trusted publisher pointing at this
+repo, the `publish-npm.yml` workflow, and the `npm` environment. That `npm` environment
+gates every publish behind maintainer approval, mirroring the `pypi` environment; npm
+generates provenance attestations automatically. A manual `workflow_dispatch` defaults
+to `dry_run: true` for safe testing.
 
 ## Install context
 

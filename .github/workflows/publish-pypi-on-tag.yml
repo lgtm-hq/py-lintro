@@ -169,6 +169,30 @@ jobs:
       arch: universal
     secrets: inherit
 
+  npm-publish:
+    name: Publish to npm
+    # Needs homebrew-tap: that job (build-binary.yml) uploads the four
+    # platform binaries to the GitHub release, which publish-npm.yml
+    # downloads. Gated to stable releases only, since build-binary does not
+    # run for prereleases.
+    needs: [homebrew-tap]
+    if: >-
+      !startsWith(github.ref_name, 'actions-v') &&
+      !contains(github.ref_name, 'a') &&
+      !contains(github.ref_name, 'b') &&
+      !contains(github.ref_name, 'rc')
+    uses: ./.github/workflows/publish-npm.yml
+    permissions:
+      # read: checkout and download release assets
+      contents: read
+      # write: OIDC for npm trusted publishing + provenance
+      id-token: write
+    with:
+      release_tag: ${{ github.ref_name }}
+    # No secrets: inherit — publishing is OIDC-only (id-token), and the
+    # reusable workflow's GITHUB_TOKEN for release-asset download is provided
+    # automatically. Avoids exposing all org/repo secrets to the call.
+
   docker-publish:
     name: Publish Docker Images to GHCR
     needs: [pypi-upload]
