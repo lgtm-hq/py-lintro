@@ -11,7 +11,7 @@ The `npm/` directory holds five packages:
 
 | Package  | npm name                       | Contents                                       |
 | -------- | ------------------------------ | ---------------------------------------------- |
-| Meta     | `lintro`                       | `bin/lintro` launcher + `optionalDependencies` |
+| Meta     | `@lgtm-hq/lintro`              | `bin/lintro` launcher + `optionalDependencies` |
 | Platform | `@lgtm-hq/lintro-darwin-arm64` | macOS Apple Silicon binary                     |
 | Platform | `@lgtm-hq/lintro-darwin-x64`   | macOS Intel binary                             |
 | Platform | `@lgtm-hq/lintro-linux-arm64`  | Linux ARM64 binary                             |
