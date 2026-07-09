@@ -21,6 +21,12 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.70.2] - 2026-07-09
+
+### Fixed
+
+- **homebrew**: sync binary formula generator with tap's authoritative output (#1199) (8dbd1ca)
+
 ## [0.70.1] - 2026-07-09
 
 ### Fixed
