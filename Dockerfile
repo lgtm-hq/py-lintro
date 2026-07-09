@@ -11,10 +11,10 @@
 # -----------------------------------------------------------------------------
 # Stage: tools — pre-built linting toolchains
 # -----------------------------------------------------------------------------
-FROM python:3.14-slim@sha256:7a500125bc50693f2214e842a621440a1b1b9cbb2188f74ab045d29ed2ea5856 AS tools
+FROM python:3.14-slim@sha256:b877e50bd90de10af8d82c57a022fc2e0dc731c5320d762a27986facfc3355c1 AS tools
 
-ARG BUN_VERSION=1.3.11
-ARG UV_VERSION=0.11.10
+ARG BUN_VERSION=1.3.14
+ARG UV_VERSION=0.11.28
 
 LABEL maintainer="lgtm-hq"
 LABEL org.opencontainers.image.source="https://github.com/lgtm-hq/py-lintro"
@@ -194,7 +194,7 @@ CMD ["--help"]
 # -----------------------------------------------------------------------------
 # Stage: base — minimal runtime without external toolchains
 # -----------------------------------------------------------------------------
-FROM python:3.14-slim@sha256:7a500125bc50693f2214e842a621440a1b1b9cbb2188f74ab045d29ed2ea5856 AS base
+FROM python:3.14-slim@sha256:b877e50bd90de10af8d82c57a022fc2e0dc731c5320d762a27986facfc3355c1 AS base
 
 LABEL org.opencontainers.image.description="Lintro base image (no external tools); GHCR package py-lintro-base"
 

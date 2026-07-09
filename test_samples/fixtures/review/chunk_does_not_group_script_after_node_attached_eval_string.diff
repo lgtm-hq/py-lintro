@@ -1,0 +1,12 @@
+diff --git a/.github/workflows/ci.yml b/.github/workflows/ci.yml
+--- a/.github/workflows/ci.yml
++++ b/.github/workflows/ci.yml
+@@ -1 +1,2 @@
+ name: CI
++run: node -escripts/build.js
+diff --git a/scripts/build.js b/scripts/build.js
+--- a/scripts/build.js
++++ b/scripts/build.js
+@@ -1 +1,2 @@
+ console.log('build')
++console.log('done')

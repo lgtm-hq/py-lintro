@@ -13,7 +13,10 @@ from lintro.ai.review.context import (
     unified_diff_preamble,
     validate_review_context_diff,
 )
-from lintro.ai.review.context.pr_metadata import _parse_changed_files_from_diff
+from lintro.ai.review.context.pr_metadata import (
+    _parse_changed_files_from_diff,
+    _parse_pr_view_json,
+)
 from lintro.ai.review.enums.changed_file_status import ChangedFileStatus
 from lintro.ai.review.enums.review_context_error_code import ReviewContextErrorCode
 from lintro.ai.review.exceptions import ReviewContextError
@@ -417,3 +420,66 @@ def test_parse_changed_files_supports_newlines_in_numstat_z_paths() -> None:
     changed_files = parse_changed_files(name_status=name_status, numstat=numstat)
     assert_that(changed_files).is_length(1)
     assert_that(changed_files[0].path).is_equal_to(path)
+
+
+def test_pr_metadata_missing_base_uses_head_repo() -> None:
+    """Resolve the repository from head when baseRepository is absent.
+
+    When ``baseRepository`` is missing but ``headRepository`` carries a valid
+    ``nameWithOwner``, the parsed head repository must be used as the fallback
+    instead of raising "Could not determine repository".
+    """
+    import json
+
+    payload = json.dumps(
+        {
+            "number": 42,
+            "title": "Example PR",
+            "baseRefOid": "a" * 40,
+            "headRefOid": "b" * 40,
+            "headRepository": {"nameWithOwner": "octo/head-fork"},
+            "body": "Body text",
+        },
+    )
+
+    metadata, base_ref, head_ref = _parse_pr_view_json(
+        payload=payload,
+        repo_override=None,
+    )
+
+    assert_that(metadata.repo).is_equal_to("octo/head-fork")
+    assert_that(metadata.head_repo).is_equal_to("octo/head-fork")
+    assert_that(base_ref).is_equal_to("a" * 40)
+    assert_that(head_ref).is_equal_to("b" * 40)
+
+
+def test_pr_metadata_base_repo_resolves_from_repo_override() -> None:
+    """Base repo derives from ``repo_override``, never a ``baseRepository`` field.
+
+    ``baseRepository`` is not a valid ``gh pr view --json`` field, so the payload
+    never contains it in the real call path. The base repository must instead be
+    taken from the CLI-provided override (``--repo`` / ``GITHUB_REPOSITORY``),
+    while ``headRepository`` continues to supply the head repo for fork PRs.
+    """
+    import json
+
+    payload = json.dumps(
+        {
+            "number": 80,
+            "title": "Fork PR",
+            "baseRefOid": "c" * 40,
+            "headRefOid": "d" * 40,
+            "headRepository": {"nameWithOwner": "fork-owner/py-lintro"},
+            "body": "Body text",
+        },
+    )
+
+    metadata, base_ref, head_ref = _parse_pr_view_json(
+        payload=payload,
+        repo_override="lgtm-hq/py-lintro",
+    )
+
+    assert_that(metadata.repo).is_equal_to("lgtm-hq/py-lintro")
+    assert_that(metadata.head_repo).is_equal_to("fork-owner/py-lintro")
+    assert_that(base_ref).is_equal_to("c" * 40)
+    assert_that(head_ref).is_equal_to("d" * 40)

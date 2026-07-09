@@ -162,7 +162,7 @@ def walk_files_with_excludes(
 
 def _should_exclude_with_spec(
     path: str,
-    spec: pathspec.PathSpec | None,
+    spec: pathspec.GitIgnoreSpec | None,
 ) -> bool:
     """Check if a path should be excluded using a pre-compiled PathSpec.
 

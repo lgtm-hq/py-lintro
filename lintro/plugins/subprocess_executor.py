@@ -10,6 +10,8 @@ import os
 import subprocess  # nosec B404 - subprocess used safely with shell=False
 import sys
 import threading
+import time
+from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from loguru import logger
@@ -21,6 +23,51 @@ if TYPE_CHECKING:
 
 # Cache for compiled binary detection
 _IS_COMPILED_BINARY: bool | None = None
+
+
+@dataclass(frozen=True)
+class SubprocessResult:
+    """Result of a subprocess execution with separated output streams.
+
+    Historically the subprocess runners concatenated stdout and stderr into a
+    single string, which forced every JSON parser to hand-roll recovery from a
+    mixed blob (a single stderr warning line could break parsing). This result
+    object keeps the streams separated so tool definitions can parse stdout
+    only and log stderr independently. See issue #1043.
+
+    Attributes:
+        returncode: The subprocess exit code.
+        stdout: Captured standard output. For streaming execution (which merges
+            the child's stderr into stdout for real-time line handling) this
+            holds the combined stream and ``stderr`` is empty.
+        stderr: Captured standard error (empty for streaming execution).
+        output: Backward-compatible display string. Normally ``stdout`` and
+            ``stderr`` concatenated, or a formatted failure message when the
+            command failed without emitting any output.
+    """
+
+    returncode: int
+    stdout: str
+    stderr: str
+    output: str
+
+    @property
+    def success(self) -> bool:
+        """Whether the subprocess exited successfully.
+
+        Returns:
+            True when the return code is zero.
+        """
+        return self.returncode == 0
+
+    def as_tuple(self) -> tuple[bool, str]:
+        """Return the legacy ``(success, output)`` representation.
+
+        Returns:
+            Tuple of the success flag and the combined/display output, matching
+            the pre-#1043 return contract used by most tool definitions.
+        """
+        return self.success, self.output
 
 
 def is_compiled_binary() -> bool:
@@ -137,7 +184,7 @@ def run_subprocess(
     timeout: float,
     cwd: str | None = None,
     env: dict[str, str] | None = None,
-) -> tuple[bool, str]:
+) -> SubprocessResult:
     """Run a subprocess command safely.
 
     Args:
@@ -148,7 +195,8 @@ def run_subprocess(
             os.environ to preserve PATH and other essential variables.
 
     Returns:
-        Tuple of (success, output) where success indicates return code 0.
+        SubprocessResult with the return code and separated stdout/stderr
+        streams (plus a combined ``output`` display string for compatibility).
 
     Raises:
         subprocess.TimeoutExpired: If command times out.
@@ -195,7 +243,12 @@ def run_subprocess(
                 )
                 logger.warning(combined)
 
-        return result.returncode == 0, combined
+        return SubprocessResult(
+            returncode=result.returncode,
+            stdout=result.stdout or "",
+            stderr=result.stderr or "",
+            output=combined,
+        )
     except subprocess.TimeoutExpired as e:
         logger.warning(f"Subprocess {cmd[0]} timed out after {timeout}s")
         # Preserve partial output from the original exception
@@ -234,7 +287,7 @@ def run_subprocess_streaming(
     cwd: str | None = None,
     env: dict[str, str] | None = None,
     line_handler: Callable[[str], None] | None = None,
-) -> tuple[bool, str]:
+) -> SubprocessResult:
     """Run a subprocess command with optional line-by-line streaming.
 
     This function allows real-time output processing by calling the line_handler
@@ -242,6 +295,10 @@ def run_subprocess_streaming(
 
     The timeout is enforced during both output reading and process completion,
     preventing indefinite blocking on slow or hanging processes.
+
+    Streaming execution merges the child's stderr into stdout so the line
+    handler observes a single ordered stream; the returned ``stderr`` field is
+    therefore empty and ``stdout`` carries the combined stream.
 
     Args:
         cmd: Command and arguments to run.
@@ -252,7 +309,8 @@ def run_subprocess_streaming(
         line_handler: Optional callback called for each line of output.
 
     Returns:
-        Tuple of (success, output) where success indicates return code 0.
+        SubprocessResult with the return code and captured output. ``stdout``
+        holds the merged stream, ``stderr`` is empty.
 
     Raises:
         subprocess.TimeoutExpired: If command times out.
@@ -295,7 +353,12 @@ def run_subprocess_streaming(
                     if line_handler:
                         line_handler(stripped)
 
-        # Use a thread to read output so we can enforce timeout
+        # Use a thread to read output so we can enforce timeout.
+        # Track elapsed wall time so the reader join and the subsequent
+        # process.wait() share a single timeout budget rather than each
+        # receiving the full timeout (which could allow ~2x the configured
+        # limit). See issue #1047.
+        start_time = time.monotonic()
         reader_thread = threading.Thread(target=read_output, daemon=True)
         reader_thread.start()
         reader_thread.join(timeout=timeout)
@@ -315,9 +378,12 @@ def run_subprocess_streaming(
                 output="\n".join(output_lines),
             )
 
-        # Reading completed, now wait for process to finish
+        # Reading completed, now wait for process to finish using only the
+        # remaining slice of the timeout budget.
+        elapsed = time.monotonic() - start_time
+        remaining_timeout = max(0.0, timeout - elapsed)
         try:
-            returncode = process.wait(timeout=timeout)
+            returncode = process.wait(timeout=remaining_timeout)
         except subprocess.TimeoutExpired as e:
             logger.warning(
                 f"Subprocess {cmd[0]} timed out after {timeout}s (during wait)",
@@ -330,7 +396,8 @@ def run_subprocess_streaming(
                 output="\n".join(output_lines),
             ) from e
 
-        output = "\n".join(output_lines)
+        raw_output = "\n".join(output_lines)
+        output = raw_output
         if returncode != 0:
             output_preview = output[:500]
             if output_preview:
@@ -348,7 +415,12 @@ def run_subprocess_streaming(
                 )
                 logger.warning(output)
 
-        return returncode == 0, output
+        return SubprocessResult(
+            returncode=returncode,
+            stdout=raw_output,
+            stderr="",
+            output=output,
+        )
 
     except FileNotFoundError as e:
         logger.warning(

@@ -32,6 +32,18 @@ def test_default_config_optional_fields() -> None:
     assert_that(config.api_key_env).is_none()
 
 
+def test_cursor_trust_workspace_defaults_false() -> None:
+    """Cursor workspace trust is opt-in and disabled by default."""
+    config = AIConfig()
+    assert_that(config.cursor_trust_workspace).is_false()
+
+
+def test_cursor_trust_workspace_opt_in() -> None:
+    """Cursor workspace trust can be explicitly enabled via config."""
+    config = AIConfig(cursor_trust_workspace=True)
+    assert_that(config.cursor_trust_workspace).is_true()
+
+
 def test_default_config_numeric_fields() -> None:
     """All numeric fields have correct defaults."""
     config = AIConfig()

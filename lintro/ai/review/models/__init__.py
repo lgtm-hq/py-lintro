@@ -10,7 +10,7 @@ from lintro.ai.review.models.file_classification import FileClassification
 from lintro.ai.review.models.pr_metadata import PRMetadata
 from lintro.ai.review.models.review_chunk import ReviewChunk
 from lintro.ai.review.models.review_context import ReviewContext
-from lintro.ai.review.models.review_finding import ReviewFinding
+from lintro.ai.review.models.review_finding import ReviewFinding, Severity
 from lintro.ai.review.models.review_metadata import ReviewMetadata
 from lintro.ai.review.models.review_result import ReviewResult
 
@@ -26,4 +26,5 @@ __all__ = [
     "ReviewFinding",
     "ReviewMetadata",
     "ReviewResult",
+    "Severity",
 ]

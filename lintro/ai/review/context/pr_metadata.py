@@ -76,7 +76,6 @@ def _parse_pr_view_json(
             code=ReviewContextErrorCode.GH_METADATA_INVALID,
         )
 
-    base_repository = data.get("baseRepository")
     head_repository = data.get("headRepository")
 
     parsed_head_repo: str | None = None
@@ -85,13 +84,13 @@ def _parse_pr_view_json(
         if isinstance(raw_head_repo, str) and raw_head_repo.strip():
             parsed_head_repo = raw_head_repo.strip()
 
+    # The base repository is derived from the caller-provided override
+    # (``--repo`` / ``GITHUB_REPOSITORY``), which the CLI always supplies in
+    # ``--pr`` mode. ``baseRepository`` is not a valid ``gh pr view --json``
+    # field, so it must never be read from the payload.
     repo_name: str | None = None
     if isinstance(repo_override, str) and repo_override.strip():
         repo_name = repo_override.strip()
-    elif isinstance(base_repository, dict):
-        base_repo_name = base_repository.get("nameWithOwner")
-        if isinstance(base_repo_name, str) and base_repo_name.strip():
-            repo_name = base_repo_name
 
     if repo_name is None:
         if repo_override is not None:
@@ -105,10 +104,13 @@ def _parse_pr_view_json(
                 "'headRepository'.",
                 code=ReviewContextErrorCode.GH_METADATA_INVALID,
             )
-        raise ReviewContextError(
-            "Could not determine repository for pull request review.",
-            code=ReviewContextErrorCode.GH_METADATA_INVALID,
-        )
+        if parsed_head_repo is not None:
+            repo_name = parsed_head_repo
+        else:
+            raise ReviewContextError(
+                "Could not determine repository for pull request review.",
+                code=ReviewContextErrorCode.GH_METADATA_INVALID,
+            )
 
     body = data.get("body")
     body_text = body if isinstance(body, str) else ""

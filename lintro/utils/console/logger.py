@@ -39,13 +39,23 @@ class ThreadSafeConsoleLogger:
     thread synchronization for parallel tool execution.
     """
 
-    def __init__(self, run_dir: Path | None = None) -> None:
+    def __init__(
+        self,
+        run_dir: Path | None = None,
+        *,
+        route_stderr: bool = False,
+    ) -> None:
         """Initialize the ThreadSafeConsoleLogger.
 
         Args:
             run_dir: Optional run directory path for output location display.
+            route_stderr: When True, all decorative console output is written
+                to stderr instead of stdout. Used for machine-readable output
+                formats (JSON/SARIF) so stdout carries only the final
+                parseable document.
         """
         self.run_dir = run_dir
+        self.route_stderr = route_stderr
         self._messages: list[str] = []
         self._lock = threading.Lock()
 
@@ -54,14 +64,17 @@ class ThreadSafeConsoleLogger:
 
         Thread-safe: Uses lock when appending to message list.
 
+        When ``route_stderr`` is set the text is written to stderr so stdout
+        stays a single parseable document for machine-readable formats.
+
         Args:
             text: Text to display.
             color: Optional color for the text.
         """
         if color:
-            click.echo(click.style(text, fg=color))
+            click.echo(click.style(text, fg=color), err=self.route_stderr)
         else:
-            click.echo(text)
+            click.echo(text, err=self.route_stderr)
 
         # Track for console.log (thread-safe)
         with self._lock:
@@ -114,7 +127,10 @@ class ThreadSafeConsoleLogger:
             **kwargs: Additional keyword arguments for logger formatting.
         """
         error_text = f"ERROR: {message}"
-        click.echo(click.style(error_text, fg="red", bold=True))
+        click.echo(
+            click.style(error_text, fg="red", bold=True),
+            err=self.route_stderr,
+        )
         with self._lock:
             self._messages.append(error_text)
         logger.error(message, **kwargs)
@@ -189,7 +205,10 @@ class ThreadSafeConsoleLogger:
         self._print_summary_table(action=action, tool_results=tool_results)
 
         # Totals line and ASCII art
-        from lintro.utils.summary_tables import count_affected_files
+        from lintro.utils.summary_tables import (
+            count_affected_files,
+            count_fixable_issues,
+        )
 
         affected_files = count_affected_files(tool_results)
 
@@ -280,6 +299,7 @@ class ThreadSafeConsoleLogger:
                 severity_errors=sev_errors,
                 severity_warnings=sev_warnings,
                 severity_info=sev_info,
+                total_fixable=count_fixable_issues(tool_results),
             )
             self._print_ascii_art(total_issues=total_for_art)
             logger.debug(
@@ -319,6 +339,7 @@ class ThreadSafeConsoleLogger:
         severity_info: int = 0,
         total_ai_applied: int = 0,
         total_ai_verified: int = 0,
+        total_fixable: int = 0,
     ) -> None:
         """Print the totals summary table for the run.
 
@@ -333,6 +354,7 @@ class ThreadSafeConsoleLogger:
             severity_info: Number of issues at INFO severity.
             total_ai_applied: Total number of AI-applied fixes (FIX mode).
             total_ai_verified: Total number of AI-resolved fixes (FIX mode).
+            total_fixable: Number of issues flagged as auto-fixable (CHECK mode).
         """
         from lintro.utils.summary_tables import print_totals_table
 
@@ -348,6 +370,7 @@ class ThreadSafeConsoleLogger:
             severity_info=severity_info,
             total_ai_applied=total_ai_applied,
             total_ai_verified=total_ai_verified,
+            total_fixable=total_fixable,
         )
 
     def _print_final_status(
