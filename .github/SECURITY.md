@@ -32,6 +32,7 @@ disclosure:
 - Detailed steps to reproduce the vulnerability
 - Affected version(s) and environment details
 - Potential impact or severity assessment, if known
+- Any suggested fixes or mitigations you might have
 
 ### Vulnerability Disclosure Timeline
 
