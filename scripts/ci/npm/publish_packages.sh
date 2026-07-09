@@ -22,6 +22,10 @@ Usage: publish_packages.sh
 Environment:
   LIVE=1              Perform a real publish. Default (unset) is --dry-run.
   NPM_PROVENANCE=0    Disable --provenance (default: enabled).
+  NPM_DIST_TAG        Dist-tag for npm publish (default: latest). Use a
+                      non-latest tag (e.g. backfill) when publishing a version
+                      lower than the current latest — npm refuses to move
+                      latest backwards without an explicit --tag.
 
 Publishes @lgtm-hq/lintro-<platform> packages first, then the root meta-package,
 so consumers never resolve a meta-package whose optional deps are missing.
@@ -43,11 +47,18 @@ publish_flags=("--access" "public")
 if [[ "${NPM_PROVENANCE:-1}" != "0" ]]; then
 	publish_flags+=("--provenance")
 fi
+# Always pass --tag so backfills of older versions do not try to move latest.
+dist_tag="${NPM_DIST_TAG:-latest}"
+if [[ -z "$dist_tag" ]]; then
+	echo "ERROR: NPM_DIST_TAG must be non-empty (use 'latest' for normal releases)" >&2
+	exit 1
+fi
+publish_flags+=("--tag" "$dist_tag")
 if [[ "${LIVE:-0}" != "1" ]]; then
 	publish_flags+=("--dry-run")
 	echo "DRY-RUN mode: no packages will be published. Set LIVE=1 to publish."
 else
-	echo "LIVE mode: packages WILL be published to the registry."
+	echo "LIVE mode: packages WILL be published to the registry (dist-tag=$dist_tag)."
 fi
 
 for pkg in "${PACKAGES[@]}"; do

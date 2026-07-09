@@ -452,3 +452,22 @@ def test_docker_ci_lintro_code_quality_wires_upstream_jobs() -> None:
             "|| needs.dogfooding-lint.result }}",
         ),
     )
+
+
+def test_publish_npm_exposes_dist_tag_for_backfills() -> None:
+    """publish-npm accepts dist_tag and forwards it as NPM_DIST_TAG."""
+    workflow = _load_workflow(name="publish-npm.yml")
+    on = workflow["on"]
+    assert_that(on["workflow_call"]["inputs"]["dist_tag"]["default"]).is_equal_to(
+        "latest",
+    )
+    assert_that(on["workflow_dispatch"]["inputs"]["dist_tag"]["default"]).is_equal_to(
+        "latest",
+    )
+
+    publish_step = next(
+        step
+        for step in workflow["jobs"]["publish"]["steps"]
+        if step.get("name") == "Publish to npm"
+    )
+    assert_that(publish_step["env"]["NPM_DIST_TAG"]).contains("inputs.dist_tag")
