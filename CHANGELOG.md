@@ -21,6 +21,12 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.70.3] - 2026-07-09
+
+### Fixed
+
+- **ci**: use Node 24 bundled npm for trusted publish (#1205) (d0543ab)
+
 ## [0.70.2] - 2026-07-09
 
 ### Fixed
