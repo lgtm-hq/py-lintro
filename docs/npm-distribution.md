@@ -59,6 +59,11 @@ gates every publish behind maintainer approval, mirroring the `pypi` environment
 generates provenance attestations automatically. A manual `workflow_dispatch` defaults
 to `dry_run: true` for safe testing.
 
+Trusted publishing requires **npm ≥ 11.5.1**. The workflow uses **Node 24**, which ships
+a compatible bundled npm — do **not** run `npm install -g npm` (or any in-place
+self-upgrade) in CI. That mutates the Actions toolcache npm tree and breaks
+`npm publish --provenance` with `Cannot find module 'sigstore'`.
+
 ## Install context
 
 `InstallContext.NPM_BIN` is detected when the running executable resolves under

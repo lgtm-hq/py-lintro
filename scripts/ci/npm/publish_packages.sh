@@ -4,6 +4,8 @@
 # meta-package). Publishing is DRY-RUN unless LIVE=1 is set. The tag pipeline
 # (publish-npm.yml, gated by the `npm` environment) sets LIVE=1; authentication
 # is via npm trusted publishing (OIDC), so no NODE_AUTH_TOKEN is required.
+# Caller must provide npm ≥ 11.5.1 (Node 24 bundled npm in CI). Do not
+# self-upgrade npm in-place before invoking this script.
 
 set -euo pipefail
 
