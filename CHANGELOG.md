@@ -21,6 +21,12 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.70.1] - 2026-07-09
+
+### Fixed
+
+- **ci**: correct setup-node pin to real v6.4.0 SHA (#1201) (7ee16b1)
+
 ## [0.70.0] - 2026-07-08
 
 ### Added
