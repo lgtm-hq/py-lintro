@@ -21,6 +21,12 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.70.5] - 2026-07-09
+
+### Fixed
+
+- **security**: update security policy and improve scorecard compliance (#787) (9eb520b)
+
 ## [0.70.4] - 2026-07-09
 
 ### Fixed
