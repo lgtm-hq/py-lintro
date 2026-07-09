@@ -95,6 +95,7 @@ def test_run_lint_tools_simple_test_action_basic() -> None:
 
         mock_pytest_tool = Mock()
         mock_pytest_tool.name = "pytest"
+        mock_pytest_tool.copy_for_execution.return_value = mock_pytest_tool
         mock_pytest_tool.check.return_value = ToolResult(
             name="pytest",
             success=True,
@@ -136,6 +137,7 @@ def test_run_lint_tools_simple_test_action_with_failures() -> None:
 
         mock_pytest_tool = Mock()
         mock_pytest_tool.name = "pytest"
+        mock_pytest_tool.copy_for_execution.return_value = mock_pytest_tool
         mock_pytest_tool.check.return_value = ToolResult(
             name="pytest",
             success=False,
@@ -207,6 +209,7 @@ def test_run_lint_tools_simple_test_action_with_tool_options() -> None:
 
         mock_pytest_tool = Mock()
         mock_pytest_tool.name = "pytest"
+        mock_pytest_tool.copy_for_execution.return_value = mock_pytest_tool
         mock_pytest_tool.check.return_value = ToolResult(
             name="pytest",
             success=True,
@@ -249,6 +252,7 @@ def test_run_lint_tools_simple_test_action_exclude_patterns() -> None:
 
         mock_pytest_tool = Mock()
         mock_pytest_tool.name = "pytest"
+        mock_pytest_tool.copy_for_execution.return_value = mock_pytest_tool
         mock_pytest_tool.check.return_value = ToolResult(
             name="pytest",
             success=True,
@@ -291,6 +295,7 @@ def test_run_lint_tools_simple_test_action_verbose() -> None:
 
         mock_pytest_tool = Mock()
         mock_pytest_tool.name = "pytest"
+        mock_pytest_tool.copy_for_execution.return_value = mock_pytest_tool
         mock_pytest_tool.check.return_value = ToolResult(
             name="pytest",
             success=True,

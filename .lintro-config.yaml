@@ -123,3 +123,13 @@ ai:
   max_parallel_calls: 5 # 1-20, concurrent API calls for fix generation
   validate_after_group: false # interactive mode: re-check right after each group
   show_cost_estimate: true
+
+# AI diff review (`lintro review`).
+review:
+  strictness: balanced # focused | balanced | thorough
+  depth: 1 # 1=checklist, 2=+generated questions, 3=+adversarial (per chunk)
+  sensitivity:
+    migration_notes: null # true/false/null — null uses preset default
+    doc_drift: null
+    test_gaps: null
+  force_semantic_chunking: false # same as --semantic-chunks (~6× agent calls)

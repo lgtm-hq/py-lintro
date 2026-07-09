@@ -22,6 +22,10 @@ from lintro.parsers.mypy.mypy_parser import parse_mypy_output
 from lintro.plugins.base import BaseToolPlugin
 from lintro.plugins.protocol import ToolDefinition
 from lintro.plugins.registry import register_tool
+from lintro.tools.core.option_validators import (
+    OptionSchema,
+    validate_option_types,
+)
 from lintro.tools.core.timeout_utils import create_timeout_result
 from lintro.utils.config import load_mypy_config
 
@@ -29,6 +33,13 @@ from lintro.utils.config import load_mypy_config
 MYPY_DEFAULT_TIMEOUT: int = 60
 MYPY_DEFAULT_PRIORITY: int = 82
 MYPY_FILE_PATTERNS: list[str] = ["*.py", "*.pyi"]
+
+# mypy prints this diagnostic (to stderr, not as JSON) and exits non-zero when
+# the resolved scope contains no Python sources, e.g. running the full tool set
+# against a non-Python repository. It surfaces in every execution path, both the
+# local CLI and the Docker image used by lgtm-ci reusable workflows, so we detect
+# it and skip cleanly like other language tools do on an empty scope.
+MYPY_NO_FILES_MARKER: str = "no .py[i] files"
 
 MYPY_DEFAULT_EXCLUDE_PATTERNS: list[str] = [
     "test_samples/*",
@@ -39,6 +50,15 @@ MYPY_DEFAULT_EXCLUDE_PATTERNS: list[str] = [
     "dist/**",
     "build/**",
 ]
+
+# Expected types for mypy-specific options, validated in set_options().
+MYPY_OPTION_TYPES: OptionSchema = {
+    "strict": bool,
+    "ignore_missing_imports": bool,
+    "python_version": str,
+    "config_file": (str, "string path"),
+    "cache_dir": (str, "string path"),
+}
 
 
 def _split_config_values(raw_value: str) -> list[str]:
@@ -57,6 +77,19 @@ def _split_config_values(raw_value: str) -> list[str]:
         if value:
             entries.append(value)
     return entries
+
+
+def _has_no_python_files_error(output: str) -> bool:
+    """Detect mypy's "no Python files in scope" diagnostic.
+
+    Args:
+        output: Combined stdout/stderr captured from the mypy subprocess.
+
+    Returns:
+        bool: True when mypy reported that no ``.py``/``.pyi`` files were found
+        in the resolved scope, meaning there is nothing to type-check.
+    """
+    return MYPY_NO_FILES_MARKER in output.lower()
 
 
 def _regex_to_glob(pattern: str) -> str:
@@ -139,24 +172,7 @@ class MypyPlugin(BaseToolPlugin):
             config_file: Path to mypy config file.
             cache_dir: Path to mypy cache directory.
             **kwargs: Other tool options.
-
-        Raises:
-            ValueError: If any provided option is of an unexpected type.
         """
-        if strict is not None and not isinstance(strict, bool):
-            raise ValueError("strict must be a boolean")
-        if ignore_missing_imports is not None and not isinstance(
-            ignore_missing_imports,
-            bool,
-        ):
-            raise ValueError("ignore_missing_imports must be a boolean")
-        if python_version is not None and not isinstance(python_version, str):
-            raise ValueError("python_version must be a string")
-        if config_file is not None and not isinstance(config_file, str):
-            raise ValueError("config_file must be a string path")
-        if cache_dir is not None and not isinstance(cache_dir, str):
-            raise ValueError("cache_dir must be a string path")
-
         options: dict[str, object] = {
             "strict": strict,
             "ignore_missing_imports": ignore_missing_imports,
@@ -164,6 +180,7 @@ class MypyPlugin(BaseToolPlugin):
             "config_file": config_file,
             "cache_dir": cache_dir,
         }
+        validate_option_types(options, MYPY_OPTION_TYPES)
         options = {k: v for k, v in options.items() if v is not None}
         super().set_options(**options, **kwargs)
 
@@ -476,12 +493,33 @@ class MypyPlugin(BaseToolPlugin):
         issues = parse_mypy_output(output=output)
         issues_count = len(issues)
 
+        # Defensive secondary guard: when mypy resolves a scope with no Python
+        # sources it errors out (exit 2) with a non-JSON "no .py[i] files"
+        # diagnostic. This path is reached when mypy performs its own directory
+        # discovery (e.g. the Docker/reusable-workflow path), where lintro's
+        # pre-flight file discovery cannot pre-empt it. Treat it as a clean skip
+        # so non-Python repositories pass like they do for other language tools.
+        # Only skip when no structured issues were parsed, so a run that both
+        # reports type errors and mentions the marker still surfaces the errors.
+        if issues_count == 0 and _has_no_python_files_error(output):
+            logger.debug("[mypy] No .py/.pyi files in scope; skipping cleanly")
+            return ToolResult(
+                name=self.definition.name,
+                success=True,
+                output="No .py/.pyi files found to check.",
+                issues_count=0,
+            )
+
         if not success and issues_count == 0:
-            # Execution failed but no structured issues were parsed; surface raw output
+            # Execution failed but no structured issues were parsed; surface diagnostics
             return ToolResult(
                 name=self.definition.name,
                 success=False,
-                output=output or "mypy execution failed.",
+                output=output
+                or (
+                    "mypy execution failed with no output.\n"
+                    "Re-run with LINTRO_LOG_LEVEL=DEBUG for subprocess details."
+                ),
                 issues_count=0,
             )
 

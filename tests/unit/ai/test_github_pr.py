@@ -14,6 +14,7 @@ from lintro.ai.integrations.github_pr import (
     _detect_pr_number,
     _format_inline_comment,
     _format_summary_comment,
+    _parse_patch_lines,
 )
 from lintro.ai.models import AIFixSuggestion, AISummary
 
@@ -161,7 +162,7 @@ def test_post_review_comments_posts_summary(test_token: str) -> None:
     )
     summary = AISummary(overview="Test overview", key_patterns=["pattern1"])
 
-    with patch.object(reporter, "_post_issue_comment", return_value=True) as mock:
+    with patch.object(reporter, "post_issue_comment", return_value=True) as mock:
         result = reporter.post_review_comments([], summary=summary)
         assert_that(result).is_true()
         mock.assert_called_once()
@@ -208,7 +209,7 @@ def test_api_request_constructs_correct_request(test_token: str) -> None:
     mock_response.__exit__ = MagicMock(return_value=False)
 
     with patch("urllib.request.urlopen", return_value=mock_response) as mock_open:
-        result = reporter._api_request(
+        result = reporter.api_request(
             "POST",
             "https://api.github.com/test",
             {"key": "value"},
@@ -219,6 +220,60 @@ def test_api_request_constructs_correct_request(test_token: str) -> None:
             f"Bearer {test_token}",
         )
         assert_that(json.loads(req.data)).is_equal_to({"key": "value"})
+
+
+def test_find_issue_comment_matches_marker(test_token: str) -> None:
+    """find_issue_comment returns the id/body of the marker-bearing comment."""
+    reporter = GitHubPRReporter(token=test_token, repo="owner/repo", pr_number=5)
+
+    page = [
+        {"id": 1, "body": "unrelated"},
+        {"id": 2, "body": "hello <!-- lintro-ai-review --> world"},
+    ]
+    mock_response = MagicMock()
+    mock_response.read.return_value = json.dumps(page).encode()
+    mock_response.__enter__ = MagicMock(return_value=mock_response)
+    mock_response.__exit__ = MagicMock(return_value=False)
+
+    with patch("urllib.request.urlopen", return_value=mock_response):
+        found = reporter.find_issue_comment(marker="<!-- lintro-ai-review -->")
+
+    assert_that(found).is_not_none()
+    found_id, _body = found or (0, "")
+    assert_that(found_id).is_equal_to(2)
+
+
+def test_find_issue_comment_returns_none_without_match(test_token: str) -> None:
+    """find_issue_comment returns None when no comment carries the marker."""
+    reporter = GitHubPRReporter(token=test_token, repo="owner/repo", pr_number=5)
+
+    mock_response = MagicMock()
+    mock_response.read.return_value = json.dumps([{"id": 1, "body": "x"}]).encode()
+    mock_response.__enter__ = MagicMock(return_value=mock_response)
+    mock_response.__exit__ = MagicMock(return_value=False)
+
+    with patch("urllib.request.urlopen", return_value=mock_response):
+        found = reporter.find_issue_comment(marker="<!-- lintro-ai-review -->")
+
+    assert_that(found).is_none()
+
+
+def test_update_issue_comment_patches(test_token: str) -> None:
+    """update_issue_comment issues a PATCH to the comment endpoint."""
+    reporter = GitHubPRReporter(token=test_token, repo="owner/repo", pr_number=5)
+
+    mock_response = MagicMock()
+    mock_response.status = 200
+    mock_response.__enter__ = MagicMock(return_value=mock_response)
+    mock_response.__exit__ = MagicMock(return_value=False)
+
+    with patch("urllib.request.urlopen", return_value=mock_response) as mock_open:
+        result = reporter.update_issue_comment(comment_id=42, body="new")
+
+    assert_that(result).is_true()
+    req = mock_open.call_args[0][0]
+    assert_that(req.get_method()).is_equal_to("PATCH")
+    assert_that(req.full_url).contains("/issues/comments/42")
 
 
 # -- TestFormatSummaryComment: Tests for summary comment formatting. ---------
@@ -367,8 +422,8 @@ def test_post_review_uses_workspace_relative_paths(test_token: str) -> None:
 
     diff = {"src/main.py": {10}}
     with (
-        patch.object(reporter, "_fetch_pr_diff_lines", return_value=diff),
-        patch.object(reporter, "_api_request", return_value=True) as mock_api,
+        patch.object(reporter, "fetch_pr_diff_lines", return_value=diff),
+        patch.object(reporter, "api_request", return_value=True) as mock_api,
     ):
         reporter._post_review(suggestions)
         payload = mock_api.call_args[0][2]
@@ -399,9 +454,116 @@ def test_post_review_skips_out_of_workspace_suggestions(test_token: str) -> None
 
     diff = {"some/other/file.py": {1, 2, 3}}
     with (
-        patch.object(reporter, "_fetch_pr_diff_lines", return_value=diff),
-        patch.object(reporter, "_api_request", return_value=True) as mock_api,
+        patch.object(reporter, "fetch_pr_diff_lines", return_value=diff),
+        patch.object(reporter, "api_request", return_value=True) as mock_api,
     ):
         reporter._post_review(suggestions)
         # Out-of-workspace suggestion should be filtered; no API call made
         mock_api.assert_not_called()
+
+
+def test_parse_patch_lines_skips_no_newline_marker() -> None:
+    r"""Ensure the "\\ No newline at end of file" marker does not shift lines.
+
+    The marker begins with a backslash rather than ``+``/``-`` and must not
+    advance the right-side line counter; otherwise added lines after it map
+    one line off.
+    """
+    patch = "\n".join(
+        [
+            "@@ -1,2 +1,3 @@",
+            " context1",
+            "-removed old",
+            "\\ No newline at end of file",
+            "+added new",
+            "+added final",
+        ],
+    )
+
+    result = _parse_patch_lines(patch)
+
+    assert_that(sorted(result)).is_equal_to([2, 3])
+
+
+def test_parse_patch_lines_no_newline_comment_mapping() -> None:
+    """Ensure a line targeted after a no-newline marker maps correctly.
+
+    A right-side line following the marker must retain its true position so
+    inline comments are not demoted to fallback issue comments.
+    """
+    patch = "\n".join(
+        [
+            "@@ -1,3 +1,4 @@",
+            " context1",
+            " context2",
+            "-old third",
+            "\\ No newline at end of file",
+            "+new third",
+            "+new fourth",
+        ],
+    )
+
+    result = _parse_patch_lines(patch)
+
+    # The added lines occupy right-side positions 3 and 4; the off-by-one
+    # positions 4 and 5 must not appear.
+    assert_that(sorted(result)).is_equal_to([3, 4])
+    assert_that(result).does_not_contain(5)
+
+
+# -- Deprecation aliases: public API promotion (#1050C). ---------------------
+
+
+def test_deprecated_post_issue_comment_alias_delegates(test_token: str) -> None:
+    """The private _post_issue_comment alias delegates to the public method."""
+    reporter = GitHubPRReporter(
+        token=test_token,
+        repo="owner/repo",
+        pr_number=5,
+    )
+
+    with (
+        patch.object(reporter, "post_issue_comment", return_value=True) as mock,
+        pytest.warns(DeprecationWarning),
+    ):
+        result = reporter._post_issue_comment("body")
+
+    assert_that(result).is_true()
+    mock.assert_called_once_with("body")
+
+
+def test_deprecated_fetch_pr_diff_lines_alias_delegates(test_token: str) -> None:
+    """The private _fetch_pr_diff_lines alias delegates to the public method."""
+    reporter = GitHubPRReporter(
+        token=test_token,
+        repo="owner/repo",
+        pr_number=5,
+    )
+    diff = {"src/main.py": {10}}
+
+    with (
+        patch.object(reporter, "fetch_pr_diff_lines", return_value=diff) as mock,
+        pytest.warns(DeprecationWarning),
+    ):
+        result = reporter._fetch_pr_diff_lines()
+
+    assert_that(result).is_equal_to(diff)
+    mock.assert_called_once_with()
+
+
+def test_deprecated_api_request_alias_delegates(test_token: str) -> None:
+    """The private _api_request alias delegates to the public method."""
+    reporter = GitHubPRReporter(
+        token=test_token,
+        repo="owner/repo",
+        pr_number=5,
+    )
+
+    with (
+        patch.object(reporter, "api_request", return_value=True) as mock,
+        pytest.warns(DeprecationWarning),
+    ):
+        result = reporter._api_request("POST", "https://api.github.com/x", {"a": 1})
+
+    assert_that(result).is_true()
+    mock.assert_called_once_with("POST", "https://api.github.com/x", {"a": 1})

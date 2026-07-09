@@ -2,63 +2,98 @@
 # For license details, see the repository root LICENSE file.
 ---
 name: Publish - TestPyPI Staging
-# Manual publish to TestPyPI for testing package distribution before production release.
-# Uses same quality and build workflows as production for consistency.
+
+# Layout: lgtm-ci docs/python-release-publish.md (v0.45.1+)
 
 'on':
   workflow_dispatch:
 
 permissions: {}
 
+concurrency:
+  group: publish-testpypi-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
-  quality:
-    uses: ./.github/workflows/reusable-quality.yml
+  pypi-build:
+    name: Build Python distribution
+    # yamllint disable-line rule:line-length
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-build-python-dist.yml@1014e3d7d5441a63215d2096545a46cff6de101c # v0.48.0
     permissions:
+      # read: checkout and build sdist/wheel (reusable-build-python-dist)
       contents: read
+    with:
+      python-version: '3.14'
+      verify-tag-version: false
+      ensure-tag-on-default-branch: false
+      artifact-name: python-dist
+      tooling-ref: '1014e3d7d5441a63215d2096545a46cff6de101c' # v0.48.0
+      egress-policy: block
+      egress-preset: pypi
+      allowed-endpoints-mode: append
+      allowed-endpoints: >
+        astral.sh:443
+        releases.astral.sh:443
+        github-releases.githubusercontent.com:443
 
-  build:
-    needs: quality
-    uses: ./.github/workflows/reusable-build.yml
-    permissions:
-      contents: read
-
-  publish:
+  pypi-upload:
     name: Upload to TestPyPI
-    needs: [build, quality]
-    runs-on: ubuntu-24.04
-    timeout-minutes: 20
-    permissions:
-      contents: read
-      id-token: write
+    needs: [pypi-build]
+    runs-on: ubuntu-latest
+    # Must match TestPyPI trusted publisher environment (same pattern as production
+    # `environment: pypi`). Auto-created in GitHub if missing.
     environment: testpypi
-    concurrency:
-      group: testpypi-publish-${{ github.sha }}
-      cancel-in-progress: true
+    permissions:
+      # read: download python-dist workflow artifact
+      contents: read
+      # write: OIDC JWT for TestPyPI trusted publishing (this workflow file)
+      id-token: write
+      # write: Sigstore provenance attestation after upload (best-effort)
+      attestations: write
     steps:
-      - name: Harden Runner
-        uses: step-security/harden-runner@fe104658747b27e96e4f7e80cd0a94068e53901d
+      - name: Harden runner
+        # yamllint disable-line rule:line-length
+        uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
         with:
-          egress-policy: 'block'
+          egress-policy: block
+          # lgtm-ci workflow-contract.md § PyPI upload (OIDC)
           allowed-endpoints: >
             github.com:443
             api.github.com:443
             codeload.github.com:443
-            release-assets.githubusercontent.com:443
             objects.githubusercontent.com:443
+            actions.githubusercontent.com:443
+            *.blob.core.windows.net:443
+            ghcr.io:443
+            pkg-containers.githubusercontent.com:443
             pypi.org:443
+            upload.pypi.org:443
             files.pythonhosted.org:443
             test.pypi.org:443
-      - name: Download artifacts
+            upload.test.pypi.org:443
+            astral.sh:443
+            releases.astral.sh:443
+            fulcio.sigstore.dev:443
+            rekor.sigstore.dev:443
+            tuf-repo-cdn.sigstore.dev:443
+            oauth2.sigstore.dev:443
+      - name: Prepare PyPI upload
+        id: prepare
         # yamllint disable-line rule:line-length
-        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+        uses: lgtm-hq/lgtm-ci/.github/actions/prepare-pypi-upload@1014e3d7d5441a63215d2096545a46cff6de101c # v0.48.0
         with:
-          name: dist
-          path: dist/
-      - name: Publish to TestPyPI (Trusted Publishing)
+          artifact-name: python-dist
+          python-version: '3.14'
+          tooling-ref: '1014e3d7d5441a63215d2096545a46cff6de101c' # v0.48.0
+      - name: Upload to TestPyPI
         # yamllint disable-line rule:line-length
-        uses: pypa/gh-action-pypi-publish@ed0c53931b1dc9bd32cbe73a98c7f6766f8a527e # v1.13.0
+        uses: pypa/gh-action-pypi-publish@cef221092ed1bacb1cc03d23a2d87d1d172e277b # v1.14.0
         with:
           repository-url: https://test.pypi.org/legacy/
-          verbose: true
-          skip-existing: true
-          verify-metadata: false
+          packages-dir: ${{ steps.prepare.outputs.dist-path }}
+      - name: Attest build provenance
+        continue-on-error: true
+        # yamllint disable-line rule:line-length
+        uses: actions/attest-build-provenance@0f67c3f4856b2e3261c31976d6725780e5e4c373 # v4.1.1
+        with:
+          subject-path: ${{ steps.prepare.outputs.dist-path }}/*

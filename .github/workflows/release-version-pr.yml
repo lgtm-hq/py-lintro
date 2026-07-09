@@ -1,0 +1,43 @@
+# SPDX-License-Identifier: MIT
+# For license details, see the repository root LICENSE file.
+---
+name: Release - Version PR
+
+# Surface trigger context in the Actions history so post-merge release failures
+# are traceable at a glance (event + branch), not just via the default commit
+# subject. Guarded by test_release_workflows_define_traceable_run_names.
+run-name: >-
+  Release - Version PR (${{ github.event_name }} on ${{ github.ref_name }})
+
+'on':
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: release-version-pr-${{ github.repository }}
+  cancel-in-progress: false
+
+jobs:
+  version-pr:
+    # yamllint disable-line rule:line-length
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-release-version-pr.yml@1014e3d7d5441a63215d2096545a46cff6de101c # v0.48.0
+    with:
+      ecosystems: python
+      auto-merge: true
+      max-bump: minor
+      tooling-ref: '1014e3d7d5441a63215d2096545a46cff6de101c' # v0.48.0
+      egress-policy: block
+      # Paired with release-auto-tag.yml (egress-preset: github-tooling).
+      # Guarded by test_release_workflows_use_paired_egress_presets.
+      egress-preset: pypi
+    secrets:
+      RELEASE_APP_ID: ${{ secrets.RELEASE_APP_ID }}
+      RELEASE_APP_PRIVATE_KEY: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
+    permissions:
+      actions: read # report-release-failure reads workflow/job metadata
+      contents: write # create version bump commits and PRs
+      issues: write # report-release-failure opens deduplicated failure issues
+      pull-requests: write

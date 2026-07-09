@@ -65,7 +65,7 @@
     },
     {
       "name": "astro_check",
-      "version": "6.1.10",
+      "version": "6.4.8",
       "install": {
         "type": "npm",
         "package": "astro",
@@ -168,7 +168,7 @@
     },
     {
       "name": "markdownlint",
-      "version": "0.22.0",
+      "version": "0.22.1",
       "install": {
         "type": "npm",
         "package": "markdownlint-cli2"

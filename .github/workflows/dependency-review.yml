@@ -2,51 +2,32 @@
 # For license details, see the repository root LICENSE file.
 ---
 name: Security - Dependency Review
-# Reviews dependency changes in PRs for known security vulnerabilities.
-# Blocks merges if high-severity vulnerabilities are introduced.
 
 'on':
   pull_request:
+    branches: [main]
+  merge_group:
+    types: [checks_requested]
 
 permissions: {}
 
+concurrency:
+  group: dependency-review-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
-  review:
-    runs-on: ubuntu-24.04
+  dependency-review:
+    # yamllint disable-line rule:line-length
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-dependency-review.yml@1014e3d7d5441a63215d2096545a46cff6de101c # v0.48.0
+    with:
+      fail-on-severity: high
+      tooling-ref: '1014e3d7d5441a63215d2096545a46cff6de101c' # v0.48.0
+      egress-policy: block
+      egress-preset: scorecard
+      allowed-endpoints-mode: append
+      allowed-endpoints: >
+        api.deps.dev:443
+        release-assets.githubusercontent.com:443
     permissions:
       contents: read
-      pull-requests: write
-    timeout-minutes: 5
-    concurrency:
-      group: dependency-review-${{ github.ref }}
-      cancel-in-progress: true
-    steps:
-      - name: Harden Runner
-        uses: step-security/harden-runner@fe104658747b27e96e4f7e80cd0a94068e53901d
-        with:
-          egress-policy: 'block'
-          allowed-endpoints: >
-            github.com:443
-            api.github.com:443
-            codeload.github.com:443
-            release-assets.githubusercontent.com:443
-            objects.githubusercontent.com:443
-            api.deps.dev:443
-            api.securityscorecards.dev:443
-      - name: Checkout
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
-      # Run dependency review; disable PR comment on forks (token is read-only)
-      # continue-on-error only for forks where Dependency Graph may not be enabled
-      - name: Dependency review
-        # yamllint disable-line rule:line-length
-        uses: actions/dependency-review-action@2031cfc080254a8a887f58cffee85186f0e49e48 # v4.9.0
-        continue-on-error: ${{ github.event.pull_request.head.repo.fork == true }}
-        with:
-          fail-on-severity: high
-          # Disable PR comments on forks where token is read-only
-          # yamllint disable-line rule:line-length
-          comment-summary-in-pr: ${{ github.event.pull_request.head.repo.fork == false }}
-          allow-ghsas: true
-          retry-on-snapshot-warnings: true
+      pull-requests: read

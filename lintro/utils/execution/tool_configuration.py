@@ -108,14 +108,21 @@ def configure_tool_for_execution(
     post_tools: set[str],
     auto_install: bool = False,
     lintro_config: LintroConfig | None = None,
-) -> None:
+) -> BaseToolPlugin:
     """Configure a tool for execution.
 
     Applies CLI overrides, unified config, and common options.
     This eliminates duplication between parallel and sequential execution paths.
 
+    Configuration is applied to a private per-invocation copy of ``tool``
+    rather than to the shared registry singleton, so concurrent logical
+    invocations do not clobber one another's option state. The passed-in
+    ``tool`` instance is left untouched; callers must execute against the
+    returned instance.
+
     Args:
-        tool: The tool plugin instance to configure.
+        tool: The tool plugin instance to configure (used as a template; not
+            mutated).
         tool_name: Name of the tool.
         config_manager: Unified config manager.
         tool_option_dict: Parsed tool options from CLI.
@@ -126,8 +133,16 @@ def configure_tool_for_execution(
         post_tools: Set of post-check tool names.
         auto_install: Whether to auto-install Node.js deps if missing (global default).
         lintro_config: Optional LintroConfig to reuse; fetched via get_config() if None.
+
+    Returns:
+        The configured per-invocation tool copy to run.
     """
-    # Reset accumulated state from prior runs (singleton instances)
+    # Operate on an isolated per-invocation copy so parallel executions do
+    # not race on the shared singleton's option state.
+    tool = tool.copy_for_execution()
+
+    # Reset accumulated state from prior runs (defensive; the copy already
+    # reflects the template's baseline state).
     tool.reset_options()
 
     # Build CLI overrides from --tool-options
@@ -181,6 +196,8 @@ def configure_tool_for_execution(
             ):
                 tool.set_options(format_check=False)
 
+    return tool
+
 
 def get_tool_display_name(tool_name: str) -> str:
     """Get the canonical display name for a tool.
@@ -211,6 +228,7 @@ def get_tools_to_run(
     action: str | Action,
     *,
     ignore_conflicts: bool = False,
+    lintro_config: LintroConfig | None = None,
 ) -> ToolsToRunResult:
     """Get the list of tools to run based on the tools string and action.
 
@@ -218,6 +236,7 @@ def get_tools_to_run(
         tools: Comma-separated tool names, "all", or None.
         action: "check", "fmt", or "test".
         ignore_conflicts: If True, skip conflict checking between tools.
+        lintro_config: Optional config override; uses global config when omitted.
 
     Returns:
         ToolsToRunResult with tools to run and skipped tools with reasons.
@@ -240,16 +259,16 @@ def get_tools_to_run(
         if not tool_manager.is_tool_registered("pytest"):
             raise ValueError("pytest tool is not available")
         # Respect enabled/disabled config for pytest
-        lintro_config = get_config()
-        if not lintro_config.is_tool_enabled("pytest"):
-            reason = _get_disabled_reason(lintro_config, "pytest")
+        config = lintro_config or get_config()
+        if not config.is_tool_enabled("pytest"):
+            reason = _get_disabled_reason(config, "pytest")
             return ToolsToRunResult(
                 skipped=[SkippedTool(name="pytest", reason=reason)],
             )
         return ToolsToRunResult(to_run=["pytest"])
 
     # Get lintro config for enabled/disabled tool checking
-    lintro_config = get_config()
+    config = lintro_config or get_config()
 
     if (
         tools is None
@@ -267,8 +286,8 @@ def get_tools_to_run(
         for name in available_tools:
             if name.lower() == "pytest":
                 continue
-            if not lintro_config.is_tool_enabled(name):
-                reason = _get_disabled_reason(lintro_config, name)
+            if not config.is_tool_enabled(name):
+                reason = _get_disabled_reason(config, name)
                 skipped.append(SkippedTool(name=name, reason=reason))
             else:
                 to_run.append(name)
@@ -302,8 +321,8 @@ def get_tools_to_run(
                 f"Unknown tool '{name}'. Available tools: {available_names}",
             )
         # Track disabled tools with reason
-        if not lintro_config.is_tool_enabled(name):
-            reason = _get_disabled_reason(lintro_config, name)
+        if not config.is_tool_enabled(name):
+            reason = _get_disabled_reason(config, name)
             skipped.append(SkippedTool(name=name, reason=reason))
             continue
         # Verify the tool supports the requested action

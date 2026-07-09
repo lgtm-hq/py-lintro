@@ -67,6 +67,17 @@ class FakeTool:
         """Reset options to defaults (stub for testing)."""
         self.options = {}
 
+    def copy_for_execution(self) -> FakeTool:
+        """Return self as the per-invocation copy.
+
+        Single-threaded stub with no shared-state race; returns itself so
+        tests assert on the same instance the runner configures and runs.
+
+        Returns:
+            This stub instance.
+        """
+        return self
+
     def set_options(self, **kwargs: Any) -> None:
         """Record option values provided to the tool stub.
 
@@ -309,6 +320,53 @@ def test_executor_json_output(
     assert_that("summary" in data).is_true()
 
 
+def test_executor_json_stdout_is_clean_and_banners_go_to_stderr(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Route decorative banners to stderr so stdout is a single JSON document.
+
+    Regression test for #1045: with ``--output-format json`` the real console
+    logger must emit banners/progress to stderr, leaving stdout parseable.
+
+    Args:
+        monkeypatch: Pytest monkeypatch fixture.
+        capsys: Pytest capture fixture for stdout/stderr.
+    """
+    # Intentionally do NOT stub the logger so real banner routing is exercised.
+    result = ToolResult(name="ruff", success=False, output="raw", issues_count=2)
+    _setup_tool_manager(
+        monkeypatch,
+        {"ruff": FakeTool("ruff", can_fix=True, result=result)},
+    )
+    code = run_lint_tools_simple(
+        action="check",
+        paths=["."],
+        tools="all",
+        tool_options=None,
+        exclude=None,
+        include_venv=False,
+        group_by="auto",
+        output_format="json",
+        verbose=False,
+        raw_output=False,
+    )
+    assert_that(code).is_equal_to(1)
+
+    captured = capsys.readouterr()
+    # stdout must be a single parseable JSON document.
+    data = json.loads(captured.out)
+    assert_that(data).contains_key("results")
+    assert_that(data).contains_key("summary")
+    # Check-mode remaining mirrors total_issues rather than a constant 0.
+    assert_that(data["summary"]["total_remaining"]).is_equal_to(
+        data["summary"]["total_issues"],
+    )
+    # The banner must not pollute stdout, but must appear on stderr.
+    assert_that(captured.out).does_not_contain("[LINTRO]")
+    assert_that(captured.err).contains("[LINTRO]")
+
+
 def test_executor_handles_tool_failure_with_output(
     monkeypatch: pytest.MonkeyPatch,
     fake_logger: Any,
@@ -405,3 +463,363 @@ def test_executor_unknown_tool(
         raw_output=False,
     )
     assert_that(code).is_equal_to(1)
+
+
+class CallTrackingTool(FakeTool):
+    """FakeTool that records whether check() or fix() was invoked.
+
+    Used to prove that ``--dry-run`` executes tools in read-only check mode
+    and never invokes ``fix()`` (which would modify files).
+    """
+
+    def __init__(self, name: str, can_fix: bool, result: ToolResult) -> None:
+        """Initialize the call-tracking tool.
+
+        Args:
+            name: Tool name.
+            can_fix: Whether fixes are supported.
+            result: Result object to return from check/fix.
+        """
+        super().__init__(name, can_fix, result)
+        self.checked = False
+        self.fixed = False
+
+    def check(
+        self,
+        paths: list[str],
+        options: dict[str, Any] | None = None,
+    ) -> ToolResult:
+        """Record that the check path ran and return the stored result.
+
+        Args:
+            paths: Target paths (ignored in stub).
+            options: Optional tool options.
+
+        Returns:
+            ToolResult: Pre-baked result instance.
+        """
+        self.checked = True
+        return self._result
+
+    def fix(
+        self,
+        paths: list[str],
+        options: dict[str, Any] | None = None,
+    ) -> ToolResult:
+        """Record that the fix path ran and return the stored result.
+
+        Args:
+            paths: Target paths (ignored in stub).
+            options: Optional tool options.
+
+        Returns:
+            ToolResult: Pre-baked result instance.
+        """
+        self.fixed = True
+        return self._result
+
+
+def _console_texts(fake_logger: Any) -> str:
+    """Join all console_output text passed to the fake logger.
+
+    Args:
+        fake_logger: FakeLogger instance whose calls were recorded.
+
+    Returns:
+        A single string of all console_output text arguments.
+    """
+    parts: list[str] = []
+    for name, args, kwargs in fake_logger.calls:
+        if name != "console_output":
+            continue
+        if "text" in kwargs:
+            parts.append(str(kwargs["text"]))
+        elif args:
+            parts.append(str(args[0]))
+    return "\n".join(parts)
+
+
+def test_executor_dry_run_runs_check_not_fix(
+    monkeypatch: pytest.MonkeyPatch,
+    fake_logger: Any,
+) -> None:
+    """Dry-run fmt executes check() and never fix(), signalling exit 1.
+
+    Args:
+        monkeypatch: Pytest monkeypatch fixture.
+        fake_logger: FakeLogger fixture.
+    """
+    _stub_logger(monkeypatch, fake_logger)
+    result = ToolResult(name="ruff", success=True, output="x", issues_count=2)
+    tool = CallTrackingTool("ruff", can_fix=True, result=result)
+    _setup_tool_manager(monkeypatch, {"ruff": tool})
+
+    code = run_lint_tools_simple(
+        action="fmt",
+        paths=["."],
+        tools="all",
+        tool_options=None,
+        exclude=None,
+        include_venv=False,
+        group_by="auto",
+        output_format="grid",
+        verbose=False,
+        raw_output=False,
+        dry_run=True,
+    )
+
+    assert_that(code).is_equal_to(1)
+    assert_that(tool.checked).is_true()
+    assert_that(tool.fixed).is_false()
+    texts = _console_texts(fake_logger)
+    assert_that(texts).contains("Dry run - no files modified")
+    assert_that(texts).contains("Would fix 2 issues in")
+
+
+def test_executor_dry_run_clean_reports_nothing(
+    monkeypatch: pytest.MonkeyPatch,
+    fake_logger: Any,
+) -> None:
+    """Dry-run fmt on a clean tree reports nothing to fix and exits 0.
+
+    Args:
+        monkeypatch: Pytest monkeypatch fixture.
+        fake_logger: FakeLogger fixture.
+    """
+    _stub_logger(monkeypatch, fake_logger)
+    result = ToolResult(name="ruff", success=True, output="", issues_count=0)
+    tool = CallTrackingTool("ruff", can_fix=True, result=result)
+    _setup_tool_manager(monkeypatch, {"ruff": tool})
+
+    code = run_lint_tools_simple(
+        action="fmt",
+        paths=["."],
+        tools="all",
+        tool_options=None,
+        exclude=None,
+        include_venv=False,
+        group_by="auto",
+        output_format="grid",
+        verbose=False,
+        raw_output=False,
+        dry_run=True,
+    )
+
+    assert_that(code).is_equal_to(0)
+    assert_that(tool.checked).is_true()
+    assert_that(tool.fixed).is_false()
+    texts = _console_texts(fake_logger)
+    assert_that(texts).contains("Nothing to fix")
+
+
+def test_executor_fmt_without_dry_run_invokes_fix(
+    monkeypatch: pytest.MonkeyPatch,
+    fake_logger: Any,
+) -> None:
+    """Normal fmt (no dry-run) still invokes fix() and does not regress.
+
+    Args:
+        monkeypatch: Pytest monkeypatch fixture.
+        fake_logger: FakeLogger fixture.
+    """
+    _stub_logger(monkeypatch, fake_logger)
+    result = ToolResult(
+        name="ruff",
+        success=True,
+        output="",
+        issues_count=0,
+        fixed_issues_count=2,
+        remaining_issues_count=0,
+    )
+    tool = CallTrackingTool("ruff", can_fix=True, result=result)
+    _setup_tool_manager(monkeypatch, {"ruff": tool})
+
+    code = run_lint_tools_simple(
+        action="fmt",
+        paths=["."],
+        tools="all",
+        tool_options=None,
+        exclude=None,
+        include_venv=False,
+        group_by="auto",
+        output_format="grid",
+        verbose=False,
+        raw_output=False,
+    )
+
+    assert_that(code).is_equal_to(0)
+    assert_that(tool.fixed).is_true()
+    assert_that(tool.checked).is_false()
+    texts = _console_texts(fake_logger)
+    assert_that(texts).does_not_contain("Dry run - no files modified")
+
+
+def test_executor_dry_run_excludes_non_fixable_issues(
+    monkeypatch: pytest.MonkeyPatch,
+    fake_logger: Any,
+) -> None:
+    """Dry-run counts only auto-fixable issues, not all check diagnostics.
+
+    A check-mode result carrying one fixable and one non-fixable issue must
+    report a single would-fix issue and exit 1.
+
+    Args:
+        monkeypatch: Pytest monkeypatch fixture.
+        fake_logger: FakeLogger fixture.
+    """
+    from lintro.parsers.ruff.ruff_issue import RuffIssue
+
+    fixable = RuffIssue(
+        file="a.py",
+        line=1,
+        column=8,
+        message="`os` imported but unused",
+        code="F401",
+        fixable=True,
+    )
+    non_fixable = RuffIssue(
+        file="a.py",
+        line=2,
+        column=1,
+        message="ambiguous variable name",
+        code="E741",
+        fixable=False,
+    )
+    _stub_logger(monkeypatch, fake_logger)
+    # Ruff reports success=False when it finds any diagnostics; dry-run must
+    # not let that alone force a failure exit.
+    result = ToolResult(
+        name="ruff",
+        success=False,
+        output="x",
+        issues_count=2,
+        issues=[fixable, non_fixable],
+    )
+    _setup_tool_manager(
+        monkeypatch,
+        {"ruff": CallTrackingTool("ruff", can_fix=True, result=result)},
+    )
+
+    code = run_lint_tools_simple(
+        action="fmt",
+        paths=["."],
+        tools="all",
+        tool_options=None,
+        exclude=None,
+        include_venv=False,
+        group_by="auto",
+        output_format="grid",
+        verbose=False,
+        raw_output=False,
+        dry_run=True,
+    )
+
+    assert_that(code).is_equal_to(1)
+    texts = _console_texts(fake_logger)
+    assert_that(texts).contains("Would fix 1 issue in")
+
+
+def test_executor_dry_run_only_non_fixable_exits_zero(
+    monkeypatch: pytest.MonkeyPatch,
+    fake_logger: Any,
+) -> None:
+    """Dry-run with only non-fixable issues reports nothing and exits 0.
+
+    Even though the tool returns ``success=False`` (it found a diagnostic),
+    dry-run must exit 0 because a real fmt run would change nothing.
+
+    Args:
+        monkeypatch: Pytest monkeypatch fixture.
+        fake_logger: FakeLogger fixture.
+    """
+    from lintro.parsers.ruff.ruff_issue import RuffIssue
+
+    non_fixable = RuffIssue(
+        file="a.py",
+        line=1,
+        column=1,
+        message="ambiguous variable name",
+        code="E741",
+        fixable=False,
+    )
+    _stub_logger(monkeypatch, fake_logger)
+    result = ToolResult(
+        name="ruff",
+        success=False,
+        output="x",
+        issues_count=1,
+        issues=[non_fixable],
+    )
+    _setup_tool_manager(
+        monkeypatch,
+        {"ruff": CallTrackingTool("ruff", can_fix=True, result=result)},
+    )
+
+    code = run_lint_tools_simple(
+        action="fmt",
+        paths=["."],
+        tools="all",
+        tool_options=None,
+        exclude=None,
+        include_venv=False,
+        group_by="auto",
+        output_format="grid",
+        verbose=False,
+        raw_output=False,
+        dry_run=True,
+    )
+
+    assert_that(code).is_equal_to(0)
+    texts = _console_texts(fake_logger)
+    assert_that(texts).contains("Nothing to fix")
+    assert_that(texts).does_not_contain("Would fix")
+
+
+def test_executor_dry_run_treats_formatter_issues_without_flag_as_fixable(
+    monkeypatch: pytest.MonkeyPatch,
+    fake_logger: Any,
+) -> None:
+    """Formatter issues lacking a ``fixable`` attribute count as would-fix.
+
+    Pure-formatter parsers (e.g. prettier) do not define a ``fixable`` field.
+    Every diagnostic such a tool emits in check mode is a reformat that fmt
+    would apply, so it must be counted.
+
+    Args:
+        monkeypatch: Pytest monkeypatch fixture.
+        fake_logger: FakeLogger fixture.
+    """
+    from lintro.parsers.prettier.prettier_issue import PrettierIssue
+
+    issue = PrettierIssue(file="a.js", line=1, column=1, message="Would reformat")
+    assert_that(hasattr(issue, "fixable")).is_false()
+    _stub_logger(monkeypatch, fake_logger)
+    result = ToolResult(
+        name="prettier",
+        success=False,
+        output="x",
+        issues_count=1,
+        issues=[issue],
+    )
+    _setup_tool_manager(
+        monkeypatch,
+        {"prettier": CallTrackingTool("prettier", can_fix=True, result=result)},
+    )
+
+    code = run_lint_tools_simple(
+        action="fmt",
+        paths=["."],
+        tools="all",
+        tool_options=None,
+        exclude=None,
+        include_venv=False,
+        group_by="auto",
+        output_format="grid",
+        verbose=False,
+        raw_output=False,
+        dry_run=True,
+    )
+
+    assert_that(code).is_equal_to(1)
+    texts = _console_texts(fake_logger)
+    assert_that(texts).contains("Would fix 1 issue in")

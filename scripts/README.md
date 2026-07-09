@@ -11,7 +11,6 @@ scripts/
 ├── build/        # Build and distribution scripts
 ├── ci/           # CI/CD and GitHub Actions scripts
 ├── docker/       # Docker-related scripts
-├── homebrew/     # Homebrew formula templates
 ├── local/        # Local development scripts
 └── utils/        # Utility scripts and shared functions
 ```
@@ -59,129 +58,98 @@ Scripts for building standalone binaries and distribution packages.
 | Script           | Purpose                                  | Usage                                        |
 | ---------------- | ---------------------------------------- | -------------------------------------------- |
 | `build_macos.py` | Build macOS binary using Nuitka compiler | `uv run python scripts/build/build_macos.py` |
+| `build_linux.py` | Build Linux binary using Nuitka compiler | `uv run python scripts/build/build_linux.py` |
 
-### 🍺 Homebrew Templates (`homebrew/`)
+### 📦 npm Distribution Scripts (`ci/npm/`)
 
-Homebrew formula templates for binary distribution.
+Scripts that package the platform binaries into the npm meta-package + per-platform
+packages and (dry-run) publish them. See the
+[npm distribution design](../docs/npm-distribution.md).
 
-| File            | Purpose                                       |
-| --------------- | --------------------------------------------- |
-| `lintro-bin.rb` | Homebrew formula template for binary releases |
+| Script                         | Purpose                                                    | Usage                                                           |
+| ------------------------------ | ---------------------------------------------------------- | --------------------------------------------------------------- |
+| `sync_npm_version.py`          | Sync/check versions across all `npm/*/package.json`        | `python scripts/ci/npm/sync_npm_version.py --version 1.2.3`     |
+| `stage_binaries.py`            | Copy downloaded platform binaries into the npm tree        | `python scripts/ci/npm/stage_binaries.py --artifacts-dir <dir>` |
+| `download_release_binaries.sh` | Download release binaries for staging                      | `./scripts/ci/npm/download_release_binaries.sh v1.2.3 <dir>`    |
+| `smoke_test.sh`                | Pack + install the meta-package and run `lintro --version` | `./scripts/ci/npm/smoke_test.sh`                                |
+| `publish_packages.sh`          | Publish npm packages (dry-run unless `LIVE=1`)             | `./scripts/ci/npm/publish_packages.sh`                          |
+
+### 🍺 Homebrew Formulas (`ci/homebrew/`)
+
+Formula templates and generators live under `scripts/ci/homebrew/` (see Homebrew Scripts
+below). Release automation writes `Formula/lintro.rb` (binary) and
+`Formula/lintro-full.rb` (PyPI full install).
 
 ### 🔧 CI/CD Scripts (`ci/`)
 
 Scripts for GitHub Actions workflows and continuous integration.
 
-| Script                                | Purpose                                                               | Usage                                                                                                                                 |
-| ------------------------------------- | --------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
-| `backfill-compute-tags.sh`            | Compute Docker image tags for a backfill release                      | `TAG=v0.52.2 SHA=876464d9f1a2b3c4d5e6f7081920a1b2c3d4e5f6 ./scripts/ci/backfill-compute-tags.sh`                                      |
-| `backfill-generate-matrix.sh`         | Generate JSON tag matrix for backfill batch                           | `BATCH=1 ./scripts/ci/backfill-generate-matrix.sh`                                                                                    |
-| `coverage-manager.sh`                 | Unified coverage ops (extract/badge/comment/threshold)                | `./scripts/utils/coverage-manager.sh --help`                                                                                          |
-| `ci-extract-coverage.sh`              | Extract coverage percentage                                           | `./scripts/ci/ci-extract-coverage.sh`                                                                                                 |
-| `ci-lintro.sh`                        | Run Lintro analysis in Docker for CI                                  | `./scripts/ci/testing/ci-lintro.sh`                                                                                                   |
-| `ci-log.sh`                           | Generic CI logging utility for workflow status messages               | `./scripts/ci/ci-log.sh <message>`                                                                                                    |
-| `ci-post-pr-comment.sh`               | Post comments to PRs using GitHub API                                 | `./scripts/ci/ci-post-pr-comment.sh [file]`                                                                                           |
-| `ci-pr-comment.sh`                    | Generate PR comments with Lintro results                              | `./scripts/ci/ci-pr-comment.sh`                                                                                                       |
-| `fail-on-lint.sh`                     | Fail CI job when lint checks fail                                     | `CHK_EXIT_CODE=1 ./scripts/ci/fail-on-lint.sh`                                                                                        |
-| `post-pr-delete-previous.sh`          | Delete previous PR comments by marker                                 | `./scripts/ci/post-pr-delete-previous.sh --help`                                                                                      |
-| `lintro-report-generate.sh`           | Generate comprehensive Lintro reports                                 | `./scripts/ci/lintro-report-generate.sh`                                                                                              |
-| `pull-lintro-image.sh`                | Pull lintro Docker image from GHCR and log digest                     | `./scripts/ci/testing/pull-lintro-image.sh`                                                                                           |
-| `pages-deploy.sh`                     | Deploy coverage reports to GitHub Pages                               | `./scripts/ci/pages-deploy.sh`                                                                                                        |
-| `maintenance/ghcr_prune_untagged.py`  | Prune untagged GHCR package versions (CLI entry shim)                 | `uv run python scripts/ci/maintenance/ghcr_prune_untagged.py`                                                                         |
-| `maintenance/ghcr_prune/api.py`       | GhcrVersion list/delete/owner-type GitHub API helpers                 | imported by `scripts/ci/maintenance/ghcr_prune_untagged.py`                                                                           |
-| `maintenance/ghcr_prune/cli.py`       | Entry-point and env-var handling for the prune CLI                    | imported by `scripts/ci/maintenance/ghcr_prune_untagged.py`                                                                           |
-| `maintenance/ghcr_prune/dates.py`     | ISO-8601 parsing and `min_age_days` comparison                        | imported by `scripts/ci/maintenance/ghcr_prune_untagged.py`                                                                           |
-| `maintenance/ghcr_prune/protocols.py` | `GhcrClient` HTTP protocol used by tests and prod                     | imported by `scripts/ci/maintenance/ghcr_prune_untagged.py`                                                                           |
-| `maintenance/ghcr_prune/prune.py`     | `prune_package` and `prune_buildcache_package` per-package logic      | imported by `scripts/ci/maintenance/ghcr_prune_untagged.py`                                                                           |
-| `maintenance/ghcr_prune/registry.py`  | OCI manifest + Referrers walk; SLSA / cosign protection set           | imported by `scripts/ci/maintenance/ghcr_prune_untagged.py`                                                                           |
-| `maintenance/ghcr_prune/tags.py`      | Buildcache tag constants and ephemeral-tag detection                  | imported by `scripts/ci/maintenance/ghcr_prune_untagged.py`                                                                           |
-| `maintenance/ghcr_prune/version.py`   | `GhcrVersion` dataclass                                               | imported by `scripts/ci/maintenance/ghcr_prune_untagged.py`                                                                           |
-| `deployments-prune.sh`                | Prune GitHub deployments via gh (keep-n/ref)                          | `./scripts/ci/deployments-prune.sh --help`                                                                                            |
-| `coverage-badge-update.sh`            | Generate and update coverage badge                                    | `./scripts/ci/testing/coverage-badge-update.sh --help`                                                                                |
-| `coverage-pr-comment.sh`              | Generate PR comments with coverage info                               | `./scripts/ci/github/coverage-pr-comment.sh --help`                                                                                   |
-| `enforce-coverage-threshold.sh`       | Enforce minimum coverage threshold                                    | `./scripts/ci/testing/enforce-coverage-threshold.sh --help`                                                                           |
-| `verify-coverage-xml.sh`              | Verify coverage.xml exists and has non-zero covered lines             | `./scripts/ci/testing/verify-coverage-xml.sh --help`                                                                                  |
-| `auto-tag-unified.sh`                 | Unified auto-tagging functions (check/read/create)                    | `./scripts/ci/auto-tag-unified.sh --help`                                                                                             |
-| `pypi-version-exists.sh`              | Check if version exists on PyPI                                       | `./scripts/ci/pypi-version-exists.sh <project> <version>`                                                                             |
-| `ensure-tag-on-main.sh`               | Ensure tag ref points to commit on main                               | `./scripts/ci/ensure-tag-on-main.sh --help`                                                                                           |
-| `guard-release-commit.sh`             | Check last commit is release bump                                     | `./scripts/ci/guard-release-commit.sh --help`                                                                                         |
-| `pre-release-quality.sh`              | Run Lintro format and check                                           | `./scripts/ci/pre-release-quality.sh --help`                                                                                          |
-| `semantic_release_compute_next.py`    | Compute next version (tag-only baseline)                              | `uv run python scripts/ci/semantic_release_compute_next.py --print-only`                                                              |
-| `security-audit.sh`                   | Audit CI scripts and workflows for security issues                    | `./scripts/ci/maintenance/security-audit.sh --help`                                                                                   |
-| `validate-action-pinning.sh`          | Scan for unpinned GitHub Actions                                      | `./scripts/ci/validate-action-pinning.sh --help`                                                                                      |
-| `semantic-pr-title-check.sh`          | Validate PR title against Conventional Commits                        | `./scripts/ci/semantic-pr-title-check.sh --help`                                                                                      |
-| `verify-tag-matches-pyproject.sh`     | Verify tag matches `pyproject.toml` version                           | `./scripts/ci/verify-tag-matches-pyproject.sh --help`                                                                                 |
-| `sbom-generate.sh`                    | Generate and export SBOMs via bomctl                                  | `./scripts/ci/sbom-generate.sh --help`                                                                                                |
-| `sbom-rename-artifacts.sh`            | Prefix SBOMs with tag and SHA for traceability                        | `./scripts/ci/sbom-rename-artifacts.sh dist/sbom`                                                                                     |
-| `sbom-attest-artifacts.sh`            | Create cosign attestations for SBOM artifacts                         | `./scripts/ci/sbom-attest-artifacts.sh dist/sbom`                                                                                     |
-| `sbom-fetch-github-api.sh`            | Fetch repo SBOM via GitHub API; export via script                     | `./scripts/ci/sbom-fetch-github-api.sh --help`                                                                                        |
-| `semantic-release-helpers.sh`         | Helpers for semantic-release workflow steps                           | `./scripts/ci/semantic-release-helpers.sh --help`                                                                                     |
-| `reusable-quality-entry.sh`           | Quality gate wrapper for reusable workflow                            | `./scripts/ci/reusable-quality-entry.sh --help`                                                                                       |
-| `configure-git-user.sh`               | Configure git user/email and safe.directory                           | `./scripts/ci/configure-git-user.sh --help`                                                                                           |
-| `egress-audit-lite.sh`                | Audit reachability of allowed endpoints                               | `./scripts/ci/egress-audit-lite.sh --help`                                                                                            |
-| `sbom-install-binary-gh.sh`           | Install bomctl from GitHub Releases via gh                            | `./scripts/ci/sbom-install-binary-gh.sh --help`                                                                                       |
-| `fail-if-semantic-invalid.sh`         | Fail step if semantic title validation failed                         | `OK=true ./scripts/ci/fail-if-semantic-invalid.sh`                                                                                    |
-| `detect-changes.sh`                   | Detect repo diffs and set has_changes output                          | `./scripts/ci/detect-changes.sh --help`                                                                                               |
-| `security-comment.sh`                 | Run osv-scanner via lintro in Docker and generate security PR comment | `./scripts/ci/security-comment.sh --help`                                                                                             |
-| `classify-suppressions.py`            | Classify vulnerability suppressions as active, stale, or expired      | `osv-scanner ... \| python3 scripts/ci/classify-suppressions.py`                                                                      |
-| `format-security-comment.py`          | Format lintro osv_scanner JSON as security PR comment markdown        | `python3 scripts/ci/format-security-comment.py osv-results.json`                                                                      |
-| `format-lintro-pr-comment.py`         | Build PR comment markdown from a lintro run's report.md               | `python3 scripts/ci/format-lintro-pr-comment.py --report-md .lintro/latest/report.md --status-file status.txt --content-file body.md` |
-| `check-vuln-suppressions.sh`          | Detect stale/expired vulnerability suppressions and open cleanup PR   | `./scripts/ci/check-vuln-suppressions.sh --help`                                                                                      |
-| `bomctl-help-test.sh`                 | Test bomctl binary installation                                       | `./scripts/ci/bomctl-help-test.sh`                                                                                                    |
-| `sbom-generate-safe.sh`               | Generate SBOMs with consolidated error handling                       | `./scripts/ci/sbom-generate-safe.sh`                                                                                                  |
-| `test-install-package.sh`             | Install and verify built package in isolated venv                     | `./scripts/ci/test-install-package.sh wheel`                                                                                          |
-| `test-built-package-integration.sh`   | Run integration tests for built package in isolated venv              | `./scripts/ci/test-built-package-integration.sh`                                                                                      |
-| `test-venv-setup.sh`                  | Create isolated Python 3.13 virtual environment                       | `./scripts/ci/test-venv-setup.sh`                                                                                                     |
-| `test-verify-cli.sh`                  | Verify lintro CLI entry points in installed package                   | `./scripts/ci/test-verify-cli.sh`                                                                                                     |
-| `test-verify-imports.sh`              | Verify critical package imports in installed lintro                   | `./scripts/ci/test-verify-imports.sh wheel`                                                                                           |
-| `extract-test-summary.sh`             | Extract pytest test summary to JSON for PR comments                   | `./scripts/ci/testing/extract-test-summary.sh <log> <out.json>`                                                                       |
-| `measure-build-times.sh`              | Emit per-run JSON of tools/main/base build durations + cache state    | `./scripts/ci/testing/measure-build-times.sh --help`                                                                                  |
-| `extract-version-from-tag.sh`         | Extract version from git tag (strips v prefix)                        | `./scripts/ci/extract-version-from-tag.sh`                                                                                            |
-| `git-commit-push.sh`                  | Stage, commit, and push with github-actions[bot]                      | `./scripts/ci/git-commit-push.sh <pattern> <message>`                                                                                 |
-| `tools-image-push.sh`                 | Push tools image tags with per-tag error handling                     | `./scripts/ci/tools-image-push.sh --help`                                                                                             |
-| `tools-image-summary.sh`              | Generate GitHub step summary for tools image build                    | `./scripts/ci/tools-image-summary.sh --help`                                                                                          |
-| `tools-image-tags.sh`                 | Generate Docker image tags for tools image build                      | `./scripts/ci/tools-image-tags.sh --help`                                                                                             |
-| `tools-image-resolve-tag.sh`          | Resolve tools image tag for reusable workflow callers                 | `./scripts/ci/tools-image-resolve-tag.sh --help`                                                                                      |
-| `tools-image-verify.sh`               | Verify required tools are installed in tools image                    | `./scripts/ci/tools-image-verify.sh --help`                                                                                           |
-| `tools-image-update-digest.sh`        | Update pinned tools image digest in repo files                        | `./scripts/ci/tools-image-update-digest.sh --help`                                                                                    |
-| `tools-image-detect-changes.sh`       | Detect tool file changes requiring fresh image build                  | `./scripts/ci/tools-image-detect-changes.sh --help`                                                                                   |
-| `tools-image-resolve.sh`              | Resolve tools image tag based on event context                        | `./scripts/ci/tools-image-resolve.sh --help`                                                                                          |
-| `tools-image-resolve-digest.sh`       | Extract and output image digest after push                            | `./scripts/ci/tools-image-resolve-digest.sh --help`                                                                                   |
-| `tools-image-digest-helpers.sh`       | Sourced-only helpers for resolving pushed tools image digests         | Sourced by `tools-image-resolve.sh` and `tools-image-resolve-digest.sh` (not executed directly)                                       |
-| `resolve-vue-tsc-version.sh`          | Read installed vue-tsc version from bun's global install root         | `./scripts/ci/resolve-vue-tsc-version.sh --help`                                                                                      |
-| `tools-image-resolve-summary.sh`      | Write tools image resolution summary to GitHub step summary           | `./scripts/ci/tools-image-resolve-summary.sh --help`                                                                                  |
-| `verify-manifest-tools.py`            | Verify tools in image match manifest versions                         | `python scripts/ci/verify-manifest-tools.py --help`                                                                                   |
-| `generate-tool-versions.py`           | Generate `_generated_versions.py` and sync `manifest.json` versions   | `python scripts/ci/generate-tool-versions.py [--check]`                                                                               |
+| Script                               | Purpose                                                               | Usage                                                                              |
+| ------------------------------------ | --------------------------------------------------------------------- | ---------------------------------------------------------------------------------- |
+| `coverage-manager.sh`                | Unified coverage ops (extract/badge/comment/threshold)                | `./scripts/utils/coverage-manager.sh --help`                                       |
+| `ci-log.sh`                          | Generic CI logging utility for workflow status messages               | `./scripts/ci/ci-log.sh <message>`                                                 |
+| `ci-post-pr-comment.sh`              | Post comments to PRs using GitHub API                                 | `./scripts/ci/ci-post-pr-comment.sh [file]`                                        |
+| `post-pr-delete-previous.sh`         | Delete previous PR comments by marker                                 | `./scripts/ci/post-pr-delete-previous.sh --help`                                   |
+| `lintro-report-generate.sh`          | Generate comprehensive Lintro reports                                 | `./scripts/ci/lintro-report-generate.sh`                                           |
+| `pull-lintro-image.sh`               | Pull lintro Docker image from GHCR and log digest                     | `./scripts/ci/testing/pull-lintro-image.sh`                                        |
+| `maintenance/delete-ci-ghcr-tags.sh` | Delete ephemeral CI GHCR tags after PR merge or close                 | `./scripts/ci/maintenance/delete-ci-ghcr-tags.sh`                                  |
+| `coverage-badge-update.sh`           | Generate and update coverage badge                                    | `./scripts/ci/coverage-badge-update.sh --help`                                     |
+| `sbom-generate.sh`                   | Generate and export SBOMs via bomctl                                  | `./scripts/ci/sbom-generate.sh --help`                                             |
+| `egress-audit-lite.sh`               | Audit reachability of allowed endpoints                               | `./scripts/ci/egress-audit-lite.sh --help`                                         |
+| `detect-changes.sh`                  | Detect repo diffs and set has_changes output                          | `./scripts/ci/detect-changes.sh --help`                                            |
+| `detect-fork-pr.sh`                  | Detect fork PRs and set `is-fork` output for conditional steps        | `EVENT_NAME=pull_request ./scripts/ci/detect-fork-pr.sh`                           |
+| `evaluate-test-gate.sh`              | Evaluate upstream compat/coverage results for required-check gate     | `COMPAT_RESULT=success COVERAGE_RESULT=success ./scripts/ci/evaluate-test-gate.sh` |
+| `fail-on-security-audit.sh`          | Fail CI when security audit finds vulnerabilities                     | `./scripts/ci/fail-on-security-audit.sh`                                           |
+| `free-disk-space.sh`                 | Free disk space on CI runner for Docker builds                        | `./scripts/ci/free-disk-space.sh`                                                  |
+| `security-comment.sh`                | Run osv-scanner via lintro in Docker and generate security PR comment | `./scripts/ci/security-comment.sh --help`                                          |
+| `run-ai-review.sh`                   | Dogfood `lintro review` on a PR using trusted base-branch lintro      | `PR_NUMBER=123 ./scripts/ci/run-ai-review.sh`                                      |
+| `enable_review_config.py`            | Enable AI review + cost cap in `.lintro-config.yaml` for a CI run     | `python3 scripts/ci/enable_review_config.py --help`                                |
+| `classify-osv-results.py`            | Classify osv_scanner JSON as ok, vulns, or error for CI status        | `python3 scripts/ci/classify-osv-results.py osv-results.json`                      |
+| `format-security-comment.py`         | Format lintro osv_scanner JSON as security PR comment markdown        | `python3 scripts/ci/format-security-comment.py osv-results.json`                   |
+| `test-install-package.sh`            | Install and verify built package in isolated venv                     | `./scripts/ci/test-install-package.sh wheel`                                       |
+| `test-built-package-integration.sh`  | Run integration tests for built package in isolated venv              | `./scripts/ci/test-built-package-integration.sh`                                   |
+| `test-venv-setup.sh`                 | Create isolated Python 3.13 virtual environment                       | `./scripts/ci/test-venv-setup.sh`                                                  |
+| `test-verify-cli.sh`                 | Verify lintro CLI entry points in installed package                   | `./scripts/ci/test-verify-cli.sh`                                                  |
+| `test-verify-imports.sh`             | Verify critical package imports in installed lintro                   | `./scripts/ci/test-verify-imports.sh wheel`                                        |
+| `extract-test-summary.sh`            | Extract pytest test summary to JSON for PR comments                   | `./scripts/ci/testing/extract-test-summary.sh <log> <out.json>`                    |
+| `load-ci-docker-images.sh`           | Load Docker images from CI tarball artifact                           | `./scripts/ci/testing/load-ci-docker-images.sh`                                    |
+| `pull-ci-docker-images.sh`           | Pull CI Docker images from GHCR for testing                           | `./scripts/ci/testing/pull-ci-docker-images.sh`                                    |
+| `resolve-vue-tsc-version.sh`         | Read installed vue-tsc version from bun's global install root         | `./scripts/ci/resolve-vue-tsc-version.sh --help`                                   |
+| `verify-manifest-tools.py`           | Verify tools in image match manifest versions                         | `python scripts/ci/verify-manifest-tools.py --help`                                |
+| `generate-tool-versions.py`          | Generate `_generated_versions.py` and sync `manifest.json` versions   | `python scripts/ci/generate-tool-versions.py [--check]`                            |
 
 #### Homebrew Scripts (`ci/homebrew/`)
 
 Scripts for generating and updating Homebrew formulas.
 
-| Script                       | Purpose                                            | Usage                                                                                                          |
-| ---------------------------- | -------------------------------------------------- | -------------------------------------------------------------------------------------------------------------- |
-| `wait-for-pypi.sh`           | Poll PyPI until package version is available       | `./scripts/ci/homebrew/wait-for-pypi.sh lintro 1.0.0`                                                          |
-| `get-release-info.sh`        | Resolve release tag and prerelease metadata        | `GITHUB_EVENT_NAME=workflow_dispatch ./scripts/ci/homebrew/get-release-info.sh`                                |
-| `create-tap-pr.sh`           | Create/update Homebrew tap PR                      | `./scripts/ci/homebrew/create-tap-pr.sh Formula/lintro.rb Formula/lintro-bin.rb "chore(homebrew): update ..."` |
-| `create-lintro-tap-pr.sh`    | Create/update lintro's generated formula PR        | `./scripts/ci/homebrew/create-lintro-tap-pr.sh 1.0.0 --skip-if-empty`                                          |
-| `generate-pypi-formula.sh`   | Generate lintro.rb formula from PyPI               | `./scripts/ci/homebrew/generate-pypi-formula.sh 1.0.0 out`                                                     |
-| `generate-binary-formula.sh` | Generate lintro-bin.rb formula for binaries        | `./scripts/ci/homebrew/generate-binary-formula.sh ...`                                                         |
-| `pypi_utils.py`              | Shared PyPI API utilities module                   | Imported by other Python scripts                                                                               |
-| `fetch_package_info.py`      | Fetch package tarball info from PyPI               | `python3 scripts/ci/homebrew/fetch_package_info.py lintro 1.0.0`                                               |
-| `fetch_wheel_info.py`        | Fetch wheel info and generate resource stanzas     | `python3 scripts/ci/homebrew/fetch_wheel_info.py pydoclint --type universal`                                   |
-| `render_formula.py`          | Render Homebrew formula from template              | `python3 scripts/ci/homebrew/render_formula.py --tarball-url ... -o out.rb`                                    |
-| `generate_resources.py`      | Generate Homebrew resource stanzas (replaces poet) | `python3 scripts/ci/homebrew/generate_resources.py lintro --exclude pkg1 pkg2`                                 |
+| Script                       | Purpose                                            | Usage                                                                                                           |
+| ---------------------------- | -------------------------------------------------- | --------------------------------------------------------------------------------------------------------------- |
+| `wait-for-pypi.sh`           | Poll PyPI until package version is available       | `./scripts/ci/homebrew/wait-for-pypi.sh lintro 1.0.0`                                                           |
+| `get-release-info.sh`        | Resolve release tag and prerelease metadata        | `GITHUB_EVENT_NAME=workflow_dispatch ./scripts/ci/homebrew/get-release-info.sh`                                 |
+| `create-tap-pr.sh`           | Create/update Homebrew tap PR                      | `./scripts/ci/homebrew/create-tap-pr.sh Formula/lintro.rb Formula/lintro-full.rb "chore(homebrew): update ..."` |
+| `create-lintro-tap-pr.sh`    | Create/update lintro's generated formula PR        | `./scripts/ci/homebrew/create-lintro-tap-pr.sh 1.0.0 --skip-if-empty`                                           |
+| `generate-pypi-formula.sh`   | Generate lintro.rb formula from PyPI               | `./scripts/ci/homebrew/generate-pypi-formula.sh 1.0.0 out`                                                      |
+| `generate-binary-formula.sh` | Generate `Formula/lintro.rb` for binary releases   | `./scripts/ci/homebrew/generate-binary-formula.sh ...`                                                          |
+| `pypi_utils.py`              | Shared PyPI API utilities module                   | Imported by other Python scripts                                                                                |
+| `fetch_package_info.py`      | Fetch package tarball info from PyPI               | `python3 scripts/ci/homebrew/fetch_package_info.py lintro 1.0.0`                                                |
+| `fetch_wheel_info.py`        | Fetch wheel info and generate resource stanzas     | `python3 scripts/ci/homebrew/fetch_wheel_info.py pydoclint --type universal`                                    |
+| `render_formula.py`          | Render Homebrew formula from template              | `python3 scripts/ci/homebrew/render_formula.py --tarball-url ... -o out.rb`                                     |
+| `generate_resources.py`      | Generate Homebrew resource stanzas (replaces poet) | `python3 scripts/ci/homebrew/generate_resources.py lintro --exclude pkg1 pkg2`                                  |
 
 ### 🐳 Docker Scripts (`docker/`)
 
 Scripts for containerized development and testing.
 
-| Script                 | Purpose                         | Usage                                     |
-| ---------------------- | ------------------------------- | ----------------------------------------- |
-| `docker-build-test.sh` | Build and test Docker image     | `./scripts/docker/docker-build-test.sh`   |
-| `docker-lintro.sh`     | Run Lintro in Docker container  | `./scripts/docker/docker-lintro.sh check` |
-| `docker-test.sh`       | Run integration tests in Docker | `./scripts/docker/docker-test.sh`         |
-| `entrypoint.sh`        | Docker container entrypoint     | Internal use by Dockerfile                |
-| `fix-permissions.sh`   | Fix mounted volume permissions  | Internal use by Dockerfile                |
+| Script                      | Purpose                                                 | Usage                                        |
+| --------------------------- | ------------------------------------------------------- | -------------------------------------------- |
+| `docker-build-test.sh`      | Build and test Docker image                             | `./scripts/docker/docker-build-test.sh`      |
+| `docker-lintro.sh`          | Run Lintro in Docker container                          | `./scripts/docker/docker-lintro.sh check`    |
+| `docker-test.sh`            | Run integration tests in Docker                         | `./scripts/docker/docker-test.sh`            |
+| `entrypoint.sh`             | Docker container entrypoint                             | Internal use by Dockerfile                   |
+| `fix-permissions.sh`        | Fix mounted volume permissions                          | Internal use by Dockerfile                   |
+| `run-docker-test-suite.sh`  | Run the full Docker test suite against built images     | `./scripts/docker/run-docker-test-suite.sh`  |
+| `save-ci-images-tarball.sh` | Save built Docker images as tarball for downstream jobs | `./scripts/docker/save-ci-images-tarball.sh` |
+| `smoke-test-base-image.sh`  | Smoke-test the base Docker image                        | `./scripts/docker/smoke-test-base-image.sh`  |
 
 ### 💻 Local Development Scripts (`local/`)
 
@@ -211,10 +179,8 @@ Shared utilities and helper scripts.
 | Script                               | Purpose                                             | Usage                                                                   |
 | ------------------------------------ | --------------------------------------------------- | ----------------------------------------------------------------------- |
 | `check-pypi-version.py`              | Check if version exists on PyPI                     | `python scripts/utils/check-pypi-version.py <version>`                  |
-| `create-release.py`                  | Create GitHub release with assets                   | `python scripts/utils/create-release.py <version>`                      |
 | `delete-previous-lintro-comments.py` | Delete old PR comments                              | `python scripts/utils/delete-previous-lintro-comments.py`               |
 | `merge_pr_comment.py`                | Merge-update PR comment body, collapsing history    | `python scripts/utils/merge_pr_comment.py --help`                       |
-| `determine-release.py`               | Determine next release version from commits         | `python scripts/utils/determine-release.py`                             |
 | `extract-coverage.py`                | Extract coverage from XML files                     | `python scripts/utils/extract-coverage.py`                              |
 | `extract_comment_body.py`            | Extract comment body from GitHub API JSON by ID     | `python scripts/utils/extract_comment_body.py <json> <comment_id>`      |
 | `extract-version.py`                 | Print `version=X.Y.Z` from TOML                     | `python scripts/utils/extract-version.py`                               |
@@ -235,23 +201,6 @@ Shared utilities and helper scripts.
 ## 🔍 Detailed Script Documentation
 
 ### CI/CD Scripts
-
-#### `ci-lintro.sh`
-
-Runs Lintro analysis in Docker for CI pipeline.
-
-**Features:**
-
-- Runs Lintro in Docker container
-- Excludes test files via `.lintro-ignore`
-- Generates GitHub Actions summaries
-- Stores exit code for PR comment step
-
-**Usage:**
-
-```bash
-./scripts/ci/testing/ci-lintro.sh
-```
 
 #### `coverage-badge-update.sh`
 
@@ -320,9 +269,8 @@ export TEST_PASSED=100 TEST_FAILED=0 TEST_TOTAL=100
 
 **Integration:**
 
-This script integrates with `coverage-pr-comment.sh` which reads the generated
-`test-summary.json` to build PR comment content. The JSON format uses single-space after
-colons for compatibility with grep-based parsers.
+`test-ci.yml` uses lgtm-ci `reusable-test-python.yml` for coverage PR comments. The JSON
+format uses single-space after colons for compatibility with grep-based parsers.
 
 #### `sbom-generate.sh`
 
@@ -367,26 +315,6 @@ Notes:
 
 - For private GitHub repos, use `--netrc` with a configured `~/.netrc`.
 - Outputs are written under `dist/sbom/` by default.
-
-#### `sbom-rename-artifacts.sh`
-
-Rename SBOM artifacts to include the current tag and commit SHA for easier traceability.
-
-Usage:
-
-```bash
-./scripts/ci/sbom-rename-artifacts.sh dist/sbom
-```
-
-#### `sbom-attest-artifacts.sh`
-
-Create keyless cosign attestations for generated SBOM artifacts (best effort).
-
-Usage:
-
-```bash
-./scripts/ci/sbom-attest-artifacts.sh dist/sbom
-```
 
 ### Docker Scripts
 
@@ -643,27 +571,3 @@ When adding new scripts:
 - [Getting Started](../docs/getting-started.md) - Installation guide
 - [Docker Usage](../docs/docker.md) - Docker documentation
 - [GitHub Integration](../docs/github-integration.md) - CI/CD setup
-
-## CI Scripts
-
-- `ci/codecov-upload.sh`: Legacy helper to download and run the Codecov uploader via
-  GitHub CLI with checksum verification. Prefer using the official GitHub Action in the
-  workflow:
-
-  ```yaml
-  - name: Upload coverage to Codecov
-    if: success()
-    uses: codecov/codecov-action@v5
-    with:
-      files: coverage.xml
-      flags: python-3.14
-      fail_ci_if_error: true
-      # token: ${{ secrets.CODECOV_TOKEN }} # for private repos only
-  ```
-
-  - Notes:
-    - Requires `gh` (GitHub CLI) available on the runner.
-    - In GitHub Actions, `gh` expects `GH_TOKEN`. The script will automatically set
-      `GH_TOKEN` from `GITHUB_TOKEN`.
-    - Set `CODECOV_VERSION` (and optionally `CODECOV_SHA256`) via organization or repo
-      vars.

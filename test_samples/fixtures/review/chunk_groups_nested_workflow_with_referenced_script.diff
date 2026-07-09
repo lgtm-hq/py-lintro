@@ -1,0 +1,12 @@
+diff --git a/.github/workflows/actions/reusable.yml b/.github/workflows/actions/reusable.yml
+--- a/.github/workflows/actions/reusable.yml
++++ b/.github/workflows/actions/reusable.yml
+@@ -1 +1,2 @@
+ name: Reusable
++run: scripts/ci/run.sh
+diff --git a/scripts/ci/run.sh b/scripts/ci/run.sh
+--- a/scripts/ci/run.sh
++++ b/scripts/ci/run.sh
+@@ -1 +1,2 @@
+ #!/usr/bin/env bash
++echo run

@@ -15,37 +15,23 @@ The repository includes pre-configured GitHub Actions workflows. To activate the
 
 ### 1. Quality Check Workflow
 
-**File:** `.github/workflows/ci-lintro-analysis.yml`
+**File:** `.github/workflows/docker-ci.yml` (`dogfooding-quality` job)
+
+Delegates to lgtm-ci `reusable-quality.yml`, linting with the Docker image built in the
+same workflow run (`lintro-image: ghcr.io/lgtm-hq/py-lintro:ci-<run_id>`). Posts results
+as a PR comment.
+
+**Triggers:** Pull requests, pushes to main, merge queue, manual dispatch (via
+docker-ci).
+
+### 2. Test Suite & Coverage
+
+**File:** `.github/workflows/test-ci.yml` and `.github/workflows/docker-ci.yml`
 
 **Features:**
 
-- 🔍 **Comprehensive analysis** across all file types
-- 🛠️ **Auto-fixing** with `lintro format` where possible
-- 📊 **Detailed reporting** in GitHub Actions summaries
-- 🚀 **Multi-tool analysis:**
-  - Python: Ruff + pydoclint
-  - Python formatting (post-check): Black
-  - YAML: Yamllint
-  - JSON: Prettier
-  - Docker: Hadolint
-
-**Triggers:**
-
-- Pull requests
-- Pushes to main branch
-- Manual workflow dispatch
-
-### 2. Test Suite, Coverage & Pages Deployment
-
-**File:** `.github/workflows/ci-pipeline.yml` (jobs: `test`, `deploy-pages`)
-
-**Features:**
-
-- 🧪 **Test coverage reporting** with badges
-- 🌐 **GitHub Pages deployment** for coverage reports (main branch only)
-- 🔄 **Auto-updating** on each push to main
-
-> Tip: Ensure Pages is enabled (Settings → Pages → Source: GitHub Actions)
+- 🧪 **Unit test coverage** via lgtm-ci `reusable-test-python.yml` (Python 3.11 + 3.14)
+- 🐳 **Docker integration tests** in `docker-ci.yml`
 
 ### 4. Lintro Report Workflow
 
@@ -60,20 +46,41 @@ The repository includes pre-configured GitHub Actions workflows. To activate the
 - 🌐 **Optional GitHub Pages deployment** for report hosting
 
 If you want to publish the weekly report to Pages, prefer using a dedicated
-`deploy-pages` job gated on the report workflow, following the pattern in
-`ci-pipeline.yml`.
+`deploy-pages` job gated on the report workflow.
 
-### 5. Complete CI Pipeline
+### 4b. AI Review (Dogfood) Workflow
 
-**File:** `.github/workflows/ci-lintro-analysis.yml`
+**File:** `.github/workflows/ai-review.yml`
+
+py-lintro dogfoods its own `lintro review` command on pull requests that touch
+`lintro/**`. The workflow runs an AI diff review and prints the JSON result to the job
+log.
 
 **Features:**
 
-- 🎯 **Quality-first approach** - Lintro runs before tests
-- 📋 **Combined reporting** - Quality + testing results
-- 🚀 **Showcase integration** - Demonstrates Lintro capabilities
+- 🤖 **AI diff review** via `lintro review --pr <n> --depth 1 --output json`
+- 🛡️ **Trusted install** — lintro is installed from the PR's **base ref** (`main`, via
+  `pull_request.base.sha`), never the PR head. The code that runs with the API key is
+  always trusted, so a PR cannot substitute its own `lintro/**` to exfiltrate the key.
+  The PR is still reviewed: `lintro review --pr` fetches the diff through `gh` (GitHub
+  API), so the PR's changes are reviewed as data and never executed with the secret.
+  Trade-off: a PR that breaks the review code itself isn't caught by this job — that is
+  covered by the unit tests.
+- 🔑 **Bring-your-own key** — reads the `ANTHROPIC_API_KEY` repository secret
+- 💸 **Bounded spend** — caps cost via `ai.max_cost_usd` (from the trusted base config,
+  so a PR cannot raise the cap)
+- 🟢 **Non-blocking / informational** — runs with `continue-on-error` and always exits
+  0, so it can never fail a pull request. It is intentionally not a required check.
+- ⏭️ **Graceful skip** — when `ANTHROPIC_API_KEY` is absent (secret not configured yet,
+  or a fork PR that cannot read secrets) and for draft PRs, the review is skipped
+  without error.
 
-### 6. Docker Image Publishing
+To activate it, add an `ANTHROPIC_API_KEY` secret to the repository (**Settings →
+Secrets and variables → Actions**). Because reviews run using trusted base-branch
+lintro, the key is safe to enable. Until that secret exists the workflow runs but skips
+gracefully, so merging it never breaks CI.
+
+### 5. Docker Image Publishing
 
 **File:** `.github/workflows/docker-build-publish.yml`
 
@@ -151,13 +158,8 @@ cp .github/workflows/*.yml your-project/.github/workflows/
 Edit the workflow files to match your project structure:
 
 ```yaml
-# .github/workflows/ci-lintro-analysis.yml
-- name: Run Lintro Quality Check
-  run: |
-    # Adjust paths for your project
-    uv run lintro check src/ tests/ --tools ruff,pydoclint --output-format grid
-    uv run lintro check .github/ --tools yamllint --output-format grid
-    uv run lintro check *.json --tools prettier --output-format grid
+# .github/workflows/docker-ci.yml — dogfooding-quality calls lgtm-ci reusable-quality
+# with lintro-image set to the CI-built ghcr.io/lgtm-hq/py-lintro:ci-<run_id> tag.
 ```
 
 ### 3. Configure Repository Settings (optional for Pages)
@@ -171,19 +173,17 @@ Edit the workflow files to match your project structure:
 
 ## Release Automation (Single Release Train)
 
-The repository ships with fully automated semantic releases and PyPI publishing.
+The repository ships with fully automated releases and PyPI publishing via lgtm-ci
+reusable workflows.
 
-- **Automated Release PR** (`.github/workflows/semantic-release.yml`)
+- **Automated Release PR** (`.github/workflows/release-version-pr.yml`)
   - On push to `main`, computes the next version from Conventional Commits
-  - Updates `pyproject.toml` and `lintro/__init__.py`
-  - Opens a Release PR (no direct push to main) and enables auto-merge; once checks
-    pass, it merges
+  - Updates version files via lgtm-ci ecosystem updaters
+  - Opens a Release PR (no direct push to main) with auto-merge enabled
 
-- **Auto Tag on Main** (`.github/workflows/auto-tag-on-main.yml`)
-  - After the Release PR is merged, a guard step ensures the last commit matches
-    `chore(release):` pattern
-  - Detects the new version in `pyproject.toml`, and creates/pushes the tag if it does
-    not already exist
+- **Auto Tag on Main** (`.github/workflows/release-auto-tag.yml`)
+  - After the Release PR is merged, creates/pushes the version tag
+  - GitHub Release is created by `publish-pypi-on-tag.yml` on tag push
 
 - **Publish to PyPI on Tag** (`.github/workflows/publish-pypi-on-tag.yml`)
   - On tag push (e.g., `1.2.3`), verifies tag equals `pyproject.toml` version
@@ -222,8 +222,8 @@ parallel release paths.
 ### Labels & guards
 
 - Release PRs are labeled `release-bump` to make them easy to target in policies.
-- Tagging is guarded in `auto-tag-on-main.yml` by checking the last commit title starts
-  with `chore(release):` to ensure tags are only created after Release PR merges.
+- Tagging is handled by `release-auto-tag.yml`, which only tags commits matching
+  `chore(release): version …` after Release PR merges.
 
 ### Security & Pinning
 
@@ -380,7 +380,7 @@ Add to your README.md:
 ### Quality Badge
 
 ```markdown
-![Code Quality](https://github.com/lgtm-hq/py-lintro/workflows/Code%20Quality/badge.svg)
+![Code Quality](https://github.com/lgtm-hq/py-lintro/workflows/CI%20-%20Quality/badge.svg)
 ```
 
 ### Custom Lintro Badge

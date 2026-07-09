@@ -22,7 +22,6 @@ def test_scripts_have_help() -> None:
         if script_file.name in [
             "utils.sh",
             "install.sh",
-            "tools-image-digest-helpers.sh",
         ]:
             continue
 
