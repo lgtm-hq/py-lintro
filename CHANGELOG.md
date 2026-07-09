@@ -21,6 +21,12 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.70.4] - 2026-07-09
+
+### Fixed
+
+- **vue-tsc**: respect tsconfig.app.json preference in shared config discovery (#1125) (819e3e3)
+
 ## [0.70.3] - 2026-07-09
 
 ### Fixed
