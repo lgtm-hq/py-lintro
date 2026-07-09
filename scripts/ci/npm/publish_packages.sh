@@ -48,7 +48,9 @@ if [[ "${NPM_PROVENANCE:-1}" != "0" ]]; then
 	publish_flags+=("--provenance")
 fi
 # Always pass --tag so backfills of older versions do not try to move latest.
-dist_tag="${NPM_DIST_TAG:-latest}"
+# Use ${VAR-default} (no colon) so an explicitly empty NPM_DIST_TAG still
+# triggers the guard below, while an unset var falls back to "latest".
+dist_tag="${NPM_DIST_TAG-latest}"
 if [[ -z "$dist_tag" ]]; then
 	echo "ERROR: NPM_DIST_TAG must be non-empty (use 'latest' for normal releases)" >&2
 	exit 1

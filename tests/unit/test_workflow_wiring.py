@@ -466,8 +466,13 @@ def test_publish_npm_exposes_dist_tag_for_backfills() -> None:
     )
 
     publish_step = next(
-        step
-        for step in workflow["jobs"]["publish"]["steps"]
-        if step.get("name") == "Publish to npm"
+        (
+            step
+            for step in workflow["jobs"]["publish"]["steps"]
+            if step.get("name") == "Publish to npm"
+        ),
+        None,
     )
+    assert_that(publish_step).described_as("'Publish to npm' step not found").is_not_none()
+    assert publish_step is not None
     assert_that(publish_step["env"]["NPM_DIST_TAG"]).contains("inputs.dist_tag")
