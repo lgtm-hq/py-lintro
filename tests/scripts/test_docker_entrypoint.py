@@ -70,7 +70,7 @@ def test_dockerfile_installs_gosu() -> None:
 def test_entrypoint_detects_volume_owner_and_reexecs_via_gosu() -> None:
     """Entrypoint must re-exec as the /code owner when running as root."""
     text = _entrypoint_text()
-    assert_that(text).contains('if [ "$(id -u)" = \'0\' ]')
+    assert_that(text).contains("if [ \"$(id -u)\" = '0' ]")
     assert_that(text).contains("stat -c '%u' /code")
     assert_that(text).contains("stat -c '%g' /code")
     assert_that(text).contains('exec gosu "$CODE_UID:$CODE_GID"')
@@ -92,5 +92,5 @@ def test_entrypoint_reexec_avoids_infinite_loop() -> None:
     re-execing again would recurse indefinitely.
     """
     text = _entrypoint_text()
-    assert_that(text).contains('CUR_UID=$(id -u)')
+    assert_that(text).contains("CUR_UID=$(id -u)")
     assert_that(text).contains('"$CODE_UID" != "$CUR_UID"')
