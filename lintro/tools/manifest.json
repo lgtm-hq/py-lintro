@@ -150,6 +150,19 @@
       "tags": ["linter"]
     },
     {
+      "name": "commitlint",
+      "version": "21.2.0",
+      "install": {
+        "type": "npm",
+        "package": "@commitlint/cli"
+      },
+      "tier": "tools",
+      "category": "npm",
+      "version_command": ["commitlint", "--version"],
+      "languages": ["git"],
+      "tags": ["linter"]
+    },
+    {
       "name": "gitleaks",
       "version": "8.30.1",
       "install": {

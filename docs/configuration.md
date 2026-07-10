@@ -2006,6 +2006,43 @@ lintro check --tools actionlint
 lintro check --tools ruff,actionlint
 ```
 
+### Git Tools
+
+#### Commitlint Configuration
+
+Commitlint validates git commit messages against the
+[Conventional Commits](https://www.conventionalcommits.org/) specification. Unlike
+file-based tools, it inspects git state: Lintro runs `commitlint --last` to validate the
+repository's most recent commit message.
+
+- Requires a config; Lintro skips it as a non-error when none is present.
+- Install: `bun add -g @commitlint/cli @commitlint/config-conventional`,
+  `npm install -g @commitlint/cli @commitlint/config-conventional`, or
+  `brew install commitlint`.
+- Cannot auto-fix — amend the commit to satisfy the rules.
+
+**File:** `commitlint.config.js` (or `.commitlintrc.{js,cjs,json,yaml,yml}`, or a
+`commitlint` key in `package.json`)
+
+```js
+// commitlint.config.js
+module.exports = { extends: ['@commitlint/config-conventional'] };
+```
+
+**Available `--tool-options`:**
+
+| Option    | Type | Default | Description                        |
+| --------- | ---- | ------- | ---------------------------------- |
+| `timeout` | int  | `30`    | Max seconds to wait for commitlint |
+
+```bash
+# Validate the latest commit message
+lintro check --tools commitlint
+
+# Increase the timeout
+lintro check --tools commitlint --tool-options "commitlint:timeout=60"
+```
+
 ## Project-Specific Configuration
 
 ### Multi-Language Projects
