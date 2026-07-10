@@ -15,6 +15,7 @@ class InstallContext(StrEnum):
 
     HOMEBREW_FULL = auto()
     HOMEBREW_BIN = auto()
+    NPM_BIN = auto()
     PIP = auto()
     DOCKER = auto()
     DEVELOPMENT = auto()
