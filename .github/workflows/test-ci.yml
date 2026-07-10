@@ -139,15 +139,19 @@ jobs:
     steps:
       - name: Harden Runner
         # yamllint disable-line rule:line-length
-        uses: lgtm-hq/lgtm-ci/.github/actions/harden-runner@f469f4d5c187f0700ccec4c023152fb68ee3dc89 # v0.32.3
+        uses: lgtm-hq/lgtm-ci/.github/actions/harden-runner@1014e3d7d5441a63215d2096545a46cff6de101c # v0.48.0
         with:
           egress-policy: block
+          # raw.githubusercontent.com is required by astral-sh/setup-uv (versions
+          # manifest). Omitting it fails this job and turns CI - Tests red on
+          # main even when tests passed (see #1227).
           allowed-endpoints: >
             github.com:443
             api.github.com:443
             codeload.github.com:443
             objects.githubusercontent.com:443
             release-assets.githubusercontent.com:443
+            raw.githubusercontent.com:443
             pypi.org:443
             files.pythonhosted.org:443
             astral.sh:443
@@ -155,11 +159,11 @@ jobs:
 
       - name: Checkout
         # yamllint disable-line rule:line-length
-        uses: lgtm-hq/lgtm-ci/.github/actions/secure-checkout@f469f4d5c187f0700ccec4c023152fb68ee3dc89 # v0.32.3
+        uses: lgtm-hq/lgtm-ci/.github/actions/secure-checkout@1014e3d7d5441a63215d2096545a46cff6de101c # v0.48.0
 
       - name: Setup Python and uv
         # yamllint disable-line rule:line-length
-        uses: lgtm-hq/lgtm-ci/.github/actions/setup-python@f469f4d5c187f0700ccec4c023152fb68ee3dc89 # v0.32.3
+        uses: lgtm-hq/lgtm-ci/.github/actions/setup-python@1014e3d7d5441a63215d2096545a46cff6de101c # v0.48.0
         with:
           python-version: '3.14'
           install-dependencies: 'true'

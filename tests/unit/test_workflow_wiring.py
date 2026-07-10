@@ -452,3 +452,45 @@ def test_docker_ci_lintro_code_quality_wires_upstream_jobs() -> None:
             "|| needs.dogfooding-lint.result }}",
         ),
     )
+
+
+# Canonical lgtm-ci pin used by most py-lintro workflows (v0.48.0).
+# Pages deploy must not regress to v0.32.3 (missing GH_TOKEN in bundler).
+_LGTM_CI_V0480 = "1014e3d7d5441a63215d2096545a46cff6de101c"
+
+
+def test_stage_coverage_html_allows_setup_uv_manifest_host() -> None:
+    """Coverage staging must allow raw.githubusercontent.com for setup-uv.
+
+    Without this host, astral-sh/setup-uv cannot fetch its versions manifest
+    under harden-runner block mode, the staging job fails, and CI - Tests goes
+    red on main even when the test gate passed (#1227).
+    """
+    workflow = _load_workflow(name="test-ci.yml")
+    steps = workflow["jobs"]["stage-coverage-html"]["steps"]
+    harden = next(step for step in steps if step.get("name") == "Harden Runner")
+    allowed = set(harden["with"]["allowed-endpoints"].split())
+
+    assert_that(allowed).contains("raw.githubusercontent.com:443")
+    assert_that(allowed).contains("astral.sh:443")
+    assert_that(allowed).contains("releases.astral.sh:443")
+
+
+def test_deploy_pages_pins_bundler_with_github_token() -> None:
+    """Pages deploy must use lgtm-ci tooling that exports GH_TOKEN to gh.
+
+    reusable-deploy-site-with-reports checks out tooling-ref for
+    bundle-workflow-artifacts. v0.32.3 omitted GH_TOKEN; v0.32.4+ (lgtm-ci#300)
+    sets ``GH_TOKEN: ${{ github.token }}``. Stay on the repo-standard v0.48.0 pin.
+    """
+    workflow = _load_workflow(name="deploy-pages.yml")
+    deploy = workflow["jobs"]["deploy"]
+    uses = deploy["uses"]
+    tooling_ref = deploy["with"]["tooling-ref"]
+
+    assert_that(uses).contains(_LGTM_CI_V0480)
+    assert_that(uses).contains("reusable-deploy-site-with-reports.yml")
+    assert_that(tooling_ref).contains(_LGTM_CI_V0480)
+    assert_that(deploy["permissions"]).contains_entry({"actions": "read"})
+    assert_that(deploy["permissions"]).contains_entry({"pages": "write"})
+    assert_that(deploy["permissions"]).contains_entry({"id-token": "write"})
