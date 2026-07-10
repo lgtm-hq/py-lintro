@@ -205,7 +205,7 @@ class TyposPlugin(BaseToolPlugin):
 
         # Re-check for anything typos could not auto-correct.
         try:
-            _, remaining_output = self._run_subprocess(
+            remaining_success, remaining_output = self._run_subprocess(
                 cmd=check_cmd,
                 timeout=ctx.timeout,
                 cwd=ctx.cwd,
@@ -225,6 +225,22 @@ class TyposPlugin(BaseToolPlugin):
             )
 
         remaining_issues = parse_typos_output(output=remaining_output)
+        if not remaining_success and not remaining_issues:
+            return ToolResult(
+                name=self.definition.name,
+                success=False,
+                output=(
+                    remaining_output or "typos re-check exited with an error."
+                ),
+                issues_count=initial_count,
+                issues=initial_issues,
+                initial_issues_count=initial_count,
+                fixed_issues_count=0,
+                remaining_issues_count=initial_count,
+                initial_issues=initial_issues or None,
+                cwd=ctx.cwd,
+            )
+
         remaining_count = len(remaining_issues)
         fixed_count = max(0, initial_count - remaining_count)
 
