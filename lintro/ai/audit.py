@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 import json
+import sys
 import time
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, IO, TextIO
 
 if TYPE_CHECKING:
     from lintro.ai.models import AIFixSuggestion
@@ -35,6 +36,9 @@ def write_audit_log(
     JSON object per line, preserving history across runs. When the file
     exceeds ``max_entries`` records, the oldest lines are dropped so the
     file stays bounded (simple size-based rotation).
+
+    Append and rotation share an exclusive file lock so concurrent lintro
+    processes cannot interleave a rewrite over another process's append.
 
     Args:
         workspace_root: Project root directory.
@@ -69,11 +73,65 @@ def write_audit_log(
     audit_path = audit_dir / AUDIT_JSONL_FILE
 
     line = json.dumps(audit, ensure_ascii=False)
-    with audit_path.open("a", encoding="utf-8") as fh:
-        fh.write(line + "\n")
-        fh.flush()
+    with audit_path.open("a+", encoding="utf-8") as fh:
+        _lock_file(fh)
+        try:
+            fh.seek(0, 2)
+            fh.write(line + "\n")
+            fh.flush()
+            _rotate_audit_log_locked(fh, max_entries)
+        finally:
+            _unlock_file(fh)
 
-    _rotate_audit_log(audit_path, max_entries)
+
+def _lock_file(fh: IO[str]) -> None:
+    """Acquire an exclusive lock on an open file handle when available.
+
+    Args:
+        fh: Open text file handle to lock.
+    """
+    if sys.platform == "win32":
+        return
+    import fcntl
+
+    fcntl.flock(fh.fileno(), fcntl.LOCK_EX)
+
+
+def _unlock_file(fh: IO[str]) -> None:
+    """Release a previously acquired exclusive file lock when available.
+
+    Args:
+        fh: Open text file handle to unlock.
+    """
+    if sys.platform == "win32":
+        return
+    import fcntl
+
+    fcntl.flock(fh.fileno(), fcntl.LOCK_UN)
+
+
+def _rotate_audit_log_locked(
+    fh: TextIO,
+    max_entries: int | None,
+) -> None:
+    """Trim the JSONL audit log while holding the caller's exclusive lock.
+
+    Args:
+        fh: Open audit file handle positioned after the latest append.
+        max_entries: Maximum records to retain; ``None`` or non-positive
+            leaves the file untouched.
+    """
+    if max_entries is None or max_entries <= 0:
+        return
+    fh.seek(0)
+    lines = [ln for ln in fh.read().splitlines() if ln.strip()]
+    if len(lines) <= max_entries:
+        return
+    kept = lines[-max_entries:]
+    fh.seek(0)
+    fh.truncate()
+    fh.write("\n".join(kept) + "\n")
+    fh.flush()
 
 
 def _rotate_audit_log(audit_path: Path, max_entries: int | None) -> None:
@@ -86,10 +144,9 @@ def _rotate_audit_log(audit_path: Path, max_entries: int | None) -> None:
     """
     if max_entries is None or max_entries <= 0:
         return
-    lines = [
-        ln for ln in audit_path.read_text(encoding="utf-8").splitlines() if ln.strip()
-    ]
-    if len(lines) <= max_entries:
-        return
-    kept = lines[-max_entries:]
-    audit_path.write_text("\n".join(kept) + "\n", encoding="utf-8")
+    with audit_path.open("a+", encoding="utf-8") as fh:
+        _lock_file(fh)
+        try:
+            _rotate_audit_log_locked(fh, max_entries)
+        finally:
+            _unlock_file(fh)
