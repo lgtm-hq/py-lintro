@@ -8,6 +8,8 @@ PHP toolchain.
 
 from __future__ import annotations
 
+from typing import cast
+
 import shutil
 import subprocess
 from pathlib import Path
@@ -15,6 +17,7 @@ from pathlib import Path
 import pytest
 from assertpy import assert_that
 
+from lintro.parsers.phpstan.phpstan_issue import PhpstanIssue
 from lintro.models.core.tool_result import ToolResult
 from lintro.plugins import ToolRegistry
 
@@ -79,7 +82,10 @@ def test_phpstan_reports_violations(tmp_path: Path) -> None:
     assert_that(result.name).is_equal_to("phpstan")
     assert_that(result.success).is_false()
     assert_that(result.issues_count).is_greater_than_or_equal_to(2)
-    identifiers = {issue.identifier for issue in result.issues}
+    assert_that(result.issues).is_not_none()
+    identifiers = {
+        cast(PhpstanIssue, issue).identifier for issue in result.issues  # type: ignore[union-attr]
+    }
     assert_that(identifiers).contains("function.notFound")
 
 

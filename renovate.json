@@ -43,12 +43,8 @@
       "allowedVersions": "<5"
     },
     {
-      "matchDatasources": [
-        "pypi"
-      ],
-      "matchUpdateTypes": [
-        "minor"
-      ],
+      "matchDatasources": ["pypi"],
+      "matchUpdateTypes": ["minor"],
       "automerge": false
     },
     {
@@ -62,9 +58,7 @@
         "setup-py",
         "uv"
       ],
-      "matchPackageNames": [
-        "python"
-      ],
+      "matchPackageNames": ["python"],
       "rangeStrategy": "widen"
     },
     {
@@ -203,17 +197,13 @@
     ]
   },
   "lockFileMaintenance": {
-    "schedule": [
-      "before 5am on monday"
-    ],
+    "schedule": ["before 5am on monday"],
     "commitMessageAction": "update lockfile"
   },
   "customManagers": [
     {
       "customType": "regex",
-      "managerFilePatterns": [
-        "Dockerfile"
-      ],
+      "managerFilePatterns": ["Dockerfile"],
       "matchStrings": [
         "ARG HADOLINT_VERSION=(?<currentValue>[0-9]+\\.[0-9]+\\.[0-9]+)"
       ],
@@ -223,9 +213,7 @@
     },
     {
       "customType": "regex",
-      "managerFilePatterns": [
-        "Dockerfile"
-      ],
+      "managerFilePatterns": ["Dockerfile"],
       "matchStrings": [
         "ARG ACTIONLINT_VERSION=(?<currentValue>[0-9]+\\.[0-9]+\\.[0-9]+)"
       ],

@@ -3,19 +3,18 @@
 ## Overview
 
 [PHPStan](https://phpstan.org/) is a static analysis tool for PHP that finds bugs in
-code without running it. It infers types (even without annotations), validates
-function and method signatures, and reports a wide range of correctness problems such
-as calls to undefined functions, wrong argument counts, dead code, and null-safety
-violations. It is a check-only tool: it reports issues but does not rewrite source
-files. This document describes lintro's PHPStan integration and the design decisions
-behind it.
+code without running it. It infers types (even without annotations), validates function
+and method signatures, and reports a wide range of correctness problems such as calls to
+undefined functions, wrong argument counts, dead code, and null-safety violations. It is
+a check-only tool: it reports issues but does not rewrite source files. This document
+describes lintro's PHPStan integration and the design decisions behind it.
 
 ## Core Tool Capabilities
 
 - **Type inference**: Reasons about types without requiring annotations.
 - **Configurable strictness**: Analysis `level` from 0 (basic) to 9 (maximum).
-- **Stable error identifiers**: Each finding carries an identifier
-  (e.g. `arguments.count`, `function.notFound`) documented at
+- **Stable error identifiers**: Each finding carries an identifier (e.g.
+  `arguments.count`, `function.notFound`) documented at
   `https://phpstan.org/error-identifiers/<identifier>`.
 - **Remediation tips**: Many findings include a `tip` with a link or hint.
 - **Framework extensions**: Optional extensions for Laravel, Symfony, Doctrine, etc.
@@ -56,19 +55,18 @@ uv run lintro check --tools phpstan --tool-options phpstan:level=6 path/to/src
 
 ## Configuration and Level Decision
 
-PHPStan requires an analysis `level`; unlike ruff or mypy there is no built-in
-"default" level. Lintro therefore chooses **run-with-defaults**, not skip-on-no-config
-(contrast stylelint/vale, which skip without config):
+PHPStan requires an analysis `level`; unlike ruff or mypy there is no built-in "default"
+level. Lintro therefore chooses **run-with-defaults**, not skip-on-no-config (contrast
+stylelint/vale, which skip without config):
 
-- When the project provides **no** native config
-  (`phpstan.neon` / `phpstan.neon.dist` / `phpstan.dist.neon`), lintro injects
-  `--level=0`. Level 0 is the most conservative setting: it reports only unambiguous
-  problems (undefined symbols, wrong argument counts) that are real bugs and that do
-  not depend on an autoloader or type annotations, which keeps false positives low on
-  standalone files.
+- When the project provides **no** native config (`phpstan.neon` / `phpstan.neon.dist` /
+  `phpstan.dist.neon`), lintro injects `--level=0`. Level 0 is the most conservative
+  setting: it reports only unambiguous problems (undefined symbols, wrong argument
+  counts) that are real bugs and that do not depend on an autoloader or type
+  annotations, which keeps false positives low on standalone files.
 - When a native `phpstan.neon` **is** present, it defines the level, so lintro does
-  **not** pass `--level` and defers entirely to the project configuration (mirroring
-  how ruff/mypy respect their native config). Users who want stricter analysis add a
+  **not** pass `--level` and defers entirely to the project configuration (mirroring how
+  ruff/mypy respect their native config). Users who want stricter analysis add a
   `phpstan.neon` with their chosen `level:`.
 
 This mirrors ruff/rubocop (run with sensible defaults) while still respecting native
@@ -84,8 +82,8 @@ the **native** PHPStan JSON parser (`--error-format=json`), not the shared SARIF
 ingestion path, for two reasons:
 
 1. **PHPStan does not emit SARIF.** Its formatters are
-   `raw, gitlab, table, junit, checkstyle, teamcity, github, json, prettyJson`. There
-   is no first-class SARIF output, so the shared SARIF parser is not even applicable
+   `raw, gitlab, table, junit, checkstyle, teamcity, github, json, prettyJson`. There is
+   no first-class SARIF output, so the shared SARIF parser is not even applicable
    without an external converter.
 2. **SARIF would drop PHPStan-specific fidelity even if available.** PHPStan's JSON
    messages carry two fields lintro surfaces directly:
