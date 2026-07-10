@@ -99,8 +99,7 @@ def _parse_row(*, row: dict[str, Any]) -> ChecklistItem:
         category = ReviewCategory(row["category"])
     except ValueError as error:
         msg = (
-            f"Checklist row {row.get('id')!r} has invalid category: "
-            f"{row['category']!r}"
+            f"Checklist row {row.get('id')!r} has invalid category: {row['category']!r}"
         )
         raise ValueError(msg) from error
 
@@ -190,9 +189,6 @@ def load_builtin_checklist() -> tuple[ChecklistItem, ...]:
     Returns:
         tuple[ChecklistItem, ...]: All built-in checklist items in corpus order
         (Tier 1 first, then Tier 2), validated for the registry invariants.
-
-    Raises:
-        ValueError: When the corpus is malformed or violates an invariant.
     """
     items = tuple(_parse_row(row=row) for row in _read_corpus_rows())
     _validate_corpus(items=items)
