@@ -291,7 +291,18 @@ def review_command(
                     repo=effective_repo,
                 )
         if output_format == "json":
-            raise click.ClickException(str(exc)) from exc
+            from lintro.ai.review.error_contract import (
+                REVIEW_ERROR_EXIT_CODE,
+                render_error_contract_json,
+            )
+
+            click.echo(
+                render_error_contract_json(
+                    provider=str(provider.name),
+                    error=exc,
+                ),
+            )
+            raise SystemExit(REVIEW_ERROR_EXIT_CODE) from exc
         render_review_error(error=exc, console=console)
         raise SystemExit(1) from exc
 
