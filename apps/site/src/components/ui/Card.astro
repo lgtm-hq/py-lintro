@@ -1,0 +1,33 @@
+---
+interface Props {
+  title?: string;
+  number?: string;
+  variant?: "default" | "featured" | "primary";
+  feature?: boolean;
+  class?: string;
+}
+
+const { title, number, variant = "default", feature = false, class: className } = Astro.props;
+---
+
+<article
+  class:list={[
+    "card",
+    variant === "featured" && "card-featured",
+    variant === "primary" && "card-primary",
+    feature && "card-feature",
+    className,
+  ]}
+>
+  {
+    number && (
+      <div class="card-header">
+        <span class="card-num">{number}</span>
+      </div>
+    )
+  }
+  <div class="card-body">
+    {title && <h3 class="card-title">{title}</h3>}
+    <slot />
+  </div>
+</article>

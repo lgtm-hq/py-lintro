@@ -13,8 +13,8 @@
 # -----------------------------------------------------------------------------
 FROM python:3.14-slim@sha256:b877e50bd90de10af8d82c57a022fc2e0dc731c5320d762a27986facfc3355c1 AS tools
 
-ARG BUN_VERSION=1.3.11
-ARG UV_VERSION=0.11.10
+ARG BUN_VERSION=1.3.14
+ARG UV_VERSION=0.11.28
 
 LABEL maintainer="lgtm-hq"
 LABEL org.opencontainers.image.source="https://github.com/lgtm-hq/py-lintro"
