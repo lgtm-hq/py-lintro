@@ -90,6 +90,24 @@ def _pyproject_addopts_has_coverage(path: Path) -> bool:
     return _addopts_has_coverage(ini_options.get("addopts"))
 
 
+def _directory_has_pytest_config(base: Path) -> bool:
+    """Return whether ``base`` contains a pytest configuration file.
+
+    Pytest stops at the first matching config while walking upward, so
+    ancestor configs beyond that directory are ignored.
+
+    Args:
+        base: Directory that may contain pytest configuration files.
+
+    Returns:
+        bool: True if ``base`` has pytest.ini, tox.ini, setup.cfg, or
+            pyproject.toml (presence only; content is not inspected).
+    """
+    if any((base / filename).is_file() for filename in _INI_FILES):
+        return True
+    return (base / "pyproject.toml").is_file()
+
+
 def _directory_enables_coverage(base: Path) -> bool:
     """Return whether pytest config in ``base`` enables coverage.
 
@@ -121,20 +139,21 @@ def config_addopts_enable_coverage(root: str | Path | None = None) -> bool:
 
     Scans the project's pytest configuration files for coverage-enabling
     ``--cov`` / ``--cov=`` flags declared in ``addopts``. Walks parent
-    directories the same way pytest does when discovering config, so a
-    subdirectory run still sees a parent ``pytest.ini`` / ``pyproject.toml``.
+    directories the same way pytest does when discovering config, stopping
+    at the first directory that contains a pytest config file.
 
     Args:
         root: Directory to search for configuration files. Defaults to the
             current working directory.
 
     Returns:
-        bool: True if any pytest configuration enables coverage via ``addopts``.
+        bool: True if the nearest pytest configuration enables coverage via
+            ``addopts``.
     """
     base = Path(root) if root is not None else Path.cwd()
     base = base.resolve()
 
     for directory in (base, *base.parents):
-        if _directory_enables_coverage(base=directory):
-            return True
+        if _directory_has_pytest_config(base=directory):
+            return _directory_enables_coverage(base=directory)
     return False

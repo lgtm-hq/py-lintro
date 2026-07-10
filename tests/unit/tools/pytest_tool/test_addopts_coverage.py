@@ -204,3 +204,27 @@ def test_detects_parent_pytest_ini_from_subdirectory(
     subdir.mkdir(parents=True)
     monkeypatch.chdir(subdir)
     assert_that(config_addopts_enable_coverage()).is_true()
+
+def test_nearer_config_without_coverage_stops_walk(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A nearer pytest.ini without coverage wins over a parent with coverage.
+
+    Pytest stops at the first config it finds while walking upward, so a
+    coverage-enabled parent must not make the banner report coverage when
+    the nearer config has no --cov flags.
+
+    Args:
+        tmp_path: Temporary directory provided by pytest.
+        monkeypatch: Pytest monkeypatch fixture used to switch the cwd.
+    """
+    (tmp_path / "pytest.ini").write_text(_PYTEST_INI_WITH_COV, encoding="utf-8")
+    pkg = tmp_path / "pkg"
+    pkg.mkdir()
+    (pkg / "pytest.ini").write_text(_PYTEST_INI_NO_COV, encoding="utf-8")
+    nested = pkg / "tests"
+    nested.mkdir()
+    monkeypatch.chdir(nested)
+    assert_that(config_addopts_enable_coverage()).is_false()
+
