@@ -171,6 +171,36 @@ class TypeScriptCheckerPlugin(BaseToolPlugin):
                 return tsconfig
         return None
 
+    def _preferred_candidate_tsconfig(self, discovery_root: Path) -> Path | None:
+        """Find a subclass-preferred tsconfig ahead of generic discovery.
+
+        Iterates ``_tsconfig_candidates`` in declared order and returns the
+        first candidate that exists directly in *discovery_root* and is listed
+        ahead of the generic ``tsconfig.json`` default. This lets a subclass
+        such as :class:`~lintro.tools.definitions.vue_tsc.VueTscPlugin` — which
+        prefers ``tsconfig.app.json`` for Vite Vue projects — win over generic
+        multi-project discovery on the ``check()`` path (issue #1112).
+
+        Candidates from ``tsconfig.json`` onward are intentionally ignored so
+        that generic discovery (``references``, monorepo directory walking)
+        stays in charge of the default config. Tools whose only candidate is
+        ``tsconfig.json`` (e.g. ``tsc``) therefore never short-circuit here,
+        keeping their behavior unchanged.
+
+        Args:
+            discovery_root: Directory scanned for a preferred tsconfig.
+
+        Returns:
+            Path to the preferred tsconfig if one exists, otherwise ``None``.
+        """
+        for candidate in self._tsconfig_candidates:
+            if candidate == "tsconfig.json":
+                break
+            candidate_path = discovery_root / candidate
+            if candidate_path.exists():
+                return candidate_path.resolve()
+        return None
+
     def _create_temp_tsconfig(
         self,
         base_tsconfig: Path,
@@ -390,8 +420,37 @@ class TypeScriptCheckerPlugin(BaseToolPlugin):
         # ancestor of input paths for tsc's multi-package support).
         discovery_root = self._compute_discovery_root(cwd_path, paths)
 
-        # Discover tsconfigs for multi-project support
+        # Discover tsconfigs for multi-project support. When the discovered
+        # configs span several directories the inputs cover multiple packages,
+        # and multi-project partitioning must keep precedence: each file is
+        # checked against its nearest package config, so a root-level
+        # preferred config must not short-circuit and route child-package
+        # files through the root app config.
         tsconfigs = discover_tsconfigs(discovery_root, self.exclude_patterns)
+        distinct_dirs = {info.path.parent.resolve() for info in tsconfigs}
+        if len(distinct_dirs) > 1:
+            return self._check_multi_project(ctx, cwd_path, tsconfigs, merged_options)
+
+        # Single project directory: respect the subclass's preferred tsconfig
+        # ordering. A subclass (e.g. VueTscPlugin) may declare a
+        # framework-specific config such as ``tsconfig.app.json`` ahead of
+        # ``tsconfig.json``; when that preferred config is present it must win
+        # over generic discovery, which would otherwise select
+        # ``tsconfig.json`` and bypass the Vue preference (issue #1112).
+        # ``tsc`` — whose sole candidate is ``tsconfig.json`` — is unaffected.
+        preferred_tsconfig = self._preferred_candidate_tsconfig(discovery_root)
+        if preferred_tsconfig is not None:
+            logger.debug(
+                "[{}] Using preferred tsconfig ahead of discovery: {}",
+                self._tool_label,
+                preferred_tsconfig,
+            )
+            return self._check_single_project(
+                ctx,
+                cwd_path,
+                merged_options,
+                discovered_tsconfig=preferred_tsconfig,
+            )
 
         if len(tsconfigs) > 1:
             return self._check_multi_project(ctx, cwd_path, tsconfigs, merged_options)
@@ -651,8 +710,7 @@ class TypeScriptCheckerPlugin(BaseToolPlugin):
                     rel_project = project_dir
                 count = len(issues)
                 section = (
-                    f"── {rel_project} "
-                    f"({count} issue{'s' if count != 1 else ''}) ──"
+                    f"── {rel_project} ({count} issue{'s' if count != 1 else ''}) ──"
                 )
                 output_sections.append(section)
 
