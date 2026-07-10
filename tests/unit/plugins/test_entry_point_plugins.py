@@ -68,9 +68,6 @@ class _FakeEntryPoint:
 
         Returns:
             The loaded plugin object.
-
-        Raises:
-            Exception: When a configured ``load_error`` was provided.
         """
         if self._load_error is not None:
             raise self._load_error
