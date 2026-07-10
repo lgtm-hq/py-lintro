@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import re
-import shlex
 from collections import defaultdict
 from pathlib import Path
 from subprocess import CompletedProcess
@@ -14,41 +12,30 @@ from lintro.ai.review.enums.changed_file_status import ChangedFileStatus
 from lintro.ai.review.models.changed_file import ChangedFile
 from lintro.ai.review.models.checklist_answer import ChecklistAnswer
 from lintro.ai.review.models.review_context import ReviewContext
-from lintro.ai.review.models.review_finding import ReviewFinding
+from lintro.ai.review.models.review_finding import ReviewFinding, Severity
 from lintro.ai.review.models.review_metadata import ReviewMetadata
 from lintro.ai.review.models.review_result import ReviewResult
 from tests.unit.ai.review.review_fixtures import load_review_fixture
 
 _REPO_ROOT = Path(__file__).resolve().parents[4]
-_SNAPSHOT_DELIM_RE = re.compile(r"---LINTRO_DIFF_SNAP_([a-f0-9]+)---")
 
-
-def _diff_ref_from_bash_snapshot_script(*, script: str) -> str:
-    """Extract the full ``git diff`` argument signature from a snapshot script."""
-    for command in script.split(";"):
-        tokens = shlex.split(command)
-        if (
-            not any(Path(token).name == "git" for token in tokens)
-            or "diff" not in tokens
-        ):
-            continue
-        diff_index = tokens.index("diff")
-        index = diff_index + 1
-        while index < len(tokens) and tokens[index].startswith("-"):
-            index += 1
-        if index >= len(tokens):
-            continue
-        args: list[str] = []
-        while index < len(tokens):
-            token = tokens[index]
-            if token in {"--name-status", "--numstat"}:
-                break
-            args.append(token)
-            index += 1
-        if args:
-            return " ".join(args)
-    msg = f"could not parse git diff target from script: {script!r}"
-    raise AssertionError(msg)
+# Shared ``git diff`` config/flags mirroring
+# lintro.ai.review.context.git_ops._git_diff_triple_snapshot so mocked argv
+# matches the real invocation exactly.
+_DIFF_SNAPSHOT_BASE_ARGV: list[str] = [
+    "git",
+    "-c",
+    "diff.mnemonicPrefix=false",
+    "-c",
+    "diff.noprefix=false",
+    "-c",
+    "color.ui=false",
+    "diff",
+    "-M",
+    "--no-color",
+    "--no-ext-diff",
+    "--no-textconv",
+]
 
 
 def _assert_review_subprocess_kwargs(*, kwargs: dict[str, object]) -> None:
@@ -77,7 +64,6 @@ class SubprocessMock:
         self._queues: dict[tuple[str, ...], list[CompletedProcess[str]]] = defaultdict(
             list,
         )
-        self._bash_snapshots: list[tuple[str, str, str, str]] = []
 
     def queue(
         self,
@@ -97,17 +83,6 @@ class SubprocessMock:
             ),
         )
 
-    def queue_bash_snapshot(
-        self,
-        *,
-        diff_ref: str,
-        unified: str = "",
-        name_status: str = "",
-        numstat: str = "",
-    ) -> None:
-        """Register stdout for the next combined ``bash -c`` diff collection."""
-        self._bash_snapshots.append((diff_ref, unified, name_status, numstat))
-
     def __call__(
         self,
         args: list[str],
@@ -116,27 +91,6 @@ class SubprocessMock:
         """Return the next queued response for ``args``."""
         _assert_review_subprocess_kwargs(kwargs=kwargs)
         normalized_args = [Path(args[0]).name, *args[1:]]
-        if len(normalized_args) >= 3 and normalized_args[:2] == ["bash", "-c"]:
-            script = args[2]
-            requested_ref = _diff_ref_from_bash_snapshot_script(script=script)
-            for index, (diff_ref, unified, name_status, numstat) in enumerate(
-                self._bash_snapshots,
-            ):
-                if diff_ref == requested_ref:
-                    del self._bash_snapshots[index]
-                    match = _SNAPSHOT_DELIM_RE.search(script)
-                    if match is None:
-                        msg = f"could not parse snapshot delimiter from script: {script!r}"
-                        raise AssertionError(msg)
-                    delimiter = f"\n---LINTRO_DIFF_SNAP_{match.group(1)}---\n"
-                    stdout = unified + delimiter + name_status + delimiter + numstat
-                    return CompletedProcess(
-                        args=["bash", "-c", script],
-                        returncode=0,
-                        stdout=stdout,
-                        stderr="",
-                    )
-
         key = tuple(normalized_args)
         if not self._queues[key]:
             if key == ("git", "rev-parse", "--show-toplevel"):
@@ -159,12 +113,27 @@ def queue_diff_snapshot(
     name_status: str = "",
     numstat: str = "",
 ) -> None:
-    """Register the combined stdout for a ``git diff`` collection."""
-    dispatcher.queue_bash_snapshot(
-        diff_ref=diff_ref,
-        unified=unified,
-        name_status=name_status,
-        numstat=numstat,
+    """Register responses for the three ``git diff`` snapshot invocations.
+
+    Mirrors ``_git_diff_triple_snapshot`` which now issues three separate git
+    calls (unified diff, name-status, numstat) instead of one bash script.
+
+    Args:
+        dispatcher: The subprocess mock to register responses on.
+        diff_ref: The diff target (for example ``base...head`` or ``HEAD``).
+        unified: Stdout for the unified diff call.
+        name_status: Stdout for the ``--name-status -z`` call.
+        numstat: Stdout for the ``--numstat -z`` call.
+    """
+    ref_args = diff_ref.split(" ")
+    dispatcher.queue([*_DIFF_SNAPSHOT_BASE_ARGV, *ref_args], stdout=unified)
+    dispatcher.queue(
+        [*_DIFF_SNAPSHOT_BASE_ARGV, "--name-status", "-z", *ref_args],
+        stdout=name_status,
+    )
+    dispatcher.queue(
+        [*_DIFF_SNAPSHOT_BASE_ARGV, "--numstat", "-z", *ref_args],
+        stdout=numstat,
     )
 
 
@@ -275,7 +244,7 @@ def sample_review_result() -> ReviewResult:
         ),
         findings=(
             ReviewFinding(
-                severity="P1",
+                severity=Severity.P1,
                 category="security",
                 file="src/main.py",
                 line=10,
@@ -287,7 +256,7 @@ def sample_review_result() -> ReviewResult:
                 checklist_ids=(1,),
             ),
             ReviewFinding(
-                severity="P2",
+                severity=Severity.P2,
                 category="test-gap",
                 file="tests/test_main.py",
                 line=5,

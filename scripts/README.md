@@ -58,6 +58,21 @@ Scripts for building standalone binaries and distribution packages.
 | Script           | Purpose                                  | Usage                                        |
 | ---------------- | ---------------------------------------- | -------------------------------------------- |
 | `build_macos.py` | Build macOS binary using Nuitka compiler | `uv run python scripts/build/build_macos.py` |
+| `build_linux.py` | Build Linux binary using Nuitka compiler | `uv run python scripts/build/build_linux.py` |
+
+### 📦 npm Distribution Scripts (`ci/npm/`)
+
+Scripts that package the platform binaries into the npm meta-package + per-platform
+packages and (dry-run) publish them. See the
+[npm distribution design](../docs/npm-distribution.md).
+
+| Script                         | Purpose                                                    | Usage                                                           |
+| ------------------------------ | ---------------------------------------------------------- | --------------------------------------------------------------- |
+| `sync_npm_version.py`          | Sync/check versions across all `npm/*/package.json`        | `python scripts/ci/npm/sync_npm_version.py --version 1.2.3`     |
+| `stage_binaries.py`            | Copy downloaded platform binaries into the npm tree        | `python scripts/ci/npm/stage_binaries.py --artifacts-dir <dir>` |
+| `download_release_binaries.sh` | Download release binaries for staging                      | `./scripts/ci/npm/download_release_binaries.sh v1.2.3 <dir>`    |
+| `smoke_test.sh`                | Pack + install the meta-package and run `lintro --version` | `./scripts/ci/npm/smoke_test.sh`                                |
+| `publish_packages.sh`          | Publish npm packages (dry-run unless `LIVE=1`)             | `./scripts/ci/npm/publish_packages.sh`                          |
 
 ### 🍺 Homebrew Formulas (`ci/homebrew/`)
 
@@ -87,6 +102,8 @@ Scripts for GitHub Actions workflows and continuous integration.
 | `fail-on-security-audit.sh`          | Fail CI when security audit finds vulnerabilities                     | `./scripts/ci/fail-on-security-audit.sh`                                           |
 | `free-disk-space.sh`                 | Free disk space on CI runner for Docker builds                        | `./scripts/ci/free-disk-space.sh`                                                  |
 | `security-comment.sh`                | Run osv-scanner via lintro in Docker and generate security PR comment | `./scripts/ci/security-comment.sh --help`                                          |
+| `run-ai-review.sh`                   | Dogfood `lintro review` on a PR using trusted base-branch lintro      | `PR_NUMBER=123 ./scripts/ci/run-ai-review.sh`                                      |
+| `enable_review_config.py`            | Enable AI review + cost cap in `.lintro-config.yaml` for a CI run     | `python3 scripts/ci/enable_review_config.py --help`                                |
 | `classify-osv-results.py`            | Classify osv_scanner JSON as ok, vulns, or error for CI status        | `python3 scripts/ci/classify-osv-results.py osv-results.json`                      |
 | `format-security-comment.py`         | Format lintro osv_scanner JSON as security PR comment markdown        | `python3 scripts/ci/format-security-comment.py osv-results.json`                   |
 | `test-install-package.sh`            | Install and verify built package in isolated venv                     | `./scripts/ci/test-install-package.sh wheel`                                       |
@@ -100,6 +117,26 @@ Scripts for GitHub Actions workflows and continuous integration.
 | `resolve-vue-tsc-version.sh`         | Read installed vue-tsc version from bun's global install root         | `./scripts/ci/resolve-vue-tsc-version.sh --help`                                   |
 | `verify-manifest-tools.py`           | Verify tools in image match manifest versions                         | `python scripts/ci/verify-manifest-tools.py --help`                                |
 | `generate-tool-versions.py`          | Generate `_generated_versions.py` and sync `manifest.json` versions   | `python scripts/ci/generate-tool-versions.py [--check]`                            |
+| `stage-python-coverage-html.sh`      | Stage flat HTML coverage for GitHub Pages bundling                    | `./scripts/ci/testing/stage-python-coverage-html.sh --help`                        |
+| `render-coverage-json-html.py`       | Render a simple HTML index from CI `coverage.json` for Pages bundling | `python scripts/ci/testing/render-coverage-json-html.py --help`                    |
+
+#### Documentation Site Scripts (`ci/site/`)
+
+Scripts for building, testing, and deploying the Astro documentation site at
+`apps/site/`.
+
+| Script                          | Purpose                                                    | Usage                                                    |
+| ------------------------------- | ---------------------------------------------------------- | -------------------------------------------------------- |
+| `build.sh`                      | Build the docs site for GitHub Pages                       | `./scripts/ci/site/build.sh --help`                      |
+| `check.sh`                      | Run Astro type-check (`astro check`)                       | `./scripts/ci/site/check.sh --help`                      |
+| `test.sh`                       | Run Vitest with coverage in `apps/site`                    | `./scripts/ci/site/test.sh --help`                       |
+| `test-python.sh`                | Run pytest for site maintenance scripts                    | `./scripts/ci/site/test-python.sh --help`                |
+| `test-all.sh`                   | Run Vitest and site script pytest                          | `./scripts/ci/site/test-all.sh --help`                   |
+| `preview-serve.sh`              | Serve built `dist/` with production `ASTRO_BASE`           | `./scripts/ci/site/preview-serve.sh --help`              |
+| `preview-pages-local.sh`        | Build Pages-like dist with optional local coverage bundles | `./scripts/ci/site/preview-pages-local.sh --help`        |
+| `prepare-lychee-action-args.sh` | Prepare lychee-action args for post-build link checking    | `./scripts/ci/site/prepare-lychee-action-args.sh --help` |
+| `migrate-docs-content.py`       | Copy `docs/` into `apps/site/src/content/docs/`            | `uv run python scripts/ci/site/migrate-docs-content.py`  |
+| `fix-markdown-docs.py`          | Fix markdownlint issues in migrated Astro docs content     | `uv run python scripts/ci/site/fix-markdown-docs.py`     |
 
 #### Homebrew Scripts (`ci/homebrew/`)
 

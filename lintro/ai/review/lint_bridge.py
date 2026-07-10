@@ -60,7 +60,7 @@ def run_lint_on_changed_files(
             continue
 
         try:
-            configure_tool_for_execution(
+            tool = configure_tool_for_execution(
                 tool=tool,
                 tool_name=tool_name,
                 config_manager=config_manager,

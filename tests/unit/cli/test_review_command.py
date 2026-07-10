@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from typing import Any
 from unittest.mock import MagicMock, patch
 
 from assertpy import assert_that
@@ -259,6 +260,273 @@ def test_review_exits_zero_without_p1_findings() -> None:
     assert_that(result.exit_code).is_equal_to(0)
     assert_that(mock_render.call_args.kwargs).contains_key(
         "checklist_display",
+    )
+
+
+def _mock_review_pipeline(
+    *,
+    mock_collect: MagicMock | None = None,
+) -> dict[str, Any]:
+    """Return patched review dependencies for CliRunner mode wiring tests."""
+    mock_context = MagicMock()
+    mock_context.changed_files = []
+    mock_context.unified_diff = ""
+    mock_config = MagicMock(ai=MagicMock(enabled=True))
+    mock_config.review.depth = 1
+    mock_config.review.strictness = ReviewStrictness.BALANCED
+    mock_config.review.sensitivity = MagicMock()
+    mock_config.review.force_semantic_chunking = False
+    mock_config.review.checklist_display = ChecklistDisplay.OFF
+
+    collect_patch = (
+        patch(
+            "lintro.cli_utils.commands.review.collect_review_context",
+            mock_collect,
+        )
+        if mock_collect is not None
+        else patch(
+            "lintro.cli_utils.commands.review.collect_review_context",
+            return_value=mock_context,
+        )
+    )
+
+    return {
+        "require_ai": patch("lintro.cli_utils.commands.review.require_ai"),
+        "get_config": patch(
+            "lintro.cli_utils.commands.review.get_config",
+            return_value=mock_config,
+        ),
+        "collect_review_context": collect_patch,
+        "classify_changed_files": patch(
+            "lintro.cli_utils.commands.review.classify_changed_files",
+            return_value=[],
+        ),
+        "get_all_checklist_items": patch(
+            "lintro.cli_utils.commands.review.get_all_checklist_items",
+            return_value=[],
+        ),
+        "select_checklist_items": patch(
+            "lintro.cli_utils.commands.review.select_checklist_items",
+            return_value=[],
+        ),
+        "format_checklist_for_prompt": patch(
+            "lintro.cli_utils.commands.review.format_checklist_for_prompt",
+            return_value=("", {}),
+        ),
+        "get_provider": patch(
+            "lintro.cli_utils.commands.review.get_provider",
+            return_value=MagicMock(
+                model_name="gpt-4o",
+                name="openai",
+            ),
+        ),
+        "run_review": patch(
+            "lintro.cli_utils.commands.review.run_review",
+            return_value=_empty_result(),
+        ),
+        "render_review_output": patch(
+            "lintro.cli_utils.commands.review.render_review_output",
+        ),
+    }
+
+
+def test_review_uncommitted_mode() -> None:
+    """Uncommitted mode does not pass an explicit base branch to collection."""
+    runner = CliRunner()
+    mock_collect = MagicMock(
+        return_value=MagicMock(changed_files=[], unified_diff=""),
+    )
+    patches = _mock_review_pipeline(mock_collect=mock_collect)
+
+    with (
+        patches["require_ai"],
+        patches["get_config"],
+        patches["collect_review_context"],
+        patches["classify_changed_files"],
+        patches["get_all_checklist_items"],
+        patches["select_checklist_items"],
+        patches["format_checklist_for_prompt"],
+        patches["get_provider"],
+        patches["run_review"],
+        patches["render_review_output"],
+    ):
+        result = runner.invoke(cli, ["review", "--uncommitted"])
+
+    assert_that(result.exit_code).is_equal_to(0)
+    assert_that(result.output).does_not_contain("Cannot combine")
+    assert_that(mock_collect.call_args.kwargs).is_equal_to(
+        {
+            "base": None,
+            "uncommitted": True,
+            "pr_number": None,
+            "repo": None,
+            "paths": None,
+        },
+    )
+
+
+def test_review_pr_mode() -> None:
+    """PR mode forwards repo without an explicit base branch."""
+    runner = CliRunner()
+    mock_collect = MagicMock(
+        return_value=MagicMock(changed_files=[], unified_diff=""),
+    )
+    patches = _mock_review_pipeline(mock_collect=mock_collect)
+
+    with (
+        patches["require_ai"],
+        patches["get_config"],
+        patches["collect_review_context"],
+        patches["classify_changed_files"],
+        patches["get_all_checklist_items"],
+        patches["select_checklist_items"],
+        patches["format_checklist_for_prompt"],
+        patches["get_provider"],
+        patches["run_review"],
+        patches["render_review_output"],
+    ):
+        result = runner.invoke(
+            cli,
+            ["review", "--pr", "5", "--repo", "owner/repo"],
+        )
+
+    assert_that(result.exit_code).is_equal_to(0)
+    assert_that(result.output).does_not_contain("explicit base branch")
+    assert_that(mock_collect.call_args.kwargs).is_equal_to(
+        {
+            "base": None,
+            "uncommitted": False,
+            "pr_number": 5,
+            "repo": "owner/repo",
+            "paths": None,
+        },
+    )
+
+
+def test_review_plain_mode() -> None:
+    """Default branch mode succeeds without CI repository env vars."""
+    runner = CliRunner()
+    mock_collect = MagicMock(
+        return_value=MagicMock(changed_files=[], unified_diff=""),
+    )
+    patches = _mock_review_pipeline(mock_collect=mock_collect)
+
+    with (
+        patches["require_ai"],
+        patches["get_config"],
+        patches["collect_review_context"],
+        patches["classify_changed_files"],
+        patches["get_all_checklist_items"],
+        patches["select_checklist_items"],
+        patches["format_checklist_for_prompt"],
+        patches["get_provider"],
+        patches["run_review"],
+        patches["render_review_output"],
+    ):
+        result = runner.invoke(cli, ["review"])
+
+    assert_that(result.exit_code).is_equal_to(0)
+    assert_that(mock_collect.call_args.kwargs).is_equal_to(
+        {
+            "base": None,
+            "uncommitted": False,
+            "pr_number": None,
+            "repo": None,
+            "paths": None,
+        },
+    )
+
+
+def test_review_plain_with_github_repository_env() -> None:
+    """CI GITHUB_REPOSITORY env does not leak into non-PR collection."""
+    runner = CliRunner()
+    mock_collect = MagicMock(
+        return_value=MagicMock(changed_files=[], unified_diff=""),
+    )
+    patches = _mock_review_pipeline(mock_collect=mock_collect)
+
+    with (
+        patches["require_ai"],
+        patches["get_config"],
+        patches["collect_review_context"],
+        patches["classify_changed_files"],
+        patches["get_all_checklist_items"],
+        patches["select_checklist_items"],
+        patches["format_checklist_for_prompt"],
+        patches["get_provider"],
+        patches["run_review"],
+        patches["render_review_output"],
+    ):
+        result = runner.invoke(
+            cli,
+            ["review"],
+            env={"GITHUB_REPOSITORY": "owner/repo"},
+        )
+
+    assert_that(result.exit_code).is_equal_to(0)
+    assert_that(result.output).does_not_contain(
+        "Cannot provide repo without pr_number",
+    )
+    assert_that(mock_collect.call_args.kwargs["repo"]).is_none()
+
+
+def test_review_repo_without_pr_fails() -> None:
+    """Explicit --repo without --pr fails fast instead of reviewing locally."""
+    runner = CliRunner()
+    mock_config = MagicMock(ai=MagicMock(enabled=True))
+
+    with (
+        patch("lintro.cli_utils.commands.review.require_ai"),
+        patch(
+            "lintro.cli_utils.commands.review.get_config",
+            return_value=mock_config,
+        ),
+    ):
+        result = runner.invoke(cli, ["review", "--repo", "owner/repo"])
+
+    assert_that(result.exit_code).is_not_equal_to(0)
+    assert_that(result.output).contains("--repo can only be used with --pr.")
+
+
+def test_review_post_with_repo_without_pr() -> None:
+    """--post with explicit --repo does not require a redundant --pr flag."""
+    runner = CliRunner()
+    mock_collect = MagicMock(
+        return_value=MagicMock(changed_files=[], unified_diff=""),
+    )
+    patches = _mock_review_pipeline(mock_collect=mock_collect)
+
+    with (
+        patches["require_ai"],
+        patches["get_config"],
+        patches["collect_review_context"],
+        patches["classify_changed_files"],
+        patches["get_all_checklist_items"],
+        patches["select_checklist_items"],
+        patches["format_checklist_for_prompt"],
+        patches["get_provider"],
+        patches["run_review"],
+        patches["render_review_output"],
+        patch(
+            "lintro.cli_utils.commands.review._detect_pr_number_from_env",
+            return_value=42,
+        ),
+        patch("lintro.ai.review.github.post_review_to_github", return_value=True),
+    ):
+        result = runner.invoke(cli, ["review", "--post", "--repo", "owner/repo"])
+
+    assert_that(result.exit_code).is_equal_to(0)
+    assert_that(result.output).does_not_contain(
+        "--repo can only be used with --pr.",
+    )
+    assert_that(mock_collect.call_args.kwargs).is_equal_to(
+        {
+            "base": None,
+            "uncommitted": False,
+            "pr_number": 42,
+            "repo": "owner/repo",
+            "paths": None,
+        },
     )
 
 

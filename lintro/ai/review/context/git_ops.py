@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import secrets
-import shlex
 import shutil
 import subprocess
 
@@ -11,6 +9,24 @@ from lintro.ai.review.enums.review_context_error_code import ReviewContextErrorC
 from lintro.ai.review.exceptions import ReviewContextError
 
 _GIT_GH_TIMEOUT_SECONDS = 120.0
+
+# Shared ``git`` configuration and ``diff`` flags used for the three diff
+# snapshot variants. Kept identical across variants so the unified diff,
+# name-status, and numstat views share the same normalized formatting.
+_DIFF_SNAPSHOT_CONFIG_ARGS: list[str] = [
+    "-c",
+    "diff.mnemonicPrefix=false",
+    "-c",
+    "diff.noprefix=false",
+    "-c",
+    "color.ui=false",
+]
+_DIFF_SNAPSHOT_FLAGS: list[str] = [
+    "-M",
+    "--no-color",
+    "--no-ext-diff",
+    "--no-textconv",
+]
 
 
 def _ensure_git_repo() -> None:
@@ -30,15 +46,6 @@ def _ensure_git_repo() -> None:
             "Not a git repository — lintro review requires a git checkout.",
             code=ReviewContextErrorCode.NOT_GIT_REPO,
         )
-
-
-def _ensure_bash() -> None:
-    """Verify bash is available for combined git diff collection."""
-    _resolve_executable(
-        command="bash",
-        code=ReviewContextErrorCode.BASH_UNAVAILABLE,
-        message="bash is not installed or not on PATH — required for lintro review.",
-    )
 
 
 def _resolve_executable(
@@ -107,62 +114,20 @@ def _run_git(
     return result
 
 
-def _run_bash(*, script: str) -> subprocess.CompletedProcess[str]:
-    """Run a bash script and return captured output.
-
-    Args:
-        script: Shell script executed via ``bash -c`` with quoted internal args.
-
-    Returns:
-        Completed process with stdout/stderr captured as text.
-
-    Raises:
-        ReviewContextError: When bash execution fails or is unavailable.
-    """
-    bash_bin = _resolve_executable(
-        command="bash",
-        code=ReviewContextErrorCode.BASH_UNAVAILABLE,
-        message="bash is not installed or not on PATH — required for lintro review.",
-    )
-    try:
-        result = subprocess.run(  # nosec B603 - argv is [resolved bash, "-c", script]; script body uses shlex-quoted git refs from _git_diff_triple_snapshot, not caller shell input
-            [bash_bin, "-c", script],
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            errors="surrogateescape",
-            check=False,
-            timeout=_GIT_GH_TIMEOUT_SECONDS,
-        )
-    except subprocess.TimeoutExpired as exc:
-        raise ReviewContextError(
-            f"bash snapshot timed out after {_GIT_GH_TIMEOUT_SECONDS}s",
-            code=ReviewContextErrorCode.GIT_COMMAND_FAILED,
-        ) from exc
-    except OSError as exc:
-        raise ReviewContextError(
-            f"Failed to run bash snapshot: {exc}",
-            code=ReviewContextErrorCode.GIT_COMMAND_FAILED,
-        ) from exc
-
-    if result.returncode != 0:
-        stderr = result.stderr.strip() or result.stdout.strip() or "unknown bash error"
-        raise ReviewContextError(
-            f"git diff snapshot failed: {stderr}",
-            code=ReviewContextErrorCode.GIT_COMMAND_FAILED,
-        )
-
-    return result
-
-
 def _git_diff_triple_snapshot(*, diff_args: list[str]) -> tuple[str, str, str]:
-    """Collect unified diff, name-status, and numstat in one subprocess.
+    """Collect unified diff, name-status, and numstat via three git calls.
 
-    The three ``git diff`` variants run inside a single shell script to avoid
-    process setup drift while preserving each view's native git formatting.
-    Output sections are separated by a random nonce delimiter; if diff content
-    ever contained that exact sentinel the snapshot would raise
-    ``GIT_OUTPUT_PARSE_FAILED``.
+    Each ``git diff`` variant runs as its own plain ``subprocess.run`` (via
+    :func:`_run_git`). This replaces the previous ``bash -c`` snapshot, dropping
+    the hard ``bash`` dependency, the nonce-delimiter collision failure mode,
+    and the Windows portability gap in ``lintro review``.
+
+    Each ``git diff`` runs via :func:`_run_git`, which raises
+    ``ReviewContextError`` on failure.
+
+    The three calls run back-to-back without yielding; callers must not
+    mutate the worktree concurrently during collection (same assumption as the
+    prior single-shell snapshot this replaced).
 
     Args:
         diff_args: Arguments passed to ``git diff`` (for example ``HEAD`` or
@@ -170,41 +135,16 @@ def _git_diff_triple_snapshot(*, diff_args: list[str]) -> tuple[str, str, str]:
 
     Returns:
         Tuple of ``(unified_diff, name_status, numstat)`` raw stdout payloads.
-
-    Raises:
-        ReviewContextError: When the snapshot command fails or returns malformed
-            output.
     """
-    ref = " ".join(shlex.quote(part) for part in diff_args)
-    git_bin = shlex.quote(
-        _resolve_executable(
-            command="git",
-            code=ReviewContextErrorCode.GIT_UNAVAILABLE,
-            message="git is not installed or not on PATH — required for lintro review.",
-        ),
-    )
-    delimiter = f"\n---LINTRO_DIFF_SNAP_{secrets.token_hex(16)}---\n"
-    delim_shell = delimiter.replace("'", "'\"'\"'")
-    git_diff_cfg = (
-        "-c diff.mnemonicPrefix=false -c diff.noprefix=false " "-c color.ui=false"
-    )
-    diff_flags = "-M --no-color --no-ext-diff --no-textconv"
-    script = (
-        f"set -euo pipefail; "
-        f"{git_bin} {git_diff_cfg} diff {diff_flags} {ref}; "
-        f"printf '%s' '{delim_shell}'; "
-        f"{git_bin} {git_diff_cfg} diff {diff_flags} --name-status -z {ref}; "
-        f"printf '%s' '{delim_shell}'; "
-        f"{git_bin} {git_diff_cfg} diff {diff_flags} --numstat -z {ref}"
-    )
-    result = _run_bash(script=script)
-    parts = result.stdout.split(delimiter)
-    if len(parts) != 3:
-        raise ReviewContextError(
-            "Failed to parse combined git diff output.",
-            code=ReviewContextErrorCode.GIT_OUTPUT_PARSE_FAILED,
-        )
-    return parts[0], parts[1], parts[2]
+    base_args = [*_DIFF_SNAPSHOT_CONFIG_ARGS, "diff", *_DIFF_SNAPSHOT_FLAGS]
+    unified_diff = _run_git(args=[*base_args, *diff_args]).stdout
+    name_status = _run_git(
+        args=[*base_args, "--name-status", "-z", *diff_args],
+    ).stdout
+    numstat = _run_git(
+        args=[*base_args, "--numstat", "-z", *diff_args],
+    ).stdout
+    return unified_diff, name_status, numstat
 
 
 def _run_gh(*, args: list[str]) -> subprocess.CompletedProcess[str]:

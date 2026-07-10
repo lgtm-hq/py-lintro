@@ -261,12 +261,26 @@ class GitleaksPlugin(BaseToolPlugin):
             issues = parse_gitleaks_output(output=output)
             issues_count = len(issues)
 
-            # Check for parsing failures: if we have output that's not empty/[] but
-            # got no issues, verify the output is valid JSON. This catches cases
-            # where the report file contains invalid data.
-            if issues_count == 0 and output and output.strip() not in ("", "[]"):
+            # Check for parsing failures. Gitleaks is a security scanner, so an
+            # empty or unparseable report must never be reported as a clean pass
+            # (see #1044).
+            stripped = output.strip()
+            if issues_count == 0 and not stripped:
+                logger.error("Gitleaks report file was empty")
+                return ToolResult(
+                    name=self.definition.name,
+                    success=False,
+                    output=(
+                        "Gitleaks report file was empty; "
+                        "treating as a parse failure."
+                    ),
+                    issues_count=0,
+                    parse_failures_count=1,
+                )
+
+            if issues_count == 0 and stripped != "[]":
                 try:
-                    json.loads(output)
+                    data = json.loads(output)
                 except json.JSONDecodeError as e:
                     logger.error(f"Failed to parse gitleaks output: {e}")
                     return ToolResult(
@@ -274,6 +288,22 @@ class GitleaksPlugin(BaseToolPlugin):
                         success=False,
                         output=f"Failed to parse gitleaks output: {e}",
                         issues_count=0,
+                        parse_failures_count=1,
+                    )
+                if not isinstance(data, list):
+                    logger.error(
+                        "Gitleaks output was not a JSON array (got %s).",
+                        type(data).__name__,
+                    )
+                    return ToolResult(
+                        name=self.definition.name,
+                        success=False,
+                        output=(
+                            "Gitleaks output was not a JSON array; "
+                            "treating as a parse failure."
+                        ),
+                        issues_count=0,
+                        parse_failures_count=1,
                     )
 
             return ToolResult(
@@ -282,6 +312,7 @@ class GitleaksPlugin(BaseToolPlugin):
                 output=None,
                 issues_count=issues_count,
                 issues=issues,
+                parse_failures_count=0,
             )
         finally:
             # Clean up the temporary report file

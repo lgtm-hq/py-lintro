@@ -153,13 +153,15 @@ def test_collect_branch_context_uses_merge_base(
             deletions=0,
         ),
     )
-    bash_calls = [
+    diff_calls = [
         call.args[0]
         for call in mock_run.call_args_list
-        if [Path(call.args[0][0]).name, *call.args[0][1:2]] == ["bash", "-c"]
+        if Path(call.args[0][0]).name == "git" and "diff" in call.args[0]
     ]
-    assert_that(bash_calls).is_length(1)
-    assert_that(bash_calls[0][2]).contains("base123...head456")
+    # Three separate git diff variants: unified, name-status, numstat.
+    assert_that(diff_calls).is_length(3)
+    for diff_call in diff_calls:
+        assert_that(diff_call).contains("base123...head456")
 
 
 @patch("lintro.ai.review.context.git_ops.subprocess.run")
@@ -171,7 +173,7 @@ def test_collect_uncommitted_context_merges_staged_and_unstaged(
     _mock_which: MagicMock,
     mock_run: MagicMock,
 ) -> None:
-    """Uncommitted mode uses a single git diff HEAD for index and working tree."""
+    """Uncommitted mode diffs HEAD for the index and working tree."""
     dispatcher = SubprocessMock()
     dispatcher.queue(["git", "rev-parse", "--git-dir"], stdout=".git\n")
     dispatcher.queue(["git", "ls-files", "--others", "--exclude-standard"], stdout="")
@@ -196,13 +198,15 @@ def test_collect_uncommitted_context_merges_staged_and_unstaged(
     assert_that({file.path for file in context.changed_files}).is_equal_to(
         {"unstaged.py", "staged.py"},
     )
-    bash_calls = [
+    diff_calls = [
         call.args[0]
         for call in mock_run.call_args_list
-        if [Path(call.args[0][0]).name, *call.args[0][1:2]] == ["bash", "-c"]
+        if Path(call.args[0][0]).name == "git" and "diff" in call.args[0]
     ]
-    assert_that(bash_calls).is_length(1)
-    assert_that(bash_calls[0][2]).contains("head456")
+    # Three separate git diff variants: unified, name-status, numstat.
+    assert_that(diff_calls).is_length(3)
+    for diff_call in diff_calls:
+        assert_that(diff_call).contains("head456")
 
 
 @patch("lintro.ai.review.context.git_ops.subprocess.run")
@@ -220,7 +224,6 @@ def test_collect_pr_context_uses_gh(
             stdout=(
                 '{"title":"Fix bug","body":"Details","number":42,'
                 '"baseRefOid":"abc123","headRefOid":"deadbeef",'
-                '"baseRepository":{"nameWithOwner":"fork-owner/fork-repo"},'
                 '"headRepository":{"nameWithOwner":"lgtm-hq/py-lintro"}}'
             ),
         ),
@@ -252,6 +255,76 @@ def test_collect_pr_context_uses_gh(
     assert_that(context.base_ref).is_equal_to("abc123")
     assert_that(context.head_ref).is_equal_to("deadbeef")
     assert_that(context.changed_files).extracting("path").contains("a.py")
+
+
+# Known-valid ``gh pr view --json`` fields used by PR-mode metadata collection.
+# ``baseRepository`` is intentionally absent: it is NOT a valid gh field and its
+# presence crashed ``lintro review --pr`` in the live dogfood on #1080. This
+# allowlist locks the request to fields gh actually accepts.
+_VALID_GH_PR_VIEW_FIELDS = frozenset(
+    {
+        "title",
+        "body",
+        "number",
+        "baseRefOid",
+        "headRefOid",
+        "headRepository",
+    },
+)
+
+
+@patch("lintro.ai.review.context.git_ops.subprocess.run")
+@patch(
+    "lintro.ai.review.context.git_ops.shutil.which",
+    side_effect=_which_for_review_tools,
+)
+def test_collect_pr_context_requests_only_valid_gh_pr_view_fields(
+    _mock_which: MagicMock,
+    mock_run: MagicMock,
+) -> None:
+    """The ``gh pr view --json`` argv must never request invalid gh fields.
+
+    Regression guard for the live-dogfood P1: ``baseRepository`` is not a valid
+    ``gh pr view --json`` field, and requesting it crashed every ``--pr`` review
+    with ``Unknown JSON field: "baseRepository"``. Mocked gh calls could not
+    catch this, so the field list itself is asserted against a known-valid
+    allowlist.
+    """
+    mock_run.side_effect = [
+        _completed(
+            stdout=(
+                '{"title":"Fix bug","body":"Details","number":42,'
+                '"baseRefOid":"abc123","headRefOid":"deadbeef",'
+                '"headRepository":{"nameWithOwner":"lgtm-hq/py-lintro"}}'
+            ),
+        ),
+        _completed(
+            stdout=(
+                "diff --git a/a.py b/a.py\n"
+                "--- a/a.py\n"
+                "+++ b/a.py\n"
+                "@@ -1 +1 @@\n"
+                "-old\n"
+                "+new\n"
+            ),
+        ),
+    ]
+
+    collect_review_context(pr_number=42, repo="lgtm-hq/py-lintro")
+
+    view_calls = [
+        call.args[0]
+        for call in mock_run.call_args_list
+        if Path(call.args[0][0]).name == "gh" and "view" in call.args[0]
+    ]
+    assert_that(view_calls).is_length(1)
+    argv = view_calls[0]
+    json_index = argv.index("--json")
+    requested_fields = argv[json_index + 1].split(",")
+
+    assert_that(requested_fields).does_not_contain("baseRepository")
+    for field in requested_fields:
+        assert_that(_VALID_GH_PR_VIEW_FIELDS).contains(field)
 
 
 @patch("lintro.ai.review.context.git_ops.subprocess.run")
@@ -374,24 +447,6 @@ def test_collect_review_context_rejects_repo_without_pr_number() -> None:
     assert_that(exc_info.value.code).is_equal_to(
         ReviewContextErrorCode.INVALID_REVIEW_MODE,
     )
-
-
-@patch("lintro.ai.review.context.git_ops.subprocess.run")
-@patch(
-    "lintro.ai.review.context.git_ops.shutil.which",
-    side_effect=lambda cmd: None if cmd == "bash" else "/usr/bin/git",
-)
-def test_collect_review_context_requires_bash_for_git_modes(
-    _mock_which: MagicMock,
-    mock_run: MagicMock,
-) -> None:
-    """Branch and uncommitted collection require bash for combined diff output."""
-    with pytest.raises(ReviewContextError) as exc_info:
-        collect_review_context(base="main")
-    assert_that(exc_info.value.code).is_equal_to(
-        ReviewContextErrorCode.BASH_UNAVAILABLE,
-    )
-    mock_run.assert_not_called()
 
 
 @patch("lintro.ai.review.context.git_ops.subprocess.run")
@@ -652,7 +707,6 @@ def test_collect_pr_context_accepts_repo_override_when_head_repository_null(
             stdout=(
                 '{"title":"Fix bug","body":"Details","number":42,'
                 '"baseRefOid":"abc123","headRefOid":"deadbeef",'
-                '"baseRepository":{"nameWithOwner":"fork-owner/fork-repo"},'
                 '"headRepository":null}'
             ),
         ),
@@ -741,7 +795,6 @@ def test_collect_pr_context_uses_head_repository_for_workflow_fetch(
             stdout=(
                 '{"title":"Fork PR","body":"","number":9,'
                 '"baseRefOid":"abc123","headRefOid":"forksha",'
-                '"baseRepository":{"nameWithOwner":"lgtm-hq/py-lintro"},'
                 '"headRepository":{"nameWithOwner":"fork-owner/py-lintro"}}'
             ),
         ),
@@ -760,7 +813,7 @@ def test_collect_pr_context_uses_head_repository_for_workflow_fetch(
         _completed(stdout="name: CI\nenv:\n  CI: true\nrun: scripts/deploy.sh\n"),
     ]
 
-    context = collect_review_context(pr_number=9)
+    context = collect_review_context(pr_number=9, repo="lgtm-hq/py-lintro")
 
     metadata = context.pr_metadata
     assert metadata is not None

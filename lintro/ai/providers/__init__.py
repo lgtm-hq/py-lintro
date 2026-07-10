@@ -82,6 +82,14 @@ def get_provider(config: AIConfig) -> BaseAIProvider:
         from lintro.ai.providers.cursor import CursorProvider
 
         provider_cls = CursorProvider
+        return provider_cls(
+            model=config.model,
+            api_key_env=config.api_key_env,
+            max_tokens=config.max_tokens,
+            base_url=config.api_base_url,
+            transport=config.transport or AITransport.API,
+            cursor_trust_workspace=config.cursor_trust_workspace,
+        )
     return provider_cls(
         model=config.model,
         api_key_env=config.api_key_env,

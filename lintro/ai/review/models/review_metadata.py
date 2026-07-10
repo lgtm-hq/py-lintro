@@ -25,6 +25,16 @@ class ReviewMetadata:
         head_ref (str): Head git ref for the diff.
         timestamp (str): ISO 8601 UTC timestamp of the review run.
         strictness (str): Sensitivity preset (focused, balanced, thorough).
+        token_usage_estimated (bool): True when token counts were estimated
+            locally (e.g. CLI transport) rather than reported by the provider.
+            Drives ``~`` / exact labeling in the posted PR comment.
+        partial (bool): True when the review stopped before every chunk was
+            reviewed (e.g. cost cap reached mid-run).
+        chunks_reviewed (int): Number of chunks actually reviewed. Equals
+            ``chunks_total`` for a complete review; smaller when ``partial``.
+        stopped_reason (str): Human-readable reason a partial review stopped
+            (e.g. "cost cap"). Empty for a complete review.
+        duration_seconds (float): Wall-clock duration of the review run.
     """
 
     model: str
@@ -42,3 +52,8 @@ class ReviewMetadata:
     head_ref: str = ""
     timestamp: str = ""
     strictness: str = "balanced"
+    token_usage_estimated: bool = False
+    partial: bool = False
+    chunks_reviewed: int = 0
+    stopped_reason: str = ""
+    duration_seconds: float = 0.0

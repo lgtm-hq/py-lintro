@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "lintro"
-version = "0.64.5"
+version = "0.71.0"
 description = "A unified CLI tool for code formatting, linting, and quality assurance"
 keywords = [
   "linting",
@@ -251,6 +251,35 @@ enabled = true
 tools = ["black"]
 enforce_failure = true
 
+# Warn-level module-size gate (issue #1052). Guards against the recurring
+# oversized-module pattern. Non-blocking today: existing violators are
+# baselined so the gate is green on merge. Ratchet plan: refactor the baselined
+# modules below the threshold, remove them from `baseline`, then lower
+# `threshold` in steps (800 -> 700 -> 600). See lintro/utils/module_size.py.
+[tool.lintro.module_size]
+enabled = true
+threshold = 800
+baseline = [
+  "lintro/ai/review/orchestrator.py",
+  "lintro/utils/tool_executor.py",
+  "lintro/ai/review/chunker/workflow_scripts.py",
+  "lintro/cli_utils/commands/doctor.py",
+  "lintro/tools/definitions/tsc.py",
+  "lintro/ai/review/checklist_builtin.py",
+  "lintro/tools/definitions/_ts_checker_base.py",
+]
+exclude = [
+  "test_samples/",
+  "node_modules/",
+  ".venv/",
+  "venv/",
+  "dist/",
+  "build/",
+  "__pycache__/",
+  ".lintro/",
+  "tests/",
+]
+
 [tool.lintro.ruff]
 
 [tool.mypy]
@@ -303,8 +332,24 @@ check_untyped_defs = true
 constraint-dependencies = [
   # Security fix: TOCTOU vulnerability in directory creation (dependabot alert #4)
   "virtualenv>=20.36.1",
-  # Security fix: accepts unknown crit header extensions, RFC 7515 violation (dependabot alert #26)
-  "pyjwt>=2.12.1",
+  # High-severity transitive remediation (issue #1118). Every advisory below
+  # flows through semgrep (`tools` extra) / twine (dev group) -> mcp; none are
+  # core runtime deps, but we force the patched versions so no shipped extra
+  # carries a known high-severity vulnerability.
+  # pyjwt: crit-header handling / RFC 7515 violation
+  # (GHSA-xgmm-8j9v-c9wx, supersedes prior >=2.12.1 for GHSA-... alert #26)
+  "pyjwt>=2.13.0",
+  # starlette: multipart/form parsing DoS
+  # (GHSA-82w8-qh3p-5jfq, GHSA-wqp7-x3pw-xc5r)
+  "starlette>=1.3.1",
+  # cryptography: OpenSSL-backed high-severity advisory (GHSA-537c-gmf6-5ccf)
+  "cryptography>=48.0.1",
+  # python-multipart: parser resource-exhaustion DoS
+  # (GHSA-5rvq-cxj2-64vf, GHSA-pp6c-gr5w-3c5g)
+  "python-multipart>=0.0.30",
+  # urllib3: redirect / pool-manager high-severity advisories
+  # (GHSA-qccp-gfcp-xxvc, GHSA-mf9v-mfxr-j63j)
+  "urllib3>=2.7.0",
 ]
 override-dependencies = [
   # semgrep 1.151.0 pins rich~=13.5.2 but lintro requires rich>=14.2.0.

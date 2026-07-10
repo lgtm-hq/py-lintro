@@ -43,6 +43,7 @@ class FakeIssue:
     code: str = "E001"
     message: str = "Test error"
     level: str = "error"
+    fixable: bool = False
 
 
 @pytest.fixture

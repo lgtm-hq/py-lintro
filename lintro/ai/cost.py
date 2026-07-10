@@ -37,6 +37,41 @@ def estimate_cost(
     return input_cost + output_cost
 
 
+def estimate_cost_with_floor(
+    model: str,
+    input_tokens: int,
+    output_tokens: int,
+) -> float:
+    """Estimate cost, using default pricing when a model is unpriced.
+
+    Some providers (notably Cursor via its subscription ``agent`` CLI) do
+    not expose per-token pricing, so their registry entries carry zero
+    rates. Pricing such calls at zero would let them accrue nothing against
+    :class:`~lintro.ai.budget.CostBudget`, turning ``ai.max_cost_usd`` into
+    a no-op and allowing deep reviews to run unbounded API calls. To keep
+    the budget a meaningful safety cap, fall back to :data:`DEFAULT_PRICING`
+    whenever the model is unknown or priced at zero.
+
+    Args:
+        model: Model identifier (e.g., "auto", "composer-2.5").
+        input_tokens: Number of input tokens.
+        output_tokens: Number of output tokens.
+
+    Returns:
+        float: Estimated cost in USD, always using a non-zero rate.
+    """
+    pricing = PROVIDERS.model_pricing.get(model)
+    if pricing is None or (
+        pricing.input_per_million == 0.0 or pricing.output_per_million == 0.0
+    ):
+        pricing = DEFAULT_PRICING
+
+    input_cost = (input_tokens / 1_000_000) * pricing.input_per_million
+    output_cost = (output_tokens / 1_000_000) * pricing.output_per_million
+
+    return input_cost + output_cost
+
+
 def format_cost(cost: float) -> str:
     """Format a cost value for display.
 

@@ -150,7 +150,7 @@ def test_fix_recomputes_totals_after_ai_changes(monkeypatch, fake_logger):
     monkeypatch.setattr(
         te,
         "configure_tool_for_execution",
-        lambda **kwargs: None,
+        lambda *, tool, **kwargs: tool,
     )
     monkeypatch.setattr(
         te,
