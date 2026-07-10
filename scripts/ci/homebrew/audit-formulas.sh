@@ -75,6 +75,14 @@ python3 "$SCRIPT_DIR/render_formula.py" \
 	--pydantic-resource "$WORK_DIR/pydantic.txt" \
 	--output "$FULL_FORMULA"
 
+# File name lintro-full.rb requires class LintroFull (same rename as
+# generate-pypi-formula.sh when targeting the full formula).
+sed -i.bak \
+	-e 's/^class Lintro </class LintroFull </' \
+	-e 's/Unified CLI tool for code formatting, linting, and quality assurance/Unified CLI for code quality (all tools included)/' \
+	"$FULL_FORMULA"
+rm -f "${FULL_FORMULA}.bak"
+
 log_info "Generating binary formula (lintro.rb) with placeholder values"
 BIN_FORMULA="$WORK_DIR/lintro.rb"
 "$SCRIPT_DIR/generate-binary-formula.sh" \
@@ -89,6 +97,12 @@ mkdir -p "${TAP_PATH}/Formula"
 cp "$FULL_FORMULA" "${TAP_PATH}/Formula/lintro-full.rb"
 cp "$BIN_FORMULA" "${TAP_PATH}/Formula/lintro.rb"
 trap 'rm -rf "$WORK_DIR" "$TAP_PATH"' EXIT
+
+# Homebrew refuses to load formulas from unsigned/ephemeral local taps until
+# they are explicitly trusted for this machine/CI runner.
+if brew trust --help &>/dev/null; then
+	brew trust "${TAP_USER}/${TAP_REPO}" || true
+fi
 
 status=0
 for name in lintro-full lintro; do
