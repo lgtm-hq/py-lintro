@@ -97,7 +97,8 @@ Some tools require separate installation. Their minimum versions are also manage
 - `shellcheck` - Shell script analyzer (`brew install shellcheck` or GitHub releases)
 - `shfmt` - Shell script formatter (`brew install shfmt` or GitHub releases)
 - `sqlfluff` - SQL linter and formatter (`pip install sqlfluff`)
-- `swiftlint` - Swift linter (`brew install swiftlint`; Linux uses the static release binary)
+- `swiftlint` - Swift linter (`brew install swiftlint`; Linux uses the static release
+  binary)
 - `taplo` - TOML linter and formatter (`brew install taplo` or GitHub releases)
 - `vale` - Prose/documentation linter (`brew install vale` or GitHub releases); requires
   a `.vale.ini`, otherwise lintro skips it as a non-error

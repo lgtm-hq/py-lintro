@@ -205,7 +205,8 @@ def get_install_hints() -> dict[str, str]:
         ),
         "swiftlint": (
             "Install via: brew install swiftlint (macOS) or download the static "
-            "Linux binary from https://github.com/realm/SwiftLint/releases (v{version}+)"
+            "Linux binary from "
+            "https://github.com/realm/SwiftLint/releases (v{version}+)"
         ),
         "taplo": (
             "Install via: cargo install taplo-cli "

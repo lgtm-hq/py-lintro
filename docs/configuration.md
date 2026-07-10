@@ -1365,9 +1365,9 @@ lintro check --tools sqlfluff --tool-options sqlfluff:templater=jinja
 
 #### SwiftLint Configuration
 
-SwiftLint runs with its built-in defaults and honors a project-level
-`.swiftlint.yml` (or `.swiftlint.yaml`) discovered from the working directory.
-lintro does not impose or override any rule set.
+SwiftLint runs with its built-in defaults and honors a project-level `.swiftlint.yml`
+(or `.swiftlint.yaml`) discovered from the working directory. lintro does not impose or
+override any rule set.
 
 **File:** `.swiftlint.yml`
 
@@ -1400,8 +1400,8 @@ identifier_name:
 | --------- | ---- | ---------------------------------- |
 | `timeout` | int  | Per-file command timeout (seconds) |
 
-> All rule configuration is expressed through the native `.swiftlint.yml` file
-> rather than lintro `--tool-options`.
+> All rule configuration is expressed through the native `.swiftlint.yml` file rather
+> than lintro `--tool-options`.
 
 **Usage Examples:**
 
