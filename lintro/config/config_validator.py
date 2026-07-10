@@ -13,9 +13,9 @@ directly.
 
 from __future__ import annotations
 
+import tomllib
 from dataclasses import dataclass, field
 from difflib import get_close_matches
-import tomllib
 from pathlib import Path
 from typing import Any
 
@@ -297,10 +297,7 @@ def validate_config_file(path: Path | str | None = None) -> ValidationResult:
     is_pyproject = config_path.name == "pyproject.toml"
     try:
         raw = config_path.read_text(encoding="utf-8")
-        if is_pyproject:
-            parsed = tomllib.loads(raw)
-        else:
-            parsed = yaml.safe_load(raw)
+        parsed = tomllib.loads(raw) if is_pyproject else yaml.safe_load(raw)
     except (OSError, yaml.YAMLError, tomllib.TOMLDecodeError) as exc:
         result.errors.append(
             ValidationMessage(message=f"Could not parse config: {exc}"),
@@ -351,10 +348,9 @@ def validate_config_file(path: Path | str | None = None) -> ValidationResult:
         _check_tool_names(tools, result.warnings)
 
     # Run the real loader to catch typed/value errors (max_fix_retries,
-    # auto_install, review schema, etc.). pyproject configs are validated via
-    # the standard search path rather than an explicit file path.
+    # auto_install, review schema, etc.) against the requested file.
     try:
-        load_config(config_path=None if is_pyproject else config_path)
+        load_config(config_path=config_path)
     except ValueError as exc:
         result.errors.append(ValidationMessage(message=str(exc)))
 
