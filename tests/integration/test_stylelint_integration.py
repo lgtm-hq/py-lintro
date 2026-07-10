@@ -15,6 +15,7 @@ from pathlib import Path
 import pytest
 from assertpy import assert_that
 
+from lintro.parsers.stylelint.stylelint_issue import StylelintIssue
 from lintro.tools.definitions.stylelint import StylelintPlugin
 
 # Shared fixtures: single source of truth for stylelint sample content.
@@ -76,7 +77,11 @@ def test_check_reports_css_violations(styled_project: Path) -> None:
 
     assert_that(result.success).is_false()
     assert_that(result.issues_count).is_greater_than(0)
-    codes = {issue.code for issue in (result.issues or [])}
+    codes = {
+        issue.code
+        for issue in (result.issues or [])
+        if isinstance(issue, StylelintIssue)
+    }
     assert_that(codes).contains("color-hex-length")
 
 
@@ -89,7 +94,11 @@ def test_check_reports_scss_violations(styled_project: Path) -> None:
     result = plugin.check([str(target)], {})
 
     assert_that(result.success).is_false()
-    codes = {issue.code for issue in (result.issues or [])}
+    codes = {
+        issue.code
+        for issue in (result.issues or [])
+        if isinstance(issue, StylelintIssue)
+    }
     assert_that(codes).contains("color-hex-length")
 
 
@@ -116,9 +125,9 @@ def test_fix_applies_and_preserves_invariant(styled_project: Path) -> None:
     # color-hex-length is auto-fixable; block-no-empty is not.
     assert_that(result.initial_issues_count).is_greater_than(0)
     assert_that(result.fixed_issues_count).is_greater_than(0)
-    assert_that(
-        result.fixed_issues_count + result.remaining_issues_count,
-    ).is_equal_to(result.initial_issues_count)
+    fixed = result.fixed_issues_count or 0
+    remaining = result.remaining_issues_count or 0
+    assert_that(fixed + remaining).is_equal_to(result.initial_issues_count)
     assert_that(target.read_text()).contains("#FFF")
     assert_that(target.read_text()).does_not_contain("#FFFFFF")
 

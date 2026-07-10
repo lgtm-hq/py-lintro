@@ -1072,7 +1072,8 @@ Stylelint is a mighty, configurable linter and fixer for CSS, SCSS, Sass, and Le
 stylesheets, with 100+ built-in rules and `--fix` support.
 
 > Stylelint requires a configuration to run. When no config is resolvable, Lintro skips
-> stylelint as a non-error (rather than surfacing stylelint's hard `ConfigurationError`).
+> stylelint as a non-error (rather than surfacing stylelint's hard
+> `ConfigurationError`).
 
 **Native Config Detection:**
 
@@ -1111,11 +1112,11 @@ bun add -d stylelint stylelint-config-standard
 
 **Available Options via `--tool-options`:**
 
-| Option               | Type    | Description                                        |
-| -------------------- | ------- | -------------------------------------------------- |
-| `config`             | string  | Path to a stylelint config file (`--config`)       |
-| `verbose_fix_output` | boolean | Include raw stylelint output in `fix()`            |
-| `timeout`            | integer | Execution timeout in seconds (default: 30)         |
+| Option               | Type    | Description                                  |
+| -------------------- | ------- | -------------------------------------------- |
+| `config`             | string  | Path to a stylelint config file (`--config`) |
+| `verbose_fix_output` | boolean | Include raw stylelint output in `fix()`      |
+| `timeout`            | integer | Execution timeout in seconds (default: 30)   |
 
 **Usage Examples:**
 

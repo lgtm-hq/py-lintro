@@ -56,9 +56,9 @@ def test_fix_partial_preserves_invariant(
     assert_that(result.initial_issues_count).is_equal_to(2)
     assert_that(result.fixed_issues_count).is_equal_to(1)
     assert_that(result.remaining_issues_count).is_equal_to(1)
-    assert_that(
-        result.fixed_issues_count + result.remaining_issues_count,
-    ).is_equal_to(result.initial_issues_count)
+    fixed = result.fixed_issues_count or 0
+    remaining = result.remaining_issues_count or 0
+    assert_that(fixed + remaining).is_equal_to(result.initial_issues_count)
     assert_that(result.success).is_false()
     assert_that(result.output).contains("Fixed 1")
 
