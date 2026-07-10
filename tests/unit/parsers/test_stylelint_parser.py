@@ -206,3 +206,16 @@ def test_bracketed_log_line_before_json_is_tolerated() -> None:
     issues = parse_stylelint_output(output=output)
     assert_that(issues).is_length(1)
     assert_that(issues[0].code).is_equal_to("block-no-empty")
+
+
+def test_unrelated_json_array_before_payload_is_skipped() -> None:
+    """A valid but non-Stylelint JSON array before the payload is ignored."""
+    output = (
+        '["warning"]\n'
+        '[{"type":"warning"}]\n'
+        '[{"source":"/tmp/a.css","warnings":[{"line":1,"column":1,'
+        '"rule":"block-no-empty","severity":"error","text":"empty"}]}]'
+    )
+    issues = parse_stylelint_output(output=output)
+    assert_that(issues).is_length(1)
+    assert_that(issues[0].code).is_equal_to("block-no-empty")

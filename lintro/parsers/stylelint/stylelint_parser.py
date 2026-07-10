@@ -16,31 +16,51 @@ from loguru import logger
 from lintro.parsers.stylelint.stylelint_issue import StylelintIssue
 
 
+def _looks_like_stylelint_payload(data: Any) -> bool:
+    """Return True when ``data`` matches Stylelint's per-file result array.
+
+    Args:
+        data: A decoded JSON value.
+
+    Returns:
+        True if ``data`` is a list of objects that look like Stylelint file
+        results (``source`` / ``warnings`` / ``parseErrors`` keys).
+    """
+    if not isinstance(data, list) or not data:
+        return False
+    stylelint_keys = {"source", "warnings", "parseErrors", "invalidOptionWarnings"}
+    for item in data:
+        if not isinstance(item, dict):
+            return False
+        if stylelint_keys.intersection(item.keys()):
+            return True
+    return False
+
+
 def _extract_json_array(output: str) -> str | None:
-    """Extract the JSON array substring from mixed tool output.
+    """Extract the Stylelint JSON array substring from mixed tool output.
 
     Stylelint writes its JSON payload to stderr, which lintro combines with
-    stdout. Extract the outermost ``[...]`` block so surrounding log lines do
-    not break parsing.
+    stdout. Skip non-Stylelint JSON arrays (e.g. ``["warning"]`` noise) and
+    bracketed log lines so the real payload is selected.
 
     Args:
         output: The combined stdout/stderr from stylelint.
 
     Returns:
-        The JSON array substring, or None if no array delimiters are found.
+        The JSON array substring, or None if no Stylelint array is found.
     """
-    # Try each "[" as a potential array start and return the first slice
-    # that decodes as valid JSON: a bracketed log line (e.g. "[Warning] ...")
-    # before the payload must not defeat extraction.
     decoder = json.JSONDecoder()
     idx = output.find("[")
     while idx != -1:
         try:
-            _, end = decoder.raw_decode(output, idx)
+            data, end = decoder.raw_decode(output, idx)
         except (json.JSONDecodeError, ValueError):
             idx = output.find("[", idx + 1)
             continue
-        return output[idx:end]
+        if _looks_like_stylelint_payload(data):
+            return output[idx:end]
+        idx = output.find("[", idx + 1)
     return None
 
 
