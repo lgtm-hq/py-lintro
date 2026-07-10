@@ -8,17 +8,16 @@ PHP toolchain.
 
 from __future__ import annotations
 
-from typing import cast
-
 import shutil
 import subprocess
 from pathlib import Path
+from typing import cast
 
 import pytest
 from assertpy import assert_that
 
-from lintro.parsers.phpstan.phpstan_issue import PhpstanIssue
 from lintro.models.core.tool_result import ToolResult
+from lintro.parsers.phpstan.phpstan_issue import PhpstanIssue
 from lintro.plugins import ToolRegistry
 
 VIOLATIONS_PHP = (
