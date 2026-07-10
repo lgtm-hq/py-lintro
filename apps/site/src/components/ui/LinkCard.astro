@@ -1,0 +1,15 @@
+---
+interface Props {
+  href: string;
+  title: string;
+  subtitle?: string;
+  class?: string;
+}
+
+const { href, title, subtitle, class: className } = Astro.props;
+---
+
+<a href={href} class:list={["link-card", className]}>
+  <strong>{title}</strong>
+  {subtitle && <span>{subtitle}</span>}
+</a>

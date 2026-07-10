@@ -165,6 +165,24 @@ def test_value_error_classifies_as_invalid_response() -> None:
     assert_that(kind).is_equal_to(ReviewErrorKind.INVALID_RESPONSE)
 
 
+def test_value_error_with_timeout_text_stays_invalid_response() -> None:
+    """A ValueError whose message says "timed out" is still INVALID_RESPONSE."""
+    error = ValueError("parsing timed out on malformed model response")
+    kind = classify_provider_error(provider="anthropic", error=error)
+
+    assert_that(kind).is_equal_to(ReviewErrorKind.INVALID_RESPONSE)
+    assert_that(kind).is_not_equal_to(ReviewErrorKind.TIMEOUT)
+
+
+def test_value_error_with_429_text_stays_invalid_response() -> None:
+    """A ValueError whose message contains "429" is still INVALID_RESPONSE."""
+    error = ValueError("unexpected token near status 429 in model output")
+    kind = classify_provider_error(provider="openai", error=error)
+
+    assert_that(kind).is_equal_to(ReviewErrorKind.INVALID_RESPONSE)
+    assert_that(kind).is_not_equal_to(ReviewErrorKind.RATE_LIMITED)
+
+
 def test_invalid_response_via_wrapped_value_error() -> None:
     """A ValueError chained under the wrapper still resolves to INVALID_RESPONSE."""
     cause = ValueError("malformed model output")
