@@ -91,6 +91,11 @@ class PyprojectParser:
         if isinstance(main, dict):
             tables.append(main)
 
+        # Legacy Poetry table still common in existing projects.
+        legacy_dev = poetry.get("dev-dependencies", {})
+        if isinstance(legacy_dev, dict):
+            tables.append(legacy_dev)
+
         group = poetry.get("group", {})
         if isinstance(group, dict):
             for spec in group.values():

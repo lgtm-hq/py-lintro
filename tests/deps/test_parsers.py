@@ -178,3 +178,64 @@ def test_parse_file_dispatch_requirements(tmp_path: Path) -> None:
     deps = parse_file(manifest)
     assert_that(deps).is_length(1)
     assert_that(deps[0].name).is_equal_to("pytest")
+
+
+def test_pyproject_parser_poetry_legacy_dev_dependencies(tmp_path: Path) -> None:
+    """Legacy ``[tool.poetry.dev-dependencies]`` tables are parsed.
+
+    Args:
+        tmp_path: Temporary directory fixture.
+    """
+    manifest = tmp_path / "pyproject.toml"
+    manifest.write_text(
+        "\n".join(
+            [
+                "[tool.poetry.dependencies]",
+                'python = "^3.11"',
+                'requests = "^2.28.0"',
+                "[tool.poetry.dev-dependencies]",
+                'pytest = "*"',
+            ],
+        ),
+    )
+    deps = PyprojectParser().parse(manifest)
+    names = {d.name for d in deps}
+    assert_that(names).contains("requests", "pytest")
+
+
+def test_cargo_parser_target_dependencies(tmp_path: Path) -> None:
+    """Platform-specific ``[target.*.dependencies]`` tables are parsed.
+
+    Args:
+        tmp_path: Temporary directory fixture.
+    """
+    manifest = tmp_path / "Cargo.toml"
+    manifest.write_text(
+        "\n".join(
+            [
+                "[dependencies]",
+                'serde = "1.0"',
+                "[target.'cfg(windows)'.dependencies]",
+                'winapi = "0.3"',
+            ],
+        ),
+    )
+    deps = CargoParser().parse(manifest)
+    names = {d.name for d in deps}
+    assert_that(names).contains("serde", "winapi")
+
+
+def test_package_json_parser_keeps_git_prerelease(tmp_path: Path) -> None:
+    """Semver prereleases containing ``git`` are not skipped as git URLs.
+
+    Args:
+        tmp_path: Temporary directory fixture.
+    """
+    manifest = tmp_path / "package.json"
+    manifest.write_text(
+        '{"dependencies": {"demo": "1.0.0-git.1", "other": "git+https://example.com/x.git"}}',
+    )
+    deps = PackageJsonParser().parse(manifest)
+    names = {d.name for d in deps}
+    assert_that(names).contains("demo")
+    assert_that(names).does_not_contain("other")

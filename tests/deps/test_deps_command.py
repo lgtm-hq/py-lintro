@@ -117,8 +117,11 @@ def test_deps_strict_policy_flags_range(
     assert_that(result.exit_code).is_equal_to(1)
 
 
-def test_deps_no_manifest_found(cli_runner: CliRunner, tmp_path: Path) -> None:
-    """Missing manifests report cleanly and exit 0.
+def test_deps_explicit_missing_file_fails(
+    cli_runner: CliRunner,
+    tmp_path: Path,
+) -> None:
+    """Explicit ``--file`` paths that do not exist exit non-zero.
 
     Args:
         cli_runner: The Click runner.
@@ -126,5 +129,23 @@ def test_deps_no_manifest_found(cli_runner: CliRunner, tmp_path: Path) -> None:
     """
     missing = tmp_path / "nope.txt"
     result = cli_runner.invoke(cli, ["deps", "--file", str(missing)])
+    assert_that(result.exit_code).is_equal_to(1)
+    assert_that(result.output).contains("not found")
+
+
+def test_deps_no_manifest_found_on_discovery(
+    cli_runner: CliRunner,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Auto-discovery with no manifests exits 0.
+
+    Args:
+        cli_runner: The Click runner.
+        tmp_path: Temporary directory.
+        monkeypatch: Pytest monkeypatch fixture.
+    """
+    monkeypatch.chdir(tmp_path)
+    result = cli_runner.invoke(cli, ["deps"])
     assert_that(result.exit_code).is_equal_to(0)
     assert_that(result.output).contains("No dependency manifests found")
