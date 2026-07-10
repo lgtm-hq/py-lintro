@@ -165,10 +165,11 @@ ai:
 
 Every field below maps 1:1 to `AIConfig` in `lintro/ai/config.py`, which is the source
 of truth. Unknown keys under `ai:` are ignored with a warning, so a typo never silently
-changes behavior. All fields are optional. When `enabled: true` and `transport` is
-omitted, provider creation falls back to API transport (the same default used by
-`lintro ai` diagnostics). Set `transport` explicitly if you want to fail fast on a
-misconfigured CLI-only setup.
+changes behavior. All fields are optional. When `enabled: true` and `transport` is omitted, Anthropic and OpenAI
+check/fix runs fall back to API transport during provider creation. Diagnostics
+still report a missing `ai.transport` as incompatible, and `provider: cursor`
+resolves a missing transport to CLI (not API). Set `transport` explicitly when
+you need a deterministic transport choice.
 
 The block below shows every field with its type, default, and accepted range. Fields are
 grouped by concern (provider, budget, safety/filtering, output, cache) for readability
@@ -185,10 +186,11 @@ ai:
   # (default: anthropic)
   provider: anthropic
 
-  # How to invoke the provider. When omitted with enabled: true, check/fix
-  # flows fall back to API transport during provider creation.
+  # How to invoke the provider. When omitted with enabled: true,
+  # Anthropic/OpenAI check/fix fall back to API; cursor defaults to CLI.
+  # Diagnostics treat a missing transport as incompatible.
   # "api" uses the provider SDK; "cli" shells out to a local binary
-  # (e.g. the Cursor agent). (one of: api | cli, default: api when enabled)
+  # (e.g. the Cursor agent). (one of: api | cli)
   transport: api
 
   # Model override (uses the provider default if omitted).
