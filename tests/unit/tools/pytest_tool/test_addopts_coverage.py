@@ -174,3 +174,33 @@ def test_banner_reports_disabled_without_coverage_config(
 
     banner = capsys.readouterr().out
     assert_that(banner).contains("Coverage: disabled")
+
+
+def test_report_only_cov_flags_do_not_enable_coverage(tmp_path: Path) -> None:
+    """Report/config-only --cov* flags do not count as enabling coverage.
+
+    Args:
+        tmp_path: Temporary directory provided by pytest.
+    """
+    (tmp_path / "pytest.ini").write_text(
+        "[pytest]\naddopts = --cov-report=xml --cov-config=.coveragerc --no-cov-on-fail\n",
+        encoding="utf-8",
+    )
+    assert_that(config_addopts_enable_coverage(tmp_path)).is_false()
+
+
+def test_detects_parent_pytest_ini_from_subdirectory(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Parent pytest.ini coverage is detected when run from a subdirectory.
+
+    Args:
+        tmp_path: Temporary directory provided by pytest.
+        monkeypatch: Pytest monkeypatch fixture used to switch the cwd.
+    """
+    (tmp_path / "pytest.ini").write_text(_PYTEST_INI_WITH_COV, encoding="utf-8")
+    subdir = tmp_path / "pkg" / "nested"
+    subdir.mkdir(parents=True)
+    monkeypatch.chdir(subdir)
+    assert_that(config_addopts_enable_coverage()).is_true()

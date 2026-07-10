@@ -14,12 +14,23 @@ import configparser
 import tomllib
 from pathlib import Path
 
-# Coverage marker recognised in pytest addopts. ``--cov`` covers ``--cov``,
-# ``--cov=pkg``, ``--cov-report=...`` and every other pytest-cov flag.
-_COV_MARKER: str = "--cov"
-
 # Config files scanned, in pytest's own precedence order.
 _INI_FILES: tuple[str, ...] = ("pytest.ini", "tox.ini", "setup.cfg")
+
+
+def _token_enables_coverage(token: str) -> bool:
+    """Return whether a single addopts token selects a coverage source.
+
+    Report/config-only flags such as ``--cov-report`` / ``--cov-config`` /
+    ``--no-cov-on-fail`` do not enable coverage by themselves.
+
+    Args:
+        token: One whitespace-delimited addopts token.
+
+    Returns:
+        bool: True if the token is ``--cov`` or ``--cov=<path>``.
+    """
+    return token == "--cov" or token.startswith("--cov=")
 
 
 def _addopts_has_coverage(addopts: str | list[str] | None) -> bool:
@@ -29,13 +40,16 @@ def _addopts_has_coverage(addopts: str | list[str] | None) -> bool:
         addopts: Raw ``addopts`` value (string or list of tokens) or None.
 
     Returns:
-        bool: True if a ``--cov`` flag is present, False otherwise.
+        bool: True if a coverage-enabling ``--cov`` / ``--cov=`` flag is present.
     """
     if not addopts:
         return False
+    tokens: list[str]
     if isinstance(addopts, list):
-        return any(_COV_MARKER in str(token) for token in addopts)
-    return _COV_MARKER in str(addopts)
+        tokens = [str(token) for token in addopts]
+    else:
+        tokens = str(addopts).split()
+    return any(_token_enables_coverage(token) for token in tokens)
 
 
 def _ini_addopts_has_coverage(path: Path, section: str) -> bool:
@@ -76,12 +90,39 @@ def _pyproject_addopts_has_coverage(path: Path) -> bool:
     return _addopts_has_coverage(ini_options.get("addopts"))
 
 
+def _directory_enables_coverage(base: Path) -> bool:
+    """Return whether pytest config in ``base`` enables coverage.
+
+    Args:
+        base: Directory that may contain pytest configuration files.
+
+    Returns:
+        bool: True if a config file in ``base`` enables coverage via addopts.
+    """
+    section_by_file: dict[str, str] = {
+        "pytest.ini": "pytest",
+        "tox.ini": "pytest",
+        "setup.cfg": "tool:pytest",
+    }
+    for filename in _INI_FILES:
+        path = base / filename
+        if path.is_file() and _ini_addopts_has_coverage(
+            path=path,
+            section=section_by_file[filename],
+        ):
+            return True
+
+    pyproject = base / "pyproject.toml"
+    return pyproject.is_file() and _pyproject_addopts_has_coverage(path=pyproject)
+
+
 def config_addopts_enable_coverage(root: str | Path | None = None) -> bool:
     """Detect whether pytest configuration ``addopts`` enable coverage.
 
-    Scans the project's pytest configuration files for ``--cov`` flags declared
-    in ``addopts``. This lets lintro report coverage accurately even when the
-    flags come from configuration rather than lintro's own options.
+    Scans the project's pytest configuration files for coverage-enabling
+    ``--cov`` / ``--cov=`` flags declared in ``addopts``. Walks parent
+    directories the same way pytest does when discovering config, so a
+    subdirectory run still sees a parent ``pytest.ini`` / ``pyproject.toml``.
 
     Args:
         root: Directory to search for configuration files. Defaults to the
@@ -91,20 +132,9 @@ def config_addopts_enable_coverage(root: str | Path | None = None) -> bool:
         bool: True if any pytest configuration enables coverage via ``addopts``.
     """
     base = Path(root) if root is not None else Path.cwd()
+    base = base.resolve()
 
-    # INI/CFG files use different section names for pytest options.
-    section_by_file: dict[str, str] = {
-        "pytest.ini": "pytest",
-        "tox.ini": "pytest",
-        "setup.cfg": "tool:pytest",
-    }
-    for filename in _INI_FILES:
-        path = base / filename
-        if path.is_file() and _ini_addopts_has_coverage(
-            path,
-            section_by_file[filename],
-        ):
+    for directory in (base, *base.parents):
+        if _directory_enables_coverage(base=directory):
             return True
-
-    pyproject = base / "pyproject.toml"
-    return pyproject.is_file() and _pyproject_addopts_has_coverage(pyproject)
+    return False
