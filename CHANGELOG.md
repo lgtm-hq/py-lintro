@@ -21,6 +21,13 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.71.3] - 2026-07-10
+
+### Fixed
+
+- **release**: format generated CHANGELOG and remove its .lintro-ignore entry (#1127)
+  (f79349b)
+
 ## [0.71.2] - 2026-07-10
 
 ### Fixed
