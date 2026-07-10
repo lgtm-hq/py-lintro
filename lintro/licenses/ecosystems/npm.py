@@ -71,11 +71,17 @@ class NpmLicenseAdapter:
             return []
 
         packages: list[PackageLicense] = []
+        prod_names = set(root_data.get("dependencies", {}).keys())
         dev_names = set(root_data.get("devDependencies", {}).keys())
 
         node_modules = path.parent / "node_modules"
         packages.extend(
-            self._collect_node_modules(node_modules, dev_names, str(path)),
+            self._collect_node_modules(
+                node_modules,
+                prod_names=prod_names,
+                dev_names=dev_names,
+                source=str(path),
+            ),
         )
 
         return sorted(packages, key=lambda p: p.name.lower())
@@ -83,16 +89,20 @@ class NpmLicenseAdapter:
     def _collect_node_modules(
         self,
         node_modules: Path,
+        *,
+        prod_names: set[str],
         dev_names: set[str],
         source: str,
     ) -> list[PackageLicense]:
         """Collect licenses from installed packages under ``node_modules``.
 
-        Handles scoped packages (``@scope/name``) one level deep.
+        Walks nested ``node_modules`` trees (including scoped packages) so
+        transitive installs are not skipped.
 
         Args:
             node_modules: Path to the ``node_modules`` directory.
-            dev_names: Names declared as dev dependencies in the root manifest.
+            prod_names: Names declared in root ``dependencies``.
+            dev_names: Names declared as root ``devDependencies``.
             source: Source file label recorded on each package.
 
         Returns:
@@ -102,22 +112,25 @@ class NpmLicenseAdapter:
             return []
 
         results: list[PackageLicense] = []
-        manifests: list[Path] = []
-        for child in sorted(node_modules.iterdir()):
-            if child.name.startswith("@") and child.is_dir():
-                manifests.extend(sorted(child.glob("*/package.json")))
-            elif (child / "package.json").is_file():
-                manifests.append(child / "package.json")
-
-        for manifest in manifests:
+        seen: set[str] = set()
+        for manifest in sorted(node_modules.rglob("package.json")):
+            # Skip the root project's own package.json if somehow present.
+            if manifest.parent == node_modules.parent:
+                continue
+            # Only treat package.json files that live inside a node_modules tree.
+            if "node_modules" not in manifest.parts:
+                continue
             try:
                 data = json.loads(manifest.read_text())
             except (OSError, json.JSONDecodeError):
                 continue
             name = data.get("name")
-            if not name:
+            if not name or name in seen:
                 continue
+            seen.add(name)
             raw = _extract_license_field(data)
+            # Production wins when a package appears in both maps.
+            is_dev = name in dev_names and name not in prod_names
             results.append(
                 PackageLicense(
                     name=name,
@@ -126,7 +139,7 @@ class NpmLicenseAdapter:
                     license_name=raw,
                     source_file=source,
                     ecosystem=self.ecosystem,
-                    is_dev=name in dev_names,
+                    is_dev=is_dev,
                 ),
             )
         return results

@@ -164,6 +164,13 @@ _SPDX_BY_LOWER: dict[str, str] = {spdx.lower(): spdx for spdx in _KNOWN_SPDX}
 
 # Splits an SPDX expression such as "MIT OR Apache-2.0" into operands.
 _EXPRESSION_SPLIT = re.compile(r"\s+(?:or|and)\s+", re.IGNORECASE)
+_HAS_AND = re.compile(r"\sand\s", re.IGNORECASE)
+_HAS_OR = re.compile(r"\sor\s", re.IGNORECASE)
+
+# Prefer these when collapsing AND expressions so denials are not dropped.
+_RESTRICTIVE_FOR_AND: frozenset[str] = (
+    STRONG_COPYLEFT_LICENSES | WEAK_COPYLEFT_LICENSES | RESTRICTED_LICENSES
+)
 
 
 def _clean(raw: str) -> str:
@@ -184,8 +191,10 @@ def normalize_to_spdx(license_string: str | None) -> str | None:
     """Normalize an arbitrary license string to a canonical SPDX identifier.
 
     Handles direct SPDX identifiers, common metadata aliases, and simple SPDX
-    expressions (``MIT OR Apache-2.0``) by selecting the first recognized
-    operand.
+    expressions. ``OR`` expressions select the first recognized operand.
+    ``AND`` expressions resolve every operand and prefer a restrictive /
+    denied-class license so a conjunction cannot collapse to only the
+    permissive side (e.g. ``MIT AND GPL-3.0-only`` → ``GPL-3.0-only``).
 
     Args:
         license_string: Raw license string from package metadata, or None.
@@ -208,12 +217,25 @@ def normalize_to_spdx(license_string: str | None) -> str | None:
     if cleaned in _ALIASES:
         return _ALIASES[cleaned]
 
-    # SPDX expression: try each operand, prefer the first that resolves.
     operands = [op for op in _EXPRESSION_SPLIT.split(cleaned) if op]
-    if len(operands) > 1:
-        for operand in operands:
-            resolved = normalize_to_spdx(operand)
-            if resolved is not None:
-                return resolved
+    if len(operands) <= 1:
+        return None
 
-    return None
+    resolved_ids: list[str] = []
+    for operand in operands:
+        resolved = normalize_to_spdx(operand)
+        if resolved is not None:
+            resolved_ids.append(resolved)
+
+    if not resolved_ids:
+        return None
+
+    # AND: every license applies — surface a restrictive operand when present.
+    if _HAS_AND.search(cleaned) and not _HAS_OR.search(cleaned):
+        for spdx_id in resolved_ids:
+            if spdx_id in _RESTRICTIVE_FOR_AND:
+                return spdx_id
+        return resolved_ids[0]
+
+    # OR (or mixed): first recognized operand wins.
+    return resolved_ids[0]

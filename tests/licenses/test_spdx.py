@@ -50,11 +50,9 @@ def test_normalize_spdx_expression_picks_first_known() -> None:
 
 
 def test_normalize_and_expression() -> None:
-    """An AND expression resolves to a recognized operand."""
-    assert_that(normalize_to_spdx("GPL-3.0-only AND MIT")).is_in(
-        "GPL-3.0-only",
-        "MIT",
-    )
+    """An AND expression prefers a restrictive/denied-class operand."""
+    assert_that(normalize_to_spdx("MIT AND GPL-3.0-only")).is_equal_to("GPL-3.0-only")
+    assert_that(normalize_to_spdx("GPL-3.0-only AND MIT")).is_equal_to("GPL-3.0-only")
 
 
 @pytest.mark.parametrize(
