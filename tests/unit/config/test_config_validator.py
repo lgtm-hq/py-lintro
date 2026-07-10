@@ -111,7 +111,9 @@ def test_no_config_found(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Non
     assert_that(result.errors[0].message).contains("lintro init")
 
 
-def test_unknown_tool_warns_with_suggestion(write_config: Callable[[str], Path]) -> None:
+def test_unknown_tool_warns_with_suggestion(
+    write_config: Callable[[str], Path],
+) -> None:
     """An unknown tool name should warn and suggest the closest match.
 
     Args:
@@ -208,7 +210,9 @@ execution:
     assert_that(result.errors[0].message).contains("max_fix_retries")
 
 
-def test_invalid_auto_install_reports_tool_name(write_config: Callable[[str], Path]) -> None:
+def test_invalid_auto_install_reports_tool_name(
+    write_config: Callable[[str], Path],
+) -> None:
     """auto_install type errors should name the offending tool.
 
     Args:
