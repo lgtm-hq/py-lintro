@@ -143,7 +143,7 @@ def test_banner_reports_enabled_when_addopts_force_coverage(
         capsys: Pytest capture fixture for stdout/stderr.
     """
     config = PytestConfiguration()
-    executor = PytestExecutor(config=config, tool=object())
+    executor = PytestExecutor(config=config, tool=None)
 
     executor.display_run_config(total_tests=1, target_files=["."])
 
@@ -168,7 +168,7 @@ def test_banner_reports_disabled_without_coverage_config(
     monkeypatch.chdir(tmp_path)
 
     config = PytestConfiguration()
-    executor = PytestExecutor(config=config, tool=object())
+    executor = PytestExecutor(config=config, tool=None)
 
     executor.display_run_config(total_tests=1, target_files=["."])
 
