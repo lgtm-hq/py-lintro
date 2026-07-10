@@ -1,0 +1,17 @@
+---
+import { hasUriScheme } from "../lib/url-utils";
+
+interface Props {
+  href: string;
+  class?: string;
+}
+
+const { href, class: className } = Astro.props;
+const base = import.meta.env.BASE_URL;
+const url =
+  href.startsWith("#") || hasUriScheme(href)
+    ? href
+    : `${base.replace(/\/?$/, "/")}${href.replace(/^\//, "")}`;
+---
+
+<a href={url} class:list={["doc-link", className]}><slot /></a>

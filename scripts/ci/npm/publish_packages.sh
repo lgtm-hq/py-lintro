@@ -1,9 +1,11 @@
 #!/usr/bin/env bash
 # publish_packages.sh
 # Publish the lintro npm packages (platform packages first, then the
-# meta-package). Publishing is DRY-RUN ONLY unless LIVE=1 is set explicitly,
-# which is intentionally never wired into any workflow in this repo — going
-# live is a deliberate, separate follow-up that also requires NODE_AUTH_TOKEN.
+# meta-package). Publishing is DRY-RUN unless LIVE=1 is set. The tag pipeline
+# (publish-npm.yml, gated by the `npm` environment) sets LIVE=1; authentication
+# is via npm trusted publishing (OIDC), so no NODE_AUTH_TOKEN is required.
+# Caller must provide npm ≥ 11.5.1 (Node 24 bundled npm in CI). Do not
+# self-upgrade npm in-place before invoking this script.
 
 set -euo pipefail
 
@@ -20,6 +22,10 @@ Usage: publish_packages.sh
 Environment:
   LIVE=1              Perform a real publish. Default (unset) is --dry-run.
   NPM_PROVENANCE=0    Disable --provenance (default: enabled).
+  NPM_DIST_TAG        Dist-tag for npm publish (default: latest). Use a
+                      non-latest tag (e.g. backfill) when publishing a version
+                      lower than the current latest — npm refuses to move
+                      latest backwards without an explicit --tag.
 
 Publishes @lgtm-hq/lintro-<platform> packages first, then the root meta-package,
 so consumers never resolve a meta-package whose optional deps are missing.
@@ -41,15 +47,47 @@ publish_flags=("--access" "public")
 if [[ "${NPM_PROVENANCE:-1}" != "0" ]]; then
 	publish_flags+=("--provenance")
 fi
+# Always pass --tag so backfills of older versions do not try to move latest.
+# Use ${VAR-default} (no colon) so an explicitly empty NPM_DIST_TAG still
+# triggers the guard below, while an unset var falls back to "latest".
+dist_tag="${NPM_DIST_TAG-latest}"
+if [[ -z "$dist_tag" ]]; then
+	echo "ERROR: NPM_DIST_TAG must be non-empty (use 'latest' for normal releases)" >&2
+	exit 1
+fi
+publish_flags+=("--tag" "$dist_tag")
 if [[ "${LIVE:-0}" != "1" ]]; then
 	publish_flags+=("--dry-run")
 	echo "DRY-RUN mode: no packages will be published. Set LIVE=1 to publish."
 else
-	echo "LIVE mode: packages WILL be published to the registry."
+	echo "LIVE mode: packages WILL be published to the registry (dist-tag=$dist_tag)."
 fi
 
 for pkg in "${PACKAGES[@]}"; do
 	pkg_dir="$NPM_DIR/$pkg"
+	# Idempotency: if this exact name@version is already on the registry
+	# (e.g. a rerun after a mid-loop failure published some packages), skip
+	# it. Without this a retry would fail on the already-published versions
+	# and leave the release partially published. Only meaningful for a real
+	# publish; dry-runs always run to exercise the tarball.
+	if [[ "${LIVE:-0}" == "1" ]]; then
+		pkg_name="$(node -p "require('$pkg_dir/package.json').name")"
+		pkg_version="$(node -p "require('$pkg_dir/package.json').version")"
+		# Distinguish "version not published" (npm E404) from a lookup that
+		# failed for another reason (network, rate-limit, auth). Only a real
+		# 404 means "safe to publish". Any other failure must abort rather
+		# than fall through to a publish that would error on a duplicate and
+		# leave the release partially published.
+		view_err="$(npm view "$pkg_name@$pkg_version" version 2>&1 >/dev/null)" && view_ok=1 || view_ok=0
+		if [[ "$view_ok" == "1" ]]; then
+			echo "==> Skipping $pkg_name@$pkg_version (already published)"
+			continue
+		elif ! grep -qi 'E404\|404 Not Found\|is not in this registry' <<<"$view_err"; then
+			echo "ERROR: could not verify $pkg_name@$pkg_version on the registry" >&2
+			echo "$view_err" >&2
+			exit 1
+		fi
+	fi
 	echo "==> Publishing $pkg (${publish_flags[*]})"
 	(cd "$pkg_dir" && npm publish "${publish_flags[@]}")
 done

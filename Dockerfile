@@ -13,8 +13,8 @@
 # -----------------------------------------------------------------------------
 FROM python:3.14-slim@sha256:b877e50bd90de10af8d82c57a022fc2e0dc731c5320d762a27986facfc3355c1 AS tools
 
-ARG BUN_VERSION=1.3.11
-ARG UV_VERSION=0.11.10
+ARG BUN_VERSION=1.3.14
+ARG UV_VERSION=0.11.28
 
 LABEL maintainer="lgtm-hq"
 LABEL org.opencontainers.image.source="https://github.com/lgtm-hq/py-lintro"
@@ -106,13 +106,15 @@ RUN echo "=== Verifying all tools ===" && \
     bun --version && uv --version && cargo --version && rustc --version && \
     rustfmt --version && cargo clippy --version && cargo audit --version && \
     cargo deny --version && actionlint --version && bandit --version && \
-    black --version && gitleaks version && hadolint --version && \
+    black --version && commitlint --version && gitleaks version && \
+    hadolint --version && \
     markdownlint-cli2 --version && mypy --version && osv-scanner --version && \
     oxfmt --version && oxlint --version && prettier --version && \
     pydoclint --version && ruff --version && semgrep --version && \
     shellcheck --version && shfmt --version && sqlfluff --version && \
     taplo --version && tsc --version && astro --version && \
     svelte-check --version && vue-tsc --version && yamllint --version && \
+    vale --version && \
     echo "=== All tools verified! ==="
 
 # -----------------------------------------------------------------------------
@@ -161,10 +163,12 @@ RUN echo "Verifying tools..." && \
     black --version && hadolint --version && actionlint --version && \
     shellcheck --version && shfmt --version && taplo --version && \
     gitleaks version && osv-scanner --version && prettier --version && \
+    commitlint --version && \
     markdownlint-cli2 --version && tsc --version && astro --version && \
     vue-tsc --version && oxlint --version && oxfmt --version && \
     bandit --version && mypy --version && pydoclint --version && \
     yamllint --version && sqlfluff --version && \
+    vale --version && \
     echo "All tools verified!"
 
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
@@ -172,6 +176,7 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
 
 RUN echo "Verifying tools as non-root user..." && \
     gosu lintro prettier --version && \
+    gosu lintro commitlint --version && \
     gosu lintro markdownlint-cli2 --version && \
     gosu lintro tsc --version && \
     gosu lintro astro --version && \
@@ -186,8 +191,10 @@ RUN echo "Verifying tools as non-root user..." && \
     gosu lintro semgrep --version && \
     echo "All tools verified for non-root user!"
 
-USER lintro
-
+# No USER directive: the container starts as root so entrypoint.sh can detect
+# the UID/GID that owns the mounted /code volume and drop privileges to it via
+# gosu. This lets auto-install write node_modules into the volume without
+# consumers passing --user. See scripts/docker/entrypoint.sh.
 ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
 CMD ["--help"]
 
@@ -233,7 +240,8 @@ RUN useradd -m lintro && \
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
     CMD /app/.venv/bin/python -m lintro --version || exit 1
 
-USER lintro
-
+# No USER directive: the container starts as root so entrypoint.sh can detect
+# the UID/GID that owns the mounted /code volume and drop privileges to it via
+# gosu (installed above). See scripts/docker/entrypoint.sh.
 ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
 CMD ["--help"]
