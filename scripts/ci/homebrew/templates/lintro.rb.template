@@ -22,6 +22,7 @@ class Lintro < Formula
   depends_on "actionlint"
   depends_on "bandit"
   depends_on "black"
+  depends_on "commitlint"
   depends_on "gitleaks"
   depends_on "hadolint"
   depends_on "libyaml"
@@ -38,6 +39,7 @@ class Lintro < Formula
   depends_on "shfmt"
   depends_on "sqlfluff"
   depends_on "taplo"
+  depends_on "vale"
   depends_on "yamllint"
 
   # Pure Python library dependencies
@@ -73,9 +75,11 @@ class Lintro < Formula
       YAML / TOML:      yamllint, taplo
       Shell:            shellcheck, shfmt
       Markdown:         markdownlint-cli2
+      Prose / docs:     vale
       JS / TS:          oxlint, oxfmt, prettier
       Dockerfiles:      hadolint
       GitHub Actions:   actionlint
+      Git commits:      commitlint
       Security:         gitleaks, semgrep
       Rust:             clippy, rustfmt (via rust)
       SQL:              sqlfluff
