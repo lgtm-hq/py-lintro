@@ -1083,8 +1083,19 @@ main() {
 			if [ "$typos_installed" = false ] && command -v cargo &>/dev/null; then
 				echo -e "${YELLOW}Pre-built binary not available, falling back to cargo install...${NC}"
 				if cargo install typos-cli --locked --version "$TYPOS_VERSION"; then
-					echo -e "${GREEN}✓ typos installed via cargo${NC}"
-					typos_installed=true
+					# cargo install writes to $CARGO_HOME/bin; copy into BIN_DIR
+					# so later verification via command -v / PATH finds it.
+					cargo_bin="${CARGO_HOME:-$HOME/.cargo}/bin/typos"
+					if [ -x "$cargo_bin" ]; then
+						cp "$cargo_bin" "$BIN_DIR/typos"
+						chmod +x "$BIN_DIR/typos"
+					fi
+					if command -v typos &>/dev/null || [ -x "$BIN_DIR/typos" ]; then
+						echo -e "${GREEN}✓ typos installed via cargo${NC}"
+						typos_installed=true
+					else
+						echo -e "${YELLOW}⚠ cargo install succeeded but typos not on PATH${NC}"
+					fi
 				fi
 			fi
 
