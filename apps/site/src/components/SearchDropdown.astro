@@ -13,7 +13,7 @@ const baseUrl = import.meta.env.BASE_URL.replace(/\/$/, '');
   <div class="search-bar-inner" id="search-trigger">
     <span class="search-bar-placeholder">What are you looking for?</span>
     <span class="search-bar-shortcut"><span class="search-bar-shortcut-mod" data-mod="⌘"></span>K</span>
-    <button class="search-bar-btn" type="button" aria-label="Search">
+    <button class="search-bar-btn" type="button" aria-label="Search" aria-expanded="false" aria-controls="search-menu" id="search-trigger-btn">
       <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
         <circle cx="11" cy="11" r="8"></circle>
         <path d="M21 21l-4.35-4.35"></path>
@@ -21,7 +21,7 @@ const baseUrl = import.meta.env.BASE_URL.replace(/\/$/, '');
     </button>
   </div>
 
-  <div class="search-menu" id="search-menu" role="dialog" aria-label="Search">
+  <div class="search-menu" id="search-menu" role="dialog" aria-modal="true" aria-label="Search">
     <div class="search-input-wrapper">
       <div id="search-input-container" class="search-input-container"></div>
       <kbd class="search-close-kbd">esc</kbd>
@@ -34,6 +34,7 @@ const baseUrl = import.meta.env.BASE_URL.replace(/\/$/, '');
   (function() {
     var searchBar = document.getElementById('search-bar');
     var trigger = document.getElementById('search-trigger');
+    var triggerBtn = document.getElementById('search-trigger-btn');
     var menu = document.getElementById('search-menu');
     var baseUrl = searchBar.getAttribute('data-base-url') || '';
     var searchInitialized = false;
@@ -45,8 +46,19 @@ const baseUrl = import.meta.env.BASE_URL.replace(/\/$/, '');
       shortcutMod.setAttribute('data-mod', isMac ? '⌘' : 'Ctrl');
     }
 
+    function focusableInMenu() {
+      return Array.prototype.slice.call(
+        menu.querySelectorAll(
+          'a[href], button:not([disabled]), input:not([disabled]), [tabindex]:not([tabindex="-1"])'
+        )
+      ).filter(function(el) {
+        return el.offsetParent !== null;
+      });
+    }
+
     async function openSearch() {
       searchBar.classList.add('open');
+      if (triggerBtn) triggerBtn.setAttribute('aria-expanded', 'true');
       await initSearch();
       if (!searchBar.classList.contains('open')) return;
       var input = searchBar.querySelector('.pagefind-ui__search-input');
@@ -58,6 +70,7 @@ const baseUrl = import.meta.env.BASE_URL.replace(/\/$/, '');
 
     function closeSearch() {
       searchBar.classList.remove('open');
+      if (triggerBtn) triggerBtn.setAttribute('aria-expanded', 'false');
     }
 
     function toggleSearch() {
@@ -78,7 +91,6 @@ const baseUrl = import.meta.env.BASE_URL.replace(/\/$/, '');
       }
 
       initSearchPromise = (async function() {
-        searchInitialized = true;
         try {
           var PagefindUI = (await import(baseUrl + '/pagefind/pagefind-ui.js')).PagefindUI;
           new PagefindUI({
@@ -89,6 +101,7 @@ const baseUrl = import.meta.env.BASE_URL.replace(/\/$/, '');
             resetStyles: false,
             autofocus: true,
           });
+          searchInitialized = true;
         } catch (e) {
           searchInitialized = false;
           initSearchPromise = null;
@@ -121,16 +134,33 @@ const baseUrl = import.meta.env.BASE_URL.replace(/\/$/, '');
       }
     });
 
-    // Keyboard shortcut: Cmd+K / Ctrl+K
+    // Keyboard shortcut: Cmd+K / Ctrl+K; Escape; Tab trap while open
     document.addEventListener('keydown', function(e) {
       if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
         e.preventDefault();
         toggleSearch();
+        return;
       }
 
-      // Escape to close
-      if (e.key === 'Escape' && searchBar.classList.contains('open')) {
+      if (!searchBar.classList.contains('open')) return;
+
+      if (e.key === 'Escape') {
         closeSearch();
+        if (triggerBtn) triggerBtn.focus();
+        return;
+      }
+
+      if (e.key !== 'Tab') return;
+      var focusable = focusableInMenu();
+      if (!focusable.length) return;
+      var first = focusable[0];
+      var last = focusable[focusable.length - 1];
+      if (e.shiftKey && document.activeElement === first) {
+        e.preventDefault();
+        last.focus();
+      } else if (!e.shiftKey && document.activeElement === last) {
+        e.preventDefault();
+        first.focus();
       }
     });
 

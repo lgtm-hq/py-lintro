@@ -154,11 +154,27 @@ def normalize_fence_lines(lines: list[str]) -> list[str]:
 
 
 def fix_heading_levels(lines: list[str]) -> list[str]:
-    """Keep heading increments to one level at a time."""
+    """Keep heading increments to one level at a time.
+
+    Fenced code blocks are skipped so language comments like ``# note`` are
+    not treated as markdown headings (which would also corrupt
+    ``previous_level`` for subsequent real headings).
+    """
     output: list[str] = []
     previous_level = 0
+    in_code = False
 
     for line in lines:
+        stripped = line.strip()
+        if stripped.startswith("```") and not stripped.startswith("````"):
+            in_code = not in_code
+            output.append(line)
+            continue
+
+        if in_code:
+            output.append(line)
+            continue
+
         match = re.match(r"^(#{1,6})\s+(.*)$", line)
         if not match:
             output.append(line)
@@ -282,7 +298,7 @@ def wrap_prose_lines(lines: list[str]) -> list[str]:
             output.append(line)
             continue
 
-        if stripped.startswith(("- ", "* ")) or re.match(r"^\d+\.", stripped):
+        if stripped.startswith(("- ", "* ", "> ")) or re.match(r"^\d+\.", stripped):
             output.append(line)
             continue
 

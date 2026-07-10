@@ -129,7 +129,7 @@ function docsInCategory(
   base: string
 ): NavDropdownItem[] {
   return docs
-    .filter((d) => d.data.category === category)
+    .filter((d) => d.data.category === category && d.data.sidebar !== false)
     .sort((a, b) => a.data.order - b.data.order)
     .map((d) => ({
       label: d.data.title,

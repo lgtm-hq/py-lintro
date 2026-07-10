@@ -67,15 +67,15 @@ const defaultLabel = themeTriggerLabels[DEFAULT_THEME] ?? 'Terminal';
 
 <script>
   let themePickerDocumentListenersBound = false;
+  const themePickerControllers = new WeakMap<
+    Element,
+    { close: () => void }
+  >();
 
   function onThemePickerDocumentClick(event: MouseEvent): void {
     const picker = document.getElementById('theme-picker');
     if (!picker || picker.contains(event.target as Node)) return;
-    picker.classList.remove('is-open');
-    const trigger = document.getElementById('theme-picker-trigger');
-    const panel = document.getElementById('theme-picker-panel');
-    trigger?.setAttribute('aria-expanded', 'false');
-    panel?.setAttribute('hidden', '');
+    themePickerControllers.get(picker)?.close();
   }
 
   function onThemePickerDocumentKeydown(event: KeyboardEvent): void {
@@ -115,9 +115,7 @@ const defaultLabel = themeTriggerLabels[DEFAULT_THEME] ?? 'Terminal';
     };
 
     if (event.key === 'Escape') {
-      picker.classList.remove('is-open');
-      trigger.setAttribute('aria-expanded', 'false');
-      panel.setAttribute('hidden', '');
+      themePickerControllers.get(picker)?.close();
       trigger.focus();
       return;
     }
@@ -212,6 +210,8 @@ const defaultLabel = themeTriggerLabels[DEFAULT_THEME] ?? 'Terminal';
         }
       }
     };
+
+    themePickerControllers.set(picker, { close: () => setOpen(false) });
 
     const setActive = (themeId: string): void => {
       const active = options.find((option) => option.dataset.themeId === themeId);

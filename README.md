@@ -42,7 +42,10 @@ assurance tools under a single command-line interface.
 ## 🚀 Quick Start
 
 ```bash
-uv pip install lintro              # Install (or: pip install lintro)
+# Install (choose one)
+uv pip install lintro              # Python / PyPI (or: pip install lintro)
+bun add -g @lgtm-hq/lintro         # Node / npm — self-contained, no Python
+
 lintro check .                     # Find issues (alias: chk)
 lintro format .                    # Fix issues (alias: fmt)
 lintro check --output-format grid  # Beautiful output

@@ -115,10 +115,7 @@ export function groupSectionDocs(
   const byGroup = new Map<string, SidebarNavDoc[]>();
 
   for (const doc of pages) {
-    const group = resolveNavGroup(doc);
-    if (!group) {
-      continue;
-    }
+    const group = resolveNavGroup(doc) ?? 'other';
     const items = byGroup.get(group) ?? [];
     items.push(doc);
     byGroup.set(group, items);
@@ -126,7 +123,10 @@ export function groupSectionDocs(
 
   const orderedKeys =
     groupOrder.length > 0
-      ? groupOrder.filter((key) => byGroup.has(key))
+      ? [
+          ...groupOrder.filter((key) => byGroup.has(key)),
+          ...[...byGroup.keys()].filter((key) => !groupOrder.includes(key)).sort(),
+        ]
       : [...byGroup.keys()].sort();
 
   const groups: SidebarNavGroup[] = orderedKeys.map((key) => ({
