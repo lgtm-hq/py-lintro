@@ -21,6 +21,12 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.71.0] - 2026-07-10
+
+### Added
+
+- **docs**: add documentation site and GitHub Pages deployment (#974) (3707809)
+
 ## [0.70.6] - 2026-07-10
 
 ### Changed
