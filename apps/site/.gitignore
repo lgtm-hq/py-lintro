@@ -1,0 +1,18 @@
+node_modules/
+dist/
+.astro/
+coverage/
+public/assets/css/
+
+# Docs content and the route map are generated from the repo-root docs/ tree
+# by scripts/ci/site/migrate-docs-content.py (chained into the dev/build/
+# check/test package scripts). docs/ is the single source of truth. The
+# committed .d.ts shim keeps type-checking working before generation.
+src/content/docs/
+src/generated/*
+!src/generated/docs-route-map.d.ts
+
+# The repo-root .gitignore ignores 'lib/' (a Python build-artifact pattern),
+# which unintentionally excludes this site's TypeScript/MJS source under
+# src/lib/. Re-include it so the Astro config and components can be built.
+!src/lib/
