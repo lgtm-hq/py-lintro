@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
 from assertpy import assert_that
 
 from benchmarks.harness import detect, runners
@@ -52,7 +53,7 @@ def test_build_runners_always_includes_lintro(tmp_path: Path) -> None:
 
 def test_build_runners_skips_unavailable_competitor(
     tmp_path: Path,
-    monkeypatch,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """An unavailable competitor is filtered out of the runner list."""
 
@@ -133,7 +134,7 @@ def test_sequential_runner_propagates_worst_exit_code(tmp_path: Path) -> None:
 
 def test_megalinter_uses_docker_when_wrapper_absent(
     tmp_path: Path,
-    monkeypatch,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Without the npm wrapper, MegaLinter is driven via the pinned docker image."""
 

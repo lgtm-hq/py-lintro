@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 from assertpy import assert_that
 
 from benchmarks.harness.results import (
@@ -147,7 +149,7 @@ def test_render_markdown_table_empty_report() -> None:
     assert_that(table).contains("no results")
 
 
-def test_write_json_creates_file(tmp_path) -> None:
+def test_write_json_creates_file(tmp_path: Path) -> None:
     """Writing a report creates a parseable JSON file on disk."""
     report = _make_report()
     destination = tmp_path / "nested" / "report.json"

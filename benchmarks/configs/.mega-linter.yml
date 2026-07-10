@@ -1,3 +1,4 @@
+---
 # Pinned MegaLinter configuration used for the comparative benchmark.
 #
 # Restricted to the Python linters that overlap with the lintro and

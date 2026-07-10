@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import cast
 
 from benchmarks.harness.timing import TimingStats
 
@@ -68,9 +69,9 @@ class ReportMetadata:
             git_sha=str(data["git_sha"]),
             platform=str(data["platform"]),
             python_version=str(data["python_version"]),
-            cpu_count=int(data["cpu_count"]),  # type: ignore[arg-type]
-            runs=int(data["runs"]),  # type: ignore[arg-type]
-            notes=list(data.get("notes", [])),  # type: ignore[arg-type]
+            cpu_count=int(cast(int | str, data["cpu_count"])),
+            runs=int(cast(int | str, data["runs"])),
+            notes=list(cast(list[object], data.get("notes", []))),
         )
 
 
@@ -122,15 +123,16 @@ class ScenarioResult:
         Returns:
             ScenarioResult: The reconstructed result.
         """
-        stats_data: dict[str, object] = dict(data["stats"])  # type: ignore[arg-type]
+        stats_data = cast(dict[str, object], data["stats"])
+        samples_raw = cast(list[object], stats_data.get("samples", []))
         stats = TimingStats(
-            runs=int(stats_data["runs"]),  # type: ignore[arg-type]
-            min_s=float(stats_data["min_s"]),  # type: ignore[arg-type]
-            max_s=float(stats_data["max_s"]),  # type: ignore[arg-type]
-            mean_s=float(stats_data["mean_s"]),  # type: ignore[arg-type]
-            median_s=float(stats_data["median_s"]),  # type: ignore[arg-type]
-            stddev_s=float(stats_data["stddev_s"]),  # type: ignore[arg-type]
-            samples=[float(value) for value in stats_data.get("samples", [])],  # type: ignore[union-attr]
+            runs=int(cast(int | str, stats_data["runs"])),
+            min_s=float(cast(int | float | str, stats_data["min_s"])),
+            max_s=float(cast(int | float | str, stats_data["max_s"])),
+            mean_s=float(cast(int | float | str, stats_data["mean_s"])),
+            median_s=float(cast(int | float | str, stats_data["median_s"])),
+            stddev_s=float(cast(int | float | str, stats_data["stddev_s"])),
+            samples=[float(cast(int | float | str, value)) for value in samples_raw],
         )
         return cls(
             tool=str(data["tool"]),
@@ -138,8 +140,8 @@ class ScenarioResult:
             fixture=str(data["fixture"]),
             scenario=str(data["scenario"]),
             stats=stats,
-            exit_codes=[int(code) for code in data["exit_codes"]],  # type: ignore[union-attr]
-            command=[str(part) for part in data["command"]],  # type: ignore[union-attr]
+            exit_codes=[int(cast(int | str, code)) for code in cast(list[object], data["exit_codes"])],
+            command=[str(part) for part in cast(list[object], data["command"])],
         )
 
 
@@ -180,16 +182,18 @@ class BenchmarkReport:
         Raises:
             ValueError: If the schema version is unsupported.
         """
-        version = int(data.get("schema_version", 0))  # type: ignore[arg-type]
+        version = int(cast(int | str, data.get("schema_version", 0)))
         if version != SCHEMA_VERSION:
             raise ValueError(
                 f"unsupported schema_version {version}; expected {SCHEMA_VERSION}",
             )
+        metadata_raw = cast(dict[str, object], data["metadata"])
+        results_raw = cast(list[object], data["results"])
         return cls(
-            metadata=ReportMetadata.from_dict(dict(data["metadata"])),  # type: ignore[arg-type]
+            metadata=ReportMetadata.from_dict(metadata_raw),
             results=[
-                ScenarioResult.from_dict(dict(item))  # type: ignore[arg-type]
-                for item in data["results"]  # type: ignore[union-attr]
+                ScenarioResult.from_dict(cast(dict[str, object], item))
+                for item in results_raw
             ],
         )
 
