@@ -454,6 +454,7 @@ tool_priorities = { ruff = 5, black = 10, prettier = 1 }
 | ruff         | 20       | Linter/Formatter |
 | markdownlint | 30       | Linter           |
 | yamllint     | 35       | Linter           |
+| vale         | 50       | Linter (docs)    |
 | pydoclint    | 40       | Linter           |
 | bandit       | 45       | Security         |
 | hadolint     | 50       | Infrastructure   |
@@ -1456,6 +1457,51 @@ MD041: false
 - Future versions may expose additional options via `[tool.lintro.markdownlint-cli2]` in
   `pyproject.toml`
 
+### Prose / Documentation Tools
+
+#### Vale Configuration {#vale-configuration}
+
+[Vale](https://vale.sh/) is a syntax-aware prose linter. Lintro defers to Vale's native
+configuration discovery, which walks upward from each linted file to find a `.vale.ini`.
+
+> Vale requires a configuration to run. When none is resolvable, Lintro skips vale as a
+> non-error (rather than surfacing vale's `E100` runtime error), keeping mixed-language
+> runs clean.
+
+**Native config detection:** `.vale.ini`, `_vale.ini`, `vale.ini`.
+
+**File:** `.vale.ini`
+
+```ini
+MinAlertLevel = suggestion
+
+[*.md]
+BasedOnStyles = Vale
+```
+
+**Installation:**
+
+```bash
+brew install vale
+# or download from https://github.com/errata-ai/vale/releases
+```
+
+**Available `--tool-options`:**
+
+| Option            | Type   | Description                                              |
+| ----------------- | ------ | -------------------------------------------------------- |
+| `config`          | string | Path to a Vale config file (maps to `--config`)          |
+| `min_alert_level` | string | Minimum alert level: `suggestion`, `warning`, or `error` |
+| `timeout`         | int    | Per-run timeout in seconds (default 30)                  |
+
+**Usage:**
+
+```bash
+lintro check docs/ --tools vale
+lintro check docs/ --tools vale --tool-options vale:min_alert_level=warning
+lintro check docs/ --tools vale --tool-options vale:config=.vale.ini
+```
+
 ### Rust Tools
 
 #### Clippy Configuration
@@ -1782,9 +1828,9 @@ lintro check scripts/ --tools shfmt
 
 #### dotenv-linter Configuration
 
-[dotenv-linter](https://dotenv-linter.github.io/) is a fast, Rust-based linter and
-fixer for `.env` files. It detects duplicate keys, lowercase keys, incorrect
-delimiters, unordered keys, and stray whitespace, and can auto-fix most of them.
+[dotenv-linter](https://dotenv-linter.github.io/) is a fast, Rust-based linter and fixer
+for `.env` files. It detects duplicate keys, lowercase keys, incorrect delimiters,
+unordered keys, and stray whitespace, and can auto-fix most of them.
 
 **Installation:**
 
@@ -1799,8 +1845,8 @@ cargo install dotenv-linter
 # https://github.com/dotenv-linter/dotenv-linter/releases
 ```
 
-**Native config:** dotenv-linter has no config file; behavior is controlled entirely
-via CLI flags (surfaced through `--tool-options`).
+**Native config:** dotenv-linter has no config file; behavior is controlled entirely via
+CLI flags (surfaced through `--tool-options`).
 
 **Lintro options via `--tool-options`:**
 
@@ -1825,11 +1871,11 @@ lintro format --tools dotenv_linter
 **Available Options:**
 
 | Option        | Type        | Description                                                    |
-| ------------- | ----------- | ------------------------------------------------------------- |
+| ------------- | ----------- | -------------------------------------------------------------- |
 | `recursive`   | bool        | Recursively scan directories for `.env` files. Default `False` |
-| `exclude`     | list\[str\] | File or directory paths to exclude                            |
-| `skip_checks` | list\[str\] | Check names to bypass (maps to `--ignore-checks`)             |
-| `schema`      | str         | Path to a schema file to validate `.env` contents             |
+| `exclude`     | list\[str\] | File or directory paths to exclude                             |
+| `skip_checks` | list\[str\] | Check names to bypass (maps to `--ignore-checks`)              |
+| `schema`      | str         | Path to a schema file to validate `.env` contents              |
 
 > Note: real `.env` files are frequently `.gitignore`d, so they may not be discovered
 > during a normal repository scan. Point Lintro at the file explicitly, or commit a

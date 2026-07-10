@@ -13,6 +13,10 @@ from typing import TYPE_CHECKING
 import pytest
 from assertpy import assert_that
 
+from lintro.parsers.dotenv_linter.dotenv_linter_issue import (
+    DotenvLinterIssue,
+)
+
 if TYPE_CHECKING:
     from lintro.plugins.base import BaseToolPlugin
 
@@ -54,7 +58,12 @@ def test_check_extracts_known_checks(
     plugin = get_plugin("dotenv_linter")
     result = plugin.check([dotenv_violation_file], {})
 
-    codes = {issue.code for issue in result.issues}
+    assert result.issues is not None
+    codes = {
+        issue.code
+        for issue in result.issues
+        if isinstance(issue, DotenvLinterIssue)
+    }
     assert_that(codes).contains("LowercaseKey")
 
 
@@ -88,7 +97,12 @@ def test_check_issue_carries_doc_url(
     plugin = get_plugin("dotenv_linter")
     result = plugin.check([dotenv_violation_file], {})
 
-    lowercase = next(i for i in result.issues if i.code == "LowercaseKey")
+    assert result.issues is not None
+    lowercase = next(
+        i
+        for i in result.issues
+        if isinstance(i, DotenvLinterIssue) and i.code == "LowercaseKey"
+    )
     doc_url = plugin.doc_url(lowercase.code)
     assert_that(doc_url).is_equal_to(
         "https://dotenv-linter.github.io/#/checks/lowercase_key",

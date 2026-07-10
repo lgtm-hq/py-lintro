@@ -2,11 +2,11 @@
 
 ## Overview
 
-[dotenv-linter](https://dotenv-linter.github.io/) is a fast, Rust-based linter and
-fixer for `.env` files. It detects common mistakes such as duplicate keys, lowercase
-keys, incorrect delimiters, unordered keys, and stray whitespace, and can auto-fix most
-of them in place. This analysis documents Lintro's wrapper implementation and how it
-maps onto the core tool.
+[dotenv-linter](https://dotenv-linter.github.io/) is a fast, Rust-based linter and fixer
+for `.env` files. It detects common mistakes such as duplicate keys, lowercase keys,
+incorrect delimiters, unordered keys, and stray whitespace, and can auto-fix most of
+them in place. This analysis documents Lintro's wrapper implementation and how it maps
+onto the core tool.
 
 ## Core Tool Capabilities
 
@@ -42,8 +42,8 @@ version.
 ## Parser Choice: Native Parser
 
 Following the SARIF ingestion evaluation guidance (issue #1066 / PR #1140): the shared
-SARIF parser is only used when a tool emits SARIF losslessly. dotenv-linter emits
-**no SARIF or structured output at all** — only plain-text (`--plain`) or ANSI-colored
+SARIF parser is only used when a tool emits SARIF losslessly. dotenv-linter emits **no
+SARIF or structured output at all** — only plain-text (`--plain`) or ANSI-colored
 diagnostics. A native line parser is therefore required.
 
 `lintro/parsers/dotenv_linter/dotenv_linter_parser.py` parses the plain-text lines with
@@ -59,12 +59,12 @@ more faithful than any SARIF ingestion would be.
 
 - **Check mode**: runs `dotenv-linter check --plain` per file and parses all findings.
 - **Fix mode**: runs `dotenv-linter fix --no-backup --plain` per file, bracketed by a
-  pre-fix check and a post-fix re-check so the `initial == fixed + remaining`
-  ToolResult invariant holds even for checks that cannot be auto-fixed.
+  pre-fix check and a post-fix re-check so the `initial == fixed + remaining` ToolResult
+  invariant holds even for checks that cannot be auto-fixed.
 - **Check name as code**: each issue carries the dotenv-linter check name, surfaced in
   the unified table's `code` column.
-- **Documentation links**: `doc_url()` converts a CamelCase check name to the
-  snake_case anchor used by the docs site, e.g. `LowercaseKey` →
+- **Documentation links**: `doc_url()` converts a CamelCase check name to the snake_case
+  anchor used by the docs site, e.g. `LowercaseKey` →
   `https://dotenv-linter.github.io/#/checks/lowercase_key`.
 - **Options**: `recursive`, `exclude`, `skip_checks` (maps to `--ignore-checks`), and
   `schema` (maps to `--schema`).
@@ -82,8 +82,7 @@ more faithful than any SARIF ingestion would be.
 
 - Homebrew: `brew install dotenv-linter`
 - Cargo: `cargo install dotenv-linter`
-- Binary release:
-  <https://github.com/dotenv-linter/dotenv-linter/releases> (v4.0.0+)
+- Binary release: <https://github.com/dotenv-linter/dotenv-linter/releases> (v4.0.0+)
 
 ## File Targeting
 

@@ -41,8 +41,8 @@ def test_fix_resolves_issues(
     assert_that(result.fixed_issues_count).is_greater_than(0)
     # Invariant: initial == fixed + remaining.
     assert_that(
-        result.fixed_issues_count + result.remaining_issues_count,
-    ).is_equal_to(result.initial_issues_count)
+        (result.fixed_issues_count or 0) + (result.remaining_issues_count or 0),
+    ).is_equal_to(result.initial_issues_count or 0)
 
 
 def test_fix_rewrites_file_in_place(

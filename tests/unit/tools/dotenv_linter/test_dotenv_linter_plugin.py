@@ -13,6 +13,10 @@ from unittest.mock import patch
 
 from assertpy import assert_that
 
+from lintro.parsers.dotenv_linter.dotenv_linter_issue import (
+    DotenvLinterIssue,
+)
+
 from lintro.enums.tool_type import ToolType
 from lintro.tools.definitions.dotenv_linter import (
     DOTENV_LINTER_DEFAULT_TIMEOUT,
@@ -216,8 +220,8 @@ def test_fix_preserves_issue_count_invariant(
     assert_that(result.fixed_issues_count).is_equal_to(2)
     assert_that(result.remaining_issues_count).is_equal_to(0)
     assert_that(
-        result.fixed_issues_count + result.remaining_issues_count,
-    ).is_equal_to(result.initial_issues_count)
+        (result.fixed_issues_count or 0) + (result.remaining_issues_count or 0),
+    ).is_equal_to(result.initial_issues_count or 0)
 
 
 def test_fix_reports_remaining_when_not_all_fixed(

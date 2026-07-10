@@ -17,6 +17,7 @@ from lintro.enums.doc_url_template import DocUrlTemplate
 from lintro.enums.tool_name import ToolName
 from lintro.enums.tool_type import ToolType
 from lintro.models.core.tool_result import ToolResult
+from lintro.parsers.dotenv_linter.dotenv_linter_issue import DotenvLinterIssue
 from lintro.parsers.dotenv_linter.dotenv_linter_parser import (
     parse_dotenv_linter_output,
 )
@@ -32,7 +33,6 @@ from lintro.tools.core.option_validators import (
 
 if TYPE_CHECKING:
     from lintro.parsers.base_issue import BaseIssue
-    from lintro.parsers.dotenv_linter.dotenv_linter_issue import DotenvLinterIssue
 
 # Constants for dotenv-linter configuration
 DOTENV_LINTER_DEFAULT_TIMEOUT: int = 30
@@ -236,7 +236,11 @@ class DotenvLinterPlugin(BaseToolPlugin):
                 initial_issues=[],
             )
 
-        initial_issues: list[DotenvLinterIssue] = list(initial.issues)
+        initial_issues: list[DotenvLinterIssue] = [
+            issue
+            for issue in initial.issues
+            if isinstance(issue, DotenvLinterIssue)
+        ]
         if not initial_issues:
             return FileFixResult(
                 file_result=FileProcessingResult(success=True, output="", issues=[]),
@@ -301,7 +305,9 @@ class DotenvLinterPlugin(BaseToolPlugin):
         # consumers do not offer an auto-fix that was already tried.
         recheck = self._process_single_file(file_path, timeout)
         remaining_issues: list[DotenvLinterIssue] = [
-            replace(issue, fixable=False) for issue in recheck.issues
+            replace(issue, fixable=False)
+            for issue in recheck.issues
+            if isinstance(issue, DotenvLinterIssue)
         ]
         fixed_count = max(len(initial_issues) - len(remaining_issues), 0)
 
