@@ -1,0 +1,106 @@
+---
+import DocsPreviewChrome from '../../../components/design/DocsPreviewChrome.astro';
+import DocsNavSampleArticle from '../../../components/design/DocsNavSampleArticle.astro';
+---
+
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="robots" content="noindex" />
+    <title>05 File Tree — docs nav</title>
+    <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600&display=swap" rel="stylesheet" />
+  </head>
+  <body>
+    <DocsPreviewChrome optionId="05" optionName="File Tree" tagline="Paths like a repo — j/k to move" />
+    <div class="shell">
+      <header class="top">
+        <span class="logo"><span class="logo-name">lintro</span><span class="logo-scope">@docs</span></span>
+        <code class="pwd">~/docs/usage/configuration</code>
+      </header>
+      <div class="layout">
+        <aside class="tree">
+          <p class="label">$ tree docs/</p>
+          <ul>
+            <li><span class="dir">getting-started/</span>
+              <ul>
+                <li><a href="#">hub.md</a></li>
+                <li><a href="#">getting-started.md</a></li>
+              </ul>
+            </li>
+            <li><span class="dir open">usage/</span>
+              <ul>
+                <li><a href="#" class="active">configuration.md</a></li>
+                <li><a href="#">docker.md</a></li>
+                <li><a href="#">github-integration.md</a></li>
+                <li><a href="#">ai-features.md</a></li>
+                <li class="dim">… +3 files</li>
+              </ul>
+            </li>
+            <li><span class="dir">tools/</span>
+              <ul class="collapsed">
+                <li class="dim">22 files — press o to open</li>
+              </ul>
+            </li>
+            <li><span class="dir">architecture/</span></li>
+            <li><span class="dir">security/</span></li>
+            <li><span class="dir">contributing/</span></li>
+          </ul>
+          <p class="keys">j/k move · o toggle · / filter</p>
+        </aside>
+        <main class="main">
+          <DocsNavSampleArticle />
+        </main>
+      </div>
+    </div>
+  </body>
+</html>
+
+<style>
+  :global(*) { box-sizing: border-box; }
+  body { margin: 0; background: #0d0d0d; color: #c8ffc8; font-family: 'IBM Plex Mono', monospace; font-size: 13px; }
+  .top {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    padding: 0.85rem 1.25rem;
+    border-bottom: 1px solid #39ff14;
+  }
+  .logo { font-weight: 600; }
+  .logo-name { color: #39ff14; }
+  .logo-scope { color: #ffb000; }
+  .pwd { margin-left: auto; font-size: 0.72rem; color: #7dd3fc; background: transparent; }
+  .layout { display: grid; grid-template-columns: 260px 1fr; min-height: calc(100vh - 45px); }
+  .tree {
+    border-right: 1px solid #2a4a2a;
+    background: #080808;
+    padding: 1rem;
+    overflow-y: auto;
+    font-size: 0.76rem;
+  }
+  .label { margin: 0 0 0.75rem; color: #4a6a4a; font-size: 0.72rem; }
+  .tree ul { list-style: none; margin: 0; padding-left: 0.85rem; }
+  .tree > ul { padding-left: 0; }
+  .dir { color: #7dd3fc; cursor: default; }
+  .dir.open::before { content: '▾ '; color: #39ff14; }
+  .dir:not(.open)::before { content: '▸ '; color: #4a6a4a; }
+  .tree a {
+    color: #6b9e6b;
+    text-decoration: none;
+  }
+  .tree a:hover { color: #39ff14; }
+  .tree a.active { color: #39ff14; font-weight: 600; }
+  .tree a.active::before { content: '● '; }
+  .dim { color: #4a6a4a; font-style: italic; padding: 0.15rem 0; }
+  .collapsed { opacity: 0.7; }
+  .keys {
+    margin: 1.25rem 0 0;
+    padding-top: 0.75rem;
+    border-top: 1px dashed #2a4a2a;
+    font-size: 0.65rem;
+    color: #4a6a4a;
+  }
+  .main { padding: 1.75rem 2rem 3rem; min-width: 0; }
+  @media (max-width: 768px) { .layout { grid-template-columns: 1fr; } }
+</style>

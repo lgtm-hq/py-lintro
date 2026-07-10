@@ -8,20 +8,31 @@
   ],
   "packageRules": [
     {
-      "matchDatasources": ["docker"],
-      "matchUpdateTypes": ["digest", "patch"],
+      "matchDatasources": [
+        "docker"
+      ],
+      "matchUpdateTypes": [
+        "digest",
+        "patch"
+      ],
       "automerge": true,
       "automergeType": "branch"
     },
     {
-      "matchDatasources": ["pypi"],
-      "matchUpdateTypes": ["minor"],
+      "matchDatasources": [
+        "pypi"
+      ],
+      "matchUpdateTypes": [
+        "minor"
+      ],
       "automerge": false
     },
     {
       "groupName": "pytest packages",
       "groupSlug": "pytest",
-      "matchPackageNames": ["/^pytest/"]
+      "matchPackageNames": [
+        "/^pytest/"
+      ]
     },
     {
       "matchManagers": [
@@ -34,7 +45,9 @@
         "setup-py",
         "uv"
       ],
-      "matchPackageNames": ["python"],
+      "matchPackageNames": [
+        "python"
+      ],
       "rangeStrategy": "widen"
     },
     {
@@ -56,6 +69,8 @@
         "rhysd/actionlint",
         "prettier",
         "markdownlint-cli2",
+        "@commitlint/cli",
+        "@commitlint/config-conventional",
         "oxlint",
         "oxfmt",
         "gitleaks",
@@ -66,8 +81,8 @@
         "mvdan/sh",
         "taplo",
         "tamasfe/taplo",
-        "phpstan",
-        "phpstan/phpstan",
+        "vale",
+        "errata-ai/vale",
         "astro",
         "@astrojs/check",
         "svelte-check",
@@ -77,7 +92,9 @@
     },
     {
       "description": "Regenerate _tool_versions.py when tool version sources change",
-      "matchManagers": ["custom.regex"],
+      "matchManagers": [
+        "custom.regex"
+      ],
       "matchFileNames": [
         "Dockerfile",
         "lintro/_tool_versions.py",
@@ -105,13 +122,17 @@
     ]
   },
   "lockFileMaintenance": {
-    "schedule": ["before 5am on monday"],
+    "schedule": [
+      "before 5am on monday"
+    ],
     "commitMessageAction": "update lockfile"
   },
   "customManagers": [
     {
       "customType": "regex",
-      "managerFilePatterns": ["Dockerfile"],
+      "managerFilePatterns": [
+        "Dockerfile"
+      ],
       "matchStrings": [
         "ARG HADOLINT_VERSION=(?<currentValue>[0-9]+\\.[0-9]+\\.[0-9]+)"
       ],
@@ -121,7 +142,9 @@
     },
     {
       "customType": "regex",
-      "managerFilePatterns": ["Dockerfile"],
+      "managerFilePatterns": [
+        "Dockerfile"
+      ],
       "matchStrings": [
         "ARG ACTIONLINT_VERSION=(?<currentValue>[0-9]+\\.[0-9]+\\.[0-9]+)"
       ],
@@ -131,7 +154,9 @@
     },
     {
       "customType": "regex",
-      "managerFilePatterns": ["Dockerfile"],
+      "managerFilePatterns": [
+        "Dockerfile"
+      ],
       "matchStrings": [
         "ARG BUN_VERSION=(?<currentValue>[0-9]+\\.[0-9]+\\.[0-9]+)"
       ],
@@ -141,7 +166,9 @@
     },
     {
       "customType": "regex",
-      "managerFilePatterns": ["Dockerfile"],
+      "managerFilePatterns": [
+        "Dockerfile"
+      ],
       "matchStrings": [
         "ARG UV_VERSION=(?<currentValue>[0-9]+\\.[0-9]+\\.[0-9]+)"
       ],
@@ -252,17 +279,17 @@
       "extractVersionTemplate": "^(?<version>[0-9]+\\.[0-9]+\\.[0-9]+)$"
     },
     {
-      "description": "Update phpstan version in _tool_versions.py (manifest follows via generator)",
+      "description": "Update vale version in _tool_versions.py",
       "customType": "regex",
       "managerFilePatterns": [
         "lintro/_tool_versions\\.py"
       ],
       "matchStrings": [
-        "ToolName\\.PHPSTAN:\\s*\"(?<currentValue>[0-9]+\\.[0-9]+\\.[0-9]+)\""
+        "ToolName\\.VALE:\\s*\"(?<currentValue>[0-9]+\\.[0-9]+\\.[0-9]+)\""
       ],
       "datasourceTemplate": "github-releases",
-      "packageNameTemplate": "phpstan/phpstan",
-      "extractVersionTemplate": "^(?<version>[0-9]+\\.[0-9]+\\.[0-9]+)$"
+      "packageNameTemplate": "errata-ai/vale",
+      "extractVersionTemplate": "^v(?<version>.*)$"
     },
     {
       "description": "Update cargo-audit version in _tool_versions.py",
@@ -326,6 +353,19 @@
       "datasourceTemplate": "github-tags",
       "packageNameTemplate": "rust-lang/rustfmt",
       "extractVersionTemplate": "^v(?<version>.*)$"
+    },
+    {
+      "description": "Update phpstan version in _tool_versions.py (manifest follows via generator)",
+      "customType": "regex",
+      "managerFilePatterns": [
+        "lintro/_tool_versions\\.py"
+      ],
+      "matchStrings": [
+        "ToolName\\.PHPSTAN:\\s*\"(?<currentValue>[0-9]+\\.[0-9]+\\.[0-9]+)\""
+      ],
+      "datasourceTemplate": "github-releases",
+      "packageNameTemplate": "phpstan/phpstan",
+      "extractVersionTemplate": "^(?<version>[0-9]+\\.[0-9]+\\.[0-9]+)$"
     }
   ]
 }

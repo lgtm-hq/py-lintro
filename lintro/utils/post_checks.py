@@ -179,6 +179,16 @@ def execute_post_checks(
                 )
                 continue
 
+            # Operate on an isolated per-invocation copy so concurrent runs
+            # never mutate the shared registry singleton's option state. The
+            # singleton fetched above is used only as a lookup template; all
+            # configuration below (apply_config_to_tool, set_options) and the
+            # subsequent execution target this private copy. Mirrors the
+            # isolation performed by configure_tool_for_execution() on the
+            # primary sequential and parallel execution paths.
+            tool = tool.copy_for_execution()
+            tool.reset_options()
+
             # Post-checks run with explicit headers (reuse standard header)
             if not json_output_mode:
                 logger.print_tool_header(tool_name=tool_name_lower, action=action)
