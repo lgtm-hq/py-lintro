@@ -7,6 +7,8 @@ from discovery, so the committed sample cannot be linted in place.
 
 from __future__ import annotations
 
+from typing import cast
+
 import shutil
 from pathlib import Path
 
@@ -89,7 +91,7 @@ def _stage_module(tmp_path: Path, target_body: str) -> Path:
 
 
 def test_check_detects_lint_violations(tmp_path: Path) -> None:
-    """buf lint reports naming/package violations on a bad proto.
+    """Buf lint reports naming/package violations on a bad proto.
 
     Args:
         tmp_path: Temporary directory for the staged fixture.
@@ -102,7 +104,8 @@ def test_check_detects_lint_violations(tmp_path: Path) -> None:
 
     assert_that(result.success).is_false()
     assert_that(result.issues_count).is_greater_than(0)
-    codes = {issue.code for issue in result.issues}
+    assert_that(result.issues).is_not_none()
+    codes = {issue.code for issue in result.issues}  # type: ignore[union-attr]
     assert_that(codes).contains("MESSAGE_PASCAL_CASE")
 
 
@@ -122,7 +125,7 @@ def test_check_clean_but_valid_package(tmp_path: Path) -> None:
 
 
 def test_check_detects_formatting(tmp_path: Path) -> None:
-    """buf format --diff flags an unformatted (but lint-clean) proto.
+    """Buf format --diff flags an unformatted (but lint-clean) proto.
 
     Args:
         tmp_path: Temporary directory for the staged fixture.
@@ -133,12 +136,13 @@ def test_check_detects_formatting(tmp_path: Path) -> None:
     result = plugin.check([str(tmp_path)], {})
 
     assert_that(result.success).is_false()
-    codes = {issue.code for issue in result.issues}
+    assert_that(result.issues).is_not_none()
+    codes = {issue.code for issue in result.issues}  # type: ignore[union-attr]
     assert_that(codes).contains("FORMAT")
 
 
 def test_fix_formats_in_place(tmp_path: Path) -> None:
-    """buf format --write rewrites the file and clears the FORMAT issue.
+    """Buf format --write rewrites the file and clears the FORMAT issue.
 
     Args:
         tmp_path: Temporary directory for the staged fixture.
