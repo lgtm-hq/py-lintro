@@ -41,6 +41,8 @@ downloads/
 eggs/
 .eggs/
 lib/
+# npm meta-package launcher library is source, not a Python build artifact.
+!npm/lintro/lib/
 lib64/
 parts/
 sdist/
@@ -340,3 +342,5 @@ coverage.json
 
 # act secrets file (DO NOT COMMIT)
 .secrets
+__pycache__/
+*.pyc

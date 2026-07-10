@@ -31,6 +31,7 @@ from lintro.config.review_config import (
     ReviewConfig,
 )
 from lintro.enums.config_key import ConfigKey
+from lintro.utils.path_utils import find_file_upward
 
 try:
     import yaml
@@ -58,21 +59,7 @@ def _find_config_file(start_dir: Path | None = None) -> Path | None:
     """
     current = Path(start_dir) if start_dir else Path.cwd()
     current = current.resolve()
-
-    while True:
-        for filename in LINTRO_CONFIG_FILENAMES:
-            config_path = current / filename
-            if config_path.exists():
-                return config_path
-
-        # Move up one directory
-        parent = current.parent
-        if parent == current:
-            # Reached filesystem root
-            break
-        current = parent
-
-    return None
+    return find_file_upward(current, LINTRO_CONFIG_FILENAMES)
 
 
 def _load_yaml_file(path: Path) -> dict[str, Any]:

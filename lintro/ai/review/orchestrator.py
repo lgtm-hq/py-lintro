@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import shlex
+import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from contextlib import suppress
 from dataclasses import dataclass, replace
@@ -16,6 +17,7 @@ from loguru import logger
 from lintro.ai.budget import CostBudget
 from lintro.ai.cli_schemas import cli_schema_for_review
 from lintro.ai.enums import AITransport
+from lintro.ai.exceptions import AICostBudgetExceededError, AIError
 from lintro.ai.invoke import call_ai
 from lintro.ai.json_response import parse_review_response_payload, strip_json_fences
 from lintro.ai.model_pricing import (
@@ -38,11 +40,15 @@ from lintro.ai.prompts.review import (
 from lintro.ai.registry import AIProvider
 from lintro.ai.review.chunker import chunk_review_context
 from lintro.ai.review.enums.review_strictness import ReviewStrictness
+from lintro.ai.review.errors_taxonomy import (
+    classify_provider_error,
+    resolve_cause_text,
+)
 from lintro.ai.review.exceptions import ReviewExecutionError
 from lintro.ai.review.group_labels import REL_DIRECTORY_PREFIX, REL_SINGLE_FILE
 from lintro.ai.review.models.checklist_answer import ChecklistAnswer
 from lintro.ai.review.models.review_chunk import ReviewChunk
-from lintro.ai.review.models.review_finding import ReviewFinding
+from lintro.ai.review.models.review_finding import ReviewFinding, Severity
 from lintro.ai.review.models.review_metadata import ReviewMetadata
 from lintro.ai.review.models.review_result import ReviewResult
 from lintro.ai.review.paths_registry import generate_interaction_paths
@@ -56,6 +62,7 @@ from lintro.ai.review.sensitivity import (
     filter_findings_by_policy,
     format_strictness_prompt_section,
 )
+from lintro.ai.secrets import redact_secrets, scan_for_secrets
 from lintro.ai.token_budget import estimate_tokens
 
 if TYPE_CHECKING:
@@ -77,6 +84,119 @@ __all__ = [
     "strip_json_fences",
 ]
 _PROMPT_OVERHEAD_TOKENS = 12_000
+
+
+def _redact_prompt_text(*, text: str, source: str) -> str:
+    """Redact detected secrets from prompt text before provider dispatch.
+
+    This is the single redaction choke point for every review prompt path
+    (base review, git-native, depth-2 question generation, and depth-3
+    adversarial sweep). Any diff or PR metadata destined for an external AI
+    provider must pass through here so credentials never leave the machine.
+
+    Args:
+        text: Raw text destined for an AI provider prompt.
+        source: Human-readable label for the text origin, used in log lines.
+
+    Returns:
+        The text with any detected secrets replaced by ``[REDACTED]``.
+    """
+    detected = scan_for_secrets(text)
+    if detected:
+        logger.warning(
+            "Redacted {count} potential secret(s) from review {source} "
+            "before sending to the AI provider.",
+            count=len(detected),
+            source=source,
+        )
+    return redact_secrets(text)
+
+
+def _aborted_before_completion(
+    *,
+    cause: Exception,
+    provider: BaseAIProvider,
+    chunk_index: int,
+    total_chunks: int,
+    step: str,
+    completed_chunks: int,
+) -> ReviewExecutionError:
+    """Wrap a mid-run chunk failure, preserving and surfacing the real cause.
+
+    Classifies the underlying provider exception into a canonical
+    :class:`~lintro.ai.review.errors_taxonomy.ReviewErrorKind` and logs the real
+    cause text so the true failure (e.g. depleted credits) is never lost behind
+    the generic "aborted" wrapper.
+
+    Args:
+        cause: The underlying provider or parser exception.
+        provider: Configured provider, used to resolve provider-aware kinds.
+        chunk_index: Zero-based index of the failing chunk.
+        total_chunks: Total chunks planned for the review.
+        step: Sub-step within the chunk where the failure occurred.
+        completed_chunks: Number of chunks completed before the failure.
+
+    Returns:
+        A ``ReviewExecutionError`` carrying the resolved kind and cause message.
+    """
+    kind = classify_provider_error(provider=str(provider.name), error=cause)
+    cause_message = resolve_cause_text(error=cause)
+    logger.error(
+        "Review aborted before all chunks completed on chunk {chunk} during "
+        "{step} — kind={kind}, cause: {cause}",
+        chunk=chunk_index,
+        step=step,
+        kind=kind.value,
+        cause=cause_message,
+    )
+    return ReviewExecutionError(
+        message="Review aborted before all chunks completed.",
+        chunk_index=chunk_index,
+        total_chunks=total_chunks,
+        step=step,
+        completed_chunks=completed_chunks,
+        cause_message=cause_message,
+        error_kind=kind,
+    )
+
+
+def _is_cost_cap_stop(*, exc: BaseException) -> bool:
+    """Return whether an exception represents a graceful cost-cap stop.
+
+    The cost cap can surface either as a raw
+    :class:`~lintro.ai.exceptions.AICostBudgetExceededError` (when the
+    top-of-loop ``budget.check()`` raises) or wrapped inside a
+    :class:`~lintro.ai.review.exceptions.ReviewExecutionError` (when an
+    intra-chunk check raises and the chunk failure is wrapped). Both cases are
+    detected by walking the ``__cause__`` chain so a cost-cap stop is never
+    misclassified as a genuine provider error, and vice versa.
+
+    Args:
+        exc: The exception raised while reviewing chunks.
+
+    Returns:
+        True when the underlying cause is a cost-cap exhaustion.
+    """
+    current: BaseException | None = exc
+    while current is not None:
+        if isinstance(current, AICostBudgetExceededError):
+            return True
+        current = current.__cause__
+    return False
+
+
+def _cost_cap_reason(*, cap: float | None) -> str:
+    """Build the human-readable ``stopped_reason`` for a cost-cap stop.
+
+    Args:
+        cap: The configured ``ai.max_cost_usd`` ceiling, if any.
+
+    Returns:
+        A message such as ``"cost cap ($0.50) reached"``.
+    """
+    if cap is None:
+        return "cost cap reached"
+    return f"cost cap (${cap:.2f}) reached"
 
 
 @dataclass(frozen=True, slots=True)
@@ -145,31 +265,40 @@ def _review_all_chunks(
     strictness_section: str,
     next_generated_checklist_id: int = 1,
     diff_budget: int,
+    completed_sink: list[_ChunkReviewPartial] | None = None,
 ) -> list[_ChunkReviewPartial]:
-    """Review all chunks sequentially or in parallel."""
+    """Review all chunks sequentially or in parallel.
+
+    When ``completed_sink`` is provided, each successfully reviewed chunk's
+    partial is appended to it as soon as it completes. This lets the caller
+    recover the chunks reviewed so far if the run aborts mid-way (e.g. the cost
+    cap is reached), enabling a graceful partial review instead of discarding
+    all completed work.
+    """
     if len(chunks) <= 1:
-        return [
-            _review_chunk_with_progress(
-                chunk_index=0,
-                chunk=chunks[0],
-                context=context,
-                provider=provider,
-                ai_config=ai_config,
-                depth=depth,
-                checklist_text=checklist_text,
-                checklist_count=len(checklist_items),
-                classifications=classifications,
-                lint_results=lint_results,
-                budget=budget,
-                progress=progress,
-                total_chunks=1,
-                repo_root=repo_root,
-                use_one_shot=use_one_shot,
-                strictness_section=strictness_section,
-                next_generated_checklist_id=next_generated_checklist_id,
-                diff_budget=diff_budget,
-            ),
-        ]
+        single = _review_chunk_with_progress(
+            chunk_index=0,
+            chunk=chunks[0],
+            context=context,
+            provider=provider,
+            ai_config=ai_config,
+            depth=depth,
+            checklist_text=checklist_text,
+            checklist_count=len(checklist_items),
+            classifications=classifications,
+            lint_results=lint_results,
+            budget=budget,
+            progress=progress,
+            total_chunks=1,
+            repo_root=repo_root,
+            use_one_shot=use_one_shot,
+            strictness_section=strictness_section,
+            next_generated_checklist_id=next_generated_checklist_id,
+            diff_budget=diff_budget,
+        )
+        if completed_sink is not None:
+            completed_sink.append(single)
+        return [single]
 
     if depth >= 2:
         sequential_partials: list[_ChunkReviewPartial] = []
@@ -201,6 +330,11 @@ def _review_all_chunks(
                     diff_budget=diff_budget,
                 )
             except Exception as exc:
+                # A cost-cap stop is an expected graceful halt, not a chunk
+                # failure: re-raise it raw (no error-level "aborted" log, no
+                # on_error) so run_review can finalize a partial cleanly.
+                if _is_cost_cap_stop(exc=exc):
+                    raise
                 progress.on_error(
                     chunk_index=chunk_index,
                     total_chunks=len(chunks),
@@ -208,15 +342,17 @@ def _review_all_chunks(
                     completed_chunks=chunk_index,
                     error=exc,
                 )
-                raise ReviewExecutionError(
-                    message="Review aborted before all chunks completed.",
+                raise _aborted_before_completion(
+                    cause=exc,
+                    provider=provider,
                     chunk_index=chunk_index,
                     total_chunks=len(chunks),
                     step="reviewing",
                     completed_chunks=chunk_index,
-                    cause_message=str(exc),
                 ) from exc
             sequential_partials.append(partial)
+            if completed_sink is not None:
+                completed_sink.append(partial)
             progress.on_chunk_done(chunk_index=chunk_index)
         return sequential_partials
 
@@ -254,21 +390,31 @@ def _review_all_chunks(
         for future in as_completed(futures):
             chunk_index = futures[future]
             try:
-                partials[chunk_index] = future.result()
+                chunk_partial = future.result()
+                partials[chunk_index] = chunk_partial
+                if completed_sink is not None:
+                    completed_sink.append(chunk_partial)
                 completed += 1
             except ReviewExecutionError:
                 for pending in futures:
                     pending.cancel()
                 raise
+            except AICostBudgetExceededError:
+                # Expected graceful stop from a top-of-chunk budget check:
+                # cancel remaining work and re-raise raw so run_review finalizes
+                # a partial rather than treating it as an aborting error.
+                for pending in futures:
+                    pending.cancel()
+                raise
             except Exception as exc:
                 if first_error is None:
-                    first_error = ReviewExecutionError(
-                        message="Review aborted before all chunks completed.",
+                    first_error = _aborted_before_completion(
+                        cause=exc,
+                        provider=provider,
                         chunk_index=chunk_index,
                         total_chunks=len(chunks),
                         step="reviewing",
                         completed_chunks=completed,
-                        cause_message=str(exc),
                     )
                 for pending in futures:
                     pending.cancel()
@@ -325,6 +471,10 @@ def _review_chunk_with_progress(
             diff_budget=diff_budget,
         )
     except Exception as exc:
+        # A cost-cap stop is an expected graceful halt, not a chunk failure:
+        # re-raise it raw so run_review can finalize a partial cleanly.
+        if _is_cost_cap_stop(exc=exc):
+            raise
         step_tracker = progress if isinstance(progress, StepTrackingProgress) else None
         last_step = step_tracker.last_step if step_tracker else "reviewing"
         progress.on_error(
@@ -334,13 +484,13 @@ def _review_chunk_with_progress(
             completed_chunks=chunk_index,
             error=exc,
         )
-        raise ReviewExecutionError(
-            message="Review aborted before all chunks completed.",
+        raise _aborted_before_completion(
+            cause=exc,
+            provider=provider,
             chunk_index=chunk_index,
             total_chunks=total_chunks,
             step=last_step,
             completed_chunks=chunk_index,
-            cause_message=str(exc),
         ) from exc
     progress.on_chunk_done(chunk_index=chunk_index)
     return partial
@@ -384,6 +534,11 @@ def run_review(
 
     Raises:
         ValueError: If ``depth`` is outside the allowed range 1-3.
+        AIError: When the review fails for a non-recoverable reason (e.g.
+            provider authentication or a genuine provider error). A cost-cap
+            stop is handled internally and returned as a partial result instead.
+        ReviewExecutionError: When a chunk fails mid-run for a reason other than
+            the cost cap.
     """
     if depth < 1 or depth > 3:
         raise ValueError(f"depth must be between 1 and 3, got {depth}")
@@ -447,9 +602,13 @@ def run_review(
     tracker.on_start(total_chunks=len(chunks), depth=depth)
     total_findings = 0
     completed = False
+    partial = False
+    stopped_reason = ""
+    collected: list[_ChunkReviewPartial] = []
     partials: list[_ChunkReviewPartial] = []
     merged = merge_review_results(partials=partials)
     filtered_findings: tuple[ReviewFinding, ...] = ()
+    started_at = time.monotonic()
     try:
         partials = _review_all_chunks(
             chunks=chunks,
@@ -471,14 +630,42 @@ def run_review(
                 _max_checklist_id(checklist_items=checklist_items) + 1
             ),
             diff_budget=diff_budget,
+            completed_sink=collected,
         )
-        merged = merge_review_results(partials=partials)
-        filtered_findings = filter_findings_by_policy(
-            findings=merged.findings,
+        merged, filtered_findings, total_findings = _finalize_partials(
+            partials=partials,
             policy=review_sensitivity,
         )
-        total_findings = len(filtered_findings)
         completed = True
+    except (AIError, ReviewExecutionError) as exc:
+        # A graceful partial review: the cost cap was reached mid-run. Keep the
+        # chunks reviewed so far instead of discarding all completed work (see
+        # issue #1094). This is an EXPECTED stop, not a failure — it is detected
+        # from the actual raised exception (a cost-cap exception, possibly
+        # wrapped in a ReviewExecutionError), never inferred from residual budget
+        # state. Any other failure (auth, provider, parser) must propagate so
+        # callers surface a real error via the #1101 taxonomy. When the cap trips
+        # before ANY chunk completes, ``collected`` is empty and the partial is
+        # empty-but-actionable rather than a generic abort.
+        if not _is_cost_cap_stop(exc=exc):
+            raise
+        cap = budget.max_cost_usd
+        partials = list(collected)
+        partial = True
+        stopped_reason = _cost_cap_reason(cap=cap)
+        merged, filtered_findings, total_findings = _finalize_partials(
+            partials=partials,
+            policy=review_sensitivity,
+        )
+        completed = True
+        logger.warning(
+            "Review stopped early — {reason} after reviewing {n} of {m} "
+            "chunks. Raise ai.max_cost_usd or narrow --path to review the rest.",
+            reason=stopped_reason,
+            n=len(partials),
+            m=len(chunks),
+            cause=str(exc),
+        )
     finally:
         if use_cursor_durable and hasattr(provider, "end_durable_session"):
             provider.end_durable_session()
@@ -487,9 +674,13 @@ def run_review(
                 tracker.on_complete(total_findings=total_findings)
             else:
                 tracker.on_abort()
-    total_input = sum(partial.input_tokens for partial in partials)
-    total_output = sum(partial.output_tokens for partial in partials)
-    total_cost = sum(partial.cost_estimate for partial in partials)
+
+    duration_seconds = time.monotonic() - started_at
+
+    total_input = sum(item.input_tokens for item in partials)
+    total_output = sum(item.output_tokens for item in partials)
+    total_cost = sum(item.cost_estimate for item in partials)
+    chunks_reviewed = len(partials)
 
     metadata = ReviewMetadata(
         model=provider.model_name,
@@ -498,7 +689,7 @@ def run_review(
         depth=depth,
         strictness=review_sensitivity.strictness.value,
         chunks_total=len(chunks),
-        chunks_current=len(chunks),
+        chunks_current=chunks_reviewed,
         files_reviewed=len(context.changed_files),
         files_total=len(context.changed_files),
         checklist_items=len(checklist_items),
@@ -511,6 +702,11 @@ def run_review(
         base_ref=context.base_ref,
         head_ref=context.head_ref,
         timestamp=datetime.now(tz=UTC).isoformat(),
+        token_usage_estimated=ai_config.transport == AITransport.CLI,
+        partial=partial,
+        chunks_reviewed=chunks_reviewed,
+        stopped_reason=stopped_reason,
+        duration_seconds=duration_seconds,
     )
 
     return ReviewResult(
@@ -519,6 +715,25 @@ def run_review(
         checklist=merged.checklist,
         findings=filtered_findings,
     )
+
+
+def _finalize_partials(
+    *,
+    partials: list[_ChunkReviewPartial],
+    policy: ReviewSensitivityPolicy,
+) -> tuple[ReviewResult, tuple[ReviewFinding, ...], int]:
+    """Merge partials and apply the sensitivity policy.
+
+    Args:
+        partials: Completed chunk partials to merge.
+        policy: Sensitivity policy used to filter findings.
+
+    Returns:
+        Tuple of ``(merged_result, filtered_findings, finding_count)``.
+    """
+    merged = merge_review_results(partials=partials)
+    filtered = filter_findings_by_policy(findings=merged.findings, policy=policy)
+    return merged, filtered, len(filtered)
 
 
 def build_review_prompt(
@@ -548,7 +763,10 @@ def build_review_prompt(
         Tuple of (system_prompt, user_prompt).
     """
     pr_title = context.pr_metadata.title if context.pr_metadata else "Local changes"
+    pr_title = _redact_prompt_text(text=pr_title, source="PR title")
     pr_summary = context.pr_metadata.body if context.pr_metadata else "(no PR summary)"
+    pr_summary = _redact_prompt_text(text=pr_summary, source="PR metadata")
+    redacted_diff = _redact_prompt_text(text=chunk.diff, source="diff")
     changed_files = [file for file in context.changed_files if file.path in chunk.files]
     combined_checklist = checklist_text
     if extra_checklist.strip():
@@ -569,7 +787,7 @@ def build_review_prompt(
         interaction_paths=interaction_paths,
         checklist_count=checklist_count,
         checklist=combined_checklist,
-        diff=chunk.diff,
+        diff=redacted_diff,
         lint_results_section=format_lint_results_section(digest=lint_results),
         strictness_section=strictness_section,
         output_schema=REVIEW_OUTPUT_SCHEMA,
@@ -588,8 +806,16 @@ def build_git_native_review_prompt(
     extra_checklist: str = "",
     strictness_section: str = "",
     embed_diff: bool = False,
+    allow_unredacted_git_native: bool = False,
 ) -> tuple[str, str]:
     """Build git-native prompts for CLI-backed review (all providers).
+
+    Redaction is a security invariant and wins by default. When ``embed_diff``
+    is False the builder would normally emit a delegated ``git diff`` command,
+    which lets the provider produce the diff itself and thus bypasses lintro's
+    secret-redaction choke point. Unless ``allow_unredacted_git_native`` is
+    explicitly True, the builder instead falls back to embedding the redacted
+    diff so no unredacted diff can reach the provider.
 
     Args:
         chunk: Semantic diff chunk to review.
@@ -601,12 +827,22 @@ def build_git_native_review_prompt(
         extra_checklist: Additional generated checklist rows for depth 2.
         strictness_section: Sensitivity instructions for the review pass.
         embed_diff: When True, inline the diff instead of agentic git commands.
+        allow_unredacted_git_native: Explicit opt-out permitting the delegated
+            ``git diff`` command path (which bypasses secret redaction) when
+            ``embed_diff`` is False. Defaults to False so redaction always
+            wins and the diff is embedded and redacted instead.
 
     Returns:
         Tuple of (system_prompt, user_prompt).
     """
+    # Redaction wins by default: never delegate diff retrieval to the provider
+    # unless the caller has explicitly opted out of the redaction guarantee.
+    if not embed_diff and not allow_unredacted_git_native:
+        embed_diff = True
     pr_title = context.pr_metadata.title if context.pr_metadata else "Local changes"
+    pr_title = _redact_prompt_text(text=pr_title, source="PR title")
     pr_summary = context.pr_metadata.body if context.pr_metadata else "(no PR summary)"
+    pr_summary = _redact_prompt_text(text=pr_summary, source="PR metadata")
     changed_files = [file for file in context.changed_files if file.path in chunk.files]
     combined_checklist = checklist_text
     if extra_checklist.strip():
@@ -617,7 +853,9 @@ def build_git_native_review_prompt(
 
     git_diff_paths = " ".join(shlex.quote(path) for path in chunk.files)
     if embed_diff:
-        diff_section = REVIEW_GIT_NATIVE_DIFF_INLINE.format(diff=chunk.diff)
+        diff_section = REVIEW_GIT_NATIVE_DIFF_INLINE.format(
+            diff=_redact_prompt_text(text=chunk.diff, source="diff"),
+        )
     elif context.head_ref == "WORKTREE":
         diff_section = REVIEW_GIT_NATIVE_DIFF_WORKTREE_COMMAND.format(
             base_ref=context.base_ref,
@@ -798,6 +1036,9 @@ def _review_chunk(
         )
 
     tracker.on_step(chunk_index=chunk_index, step="reviewing")
+    # Gate before the main provider call so intra-chunk (depth-2/3) work
+    # cannot overshoot the budget between the per-chunk checks.
+    budget.check()
     use_git_native = ai_config.transport == AITransport.CLI
     if use_git_native:
         embed_diff = estimate_tokens(chunk.diff) <= max(diff_budget, 1)
@@ -811,6 +1052,7 @@ def _review_chunk(
             extra_checklist=extra_checklist,
             strictness_section=strictness_section,
             embed_diff=embed_diff,
+            allow_unredacted_git_native=ai_config.review_allow_unredacted_git_native,
         )
     else:
         system_prompt, user_prompt = build_review_prompt(
@@ -884,9 +1126,10 @@ def _generate_extra_checklist(
         files=[file for file in context.changed_files if file.path in chunk.files],
     )
     prompt = REVIEW_GENERATE_QUESTIONS_TEMPLATE.format(
-        diff=chunk.diff,
+        diff=_redact_prompt_text(text=chunk.diff, source="diff"),
         changed_files=changed_files,
     )
+    budget.check()
     response = call_ai(
         provider=provider,
         ai_config=ai_config,
@@ -955,8 +1198,9 @@ def _run_adversarial_pass(
     )
     prompt = REVIEW_ADVERSARIAL_SWEEP_TEMPLATE.format(
         prior_findings_json=prior_json,
-        diff=chunk.diff,
+        diff=_redact_prompt_text(text=chunk.diff, source="diff"),
     )
+    budget.check()
     response = call_ai(
         provider=provider,
         ai_config=ai_config,
@@ -1080,7 +1324,7 @@ def _parse_findings(*, raw_findings: object) -> tuple[ReviewFinding, ...]:
             )
         findings.append(
             ReviewFinding(
-                severity=str(item.get("severity", "P3")),
+                severity=_normalize_severity(raw=item.get("severity", "P3")),
                 category=str(item.get("category", "logic-bug")),
                 file=str(item.get("file", "")),
                 line=line,
@@ -1090,6 +1334,7 @@ def _parse_findings(*, raw_findings: object) -> tuple[ReviewFinding, ...]:
                 fix=str(item.get("fix", "")),
                 confidence=str(item.get("confidence", "medium")),
                 checklist_ids=checklist_ids,
+                suggested_code=str(item.get("suggested_code", "")),
             ),
         )
     return tuple(findings)
@@ -1127,6 +1372,68 @@ def _max_checklist_id(*, checklist_items: list[ChecklistItem]) -> int:
     return int(max(item.id for item in checklist_items))
 
 
+_SEVERITY_SYNONYMS: dict[str, Severity] = {
+    "CRITICAL": Severity.P1,
+    "BLOCKER": Severity.P1,
+    "BLOCKING": Severity.P1,
+    "HIGH": Severity.P1,
+    "SEVERE": Severity.P1,
+    "ERROR": Severity.P1,
+    "MAJOR": Severity.P2,
+    "MEDIUM": Severity.P2,
+    "MODERATE": Severity.P2,
+    "WARNING": Severity.P2,
+    "WARN": Severity.P2,
+    "MINOR": Severity.P3,
+    "LOW": Severity.P3,
+    "TRIVIAL": Severity.P3,
+    "INFO": Severity.P3,
+    "NOTE": Severity.P3,
+}
+
+
+def _normalize_severity(*, raw: object) -> Severity:
+    """Normalize an unvalidated model severity value to a ``Severity`` member.
+
+    Strips surrounding whitespace and uppercases the value before matching
+    against the canonical ``P1``/``P2``/``P3`` labels. When the value is not a
+    canonical label, it is matched against a table of common synonyms so that
+    blocking words like ``critical`` map to ``P1`` rather than being downgraded.
+    A truly unknown value fails closed to ``Severity.P1`` and is logged: since
+    the exit gate only trips on ``P1``, an unrecognized label (e.g. ``fatal``)
+    must be treated as blocking so malformed model output can never silently
+    pass the gate. The synonym table already captures the benign labels, so the
+    fallback is deliberately conservative.
+
+    Synonym mapping:
+        P1: critical, blocker, blocking, high, severe, error.
+        P2: major, medium, moderate, warning, warn.
+        P3: minor, low, trivial, info, note.
+
+    Args:
+        raw: Raw severity value from a parsed model response.
+
+    Returns:
+        The matching ``Severity`` member, a synonym-mapped member, or
+        ``Severity.P1`` (fail-closed) when the value is unrecognized.
+    """
+    normalized = str(raw).strip().upper()
+    try:
+        return Severity(normalized)
+    except ValueError:
+        pass
+
+    synonym = _SEVERITY_SYNONYMS.get(normalized)
+    if synonym is not None:
+        return synonym
+
+    logger.warning(
+        "Unknown finding severity {raw!r}; failing closed to P1.",
+        raw=raw,
+    )
+    return Severity.P1
+
+
 def _normalize_checklist_answer_value(*, answer: str) -> str:
     """Normalize checklist answers to the yes/no contract."""
     normalized = answer.strip().lower()
@@ -1136,11 +1443,24 @@ def _normalize_checklist_answer_value(*, answer: str) -> str:
 
 
 def _checklist_answer_strength(*, answer: ChecklistAnswer) -> int:
-    """Score checklist answers for merge precedence."""
+    """Score checklist answers for merge precedence.
+
+    Per epic #991's v3.1 contract, every ``yes`` must map to a finding, so a
+    ``yes`` from any chunk strictly wins over a ``no`` regardless of evidence.
+    Evidence only breaks ties between two answers of the same polarity. This
+    prevents an evidence-backed ``no`` from one chunk silently overturning a
+    bare ``yes`` from another and dropping the finding non-deterministically.
+
+    Args:
+        answer: Checklist answer to score.
+
+    Returns:
+        Strength score: yes-with-evidence 4, yes 3, no-with-evidence 2, no 1.
+    """
     has_evidence = bool(answer.evidence.strip())
     if answer.answer == "yes":
-        return 4 if has_evidence else 2
-    return 3 if has_evidence else 1
+        return 4 if has_evidence else 3
+    return 2 if has_evidence else 1
 
 
 def _pick_preferred_checklist_answer(

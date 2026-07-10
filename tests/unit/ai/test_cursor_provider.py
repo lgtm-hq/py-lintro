@@ -9,6 +9,7 @@ from unittest.mock import patch
 import pytest
 from assertpy import assert_that
 
+from lintro.ai.budget import CostBudget
 from lintro.ai.exceptions import (
     AIAuthenticationError,
     AINotAvailableError,
@@ -296,8 +297,8 @@ def test_complete_uses_minimum_timeout_for_agent(provider):
         )
 
 
-def test_complete_cost_estimate_is_zero(provider):
-    """Cursor subscription — per-token cost is always zero."""
+def test_complete_estimates_nonzero_cost_from_cli_usage(provider):
+    """Cursor prices reported usage with a non-zero floor for the budget."""
     stdout = _cli_json(result="ok", input_tokens=5000, output_tokens=2000)
     with patch("subprocess.run") as mock_run:
         mock_run.return_value = subprocess.CompletedProcess(
@@ -307,7 +308,76 @@ def test_complete_cost_estimate_is_zero(provider):
             stderr="",
         )
         resp = provider.complete("Hello")
-    assert_that(resp.cost_estimate).is_equal_to(0.0)
+    assert_that(resp.input_tokens).is_equal_to(5000)
+    assert_that(resp.output_tokens).is_equal_to(2000)
+    assert_that(resp.cost_estimate).is_greater_than(0.0)
+
+
+def test_complete_estimates_tokens_when_cli_omits_usage(provider):
+    """When the CLI omits usage, tokens are estimated locally from text."""
+    stdout = _cli_json(
+        result="a fairly long review answer",
+        input_tokens=0,
+        output_tokens=0,
+    )
+    with patch("subprocess.run") as mock_run:
+        mock_run.return_value = subprocess.CompletedProcess(
+            args=[],
+            returncode=0,
+            stdout=stdout,
+            stderr="",
+        )
+        resp = provider.complete("Hello there, please review this code carefully")
+    assert_that(resp.input_tokens).is_greater_than(0)
+    assert_that(resp.output_tokens).is_greater_than(0)
+    assert_that(resp.cost_estimate).is_greater_than(0.0)
+
+
+def test_cursor_cost_accrues_into_budget(provider):
+    """A Cursor response's estimated cost is recorded by CostBudget."""
+    stdout = _cli_json(result="ok", input_tokens=5000, output_tokens=2000)
+    budget = CostBudget(max_cost_usd=1.0)
+    with patch("subprocess.run") as mock_run:
+        mock_run.return_value = subprocess.CompletedProcess(
+            args=[],
+            returncode=0,
+            stdout=stdout,
+            stderr="",
+        )
+        resp = provider.complete("Hello")
+    budget.record(resp.cost_estimate)
+    assert_that(budget.spent).is_greater_than(0.0)
+
+
+def test_complete_omits_trust_flag_by_default(provider):
+    """The '--trust' flag is absent unless workspace trust is opted in."""
+    stdout = _cli_json(result="ok")
+    with patch("subprocess.run") as mock_run:
+        mock_run.return_value = subprocess.CompletedProcess(
+            args=[],
+            returncode=0,
+            stdout=stdout,
+            stderr="",
+        )
+        provider.complete("Hello", repo_root="/tmp/repo")
+    cmd = mock_run.call_args.args[0]
+    assert_that(cmd).does_not_contain("--trust")
+
+
+def test_complete_includes_trust_flag_when_opted_in(_mock_agent_on_path):
+    """The '--trust' flag is present only when the opt-in is set."""
+    trusting = CursorProvider(cursor_trust_workspace=True)
+    stdout = _cli_json(result="ok")
+    with patch("subprocess.run") as mock_run:
+        mock_run.return_value = subprocess.CompletedProcess(
+            args=[],
+            returncode=0,
+            stdout=stdout,
+            stderr="",
+        )
+        trusting.complete("Hello", repo_root="/tmp/repo")
+    cmd = mock_run.call_args.args[0]
+    assert_that(cmd).contains("--trust")
 
 
 # -- CursorProvider._extract_json_object() ---------------------------------

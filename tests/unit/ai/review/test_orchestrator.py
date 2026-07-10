@@ -11,16 +11,20 @@ from unittest.mock import MagicMock, patch
 import pytest
 from assertpy import assert_that
 
+from lintro.ai.budget import CostBudget
 from lintro.ai.config import AIConfig
 from lintro.ai.enums import AITransport
+from lintro.ai.exceptions import AIError
 from lintro.ai.providers.response import AIResponse
 from lintro.ai.review.enums.review_category import ReviewCategory
 from lintro.ai.review.exceptions import ReviewExecutionError
+from lintro.ai.review.group_labels import REL_SINGLE_FILE
 from lintro.ai.review.models.changed_file import ChangedFile
 from lintro.ai.review.models.checklist_item import ChecklistItem
 from lintro.ai.review.models.review_chunk import ReviewChunk
 from lintro.ai.review.models.review_context import ReviewContext
 from lintro.ai.review.orchestrator import (
+    _review_chunk,
     build_git_native_review_prompt,
     parse_review_response,
     resolve_review_chunks,
@@ -86,6 +90,224 @@ def test_parse_review_response_validates_required_keys() -> None:
 
     assert_that(payload["summary"]).contains("Merge")
     assert_that(payload["checklist"]).is_length(1)
+
+
+def _one_file_context() -> ReviewContext:
+    """Build a single-file review context."""
+    return ReviewContext(
+        base_ref="main",
+        head_ref="feature",
+        changed_files=[
+            ChangedFile(
+                path="src/main.py",
+                status="modified",
+                additions=1,
+                deletions=0,
+            ),
+        ],
+        unified_diff="diff --git a/src/main.py b/src/main.py\n+change",
+        pr_metadata=None,
+    )
+
+
+def test_run_review_marks_cli_transport_tokens_estimated() -> None:
+    """CLI transport flags token usage as locally estimated in metadata."""
+    provider = _mock_provider(content=_sample_response_json())
+
+    with patch(
+        "lintro.ai.review.orchestrator.call_ai",
+        side_effect=lambda *, provider, user_prompt, system_prompt=None, **kwargs: provider.complete(
+            user_prompt,
+            system=system_prompt,
+            max_tokens=kwargs.get("max_tokens", 1024),
+        ),
+    ):
+        result = run_review(
+            _one_file_context(),
+            provider=provider,
+            ai_config=AIConfig(enabled=True, transport=AITransport.CLI),
+            depth=1,
+            checklist_items=[],
+            checklist_text="1. [logic-bug] Example?",
+            classifications=[],
+        )
+
+    assert_that(result.metadata.token_usage_estimated).is_true()
+    assert_that(result.metadata.partial).is_false()
+    assert_that(result.metadata.chunks_reviewed).is_equal_to(
+        result.metadata.chunks_total,
+    )
+
+
+def test_run_review_returns_partial_on_cost_cap() -> None:
+    """Cost cap mid-run finalizes a partial review instead of erroring."""
+    provider = _mock_provider(content=_sample_response_json())
+    chunks = [
+        ReviewChunk(
+            id=1,
+            files=["a.py"],
+            diff="diff --git a/a.py b/a.py\n+x",
+            relationship=REL_SINGLE_FILE,
+        ),
+        ReviewChunk(
+            id=2,
+            files=["b.py"],
+            diff="diff --git a/b.py b/b.py\n+y",
+            relationship=REL_SINGLE_FILE,
+        ),
+    ]
+
+    def _recording_call_ai(
+        *,
+        provider,
+        user_prompt,
+        budget=None,
+        **kwargs,
+    ):  # noqa: ANN001, ANN003, ANN202
+        response = provider.complete(
+            user_prompt,
+            system=kwargs.get("system_prompt"),
+            max_tokens=kwargs.get("max_tokens", 1024),
+        )
+        if budget is not None:
+            budget.record(response.cost_estimate)
+        return response
+
+    with (
+        patch(
+            "lintro.ai.review.orchestrator.resolve_review_chunks",
+            return_value=chunks,
+        ),
+        patch(
+            "lintro.ai.review.orchestrator.call_ai",
+            side_effect=_recording_call_ai,
+        ),
+    ):
+        result = run_review(
+            _one_file_context(),
+            provider=provider,
+            ai_config=AIConfig(
+                enabled=True,
+                transport=AITransport.API,
+                max_cost_usd=0.01,
+            ),
+            depth=1,
+            checklist_items=[],
+            checklist_text="1. [logic-bug] Example?",
+            classifications=[],
+        )
+
+    assert_that(result.metadata.partial).is_true()
+    assert_that(result.metadata.stopped_reason).is_equal_to("cost cap ($0.01) reached")
+    assert_that(result.metadata.chunks_reviewed).is_equal_to(1)
+    assert_that(result.metadata.chunks_total).is_equal_to(2)
+    assert_that(result.findings).is_not_empty()
+
+
+def test_run_review_partial_when_cost_cap_before_any_chunk() -> None:
+    """Cap tripping before any chunk completes returns an actionable partial.
+
+    A depth-2 chunk overspends the cap on its question-generation call, so the
+    main review budget check raises before the chunk produces a partial. The
+    result must be a clean, empty partial (``partial=True``, zero chunks
+    reviewed) rather than the generic abort error.
+    """
+    provider = _mock_provider(content=_sample_response_json())
+
+    def _recording_call_ai(
+        *,
+        provider,
+        budget=None,
+        **kwargs,
+    ):  # noqa: ANN001, ANN003, ANN202
+        response = provider.complete(
+            kwargs.get("user_prompt", ""),
+            system=kwargs.get("system_prompt"),
+            max_tokens=kwargs.get("max_tokens", 1024),
+        )
+        if budget is not None:
+            budget.record(response.cost_estimate)
+        return response
+
+    with patch(
+        "lintro.ai.review.orchestrator.call_ai",
+        side_effect=_recording_call_ai,
+    ):
+        result = run_review(
+            _one_file_context(),
+            provider=provider,
+            ai_config=AIConfig(
+                enabled=True,
+                transport=AITransport.API,
+                max_cost_usd=0.005,
+            ),
+            depth=2,
+            checklist_items=[],
+            checklist_text="1. [logic-bug] Example?",
+            classifications=[],
+        )
+
+    assert_that(result.metadata.partial).is_true()
+    assert_that(result.metadata.chunks_reviewed).is_equal_to(0)
+    assert_that(result.metadata.stopped_reason).contains("cost cap")
+    assert_that(result.findings).is_empty()
+
+
+def test_run_review_raises_on_genuine_provider_error_mid_review() -> None:
+    """A real provider error mid-review still raises, never a silent partial."""
+    provider = _mock_provider(content=_sample_response_json())
+    chunks = [
+        ReviewChunk(
+            id=1,
+            files=["a.py"],
+            diff="diff --git a/a.py b/a.py\n+x",
+            relationship=REL_SINGLE_FILE,
+        ),
+        ReviewChunk(
+            id=2,
+            files=["b.py"],
+            diff="diff --git a/b.py b/b.py\n+y",
+            relationship=REL_SINGLE_FILE,
+        ),
+    ]
+    seen: list[str] = []
+
+    def _flaky_call_ai(
+        *,
+        provider,
+        budget=None,
+        **kwargs,
+    ):  # noqa: ANN001, ANN003, ANN202
+        del budget
+        seen.append("call")
+        if len(seen) >= 2:
+            raise AIError("anthropic: overloaded_error")
+        return provider.complete(
+            kwargs.get("user_prompt", ""),
+            system=kwargs.get("system_prompt"),
+            max_tokens=kwargs.get("max_tokens", 1024),
+        )
+
+    with (
+        patch(
+            "lintro.ai.review.orchestrator.resolve_review_chunks",
+            return_value=chunks,
+        ),
+        patch(
+            "lintro.ai.review.orchestrator.call_ai",
+            side_effect=_flaky_call_ai,
+        ),
+        pytest.raises(AIError),
+    ):
+        run_review(
+            _one_file_context(),
+            provider=provider,
+            ai_config=AIConfig(enabled=True, transport=AITransport.API),
+            depth=1,
+            checklist_items=[],
+            checklist_text="1. [logic-bug] Example?",
+            classifications=[],
+        )
 
 
 def test_run_review_depth1_returns_review_result() -> None:
@@ -224,6 +446,128 @@ def test_run_review_depth2_calls_provider_twice() -> None:
     assert_that(result.metadata.token_usage["prompt"]).is_equal_to(150)
     assert_that(result.metadata.token_usage["completion"]).is_equal_to(70)
     assert_that(result.metadata.cost_estimate_usd).is_equal_to(0.015)
+
+
+def _single_chunk() -> ReviewChunk:
+    """Build a one-file review chunk for direct ``_review_chunk`` tests."""
+    return ReviewChunk(
+        id=1,
+        files=["src/main.py"],
+        diff="diff --git a/src/main.py b/src/main.py\n+change",
+        relationship=REL_SINGLE_FILE,
+    )
+
+
+def _single_file_context() -> ReviewContext:
+    """Build a minimal review context for direct ``_review_chunk`` tests."""
+    return ReviewContext(
+        base_ref="main",
+        head_ref="feature",
+        changed_files=[
+            ChangedFile(
+                path="src/main.py",
+                status="modified",
+                additions=1,
+                deletions=0,
+            ),
+        ],
+        unified_diff="diff --git a/src/main.py b/src/main.py\n+change",
+        pr_metadata=None,
+    )
+
+
+def test_review_chunk_checks_budget_before_each_provider_call() -> None:
+    """Depth-3 review checks the budget before every intra-chunk call."""
+    events: list[str] = []
+    budget = CostBudget(max_cost_usd=None)
+    original_check = budget.check
+
+    def _record_check() -> None:
+        events.append("check")
+        original_check()
+
+    def _fake_call_ai(*, budget: CostBudget, **kwargs: object) -> AIResponse:
+        del budget, kwargs
+        events.append("call")
+        return AIResponse(
+            content=_sample_response_json(include_finding=False),
+            model="auto",
+            input_tokens=100,
+            output_tokens=50,
+            cost_estimate=0.01,
+            provider="cursor",
+        )
+
+    with (
+        patch.object(budget, "check", side_effect=_record_check),
+        patch(
+            "lintro.ai.review.orchestrator.call_ai",
+            side_effect=_fake_call_ai,
+        ),
+    ):
+        _review_chunk(
+            chunk=_single_chunk(),
+            context=_single_file_context(),
+            provider=MagicMock(),
+            ai_config=AIConfig(enabled=True, transport=AITransport.API),
+            depth=3,
+            checklist_text="1. [logic-bug] Example?",
+            checklist_count=1,
+            next_generated_checklist_id=100,
+            classifications=[],
+            lint_results=None,
+            budget=budget,
+        )
+
+    # Three provider calls (extra checklist, main review, adversarial), each
+    # preceded by a budget check.
+    assert_that(events.count("call")).is_equal_to(3)
+    for index, event in enumerate(events):
+        if event == "call":
+            assert_that(events[index - 1]).is_equal_to("check")
+
+
+def test_review_chunk_budget_stops_runaway_calls() -> None:
+    """An exhausted budget halts the chunk before overspending on more calls."""
+    calls: list[str] = []
+    budget = CostBudget(max_cost_usd=0.01)
+
+    def _fake_call_ai(*, budget: CostBudget, **kwargs: object) -> AIResponse:
+        del kwargs
+        calls.append("call")
+        response = AIResponse(
+            content=_sample_response_json(include_finding=False),
+            model="auto",
+            input_tokens=100,
+            output_tokens=50,
+            cost_estimate=0.02,
+            provider="cursor",
+        )
+        budget.record(response.cost_estimate)
+        return response
+
+    with patch(
+        "lintro.ai.review.orchestrator.call_ai",
+        side_effect=_fake_call_ai,
+    ):
+        with pytest.raises(AIError):
+            _review_chunk(
+                chunk=_single_chunk(),
+                context=_single_file_context(),
+                provider=MagicMock(),
+                ai_config=AIConfig(enabled=True, transport=AITransport.API),
+                depth=3,
+                checklist_text="1. [logic-bug] Example?",
+                checklist_count=1,
+                next_generated_checklist_id=100,
+                classifications=[],
+                lint_results=None,
+                budget=budget,
+            )
+
+    # The first depth-2 call overspends the $0.01 cap; the budget check gates
+    # the next call before a runaway depth-3 sweep can fire.
+    assert_that(len(calls)).is_less_than(3)
 
 
 def test_resolve_review_chunks_uses_fast_path_for_small_diff(
@@ -550,7 +894,12 @@ def test_build_git_native_review_prompt_embeds_diff_when_requested(
 def test_build_git_native_review_prompt_uses_git_command_when_not_embedded(
     sample_review_context: ReviewContext,
 ) -> None:
-    """Large diffs keep agentic git diff instructions."""
+    """Large diffs keep agentic git diff instructions under the opt-out.
+
+    The delegated ``git diff`` command bypasses secret redaction, so it is
+    only emitted when the caller explicitly opts out of the redaction
+    guarantee via ``allow_unredacted_git_native``.
+    """
     chunk = ReviewChunk(
         id=1,
         files=["src/lib/math.py"],
@@ -566,6 +915,7 @@ def test_build_git_native_review_prompt_uses_git_command_when_not_embedded(
         checklist_count=1,
         interaction_paths="(none)",
         embed_diff=False,
+        allow_unredacted_git_native=True,
     )
 
     assert_that(user_prompt).contains("git diff")

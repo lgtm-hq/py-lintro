@@ -1,0 +1,29 @@
+{
+  "name": "@lgtm-hq/lintro-linux-x64",
+  "version": "0.0.0-dev",
+  "description": "Linux x86_64 binary for lintro. Installed automatically by the `lintro` package.",
+  "homepage": "https://github.com/lgtm-hq/py-lintro#readme",
+  "bugs": {
+    "url": "https://github.com/lgtm-hq/py-lintro/issues"
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/lgtm-hq/py-lintro.git",
+    "directory": "npm/linux-x64"
+  },
+  "os": [
+    "linux"
+  ],
+  "cpu": [
+    "x64"
+  ],
+  "main": "index.js",
+  "files": [
+    "bin/lintro",
+    "index.js"
+  ],
+  "engines": {
+    "node": ">=18"
+  }
+}

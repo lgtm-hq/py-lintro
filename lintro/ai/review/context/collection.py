@@ -12,7 +12,6 @@ from lintro.ai.review.context.diff_parse import (
     unified_diff_preamble,
 )
 from lintro.ai.review.context.git_ops import (
-    _ensure_bash,
     _ensure_git_repo,
     _git_diff_triple_snapshot,
     _run_gh,
@@ -64,7 +63,6 @@ def collect_review_context(
         repo=repo,
     )
     if pr_number is None:
-        _ensure_bash()
         _ensure_git_repo()
         repo_root = _run_git(args=["rev-parse", "--show-toplevel"]).stdout.strip()
     else:
@@ -336,7 +334,7 @@ def _collect_pr_context(
         "view",
         str(pr_number),
         "--json",
-        "title,body,number,baseRefOid,headRefOid,baseRepository,headRepository",
+        "title,body,number,baseRefOid,headRefOid,headRepository",
     ]
     if repo is not None:
         diff_args.extend(["--repo", repo])

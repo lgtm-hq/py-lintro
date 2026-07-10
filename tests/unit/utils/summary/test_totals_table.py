@@ -11,7 +11,11 @@ from typing import TYPE_CHECKING
 from assertpy import assert_that
 
 from lintro.enums.action import Action
-from lintro.utils.summary_tables import count_affected_files, print_totals_table
+from lintro.utils.summary_tables import (
+    count_affected_files,
+    count_fixable_issues,
+    print_totals_table,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -159,8 +163,98 @@ def test_count_affected_files_no_issues_attribute() -> None:
 
 
 # =============================================================================
+# count_fixable_issues Tests
+# =============================================================================
+
+
+def test_count_fixable_issues_empty_results() -> None:
+    """Verify count_fixable_issues returns 0 for empty results list."""
+    assert_that(count_fixable_issues([])).is_equal_to(0)
+
+
+def test_count_fixable_issues_counts_only_fixable(
+    fake_tool_result_factory: Callable[..., FakeToolResult],
+    fake_issue_factory: Callable[..., FakeIssue],
+) -> None:
+    """Verify count_fixable_issues counts only issues flagged fixable.
+
+    Args:
+        fake_tool_result_factory: Factory for creating FakeToolResult instances.
+        fake_issue_factory: Factory for creating FakeIssue instances.
+    """
+    results = [
+        fake_tool_result_factory(
+            issues=[
+                fake_issue_factory(fixable=True),
+                fake_issue_factory(fixable=True),
+                fake_issue_factory(fixable=False),
+            ],
+        ),
+    ]
+    assert_that(count_fixable_issues(results)).is_equal_to(2)
+
+
+def test_count_fixable_issues_no_fixable_attribute() -> None:
+    """Verify count_fixable_issues does not fabricate fixability.
+
+    Issues without a truthy ``fixable`` attribute are never counted, so
+    tools that do not report fixability contribute zero.
+    """
+
+    class BareIssue:
+        file: str = "a.py"
+
+    class Result:
+        issues = [BareIssue()]
+
+    assert_that(count_fixable_issues([Result()])).is_equal_to(0)
+
+
+# =============================================================================
 # print_totals_table Tests - CHECK Mode
 # =============================================================================
+
+
+def test_totals_table_check_mode_shows_auto_fixable_row(
+    console_capture: tuple[Callable[..., None], list[str]],
+) -> None:
+    """Verify CHECK mode table shows an Auto-fixable row and fmt hint.
+
+    Args:
+        console_capture: Fixture for capturing console output.
+    """
+    capture_func, output = console_capture
+    print_totals_table(
+        console_output_func=capture_func,
+        action=Action.CHECK,
+        total_issues=5,
+        affected_files=2,
+        total_fixable=3,
+    )
+    combined = "\n".join(output)
+    assert_that(combined).contains("Auto-fixable")
+    assert_that(combined).contains("3")
+    assert_that(combined).contains("lintro fmt")
+
+
+def test_totals_table_check_mode_no_fmt_hint_when_none_fixable(
+    console_capture: tuple[Callable[..., None], list[str]],
+) -> None:
+    """Verify no fmt hint is shown when no issue is auto-fixable.
+
+    Args:
+        console_capture: Fixture for capturing console output.
+    """
+    capture_func, output = console_capture
+    print_totals_table(
+        console_output_func=capture_func,
+        action=Action.CHECK,
+        total_issues=5,
+        affected_files=2,
+        total_fixable=0,
+    )
+    combined = "\n".join(output)
+    assert_that(combined).does_not_contain("run `lintro fmt`")
 
 
 def test_totals_table_check_mode_contains_total_issues(
@@ -246,6 +340,53 @@ def test_totals_table_test_mode_uses_check_layout(
     combined = "\n".join(output)
     assert_that(combined).contains("Total Issues")
     assert_that(combined).contains("Affected Files")
+
+
+def test_totals_table_test_mode_omits_fmt_hint_when_fixable(
+    console_capture: tuple[Callable[..., None], list[str]],
+) -> None:
+    """Verify TEST mode omits the fmt hint even when issues are fixable.
+
+    Test mode is read-only and must not advertise ``fmt``. The Auto-fixable
+    row still renders so users know issues could be fixed elsewhere.
+
+    Args:
+        console_capture: Fixture for capturing console output.
+    """
+    capture_func, output = console_capture
+    print_totals_table(
+        console_output_func=capture_func,
+        action=Action.TEST,
+        total_issues=5,
+        affected_files=2,
+        total_fixable=3,
+    )
+    combined = "\n".join(output)
+    assert_that(combined).contains("Auto-fixable")
+    assert_that(combined).does_not_contain("lintro fmt")
+
+
+def test_totals_table_check_mode_shows_fmt_hint_for_same_input(
+    console_capture: tuple[Callable[..., None], list[str]],
+) -> None:
+    """Verify CHECK mode still shows the fmt hint for the same fixable input.
+
+    Companion to the TEST mode omission test: identical inputs on the check
+    path must continue to nudge toward ``lintro fmt``.
+
+    Args:
+        console_capture: Fixture for capturing console output.
+    """
+    capture_func, output = console_capture
+    print_totals_table(
+        console_output_func=capture_func,
+        action=Action.CHECK,
+        total_issues=5,
+        affected_files=2,
+        total_fixable=3,
+    )
+    combined = "\n".join(output)
+    assert_that(combined).contains("lintro fmt")
 
 
 # =============================================================================

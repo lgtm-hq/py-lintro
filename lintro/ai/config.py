@@ -161,6 +161,34 @@ class AIConfig(BaseModel):
             "'off' disables detection."
         ),
     )
+    cursor_trust_workspace: bool = Field(
+        default=False,
+        description=(
+            "Pass '--trust' to the Cursor 'agent' CLI, granting it workspace "
+            "trust. Security risk: the Cursor provider is fed untrusted, "
+            "prompt-injectable content (e.g. 'lintro review --pr N' embeds "
+            "diffs from arbitrary fork PRs). Combining workspace trust with "
+            "such input could let an injected diff drive an agent operating "
+            "with full workspace trust, so this defaults to False and should "
+            "only be enabled for fully trusted local workspaces."
+        ),
+    )
+
+    review_allow_unredacted_git_native: bool = Field(
+        default=False,
+        description=(
+            "Allow the git-native (CLI transport) review path to delegate "
+            "diff retrieval to the provider by emitting a 'git diff' command "
+            "instead of embedding the diff. Security risk: a delegated diff "
+            "is produced by the provider itself and never passes through "
+            "lintro's secret-redaction choke point, so secrets present in "
+            "the diff can reach the provider's backend unredacted. Defaults "
+            "to False so redaction always wins: lintro embeds the redacted "
+            "diff in the prompt even for large diffs. Only enable this for "
+            "trusted diffs with no secrets concern when the efficiency of "
+            "delegated git retrieval on very large diffs is required."
+        ),
+    )
 
     @model_validator(mode="after")
     def _validate_transport_and_retries(self) -> AIConfig:

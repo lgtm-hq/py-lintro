@@ -69,7 +69,7 @@ TOOL_VERSIONS: dict[ToolName | str, str] = {
     ToolName.RUSTC: "1.96.1",
     ToolName.RUSTFMT: "1.8.0",
     ToolName.SHELLCHECK: "0.11.0",
-    ToolName.SHFMT: "3.13.0",
+    ToolName.SHFMT: "3.13.1",
     ToolName.TAPLO: "0.10.0",
 }
 

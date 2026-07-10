@@ -17,7 +17,10 @@ from lintro.enums.doc_url_template import DocUrlTemplate
 from lintro.enums.tool_name import ToolName
 from lintro.enums.tool_type import ToolType
 from lintro.models.core.tool_result import ToolResult
-from lintro.parsers.cargo_audit.cargo_audit_parser import parse_cargo_audit_output
+from lintro.parsers.cargo_audit.cargo_audit_parser import (
+    extract_cargo_audit_payload,
+    parse_cargo_audit_output,
+)
 from lintro.plugins.base import BaseToolPlugin
 from lintro.plugins.protocol import ToolDefinition
 from lintro.plugins.registry import register_tool
@@ -150,7 +153,7 @@ class CargoAuditPlugin(BaseToolPlugin):
 
         cmd = self._build_command()
         try:
-            success, output = self._run_subprocess(
+            proc = self._run_subprocess_result(
                 cmd,
                 timeout=ctx.timeout,
                 cwd=str(cargo_root),
@@ -163,7 +166,21 @@ class CargoAuditPlugin(BaseToolPlugin):
                 issues_count=0,
             )
 
-        issues = parse_cargo_audit_output(output)
+        success = proc.success
+        # cargo-audit writes its JSON report to stdout; parse stdout only so a
+        # stderr warning cannot corrupt parsing (see #1043). ``output``
+        # (combined) is retained for display.
+        output = proc.output
+        payload = extract_cargo_audit_payload(proc.stdout)
+        issues = parse_cargo_audit_output(proc.stdout, data=payload)
+
+        # Fail closed on unparseable output. cargo-audit is a security scanner,
+        # so a payload we cannot parse (yet non-empty stdout) must never be
+        # reported as a clean pass (see #1044).
+        parse_failure = payload is None and bool(proc.stdout.strip())
+        if parse_failure:
+            success = False
+        parse_failures_count = 1 if parse_failure else 0
 
         # Determine overall success: subprocess must succeed AND no issues found.
         # cargo-audit returns non-zero if vulnerabilities found, but also if
@@ -181,6 +198,7 @@ class CargoAuditPlugin(BaseToolPlugin):
             output=output if should_show_output else None,
             issues_count=len(issues),
             issues=issues if issues else None,
+            parse_failures_count=parse_failures_count,
         )
 
     def fix(self, paths: list[str], options: dict[str, object]) -> ToolResult:

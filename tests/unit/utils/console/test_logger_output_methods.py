@@ -30,7 +30,7 @@ def test_console_output_no_color(logger: ThreadSafeConsoleLogger) -> None:
     """
     with patch("click.echo") as mock_echo:
         logger.console_output("test message")
-        mock_echo.assert_called_once_with("test message")
+        mock_echo.assert_called_once_with("test message", err=False)
 
 
 def test_console_output_with_color(logger: ThreadSafeConsoleLogger) -> None:
@@ -48,7 +48,19 @@ def test_console_output_with_color(logger: ThreadSafeConsoleLogger) -> None:
     ):
         logger.console_output("test message", color="red")
         mock_style.assert_called_once_with("test message", fg="red")
-        mock_echo.assert_called_once_with("styled text")
+        mock_echo.assert_called_once_with("styled text", err=False)
+
+
+def test_console_output_routes_to_stderr_when_enabled() -> None:
+    """Verify console_output writes to stderr when route_stderr is enabled.
+
+    Regression test for #1045: machine-readable formats route decorative
+    output to stderr so stdout stays a single parseable document.
+    """
+    stderr_logger = ThreadSafeConsoleLogger(route_stderr=True)
+    with patch("click.echo") as mock_echo:
+        stderr_logger.console_output("banner text")
+        mock_echo.assert_called_once_with("banner text", err=True)
 
 
 @pytest.mark.parametrize(
