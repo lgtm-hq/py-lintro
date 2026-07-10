@@ -165,8 +165,9 @@ ai:
 
 Every field below maps 1:1 to `AIConfig` in `lintro/ai/config.py`, which is the source
 of truth. Unknown keys under `ai:` are ignored with a warning, so a typo never silently
-changes behavior. All fields are optional. When `enabled: true` and `transport` is omitted, Anthropic and OpenAI
-check/fix runs fall back to API transport during provider creation. Diagnostics
+changes behavior. All fields are optional. When `enabled: true` and `transport` is
+omitted, Anthropic and OpenAI check/fix runs fall back to API transport during
+provider creation. Diagnostics
 still report a missing `ai.transport` as incompatible, and `provider: cursor`
 resolves a missing transport to CLI (not API). Set `transport` explicitly when
 you need a deterministic transport choice.
