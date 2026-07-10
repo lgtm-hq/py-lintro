@@ -253,9 +253,26 @@ class MypyPlugin(BaseToolPlugin):
         if config_args:
             cmd.extend(config_args)
 
+        ignore_missing_imports = bool(self.options.get("ignore_missing_imports", True))
         if self.options.get("strict") is True:
             cmd.append("--strict")
-        if self.options.get("ignore_missing_imports", True):
+            # When missing imports are ignored, unresolved third-party
+            # dependencies resolve to ``Any``. Under ``--strict`` this makes
+            # ``disallow_subclassing_any`` and ``disallow_untyped_decorators``
+            # fire as false positives on that ``Any`` (e.g. subclassing
+            # SQLAlchemy's ``DeclarativeBase`` or FastAPI ``@app.get`` route
+            # decorators) whenever the scanned project's runtime deps aren't
+            # installed in the environment lintro runs mypy from. Counter those
+            # two specific strict sub-flags so an incomplete type environment
+            # doesn't manufacture spurious errors. These flags follow
+            # ``--strict`` on the command line so they win (mypy applies flags
+            # left-to-right). When callers guarantee a complete environment via
+            # ``ignore_missing_imports=False``, full strict behavior is kept.
+            if ignore_missing_imports:
+                cmd.extend(
+                    ["--allow-subclassing-any", "--allow-untyped-decorators"],
+                )
+        if ignore_missing_imports:
             cmd.append("--ignore-missing-imports")
 
         if self.options.get("python_version") and "target_python" not in enforced:

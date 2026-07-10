@@ -156,6 +156,19 @@ def detect_project_languages() -> list[str]:
     if toml_files:
         langs.add("toml")
 
+    # Prose/documentation formats beyond Markdown (vale targets).
+    docs_dir = cwd / "docs"
+    has_rst = any(cwd.glob("*.rst")) or (
+        docs_dir.is_dir() and any(docs_dir.glob("**/*.rst"))
+    )
+    if has_rst:
+        langs.add("restructuredtext")
+    has_adoc = any(cwd.glob("*.adoc")) or (
+        docs_dir.is_dir() and any(docs_dir.glob("**/*.adoc"))
+    )
+    if has_adoc:
+        langs.add("asciidoc")
+
     return sorted(langs)
 
 

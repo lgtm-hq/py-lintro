@@ -56,7 +56,6 @@ DEFAULT_MODULE_SIZE_EXCLUDES: tuple[str, ...] = (
 DEFAULT_MODULE_SIZE_BASELINE: tuple[str, ...] = (
     "lintro/ai/review/orchestrator.py",
     "lintro/utils/tool_executor.py",
-    "lintro/ai/review/chunker/workflow_scripts.py",
     "lintro/cli_utils/commands/doctor.py",
     "lintro/tools/definitions/tsc.py",
 )
