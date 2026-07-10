@@ -58,6 +58,9 @@ STATE_VERSION = 1
 MAX_COMMENT_CHARS = 60_000
 # Cap how many run records are retained in the sticky state block.
 MAX_STORED_RUNS = 30
+# Slack reserved when budgeting the findings section against the comment cap,
+# covering the truncation marker, section joins, and the final _cap_body notice.
+_TRUNCATION_MARGIN = 400
 
 _SEVERITY_EMOJI: dict[Severity, str] = {
     Severity.P1: "🔴",
@@ -256,6 +259,8 @@ def format_review_summary(
     result: ReviewResult,
     checklist_display: ChecklistDisplay = ChecklistDisplay.OFF,
     question_map: dict[int, str] | None = None,
+    diff_lines: dict[str, set[int]] | None = None,
+    findings_char_budget: int | None = None,
 ) -> str:
     """Format the per-run review summary section.
 
@@ -267,6 +272,10 @@ def format_review_summary(
         result: Review result to summarize.
         checklist_display: Structured checklist visibility mode.
         question_map: Prompt id to question text for the checklist appendix.
+        diff_lines: Diff line map used to order fallback findings first in the
+            findings section. ``None`` treats all findings as fallback.
+        findings_char_budget: Optional soft character budget for the findings
+            section; overflow is replaced by an explicit truncation marker.
 
     Returns:
         Markdown summary section body.
@@ -316,6 +325,8 @@ def format_review_summary(
             findings=result.findings,
             checklist_display=checklist_display,
             question_map=question_map or {},
+            diff_lines=diff_lines,
+            char_budget=findings_char_budget,
         ),
     )
 
@@ -327,46 +338,146 @@ def format_review_summary(
     return "\n".join(lines)
 
 
+def _is_diff_mappable(
+    *,
+    finding: ReviewFinding,
+    diff_lines: dict[str, set[int]] | None,
+) -> bool:
+    """Report whether a finding maps onto a line inside the PR diff.
+
+    A diff-mappable finding also posts as an inline review comment, so the
+    sticky comment is not its only surface. A non-diff-mappable ("fallback")
+    finding has no inline path and must survive sticky-comment truncation.
+
+    Args:
+        finding: Review finding to classify.
+        diff_lines: Map of repo-relative path to the set of diff-covered line
+            numbers, or ``None`` when the diff is unavailable (all findings are
+            then treated as fallback).
+
+    Returns:
+        True when the finding lands on a diff-covered line, else False.
+    """
+    rel = finding.file.removeprefix("./").replace("\\", "/")
+    if not rel or finding.line <= 0 or diff_lines is None:
+        return False
+    return finding.line in diff_lines.get(rel, set())
+
+
+def _finding_block(
+    *,
+    finding: ReviewFinding,
+    checklist_display: ChecklistDisplay,
+    question_map: dict[int, str],
+) -> list[str]:
+    """Render the markdown lines for a single finding in the findings list."""
+    location = _location_label(finding=finding)
+    title = sanitize_comment_text(finding.title, limit=200)
+    headline = (
+        f"{_severity_badge(severity=finding.severity)} · "
+        f"{_chip(finding.category)} — **{title}**"
+    )
+    if location:
+        headline += f" · {location}"
+    body = format_finding_comment(
+        finding=finding,
+        checklist_display=checklist_display,
+        question_map=question_map,
+    )
+    return [
+        "",
+        headline,
+        "",
+        "<details><summary>Details</summary>",
+        "",
+        body,
+        "",
+        "</details>",
+    ]
+
+
 def _format_findings_section(
     *,
     findings: tuple[ReviewFinding, ...],
     checklist_display: ChecklistDisplay,
     question_map: dict[int, str],
+    diff_lines: dict[str, set[int]] | None = None,
+    char_budget: int | None = None,
 ) -> list[str]:
-    """Render a compact, collapsible list of all findings."""
+    """Render a compact, collapsible list of all findings.
+
+    Non-diff-mappable ("fallback") findings render first: they have no inline
+    surface, so if truncation must drop anything it only drops findings that
+    also exist as inline comments. When ``char_budget`` is set and the rendered
+    blocks would overflow it, rendering stops early and an explicit marker names
+    how many findings were dropped so nothing silently vanishes.
+
+    Args:
+        findings: Findings to render.
+        checklist_display: Structured checklist visibility mode.
+        question_map: Prompt id to question text for linked display.
+        diff_lines: Diff line map used to order fallback findings first. ``None``
+            treats every finding as fallback (preserving severity ordering).
+        char_budget: Optional soft character budget for the finding blocks. When
+            exceeded, remaining *diff-mappable* findings are replaced by a
+            truncation marker (they still exist as inline comments). Fallback
+            findings are never budget-truncated — they have no other surface.
+
+    Returns:
+        Markdown lines for the findings section.
+    """
     if not findings:
         return ["", "### Findings", "", "✅ No actionable findings."]
 
     ordered = sorted(
         findings,
-        key=lambda f: (f.severity.value, f.file, f.line),
+        key=lambda f: (
+            _is_diff_mappable(finding=f, diff_lines=diff_lines),
+            f.severity.value,
+            f.file,
+            f.line,
+        ),
     )
     lines = ["", f"### Findings ({len(findings)})"]
-    for finding in ordered:
-        location = _location_label(finding=finding)
-        title = sanitize_comment_text(finding.title, limit=200)
-        headline = (
-            f"{_severity_badge(severity=finding.severity)} · "
-            f"{_chip(finding.category)} — **{title}**"
-        )
-        if location:
-            headline += f" · {location}"
-        lines.extend(["", headline])
-        body = format_finding_comment(
+    used = 0
+    for index, finding in enumerate(ordered):
+        block = _finding_block(
             finding=finding,
             checklist_display=checklist_display,
             question_map=question_map,
         )
-        lines.extend(
-            [
-                "",
-                "<details><summary>Details</summary>",
-                "",
-                body,
-                "",
-                "</details>",
-            ],
-        )
+        block_len = len("\n".join(block))
+        # The budget is enforced on *every* finding so the section always fits
+        # inside the caller's char_budget — otherwise ``_cap_body`` would later
+        # trim the sticky from the tail and could silently drop findings.
+        # Fallback (non-diff-mappable) findings sort first, so they are only ever
+        # dropped when fallback content alone exceeds GitHub's hard comment limit
+        # (unavoidable). The marker text adapts: if any dropped finding is a
+        # fallback (no inline surface), it points to the workflow logs rather
+        # than to inline comments that do not exist for it. ``index > 0`` always
+        # renders at least one finding so a single oversized block is not lost.
+        if char_budget is not None and index > 0 and used + block_len > char_budget:
+            remaining = ordered[index:]
+            dropped = len(remaining)
+            any_fallback = any(
+                not _is_diff_mappable(finding=item, diff_lines=diff_lines)
+                for item in remaining
+            )
+            where = (
+                "the workflow logs"
+                if any_fallback
+                else "the inline comments and workflow logs"
+            )
+            lines.extend(
+                [
+                    "",
+                    f"> ✂️ **{dropped} more finding(s) truncated** to fit "
+                    f"GitHub's size limit — see {where} for the full list.",
+                ],
+            )
+            break
+        lines.extend(block)
+        used += block_len
     return lines
 
 
@@ -386,8 +497,15 @@ def build_sticky_comment(
     prior_runs: list[dict[str, Any]] | None = None,
     checklist_display: ChecklistDisplay = ChecklistDisplay.OFF,
     question_map: dict[int, str] | None = None,
+    diff_lines: dict[str, set[int]] | None = None,
 ) -> str:
     """Compose the full sticky PR comment body, including cumulative telemetry.
+
+    Non-diff-mappable ("fallback") findings — whose only surface is this sticky
+    comment — render first in the findings section. When the assembled body
+    exceeds ``MAX_COMMENT_CHARS`` the findings section is re-rendered against a
+    character budget so overflow is dropped explicitly (a visible marker names
+    the count) and only ever falls on findings that also post inline.
 
     Args:
         result: Current review result.
@@ -395,6 +513,9 @@ def build_sticky_comment(
             state block. ``None`` for the first run on a PR.
         checklist_display: Structured checklist visibility mode.
         question_map: Prompt id to question text for the checklist appendix.
+        diff_lines: Diff line map used to order fallback findings first and to
+            decide which findings are safe to truncate. ``None`` treats all
+            findings as fallback.
 
     Returns:
         Complete Markdown body carrying the hidden marker and state block.
@@ -403,25 +524,45 @@ def build_sticky_comment(
     current = _run_record(result=result)
     all_runs = [*prior, current][-MAX_STORED_RUNS:]
 
-    sections = [STICKY_MARKER]
-    sections.append(_format_cumulative_header(runs=all_runs))
-    sections.append(
-        format_review_summary(
-            result=result,
-            checklist_display=checklist_display,
-            question_map=question_map,
-        ),
-    )
-    sections.append(
-        "<details><summary>⚙️ Run mechanics (this run)</summary>\n\n"
-        + format_run_mechanics(metadata=result.metadata)
-        + "\n\n</details>",
-    )
-    if prior:
-        sections.append(_format_previous_runs(runs=prior))
-    sections.append(_FOOTER)
+    def assemble(*, findings_char_budget: int | None) -> str:
+        sections = [STICKY_MARKER, _format_cumulative_header(runs=all_runs)]
+        sections.append(
+            format_review_summary(
+                result=result,
+                checklist_display=checklist_display,
+                question_map=question_map,
+                diff_lines=diff_lines,
+                findings_char_budget=findings_char_budget,
+            ),
+        )
+        sections.append(
+            "<details><summary>⚙️ Run mechanics (this run)</summary>\n\n"
+            + format_run_mechanics(metadata=result.metadata)
+            + "\n\n</details>",
+        )
+        if prior:
+            sections.append(_format_previous_runs(runs=prior))
+        sections.append(_FOOTER)
+        return "\n\n".join(sections)
 
-    body = "\n\n".join(sections)
+    body = assemble(findings_char_budget=None)
+    if len(body) > MAX_COMMENT_CHARS:
+        # Isolate the findings section's contribution so the remaining budget
+        # can be handed back to it explicitly, keeping fallback findings intact.
+        findings_len = len(
+            "\n".join(
+                _format_findings_section(
+                    findings=result.findings,
+                    checklist_display=checklist_display,
+                    question_map=question_map or {},
+                    diff_lines=diff_lines,
+                ),
+            ),
+        )
+        overhead = len(body) - findings_len
+        findings_budget = max(MAX_COMMENT_CHARS - overhead - _TRUNCATION_MARGIN, 0)
+        body = assemble(findings_char_budget=findings_budget)
+
     body = _cap_body(body=body)
     return body + _render_state_block(runs=all_runs)
 
@@ -661,18 +802,20 @@ def post_review_to_github(
 
     prompt_questions = question_map or {}
     comment_id, prior_runs = _load_prior_runs(reporter=gh_reporter)
+    diff_lines = gh_reporter.fetch_pr_diff_lines()
     body = build_sticky_comment(
         result=result,
         prior_runs=prior_runs,
         checklist_display=checklist_display,
         question_map=prompt_questions,
+        diff_lines=diff_lines,
     )
 
     success = _upsert_sticky(reporter=gh_reporter, body=body, comment_id=comment_id)
 
     inline_findings, _fallback = _partition_findings(
-        result=result,
-        reporter=gh_reporter,
+        findings=result.findings,
+        diff_lines=diff_lines,
     )
     if inline_findings and not _post_inline_findings(
         reporter=gh_reporter,
@@ -792,25 +935,26 @@ def _format_checklist_appendix_markdown(*, result: ReviewResult) -> list[str]:
 
 def _partition_findings(
     *,
-    result: ReviewResult,
-    reporter: GitHubPRReporter,
+    findings: tuple[ReviewFinding, ...],
+    diff_lines: dict[str, set[int]] | None,
 ) -> tuple[list[ReviewFinding], list[ReviewFinding]]:
-    """Split findings into inline-capable and fallback groups."""
-    diff_lines = reporter.fetch_pr_diff_lines()
+    """Split findings into inline-capable and fallback groups.
+
+    Args:
+        findings: Findings to partition.
+        diff_lines: Diff line map; ``None`` classifies every finding as fallback.
+
+    Returns:
+        Tuple of ``(inline, fallback)`` finding lists.
+    """
     inline: list[ReviewFinding] = []
     fallback: list[ReviewFinding] = []
 
-    for finding in result.findings:
-        rel = finding.file.removeprefix("./").replace("\\", "/")
-        if (
-            not rel
-            or finding.line <= 0
-            or diff_lines is None
-            or finding.line not in diff_lines.get(rel, set())
-        ):
-            fallback.append(finding)
-        else:
+    for finding in findings:
+        if _is_diff_mappable(finding=finding, diff_lines=diff_lines):
             inline.append(finding)
+        else:
+            fallback.append(finding)
 
     return inline, fallback
 

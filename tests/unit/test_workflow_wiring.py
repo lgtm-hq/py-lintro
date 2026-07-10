@@ -206,6 +206,51 @@ def test_changelog_no_longer_ignored_by_lintro() -> None:
     assert_that(entries).does_not_contain("CHANGELOG.md")
 
 
+@pytest.mark.parametrize(
+    ("workflow_name", "identity"),
+    [
+        ("release-auto-tag.yml", "Release - Auto Tag"),
+        ("release-version-pr.yml", "Release - Version PR"),
+    ],
+)
+def test_release_workflows_define_traceable_run_names(
+    *,
+    workflow_name: str,
+    identity: str,
+) -> None:
+    """Release callers set a run-name carrying workflow identity, event, and branch.
+
+    A dynamic ``run-name`` surfaces post-merge release failures in the Actions
+    history (event + branch) instead of the default commit subject, which can
+    look healthy even when a release job fails.
+    """
+    workflow = _load_workflow(name=workflow_name)
+    run_name = workflow["run-name"]
+
+    assert_that(run_name).is_instance_of(str)
+    assert_that(run_name).contains(identity)
+    assert_that(run_name).contains("${{ github.event_name }}")
+    assert_that(run_name).contains("${{ github.ref_name }}")
+
+
+def test_release_workflows_grant_failure_reporting_permissions() -> None:
+    """Both release callers grant the upstream report-release-failure job access.
+
+    The lgtm-ci reusables open/update a deduplicated failure issue on ``main``
+    release failures, which requires reading workflow/run metadata and writing
+    issues. Guarding the permissions keeps that visibility path wired.
+    """
+    for workflow_name, job_name in (
+        ("release-auto-tag.yml", "auto-tag"),
+        ("release-version-pr.yml", "version-pr"),
+    ):
+        permissions = _load_workflow(name=workflow_name)["jobs"][job_name][
+            "permissions"
+        ]
+        assert_that(permissions).contains_entry({"actions": "read"})
+        assert_that(permissions).contains_entry({"issues": "write"})
+
+
 def test_semantic_pr_title_can_write_failure_comments() -> None:
     """Semantic PR title workflow can upsert failure comments on PRs."""
     workflow = _load_workflow(name="semantic-pr-title.yml")
@@ -427,3 +472,45 @@ def test_docker_ci_lintro_code_quality_wires_upstream_jobs() -> None:
             "|| needs.dogfooding-lint.result }}",
         ),
     )
+
+
+# Canonical lgtm-ci pin used by most py-lintro workflows (v0.48.0).
+# Pages deploy must not regress to v0.32.3 (missing GH_TOKEN in bundler).
+_LGTM_CI_V0480 = "1014e3d7d5441a63215d2096545a46cff6de101c"
+
+
+def test_stage_coverage_html_allows_setup_uv_manifest_host() -> None:
+    """Coverage staging must allow raw.githubusercontent.com for setup-uv.
+
+    Without this host, astral-sh/setup-uv cannot fetch its versions manifest
+    under harden-runner block mode, the staging job fails, and CI - Tests goes
+    red on main even when the test gate passed (#1227).
+    """
+    workflow = _load_workflow(name="test-ci.yml")
+    steps = workflow["jobs"]["stage-coverage-html"]["steps"]
+    harden = next(step for step in steps if step.get("name") == "Harden Runner")
+    allowed = set(harden["with"]["allowed-endpoints"].split())
+
+    assert_that(allowed).contains("raw.githubusercontent.com:443")
+    assert_that(allowed).contains("astral.sh:443")
+    assert_that(allowed).contains("releases.astral.sh:443")
+
+
+def test_deploy_pages_pins_bundler_with_github_token() -> None:
+    """Pages deploy must use lgtm-ci tooling that exports GH_TOKEN to gh.
+
+    reusable-deploy-site-with-reports checks out tooling-ref for
+    bundle-workflow-artifacts. v0.32.3 omitted GH_TOKEN; v0.32.4+ (lgtm-ci#300)
+    sets ``GH_TOKEN: ${{ github.token }}``. Stay on the repo-standard v0.48.0 pin.
+    """
+    workflow = _load_workflow(name="deploy-pages.yml")
+    deploy = workflow["jobs"]["deploy"]
+    uses = deploy["uses"]
+    tooling_ref = deploy["with"]["tooling-ref"]
+
+    assert_that(uses).contains(_LGTM_CI_V0480)
+    assert_that(uses).contains("reusable-deploy-site-with-reports.yml")
+    assert_that(tooling_ref).contains(_LGTM_CI_V0480)
+    assert_that(deploy["permissions"]).contains_entry({"actions": "read"})
+    assert_that(deploy["permissions"]).contains_entry({"pages": "write"})
+    assert_that(deploy["permissions"]).contains_entry({"id-token": "write"})

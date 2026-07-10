@@ -21,6 +21,173 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.71.2] - 2026-07-10
+
+### Fixed
+
+- **ci**: restore main Pages deploy after docs site merge (#1233) (c7d38d4)
+
+## [0.71.1] - 2026-07-10
+
+### Fixed
+
+- **ci**: decouple lintro report from stale GHCR :latest pulls (#1032) (9904cd7)
+
+## [0.71.0] - 2026-07-10
+
+### Added
+
+- **docs**: add documentation site and GitHub Pages deployment (#974) (3707809)
+
+## [0.70.6] - 2026-07-10
+
+### Changed
+
+- **deps**: update digest (#917) (a69fbe5)
+- **deps**: update rust-lang/rust to 1.96.1 (minor) (#915) (4c9825b)
+- **deps**: update @astrojs/check to 0.9.9 (#866) (b346fc2)
+
+### Fixed
+
+- **astro-check**: run non-interactively to prevent prompt hang and timeout (#958)
+  (0b1ea63)
+
+## [0.70.5] - 2026-07-09
+
+### Fixed
+
+- **security**: update security policy and improve scorecard compliance (#787) (9eb520b)
+
+## [0.70.4] - 2026-07-09
+
+### Fixed
+
+- **vue-tsc**: respect tsconfig.app.json preference in shared config discovery (#1125)
+  (819e3e3)
+
+## [0.70.3] - 2026-07-09
+
+### Fixed
+
+- **ci**: use Node 24 bundled npm for trusted publish (#1205) (d0543ab)
+
+## [0.70.2] - 2026-07-09
+
+### Fixed
+
+- **homebrew**: sync binary formula generator with tap's authoritative output (#1199)
+  (8dbd1ca)
+
+## [0.70.1] - 2026-07-09
+
+### Fixed
+
+- **ci**: correct setup-node pin to real v6.4.0 SHA (#1201) (7ee16b1)
+
+## [0.70.0] - 2026-07-08
+
+### Added
+
+- **npm**: publish via OIDC trusted publishing on release tags (#1194) (84b032e)
+
+### Changed
+
+- **deps**: update astral-sh/uv to 0.11.28 (#911) (63dfa6c)
+- **deps**: update oven-sh/bun to 1.3.14 (#914) (936b078)
+- **release**: version 0.69.6 (#1197) (1d42fa3)
+- **docker**: bump lgtm-ci to v0.48.0 and add historical backfill dispatch (#1193)
+  (1174f17)
+
+### Fixed
+
+- **npm**: scope meta-package as @lgtm-hq/lintro (#1182) (ca3a270)
+- **ci**: always run CodeQL on PRs so its required check reports (#1196) (9d34024)
+
+## [0.69.6] - 2026-07-08
+
+### Changed
+
+- **docker**: bump lgtm-ci to v0.48.0 and add historical backfill dispatch (#1193)
+  (1174f17)
+
+### Fixed
+
+- **ci**: always run CodeQL on PRs so its required check reports (#1196) (9d34024)
+
+## [0.69.5] - 2026-07-07
+
+### Changed
+
+- **ci**: bump lgtm-ci reusables to v0.47.1 (#1191) (7b34b01)
+
+### Fixed
+
+- **release**: surface release automation failures on main via run-name (#1133)
+  (c964659)
+
+## [0.69.4] - 2026-07-07
+
+### Fixed
+
+- **security**: remediate high-severity dependency vulnerabilities (#1126) (c674b5e)
+
+## [0.69.3] - 2026-07-07
+
+### Fixed
+
+- **execution**: route all execution paths through per-execution isolated tool copies
+  (#1124) (691bd54)
+
+## [0.69.2] - 2026-07-07
+
+### Fixed
+
+- **output**: suppress 'run lintro fmt' hint in test mode (#1123) (94cd961)
+
+## [0.69.1] - 2026-07-07
+
+### Changed
+
+- **contributing**: document merge-discipline and no-paper-over norms (#1121) (edba1ac)
+- **build**: allow setup-uv endpoints in binary build egress policy (#1152) (969d8ac)
+
+### Fixed
+
+- **ai/review**: classify ValueError as INVALID_RESPONSE before shared severity
+  signatures (#1122) (14b618f)
+
+## [0.69.0] - 2026-07-06
+
+### Added
+
+- **install**: distribute lintro as npm package via platform binaries (#1141) (15078fb)
+
+## [0.68.0] - 2026-07-06
+
+### Added
+
+- **shellcheck**: support source-following for repo-local includes (#1110) (3db899c)
+
+## [0.67.0] - 2026-07-06
+
+### Added
+
+- **cli**: add fmt --dry-run mode to preview fixes without writing (#1109) (a53b686)
+
+### Changed
+
+- **sbom**: set fail-on-severity=high to stop 'negligible or higher' warnings (#1108)
+  (30c715e)
+- ignore auto-generated CHANGELOG.md + resync uv.lock to 0.66.0 (#1104) (6173f73)
+
+### Fixed
+
+- **ai/review**: prioritize non-diff-mappable findings before sticky-comment truncation
+  (#1107) (8f343e1)
+- **ci**: keep main green — revert SBOM hard-fail + decouple flaky Pages deploy (#1111)
+  (2208ef3)
+- **ai/review**: graceful partial when cost cap trips before any chunk (#1103) (d7d733c)
+
 ## [0.66.0] - 2026-07-06
 
 ### Added
