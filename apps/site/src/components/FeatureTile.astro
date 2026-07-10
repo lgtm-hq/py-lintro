@@ -1,0 +1,70 @@
+---
+type FeatureIconId = "privacy" | "offline" | "templates" | "pdf" | "import" | "cloud";
+
+interface TileAction {
+  label: string;
+  href: string;
+  external?: boolean;
+  primary?: boolean;
+}
+
+interface Props {
+  name: string;
+  description: string;
+  icon: FeatureIconId;
+  tags: string[];
+  badge?: string;
+  actions: TileAction[];
+}
+
+const ICONS: Record<FeatureIconId, string> = {
+  privacy: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>`,
+  offline: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/><path d="m2 9 20 6"/></svg>`,
+  templates: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>`,
+  pdf: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><path d="M10 12h4M10 16h4M10 8h1"/></svg>`,
+  import: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>`,
+  cloud: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M18 10h-1.26A8 8 0 1 0 9 20h9a5 5 0 0 0 0-10z"/></svg>`,
+};
+
+const { name, description, icon, tags, badge, actions } = Astro.props;
+const iconMarkup = ICONS[icon] ?? ICONS.privacy;
+---
+
+<article class="feature-tile">
+  <div class="feature-tile-bubble">
+    <span class="feature-tile-icon" set:html={iconMarkup} />
+  </div>
+  <div class="feature-tile-body">
+    <h3 class="feature-tile-title">{name}</h3>
+    <p class="feature-tile-description">{description}</p>
+    <div class="feature-tile-tags">
+      {tags.map((tag) => (
+        <span class="feature-tile-tag">{tag}</span>
+      ))}
+      {badge && <span class="feature-tile-badge">{badge}</span>}
+    </div>
+    <div class="feature-tile-actions">
+      {
+        actions.map((action) => (
+          <a
+            href={action.href}
+            class:list={['btn', action.primary ? 'btn-primary' : 'btn-outline']}
+            target={action.external ? '_blank' : undefined}
+            rel={action.external ? 'noopener noreferrer' : undefined}
+          >
+            {action.label}
+            {
+              action.external && (
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                  <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />
+                  <polyline points="15 3 21 3 21 9" />
+                  <line x1="10" y1="14" x2="21" y2="3" />
+                </svg>
+              )
+            }
+          </a>
+        ))
+      }
+    </div>
+  </div>
+</article>
