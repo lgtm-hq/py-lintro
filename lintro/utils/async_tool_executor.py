@@ -138,7 +138,7 @@ class AsyncToolExecutor:
         except Exception as exc:
             if _profile_timer is not None:
                 _profile_timer.__exit__(None, None, None)
-                setattr(exc, "profile_duration", _profile_timer.duration)
+                exc.profile_duration = _profile_timer.duration  # type: ignore[attr-defined]
             raise
         logger.debug(f"Completed async execution of {tool.definition.name}")
 
