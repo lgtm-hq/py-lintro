@@ -98,6 +98,8 @@ Some tools require separate installation. Their minimum versions are also manage
   `npm install -g stylelint`); skips cleanly when no stylelint config is found —
   add one (e.g. `.stylelintrc.json`) to enable linting
 - `taplo` - TOML linter and formatter (`brew install taplo` or GitHub releases)
+- `vale` - Prose/documentation linter (`brew install vale` or GitHub releases); requires
+  a `.vale.ini`, otherwise lintro skips it as a non-error
 - `cargo-audit` - Rust dependency vulnerability scanner (`cargo install cargo-audit`)
 - `cargo-deny` - Rust dependency license/advisory checker (`cargo install cargo-deny`)
 - `osv-scanner` - Multi-ecosystem vulnerability scanner using the OSV database

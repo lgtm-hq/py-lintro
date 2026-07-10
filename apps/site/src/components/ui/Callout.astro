@@ -1,0 +1,20 @@
+---
+interface Props {
+  title?: string;
+  variant?: "primary" | "info" | "success" | "warning" | "danger";
+  class?: string;
+}
+
+const { title, variant = "primary", class: className } = Astro.props;
+---
+
+<div class:list={["message", `message-${variant}`, className]}>
+  {title && (
+    <div class="message-header">
+      <p>{title}</p>
+    </div>
+  )}
+  <div class="message-body">
+    <slot />
+  </div>
+</div>

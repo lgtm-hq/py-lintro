@@ -3,6 +3,12 @@
 ---
 name: Release - Version PR
 
+# Surface trigger context in the Actions history so post-merge release failures
+# are traceable at a glance (event + branch), not just via the default commit
+# subject. Guarded by test_release_workflows_define_traceable_run_names.
+run-name: >-
+  Release - Version PR (${{ github.event_name }} on ${{ github.ref_name }})
+
 'on':
   push:
     branches: [main]
@@ -17,12 +23,17 @@ concurrency:
 jobs:
   version-pr:
     # yamllint disable-line rule:line-length
-    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-release-version-pr.yml@4aaefe64763b7841b6d92d94dc47185083d34c9a # v0.46.0
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-release-version-pr.yml@1014e3d7d5441a63215d2096545a46cff6de101c # v0.48.0
     with:
       ecosystems: python
       auto-merge: true
       max-bump: minor
-      tooling-ref: '4aaefe64763b7841b6d92d94dc47185083d34c9a' # v0.46.0
+      # Reflow the generated CHANGELOG.md to lintro's 88-column markdown budget
+      # after it is written and before the version PR is committed, so release
+      # PRs pass dogfooding-lint without CHANGELOG.md being ignored (#1117).
+      # Shell/format logic lives in the dedicated script, not an inline run.
+      version-update-script: scripts/ci/format-changelog.py
+      tooling-ref: '1014e3d7d5441a63215d2096545a46cff6de101c' # v0.48.0
       egress-policy: block
       # Paired with release-auto-tag.yml (egress-preset: github-tooling).
       # Guarded by test_release_workflows_use_paired_egress_presets.
