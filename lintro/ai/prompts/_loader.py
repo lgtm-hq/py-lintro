@@ -12,9 +12,7 @@ unchanged.
 from __future__ import annotations
 
 from functools import cache
-from importlib.resources import (
-    files,
-)  # nosemgrep: python.lang.compatibility.python37.python37-compatibility-importlib2
+from importlib.resources import files  # nosemgrep: python.lang.compatibility.python37.python37-compatibility-importlib2
 
 _TEMPLATES_PACKAGE = "lintro.ai.prompts.templates"
 

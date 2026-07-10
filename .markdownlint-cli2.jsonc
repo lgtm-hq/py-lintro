@@ -6,18 +6,10 @@
       "tables": false,
     },
   },
+  "ignores": [
+    "lintro/ai/prompts/templates/**",
+  ],
   "overrides": [
-    {
-      "globs": ["lintro/ai/prompts/templates/**/*.md"],
-      "config": {
-        "MD013": false,
-        "MD022": false,
-        "MD032": false,
-        "MD041": false,
-        "MD047": false,
-      },
-    },
-
     {
       "globs": ["apps/site/src/content/docs/**/*.md"],
       "config": {
