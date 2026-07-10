@@ -310,7 +310,7 @@ class DotenvLinterPlugin(BaseToolPlugin):
                 file_result=FileProcessingResult(
                     success=False,
                     output=recheck.output or recheck.error or fix_output,
-                    issues=initial_issues,
+                    issues=[replace(issue, fixable=False) for issue in initial_issues],
                     error=recheck.error or "dotenv-linter recheck failed",
                 ),
                 initial_count=len(initial_issues),
