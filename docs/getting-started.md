@@ -85,6 +85,9 @@ Some tools require separate installation. Their minimum versions are also manage
 `pyproject.toml`:
 
 - `prettier` - JavaScript/TypeScript formatter (install via npm)
+- `commitlint` - Conventional Commits message linter
+  (`bun add -g @commitlint/cli @commitlint/config-conventional` or
+  `brew install commitlint`); requires a commitlint config, skipped otherwise
 - `hadolint` - Dockerfile linter (download from GitHub releases)
 - `actionlint` - GitHub Actions linter (download from GitHub releases)
 - `semgrep` - Security scanner and code analyzer (`pipx install semgrep`,

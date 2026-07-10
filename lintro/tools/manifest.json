@@ -147,6 +147,19 @@
       "tags": ["linter"]
     },
     {
+      "name": "commitlint",
+      "version": "21.2.0",
+      "install": {
+        "type": "npm",
+        "package": "@commitlint/cli"
+      },
+      "tier": "tools",
+      "category": "npm",
+      "version_command": ["commitlint", "--version"],
+      "languages": ["git"],
+      "tags": ["linter"]
+    },
+    {
       "name": "dotenv_linter",
       "version": "4.0.0",
       "install": {

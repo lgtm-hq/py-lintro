@@ -56,6 +56,8 @@
         "rhysd/actionlint",
         "prettier",
         "markdownlint-cli2",
+        "@commitlint/cli",
+        "@commitlint/config-conventional",
         "oxlint",
         "oxfmt",
         "gitleaks",

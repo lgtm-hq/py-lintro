@@ -22,6 +22,7 @@ class Lintro < Formula
   depends_on "actionlint"
   depends_on "bandit"
   depends_on "black"
+  depends_on "commitlint"
   depends_on "dotenv-linter"
   depends_on "gitleaks"
   depends_on "hadolint"
@@ -80,6 +81,7 @@ class Lintro < Formula
       JS / TS:          oxlint, oxfmt, prettier
       Dockerfiles:      hadolint
       GitHub Actions:   actionlint
+      Git commits:      commitlint
       Security:         gitleaks, semgrep
       Rust:             clippy, rustfmt (via rust)
       SQL:              sqlfluff
