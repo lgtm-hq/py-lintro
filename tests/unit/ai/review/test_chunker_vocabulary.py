@@ -89,34 +89,34 @@ class StripCase:
 
     id: str
     segment: str
-    expected_first_token: str
+    expected_command: str
 
 
 _STRIP_CASES: tuple[StripCase, ...] = (
     StripCase(
         id="timeout-consumes-duration",
         segment="timeout 30 scripts/build.sh",
-        expected_first_token="scripts/build.sh",
+        expected_command="scripts/build.sh",
     ),
     StripCase(
         id="sudo-consumes-user-flag",
         segment="sudo -u ci scripts/build.sh",
-        expected_first_token="scripts/build.sh",
+        expected_command="scripts/build.sh",
     ),
     StripCase(
         id="env-var-assignment",
         segment="env FOO=bar scripts/build.sh",
-        expected_first_token="scripts/build.sh",
+        expected_command="scripts/build.sh",
     ),
     StripCase(
         id="exec-wrapper",
         segment="exec scripts/build.sh",
-        expected_first_token="scripts/build.sh",
+        expected_command="scripts/build.sh",
     ),
     StripCase(
         id="compound-leader-then",
         segment="then scripts/build.sh",
-        expected_first_token="scripts/build.sh",
+        expected_command="scripts/build.sh",
     ),
 )
 
@@ -125,7 +125,7 @@ _STRIP_CASES: tuple[StripCase, ...] = (
 def test_wrapper_stripping_exposes_command(case: StripCase) -> None:
     """Dispatch/env/compound wrappers are consumed before the invoked command."""
     normalized = _normalize_invoked_command_segment(segment=case.segment)
-    assert_that(normalized).starts_with(case.expected_first_token)
+    assert_that(normalized).starts_with(case.expected_command)
 
 
 @dataclass(frozen=True)
