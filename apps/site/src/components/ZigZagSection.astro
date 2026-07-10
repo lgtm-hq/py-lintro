@@ -1,0 +1,40 @@
+---
+import Figure from './ui/Figure.astro';
+
+interface Props {
+  imageSrc: string;
+  imageAlt: string;
+  imageFirst?: boolean;
+  imageWidth?: number;
+  imageHeight?: number;
+  class?: string;
+}
+
+const {
+  imageSrc,
+  imageAlt,
+  imageFirst = true,
+  imageWidth = 640,
+  imageHeight = 360,
+  class: className,
+} = Astro.props;
+---
+
+<section
+  class:list={[
+    'craft-zigzag',
+    !imageFirst && 'craft-zigzag-reverse',
+    className,
+  ]}
+>
+  <Figure
+    class="craft-zigzag-visual"
+    src={imageSrc}
+    alt={imageAlt}
+    width={imageWidth}
+    height={imageHeight}
+  />
+  <div class="craft-zigzag-copy">
+    <slot />
+  </div>
+</section>

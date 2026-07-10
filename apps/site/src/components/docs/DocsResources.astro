@@ -1,0 +1,23 @@
+---
+import SmartLink from "../SmartLink.astro";
+import type { DocResource } from "../../lib/doc-resources";
+
+interface Props {
+  resources: DocResource[];
+}
+
+const { resources } = Astro.props;
+---
+
+{resources.length > 0 && (
+  <footer class="docs-resources" data-pagefind-ignore>
+    <p class="docs-resources-title">Resources</p>
+    <div class="docs-resources-links">
+      {
+        resources.map(({ label, href }) => (
+          <SmartLink name={label} href={href} class="docs-resource-tag" />
+        ))
+      }
+    </div>
+  </footer>
+)}
