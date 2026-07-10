@@ -3,7 +3,7 @@
 ---
 name: Publish - TestPyPI Staging
 
-# Layout: lgtm-ci docs/python-release-publish.md (v0.24.0+)
+# Layout: lgtm-ci docs/python-release-publish.md (v0.45.1+)
 
 'on':
   workflow_dispatch:
@@ -18,7 +18,7 @@ jobs:
   pypi-build:
     name: Build Python distribution
     # yamllint disable-line rule:line-length
-    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-build-python-dist.yml@f96f88353ccf669dacb7c9e2bd3b5d4410d859fd # v0.24.0
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-build-python-dist.yml@1014e3d7d5441a63215d2096545a46cff6de101c # v0.48.0
     permissions:
       # read: checkout and build sdist/wheel (reusable-build-python-dist)
       contents: read
@@ -27,19 +27,14 @@ jobs:
       verify-tag-version: false
       ensure-tag-on-default-branch: false
       artifact-name: python-dist
-      tooling-ref: 'f96f88353ccf669dacb7c9e2bd3b5d4410d859fd' # v0.24.0
+      tooling-ref: '1014e3d7d5441a63215d2096545a46cff6de101c' # v0.48.0
       egress-policy: block
-      # lgtm-ci workflow-contract.md § PyPI build
+      egress-preset: pypi
+      allowed-endpoints-mode: append
       allowed-endpoints: >
-        github.com:443
-        api.github.com:443
-        codeload.github.com:443
-        release-assets.githubusercontent.com:443
-        objects.githubusercontent.com:443
-        github-releases.githubusercontent.com:443
-        raw.githubusercontent.com:443
         astral.sh:443
         releases.astral.sh:443
+        github-releases.githubusercontent.com:443
 
   pypi-upload:
     name: Upload to TestPyPI
@@ -58,13 +53,17 @@ jobs:
     steps:
       - name: Harden runner
         # yamllint disable-line rule:line-length
-        uses: step-security/harden-runner@fe104658747b27e96e4f7e80cd0a94068e53901d # v2.16.1
+        uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
         with:
           egress-policy: block
           # lgtm-ci workflow-contract.md § PyPI upload (OIDC)
           allowed-endpoints: >
             github.com:443
             api.github.com:443
+            codeload.github.com:443
+            objects.githubusercontent.com:443
+            actions.githubusercontent.com:443
+            *.blob.core.windows.net:443
             ghcr.io:443
             pkg-containers.githubusercontent.com:443
             pypi.org:443
@@ -72,15 +71,29 @@ jobs:
             files.pythonhosted.org:443
             test.pypi.org:443
             upload.test.pypi.org:443
+            astral.sh:443
+            releases.astral.sh:443
             fulcio.sigstore.dev:443
             rekor.sigstore.dev:443
             tuf-repo-cdn.sigstore.dev:443
             oauth2.sigstore.dev:443
-      - name: Upload to TestPyPI (OIDC)
+      - name: Prepare PyPI upload
+        id: prepare
         # yamllint disable-line rule:line-length
-        uses: lgtm-hq/lgtm-ci/.github/actions/upload-pypi-oidc@f96f88353ccf669dacb7c9e2bd3b5d4410d859fd # v0.24.0
+        uses: lgtm-hq/lgtm-ci/.github/actions/prepare-pypi-upload@1014e3d7d5441a63215d2096545a46cff6de101c # v0.48.0
         with:
           artifact-name: python-dist
-          test-pypi: true
           python-version: '3.14'
-          tooling-ref: 'f96f88353ccf669dacb7c9e2bd3b5d4410d859fd' # v0.24.0
+          tooling-ref: '1014e3d7d5441a63215d2096545a46cff6de101c' # v0.48.0
+      - name: Upload to TestPyPI
+        # yamllint disable-line rule:line-length
+        uses: pypa/gh-action-pypi-publish@cef221092ed1bacb1cc03d23a2d87d1d172e277b # v1.14.0
+        with:
+          repository-url: https://test.pypi.org/legacy/
+          packages-dir: ${{ steps.prepare.outputs.dist-path }}
+      - name: Attest build provenance
+        continue-on-error: true
+        # yamllint disable-line rule:line-length
+        uses: actions/attest-build-provenance@0f67c3f4856b2e3261c31976d6725780e5e4c373 # v4.1.1
+        with:
+          subject-path: ${{ steps.prepare.outputs.dist-path }}/*

@@ -37,7 +37,7 @@ pipelines.
 **Examples**:
 
 - `ci-post-pr-comment.sh` - Post comments to PRs via GitHub API
-- `ghcr_prune_untagged.py` - Prune untagged GHCR versions and stale cache tags
+- `maintenance/delete-ci-ghcr-tags.sh` - Delete ephemeral CI GHCR tags after docker-ci
 
 ### `scripts/local/` - Local Development Scripts
 

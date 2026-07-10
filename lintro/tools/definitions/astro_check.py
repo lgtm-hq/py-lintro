@@ -33,6 +33,10 @@ from lintro.parsers.base_parser import strip_ansi_codes
 from lintro.plugins.base import BaseToolPlugin
 from lintro.plugins.protocol import ToolDefinition
 from lintro.plugins.registry import register_tool
+from lintro.tools.core.option_validators import (
+    OptionSchema,
+    validate_option_types,
+)
 from lintro.tools.core.timeout_utils import create_timeout_result
 from lintro.utils.env import get_subprocess_env
 
@@ -46,6 +50,11 @@ _ASTRO_CONFIG_NAMES: tuple[str, ...] = (
     "astro.config.js",
     "astro.config.cjs",
 )
+
+# Expected types for astro-check-specific options, validated in set_options().
+ASTRO_CHECK_OPTION_TYPES: OptionSchema = {
+    "root": (str, "string path"),
+}
 
 
 def _local_astro_binary(cwd: Path) -> Path | None:
@@ -113,14 +122,9 @@ class AstroCheckPlugin(BaseToolPlugin):
         Args:
             root: Root directory for the Astro project.
             **kwargs: Other tool options.
-
-        Raises:
-            ValueError: If any provided option is of an unexpected type.
         """
-        if root is not None and not isinstance(root, str):
-            raise ValueError("root must be a string path")
-
         options: dict[str, object] = {"root": root}
+        validate_option_types(options, ASTRO_CHECK_OPTION_TYPES)
         options = {k: v for k, v in options.items() if v is not None}
         super().set_options(**options, **kwargs)
 

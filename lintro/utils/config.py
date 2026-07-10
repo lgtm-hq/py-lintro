@@ -28,6 +28,7 @@ __all__ = [
     "load_lintro_tool_config",
     "get_tool_order_config",
     "load_post_checks_config",
+    "load_module_size_config",
     # Tool-specific loaders
     "load_ruff_config",
     "load_bandit_config",
@@ -171,6 +172,7 @@ def load_lintro_global_config() -> dict[str, Any]:
         "pydoclint",
         "tsc",
         "post_checks",
+        "module_size",
         "versions",
     }
 
@@ -220,6 +222,26 @@ def load_post_checks_config() -> dict[str, Any]:
     """
     cfg = _get_lintro_section()
     section = cfg.get("post_checks", {})
+    if isinstance(section, dict):
+        return section
+    return {}
+
+
+def load_module_size_config() -> dict[str, Any]:
+    """Load module-size gate configuration from pyproject.
+
+    Reads the ``[tool.lintro.module_size]`` table. See
+    ``lintro/utils/module_size.py`` for the ratchet-down plan.
+
+    Returns:
+        Dict with keys like:
+            - enabled: bool
+            - threshold: int
+            - baseline: list[str]
+            - exclude: list[str]
+    """
+    cfg = _get_lintro_section()
+    section = cfg.get("module_size", {})
     if isinstance(section, dict):
         return section
     return {}

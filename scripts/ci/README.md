@@ -12,6 +12,7 @@ scripts/ci/
 ├── maintenance/         # GHCR prune, security audit, egress checks
 ├── testing/             # Test summaries, image pull helpers
 ├── coverage-badge-update.sh  # Wrapper → testing/coverage-badge-update.sh
+├── classify-osv-results.py
 ├── format-security-comment.py
 ├── security-comment.sh
 └── …                    # Tag/version helpers, manifest sync, etc.
@@ -27,7 +28,8 @@ scripts/ci/
 | `pr-comment-cleanup.yml`      | `post-pr-delete-previous.sh`                                                |
 | `lintro-report-scheduled.yml` | `lintro-report-generate.sh`                                                 |
 | GHCR cleanup (docker-ci)      | `maintenance/delete-ci-ghcr-tags.sh`                                        |
-| GHCR cleanup (scheduled)      | `maintenance/ghcr_prune_untagged.py` (shim → `ghcr_prune/cli.py`)           |
+| GHCR cleanup (scheduled)      | lgtm-ci `reusable-ghcr-cleanup.yml` (`ghcr-cleanup.yml`)                    |
+| Vuln suppression check        | lgtm-ci `reusable-vuln-suppression-check.yml`                               |
 
 Release versioning and auto-tagging use lgtm-ci reusable workflows
 (`release-version-pr.yml`, `release-auto-tag.yml`).
@@ -35,9 +37,9 @@ Release versioning and auto-tagging use lgtm-ci reusable workflows
 ## GHCR Cache Tags
 
 BuildKit registry cache is stored on production packages as `:cache` (not separate
-`*-buildcache` repos). The prune utility reaps ephemeral `pr-*` / `mq-*` / `dispatch-*`
-cache exports from `py-lintro` and `py-lintro-base` while preserving the permanent
-`:cache` tag.
+`*-buildcache` repos). Scheduled cleanup uses lgtm-ci `reusable-ghcr-cleanup.yml`, which
+reaps ephemeral `pr-*` / `mq-*` / `dispatch-*` cache exports from `py-lintro` and
+`py-lintro-base` while preserving referenced digests and the permanent `:cache` tag.
 
 ## Local Development
 

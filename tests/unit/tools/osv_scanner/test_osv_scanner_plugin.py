@@ -15,10 +15,38 @@ from assertpy import assert_that
 from lintro.enums.severity_level import SeverityLevel
 from lintro.enums.tool_type import ToolType
 from lintro.parsers.osv_scanner.osv_scanner_issue import OsvScannerIssue
+from lintro.plugins.subprocess_executor import SubprocessResult
 from lintro.tools.definitions.osv_scanner import (
     OSV_SCANNER_DEFAULT_TIMEOUT,
     OsvScannerPlugin,
 )
+
+
+def _proc(
+    *,
+    success: bool,
+    stdout: str = "",
+    stderr: str = "",
+    output: str | None = None,
+) -> SubprocessResult:
+    """Build a SubprocessResult for mocking ``_run_subprocess_result``.
+
+    Args:
+        success: Whether the subprocess succeeded (return code 0).
+        stdout: Captured standard output (the JSON report stream).
+        stderr: Captured standard error (human-readable log lines).
+        output: Combined display output; defaults to ``stdout`` when omitted.
+
+    Returns:
+        SubprocessResult with the requested streams.
+    """
+    return SubprocessResult(
+        returncode=0 if success else 1,
+        stdout=stdout,
+        stderr=stderr,
+        output=stdout if output is None else output,
+    )
+
 
 # =============================================================================
 # Tests for definition
@@ -104,8 +132,8 @@ def test_check_no_vulnerabilities(
 
     with patch.object(
         osv_scanner_plugin,
-        "_run_subprocess",
-        return_value=(True, ""),
+        "_run_subprocess_result",
+        return_value=_proc(success=True),
     ):
         result = osv_scanner_plugin.check([str(lockfile)], {})
 
@@ -128,13 +156,80 @@ def test_check_clean_scan_with_log_prefix_and_nonzero_exit(
 
     with patch.object(
         osv_scanner_plugin,
-        "_run_subprocess",
-        return_value=(False, osv_output),
+        "_run_subprocess_result",
+        return_value=_proc(success=False, stdout=osv_output),
     ):
         result = osv_scanner_plugin.check([str(lockfile)], {})
 
     assert_that(result.success).is_true()
     assert_that(result.issues_count).is_equal_to(0)
+
+
+def test_check_no_package_sources_sets_parse_failures_count(
+    osv_scanner_plugin: OsvScannerPlugin,
+    tmp_path: Path,
+) -> None:
+    """Plain-text no-op scans report parse_failures_count=0 for CI classification."""
+    lockfile = tmp_path / "requirements.txt"
+    lockfile.write_text("requests==2.32.3\n")
+
+    osv_output = (
+        "Scanned 0 packages and found 0 vulnerabilities\nNo package sources found\n"
+    )
+
+    with patch.object(
+        osv_scanner_plugin,
+        "_run_subprocess_result",
+        return_value=_proc(success=False, stderr=osv_output, output=osv_output),
+    ):
+        result = osv_scanner_plugin.check([str(lockfile)], {})
+
+    assert_that(result.success).is_true()
+    assert_that(result.issues_count).is_equal_to(0)
+    assert_that(result.parse_failures_count).is_equal_to(0)
+
+
+def test_check_zero_packages_without_no_sources_is_not_success(
+    osv_scanner_plugin: OsvScannerPlugin,
+    tmp_path: Path,
+) -> None:
+    """Ambiguous zero-package output without the no-sources signal stays a failure."""
+    lockfile = tmp_path / "requirements.txt"
+    lockfile.write_text("requests==2.32.3\n")
+
+    osv_output = "Scanned 0 packages and found 0 vulnerabilities\n"
+
+    with patch.object(
+        osv_scanner_plugin,
+        "_run_subprocess_result",
+        return_value=_proc(success=False, stderr=osv_output, output=osv_output),
+    ):
+        result = osv_scanner_plugin.check([str(lockfile)], {})
+
+    assert_that(result.success).is_false()
+    assert_that(result.issues_count).is_equal_to(0)
+
+
+def test_check_garbage_stdout_with_zero_exit_is_not_clean(
+    osv_scanner_plugin: OsvScannerPlugin,
+    tmp_path: Path,
+) -> None:
+    """Unparseable stdout with a zero exit must not report a clean scan (#1044)."""
+    lockfile = tmp_path / "requirements.txt"
+    lockfile.write_text("requests==2.32.3\n")
+
+    garbage = "}{ this is not valid json at all"
+
+    with patch.object(
+        osv_scanner_plugin,
+        "_run_subprocess_result",
+        return_value=_proc(success=True, stdout=garbage),
+    ):
+        result = osv_scanner_plugin.check([str(lockfile)], {})
+
+    assert_that(result.success).is_false()
+    assert_that(result.issues_count).is_equal_to(0)
+    assert_that(result.parse_failures_count).is_equal_to(1)
 
 
 def test_check_error_payload_without_results_is_not_success(
@@ -149,13 +244,113 @@ def test_check_error_payload_without_results_is_not_success(
 
     with patch.object(
         osv_scanner_plugin,
-        "_run_subprocess",
-        return_value=(False, osv_output),
+        "_run_subprocess_result",
+        return_value=_proc(success=False, stdout=osv_output),
     ):
         result = osv_scanner_plugin.check([str(lockfile)], {})
 
     assert_that(result.success).is_false()
     assert_that(result.issues_count).is_equal_to(0)
+
+
+def test_check_exit_zero_error_payload_fails_closed(
+    osv_scanner_plugin: OsvScannerPlugin,
+    tmp_path: Path,
+) -> None:
+    """Exit-0 with an error-shaped payload is a scan failure, not a clean pass.
+
+    osv-scanner can exit 0 while emitting ``{"error": ...}``. Reporting that as
+    a clean scan would be a silent false-negative in a security gate (#1028).
+
+    Args:
+        osv_scanner_plugin: The OsvScannerPlugin instance to test.
+        tmp_path: Temporary directory path for test files.
+    """
+    lockfile = tmp_path / "requirements.txt"
+    lockfile.write_text("setuptools==80.9.0\n")
+
+    osv_output = '{"error": "failed to load config"}\n'
+
+    with patch.object(
+        osv_scanner_plugin,
+        "_run_subprocess_result",
+        return_value=_proc(success=True, stdout=osv_output),
+    ):
+        result = osv_scanner_plugin.check([str(lockfile)], {})
+
+    assert_that(result.success).is_false()
+    assert_that(result.issues_count).is_equal_to(0)
+    assert_that(result.parse_failures_count).is_equal_to(1)
+
+
+def test_check_exit_zero_results_not_a_list_fails_closed(
+    osv_scanner_plugin: OsvScannerPlugin,
+    tmp_path: Path,
+) -> None:
+    """Exit-0 with a non-list ``results`` value fails closed (#1028).
+
+    Args:
+        osv_scanner_plugin: The OsvScannerPlugin instance to test.
+        tmp_path: Temporary directory path for test files.
+    """
+    lockfile = tmp_path / "requirements.txt"
+    lockfile.write_text("setuptools==80.9.0\n")
+
+    osv_output = '{"results": "not-a-list"}\n'
+
+    with patch.object(
+        osv_scanner_plugin,
+        "_run_subprocess_result",
+        return_value=_proc(success=True, stdout=osv_output),
+    ):
+        result = osv_scanner_plugin.check([str(lockfile)], {})
+
+    assert_that(result.success).is_false()
+    assert_that(result.issues_count).is_equal_to(0)
+    assert_that(result.parse_failures_count).is_equal_to(1)
+
+
+def test_check_exit_zero_empty_results_is_clean(
+    osv_scanner_plugin: OsvScannerPlugin,
+    tmp_path: Path,
+) -> None:
+    """Exit-0 with an empty results list is a legitimate clean scan (#1028).
+
+    Args:
+        osv_scanner_plugin: The OsvScannerPlugin instance to test.
+        tmp_path: Temporary directory path for test files.
+    """
+    lockfile = tmp_path / "requirements.txt"
+    lockfile.write_text("setuptools==80.9.0\n")
+
+    osv_output = '{"results": []}\n'
+
+    with patch.object(
+        osv_scanner_plugin,
+        "_run_subprocess_result",
+        return_value=_proc(success=True, stdout=osv_output),
+    ):
+        result = osv_scanner_plugin.check([str(lockfile)], {})
+
+    assert_that(result.success).is_true()
+    assert_that(result.issues_count).is_equal_to(0)
+    assert_that(result.parse_failures_count).is_equal_to(0)
+
+
+def test_payload_has_valid_results_discriminates_shapes() -> None:
+    """The results-shape guard accepts only dicts with a list ``results``."""
+    assert_that(
+        OsvScannerPlugin._payload_has_valid_results({"results": []}),
+    ).is_true()
+    assert_that(
+        OsvScannerPlugin._payload_has_valid_results({"results": [{"x": 1}]}),
+    ).is_true()
+    assert_that(
+        OsvScannerPlugin._payload_has_valid_results({"error": "boom"}),
+    ).is_false()
+    assert_that(
+        OsvScannerPlugin._payload_has_valid_results({"results": "nope"}),
+    ).is_false()
 
 
 def test_check_with_vulnerabilities(
@@ -221,8 +416,8 @@ def test_check_with_vulnerabilities(
 
     with patch.object(
         osv_scanner_plugin,
-        "_run_subprocess",
-        return_value=(False, osv_output),
+        "_run_subprocess_result",
+        return_value=_proc(success=False, stdout=osv_output),
     ):
         result = osv_scanner_plugin.check([str(lockfile)], {})
 
@@ -251,7 +446,7 @@ def test_check_timeout(
 
     with patch.object(
         osv_scanner_plugin,
-        "_run_subprocess",
+        "_run_subprocess_result",
         side_effect=subprocess.TimeoutExpired(
             cmd=["osv-scanner"],
             timeout=120,
@@ -334,10 +529,10 @@ def test_check_with_suppressions_detects_stale(
     # Probe scan: also no issues (vuln was fixed upstream → stale)
     with patch.object(
         osv_scanner_plugin,
-        "_run_subprocess",
+        "_run_subprocess_result",
         side_effect=[
-            (True, ""),  # gating scan
-            (True, ""),  # probe scan
+            _proc(success=True),  # gating scan
+            _proc(success=True),  # probe scan
         ],
     ):
         result = osv_scanner_plugin.check([str(lockfile)], {})
@@ -361,8 +556,8 @@ def test_check_without_config_no_metadata(
 
     with patch.object(
         osv_scanner_plugin,
-        "_run_subprocess",
-        return_value=(True, ""),
+        "_run_subprocess_result",
+        return_value=_proc(success=True),
     ):
         result = osv_scanner_plugin.check([str(lockfile)], {})
 
@@ -388,8 +583,8 @@ def test_check_suppressions_disabled(
 
     with patch.object(
         osv_scanner_plugin,
-        "_run_subprocess",
-        return_value=(True, ""),
+        "_run_subprocess_result",
+        return_value=_proc(success=True),
     ) as mock_run:
         result = osv_scanner_plugin.check(
             [str(lockfile)],
@@ -419,9 +614,9 @@ def test_check_suppressions_probe_timeout(
 
     with patch.object(
         osv_scanner_plugin,
-        "_run_subprocess",
+        "_run_subprocess_result",
         side_effect=[
-            (True, ""),  # gating scan succeeds
+            _proc(success=True),  # gating scan succeeds
             subprocess.TimeoutExpired(cmd=["osv-scanner"], timeout=120),  # probe
         ],
     ):

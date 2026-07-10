@@ -9,10 +9,11 @@ from assertpy import assert_that
 
 from lintro.ai.cost import (
     estimate_cost,
+    estimate_cost_with_floor,
     format_cost,
     format_token_count,
 )
-from lintro.ai.registry import DEFAULT_PRICING, PROVIDERS
+from lintro.ai.registry import DEFAULT_PRICING, PROVIDERS, ModelPricing
 
 
 def test_cost_known_model():
@@ -22,6 +23,15 @@ def test_cost_known_model():
     expected = (1000 / 1_000_000) * pricing.input_per_million + (
         500 / 1_000_000
     ) * pricing.output_per_million
+    assert_that(cost).is_close_to(expected, 1e-10)
+
+
+def test_estimate_cost_with_floor_partial_zero_uses_default():
+    """Verify partial zero pricing falls back to default rates."""
+    partial_zero = ModelPricing(input_per_million=3.0, output_per_million=0.0)
+    with patch.dict(PROVIDERS.model_pricing, {"partial-zero": partial_zero}):
+        cost = estimate_cost_with_floor("partial-zero", 1_000_000, 1_000_000)
+    expected = DEFAULT_PRICING.input_per_million + DEFAULT_PRICING.output_per_million
     assert_that(cost).is_close_to(expected, 1e-10)
 
 
@@ -64,10 +74,14 @@ def test_cost_large_token_count():
 
 
 @pytest.mark.parametrize("model", list(PROVIDERS.model_pricing.keys()))
-def test_cost_all_known_models_have_pricing(model):
-    """Verify every registered model produces a positive cost estimate."""
+def test_cost_all_known_models_have_pricing(model: str) -> None:
+    """Verify every registered model produces a known cost estimate."""
+    pricing = PROVIDERS.model_pricing[model]
     cost = estimate_cost(model, 1000, 1000)
-    assert_that(cost).is_greater_than(0)
+    if pricing.input_per_million == 0 and pricing.output_per_million == 0:
+        assert_that(cost).is_equal_to(0.0)
+    else:
+        assert_that(cost).is_greater_than(0)
 
 
 def test_cost_format_small():

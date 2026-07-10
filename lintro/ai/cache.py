@@ -74,11 +74,13 @@ def get_cached_suggestion(
     if isinstance(suggestion, dict):
         # Touch the file to update its access/modification time for LRU tracking
         cache_file.touch()
-        return AIFixSuggestion(**{
-            k: v
-            for k, v in suggestion.items()
-            if k in {f.name for f in dataclasses.fields(AIFixSuggestion)}
-        })
+        return AIFixSuggestion(
+            **{
+                k: v
+                for k, v in suggestion.items()
+                if k in {f.name for f in dataclasses.fields(AIFixSuggestion)}
+            }
+        )
     return None
 
 

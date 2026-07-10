@@ -1,0 +1,12 @@
+diff --git a/.github/workflows/ci.yml b/.github/workflows/ci.yml
+--- a/.github/workflows/ci.yml
++++ b/.github/workflows/ci.yml
+@@ -1 +1,2 @@
+ name: CI
++run: python -c scripts/review.py
+diff --git a/scripts/review.py b/scripts/review.py
+--- a/scripts/review.py
++++ b/scripts/review.py
+@@ -1 +1,2 @@
+ def main():
++    return 0

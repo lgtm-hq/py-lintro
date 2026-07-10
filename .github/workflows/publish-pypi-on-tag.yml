@@ -4,7 +4,7 @@
 name: Publish - PyPI Production
 # Publishes package to PyPI when version tags are pushed.
 # Lint gate: docker-ci on main/PR (no duplicate quality on tag).
-# Layout: lgtm-ci docs/python-release-publish.md (requires lgtm-ci v0.24.0+)
+# Layout: lgtm-ci docs/python-release-publish.md (requires lgtm-ci v0.45.1+)
 
 'on':
   push:
@@ -30,32 +30,16 @@ jobs:
     name: Generate and verify SBOM
     if: ${{ !startsWith(github.ref_name, 'actions-v') }}
     # yamllint disable-line rule:line-length
-    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-sbom.yml@f96f88353ccf669dacb7c9e2bd3b5d4410d859fd # v0.24.0
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-sbom.yml@1014e3d7d5441a63215d2096545a46cff6de101c # v0.48.0
     with:
       target: .
       target-type: dir
       sbom-format: cyclonedx-json
       scan-vulnerabilities: true
       create-attestation: true
+      tooling-ref: '1014e3d7d5441a63215d2096545a46cff6de101c' # v0.48.0
       egress-policy: block
-      allowed-endpoints: >
-        github.com:443
-        api.github.com:443
-        codeload.github.com:443
-        release-assets.githubusercontent.com:443
-        objects.githubusercontent.com:443
-        raw.githubusercontent.com:443
-        anchore.io:443
-        get.anchore.io:443
-        toolbox-data.anchore.io:443
-        grype.anchore.io:443
-        pipelines.actions.githubusercontent.com:443
-        fulcio.sigstore.dev:443
-        rekor.sigstore.dev:443
-        timestamp.sigstore.dev:443
-        tuf-repo-cdn.sigstore.dev:443
-        sigstore-tuf-root.storage.googleapis.com:443
-      tooling-ref: 'f96f88353ccf669dacb7c9e2bd3b5d4410d859fd' # v0.24.0
+      egress-preset: sbom
     permissions:
       # read: checkout repo for SBOM generation
       contents: read
@@ -73,26 +57,21 @@ jobs:
       github.ref_type == 'tag' &&
       !startsWith(github.ref_name, 'actions-v')
     # yamllint disable-line rule:line-length
-    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-build-python-dist.yml@f96f88353ccf669dacb7c9e2bd3b5d4410d859fd # v0.24.0
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-build-python-dist.yml@1014e3d7d5441a63215d2096545a46cff6de101c # v0.48.0
     permissions:
       # read: checkout and build sdist/wheel (reusable-build-python-dist)
       contents: read
     with:
       python-version: '3.14'
       artifact-name: python-dist
-      tooling-ref: 'f96f88353ccf669dacb7c9e2bd3b5d4410d859fd' # v0.24.0
+      tooling-ref: '1014e3d7d5441a63215d2096545a46cff6de101c' # v0.48.0
       egress-policy: block
-      # lgtm-ci workflow-contract.md § PyPI build
+      egress-preset: pypi
+      allowed-endpoints-mode: append
       allowed-endpoints: >
-        github.com:443
-        api.github.com:443
-        codeload.github.com:443
-        release-assets.githubusercontent.com:443
-        objects.githubusercontent.com:443
-        github-releases.githubusercontent.com:443
-        raw.githubusercontent.com:443
         astral.sh:443
         releases.astral.sh:443
+        github-releases.githubusercontent.com:443
 
   pypi-upload:
     name: Upload to PyPI
@@ -112,51 +91,66 @@ jobs:
     steps:
       - name: Harden runner
         # yamllint disable-line rule:line-length
-        uses: step-security/harden-runner@fe104658747b27e96e4f7e80cd0a94068e53901d # v2.16.1
+        uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
         with:
           egress-policy: block
           # lgtm-ci workflow-contract.md § PyPI upload (OIDC)
           allowed-endpoints: >
             github.com:443
             api.github.com:443
+            codeload.github.com:443
+            objects.githubusercontent.com:443
+            actions.githubusercontent.com:443
+            *.blob.core.windows.net:443
             ghcr.io:443
             pkg-containers.githubusercontent.com:443
             pypi.org:443
             upload.pypi.org:443
             files.pythonhosted.org:443
+            astral.sh:443
+            releases.astral.sh:443
             fulcio.sigstore.dev:443
             rekor.sigstore.dev:443
             tuf-repo-cdn.sigstore.dev:443
             oauth2.sigstore.dev:443
-      - name: Upload to PyPI (OIDC)
+      - name: Prepare PyPI upload
+        id: prepare
         # yamllint disable-line rule:line-length
-        uses: lgtm-hq/lgtm-ci/.github/actions/upload-pypi-oidc@f96f88353ccf669dacb7c9e2bd3b5d4410d859fd # v0.24.0
+        uses: lgtm-hq/lgtm-ci/.github/actions/prepare-pypi-upload@1014e3d7d5441a63215d2096545a46cff6de101c # v0.48.0
         with:
           artifact-name: python-dist
           python-version: '3.14'
-          tooling-ref: 'f96f88353ccf669dacb7c9e2bd3b5d4410d859fd' # v0.24.0
+          tooling-ref: '1014e3d7d5441a63215d2096545a46cff6de101c' # v0.48.0
+      - name: Upload to PyPI
+        # yamllint disable-line rule:line-length
+        uses: pypa/gh-action-pypi-publish@cef221092ed1bacb1cc03d23a2d87d1d172e277b # v1.14.0
+        with:
+          repository-url: https://upload.pypi.org/legacy/
+          packages-dir: ${{ steps.prepare.outputs.dist-path }}
+      - name: Attest build provenance
+        continue-on-error: true
+        # yamllint disable-line rule:line-length
+        uses: actions/attest-build-provenance@0f67c3f4856b2e3261c31976d6725780e5e4c373 # v4.1.1
+        with:
+          subject-path: ${{ steps.prepare.outputs.dist-path }}/*
 
   github-release:
     name: Create GitHub Release
     needs: [pypi-upload]
     if: ${{ !startsWith(github.ref_name, 'actions-v') }}
     # yamllint disable-line rule:line-length
-    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-github-release.yml@f96f88353ccf669dacb7c9e2bd3b5d4410d859fd # v0.24.0
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-github-release.yml@1014e3d7d5441a63215d2096545a46cff6de101c # v0.48.0
     permissions:
       # write: create GitHub Release and upload dist assets
       contents: write
     with:
       artifact-name: python-dist
       generate-release-notes: true
-      tooling-ref: 'f96f88353ccf669dacb7c9e2bd3b5d4410d859fd' # v0.24.0
+      tooling-ref: '1014e3d7d5441a63215d2096545a46cff6de101c' # v0.48.0
       egress-policy: block
-      allowed-endpoints: >
-        github.com:443
-        api.github.com:443
-        uploads.github.com:443
-        codeload.github.com:443
-        release-assets.githubusercontent.com:443
-        objects.githubusercontent.com:443
+      egress-preset: github-tooling
+      allowed-endpoints-mode: append
+      allowed-endpoints: uploads.github.com:443
 
   homebrew-tap:
     name: Publish Homebrew Tap
@@ -174,6 +168,30 @@ jobs:
       release_tag: ${{ github.ref_name }}
       arch: universal
     secrets: inherit
+
+  npm-publish:
+    name: Publish to npm
+    # Needs homebrew-tap: that job (build-binary.yml) uploads the four
+    # platform binaries to the GitHub release, which publish-npm.yml
+    # downloads. Gated to stable releases only, since build-binary does not
+    # run for prereleases.
+    needs: [homebrew-tap]
+    if: >-
+      !startsWith(github.ref_name, 'actions-v') &&
+      !contains(github.ref_name, 'a') &&
+      !contains(github.ref_name, 'b') &&
+      !contains(github.ref_name, 'rc')
+    uses: ./.github/workflows/publish-npm.yml
+    permissions:
+      # read: checkout and download release assets
+      contents: read
+      # write: OIDC for npm trusted publishing + provenance
+      id-token: write
+    with:
+      release_tag: ${{ github.ref_name }}
+    # No secrets: inherit — publishing is OIDC-only (id-token), and the
+    # reusable workflow's GITHUB_TOKEN for release-asset download is provided
+    # automatically. Avoids exposing all org/repo secrets to the call.
 
   docker-publish:
     name: Publish Docker Images to GHCR

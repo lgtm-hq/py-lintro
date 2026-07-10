@@ -134,6 +134,7 @@ def test_print_totals_table_delegates_to_module_function() -> None:
             severity_info=0,
             total_ai_applied=0,
             total_ai_verified=0,
+            total_fixable=0,
         )
 
 
@@ -166,6 +167,7 @@ def test_print_totals_table_delegates_fix_mode() -> None:
             severity_info=0,
             total_ai_applied=2,
             total_ai_verified=1,
+            total_fixable=0,
         )
 
 

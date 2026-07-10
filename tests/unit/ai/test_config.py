@@ -7,6 +7,8 @@ from assertpy import assert_that
 from pydantic import ValidationError
 
 from lintro.ai.config import AIConfig
+from lintro.ai.enums import AITransport
+from lintro.ai.registry import AIProvider
 
 # -- Defaults --------------------------------------------------------------
 
@@ -30,6 +32,18 @@ def test_default_config_optional_fields() -> None:
     assert_that(config.api_key_env).is_none()
 
 
+def test_cursor_trust_workspace_defaults_false() -> None:
+    """Cursor workspace trust is opt-in and disabled by default."""
+    config = AIConfig()
+    assert_that(config.cursor_trust_workspace).is_false()
+
+
+def test_cursor_trust_workspace_opt_in() -> None:
+    """Cursor workspace trust can be explicitly enabled via config."""
+    config = AIConfig(cursor_trust_workspace=True)
+    assert_that(config.cursor_trust_workspace).is_true()
+
+
 def test_default_config_numeric_fields() -> None:
     """All numeric fields have correct defaults."""
     config = AIConfig()
@@ -50,28 +64,28 @@ def test_default_config_numeric_fields() -> None:
 
 def test_provider_anthropic() -> None:
     """Provider 'anthropic' is accepted (Pydantic coerces str to AIProvider)."""
-    config = AIConfig(provider="anthropic")  # type: ignore[arg-type]  # tests YAML-style str coercion
-    assert_that(config.provider).is_equal_to("anthropic")
+    config = AIConfig.model_validate({"provider": "anthropic"})
+    assert_that(config.provider).is_equal_to(AIProvider.ANTHROPIC)
 
 
 def test_provider_openai() -> None:
     """Provider 'openai' is accepted (Pydantic coerces str to AIProvider)."""
-    config = AIConfig(provider="openai")  # type: ignore[arg-type]  # tests YAML-style str coercion
-    assert_that(config.provider).is_equal_to("openai")
+    config = AIConfig.model_validate({"provider": "openai"})
+    assert_that(config.provider).is_equal_to(AIProvider.OPENAI)
 
 
 def test_provider_invalid_rejected() -> None:
     """An invalid provider string is rejected by validation."""
     with pytest.raises(ValidationError):
-        AIConfig(provider="gemini")  # type: ignore[arg-type]  # intentionally invalid
+        AIConfig.model_validate({"provider": "gemini"})
 
 
 # -- Boolean overrides -----------------------------------------------------
 
 
 def test_enabled_override() -> None:
-    """Enabled can be set to True."""
-    config = AIConfig(enabled=True)
+    """Enabled can be set to True with required transport."""
+    config = AIConfig(enabled=True, transport=AITransport.API)
     assert_that(config.enabled).is_true()
 
 
@@ -160,7 +174,7 @@ def test_numeric_field_accepts_valid_value(
     expected: int | float,
 ) -> None:
     """Numeric field {field_name} accepts value {valid_value}."""
-    config = AIConfig(**{field_name: valid_value})  # type: ignore[arg-type]  # dynamic field name
+    config = AIConfig.model_validate({field_name: valid_value})
     assert_that(getattr(config, field_name)).is_equal_to(expected)
 
 
@@ -203,7 +217,7 @@ def test_numeric_field_rejects_invalid_value(
 ) -> None:
     """Numeric field {field_name} rejects invalid value {invalid_value}."""
     with pytest.raises(ValidationError):
-        AIConfig(**{field_name: invalid_value})  # type: ignore[arg-type]  # dynamic field name
+        AIConfig.model_validate({field_name: invalid_value})
 
 
 # -- Cross-field validators ------------------------------------------------

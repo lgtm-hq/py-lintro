@@ -7,6 +7,7 @@ from assertpy import assert_that
 
 from lintro.ai.exceptions import AIProviderError
 from lintro.ai.fallback import stream_complete_with_fallback
+from lintro.ai.json_response import CliSchemaRequest
 from lintro.ai.providers.base import AIResponse, AIStreamResult, BaseAIProvider
 from lintro.ai.providers.constants import DEFAULT_PER_CALL_MAX_TOKENS, DEFAULT_TIMEOUT
 
@@ -45,7 +46,12 @@ class _SuccessProvider(BaseAIProvider):
         system: str | None = None,
         max_tokens: int = DEFAULT_PER_CALL_MAX_TOKENS,
         timeout: float = DEFAULT_TIMEOUT,
+        repo_root: str | None = None,
+        use_one_shot: bool = False,
+        model: str | None = None,
+        cli_schema: CliSchemaRequest | None = None,
     ) -> AIResponse:
+        del model, cli_schema
         return _make_response(content=f"from-{self._name}", provider=self._name)
 
     def stream_complete(
@@ -55,7 +61,9 @@ class _SuccessProvider(BaseAIProvider):
         system: str | None = None,
         max_tokens: int = DEFAULT_PER_CALL_MAX_TOKENS,
         timeout: float = DEFAULT_TIMEOUT,
+        model: str | None = None,
     ) -> AIStreamResult:
+        del model
         resp = _make_response(content="", provider=self._name)
         return AIStreamResult(
             _chunks=iter([f"chunk-{self._name}"]),
@@ -85,7 +93,12 @@ class _FailingProvider(BaseAIProvider):
         system: str | None = None,
         max_tokens: int = DEFAULT_PER_CALL_MAX_TOKENS,
         timeout: float = DEFAULT_TIMEOUT,
+        repo_root: str | None = None,
+        use_one_shot: bool = False,
+        model: str | None = None,
+        cli_schema: CliSchemaRequest | None = None,
     ) -> AIResponse:
+        del model, cli_schema
         raise AIProviderError("provider down")
 
     def stream_complete(
@@ -95,7 +108,9 @@ class _FailingProvider(BaseAIProvider):
         system: str | None = None,
         max_tokens: int = DEFAULT_PER_CALL_MAX_TOKENS,
         timeout: float = DEFAULT_TIMEOUT,
+        model: str | None = None,
     ) -> AIStreamResult:
+        del model
         raise AIProviderError("stream provider down")
 
 
@@ -120,15 +135,18 @@ def test_stream_fallback_tries_fallback_models() -> None:
             system: str | None = None,
             max_tokens: int = DEFAULT_PER_CALL_MAX_TOKENS,
             timeout: float = DEFAULT_TIMEOUT,
+            model: str | None = None,
         ) -> AIStreamResult:
-            calls.append(self._model)
-            if self._model == "test-model":
+            effective_model = model or self._model
+            calls.append(effective_model)
+            if effective_model == "test-model":
                 raise AIProviderError("primary failed")
             return super().stream_complete(
                 prompt,
                 system=system,
                 max_tokens=max_tokens,
                 timeout=timeout,
+                model=model,
             )
 
     provider = _ModelTrackingProvider("tracker")
@@ -162,14 +180,17 @@ def test_stream_fallback_restores_model_name() -> None:
             system: str | None = None,
             max_tokens: int = DEFAULT_PER_CALL_MAX_TOKENS,
             timeout: float = DEFAULT_TIMEOUT,
+            model: str | None = None,
         ) -> AIStreamResult:
-            if self._model == "test-model":
+            effective_model = model or self._model
+            if effective_model == "test-model":
                 raise AIProviderError("primary failed")
             return super().stream_complete(
                 prompt,
                 system=system,
                 max_tokens=max_tokens,
                 timeout=timeout,
+                model=model,
             )
 
     provider = _FailThenSuccessProvider("p1")

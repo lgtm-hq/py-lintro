@@ -39,7 +39,7 @@ def test_console_output_no_color(logger: ThreadSafeConsoleLogger) -> None:
     with patch("lintro.utils.console.logger.click.echo") as mock_echo:
         logger.console_output("Test message")
 
-        mock_echo.assert_called_once_with("Test message")
+        mock_echo.assert_called_once_with("Test message", err=False)
         assert_that(logger._messages).contains("Test message")
 
 
@@ -57,7 +57,7 @@ def test_console_output_with_color(logger: ThreadSafeConsoleLogger) -> None:
         logger.console_output("Test message", color="green")
 
         mock_style.assert_called_once_with("Test message", fg="green")
-        mock_echo.assert_called_once_with("styled text")
+        mock_echo.assert_called_once_with("styled text", err=False)
         assert_that(logger._messages).contains("Test message")
 
 
@@ -73,7 +73,7 @@ def test_info(logger: ThreadSafeConsoleLogger) -> None:
     ):
         logger.info("Info message")
 
-        mock_echo.assert_called_once_with("Info message")
+        mock_echo.assert_called_once_with("Info message", err=False)
         mock_logger.info.assert_called_once()
         assert_that(logger._messages).contains("Info message")
 
@@ -93,7 +93,7 @@ def test_info_blue(logger: ThreadSafeConsoleLogger) -> None:
         logger.info_blue("Blue message")
 
         mock_style.assert_called_once_with("Blue message", fg="cyan")
-        mock_echo.assert_called_once_with("styled")
+        mock_echo.assert_called_once_with("styled", err=False)
         mock_logger.info.assert_called_once()
         assert_that(logger._messages).contains("Blue message")
 

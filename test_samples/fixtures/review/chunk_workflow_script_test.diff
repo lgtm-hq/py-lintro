@@ -1,0 +1,36 @@
+diff --git a/.github/workflows/ci.yml b/.github/workflows/ci.yml
+index 1111111..2222222 100644
+--- a/.github/workflows/ci.yml
++++ b/.github/workflows/ci.yml
+@@ -1,1 +1,2 @@
+ name: CI
++run: scripts/ci/run.sh
+diff --git a/scripts/ci/run.sh b/scripts/ci/run.sh
+index 1111111..2222222 100755
+--- a/scripts/ci/run.sh
++++ b/scripts/ci/run.sh
+@@ -1,1 +1,2 @@
+ #!/usr/bin/env bash
++echo "running"
+diff --git a/scripts/ci/test_run.bats b/scripts/ci/test_run.bats
+index 1111111..2222222 100644
+--- a/scripts/ci/test_run.bats
++++ b/scripts/ci/test_run.bats
+@@ -1,1 +1,2 @@
+ @test "run script" {
++  run scripts/ci/run.sh
+ }
+diff --git a/src/lib/math.py b/src/lib/math.py
+index 1111111..2222222 100644
+--- a/src/lib/math.py
++++ b/src/lib/math.py
+@@ -1,1 +1,2 @@
+ def add(a, b):
++    return a + b
+diff --git a/tests/lib/test_math.py b/tests/lib/test_math.py
+index 1111111..2222222 100644
+--- a/tests/lib/test_math.py
++++ b/tests/lib/test_math.py
+@@ -1,1 +1,2 @@
+ def test_add():
++    assert add(1, 2) == 3

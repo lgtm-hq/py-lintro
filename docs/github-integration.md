@@ -48,6 +48,38 @@ docker-ci).
 If you want to publish the weekly report to Pages, prefer using a dedicated
 `deploy-pages` job gated on the report workflow.
 
+### 4b. AI Review (Dogfood) Workflow
+
+**File:** `.github/workflows/ai-review.yml`
+
+py-lintro dogfoods its own `lintro review` command on pull requests that touch
+`lintro/**`. The workflow runs an AI diff review and prints the JSON result to the job
+log.
+
+**Features:**
+
+- 🤖 **AI diff review** via `lintro review --pr <n> --depth 1 --output json`
+- 🛡️ **Trusted install** — lintro is installed from the PR's **base ref** (`main`, via
+  `pull_request.base.sha`), never the PR head. The code that runs with the API key is
+  always trusted, so a PR cannot substitute its own `lintro/**` to exfiltrate the key.
+  The PR is still reviewed: `lintro review --pr` fetches the diff through `gh` (GitHub
+  API), so the PR's changes are reviewed as data and never executed with the secret.
+  Trade-off: a PR that breaks the review code itself isn't caught by this job — that is
+  covered by the unit tests.
+- 🔑 **Bring-your-own key** — reads the `ANTHROPIC_API_KEY` repository secret
+- 💸 **Bounded spend** — caps cost via `ai.max_cost_usd` (from the trusted base config,
+  so a PR cannot raise the cap)
+- 🟢 **Non-blocking / informational** — runs with `continue-on-error` and always exits
+  0, so it can never fail a pull request. It is intentionally not a required check.
+- ⏭️ **Graceful skip** — when `ANTHROPIC_API_KEY` is absent (secret not configured yet,
+  or a fork PR that cannot read secrets) and for draft PRs, the review is skipped
+  without error.
+
+To activate it, add an `ANTHROPIC_API_KEY` secret to the repository (**Settings →
+Secrets and variables → Actions**). Because reviews run using trusted base-branch
+lintro, the key is safe to enable. Until that secret exists the workflow runs but skips
+gracefully, so merging it never breaks CI.
+
 ### 5. Docker Image Publishing
 
 **File:** `.github/workflows/docker-build-publish.yml`
