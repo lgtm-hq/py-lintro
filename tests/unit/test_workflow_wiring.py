@@ -469,7 +469,7 @@ def test_stage_coverage_html_allows_setup_uv_manifest_host() -> None:
     workflow = _load_workflow(name="test-ci.yml")
     steps = workflow["jobs"]["stage-coverage-html"]["steps"]
     harden = next(step for step in steps if step.get("name") == "Harden Runner")
-    allowed = harden["with"]["allowed-endpoints"]
+    allowed = set(harden["with"]["allowed-endpoints"].split())
 
     assert_that(allowed).contains("raw.githubusercontent.com:443")
     assert_that(allowed).contains("astral.sh:443")
