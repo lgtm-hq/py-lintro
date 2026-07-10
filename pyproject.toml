@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "lintro"
-version = "0.72.0"
+version = "0.73.0"
 description = "A unified CLI tool for code formatting, linting, and quality assurance"
 keywords = [
   "linting",
@@ -167,6 +167,7 @@ packages = [
   "lintro.parsers.oxfmt",
   "lintro.parsers.oxlint",
   "lintro.parsers.prettier",
+  "lintro.parsers.sarif",
   "lintro.parsers.shellcheck",
   "lintro.parsers.shfmt",
   "lintro.parsers.sqlfluff",
