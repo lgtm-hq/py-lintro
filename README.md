@@ -100,6 +100,12 @@ system.
 <td><code>rustup component add clippy</code></td>
 </tr>
 <tr>
+<td><a href="https://commitlint.js.org/"><img src="https://img.shields.io/badge/commitlint-f7b93e?logo=commitlint&logoColor=black" alt="commitlint"></a></td>
+<td>🔀 Git commits</td>
+<td>-</td>
+<td><code>bun add -g @commitlint/cli @commitlint/config-conventional</code><br><code>brew install commitlint</code></td>
+</tr>
+<tr>
 <td><a href="https://github.com/hadolint/hadolint"><img src="https://img.shields.io/badge/Hadolint-2496ED?logo=docker&logoColor=white" alt="Hadolint"></a></td>
 <td>🐳 Dockerfile</td>
 <td>-</td>
@@ -339,6 +345,11 @@ lintro check --tools tsc --auto-install
 
 # Exclude directories
 lintro check --exclude "node_modules,dist,venv"
+
+# Only scan files changed vs a git base ref (fast PR-scoped checks)
+lintro check --diff              # vs the repo default branch (origin/HEAD)
+lintro check --diff main         # vs an explicit ref
+lintro format --diff             # format only changed files
 
 # List available tools
 lintro list-tools

@@ -121,7 +121,7 @@
     },
     {
       "name": "cargo_deny",
-      "version": "0.19.0",
+      "version": "0.20.0",
       "install": {
         "type": "cargo",
         "package": "cargo-deny"
@@ -143,6 +143,19 @@
       "category": "external",
       "version_command": ["cargo", "clippy", "--version"],
       "languages": ["rust"],
+      "tags": ["linter"]
+    },
+    {
+      "name": "commitlint",
+      "version": "21.2.0",
+      "install": {
+        "type": "npm",
+        "package": "@commitlint/cli"
+      },
+      "tier": "tools",
+      "category": "npm",
+      "version_command": ["commitlint", "--version"],
+      "languages": ["git"],
       "tags": ["linter"]
     },
     {

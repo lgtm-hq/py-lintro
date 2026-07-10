@@ -108,6 +108,7 @@ def configure_tool_for_execution(
     post_tools: set[str],
     auto_install: bool = False,
     lintro_config: LintroConfig | None = None,
+    diff_base: str | None = None,
 ) -> BaseToolPlugin:
     """Configure a tool for execution.
 
@@ -133,6 +134,8 @@ def configure_tool_for_execution(
         post_tools: Set of post-check tool names.
         auto_install: Whether to auto-install Node.js deps if missing (global default).
         lintro_config: Optional LintroConfig to reuse; fetched via get_config() if None.
+        diff_base: Resolved git base ref for ``--diff`` scanning, or None to scan
+            all discovered files.
 
     Returns:
         The configured per-invocation tool copy to run.
@@ -168,6 +171,10 @@ def configure_tool_for_execution(
     # Set incremental mode if enabled
     if incremental:
         tool.set_options(incremental=True)
+
+    # Set git-diff base so discovery restricts to changed files.
+    if diff_base:
+        tool.set_options(diff_base=diff_base)
 
     # Resolve per-tool auto_install: per-tool config > global effective > False
     lintro_config = lintro_config or get_config()
