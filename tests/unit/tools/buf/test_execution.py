@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import cast
+
 from pathlib import Path
 from unittest.mock import patch
 
@@ -83,7 +85,8 @@ def test_check_reports_lint_issues(buf_plugin: BufPlugin, tmp_path: Path) -> Non
 
     assert_that(result.success).is_false()
     assert_that(result.issues_count).is_equal_to(1)
-    assert_that(result.issues[0].code).is_equal_to("PACKAGE_LOWER_SNAKE_CASE")
+    assert_that(result.issues).is_not_none()
+    assert_that(result.issues[0].code)  # type: ignore[index, union-attr].is_equal_to("PACKAGE_LOWER_SNAKE_CASE")
 
 
 def test_check_reports_format_issues(buf_plugin: BufPlugin, tmp_path: Path) -> None:
@@ -109,7 +112,8 @@ def test_check_reports_format_issues(buf_plugin: BufPlugin, tmp_path: Path) -> N
 
     assert_that(result.success).is_false()
     assert_that(result.issues_count).is_equal_to(1)
-    assert_that(result.issues[0].code).is_equal_to("FORMAT")
+    assert_that(result.issues).is_not_none()
+    assert_that(result.issues[0].code)  # type: ignore[index, union-attr].is_equal_to("FORMAT")
 
 
 def test_check_no_proto_files(buf_plugin: BufPlugin, tmp_path: Path) -> None:
