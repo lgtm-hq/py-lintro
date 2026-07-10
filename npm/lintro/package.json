@@ -1,5 +1,5 @@
 {
-  "name": "lintro",
+  "name": "@lgtm-hq/lintro",
   "version": "0.0.0-dev",
   "description": "A unified CLI for code formatting, linting, and quality assurance. Ships self-contained platform binaries — no Python required.",
   "keywords": [
