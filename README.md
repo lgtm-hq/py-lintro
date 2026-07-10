@@ -377,6 +377,7 @@ docker run --rm -v $(pwd):/code ghcr.io/lgtm-hq/py-lintro-base:latest check
 | [AI Features](docs/ai-features.md)               | AI summaries, fix suggestions, config   |
 | [Docker Usage](docs/docker.md)                   | Containerized development               |
 | [GitHub Integration](docs/github-integration.md) | CI/CD setup, workflows                  |
+| [Pre-commit Integration](docs/pre-commit.md)     | Run lintro as a pre-commit hook         |
 | [Contributing](docs/contributing.md)             | Development guide, adding tools         |
 | [Troubleshooting](docs/troubleshooting.md)       | Common issues and solutions             |
 
