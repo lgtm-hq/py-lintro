@@ -13,8 +13,8 @@
 # -----------------------------------------------------------------------------
 FROM python:3.14-slim@sha256:b877e50bd90de10af8d82c57a022fc2e0dc731c5320d762a27986facfc3355c1 AS tools
 
-ARG BUN_VERSION=1.3.11
-ARG UV_VERSION=0.11.10
+ARG BUN_VERSION=1.3.14
+ARG UV_VERSION=0.11.28
 
 LABEL maintainer="lgtm-hq"
 LABEL org.opencontainers.image.source="https://github.com/lgtm-hq/py-lintro"
@@ -157,8 +157,10 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
 
 RUN gosu lintro /app/scripts/ci/verify-tools.sh --label non-root
 
-USER lintro
-
+# No USER directive: the container starts as root so entrypoint.sh can detect
+# the UID/GID that owns the mounted /code volume and drop privileges to it via
+# gosu. This lets auto-install write node_modules into the volume without
+# consumers passing --user. See scripts/docker/entrypoint.sh.
 ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
 CMD ["--help"]
 
@@ -208,7 +210,8 @@ RUN useradd -m lintro && \
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
     CMD /app/.venv/bin/python -m lintro --version || exit 1
 
-USER lintro
-
+# No USER directive: the container starts as root so entrypoint.sh can detect
+# the UID/GID that owns the mounted /code volume and drop privileges to it via
+# gosu (installed above). See scripts/docker/entrypoint.sh.
 ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
 CMD ["--help"]

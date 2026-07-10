@@ -1,0 +1,72 @@
+---
+import BrandLogo from './BrandLogo.astro';
+import { docs, external } from '../data/site-links';
+
+const base = import.meta.env.BASE_URL;
+const year = new Date().getFullYear();
+---
+
+<footer class="site-footer" data-pagefind-ignore>
+  <div class="footer-inner">
+    <div class="footer-grid">
+      <div>
+        <BrandLogo class="footer-brand" as="strong" />
+        <p class="footer-tagline">// unified lint · format · test</p>
+      </div>
+      <div class="footer-col">
+        <h4>// docs</h4>
+        <a href={`${base}${docs.gettingStarted}`}>getting-started</a>
+        <a href={`${base}${docs.configuration}`}>configuration</a>
+        <a href={`${base}${docs.toolsIndex}`}>tools</a>
+        <a href={`${base}${docs.coverage}`}>coverage</a>
+      </div>
+      <div class="footer-col">
+        <h4>// links</h4>
+        <a href={external.github.href} target="_blank" rel="noopener noreferrer">github</a>
+        <a href={`${external.github.href}/issues`} target="_blank" rel="noopener noreferrer">issues</a>
+        <a href={`${external.pypi.href}`} target="_blank" rel="noopener noreferrer">pypi</a>
+      </div>
+    </div>
+    <p class="footer-bottom">MIT © {year} lintro</p>
+  </div>
+</footer>
+
+<style>
+  .site-footer {
+    border-top: 1px solid color-mix(in srgb, var(--site-accent, var(--lintro-accent)) 15%, var(--turbo-border-default));
+    background: color-mix(in srgb, var(--turbo-bg-surface) 90%, var(--site-accent, var(--lintro-accent)) 10%);
+    padding: 3rem 0 1.5rem;
+    margin-top: 4rem;
+  }
+  .footer-inner { max-width: var(--max-width); margin: 0 auto; padding: 0 1.5rem; }
+  .footer-grid { display: grid; grid-template-columns: 2fr 1fr 1fr; gap: 2rem; }
+  .footer-brand {
+    font-size: 0.95rem;
+  }
+  .footer-tagline { color: var(--turbo-text-muted, var(--turbo-text-secondary)); margin-top: 0.5rem; font-size: 0.8rem; }
+  .footer-col { display: flex; flex-direction: column; gap: 0.4rem; }
+  .footer-col h4 {
+    font-family: var(--font-mono);
+    font-size: 0.68rem;
+    text-transform: lowercase;
+    letter-spacing: 0.06em;
+    color: #4a6a4a;
+    margin-bottom: 0.25rem;
+  }
+  .footer-col a {
+    color: var(--turbo-text-muted, var(--turbo-text-secondary));
+    font-size: 0.8rem;
+    text-decoration: none;
+    text-transform: lowercase;
+  }
+  .footer-col a:hover { color: var(--site-accent, var(--lintro-accent)); }
+  .footer-bottom {
+    margin-top: 2rem;
+    padding-top: 1rem;
+    border-top: 1px solid var(--turbo-border-default);
+    font-size: 0.75rem;
+    color: #4a6a4a;
+    text-transform: lowercase;
+  }
+  @media (max-width: 768px) { .footer-grid { grid-template-columns: 1fr; } }
+</style>

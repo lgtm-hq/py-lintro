@@ -1,0 +1,138 @@
+---
+const base = import.meta.env.BASE_URL;
+
+const options = [
+  {
+    slug: 'tree',
+    num: '01',
+    name: 'Collapsible Tree',
+    tagline: 'Expand sections — tools collapsed by default',
+    accent: '#39ff14',
+  },
+  {
+    slug: 'dual-rail',
+    num: '02',
+    name: 'Dual Rail',
+    tagline: 'Category picker + page list — never 40 links at once',
+    accent: '#7dd3fc',
+  },
+  {
+    slug: 'tabs',
+    num: '03',
+    name: 'Section Tabs',
+    tagline: 'Horizontal sections — sidebar scoped to active tab',
+    accent: '#ffb000',
+  },
+  {
+    slug: 'palette',
+    num: '04',
+    name: 'Search-First',
+    tagline: 'Cmd+K palette — slim nav, jump anywhere',
+    accent: '#ff6b9e',
+  },
+  {
+    slug: 'filetree',
+    num: '05',
+    name: 'File Tree',
+    tagline: 'Terminal tree — paths, folders, keyboard hints',
+    accent: '#39ff14',
+  },
+];
+---
+
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="robots" content="noindex" />
+    <title>Docs navigation — Lintro design</title>
+    <link
+      href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600&display=swap"
+      rel="stylesheet"
+    />
+  </head>
+  <body>
+    <main class="gallery">
+      <p class="eyebrow">Docs navigation exploration</p>
+      <h1>Pick a docs layout</h1>
+      <p class="lead">
+        Five full-page mockups for fixing docs navigation. The current sidebar lists every page
+        (22+ tools) in one scroll — these options reduce noise and improve wayfinding.
+      </p>
+      <p class="current">
+        Current docs:
+        <a href={`${base}docs/usage/configuration/`}>live configuration page</a>
+      </p>
+      <ul class="grid">
+        {
+          options.map((o) => (
+            <li>
+              <a href={`${base}design/docs/${o.slug}/`} class="card" style={`--accent:${o.accent}`}>
+                <span class="num">{o.num}</span>
+                <span class="title">{o.name}</span>
+                <span class="tag">{o.tagline}</span>
+                <span class="cta">Open mockup →</span>
+              </a>
+            </li>
+          ))
+        }
+      </ul>
+    </main>
+  </body>
+</html>
+
+<style>
+  :global(*) { box-sizing: border-box; }
+  body {
+    margin: 0;
+    min-height: 100vh;
+    font-family: 'IBM Plex Mono', monospace;
+    background: #0d0d0d;
+    color: #c8ffc8;
+    font-size: 14px;
+  }
+  .gallery { max-width: 1100px; margin: 0 auto; padding: 3rem 1.5rem 4rem; }
+  .eyebrow {
+    font-size: 0.72rem;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: #4a6a4a;
+    margin: 0 0 0.5rem;
+  }
+  h1 {
+    font-size: clamp(1.6rem, 4vw, 2.2rem);
+    margin: 0 0 1rem;
+    color: #e8ffe8;
+    text-transform: lowercase;
+  }
+  .lead { max-width: 42rem; line-height: 1.6; color: #8fbc8f; margin: 0 0 1rem; }
+  .current { font-size: 0.82rem; color: #6b9e6b; margin-bottom: 2.5rem; }
+  .current a { color: #39ff14; }
+  .grid {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+    gap: 1px;
+    background: #39ff14;
+    border: 1px solid #39ff14;
+  }
+  .card {
+    display: flex;
+    flex-direction: column;
+    gap: 0.35rem;
+    padding: 1.5rem;
+    text-decoration: none;
+    color: inherit;
+    background: #0d0d0d;
+    min-height: 140px;
+    transition: background 150ms;
+  }
+  .card:hover { background: #111; }
+  .num { font-size: 0.7rem; font-weight: 600; color: var(--accent); }
+  .title { font-size: 1.05rem; font-weight: 600; color: #e8ffe8; }
+  .tag { font-size: 0.78rem; color: #8fbc8f; flex: 1; line-height: 1.45; }
+  .cta { font-size: 0.78rem; color: var(--accent); margin-top: 0.5rem; }
+</style>
