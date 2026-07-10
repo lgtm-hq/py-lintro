@@ -1,10 +1,15 @@
 ---
-name: Publish - npm (dry-run)
+name: Publish - npm
 
 # Distributes lintro as an npm package via platform-specific Nuitka binaries
-# (the esbuild/biome model). This workflow is DRY-RUN ONLY: every `npm
-# publish` runs with `--dry-run`. Going live is a deliberate follow-up that
-# requires wiring NODE_AUTH_TOKEN and flipping LIVE=1 in publish_packages.sh.
+# (the esbuild/biome model). Publishing uses npm trusted publishing (OIDC):
+# no NODE_AUTH_TOKEN secret is required. The `npm` environment gates every
+# live publish behind maintainer approval, mirroring the `pypi` environment.
+#
+# Set the `dry_run` input to skip the real publish (still requires the
+# environment approval). The platform binaries are downloaded from the
+# GitHub release created earlier in the tag pipeline, so this workflow must
+# run after build-binary.yml has uploaded them.
 
 'on':
   workflow_call:
@@ -13,12 +18,22 @@ name: Publish - npm (dry-run)
         description: 'Release tag whose binaries to package'
         required: true
         type: string
+      dry_run:
+        description: 'Run npm publish with --dry-run instead of publishing'
+        required: false
+        default: false
+        type: boolean
   workflow_dispatch:
     inputs:
       release_tag:
         description: 'Release tag whose binaries to package'
         required: true
         type: string
+      dry_run:
+        description: 'Run npm publish with --dry-run instead of publishing'
+        required: false
+        default: true
+        type: boolean
 
 permissions: {}
 
@@ -27,13 +42,14 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  publish-dry-run:
-    name: Package and dry-run publish
+  publish:
+    name: Package and publish
     runs-on: ubuntu-24.04
+    environment: npm
     permissions:
+      # read: checkout and download release assets
       contents: read
-      # id-token is required for `npm publish --provenance`; harmless in
-      # dry-run and pre-wired for a future live publish.
+      # write: OIDC for npm trusted publishing + provenance attestation
       id-token: write
 
     steps:
@@ -47,13 +63,30 @@ jobs:
             api.github.com:443
             codeload.github.com:443
             objects.githubusercontent.com:443
+            release-assets.githubusercontent.com:443
             uploads.github.com:443
+            token.actions.githubusercontent.com:443
+            nodejs.org:443
             registry.npmjs.org:443
+            fulcio.sigstore.dev:443
+            rekor.sigstore.dev:443
+            tuf-repo-cdn.sigstore.dev:443
+            oauth2.sigstore.dev:443
 
       - name: Checkout code
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
         with:
           persist-credentials: false
+
+      - name: Set up Node.js
+        # Node 24 ships npm ≥ 11.5.1 (required for OIDC trusted publishing).
+        # Do not run `npm install -g npm` here: in-place self-upgrade corrupts
+        # the toolcache tree and breaks `npm publish --provenance` (missing
+        # sigstore). See #1203.
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version: '24'
+          registry-url: 'https://registry.npmjs.org'
 
       - name: Set up Python
         uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
@@ -91,7 +124,11 @@ jobs:
       - name: Smoke test launcher (Linux x64)
         run: scripts/ci/npm/smoke_test.sh
 
-      - name: Publish (dry-run)
-        # LIVE is intentionally unset: this always runs `npm publish
-        # --dry-run`. Do not set LIVE=1 here.
+      - name: Publish to npm
+        # LIVE drives publish_packages.sh: 1 for a real publish, 0 for
+        # --dry-run. Trusted publishing generates provenance automatically;
+        # disable the explicit flag on dry-runs where nothing is published.
+        env:
+          LIVE: ${{ inputs.dry_run && '0' || '1' }}
+          NPM_PROVENANCE: ${{ inputs.dry_run && '0' || '1' }}
         run: scripts/ci/npm/publish_packages.sh
