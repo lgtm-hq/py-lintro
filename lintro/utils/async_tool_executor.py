@@ -80,6 +80,7 @@ class AsyncToolExecutor:
         action: Action,
         options: dict[str, Any] | None = None,
         max_fix_retries: int = 3,
+        profile: bool = False,
     ) -> ToolResult:
         """Run a single tool asynchronously.
 
@@ -89,6 +90,7 @@ class AsyncToolExecutor:
             action: The action to perform (check or fix).
             options: Additional options to pass to the tool.
             max_fix_retries: Maximum fix→verify convergence cycles.
+            profile: When True, measure and attach per-tool duration.
 
         Returns:
             ToolResult: The result of tool execution.
@@ -138,6 +140,7 @@ class AsyncToolExecutor:
         options_per_tool: dict[str, dict[str, Any]] | None = None,
         on_result: Callable[[str, ToolResult], None] | None = None,
         max_fix_retries: int = 3,
+        profile: bool = False,
     ) -> list[tuple[str, ToolResult]]:
         """Run multiple tools in parallel.
 
@@ -148,6 +151,7 @@ class AsyncToolExecutor:
             options_per_tool: Optional dict mapping tool names to their options.
             on_result: Optional callback called when each tool completes.
             max_fix_retries: Maximum fix→verify convergence cycles.
+            profile: When True, measure and attach per-tool duration.
 
         Returns:
             List of (tool_name, ToolResult) tuples in completion order.
@@ -182,6 +186,7 @@ class AsyncToolExecutor:
                 action,
                 tool_opts,
                 max_fix_retries=max_fix_retries,
+                profile=profile,
             )
             if on_result:
                 on_result(name, result)

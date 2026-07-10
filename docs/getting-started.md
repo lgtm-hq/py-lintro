@@ -506,7 +506,7 @@ Tool Timing (sorted by duration):
 │ mypy  │ 12.34s   │ 2     │ 3      │
 │ ruff  │ 0.42s    │ 5     │ 5      │
 ├───────┼──────────┼───────┼────────┤
-│ TOTAL │ 12.76s   │       │ 8      │
+│ CUMULATIVE │ 12.76s   │       │ 8      │
 └───────┴──────────┴───────┴────────┘
 
 Suggestions:
@@ -515,7 +515,7 @@ Suggestions:
 ```
 
 The `Files` column counts the distinct files each tool reported issues on. In JSON mode
-the profile is added additively under a top-level `profile` key (`total_duration`,
+the profile is added additively under a top-level `profile` key (`cumulative_tool_duration`,
 `tools[]`, `suggestions[]`) and the existing `results`/`summary` schema is unchanged.
 
 ## Tips and Tricks

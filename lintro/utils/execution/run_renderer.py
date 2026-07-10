@@ -560,6 +560,12 @@ def _write_run_files(
 
     # Write side-channel artifact files when configured or when running inside
     # GitHub Actions (SARIF auto-emit for Code Scanning).
+    artifact_profile = None
+    if ctx.profile:
+        from lintro.profiling.report import build_profile_data
+
+        artifact_profile = build_profile_data(all_results)
+
     _write_artifacts(
         all_results,
         ctx.lintro_config,
@@ -569,10 +575,7 @@ def _write_run_files(
         total_fixed=artifact.total_fixed,
         warn_func=warn_func,
         ai_enrichment=ai_enrichment,
-            profile_data=_artifact_profile_data(
-            profile=ctx.profile,
-            all_results=all_results,
-        ),
+        profile_data=artifact_profile,
     )
 
     # Clean up old run directories to prevent unbounded growth

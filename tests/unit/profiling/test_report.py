@@ -39,14 +39,14 @@ def sample_results() -> list[ToolResult]:
             success=True,
             issues_count=2,
             issues=[_issue("a.py"), _issue("b.py")],
-            duration=0.4,
+            duration_seconds=0.4,
         ),
         ToolResult(
             name="mypy",
             success=False,
             issues_count=3,
             issues=[_issue("a.py"), _issue("a.py"), _issue("c.py")],
-            duration=12.0,
+            duration_seconds=12.0,
         ),
         ToolResult(
             name="bandit",
@@ -90,11 +90,11 @@ def test_build_timings_attributes_files_and_issues(
 
 
 def test_build_profile_data_shape(sample_results: list[ToolResult]) -> None:
-    """The JSON payload exposes total_duration, tools, and suggestions."""
+    """The JSON payload exposes cumulative_tool_duration, tools, and suggestions."""
     data = build_profile_data(sample_results)
 
-    assert_that(data).contains_key("total_duration", "tools", "suggestions")
-    assert_that(data["total_duration"]).is_equal_to(12.4)
+    assert_that(data).contains_key("cumulative_tool_duration", "tools", "suggestions")
+    assert_that(data["cumulative_tool_duration"]).is_equal_to(12.4)
     assert_that(data["tools"]).is_length(2)
     first = data["tools"][0]
     assert_that(first).contains_key(
@@ -118,7 +118,7 @@ def test_build_profile_data_empty_when_nothing_timed() -> None:
 
     data = build_profile_data(results)
 
-    assert_that(data["total_duration"]).is_equal_to(0)
+    assert_that(data["cumulative_tool_duration"]).is_equal_to(0)
     assert_that(data["tools"]).is_empty()
     assert_that(data["suggestions"]).is_empty()
 
@@ -126,13 +126,13 @@ def test_build_profile_data_empty_when_nothing_timed() -> None:
 def test_render_profile_report_contains_table_and_total(
     sample_results: list[ToolResult],
 ) -> None:
-    """The rendered report includes the header, tools, and TOTAL row."""
+    """The rendered report includes the header, tools, and CUMULATIVE row."""
     report = render_profile_report(sample_results)
 
     assert_that(report).contains("Performance Profile")
     assert_that(report).contains("mypy")
     assert_that(report).contains("ruff")
-    assert_that(report).contains("TOTAL")
+    assert_that(report).contains("CUMULATIVE")
     assert_that(report).contains("12.00s")
 
 
