@@ -289,6 +289,7 @@ def _write_artifacts(
     total_fixed: int,
     *,
     warn_func: Any = None,
+    profile_data: dict[str, Any] | None = None,
 ) -> None:
     """Write side-channel artifact files alongside primary output.
 
@@ -308,11 +309,13 @@ def _write_artifacts(
         total_fixed: Total number of issues fixed.
         warn_func: Optional callback for emitting warnings.  When ``None``,
             falls back to ``logger.console_output``.
+        profile_data: Optional performance profile payload to attach to
+            JSON artifacts so they match the primary JSON schema.
     """
     import os
     from pathlib import Path
 
-    from lintro.enums.output_format import normalize_output_format
+    from lintro.enums.output_format import OutputFormat, normalize_output_format
     from lintro.utils.output.file_writer import write_output_file
 
     artifacts: list[str] = [a.lower() for a in lintro_config.execution.artifacts]
@@ -343,6 +346,9 @@ def _write_artifacts(
                 action=action,
                 total_issues=total_issues,
                 total_fixed=total_fixed,
+                profile_data=(
+                    profile_data if fmt == OutputFormat.JSON else None
+                ),
             )
         except (OSError, ValueError, TypeError) as e:
             _emit(f"Warning: Failed to write {artifact} artifact: {e}")
@@ -1146,6 +1152,11 @@ def run_lint_tools_simple(
 
         # Write side-channel artifact files when configured or when
         # running inside GitHub Actions (SARIF auto-emit for Code Scanning).
+        artifact_profile = None
+        if profile:
+            from lintro.profiling.report import build_profile_data
+
+            artifact_profile = build_profile_data(all_results)
         _write_artifacts(
             all_results,
             lintro_config,
@@ -1154,6 +1165,7 @@ def run_lint_tools_simple(
             total_issues=total_issues,
             total_fixed=total_fixed,
             warn_func=_warn,
+            profile_data=artifact_profile,
         )
 
         # Clean up old run directories to prevent unbounded growth
