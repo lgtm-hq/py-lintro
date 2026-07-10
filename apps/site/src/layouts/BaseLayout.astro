@@ -1,0 +1,128 @@
+---
+import SEOHead from '../components/SEOHead.astro';
+import Header from '../components/Header.astro';
+import Footer from '../components/Footer.astro';
+import ExternalLinks from '../components/ExternalLinks.astro';
+import {
+  DEFAULT_THEME,
+  NATIVE_THEME,
+  themeAppearances,
+  turboThemeIds,
+  validThemeIds,
+} from '../data/themes';
+import '../styles/global.css';
+
+interface Props {
+  title?: string;
+  description?: string;
+}
+
+const {
+  title = 'Lintro',
+  description = 'Unified linting, formatting, and testing for modern projects.',
+} = Astro.props;
+
+const baseUrl = import.meta.env.BASE_URL.replace(/\/$/, '');
+---
+
+<!doctype html>
+<html lang="en" data-theme={DEFAULT_THEME} data-baseurl={baseUrl}>
+  <head>
+    <SEOHead title={title} description={description} />
+    <link rel="stylesheet" href={`${baseUrl}/assets/css/turbo-core.css`} />
+    <link rel="stylesheet" href={`${baseUrl}/assets/css/turbo-base.css`} />
+    <link rel="stylesheet" href={`${baseUrl}/assets/css/turbo-syntax.css`} />
+    <link rel="stylesheet" href={`${baseUrl}/assets/css/turbo-components.css`} />
+    <link
+      id="turbo-theme-css"
+      rel="stylesheet"
+      href={`${baseUrl}/assets/css/themes/${DEFAULT_THEME}.css`}
+      disabled
+    />
+    <script
+      is:inline
+      define:vars={{ validThemeIds, turboThemeIds, NATIVE_THEME, DEFAULT_THEME, themeAppearances, baseUrl }}
+    >
+      (function () {
+        var STORAGE_KEY = 'turbo-theme';
+
+        function applyTheme(id) {
+          var themeId = validThemeIds.indexOf(id) !== -1 ? id : DEFAULT_THEME;
+          var isNative = themeId === NATIVE_THEME;
+          var root = document.documentElement;
+          var appearance = themeAppearances[themeId] || 'dark';
+
+          root.setAttribute('data-theme', themeId);
+          root.setAttribute('data-appearance', appearance);
+
+          var link = document.getElementById('turbo-theme-css');
+          if (link) {
+            if (isNative) {
+              link.setAttribute('disabled', 'true');
+            } else {
+              link.removeAttribute('disabled');
+              link.href = baseUrl + '/assets/css/themes/' + themeId + '.css';
+            }
+          }
+
+          try {
+            localStorage.setItem(STORAGE_KEY, themeId);
+          } catch (_) {}
+
+          document.dispatchEvent(
+            new CustomEvent('turbo-theme-applied', { detail: { themeId: themeId } })
+          );
+        }
+
+        window.__applyTheme = applyTheme;
+
+        try {
+          var saved = localStorage.getItem(STORAGE_KEY) || DEFAULT_THEME;
+          applyTheme(saved);
+        } catch (e) {
+          applyTheme(DEFAULT_THEME);
+        }
+
+        document.addEventListener('astro:page-load', function () {
+          try {
+            var saved = localStorage.getItem(STORAGE_KEY) || DEFAULT_THEME;
+            applyTheme(saved);
+          } catch (_) {
+            applyTheme(DEFAULT_THEME);
+          }
+        });
+      })();
+    </script>
+  </head>
+  <body>
+    <Header />
+    <main class="main">
+      <slot />
+    </main>
+    <Footer />
+    <ExternalLinks />
+    <script is:inline>
+      function initCodeBlockCursors() {
+        document.querySelectorAll('pre.astro-code code').forEach(function (codeEl) {
+          var lines = codeEl.querySelectorAll(':scope > .line');
+          var lastLine = lines.length > 0 ? lines[lines.length - 1] : codeEl;
+          if (lastLine.querySelector('.code-block-cursor')) {
+            return;
+          }
+          var cursor = document.createElement('span');
+          cursor.className = 'code-block-cursor';
+          cursor.setAttribute('aria-hidden', 'true');
+          lastLine.appendChild(cursor);
+        });
+      }
+
+      if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', initCodeBlockCursors);
+      } else {
+        initCodeBlockCursors();
+      }
+
+      document.addEventListener('astro:page-load', initCodeBlockCursors);
+    </script>
+  </body>
+</html>

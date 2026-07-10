@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "lintro"
-version = "0.69.0"
+version = "0.71.3"
 description = "A unified CLI tool for code formatting, linting, and quality assurance"
 keywords = [
   "linting",
@@ -334,8 +334,24 @@ check_untyped_defs = true
 constraint-dependencies = [
   # Security fix: TOCTOU vulnerability in directory creation (dependabot alert #4)
   "virtualenv>=20.36.1",
-  # Security fix: accepts unknown crit header extensions, RFC 7515 violation (dependabot alert #26)
-  "pyjwt>=2.12.1",
+  # High-severity transitive remediation (issue #1118). Every advisory below
+  # flows through semgrep (`tools` extra) / twine (dev group) -> mcp; none are
+  # core runtime deps, but we force the patched versions so no shipped extra
+  # carries a known high-severity vulnerability.
+  # pyjwt: crit-header handling / RFC 7515 violation
+  # (GHSA-xgmm-8j9v-c9wx, supersedes prior >=2.12.1 for GHSA-... alert #26)
+  "pyjwt>=2.13.0",
+  # starlette: multipart/form parsing DoS
+  # (GHSA-82w8-qh3p-5jfq, GHSA-wqp7-x3pw-xc5r)
+  "starlette>=1.3.1",
+  # cryptography: OpenSSL-backed high-severity advisory (GHSA-537c-gmf6-5ccf)
+  "cryptography>=48.0.1",
+  # python-multipart: parser resource-exhaustion DoS
+  # (GHSA-5rvq-cxj2-64vf, GHSA-pp6c-gr5w-3c5g)
+  "python-multipart>=0.0.30",
+  # urllib3: redirect / pool-manager high-severity advisories
+  # (GHSA-qccp-gfcp-xxvc, GHSA-mf9v-mfxr-j63j)
+  "urllib3>=2.7.0",
 ]
 override-dependencies = [
   # semgrep 1.151.0 pins rich~=13.5.2 but lintro requires rich>=14.2.0.
