@@ -1,0 +1,17 @@
+---
+import Kicker from "./Kicker.astro";
+
+interface Props {
+  title: string;
+  description?: string;
+  kicker?: string;
+}
+
+const { title, description, kicker } = Astro.props;
+---
+
+<header class="page-header">
+  {kicker && <Kicker>{kicker}</Kicker>}
+  <h1 class="page-title">{title}</h1>
+  {description && <p class="lead">{description}</p>}
+</header>
