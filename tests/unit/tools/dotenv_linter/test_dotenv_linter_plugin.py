@@ -295,9 +295,7 @@ def test_fix_marks_surviving_issues_not_fixable(
 
     assert_that(result.issues).is_not_empty()
     remaining = [
-        issue
-        for issue in (result.issues or [])
-        if isinstance(issue, DotenvLinterIssue)
+        issue for issue in (result.issues or []) if isinstance(issue, DotenvLinterIssue)
     ]
     assert_that([issue.fixable for issue in remaining]).contains_only(False)
     # issues_count reflects what the re-check reported, matching ``issues``.
