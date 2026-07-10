@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import json
+import os
 import sys
+import tempfile
 import time
 from pathlib import Path
-from typing import IO, TYPE_CHECKING, TextIO
+from typing import IO, TYPE_CHECKING
 
 if TYPE_CHECKING:
     from lintro.ai.models import AIFixSuggestion
@@ -20,6 +22,9 @@ AUDIT_JSONL_FILE = "audit.jsonl"
 
 AUDIT_MAX_ENTRIES = 1000
 """Default cap on retained audit records; oldest lines are dropped past this."""
+
+AUDIT_LOCK_FILE = "audit.jsonl.lock"
+"""Sibling lock file used for cross-platform exclusive locking."""
 
 
 def write_audit_log(
@@ -71,67 +76,101 @@ def write_audit_log(
     audit_dir = workspace_root / AUDIT_DIR
     audit_dir.mkdir(parents=True, exist_ok=True)
     audit_path = audit_dir / AUDIT_JSONL_FILE
+    lock_path = audit_dir / AUDIT_LOCK_FILE
 
     line = json.dumps(audit, ensure_ascii=False)
-    with audit_path.open("a+", encoding="utf-8") as fh:
-        _lock_file(fh)
+    with lock_path.open("a+", encoding="utf-8") as lock_fh:
+        _lock_file(lock_fh)
         try:
-            fh.seek(0, 2)
-            fh.write(line + "\n")
-            fh.flush()
-            _rotate_audit_log_locked(fh, max_entries)
+            with audit_path.open("a+", encoding="utf-8") as fh:
+                fh.seek(0, 2)
+                fh.write(line + "\n")
+                fh.flush()
+            _rotate_audit_log_atomic(audit_path, max_entries)
         finally:
-            _unlock_file(fh)
+            _unlock_file(lock_fh)
 
 
 def _lock_file(fh: IO[str]) -> None:
-    """Acquire an exclusive lock on an open file handle when available.
+    """Acquire an exclusive lock on an open file handle.
 
     Args:
         fh: Open text file handle to lock.
     """
     if sys.platform == "win32":
+        import msvcrt
+
+        # Lock the first byte of the sibling lock file.
+        fh.seek(0)
+        if fh.read(1) == "":
+            fh.write("0")
+            fh.flush()
+        fh.seek(0)
+        msvcrt.locking(fh.fileno(), msvcrt.LK_LOCK, 1)
         return
+
     import fcntl
 
     fcntl.flock(fh.fileno(), fcntl.LOCK_EX)
 
 
 def _unlock_file(fh: IO[str]) -> None:
-    """Release a previously acquired exclusive file lock when available.
+    """Release a previously acquired exclusive file lock.
 
     Args:
         fh: Open text file handle to unlock.
     """
     if sys.platform == "win32":
+        import msvcrt
+
+        fh.seek(0)
+        msvcrt.locking(fh.fileno(), msvcrt.LK_UNLCK, 1)
         return
+
     import fcntl
 
     fcntl.flock(fh.fileno(), fcntl.LOCK_UN)
 
 
-def _rotate_audit_log_locked(
-    fh: TextIO,
+def _rotate_audit_log_atomic(
+    audit_path: Path,
     max_entries: int | None,
 ) -> None:
-    """Trim the JSONL audit log while holding the caller's exclusive lock.
+    """Trim the JSONL audit log via temp file + atomic replace.
 
     Args:
-        fh: Open audit file handle positioned after the latest append.
+        audit_path: Path to the ``audit.jsonl`` file.
         max_entries: Maximum records to retain; ``None`` or non-positive
             leaves the file untouched.
     """
     if max_entries is None or max_entries <= 0:
         return
-    fh.seek(0)
-    lines = [ln for ln in fh.read().splitlines() if ln.strip()]
+    if not audit_path.is_file():
+        return
+    lines = [
+        ln for ln in audit_path.read_text(encoding="utf-8").splitlines() if ln.strip()
+    ]
     if len(lines) <= max_entries:
         return
     kept = lines[-max_entries:]
-    fh.seek(0)
-    fh.truncate()
-    fh.write("\n".join(kept) + "\n")
-    fh.flush()
+    content = "\n".join(kept) + "\n"
+    fd, tmp_name = tempfile.mkstemp(
+        prefix="audit-",
+        suffix=".jsonl",
+        dir=str(audit_path.parent),
+    )
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as tmp_fh:
+            tmp_fh.write(content)
+            tmp_fh.flush()
+            os.fsync(tmp_fh.fileno())
+        os.replace(tmp_name, audit_path)
+    except Exception:
+        try:
+            os.unlink(tmp_name)
+        except OSError:
+            pass
+        raise
 
 
 def _rotate_audit_log(audit_path: Path, max_entries: int | None) -> None:
@@ -142,11 +181,10 @@ def _rotate_audit_log(audit_path: Path, max_entries: int | None) -> None:
         max_entries: Maximum records to retain; ``None`` or non-positive
             leaves the file untouched.
     """
-    if max_entries is None or max_entries <= 0:
-        return
-    with audit_path.open("a+", encoding="utf-8") as fh:
-        _lock_file(fh)
+    lock_path = audit_path.parent / AUDIT_LOCK_FILE
+    with lock_path.open("a+", encoding="utf-8") as lock_fh:
+        _lock_file(lock_fh)
         try:
-            _rotate_audit_log_locked(fh, max_entries)
+            _rotate_audit_log_atomic(audit_path, max_entries)
         finally:
-            _unlock_file(fh)
+            _unlock_file(lock_fh)

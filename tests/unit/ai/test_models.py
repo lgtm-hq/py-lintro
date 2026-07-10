@@ -45,7 +45,11 @@ def test_models_summary_list_fields_are_independent():
     first = AISummary()
     second = AISummary()
     first.key_patterns.append("pattern")
+    first.priority_actions.append("action")
+    first.triage_suggestions.append("suggestion")
     assert_that(second.key_patterns).is_empty()
+    assert_that(second.priority_actions).is_empty()
+    assert_that(second.triage_suggestions).is_empty()
 
 
 def test_models_summary_serialization_roundtrip():
@@ -54,6 +58,7 @@ def test_models_summary_serialization_roundtrip():
         overview="looks fine",
         key_patterns=["p1"],
         priority_actions=["a1", "a2"],
+        triage_suggestions=["t1"],
         estimated_effort="low",
         input_tokens=10,
         output_tokens=5,
@@ -63,7 +68,10 @@ def test_models_summary_serialization_roundtrip():
     assert_that(data["overview"]).is_equal_to("looks fine")
     assert_that(data["key_patterns"]).is_equal_to(["p1"])
     assert_that(data["priority_actions"]).is_equal_to(["a1", "a2"])
+    assert_that(data["triage_suggestions"]).is_equal_to(["t1"])
     assert_that(data["estimated_effort"]).is_equal_to("low")
+    assert_that(data["input_tokens"]).is_equal_to(10)
+    assert_that(data["output_tokens"]).is_equal_to(5)
     assert_that(data["cost_estimate"]).is_equal_to(0.002)
 
 
