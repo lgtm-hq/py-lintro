@@ -586,12 +586,12 @@ def test_write_json_output_includes_profile_when_provided(
         action=Action.CHECK,
         total_issues=1,
         total_fixed=0,
-        profile_data={"total_duration": 1.23, "tools": []},
+        profile_data={"cumulative_tool_duration": 1.23, "tools": []},
     )
 
     content = json.loads(output_path.read_text())
     assert_that(content).contains_key("profile")
-    assert_that(content["profile"]["total_duration"]).is_equal_to(1.23)
+    assert_that(content["profile"]["cumulative_tool_duration"]).is_equal_to(1.23)
 
 
 def test_write_json_output_omits_profile_by_default(

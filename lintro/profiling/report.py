@@ -79,9 +79,10 @@ def build_profile_data(results: list[ToolResult]) -> dict[str, Any]:
         results: Completed tool results from a run.
 
     Returns:
-        A dict with ``total_duration`` (seconds), a ``tools`` list of
-        per-tool objects (``name``, ``duration``, ``files_checked``,
-        ``issues_found``), and a ``suggestions`` list.
+        A dict with ``cumulative_tool_duration`` (sum of per-tool seconds; not
+        wall-clock under parallel execution), a ``tools`` list of per-tool
+        objects (``name``, ``duration``, ``files_checked``, ``issues_found``),
+        and a ``suggestions`` list.
     """
     timings = build_timings(results)
     total_duration = round(
@@ -89,7 +90,7 @@ def build_profile_data(results: list[ToolResult]) -> dict[str, Any]:
         _DURATION_PRECISION,
     )
     return {
-        "total_duration": total_duration,
+        "cumulative_tool_duration": total_duration,
         "tools": [
             {
                 "name": t.tool,
@@ -125,7 +126,7 @@ def _render_table(timings: list[ToolTiming], total_duration: float) -> list[str]
     ]
     total_issues = sum(t.issues_found for t in timings)
     total_row = (
-        "TOTAL",
+        "CUMULATIVE",
         f"{total_duration:.2f}s",
         "",
         str(total_issues),

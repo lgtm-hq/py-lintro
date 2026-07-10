@@ -753,6 +753,7 @@ def run_lint_tools_simple(
             incremental=incremental,
             auto_install=effective_auto_install,
             max_fix_retries=lintro_config.execution.max_fix_retries,
+            profile=profile,
         )
 
         # Enrich parallel results with doc_url from each plugin
@@ -791,6 +792,7 @@ def run_lint_tools_simple(
     else:
         # Sequential execution (original behavior)
         for tool_name in tools_to_run:
+            timed_duration: float | None = None
             try:
                 tool = tool_manager.get_tool(tool_name)
                 display_name = get_tool_display_name(tool_name)
@@ -814,11 +816,14 @@ def run_lint_tools_simple(
                     lintro_config=lintro_config,
                 )
 
-                # Execute the tool, capturing per-tool wall-clock time so the
-                # optional --profile report can attribute duration accurately.
+                # Execute the tool. Time only when --profile is requested so
+                # normal runs avoid timer overhead and result mutation.
                 from lintro.profiling.timer import Timer
 
-                with Timer() as _timer:
+                _profile_timer: Timer | None = Timer() if profile else None
+                if _profile_timer is not None:
+                    _profile_timer.__enter__()
+                try:
                     if action == Action.FIX:
                         result = _run_fix_with_retry(
                             tool=tool,
@@ -828,7 +833,15 @@ def run_lint_tools_simple(
                         )
                     else:
                         result = tool.check(paths, {})
-                result.duration = _timer.duration
+                    if _profile_timer is not None:
+                        _profile_timer.__exit__(None, None, None)
+                        timed_duration = _profile_timer.duration
+                        result.duration = timed_duration
+                        _profile_timer = None
+                finally:
+                    if _profile_timer is not None:
+                        _profile_timer.__exit__(None, None, None)
+                        timed_duration = _profile_timer.duration
 
                 # Populate doc_url on each issue from the plugin
                 _enrich_issues_with_doc_urls(tool, result)
@@ -882,6 +895,7 @@ def run_lint_tools_simple(
                     success=False,
                     output=f"Failed to initialize tool: {e}",
                     issues_count=0,
+                    duration=timed_duration,
                 )
                 all_results.append(failed_result)
 
