@@ -68,6 +68,8 @@
         "mvdan/sh",
         "taplo",
         "tamasfe/taplo",
+        "vale",
+        "errata-ai/vale",
         "astro",
         "@astrojs/check",
         "svelte-check",
@@ -252,16 +254,27 @@
       "extractVersionTemplate": "^(?<version>[0-9]+\\.[0-9]+\\.[0-9]+)$"
     },
     {
+<<<<<<< HEAD
       "description": "Update buf version in _tool_versions.py",
+=======
+      "description": "Update vale version in _tool_versions.py",
+>>>>>>> origin/main
       "customType": "regex",
       "managerFilePatterns": [
         "lintro/_tool_versions\\.py"
       ],
       "matchStrings": [
+<<<<<<< HEAD
         "ToolName\\.BUF:\\s*\"(?<currentValue>[0-9]+\\.[0-9]+\\.[0-9]+)\""
       ],
       "datasourceTemplate": "github-releases",
       "packageNameTemplate": "bufbuild/buf",
+=======
+        "ToolName\\.VALE:\\s*\"(?<currentValue>[0-9]+\\.[0-9]+\\.[0-9]+)\""
+      ],
+      "datasourceTemplate": "github-releases",
+      "packageNameTemplate": "errata-ai/vale",
+>>>>>>> origin/main
       "extractVersionTemplate": "^v(?<version>.*)$"
     },
     {

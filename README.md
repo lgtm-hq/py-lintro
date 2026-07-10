@@ -112,6 +112,12 @@ system.
 <td><code>bun add -g markdownlint-cli2</code><br><code>npm install -g markdownlint-cli2</code></td>
 </tr>
 <tr>
+<td><a href="https://vale.sh/"><img src="https://img.shields.io/badge/Vale-2ea44f?logo=markdown&logoColor=white" alt="Vale"></a></td>
+<td>📝 Prose / Docs</td>
+<td>-</td>
+<td><code>brew install vale</code><br><a href="https://github.com/errata-ai/vale/releases">GitHub Releases</a></td>
+</tr>
+<tr>
 <td><a href="https://oxc.rs/"><img src="https://img.shields.io/badge/Oxlint-e05d44?logo=javascript&logoColor=white" alt="Oxlint"></a></td>
 <td>🟨 JS/TS</td>
 <td>✅</td>

@@ -113,6 +113,7 @@ RUN echo "=== Verifying all tools ===" && \
     shellcheck --version && shfmt --version && sqlfluff --version && \
     taplo --version && buf --version && tsc --version && astro --version && \
     svelte-check --version && vue-tsc --version && yamllint --version && \
+    vale --version && \
     echo "=== All tools verified! ==="
 
 # -----------------------------------------------------------------------------
@@ -166,6 +167,7 @@ RUN echo "Verifying tools..." && \
     vue-tsc --version && oxlint --version && oxfmt --version && \
     bandit --version && mypy --version && pydoclint --version && \
     yamllint --version && sqlfluff --version && \
+    vale --version && \
     echo "All tools verified!"
 
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \

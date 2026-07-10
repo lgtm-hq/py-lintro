@@ -83,6 +83,7 @@ This script installs:
   - shfmt (Shell script formatter)
   - SQLFluff (SQL linter and formatter)
   - Taplo (TOML linter and formatter)
+  - Vale (Prose/documentation linter)
   - TypeScript (TypeScript compiler and type checker)
   - Astro Check (Astro component type checker)
   - Gitleaks (Secret detection scanner)
@@ -169,7 +170,7 @@ SUPPORTED_TOOLS=(
 	"clippy" "gitleaks" "hadolint" "markdownlint" "markdownlint-cli2" "mypy" "osv-scanner"
 	"oxfmt" "oxlint" "prettier" "pydoclint" "ruff" "rustfmt" "semgrep"
 	"shellcheck" "shfmt" "sqlfluff" "svelte-check" "taplo" "tsc"
-	"vue-tsc" "yamllint"
+	"vale" "vue-tsc" "yamllint"
 )
 
 # Validate --tools filter against known tool names (fail-fast on typos).
@@ -1512,7 +1513,7 @@ main() {
 	# Verify installations
 	echo -e "${YELLOW}Verifying installations...${NC}"
 
-	tools_to_verify=("actionlint" "astro" "bandit" "black" "buf" "cargo-audit" "cargo-deny" "clippy" "rustfmt" "gitleaks" "hadolint" "markdownlint-cli2" "mypy" "osv-scanner" "oxfmt" "oxlint" "prettier" "pydoclint" "ruff" "semgrep" "shellcheck" "shfmt" "sqlfluff" "svelte-check" "taplo" "tsc" "vue-tsc" "yamllint")
+	tools_to_verify=("actionlint" "astro" "bandit" "black" "cargo-audit" "cargo-deny" "clippy" "rustfmt" "gitleaks" "hadolint" "markdownlint-cli2" "mypy" "osv-scanner" "oxfmt" "oxlint" "prettier" "pydoclint" "ruff" "semgrep" "shellcheck" "shfmt" "sqlfluff" "svelte-check" "taplo" "tsc" "vale" "vue-tsc" "yamllint" "buf")
 
 	# Filter verification list when --tools is set.
 	# Map aliases so e.g. --tools markdownlint verifies markdownlint-cli2.
