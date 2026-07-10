@@ -59,6 +59,12 @@ gates every publish behind maintainer approval, mirroring the `pypi` environment
 generates provenance attestations automatically. A manual `workflow_dispatch` defaults
 to `dry_run: true` for safe testing.
 
+The workflow accepts a `dist_tag` input (default `latest`). When backfilling a version
+older than the registry's current `latest`, set `dist_tag` to a non-latest value such as
+`backfill` — npm refuses to move `latest` backwards without an explicit `--tag`. The
+version remains installable as `@lgtm-hq/lintro@<version>`; only the floating `latest`
+pointer is left alone.
+
 Trusted publishing requires **npm ≥ 11.5.1**. The workflow uses **Node 24**, which ships
 a compatible bundled npm — do **not** run `npm install -g npm` (or any in-place
 self-upgrade) in CI. That mutates the Actions toolcache npm tree and breaks
