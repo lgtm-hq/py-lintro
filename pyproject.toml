@@ -167,6 +167,7 @@ packages = [
   "lintro.parsers.oxfmt",
   "lintro.parsers.oxlint",
   "lintro.parsers.prettier",
+  "lintro.parsers.sarif",
   "lintro.parsers.shellcheck",
   "lintro.parsers.shfmt",
   "lintro.parsers.sqlfluff",
