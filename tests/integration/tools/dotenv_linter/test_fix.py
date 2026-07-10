@@ -27,7 +27,7 @@ def test_fix_resolves_issues(
     get_plugin: Callable[[str], BaseToolPlugin],
     dotenv_violation_file: str,
 ) -> None:
-    """fix auto-corrects the issues and leaves the file clean.
+    """Fix auto-corrects the issues and leaves the file clean.
 
     Args:
         get_plugin: Fixture factory to get plugin instances.
@@ -49,7 +49,7 @@ def test_fix_rewrites_file_in_place(
     get_plugin: Callable[[str], BaseToolPlugin],
     dotenv_violation_file: str,
 ) -> None:
-    """fix modifies the file so a subsequent check finds no issues.
+    """Fix modifies the file so a subsequent check finds no issues.
 
     Args:
         get_plugin: Fixture factory to get plugin instances.
@@ -71,7 +71,7 @@ def test_fix_does_not_create_backup_file(
     get_plugin: Callable[[str], BaseToolPlugin],
     dotenv_violation_file: str,
 ) -> None:
-    """fix runs with --no-backup so no .env.bak file is left behind.
+    """Fix runs with --no-backup so no .env.bak file is left behind.
 
     Args:
         get_plugin: Fixture factory to get plugin instances.
@@ -88,7 +88,7 @@ def test_fix_clean_file_is_noop(
     get_plugin: Callable[[str], BaseToolPlugin],
     dotenv_clean_file: str,
 ) -> None:
-    """fix on a clean file reports nothing to fix.
+    """Fix on a clean file reports nothing to fix.
 
     Args:
         get_plugin: Fixture factory to get plugin instances.

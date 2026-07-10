@@ -13,11 +13,8 @@ from unittest.mock import patch
 
 from assertpy import assert_that
 
-from lintro.parsers.dotenv_linter.dotenv_linter_issue import (
-    DotenvLinterIssue,
-)
-
 from lintro.enums.tool_type import ToolType
+from lintro.parsers.dotenv_linter.dotenv_linter_issue import DotenvLinterIssue
 from lintro.tools.definitions.dotenv_linter import (
     DOTENV_LINTER_DEFAULT_TIMEOUT,
     DotenvLinterPlugin,
@@ -297,6 +294,11 @@ def test_fix_marks_surviving_issues_not_fixable(
         result = dotenv_linter_plugin.fix([str(env_file)], {})
 
     assert_that(result.issues).is_not_empty()
-    assert_that([issue.fixable for issue in result.issues]).contains_only(False)
+    remaining = [
+        issue
+        for issue in (result.issues or [])
+        if isinstance(issue, DotenvLinterIssue)
+    ]
+    assert_that([issue.fixable for issue in remaining]).contains_only(False)
     # issues_count reflects what the re-check reported, matching ``issues``.
-    assert_that(result.issues_count).is_equal_to(len(result.issues))
+    assert_that(result.issues_count).is_equal_to(len(remaining))

@@ -30,7 +30,7 @@ def test_check_detects_issues(
     get_plugin: Callable[[str], BaseToolPlugin],
     dotenv_violation_file: str,
 ) -> None:
-    """check reports issues for a malformed .env file.
+    """Check reports issues for a malformed .env file.
 
     Args:
         get_plugin: Fixture factory to get plugin instances.
@@ -49,7 +49,7 @@ def test_check_extracts_known_checks(
     get_plugin: Callable[[str], BaseToolPlugin],
     dotenv_violation_file: str,
 ) -> None:
-    """check surfaces recognizable dotenv-linter check names.
+    """Check surfaces recognizable dotenv-linter check names.
 
     Args:
         get_plugin: Fixture factory to get plugin instances.
@@ -60,9 +60,7 @@ def test_check_extracts_known_checks(
 
     assert result.issues is not None
     codes = {
-        issue.code
-        for issue in result.issues
-        if isinstance(issue, DotenvLinterIssue)
+        issue.code for issue in result.issues if isinstance(issue, DotenvLinterIssue)
     }
     assert_that(codes).contains("LowercaseKey")
 
@@ -71,7 +69,7 @@ def test_check_clean_file_passes(
     get_plugin: Callable[[str], BaseToolPlugin],
     dotenv_clean_file: str,
 ) -> None:
-    """check passes on a well-formed .env file.
+    """Check passes on a well-formed .env file.
 
     Args:
         get_plugin: Fixture factory to get plugin instances.

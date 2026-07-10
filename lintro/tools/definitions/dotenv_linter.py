@@ -237,9 +237,7 @@ class DotenvLinterPlugin(BaseToolPlugin):
             )
 
         initial_issues: list[DotenvLinterIssue] = [
-            issue
-            for issue in initial.issues
-            if isinstance(issue, DotenvLinterIssue)
+            issue for issue in initial.issues if isinstance(issue, DotenvLinterIssue)
         ]
         if not initial_issues:
             return FileFixResult(
@@ -304,6 +302,21 @@ class DotenvLinterPlugin(BaseToolPlugin):
         # survived an attempted fix are marked non-fixable so downstream
         # consumers do not offer an auto-fix that was already tried.
         recheck = self._process_single_file(file_path, timeout)
+        if recheck.error or (not recheck.success and not recheck.issues):
+            # Recheck failed without parseable diagnostics — preserve the
+            # original issues as remaining rather than treating an empty list
+            # as "everything was fixed".
+            return FileFixResult(
+                file_result=FileProcessingResult(
+                    success=False,
+                    output=recheck.output or recheck.error or fix_output,
+                    issues=initial_issues,
+                    error=recheck.error or "dotenv-linter recheck failed",
+                ),
+                initial_count=len(initial_issues),
+                fixed_count=0,
+                initial_issues=initial_issues,
+            )
         remaining_issues: list[DotenvLinterIssue] = [
             replace(issue, fixable=False)
             for issue in recheck.issues
