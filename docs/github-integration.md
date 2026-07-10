@@ -83,8 +83,8 @@ gracefully, so merging it never breaks CI.
 #### JSON error contract
 
 Under `--output json`, a **provider failure** (invalid key, rate limit, depleted
-quota/credits, 5xx, or a malformed model response) emits a stable machine-readable
-error envelope on **stdout** and exits with code **`2`**, so CI consumers can classify
+quota/credits, 5xx, or a malformed model response) emits a stable machine-readable error
+envelope on **stdout** and exits with code **`2`**, so CI consumers can classify
 failures without scraping human-readable stderr prose:
 
 ```json
@@ -109,16 +109,15 @@ failures without scraping human-readable stderr prose:
 
 `kind` is one of: `auth_failed`, `insufficient_credits`, `quota_exceeded`,
 `rate_limited`, `context_length`, `server_error`, `timeout`, `invalid_response`,
-`unknown`. `retryable` is `true` only for `rate_limited`, `server_error`, and
-`timeout`.
+`unknown`. `retryable` is `true` only for `rate_limited`, `server_error`, and `timeout`.
 
 **Exit codes under `--output json`:**
 
-| Code | Meaning                                                              |
-| ---- | ------------------------------------------------------------------- |
-| `0`  | Review completed, no P1 findings. Success envelope on stdout.       |
-| `1`  | Review completed **with** P1 findings. Success envelope on stdout.  |
-| `2`  | Provider/execution failure. **Error** envelope (above) on stdout.   |
+| Code | Meaning                                                            |
+| ---- | ------------------------------------------------------------------ |
+| `0`  | Review completed, no P1 findings. Success envelope on stdout.      |
+| `1`  | Review completed **with** P1 findings. Success envelope on stdout. |
+| `2`  | Provider/execution failure. **Error** envelope (above) on stdout.  |
 
 Exit `2` disambiguates a provider error from the P1-findings exit `1`, so consumers
 never have to guess whether stdout holds a review or an error — check for the top-level

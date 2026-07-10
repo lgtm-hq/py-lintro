@@ -13,8 +13,8 @@ from lintro.ai.exceptions import (
     AIRateLimitError,
 )
 from lintro.ai.review.error_contract import (
-    REVIEW_ERROR_EXIT_CODE,
     RETRYABLE_KINDS,
+    REVIEW_ERROR_EXIT_CODE,
     build_error_contract,
     is_retryable_kind,
     render_error_contract_json,
