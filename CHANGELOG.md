@@ -49,7 +49,8 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Fixed
 
-- **astro-check**: run non-interactively to prevent prompt hang and timeout (#958) (0b1ea63)
+- **astro-check**: run non-interactively to prevent prompt hang and timeout (#958)
+  (0b1ea63)
 
 ## [0.70.5] - 2026-07-09
 
@@ -61,7 +62,8 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Fixed
 
-- **vue-tsc**: respect tsconfig.app.json preference in shared config discovery (#1125) (819e3e3)
+- **vue-tsc**: respect tsconfig.app.json preference in shared config discovery (#1125)
+  (819e3e3)
 
 ## [0.70.3] - 2026-07-09
 
@@ -73,7 +75,8 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Fixed
 
-- **homebrew**: sync binary formula generator with tap's authoritative output (#1199) (8dbd1ca)
+- **homebrew**: sync binary formula generator with tap's authoritative output (#1199)
+  (8dbd1ca)
 
 ## [0.70.1] - 2026-07-09
 
@@ -92,7 +95,8 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 - **deps**: update astral-sh/uv to 0.11.28 (#911) (63dfa6c)
 - **deps**: update oven-sh/bun to 1.3.14 (#914) (936b078)
 - **release**: version 0.69.6 (#1197) (1d42fa3)
-- **docker**: bump lgtm-ci to v0.48.0 and add historical backfill dispatch (#1193) (1174f17)
+- **docker**: bump lgtm-ci to v0.48.0 and add historical backfill dispatch (#1193)
+  (1174f17)
 
 ### Fixed
 
@@ -103,7 +107,8 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Changed
 
-- **docker**: bump lgtm-ci to v0.48.0 and add historical backfill dispatch (#1193) (1174f17)
+- **docker**: bump lgtm-ci to v0.48.0 and add historical backfill dispatch (#1193)
+  (1174f17)
 
 ### Fixed
 
@@ -117,7 +122,8 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Fixed
 
-- **release**: surface release automation failures on main via run-name (#1133) (c964659)
+- **release**: surface release automation failures on main via run-name (#1133)
+  (c964659)
 
 ## [0.69.4] - 2026-07-07
 
@@ -129,7 +135,8 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Fixed
 
-- **execution**: route all execution paths through per-execution isolated tool copies (#1124) (691bd54)
+- **execution**: route all execution paths through per-execution isolated tool copies
+  (#1124) (691bd54)
 
 ## [0.69.2] - 2026-07-07
 
@@ -146,7 +153,8 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Fixed
 
-- **ai/review**: classify ValueError as INVALID_RESPONSE before shared severity signatures (#1122) (14b618f)
+- **ai/review**: classify ValueError as INVALID_RESPONSE before shared severity
+  signatures (#1122) (14b618f)
 
 ## [0.69.0] - 2026-07-06
 
@@ -168,35 +176,44 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Changed
 
-- **sbom**: set fail-on-severity=high to stop 'negligible or higher' warnings (#1108) (30c715e)
+- **sbom**: set fail-on-severity=high to stop 'negligible or higher' warnings (#1108)
+  (30c715e)
 - ignore auto-generated CHANGELOG.md + resync uv.lock to 0.66.0 (#1104) (6173f73)
 
 ### Fixed
 
-- **ai/review**: prioritize non-diff-mappable findings before sticky-comment truncation (#1107) (8f343e1)
-- **ci**: keep main green — revert SBOM hard-fail + decouple flaky Pages deploy (#1111) (2208ef3)
+- **ai/review**: prioritize non-diff-mappable findings before sticky-comment truncation
+  (#1107) (8f343e1)
+- **ci**: keep main green — revert SBOM hard-fail + decouple flaky Pages deploy (#1111)
+  (2208ef3)
 - **ai/review**: graceful partial when cost cap trips before any chunk (#1103) (d7d733c)
 
 ## [0.66.0] - 2026-07-06
 
 ### Added
 
-- **ai/review**: post rich, telemetry-informative review comments (--post) (#1097) (2c9e3f6)
+- **ai/review**: post rich, telemetry-informative review comments (--post) (#1097)
+  (2c9e3f6)
 - **output**: show auto-fixable indicator in check output (#1093) (41c4d7a)
 
 ### Changed
 
 - **changelog**: wrap release-note lines to satisfy lint gate (#1088) (1180000)
 - **tools**: deduplicate tsc and vue_tsc definitions (76% identical) (#1092) (e13bb69)
-- **tools**: replace repetitive tool-option type validation with schema-based checks (#1076) (caa0540)
+- **tools**: replace repetitive tool-option type validation with schema-based checks
+  (#1076) (caa0540)
 
 ### Fixed
 
-- **ai/review**: provider-aware error taxonomy — surface real cause (not generic 'aborted') (#1102) (08867ca)
-- **ai/review**: exclude interpreter command-string operands from workflow script matching (#1090) (be07eeb)
+- **ai/review**: provider-aware error taxonomy — surface real cause (not generic
+  'aborted') (#1102) (08867ca)
+- **ai/review**: exclude interpreter command-string operands from workflow script
+  matching (#1090) (be07eeb)
 - **mypy**: treat no Python files as a clean skip (#1089) (6164283)
-- **osv_scanner**: treat malformed exit-0 payload as scan error, not clean (#1085) (e544d09)
-- **plugins**: tool option mutation is not safe under parallel/thread execution (#1080) (6fe24b6)
+- **osv_scanner**: treat malformed exit-0 payload as scan error, not clean (#1085)
+  (e544d09)
+- **plugins**: tool option mutation is not safe under parallel/thread execution (#1080)
+  (6fe24b6)
 
 ## [0.65.0] - 2026-07-06
 

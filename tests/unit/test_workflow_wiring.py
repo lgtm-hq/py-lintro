@@ -186,6 +186,26 @@ def test_release_workflows_use_paired_egress_presets() -> None:
     )
 
 
+def test_version_pr_formats_changelog_via_dedicated_script() -> None:
+    """Version-PR workflow reflows the generated CHANGELOG via a repo script."""
+    version_pr = _load_workflow(name="release-version-pr.yml")
+
+    script = version_pr["jobs"]["version-pr"]["with"]["version-update-script"]
+    assert_that(script).is_equal_to("scripts/ci/format-changelog.py")
+    assert_that((_REPO_ROOT / script).is_file()).is_true()
+
+
+def test_changelog_no_longer_ignored_by_lintro() -> None:
+    """CHANGELOG.md must be linted like every other file (#1117)."""
+    ignore = (_REPO_ROOT / ".lintro-ignore").read_text(encoding="utf-8")
+    entries = {
+        line.strip()
+        for line in ignore.splitlines()
+        if line.strip() and not line.lstrip().startswith("#")
+    }
+    assert_that(entries).does_not_contain("CHANGELOG.md")
+
+
 @pytest.mark.parametrize(
     ("workflow_name", "identity"),
     [
