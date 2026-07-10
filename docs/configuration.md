@@ -1657,11 +1657,11 @@ Layout/LineLength:
 
 ```bash
 # Default: safe autocorrect only (rubocop --autocorrect)
-lintro fmt --tools rubocop
+lintro format --tools rubocop
 
 # Opt in to unsafe autocorrect (rubocop --autocorrect-all), which may change
 # program semantics — review the diff afterwards.
-lintro fmt --tools rubocop --tool-options "rubocop:unsafe_fixes=True"
+lintro format --tools rubocop --tool-options "rubocop:unsafe_fixes=True"
 ```
 
 **Available Options:**
