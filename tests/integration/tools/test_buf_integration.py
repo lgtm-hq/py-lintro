@@ -7,8 +7,6 @@ from discovery, so the committed sample cannot be linted in place.
 
 from __future__ import annotations
 
-from typing import cast
-
 import shutil
 from pathlib import Path
 

@@ -2,14 +2,14 @@
 
 from __future__ import annotations
 
-from typing import cast
-
 import subprocess
 from pathlib import Path
+from typing import cast
 from unittest.mock import patch
 
 from assertpy import assert_that
 
+from lintro.parsers.buf.buf_issue import BufIssue
 from lintro.tools.definitions.buf import BufPlugin
 
 
@@ -62,7 +62,8 @@ def test_check_timeout_returns_error_result(
     assert_that(result.success).is_false()
     assert_that(result.issues_count).is_equal_to(1)
     assert_that(result.issues).is_not_none()
-    assert_that(result.issues[0].code)  # type: ignore[index, union-attr].is_equal_to("TIMEOUT")
+    issue = cast(BufIssue, result.issues[0])  # type: ignore[index]
+    assert_that(issue.code).is_equal_to("TIMEOUT")
 
 
 def test_fix_timeout_returns_error_result(
@@ -90,4 +91,6 @@ def test_fix_timeout_returns_error_result(
             result = buf_plugin.fix([str(proto)], {})
 
     assert_that(result.success).is_false()
-    assert_that(result.issues[-1].code).is_equal_to("TIMEOUT")
+    assert_that(result.issues).is_not_none()
+    issue = cast(BufIssue, result.issues[-1])  # type: ignore[index]
+    assert_that(issue.code).is_equal_to("TIMEOUT")

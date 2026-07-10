@@ -1893,10 +1893,10 @@ lintro check --tools taplo --tool-options taplo:schema=pyproject.schema.json
 
 **File:** `buf.yaml` (or `buf.work.yaml` for multi-module workspaces)
 
-buf works with or without a `buf.yaml`. When no config is present, buf lints
-against its `STANDARD` default rule set with the current directory as the module
-root. Add a `buf.yaml` to select rule categories (`MINIMAL`, `BASIC`, `STANDARD`)
-or to opt into `COMMENTS`/`UNARY_RPC`:
+buf works with or without a `buf.yaml`. When no config is present, buf lints against its
+`STANDARD` default rule set with the current directory as the module root. Add a
+`buf.yaml` to select rule categories (`MINIMAL`, `BASIC`, `STANDARD`) or to opt into
+`COMMENTS`/`UNARY_RPC`:
 
 ```yaml
 version: v2
@@ -1909,10 +1909,10 @@ lint:
 
 **Available Options:**
 
-| Option             | Type    | Description                                      |
-| ------------------ | ------- | ------------------------------------------------ |
-| `config`           | string  | Path to a `buf.yaml` file or inline config data  |
-| `disable_symlinks` | boolean | Do not follow symlinks when reading sources      |
+| Option             | Type    | Description                                     |
+| ------------------ | ------- | ----------------------------------------------- |
+| `config`           | string  | Path to a `buf.yaml` file or inline config data |
+| `disable_symlinks` | boolean | Do not follow symlinks when reading sources     |
 
 **Usage Examples:**
 
@@ -1927,11 +1927,11 @@ lintro format --tools buf
 lintro check --tools buf --tool-options buf:config=proto/buf.yaml
 ```
 
-> **Note on module roots:** lintro runs buf from the common parent directory of
-> the `.proto` files it selects. buf's directory-based rules (e.g.
-> `PACKAGE_DIRECTORY_MATCH`) resolve package paths relative to that directory, so
-> run lintro from the module root (or add a `buf.yaml`) when your packages are
-> laid out as nested directories.
+> **Note on module roots:** lintro runs buf from the common parent directory of the
+> `.proto` files it selects. buf's directory-based rules (e.g.
+> `PACKAGE_DIRECTORY_MATCH`) resolve package paths relative to that directory, so run
+> lintro from the module root (or add a `buf.yaml`) when your packages are laid out as
+> nested directories.
 
 ### Infrastructure Tools
 
