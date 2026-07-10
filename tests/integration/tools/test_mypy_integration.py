@@ -14,6 +14,8 @@ from typing import TYPE_CHECKING
 import pytest
 from assertpy import assert_that
 
+from lintro.parsers.mypy.mypy_issue import MypyIssue
+
 if TYPE_CHECKING:
     from lintro.plugins.base import BaseToolPlugin
 
@@ -286,7 +288,11 @@ def missing_annotations(value):
     result = mypy_plugin.check([str(file_path)], {})
 
     assert_that(result.issues_count).is_greater_than(0)
-    codes = {issue.code for issue in result.issues}
+    assert_that(result.issues).is_not_none()
+    assert result.issues is not None  # narrow for type checker
+    codes = {
+        issue.code for issue in result.issues if isinstance(issue, MypyIssue)
+    }
     assert_that(codes).contains("no-untyped-def")
     assert_that(codes).does_not_contain("misc")
 
