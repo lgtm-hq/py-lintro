@@ -3,7 +3,7 @@ set -e
 
 # Lintro Report Generation Script (Docker)
 # Generates comprehensive lintro reports by running lintro inside a Docker container.
-# Expects py-lintro:latest to be available locally (pulled from GHCR by the workflow).
+# Expects py-lintro:latest locally (pulled via pull-lintro-image.sh from sha-<commit>).
 
 # Show help if requested
 if [ "$1" = "--help" ] || [ "$1" = "-h" ]; then
@@ -17,7 +17,7 @@ if [ "$1" = "--help" ] || [ "$1" = "-h" ]; then
 	echo "  - Reuses output for both step summary and report artifact"
 	echo "  - Lists available tools in GitHub Actions summary"
 	echo ""
-	echo "Requires: py-lintro:latest Docker image (pull from GHCR first)"
+	echo "Requires: py-lintro:latest Docker image (pull via pull-lintro-image.sh first)"
 	echo "This script is designed to be run in GitHub Actions CI environment."
 	exit 0
 fi
@@ -68,7 +68,7 @@ rm -f "$LINTRO_OUTPUT"
 	echo "## 🔧 Lintro Full Codebase Report"
 	echo ""
 	echo "**Generated on:** $(date)"
-	echo "**Container:** py-lintro:latest"
+	echo "**Container:** py-lintro:latest (sha-pinned via pull-lintro-image.sh)"
 	echo ""
 	echo "### 📋 Available Tools"
 	echo '```'
