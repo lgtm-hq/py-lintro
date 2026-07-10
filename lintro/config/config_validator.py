@@ -15,6 +15,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from difflib import get_close_matches
+import tomllib
 from pathlib import Path
 from typing import Any
 
@@ -44,6 +45,8 @@ KNOWN_EXECUTION_KEYS: frozenset[str] = frozenset(
         "parallel",
         "auto_install_deps",
         "max_fix_retries",
+        "max_workers",
+        "artifacts",
     },
 )
 
@@ -291,10 +294,14 @@ def validate_config_file(path: Path | str | None = None) -> ValidationResult:
         )
         return result
 
+    is_pyproject = config_path.name == "pyproject.toml"
     try:
         raw = config_path.read_text(encoding="utf-8")
-        parsed = yaml.safe_load(raw)
-    except (OSError, yaml.YAMLError) as exc:
+        if is_pyproject:
+            parsed = tomllib.loads(raw)
+        else:
+            parsed = yaml.safe_load(raw)
+    except (OSError, yaml.YAMLError, tomllib.TOMLDecodeError) as exc:
         result.errors.append(
             ValidationMessage(message=f"Could not parse config: {exc}"),
         )
@@ -318,7 +325,6 @@ def validate_config_file(path: Path | str | None = None) -> ValidationResult:
 
     # pyproject.toml uses a flat [tool.lintro] layout; normalize before
     # structural checks so nested keys line up with the schema.
-    is_pyproject = config_path.name == "pyproject.toml"
     if is_pyproject:
         parsed = _convert_pyproject_to_config(
             parsed.get("tool", {}).get("lintro", {}),
