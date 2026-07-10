@@ -16,6 +16,7 @@ import pytest
 from assertpy import assert_that
 
 from lintro.enums.tool_type import ToolType
+from lintro.parsers.pip_audit.pip_audit_issue import PipAuditIssue
 from lintro.plugins.subprocess_executor import SubprocessResult
 from lintro.tools.definitions.pip_audit import (
     PIP_AUDIT_DEFAULT_TIMEOUT,
@@ -255,7 +256,11 @@ def test_check_with_vulnerabilities(
 
     assert_that(result.success).is_false()
     assert_that(result.issues_count).is_equal_to(1)
-    assert_that(result.issues[0].vuln_id).is_equal_to("PYSEC-2019-217")
+    assert_that(result.issues).is_not_none()
+    assert result.issues is not None
+    first = result.issues[0]
+    assert isinstance(first, PipAuditIssue)
+    assert_that(first.vuln_id).is_equal_to("PYSEC-2019-217")
 
 
 def test_check_unparseable_output_fails_closed(

@@ -5,9 +5,9 @@ integration.
 
 ## Sample Files
 
-- `requirements_violations.txt` — pins packages with historically known
+- `pip_audit_violations.txt` — pins packages with historically known
   vulnerabilities (for manual/integration testing; requires network access).
-- `requirements_clean.txt` — pins a package with no known vulnerabilities.
+- `pip_audit_clean.txt` — pins a package with no known vulnerabilities.
 
 ## Why the Unit Tests Do Not Depend on the Network
 

@@ -933,8 +933,8 @@ command line by upstream and are not exposed via lintro.
 
 - pip-audit's JSON output carries no severity field, so lintro reports severity as
   `UNKNOWN`.
-- Advisory IDs (PYSEC/GHSA/CVE) link to the corresponding
-  [osv.dev](https://osv.dev) page.
+- Advisory IDs (PYSEC/GHSA/CVE) link to the corresponding [osv.dev](https://osv.dev)
+  page.
 
 **Usage Examples:**
 
