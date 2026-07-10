@@ -11,7 +11,7 @@ unchanged.
 
 from __future__ import annotations
 
-from functools import lru_cache
+from functools import cache
 from importlib.resources import (
     files,
 )  # nosemgrep: python.lang.compatibility.python37.python37-compatibility-importlib2
@@ -19,7 +19,7 @@ from importlib.resources import (
 _TEMPLATES_PACKAGE = "lintro.ai.prompts.templates"
 
 
-@lru_cache(maxsize=None)
+@cache
 def load_prompt_template(*path_parts: str) -> str:
     """Load a packaged prompt template as UTF-8 text.
 
