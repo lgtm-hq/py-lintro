@@ -69,7 +69,7 @@ class _FakeEntryPoint:
             The loaded plugin object.
 
         Raises:
-            Exception: The configured ``load_error`` if one was provided.
+            Exception: When a configured ``load_error`` was provided.
         """
         if self._load_error is not None:
             raise self._load_error
@@ -189,7 +189,7 @@ def _patch_entry_points(
     entry_points: list[_FakeEntryPoint],
     *,
     group: str = ENTRY_POINT_GROUP,
-):
+) -> object:
     """Patch ``importlib.metadata.entry_points`` to return fakes for one group.
 
     Args:
