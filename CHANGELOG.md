@@ -21,6 +21,18 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.70.6] - 2026-07-10
+
+### Changed
+
+- **deps**: update digest (#917) (a69fbe5)
+- **deps**: update rust-lang/rust to 1.96.1 (minor) (#915) (4c9825b)
+- **deps**: update @astrojs/check to 0.9.9 (#866) (b346fc2)
+
+### Fixed
+
+- **astro-check**: run non-interactively to prevent prompt hang and timeout (#958) (0b1ea63)
+
 ## [0.70.5] - 2026-07-09
 
 ### Fixed
