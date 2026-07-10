@@ -88,6 +88,8 @@ tools:
   # Bandit - Security linter (config in pyproject.toml [tool.bandit])
   bandit:
     enabled: true
+    options:
+      timeout: 120
 
   # Hadolint - Dockerfile linter (defaults above or .hadolint.yaml)
   hadolint:
