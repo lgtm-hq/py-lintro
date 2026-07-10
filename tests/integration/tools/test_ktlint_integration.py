@@ -9,12 +9,15 @@ file with a non-auto-correctable violation remaining.
 
 from __future__ import annotations
 
+from typing import cast
+
 import shutil
 from pathlib import Path
 
 import pytest
 from assertpy import assert_that
 
+from lintro.parsers.ktlint.ktlint_issue import KtlintIssue
 from lintro.tools.definitions.ktlint import KtlintPlugin
 
 pytestmark = pytest.mark.skipif(
@@ -138,7 +141,7 @@ def test_fix_full_auto_correct(plugin: KtlintPlugin, tmp_path: Path) -> None:
     assert_that(result.remaining_issues_count).is_equal_to(0)
     assert_that(result.initial_issues_count).is_equal_to(initial)
     assert_that(result.initial_issues_count).is_equal_to(
-        result.fixed_issues_count + result.remaining_issues_count,
+        (result.fixed_issues_count or 0) + (result.remaining_issues_count or 0),
     )
     # Re-checking the fixed file reports no issues.
     assert_that(plugin.check([target], {}).issues_count).is_equal_to(0)
@@ -167,7 +170,7 @@ def test_fix_partial_leaves_non_correctable(
     assert_that(result.remaining_issues_count).is_greater_than(0)
     assert_that(result.initial_issues_count).is_equal_to(initial)
     assert_that(result.initial_issues_count).is_equal_to(
-        result.fixed_issues_count + result.remaining_issues_count,
+        (result.fixed_issues_count or 0) + (result.remaining_issues_count or 0),
     )
     assert_that([issue.rule for issue in result.issues]).contains(
         "standard:filename",
