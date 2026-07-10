@@ -1,7 +1,11 @@
-.PHONY: setup install test test-integration lint format clean help
+.PHONY: setup install test test-integration lint format clean help site-dev site-build site-test site-preview
 
 # Include .env file if it exists
 -include .env
+
+# Documentation site (Astro + Pagefind)
+-include scripts/ci/site/defaults.env
+SITE_ASTRO_BASE ?= $(ASTRO_BASE_DEFAULT)
 
 # Default target
 all: setup test
@@ -81,6 +85,20 @@ clean:
 	find . -type d -name "htmlcov" -exec rm -rf {} +
 	find . -type d -name ".tox" -exec rm -rf {} +
 
+site-dev:
+	cd apps/site && bun install && ASTRO_BASE="$(SITE_ASTRO_BASE)" bun run dev
+
+site-build:
+	uv run python scripts/ci/site/migrate-docs-content.py
+	./scripts/ci/site/build.sh
+
+site-test:
+	./scripts/ci/site/check.sh
+	./scripts/ci/site/test.sh
+
+site-preview: site-build
+	./scripts/ci/site/preview-serve.sh
+
 # Show help
 help:
 	@echo "Available targets:"
@@ -95,4 +113,8 @@ help:
 	@echo "  docker-build    - Build Docker image"
 	@echo "  docker-test     - Run tests in Docker"
 	@echo "  clean           - Clean up build artifacts"
+	@echo "  site-dev        - Astro docs site dev server"
+	@echo "  site-build      - Build docs site (+ Pagefind index)"
+	@echo "  site-test       - Run docs site checks and tests"
+	@echo "  site-preview    - Preview built docs site"
 	@echo "  help            - Show this help message" 

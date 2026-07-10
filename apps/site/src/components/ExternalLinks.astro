@@ -1,0 +1,19 @@
+---
+/** Adds target="_blank" to external http(s) links in rendered content. */
+---
+
+<script is:inline>
+  (function () {
+    var origin = window.location.origin;
+    document.querySelectorAll('a[href^="http://"], a[href^="https://"]').forEach(function (link) {
+      try {
+        if (new URL(link.href).origin !== origin) {
+          link.target = '_blank';
+          link.rel = 'noopener noreferrer';
+        }
+      } catch (_) {
+        // Ignore malformed URLs.
+      }
+    });
+  })();
+</script>

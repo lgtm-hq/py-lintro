@@ -1,0 +1,19 @@
+---
+interface Props {
+  variant?: "default" | "outline" | "warning" | "info";
+  class?: string;
+}
+
+const { variant = "default", class: className } = Astro.props;
+
+const variantClass =
+  variant === "outline"
+    ? "tag tag-outline"
+    : variant === "warning"
+      ? "tag tag-warning"
+      : variant === "info"
+        ? "tag tag-info"
+        : "tag";
+---
+
+<span class:list={[variantClass, "tag-sm", className]}><slot /></span>
