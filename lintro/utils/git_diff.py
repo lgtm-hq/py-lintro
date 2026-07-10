@@ -266,9 +266,6 @@ def filter_files_by_diff(
 
     Returns:
         The subset of ``files`` that changed vs ``base`` (order preserved).
-
-    Raises:
-        DiffResolutionError: When ``base`` does not resolve to a commit.
     """
     changed = get_changed_files(base, cwd)
     if not changed:
