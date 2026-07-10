@@ -63,7 +63,7 @@ def test_dockerfile_has_no_root_user_directive() -> None:
 
 
 def test_dockerfile_installs_gosu() -> None:
-    """gosu must be installed so the entrypoint can drop privileges."""
+    """Gosu must be installed so the entrypoint can drop privileges."""
     assert_that(_dockerfile_text()).contains("gosu")
 
 
