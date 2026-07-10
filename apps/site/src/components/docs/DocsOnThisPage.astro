@@ -1,0 +1,175 @@
+---
+interface Props {
+  enabled?: boolean;
+}
+
+const { enabled = true } = Astro.props;
+---
+
+{enabled && (
+  <aside class="docs-toc" data-pagefind-ignore aria-label="On this page">
+    <p class="docs-toc-title">On this page</p>
+    <nav class="docs-toc-nav" id="docs-toc-nav">
+      <ul class="docs-toc-list" id="docs-toc-list"></ul>
+    </nav>
+  </aside>
+)}
+
+<script>
+  type DocsTocApi = {
+    onPageLoad: () => void;
+    onBeforeSwap: () => void;
+    cleanup: (() => void) | null;
+  };
+
+  const w = window as Window & { __docsToc?: DocsTocApi };
+
+  if (!w.__docsToc) {
+    w.__docsToc = {
+      onPageLoad: (): void => {
+        initDocsToc();
+      },
+      onBeforeSwap: (): void => {
+        w.__docsToc?.cleanup?.();
+        if (w.__docsToc) {
+          w.__docsToc.cleanup = null;
+        }
+      },
+      cleanup: null,
+    };
+  }
+
+  function slugify(text: string): string {
+    return text
+      .toLowerCase()
+      .trim()
+      .replace(/[^\w\s-]/g, "")
+      .replace(/\s+/g, "-");
+  }
+
+  function uniqueId(base: string, used: Set<string>): string {
+    const slugBase = base || "section";
+    let id = slugBase;
+    let suffix = 2;
+    while (used.has(id)) {
+      id = `${slugBase}-${suffix++}`;
+    }
+    used.add(id);
+    return id;
+  }
+
+  function scrollOffset(): number {
+    const header = document.querySelector<HTMLElement>(".site-header");
+    return (header?.offsetHeight ?? 72) + 32;
+  }
+
+  function initDocsToc(): void {
+    w.__docsToc?.cleanup?.();
+    if (w.__docsToc) {
+      w.__docsToc.cleanup = null;
+    }
+
+    const prose = document.querySelector<HTMLElement>(".docs-content .prose");
+    const list = document.getElementById("docs-toc-list");
+    const toc = document.querySelector<HTMLElement>(".docs-toc");
+    if (!prose || !list || !toc) return;
+
+    list.replaceChildren();
+    const headings = [...prose.querySelectorAll<HTMLHeadingElement>("h2, h3")];
+
+    if (headings.length === 0) {
+      toc.hidden = true;
+      return;
+    }
+
+    toc.hidden = false;
+
+    const usedIds = new Set<string>();
+    const links = new Map<string, HTMLAnchorElement>();
+
+    for (const heading of headings) {
+      if (!heading.id) {
+        heading.id = uniqueId(slugify(heading.textContent ?? "section"), usedIds);
+      } else {
+        usedIds.add(heading.id);
+      }
+
+      const li = document.createElement("li");
+      li.className =
+        heading.tagName === "H3" ? "docs-toc-item docs-toc-item--nested" : "docs-toc-item";
+
+      const link = document.createElement("a");
+      link.href = `#${heading.id}`;
+      link.textContent = heading.textContent ?? "";
+      link.className = "docs-toc-link";
+      link.dataset.target = heading.id;
+
+      li.append(link);
+      list.append(li);
+      links.set(heading.id, link);
+    }
+
+    function setActive(id: string): void {
+      for (const [linkId, link] of links) {
+        const active = linkId === id;
+        link.classList.toggle("is-active", active);
+        if (active) {
+          link.setAttribute("aria-current", "location");
+        } else {
+          link.removeAttribute("aria-current");
+        }
+      }
+    }
+
+    function activeHeadingId(): string {
+      const offset = scrollOffset();
+      let activeId = headings[0]?.id ?? "";
+
+      for (const heading of headings) {
+        if (heading.getBoundingClientRect().top <= offset) {
+          activeId = heading.id;
+        } else {
+          break;
+        }
+      }
+
+      return activeId;
+    }
+
+    function syncActiveFromScroll(): void {
+      setActive(activeHeadingId());
+    }
+
+    let ticking = false;
+    const onScroll = (): void => {
+      if (ticking) return;
+      ticking = true;
+      requestAnimationFrame(() => {
+        syncActiveFromScroll();
+        ticking = false;
+      });
+    };
+
+    const onResize = (): void => {
+      syncActiveFromScroll();
+    };
+
+    window.addEventListener("scroll", onScroll, { passive: true });
+    window.addEventListener("resize", onResize, { passive: true });
+    syncActiveFromScroll();
+
+    if (w.__docsToc) {
+      w.__docsToc.cleanup = () => {
+        window.removeEventListener("scroll", onScroll);
+        window.removeEventListener("resize", onResize);
+      };
+    }
+  }
+
+  const { onPageLoad, onBeforeSwap } = w.__docsToc;
+  document.removeEventListener("astro:page-load", onPageLoad);
+  document.removeEventListener("astro:before-swap", onBeforeSwap);
+  document.addEventListener("astro:page-load", onPageLoad);
+  document.addEventListener("astro:before-swap", onBeforeSwap);
+  initDocsToc();
+</script>
