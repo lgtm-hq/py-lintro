@@ -41,7 +41,7 @@ def _audit_path(tmp_path: Path) -> Path:
     return tmp_path / AUDIT_DIR / AUDIT_JSONL_FILE
 
 
-def _read_records(tmp_path: Path) -> list[dict]:
+def _read_records(tmp_path: Path) -> list[dict[str, object]]:
     """Parse each JSONL line into a dict."""
     text = _audit_path(tmp_path).read_text(encoding="utf-8")
     return [json.loads(line) for line in text.splitlines() if line.strip()]

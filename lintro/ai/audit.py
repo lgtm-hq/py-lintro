@@ -6,7 +6,7 @@ import json
 import sys
 import time
 from pathlib import Path
-from typing import TYPE_CHECKING, IO, TextIO
+from typing import IO, TYPE_CHECKING, TextIO
 
 if TYPE_CHECKING:
     from lintro.ai.models import AIFixSuggestion

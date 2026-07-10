@@ -7,12 +7,24 @@ from unittest.mock import MagicMock
 from assertpy import assert_that
 
 from lintro.ai.display.streaming import stream_to_console
+from lintro.ai.providers.response import AIResponse
 from lintro.ai.providers.stream_result import AIStreamResult
 
 
 def _stream(chunks: list[str]) -> AIStreamResult:
     """Build an AIStreamResult over a fixed list of chunks."""
-    return AIStreamResult(_chunks=iter(chunks), _on_done=lambda: None)
+
+    def _on_done() -> AIResponse:
+        return AIResponse(
+            content="".join(chunks),
+            model="test",
+            input_tokens=0,
+            output_tokens=0,
+            cost_estimate=0.0,
+            provider="test",
+        )
+
+    return AIStreamResult(_chunks=iter(chunks), _on_done=_on_done)
 
 
 def test_returns_empty_string_for_empty_stream() -> None:

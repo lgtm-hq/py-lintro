@@ -35,7 +35,7 @@ class _FakeTimeoutError(_FakeAnthropicError):
 
 
 @pytest.fixture
-def fake_anthropic_sdk():
+def fake_anthropic_sdk() -> SimpleNamespace:
     """Patch the module's ``anthropic`` reference with fake error classes."""
     fake = SimpleNamespace(
         AnthropicError=_FakeAnthropicError,
@@ -47,35 +47,35 @@ def fake_anthropic_sdk():
         yield fake
 
 
-def test_map_errors_authentication(fake_anthropic_sdk) -> None:
+def test_map_errors_authentication(fake_anthropic_sdk: SimpleNamespace) -> None:
     """SDK AuthenticationError maps to AIAuthenticationError."""
     with pytest.raises(AIAuthenticationError):
         with AnthropicProvider._map_errors():
             raise _FakeAuthError("bad key")
 
 
-def test_map_errors_rate_limit(fake_anthropic_sdk) -> None:
+def test_map_errors_rate_limit(fake_anthropic_sdk: SimpleNamespace) -> None:
     """SDK RateLimitError maps to AIRateLimitError."""
     with pytest.raises(AIRateLimitError):
         with AnthropicProvider._map_errors():
             raise _FakeRateLimitError("slow down")
 
 
-def test_map_errors_timeout(fake_anthropic_sdk) -> None:
+def test_map_errors_timeout(fake_anthropic_sdk: SimpleNamespace) -> None:
     """SDK APITimeoutError maps to the generic AIProviderError."""
     with pytest.raises(AIProviderError):
         with AnthropicProvider._map_errors():
             raise _FakeTimeoutError("timed out")
 
 
-def test_map_errors_generic_api_error(fake_anthropic_sdk) -> None:
+def test_map_errors_generic_api_error(fake_anthropic_sdk: SimpleNamespace) -> None:
     """A generic SDK AnthropicError maps to AIProviderError."""
     with pytest.raises(AIProviderError):
         with AnthropicProvider._map_errors():
             raise _FakeAnthropicError("boom")
 
 
-def test_map_errors_passes_through_on_success(fake_anthropic_sdk) -> None:
+def test_map_errors_passes_through_on_success(fake_anthropic_sdk: SimpleNamespace) -> None:
     """The context manager is transparent when no error is raised."""
     with AnthropicProvider._map_errors():
         value = 21 * 2

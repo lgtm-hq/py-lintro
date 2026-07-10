@@ -35,7 +35,7 @@ class _FakeTimeoutError(_FakeOpenAIError):
 
 
 @pytest.fixture
-def fake_openai_sdk():
+def fake_openai_sdk() -> SimpleNamespace:
     """Patch the module's ``openai`` reference with fake error classes."""
     fake = SimpleNamespace(
         OpenAIError=_FakeOpenAIError,
@@ -47,35 +47,35 @@ def fake_openai_sdk():
         yield fake
 
 
-def test_map_errors_authentication(fake_openai_sdk) -> None:
+def test_map_errors_authentication(fake_openai_sdk: SimpleNamespace) -> None:
     """SDK AuthenticationError maps to AIAuthenticationError."""
     with pytest.raises(AIAuthenticationError):
         with OpenAIProvider._map_errors():
             raise _FakeAuthError("bad key")
 
 
-def test_map_errors_rate_limit(fake_openai_sdk) -> None:
+def test_map_errors_rate_limit(fake_openai_sdk: SimpleNamespace) -> None:
     """SDK RateLimitError maps to AIRateLimitError."""
     with pytest.raises(AIRateLimitError):
         with OpenAIProvider._map_errors():
             raise _FakeRateLimitError("slow down")
 
 
-def test_map_errors_timeout(fake_openai_sdk) -> None:
+def test_map_errors_timeout(fake_openai_sdk: SimpleNamespace) -> None:
     """SDK APITimeoutError maps to the generic AIProviderError."""
     with pytest.raises(AIProviderError):
         with OpenAIProvider._map_errors():
             raise _FakeTimeoutError("timed out")
 
 
-def test_map_errors_generic_api_error(fake_openai_sdk) -> None:
+def test_map_errors_generic_api_error(fake_openai_sdk: SimpleNamespace) -> None:
     """A generic SDK OpenAIError maps to AIProviderError."""
     with pytest.raises(AIProviderError):
         with OpenAIProvider._map_errors():
             raise _FakeOpenAIError("boom")
 
 
-def test_map_errors_passes_through_on_success(fake_openai_sdk) -> None:
+def test_map_errors_passes_through_on_success(fake_openai_sdk: SimpleNamespace) -> None:
     """The context manager is transparent when no error is raised."""
     with OpenAIProvider._map_errors():
         value = 21 * 2
