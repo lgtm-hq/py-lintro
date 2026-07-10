@@ -41,7 +41,7 @@ _LIST_RE = re.compile(r"^(?P<indent>\s*)(?P<marker>[-*+]|\d+[.)]) (?P<text>.*)$"
 _HEADING_RE = re.compile(r"^\s{0,3}#")
 _HTML_COMMENT_RE = re.compile(r"^\s*<!--")
 _LINK_REF_RE = re.compile(r"^\s*\[[^\]]+\]:\s")
-_FENCE_RE = re.compile(r"^\s*(?:```|~~~)")
+_FENCE_RE = re.compile(r"^(?P<indent>\s*)(?P<marker>`{3,}|~{3,})")
 
 
 def _tokenize(text: str) -> list[str]:
@@ -123,15 +123,29 @@ def format_changelog(text: str) -> str:
     out: list[str] = []
     index = 0
     total = len(lines)
-    in_fence = False
+    fence_marker: str | None = None
+    fence_length = 0
     while index < total:
         line = lines[index]
-        if _FENCE_RE.match(line):
-            in_fence = not in_fence
-            out.append(line.rstrip())
-            index += 1
-            continue
-        if in_fence:
+        fence_match = _FENCE_RE.match(line)
+        if fence_match is not None:
+            marker = fence_match.group("marker")
+            marker_char = marker[0]
+            marker_length = len(marker)
+            if fence_marker is None:
+                fence_marker = marker_char
+                fence_length = marker_length
+                out.append(line.rstrip())
+                index += 1
+                continue
+            if marker_char == fence_marker and marker_length >= fence_length:
+                fence_marker = None
+                fence_length = 0
+                out.append(line.rstrip())
+                index += 1
+                continue
+        if fence_marker is not None:
+            # Preserve fenced content byte-for-byte, including blank-line runs.
             out.append(line)
             index += 1
             continue
@@ -159,6 +173,10 @@ def format_changelog(text: str) -> str:
                 if _LIST_RE.match(nxt) and not nxt.startswith(cont_prefix + " "):
                     break
                 if nxt.startswith(cont_prefix) or nxt.startswith(indent + " "):
+                    # Keep hard-break lines separate so trailing ``  `` / ``\``
+                    # markers are not stripped by flatten-and-rewrap.
+                    if nxt.rstrip().endswith("\\") or nxt.rstrip("\n").endswith("  "):
+                        break
                     tokens.extend(_tokenize(nxt.strip()))
                     index += 1
                 else:
@@ -177,13 +195,42 @@ def format_changelog(text: str) -> str:
                 or _FENCE_RE.match(candidate)
             ):
                 break
+            if candidate.rstrip().endswith("\\") or candidate.rstrip("\n").endswith(
+                "  ",
+            ):
+                # Emit any accumulated prose, then keep the hard-break line as-is.
+                if paragraph:
+                    out.extend(_wrap(paragraph, "", ""))
+                    paragraph = []
+                out.append(candidate.rstrip("\n"))
+                index += 1
+                break
             paragraph.extend(_tokenize(candidate.strip()))
             index += 1
-        out.extend(_wrap(paragraph, "", ""))
+        if paragraph:
+            out.extend(_wrap(paragraph, "", ""))
 
     collapsed: list[str] = []
+    in_fence_collapse = False
+    fence_char: str | None = None
+    fence_len = 0
     for line in out:
-        if line == "" and collapsed and collapsed[-1] == "":
+        fence_match = _FENCE_RE.match(line)
+        if fence_match is not None:
+            marker = fence_match.group("marker")
+            marker_char = marker[0]
+            marker_length = len(marker)
+            if not in_fence_collapse:
+                in_fence_collapse = True
+                fence_char = marker_char
+                fence_len = marker_length
+            elif marker_char == fence_char and marker_length >= fence_len:
+                in_fence_collapse = False
+                fence_char = None
+                fence_len = 0
+            collapsed.append(line)
+            continue
+        if line == "" and collapsed and collapsed[-1] == "" and not in_fence_collapse:
             continue
         collapsed.append(line)
     while collapsed and collapsed[-1] == "":
@@ -212,8 +259,9 @@ def main(argv: list[str]) -> int:
         argv: Command-line arguments excluding the program name.
 
     Returns:
-        int: Process exit code (``0`` on success, ``1`` when the file is
-        missing).
+        int: Process exit code. Always ``0``: a missing changelog is a
+        non-fatal skip (warning only) so the release Version-PR job is not
+        blocked when the file is absent.
     """
     path = _resolve_path(argv)
     if not path.is_file():

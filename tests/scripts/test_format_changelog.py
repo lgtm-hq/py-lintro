@@ -91,9 +91,7 @@ def test_headings_and_comments_pass_through(module: ModuleType) -> None:
     )
     result = module.format_changelog(src)
 
-    assert_that(result).contains("<!-- markdownlint-disable MD024 -->")
-    assert_that(result).contains("# Changelog")
-    assert_that(result).contains("## [1.2.3] - 2026-07-06")
+    assert_that(result).is_equal_to(src)
 
 
 def test_is_idempotent(module: ModuleType) -> None:
@@ -123,6 +121,31 @@ def test_collapses_blank_line_runs(module: ModuleType) -> None:
     assert_that(result).is_equal_to("# Title\n\nParagraph text.\n")
 
 
+def test_fenced_blank_lines_are_preserved(module: ModuleType) -> None:
+    """Blank-line runs inside fenced code blocks are not collapsed."""
+    src = "```text\nline one\n\n\nline two\n```\n"
+    result = module.format_changelog(src)
+
+    assert_that(result).is_equal_to(src)
+
+
+def test_tilde_inside_backtick_fence_does_not_close(module: ModuleType) -> None:
+    """A shorter/different fence marker inside a fence stays as content."""
+    src = "```bash\necho hi\n~~~\nstill in fence\n```\n"
+    result = module.format_changelog(src)
+
+    assert_that(result).is_equal_to(src)
+
+
+def test_hard_break_lines_are_not_flattened(module: ModuleType) -> None:
+    """Trailing hard-break markers are preserved rather than stripped."""
+    src = "first line with a hard break  \nsecond line continues here\n"
+    result = module.format_changelog(src)
+
+    assert_that(result).contains("first line with a hard break  ")
+    assert_that(result).contains("second line continues here")
+
+
 def test_missing_file_is_a_non_fatal_skip(
     module: ModuleType,
     tmp_path: Path,
@@ -142,8 +165,13 @@ def test_main_formats_file_in_place(module: ModuleType, tmp_path: Path) -> None:
         encoding="utf-8",
     )
     exit_code = module.main([str(target)])
+    rewritten = target.read_text(encoding="utf-8")
 
     assert_that(exit_code).is_equal_to(0)
-    assert_that(_max_line_length(target.read_text(encoding="utf-8"))).is_less_than_or_equal_to(
+    assert_that(_max_line_length(rewritten)).is_less_than_or_equal_to(
         module.WRAP_WIDTH,
     )
+    assert_that(rewritten).contains("eighty")
+    assert_that(rewritten).contains("eight column budget")
+    assert_that(rewritten).contains("(#1) (abc1234)")
+    assert_that(rewritten).is_equal_to(module.format_changelog(rewritten))
