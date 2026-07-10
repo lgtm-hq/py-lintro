@@ -7,6 +7,7 @@ import os
 import sys
 import tempfile
 import time
+from contextlib import suppress
 from pathlib import Path
 from typing import IO, TYPE_CHECKING
 
@@ -142,6 +143,9 @@ def _rotate_audit_log_atomic(
         audit_path: Path to the ``audit.jsonl`` file.
         max_entries: Maximum records to retain; ``None`` or non-positive
             leaves the file untouched.
+
+    Raises:
+        Exception: Re-raises any failure after best-effort temp cleanup.
     """
     if max_entries is None or max_entries <= 0:
         return
@@ -166,10 +170,8 @@ def _rotate_audit_log_atomic(
             os.fsync(tmp_fh.fileno())
         os.replace(tmp_name, audit_path)
     except Exception:
-        try:
+        with suppress(OSError):
             os.unlink(tmp_name)
-        except OSError:
-            pass
         raise
 
 

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Generator
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
@@ -35,7 +36,7 @@ class _FakeTimeoutError(_FakeAnthropicError):
 
 
 @pytest.fixture
-def fake_anthropic_sdk() -> SimpleNamespace:
+def fake_anthropic_sdk() -> Generator[SimpleNamespace]:
     """Patch the module's ``anthropic`` reference with fake error classes."""
     fake = SimpleNamespace(
         AnthropicError=_FakeAnthropicError,

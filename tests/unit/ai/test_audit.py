@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from typing import Any, cast
 
 import pytest
 from assertpy import assert_that
@@ -41,7 +42,7 @@ def _audit_path(tmp_path: Path) -> Path:
     return tmp_path / AUDIT_DIR / AUDIT_JSONL_FILE
 
 
-def _read_records(tmp_path: Path) -> list[dict[str, object]]:
+def _read_records(tmp_path: Path) -> list[dict[str, Any]]:
     """Parse each JSONL line into a dict."""
     text = _audit_path(tmp_path).read_text(encoding="utf-8")
     return [json.loads(line) for line in text.splitlines() if line.strip()]
@@ -121,7 +122,8 @@ def test_contains_correct_fields(
     assert_that(record["rejected_count"]).is_equal_to(2)
     assert_that(record["entries"]).is_length(1)
 
-    entry = record["entries"][0]
+    entries = cast(list[dict[str, Any]], record["entries"])
+    entry = entries[0]
     assert_that(entry["file"]).is_equal_to("src/app.py")
     assert_that(entry["line"]).is_equal_to(42)
     assert_that(entry["code"]).is_equal_to("E501")

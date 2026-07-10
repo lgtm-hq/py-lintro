@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Generator
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
@@ -35,7 +36,7 @@ class _FakeTimeoutError(_FakeOpenAIError):
 
 
 @pytest.fixture
-def fake_openai_sdk() -> SimpleNamespace:
+def fake_openai_sdk() -> Generator[SimpleNamespace]:
     """Patch the module's ``openai`` reference with fake error classes."""
     fake = SimpleNamespace(
         OpenAIError=_FakeOpenAIError,
