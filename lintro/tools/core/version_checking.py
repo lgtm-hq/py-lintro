@@ -204,7 +204,8 @@ def get_install_hints() -> dict[str, str]:
             "or download from https://github.com/tamasfe/taplo/releases (v{version}+)"
         ),
         "typos": (
-            "Install via: cargo install typos-cli or brew install typos-cli (v{version}+)"
+            "Install via: cargo install typos-cli or brew install typos-cli "
+            "(v{version}+)"
         ),
         "vale": (
             "Install via: brew install vale "
