@@ -143,7 +143,7 @@
     },
     {
       "name": "clippy",
-      "version": "1.94.0",
+      "version": "1.96.0",
       "install": {
         "type": "rustup",
         "component": "clippy"
@@ -180,7 +180,7 @@
     },
     {
       "name": "markdownlint",
-      "version": "0.22.1",
+      "version": "0.23.0",
       "install": {
         "type": "npm",
         "package": "markdownlint-cli2"
@@ -219,7 +219,7 @@
     },
     {
       "name": "oxfmt",
-      "version": "0.43.0",
+      "version": "0.57.0",
       "install": {
         "type": "npm",
         "package": "oxfmt"
@@ -232,7 +232,7 @@
     },
     {
       "name": "oxlint",
-      "version": "1.58.0",
+      "version": "1.72.0",
       "install": {
         "type": "npm",
         "package": "oxlint"
@@ -245,7 +245,7 @@
     },
     {
       "name": "prettier",
-      "version": "3.8.1",
+      "version": "3.9.4",
       "install": {
         "type": "npm",
         "package": "prettier"
@@ -297,7 +297,7 @@
     },
     {
       "name": "rustc",
-      "version": "1.94.0",
+      "version": "1.96.1",
       "install": {
         "type": "rustup"
       },
@@ -347,7 +347,7 @@
     },
     {
       "name": "shfmt",
-      "version": "3.13.0",
+      "version": "3.13.1",
       "install": {
         "type": "binary"
       },
@@ -372,7 +372,7 @@
     },
     {
       "name": "svelte_check",
-      "version": "4.4.6",
+      "version": "4.7.1",
       "install": {
         "type": "npm",
         "package": "svelte-check",
@@ -412,7 +412,7 @@
     },
     {
       "name": "vue_tsc",
-      "version": "3.2.6",
+      "version": "3.3.6",
       "install": {
         "type": "npm",
         "package": "vue-tsc",
