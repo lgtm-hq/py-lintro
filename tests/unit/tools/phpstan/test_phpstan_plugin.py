@@ -5,12 +5,14 @@ from __future__ import annotations
 import json
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any
+from typing import Any, cast
 
 import pytest
 from assertpy import assert_that
 
 from lintro.enums.doc_url_template import DocUrlTemplate
+from lintro.parsers.phpstan.phpstan_issue import PhpstanIssue
+from lintro.tools.definitions.phpstan import PhpstanPlugin
 from lintro.enums.tool_type import ToolType
 from lintro.models.core.tool_result import ToolResult
 from lintro.plugins import ToolRegistry
@@ -23,7 +25,7 @@ _VERSION_STDOUT = (
 )
 
 
-def _fake_run_factory(analyse_stdout: str, analyse_rc: int):
+def _fake_run_factory(analyse_stdout: str, analyse_rc: int) -> Any:
     """Build a fake ``subprocess.run`` replacement for PHPStan.
 
     Args:
@@ -94,7 +96,7 @@ def test_phpstan_build_command_adds_level_without_config(
 ) -> None:
     """Without a native config, the command includes --level."""
     monkeypatch.chdir(tmp_path)
-    tool = ToolRegistry.get("phpstan")
+    tool = cast(PhpstanPlugin, ToolRegistry.get("phpstan"))
     cmd = tool._build_command(files=["a.php"])
     assert_that(cmd).contains("--level")
     assert_that(cmd).contains("--error-format")
@@ -108,7 +110,7 @@ def test_phpstan_build_command_omits_level_with_native_config(
     """A native phpstan.neon suppresses the injected --level flag."""
     (tmp_path / "phpstan.neon").write_text("parameters:\n    level: 6\n")
     monkeypatch.chdir(tmp_path)
-    tool = ToolRegistry.get("phpstan")
+    tool = cast(PhpstanPlugin, ToolRegistry.get("phpstan"))
     cmd = tool._build_command(files=["a.php"])
     assert_that(cmd).does_not_contain("--level")
 
@@ -146,7 +148,9 @@ def test_phpstan_check_reports_violations(
     assert_that(result.name).is_equal_to("phpstan")
     assert_that(result.success).is_false()
     assert_that(result.issues_count).is_equal_to(1)
-    assert_that(result.issues[0].identifier).is_equal_to("arguments.count")
+    assert_that(result.issues).is_not_none()
+    issue = cast(PhpstanIssue, result.issues[0])  # type: ignore[index]
+    assert_that(issue.identifier).is_equal_to("arguments.count")
 
 
 def test_phpstan_check_clean_passes(

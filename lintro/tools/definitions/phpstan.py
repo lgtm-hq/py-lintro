@@ -104,9 +104,6 @@ class PhpstanPlugin(BaseToolPlugin):
             configuration: Path to a PHPStan configuration file.
             memory_limit: Memory limit passed to PHPStan (e.g. ``512M``).
             **kwargs: Other tool options.
-
-        Raises:
-            ValueError: If ``level`` is outside the supported 0-9 range.
         """
         if level is not None:
             validate_int(
