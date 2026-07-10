@@ -60,7 +60,7 @@ cat >"$WORK_DIR/pydoclint.txt" <<EOF
   end
 EOF
 cat >"$WORK_DIR/pydantic.txt" <<EOF
-  resource "pydantic_core" do
+  resource "pydantic-core" do
     url "https://files.pythonhosted.org/packages/cc/pydantic_core-2.0.0-cp313-cp313-macosx_11_0_arm64.whl"
     sha256 "${DUMMY_SHA_C}"
   end

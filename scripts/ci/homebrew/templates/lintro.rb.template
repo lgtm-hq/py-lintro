@@ -61,13 +61,13 @@ class Lintro < Formula
     venv = virtualenv_create(libexec, "python3.13")
 
     # Install other resources first (this sets up pip in the venv)
-    other_resources = resources.reject { |r| r.name == "pydantic_core" }
+    other_resources = resources.reject { |r| r.name == "pydantic-core" }
     venv.pip_install other_resources
 
-    # Install pydantic_core wheel (requires special handling due to Rust build)
-    resource("pydantic_core").stage do
+    # Install pydantic-core wheel (requires special handling due to Rust build)
+    resource("pydantic-core").stage do
       wheel = Pathname.pwd.children.find { |f| f.extname == ".whl" }
-      odie "pydantic_core wheel not found in staged resource" if wheel.nil?
+      odie "pydantic-core wheel not found in staged resource" if wheel.nil?
       system libexec/"bin/python", "-m", "pip",
              "install", "--no-deps", "--ignore-installed", wheel.to_s
     end
