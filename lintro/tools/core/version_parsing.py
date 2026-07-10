@@ -38,6 +38,7 @@ TOOLS_WITH_SIMPLE_VERSION_PATTERN: set[ToolName] = {
     ToolName.BUF,
     ToolName.CARGO_AUDIT,
     ToolName.CARGO_DENY,
+    ToolName.COMMITLINT,
     ToolName.GITLEAKS,
     ToolName.HADOLINT,
     ToolName.OSV_SCANNER,

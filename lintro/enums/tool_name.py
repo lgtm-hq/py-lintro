@@ -19,6 +19,7 @@ class ToolName(StrEnum):
     CARGO_AUDIT = auto()
     CARGO_DENY = auto()
     CLIPPY = auto()
+    COMMITLINT = auto()
     GITLEAKS = auto()
     HADOLINT = auto()
     IDIOM_REVIEW = auto()

@@ -23,6 +23,7 @@ class Lintro < Formula
   depends_on "bandit"
   depends_on "black"
   depends_on "buf"
+  depends_on "commitlint"
   depends_on "gitleaks"
   depends_on "hadolint"
   depends_on "libyaml"
@@ -80,6 +81,7 @@ class Lintro < Formula
       Dockerfiles:      hadolint
       Protobuf:         buf
       GitHub Actions:   actionlint
+      Git commits:      commitlint
       Security:         gitleaks, semgrep
       Rust:             clippy, rustfmt (via rust)
       SQL:              sqlfluff
