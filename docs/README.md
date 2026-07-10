@@ -45,6 +45,8 @@ configuring, and contributing to Lintro.
   decisions and their rationale
 - **[Roadmap](architecture/ROADMAP.md)** - Prioritized improvements and development
   phases
+- **[Design Documents](design/)** - Design and evaluation docs for larger or exploratory
+  changes
 
 **Reference Documentation:**
 
