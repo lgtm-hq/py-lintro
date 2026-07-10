@@ -155,6 +155,10 @@ def get_install_hints() -> dict[str, str]:
         "pytest": (
             "Install via: pip install pytest>={version} or uv add pytest>={version}"
         ),
+        "commitlint": (
+            "Install via: bun add -g @commitlint/cli@{version} "
+            "@commitlint/config-conventional@{version}"
+        ),
         "markdownlint": "Install via: bun add -d markdownlint-cli2@>={version}",
         "markdownlint-cli2": "Install via: bun add -d markdownlint-cli2@>={version}",
         "oxfmt": "Install via: bun add -d oxfmt@>={version}",
@@ -206,6 +210,10 @@ def get_install_hints() -> dict[str, str]:
         "taplo": (
             "Install via: cargo install taplo-cli "
             "or download from https://github.com/tamasfe/taplo/releases (v{version}+)"
+        ),
+        "vale": (
+            "Install via: brew install vale "
+            "or download from https://github.com/errata-ai/vale/releases (v{version}+)"
         ),
         "astro_check": (
             "Install via: bun add astro@>={version} or npm install astro@>={version}"

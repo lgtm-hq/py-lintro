@@ -1,0 +1,240 @@
+---
+import { getCollection } from "astro:content";
+import {
+  CATEGORY_LABELS,
+  findSectionOverviewDoc,
+  type DocCategory,
+} from "../../data/docs-nav";
+import { groupSectionDocs, sidebarLabel } from "../../data/sidebar-nav";
+
+interface Props {
+  currentSlug: string;
+  currentCategory: DocCategory;
+}
+
+const { currentSlug, currentCategory } = Astro.props;
+const base = import.meta.env.BASE_URL;
+
+const allDocs = await getCollection("docs", ({ data }) => !data.draft);
+const overview = findSectionOverviewDoc(allDocs, currentCategory);
+const sectionDocs = allDocs
+  .filter((d) => d.data.category === currentCategory && d.data.sidebar !== false)
+  .sort((a, b) => a.data.order - b.data.order);
+const sectionLabel = CATEGORY_LABELS[currentCategory];
+const { groups } = groupSectionDocs(currentCategory, sectionDocs);
+const overviewHref = overview ? `${base}docs/${overview.id}/` : undefined;
+const overviewActive = overview?.id === currentSlug;
+---
+
+<div class="docs-nav-col" id="docs-nav-col" data-pagefind-ignore>
+  <div class="docs-sidebar-toolbar">
+    <button
+      type="button"
+      class="sidebar-toggle"
+      id="docs-sidebar-hide"
+      aria-label="Hide section navigation"
+      aria-expanded="true"
+      title="Hide sidebar"
+    >
+      ⟨
+    </button>
+  </div>
+  <aside class="docs-sidebar">
+    <p class="sidebar-section-title sidebar-section-heading">
+      {sectionLabel}
+      <span class="sidebar-section-count">{sectionDocs.length}</span>
+    </p>
+
+    {
+      overviewHref && (
+        <a
+          href={overviewHref}
+          class:list={["sidebar-link", { active: overviewActive }]}
+          aria-current={overviewActive ? "page" : undefined}
+        >
+          overview
+        </a>
+      )
+    }
+
+    {
+      groups.map((group) => {
+        const isActiveGroup = group.docs.some((doc) => doc.id === currentSlug);
+        return (
+          <details class="sidebar-nav-group" open={isActiveGroup}>
+            <summary>
+              <span class="sidebar-group-heading">
+                <span class="sidebar-group-prefix" aria-hidden="true">//</span>
+                <span class="sidebar-group-label">{group.label}</span>
+              </span>
+              <span class="sidebar-group-meta">
+                <span class="sidebar-group-count">{group.docs.length}</span>
+              </span>
+            </summary>
+            {
+              group.docs.map((doc) => (
+                <a
+                  href={`${base}docs/${doc.id}/`}
+                  class:list={["sidebar-link", { active: doc.id === currentSlug }]}
+                  aria-current={doc.id === currentSlug ? "page" : undefined}
+                >
+                  {sidebarLabel(doc)}
+                </a>
+              ))
+            }
+          </details>
+        );
+      })
+    }
+  </aside>
+
+  <div class="docs-mobile-nav">
+    <label class="docs-mobile-nav-label" for="docs-page-jump">
+      {sectionLabel} — jump to page
+    </label>
+    <select id="docs-page-jump" class="docs-mobile-nav-select">
+      {
+        overviewHref && (
+          <option value={overviewHref} selected={overviewActive}>
+            overview
+          </option>
+        )
+      }
+      {
+        groups.map((group) => (
+          <optgroup label={group.label}>
+            {
+              group.docs.map((doc) => (
+                <option value={`${base}docs/${doc.id}/`} selected={doc.id === currentSlug}>
+                  {sidebarLabel(doc)}
+                </option>
+              ))
+            }
+          </optgroup>
+        ))
+      }
+    </select>
+  </div>
+  <div
+    class="sidebar-resize-handle"
+    id="docs-sidebar-resize"
+    role="separator"
+    aria-orientation="vertical"
+    aria-label="Resize sidebar"
+    tabindex="0"
+  ></div>
+</div>
+
+<button
+  type="button"
+  class="sidebar-expand-fab"
+  id="docs-sidebar-show"
+  aria-label="Show section navigation"
+  title="Show sidebar"
+  hidden
+>
+  ⟩ nav
+</button>
+
+<script>
+  const select = document.getElementById("docs-page-jump") as HTMLSelectElement | null;
+  select?.addEventListener("change", () => {
+    if (select.value) {
+      window.location.href = select.value;
+    }
+  });
+
+  const WIDTH_KEY = "docs-sidebar-width";
+  const COLLAPSED_KEY = "docs-sidebar-collapsed";
+  const MIN_WIDTH = 220;
+  const MAX_WIDTH = 420;
+  const DEFAULT_WIDTH = 280;
+
+  const layout = document.querySelector(".docs-layout") as HTMLElement | null;
+  const hideBtn = document.getElementById("docs-sidebar-hide");
+  const showBtn = document.getElementById("docs-sidebar-show");
+  const resizeHandle = document.getElementById("docs-sidebar-resize");
+
+  function clampWidth(width: number): number {
+    return Math.min(MAX_WIDTH, Math.max(MIN_WIDTH, width));
+  }
+
+  function readWidth(): number {
+    const stored = Number.parseInt(localStorage.getItem(WIDTH_KEY) ?? "", 10);
+    return Number.isFinite(stored) ? clampWidth(stored) : DEFAULT_WIDTH;
+  }
+
+  function applyWidth(width: number) {
+    if (!layout) {
+      return;
+    }
+    const next = clampWidth(width);
+    layout.style.setProperty("--docs-sidebar-width", `${next}px`);
+    localStorage.setItem(WIDTH_KEY, String(next));
+  }
+
+  function setCollapsed(collapsed: boolean) {
+    if (!layout || !hideBtn || !showBtn) {
+      return;
+    }
+    layout.classList.toggle("sidebar-collapsed", collapsed);
+    hideBtn.setAttribute("aria-expanded", collapsed ? "false" : "true");
+    showBtn.hidden = !collapsed;
+    localStorage.setItem(COLLAPSED_KEY, collapsed ? "true" : "false");
+  }
+
+  function initSidebarChrome() {
+    if (!layout) {
+      return;
+    }
+    const collapsed = localStorage.getItem(COLLAPSED_KEY) === "true";
+    applyWidth(readWidth());
+    setCollapsed(collapsed);
+  }
+
+  hideBtn?.addEventListener("click", () => setCollapsed(true));
+  showBtn?.addEventListener("click", () => setCollapsed(false));
+
+  resizeHandle?.addEventListener("pointerdown", (event) => {
+    if (!layout || layout.classList.contains("sidebar-collapsed")) {
+      return;
+    }
+    event.preventDefault();
+    const startX = event.clientX;
+    const startWidth = readWidth();
+    resizeHandle.setPointerCapture(event.pointerId);
+    document.body.classList.add("sidebar-resizing");
+
+    const onMove = (moveEvent: PointerEvent) => {
+      applyWidth(startWidth + (moveEvent.clientX - startX));
+    };
+
+    const onUp = () => {
+      document.body.classList.remove("sidebar-resizing");
+      resizeHandle?.removeEventListener("pointermove", onMove);
+      resizeHandle?.removeEventListener("pointerup", onUp);
+      resizeHandle?.removeEventListener("pointercancel", onUp);
+    };
+
+    resizeHandle.addEventListener("pointermove", onMove);
+    resizeHandle.addEventListener("pointerup", onUp);
+    resizeHandle.addEventListener("pointercancel", onUp);
+  });
+
+  resizeHandle?.addEventListener("keydown", (event) => {
+    if (layout?.classList.contains("sidebar-collapsed")) {
+      return;
+    }
+    const step = event.shiftKey ? 40 : 16;
+    if (event.key === "ArrowLeft") {
+      event.preventDefault();
+      applyWidth(readWidth() - step);
+    } else if (event.key === "ArrowRight") {
+      event.preventDefault();
+      applyWidth(readWidth() + step);
+    }
+  });
+
+  initSidebarChrome();
+  document.addEventListener("astro:page-load", initSidebarChrome);
+</script>

@@ -85,6 +85,9 @@ Some tools require separate installation. Their minimum versions are also manage
 `pyproject.toml`:
 
 - `prettier` - JavaScript/TypeScript formatter (install via npm)
+- `commitlint` - Conventional Commits message linter
+  (`bun add -g @commitlint/cli @commitlint/config-conventional` or
+  `brew install commitlint`); requires a commitlint config, skipped otherwise
 - `hadolint` - Dockerfile linter (download from GitHub releases)
 - `actionlint` - GitHub Actions linter (download from GitHub releases)
 - `semgrep` - Security scanner and code analyzer (`pipx install semgrep`,
@@ -96,6 +99,8 @@ Some tools require separate installation. Their minimum versions are also manage
 - `sqlfluff` - SQL linter and formatter (`pip install sqlfluff`)
 - `swiftlint` - Swift linter (`brew install swiftlint`; Linux uses the static release binary)
 - `taplo` - TOML linter and formatter (`brew install taplo` or GitHub releases)
+- `vale` - Prose/documentation linter (`brew install vale` or GitHub releases); requires
+  a `.vale.ini`, otherwise lintro skips it as a non-error
 - `cargo-audit` - Rust dependency vulnerability scanner (`cargo install cargo-audit`)
 - `cargo-deny` - Rust dependency license/advisory checker (`cargo install cargo-deny`)
 - `osv-scanner` - Multi-ecosystem vulnerability scanner using the OSV database
