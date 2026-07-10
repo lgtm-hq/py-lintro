@@ -553,9 +553,9 @@ def run_lint_tools_simple(
     from lintro.utils.console import create_logger
 
     machine_readable_output = output_format.lower() in ("json", "sarif")
-    # In score-only mode, route all decorative/live output to stderr so stdout
-    # carries only the final numeric score.
-    score_only = score and not machine_readable_output
+    # Score-only takes priority over machine-readable formats so
+    # ``--score --output-format json`` still prints only the numeric score.
+    score_only = bool(score)
     logger = create_logger(
         run_dir=output_manager.run_dir,
         route_stderr=machine_readable_output or score_only,
@@ -577,7 +577,20 @@ def run_lint_tools_simple(
 
     if not tools_to_run and not skipped_tools:
         logger.console_output("No tools to run.")
-        return 0
+        from lintro.config.config_loader import get_config
+        from lintro.utils.health_score import health_score_for_results
+
+        empty_config = get_config()
+        health = health_score_for_results(
+            [],
+            getattr(empty_config, "score", None),
+        )
+        exit_code = 0
+        if fail_under is not None and health.score < fail_under:
+            exit_code = 1
+        if score_only:
+            print(health.score)
+        return exit_code
 
     if not tools_to_run and skipped_tools:
         _missing_keywords = ("not found", "missing")
@@ -998,7 +1011,10 @@ def run_lint_tools_simple(
 
     # Display results
     if all_results:
-        if output_format.lower() == "json":
+        if score_only:
+            # Score-only wins over JSON/SARIF so stdout stays a bare number.
+            print(health.score)
+        elif output_format.lower() == "json":
             # Output JSON to stdout
             import json
 
@@ -1033,10 +1049,6 @@ def run_lint_tools_simple(
                 standard_issues=standard_issues,
             )
             print(sarif_json)
-        elif score_only:
-            # Score-only mode: emit just the numeric health score to stdout;
-            # all decorative output was routed to stderr above.
-            print(health.score)
         else:
             logger.print_execution_summary(action, all_results)
 
@@ -1171,5 +1183,9 @@ def run_lint_tools_simple(
             output_manager.cleanup_old_runs()
         except OSError as e:
             _warn(f"Warning: Failed to clean up old runs: {e}")
+
+    elif score_only:
+        # Empty result set (e.g. all tools skipped) still needs numeric stdout.
+        print(health.score)
 
     return final_exit_code
