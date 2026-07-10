@@ -6,7 +6,7 @@ from pathlib import Path
 
 from assertpy import assert_that
 
-from lintro.deps.models import Ecosystem, VersionSpecType
+from lintro.deps.models import Dependency, Ecosystem, VersionSpecType
 from lintro.deps.parsers import parse_file
 from lintro.deps.parsers.cargo_parser import CargoParser
 from lintro.deps.parsers.package_json_parser import PackageJsonParser
@@ -14,7 +14,7 @@ from lintro.deps.parsers.pyproject_parser import PyprojectParser
 from lintro.deps.parsers.requirements_parser import RequirementsParser
 
 
-def _by_name(deps: list, name: str):
+def _by_name(deps: list[Dependency], name: str) -> Dependency:
     """Return the first dependency matching ``name``.
 
     Args:
