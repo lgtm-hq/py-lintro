@@ -2,17 +2,13 @@
 
 from __future__ import annotations
 
-from typing import cast
-
 from pathlib import Path
 from unittest.mock import patch
 
 from assertpy import assert_that
 
-from lintro.plugins.subprocess_executor import SubprocessResult
-
 from lintro.enums.tool_type import ToolType
-from lintro.parsers.swiftlint.swiftlint_issue import SwiftlintIssue
+from lintro.plugins.subprocess_executor import SubprocessResult
 from lintro.tools.definitions.swiftlint import SwiftlintPlugin
 from tests.unit.tools.swiftlint.conftest import SAMPLE_JSON
 
