@@ -186,14 +186,20 @@ def _parse_execution_config(data: dict[str, Any]) -> ExecutionConfig:
             f"got {max_fix_retries}",
         )
 
-    return ExecutionConfig(
-        enabled_tools=enabled_tools,
-        tool_order=tool_order,
-        fail_fast=data.get("fail_fast", False),
-        parallel=data.get("parallel", True),
-        auto_install_deps=data.get("auto_install_deps"),
-        max_fix_retries=max_fix_retries,
-    )
+    kwargs: dict[str, Any] = {
+        "enabled_tools": enabled_tools,
+        "tool_order": tool_order,
+        "fail_fast": data.get("fail_fast", False),
+        "parallel": data.get("parallel", True),
+        "auto_install_deps": data.get("auto_install_deps"),
+        "max_fix_retries": max_fix_retries,
+    }
+    if "max_workers" in data:
+        kwargs["max_workers"] = data["max_workers"]
+    if "artifacts" in data:
+        kwargs["artifacts"] = data["artifacts"]
+
+    return ExecutionConfig(**kwargs)
 
 
 def _parse_tool_config(tool_name: str, data: dict[str, Any]) -> LintroToolConfig:
@@ -431,6 +437,8 @@ def _convert_pyproject_to_config(data: dict[str, Any]) -> dict[str, Any]:
         "parallel",
         "auto_install_deps",
         "max_fix_retries",
+        "max_workers",
+        "artifacts",
     }
 
     # Known enforce settings (formerly global)
