@@ -36,7 +36,7 @@ log_info "ARM64 SHA256: ${ARM64_SHA}"
 log_info "x86_64 SHA256: ${X86_SHA}"
 
 cat >"$OUTPUT_FILE" <<EOF
-# typed: false
+# typed: strict
 # frozen_string_literal: true
 
 # Homebrew formula for lintro binary distribution
@@ -47,15 +47,23 @@ class Lintro < Formula
   version "${VERSION}"
   license "MIT"
 
-  RELEASE_BASE = "https://github.com/lgtm-hq/py-lintro/releases"
+  # Track the latest GitHub release via the releases API rather than scanning all
+  # tags, so the stray single-component "v1" tag is ignored. url :stable is
+  # required by FormulaAudit/LivecheckUrlSymbol; github_latest derives the repo
+  # from it, and the semver regex is a defensive filter on the release tag.
+  livecheck do
+    url :stable
+    strategy :github_latest
+    regex(/^v?(\d+\.\d+\.\d+)$/i)
+  end
 
   on_macos do
     on_arm do
-      url "#{RELEASE_BASE}/download/v#{version}/lintro-macos-arm64"
+      url "https://github.com/lgtm-hq/py-lintro/releases/download/v#{version}/lintro-macos-arm64"
       sha256 "${ARM64_SHA}"
     end
     on_intel do
-      url "#{RELEASE_BASE}/download/v#{version}/lintro-macos-x86_64"
+      url "https://github.com/lgtm-hq/py-lintro/releases/download/v#{version}/lintro-macos-x86_64"
       sha256 "${X86_SHA}"
     end
   end
