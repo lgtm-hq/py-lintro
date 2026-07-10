@@ -483,6 +483,7 @@ def run_lint_tools_simple(
     transport: str | None = None,
     dry_run: bool = False,
     profile: bool = False,
+    diff_base: str | None = None,
 ) -> int:
     """Simplified runner using Loguru-based logging with rich formatting.
 
@@ -522,6 +523,10 @@ def run_lint_tools_simple(
             timing captured around each tool is rendered as a timing table
             (non-machine formats) and added under a ``profile`` key in JSON
             output. Off by default and does not affect the exit code.
+        diff_base: Git base ref for ``--diff`` scanning. ``None`` scans all
+            files; :data:`~lintro.utils.git_diff.DIFF_DEFAULT_SENTINEL` resolves
+            the repository default base; any other value is used as the base
+            ref. Non-git directories fall back to a full scan with a warning.
 
     Returns:
         Exit code (0 for success, 1 for failures).
@@ -653,6 +658,51 @@ def run_lint_tools_simple(
             color="cyan",
         )
 
+    # Resolve the git-diff base ref (if --diff was supplied). Non-git dirs and
+    # unresolvable default refs fall back to a full scan with a warning; an
+    # explicit but unresolvable ref is a hard error.
+    resolved_diff_base: str | None = None
+    if diff_base is not None:
+        from lintro.utils.git_diff import (
+            DIFF_DEFAULT_SENTINEL,
+            DiffResolutionError,
+            get_changed_files,
+            is_git_repository,
+            resolve_default_base,
+        )
+
+        if not is_git_repository():
+            logger.console_output(
+                text="--diff requested but not inside a git repository; "
+                "scanning all files.",
+                color="yellow",
+            )
+        elif diff_base == DIFF_DEFAULT_SENTINEL:
+            resolved_diff_base = resolve_default_base()
+            if resolved_diff_base is None:
+                logger.console_output(
+                    text="--diff: could not resolve a default base ref "
+                    "(tried origin/HEAD, origin/main, main, ...); "
+                    "scanning all files.",
+                    color="yellow",
+                )
+        else:
+            resolved_diff_base = diff_base
+
+        if resolved_diff_base is not None:
+            try:
+                changed = get_changed_files(resolved_diff_base)
+            except DiffResolutionError as exc:
+                logger.console_output(text=f"Error: {exc}", color="red")
+                return 1
+            logger.console_output(
+                text=(
+                    f"Diff mode: scanning {len(changed)} file(s) changed vs "
+                    f"{resolved_diff_base}"
+                ),
+                color="cyan",
+            )
+
     # Execute tools and collect results
     all_results: list[ToolResult] = []
     total_issues = 0
@@ -754,6 +804,7 @@ def run_lint_tools_simple(
             auto_install=effective_auto_install,
             max_fix_retries=lintro_config.execution.max_fix_retries,
             profile=profile,
+            diff_base=resolved_diff_base,
         )
 
         # Enrich parallel results with doc_url from each plugin
@@ -814,6 +865,7 @@ def run_lint_tools_simple(
                     post_tools=post_tools_early,
                     auto_install=effective_auto_install,
                     lintro_config=lintro_config,
+                    diff_base=resolved_diff_base,
                 )
 
                 # Execute the tool. Time only when --profile is requested so
@@ -925,6 +977,7 @@ def run_lint_tools_simple(
         total_issues=total_issues,
         total_fixed=total_fixed,
         total_remaining=total_remaining,
+        diff_base=resolved_diff_base,
     )
 
     # Dry-run: post-checks may append additional check-mode results. Restrict

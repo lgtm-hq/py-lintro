@@ -41,6 +41,7 @@ def run_tools_parallel(
     auto_install: bool = False,
     max_fix_retries: int = 3,
     profile: bool = False,
+    diff_base: str | None = None,
 ) -> list[ToolResult]:
     """Run tools in parallel using async executor.
 
@@ -58,6 +59,7 @@ def run_tools_parallel(
         auto_install: Whether to auto-install Node.js deps if missing.
         max_fix_retries: Maximum fix→verify convergence cycles.
         profile: When True, measure and attach per-tool duration.
+        diff_base: Resolved git base ref for ``--diff`` scanning, or None.
 
     Returns:
         List of ToolResult objects.
@@ -116,6 +118,7 @@ def run_tools_parallel(
                         action=action,
                         post_tools=post_tools,
                         auto_install=auto_install,
+                        diff_base=diff_base,
                     )
 
                     tools_with_instances.append((tool_name, tool))
