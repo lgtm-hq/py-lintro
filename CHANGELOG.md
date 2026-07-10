@@ -21,6 +21,13 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.74.0] - 2026-07-10
+
+### Added
+
+- **tools**: add stylelint for CSS/SCSS/Less linting and fixing (#1143) (a81df54)
+- **integration**: add consumer-facing pre-commit hook support (#1167) (3557eb6)
+
 ## [0.73.0] - 2026-07-10
 
 ### Added
