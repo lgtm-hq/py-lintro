@@ -33,7 +33,7 @@ def test_trivy_detects_vulnerabilities_on_sample_file() -> None:
     assert_that(tool).is_not_none()
     tool.exclude_patterns = []
     sample = os.path.abspath(
-        "test_samples/tools/security/trivy/vulnerable_requirements.txt",
+        "test_samples/tools/security/trivy/vulnerable_deps.txt",
     )
     assert_that(os.path.exists(sample)).is_true()
 
