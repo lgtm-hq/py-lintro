@@ -21,6 +21,7 @@ class ToolName(StrEnum):
     COMMITLINT = auto()
     GITLEAKS = auto()
     HADOLINT = auto()
+    IDIOM_REVIEW = auto()
     MARKDOWNLINT = auto()
     MYPY = auto()
     OSV_SCANNER = auto()
@@ -39,6 +40,7 @@ class ToolName(StrEnum):
     SVELTE_CHECK = auto()
     TAPLO = auto()
     TSC = auto()
+    VALE = auto()
     VUE_TSC = auto()
     YAMLLINT = auto()
 
