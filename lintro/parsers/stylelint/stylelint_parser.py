@@ -26,8 +26,10 @@ def _looks_like_stylelint_payload(data: Any) -> bool:
         True if ``data`` is a list of objects that look like Stylelint file
         results (``source`` / ``warnings`` / ``parseErrors`` keys).
     """
-    if not isinstance(data, list) or not data:
+    if not isinstance(data, list):
         return False
+    if not data:
+        return True
     stylelint_keys = {"source", "warnings", "parseErrors", "invalidOptionWarnings"}
     for item in data:
         if not isinstance(item, dict):
