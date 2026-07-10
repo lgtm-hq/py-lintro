@@ -37,6 +37,7 @@ TOOLS_WITH_SIMPLE_VERSION_PATTERN: set[ToolName] = {
     ToolName.BANDIT,
     ToolName.CARGO_AUDIT,
     ToolName.CARGO_DENY,
+    ToolName.COMMITLINT,
     ToolName.GITLEAKS,
     ToolName.HADOLINT,
     ToolName.HTML_VALIDATE,

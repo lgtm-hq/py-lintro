@@ -22,6 +22,7 @@ class Lintro < Formula
   depends_on "actionlint"
   depends_on "bandit"
   depends_on "black"
+  depends_on "commitlint"
   depends_on "gitleaks"
   depends_on "hadolint"
   depends_on "libyaml"
@@ -79,6 +80,7 @@ class Lintro < Formula
       HTML:             html-validate (via npm, see below)
       Dockerfiles:      hadolint
       GitHub Actions:   actionlint
+      Git commits:      commitlint
       Security:         gitleaks, semgrep
       Rust:             clippy, rustfmt (via rust)
       SQL:              sqlfluff
