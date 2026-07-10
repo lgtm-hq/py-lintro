@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import cast
+
 import subprocess
 from pathlib import Path
 from unittest.mock import patch
@@ -59,7 +61,8 @@ def test_check_timeout_returns_error_result(
 
     assert_that(result.success).is_false()
     assert_that(result.issues_count).is_equal_to(1)
-    assert_that(result.issues[0].code).is_equal_to("TIMEOUT")
+    assert_that(result.issues).is_not_none()
+    assert_that(result.issues[0].code)  # type: ignore[index, union-attr].is_equal_to("TIMEOUT")
 
 
 def test_fix_timeout_returns_error_result(
