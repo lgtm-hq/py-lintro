@@ -37,17 +37,21 @@
   name: lintro check (isolated python env)
   description: >-
     Run lintro quality checks in a pre-commit-managed Python env
-    (Python-based tools only).
+    (Python-based tools only). Installs the ``full`` extra so ruff,
+    black, mypy, bandit, pydoclint, and yamllint are present.
   entry: lintro check
   language: python
   types: [file]
   require_serial: true
+  additional_dependencies: ['.[full]']
 - id: lintro-format-python
   name: lintro format (isolated python env)
   description: >-
     Run lintro auto-formatting in a pre-commit-managed Python env
-    (Python-based tools only).
+    (Python-based tools only). Installs the ``full`` extra so the
+    Python formatters are present.
   entry: lintro format
   language: python
   types: [file]
   require_serial: true
+  additional_dependencies: ['.[full]']
