@@ -1,0 +1,12 @@
+---
+interface Props {
+  class?: string;
+  as?: 'span' | 'strong';
+}
+
+const { class: className, as: Element = 'span' }: Props = Astro.props;
+---
+
+<Element class:list={['brand-logo', className]}>
+  <span class="brand-logo-name">lintro</span><span class="brand-logo-scope">@docs</span>
+</Element>
