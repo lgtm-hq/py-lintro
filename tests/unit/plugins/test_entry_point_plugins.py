@@ -9,8 +9,9 @@ name collisions, and per-invocation execution isolation.
 from __future__ import annotations
 
 from collections.abc import Iterator
+from contextlib import AbstractContextManager
 from dataclasses import dataclass
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 from assertpy import assert_that
@@ -189,7 +190,7 @@ def _patch_entry_points(
     entry_points: list[_FakeEntryPoint],
     *,
     group: str = ENTRY_POINT_GROUP,
-) -> object:
+) -> AbstractContextManager[MagicMock]:
     """Patch ``importlib.metadata.entry_points`` to return fakes for one group.
 
     Args:
