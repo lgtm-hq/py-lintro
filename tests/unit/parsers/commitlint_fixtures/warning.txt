@@ -1,0 +1,8 @@
+⧗   --- input ---
+feat: ok subject
+
+this body line is definitely longer than twenty chars
+⚠   body's lines must not be longer than 20 characters [body-max-line-length]
+
+⚠   found 0 problems, 1 warnings
+ⓘ   Get help: https://github.com/conventional-changelog/commitlint/#what-is-commitlint

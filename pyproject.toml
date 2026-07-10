@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "lintro"
-version = "0.71.3"
+version = "0.72.0"
 description = "A unified CLI tool for code formatting, linting, and quality assurance"
 keywords = [
   "linting",
@@ -152,6 +152,7 @@ packages = [
   "lintro.parsers.cargo_audit",
   "lintro.parsers.cargo_deny",
   "lintro.parsers.clippy",
+  "lintro.parsers.commitlint",
   "lintro.parsers.gitleaks",
   "lintro.parsers.hadolint",
   "lintro.parsers.idiom_review",
