@@ -206,11 +206,7 @@ def test_parse_buf_format_output_multiple_files() -> None:
 
 def test_parse_buf_format_output_deduplicates_paths() -> None:
     """Repeated target headers for the same file collapse to one issue."""
-    output = (
-        "+++ f.proto\t2026-07-07\n"
-        "@@ -1 +1 @@\n"
-        "+++ f.proto\t2026-07-07\n"
-    )
+    output = "+++ f.proto\t2026-07-07\n" "@@ -1 +1 @@\n" "+++ f.proto\t2026-07-07\n"
     result = parse_buf_format_output(output)
 
     assert_that(result).is_length(1)
