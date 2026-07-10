@@ -70,10 +70,10 @@ class _FakeEntryPoint:
             The loaded plugin object.
 
         Raises:
-            Exception: When a configured ``load_error`` was provided.
+            RuntimeError: When a configured ``load_error`` was provided.
         """
         if self._load_error is not None:
-            raise self._load_error
+            raise RuntimeError(str(self._load_error)) from self._load_error
         return self._loaded
 
 
