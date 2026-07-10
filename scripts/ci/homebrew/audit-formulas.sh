@@ -27,7 +27,8 @@ Renders:
   - Formula/lintro-full.rb from templates/lintro.rb.template (PyPI + resources)
   - Formula/lintro.rb from generate-binary-formula.sh (standalone binary)
 
-Runs `brew style` and `brew audit --strict --formula` against each.
+Runs `brew style` on each rendered file and `brew audit --strict --formula`
+  by name via an ephemeral local tap (Homebrew no longer accepts paths).
 EOF
 	exit 0
 fi
@@ -38,7 +39,6 @@ if ! command -v brew &>/dev/null; then
 fi
 
 WORK_DIR="$(mktemp -d)"
-trap 'rm -rf "$WORK_DIR"' EXIT
 
 # 64-char hex placeholder SHA256 values (structurally valid, not real).
 DUMMY_SHA_A="$(printf 'a%.0s' {1..64})"
@@ -80,17 +80,29 @@ BIN_FORMULA="$WORK_DIR/lintro.rb"
 "$SCRIPT_DIR/generate-binary-formula.sh" \
 	"0.0.0" "$DUMMY_SHA_A" "$DUMMY_SHA_B" "$BIN_FORMULA"
 
+# Homebrew disabled `brew audit [path ...]`; audit by formula name via an
+# ephemeral local tap, then clean it up.
+TAP_USER="lgtm-ci"
+TAP_REPO="lintro-audit"
+TAP_PATH="$(brew --repository)/Library/Taps/${TAP_USER}/homebrew-${TAP_REPO}"
+mkdir -p "${TAP_PATH}/Formula"
+cp "$FULL_FORMULA" "${TAP_PATH}/Formula/lintro-full.rb"
+cp "$BIN_FORMULA" "${TAP_PATH}/Formula/lintro.rb"
+trap 'rm -rf "$WORK_DIR" "$TAP_PATH"' EXIT
+
 status=0
-for formula in "$FULL_FORMULA" "$BIN_FORMULA"; do
-	name="$(basename "$formula")"
+for name in lintro-full lintro; do
+	formula_path="${TAP_PATH}/Formula/${name}.rb"
+	qualified="${TAP_USER}/${TAP_REPO}/${name}"
+
 	log_info "brew style ${name}"
-	if ! brew style "$formula"; then
+	if ! brew style "$formula_path"; then
 		log_error "brew style failed for ${name}"
 		status=1
 	fi
 
-	log_info "brew audit --strict ${name}"
-	if ! brew audit --strict --formula "$formula"; then
+	log_info "brew audit --strict ${qualified}"
+	if ! brew audit --strict --formula "$qualified"; then
 		log_error "brew audit failed for ${name}"
 		status=1
 	fi
