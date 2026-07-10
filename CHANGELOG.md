@@ -21,6 +21,23 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.72.0] - 2026-07-10
+
+### Added
+
+- **tools**: add vale for prose/documentation linting (#1150) (9c1e1f9)
+- **ai**: add idiom-review tool plugin (idiomatic-miss + duplication) (#1142) (33c7a27)
+
+### Changed
+
+- add ADRs and test-mapping guide for onboarding (#1166) (5f3c40d)
+- **ai/review**: split monolithic chunker workflow module (#1132) (8f9cf8a)
+
+### Fixed
+
+- **mypy**: stop strict false-positives when project deps aren't installed (#1128)
+  (fb74548)
+
 ## [0.71.3] - 2026-07-10
 
 ### Fixed
