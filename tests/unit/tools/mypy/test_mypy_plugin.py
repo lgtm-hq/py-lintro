@@ -195,3 +195,77 @@ def test_build_effective_excludes_converts_regex(mypy_plugin: MypyPlugin) -> Non
     result = mypy_plugin._build_effective_excludes(["^tests/.*$"])
 
     assert_that("tests/*" in result).is_true()
+
+
+# Tests for MypyPlugin._build_command strict/missing-import flag handling.
+#
+# Regression coverage for #1081: when a scanned project's runtime deps are not
+# installed, third-party libraries resolve to ``Any``. Under ``--strict`` this
+# makes ``disallow_subclassing_any``/``disallow_untyped_decorators`` fire as
+# false positives, so lintro counters them with ``--allow-*`` flags whenever
+# missing imports are ignored.
+
+
+def test_build_command_strict_adds_allow_any_flags(mypy_plugin: MypyPlugin) -> None:
+    """Emit --allow-* flags when strict and missing imports are ignored.
+
+    Args:
+        mypy_plugin: The MypyPlugin instance to test.
+    """
+    mypy_plugin.set_options(strict=True, ignore_missing_imports=True)
+
+    cmd = mypy_plugin._build_command(files=["a.py"])
+
+    assert_that(cmd).contains(
+        "--strict",
+        "--allow-subclassing-any",
+        "--allow-untyped-decorators",
+        "--ignore-missing-imports",
+    )
+    # The allow-flags must follow --strict so mypy (left-to-right) honours them.
+    assert_that(cmd.index("--allow-subclassing-any")).is_greater_than(
+        cmd.index("--strict"),
+    )
+    assert_that(cmd.index("--allow-untyped-decorators")).is_greater_than(
+        cmd.index("--strict"),
+    )
+
+
+def test_build_command_strict_without_ignore_keeps_full_strict(
+    mypy_plugin: MypyPlugin,
+) -> None:
+    """Keep full strict behavior when missing imports are not ignored.
+
+    Args:
+        mypy_plugin: The MypyPlugin instance to test.
+    """
+    mypy_plugin.set_options(strict=True, ignore_missing_imports=False)
+
+    cmd = mypy_plugin._build_command(files=["a.py"])
+
+    assert_that(cmd).contains("--strict")
+    assert_that(cmd).does_not_contain(
+        "--allow-subclassing-any",
+        "--allow-untyped-decorators",
+        "--ignore-missing-imports",
+    )
+
+
+def test_build_command_non_strict_omits_allow_any_flags(
+    mypy_plugin: MypyPlugin,
+) -> None:
+    """Omit --allow-* flags when strict mode is disabled.
+
+    Args:
+        mypy_plugin: The MypyPlugin instance to test.
+    """
+    mypy_plugin.set_options(strict=False, ignore_missing_imports=True)
+
+    cmd = mypy_plugin._build_command(files=["a.py"])
+
+    assert_that(cmd).does_not_contain(
+        "--strict",
+        "--allow-subclassing-any",
+        "--allow-untyped-decorators",
+    )
+    assert_that(cmd).contains("--ignore-missing-imports")
