@@ -1,0 +1,122 @@
+---
+import BrandLogo from './BrandLogo.astro';
+import ThemeDropdown from './ThemeDropdown.astro';
+import SearchDropdown from './SearchDropdown.astro';
+import NavDropdown from './NavDropdown.astro';
+import { getCollection } from 'astro:content';
+import { buildMainNav } from '../data/docs-nav';
+import { external } from '../data/site-links';
+
+const base = import.meta.env.BASE_URL;
+const docsCollection = await getCollection('docs', ({ data }) => !data.draft);
+const nav = buildMainNav(base, docsCollection);
+---
+
+<header class="site-header" data-pagefind-ignore>
+  <div class="header-inner">
+    <a href={base} class="logo-link">
+      <BrandLogo class="logo-text" />
+    </a>
+
+    <nav class="header-nav" aria-label="Main">
+      {nav.map((item) => (
+        <NavDropdown label={item.label} href={item.href} groups={item.groups} />
+      ))}
+    </nav>
+
+    <div class="header-controls">
+      <SearchDropdown />
+      <ThemeDropdown />
+      <a
+        href={external.github.href}
+        class="github-link"
+        target="_blank"
+        rel="noopener noreferrer"
+        aria-label="GitHub"
+      >
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"/></svg>
+      </a>
+    </div>
+  </div>
+</header>
+
+<style>
+  .site-header {
+    position: sticky;
+    top: 0;
+    z-index: 100;
+    height: var(--header-height);
+    border-bottom: 1px solid color-mix(in srgb, var(--site-accent, var(--lintro-accent)) 20%, var(--turbo-border-default));
+    background: color-mix(in srgb, var(--turbo-bg-base) 92%, transparent);
+    backdrop-filter: blur(10px);
+  }
+
+  .header-inner {
+    max-width: var(--max-width);
+    margin: 0 auto;
+    padding: 0 1.5rem;
+    height: 100%;
+    display: flex;
+    align-items: center;
+    gap: 1.5rem;
+  }
+
+  .logo-link {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    color: var(--site-accent, var(--lintro-accent));
+    text-decoration: none;
+    flex-shrink: 0;
+    font-weight: 600;
+  }
+  .logo-link:hover { text-decoration: none; color: var(--site-accent, var(--lintro-accent)); }
+
+  .logo-text {
+    font-family: var(--font-mono);
+    font-size: 0.95rem;
+    font-weight: 600;
+  }
+
+  .header-nav {
+    display: flex;
+    gap: 0.15rem;
+    flex: 1;
+    align-items: center;
+  }
+
+  .header-nav :global(.nav-link) {
+    padding: 0.4rem 0.75rem;
+    border-radius: var(--radius);
+    font-size: 0.85rem;
+    color: var(--turbo-body-secondary, var(--turbo-text-secondary));
+    text-decoration: none;
+    text-transform: lowercase;
+    transition: color var(--transition-fast), background var(--transition-fast);
+  }
+
+  .header-nav :global(.nav-link:hover),
+  .header-nav :global(.nav-dropdown.is-open .nav-link) {
+    background: var(--turbo-dropdown-item-hover, var(--turbo-bg-overlay));
+    color: var(--site-accent-light, var(--lintro-accent-light));
+    text-decoration: none;
+  }
+
+  .header-controls {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+  }
+
+  .github-link {
+    display: flex;
+    padding: 0.4rem;
+    color: var(--turbo-text-muted, var(--turbo-text-secondary));
+    border-radius: var(--radius);
+  }
+  .github-link:hover { color: var(--site-accent); background: var(--turbo-bg-overlay); }
+
+  @media (max-width: 768px) {
+    .header-nav { display: none; }
+  }
+</style>

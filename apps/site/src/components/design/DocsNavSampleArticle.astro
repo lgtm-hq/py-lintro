@@ -1,0 +1,141 @@
+---
+interface Props {
+  title?: string;
+}
+
+const { title = 'configuration' } = Astro.props;
+---
+
+<article class="sample-article">
+  <header class="sample-header">
+    <p class="breadcrumb">usage / {title}</p>
+    <h1>{title}</h1>
+    <p class="desc">Configure Lintro via <code>pyproject.toml</code>, CLI flags, and per-tool native configs.</p>
+  </header>
+  <div class="sample-prose">
+    <h2 id="quick-start">quick start</h2>
+    <p>Add a <code>[tool.lintro]</code> section and run your first check.</p>
+    <pre><code>[tool.lintro]
+default_tools = ["ruff", "prettier", "yamllint"]</code></pre>
+    <h2 id="tool-overrides">tool overrides</h2>
+    <p>Each tool respects its native configuration file — no migration required.</p>
+    <h3 id="python">python tools</h3>
+    <p>Ruff, Black, Bandit, and mypy read from <code>pyproject.toml</code>.</p>
+    <h3 id="js-ts">js / ts tools</h3>
+    <p>Prettier, ESLint, and tsc use project-local config files.</p>
+    <h2 id="ci">ci integration</h2>
+    <p>Emit SARIF, JSON, or grid output for GitHub Actions annotations.</p>
+  </div>
+  <aside class="sample-toc" aria-label="On this page preview">
+    <p class="toc-label">// on this page</p>
+    <ul>
+      <li class="active"><a href="#quick-start">quick start</a></li>
+      <li><a href="#tool-overrides">tool overrides</a></li>
+      <li class="nested"><a href="#python">python tools</a></li>
+      <li class="nested"><a href="#js-ts">js / ts tools</a></li>
+      <li><a href="#ci">ci integration</a></li>
+    </ul>
+  </aside>
+</article>
+
+<style>
+  .sample-article {
+    display: grid;
+    grid-template-columns: 1fr 180px;
+    gap: 2rem;
+    min-width: 0;
+  }
+  .sample-header { grid-column: 1; margin-bottom: 0.5rem; }
+  .sample-prose { grid-column: 1; min-width: 0; }
+  .sample-toc { grid-column: 2; grid-row: 1 / span 2; }
+  .breadcrumb {
+    margin: 0 0 0.5rem;
+    font-size: 0.72rem;
+    color: #4a6a4a;
+    text-transform: lowercase;
+  }
+  h1 {
+    margin: 0 0 0.65rem;
+    font-size: 1.25rem;
+    text-transform: lowercase;
+    color: #e8ffe8;
+  }
+  .desc {
+    margin: 0;
+    font-size: 0.85rem;
+    color: #8fbc8f;
+    max-width: 38rem;
+    line-height: 1.55;
+  }
+  .desc code {
+    color: #ffb000;
+    background: #080808;
+    padding: 0.1em 0.35em;
+  }
+  .sample-prose h2 {
+    margin: 2rem 0 0.65rem;
+    font-size: 0.95rem;
+    text-transform: lowercase;
+    color: #e8ffe8;
+    border-bottom: 1px solid #2a4a2a;
+    padding-bottom: 0.35rem;
+  }
+  .sample-prose h2:first-child { margin-top: 0; }
+  .sample-prose h3 {
+    margin: 1.25rem 0 0.5rem;
+    font-size: 0.85rem;
+    color: #c8ffc8;
+    text-transform: lowercase;
+  }
+  .sample-prose p {
+    margin: 0 0 1rem;
+    font-size: 0.82rem;
+    color: #8fbc8f;
+    line-height: 1.55;
+  }
+  .sample-prose code {
+    color: #ffb000;
+    background: #080808;
+    padding: 0.1em 0.3em;
+    font-size: 0.9em;
+  }
+  .sample-prose pre {
+    margin: 0 0 1rem;
+    padding: 0.85rem 1rem;
+    background: #080808;
+    border: 1px solid #2a4a2a;
+    font-size: 0.75rem;
+    color: #ffb000;
+    overflow-x: auto;
+  }
+  .toc-label {
+    margin: 0 0 0.65rem;
+    font-size: 0.68rem;
+    color: #4a6a4a;
+    text-transform: lowercase;
+  }
+  .sample-toc ul {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    font-size: 0.75rem;
+  }
+  .sample-toc li { margin-bottom: 0.25rem; }
+  .sample-toc li.nested { padding-left: 0.75rem; }
+  .sample-toc a {
+    color: #6b9e6b;
+    text-decoration: none;
+  }
+  .sample-toc li.active a,
+  .sample-toc a:hover { color: #39ff14; }
+  .sample-toc li.active a::before { content: '> '; }
+  @media (max-width: 900px) {
+    .sample-article { grid-template-columns: 1fr; }
+    .sample-toc {
+      grid-column: 1;
+      grid-row: auto;
+      border-top: 1px solid #2a4a2a;
+      padding-top: 1rem;
+    }
+  }
+</style>
