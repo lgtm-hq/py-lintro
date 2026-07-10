@@ -118,6 +118,7 @@ Scripts for GitHub Actions workflows and continuous integration.
 | `verify-manifest-tools.py`           | Verify tools in image match manifest versions                         | `python scripts/ci/verify-manifest-tools.py --help`                                |
 | `generate-tool-versions.py`          | Generate `_generated_versions.py` and sync `manifest.json` versions   | `python scripts/ci/generate-tool-versions.py [--check]`                            |
 | `stage-python-coverage-html.sh`      | Stage flat HTML coverage for GitHub Pages bundling                    | `./scripts/ci/testing/stage-python-coverage-html.sh --help`                        |
+| `render-coverage-json-html.py`       | Render a simple HTML index from CI `coverage.json` for Pages bundling | `python scripts/ci/testing/render-coverage-json-html.py --help`                    |
 
 #### Documentation Site Scripts (`ci/site/`)
 

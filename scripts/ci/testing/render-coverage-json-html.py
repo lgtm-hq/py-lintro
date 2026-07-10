@@ -114,6 +114,9 @@ def main() -> int:
 
     Returns:
         Process exit code.
+
+    Raises:
+        SystemExit: If coverage.json root is not a JSON object.
     """
     parser = argparse.ArgumentParser(
         description="Render coverage.json to a simple HTML index.",
