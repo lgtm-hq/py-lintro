@@ -1,0 +1,92 @@
+---
+import DocsPreviewChrome from '../../../components/design/DocsPreviewChrome.astro';
+import DocsNavSampleArticle from '../../../components/design/DocsNavSampleArticle.astro';
+---
+
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="robots" content="noindex" />
+    <title>03 Section Tabs — docs nav</title>
+    <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600&display=swap" rel="stylesheet" />
+  </head>
+  <body>
+    <DocsPreviewChrome optionId="03" optionName="Section Tabs" tagline="Tabs scope the sidebar" />
+    <div class="shell">
+      <header class="top"><span class="logo"><span class="logo-name">lintro</span><span class="logo-scope">@docs</span></span></header>
+      <nav class="tabs" aria-label="Doc sections">
+        <a href="#">getting-started</a>
+        <a href="#" class="active">usage</a>
+        <a href="#">tools</a>
+        <a href="#">architecture</a>
+        <a href="#">security</a>
+        <a href="#">contributing</a>
+      </nav>
+      <div class="layout">
+        <aside class="sidebar">
+          <p class="label">usage — 7 pages</p>
+          <a href="#" class="active">configuration</a>
+          <a href="#">docker</a>
+          <a href="#">github-integration</a>
+          <a href="#">ai-features</a>
+          <a href="#">debugging</a>
+          <a href="#">plugins</a>
+          <a href="#">troubleshooting</a>
+        </aside>
+        <main class="main">
+          <DocsNavSampleArticle />
+        </main>
+      </div>
+    </div>
+  </body>
+</html>
+
+<style>
+  :global(*) { box-sizing: border-box; }
+  body { margin: 0; background: #0d0d0d; color: #c8ffc8; font-family: 'IBM Plex Mono', monospace; font-size: 13px; }
+  .top { padding: 0.85rem 1.25rem; border-bottom: 1px solid #39ff14; }
+  .logo { font-weight: 600; }
+  .logo-name { color: #39ff14; }
+  .logo-scope { color: #ffb000; }
+  .tabs {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0;
+    border-bottom: 1px solid #2a4a2a;
+    background: #080808;
+    padding: 0 1rem;
+    overflow-x: auto;
+  }
+  .tabs a {
+    padding: 0.65rem 1rem;
+    font-size: 0.75rem;
+    color: #6b9e6b;
+    text-decoration: none;
+    text-transform: lowercase;
+    border-bottom: 2px solid transparent;
+    white-space: nowrap;
+  }
+  .tabs a:hover { color: #ffb000; }
+  .tabs a.active {
+    color: #ffb000;
+    border-bottom-color: #ffb000;
+    font-weight: 600;
+  }
+  .layout { display: grid; grid-template-columns: 220px 1fr; min-height: calc(100vh - 90px); }
+  .sidebar { border-right: 1px solid #2a4a2a; padding: 1rem 0; background: #0a0a0a; }
+  .label { margin: 0 1rem 0.75rem; font-size: 0.68rem; color: #4a6a4a; }
+  .sidebar a {
+    display: block;
+    padding: 0.35rem 1rem;
+    color: #6b9e6b;
+    text-decoration: none;
+    font-size: 0.78rem;
+    text-transform: lowercase;
+  }
+  .sidebar a.active { color: #39ff14; }
+  .sidebar a.active::before { content: '> '; }
+  .main { padding: 1.75rem 2rem 3rem; min-width: 0; }
+  @media (max-width: 768px) { .layout { grid-template-columns: 1fr; } }
+</style>

@@ -1,0 +1,46 @@
+---
+import { getCollection } from 'astro:content';
+import {
+  CATEGORY_LABELS,
+  CATEGORY_TAB_LABELS,
+  CORE_DOC_CATEGORIES,
+  categoryLandingHref,
+  sectionDocCount,
+  type DocCategory,
+} from '../../data/docs-nav';
+
+interface Props {
+  currentCategory?: DocCategory;
+}
+
+const { currentCategory } = Astro.props;
+const base = import.meta.env.BASE_URL;
+
+const allDocs = await getCollection('docs', ({ data }) => !data.draft);
+const tabs = CORE_DOC_CATEGORIES.map((key) => ({
+  key,
+  label: CATEGORY_TAB_LABELS[key],
+  title: CATEGORY_LABELS[key],
+  href: categoryLandingHref(allDocs, key, base),
+  count: sectionDocCount(allDocs, key),
+})).filter((t) => t.count > 0);
+---
+
+<nav class="docs-section-tabs" aria-label="Documentation sections" data-pagefind-ignore>
+  <div class="docs-section-tabs-inner">
+    {
+      tabs.map((tab) => (
+        <a
+          href={tab.href}
+          class:list={['docs-section-tab', { active: tab.key === currentCategory }]}
+          aria-current={tab.key === currentCategory ? 'true' : undefined}
+          title={`${tab.title} (${tab.count})`}
+        >
+          <span class="docs-section-tab-short">{tab.label}</span>
+          <span class="docs-section-tab-full">{tab.title}</span>
+          <span class="docs-section-tab-count">{tab.count}</span>
+        </a>
+      ))
+    }
+  </div>
+</nav>

@@ -3,7 +3,7 @@
 This repository uses GitHub Actions for quality gates, release automation, and
 publishing. Shared workflows are thin callers to
 [lgtm-ci](https://github.com/lgtm-hq/lgtm-ci) reusable workflows pinned at
-`4aaefe64763b7841b6d92d94dc47185083d34c9a` (**v0.46.0**). All workflow SHA pins include
+`1014e3d7d5441a63215d2096545a46cff6de101c` (**v0.48.0**). All workflow SHA pins include
 trailing `# vX.Y.Z` comments so Renovate can track digest updates. Policy is enforced by
 [lgtm-ci validate-action-pinning](https://github.com/lgtm-hq/lgtm-ci/pull/221) (via
 `validate-action-pinning.yml`) and automated by the
@@ -26,6 +26,12 @@ trailing `# vX.Y.Z` comments so Renovate can track digest updates. Policy is enf
 - **release-auto-tag.yml** — Creates tags on release commits via
   `reusable-release-auto-tag.yml` (`create-release: false`; GitHub Release is created by
   publish workflow)
+
+Both callers set a dynamic `run-name` (event + branch) so post-merge release failures
+are traceable from the Actions list rather than the default commit subject. Failure
+visibility itself lives upstream: the reusables run a `report-release-failure` job that
+writes trigger context to the step summary and opens/updates a deduplicated GitHub issue
+on `main` failures — hence the `actions: read` + `issues: write` job permissions.
 
 ## Publish
 
