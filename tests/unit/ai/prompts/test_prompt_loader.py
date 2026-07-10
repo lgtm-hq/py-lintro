@@ -114,7 +114,7 @@ def test_placeholder_braces_survive_migration() -> None:
 
 
 def test_batch_template_double_escape_survives() -> None:
-    """The batch template's `{{{{` escapes collapse to `{{` then `{`."""
+    """The batch template's `{{{{` escapes collapse to a literal `{{`."""
     rendered = load_prompt_template("fix", "batch_prompt.md").format(
         tool_name="ruff",
         file="a.py",
@@ -122,7 +122,8 @@ def test_batch_template_double_escape_survives() -> None:
         boundary="BOUND",
         file_content="print()",
     )
-    assert_that(rendered).contains('{\n    "line"')
+    # One str.format pass turns `{{{{` into `{{` so the model sees a JSON object brace.
+    assert_that(rendered).contains('{{ "line"')
 
 
 def test_missing_template_raises_file_not_found() -> None:
