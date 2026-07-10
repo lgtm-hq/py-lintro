@@ -48,12 +48,23 @@ class VersionAnalyzer:
         if self._is_wildcard(spec):
             return VersionSpecType.WILDCARD
 
+        # Alternative clauses (npm ``||``, Cargo commas already handled below)
+        # are never a single exact pin.
+        if "||" in spec:
+            if self.has_upper_bound(spec, ecosystem):
+                return VersionSpecType.RANGE
+            return VersionSpecType.UNBOUNDED
+
         if spec.startswith("^"):
             return VersionSpecType.CARET
 
         if spec.startswith("~"):
             # ``~=`` (PEP 440) and ``~`` (npm/cargo) are both tilde ranges.
             return VersionSpecType.TILDE
+
+        # Exclusion-only specs (``!=1.2.3``) are unbounded, not exact pins.
+        if spec.startswith("!=") or spec.startswith("≠"):
+            return VersionSpecType.UNBOUNDED
 
         if spec.startswith("=="):
             return VersionSpecType.EXACT
@@ -63,7 +74,7 @@ class VersionAnalyzer:
             return VersionSpecType.EXACT
 
         # Multi-clause or comparator constraints (``>=1,<2``, ``>=1``).
-        if any(op in spec for op in (">", "<", ",")):
+        if any(op in spec for op in (">", "<", ",", "!=")):
             if self.has_upper_bound(spec, ecosystem):
                 return VersionSpecType.RANGE
             return VersionSpecType.UNBOUNDED
@@ -129,15 +140,19 @@ class VersionAnalyzer:
             return VersionSpecType.ANY
         if self._is_wildcard(spec):
             return VersionSpecType.WILDCARD
+        if "||" in spec:
+            return VersionSpecType.RANGE
         if spec.startswith("^"):
             return VersionSpecType.CARET
         if spec.startswith("~"):
             return VersionSpecType.TILDE
+        if spec.startswith("!="):
+            return VersionSpecType.UNBOUNDED
         if spec.startswith("=="):
             return VersionSpecType.EXACT
         if spec.startswith("="):
             return VersionSpecType.EXACT
-        if any(op in spec for op in (">", "<", ",")):
+        if any(op in spec for op in (">", "<", ",", "!=")):
             return VersionSpecType.RANGE
         if ecosystem is Ecosystem.CARGO:
             return VersionSpecType.CARET

@@ -45,10 +45,18 @@ class PackageJsonParser:
             for name, version_spec in table.items():
                 if not isinstance(version_spec, str):
                     continue
-                # Skip non-registry references (workspaces, git, file paths).
-                if any(
-                    token in version_spec
-                    for token in ("workspace:", "file:", "git", "://", "npm:")
+                # Skip non-registry references (workspaces, git URLs, file paths).
+                # Match protocol prefixes only — avoid false positives like
+                # ``1.0.0-git.1`` prerelease tags.
+                lowered = version_spec.lower()
+                if (
+                    lowered.startswith("workspace:")
+                    or lowered.startswith("file:")
+                    or lowered.startswith("npm:")
+                    or lowered.startswith("git+")
+                    or lowered.startswith("git:")
+                    or "://" in lowered
+                    or lowered.endswith(".git")
                 ):
                     continue
                 deps.append(

@@ -41,21 +41,49 @@ class CargoParser:
 
         for section in _DEP_SECTIONS:
             table = data.get(section)
-            if not isinstance(table, dict):
-                continue
-            for name, constraint in table.items():
-                version_spec = self._constraint(constraint)
-                if version_spec is None:
-                    continue
-                deps.append(
-                    build_dependency(
-                        name=name,
-                        version_spec=version_spec,
-                        ecosystem=Ecosystem.CARGO,
-                        file=file,
-                    ),
-                )
+            if isinstance(table, dict):
+                deps.extend(self._from_table(table, file))
 
+        # Platform-specific deps: [target.'cfg(...)'.dependencies]
+        target = data.get("target")
+        if isinstance(target, dict):
+            for target_table in target.values():
+                if not isinstance(target_table, dict):
+                    continue
+                for section in _DEP_SECTIONS:
+                    nested = target_table.get(section)
+                    if isinstance(nested, dict):
+                        deps.extend(self._from_table(nested, file))
+
+        return deps
+
+    def _from_table(
+        self,
+        table: dict[str, Any],
+        file: str,
+    ) -> list[Dependency]:
+        """Build dependencies from one Cargo dependency table.
+
+        Args:
+            table: Mapping of package name to constraint.
+            file: Manifest path string.
+
+        Returns:
+            list[Dependency]: Parsed dependencies from the table.
+        """
+        deps: list[Dependency] = []
+        for name, constraint in table.items():
+            version_spec = self._constraint(constraint)
+            if version_spec is None:
+                continue
+            deps.append(
+                build_dependency(
+                    name=name,
+                    version_spec=version_spec,
+                    ecosystem=Ecosystem.CARGO,
+                    file=file,
+                ),
+            )
         return deps
 
     @staticmethod
