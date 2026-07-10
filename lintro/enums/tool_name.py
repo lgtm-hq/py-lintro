@@ -20,6 +20,7 @@ class ToolName(StrEnum):
     CLIPPY = auto()
     GITLEAKS = auto()
     HADOLINT = auto()
+    IDIOM_REVIEW = auto()
     MARKDOWNLINT = auto()
     MYPY = auto()
     OSV_SCANNER = auto()
@@ -39,6 +40,7 @@ class ToolName(StrEnum):
     TAPLO = auto()
     TSC = auto()
     TYPOS = auto()
+    VALE = auto()
     VUE_TSC = auto()
     YAMLLINT = auto()
 

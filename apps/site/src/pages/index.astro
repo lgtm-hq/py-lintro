@@ -1,0 +1,54 @@
+---
+import BaseLayout from '../layouts/BaseLayout.astro';
+import HomeFeatureCards from '../components/HomeFeatureCards.astro';
+import DocLink from '../components/DocLink.astro';
+import { docs, docHref, external } from '../data/site-links';
+
+const base = import.meta.env.BASE_URL;
+---
+
+<BaseLayout title="Lintro" description="Unified linting, formatting, and testing for modern projects.">
+  <div class="container">
+    <section class="term-hero">
+      <p class="term-prompt">
+        <span class="user">dev@repo</span>:<span class="path">~/project</span>$ lintro --help
+      </p>
+      <h1>ONE CLI.<br />MANY TOOLS.<br />ZERO CEREMONY.</h1>
+      <p class="term-lead">
+        Unified linting, formatting, and testing. Native configs. Grid output. No migration
+        theatre.
+      </p>
+      <div class="term-actions">
+        <a href={docHref(base, docs.gettingStarted)} class="btn btn-primary">$ lintro check .</a>
+        <a href={docHref(base, docs.hub)} class="btn btn-secondary">man lintro</a>
+      </div>
+      <pre class="term-output" aria-hidden="true"><code>✓ ruff      0 issues
+✓ prettier  0 issues
+✓ yamllint  0 issues
+────────────────────
+PASS  3 tools  0 issues</code></pre>
+    </section>
+
+    <HomeFeatureCards />
+
+    <section class="term-cta">
+      <h2>// ready?</h2>
+      <p>
+        Install from PyPI, run <code>lintro check</code>, and explore the{' '}
+        <DocLink href={docs.hub}>documentation hub</DocLink> for configuration and CI setup.
+      </p>
+      <div class="term-actions">
+        <a href={docHref(base, docs.gettingStarted)} class="btn btn-primary">read the docs</a>
+        <a href={docHref(base, docs.coverage)} class="btn btn-secondary">view coverage</a>
+        <a
+          href={external.github.href}
+          class="btn btn-secondary"
+          target="_blank"
+          rel="noopener noreferrer"
+        >
+          github
+        </a>
+      </div>
+    </section>
+  </div>
+</BaseLayout>

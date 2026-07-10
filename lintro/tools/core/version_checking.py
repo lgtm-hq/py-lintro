@@ -206,6 +206,10 @@ def get_install_hints() -> dict[str, str]:
         "typos": (
             "Install via: cargo install typos-cli or brew install typos-cli (v{version}+)"
         ),
+        "vale": (
+            "Install via: brew install vale "
+            "or download from https://github.com/errata-ai/vale/releases (v{version}+)"
+        ),
         "astro_check": (
             "Install via: bun add astro@>={version} or npm install astro@>={version}"
         ),

@@ -39,6 +39,7 @@ class Lintro < Formula
   depends_on "sqlfluff"
   depends_on "taplo"
   depends_on "typos-cli"
+  depends_on "vale"
   depends_on "yamllint"
 
   # Pure Python library dependencies
@@ -74,6 +75,7 @@ class Lintro < Formula
       YAML / TOML:      yamllint, taplo
       Shell:            shellcheck, shfmt
       Markdown:         markdownlint-cli2
+      Prose / docs:     vale
       JS / TS:          oxlint, oxfmt, prettier
       Dockerfiles:      hadolint
       GitHub Actions:   actionlint

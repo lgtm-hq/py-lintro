@@ -13,8 +13,8 @@
 # -----------------------------------------------------------------------------
 FROM python:3.14-slim@sha256:b877e50bd90de10af8d82c57a022fc2e0dc731c5320d762a27986facfc3355c1 AS tools
 
-ARG BUN_VERSION=1.3.11
-ARG UV_VERSION=0.11.10
+ARG BUN_VERSION=1.3.14
+ARG UV_VERSION=0.11.28
 
 LABEL maintainer="lgtm-hq"
 LABEL org.opencontainers.image.source="https://github.com/lgtm-hq/py-lintro"
@@ -114,6 +114,7 @@ RUN echo "=== Verifying all tools ===" && \
     taplo --version && tsc --version && astro --version && \
     typos --version && \
     svelte-check --version && vue-tsc --version && yamllint --version && \
+    vale --version && \
     echo "=== All tools verified! ==="
 
 # -----------------------------------------------------------------------------
@@ -166,6 +167,7 @@ RUN echo "Verifying tools..." && \
     vue-tsc --version && oxlint --version && oxfmt --version && \
     bandit --version && mypy --version && pydoclint --version && \
     yamllint --version && sqlfluff --version && typos --version && \
+    vale --version && \
     echo "All tools verified!"
 
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
