@@ -10,6 +10,10 @@ A comprehensive CLI tool that unifies various code formatting, linting, and qual
 assurance tools under a single command-line interface.
 </p>
 
+<p align="center">
+<a href="https://lgtm-hq.github.io/py-lintro/">Documentation</a>
+</p>
+
 <!-- Badges: Build & Quality -->
 <p align="center">
 <a href="https://github.com/lgtm-hq/py-lintro/actions/workflows/docker-ci.yml?query=branch%3Amain"><img src="https://img.shields.io/github/actions/workflow/status/lgtm-hq/py-lintro/docker-ci.yml?label=ci&branch=main&logo=githubactions&logoColor=white" alt="CI"></a>
@@ -38,7 +42,10 @@ assurance tools under a single command-line interface.
 ## 🚀 Quick Start
 
 ```bash
-uv pip install lintro              # Install (or: pip install lintro)
+# Install (choose one)
+uv pip install lintro              # Python / PyPI (or: pip install lintro)
+bun add -g @lgtm-hq/lintro         # Node / npm — self-contained, no Python
+
 lintro check .                     # Find issues (alias: chk)
 lintro format .                    # Fix issues (alias: fmt)
 lintro check --output-format grid  # Beautiful output
@@ -93,6 +100,12 @@ system.
 <td><code>rustup component add clippy</code></td>
 </tr>
 <tr>
+<td><a href="https://commitlint.js.org/"><img src="https://img.shields.io/badge/commitlint-f7b93e?logo=commitlint&logoColor=black" alt="commitlint"></a></td>
+<td>🔀 Git commits</td>
+<td>-</td>
+<td><code>bun add -g @commitlint/cli @commitlint/config-conventional</code><br><code>brew install commitlint</code></td>
+</tr>
+<tr>
 <td><a href="https://github.com/hadolint/hadolint"><img src="https://img.shields.io/badge/Hadolint-2496ED?logo=docker&logoColor=white" alt="Hadolint"></a></td>
 <td>🐳 Dockerfile</td>
 <td>-</td>
@@ -103,6 +116,12 @@ system.
 <td>📝 Markdown</td>
 <td>-</td>
 <td><code>bun add -g markdownlint-cli2</code><br><code>npm install -g markdownlint-cli2</code></td>
+</tr>
+<tr>
+<td><a href="https://vale.sh/"><img src="https://img.shields.io/badge/Vale-2ea44f?logo=markdown&logoColor=white" alt="Vale"></a></td>
+<td>📝 Prose / Docs</td>
+<td>-</td>
+<td><code>brew install vale</code><br><a href="https://github.com/errata-ai/vale/releases">GitHub Releases</a></td>
 </tr>
 <tr>
 <td><a href="https://oxc.rs/"><img src="https://img.shields.io/badge/Oxlint-e05d44?logo=javascript&logoColor=white" alt="Oxlint"></a></td>

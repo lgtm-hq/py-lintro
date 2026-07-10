@@ -454,6 +454,7 @@ tool_priorities = { ruff = 5, black = 10, prettier = 1 }
 | ruff         | 20       | Linter/Formatter |
 | markdownlint | 30       | Linter           |
 | yamllint     | 35       | Linter           |
+| vale         | 50       | Linter (docs)    |
 | pydoclint    | 40       | Linter           |
 | bandit       | 45       | Security         |
 | hadolint     | 50       | Infrastructure   |
@@ -1456,6 +1457,51 @@ MD041: false
 - Future versions may expose additional options via `[tool.lintro.markdownlint-cli2]` in
   `pyproject.toml`
 
+### Prose / Documentation Tools
+
+#### Vale Configuration {#vale-configuration}
+
+[Vale](https://vale.sh/) is a syntax-aware prose linter. Lintro defers to Vale's native
+configuration discovery, which walks upward from each linted file to find a `.vale.ini`.
+
+> Vale requires a configuration to run. When none is resolvable, Lintro skips vale as a
+> non-error (rather than surfacing vale's `E100` runtime error), keeping mixed-language
+> runs clean.
+
+**Native config detection:** `.vale.ini`, `_vale.ini`, `vale.ini`.
+
+**File:** `.vale.ini`
+
+```ini
+MinAlertLevel = suggestion
+
+[*.md]
+BasedOnStyles = Vale
+```
+
+**Installation:**
+
+```bash
+brew install vale
+# or download from https://github.com/errata-ai/vale/releases
+```
+
+**Available `--tool-options`:**
+
+| Option            | Type   | Description                                              |
+| ----------------- | ------ | -------------------------------------------------------- |
+| `config`          | string | Path to a Vale config file (maps to `--config`)          |
+| `min_alert_level` | string | Minimum alert level: `suggestion`, `warning`, or `error` |
+| `timeout`         | int    | Per-run timeout in seconds (default 30)                  |
+
+**Usage:**
+
+```bash
+lintro check docs/ --tools vale
+lintro check docs/ --tools vale --tool-options vale:min_alert_level=warning
+lintro check docs/ --tools vale --tool-options vale:config=.vale.ini
+```
+
 ### Rust Tools
 
 #### Clippy Configuration
@@ -1917,6 +1963,43 @@ lintro check --tools actionlint
 
 # Validate workflows along with other tools
 lintro check --tools ruff,actionlint
+```
+
+### Git Tools
+
+#### Commitlint Configuration
+
+Commitlint validates git commit messages against the
+[Conventional Commits](https://www.conventionalcommits.org/) specification. Unlike
+file-based tools, it inspects git state: Lintro runs `commitlint --last` to validate the
+repository's most recent commit message.
+
+- Requires a config; Lintro skips it as a non-error when none is present.
+- Install: `bun add -g @commitlint/cli @commitlint/config-conventional`,
+  `npm install -g @commitlint/cli @commitlint/config-conventional`, or
+  `brew install commitlint`.
+- Cannot auto-fix — amend the commit to satisfy the rules.
+
+**File:** `commitlint.config.js` (or `.commitlintrc.{js,cjs,json,yaml,yml}`, or a
+`commitlint` key in `package.json`)
+
+```js
+// commitlint.config.js
+module.exports = { extends: ['@commitlint/config-conventional'] };
+```
+
+**Available `--tool-options`:**
+
+| Option    | Type | Default | Description                        |
+| --------- | ---- | ------- | ---------------------------------- |
+| `timeout` | int  | `30`    | Max seconds to wait for commitlint |
+
+```bash
+# Validate the latest commit message
+lintro check --tools commitlint
+
+# Increase the timeout
+lintro check --tools commitlint --tool-options "commitlint:timeout=60"
 ```
 
 ## Project-Specific Configuration
