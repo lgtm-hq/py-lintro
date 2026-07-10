@@ -350,6 +350,11 @@ lintro check --tools tsc --auto-install
 # Exclude directories
 lintro check --exclude "node_modules,dist,venv"
 
+# Only scan files changed vs a git base ref (fast PR-scoped checks)
+lintro check --diff              # vs the repo default branch (origin/HEAD)
+lintro check --diff main         # vs an explicit ref
+lintro format --diff             # format only changed files
+
 # List available tools
 lintro list-tools
 ```
