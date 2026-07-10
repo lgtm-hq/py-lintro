@@ -87,6 +87,7 @@ def walk_files_with_excludes(
     include_venv: bool = False,
     incremental: bool = False,
     tool_name: str | None = None,
+    diff_base: str | None = None,
 ) -> list[str]:
     """Return files under ``paths`` matching patterns and not excluded.
 
@@ -99,6 +100,9 @@ def walk_files_with_excludes(
         include_venv: Include virtual environment directories when True.
         incremental: If True, only return files changed since last run.
         tool_name: Tool name for incremental cache (required if incremental=True).
+        diff_base: Resolved git base ref. When set, the result is restricted to
+            files changed relative to this ref (``git diff <base>...HEAD`` plus
+            working-tree and untracked changes).
 
     Returns:
         Sorted file paths matching include filters and not excluded.
@@ -143,6 +147,13 @@ def walk_files_with_excludes(
                         exclude_spec,
                     ):
                         all_files.append(abs_file_path)
+
+    # Apply git-diff filtering if a base ref was resolved. Restricts the set to
+    # files changed relative to the base so only branch changes are scanned.
+    if diff_base:
+        from lintro.utils.git_diff import filter_files_by_diff
+
+        all_files = filter_files_by_diff(all_files, diff_base)
 
     # Apply incremental filtering if enabled
     if incremental and tool_name:
