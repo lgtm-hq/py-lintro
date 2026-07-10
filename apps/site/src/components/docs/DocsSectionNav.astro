@@ -1,0 +1,35 @@
+---
+import { getCollection } from "astro:content";
+import type { DocCategory } from "../../data/docs-nav";
+import { CATEGORY_LABELS } from "../../data/docs-nav";
+
+interface Props {
+  category: DocCategory;
+  currentSlug: string;
+}
+
+const { category, currentSlug } = Astro.props;
+const base = import.meta.env.BASE_URL;
+
+const sectionDocs = (await getCollection("docs", ({ data }) => !data.draft && data.category === category))
+  .sort((a, b) => a.data.order - b.data.order);
+---
+
+<nav class="docs-section-nav" aria-label={`${CATEGORY_LABELS[category]} section`} data-pagefind-ignore>
+  <span class="docs-section-nav-label">{CATEGORY_LABELS[category]}</span>
+  <div class="docs-section-nav-groups">
+    <div class="docs-section-nav-group">
+      <div class="docs-section-nav-links">
+        {sectionDocs.map((doc) => (
+          <a
+            href={`${base}docs/${doc.id}/`}
+            class:list={["docs-section-nav-link", { active: doc.id === currentSlug }]}
+            aria-current={doc.id === currentSlug ? "page" : undefined}
+          >
+            {doc.data.title}
+          </a>
+        ))}
+      </div>
+    </div>
+  </div>
+</nav>

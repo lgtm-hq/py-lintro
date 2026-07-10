@@ -1,0 +1,100 @@
+---
+import DocsPreviewChrome from '../../../components/design/DocsPreviewChrome.astro';
+import DocsNavSampleArticle from '../../../components/design/DocsNavSampleArticle.astro';
+---
+
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="robots" content="noindex" />
+    <title>02 Dual Rail — docs nav</title>
+    <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600&display=swap" rel="stylesheet" />
+  </head>
+  <body>
+    <DocsPreviewChrome optionId="02" optionName="Dual Rail" tagline="Category rail + page list" />
+    <div class="shell">
+      <header class="top"><span class="logo"><span class="logo-name">lintro</span><span class="logo-scope">@docs</span></span></header>
+      <div class="layout">
+        <nav class="rail-cats" aria-label="Categories">
+          <p class="label">// section</p>
+          <a href="#">start</a>
+          <a href="#" class="active">usage</a>
+          <a href="#">tools</a>
+          <a href="#">arch</a>
+          <a href="#">sec</a>
+          <a href="#">contrib</a>
+        </nav>
+        <aside class="rail-pages">
+          <p class="label">usage/</p>
+          <a href="#" class="active">configuration</a>
+          <a href="#">docker</a>
+          <a href="#">github-integration</a>
+          <a href="#">ai-features</a>
+          <a href="#">debugging</a>
+          <a href="#">plugins</a>
+          <a href="#">troubleshooting</a>
+        </aside>
+        <main class="main">
+          <DocsNavSampleArticle />
+        </main>
+      </div>
+    </div>
+  </body>
+</html>
+
+<style>
+  :global(*) { box-sizing: border-box; }
+  body { margin: 0; background: #0d0d0d; color: #c8ffc8; font-family: 'IBM Plex Mono', monospace; font-size: 13px; }
+  .top { padding: 0.85rem 1.25rem; border-bottom: 1px solid #39ff14; }
+  .logo { font-weight: 600; }
+  .logo-name { color: #39ff14; }
+  .logo-scope { color: #ffb000; }
+  .layout { display: grid; grid-template-columns: 88px 200px 1fr; min-height: calc(100vh - 45px); }
+  .rail-cats {
+    background: #080808;
+    border-right: 1px solid #2a4a2a;
+    padding: 1rem 0;
+    display: flex;
+    flex-direction: column;
+    gap: 0.15rem;
+  }
+  .rail-pages {
+    border-right: 1px solid #2a4a2a;
+    background: #0a0a0a;
+    padding: 1rem 0;
+    overflow-y: auto;
+  }
+  .label { margin: 0 0.75rem 0.65rem; font-size: 0.65rem; color: #4a6a4a; text-transform: lowercase; }
+  .rail-cats a {
+    display: block;
+    padding: 0.45rem 0.5rem;
+    text-align: center;
+    font-size: 0.68rem;
+    color: #6b9e6b;
+    text-decoration: none;
+    text-transform: lowercase;
+    border-left: 2px solid transparent;
+  }
+  .rail-cats a:hover { color: #7dd3fc; }
+  .rail-cats a.active {
+    color: #7dd3fc;
+    background: #111;
+    border-left-color: #7dd3fc;
+    font-weight: 600;
+  }
+  .rail-pages a {
+    display: block;
+    padding: 0.35rem 1rem;
+    color: #6b9e6b;
+    text-decoration: none;
+    font-size: 0.78rem;
+    text-transform: lowercase;
+  }
+  .rail-pages a:hover { color: #39ff14; }
+  .rail-pages a.active { color: #39ff14; font-weight: 600; }
+  .rail-pages a.active::before { content: '> '; }
+  .main { padding: 1.75rem 2rem 3rem; min-width: 0; }
+  @media (max-width: 900px) { .layout { grid-template-columns: 72px 1fr; } .rail-pages { display: none; } }
+</style>

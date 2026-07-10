@@ -573,8 +573,9 @@ def print_totals_table(
         total_ai_applied: Total number of AI-applied fixes (FIX mode).
         total_ai_verified: Total number of AI-verified fixes (FIX mode).
         total_fixable: Number of issues the tools flagged as auto-fixable
-            (CHECK mode). When greater than zero, an "Auto-fixable" row and a
-            hint to run ``lintro fmt`` are shown.
+            (CHECK/TEST mode). When greater than zero, an "Auto-fixable" row is
+            shown. The hint to run ``lintro fmt`` is emitted only in CHECK
+            mode; TEST mode is read-only and never advertises ``fmt``.
     """
     try:
         import click
@@ -615,11 +616,11 @@ def print_totals_table(
         console_output_func(text=table)
         console_output_func(text="")
 
-        # In check/test mode, nudge the user toward auto-fixing when the
-        # tools report fixable issues. Only shown when at least one issue is
+        # In check mode, nudge the user toward auto-fixing when the tools
+        # report fixable issues. Only shown when at least one issue is
         # actually flagged fixable, so tools that do not report fixability
-        # stay silent.
-        if action != Action.FIX and total_fixable > 0:
+        # stay silent. Test mode is read-only and must not advertise `fmt`.
+        if action == Action.CHECK and total_fixable > 0:
             noun = "issue" if total_fixable == 1 else "issues"
             console_output_func(
                 text=(
