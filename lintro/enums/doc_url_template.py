@@ -29,6 +29,7 @@ class DocUrlTemplate(StrEnum):
     CARGO_AUDIT = "https://rustsec.org/advisories/{code}"
     CARGO_DENY = "https://embarkstudios.github.io/cargo-deny/"
     CLIPPY = "https://rust-lang.github.io/rust-clippy/master/index.html#{code}"
+    COMMITLINT = "https://commitlint.js.org/reference/rules.html"
     HADOLINT = "https://github.com/hadolint/hadolint/wiki/{code}"
     KTLINT = "https://pinterest.github.io/ktlint/latest/rules/{ruleset}/"
     MARKDOWNLINT = "https://github.com/DavidAnson/markdownlint/blob/main/doc/{code}.md"

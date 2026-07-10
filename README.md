@@ -100,6 +100,12 @@ system.
 <td><code>rustup component add clippy</code></td>
 </tr>
 <tr>
+<td><a href="https://commitlint.js.org/"><img src="https://img.shields.io/badge/commitlint-f7b93e?logo=commitlint&logoColor=black" alt="commitlint"></a></td>
+<td>🔀 Git commits</td>
+<td>-</td>
+<td><code>bun add -g @commitlint/cli @commitlint/config-conventional</code><br><code>brew install commitlint</code></td>
+</tr>
+<tr>
 <td><a href="https://github.com/hadolint/hadolint"><img src="https://img.shields.io/badge/Hadolint-2496ED?logo=docker&logoColor=white" alt="Hadolint"></a></td>
 <td>🐳 Dockerfile</td>
 <td>-</td>
@@ -110,6 +116,12 @@ system.
 <td>📝 Markdown</td>
 <td>-</td>
 <td><code>bun add -g markdownlint-cli2</code><br><code>npm install -g markdownlint-cli2</code></td>
+</tr>
+<tr>
+<td><a href="https://vale.sh/"><img src="https://img.shields.io/badge/Vale-2ea44f?logo=markdown&logoColor=white" alt="Vale"></a></td>
+<td>📝 Prose / Docs</td>
+<td>-</td>
+<td><code>brew install vale</code><br><a href="https://github.com/errata-ai/vale/releases">GitHub Releases</a></td>
 </tr>
 <tr>
 <td><a href="https://oxc.rs/"><img src="https://img.shields.io/badge/Oxlint-e05d44?logo=javascript&logoColor=white" alt="Oxlint"></a></td>

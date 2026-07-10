@@ -23,6 +23,13 @@ name: Publish - npm
         required: false
         default: false
         type: boolean
+      dist_tag:
+        description: >-
+          npm dist-tag for the publish (default latest). Use a non-latest tag
+          such as backfill when publishing a version older than current latest.
+        required: false
+        default: latest
+        type: string
   workflow_dispatch:
     inputs:
       release_tag:
@@ -34,6 +41,13 @@ name: Publish - npm
         required: false
         default: true
         type: boolean
+      dist_tag:
+        description: >-
+          npm dist-tag (default latest). Use backfill for versions older than
+          current latest so npm does not refuse to move the latest tag.
+        required: false
+        default: latest
+        type: string
 
 permissions: {}
 
@@ -128,7 +142,10 @@ jobs:
         # LIVE drives publish_packages.sh: 1 for a real publish, 0 for
         # --dry-run. Trusted publishing generates provenance automatically;
         # disable the explicit flag on dry-runs where nothing is published.
+        # dist_tag must be non-latest when backfilling versions below current
+        # latest (npm refuses to move latest backwards without --tag).
         env:
           LIVE: ${{ inputs.dry_run && '0' || '1' }}
           NPM_PROVENANCE: ${{ inputs.dry_run && '0' || '1' }}
+          NPM_DIST_TAG: ${{ inputs.dist_tag || 'latest' }}
         run: scripts/ci/npm/publish_packages.sh

@@ -56,6 +56,8 @@
         "rhysd/actionlint",
         "prettier",
         "markdownlint-cli2",
+        "@commitlint/cli",
+        "@commitlint/config-conventional",
         "oxlint",
         "oxfmt",
         "gitleaks",
@@ -68,6 +70,8 @@
         "mvdan/sh",
         "taplo",
         "tamasfe/taplo",
+        "vale",
+        "errata-ai/vale",
         "astro",
         "@astrojs/check",
         "svelte-check",
@@ -262,6 +266,19 @@
       "datasourceTemplate": "github-releases",
       "packageNameTemplate": "tamasfe/taplo",
       "extractVersionTemplate": "^(?<version>[0-9]+\\.[0-9]+\\.[0-9]+)$"
+    },
+    {
+      "description": "Update vale version in _tool_versions.py",
+      "customType": "regex",
+      "managerFilePatterns": [
+        "lintro/_tool_versions\\.py"
+      ],
+      "matchStrings": [
+        "ToolName\\.VALE:\\s*\"(?<currentValue>[0-9]+\\.[0-9]+\\.[0-9]+)\""
+      ],
+      "datasourceTemplate": "github-releases",
+      "packageNameTemplate": "errata-ai/vale",
+      "extractVersionTemplate": "^v(?<version>.*)$"
     },
     {
       "description": "Update cargo-audit version in _tool_versions.py",
