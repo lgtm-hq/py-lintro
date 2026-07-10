@@ -1,0 +1,127 @@
+---
+import DocsPreviewChrome from '../../../components/design/DocsPreviewChrome.astro';
+import DocsNavSampleArticle from '../../../components/design/DocsNavSampleArticle.astro';
+---
+
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="robots" content="noindex" />
+    <title>01 Collapsible Tree — docs nav</title>
+    <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600&display=swap" rel="stylesheet" />
+  </head>
+  <body>
+    <DocsPreviewChrome optionId="01" optionName="Collapsible Tree" tagline="Expand only what you need" />
+    <div class="shell">
+      <header class="top">
+        <span class="logo"><span class="logo-name">lintro</span><span class="logo-scope">@docs</span></span>
+        <input class="search" type="search" placeholder="filter sidebar…" aria-label="Filter sidebar" />
+      </header>
+      <div class="layout">
+        <aside class="sidebar">
+          <p class="label">// navigate</p>
+          <details open>
+            <summary>getting-started <span class="count">2</span></summary>
+            <a href="#">hub</a>
+            <a href="#">getting-started</a>
+          </details>
+          <details open>
+            <summary>usage <span class="count">7</span></summary>
+            <a href="#" class="active">configuration</a>
+            <a href="#">docker</a>
+            <a href="#">github-integration</a>
+            <a href="#">ai-features</a>
+            <a class="more" href="#">+ 3 more</a>
+          </details>
+          <details>
+            <summary>tools <span class="count">22</span></summary>
+            <a href="#">tool matrix</a>
+            <a href="#">ruff</a>
+            <a href="#">prettier</a>
+            <a class="more" href="#">+ 19 more</a>
+          </details>
+          <details>
+            <summary>architecture <span class="count">4</span></summary>
+            <a href="#">overview</a>
+            <a href="#">vision</a>
+          </details>
+          <details>
+            <summary>security <span class="count">2</span></summary>
+          </details>
+          <details>
+            <summary>contributing <span class="count">4</span></summary>
+          </details>
+        </aside>
+        <main class="main">
+          <DocsNavSampleArticle />
+        </main>
+      </div>
+    </div>
+  </body>
+</html>
+
+<style>
+  :global(*) { box-sizing: border-box; }
+  body { margin: 0; background: #0d0d0d; color: #c8ffc8; font-family: 'IBM Plex Mono', monospace; font-size: 13px; }
+  .shell { min-height: 100vh; }
+  .top {
+    display: flex;
+    align-items: center;
+    gap: 1.5rem;
+    padding: 0.85rem 1.25rem;
+    border-bottom: 1px solid #39ff14;
+  }
+  .logo { font-weight: 600; font-size: 0.9rem; }
+  .logo-name { color: #39ff14; }
+  .logo-scope { color: #ffb000; }
+  .search {
+    margin-left: auto;
+    width: min(220px, 40vw);
+    padding: 0.4rem 0.65rem;
+    background: #080808;
+    border: 1px solid #2a4a2a;
+    color: #c8ffc8;
+    font-family: inherit;
+    font-size: 0.78rem;
+  }
+  .search::placeholder { color: #4a6a4a; }
+  .layout { display: grid; grid-template-columns: 240px 1fr; min-height: calc(100vh - 49px); }
+  .sidebar {
+    border-right: 1px solid #2a4a2a;
+    background: #080808;
+    padding: 1rem 0;
+    overflow-y: auto;
+  }
+  .label { margin: 0 1rem 0.75rem; font-size: 0.68rem; color: #4a6a4a; }
+  details { border-bottom: 1px solid #1a2a1a; }
+  summary {
+    list-style: none;
+    cursor: pointer;
+    padding: 0.5rem 1rem;
+    color: #8fbc8f;
+    text-transform: lowercase;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+  summary::-webkit-details-marker { display: none; }
+  summary::before { content: '▸ '; color: #39ff14; }
+  details[open] summary::before { content: '▾ '; }
+  .count { font-size: 0.65rem; color: #4a6a4a; }
+  .sidebar a {
+    display: block;
+    padding: 0.3rem 1rem 0.3rem 1.75rem;
+    color: #6b9e6b;
+    text-decoration: none;
+    font-size: 0.78rem;
+    text-transform: lowercase;
+  }
+  .sidebar a:hover { color: #39ff14; }
+  .sidebar a.active { color: #39ff14; }
+  .sidebar a.active::before { content: '> '; }
+  .more { color: #4a6a4a !important; font-style: italic; }
+  .main { padding: 1.75rem 2rem 3rem; min-width: 0; }
+  @media (max-width: 768px) { .layout { grid-template-columns: 1fr; } .sidebar { max-height: 200px; } }
+</style>

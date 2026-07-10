@@ -1,0 +1,46 @@
+---
+import BaseLayout from './BaseLayout.astro';
+import DocsSectionTabs from '../components/docs/DocsSectionTabs.astro';
+import DocsSidebar from '../components/docs/DocsSidebar.astro';
+import DocsOnThisPage from '../components/docs/DocsOnThisPage.astro';
+import DocsResources from '../components/docs/DocsResources.astro';
+import { stripHtml, formatDocDescription, sanitizeDocDescription } from '../data/landing';
+import type { DocCategory } from '../data/docs-nav';
+import type { DocResource } from '../lib/doc-resources';
+
+interface Props {
+  title: string;
+  description: string;
+  slug: string;
+  category: DocCategory;
+  toc?: boolean;
+  resources?: DocResource[];
+}
+
+const { title, description, slug, category, toc = true, resources } = Astro.props;
+const base = import.meta.env.BASE_URL;
+const metaDescription = stripHtml(description);
+const formattedDescription = sanitizeDocDescription(formatDocDescription(description, base));
+---
+
+<BaseLayout title={title} description={metaDescription}>
+  <div class="docs-shell">
+    <DocsSectionTabs currentCategory={category} />
+    <div class="docs-layout">
+      <DocsSidebar currentSlug={slug} currentCategory={category} />
+      <main class="docs-main">
+        <article class="docs-content" data-pagefind-body>
+          <header class="docs-header">
+            <h1 class="docs-title">{title}</h1>
+            {description && <p class="docs-description" set:html={formattedDescription} />}
+          </header>
+          <div class="prose">
+            <slot />
+          </div>
+        </article>
+        <DocsResources resources={resources ?? []} />
+      </main>
+      <DocsOnThisPage enabled={toc} />
+    </div>
+  </div>
+</BaseLayout>
