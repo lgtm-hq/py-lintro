@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from typing import Any
 
 import pytest
 from assertpy import assert_that
@@ -42,7 +43,7 @@ def semgrep_sarif() -> str:
     return (_FIXTURES / "semgrep.sarif").read_text()
 
 
-def _make_sarif(results: list[dict[str, object]], *, driver: str = "acme") -> str:
+def _make_sarif(results: list[dict[str, Any]], *, driver: str = "acme") -> str:
     """Build a minimal single-run SARIF log around the given results.
 
     Args:
