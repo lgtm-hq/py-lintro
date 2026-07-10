@@ -10,6 +10,7 @@ from assertpy import assert_that
 
 from lintro.enums.doc_url_template import DocUrlTemplate
 from lintro.enums.tool_type import ToolType
+from lintro.parsers.commitlint.commitlint_issue import CommitlintIssue
 from lintro.plugins.subprocess_executor import SubprocessResult
 from lintro.tools.definitions.commitlint import CommitlintPlugin
 
@@ -101,7 +102,8 @@ def test_check_errors_found(
 
     assert_that(result.success).is_false()
     assert_that(result.issues_count).is_equal_to(2)
-    assert_that([i.rule for i in result.issues]).is_equal_to(
+    issues = [i for i in (result.issues or []) if isinstance(i, CommitlintIssue)]
+    assert_that([i.rule for i in issues]).is_equal_to(
         ["subject-empty", "type-empty"],
     )
 
@@ -136,8 +138,10 @@ def test_check_warning_reported(
         result = commitlint_plugin.check(_paths(tmp_path), {})
 
     assert_that(result.issues_count).is_equal_to(1)
-    assert_that(result.issues[0].rule).is_equal_to("body-max-line-length")
-    assert_that(result.issues[0].level).is_equal_to("warning")
+    issues = [i for i in (result.issues or []) if isinstance(i, CommitlintIssue)]
+    assert_that(issues).is_length(1)
+    assert_that(issues[0].rule).is_equal_to("body-max-line-length")
+    assert_that(issues[0].level).is_equal_to("warning")
 
 
 def test_check_config_missing_skips(

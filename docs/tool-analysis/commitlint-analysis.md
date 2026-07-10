@@ -14,8 +14,8 @@ Lintro wraps the upstream `@commitlint/cli` binary.
 - Highly configurable rules with two severity levels (`warning` = 1, `error` = 2)
 - Reads input from a commit range (`--from`/`--to`), the last commit (`--last`), a
   message file (`--edit`), or stdin
-- Requires a config file discovered via cosmiconfig
-  (`commitlint.config.js`, `.commitlintrc.*`, or a `commitlint` key in `package.json`)
+- Requires a config file discovered via cosmiconfig (`commitlint.config.js`,
+  `.commitlintrc.*`, or a `commitlint` key in `package.json`)
 
 ## Installation
 
@@ -40,8 +40,8 @@ Unlike every other Lintro tool, commitlint does not inspect files — it inspect
 commit messages. To fit Lintro's file-oriented plugin model the plugin mirrors the
 git-history-oriented `gitleaks` plugin:
 
-- `file_patterns=["*"]` keeps shared execution preparation from short-circuiting when
-  no tool-specific files are discovered. The discovered file list is then intentionally
+- `file_patterns=["*"]` keeps shared execution preparation from short-circuiting when no
+  tool-specific files are discovered. The discovered file list is then intentionally
   ignored.
 - `check()` runs `commitlint --last`, validating the repository's most recent commit
   message in the working directory.
@@ -89,14 +89,14 @@ to ingest.
 
 ## Common Rules
 
-| Rule                  | Level   | Description                                   |
-| --------------------- | ------- | --------------------------------------------- |
-| `type-empty`          | error   | Commit type must not be empty                 |
-| `subject-empty`       | error   | Commit subject must not be empty              |
-| `type-enum`           | error   | Type must be one of the allowed values        |
-| `header-max-length`   | error   | Header must not exceed the configured length  |
-| `body-leading-blank`  | warning | Body must be preceded by a blank line         |
-| `body-max-line-length`| warning | Body lines must not exceed the configured max |
+| Rule                   | Level   | Description                                   |
+| ---------------------- | ------- | --------------------------------------------- |
+| `type-empty`           | error   | Commit type must not be empty                 |
+| `subject-empty`        | error   | Commit subject must not be empty              |
+| `type-enum`            | error   | Type must be one of the allowed values        |
+| `header-max-length`    | error   | Header must not exceed the configured length  |
+| `body-leading-blank`   | warning | Body must be preceded by a blank line         |
+| `body-max-line-length` | warning | Body lines must not exceed the configured max |
 
 ## Integration with Git Hooks
 
@@ -107,8 +107,8 @@ messages as they are written:
 commitlint --edit "$1"
 ```
 
-Lintro's plugin instead validates the already-committed `--last` message, which suits
-CI and ad-hoc `lintro check` runs.
+Lintro's plugin instead validates the already-committed `--last` message, which suits CI
+and ad-hoc `lintro check` runs.
 
 ## References
 

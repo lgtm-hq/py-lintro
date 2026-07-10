@@ -14,6 +14,7 @@ import pytest
 from assertpy import assert_that
 
 from lintro.models.core.tool_result import ToolResult
+from lintro.parsers.commitlint.commitlint_issue import CommitlintIssue
 from lintro.plugins import ToolRegistry
 
 _SELF_CONTAINED_CONFIG = (
@@ -62,7 +63,7 @@ def _init_repo(repo: Path, *, config: str | None) -> None:
 
 @_requires_binaries
 def test_commitlint_detects_bad_last_commit(tmp_path: Path) -> None:
-    """commitlint flags a non-conventional last commit message."""
+    """Commitlint flags a non-conventional last commit message."""
     _init_repo(tmp_path, config=_SELF_CONTAINED_CONFIG)
     (tmp_path / "a.txt").write_text("x\n", encoding="utf-8")
     _git(tmp_path, "add", "-A")
@@ -75,12 +76,13 @@ def test_commitlint_detects_bad_last_commit(tmp_path: Path) -> None:
     assert_that(result.name).is_equal_to("commitlint")
     assert_that(result.success).is_false()
     assert_that(result.issues_count > 0).is_true()
-    assert_that([i.rule for i in result.issues]).contains("subject-empty")
+    issues = [i for i in (result.issues or []) if isinstance(i, CommitlintIssue)]
+    assert_that([i.rule for i in issues]).contains("subject-empty")
 
 
 @_requires_binaries
 def test_commitlint_passes_conventional_commit(tmp_path: Path) -> None:
-    """commitlint accepts a conventional last commit message."""
+    """Commitlint accepts a conventional last commit message."""
     _init_repo(tmp_path, config=_SELF_CONTAINED_CONFIG)
     (tmp_path / "a.txt").write_text("x\n", encoding="utf-8")
     _git(tmp_path, "add", "-A")
@@ -96,7 +98,7 @@ def test_commitlint_passes_conventional_commit(tmp_path: Path) -> None:
 
 @_requires_binaries
 def test_commitlint_skips_without_config(tmp_path: Path) -> None:
-    """commitlint is skipped (non-error) when no config is present."""
+    """Commitlint is skipped (non-error) when no config is present."""
     _init_repo(tmp_path, config=None)
     (tmp_path / "a.txt").write_text("x\n", encoding="utf-8")
     _git(tmp_path, "add", "-A")
