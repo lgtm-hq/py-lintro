@@ -2,12 +2,11 @@
 
 from __future__ import annotations
 
-from types import SimpleNamespace
-
 import pytest
 from assertpy import assert_that
 
 from lintro.models.core.tool_result import ToolResult
+from lintro.parsers.base_issue import BaseIssue
 from lintro.profiling.report import (
     build_profile_data,
     build_timings,
@@ -15,16 +14,16 @@ from lintro.profiling.report import (
 )
 
 
-def _issue(file: str) -> SimpleNamespace:
-    """Build a minimal issue-like object with a ``file`` attribute.
+def _issue(file: str) -> BaseIssue:
+    """Build a minimal issue with a ``file`` attribute.
 
     Args:
         file: The file path to attach to the issue.
 
     Returns:
-        A lightweight object exposing ``file``.
+        A ``BaseIssue`` exposing ``file``.
     """
-    return SimpleNamespace(file=file)
+    return BaseIssue(file=file, line=1, column=1, message="test")
 
 
 @pytest.fixture
