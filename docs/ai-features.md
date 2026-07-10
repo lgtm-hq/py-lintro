@@ -107,6 +107,46 @@ issues, the AI generates fix suggestions and presents them interactively (same U
 `--fix` in `check`). After the session, a post-fix summary wraps up what was
 accomplished.
 
+### AI Idiom Review (`idiom-review` tool)
+
+Unlike the AI summary and `--fix` flows (where AI _explains_ or _fixes_ issues that
+linters found), the `idiom-review` tool uses AI to _find_ issues that syntax-matching
+linters structurally cannot. It has no external binary — it runs through the existing AI
+provider abstraction, respecting the same retry, fallback, and cost-budget controls.
+
+It offers two modes:
+
+- **per-file** (Mode 1) — flags _idiomatic misses_: code that is correct but verbose,
+  e.g. `found = False; for x in items: ...` instead of `any(cond for x in items)`.
+- **duplication** (Mode 2) — flags the same utility logic reimplemented across files,
+  invisible to any per-file linter, with a suggested extraction point.
+
+The tool ships **disabled by default** and is a no-op until you opt in. Findings are
+cached by a content hash under `.lintro-cache/idiom`, so unchanged files cost nothing on
+repeat runs. When no AI provider is available (missing SDK, key, or credits), the tool
+degrades gracefully to a skipped result rather than failing the run.
+
+```yaml
+# .lintro-config.yaml
+ai:
+  enabled: true
+  provider: anthropic
+  transport: api
+tools:
+  idiom-review:
+    options:
+      enabled: true # opt-in gate (default: false)
+      mode: per-file # per-file | duplication | both
+      min_confidence: medium # drop findings below this confidence
+      max_files: 25 # cap files reviewed per run (cost bound)
+```
+
+Or enable it ad hoc from the CLI:
+
+```bash
+lintro chk --tools idiom-review --tool-options idiom-review:enabled=true
+```
+
 ## Configuration
 
 ### Basic Setup
