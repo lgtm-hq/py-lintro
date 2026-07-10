@@ -431,20 +431,28 @@ class BufPlugin(BaseToolPlugin):
         verification_failed = (not final_lint.success and not final_lint_issues) or (
             not final_fmt.success and not parse_buf_format_output(final_fmt.stdout)
         )
-        if verification_failed and not remaining_issues:
+        if verification_failed:
+            # Always surface stderr-only verification failures, even when the
+            # lint pass still reports remaining issues (mixed failure).
+            issues = remaining_issues if remaining_issues else initial_issues
+            count = len(issues)
+            verification_error = (
+                final_lint.stderr.strip()
+                or final_fmt.stderr.strip()
+                or "buf verification exited with an error after fixing."
+            )
+            detail = ""
+            if remaining_issues:
+                detail = f" Found {count} remaining issue(s)."
             return ToolResult(
                 name=self.definition.name,
                 success=False,
-                output=(
-                    final_lint.stderr.strip()
-                    or final_fmt.stderr.strip()
-                    or "buf verification exited with an error after fixing."
-                ),
-                issues_count=initial_count,
-                issues=initial_issues,
+                output=f"{verification_error}{detail}".strip(),
+                issues_count=count,
+                issues=issues,
                 initial_issues_count=initial_count,
-                fixed_issues_count=0,
-                remaining_issues_count=initial_count,
+                fixed_issues_count=max(0, initial_count - count),
+                remaining_issues_count=count,
                 cwd=ctx.cwd,
             )
 
