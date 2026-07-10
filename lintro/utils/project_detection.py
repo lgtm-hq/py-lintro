@@ -30,8 +30,14 @@ def detect_project_languages() -> list[str]:
     cwd = Path.cwd()
     langs: set[str] = set()
 
-    # Python
-    if (cwd / "pyproject.toml").exists() or (cwd / "setup.py").exists():
+    # Python — include requirements-only projects so pip_audit is selected.
+    if (
+        (cwd / "pyproject.toml").exists()
+        or (cwd / "setup.py").exists()
+        or (cwd / "setup.cfg").exists()
+        or (cwd / "Pipfile").exists()
+        or next(cwd.glob("requirements*.txt"), None) is not None
+    ):
         langs.add("python")
 
     # JavaScript / TypeScript
