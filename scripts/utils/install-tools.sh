@@ -1191,9 +1191,21 @@ main() {
 		# ...) that must not pollute lintro's own runtime environment.
 		echo -e "${BLUE}Installing checkov...${NC}"
 		CHECKOV_VERSION=$(get_tool_version "checkov") || exit 1
+		# Docker images verify tools as the non-root `lintro` user via gosu.
+		# Keep the uv tool env on a shared path (not /root/...) so that user
+		# can execute the shim in BIN_DIR.
+		if [ "$INSTALL_MODE" = "--docker" ] || [ "$INSTALL_MODE" = "docker" ]; then
+			CHECKOV_UV_TOOL_DIR="/opt/uv-tools"
+		else
+			CHECKOV_UV_TOOL_DIR="${UV_TOOL_DIR:-$HOME/.local/share/uv/tools}"
+		fi
 		if [ $DRY_RUN -eq 1 ]; then
 			log_info "[DRY-RUN] Would install checkov==${CHECKOV_VERSION}"
-		elif command -v uv &>/dev/null && UV_TOOL_BIN_DIR="$BIN_DIR" uv tool install "checkov==${CHECKOV_VERSION}"; then
+		elif command -v uv &>/dev/null &&
+			mkdir -p "$CHECKOV_UV_TOOL_DIR" &&
+			UV_TOOL_DIR="$CHECKOV_UV_TOOL_DIR" UV_TOOL_BIN_DIR="$BIN_DIR" \
+				uv tool install "checkov==${CHECKOV_VERSION}" &&
+			chmod -R a+rX "$CHECKOV_UV_TOOL_DIR"; then
 			# UV_TOOL_BIN_DIR places the checkov shim in BIN_DIR (on PATH for
 			# both local and Docker installs) while keeping deps isolated.
 			echo -e "${GREEN}✓ checkov installed successfully${NC}"
