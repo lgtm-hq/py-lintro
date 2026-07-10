@@ -21,6 +21,12 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.71.2] - 2026-07-10
+
+### Fixed
+
+- **ci**: restore main Pages deploy after docs site merge (#1233) (c7d38d4)
+
 ## [0.71.1] - 2026-07-10
 
 ### Fixed
