@@ -47,14 +47,16 @@ EXPECTED_HOOK_LANGUAGES = {
 
 
 @pytest.fixture
-def hooks() -> list[dict]:
+def hooks() -> list[dict[str, object]]:
     """Parse ``.pre-commit-hooks.yaml`` into a list of hook definitions.
 
     Returns:
-        list[dict]: The parsed hook definitions.
+        list[dict[str, object]]: The parsed hook definitions.
     """
     content = HOOKS_FILE.read_text(encoding="utf-8")
-    return yaml.safe_load(content)
+    loaded = yaml.safe_load(content)
+    assert_that(loaded).is_type_of(list)
+    return loaded
 
 
 def test_hooks_file_exists() -> None:
@@ -62,7 +64,7 @@ def test_hooks_file_exists() -> None:
     assert_that(HOOKS_FILE.is_file()).is_true()
 
 
-def test_hooks_file_parses_to_list(hooks: list[dict]) -> None:
+def test_hooks_file_parses_to_list(hooks: list[dict[str, object]]) -> None:
     """The manifest must be a non-empty YAML list of mappings."""
     assert_that(hooks).is_type_of(list)
     assert_that(hooks).is_not_empty()
@@ -70,31 +72,31 @@ def test_hooks_file_parses_to_list(hooks: list[dict]) -> None:
         assert_that(hook).is_type_of(dict)
 
 
-def test_expected_hook_ids_present(hooks: list[dict]) -> None:
+def test_expected_hook_ids_present(hooks: list[dict[str, object]]) -> None:
     """The system-default and isolated-python hook variants must be defined."""
     ids = {hook["id"] for hook in hooks}
     assert_that(ids).is_equal_to(EXPECTED_HOOK_IDS)
 
 
-def test_hook_ids_are_unique(hooks: list[dict]) -> None:
+def test_hook_ids_are_unique(hooks: list[dict[str, object]]) -> None:
     """pre-commit rejects duplicate hook ids within a repo."""
     ids = [hook["id"] for hook in hooks]
     assert_that(sorted(set(ids))).is_equal_to(sorted(ids))
 
 
-def test_hooks_have_required_keys(hooks: list[dict]) -> None:
+def test_hooks_have_required_keys(hooks: list[dict[str, object]]) -> None:
     """Every hook must declare the keys pre-commit requires."""
     for hook in hooks:
         assert_that(set(hook.keys())).contains(*REQUIRED_KEYS)
 
 
-def test_hook_languages_are_valid(hooks: list[dict]) -> None:
+def test_hook_languages_are_valid(hooks: list[dict[str, object]]) -> None:
     """Each hook must use a language pre-commit understands."""
     for hook in hooks:
         assert_that(VALID_LANGUAGES).contains(hook["language"])
 
 
-def test_hook_languages_match_variant(hooks: list[dict]) -> None:
+def test_hook_languages_match_variant(hooks: list[dict[str, object]]) -> None:
     """Default hooks stay ``system``; ``-python`` variants stay ``python``.
 
     The system default keeps lintro's native (non-Python) tools available;
@@ -102,11 +104,13 @@ def test_hook_languages_match_variant(hooks: list[dict]) -> None:
     """
     for hook in hooks:
         assert_that(hook["language"]).is_equal_to(
-            EXPECTED_HOOK_LANGUAGES[hook["id"]],
+            EXPECTED_HOOK_LANGUAGES[str(hook["id"])],
         )
 
 
-def test_hook_entries_resolve_to_real_cli_commands(hooks: list[dict]) -> None:
+def test_hook_entries_resolve_to_real_cli_commands(
+    hooks: list[dict[str, object]],
+) -> None:
     """Every ``entry`` must invoke ``lintro`` with a real CLI command.
 
     Guards against typos or renamed commands leaving a released hook pointing
@@ -116,14 +120,16 @@ def test_hook_entries_resolve_to_real_cli_commands(hooks: list[dict]) -> None:
     known_commands = set(cli.list_commands(ctx))
 
     for hook in hooks:
-        tokens = hook["entry"].split()
+        entry = hook["entry"]
+        assert_that(entry).is_type_of(str)
+        tokens = str(entry).split()
         assert_that(tokens).is_not_empty()
         assert_that(tokens[0]).is_equal_to("lintro")
         assert_that(tokens).is_length(2)  # "lintro <command>"
         assert_that(known_commands).contains(tokens[1])
 
 
-def test_hooks_use_serial_execution(hooks: list[dict]) -> None:
+def test_hooks_use_serial_execution(hooks: list[dict[str, object]]) -> None:
     """Lintro coordinates multiple tools, so it must run once over all files.
 
     ``require_serial`` prevents pre-commit from splitting files across parallel
