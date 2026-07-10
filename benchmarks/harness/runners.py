@@ -10,6 +10,7 @@ from __future__ import annotations
 from collections.abc import Sequence
 from dataclasses import dataclass
 from enum import StrEnum, auto
+import shlex
 from pathlib import Path
 
 from benchmarks.harness.detect import (
@@ -91,7 +92,7 @@ def _sequential_command(fixture_dir: Path) -> list[str]:
     Returns:
         list[str]: Argv for the sequential native invocation.
     """
-    target = str(fixture_dir)
+    target = shlex.quote(str(fixture_dir))
     sequence = (
         f"uv run ruff check {target}; c1=$?; "
         f"uv run ruff format --check {target}; c2=$?; "
