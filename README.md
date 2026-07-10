@@ -10,6 +10,10 @@ A comprehensive CLI tool that unifies various code formatting, linting, and qual
 assurance tools under a single command-line interface.
 </p>
 
+<p align="center">
+<a href="https://lgtm-hq.github.io/py-lintro/">Documentation</a>
+</p>
+
 <!-- Badges: Build & Quality -->
 <p align="center">
 <a href="https://github.com/lgtm-hq/py-lintro/actions/workflows/docker-ci.yml?query=branch%3Amain"><img src="https://img.shields.io/github/actions/workflow/status/lgtm-hq/py-lintro/docker-ci.yml?label=ci&branch=main&logo=githubactions&logoColor=white" alt="CI"></a>

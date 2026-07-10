@@ -28,6 +28,11 @@ jobs:
       ecosystems: python
       auto-merge: true
       max-bump: minor
+      # Reflow the generated CHANGELOG.md to lintro's 88-column markdown budget
+      # after it is written and before the version PR is committed, so release
+      # PRs pass dogfooding-lint without CHANGELOG.md being ignored (#1117).
+      # Shell/format logic lives in the dedicated script, not an inline run.
+      version-update-script: scripts/ci/format-changelog.py
       tooling-ref: '1014e3d7d5441a63215d2096545a46cff6de101c' # v0.48.0
       egress-policy: block
       # Paired with release-auto-tag.yml (egress-preset: github-tooling).
