@@ -11,12 +11,12 @@ import pytest
 from assertpy import assert_that
 
 from lintro.enums.doc_url_template import DocUrlTemplate
-from lintro.parsers.phpstan.phpstan_issue import PhpstanIssue
-from lintro.tools.definitions.phpstan import PhpstanPlugin
 from lintro.enums.tool_type import ToolType
 from lintro.models.core.tool_result import ToolResult
+from lintro.parsers.phpstan.phpstan_issue import PhpstanIssue
 from lintro.plugins import ToolRegistry
 from lintro.tools.core.version_parsing import get_minimum_versions
+from lintro.tools.definitions.phpstan import PhpstanPlugin
 
 # Build the fake --version banner from the canonical version so the test does
 # not hardcode a version literal (enforced by test_no_version_literals).
