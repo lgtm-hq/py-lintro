@@ -16,7 +16,8 @@ language tags.
 
 from __future__ import annotations
 
-from importlib import resources  # nosemgrep: python.lang.compatibility.python37.python37-compatibility-importlib2
+# nosemgrep: python.lang.compatibility.python37.python37-compatibility-importlib2
+from importlib import resources
 from typing import Any
 
 import yaml

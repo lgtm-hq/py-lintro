@@ -1,3 +1,5 @@
+# yamllint disable rule:line-length
+---
 # Tier 1 built-in review checklist corpus.
 # Always-included items (IDs 1-15). Empty domains and languages.
 # One row per ChecklistItem; loaded by lintro.ai.review.checklist.loader.
