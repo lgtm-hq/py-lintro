@@ -21,6 +21,19 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.73.0] - 2026-07-10
+
+### Added
+
+- **ai/review**: machine-readable JSON error contract for provider failures (#1131)
+  (c8d0aad)
+- **tools**: add commitlint for conventional commit validation (#1147) (c6030df)
+
+### Fixed
+
+- **docker**: drop USER lintro so entrypoint can match volume owner (#1170) (8ebc9b2)
+- **ci**: allow npm dist-tag for version backfills (#1208) (3fcf55c)
+
 ## [0.72.0] - 2026-07-10
 
 ### Added
