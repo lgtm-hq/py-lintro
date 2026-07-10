@@ -40,6 +40,8 @@ def analyzer() -> VersionAnalyzer:
         ("=0.8.5", Ecosystem.CARGO, VersionSpecType.EXACT),
         ("~1.2", Ecosystem.CARGO, VersionSpecType.TILDE),
         ("*", Ecosystem.CARGO, VersionSpecType.ANY),
+        ("!=1.2.3", Ecosystem.PYTHON, VersionSpecType.UNBOUNDED),
+        ("==1.2.3 || ==2.0.0", Ecosystem.NPM, VersionSpecType.RANGE),
     ],
 )
 def test_classify(
