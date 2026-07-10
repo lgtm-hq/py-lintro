@@ -34,6 +34,8 @@ _SEVERITY_ALIASES: dict[str, SeverityLevel] = {
     "HINT": SeverityLevel.INFO,
     "STYLE": SeverityLevel.INFO,
     "HELP": SeverityLevel.INFO,
+    # Vale alert level
+    "SUGGESTION": SeverityLevel.INFO,
     # Bandit / cargo-audit severity levels
     "HIGH": SeverityLevel.ERROR,
     "CRITICAL": SeverityLevel.ERROR,

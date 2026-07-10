@@ -72,6 +72,7 @@ TOOL_VERSIONS: dict[ToolName | str, str] = {
     ToolName.SHFMT: "3.13.1",
     ToolName.TAPLO: "0.10.0",
     ToolName.TRIVY: "0.72.0",
+    ToolName.VALE: "3.15.1",
 }
 
 _NPM_PACKAGE_TO_TOOL: dict[str, ToolName] = {
