@@ -71,7 +71,7 @@ class ReportMetadata:
             python_version=str(data["python_version"]),
             cpu_count=int(cast(int | str, data["cpu_count"])),
             runs=int(cast(int | str, data["runs"])),
-            notes=list(cast(list[object], data.get("notes", []))),
+            notes=[str(note) for note in cast(list[object], data.get("notes", []))],
         )
 
 
@@ -140,7 +140,10 @@ class ScenarioResult:
             fixture=str(data["fixture"]),
             scenario=str(data["scenario"]),
             stats=stats,
-            exit_codes=[int(cast(int | str, code)) for code in cast(list[object], data["exit_codes"])],
+            exit_codes=[
+                int(cast(int | str, code))
+                for code in cast(list[object], data["exit_codes"])
+            ],
             command=[str(part) for part in cast(list[object], data["command"])],
         )
 
