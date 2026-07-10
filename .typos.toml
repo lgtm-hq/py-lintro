@@ -18,6 +18,8 @@ invokable = "invokable"
 # "ded" appears only inside example rustc/clippy commit hashes ("ded5c06cf...")
 # quoted in comments; it is not a misspelling.
 ded = "ded"
+# "afe" appears inside abbreviated commit SHAs in CHANGELOG.md (e.g. 7b0afe0).
+afe = "afe"
 
 [files]
 # These paths embed deliberate fixture data (French words, scrambled tokens,
@@ -29,4 +31,12 @@ extend-exclude = [
   "tests/unit/parsers/typos_parser/",
   "tests/unit/tools/typos/",
   "tests/integration/tools/test_typos_integration.py",
+  # Binary assets — typos scans file bytes as text and emits noise.
+  "*.png",
+  "*.jpg",
+  "*.jpeg",
+  "*.gif",
+  "*.webp",
+  "*.ico",
+  "apps/site/public/assets/",
 ]
