@@ -178,12 +178,15 @@ def prepare_execution(
             ),
         }
 
-    # Discover files matching tool patterns
+    # Discover files matching tool patterns, restricting to the git-diff
+    # changed set when a base ref was resolved for this run.
+    diff_base = merged_options.get("diff_base")
     files = discover_files(
         paths=paths,
         definition=definition,
         exclude_patterns=exclude_patterns,
         include_venv=include_venv,
+        diff_base=diff_base if isinstance(diff_base, str) else None,
     )
 
     if not files:
