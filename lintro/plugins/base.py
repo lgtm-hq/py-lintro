@@ -377,6 +377,7 @@ class BaseToolPlugin(ABC):
         timeout: int | float | None = None,
         cwd: str | None = None,
         env: dict[str, str] | None = None,
+        stdin: int | None = None,
     ) -> SubprocessResult:
         """Run a subprocess command, returning separated output streams.
 
@@ -389,12 +390,20 @@ class BaseToolPlugin(ABC):
             timeout: Timeout in seconds (defaults to tool's timeout).
             cwd: Working directory for command execution.
             env: Environment variables for the subprocess.
+            stdin: Optional stdin handle (e.g. ``subprocess.DEVNULL``) to keep
+                interactive tools from blocking when no TTY is attached.
 
         Returns:
             SubprocessResult with the return code and separated stdout/stderr.
         """
         effective_timeout = self._get_effective_timeout(timeout)
-        return run_subprocess(cmd, effective_timeout, cwd, env)
+        return run_subprocess(
+            cmd,
+            effective_timeout,
+            cwd,
+            env,
+            stdin,
+        )
 
     def _run_subprocess(
         self,
@@ -402,6 +411,7 @@ class BaseToolPlugin(ABC):
         timeout: int | float | None = None,
         cwd: str | None = None,
         env: dict[str, str] | None = None,
+        stdin: int | None = None,
     ) -> tuple[bool, str]:
         """Run a subprocess command safely.
 
@@ -414,11 +424,19 @@ class BaseToolPlugin(ABC):
             timeout: Timeout in seconds (defaults to tool's timeout).
             cwd: Working directory for command execution.
             env: Environment variables for the subprocess.
+            stdin: Optional stdin handle (e.g. ``subprocess.DEVNULL``) to keep
+                interactive tools from blocking when no TTY is attached.
 
         Returns:
             Tuple of (success, output) where success indicates return code 0.
         """
-        return self._run_subprocess_result(cmd, timeout, cwd, env).as_tuple()
+        return self._run_subprocess_result(
+            cmd,
+            timeout,
+            cwd,
+            env,
+            stdin,
+        ).as_tuple()
 
     def _run_subprocess_streaming_result(
         self,
