@@ -626,8 +626,7 @@ def run_lint_tools_simple(
     if main_phase_empty_due_to_filter:
         logger.console_output(
             text=(
-                "All selected tools are configured as post-checks - "
-                "skipping main phase"
+                "All selected tools are configured as post-checks - skipping main phase"
             ),
         )
 
@@ -948,6 +947,7 @@ def run_lint_tools_simple(
         total_issues=total_issues,
         total_fixed=total_fixed,
         total_remaining=total_remaining,
+        diff_base=resolved_diff_base,
     )
 
     # Dry-run: post-checks may append additional check-mode results. Restrict

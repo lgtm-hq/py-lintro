@@ -63,6 +63,8 @@ def execute_ruff_check(
         )
 
     # Use shared utility for file discovery
+    diff_base_opt = tool.options.get("diff_base")
+    diff_base = diff_base_opt if isinstance(diff_base_opt, str) else None
     python_files: list[str] = walk_files_with_excludes(
         paths=paths,
         file_patterns=tool.definition.file_patterns,
@@ -70,11 +72,7 @@ def execute_ruff_check(
         include_venv=tool.include_venv,
         incremental=bool(tool.options.get("incremental", False)),
         tool_name="ruff",
-        diff_base=(
-            tool.options.get("diff_base")
-            if isinstance(tool.options.get("diff_base"), str)
-            else None
-        ),
+        diff_base=diff_base,
     )
 
     if not python_files:
