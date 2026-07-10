@@ -63,7 +63,6 @@ TOOL_VERSIONS: dict[ToolName | str, str] = {
     ToolName.CARGO_AUDIT: "0.22.0",
     ToolName.CARGO_DENY: "0.19.0",
     ToolName.CLIPPY: "1.96.0",
-    ToolName.CLIPPY: "1.94.0",
     ToolName.DOTENV_LINTER: "4.0.0",
     ToolName.GITLEAKS: "8.30.1",
     ToolName.HADOLINT: "2.14.0",

@@ -132,7 +132,7 @@
     },
     {
       "name": "clippy",
-      "version": "1.94.0",
+      "version": "1.96.0",
       "install": {
         "type": "rustup",
         "component": "clippy"
