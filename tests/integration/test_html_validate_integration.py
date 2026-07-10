@@ -88,8 +88,11 @@ def test_html_validate_detects_violations() -> None:
     assert_that(result.name).is_equal_to("html_validate")
     assert_that(result.issues_count).is_greater_than(0)
     assert_that(result.success).is_false()
+    assert_that(result.issues).is_not_none()
+    issues = result.issues
+    assert issues is not None
 
-    issue = result.issues[0]
+    issue = issues[0]
     if not isinstance(issue, HtmlValidateIssue):
         pytest.fail("issue should be HtmlValidateIssue")
     assert_that(issue.file).is_not_empty()
