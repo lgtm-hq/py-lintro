@@ -222,6 +222,7 @@ def _write_artifacts(
     *,
     warn_func: Any = None,
     ai_enrichment: AISarifEnrichment | None = None,
+    profile_data: dict[str, Any] | None = None,
 ) -> None:
     """Write side-channel artifact files alongside primary output.
 
@@ -294,6 +295,9 @@ def _write_artifacts(
                 total_issues=total_issues,
                 total_fixed=total_fixed,
                 ai_enrichment=enrichment,
+                profile_data=(
+                    profile_data if fmt == OutputFormat.JSON else None
+                ),
             )
         except (OSError, ValueError, TypeError) as e:
             _emit(f"Warning: Failed to write {artifact} artifact: {e}")
@@ -565,6 +569,10 @@ def _write_run_files(
         total_fixed=artifact.total_fixed,
         warn_func=warn_func,
         ai_enrichment=ai_enrichment,
+            profile_data=_artifact_profile_data(
+            profile=ctx.profile,
+            all_results=all_results,
+        ),
     )
 
     # Clean up old run directories to prevent unbounded growth
