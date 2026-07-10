@@ -1,0 +1,62 @@
+---
+import { getCollection } from 'astro:content';
+import BaseLayout from '../../layouts/BaseLayout.astro';
+import DocsSectionTabs from '../../components/docs/DocsSectionTabs.astro';
+import PageHeader from '../../components/ui/PageHeader.astro';
+import Card from '../../components/ui/Card.astro';
+import { stripHtml } from '../../data/landing';
+import { CATEGORY_LABELS, CORE_DOC_CATEGORIES } from '../../data/docs-nav';
+
+const base = import.meta.env.BASE_URL;
+const docs = await getCollection('docs', ({ data }) => !data.draft);
+
+const coreGrouped = CORE_DOC_CATEGORIES.map((key) => ({
+  key,
+  label: CATEGORY_LABELS[key],
+  docs: docs.filter((d) => d.data.category === key).sort((a, b) => a.data.order - b.data.order),
+})).filter((g) => g.docs.length > 0);
+---
+
+<BaseLayout
+  title="Documentation"
+  description="Lintro documentation — installation, configuration, supported tools, and contributing guides."
+>
+  <div class="docs-shell docs-shell--hub">
+    <DocsSectionTabs />
+    <div class="container content docs-hub">
+      <PageHeader
+        kicker="// guides · reference"
+        title="documentation"
+        description="Unified linting, formatting, and testing for polyglot projects."
+      />
+
+      <div class="doc-categories">
+      {
+        coreGrouped.map(({ label, docs: catDocs }, i) => (
+          <Card feature number={String(i + 1).padStart(2, '0')} class="doc-category">
+            <h2>{label}</h2>
+            <ul>
+              {
+                catDocs.map((doc) => (
+                  <li>
+                    <a href={`${base}docs/${doc.id}/`}>{doc.data.title}</a>
+                    {doc.data.description && <span> — {stripHtml(doc.data.description)}</span>}
+                  </li>
+                ))
+              }
+            </ul>
+          </Card>
+        ))
+      }
+      </div>
+    </div>
+  </div>
+</BaseLayout>
+
+<style>
+  .docs-hub {
+    max-width: var(--max-width);
+    margin: 0 auto;
+    padding: 2rem 1.5rem 4rem;
+  }
+</style>

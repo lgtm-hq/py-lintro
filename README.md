@@ -10,6 +10,10 @@ A comprehensive CLI tool that unifies various code formatting, linting, and qual
 assurance tools under a single command-line interface.
 </p>
 
+<p align="center">
+<a href="https://lgtm-hq.github.io/py-lintro/">Documentation</a>
+</p>
+
 <!-- Badges: Build & Quality -->
 <p align="center">
 <a href="https://github.com/lgtm-hq/py-lintro/actions/workflows/docker-ci.yml?query=branch%3Amain"><img src="https://img.shields.io/github/actions/workflow/status/lgtm-hq/py-lintro/docker-ci.yml?label=ci&branch=main&logo=githubactions&logoColor=white" alt="CI"></a>
@@ -106,6 +110,12 @@ system.
 <td>📝 Markdown</td>
 <td>-</td>
 <td><code>bun add -g markdownlint-cli2</code><br><code>npm install -g markdownlint-cli2</code></td>
+</tr>
+<tr>
+<td><a href="https://vale.sh/"><img src="https://img.shields.io/badge/Vale-2ea44f?logo=markdown&logoColor=white" alt="Vale"></a></td>
+<td>📝 Prose / Docs</td>
+<td>-</td>
+<td><code>brew install vale</code><br><a href="https://github.com/errata-ai/vale/releases">GitHub Releases</a></td>
 </tr>
 <tr>
 <td><a href="https://oxc.rs/"><img src="https://img.shields.io/badge/Oxlint-e05d44?logo=javascript&logoColor=white" alt="Oxlint"></a></td>
