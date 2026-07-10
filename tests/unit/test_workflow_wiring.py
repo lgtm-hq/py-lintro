@@ -474,6 +474,32 @@ def test_docker_ci_lintro_code_quality_wires_upstream_jobs() -> None:
     )
 
 
+def test_publish_npm_exposes_dist_tag_for_backfills() -> None:
+    """publish-npm accepts dist_tag and forwards it as NPM_DIST_TAG."""
+    workflow = _load_workflow(name="publish-npm.yml")
+    on = workflow["on"]
+    assert_that(on["workflow_call"]["inputs"]["dist_tag"]["default"]).is_equal_to(
+        "latest",
+    )
+    assert_that(on["workflow_dispatch"]["inputs"]["dist_tag"]["default"]).is_equal_to(
+        "latest",
+    )
+
+    publish_step = next(
+        (
+            step
+            for step in workflow["jobs"]["publish"]["steps"]
+            if step.get("name") == "Publish to npm"
+        ),
+        None,
+    )
+    assert_that(publish_step).described_as(
+        "'Publish to npm' step not found",
+    ).is_not_none()
+    assert publish_step is not None
+    assert_that(publish_step["env"]["NPM_DIST_TAG"]).contains("inputs.dist_tag")
+
+
 # Canonical lgtm-ci pin used by most py-lintro workflows (v0.48.0).
 # Pages deploy must not regress to v0.32.3 (missing GH_TOKEN in bundler).
 _LGTM_CI_V0480 = "1014e3d7d5441a63215d2096545a46cff6de101c"
