@@ -7,6 +7,7 @@ command so a released tag never ships a broken hook definition.
 """
 
 from pathlib import Path
+from typing import cast
 
 import click
 import pytest
@@ -56,7 +57,8 @@ def hooks() -> list[dict[str, object]]:
     content = HOOKS_FILE.read_text(encoding="utf-8")
     loaded = yaml.safe_load(content)
     assert_that(loaded).is_type_of(list)
-    return loaded
+    assert isinstance(loaded, list)
+    return cast(list[dict[str, object]], loaded)
 
 
 def test_hooks_file_exists() -> None:
@@ -80,7 +82,7 @@ def test_expected_hook_ids_present(hooks: list[dict[str, object]]) -> None:
 
 def test_hook_ids_are_unique(hooks: list[dict[str, object]]) -> None:
     """pre-commit rejects duplicate hook ids within a repo."""
-    ids = [hook["id"] for hook in hooks]
+    ids = [str(hook["id"]) for hook in hooks]
     assert_that(sorted(set(ids))).is_equal_to(sorted(ids))
 
 
