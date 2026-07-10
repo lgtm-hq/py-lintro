@@ -342,6 +342,53 @@ def test_totals_table_test_mode_uses_check_layout(
     assert_that(combined).contains("Affected Files")
 
 
+def test_totals_table_test_mode_omits_fmt_hint_when_fixable(
+    console_capture: tuple[Callable[..., None], list[str]],
+) -> None:
+    """Verify TEST mode omits the fmt hint even when issues are fixable.
+
+    Test mode is read-only and must not advertise ``fmt``. The Auto-fixable
+    row still renders so users know issues could be fixed elsewhere.
+
+    Args:
+        console_capture: Fixture for capturing console output.
+    """
+    capture_func, output = console_capture
+    print_totals_table(
+        console_output_func=capture_func,
+        action=Action.TEST,
+        total_issues=5,
+        affected_files=2,
+        total_fixable=3,
+    )
+    combined = "\n".join(output)
+    assert_that(combined).contains("Auto-fixable")
+    assert_that(combined).does_not_contain("lintro fmt")
+
+
+def test_totals_table_check_mode_shows_fmt_hint_for_same_input(
+    console_capture: tuple[Callable[..., None], list[str]],
+) -> None:
+    """Verify CHECK mode still shows the fmt hint for the same fixable input.
+
+    Companion to the TEST mode omission test: identical inputs on the check
+    path must continue to nudge toward ``lintro fmt``.
+
+    Args:
+        console_capture: Fixture for capturing console output.
+    """
+    capture_func, output = console_capture
+    print_totals_table(
+        console_output_func=capture_func,
+        action=Action.CHECK,
+        total_issues=5,
+        affected_files=2,
+        total_fixable=3,
+    )
+    combined = "\n".join(output)
+    assert_that(combined).contains("lintro fmt")
+
+
 # =============================================================================
 # print_totals_table Tests - FIX Mode
 # =============================================================================
