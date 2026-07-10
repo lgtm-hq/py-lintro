@@ -26,7 +26,8 @@ Review this code change for actionable findings.
 
 ### Mandatory checklist (complete all {checklist_count} before finalizing)
 
-Answer every item. Any **yes** → add a finding. Any **no** → record in `checklist` with brief evidence (file:line).
+Answer every item. Any **yes** → add a finding. Any **no** → record in `checklist` with
+brief evidence (file:line).
 
 {checklist}
 
@@ -48,7 +49,9 @@ Answer every item. Any **yes** → add a finding. Any **no** → record in `chec
 
 **Rules:**
 
-- Include all **{checklist_count}** checklist entries in `checklist` (even if answer is "no").
+- Include all **{checklist_count}** checklist entries in `checklist` (even if answer is
+  "no").
 - Every checklist **yes** must have a corresponding finding (link via `checklist_ids`).
-- Do not duplicate findings — merge related checklist items when they share a root cause.
+- Do not duplicate findings — merge related checklist items when they share a root
+  cause.
 - Prioritize cross-file integration bugs over isolated nits.

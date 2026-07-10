@@ -12,7 +12,9 @@ unchanged.
 from __future__ import annotations
 
 from functools import lru_cache
-from importlib.resources import files
+from importlib.resources import (
+    files,
+)  # nosemgrep: python.lang.compatibility.python37.python37-compatibility-importlib2
 
 _TEMPLATES_PACKAGE = "lintro.ai.prompts.templates"
 
@@ -39,7 +41,6 @@ def load_prompt_template(*path_parts: str) -> str:
     if not resource.is_file():
         joined = "/".join(path_parts)
         raise FileNotFoundError(
-            f"Prompt template not found: {joined} "
-            f"(package {_TEMPLATES_PACKAGE})",
+            f"Prompt template not found: {joined} " f"(package {_TEMPLATES_PACKAGE})",
         )
     return resource.read_text(encoding="utf-8")
