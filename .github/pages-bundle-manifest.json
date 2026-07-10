@@ -1,0 +1,12 @@
+{
+  "strict": false,
+  "bundles": [
+    {
+      "id": "python-coverage",
+      "workflow": "CI - Tests",
+      "artifact": "coverage-html",
+      "dest": "coverage",
+      "require_success": true
+    }
+  ]
+}

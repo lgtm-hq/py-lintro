@@ -37,6 +37,7 @@ TOOLS_WITH_SIMPLE_VERSION_PATTERN: set[ToolName] = {
     ToolName.BANDIT,
     ToolName.CARGO_AUDIT,
     ToolName.CARGO_DENY,
+    ToolName.COMMITLINT,
     ToolName.CPPCHECK,
     ToolName.GITLEAKS,
     ToolName.HADOLINT,
@@ -53,6 +54,7 @@ TOOLS_WITH_SIMPLE_VERSION_PATTERN: set[ToolName] = {
     ToolName.SQLFLUFF,
     ToolName.SVELTE_CHECK,
     ToolName.TAPLO,
+    ToolName.VALE,
     ToolName.VUE_TSC,
 }
 

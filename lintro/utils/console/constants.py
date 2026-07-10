@@ -26,6 +26,7 @@ TOOL_EMOJIS: dict[str, str] = {
     "oxlint": "⚡",
     "oxfmt": "✨",
     "prettier": "💅",
+    "vale": "✍️",
 }
 DEFAULT_EMOJI: str = "🔧"
 BORDER_LENGTH: int = 70

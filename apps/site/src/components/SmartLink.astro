@@ -1,0 +1,93 @@
+---
+import { joinBase } from "../data/landing";
+import { remoteFaviconUrl } from "../lib/favicon";
+import { hasUriScheme } from "../lib/url-utils";
+
+interface Props {
+  name: string;
+  href: string;
+  external?: boolean;
+  showArrow?: boolean;
+  showIcon?: boolean;
+  class?: string;
+}
+
+const {
+  name,
+  href,
+  external: externalProp,
+  showArrow = false,
+  showIcon = true,
+  class: className,
+} = Astro.props;
+const base = import.meta.env.BASE_URL;
+const isHttpAbsolute = /^https?:\/\//i.test(href);
+const isProtocolRelative = href.startsWith("//");
+const isSchemeUrl = hasUriScheme(href);
+const isAbsoluteUrl = isSchemeUrl || isProtocolRelative;
+const opensInNewTab = isHttpAbsolute || isProtocolRelative;
+const external = externalProp ?? opensInNewTab;
+
+let url = href;
+if (!isAbsoluteUrl && !href.startsWith("#")) {
+  if (external || !href.startsWith(base)) {
+    url = joinBase(base, href);
+  }
+}
+
+const fallbackIcon = joinBase(base, "assets/smart-link-fallback.svg");
+const remoteIcon = remoteFaviconUrl(url);
+---
+
+<a
+  class:list={["smart-link", className]}
+  href={url}
+  target={external && opensInNewTab ? "_blank" : undefined}
+  rel={external && opensInNewTab ? "noopener noreferrer" : undefined}
+>{
+  showIcon && remoteIcon && (
+    <img
+      class="smart-link-icon"
+      src={remoteIcon}
+      data-fallback={fallbackIcon}
+      alt=""
+      width="16"
+      height="16"
+      loading="lazy"
+      decoding="async"
+    />
+  )
+}{
+  showIcon && !remoteIcon && (
+    <span class="smart-link-icon smart-link-icon-glyph" aria-hidden="true"></span>
+  )
+}<span class="smart-link-label">{name}</span>{showArrow && <span class="smart-link-arrow" aria-hidden="true">↗</span>}</a>
+
+<script>
+  function swapToFallback(img: HTMLImageElement): void {
+    const fallback = img.dataset.fallback;
+    if (fallback && img.src !== fallback) {
+      img.src = fallback;
+    }
+  }
+
+  // Error events do not bubble; catch failed favicon loads in capture phase
+  // and swap to the bundled fallback icon.
+  document.addEventListener(
+    "error",
+    (event) => {
+      const target = event.target;
+      if (target instanceof HTMLImageElement && target.classList.contains("smart-link-icon")) {
+        swapToFallback(target);
+      }
+    },
+    true,
+  );
+
+  // Icons that already failed before this script ran.
+  for (const img of document.querySelectorAll<HTMLImageElement>("img.smart-link-icon")) {
+    if (img.complete && img.naturalWidth === 0) {
+      swapToFallback(img);
+    }
+  }
+</script>

@@ -1,0 +1,60 @@
+---
+import { docs, docHref } from '../data/site-links';
+
+const base = import.meta.env.BASE_URL;
+
+const features = [
+  {
+    num: '[01]',
+    title: 'unified',
+    body: 'One command surface for 25+ ecosystem tools.',
+    href: docHref(base, docs.toolsIndex),
+    link: 'tool matrix',
+  },
+  {
+    num: '[02]',
+    title: 'native',
+    body: 'Respects pyproject.toml, .prettierrc, and .yamllint.',
+    href: docHref(base, docs.configuration),
+    link: 'configuration',
+  },
+  {
+    num: '[03]',
+    title: 'reports',
+    body: 'Grid, JSON, SARIF, HTML — same run, any format.',
+    href: docHref(base, docs.githubIntegration),
+    link: 'ci integration',
+  },
+];
+---
+
+<section class="term-features" aria-label="Capabilities">
+  {
+    features.map((f) => (
+      <article>
+        <p class="num">{f.num}</p>
+        <h3>{f.title}</h3>
+        <p>{f.body}</p>
+        <a href={f.href} class="term-feature-link">
+          → {f.link}
+        </a>
+      </article>
+    ))
+  }
+</section>
+
+<style>
+  .term-feature-link {
+    display: inline-block;
+    margin-top: 0.75rem;
+    font-size: 0.75rem;
+    color: var(--site-accent);
+    text-decoration: none;
+    text-transform: lowercase;
+  }
+
+  .term-feature-link:hover {
+    color: var(--turbo-heading-h1);
+    text-decoration: none;
+  }
+</style>
