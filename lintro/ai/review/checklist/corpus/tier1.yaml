@@ -6,88 +6,88 @@
   category: integration
   domains: []
   languages: []
-  question: "Does any early return skip independent work that could proceed when an optional step fails?"
+  question: 'Does any early return skip independent work that could proceed when an optional step fails?'
 - id: 2
   tier: 1
   category: test-gap
   domains: []
   languages: []
-  question: "Do test setup/fixture defaults match production/workflow/script defaults?"
+  question: 'Do test setup/fixture defaults match production/workflow/script defaults?'
 - id: 3
   tier: 1
   category: contract-drift
   domains: []
   languages: []
-  question: "Does documentation claim behavior the implementation does not provide?"
+  question: 'Does documentation claim behavior the implementation does not provide?'
 - id: 4
   tier: 1
   category: silent-failure
   domains: []
   languages: []
-  question: "Does any error path exit or return success when callers expect failure?"
+  question: 'Does any error path exit or return success when callers expect failure?'
 - id: 5
   tier: 1
   category: breaking-change
   domains: []
   languages: []
-  question: "Do new defaults break existing callers without migration guidance?"
+  question: 'Do new defaults break existing callers without migration guidance?'
 - id: 6
   tier: 1
   category: contract-drift
   domains: []
   languages: []
-  question: "Must two or more files be updated in lockstep for the change to stay correct?"
+  question: 'Must two or more files be updated in lockstep for the change to stay correct?'
 - id: 7
   tier: 1
   category: logic-bug
   domains: []
   languages: []
-  question: "Does the diff implement behavior that already exists elsewhere (duplicate logic)?"
+  question: 'Does the diff implement behavior that already exists elsewhere (duplicate logic)?'
 - id: 8
   tier: 1
   category: logic-bug
   domains: []
   languages: []
-  question: "Does the diff actually do what the PR description claims?"
+  question: 'Does the diff actually do what the PR description claims?'
 - id: 9
   tier: 1
   category: security
   domains: []
   languages: []
-  question: "Does any unknown/unparseable enum or status default to permissive access (fail-open)?"
+  question: 'Does any unknown/unparseable enum or status default to permissive access (fail-open)?'
 - id: 10
   tier: 1
   category: contract-drift
   domains: []
   languages: []
-  question: "Does the client classify server errors using fragile substring matching on prose messages?"
+  question: 'Does the client classify server errors using fragile substring matching on prose messages?'
 - id: 11
   tier: 1
   category: contract-drift
   domains: []
   languages: []
-  question: "Does the server return prose-only errors without stable machine-readable error codes?"
+  question: 'Does the server return prose-only errors without stable machine-readable error codes?'
 - id: 12
   tier: 1
   category: test-gap
   domains: []
   languages: []
-  question: "Are there visibility-only tests without asserting content, state, or copy?"
+  question: 'Are there visibility-only tests without asserting content, state, or copy?'
 - id: 13
   tier: 1
   category: test-gap
   domains: []
   languages: []
-  question: "Do tests mock internals/private methods such that behavior breaks could still pass?"
+  question: 'Do tests mock internals/private methods such that behavior breaks could still pass?'
 - id: 14
   tier: 1
   category: integration
   domains: []
   languages: []
-  question: "Does the diff implement behavior contradicting explicitly deferred/out-of-scope items in the PR summary?"
+  question: 'Does the diff implement behavior contradicting explicitly deferred/out-of-scope items in the PR summary?'
 - id: 15
   tier: 1
   category: silent-failure
   domains: []
   languages: []
-  question: "Does API/client code use type casts on responses without runtime validation?"
+  question: 'Does API/client code use type casts on responses without runtime validation?'
