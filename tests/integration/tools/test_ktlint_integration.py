@@ -9,15 +9,12 @@ file with a non-auto-correctable violation remaining.
 
 from __future__ import annotations
 
-from typing import cast
-
 import shutil
 from pathlib import Path
 
 import pytest
 from assertpy import assert_that
 
-from lintro.parsers.ktlint.ktlint_issue import KtlintIssue
 from lintro.tools.definitions.ktlint import KtlintPlugin
 
 pytestmark = pytest.mark.skipif(

@@ -2,9 +2,8 @@
 
 from __future__ import annotations
 
-from typing import cast
-
 from pathlib import Path
+from typing import cast
 from unittest.mock import patch
 
 from assertpy import assert_that
@@ -164,7 +163,9 @@ def test_fix_preserves_invariant_full_fix(
     assert_that(result.remaining_issues_count).is_equal_to(0)
     assert_that(
         result.initial_issues_count,
-    ).is_equal_to((result.fixed_issues_count or 0) + (result.remaining_issues_count or 0))
+    ).is_equal_to(
+        (result.fixed_issues_count or 0) + (result.remaining_issues_count or 0)
+    )
 
 
 def test_fix_preserves_invariant_partial_fix(
@@ -210,7 +211,9 @@ def test_fix_preserves_invariant_partial_fix(
     assert_that(issue.rule).is_equal_to("standard:filename")
     assert_that(
         result.initial_issues_count,
-    ).is_equal_to((result.fixed_issues_count or 0) + (result.remaining_issues_count or 0))
+    ).is_equal_to(
+        (result.fixed_issues_count or 0) + (result.remaining_issues_count or 0)
+    )
 
 
 def test_fix_format_crash_surfaces_error(
@@ -314,4 +317,6 @@ def test_fix_new_findings_after_format_keep_counts_consistent(
     assert_that(result.remaining_issues_count).is_equal_to(2)
     assert_that(
         result.initial_issues_count,
-    ).is_equal_to((result.fixed_issues_count or 0) + (result.remaining_issues_count or 0))
+    ).is_equal_to(
+        (result.fixed_issues_count or 0) + (result.remaining_issues_count or 0)
+    )
