@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+from typing import cast
+
 from pathlib import Path
 from unittest.mock import patch
 
 from assertpy import assert_that
 
+from lintro.parsers.ktlint.ktlint_issue import KtlintIssue
 from lintro.tools.definitions.ktlint import KtlintPlugin
 
 from .conftest import error, make_result
@@ -77,7 +80,9 @@ def test_check_reports_issues(
 
     assert_that(result.success).is_false()
     assert_that(result.issues_count).is_equal_to(2)
-    assert_that(result.issues[0].rule).is_equal_to("standard:colon-spacing")
+    assert_that(result.issues).is_not_none()
+    issue = cast(KtlintIssue, result.issues[0])  # type: ignore[index]
+    assert_that(issue.rule).is_equal_to("standard:colon-spacing")
 
 
 def test_check_execution_failure_is_surfaced(
@@ -159,7 +164,7 @@ def test_fix_preserves_invariant_full_fix(
     assert_that(result.remaining_issues_count).is_equal_to(0)
     assert_that(
         result.initial_issues_count,
-    ).is_equal_to(result.fixed_issues_count + result.remaining_issues_count)
+    ).is_equal_to((result.fixed_issues_count or 0) + (result.remaining_issues_count or 0))
 
 
 def test_fix_preserves_invariant_partial_fix(
@@ -200,10 +205,12 @@ def test_fix_preserves_invariant_partial_fix(
     assert_that(result.initial_issues_count).is_equal_to(3)
     assert_that(result.fixed_issues_count).is_equal_to(2)
     assert_that(result.remaining_issues_count).is_equal_to(1)
-    assert_that(result.issues[0].rule).is_equal_to("standard:filename")
+    assert_that(result.issues).is_not_none()
+    issue = cast(KtlintIssue, result.issues[0])  # type: ignore[index]
+    assert_that(issue.rule).is_equal_to("standard:filename")
     assert_that(
         result.initial_issues_count,
-    ).is_equal_to(result.fixed_issues_count + result.remaining_issues_count)
+    ).is_equal_to((result.fixed_issues_count or 0) + (result.remaining_issues_count or 0))
 
 
 def test_fix_format_crash_surfaces_error(
@@ -307,4 +314,4 @@ def test_fix_new_findings_after_format_keep_counts_consistent(
     assert_that(result.remaining_issues_count).is_equal_to(2)
     assert_that(
         result.initial_issues_count,
-    ).is_equal_to(result.fixed_issues_count + result.remaining_issues_count)
+    ).is_equal_to((result.fixed_issues_count or 0) + (result.remaining_issues_count or 0))

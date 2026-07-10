@@ -117,9 +117,6 @@ class KtlintPlugin(BaseToolPlugin):
             editorconfig: Path to a default ``.editorconfig`` used when no
                 ``.editorconfig`` is found on the path to a scanned file.
             **kwargs: Other tool options.
-
-        Raises:
-            ValueError: If ``code_style`` is not a valid ktlint code style.
         """
         if code_style is not None:
             code_style = normalize_ktlint_code_style(code_style)
