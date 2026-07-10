@@ -60,7 +60,9 @@ def test_actionlint_reports_violations(tmp_path: Path) -> None:
     wf = wf_dir / "workflow_bad.yml"
     wf.write_text(SAMPLE_BAD.read_text())
     proc = subprocess.run(
-        ["actionlint", str(wf)], capture_output=True, text=True
+        ["actionlint", str(wf)],
+        capture_output=True,
+        text=True,
     )  # nosec B603 B607 - fixed argv run against a real binary in a controlled test; binary name resolved from PATH, not attacker-controlled; shell=False, no user shell input
     direct_out = proc.stdout + proc.stderr
     logger.info(f"[LOG] actionlint stdout+stderr:\n{direct_out}")

@@ -20,7 +20,11 @@ def run(cmd: list[str], cwd: Path) -> subprocess.CompletedProcess[str]:
         CompletedProcess[str]: Completed process with stdout/stderr.
     """
     return subprocess.run(
-        cmd, cwd=cwd, text=True, capture_output=True, check=False
+        cmd,
+        cwd=cwd,
+        text=True,
+        capture_output=True,
+        check=False,
     )  # nosec B603 - fixed argv run against a real binary in a controlled test; shell=False, no user shell input
 
 
