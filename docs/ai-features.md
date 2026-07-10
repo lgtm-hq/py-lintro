@@ -165,8 +165,10 @@ ai:
 
 Every field below maps 1:1 to `AIConfig` in `lintro/ai/config.py`, which is the source
 of truth. Unknown keys under `ai:` are ignored with a warning, so a typo never silently
-changes behavior. All fields are optional except that `transport` is required whenever
-`enabled: true`.
+changes behavior. All fields are optional. When `enabled: true` and `transport` is
+omitted, provider creation falls back to API transport (the same default used by
+`lintro ai` diagnostics). Set `transport` explicitly if you want to fail fast on a
+misconfigured CLI-only setup.
 
 The block below shows every field with its type, default, and accepted range. Fields are
 grouped by concern (provider, budget, safety/filtering, output, cache) for readability
@@ -183,9 +185,10 @@ ai:
   # (default: anthropic)
   provider: anthropic
 
-  # How to invoke the provider. REQUIRED when enabled is true.
+  # How to invoke the provider. When omitted with enabled: true, check/fix
+  # flows fall back to API transport during provider creation.
   # "api" uses the provider SDK; "cli" shells out to a local binary
-  # (e.g. the Cursor agent). (one of: api | cli, default: none)
+  # (e.g. the Cursor agent). (one of: api | cli, default: api when enabled)
   transport: api
 
   # Model override (uses the provider default if omitted).
@@ -583,14 +586,21 @@ The amount of code sent per issue is size-dependent, controlled by `FULL_FILE_TH
 - **Files over 500 lines** — only a context window around the issue line is sent
   (`context_lines`, default 15 lines before and after). The same windowing is used for a
   small file whose full contents would exceed the prompt token budget.
-- **Token budget** — in all cases the prompt is capped by `max_prompt_tokens` (default
-  12000). If the full file or the initial window would exceed it, the context window is
-  progressively halved (down to a 3-line floor) until it fits.
+- **Batch fix path** — when multiple fixable issues share one file, batch prompt
+  construction may still embed the sanitized full file if the estimated prompt fits
+  under `max_prompt_tokens`. The 500-line threshold applies to the single-issue path;
+  batching falls back to per-issue prompts only when the estimated batch prompt is over
+  budget.
+- **Token budget** — prompts are bounded by `max_prompt_tokens` (default 12000) on a
+  best-effort basis. The single-issue path can still send the 3-line minimum window when
+  that floor remains over budget, and refinement prompts build a fixed context window
+  without the same shrinking check. Very wide lines or refinement retries can therefore
+  exceed the documented cap.
 
 So enabling fix mode can send whole source files to your configured provider. Secret
 redaction and prompt-injection scanning (see below) are applied to every prompt
-regardless of context size, and `max_prompt_tokens` bounds the maximum amount of code
-that leaves your environment per request.
+regardless of context size. Treat `max_prompt_tokens` as a soft budget rather than a
+hard guarantee for every code path.
 
 ### What is NOT sent
 
