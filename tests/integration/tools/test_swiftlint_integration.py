@@ -7,6 +7,8 @@ check and fix paths, including the ``initial == fixed + remaining`` invariant.
 
 from __future__ import annotations
 
+from typing import cast
+
 import shutil
 from collections.abc import Callable
 from pathlib import Path
@@ -14,6 +16,8 @@ from typing import TYPE_CHECKING
 
 import pytest
 from assertpy import assert_that
+
+from lintro.parsers.swiftlint.swiftlint_issue import SwiftlintIssue
 
 if TYPE_CHECKING:
     from lintro.plugins.base import BaseToolPlugin
@@ -171,7 +175,7 @@ def test_fix_invariant_holds(
     result = plugin.fix([swift_file_with_issues], {})
 
     assert_that(result.initial_issues_count).is_equal_to(
-        result.fixed_issues_count + result.remaining_issues_count,
+        (result.fixed_issues_count or 0) + (result.remaining_issues_count or 0),
     )
     assert_that(result.initial_issues_count).is_equal_to(initial)
     assert_that(result.fixed_issues_count).is_greater_than(0)

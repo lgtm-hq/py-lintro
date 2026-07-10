@@ -2,17 +2,22 @@
 
 from __future__ import annotations
 
+from typing import cast
+
 from pathlib import Path
 from unittest.mock import patch
 
 from assertpy import assert_that
 
+from lintro.plugins.subprocess_executor import SubprocessResult
+
 from lintro.enums.tool_type import ToolType
+from lintro.parsers.swiftlint.swiftlint_issue import SwiftlintIssue
 from lintro.tools.definitions.swiftlint import SwiftlintPlugin
 from tests.unit.tools.swiftlint.conftest import SAMPLE_JSON
 
 
-def _sp(success: bool, output: str):
+def _sp(success: bool, output: str) -> SubprocessResult:
     """Build a SubprocessResult from a legacy (success, output) pair.
 
     Args:
@@ -22,8 +27,6 @@ def _sp(success: bool, output: str):
     Returns:
         SubprocessResult with the JSON payload on stdout.
     """
-    from lintro.plugins.subprocess_executor import SubprocessResult
-
     return SubprocessResult(
         returncode=0 if success else 1,
         stdout=output,

@@ -2,16 +2,21 @@
 
 from __future__ import annotations
 
+from typing import cast
+
 from pathlib import Path
 from unittest.mock import patch
 
 from assertpy import assert_that
 
+from lintro.plugins.subprocess_executor import SubprocessResult
+
+from lintro.parsers.swiftlint.swiftlint_issue import SwiftlintIssue
 from lintro.tools.definitions.swiftlint import SwiftlintPlugin
 from tests.unit.tools.swiftlint.conftest import FIXABLE_JSON, SAMPLE_JSON
 
 
-def _sp(success: bool, output: str):
+def _sp(success: bool, output: str) -> SubprocessResult:
     """Build a SubprocessResult from a legacy (success, output) pair.
 
     Args:
@@ -21,8 +26,6 @@ def _sp(success: bool, output: str):
     Returns:
         SubprocessResult with the JSON payload on stdout.
     """
-    from lintro.plugins.subprocess_executor import SubprocessResult
-
     return SubprocessResult(
         returncode=0 if success else 1,
         stdout=output,
@@ -46,7 +49,7 @@ def test_fix_corrects_fixable_issue(
 
     calls: list[list[str]] = []
 
-    def mock_run(cmd: list[str], timeout: int) -> tuple[bool, str]:
+    def mock_run(cmd: list[str], timeout: int) -> SubprocessResult:
         """Return check JSON, fix success, then a clean re-check.
 
         Args:
@@ -82,7 +85,7 @@ def test_fix_corrects_fixable_issue(
     assert_that(result.remaining_issues_count).is_equal_to(0)
     # Invariant: initial == fixed + remaining.
     assert_that(result.initial_issues_count).is_equal_to(
-        result.fixed_issues_count + result.remaining_issues_count,
+        (result.fixed_issues_count or 0) + (result.remaining_issues_count or 0),
     )
 
 
@@ -99,7 +102,7 @@ def test_fix_leaves_unfixable_issue(
     test_file = tmp_path / "Sample.swift"
     test_file.write_text("class foo {}\n")
 
-    def mock_run(cmd: list[str], timeout: int) -> tuple[bool, str]:
+    def mock_run(cmd: list[str], timeout: int) -> SubprocessResult:
         """Return the same issues before and after the fix attempt.
 
         Args:
@@ -130,7 +133,7 @@ def test_fix_leaves_unfixable_issue(
     assert_that(result.remaining_issues_count).is_equal_to(2)
     assert_that(result.initial_issues).is_not_none()
     assert_that(result.initial_issues_count).is_equal_to(
-        result.fixed_issues_count + result.remaining_issues_count,
+        (result.fixed_issues_count or 0) + (result.remaining_issues_count or 0),
     )
 
 
@@ -149,7 +152,7 @@ def test_fix_nothing_to_fix(
 
     fix_invoked = False
 
-    def mock_run(cmd: list[str], timeout: int) -> tuple[bool, str]:
+    def mock_run(cmd: list[str], timeout: int) -> SubprocessResult:
         """Track whether the --fix subprocess is invoked.
 
         Args:
