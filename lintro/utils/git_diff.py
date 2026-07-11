@@ -53,6 +53,9 @@ def _run_git(args: list[str], cwd: str) -> subprocess.CompletedProcess[str]:
 
     Returns:
         The completed process (never raises on non-zero exit).
+
+    Raises:
+        FileNotFoundError: When ``git`` is not installed or not on ``PATH``.
     """
     git_bin = shutil.which("git")
     if git_bin is None:
