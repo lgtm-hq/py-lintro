@@ -560,9 +560,54 @@ def test_publish_npm_exposes_dist_tag_for_backfills() -> None:
     assert_that(publish_step["env"]["NPM_DIST_TAG"]).contains("inputs.dist_tag")
 
 
-# Canonical lgtm-ci pin used by most py-lintro workflows (v0.48.0).
+# Canonical lgtm-ci pin used by all py-lintro workflows (v0.52.3).
 # Pages deploy must not regress to v0.32.3 (missing GH_TOKEN in bundler).
-_LGTM_CI_V0480 = "1014e3d7d5441a63215d2096545a46cff6de101c"
+_LGTM_CI_PIN = "66cad82ead0e5d119928c895c7d7da9c837989e5"
+
+
+def test_all_lgtm_ci_refs_use_the_canonical_pin() -> None:
+    """Every lgtm-ci ref in workflows must match the single canonical pin.
+
+    Guards the repo-wide invariant from #1280: `uses:` refs,
+    `tooling-ref:` inputs, and manual `actions/checkout` steps targeting
+    lgtm-hq/lgtm-ci all point at the same lgtm-ci commit, so pins cannot
+    silently drift apart again. Any ref shape (tag, branch, short SHA,
+    any quoting) that is not the canonical pin is an offender.
+    """
+    ref_pattern = re.compile(
+        r"lgtm-hq/lgtm-ci/[^@\s]+@([^\s#]+)|tooling-ref:\s*[\"']?([^\"'\s#]+)",
+    )
+    workflows_dir = _REPO_ROOT / ".github" / "workflows"
+    offenders: list[str] = []
+    workflow_paths = sorted(
+        (*workflows_dir.glob("*.yml"), *workflows_dir.glob("*.yaml")),
+    )
+    for path in workflow_paths:
+        for lineno, line in enumerate(
+            path.read_text(encoding="utf-8").splitlines(),
+            start=1,
+        ):
+            for match in ref_pattern.finditer(line):
+                ref = match.group(1) or match.group(2)
+                if ref != _LGTM_CI_PIN:
+                    offenders.append(f"{path.name}:{lineno}: {ref}")
+
+        # Manual lgtm-ci tooling checkouts pin via a separate `ref:` field
+        # (e.g. site-quality.yml); a bare `ref:` regex would false-positive
+        # on checkouts of other repositories, so walk the parsed YAML.
+        workflow = yaml.safe_load(path.read_text(encoding="utf-8"))
+        for job_id, job in (workflow.get("jobs") or {}).items():
+            for step in job.get("steps") or []:
+                with_block = step.get("with") or {}
+                if with_block.get("repository") != "lgtm-hq/lgtm-ci":
+                    continue
+                if with_block.get("ref") != _LGTM_CI_PIN:
+                    offenders.append(
+                        f"{path.name}:{job_id}: checkout ref "
+                        f"{with_block.get('ref')!r}",
+                    )
+
+    assert_that(offenders).is_empty()
 
 
 def test_stage_coverage_html_allows_setup_uv_manifest_host() -> None:
@@ -587,16 +632,18 @@ def test_deploy_pages_pins_bundler_with_github_token() -> None:
 
     reusable-deploy-site-with-reports checks out tooling-ref for
     bundle-workflow-artifacts. v0.32.3 omitted GH_TOKEN; v0.32.4+ (lgtm-ci#300)
-    sets ``GH_TOKEN: ${{ github.token }}``. Stay on the repo-standard v0.48.0 pin.
+    sets ``GH_TOKEN: ${{ github.token }}``. Stay on the repo-standard v0.52.3 pin.
     """
     workflow = _load_workflow(name="deploy-pages.yml")
     deploy = workflow["jobs"]["deploy"]
     uses = deploy["uses"]
     tooling_ref = deploy["with"]["tooling-ref"]
 
-    assert_that(uses).contains(_LGTM_CI_V0480)
+    assert_that(uses).contains(_LGTM_CI_PIN)
     assert_that(uses).contains("reusable-deploy-site-with-reports.yml")
-    assert_that(tooling_ref).contains(_LGTM_CI_V0480)
-    assert_that(deploy["permissions"]).contains_entry({"actions": "read"})
+    assert_that(tooling_ref).contains(_LGTM_CI_PIN)
+    # v0.52.3 build job requests actions: write (lgtm-ci#415 rerun
+    # self-heal); a lower caller grant is a parse-time startup_failure.
+    assert_that(deploy["permissions"]).contains_entry({"actions": "write"})
     assert_that(deploy["permissions"]).contains_entry({"pages": "write"})
     assert_that(deploy["permissions"]).contains_entry({"id-token": "write"})

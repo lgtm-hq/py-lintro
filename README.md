@@ -197,6 +197,12 @@ system.
 <td>✅</td>
 <td><code>brew install taplo</code><br><a href="https://github.com/tamasfe/taplo/releases">GitHub Releases</a></td>
 </tr>
+<tr>
+<td><a href="https://stylelint.io/"><img src="https://img.shields.io/badge/Stylelint-263238?logo=stylelint&logoColor=white" alt="Stylelint"></a></td>
+<td>🎨 CSS/SCSS/Sass/Less</td>
+<td>✅</td>
+<td><code>bun add -g stylelint</code><br><code>npm install -g stylelint</code></td>
+</tr>
 <tr><th colspan="4">Type Checkers</th></tr>
 <tr>
 <td><a href="https://astro.build/"><img src="https://img.shields.io/badge/Astro-ff5d01?logo=astro&logoColor=white" alt="Astro"></a></td>
@@ -377,6 +383,7 @@ docker run --rm -v $(pwd):/code ghcr.io/lgtm-hq/py-lintro-base:latest check
 | [AI Features](docs/ai-features.md)               | AI summaries, fix suggestions, config   |
 | [Docker Usage](docs/docker.md)                   | Containerized development               |
 | [GitHub Integration](docs/github-integration.md) | CI/CD setup, workflows                  |
+| [Pre-commit Integration](docs/pre-commit.md)     | Run lintro as a pre-commit hook         |
 | [Contributing](docs/contributing.md)             | Development guide, adding tools         |
 | [Troubleshooting](docs/troubleshooting.md)       | Common issues and solutions             |
 

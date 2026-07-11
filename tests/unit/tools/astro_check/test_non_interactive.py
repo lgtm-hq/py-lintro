@@ -8,7 +8,7 @@ stdin) and prefers the project-local astro binary.
 
 from __future__ import annotations
 
-import subprocess
+import subprocess  # nosec B404 - subprocess used with fixed argv in controlled tests
 from pathlib import Path
 from typing import Any
 from unittest.mock import patch
