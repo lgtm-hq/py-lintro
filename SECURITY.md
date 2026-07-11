@@ -58,6 +58,38 @@ We follow a coordinated vulnerability disclosure process:
 We appreciate responsible disclosure and will credit reporters (unless anonymity is
 requested) in our security advisories and release notes.
 
+## External Plugin Trust Model
+
+Lintro supports third-party tool plugins discovered via Python entry points in the
+`lintro.plugins` group. Loading such a plugin imports and executes its code, so Lintro
+treats external plugins as untrusted by default.
+
+### Threat model
+
+Any package installed in the same environment as Lintro can expose a `lintro.plugins`
+entry point. If Lintro loaded these unconditionally, a malicious or compromised
+dependency would run arbitrary code every time the CLI starts — a supply-chain
+escalation from "installed" to "executed on every invocation". Protocol validation does
+not help here because it happens only _after_ the plugin module has already been
+imported and executed.
+
+### Default-deny, opt-in loading
+
+- **External plugin loading is disabled by default.** A default installation never
+  imports or executes third-party plugin code at startup.
+- Enabling requires an explicit user action, via either mechanism below:
+  - Set the environment variable `LINTRO_ENABLE_EXTERNAL_PLUGINS=1` (accepted truthy
+    values: `1`, `true`, `yes`, `on`).
+  - Configure a `plugins` section in `.lintro-config.yaml` (or `[tool.lintro.plugins]`
+    in `pyproject.toml`) with `enabled: true` and/or a `trusted` allowlist.
+- When a `trusted` allowlist is configured, only entry points whose entry-point name or
+  distribution name appears in the list are loaded; every other discovered plugin is
+  skipped and logged. Prefer the allowlist over the blanket env-var toggle so you only
+  execute plugins you have explicitly vetted.
+
+Only enable external plugins you trust and have reviewed. See
+[docs/configuration.md](docs/configuration.md) for configuration details.
+
 ## For Contributors
 
 - Review dependencies regularly for known vulnerabilities

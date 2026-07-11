@@ -13,8 +13,9 @@ from __future__ import annotations
 
 import importlib
 import importlib.metadata
+import os
 from pathlib import Path
-from typing import cast
+from typing import Any, cast
 
 from loguru import logger
 
@@ -26,6 +27,13 @@ BUILTIN_DEFINITIONS_PATH = Path(__file__).parent.parent / "tools" / "definitions
 
 # Entry point group for external plugins
 ENTRY_POINT_GROUP = "lintro.plugins"
+
+# Environment variable that opts in to loading external (third-party) plugins.
+# Truthy values: "1", "true", "yes", "on" (case-insensitive).
+ENV_ENABLE_EXTERNAL_PLUGINS = "LINTRO_ENABLE_EXTERNAL_PLUGINS"
+
+# Truthy string values accepted for the opt-in environment variable.
+_TRUTHY_ENV_VALUES = frozenset({"1", "true", "yes", "on"})
 
 # Track whether discovery has been performed
 _discovered: bool = False
@@ -71,8 +79,113 @@ def discover_builtin_tools() -> int:
     return loaded_count
 
 
+def _load_plugins_config() -> dict[str, Any]:
+    """Load the ``plugins`` configuration section for external plugin trust.
+
+    Reads the ``plugins`` mapping from ``.lintro-config.yaml`` if present,
+    otherwise falls back to ``[tool.lintro.plugins]`` in ``pyproject.toml``.
+    This is intentionally lightweight and independent of the full config
+    loader so plugin discovery never triggers heavier config parsing.
+
+    Returns:
+        The raw ``plugins`` mapping, or an empty dict if none is configured.
+    """
+    # Imported lazily to avoid pulling config parsing into module import.
+    from lintro.config.config_loader import (
+        _find_config_file,
+        _load_pyproject_fallback,
+        _load_yaml_file,
+    )
+
+    try:
+        found_path = _find_config_file()
+        if found_path is not None:
+            data = _load_yaml_file(found_path)
+            plugins = data.get("plugins")
+            return plugins if isinstance(plugins, dict) else {}
+
+        pyproject_data, _ = _load_pyproject_fallback()
+        plugins = pyproject_data.get("plugins")
+        return plugins if isinstance(plugins, dict) else {}
+    except (OSError, ValueError, ImportError) as e:
+        logger.debug(f"Could not read plugins config: {e}")
+        return {}
+
+
+def _resolve_plugin_trust() -> tuple[bool, frozenset[str] | None]:
+    """Resolve whether external plugins are enabled and which are trusted.
+
+    External plugin loading is opt-in and default-deny. It is enabled when
+    either of the following is true:
+
+    - The ``LINTRO_ENABLE_EXTERNAL_PLUGINS`` environment variable is set to a
+      truthy value (``1``/``true``/``yes``/``on``).
+    - A ``plugins`` config section opts in, via ``enabled: true`` and/or a
+      ``trusted`` allowlist of entry-point or distribution names.
+
+    When a ``trusted`` allowlist is configured, only entry points whose name
+    or distribution is in the list are loaded, regardless of how loading was
+    enabled. When no allowlist is configured, all discovered entry points are
+    eligible once loading is enabled.
+
+    Returns:
+        A tuple ``(enabled, trusted)`` where ``enabled`` reports whether any
+        external plugin loading is permitted and ``trusted`` is the allowlist
+        of names (or ``None`` when no allowlist is configured).
+    """
+    env_value = os.environ.get(ENV_ENABLE_EXTERNAL_PLUGINS, "").strip().lower()
+    env_enabled = env_value in _TRUTHY_ENV_VALUES
+
+    config_enabled = False
+    trusted: frozenset[str] | None = None
+
+    plugins_cfg = _load_plugins_config()
+    if plugins_cfg:
+        raw_trusted = plugins_cfg.get("trusted")
+        if isinstance(raw_trusted, str):
+            raw_trusted = [raw_trusted]
+        if isinstance(raw_trusted, list):
+            # Presence of a trusted allowlist is itself an explicit opt-in.
+            trusted = frozenset(str(name) for name in raw_trusted)
+            config_enabled = True
+
+        enabled_flag = plugins_cfg.get("enabled")
+        if isinstance(enabled_flag, bool):
+            config_enabled = config_enabled or enabled_flag
+
+    return (env_enabled or config_enabled), trusted
+
+
+def _is_trusted_entry_point(
+    ep: importlib.metadata.EntryPoint,
+    trusted: frozenset[str] | None,
+) -> bool:
+    """Check whether an entry point is permitted by the trust allowlist.
+
+    Args:
+        ep: The entry point being considered for loading.
+        trusted: Allowlist of trusted entry-point or distribution names, or
+            ``None`` when no allowlist is configured (all names permitted).
+
+    Returns:
+        True if the entry point may be loaded, False otherwise.
+    """
+    if trusted is None:
+        return True
+    if ep.name in trusted:
+        return True
+    dist = getattr(ep, "dist", None)
+    dist_name = getattr(dist, "name", None)
+    return isinstance(dist_name, str) and dist_name in trusted
+
+
 def discover_external_plugins() -> int:
     """Load external plugins via entry points.
+
+    External plugin loading is opt-in and default-deny: a default installation
+    never imports or executes third-party plugin code at startup. Loading is
+    enabled only via the ``LINTRO_ENABLE_EXTERNAL_PLUGINS`` environment
+    variable or a ``plugins`` config section (see :func:`_resolve_plugin_trust`).
 
     External plugins can register themselves by defining an entry point
     in their pyproject.toml or setup.py:
@@ -89,6 +202,15 @@ def discover_external_plugins() -> int:
     """
     loaded_count = 0
 
+    enabled, trusted = _resolve_plugin_trust()
+    if not enabled:
+        logger.debug(
+            "External plugin loading is disabled (default). Set "
+            f"{ENV_ENABLE_EXTERNAL_PLUGINS}=1 or configure a [tool.lintro] "
+            "plugins allowlist to enable it.",
+        )
+        return loaded_count
+
     try:
         entry_points = importlib.metadata.entry_points(group=ENTRY_POINT_GROUP)
     except (TypeError, AttributeError, KeyError) as e:
@@ -96,6 +218,12 @@ def discover_external_plugins() -> int:
         return loaded_count
 
     for ep in entry_points:
+        if not _is_trusted_entry_point(ep=ep, trusted=trusted):
+            logger.info(
+                f"Skipping untrusted external plugin {ep.name!r} "
+                "(not in the configured plugins.trusted allowlist)",
+            )
+            continue
         try:
             plugin_class = ep.load()
 

@@ -267,18 +267,72 @@ export LINTRO_DEFAULT_FORMAT="grid"
 # Auto-install Node.js dependencies (useful in Docker/CI)
 # Set to 1 to enable, 0 to disable (overrides container auto-detection)
 export LINTRO_AUTO_INSTALL_DEPS=1
+
+# Opt in to loading external (third-party) plugins. Disabled by default.
+export LINTRO_ENABLE_EXTERNAL_PLUGINS=1
 ```
 
-| Variable                   | Description                                  | Default |
-| -------------------------- | -------------------------------------------- | ------- |
-| `LINTRO_DEFAULT_TIMEOUT`   | Default timeout for tool execution (seconds) | `30`    |
-| `LINTRO_VERBOSE`           | Enable verbose logging (`1` to enable)       | `0`     |
-| `LINTRO_EXCLUDE`           | Comma-separated exclude patterns             | -       |
-| `LINTRO_DEFAULT_FORMAT`    | Default output format                        | -       |
-| `LINTRO_AUTO_INSTALL_DEPS` | Auto-install Node.js deps (`1`/`0`)          | `0`\*   |
+| Variable                         | Description                                  | Default |
+| -------------------------------- | -------------------------------------------- | ------- |
+| `LINTRO_DEFAULT_TIMEOUT`         | Default timeout for tool execution (seconds) | `30`    |
+| `LINTRO_VERBOSE`                 | Enable verbose logging (`1` to enable)       | `0`     |
+| `LINTRO_EXCLUDE`                 | Comma-separated exclude patterns             | -       |
+| `LINTRO_DEFAULT_FORMAT`          | Default output format                        | -       |
+| `LINTRO_AUTO_INSTALL_DEPS`       | Auto-install Node.js deps (`1`/`0`)          | `0`\*   |
+| `LINTRO_ENABLE_EXTERNAL_PLUGINS` | Opt in to external plugins (`1`/`0`)         | `0`     |
 
 \* In container environments, `LINTRO_AUTO_INSTALL_DEPS` effectively defaults to `1` via
 container auto-detection. Set to `0` to explicitly disable.
+
+### External Plugins (Trust Model)
+
+Lintro can load third-party tool plugins published as Python packages that expose a
+`lintro.plugins` entry point. Because loading a plugin imports and executes its code,
+**external plugins are disabled by default** — a default installation never runs
+third-party plugin code at startup. This is a security boundary: any package installed
+in the same environment could otherwise execute arbitrary code every time Lintro runs.
+See [SECURITY.md](../SECURITY.md) for the full threat model.
+
+Enable external plugins only after you have reviewed and trust them, using either
+mechanism:
+
+```yaml
+# .lintro-config.yaml
+plugins:
+  # Opt in and restrict loading to an explicit allowlist (recommended).
+  # Names match the entry-point name or the distribution (package) name.
+  trusted:
+    - my-org-tool
+    - another-plugin
+  # Optional: enable loading of ALL discovered plugins (no allowlist).
+  # Prefer 'trusted' over this blanket toggle.
+  enabled: false
+```
+
+Equivalent `pyproject.toml`:
+
+```toml
+[tool.lintro.plugins]
+trusted = ["my-org-tool", "another-plugin"]
+enabled = false
+```
+
+Or, for a one-off/CI run, the environment variable:
+
+```bash
+export LINTRO_ENABLE_EXTERNAL_PLUGINS=1
+```
+
+Resolution rules:
+
+- Loading is enabled when `LINTRO_ENABLE_EXTERNAL_PLUGINS` is truthy **or** the
+  `plugins` config opts in (a `trusted` allowlist is itself an opt-in, as is
+  `enabled: true`).
+- When a `trusted` allowlist is present, only plugins whose entry-point name or
+  distribution name is listed are loaded; all others are skipped and logged, regardless
+  of how loading was enabled.
+- With no allowlist configured, enabling loads all discovered `lintro.plugins` entry
+  points — use this only in fully trusted environments.
 
 ### Pre-Execution Summary
 
