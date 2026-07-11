@@ -500,9 +500,9 @@ def test_publish_npm_exposes_dist_tag_for_backfills() -> None:
     assert_that(publish_step["env"]["NPM_DIST_TAG"]).contains("inputs.dist_tag")
 
 
-# Canonical lgtm-ci pin used by most py-lintro workflows (v0.48.0).
+# Canonical lgtm-ci pin used by all py-lintro workflows (v0.52.3).
 # Pages deploy must not regress to v0.32.3 (missing GH_TOKEN in bundler).
-_LGTM_CI_V0480 = "1014e3d7d5441a63215d2096545a46cff6de101c"
+_LGTM_CI_PIN = "66cad82ead0e5d119928c895c7d7da9c837989e5"
 
 
 def test_stage_coverage_html_allows_setup_uv_manifest_host() -> None:
@@ -527,16 +527,16 @@ def test_deploy_pages_pins_bundler_with_github_token() -> None:
 
     reusable-deploy-site-with-reports checks out tooling-ref for
     bundle-workflow-artifacts. v0.32.3 omitted GH_TOKEN; v0.32.4+ (lgtm-ci#300)
-    sets ``GH_TOKEN: ${{ github.token }}``. Stay on the repo-standard v0.48.0 pin.
+    sets ``GH_TOKEN: ${{ github.token }}``. Stay on the repo-standard v0.52.3 pin.
     """
     workflow = _load_workflow(name="deploy-pages.yml")
     deploy = workflow["jobs"]["deploy"]
     uses = deploy["uses"]
     tooling_ref = deploy["with"]["tooling-ref"]
 
-    assert_that(uses).contains(_LGTM_CI_V0480)
+    assert_that(uses).contains(_LGTM_CI_PIN)
     assert_that(uses).contains("reusable-deploy-site-with-reports.yml")
-    assert_that(tooling_ref).contains(_LGTM_CI_V0480)
+    assert_that(tooling_ref).contains(_LGTM_CI_PIN)
     assert_that(deploy["permissions"]).contains_entry({"actions": "read"})
     assert_that(deploy["permissions"]).contains_entry({"pages": "write"})
     assert_that(deploy["permissions"]).contains_entry({"id-token": "write"})
