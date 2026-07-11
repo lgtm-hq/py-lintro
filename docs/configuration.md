@@ -146,6 +146,85 @@ The config command shows:
 - **Per-tool configuration**: Whether enabled, native config found
 - **Defaults applied**: Which tools are using fallback defaults
 
+### Health Score
+
+`lintro check` computes a single, deterministic **0-100 health score** that aggregates
+every issue across every tool into one trackable, CI-gateable, shareable number.
+
+```bash
+lintro check                  # normal output + health score line at the end
+lintro check --score          # print ONLY the score (for scripts/badges)
+lintro check --fail-under 75  # exit 1 if the score is below 75
+lintro check --output-format json   # score included under summary.health_score
+```
+
+#### Scoring model
+
+Every issue is normalised to one of three severities (`ERROR`, `WARNING`, `INFO`) and
+weighted, then mapped onto 0-100 with a smoothly saturating penalty:
+
+```text
+weighted  = error_weight   * n_errors
+          + warning_weight * n_warnings
+          + info_weight    * n_info
+
+score     = floor( 100 * scale / (scale + weighted) )
+```
+
+With the default weights (`ERROR=10`, `WARNING=3`, `INFO=1`) and `scale=100`, this has
+the following guaranteed properties:
+
+- **Zero issues → exactly 100.** A clean run is unambiguous.
+- **Any issue → strictly below 100** (`floor` keeps it at most 99).
+- **Monotonic.** Adding an issue, or raising its severity, never raises the score.
+- **Bounded** to `[0, 100]` and **deterministic** — the result depends only on the
+  severity counts and the configured weights/scale, never on ordering or timing.
+
+The score hits 50 when the total weighted penalty equals `scale` (e.g. ten `ERROR`
+issues, or ~33 `WARNING` issues, with the defaults).
+
+#### Score tiers
+
+| Score  | Tier         |
+| ------ | ------------ |
+| 75-100 | `great`      |
+| 50-74  | `needs-work` |
+| 0-49   | `critical`   |
+
+#### Configuring the weights
+
+Weights and the smoothing scale are tunable via the `score` section:
+
+```yaml
+# .lintro-config.yaml
+score:
+  error_weight: 10 # penalty per ERROR issue
+  warning_weight: 3 # penalty per WARNING issue
+  info_weight: 1 # penalty per INFO issue
+  scale: 100 # larger = the score decays more slowly
+```
+
+#### JSON output
+
+In `--output-format json` the score is added **additively** under
+`summary.health_score`, leaving all existing keys untouched:
+
+```json
+{
+  "summary": {
+    "total_issues": 3,
+    "total_fixed": 0,
+    "total_remaining": 3,
+    "health_score": {
+      "score": 88,
+      "tier": "great",
+      "severity_counts": { "error": 1, "warning": 0, "info": 0 },
+      "weighted_penalty": 10.0
+    }
+  }
+}
+```
+
 ### Command-Line Options
 
 #### Global Options
@@ -1064,6 +1143,74 @@ lintro check --tools oxlint --tool-options "oxlint:config=.oxlintrc.custom.json"
 
 # Specify tsconfig for TypeScript projects
 lintro check --tools oxlint --tool-options "oxlint:tsconfig=tsconfig.app.json"
+```
+
+#### Stylelint Configuration
+
+Stylelint is a mighty, configurable linter and fixer for CSS, SCSS, Sass, and Less
+stylesheets, with 100+ built-in rules and `--fix` support.
+
+> Stylelint requires a configuration to run. When no config is resolvable, Lintro skips
+> stylelint as a non-error (rather than surfacing stylelint's hard
+> `ConfigurationError`).
+
+**Native Config Detection:**
+
+Stylelint resolves configuration per file (walking upward). Lintro supports:
+
+- `.stylelintrc`, `.stylelintrc.json`, `.stylelintrc.yaml`, `.stylelintrc.yml`
+- `.stylelintrc.js`, `.stylelintrc.cjs`, `.stylelintrc.mjs`
+- `stylelint.config.js`, `stylelint.config.cjs`, `stylelint.config.mjs`
+- a `stylelint` key in `package.json`
+
+`.stylelintignore` is honored by the underlying tool.
+
+**Installation:**
+
+```bash
+# npm/bun
+npm install -g stylelint
+bun add -g stylelint
+
+# Per-project (recommended, with a shareable config)
+bun add -d stylelint stylelint-config-standard
+```
+
+**File:** `.stylelintrc.json`
+
+```json
+{
+  "extends": ["stylelint-config-standard"],
+  "rules": {
+    "color-hex-length": "short",
+    "block-no-empty": true,
+    "declaration-block-no-duplicate-properties": true
+  }
+}
+```
+
+**Available Options via `--tool-options`:**
+
+| Option               | Type    | Description                                  |
+| -------------------- | ------- | -------------------------------------------- |
+| `config`             | string  | Path to a stylelint config file (`--config`) |
+| `verbose_fix_output` | boolean | Include raw stylelint output in `fix()`      |
+| `timeout`            | integer | Execution timeout in seconds (default: 30)   |
+
+**Usage Examples:**
+
+```bash
+# Basic check
+lintro check styles/ --tools stylelint
+
+# Auto-fix issues
+lintro format styles/ --tools stylelint
+
+# Use a specific config file
+lintro check styles/ --tools stylelint --tool-options "stylelint:config=.stylelintrc.json"
+
+# Increase timeout for large stylesheets
+lintro check styles/ --tools stylelint --tool-options "stylelint:timeout=60"
 ```
 
 #### Oxfmt Configuration
