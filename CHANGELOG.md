@@ -21,6 +21,12 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.77.1] - 2026-07-11
+
+### Fixed
+
+- **release**: gate publish jobs on anchored prerelease classifier (#1274) (47b2225)
+
 ## [0.77.0] - 2026-07-11
 
 ### Added
