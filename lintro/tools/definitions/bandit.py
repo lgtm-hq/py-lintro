@@ -30,7 +30,8 @@ from lintro.plugins.registry import register_tool
 from lintro.utils.config import load_bandit_config
 
 # Constants for Bandit configuration
-BANDIT_DEFAULT_TIMEOUT: int = 30
+# Full-repo scans with B404/B603/B607 enabled routinely exceed 30s in CI.
+BANDIT_DEFAULT_TIMEOUT: int = 90
 BANDIT_DEFAULT_PRIORITY: int = 90  # High priority for security tool
 BANDIT_FILE_PATTERNS: list[str] = ["*.py", "*.pyi"]
 BANDIT_OUTPUT_FORMAT: str = "json"

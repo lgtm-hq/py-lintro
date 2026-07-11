@@ -224,7 +224,7 @@ def test_check_timeout_handling(
         vue_tsc_plugin: The VueTscPlugin instance to test.
         tmp_path: Temporary directory path for test files.
     """
-    import subprocess
+    import subprocess  # nosec B404 - subprocess is used to drive the tool/CLI under test; invocations use shell=False
 
     # Create Vue file and tsconfig
     vue_file = tmp_path / "test.vue"

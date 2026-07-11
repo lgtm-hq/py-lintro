@@ -49,18 +49,36 @@ class ToolRegistry:
     manifest-derived tool metadata rather than live plugin instances.
     """
 
+    #: Origin label used for tools shipped inside lintro itself.
+    BUILTIN_ORIGIN: str = "builtin"
+
     _tools: dict[str, type[BaseToolPlugin]] = {}
     _instances: dict[str, BaseToolPlugin] = {}
+    _origins: dict[str, str] = {}
     _lock: threading.RLock = threading.RLock()  # Reentrant lock for nested calls
 
     @classmethod
-    def register(cls, plugin_class: type[BaseToolPlugin]) -> type[BaseToolPlugin]:
+    def register(
+        cls,
+        plugin_class: type[BaseToolPlugin],
+        *,
+        origin: str = BUILTIN_ORIGIN,
+        instance: BaseToolPlugin | None = None,
+    ) -> type[BaseToolPlugin]:
         """Register a tool class.
 
         Can be used as a decorator or called directly.
 
         Args:
             plugin_class: The tool class to register.
+            origin: Where the tool came from — ``"builtin"`` for tools shipped
+                with lintro (the default, so decorator usage stays unchanged) or
+                the distribution/package name for third-party plugins loaded via
+                entry points. Surfaced by ``lintro list-tools``.
+            instance: Pre-built plugin instance to adopt. When provided it is
+                reused instead of instantiating ``plugin_class`` again, which
+                lets discovery probe a plugin's name once and register the same
+                instance without paying for a second construction.
 
         Returns:
             The registered tool class (allows use as decorator).
@@ -71,8 +89,10 @@ class ToolRegistry:
             ...     pass
         """
         with cls._lock:
-            # Create a temporary instance to get the definition
-            instance = plugin_class()
+            # Create a temporary instance to get the definition (unless the
+            # caller already built one).
+            if instance is None:
+                instance = plugin_class()
             name = instance.definition.name.lower()
 
             if name in cls._tools:
@@ -86,7 +106,8 @@ class ToolRegistry:
             cls._tools[name] = plugin_class
             # Store the instance we created for get() calls
             cls._instances[name] = instance
-            logger.debug(f"Registered tool: {name}")
+            cls._origins[name] = origin
+            logger.debug(f"Registered tool: {name} (origin={origin})")
 
         return plugin_class
 
@@ -181,6 +202,22 @@ class ToolRegistry:
             return sorted(cls._tools.keys())
 
     @classmethod
+    def get_origin(cls, name: str) -> str:
+        """Return the origin label for a registered tool.
+
+        Args:
+            name: Tool name (case-insensitive).
+
+        Returns:
+            ``"builtin"`` for tools shipped with lintro, or the distribution
+            name for a third-party plugin. Returns ``"unknown"`` if the tool
+            has no recorded origin (e.g. registered by legacy code paths).
+        """
+        with cls._lock:
+            cls._ensure_discovered()
+            return cls._origins.get(name.lower(), "unknown")
+
+    @classmethod
     def is_registered(cls, name: str) -> bool:
         """Check if a tool is registered.
 
@@ -203,6 +240,7 @@ class ToolRegistry:
         with cls._lock:
             cls._tools.clear()
             cls._instances.clear()
+            cls._origins.clear()
             logger.debug("Cleared tool registry")
 
     @classmethod

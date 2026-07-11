@@ -29,6 +29,48 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.77.2] - 2026-07-11
+
+### Changed
+
+- **ci**: adopt canonical emoji check names (#1283) (eb63aa7)
+- **ci**: unify lgtm-ci pins at v0.52.3 (#1281) (2ef4016)
+
+### Fixed
+
+- **ci**: pass complete egress allowlist to release version-pr job (#1288) (623fb06)
+- **ci**: grant permissions required by lgtm-ci v0.52.3 reusables (#1285) (d50428e)
+
+## [0.77.1] - 2026-07-11
+
+### Fixed
+
+- **release**: gate publish jobs on anchored prerelease classifier (#1274) (47b2225)
+
+## [0.77.0] - 2026-07-11
+
+### Added
+
+- **licenses**: add dependency license compliance checking (#1178) (83cf9a7)
+
+## [0.76.0] - 2026-07-11
+
+### Added
+
+- **reporting**: add 0-100 health score to check runs (#1173) (83ff3ef)
+
+## [0.75.0] - 2026-07-11
+
+### Added
+
+- **plugins**: support third-party tool plugins via Python entry points (#1137)
+  (d659c93)
+
+### Changed
+
+- **config**: scope subprocess lint suppressions (B404/B603/B607) (#1135) (a2b597e)
+- **ai/review**: externalize builtin checklist corpus to YAML (#1130) (9f9205c)
+
 ## [0.74.0] - 2026-07-10
 
 ### Added

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import shutil
-import subprocess
+import subprocess  # nosec B404 - subprocess is used to drive the tool/CLI under test; invocations use shell=False
 from collections.abc import Sequence
 from pathlib import Path
 
@@ -21,7 +21,7 @@ def _check_command_version(cmd: Sequence[str], timeout: int) -> bool:
         True if the command exits with returncode 0, False otherwise.
     """
     try:
-        result = subprocess.run(
+        result = subprocess.run(  # nosec B603 - fixed argv run against a real binary in a controlled test; shell=False, no user shell input
             cmd,
             capture_output=True,
             timeout=timeout,

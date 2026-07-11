@@ -112,7 +112,7 @@ def check_line_length_violations(
     logger.debug(f"Running line length check: {' '.join(cmd)}")
 
     try:
-        result = subprocess.run(
+        result = subprocess.run(  # nosec B603 - argv is an internally-built list run with shell=False; binary resolved from a known command, no user shell input
             cmd,
             capture_output=True,
             text=True,

@@ -28,7 +28,7 @@ from __future__ import annotations
 import json
 import re
 import shutil
-import subprocess
+import subprocess  # nosec B404 - subprocess is the core mechanism for invoking external tools; all invocations use shell=False
 import threading
 from dataclasses import dataclass, field
 
@@ -221,7 +221,7 @@ def discover_tool(
     probe_ok = False
 
     try:
-        proc_result = subprocess.run(
+        proc_result = subprocess.run(  # nosec B603 - argv is an internally-built list run with shell=False; binary resolved from a known command, no user shell input
             version_cmd,
             capture_output=True,
             text=True,
