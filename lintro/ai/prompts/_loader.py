@@ -41,6 +41,6 @@ def load_prompt_template(*path_parts: str) -> str:
     if not resource.is_file():
         joined = "/".join(path_parts)
         raise FileNotFoundError(
-            f"Prompt template not found: {joined} " f"(package {_TEMPLATES_PACKAGE})",
+            f"Prompt template not found: {joined} (package {_TEMPLATES_PACKAGE})",
         )
     return resource.read_text(encoding="utf-8")
