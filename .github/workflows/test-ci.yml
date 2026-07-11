@@ -105,7 +105,7 @@ jobs:
 
   # Evaluate both upstream jobs into a single result for the required-check gate
   test-gate:
-    name: Test Gate
+    name: 🚦 Test Gate
     needs: [test-compat, test-coverage]
     if: always()
     runs-on: ubuntu-24.04
