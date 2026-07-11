@@ -39,7 +39,7 @@ jobs:
       site-root: apps/site/dist
       build-command: bash scripts/ci/site/build.sh
       package-manager: bun
-      node-version: '22'
+      node-version: '24'
       working-directory: apps/site
       bundle-manifest: .github/pages-bundle-manifest.json
       commit-sha: ${{ github.event.workflow_run.head_sha || github.sha }}
