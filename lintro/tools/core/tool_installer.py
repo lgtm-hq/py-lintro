@@ -21,7 +21,7 @@ from __future__ import annotations
 
 import shlex
 import shutil
-import subprocess
+import subprocess  # nosec B404 - subprocess is the core mechanism for invoking external tools; all invocations use shell=False
 import time
 from pathlib import Path
 
@@ -215,7 +215,7 @@ class ToolInstaller:
             return None
 
         try:
-            result = subprocess.run(
+            result = subprocess.run(  # nosec B603 - argv is an internally-built list run with shell=False; binary resolved from a known command, no user shell input
                 tool.version_command,
                 capture_output=True,
                 text=True,
@@ -310,7 +310,7 @@ class ToolInstaller:
         if not shutil.which("brew"):
             return False
         try:
-            result = subprocess.run(
+            result = subprocess.run(  # nosec B603 B607 - argv is an internally-built list run with shell=False; binary name resolved from PATH, not attacker-controlled; binary resolved from a known command, no user shell input
                 ["brew", "list", "--formula", package],
                 capture_output=True,
                 timeout=10,
@@ -387,7 +387,7 @@ class ToolInstaller:
                 )
 
             # Otherwise run the command directly
-            proc = subprocess.run(
+            proc = subprocess.run(  # nosec B603 - argv is an internally-built list run with shell=False; binary resolved from a known command, no user shell input
                 shlex.split(command),
                 capture_output=True,
                 text=True,
@@ -483,7 +483,7 @@ class ToolInstaller:
 
         start = time.monotonic()
         try:
-            proc = subprocess.run(
+            proc = subprocess.run(  # nosec B603 - argv is an internally-built list run with shell=False; binary resolved from a known command, no user shell input
                 cmd,
                 capture_output=True,
                 text=True,

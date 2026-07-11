@@ -7,7 +7,7 @@ import argparse
 import json
 import os
 import re
-import subprocess
+import subprocess  # nosec B404 - subprocess is the core mechanism for invoking external tools; all invocations use shell=False
 import sys
 from collections.abc import Iterable
 from typing import Any
@@ -17,7 +17,7 @@ _VERSION_RE = re.compile(r"\d+(?:\.\d+){1,3}")
 
 def _run(cmd: list[str]) -> tuple[int, str]:
     try:
-        result = subprocess.run(
+        result = subprocess.run(  # nosec B603 - argv is an internally-built list run with shell=False; binary resolved from a known command, no user shell input
             cmd,
             check=False,
             capture_output=True,
