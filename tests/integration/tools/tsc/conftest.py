@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import shutil
-import subprocess
+import subprocess  # nosec B404 - subprocess is used to drive the tool/CLI under test; invocations use shell=False
 from pathlib import Path
 
 import pytest
@@ -22,7 +22,7 @@ def tsc_is_available() -> bool:
     if shutil.which("tsc") is None:
         return False
     try:
-        result = subprocess.run(
+        result = subprocess.run(  # nosec B603 B607 - fixed argv run against a real binary in a controlled test; binary name resolved from PATH, not attacker-controlled; shell=False, no user shell input
             ["tsc", "--version"],
             capture_output=True,
             timeout=10,
