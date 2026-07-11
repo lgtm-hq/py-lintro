@@ -21,6 +21,12 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.76.0] - 2026-07-11
+
+### Added
+
+- **reporting**: add 0-100 health score to check runs (#1173) (83ff3ef)
+
 ## [0.75.0] - 2026-07-11
 
 ### Added
