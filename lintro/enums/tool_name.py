@@ -25,6 +25,7 @@ class ToolName(StrEnum):
     HADOLINT = auto()
     HTML_VALIDATE = auto()
     IDIOM_REVIEW = auto()
+    J2LINT = auto()
     MARKDOWNLINT = auto()
     MYPY = auto()
     OSV_SCANNER = auto()
