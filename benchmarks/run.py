@@ -14,7 +14,7 @@ from __future__ import annotations
 import argparse
 import os
 import platform
-import subprocess
+import subprocess  # nosec B404 - subprocess reads git SHA via fixed argv; shell=False
 import sys
 from datetime import UTC, datetime
 from pathlib import Path
@@ -42,7 +42,7 @@ def _git_sha() -> str:
         str: Short SHA, or ``"unknown"`` when git is unavailable.
     """
     try:
-        completed = subprocess.run(  # noqa: S603,S607 - fixed argv, trusted
+        completed = subprocess.run(  # noqa: S603,S607 - fixed argv, trusted  # nosec B603 B607
             ["git", "rev-parse", "--short", "HEAD"],
             capture_output=True,
             text=True,
