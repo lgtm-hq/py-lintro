@@ -97,6 +97,8 @@ Some tools require separate installation. Their minimum versions are also manage
 - `shellcheck` - Shell script analyzer (`brew install shellcheck` or GitHub releases)
 - `shfmt` - Shell script formatter (`brew install shfmt` or GitHub releases)
 - `sqlfluff` - SQL linter and formatter (`pip install sqlfluff`)
+- `djlint` - HTML template linter and formatter for Jinja/Django/Nunjucks/Handlebars
+  (`brew install djlint` or `pip install djlint`)
 - `stylelint` - CSS/SCSS/Sass/Less linter and fixer (`bun add -g stylelint` or
   `npm install -g stylelint`); skips cleanly when no stylelint config is found — add one
   (e.g. `.stylelintrc.json`) to enable linting

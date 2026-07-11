@@ -23,6 +23,7 @@ class Lintro < Formula
   depends_on "bandit"
   depends_on "black"
   depends_on "commitlint"
+  depends_on "djlint"
   depends_on "gitleaks"
   depends_on "hadolint"
   depends_on "libyaml"
@@ -83,6 +84,7 @@ class Lintro < Formula
       Security:         gitleaks, semgrep
       Rust:             clippy, rustfmt (via rust)
       SQL:              sqlfluff
+      HTML templates:   djlint
 
       Not installed automatically (install if needed):
         cargo install cargo-audit cargo-deny   # Rust dependency auditing

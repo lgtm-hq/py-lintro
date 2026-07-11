@@ -112,6 +112,7 @@ RUN echo "=== Verifying all tools ===" && \
     oxfmt --version && oxlint --version && prettier --version && \
     pydoclint --version && ruff --version && semgrep --version && \
     shellcheck --version && shfmt --version && sqlfluff --version && \
+    djlint --version && \
     stylelint --version && \
     taplo --version && tsc --version && astro --version && \
     svelte-check --version && vue-tsc --version && yamllint --version && \
@@ -169,6 +170,7 @@ RUN echo "Verifying tools..." && \
     vue-tsc --version && oxlint --version && oxfmt --version && \
     bandit --version && mypy --version && pydoclint --version && \
     yamllint --version && sqlfluff --version && stylelint --version && \
+    djlint --version && \
     vale --version && \
     echo "All tools verified!"
 

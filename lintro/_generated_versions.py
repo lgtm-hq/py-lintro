@@ -26,6 +26,7 @@ NPM_VERSIONS: dict[str, str] = {
 PYPI_VERSIONS: dict[str, str] = {
     "bandit": "1.9.4",
     "black": "26.3.1",
+    "djlint": "1.39.2",
     "mypy": "1.19.1",
     "pydoclint": "0.8.3",
     "pytest": "9.0.3",

@@ -30,6 +30,7 @@ class DocUrlTemplate(StrEnum):
     CARGO_DENY = "https://embarkstudios.github.io/cargo-deny/"
     CLIPPY = "https://rust-lang.github.io/rust-clippy/master/index.html#{code}"
     COMMITLINT = "https://commitlint.js.org/reference/rules.html"
+    DJLINT = "https://www.djlint.com/docs/linter/"
     HADOLINT = "https://github.com/hadolint/hadolint/wiki/{code}"
     MARKDOWNLINT = "https://github.com/DavidAnson/markdownlint/blob/main/doc/{code}.md"
     MYPY = "https://mypy.readthedocs.io/en/stable/error_code_list.html"
