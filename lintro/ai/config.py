@@ -15,6 +15,8 @@ is the primary interface; the grouping is for documentation only.
 
 from __future__ import annotations
 
+import warnings
+
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from lintro.ai.config_views import AIBudgetConfig, AIOutputConfig, AIProviderConfig
@@ -40,12 +42,34 @@ class AIConfig(BaseModel):
 
     model_config = ConfigDict(frozen=False, extra="forbid")
 
-    enabled: bool = False
+    enabled: bool = Field(
+        default=False,
+        description=(
+            "Master switch for all AI features. ANDs with the per-feature "
+            "toggles ai.lint and ai.review. When true with neither sub-toggle "
+            "set explicitly, both are enabled for backward compatibility "
+            "(deprecated: set ai.lint and/or ai.review explicitly)."
+        ),
+    )
+    lint: bool = Field(
+        default=False,
+        description=(
+            "Enable AI lint summarization after check/fix runs. Effective only "
+            "when ai.enabled is also true (the two are ANDed)."
+        ),
+    )
+    review: bool = Field(
+        default=False,
+        description=(
+            "Enable the `lintro review` AI diff-review command. Effective only "
+            "when ai.enabled is also true (the two are ANDed)."
+        ),
+    )
     provider: AIProvider = AIProvider.ANTHROPIC
     transport: AITransport | None = Field(
         default=None,
         description=(
-            "Required when ai.enabled is true. "
+            "Required when any AI feature (ai.lint or ai.review) is enabled. "
             "How to invoke the provider: 'api' (SDK) or 'cli' (local binary)."
         ),
     )
@@ -191,6 +215,31 @@ class AIConfig(BaseModel):
     )
 
     @model_validator(mode="after")
+    def _apply_legacy_enabled_default(self) -> AIConfig:
+        """Enable both sub-toggles for legacy ``ai.enabled``-only configs.
+
+        Prior to the ai.lint / ai.review split, ``ai.enabled: true`` turned on
+        both AI lint summarization and AI review. To preserve that behaviour,
+        when ``enabled`` is true but neither sub-toggle was set explicitly, both
+        are switched on and a deprecation warning is emitted.
+
+        Returns:
+            The validated configuration instance.
+        """
+        fields_set = self.model_fields_set
+        if self.enabled and "lint" not in fields_set and "review" not in fields_set:
+            self.lint = True
+            self.review = True
+            warnings.warn(
+                "ai.enabled without ai.lint/ai.review is deprecated; both AI "
+                "lint summarization and AI review were enabled for backward "
+                "compatibility. Set ai.lint and/or ai.review explicitly.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+        return self
+
+    @model_validator(mode="after")
     def _validate_transport_and_retries(self) -> AIConfig:
         if self.retry_max_delay < self.retry_base_delay:
             msg = (
@@ -199,6 +248,35 @@ class AIConfig(BaseModel):
             )
             raise ValueError(msg)
         return self
+
+    # -- Effective feature state -------------------------------------------
+
+    @property
+    def lint_enabled(self) -> bool:
+        """Whether AI lint summarization is active.
+
+        Returns:
+            True when both the master switch and the lint sub-toggle are on.
+        """
+        return self.enabled and self.lint
+
+    @property
+    def review_enabled(self) -> bool:
+        """Whether the AI review command is active.
+
+        Returns:
+            True when both the master switch and the review sub-toggle are on.
+        """
+        return self.enabled and self.review
+
+    @property
+    def any_feature_enabled(self) -> bool:
+        """Whether any AI feature (lint summary or review) is active.
+
+        Returns:
+            True when either lint_enabled or review_enabled is true.
+        """
+        return self.lint_enabled or self.review_enabled
 
     # -- Grouped views -----------------------------------------------------
 
