@@ -155,6 +155,7 @@ RUN echo "=== Verifying all tools ===" && \
     pydoclint --version && ruff --version && semgrep --version && \
     pip-audit --version && \
     shellcheck --version && shfmt --version && sqlfluff --version && \
+    djlint --version && \
     dotenv-linter --version && \
     stylelint --version && \
     taplo --version && tsc --version && astro --version && \
