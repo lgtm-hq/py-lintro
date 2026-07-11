@@ -8,7 +8,7 @@ skip automatically when stylelint is not resolvable in the environment.
 from __future__ import annotations
 
 import shutil
-import subprocess
+import subprocess  # nosec B404 - subprocess is used to drive the tool/CLI under test; invocations use shell=False
 import tempfile
 from pathlib import Path
 
@@ -34,7 +34,7 @@ def _stylelint_available() -> bool:
         # Probe from a neutral cwd: bunx/npx resolution can succeed from the
         # repo root (whose node_modules satisfy the CLI) while failing in the
         # tmp directories the tests actually lint from.
-        proc = subprocess.run(  # noqa: S603
+        proc = subprocess.run(  # noqa: S603  # nosec B603 - fixed argv probe of stylelint binary; shell=False, no user shell input
             cmd,
             capture_output=True,
             text=True,
