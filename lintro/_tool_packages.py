@@ -45,6 +45,7 @@ NPM_PACKAGE_OWNERS: dict[str, ToolName | None] = {
 PYPI_PACKAGE_OWNERS: dict[str, ToolName | None] = {
     "bandit": ToolName.BANDIT,
     "black": ToolName.BLACK,
+    "djlint": ToolName.DJLINT,
     "mypy": ToolName.MYPY,
     "pip-audit": ToolName.PIP_AUDIT,
     "pydoclint": ToolName.PYDOCLINT,

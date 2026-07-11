@@ -109,6 +109,8 @@ install mode.
 - `dotenv-linter` - `.env` file linter and fixer (`brew install dotenv-linter`,
   `cargo install dotenv-linter`, or GitHub releases)
 - `sqlfluff` - SQL linter and formatter (`pip install sqlfluff`)
+- `djlint` - HTML template linter and formatter for Jinja/Django/Nunjucks/Handlebars
+  (`brew install djlint` or `pip install djlint`)
 - `stylelint` - CSS/SCSS/Sass/Less linter and fixer (install into the project you check
   with `bun add -D stylelint` or `npm install -D stylelint`; it is run through
   `bunx`/`npx`, which never consult `PATH`); skips cleanly when no stylelint config is

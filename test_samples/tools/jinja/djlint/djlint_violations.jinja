@@ -1,0 +1,12 @@
+<div>
+<img src="logo.png">
+    <p>Welcome, {{ user.name }}</p>
+        <span>Poorly indented content</span>
+</div>
+{% if items %}
+<ul>
+{% for item in items %}
+<li>{{ item }}</li>
+{% endfor %}
+</ul>
+{% endif %}
