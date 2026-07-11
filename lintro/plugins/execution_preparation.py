@@ -187,6 +187,7 @@ def prepare_execution(
         exclude_patterns=exclude_patterns,
         include_venv=include_venv,
         diff_base=diff_base if isinstance(diff_base, str) else None,
+        incremental=bool(merged_options.get("incremental", False)),
     )
 
     if not files:
