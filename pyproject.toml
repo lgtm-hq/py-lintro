@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "lintro"
-version = "0.73.0"
+version = "0.77.2"
 description = "A unified CLI tool for code formatting, linting, and quality assurance"
 keywords = [
   "linting",
@@ -130,6 +130,7 @@ packages = [
   "lintro.ai.prompts",
   "lintro.ai.providers",
   "lintro.ai.review",
+  "lintro.ai.review.checklist",
   "lintro.ai.review.chunker",
   "lintro.ai.review.context",
   "lintro.ai.review.enums",
@@ -142,6 +143,8 @@ packages = [
   "lintro.formatters",
   "lintro.formatters.core",
   "lintro.formatters.styles",
+  "lintro.licenses",
+  "lintro.licenses.ecosystems",
   "lintro.models",
   "lintro.models.core",
   "lintro.parsers",
@@ -171,6 +174,7 @@ packages = [
   "lintro.parsers.shellcheck",
   "lintro.parsers.shfmt",
   "lintro.parsers.sqlfluff",
+  "lintro.parsers.stylelint",
   "lintro.parsers.svelte_check",
   "lintro.parsers.taplo",
   "lintro.parsers.pydoclint",
@@ -195,6 +199,7 @@ packages = [
 
 [tool.setuptools.package-data]
 lintro = ["tools/*.json"]
+"lintro.ai.review.checklist" = ["corpus/*.yaml"]
 
 [tool.ruff]
 line-length = 88
@@ -237,14 +242,18 @@ exclude = "/(\n    \\.git\n    | \\.venv\n    | venv\n    | build\n    | dist\n 
 
 [tool.bandit]
 exclude_dirs = ["test_samples"]
-# Global skips for rules that are unavoidable or noisy in a tool-runner codebase.
-# Prefer inline ``# nosec Bxxx - reason`` at call sites when removing a skip.
+# Suppression policy (see issue #1026):
+#   - Global skips are reserved for rules that are genuinely universal noise
+#     across the whole codebase and cannot be meaningfully scoped.
+#   - Subprocess rules (B404/B603/B607) are NOT skipped globally: subprocess is
+#     the core execution mechanism, but each call site must be reviewed and
+#     suppressed inline with a justification, e.g.
+#       ``subprocess.run(...)  # nosec B603 - resolved binary, shell=False, no user shell input``
+#   - Use a file-top / per-call-site ``# nosec Bxxx - <specific reason>`` rather
+#     than a broad global skip whenever the rule can apply to new code.
 skips = [
-  "B101", # assert_used — pytest and test helpers rely on ``assert``
-  "B404", # import_subprocess — subprocess is the core execution mechanism
-  "B603", # subprocess_without_shell_equals_true — every tool invocation uses subprocess; mitigate with ``shell=False`` and resolved binaries
-  "B607", # start_process_with_a_partial_path — ``shutil.which`` often returns bare command names (``git``, ``ruff``)
-  "B108", # hardcoded_tmp_directory — ``/tmp`` appears in fixtures and temp-path examples
+  "B101", # assert_used — pytest and test helpers rely on ``assert`` across all of tests/; genuinely universal, cannot be scoped meaningfully
+  "B108", # hardcoded_tmp_directory — ``/tmp`` appears in fixtures and temp-path examples throughout tests; universal noise
 ]
 
 [tool.lintro]

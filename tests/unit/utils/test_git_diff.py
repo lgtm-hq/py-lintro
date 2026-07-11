@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-import subprocess
+import subprocess  # nosec B404 - subprocess is used to drive git under test; invocations use shell=False
 from collections.abc import Iterator
 from pathlib import Path
 
@@ -38,7 +38,7 @@ def _git(repo: Path, *args: str) -> None:
         repo: Repository working directory.
         *args: Git arguments (without the leading ``git``).
     """
-    subprocess.run(
+    subprocess.run(  # nosec B603 B607 - fixed argv run against git in a controlled test; binary name resolved from PATH, not attacker-controlled; shell=False, no user shell input
         ["git", *args],
         cwd=repo,
         check=True,
