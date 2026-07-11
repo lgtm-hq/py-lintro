@@ -21,6 +21,18 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.75.0] - 2026-07-11
+
+### Added
+
+- **plugins**: support third-party tool plugins via Python entry points (#1137)
+  (d659c93)
+
+### Changed
+
+- **config**: scope subprocess lint suppressions (B404/B603/B607) (#1135) (a2b597e)
+- **ai/review**: externalize builtin checklist corpus to YAML (#1130) (9f9205c)
+
 ## [0.74.0] - 2026-07-10
 
 ### Added
