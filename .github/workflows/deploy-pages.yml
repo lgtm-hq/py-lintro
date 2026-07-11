@@ -29,7 +29,10 @@ jobs:
       contents: read
       pages: write
       id-token: write
-      actions: read
+      # write: reusable-deploy-site-with-reports v0.52.3 requests actions:
+      # write (self-heal rerun artifact pruning, lgtm-ci#415); a lower caller
+      # grant is a parse-time startup_failure
+      actions: write
     # v0.32.4+ passes github.token as GH_TOKEN into bundle-workflow-artifacts
     # (lgtm-ci#300). v0.32.3 left gh unauthenticated and blocked Pages deploy
     # after #974 (see #1227). Pin with the repo-standard v0.52.3 tooling.

@@ -582,6 +582,8 @@ def test_deploy_pages_pins_bundler_with_github_token() -> None:
     assert_that(uses).contains(_LGTM_CI_PIN)
     assert_that(uses).contains("reusable-deploy-site-with-reports.yml")
     assert_that(tooling_ref).contains(_LGTM_CI_PIN)
-    assert_that(deploy["permissions"]).contains_entry({"actions": "read"})
+    # v0.52.3 build job requests actions: write (lgtm-ci#415 rerun
+    # self-heal); a lower caller grant is a parse-time startup_failure.
+    assert_that(deploy["permissions"]).contains_entry({"actions": "write"})
     assert_that(deploy["permissions"]).contains_entry({"pages": "write"})
     assert_that(deploy["permissions"]).contains_entry({"id-token": "write"})
