@@ -28,7 +28,9 @@ jobs:
       egress-policy: block
       egress-preset: sbom
     permissions:
-      contents: read
+      # write: reusable-sbom v0.52.3 requests contents: write (release SBOM
+      # asset upload); a lower caller grant is a parse-time startup_failure
+      contents: write
       security-events: write
       id-token: write
       attestations: write
