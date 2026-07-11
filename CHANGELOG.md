@@ -21,6 +21,18 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.77.2] - 2026-07-11
+
+### Changed
+
+- **ci**: adopt canonical emoji check names (#1283) (eb63aa7)
+- **ci**: unify lgtm-ci pins at v0.52.3 (#1281) (2ef4016)
+
+### Fixed
+
+- **ci**: pass complete egress allowlist to release version-pr job (#1288) (623fb06)
+- **ci**: grant permissions required by lgtm-ci v0.52.3 reusables (#1285) (d50428e)
+
 ## [0.77.1] - 2026-07-11
 
 ### Fixed
