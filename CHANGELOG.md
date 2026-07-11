@@ -21,6 +21,12 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.77.0] - 2026-07-11
+
+### Added
+
+- **licenses**: add dependency license compliance checking (#1178) (83cf9a7)
+
 ## [0.76.0] - 2026-07-11
 
 ### Added
