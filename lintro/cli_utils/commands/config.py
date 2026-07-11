@@ -171,6 +171,11 @@ def _output_json(
 
     output: dict[str, Any] = {
         "config_source": config.config_path or "defaults",
+        "global_config": {
+            "found": config.global_config_path is not None,
+            "path": config.global_config_path,
+            "contributed_keys": config.global_contributed_keys,
+        },
         "global_settings": {
             "line_length": config.enforce.line_length,
             "target_python": config.enforce.target_python,
@@ -211,6 +216,51 @@ def _output_json(
     print(json.dumps(output, indent=2))
 
 
+def _print_global_config(
+    console: Console,
+    config: LintroConfig,
+) -> None:
+    """Print the user-level global config section.
+
+    Shows whether a global config file (``~/.lintro-config.yaml`` or the XDG
+    fallback) was found, its resolved path, and which effective values it
+    contributed (keys the project config did not override).
+
+    Args:
+        console: Rich Console instance.
+        config: Loaded configuration.
+    """
+    global_table = Table(
+        title="Global Config",
+        show_header=False,
+        box=None,
+    )
+    global_table.add_column("Setting", style="cyan", width=25)
+    global_table.add_column("Value", style="yellow")
+
+    found = config.global_config_path is not None
+    global_table.add_row(
+        "found",
+        "[green]yes[/green]" if found else "[dim]no[/dim]",
+    )
+    global_table.add_row(
+        "path",
+        config.global_config_path or "[dim]Not found[/dim]",
+    )
+
+    contributed = config.global_contributed_keys
+    if contributed:
+        contributed_display = ", ".join(contributed)
+    elif found:
+        contributed_display = "[dim]None (all overridden by project)[/dim]"
+    else:
+        contributed_display = "[dim]None[/dim]"
+    global_table.add_row("contributed_values", contributed_display)
+
+    console.print(global_table)
+    console.print()
+
+
 def _output_rich(
     console: Console,
     config: LintroConfig,
@@ -236,6 +286,9 @@ def _output_rich(
     config_source = config.config_path or "[dim]No config file (using defaults)[/dim]"
     console.print(f"[bold]Config Source:[/bold] {config_source}")
     console.print()
+
+    # Global Config Section (user-level ~/.lintro-config.yaml)
+    _print_global_config(console=console, config=config)
 
     # Global Settings Section
     global_table = Table(

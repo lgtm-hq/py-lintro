@@ -43,7 +43,12 @@ class LintroConfig(BaseModel):
         ai: AI-powered features configuration (optional, disabled by default).
         review: Diff review command configuration (checklist items).
         score: Health score weights and scale (0-100 metric).
-        config_path: Path to the config file (set by loader).
+        config_path: Path to the project config file (set by loader).
+        global_config_path: Path to the user-level global config file, if one
+            was found and merged (set by loader).
+        global_contributed_keys: Dotted key paths whose effective value came
+            from the global config (i.e. the project config did not override
+            them). Set by loader.
     """
 
     model_config = ConfigDict(frozen=False, extra="forbid")
@@ -56,6 +61,8 @@ class LintroConfig(BaseModel):
     review: ReviewConfig = Field(default_factory=ReviewConfig)
     score: ScoreConfig = Field(default_factory=ScoreConfig)
     config_path: str | None = None
+    global_config_path: str | None = None
+    global_contributed_keys: list[str] = Field(default_factory=list)
 
     def get_tool_config(self, tool_name: str) -> LintroToolConfig:
         """Get configuration for a specific tool.

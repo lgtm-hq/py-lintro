@@ -81,6 +81,54 @@ For a tool like Prettier:
 
 This ensures consistent behavior while respecting tool-specific configurations.
 
+### Configuration Source Precedence
+
+Independently of the tier model above (which describes _how_ each section is applied),
+Lintro resolves _where_ config values come from in a fixed order. Later sources override
+earlier ones **key-by-key** via a deep merge, including nested `ai:` and `tools:`
+sections:
+
+1. **Built-in defaults** — the empty baseline configuration.
+2. **User-level global config** — `~/.lintro-config.yaml` (see below). Supplies base
+   values shared across all your projects.
+3. **Project config** — the first of: an explicit `--config` path, an upward-searched
+   `.lintro-config.yaml` variant, or `[tool.lintro]` in `pyproject.toml`. Overrides the
+   global config per key.
+
+A value set in the global config survives only where the project config does not
+override that exact key path. A missing or empty global file is never an error.
+
+### User-Level Global Config
+
+Place a `~/.lintro-config.yaml` in your home directory to share settings across every
+project. It uses the exact same schema as a project `.lintro-config.yaml`. Project
+config always wins on a per-key basis, so the global file is best for personal defaults
+(for example an `ai:` block or a preferred `enforce.line_length`) that individual
+projects can still override.
+
+**Resolution order** (first existing file wins):
+
+1. `~/.lintro-config.yaml` — the primary, authoritative location.
+2. `$XDG_CONFIG_HOME/lintro/config.yaml` — an XDG fallback, where `$XDG_CONFIG_HOME`
+   defaults to `~/.config` when unset.
+
+The home-directory dotfile deliberately takes precedence over the XDG fallback when both
+exist, so `~/.lintro-config.yaml` is always authoritative.
+
+Run `lintro config` to see a **Global Config** section reporting whether a global file
+was found, its resolved path, and which effective values it contributed (the keys your
+project config did not override). The same details appear under `global_config` in
+`lintro config --json`.
+
+```yaml
+# ~/.lintro-config.yaml — applies to all your projects unless overridden
+enforce:
+  line_length: 100
+ai:
+  enabled: true
+  provider: anthropic
+```
+
 ## Lintro Configuration
 
 ### Configuration File: `.lintro-config.yaml`
