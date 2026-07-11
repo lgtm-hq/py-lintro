@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-import subprocess
+import subprocess  # nosec B404 - subprocess is used for TimeoutExpired in mocked tool execution tests
 from pathlib import Path
 from typing import cast
 from unittest.mock import patch
