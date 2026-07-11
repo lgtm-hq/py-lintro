@@ -42,11 +42,13 @@ def _git_sha() -> str:
         str: Short SHA, or ``"unknown"`` when git is unavailable.
     """
     try:
-        completed = subprocess.run(  # noqa: S603,S607 - fixed argv, trusted  # nosec B603 B607
-            ["git", "rev-parse", "--short", "HEAD"],
-            capture_output=True,
-            text=True,
-            check=False,
+        completed = (
+            subprocess.run(  # noqa: S603,S607 - fixed argv, trusted  # nosec B603 B607
+                ["git", "rev-parse", "--short", "HEAD"],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
         )
     except OSError:
         return "unknown"

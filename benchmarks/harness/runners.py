@@ -111,8 +111,9 @@ def _pre_commit_command(fixture_dir: Path, config: Path) -> list[str]:
     Returns:
         list[str]: Argv for the pre-commit run.
     """
+    executable = "pre-commit" if which("pre-commit") is not None else "prek"
     return [
-        "pre-commit",
+        executable,
         "run",
         "--config",
         str(config),

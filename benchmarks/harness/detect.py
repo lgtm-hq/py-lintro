@@ -58,11 +58,15 @@ def _pre_commit_available() -> Availability:
         Availability: Status for the pre-commit competitor.
     """
     if which("pre-commit") is not None or which("prek") is not None:
-        return Availability(CompetitorTool.PRE_COMMIT, True, "found on PATH")
+        return Availability(
+            tool=CompetitorTool.PRE_COMMIT,
+            available=True,
+            reason="found on PATH",
+        )
     return Availability(
-        CompetitorTool.PRE_COMMIT,
-        False,
-        "neither 'pre-commit' nor 'prek' found on PATH",
+        tool=CompetitorTool.PRE_COMMIT,
+        available=False,
+        reason="neither 'pre-commit' nor 'prek' found on PATH",
     )
 
 
@@ -77,20 +81,20 @@ def _megalinter_available() -> Availability:
     """
     if which("mega-linter-runner") is not None:
         return Availability(
-            CompetitorTool.MEGALINTER,
-            True,
-            "mega-linter-runner on PATH",
+            tool=CompetitorTool.MEGALINTER,
+            available=True,
+            reason="mega-linter-runner on PATH",
         )
     if which("docker") is not None:
         return Availability(
-            CompetitorTool.MEGALINTER,
-            True,
-            "docker available (image pulled on first run)",
+            tool=CompetitorTool.MEGALINTER,
+            available=True,
+            reason="docker available (image pulled on first run)",
         )
     return Availability(
-        CompetitorTool.MEGALINTER,
-        False,
-        "neither 'mega-linter-runner' nor 'docker' found on PATH",
+        tool=CompetitorTool.MEGALINTER,
+        available=False,
+        reason="neither 'mega-linter-runner' nor 'docker' found on PATH",
     )
 
 
@@ -106,14 +110,14 @@ def detect_runners() -> dict[CompetitorTool, Availability]:
     """
     return {
         CompetitorTool.LINTRO: Availability(
-            CompetitorTool.LINTRO,
-            True,
-            "invoked via 'uv run lintro'",
+            tool=CompetitorTool.LINTRO,
+            available=True,
+            reason="invoked via 'uv run lintro'",
         ),
         CompetitorTool.SEQUENTIAL: Availability(
-            CompetitorTool.SEQUENTIAL,
-            True,
-            "invoked via 'uv run' against lintro-managed tools",
+            tool=CompetitorTool.SEQUENTIAL,
+            available=True,
+            reason="invoked via 'uv run' against lintro-managed tools",
         ),
         CompetitorTool.PRE_COMMIT: _pre_commit_available(),
         CompetitorTool.MEGALINTER: _megalinter_available(),
