@@ -427,9 +427,9 @@ def test_get_all_tool_versions(mock_run: MagicMock) -> None:
     results = get_all_tool_versions()
 
     # Dynamically build expected set from registry (same source of truth)
-    from lintro.tools.core.tool_registry import ToolRegistry
+    from lintro.tools.core.tool_registry import ManifestRegistry
 
-    registry = ToolRegistry.load()
+    registry = ManifestRegistry.load()
     expected_tools = {
         tool.name
         for tool in registry.all_tools(include_dev=True)

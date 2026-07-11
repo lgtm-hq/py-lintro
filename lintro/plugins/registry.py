@@ -1,7 +1,14 @@
 """Tool registry for discovering and managing Lintro plugins.
 
 This module provides a central registry for all Lintro tools, supporting
-both built-in tools and external plugins discovered via entry points.
+both built-in tools and external plugins discovered via entry points. It
+owns *live plugin instances* (registered ``BaseToolPlugin`` subclasses) and
+handles registration, lazy instantiation, and lookup by name.
+
+This is distinct from :class:`lintro.tools.core.tool_registry.ManifestRegistry`
+(formerly also named ``ToolRegistry``), which owns static tool *metadata*
+(versions, install commands, language mappings, profiles) parsed from
+``manifest.json`` rather than live plugin instances.
 
 Example:
     >>> from lintro.plugins.registry import ToolRegistry, register_tool
@@ -36,6 +43,10 @@ class ToolRegistry:
     and listing tools.
 
     The registry is thread-safe and uses lazy instantiation for tool instances.
+
+    Not to be confused with
+    :class:`lintro.tools.core.tool_registry.ManifestRegistry`, which manages
+    manifest-derived tool metadata rather than live plugin instances.
     """
 
     _tools: dict[str, type[BaseToolPlugin]] = {}
