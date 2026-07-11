@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import os
-import subprocess
+import subprocess  # nosec B404 - subprocess is used to drive the tool/CLI under test; invocations use shell=False
 import tempfile
 from pathlib import Path
 
@@ -30,7 +30,7 @@ _REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 def test_docker_ci_scripts_expose_help(script: str) -> None:
     """Each docker-ci helper script should support --help."""
     script_path = (_REPO_ROOT / script).resolve()
-    result = subprocess.run(
+    result = subprocess.run(  # nosec B603 - fixed argv run against a real binary in a controlled test; shell=False, no user shell input
         [str(script_path), "--help"],
         capture_output=True,
         text=True,
@@ -59,7 +59,7 @@ def test_detect_fork_pr_writes_github_output(
         output_path = output_file.name
 
     try:
-        result = subprocess.run(
+        result = subprocess.run(  # nosec B603 - fixed argv run against a real binary in a controlled test; shell=False, no user shell input
             [str(script_path)],
             capture_output=True,
             text=True,
@@ -81,7 +81,7 @@ def test_detect_fork_pr_writes_github_output(
 def test_pull_ci_docker_images_requires_ci_tag() -> None:
     """pull-ci-docker-images.sh should fail when CI_TAG is missing."""
     script_path = (_REPO_ROOT / "scripts/ci/testing/pull-ci-docker-images.sh").resolve()
-    result = subprocess.run(
+    result = subprocess.run(  # nosec B603 - fixed argv run against a real binary in a controlled test; shell=False, no user shell input
         [str(script_path), "full"],
         capture_output=True,
         text=True,
