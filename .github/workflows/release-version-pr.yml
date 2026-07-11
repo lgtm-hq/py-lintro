@@ -38,6 +38,21 @@ jobs:
       # Paired with release-auto-tag.yml (egress-preset: github-tooling).
       # Guarded by test_release_workflows_use_paired_egress_presets.
       egress-preset: pypi
+      # Since lgtm-ci v0.50.0 the enforcing harden-runner step runs before
+      # preset resolution, so the preset's extra hosts never reach it and
+      # pip is blocked from PyPI (#1287, lgtm-hq/lgtm-ci#512). Pass the
+      # complete list explicitly; harden-runner splits on spaces, so keep
+      # the folded scalar.
+      allowed-endpoints: >-
+        github.com:443
+        api.github.com:443
+        codeload.github.com:443
+        objects.githubusercontent.com:443
+        raw.githubusercontent.com:443
+        uploads.github.com:443
+        pipelines.actions.githubusercontent.com:443
+        pypi.org:443
+        files.pythonhosted.org:443
     secrets:
       RELEASE_APP_ID: ${{ secrets.RELEASE_APP_ID }}
       RELEASE_APP_PRIVATE_KEY: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
