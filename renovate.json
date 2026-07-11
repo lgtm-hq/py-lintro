@@ -8,20 +8,9 @@
   ],
   "packageRules": [
     {
-      "matchDatasources": ["docker"],
-      "matchUpdateTypes": ["digest", "patch"],
-      "automerge": true,
-      "automergeType": "branch"
-    },
-    {
       "matchDatasources": ["pypi"],
       "matchUpdateTypes": ["minor"],
       "automerge": false
-    },
-    {
-      "groupName": "pytest packages",
-      "groupSlug": "pytest",
-      "matchPackageNames": ["/^pytest/"]
     },
     {
       "matchManagers": [
