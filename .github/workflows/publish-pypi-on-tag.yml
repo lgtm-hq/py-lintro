@@ -26,6 +26,41 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  classify-tag:
+    name: Classify release tag
+    if: ${{ !startsWith(github.ref_name, 'actions-v') }}
+    runs-on: ubuntu-latest
+    permissions:
+      # read: sparse checkout of scripts for the classifier
+      contents: read
+    outputs:
+      # true when github.ref_name is a prerelease (alpha/beta/rc or any
+      # non-``X.Y.Z`` suffix); false for stable releases including +build
+      # metadata. Consumed by Homebrew/npm/Docker gating below.
+      is_prerelease: ${{ steps.classify.outputs.is_prerelease }}
+    steps:
+      - name: Harden runner
+        # yamllint disable-line rule:line-length
+        uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
+        with:
+          egress-policy: block
+          allowed-endpoints: >
+            github.com:443
+            api.github.com:443
+            codeload.github.com:443
+            objects.githubusercontent.com:443
+      - name: Checkout scripts
+        # yamllint disable-line rule:line-length
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          sparse-checkout: scripts/ci/classify-release-tag.py
+          sparse-checkout-cone-mode: false
+      - name: Classify tag
+        id: classify
+        env:
+          TAG_NAME: ${{ github.ref_name }}
+        run: python3 scripts/ci/classify-release-tag.py "$TAG_NAME"
+
   sbom:
     name: Generate and verify SBOM
     if: ${{ !startsWith(github.ref_name, 'actions-v') }}
@@ -154,12 +189,10 @@ jobs:
 
   homebrew-tap:
     name: Publish Homebrew Tap
-    needs: [pypi-upload, github-release]
+    needs: [classify-tag, pypi-upload, github-release]
     if: >-
       !startsWith(github.ref_name, 'actions-v') &&
-      !contains(github.ref_name, 'a') &&
-      !contains(github.ref_name, 'b') &&
-      !contains(github.ref_name, 'rc')
+      needs.classify-tag.outputs.is_prerelease == 'false'
     uses: ./.github/workflows/build-binary.yml
     permissions:
       # write: push formula updates to Homebrew tap repository
@@ -175,12 +208,10 @@ jobs:
     # platform binaries to the GitHub release, which publish-npm.yml
     # downloads. Gated to stable releases only, since build-binary does not
     # run for prereleases.
-    needs: [homebrew-tap]
+    needs: [classify-tag, homebrew-tap]
     if: >-
       !startsWith(github.ref_name, 'actions-v') &&
-      !contains(github.ref_name, 'a') &&
-      !contains(github.ref_name, 'b') &&
-      !contains(github.ref_name, 'rc')
+      needs.classify-tag.outputs.is_prerelease == 'false'
     uses: ./.github/workflows/publish-npm.yml
     permissions:
       # read: checkout and download release assets
@@ -195,13 +226,11 @@ jobs:
 
   docker-publish:
     name: Publish Docker Images to GHCR
-    needs: [pypi-upload]
+    needs: [classify-tag, pypi-upload]
     # yamllint disable-line rule:line-length
     if: >-
       !startsWith(github.ref_name, 'actions-v') &&
-      !contains(github.ref_name, 'a') &&
-      !contains(github.ref_name, 'b') &&
-      !contains(github.ref_name, 'rc')
+      needs.classify-tag.outputs.is_prerelease == 'false'
     uses: ./.github/workflows/docker-build-publish.yml
     permissions:
       # read: checkout for Docker build context
