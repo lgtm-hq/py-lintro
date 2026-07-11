@@ -22,6 +22,7 @@ class ToolName(StrEnum):
     GITLEAKS = auto()
     HADOLINT = auto()
     IDIOM_REVIEW = auto()
+    J2LINT = auto()
     MARKDOWNLINT = auto()
     MYPY = auto()
     OSV_SCANNER = auto()

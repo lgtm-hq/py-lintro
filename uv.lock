@@ -883,6 +883,19 @@ wheels = [
 ]
 
 [[package]]
+name = "j2lint"
+version = "1.2.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "jinja2" },
+    { name = "rich" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/41/b8/c3a194c6ec14d51104ac9070564b42c0335ba131d7d27e3e137d227c2a1d/j2lint-1.2.0.tar.gz", hash = "sha256:3bb9d2a3e3eb1647fe6c469bfbd2c2a9a8597378cda8590ed9eb7df7f3334639", size = 32451, upload-time = "2025-04-04T07:51:17.58Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/05/7c/f24df7f5fca454036ed4d87847c81390793d120c3c89629cef8d79ecc3fc/j2lint-1.2.0-py3-none-any.whl", hash = "sha256:cda7fab7af742f25dcb4925168de785721dcf66c7add2063d8e3643241e19e4e", size = 34880, upload-time = "2025-04-04T07:51:15.536Z" },
+]
+
+[[package]]
 name = "jaraco-classes"
 version = "3.4.0"
 source = { registry = "https://pypi.org/simple" }
@@ -1185,6 +1198,7 @@ dev = [
 full = [
     { name = "bandit" },
     { name = "black" },
+    { name = "j2lint" },
     { name = "mypy" },
     { name = "pydoclint" },
     { name = "ruff" },
@@ -1217,6 +1231,7 @@ dev = [
     { name = "bandit" },
     { name = "black" },
     { name = "build" },
+    { name = "j2lint" },
     { name = "mypy" },
     { name = "pytest" },
     { name = "pytest-cov" },
@@ -1246,6 +1261,7 @@ requires-dist = [
     { name = "httpx", specifier = ">=0.28.1" },
     { name = "httpx", marker = "extra == 'dev'", specifier = ">=0.28.1" },
     { name = "identify", specifier = ">=2.6.19" },
+    { name = "j2lint", marker = "extra == 'full'", specifier = ">=1.2.0" },
     { name = "loguru", specifier = ">=0.7.3" },
     { name = "mypy", marker = "extra == 'dev'", specifier = ">=1.19.1" },
     { name = "mypy", marker = "extra == 'full'", specifier = ">=1.19.1" },
@@ -1288,6 +1304,7 @@ dev = [
     { name = "bandit", specifier = ">=1.9.4" },
     { name = "black", specifier = ">=26.3.1" },
     { name = "build", specifier = ">=1.4.0" },
+    { name = "j2lint", specifier = ">=1.2.0" },
     { name = "mypy", specifier = ">=1.19.1" },
     { name = "pytest", specifier = ">=9.0.3" },
     { name = "pytest-cov", specifier = ">=7.0.0" },

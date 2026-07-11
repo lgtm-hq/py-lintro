@@ -167,7 +167,7 @@ should_install() {
 # Kept in sync with the should_install blocks and tools_to_verify array.
 SUPPORTED_TOOLS=(
 	"actionlint" "astro" "bandit" "black" "cargo-audit" "cargo-deny"
-	"clippy" "commitlint" "gitleaks" "hadolint" "markdownlint" "markdownlint-cli2" "mypy" "osv-scanner"
+	"clippy" "commitlint" "gitleaks" "hadolint" "j2lint" "markdownlint" "markdownlint-cli2" "mypy" "osv-scanner"
 	"oxfmt" "oxlint" "prettier" "pydoclint" "ruff" "rustfmt" "semgrep"
 	"shellcheck" "shfmt" "sqlfluff" "stylelint" "svelte-check" "taplo" "tsc"
 	"vale" "vue-tsc" "yamllint"
@@ -1098,6 +1098,20 @@ main() {
 		fi
 	fi # bandit
 
+	if should_install "j2lint"; then
+		# Install j2lint (Jinja2 template linter)
+		echo -e "${BLUE}Installing j2lint...${NC}"
+		J2LINT_VERSION=$(get_tool_version "j2lint") || exit 1
+		if [ $DRY_RUN -eq 1 ]; then
+			log_info "[DRY-RUN] Would install j2lint==${J2LINT_VERSION}"
+		elif install_python_package "j2lint" "$J2LINT_VERSION"; then
+			echo -e "${GREEN}✓ j2lint installed successfully${NC}"
+		else
+			echo -e "${RED}✗ Failed to install j2lint${NC}"
+			exit 1
+		fi
+	fi # j2lint
+
 	if should_install "mypy"; then
 		# Install mypy (Python type checker)
 		echo -e "${BLUE}Installing mypy...${NC}"
@@ -1544,6 +1558,7 @@ main() {
 		["clippy"]="Rust linting"
 		["gitleaks"]="Secret detection"
 		["hadolint"]="Docker linting"
+		["j2lint"]="Jinja2 template linting"
 		["markdownlint"]="Markdown linting"
 		["mypy"]="Python type checking"
 		["osv-scanner"]="Multi-ecosystem vulnerability scanning"
@@ -1575,7 +1590,7 @@ main() {
 	# Verify installations
 	echo -e "${YELLOW}Verifying installations...${NC}"
 
-	tools_to_verify=("actionlint" "astro" "bandit" "black" "cargo-audit" "cargo-deny" "clippy" "commitlint" "gitleaks" "hadolint" "markdownlint-cli2" "mypy" "osv-scanner" "oxfmt" "oxlint" "prettier" "pydoclint" "ruff" "rustfmt" "semgrep" "shellcheck" "shfmt" "sqlfluff" "stylelint" "svelte-check" "taplo" "tsc" "vale" "vue-tsc" "yamllint")
+	tools_to_verify=("actionlint" "astro" "bandit" "black" "cargo-audit" "cargo-deny" "clippy" "commitlint" "gitleaks" "hadolint" "j2lint" "markdownlint-cli2" "mypy" "osv-scanner" "oxfmt" "oxlint" "prettier" "pydoclint" "ruff" "rustfmt" "semgrep" "shellcheck" "shfmt" "sqlfluff" "stylelint" "svelte-check" "taplo" "tsc" "vale" "vue-tsc" "yamllint")
 
 	# Filter verification list when --tools is set.
 	# Map aliases so e.g. --tools markdownlint verifies markdownlint-cli2.

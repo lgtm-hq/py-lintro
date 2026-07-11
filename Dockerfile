@@ -107,7 +107,7 @@ RUN echo "=== Verifying all tools ===" && \
     rustfmt --version && cargo clippy --version && cargo audit --version && \
     cargo deny --version && actionlint --version && bandit --version && \
     black --version && commitlint --version && gitleaks version && \
-    hadolint --version && \
+    hadolint --version && j2lint --version && \
     markdownlint-cli2 --version && mypy --version && osv-scanner --version && \
     oxfmt --version && oxlint --version && prettier --version && \
     pydoclint --version && ruff --version && semgrep --version && \
@@ -167,7 +167,8 @@ RUN echo "Verifying tools..." && \
     commitlint --version && \
     markdownlint-cli2 --version && tsc --version && astro --version && \
     vue-tsc --version && oxlint --version && oxfmt --version && \
-    bandit --version && mypy --version && pydoclint --version && \
+    bandit --version && j2lint --version && mypy --version && \
+    pydoclint --version && \
     yamllint --version && sqlfluff --version && stylelint --version && \
     vale --version && \
     echo "All tools verified!"
