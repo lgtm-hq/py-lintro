@@ -7,7 +7,7 @@ template resources inside a freshly built wheel.
 
 from __future__ import annotations
 
-import subprocess
+import subprocess  # nosec B404 - subprocess drives uv build under test; invocations use shell=False
 import tempfile
 import zipfile
 from pathlib import Path
@@ -152,7 +152,7 @@ def test_templates_present_in_built_wheel() -> None:
     project_root = Path(__file__).parents[4]
     with tempfile.TemporaryDirectory() as tmpdir:
         dist_dir = Path(tmpdir) / "dist"
-        build_result = subprocess.run(
+        build_result = subprocess.run(  # nosec B603 B607 - fixed argv run against uv in a controlled test; binary name resolved from PATH, not attacker-controlled; shell=False, no user shell input
             ["uv", "build", "--wheel", "--out-dir", str(dist_dir)],
             cwd=str(project_root),
             capture_output=True,
