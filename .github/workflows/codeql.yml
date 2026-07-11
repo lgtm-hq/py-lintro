@@ -38,8 +38,19 @@ jobs:
       tooling-ref: '66cad82ead0e5d119928c895c7d7da9c837989e5' # v0.52.3
       egress-policy: block
       egress-preset: github-tooling
-      allowed-endpoints-mode: append
-      allowed-endpoints: release-assets.githubusercontent.com:443
+      # Full list (v0.50.0+ replace semantics): the reusable passes
+      # allowed-endpoints verbatim to step-security/harden-runner, so a
+      # non-empty value must include the github-tooling baseline.
+      allowed-endpoints-mode: replace
+      allowed-endpoints: >
+        github.com:443
+        api.github.com:443
+        codeload.github.com:443
+        objects.githubusercontent.com:443
+        raw.githubusercontent.com:443
+        uploads.github.com:443
+        pipelines.actions.githubusercontent.com:443
+        release-assets.githubusercontent.com:443
     permissions:
       contents: read
       security-events: write

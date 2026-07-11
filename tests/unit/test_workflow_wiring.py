@@ -505,6 +505,31 @@ def test_publish_npm_exposes_dist_tag_for_backfills() -> None:
 _LGTM_CI_PIN = "66cad82ead0e5d119928c895c7d7da9c837989e5"
 
 
+def test_all_lgtm_ci_refs_use_the_canonical_pin() -> None:
+    """Every lgtm-ci ref in workflows must match the single canonical pin.
+
+    Guards the repo-wide invariant from #1280: `uses:` refs and
+    `tooling-ref:` inputs all point at the same lgtm-ci commit, so pins
+    cannot silently drift apart again.
+    """
+    ref_pattern = re.compile(
+        r"lgtm-hq/lgtm-ci/[^@\s]+@([0-9a-f]{40})" r"|tooling-ref: '([0-9a-f]{40})'",
+    )
+    workflows_dir = _REPO_ROOT / ".github" / "workflows"
+    offenders: list[str] = []
+    for path in sorted(workflows_dir.glob("*.yml")):
+        for lineno, line in enumerate(
+            path.read_text(encoding="utf-8").splitlines(),
+            start=1,
+        ):
+            for match in ref_pattern.finditer(line):
+                sha = match.group(1) or match.group(2)
+                if sha != _LGTM_CI_PIN:
+                    offenders.append(f"{path.name}:{lineno}: {sha}")
+
+    assert_that(offenders).is_empty()
+
+
 def test_stage_coverage_html_allows_setup_uv_manifest_host() -> None:
     """Coverage staging must allow raw.githubusercontent.com for setup-uv.
 
