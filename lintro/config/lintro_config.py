@@ -70,7 +70,12 @@ class LintroConfig(BaseModel):
         output: Console output presentation settings (e.g. ASCII art toggle).
         watch: Watch-mode (``lintro watch``) defaults.
         deps: Dependency version policy configuration.
-        config_path: Path to the config file (set by loader).
+        config_path: Path to the project config file (set by loader).
+        global_config_path: Path to the user-level global config file, if one
+            was found and merged (set by loader).
+        global_contributed_keys: Dotted key paths whose effective value came
+            from the global config (i.e. the project config did not override
+            them). Set by loader.
     """
 
     model_config = ConfigDict(frozen=False, extra="forbid")
@@ -86,6 +91,8 @@ class LintroConfig(BaseModel):
     watch: WatchConfig = Field(default_factory=WatchConfig)
     deps: DepsConfig = Field(default_factory=DepsConfig)
     config_path: str | None = None
+    global_config_path: str | None = None
+    global_contributed_keys: list[str] = Field(default_factory=list)
 
     def get_tool_config(self, tool_name: str) -> LintroToolConfig:
         """Get configuration for a specific tool.

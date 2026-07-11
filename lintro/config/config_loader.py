@@ -12,6 +12,7 @@ Supports the new tiered configuration model:
 
 from __future__ import annotations
 
+import os
 import tomllib
 from pathlib import Path
 from typing import Any, NamedTuple
@@ -74,6 +75,110 @@ PYPROJECT_ORDERING_KEYS: frozenset[str] = frozenset(
         "tool_priorities",
     },
 )
+
+# User-level global config file in the home directory. This is the primary
+# global location and takes precedence over the XDG fallback below when both
+# exist. See ``_find_global_config_file`` for the full resolution order.
+GLOBAL_CONFIG_FILENAME = ".lintro-config.yaml"
+
+# XDG base directory fallback: ``$XDG_CONFIG_HOME/lintro/config.yaml`` (with
+# ``$XDG_CONFIG_HOME`` defaulting to ``~/.config``). Only consulted when the
+# home-directory dotfile above is absent.
+XDG_GLOBAL_CONFIG_RELPATH = Path("lintro") / "config.yaml"
+
+
+def _find_global_config_file() -> Path | None:
+    """Resolve the user-level global config file path, if present.
+
+    Resolution order (first existing file wins):
+
+    1. ``~/.lintro-config.yaml`` (home-directory dotfile, the primary location)
+    2. ``$XDG_CONFIG_HOME/lintro/config.yaml`` (XDG fallback; ``$XDG_CONFIG_HOME``
+       defaults to ``~/.config`` when unset)
+
+    The home-directory dotfile deliberately takes precedence over the XDG
+    fallback so a single documented path (``~/.lintro-config.yaml``) is always
+    authoritative when it exists.
+
+    Returns:
+        Path | None: Path to the global config file, or None if neither
+            location exists.
+    """
+    home_config = Path.home() / GLOBAL_CONFIG_FILENAME
+    if home_config.is_file():
+        return home_config
+
+    xdg_config_home = os.environ.get("XDG_CONFIG_HOME")
+    xdg_base = Path(xdg_config_home) if xdg_config_home else Path.home() / ".config"
+    xdg_config = xdg_base / XDG_GLOBAL_CONFIG_RELPATH
+    if xdg_config.is_file():
+        return xdg_config
+
+    return None
+
+
+def _deep_merge(
+    base: dict[str, Any],
+    override: dict[str, Any],
+) -> dict[str, Any]:
+    """Recursively merge ``override`` onto ``base``, returning a new dict.
+
+    Nested mappings are merged key-by-key; any non-mapping value in
+    ``override`` (including lists) replaces the corresponding value in
+    ``base`` wholesale. Neither input is mutated.
+
+    Args:
+        base: Base mapping providing fallback values (e.g. global config).
+        override: Mapping whose values take precedence (e.g. project config).
+
+    Returns:
+        dict[str, Any]: The deep-merged mapping.
+    """
+    result: dict[str, Any] = dict(base)
+    for key, value in override.items():
+        existing = result.get(key)
+        if isinstance(existing, dict) and isinstance(value, dict):
+            result[key] = _deep_merge(existing, value)
+        else:
+            result[key] = value
+    return result
+
+
+def _global_contributed_paths(
+    global_data: dict[str, Any],
+    project_data: dict[str, Any],
+    prefix: str = "",
+) -> list[str]:
+    """Compute dotted key paths whose effective value comes from global config.
+
+    A leaf value is "contributed" by the global config when the global config
+    supplies it and the project config does not override that exact key path.
+
+    Args:
+        global_data: Raw global config mapping.
+        project_data: Raw project config mapping (overrides global).
+        prefix: Internal dotted-path prefix used during recursion.
+
+    Returns:
+        list[str]: Sorted dotted key paths contributed by the global config.
+    """
+    paths: list[str] = []
+    for key, value in global_data.items():
+        path = f"{prefix}{key}"
+        project_has = isinstance(project_data, dict) and key in project_data
+        project_value = project_data.get(key) if project_has else None
+        if isinstance(value, dict):
+            sub_project = project_value if isinstance(project_value, dict) else {}
+            paths.extend(
+                _global_contributed_paths(
+                    global_data=value,
+                    project_data=sub_project,
+                    prefix=f"{path}.",
+                ),
+            )
+        elif not project_has:
+            paths.append(path)
+    return sorted(paths)
 
 
 def _find_config_file(start_dir: Path | None = None) -> Path | None:
@@ -819,11 +924,18 @@ def load_config(
 ) -> LintroConfig:
     """Load Lintro configuration.
 
-    Priority:
-    1. Explicit config_path if provided
-    2. .lintro-config.yaml found by searching upward
-    3. [tool.lintro] in pyproject.toml fallback
-    4. Default empty configuration
+    Precedence (lowest to highest, later tiers override earlier ones
+    key-by-key via deep merge):
+
+    1. Built-in defaults (empty configuration)
+    2. User-level global config (``~/.lintro-config.yaml`` or the XDG fallback)
+    3. Project config (explicit ``config_path``, an upward-searched
+       ``.lintro-config.yaml`` variant, or ``[tool.lintro]`` in
+       ``pyproject.toml``)
+
+    The global config supplies base values; the project config overrides them
+    key-by-key, including nested ``ai:`` and ``tools:`` sections. A missing or
+    empty global file is not an error.
 
     Args:
         config_path: Explicit path to config file. If None, searches for
@@ -839,33 +951,43 @@ def load_config(
             example a null ``tools.<name>`` entry or a non-mapping
             ``execution`` / ``enforce`` table).
     """
-    data: dict[str, Any] = {}
+    project_data: dict[str, Any] = {}
     resolved_path: str | None = None
 
     try:
+        # Load the user-level global config first (base tier). A missing or empty
+        # file is not an error.
+        global_data: dict[str, Any] = {}
+        global_config_path: str | None = None
+        global_file = _find_global_config_file()
+        if global_file is not None:
+            global_data = _load_yaml_file(global_file)
+            global_config_path = str(global_file.resolve())
+            logger.debug(f"Loaded global config from: {global_config_path}")
+
         # Try explicit path first
         if config_path:
             path = Path(config_path)
             if path.exists():
-                data = _load_yaml_file(path)
+                project_data = _load_yaml_file(path)
                 resolved_path = str(path.resolve())
                 logger.debug(f"Loaded config from explicit path: {resolved_path}")
             else:
                 logger.warning(f"Config file not found: {config_path}")
 
         # Try searching for .lintro-config.yaml
-        if not data:
+        if not project_data:
             found_path = _find_config_file()
             if found_path:
-                data = _load_yaml_file(found_path)
+                project_data = _load_yaml_file(found_path)
                 resolved_path = str(found_path.resolve())
                 logger.debug(f"Loaded config from: {resolved_path}")
 
         # Fall back to pyproject.toml
-        if not data and allow_pyproject_fallback:
+        if not project_data and allow_pyproject_fallback:
             pyproject_data, pyproject_path = _load_pyproject_fallback()
             if pyproject_data:
-                data = _convert_pyproject_to_config(pyproject_data)
+                project_data = _convert_pyproject_to_config(pyproject_data)
                 resolved_path = (
                     str(pyproject_path.resolve()) if pyproject_path else None
                 )
@@ -874,7 +996,15 @@ def load_config(
                     "Consider migrating to .lintro-config.yaml",
                 )
 
-        return build_config_from_dict(data, resolved_path=resolved_path)
+        # Deep-merge: global config is the base, project config overrides per key.
+        data = _deep_merge(base=global_data, override=project_data)
+        config = build_config_from_dict(data, resolved_path=resolved_path)
+        config.global_config_path = global_config_path
+        config.global_contributed_keys = _global_contributed_paths(
+            global_data=global_data,
+            project_data=project_data,
+        )
+        return config
     except ValueError as exc:
         raise ConfigurationError(str(exc)) from exc
 
@@ -959,6 +1089,8 @@ def build_config_from_dict(
         watch=watch_config,
         deps=deps_config,
         config_path=resolved_path,
+        global_config_path=global_config_path,
+        global_contributed_keys=global_contributed_keys,
     )
 
 
