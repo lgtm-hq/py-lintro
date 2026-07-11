@@ -143,6 +143,8 @@ packages = [
   "lintro.formatters",
   "lintro.formatters.core",
   "lintro.formatters.styles",
+  "lintro.licenses",
+  "lintro.licenses.ecosystems",
   "lintro.models",
   "lintro.models.core",
   "lintro.parsers",
