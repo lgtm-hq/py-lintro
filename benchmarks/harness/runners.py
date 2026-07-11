@@ -7,10 +7,10 @@ to hand directly to :func:`benchmarks.harness.timing.measure_command`.
 
 from __future__ import annotations
 
+import shlex
 from collections.abc import Sequence
 from dataclasses import dataclass
 from enum import StrEnum, auto
-import shlex
 from pathlib import Path
 
 from benchmarks.harness.detect import (
