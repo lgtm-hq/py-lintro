@@ -76,8 +76,9 @@ jobs:
       egress-policy: block
       egress-preset: sbom
     permissions:
-      # read: checkout repo for SBOM generation
-      contents: read
+      # write: reusable-sbom v0.52.3 requests contents: write (attach SBOM to
+      # release assets, lgtm-ci#505); a lower grant is a startup_failure
+      contents: write
       # write: upload vulnerability findings to GitHub Security tab
       security-events: write
       # write: OIDC for SBOM attestation signing
