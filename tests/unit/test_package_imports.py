@@ -36,19 +36,50 @@ def _discover_packages_from_source() -> set[str]:
 
 
 def _get_packages_from_pyproject() -> set[str]:
-    """Read the packages list from pyproject.toml.
+    """Resolve the packages selected by pyproject.toml packaging config.
+
+    Evaluates the [tool.setuptools.packages.find] directive with the same
+    where/include/exclude settings setuptools uses at build time.
 
     Returns:
-        Set of package names listed in [tool.setuptools].packages.
+        Set of package names resolved from the find directive.
     """
     import tomllib
+    from fnmatch import fnmatchcase
 
     pyproject_path = PROJECT_ROOT / "pyproject.toml"
     with pyproject_path.open("rb") as f:
         data = tomllib.load(f)
 
-    packages = data.get("tool", {}).get("setuptools", {}).get("packages", [])
-    return set(packages)
+    find_config = (
+        data.get("tool", {}).get("setuptools", {}).get("packages", {}).get("find", {})
+    )
+    where_dirs = find_config.get("where", ["."])
+    include = find_config.get("include", ["*"])
+    exclude = find_config.get("exclude", [])
+
+    packages: set[str] = set()
+    for where in where_dirs:
+        base = (PROJECT_ROOT / where).resolve()
+        for init_file in base.rglob("__init__.py"):
+            parts = init_file.parent.relative_to(base).parts
+            if not parts:
+                continue
+            # Mirror setuptools find_packages: every ancestor directory
+            # must itself be a package (contain __init__.py).
+            ancestors_are_packages = all(
+                (base / Path(*parts[: depth + 1]) / "__init__.py").is_file()
+                for depth in range(len(parts))
+            )
+            if not ancestors_are_packages:
+                continue
+            package_name = ".".join(parts)
+            if not any(fnmatchcase(package_name, pat) for pat in include):
+                continue
+            if any(fnmatchcase(package_name, pat) for pat in exclude):
+                continue
+            packages.add(package_name)
+    return packages
 
 
 def _get_configured_packages() -> list[str]:
@@ -70,16 +101,17 @@ def test_package_importable(package: str) -> None:
     except ImportError as e:
         pytest.fail(
             f"Failed to import '{package}': {e}\n"
-            f"This likely means the package is missing from "
-            f"[tool.setuptools].packages in pyproject.toml",
+            f"This likely means the package is not selected by "
+            f"[tool.setuptools.packages.find] in pyproject.toml",
         )
 
 
 def test_all_source_packages_are_configured() -> None:
     """Verify all packages in the source tree are listed in pyproject.toml.
 
-    This catches the case where a developer adds a new package directory
-    but forgets to add it to [tool.setuptools].packages.
+    This catches the case where a new package directory is not picked up
+    by the [tool.setuptools.packages.find] directive (e.g. because it is
+    matched by an exclude pattern or lacks an __init__.py).
     """
     source_packages = _discover_packages_from_source()
     configured_packages = _get_packages_from_pyproject()
@@ -88,9 +120,9 @@ def test_all_source_packages_are_configured() -> None:
     if missing:
         missing_list = "\n  - ".join(sorted(missing))
         pytest.fail(
-            f"Found {len(missing)} package(s) in source tree not listed in "
-            f"pyproject.toml [tool.setuptools].packages:\n  - {missing_list}\n\n"
-            f"Add these packages to pyproject.toml to include them in the build.",
+            f"Found {len(missing)} package(s) in source tree not selected by "
+            f"pyproject.toml [tool.setuptools.packages.find]:\n  - {missing_list}\n\n"
+            f"Adjust the find directive so these packages ship in the build.",
         )
 
 
