@@ -508,24 +508,44 @@ _LGTM_CI_PIN = "66cad82ead0e5d119928c895c7d7da9c837989e5"
 def test_all_lgtm_ci_refs_use_the_canonical_pin() -> None:
     """Every lgtm-ci ref in workflows must match the single canonical pin.
 
-    Guards the repo-wide invariant from #1280: `uses:` refs and
-    `tooling-ref:` inputs all point at the same lgtm-ci commit, so pins
-    cannot silently drift apart again.
+    Guards the repo-wide invariant from #1280: `uses:` refs,
+    `tooling-ref:` inputs, and manual `actions/checkout` steps targeting
+    lgtm-hq/lgtm-ci all point at the same lgtm-ci commit, so pins cannot
+    silently drift apart again. Any ref shape (tag, branch, short SHA,
+    any quoting) that is not the canonical pin is an offender.
     """
     ref_pattern = re.compile(
-        r"lgtm-hq/lgtm-ci/[^@\s]+@([0-9a-f]{40})" r"|tooling-ref: '([0-9a-f]{40})'",
+        r"lgtm-hq/lgtm-ci/[^@\s]+@([^\s#]+)|tooling-ref:\s*[\"']?([^\"'\s#]+)",
     )
     workflows_dir = _REPO_ROOT / ".github" / "workflows"
     offenders: list[str] = []
-    for path in sorted(workflows_dir.glob("*.yml")):
+    workflow_paths = sorted(
+        (*workflows_dir.glob("*.yml"), *workflows_dir.glob("*.yaml")),
+    )
+    for path in workflow_paths:
         for lineno, line in enumerate(
             path.read_text(encoding="utf-8").splitlines(),
             start=1,
         ):
             for match in ref_pattern.finditer(line):
-                sha = match.group(1) or match.group(2)
-                if sha != _LGTM_CI_PIN:
-                    offenders.append(f"{path.name}:{lineno}: {sha}")
+                ref = match.group(1) or match.group(2)
+                if ref != _LGTM_CI_PIN:
+                    offenders.append(f"{path.name}:{lineno}: {ref}")
+
+        # Manual lgtm-ci tooling checkouts pin via a separate `ref:` field
+        # (e.g. site-quality.yml); a bare `ref:` regex would false-positive
+        # on checkouts of other repositories, so walk the parsed YAML.
+        workflow = yaml.safe_load(path.read_text(encoding="utf-8"))
+        for job_id, job in (workflow.get("jobs") or {}).items():
+            for step in job.get("steps") or []:
+                with_block = step.get("with") or {}
+                if with_block.get("repository") != "lgtm-hq/lgtm-ci":
+                    continue
+                if with_block.get("ref") != _LGTM_CI_PIN:
+                    offenders.append(
+                        f"{path.name}:{job_id}: checkout ref "
+                        f"{with_block.get('ref')!r}",
+                    )
 
     assert_that(offenders).is_empty()
 
