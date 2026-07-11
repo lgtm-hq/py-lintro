@@ -10,7 +10,7 @@ Google-style docstrings are used per project standards.
 from __future__ import annotations
 
 import os
-import subprocess
+import subprocess  # nosec B404 - subprocess is used to drive the tool/CLI under test; invocations use shell=False
 import tempfile
 from pathlib import Path
 from unittest.mock import patch
@@ -51,7 +51,7 @@ def test_script_help_output(ci_script_path: Path) -> None:
     Args:
         ci_script_path: Path to the script being tested.
     """
-    result = subprocess.run(
+    result = subprocess.run(  # nosec B603 - fixed argv run against a real binary in a controlled test; shell=False, no user shell input
         [str(ci_script_path), "--help"],
         capture_output=True,
         text=True,
@@ -70,7 +70,7 @@ def test_script_help_short_flag(ci_script_path: Path) -> None:
     Args:
         ci_script_path: Path to the script being tested.
     """
-    result = subprocess.run(
+    result = subprocess.run(  # nosec B603 - fixed argv run against a real binary in a controlled test; shell=False, no user shell input
         [str(ci_script_path), "-h"],
         capture_output=True,
         text=True,
@@ -99,7 +99,7 @@ def test_script_exits_when_not_in_pr_context(ci_script_path: Path) -> None:
         env.pop("GITHUB_EVENT_NAME", None)
         env.pop("PR_NUMBER", None)
 
-        result = subprocess.run(
+        result = subprocess.run(  # nosec B603 - fixed argv run against a real binary in a controlled test; shell=False, no user shell input
             [str(ci_script_path), comment_file],
             capture_output=True,
             text=True,
@@ -131,7 +131,7 @@ def test_script_fails_with_missing_comment_file(ci_script_path: Path) -> None:
         },
     )
 
-    result = subprocess.run(
+    result = subprocess.run(  # nosec B603 - fixed argv run against a real binary in a controlled test; shell=False, no user shell input
         [str(ci_script_path), "nonexistent-file.txt"],
         capture_output=True,
         text=True,
@@ -169,7 +169,7 @@ def test_script_uses_default_comment_file(ci_script_path: Path) -> None:
         )
 
         # Change to temp directory so default file is found
-        result = subprocess.run(
+        result = subprocess.run(  # nosec B603 - fixed argv run against a real binary in a controlled test; shell=False, no user shell input
             [str(ci_script_path)],
             capture_output=True,
             text=True,
@@ -242,7 +242,7 @@ def test_script_integrates_with_python_utilities(
                 # Our script should complete without API calls in test environment
             ]
 
-            subprocess.run(
+            subprocess.run(  # nosec B603 - fixed argv run against a real binary in a controlled test; shell=False, no user shell input
                 [str(ci_script_path), comment_file],
                 capture_output=True,
                 text=True,
@@ -269,7 +269,7 @@ def test_script_syntax_check(ci_script_path: Path) -> None:
     Raises:
         AssertionError: If the script has syntax errors.
     """
-    result = subprocess.run(
+    result = subprocess.run(  # nosec B603 B607 - fixed argv run against a real binary in a controlled test; binary name resolved from PATH, not attacker-controlled; shell=False, no user shell input
         ["bash", "-n", str(ci_script_path)],
         capture_output=True,
         text=True,

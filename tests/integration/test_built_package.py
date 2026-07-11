@@ -7,7 +7,7 @@ when the package is installed (not in editable mode).
 
 from __future__ import annotations
 
-import subprocess
+import subprocess  # nosec B404 - subprocess is used to drive the tool/CLI under test; invocations use shell=False
 import sys
 import tempfile
 from pathlib import Path
@@ -37,7 +37,7 @@ def test_built_wheel_imports() -> None:
         dist_dir = tmpdir_path / "dist"
 
         # Step 1: Build the wheel
-        build_result = subprocess.run(
+        build_result = subprocess.run(  # nosec B603 B607 - fixed argv run against a real binary in a controlled test; binary name resolved from PATH, not attacker-controlled; shell=False, no user shell input
             ["uv", "build", "--out-dir", str(dist_dir)],
             cwd=str(project_root),
             capture_output=True,
@@ -53,7 +53,7 @@ def test_built_wheel_imports() -> None:
         wheel_path = wheels[0]
 
         # Step 2: Create a fresh virtual environment
-        venv_result = subprocess.run(
+        venv_result = subprocess.run(  # nosec B603 - fixed argv run against a real binary in a controlled test; shell=False, no user shell input
             [sys.executable, "-m", "venv", str(venv_path)],
             capture_output=True,
             text=True,
@@ -70,7 +70,7 @@ def test_built_wheel_imports() -> None:
         assert_that(python_exe.exists()).is_true()
 
         # Step 3: Install the wheel in the venv
-        install_result = subprocess.run(
+        install_result = subprocess.run(  # nosec B603 - fixed argv run against a real binary in a controlled test; shell=False, no user shell input
             [str(python_exe), "-m", "pip", "install", str(wheel_path)],
             capture_output=True,
             text=True,
@@ -89,7 +89,7 @@ def test_built_wheel_imports() -> None:
         ]
 
         for import_statement in test_imports:
-            import_result = subprocess.run(
+            import_result = subprocess.run(  # nosec B603 - fixed argv run against a real binary in a controlled test; shell=False, no user shell input
                 [str(python_exe), "-c", import_statement],
                 capture_output=True,
                 text=True,
@@ -102,7 +102,7 @@ def test_built_wheel_imports() -> None:
             ).is_equal_to(0)
 
         # Step 5: Test that lintro CLI works
-        cli_result = subprocess.run(
+        cli_result = subprocess.run(  # nosec B603 - fixed argv run against a real binary in a controlled test; shell=False, no user shell input
             [str(python_exe), "-m", "lintro", "--version"],
             capture_output=True,
             text=True,
@@ -122,7 +122,7 @@ def test_built_wheel_with_full_extra() -> None:
         venv_path = tmpdir_path / "test_venv"
         dist_dir = tmpdir_path / "dist"
 
-        build_result = subprocess.run(
+        build_result = subprocess.run(  # nosec B603 B607 - fixed argv run against a real binary in a controlled test; binary name resolved from PATH, not attacker-controlled; shell=False, no user shell input
             ["uv", "build", "--out-dir", str(dist_dir)],
             cwd=str(project_root),
             capture_output=True,
@@ -135,7 +135,7 @@ def test_built_wheel_with_full_extra() -> None:
         assert_that(wheels).is_not_empty()
         wheel_path = wheels[0]
 
-        subprocess.run(
+        subprocess.run(  # nosec B603 - fixed argv run against a real binary in a controlled test; shell=False, no user shell input
             [sys.executable, "-m", "venv", str(venv_path)],
             check=True,
             capture_output=True,
@@ -147,7 +147,7 @@ def test_built_wheel_with_full_extra() -> None:
         else:
             python_exe = venv_path / "bin" / "python"
 
-        install_result = subprocess.run(
+        install_result = subprocess.run(  # nosec B603 - fixed argv run against a real binary in a controlled test; shell=False, no user shell input
             [str(python_exe), "-m", "pip", "install", f"{wheel_path}[full]"],
             capture_output=True,
             text=True,
@@ -156,7 +156,7 @@ def test_built_wheel_with_full_extra() -> None:
         assert_that(install_result.returncode).is_equal_to(0)
 
         for module in ("ruff", "black", "mypy", "bandit", "pydoclint", "yamllint"):
-            import_result = subprocess.run(
+            import_result = subprocess.run(  # nosec B603 - fixed argv run against a real binary in a controlled test; shell=False, no user shell input
                 [str(python_exe), "-c", f"import {module}"],
                 capture_output=True,
                 text=True,
