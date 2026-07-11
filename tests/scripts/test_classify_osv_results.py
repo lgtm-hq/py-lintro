@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import importlib.util
-import subprocess
+import subprocess  # nosec B404 - subprocess is used to drive the tool/CLI under test; invocations use shell=False
 import sys
 from pathlib import Path
 from types import ModuleType
@@ -259,7 +259,7 @@ def test_script_prints_ok_for_clean_results(
         encoding="utf-8",
     )
 
-    completed = subprocess.run(
+    completed = subprocess.run(  # nosec B603 - fixed argv run against a real binary in a controlled test; shell=False, no user shell input
         [sys.executable, str(script_path), str(results_path)],
         capture_output=True,
         text=True,
@@ -282,7 +282,7 @@ def test_script_prints_vulns_for_reported_issues(
         encoding="utf-8",
     )
 
-    completed = subprocess.run(
+    completed = subprocess.run(  # nosec B603 - fixed argv run against a real binary in a controlled test; shell=False, no user shell input
         [sys.executable, str(script_path), str(results_path)],
         capture_output=True,
         text=True,
@@ -305,7 +305,7 @@ def test_script_prints_error_for_parse_failures(
         encoding="utf-8",
     )
 
-    completed = subprocess.run(
+    completed = subprocess.run(  # nosec B603 - fixed argv run against a real binary in a controlled test; shell=False, no user shell input
         [sys.executable, str(script_path), str(results_path)],
         capture_output=True,
         text=True,
@@ -324,7 +324,7 @@ def test_script_prints_error_for_invalid_json(
     results_path = tmp_path / "osv-results.json"
     results_path.write_text("{not-json", encoding="utf-8")
 
-    completed = subprocess.run(
+    completed = subprocess.run(  # nosec B603 - fixed argv run against a real binary in a controlled test; shell=False, no user shell input
         [sys.executable, str(script_path), str(results_path)],
         capture_output=True,
         text=True,

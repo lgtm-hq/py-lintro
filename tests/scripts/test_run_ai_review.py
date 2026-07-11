@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import importlib.util
 import os
-import subprocess
+import subprocess  # nosec B404 - subprocess is used to drive the tool/CLI under test; invocations use shell=False
 import sys
 from pathlib import Path
 from types import ModuleType
@@ -65,7 +65,7 @@ def _run_shell(
     """
     env = {"PATH": os.environ.get("PATH", "")}
     env.update(env_overrides)
-    return subprocess.run(
+    return subprocess.run(  # nosec B603 - fixed argv run against a real binary in a controlled test; shell=False, no user shell input
         [str(SHELL_SCRIPT), *args],
         capture_output=True,
         text=True,

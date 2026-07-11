@@ -3,6 +3,25 @@
 This module defines the core abstractions for Lintro's plugin system:
 - ToolDefinition: Metadata describing what a tool IS
 - LintroPlugin: Protocol contract that all tools must satisfy
+- LINTRO_PLUGIN_API_VERSION: Public API version for third-party plugins
+
+Public plugin contract (stable surface for third-party plugins):
+    Third-party tool plugins are ordinary Python classes shipped in a separate
+    distribution and advertised through the ``lintro.tools`` entry-point group.
+    To be discovered and registered, a plugin class must:
+
+    1. Subclass :class:`lintro.plugins.base.BaseToolPlugin` (recommended) or
+       otherwise satisfy the :class:`LintroPlugin` protocol below — i.e. expose
+       a ``definition`` property plus ``check``, ``fix`` and ``set_options``
+       methods.
+    2. Optionally declare ``LINTRO_PLUGIN_API_VERSION`` (a class attribute) so
+       the loader can reject plugins built against an incompatible core.
+
+    Subclassing ``BaseToolPlugin`` is strongly preferred: it provides the same
+    lifecycle builtin tools use (config injection, file discovery, subprocess
+    execution, output normalization) and — critically — the per-invocation
+    isolation contract (:meth:`~lintro.plugins.base.BaseToolPlugin.copy_for_execution`)
+    that the parallel executor relies on.
 
 Example:
     >>> from lintro.plugins.protocol import ToolDefinition, LintroPlugin
@@ -23,6 +42,46 @@ from lintro.enums.tool_type import ToolType
 
 if TYPE_CHECKING:
     from lintro.models.core.tool_result import ToolResult
+
+#: Current major version of the public Lintro plugin API.
+#:
+#: This is the stability contract for third-party tool plugins discovered via
+#: the ``lintro.tools`` entry-point group. External plugins may declare the API
+#: version they were written against with a class-level
+#: ``LINTRO_PLUGIN_API_VERSION`` attribute; at load time the registry compares
+#: it against this constant and skips (with a warning) any plugin built for an
+#: incompatible major version, so core refactors never silently break — or
+#: crash — installed plugins.
+#:
+#: Bump this only on a breaking change to the plugin-facing contract
+#: (``BaseToolPlugin`` / ``LintroPlugin`` / ``ToolDefinition``).
+LINTRO_PLUGIN_API_VERSION: int = 1
+
+
+def is_compatible_api_version(declared: object) -> bool:
+    """Report whether a plugin's declared API version is compatible with core.
+
+    A plugin may declare the plugin-API major version it targets via a
+    class-level ``LINTRO_PLUGIN_API_VERSION`` attribute. Compatibility rules:
+
+    - ``None`` (undeclared) is treated as compatible for convenience, though
+      declaring a version is strongly recommended for forward safety.
+    - An integer equal to :data:`LINTRO_PLUGIN_API_VERSION` is compatible.
+    - Anything else (a different major version, or a non-integer value) is
+      incompatible.
+
+    Args:
+        declared: The value of the plugin's ``LINTRO_PLUGIN_API_VERSION``
+            attribute, or ``None`` if it declares none.
+
+    Returns:
+        True if the declared version is compatible with the running core.
+    """
+    if declared is None:
+        return True
+    if isinstance(declared, bool) or not isinstance(declared, int):
+        return False
+    return declared == LINTRO_PLUGIN_API_VERSION
 
 
 @dataclass(frozen=True)
