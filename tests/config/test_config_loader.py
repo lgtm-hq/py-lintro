@@ -195,6 +195,47 @@ enforce:
     assert_that(config.enforce.line_length).is_equal_to(120)
 
 
+def test_score_config_defaults(tmp_path: Path) -> None:
+    """Score config falls back to defaults when unspecified.
+
+    Args:
+        tmp_path: Temporary directory path for test files.
+    """
+    config_file = tmp_path / "custom-config.yaml"
+    config_file.write_text("enforce:\n  line_length: 88\n")
+
+    config = load_config(config_path=str(config_file))
+
+    assert_that(config.score.error_weight).is_equal_to(10.0)
+    assert_that(config.score.warning_weight).is_equal_to(3.0)
+    assert_that(config.score.info_weight).is_equal_to(1.0)
+    assert_that(config.score.scale).is_equal_to(100.0)
+
+
+def test_score_config_from_yaml(tmp_path: Path) -> None:
+    """Score weights and scale load from the ``score`` section.
+
+    Args:
+        tmp_path: Temporary directory path for test files.
+    """
+    config_content = """\
+score:
+  error_weight: 20
+  warning_weight: 5
+  info_weight: 2
+  scale: 200
+"""
+    config_file = tmp_path / "custom-config.yaml"
+    config_file.write_text(config_content)
+
+    config = load_config(config_path=str(config_file))
+
+    assert_that(config.score.error_weight).is_equal_to(20.0)
+    assert_that(config.score.warning_weight).is_equal_to(5.0)
+    assert_that(config.score.info_weight).is_equal_to(2.0)
+    assert_that(config.score.scale).is_equal_to(200.0)
+
+
 def test_returns_default_when_no_config(tmp_path: Path) -> None:
     """Should return default config when no file found.
 

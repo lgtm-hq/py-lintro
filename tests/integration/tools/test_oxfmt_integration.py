@@ -7,7 +7,7 @@ They verify the OxfmtPlugin definition, check command, fix command, and set_opti
 from __future__ import annotations
 
 import shutil
-import subprocess
+import subprocess  # nosec B404 - subprocess is used to drive the tool/CLI under test; invocations use shell=False
 from collections.abc import Callable
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -33,7 +33,7 @@ def oxfmt_is_available() -> bool:
         return False
     try:
         # First check --version works
-        version_result = subprocess.run(
+        version_result = subprocess.run(  # nosec B603 B607 - fixed argv run against a real binary in a controlled test; binary name resolved from PATH, not attacker-controlled; shell=False, no user shell input
             ["oxfmt", "--version"],
             capture_output=True,
             timeout=10,
@@ -43,7 +43,7 @@ def oxfmt_is_available() -> bool:
             return False
 
         # Then verify it can actually format code (catches missing npm packages)
-        format_result = subprocess.run(
+        format_result = subprocess.run(  # nosec B603 B607 - fixed argv run against a real binary in a controlled test; binary name resolved from PATH, not attacker-controlled; shell=False, no user shell input
             ["oxfmt", "--stdin-filepath", "test.js"],
             input=b"const x=1;\n",
             capture_output=True,
@@ -110,7 +110,7 @@ const obj={a:1,b:2,c:3}
 """,
     )
     # Format it with oxfmt so it's guaranteed to be "formatted" for this version
-    subprocess.run(
+    subprocess.run(  # nosec B603 B607 - fixed argv run against a real binary in a controlled test; binary name resolved from PATH, not attacker-controlled; shell=False, no user shell input
         ["oxfmt", "--write", str(file_path)],
         check=True,
         capture_output=True,
