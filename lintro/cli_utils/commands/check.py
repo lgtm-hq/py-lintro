@@ -10,8 +10,8 @@ Functions:
 import sys
 
 import click
-from click.testing import CliRunner
 
+from lintro.api import core as api
 from lintro.utils.git_diff import DIFF_DEFAULT_SENTINEL
 from lintro.utils.tool_executor import run_lint_tools_simple
 
@@ -297,39 +297,22 @@ def check(
     Returns:
         None: This function does not return a value.
     """
-    # Build arguments for the click command
-    args: list[str] = []
-    if paths:
-        args.extend(list(paths))
-    if tools:
-        args.extend(["--tools", tools])
-    if tool_options:
-        args.extend(["--tool-options", tool_options])
-    if exclude:
-        args.extend(["--exclude", exclude])
-    if include_venv:
-        args.append("--include-venv")
-    if output:
-        args.extend(["--output", output])
-    if output_format:
-        args.extend(["--output-format", output_format])
-    if group_by:
-        args.extend(["--group-by", group_by])
-    if ignore_conflicts:
-        args.append("--ignore-conflicts")
-    if verbose:
-        args.append("--verbose")
-    if no_log:
-        args.append("--no-log")
-    if auto_install:
-        args.append("--auto-install")
-    if yes:
-        args.append("--yes")
-    if ai_fix:
-        args.append("--fix")
-
-    runner = CliRunner()
-    result = runner.invoke(check_command, args)
+    result = api.check(
+        paths=paths,
+        tools=tools,
+        tool_options=tool_options,
+        exclude=exclude,
+        include_venv=include_venv,
+        output=output,
+        output_format=output_format,
+        group_by=group_by,
+        ignore_conflicts=ignore_conflicts,
+        verbose=verbose,
+        no_log=no_log,
+        auto_install=auto_install,
+        yes=yes,
+        ai_fix=ai_fix,
+    )
 
     if result.exit_code != DEFAULT_EXIT_CODE:
         sys.exit(result.exit_code)
