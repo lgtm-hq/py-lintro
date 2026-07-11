@@ -58,7 +58,6 @@ DEFAULT_MODULE_SIZE_BASELINE: tuple[str, ...] = (
     "lintro/utils/tool_executor.py",
     "lintro/cli_utils/commands/doctor.py",
     "lintro/tools/definitions/tsc.py",
-    "lintro/ai/review/checklist_builtin.py",
 )
 
 
