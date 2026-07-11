@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "lintro"
-version = "0.72.0"
+version = "0.74.0"
 description = "A unified CLI tool for code formatting, linting, and quality assurance"
 keywords = [
   "linting",
@@ -130,6 +130,7 @@ packages = [
   "lintro.ai.prompts",
   "lintro.ai.providers",
   "lintro.ai.review",
+  "lintro.ai.review.checklist",
   "lintro.ai.review.chunker",
   "lintro.ai.review.context",
   "lintro.ai.review.enums",
@@ -152,6 +153,7 @@ packages = [
   "lintro.parsers.cargo_audit",
   "lintro.parsers.cargo_deny",
   "lintro.parsers.clippy",
+  "lintro.parsers.commitlint",
   "lintro.parsers.gitleaks",
   "lintro.parsers.hadolint",
   "lintro.parsers.idiom_review",
@@ -166,9 +168,11 @@ packages = [
   "lintro.parsers.oxfmt",
   "lintro.parsers.oxlint",
   "lintro.parsers.prettier",
+  "lintro.parsers.sarif",
   "lintro.parsers.shellcheck",
   "lintro.parsers.shfmt",
   "lintro.parsers.sqlfluff",
+  "lintro.parsers.stylelint",
   "lintro.parsers.svelte_check",
   "lintro.parsers.taplo",
   "lintro.parsers.pydoclint",
@@ -193,6 +197,7 @@ packages = [
 
 [tool.setuptools.package-data]
 lintro = ["tools/*.json"]
+"lintro.ai.review.checklist" = ["corpus/*.yaml"]
 
 [tool.ruff]
 line-length = 88

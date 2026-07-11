@@ -1066,6 +1066,74 @@ lintro check --tools oxlint --tool-options "oxlint:config=.oxlintrc.custom.json"
 lintro check --tools oxlint --tool-options "oxlint:tsconfig=tsconfig.app.json"
 ```
 
+#### Stylelint Configuration
+
+Stylelint is a mighty, configurable linter and fixer for CSS, SCSS, Sass, and Less
+stylesheets, with 100+ built-in rules and `--fix` support.
+
+> Stylelint requires a configuration to run. When no config is resolvable, Lintro skips
+> stylelint as a non-error (rather than surfacing stylelint's hard
+> `ConfigurationError`).
+
+**Native Config Detection:**
+
+Stylelint resolves configuration per file (walking upward). Lintro supports:
+
+- `.stylelintrc`, `.stylelintrc.json`, `.stylelintrc.yaml`, `.stylelintrc.yml`
+- `.stylelintrc.js`, `.stylelintrc.cjs`, `.stylelintrc.mjs`
+- `stylelint.config.js`, `stylelint.config.cjs`, `stylelint.config.mjs`
+- a `stylelint` key in `package.json`
+
+`.stylelintignore` is honored by the underlying tool.
+
+**Installation:**
+
+```bash
+# npm/bun
+npm install -g stylelint
+bun add -g stylelint
+
+# Per-project (recommended, with a shareable config)
+bun add -d stylelint stylelint-config-standard
+```
+
+**File:** `.stylelintrc.json`
+
+```json
+{
+  "extends": ["stylelint-config-standard"],
+  "rules": {
+    "color-hex-length": "short",
+    "block-no-empty": true,
+    "declaration-block-no-duplicate-properties": true
+  }
+}
+```
+
+**Available Options via `--tool-options`:**
+
+| Option               | Type    | Description                                  |
+| -------------------- | ------- | -------------------------------------------- |
+| `config`             | string  | Path to a stylelint config file (`--config`) |
+| `verbose_fix_output` | boolean | Include raw stylelint output in `fix()`      |
+| `timeout`            | integer | Execution timeout in seconds (default: 30)   |
+
+**Usage Examples:**
+
+```bash
+# Basic check
+lintro check styles/ --tools stylelint
+
+# Auto-fix issues
+lintro format styles/ --tools stylelint
+
+# Use a specific config file
+lintro check styles/ --tools stylelint --tool-options "stylelint:config=.stylelintrc.json"
+
+# Increase timeout for large stylesheets
+lintro check styles/ --tools stylelint --tool-options "stylelint:timeout=60"
+```
+
 #### Oxfmt Configuration
 
 Oxfmt is a fast JavaScript/TypeScript formatter (30x faster than Prettier) that provides
@@ -1936,6 +2004,43 @@ lintro check --tools actionlint
 
 # Validate workflows along with other tools
 lintro check --tools ruff,actionlint
+```
+
+### Git Tools
+
+#### Commitlint Configuration
+
+Commitlint validates git commit messages against the
+[Conventional Commits](https://www.conventionalcommits.org/) specification. Unlike
+file-based tools, it inspects git state: Lintro runs `commitlint --last` to validate the
+repository's most recent commit message.
+
+- Requires a config; Lintro skips it as a non-error when none is present.
+- Install: `bun add -g @commitlint/cli @commitlint/config-conventional`,
+  `npm install -g @commitlint/cli @commitlint/config-conventional`, or
+  `brew install commitlint`.
+- Cannot auto-fix — amend the commit to satisfy the rules.
+
+**File:** `commitlint.config.js` (or `.commitlintrc.{js,cjs,json,yaml,yml}`, or a
+`commitlint` key in `package.json`)
+
+```js
+// commitlint.config.js
+module.exports = { extends: ['@commitlint/config-conventional'] };
+```
+
+**Available `--tool-options`:**
+
+| Option    | Type | Default | Description                        |
+| --------- | ---- | ------- | ---------------------------------- |
+| `timeout` | int  | `30`    | Max seconds to wait for commitlint |
+
+```bash
+# Validate the latest commit message
+lintro check --tools commitlint
+
+# Increase the timeout
+lintro check --tools commitlint --tool-options "commitlint:timeout=60"
 ```
 
 ## Project-Specific Configuration
