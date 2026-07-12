@@ -54,12 +54,14 @@ def _run_resolve(
 
 def test_resolve_lintro_image_help() -> None:
     """resolve-lintro-image.sh should expose usage via --help."""
-    result = subprocess.run(  # nosec B603 - fixed argv run against repo script; shell=False
-        [str(_SCRIPT.resolve()), "--help"],
-        capture_output=True,
-        text=True,
-        check=False,
-        cwd=_REPO_ROOT,
+    result = (
+        subprocess.run(  # nosec B603 - fixed argv run against repo script; shell=False
+            [str(_SCRIPT.resolve()), "--help"],
+            capture_output=True,
+            text=True,
+            check=False,
+            cwd=_REPO_ROOT,
+        )
     )
     assert_that(result.returncode).is_equal_to(0)
     assert_that(result.stdout).contains("Usage:")

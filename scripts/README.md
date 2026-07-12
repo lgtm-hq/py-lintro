@@ -92,6 +92,7 @@ Scripts for GitHub Actions workflows and continuous integration.
 | `post-pr-delete-previous.sh`         | Delete previous PR comments by marker                                 | `./scripts/ci/post-pr-delete-previous.sh --help`                                   |
 | `lintro-report-generate.sh`          | Generate comprehensive Lintro reports                                 | `./scripts/ci/lintro-report-generate.sh`                                           |
 | `pull-lintro-image.sh`               | Pull lintro Docker image from GHCR and log digest                     | `./scripts/ci/testing/pull-lintro-image.sh`                                        |
+| `resolve-lintro-image.sh`            | Resolve GHCR image for scheduled lintro analysis with sha fallback    | `LINTRO_SHA=<sha> ./scripts/ci/testing/resolve-lintro-image.sh`                    |
 | `maintenance/delete-ci-ghcr-tags.sh` | Delete ephemeral CI GHCR tags after PR merge or close                 | `./scripts/ci/maintenance/delete-ci-ghcr-tags.sh`                                  |
 | `coverage-badge-update.sh`           | Generate and update coverage badge                                    | `./scripts/ci/coverage-badge-update.sh --help`                                     |
 | `sbom-generate.sh`                   | Generate and export SBOMs via bomctl                                  | `./scripts/ci/sbom-generate.sh --help`                                             |
