@@ -749,7 +749,5 @@ def test_build_sticky_cap_body_survives_all_fallback_overflow(
     assert_that(len(body)).is_less_than_or_equal_to(MAX_COMMENT_CHARS + 1000)
     assert_that(body).contains("### Findings")
     assert_that(body).contains("StickyFallback0")
-    marker_present = (
-        "finding(s) omitted" in body or "more finding(s) truncated" in body
-    )
+    marker_present = "finding(s) omitted" in body or "more finding(s) truncated" in body
     assert_that(marker_present).is_true()

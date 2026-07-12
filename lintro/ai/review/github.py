@@ -83,11 +83,11 @@ _PREVIOUS_RUNS_RE = re.compile(
     r"\n\n<details><summary>🕔 Previous runs[\s\S]*?</details>",
 )
 _CHECKLIST_APPENDIX_RE = re.compile(
-    r"\n### Cleared checks[\s\S]*?(?=\n\n<details><summary>|\Z)",
+    r"\n### Cleared checks \(\d+\)[\s\S]*?(?=\n\n<details><summary>|\Z)",
 )
 _FINDINGS_SECTION_RE = re.compile(
     r"(\n### Findings(?: \(\d+\))?)([\s\S]*?)"
-    r"(\n\*\*Structured checks:\*\*[\s\S]*?(?=\n\n<details><summary>|\Z)|\Z)",
+    r"(\n\*\*Structured checks:\*\* \d+[\s\S]*?(?=\n\n<details><summary>|\Z)|\Z)",
 )
 _FINDING_BLOCK_START_RE = re.compile(r"(?=\n\n[🔴🟠🟡] \*\*P[123]\*\*)")
 
@@ -711,9 +711,7 @@ def _cap_findings_section(*, body: str) -> str:
     suffix = match.group(3)
 
     blocks = [
-        block
-        for block in _FINDING_BLOCK_START_RE.split(findings_body)
-        if block.strip()
+        block for block in _FINDING_BLOCK_START_RE.split(findings_body) if block.strip()
     ]
     if not blocks:
         return body
