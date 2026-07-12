@@ -21,6 +21,17 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.78.1] - 2026-07-12
+
+### Changed
+
+- **deps**: update dependency setuptools to 83.0.0 (patch) (#1294) (c426508)
+
+### Fixed
+
+- **ci**: unblock main deploy-pages egress and dogfooding black finding (#1300)
+  (70a9d48)
+
 ## [0.78.0] - 2026-07-12
 
 ### Added
