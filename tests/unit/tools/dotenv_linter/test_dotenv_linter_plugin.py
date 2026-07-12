@@ -7,7 +7,7 @@ the binary installed.
 
 from __future__ import annotations
 
-import subprocess
+import subprocess  # nosec B404 - subprocess is used to drive the tool/CLI under test; invocations use shell=False
 from pathlib import Path
 from unittest.mock import patch
 
