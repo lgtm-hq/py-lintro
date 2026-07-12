@@ -222,12 +222,12 @@ jobs:
         needs.manifest-sync.result == 'skipped'
       )
     # yamllint disable-line rule:line-length
-    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-quality-lint.yml@768a6b72f0a5346b5ecba3f4e13b90040472341c # v0.52.3
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-quality-lint.yml@768a6b72f0a5346b5ecba3f4e13b90040472341c # v0.52.4
     permissions:
       contents: read
       packages: read # pull lintro-image from GHCR in reusable-quality-lint
     with:
-      tooling-ref: '768a6b72f0a5346b5ecba3f4e13b90040472341c' # v0.52.3
+      tooling-ref: '768a6b72f0a5346b5ecba3f4e13b90040472341c' # v0.52.4
       job-name: '🛠️ Dogfooding Lint'
       lintro-tool-options: >-
         pydoclint:timeout=120,bandit:timeout=120,osv_scanner:check_suppressions=false
@@ -258,13 +258,13 @@ jobs:
       github.event.pull_request.head.repo.fork == false &&
       github.event.pull_request.draft == false
     # yamllint disable-line rule:line-length
-    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-publish-quality-summary.yml@768a6b72f0a5346b5ecba3f4e13b90040472341c # v0.52.3
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-publish-quality-summary.yml@768a6b72f0a5346b5ecba3f4e13b90040472341c # v0.52.4
     permissions:
       contents: read
       pull-requests: write # post lintro results as PR comment
     with:
       exit-code: ${{ needs.dogfooding-lint.outputs.exit-code }}
-      tooling-ref: '768a6b72f0a5346b5ecba3f4e13b90040472341c' # v0.52.3
+      tooling-ref: '768a6b72f0a5346b5ecba3f4e13b90040472341c' # v0.52.4
       job-name: '🛠️ Dogfooding Lint PR Comment'
       egress-policy: block
 
@@ -279,11 +279,11 @@ jobs:
         github.event.pull_request.draft == false
       )
     # yamllint disable-line rule:line-length
-    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-required-check.yml@768a6b72f0a5346b5ecba3f4e13b90040472341c # v0.52.3
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-required-check.yml@768a6b72f0a5346b5ecba3f4e13b90040472341c # v0.52.4
     permissions:
       contents: read
     with:
-      tooling-ref: '768a6b72f0a5346b5ecba3f4e13b90040472341c' # v0.52.3
+      tooling-ref: '768a6b72f0a5346b5ecba3f4e13b90040472341c' # v0.52.4
       job-name: '🛠️ Lintro Code Quality'
       runner-image: ubuntu-24.04
       upstream-result: >-
@@ -357,7 +357,7 @@ jobs:
         if: github.event_name == 'pull_request'
         continue-on-error: true
         # yamllint disable-line rule:line-length
-        uses: lgtm-hq/lgtm-ci/.github/actions/post-pr-comment@768a6b72f0a5346b5ecba3f4e13b90040472341c # v0.52.3
+        uses: lgtm-hq/lgtm-ci/.github/actions/post-pr-comment@768a6b72f0a5346b5ecba3f4e13b90040472341c # v0.52.4
         with:
           file: security-audit-comment.txt
           marker: security-audit-report
