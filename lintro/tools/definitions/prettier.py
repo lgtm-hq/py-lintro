@@ -33,7 +33,7 @@ from lintro.tools.core.option_validators import (
 from lintro.utils.path_utils import find_file_upward
 
 # Constants for Prettier configuration
-PRETTIER_DEFAULT_TIMEOUT: int = 30
+PRETTIER_DEFAULT_TIMEOUT: int = 120
 PRETTIER_DEFAULT_PRIORITY: int = 80
 # Note: JS/TS/Vue files are handled by oxfmt (faster).
 # Prettier handles file types that oxfmt doesn't support.
