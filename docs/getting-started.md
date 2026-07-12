@@ -419,10 +419,10 @@ fetched) is a hard error: lintro prints the failing ref and exits with code 1.
 
 ### Preview fixes without writing (`format --dry-run`)
 
-`lintro format --dry-run` runs formatter tools in
-read-only mode and reports which issues would be fixed without modifying any files. This
-is useful for CI gates that should fail when auto-fixable drift exists, or when you want
-to review the fix list before applying changes.
+`lintro format --dry-run` runs formatter tools in read-only mode and reports which
+issues would be fixed without modifying any files. This is useful for CI gates that
+should fail when auto-fixable drift exists, or when you want to review the fix list
+before applying changes.
 
 ```bash
 lintro format --dry-run                 # preview all would-be fixes
