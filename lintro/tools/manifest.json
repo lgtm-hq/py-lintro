@@ -44,6 +44,10 @@
     "yaml": ["yamllint"],
     "markdown": ["markdownlint", "vale"],
     "toml": ["taplo"],
+    "css": ["stylelint"],
+    "scss": ["stylelint"],
+    "less": ["stylelint"],
+    "sass": ["stylelint"],
     "github_actions": ["actionlint"],
     "security": ["gitleaks", "osv_scanner", "semgrep"],
     "astro": ["astro_check", "prettier"],
@@ -373,6 +377,20 @@
       "version_command": ["sqlfluff", "--version"],
       "languages": ["sql"],
       "tags": ["linter"]
+    },
+    {
+      "name": "stylelint",
+      "version": "17.14.0",
+      "install": {
+        "type": "npm",
+        "package": "stylelint",
+        "bin": "stylelint"
+      },
+      "tier": "tools",
+      "category": "npm",
+      "version_command": ["stylelint", "--version"],
+      "languages": ["css", "scss", "sass", "less"],
+      "tags": ["linter", "formatter"]
     },
     {
       "name": "svelte_check",

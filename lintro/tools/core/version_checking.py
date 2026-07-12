@@ -164,6 +164,7 @@ def get_install_hints() -> dict[str, str]:
         "oxfmt": "Install via: bun add -d oxfmt@>={version}",
         "oxlint": "Install via: bun add -d oxlint@>={version}",
         "prettier": "Install via: bun add -d prettier@>={version}",
+        "stylelint": "Install via: bun add -d stylelint@>={version}",
         "tsc": (
             "Install via: bun add -g typescript@{version}, "
             "npm install -g typescript@{version}, or brew install typescript"

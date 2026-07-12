@@ -1,0 +1,25 @@
+{
+  "summary": "2-3 sentence assessment (safe to merge / merge with fixes / needs rework)",
+  "checklist": [
+    {
+      "id": 1,
+      "answer": "yes|no",
+      "evidence": "One sentence — file:line or logic trace"
+    }
+  ],
+  "findings": [
+    {
+      "severity": "P1|P2|P3",
+      "category": "logic-bug|silent-failure|integration|test-gap|contract-drift|security|breaking-change",
+      "file": "path/to/file",
+      "line": 123,
+      "title": "Short title (5-8 words)",
+      "description": "What is wrong and why it matters in production",
+      "cause": "Root cause — trace the code path",
+      "fix": "Concise fix suggestion",
+      "suggested_code": "Exact replacement for the flagged line(s) when a mechanical fix applies (one-click GitHub suggestion); else empty string",
+      "confidence": "high|medium|low",
+      "checklist_ids": [1, 2]
+    }
+  ]
+}

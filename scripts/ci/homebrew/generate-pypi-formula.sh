@@ -34,7 +34,7 @@ VERSION="${1:?Version is required}"
 OUTPUT_FILE="${2:?Output file is required}"
 
 # Packages that require special handling (can't build from source in Homebrew)
-WHEEL_PACKAGES=("pydoclint" "pydantic_core")
+WHEEL_PACKAGES=("pydoclint" "pydantic-core")
 
 # Packages available as Homebrew formulae (use depends_on instead of bundling)
 HOMEBREW_PACKAGES=("bandit" "black" "mypy" "ruff" "yamllint")
@@ -136,12 +136,12 @@ except Exception as e:
 }
 log_info "Installed pydantic-core version: ${PYDANTIC_CORE_VERSION}"
 
-python3 "$SCRIPT_DIR/fetch_wheel_info.py" pydantic_core \
+python3 "$SCRIPT_DIR/fetch_wheel_info.py" pydantic-core \
 	--type platform \
 	--version "$PYDANTIC_CORE_VERSION" \
-	--comment "pydantic_core requires Rust to build - use platform-specific wheels" \
+	--comment "pydantic-core requires Rust to build - use platform-specific wheels" \
 	>"$TMPDIR/pydantic.txt" || {
-	log_error "Failed to fetch pydantic_core wheel info"
+	log_error "Failed to fetch pydantic-core wheel info"
 	exit 1
 }
 

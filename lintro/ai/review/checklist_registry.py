@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from lintro.ai.review.checklist_builtin import BUILTIN_CHECKLIST_ITEMS
+from lintro.ai.review.checklist import BUILTIN_CHECKLIST_ITEMS
 from lintro.ai.review.constants import (
     CUSTOM_CHECKLIST_ID_START,
     TIER1_CHECKLIST_ID_END,

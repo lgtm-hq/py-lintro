@@ -21,7 +21,7 @@ from __future__ import annotations
 
 import os
 import shutil
-import subprocess
+import subprocess  # nosec B404 - subprocess is the core mechanism for invoking git; all invocations use shell=False
 from functools import lru_cache
 
 # Sentinel used by the ``--diff`` CLI option to mean "flag supplied without an
@@ -53,9 +53,15 @@ def _run_git(args: list[str], cwd: str) -> subprocess.CompletedProcess[str]:
 
     Returns:
         The completed process (never raises on non-zero exit).
+
+    Raises:
+        FileNotFoundError: When ``git`` is not installed or not on ``PATH``.
     """
-    return subprocess.run(
-        ["git", *args],
+    git_bin = shutil.which("git")
+    if git_bin is None:
+        raise FileNotFoundError("git is not installed or not on PATH")
+    return subprocess.run(  # nosec B603 - argv is [resolved git binary, *args]; shell=False; args are git subcommands only, not user shell input
+        [git_bin, *args],
         cwd=cwd,
         capture_output=True,
         text=True,
