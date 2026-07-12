@@ -67,10 +67,10 @@ def main(argv: list[str]) -> int:
         path=_HOOKS[1],
         module_name="sync_release_docs_hook",
     )
-    exit_code = format_changelog.main(argv)
+    exit_code = int(format_changelog.main(argv))
     if exit_code != 0:
         return exit_code
-    return sync_release_docs.main([])
+    return int(sync_release_docs.main([]))
 
 
 if __name__ == "__main__":
