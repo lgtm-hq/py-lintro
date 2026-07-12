@@ -1,0 +1,106 @@
+{
+  "schema_version": 1,
+  "metadata": {
+    "generated_at": "2026-07-07T07:16:38.117519+00:00",
+    "git_sha": "b36ec30c",
+    "platform": "macOS-27.0-arm64-arm-64bit-Mach-O",
+    "python_version": "3.13.11",
+    "cpu_count": 10,
+    "runs": 3,
+    "notes": []
+  },
+  "results": [
+    {
+      "tool": "lintro",
+      "label": "lintro",
+      "fixture": "small-python",
+      "scenario": "full_check_cold",
+      "stats": {
+        "runs": 3,
+        "min_s": 0.35536308301379904,
+        "max_s": 0.4980396250030026,
+        "mean_s": 0.40671281933706876,
+        "median_s": 0.3667357499944046,
+        "stddev_s": 0.07929548198617858,
+        "samples": [0.4980396250030026, 0.35536308301379904, 0.3667357499944046]
+      },
+      "exit_codes": [0, 0, 0],
+      "command": [
+        "uv",
+        "run",
+        "lintro",
+        "chk",
+        "--tools",
+        "ruff",
+        "/Users/eiteldagnin/Code/py-lintro/.claude/worktrees/agent-aa8bd1df3a9b847e5/benchmarks/fixtures/small-python"
+      ]
+    },
+    {
+      "tool": "sequential",
+      "label": "sequential-native",
+      "fixture": "small-python",
+      "scenario": "full_check_cold",
+      "stats": {
+        "runs": 3,
+        "min_s": 0.09000545798335224,
+        "max_s": 0.11541095800930634,
+        "mean_s": 0.09862327767768875,
+        "median_s": 0.09045341704040766,
+        "stddev_s": 0.01454028283826125,
+        "samples": [0.11541095800930634, 0.09045341704040766, 0.09000545798335224]
+      },
+      "exit_codes": [0, 0, 0],
+      "command": [
+        "bash",
+        "-c",
+        "uv run ruff check /Users/eiteldagnin/Code/py-lintro/.claude/worktrees/agent-aa8bd1df3a9b847e5/benchmarks/fixtures/small-python; c1=$?; uv run ruff format --check /Users/eiteldagnin/Code/py-lintro/.claude/worktrees/agent-aa8bd1df3a9b847e5/benchmarks/fixtures/small-python; c2=$?; exit $(( c1 > c2 ? c1 : c2 ))"
+      ]
+    },
+    {
+      "tool": "lintro",
+      "label": "lintro",
+      "fixture": "small-python",
+      "scenario": "full_check_warm",
+      "stats": {
+        "runs": 3,
+        "min_s": 0.3546465419931337,
+        "max_s": 0.36559041700093076,
+        "mean_s": 0.361670430652642,
+        "median_s": 0.3647743329638615,
+        "stddev_s": 0.0060965364933514956,
+        "samples": [0.36559041700093076, 0.3546465419931337, 0.3647743329638615]
+      },
+      "exit_codes": [0, 0, 0],
+      "command": [
+        "uv",
+        "run",
+        "lintro",
+        "chk",
+        "--tools",
+        "ruff",
+        "/Users/eiteldagnin/Code/py-lintro/.claude/worktrees/agent-aa8bd1df3a9b847e5/benchmarks/fixtures/small-python"
+      ]
+    },
+    {
+      "tool": "sequential",
+      "label": "sequential-native",
+      "fixture": "small-python",
+      "scenario": "full_check_warm",
+      "stats": {
+        "runs": 3,
+        "min_s": 0.09036470798309892,
+        "max_s": 0.09309966600267217,
+        "mean_s": 0.09192208299646154,
+        "median_s": 0.09230187500361353,
+        "stddev_s": 0.001406477983734335,
+        "samples": [0.09230187500361353, 0.09036470798309892, 0.09309966600267217]
+      },
+      "exit_codes": [0, 0, 0],
+      "command": [
+        "bash",
+        "-c",
+        "uv run ruff check /Users/eiteldagnin/Code/py-lintro/.claude/worktrees/agent-aa8bd1df3a9b847e5/benchmarks/fixtures/small-python; c1=$?; uv run ruff format --check /Users/eiteldagnin/Code/py-lintro/.claude/worktrees/agent-aa8bd1df3a9b847e5/benchmarks/fixtures/small-python; c2=$?; exit $(( c1 > c2 ? c1 : c2 ))"
+      ]
+    }
+  ]
+}
