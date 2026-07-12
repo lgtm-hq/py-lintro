@@ -40,12 +40,14 @@ def _run_script(
 def test_code_quality_gate_scripts_expose_help(script: str) -> None:
     """Each gate helper script should support --help."""
     script_path = (_REPO_ROOT / script).resolve()
-    result = subprocess.run(  # nosec B603 - fixed argv against repo scripts; shell=False
-        [str(script_path), "--help"],
-        capture_output=True,
-        text=True,
-        check=False,
-        env=os.environ.copy(),
+    result = (
+        subprocess.run(  # nosec B603 - fixed argv against repo scripts; shell=False
+            [str(script_path), "--help"],
+            capture_output=True,
+            text=True,
+            check=False,
+            env=os.environ.copy(),
+        )
     )
     assert_that(result.returncode).is_equal_to(0)
     assert_that(result.stdout).contains("Usage:")
@@ -178,6 +180,31 @@ def test_evaluate_code_quality_gate_propagates_docker_build_failure() -> None:
         assert_that(result.returncode).is_equal_to(0)
         output = Path(output_path).read_text()
         assert_that(output).contains("upstream-result=failure")
+        assert_that(output).contains("status-output=failed")
+        assert_that(output).contains("exit-code-output=1")
+    finally:
+        Path(output_path).unlink(missing_ok=True)
+
+
+def test_run_code_quality_gate_fails_on_docker_build_failure() -> None:
+    """End-to-end gate should fail when docker-build did not succeed."""
+    with tempfile.NamedTemporaryFile(mode="w+", delete=False) as output_file:
+        output_path = output_file.name
+
+    try:
+        result = _run_script(
+            "scripts/ci/run-code-quality-gate.sh",
+            env={
+                "GITHUB_OUTPUT": output_path,
+                "DOCKER_BUILD_RESULT": "failure",
+                "MANIFEST_SYNC_RESULT": "success",
+                "PRIMARY_LINT_RESULT": "skipped",
+            },
+        )
+        assert_that(result.returncode).is_equal_to(1)
+        output = Path(output_path).read_text()
+        assert_that(output).contains("result=failure")
+        assert_that(output).contains("passed=false")
     finally:
         Path(output_path).unlink(missing_ok=True)
 

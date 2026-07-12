@@ -46,18 +46,18 @@ write_output() {
 
 if [[ "${DOCKER_BUILD_RESULT}" != "success" ]]; then
 	write_output upstream-result "${DOCKER_BUILD_RESULT}"
-	write_output status-output ""
-	write_output exit-code-output ""
-	write_output upstream-conclusion ""
+	write_output status-output "failed"
+	write_output exit-code-output "1"
+	write_output upstream-conclusion "${DOCKER_BUILD_RESULT}"
 	write_output failure-reason "docker-build ${DOCKER_BUILD_RESULT}"
 	exit 0
 fi
 
 if [[ "${MANIFEST_SYNC_RESULT}" != "success" && "${MANIFEST_SYNC_RESULT}" != "skipped" ]]; then
 	write_output upstream-result "${MANIFEST_SYNC_RESULT}"
-	write_output status-output ""
-	write_output exit-code-output ""
-	write_output upstream-conclusion ""
+	write_output status-output "failed"
+	write_output exit-code-output "1"
+	write_output upstream-conclusion "${MANIFEST_SYNC_RESULT}"
 	write_output failure-reason "manifest-sync ${MANIFEST_SYNC_RESULT}"
 	exit 0
 fi
@@ -68,7 +68,7 @@ effective_exit_code="${PRIMARY_LINT_EXIT_CODE:-}"
 effective_conclusion="${PRIMARY_LINT_CONCLUSION:-}"
 effective_failure_reason="${PRIMARY_FAILURE_REASON:-}"
 
-if [[ -n "${RETRY_LINT_RESULT:-}" && "${RETRY_LINT_RESULT}" != "skipped" ]]; then
+if [[ "${RETRY_LINT_RESULT:-}" == "success" ]]; then
 	effective_result="${RETRY_LINT_RESULT}"
 	effective_status="${RETRY_LINT_STATUS:-}"
 	effective_exit_code="${RETRY_LINT_EXIT_CODE:-}"

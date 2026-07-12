@@ -99,6 +99,10 @@ Scripts for GitHub Actions workflows and continuous integration.
 | `detect-changes.sh`                  | Detect repo diffs and set has_changes output                          | `./scripts/ci/detect-changes.sh --help`                                            |
 | `detect-fork-pr.sh`                  | Detect fork PRs and set `is-fork` output for conditional steps        | `EVENT_NAME=pull_request ./scripts/ci/detect-fork-pr.sh`                           |
 | `evaluate-test-gate.sh`              | Evaluate upstream compat/coverage results for required-check gate     | `COMPAT_RESULT=success COVERAGE_RESULT=success ./scripts/ci/evaluate-test-gate.sh` |
+| `is-infra-flake-failure.sh`          | Classify upstream CI failures caused by runner infrastructure noise   | `UPSTREAM_RESULT=failure scripts/ci/is-infra-flake-failure.sh`                     |
+| `assert-required-check.sh`           | Fail when an upstream reusable job did not pass required outputs      | `UPSTREAM_RESULT=success scripts/ci/assert-required-check.sh`                      |
+| `evaluate-code-quality-gate.sh`      | Evaluate docker-ci upstream jobs for the code-quality gate            | `DOCKER_BUILD_RESULT=success scripts/ci/evaluate-code-quality-gate.sh`             |
+| `run-code-quality-gate.sh`           | Evaluate docker-ci upstream jobs and assert the code-quality gate     | `DOCKER_BUILD_RESULT=success scripts/ci/run-code-quality-gate.sh`                  |
 | `fail-on-security-audit.sh`          | Fail CI when security audit finds vulnerabilities                     | `./scripts/ci/fail-on-security-audit.sh`                                           |
 | `free-disk-space.sh`                 | Free disk space on CI runner for Docker builds                        | `./scripts/ci/free-disk-space.sh`                                                  |
 | `security-comment.sh`                | Run osv-scanner via lintro in Docker and generate security PR comment | `./scripts/ci/security-comment.sh --help`                                          |
