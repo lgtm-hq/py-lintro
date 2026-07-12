@@ -8,20 +8,9 @@
   ],
   "packageRules": [
     {
-      "matchDatasources": ["docker"],
-      "matchUpdateTypes": ["digest", "patch"],
-      "automerge": true,
-      "automergeType": "branch"
-    },
-    {
       "matchDatasources": ["pypi"],
       "matchUpdateTypes": ["minor"],
       "automerge": false
-    },
-    {
-      "groupName": "pytest packages",
-      "groupSlug": "pytest",
-      "matchPackageNames": ["/^pytest/"]
     },
     {
       "matchManagers": [
@@ -239,6 +228,19 @@
       ],
       "datasourceTemplate": "github-releases",
       "packageNameTemplate": "mvdan/sh",
+      "extractVersionTemplate": "^v(?<version>.*)$"
+    },
+    {
+      "description": "Update dotenv-linter version in _tool_versions.py",
+      "customType": "regex",
+      "managerFilePatterns": [
+        "lintro/_tool_versions\\.py"
+      ],
+      "matchStrings": [
+        "ToolName\\.DOTENV_LINTER:\\s*\"(?<currentValue>[0-9]+\\.[0-9]+\\.[0-9]+)\""
+      ],
+      "datasourceTemplate": "github-releases",
+      "packageNameTemplate": "dotenv-linter/dotenv-linter",
       "extractVersionTemplate": "^v(?<version>.*)$"
     },
     {

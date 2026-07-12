@@ -1,4 +1,4 @@
-# syntax=docker/dockerfile:1
+# syntax=docker/dockerfile:1@sha256:87999aa3d42bdc6bea60565083ee17e86d1f3339802f543c0d03998580f9cb89
 # =============================================================================
 # Lintro Docker Image (multi-stage)
 # =============================================================================
@@ -112,6 +112,7 @@ RUN echo "=== Verifying all tools ===" && \
     oxfmt --version && oxlint --version && prettier --version && \
     pydoclint --version && ruff --version && semgrep --version && \
     shellcheck --version && shfmt --version && sqlfluff --version && \
+    dotenv-linter --version && \
     stylelint --version && \
     taplo --version && tsc --version && astro --version && \
     svelte-check --version && vue-tsc --version && yamllint --version && \
@@ -163,6 +164,7 @@ RUN echo "Verifying tools..." && \
     cargo deny --version && semgrep --version && ruff --version && \
     black --version && hadolint --version && actionlint --version && \
     shellcheck --version && shfmt --version && taplo --version && \
+    dotenv-linter --version && \
     gitleaks version && osv-scanner --version && prettier --version && \
     commitlint --version && \
     markdownlint-cli2 --version && tsc --version && astro --version && \
@@ -191,6 +193,7 @@ RUN echo "Verifying tools as non-root user..." && \
     gosu lintro cargo deny --version && \
     gosu lintro osv-scanner --version && \
     gosu lintro semgrep --version && \
+    gosu lintro dotenv-linter --version && \
     echo "All tools verified for non-root user!"
 
 # No USER directive: the container starts as root so entrypoint.sh can detect

@@ -21,6 +21,78 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.78.2] - 2026-07-12
+
+### Changed
+
+- **deps**: pin dependencies (#1293) (1980fbd)
+- **docker**: allow deb.debian.org egress in docker publish builds (#1304) (8287eb7)
+
+### Fixed
+
+- **docker**: stop main-push overwriting multi-arch latest (#1323) (845531c)
+
+## [0.78.1] - 2026-07-12
+
+### Changed
+
+- **deps**: update dependency setuptools to 83.0.0 (patch) (#1294) (c426508)
+
+### Fixed
+
+- **ci**: unblock main deploy-pages egress and dogfooding black finding (#1300)
+  (70a9d48)
+
+## [0.78.0] - 2026-07-12
+
+### Added
+
+- **tools**: add dotenv-linter for .env file validation (#1144) (d428037)
+
+## [0.77.4] - 2026-07-12
+
+### Fixed
+
+- **test**: reconcile pytest addopts coverage with lintro banner (#1164) (a42b985)
+
+## [0.77.3] - 2026-07-12
+
+### Changed
+
+- **deps**: pin dependencies (#1292) (4ecf180)
+- **bench**: add comparative benchmark harness vs meta-linters (#1139) (52dfe8a)
+- **ai**: externalize prompt templates to packaged files (#1134) (505894d)
+- **deps**: update dependency fast-uri to 3.1.3 (patch) (#1291) (1aa1dbc)
+- **deps**: update dependency defu to 6.1.7 (patch) (#1290) (7372683)
+
+### Fixed
+
+- **homebrew**: harden formulas and add brew audit/style CI (#1187) (7b65ca4)
+
+## [0.77.2] - 2026-07-11
+
+### Changed
+
+- **ci**: adopt canonical emoji check names (#1283) (eb63aa7)
+- **ci**: unify lgtm-ci pins at v0.52.3 (#1281) (2ef4016)
+
+### Fixed
+
+- **ci**: pass complete egress allowlist to release version-pr job (#1288) (623fb06)
+- **ci**: grant permissions required by lgtm-ci v0.52.3 reusables (#1285) (d50428e)
+
+## [0.77.1] - 2026-07-11
+
+### Fixed
+
+- **release**: gate publish jobs on anchored prerelease classifier (#1274) (47b2225)
+
+## [0.77.0] - 2026-07-11
+
+### Added
+
+- **licenses**: add dependency license compliance checking (#1178) (83cf9a7)
+
 ## [0.76.0] - 2026-07-11
 
 ### Added
