@@ -9,10 +9,10 @@ Usage:
     python3 fetch_wheel_info.py pydoclint --type universal
 
     # Platform-specific wheels (macos arm64/x86_64)
-    python3 fetch_wheel_info.py pydantic_core --type platform
+    python3 fetch_wheel_info.py pydantic-core --type platform
 
     # Specific version
-    python3 fetch_wheel_info.py pydantic_core --type platform --version 2.41.5
+    python3 fetch_wheel_info.py pydantic-core --type platform --version 2.41.5
 """
 
 import argparse
