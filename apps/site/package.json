@@ -5,7 +5,7 @@
   "private": true,
   "license": "MIT",
   "engines": {
-    "node": ">=22.12.0"
+    "node": ">=24.0.0"
   },
   "scripts": {
     "migrate": "python3 ../../scripts/ci/site/migrate-docs-content.py",
@@ -24,13 +24,13 @@
   },
   "devDependencies": {
     "@astrojs/check": "^0.9.9",
-    "@pagefind/default-ui": "^1.5.2",
+    "@pagefind/default-ui": "1.5.2",
     "pagefind": "1.5.2",
-    "@types/sanitize-html": "^2.16.1",
-    "@vitest/coverage-v8": "^4.1.10",
-    "typescript": "^6.0.3",
-    "vitest": "^4.1.10",
-    "yaml": "^2.9.0"
+    "@types/sanitize-html": "2.16.1",
+    "@vitest/coverage-v8": "4.1.10",
+    "typescript": "6.0.3",
+    "vitest": "4.1.10",
+    "yaml": "2.9.0"
   },
   "overrides": {
     "yaml": "^2.9.0",
