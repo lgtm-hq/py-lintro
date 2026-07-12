@@ -35,18 +35,16 @@ write_job_outputs() {
 	local status="$3"
 	local exit_code="$4"
 	if [[ -n "${GITHUB_OUTPUT:-}" ]]; then
-		echo "result=${result}" >>"${GITHUB_OUTPUT}"
-		echo "passed=${passed}" >>"${GITHUB_OUTPUT}"
-		echo "status=${status}" >>"${GITHUB_OUTPUT}"
-		echo "exit-code=${exit_code}" >>"${GITHUB_OUTPUT}"
+		{
+			echo "result=${result}"
+			echo "passed=${passed}"
+			echo "status=${status}"
+			echo "exit-code=${exit_code}"
+		} >>"${GITHUB_OUTPUT}"
 	fi
 }
 
-cleanup() {
-	rm -f "${EVALUATE_OUTPUT}"
-}
-
-trap cleanup EXIT
+trap 'rm -f "${EVALUATE_OUTPUT}"' EXIT
 
 : "${DOCKER_BUILD_RESULT:?}"
 : "${MANIFEST_SYNC_RESULT:?}"

@@ -40,7 +40,7 @@ write_output() {
 	local key="$1"
 	local value="$2"
 	if [[ -n "${GITHUB_OUTPUT:-}" ]]; then
-		echo "${key}=${value}" >>"${GITHUB_OUTPUT}"
+		printf '%s=%s\n' "${key}" "${value}" >>"${GITHUB_OUTPUT}"
 	fi
 }
 
