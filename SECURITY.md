@@ -8,8 +8,8 @@ Currently supporting the latest stable version:
 
 | Version | Supported |
 | ------- | --------- |
-| 0.64.x  | ✅        |
-| < 0.64  | ❌        |
+| 0.78.x  | ✅        |
+| < 0.78  | ❌        |
 
 <!-- markdownlint-enable MD060 -->
 
@@ -40,7 +40,7 @@ disclosure:
 - Potential impact or severity assessment, if known
 - Any suggested fixes or mitigations you might have
 
-### **Vulnerability Disclosure Timeline**
+### Vulnerability Disclosure Timeline
 
 We follow a coordinated vulnerability disclosure process:
 
@@ -48,9 +48,9 @@ We follow a coordinated vulnerability disclosure process:
   receipt and begin our initial assessment.
 - **Investigation**: Within 30 days, we will investigate the vulnerability, determine
   its severity, and develop a fix.
-- **Fix & Release**: We aim to release a patch within 90 days of the initial report.
-  Critical vulnerabilities may receive expedited fixes.
-- **Public Disclosure**: After the fix is released, we will coordinate public disclosure
+- **Fix & Release**: Critical vulnerabilities are patched as soon as possible; other
+  fixes are released within 90 days of the initial report.
+- **Public Disclosure**: After a fix is available, we will coordinate public disclosure
   with the reporter. We request that reporters refrain from public disclosure until a
   fix is available to protect users.
 - **Updates**: You will be kept informed of progress throughout the process.
