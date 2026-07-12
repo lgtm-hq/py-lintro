@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "lintro"
-version = "0.77.2"
+version = "0.77.3"
 description = "A unified CLI tool for code formatting, linting, and quality assurance"
 keywords = [
   "linting",
@@ -128,6 +128,7 @@ packages = [
   "lintro.ai.models",
   "lintro.ai.output",
   "lintro.ai.prompts",
+  "lintro.ai.prompts.templates",
   "lintro.ai.providers",
   "lintro.ai.review",
   "lintro.ai.review.checklist",
@@ -199,6 +200,7 @@ packages = [
 
 [tool.setuptools.package-data]
 lintro = ["tools/*.json"]
+"lintro.ai.prompts.templates" = ["**/*.md", "**/*.json"]
 "lintro.ai.review.checklist" = ["corpus/*.yaml"]
 
 [tool.ruff]
