@@ -21,6 +21,20 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.77.3] - 2026-07-12
+
+### Changed
+
+- **deps**: pin dependencies (#1292) (4ecf180)
+- **bench**: add comparative benchmark harness vs meta-linters (#1139) (52dfe8a)
+- **ai**: externalize prompt templates to packaged files (#1134) (505894d)
+- **deps**: update dependency fast-uri to 3.1.3 (patch) (#1291) (1aa1dbc)
+- **deps**: update dependency defu to 6.1.7 (patch) (#1290) (7372683)
+
+### Fixed
+
+- **homebrew**: harden formulas and add brew audit/style CI (#1187) (7b65ca4)
+
 ## [0.77.2] - 2026-07-11
 
 ### Changed
