@@ -5,6 +5,9 @@ from __future__ import annotations
 import pytest
 from assertpy import assert_that
 
+from lintro.config.licenses_config import LicensesConfig
+from lintro.licenses.models import LicenseStatus, PackageLicense
+from lintro.licenses.policy_engine import LicensePolicyEngine
 from lintro.licenses.spdx import normalize_to_spdx
 
 
@@ -53,6 +56,29 @@ def test_normalize_and_expression() -> None:
     """An AND expression prefers a restrictive/denied-class operand."""
     assert_that(normalize_to_spdx("MIT AND GPL-3.0-only")).is_equal_to("GPL-3.0-only")
     assert_that(normalize_to_spdx("GPL-3.0-only AND MIT")).is_equal_to("GPL-3.0-only")
+
+
+def test_normalize_mixed_or_and_respects_precedence() -> None:
+    """AND binds tighter than OR when collapsing SPDX expressions."""
+    assert_that(normalize_to_spdx("MIT OR Apache-2.0 AND GPL-3.0")).is_equal_to("MIT")
+    assert_that(normalize_to_spdx("Apache-2.0 AND GPL-3.0 OR MIT")).is_equal_to(
+        "GPL-3.0-only",
+    )
+
+
+def test_mixed_or_and_with_denied_operand_fails_policy() -> None:
+    """A denied AND operand cannot be bypassed by a later OR branch."""
+    expression = "Apache-2.0 AND GPL-3.0 OR MIT"
+    package = PackageLicense(
+        name="mixed-license",
+        version="1.0.0",
+        license_id=normalize_to_spdx(expression),
+        license_name=expression,
+        ecosystem="npm",
+    )
+    engine = LicensePolicyEngine(LicensesConfig(policy="permissive"))
+    result = engine.check(package)
+    assert_that(result.status).is_equal_to(LicenseStatus.DENIED)
 
 
 @pytest.mark.parametrize(

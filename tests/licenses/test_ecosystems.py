@@ -7,7 +7,10 @@ from pathlib import Path
 
 from assertpy import assert_that
 
+from lintro.config.licenses_config import LicensesConfig
 from lintro.licenses.ecosystems import NpmLicenseAdapter, PythonLicenseAdapter
+from lintro.licenses.models import LicenseStatus
+from lintro.licenses.policy_engine import LicensePolicyEngine
 
 
 def test_python_adapter_collects_installed_packages() -> None:
@@ -110,3 +113,164 @@ def test_npm_adapter_missing_file_returns_empty(tmp_path: Path) -> None:
         tmp_path / "package.json",
     )
     assert_that(packages).is_empty()
+
+
+def test_npm_adapter_reports_shadowed_nested_versions(tmp_path: Path) -> None:
+    """Nested installs with the same name but different versions are kept.
+
+    Args:
+        tmp_path: Temporary project directory.
+    """
+    (tmp_path / "package.json").write_text(
+        json.dumps(
+            {
+                "name": "root",
+                "dependencies": {"parent-pkg": "1.0.0"},
+            },
+        ),
+    )
+    parent = tmp_path / "node_modules" / "parent-pkg"
+    parent.mkdir(parents=True)
+    parent.joinpath("package.json").write_text(
+        json.dumps(
+            {
+                "name": "parent-pkg",
+                "version": "1.0.0",
+                "license": "MIT",
+                "dependencies": {"shared-lib": "1.0.0"},
+            },
+        ),
+    )
+    nested = parent / "node_modules" / "shared-lib"
+    nested.mkdir(parents=True)
+    nested.joinpath("package.json").write_text(
+        json.dumps(
+            {
+                "name": "shared-lib",
+                "version": "1.0.0",
+                "license": "GPL-3.0",
+            },
+        ),
+    )
+    hoisted = tmp_path / "node_modules" / "shared-lib"
+    hoisted.mkdir(parents=True)
+    hoisted.joinpath("package.json").write_text(
+        json.dumps(
+            {
+                "name": "shared-lib",
+                "version": "2.0.0",
+                "license": "MIT",
+            },
+        ),
+    )
+
+    packages = NpmLicenseAdapter().get_licenses_from_package_json(
+        tmp_path / "package.json",
+    )
+    shared = [p for p in packages if p.name == "shared-lib"]
+    assert_that(shared).is_length(2)
+    assert_that({p.version for p in shared}).is_equal_to({"1.0.0", "2.0.0"})
+
+
+def test_npm_adapter_shadowed_denied_license_fails_policy(tmp_path: Path) -> None:
+    """A denied license in a shadowed nested version is still evaluated.
+
+    Args:
+        tmp_path: Temporary project directory.
+    """
+    (tmp_path / "package.json").write_text(
+        json.dumps(
+            {
+                "name": "root",
+                "dependencies": {"parent-pkg": "1.0.0"},
+            },
+        ),
+    )
+    parent = tmp_path / "node_modules" / "parent-pkg"
+    parent.mkdir(parents=True)
+    parent.joinpath("package.json").write_text(
+        json.dumps(
+            {
+                "name": "parent-pkg",
+                "version": "1.0.0",
+                "license": "MIT",
+                "dependencies": {"shared-lib": "1.0.0"},
+            },
+        ),
+    )
+    nested = parent / "node_modules" / "shared-lib"
+    nested.mkdir(parents=True)
+    nested.joinpath("package.json").write_text(
+        json.dumps(
+            {
+                "name": "shared-lib",
+                "version": "1.0.0",
+                "license": "GPL-3.0",
+            },
+        ),
+    )
+    hoisted = tmp_path / "node_modules" / "shared-lib"
+    hoisted.mkdir(parents=True)
+    hoisted.joinpath("package.json").write_text(
+        json.dumps(
+            {
+                "name": "shared-lib",
+                "version": "2.0.0",
+                "license": "MIT",
+            },
+        ),
+    )
+
+    packages = NpmLicenseAdapter().get_licenses_from_package_json(
+        tmp_path / "package.json",
+    )
+    engine = LicensePolicyEngine(LicensesConfig(policy="permissive"))
+    results = engine.evaluate_all(packages)
+    denied_names = [r.package.name for r in results if r.status is LicenseStatus.DENIED]
+    assert_that(denied_names).contains("shared-lib")
+
+
+def test_npm_adapter_classifies_transitive_dev_dependencies(tmp_path: Path) -> None:
+    """Transitive dependencies of a dev dependency are classified as dev.
+
+    Args:
+        tmp_path: Temporary project directory.
+    """
+    (tmp_path / "package.json").write_text(
+        json.dumps(
+            {
+                "name": "root",
+                "devDependencies": {"eslint": "1.0.0"},
+            },
+        ),
+    )
+    eslint = tmp_path / "node_modules" / "eslint"
+    eslint.mkdir(parents=True)
+    eslint.joinpath("package.json").write_text(
+        json.dumps(
+            {
+                "name": "eslint",
+                "version": "1.0.0",
+                "license": "MIT",
+                "dependencies": {"lodash": "4.0.0"},
+            },
+        ),
+    )
+    lodash = tmp_path / "node_modules" / "lodash"
+    lodash.mkdir(parents=True)
+    lodash.joinpath("package.json").write_text(
+        json.dumps(
+            {
+                "name": "lodash",
+                "version": "4.0.0",
+                "license": "MIT",
+            },
+        ),
+    )
+
+    packages = NpmLicenseAdapter().get_licenses_from_package_json(
+        tmp_path / "package.json",
+    )
+    by_name = {p.name: p for p in packages}
+    assert_that(by_name["eslint"].is_dev).is_true()
+    assert_that(by_name["lodash"].is_dev).is_true()
