@@ -267,9 +267,9 @@ def _tokenize(expression: str) -> list[_Token]:
         if atom:
             tokens.append(_Token(kind=_TokenKind.ATOM, value=atom))
         token = match.group(0)
-        if token == "(":
+        if len(token) == 1 and ord(token) == 40:
             tokens.append(_Token(kind=_TokenKind.LPAREN))
-        elif token == ")":
+        elif len(token) == 1 and ord(token) == 41:
             tokens.append(_Token(kind=_TokenKind.RPAREN))
         elif token.upper() == "AND":
             tokens.append(_Token(kind=_TokenKind.AND))
@@ -383,9 +383,13 @@ def _parse_expression(expression: str) -> _ExprNode | None:
         expression: Cleaned SPDX expression text.
 
     Returns:
-        _ExprNode | None: Parsed expression tree, or None when empty.
+        _ExprNode | None: Parsed expression tree, or None when empty or invalid.
     """
-    return _SpdxExpressionParser(tokens=_tokenize(expression)).parse()
+    parser = _SpdxExpressionParser(tokens=_tokenize(expression))
+    node = parser.parse()
+    if node is not None and parser._current().kind is not _TokenKind.EOF:
+        return None
+    return node
 
 
 def _normalize_and_node(node: _AndNode) -> str | None:
