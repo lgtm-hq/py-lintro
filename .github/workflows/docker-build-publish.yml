@@ -37,12 +37,17 @@ jobs:
     if: github.event_name == 'workflow_dispatch'
     name: Validate backfill inputs
     runs-on: ubuntu-24.04
+    outputs:
+      backfill_version: ${{ steps.validate.outputs.backfill_version }}
+      backfill_ref: ${{ steps.validate.outputs.backfill_ref }}
+      force_publish: ${{ steps.validate.outputs.force_publish }}
     steps:
       - name: Checkout
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
         with:
           persist-credentials: false
       - name: Validate dispatch inputs
+        id: validate
         env:
           BACKFILL_VERSION: ${{ inputs.backfill_version }}
           BACKFILL_REF: ${{ inputs.backfill_ref }}
@@ -72,7 +77,7 @@ jobs:
       image-name: lgtm-hq/py-lintro-base
       version: >-
         ${{ (github.event_name == 'workflow_dispatch'
-        && inputs.backfill_version != '') && inputs.backfill_version
+        && needs.validate-backfill-inputs.outputs.backfill_version != '') && needs.validate-backfill-inputs.outputs.backfill_version
         || (startsWith(github.ref, 'refs/tags/')
         && github.ref_name
         || (github.event_name == 'release' && github.event.release.tag_name || '')) }}
@@ -82,13 +87,13 @@ jobs:
         || startsWith(github.ref, 'refs/tags/')
         || github.event_name == 'release'
         || (github.event_name == 'workflow_dispatch'
-        && (inputs.force_publish == 'true' || inputs.backfill_version != ''))) }}
+        && (needs.validate-backfill-inputs.outputs.force_publish == 'true' || needs.validate-backfill-inputs.outputs.backfill_version != ''))) }}
       source-ref: >-
         ${{ github.event_name == 'workflow_dispatch'
-        && inputs.backfill_ref || '' }}
+        && needs.validate-backfill-inputs.outputs.backfill_ref || '' }}
       tag-latest: >-
         ${{ !(github.event_name == 'workflow_dispatch'
-        && inputs.backfill_version != '') }}
+        && needs.validate-backfill-inputs.outputs.backfill_version != '') }}
       platforms: linux/amd64,linux/arm64
       runner-map: '{"linux/arm64":"ubuntu-24.04-arm"}'
       smoke-test: lintro --version
@@ -97,7 +102,7 @@ jobs:
       no-cache: >-
         ${{ startsWith(github.ref, 'refs/tags/')
         || (github.event_name == 'workflow_dispatch'
-        && inputs.backfill_version != '') }}
+        && needs.validate-backfill-inputs.outputs.backfill_version != '') }}
       provenance: false
       sbom: false
       tooling-ref: '66cad82ead0e5d119928c895c7d7da9c837989e5' # v0.52.3
@@ -160,7 +165,7 @@ jobs:
       image-name: lgtm-hq/py-lintro
       version: >-
         ${{ (github.event_name == 'workflow_dispatch'
-        && inputs.backfill_version != '') && inputs.backfill_version
+        && needs.validate-backfill-inputs.outputs.backfill_version != '') && needs.validate-backfill-inputs.outputs.backfill_version
         || (startsWith(github.ref, 'refs/tags/')
         && github.ref_name
         || (github.event_name == 'release' && github.event.release.tag_name || '')) }}
@@ -170,13 +175,13 @@ jobs:
         || startsWith(github.ref, 'refs/tags/')
         || github.event_name == 'release'
         || (github.event_name == 'workflow_dispatch'
-        && (inputs.force_publish == 'true' || inputs.backfill_version != ''))) }}
+        && (needs.validate-backfill-inputs.outputs.force_publish == 'true' || needs.validate-backfill-inputs.outputs.backfill_version != ''))) }}
       source-ref: >-
         ${{ github.event_name == 'workflow_dispatch'
-        && inputs.backfill_ref || '' }}
+        && needs.validate-backfill-inputs.outputs.backfill_ref || '' }}
       tag-latest: >-
         ${{ !(github.event_name == 'workflow_dispatch'
-        && inputs.backfill_version != '') }}
+        && needs.validate-backfill-inputs.outputs.backfill_version != '') }}
       platforms: linux/amd64,linux/arm64
       runner-map: '{"linux/arm64":"ubuntu-24.04-arm"}'
       smoke-test: lintro --version
@@ -185,7 +190,7 @@ jobs:
       no-cache: >-
         ${{ startsWith(github.ref, 'refs/tags/')
         || (github.event_name == 'workflow_dispatch'
-        && inputs.backfill_version != '') }}
+        && needs.validate-backfill-inputs.outputs.backfill_version != '') }}
       provenance: false
       sbom: false
       tooling-ref: '66cad82ead0e5d119928c895c7d7da9c837989e5' # v0.52.3

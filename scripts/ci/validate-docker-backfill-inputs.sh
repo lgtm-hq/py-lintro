@@ -23,11 +23,16 @@ EOF
 	exit 0
 fi
 
-backfill_version="${BACKFILL_VERSION:-}"
-backfill_ref="${BACKFILL_REF:-}"
+trim_input() {
+	local value="$1"
+	value="${value#"${value%%[![:space:]]*}"}"
+	value="${value%"${value##*[![:space:]]}"}"
+	printf '%s' "$value"
+}
+
+backfill_version="$(trim_input "${BACKFILL_VERSION:-}")"
+backfill_ref="$(trim_input "${BACKFILL_REF:-}")"
 force_publish="${FORCE_PUBLISH:-false}"
-backfill_version="${backfill_version//[[:space:]]/}"
-backfill_ref="${backfill_ref//[[:space:]]/}"
 
 if [[ -n "$backfill_version" && -z "$backfill_ref" ]]; then
 	echo "::error::BACKFILL_REF is required when BACKFILL_VERSION is set." >&2
@@ -45,3 +50,11 @@ if [[ "$force_publish" == "true" && -z "$backfill_version" ]]; then
 fi
 
 echo "Docker backfill inputs are valid."
+
+if [[ -n "${GITHUB_OUTPUT:-}" ]]; then
+	{
+		echo "backfill_version=${backfill_version}"
+		echo "backfill_ref=${backfill_ref}"
+		echo "force_publish=${force_publish}"
+	} >>"$GITHUB_OUTPUT"
+fi
