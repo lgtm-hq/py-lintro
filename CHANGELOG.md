@@ -21,6 +21,17 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.78.2] - 2026-07-12
+
+### Changed
+
+- **deps**: pin dependencies (#1293) (1980fbd)
+- **docker**: allow deb.debian.org egress in docker publish builds (#1304) (8287eb7)
+
+### Fixed
+
+- **docker**: stop main-push overwriting multi-arch latest (#1323) (845531c)
+
 ## [0.78.1] - 2026-07-12
 
 ### Changed
