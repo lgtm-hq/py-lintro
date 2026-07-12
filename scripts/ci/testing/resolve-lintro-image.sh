@@ -61,8 +61,9 @@ find_newest_sha_tag() {
 		echo "::error::Failed to list GHCR sha-* tags for fallback resolution." >&2
 		exit 1
 	fi
-	if ! tag=$(printf '%s' "$versions_json" | jq -r '
-		[.[]
+	if ! tag=$(printf '%s' "$versions_json" | jq -s -r '
+		add
+		| [.[]
 			| select((.metadata.container.tags // []) | any(startswith("sha-")))
 			| {
 				updated: .updated_at,
