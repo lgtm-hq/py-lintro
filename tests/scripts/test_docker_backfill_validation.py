@@ -51,11 +51,20 @@ def _run_validation(env: dict[str, str]) -> subprocess.CompletedProcess[str]:
             },
             "FORCE_PUBLISH cannot be true when BACKFILL_VERSION is empty",
         ),
+        (
+            {
+                "BACKFILL_VERSION": " ",
+                "BACKFILL_REF": "v0.65.0",
+                "FORCE_PUBLISH": "false",
+            },
+            "BACKFILL_VERSION is required when BACKFILL_REF is set",
+        ),
     ],
     ids=[
         "missing-backfill-ref",
         "missing-backfill-version",
         "force-publish-without-version",
+        "whitespace-only-backfill-version",
     ],
 )
 def test_validate_docker_backfill_inputs_rejects_invalid(

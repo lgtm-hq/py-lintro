@@ -26,6 +26,8 @@ fi
 backfill_version="${BACKFILL_VERSION:-}"
 backfill_ref="${BACKFILL_REF:-}"
 force_publish="${FORCE_PUBLISH:-false}"
+backfill_version="${backfill_version//[[:space:]]/}"
+backfill_ref="${backfill_ref//[[:space:]]/}"
 
 if [[ -n "$backfill_version" && -z "$backfill_ref" ]]; then
 	echo "::error::BACKFILL_REF is required when BACKFILL_VERSION is set." >&2
