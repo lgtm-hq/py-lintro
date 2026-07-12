@@ -443,8 +443,14 @@ def test_docker_ci_comment_condition_semantics(
         _evaluate_github_if(
             comment_condition,
             cancelled=cancelled,
-            results={"dogfooding-lint": dogfooding_lint},
-            outputs={"dogfooding-lint": lint_outputs},
+            results={
+                "dogfooding-lint": dogfooding_lint,
+                "dogfooding_lint_retry": "skipped",
+            },
+            outputs={
+                "dogfooding-lint": lint_outputs,
+                "dogfooding_lint_retry": {"exit-code": "", "status": ""},
+            },
             event_is_pull_request=event_is_pull_request,
             head_repo_not_fork=head_repo_not_fork,
             pull_request_not_draft=pull_request_not_draft,
@@ -453,25 +459,43 @@ def test_docker_ci_comment_condition_semantics(
 
 
 def test_docker_ci_lintro_code_quality_wires_upstream_jobs() -> None:
-    """Required check propagates docker-build failure even when lint is skipped."""
+    """Required check consumes the code-quality gate rollup output."""
     docker_ci = _load_workflow(name="docker-ci.yml")
+    gate_job = docker_ci["jobs"]["code-quality-gate"]
     job = docker_ci["jobs"]["lintro-code-quality"]
 
-    assert_that(job["needs"]).contains(
+    assert_that(gate_job["needs"]).contains(
+        "docker-build",
+        "manifest-sync",
+        "dogfooding-lint",
+        "dogfooding_lint_retry",
+    )
+    assert_that(job["needs"]).contains("code-quality-gate")
+    assert_that(job["if"]).contains("!cancelled()")
+    assert_that(job["with"]["upstream-result"]).contains(
+        "needs.code-quality-gate.outputs.result",
+    )
+    assert_that(job["with"]["passed-output"]).contains(
+        "needs.code-quality-gate.outputs.passed",
+    )
+    assert_that(job["with"]["status-output"]).contains(
+        "needs.code-quality-gate.outputs.status",
+    )
+
+
+def test_docker_ci_retries_dogfooding_lint_on_failure() -> None:
+    """Dogfooding lint retry runs only after a primary lint failure."""
+    docker_ci = _load_workflow(name="docker-ci.yml")
+    retry_job = docker_ci["jobs"]["dogfooding_lint_retry"]
+    retry_condition = retry_job["if"]
+
+    assert_that(retry_job["needs"]).contains(
         "docker-build",
         "manifest-sync",
         "dogfooding-lint",
     )
-    assert_that(job["if"]).contains("!cancelled()")
-    upstream = _normalize_github_expr(job["with"]["upstream-result"])
-    assert_that(upstream).is_equal_to(
-        _normalize_github_expr(
-            "${{ needs.docker-build.result != 'success' && needs.docker-build.result "
-            "|| ( needs.manifest-sync.result != 'success' && "
-            "needs.manifest-sync.result != 'skipped' ) && needs.manifest-sync.result "
-            "|| needs.dogfooding-lint.result }}",
-        ),
-    )
+    assert_that(retry_condition).contains("needs.dogfooding-lint.result == 'failure'")
+    assert_that(retry_condition).contains("needs.docker-build.result == 'success'")
 
 
 def test_publish_npm_exposes_dist_tag_for_backfills() -> None:

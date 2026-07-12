@@ -245,15 +245,104 @@ jobs:
         )
         || format('ghcr.io/lgtm-hq/py-lintro:ci-{0}', github.run_id) }}
 
-  dogfooding-pr-comment:
-    needs: dogfooding-lint
+  # Bounded retry (1 attempt) when dogfooding-lint fails — absorbs runner shutdown
+  # (exit 143) and artifact ETIMEDOUT flakes without a manual workflow rerun.
+  dogfooding_lint_retry:
+    needs: [docker-build, manifest-sync, dogfooding-lint]
     if: >-
       always() &&
       !cancelled() &&
-      needs.dogfooding-lint.result != 'cancelled' &&
-      needs.dogfooding-lint.result != 'skipped' &&
-      needs.dogfooding-lint.outputs.exit-code != '' &&
-      needs.dogfooding-lint.outputs.status != '' &&
+      needs.dogfooding-lint.result == 'failure' &&
+      needs.docker-build.result == 'success' &&
+      (
+        needs.manifest-sync.result == 'success' ||
+        needs.manifest-sync.result == 'skipped'
+      )
+    # yamllint disable-line rule:line-length
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-quality-lint.yml@66cad82ead0e5d119928c895c7d7da9c837989e5 # v0.52.3
+    permissions:
+      contents: read
+      packages: read # pull lintro-image from GHCR in reusable-quality-lint
+    with:
+      tooling-ref: '66cad82ead0e5d119928c895c7d7da9c837989e5' # v0.52.3
+      job-name: '🛠️ Dogfooding Lint (retry)'
+      lintro-tool-options: >-
+        pydoclint:timeout=120,bandit:timeout=120,osv_scanner:check_suppressions=false
+      egress-policy: block
+      lintro-image: >-
+        ${{ needs.docker-build.outputs.is-fork == 'true'
+        && format(
+          'ghcr.io/lgtm-hq/py-lintro@sha256:{0}',
+          '1ff3db35939283734b859c7c5d95be87fd8fd62734b3434e0437769d50d53578'
+        )
+        || format('ghcr.io/lgtm-hq/py-lintro:ci-{0}', github.run_id) }}
+
+  code-quality-gate:
+    name: 🚦 Code Quality Gate
+    needs: [docker-build, manifest-sync, dogfooding-lint, dogfooding_lint_retry]
+    if: >-
+      always() &&
+      !cancelled() &&
+      (
+        github.event_name != 'pull_request' ||
+        github.event.pull_request.draft == false
+      )
+    runs-on: ubuntu-24.04
+    permissions: {}
+    timeout-minutes: 5
+    outputs:
+      result: ${{ steps.gate.outputs.result }}
+      passed: ${{ steps.gate.outputs.passed }}
+      status: ${{ steps.gate.outputs.status }}
+      exit-code: ${{ steps.gate.outputs.exit-code }}
+    steps:
+      - name: Checkout gate scripts
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          sparse-checkout: |
+            scripts/ci/run-code-quality-gate.sh
+            scripts/ci/evaluate-code-quality-gate.sh
+            scripts/ci/assert-required-check.sh
+            scripts/ci/is-infra-flake-failure.sh
+          sparse-checkout-cone-mode: false
+          persist-credentials: false
+      - name: Evaluate and assert code quality gate
+        id: gate
+        env:
+          DOCKER_BUILD_RESULT: ${{ needs.docker-build.result }}
+          MANIFEST_SYNC_RESULT: ${{ needs.manifest-sync.result }}
+          PRIMARY_LINT_RESULT: ${{ needs.dogfooding-lint.result }}
+          RETRY_LINT_RESULT: ${{ needs.dogfooding_lint_retry.result }}
+          PRIMARY_LINT_STATUS: ${{ needs.dogfooding-lint.outputs.status }}
+          PRIMARY_LINT_EXIT_CODE: ${{ needs.dogfooding-lint.outputs.exit-code }}
+          RETRY_LINT_STATUS: ${{ needs.dogfooding_lint_retry.outputs.status }}
+          RETRY_LINT_EXIT_CODE: ${{ needs.dogfooding_lint_retry.outputs.exit-code }}
+        run: scripts/ci/run-code-quality-gate.sh
+
+  dogfooding-pr-comment:
+    needs: [dogfooding-lint, dogfooding_lint_retry]
+    if: >-
+      always() &&
+      !cancelled() &&
+      (
+        (
+          needs.dogfooding_lint_retry.result != 'skipped' &&
+          needs.dogfooding_lint_retry.result != 'cancelled'
+        ) || (
+          needs.dogfooding-lint.result != 'cancelled' &&
+          needs.dogfooding-lint.result != 'skipped'
+        )
+      ) &&
+      (
+        (
+          needs.dogfooding_lint_retry.result != 'skipped' &&
+          needs.dogfooding_lint_retry.outputs.exit-code != '' &&
+          needs.dogfooding_lint_retry.outputs.status != ''
+        ) || (
+          needs.dogfooding-lint.outputs.exit-code != '' &&
+          needs.dogfooding-lint.outputs.status != ''
+        )
+      ) &&
       github.event_name == 'pull_request' &&
       github.event.pull_request.head.repo.fork == false &&
       github.event.pull_request.draft == false
@@ -263,14 +352,20 @@ jobs:
       contents: read
       pull-requests: write # post lintro results as PR comment
     with:
-      exit-code: ${{ needs.dogfooding-lint.outputs.exit-code }}
+      exit-code: >-
+        ${{
+          needs.dogfooding_lint_retry.result != 'skipped' &&
+          needs.dogfooding_lint_retry.outputs.exit-code != '' &&
+          needs.dogfooding_lint_retry.outputs.exit-code
+          || needs.dogfooding-lint.outputs.exit-code
+        }}
       tooling-ref: '66cad82ead0e5d119928c895c7d7da9c837989e5' # v0.52.3
       job-name: '🛠️ Dogfooding Lint PR Comment'
       egress-policy: block
 
   # Org ruleset (checks-py-lintro): lintro-code-quality / 🛠️ Lintro Code Quality
   lintro-code-quality:
-    needs: [docker-build, manifest-sync, dogfooding-lint]
+    needs: [code-quality-gate]
     if: >-
       always() &&
       !cancelled() &&
@@ -286,16 +381,9 @@ jobs:
       tooling-ref: '66cad82ead0e5d119928c895c7d7da9c837989e5' # v0.52.3
       job-name: '🛠️ Lintro Code Quality'
       runner-image: ubuntu-24.04
-      upstream-result: >-
-        ${{
-          needs.docker-build.result != 'success' && needs.docker-build.result
-          || (
-            needs.manifest-sync.result != 'success' &&
-            needs.manifest-sync.result != 'skipped'
-          ) && needs.manifest-sync.result
-          || needs.dogfooding-lint.result
-        }}
-      status-output: ${{ needs.dogfooding-lint.outputs.status }}
+      upstream-result: ${{ needs.code-quality-gate.outputs.result }}
+      passed-output: ${{ needs.code-quality-gate.outputs.passed }}
+      status-output: ${{ needs.code-quality-gate.outputs.status }}
       status-expected: passed
       egress-policy: block
       egress-preset: github-tooling
@@ -462,8 +550,11 @@ jobs:
 
   publish:
     name: 📦 Publish to GHCR
-    needs: [dogfooding-lint, security-audit, integration-test]
-    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    needs: [code-quality-gate, security-audit, integration-test]
+    if: >-
+      github.ref == 'refs/heads/main' &&
+      github.event_name == 'push' &&
+      needs.code-quality-gate.outputs.result == 'success'
     runs-on: ubuntu-24.04
     permissions:
       contents: read # checkout and metadata extraction
@@ -574,7 +665,7 @@ jobs:
 
   cleanup-ci-images:
     name: 🧹 Cleanup CI Images
-    needs: [docker-build, dogfooding-lint, security-audit, integration-test, publish]
+    needs: [docker-build, code-quality-gate, security-audit, integration-test, publish]
     if: >-
       always() &&
       needs.docker-build.outputs.is-fork != 'true'
