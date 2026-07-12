@@ -96,7 +96,7 @@ def test_check_script_reports_missing_tooling(tmp_path: Path) -> None:
         env={
             **os.environ.copy(),
             "GITHUB_WORKSPACE": str(workspace),
-            "GH_TOKEN": "fake-token",
+            "GH_TOKEN": "fake-token",  # nosec B105 - test-only placeholder, not a real credential
         },
     )
 
@@ -203,7 +203,7 @@ def test_install_script_retries_transient_curl_exit_23(tmp_path: Path) -> None:
     env["PATH"] = f"{mock_bin}:{env['PATH']}"
     env["DOWNLOAD_MAX_ATTEMPTS"] = "3"
 
-    result = subprocess.run(  # nosec B603 - fixed argv run against a real binary in a controlled test; shell=False, no user shell input
+    result = subprocess.run(  # nosec B603 B607 - fixed argv run against a real binary in a controlled test; bash resolved from PATH in controlled env; shell=False, no user shell input
         ["bash", str(script_copy), "9.9.9"],
         capture_output=True,
         text=True,
@@ -222,9 +222,9 @@ def test_vuln_suppression_workflow_uses_local_scripts() -> None:
     content = workflow_path.read_text(encoding="utf-8")
 
     assert_that(content).contains(
-        "install-script: scripts/ci/security/install-osv-scanner.sh"
+        "install-script: scripts/ci/security/install-osv-scanner.sh",
     )
     assert_that(content).contains(
-        "check-script: scripts/ci/security/check-vuln-suppressions.sh"
+        "check-script: scripts/ci/security/check-vuln-suppressions.sh",
     )
     assert_that(content).contains(_LGTM_CI_PIN)
