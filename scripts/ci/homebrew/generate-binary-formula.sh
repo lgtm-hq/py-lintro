@@ -68,6 +68,9 @@ class Lintro < Formula
     end
   end
 
+  # Shares the "lintro" binary with the PyPI-based full formula.
+  conflicts_with "lintro-full", because: "both provide the lintro binary"
+
   def install
     if Hardware::CPU.arm?
       bin.install "lintro-macos-arm64" => "lintro"
@@ -91,6 +94,10 @@ class Lintro < Formula
 
   test do
     assert_match version.to_s, shell_output("#{bin}/lintro --version")
+    assert_match "Usage:", shell_output("#{bin}/lintro --help")
+    # \`lintro doctor\` exits non-zero when optional tools are missing (expected
+    # inside the sandboxed test environment), so accept exit status 1.
+    assert_match "Lintro Doctor", shell_output("#{bin}/lintro doctor", 1)
   end
 end
 EOF
