@@ -50,7 +50,7 @@ def _addopts_has_coverage(addopts: str | list[str] | None) -> bool:
     return any(_token_enables_coverage(token) for token in tokens)
 
 
-def _load_pyproject_toml(path: Path) -> dict | None:
+def _load_pyproject_toml(path: Path) -> dict[str, object] | None:
     """Load and parse a ``pyproject.toml`` file.
 
     Args:
@@ -66,7 +66,7 @@ def _load_pyproject_toml(path: Path) -> dict | None:
         return None
 
 
-def _pyproject_pytest_tool(data: dict) -> dict | None:
+def _pyproject_pytest_tool(data: dict[str, object]) -> dict[str, object] | None:
     """Return the ``[tool.pytest]`` table when it is a valid mapping.
 
     Args:
