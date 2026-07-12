@@ -6,7 +6,7 @@ import os
 
 import click
 
-from lintro.utils.git_diff import DIFF_DEFAULT_SENTINEL
+from lintro.utils.git_diff import DIFF_DEFAULT_SENTINEL, ref_exists
 
 _DIFF_PATH_ERROR: str = (
     "--diff value '{value}' looks like a filesystem path, not a git ref. "
@@ -29,6 +29,6 @@ def validate_diff_base_ref(diff_base: str | None) -> str | None:
     """
     if diff_base is None or diff_base == DIFF_DEFAULT_SENTINEL:
         return diff_base
-    if os.path.exists(diff_base):
+    if os.path.exists(diff_base) and not ref_exists(diff_base):
         raise click.UsageError(_DIFF_PATH_ERROR.format(value=diff_base))
     return diff_base

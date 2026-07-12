@@ -143,7 +143,7 @@ def _repo_root(cwd: str) -> str | None:
     return root or None
 
 
-def _ref_exists(ref: str, cwd: str) -> bool:
+def ref_exists(ref: str, cwd: str = ".") -> bool:
     """Return whether ``ref`` resolves to a commit.
 
     Args:
@@ -182,13 +182,13 @@ def resolve_default_base(cwd: str = ".") -> str | None:
         )
         if symbolic.returncode == 0:
             candidate = symbolic.stdout.strip()
-            if candidate and candidate != "origin/HEAD" and _ref_exists(candidate, cwd):
+            if candidate and candidate != "origin/HEAD" and ref_exists(candidate, cwd):
                 return candidate
     except (OSError, subprocess.SubprocessError):
         pass
 
     for candidate in _DEFAULT_BASE_CANDIDATES:
-        if _ref_exists(candidate, cwd):
+        if ref_exists(candidate, cwd):
             return candidate
     return None
 
@@ -273,7 +273,7 @@ def get_changed_files(base: str, cwd: str = ".") -> frozenset[str]:
     """
     root = _repo_root(cwd) or os.path.abspath(cwd)
 
-    if not _ref_exists(base, cwd):
+    if not ref_exists(base, cwd):
         raise DiffResolutionError(
             f"Cannot resolve --diff base ref '{base}'. Fetch it or pass an "
             f"existing ref (e.g. 'main' or 'origin/main').",

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import os
+import subprocess  # nosec B404 - subprocess drives git in controlled test fixtures
 from pathlib import Path
 from unittest.mock import patch
 
@@ -131,3 +133,50 @@ def test_diff_with_separator_treats_path_as_scan_target(tmp_path: Path) -> None:
         DIFF_DEFAULT_SENTINEL,
     )
     assert_that(mock_run.call_args.kwargs["paths"]).contains(str(scan_dir))
+
+
+def test_diff_equals_syntax_allows_ref_when_path_exists(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """``--diff=main`` works when a ``main/`` directory also exists."""
+    subprocess.run(  # nosec B603 B607 - fixed git argv in test repo setup; shell=False
+        ["git", "init", "-q"],
+        cwd=tmp_path,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    subprocess.run(  # nosec B603 B607 - fixed git argv in test repo setup; shell=False
+        ["git", "commit", "--allow-empty", "-qm", "init"],
+        cwd=tmp_path,
+        check=True,
+        capture_output=True,
+        text=True,
+        env={
+            **os.environ,
+            "GIT_AUTHOR_NAME": "Test",
+            "GIT_AUTHOR_EMAIL": "test@example.com",
+            "GIT_COMMITTER_NAME": "Test",
+            "GIT_COMMITTER_EMAIL": "test@example.com",
+        },
+    )
+    subprocess.run(  # nosec B603 B607 - fixed git argv in test repo setup; shell=False
+        ["git", "branch", "-M", "main"],
+        cwd=tmp_path,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    (tmp_path / "main").mkdir()
+    monkeypatch.chdir(tmp_path)
+
+    runner = CliRunner()
+    with patch(
+        "lintro.cli_utils.commands.check.run_lint_tools_simple",
+        return_value=0,
+    ) as mock_run:
+        result = runner.invoke(cli, ["chk", "--diff=main", "--tools", "ruff"])
+
+    assert_that(result.exit_code).is_equal_to(0)
+    assert_that(mock_run.call_args.kwargs["diff_base"]).is_equal_to("main")
