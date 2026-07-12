@@ -64,9 +64,9 @@ def test_pypi_template_has_richer_test_block() -> None:
 
 
 def test_pypi_template_has_no_escaped_interpolation() -> None:
-    """The formula must use real Ruby interpolation, not a literal ``\\#{``.
+    r"""The formula must use real Ruby interpolation, not a literal ``\#{``.
 
-    An escaped ``\\#{bin}`` renders to the literal string ``#{bin}`` and breaks
+    An escaped ``\#{bin}`` renders to the literal string ``#{bin}`` and breaks
     the test block, so guard against the regression.
     """
     template = _TEMPLATE.read_text(encoding="utf-8")
@@ -166,7 +166,7 @@ def test_workflow_triggers_on_homebrew_paths() -> None:
     """The workflow only runs when Homebrew scripts or the workflow change."""
     workflow = _load_workflow()
     # ``on`` is parsed as the boolean-like key ``True`` by PyYAML.
-    on = workflow.get("on") or workflow.get(True)
+    on = workflow["on"] if "on" in workflow else workflow[True]
     pr_paths = on["pull_request"]["paths"]
 
     assert_that(pr_paths).contains("scripts/ci/homebrew/**")
