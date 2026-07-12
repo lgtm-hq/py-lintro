@@ -228,3 +228,59 @@ def test_nearer_config_without_coverage_stops_walk(
     monkeypatch.chdir(nested)
     assert_that(config_addopts_enable_coverage()).is_false()
 
+
+def test_sectionless_tox_ini_does_not_block_parent_coverage(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A sectionless tox.ini must not stop the upward walk before parent config.
+
+    Args:
+        tmp_path: Temporary directory provided by pytest.
+        monkeypatch: Pytest monkeypatch fixture used to switch the cwd.
+    """
+    (tmp_path / "pytest.ini").write_text(_PYTEST_INI_WITH_COV, encoding="utf-8")
+    pkg = tmp_path / "pkg"
+    pkg.mkdir()
+    (pkg / "tox.ini").write_text("[tox]\nenvlist = py313\n", encoding="utf-8")
+    nested = pkg / "tests"
+    nested.mkdir()
+    monkeypatch.chdir(nested)
+    assert_that(config_addopts_enable_coverage()).is_true()
+
+
+def test_pyproject_wins_over_tox_ini_without_coverage(tmp_path: Path) -> None:
+    """Same-directory pyproject.ini_options beat tox.ini coverage addopts.
+
+    Args:
+        tmp_path: Temporary directory provided by pytest.
+    """
+    (tmp_path / "pyproject.toml").write_text(
+        '[tool.pytest.ini_options]\naddopts = "-ra"\n',
+        encoding="utf-8",
+    )
+    (tmp_path / "tox.ini").write_text(
+        "[pytest]\naddopts = --cov=pkg\n",
+        encoding="utf-8",
+    )
+    assert_that(config_addopts_enable_coverage(tmp_path)).is_false()
+
+
+def test_pyproject_coverage_wins_over_setup_cfg_without_coverage(
+    tmp_path: Path,
+) -> None:
+    """Same-directory pyproject coverage beats a setup.cfg without coverage.
+
+    Args:
+        tmp_path: Temporary directory provided by pytest.
+    """
+    (tmp_path / "pyproject.toml").write_text(
+        '[tool.pytest.ini_options]\naddopts = "--cov=pkg"\n',
+        encoding="utf-8",
+    )
+    (tmp_path / "setup.cfg").write_text(
+        "[tool:pytest]\naddopts = -ra\n",
+        encoding="utf-8",
+    )
+    assert_that(config_addopts_enable_coverage(tmp_path)).is_true()
+
