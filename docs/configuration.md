@@ -1980,6 +1980,63 @@ lintro format --tools shfmt
 lintro check scripts/ --tools shfmt
 ```
 
+### Dotenv Tools
+
+#### dotenv-linter Configuration
+
+[dotenv-linter](https://dotenv-linter.github.io/) is a fast, Rust-based linter and fixer
+for `.env` files. It detects duplicate keys, lowercase keys, incorrect delimiters,
+unordered keys, and stray whitespace, and can auto-fix most of them.
+
+**Installation:**
+
+```bash
+# macOS
+brew install dotenv-linter
+
+# Cargo
+cargo install dotenv-linter
+
+# Binary releases
+# https://github.com/dotenv-linter/dotenv-linter/releases
+```
+
+**Native config:** dotenv-linter has no config file; behavior is controlled entirely via
+CLI flags (surfaced through `--tool-options`).
+
+**Lintro options via `--tool-options`:**
+
+```bash
+# Recursively scan directories for .env files
+lintro check --tools dotenv_linter --tool-options "dotenv_linter:recursive=True"
+
+# Skip specific checks (maps to --ignore-checks)
+lintro check --tools dotenv_linter \
+  --tool-options "dotenv_linter:skip_checks=LowercaseKey|UnorderedKey"
+
+# Exclude paths from linting
+lintro check --tools dotenv_linter --tool-options "dotenv_linter:exclude=vendor"
+
+# Validate against a schema file
+lintro check --tools dotenv_linter --tool-options "dotenv_linter:schema=env.schema.json"
+
+# Auto-fix issues in place (no .env.bak backups are created)
+lintro format --tools dotenv_linter
+```
+
+**Available Options:**
+
+| Option        | Type        | Description                                                    |
+| ------------- | ----------- | -------------------------------------------------------------- |
+| `recursive`   | bool        | Recursively scan directories for `.env` files. Default `False` |
+| `exclude`     | list\[str\] | File or directory paths to exclude                             |
+| `skip_checks` | list\[str\] | Check names to bypass (maps to `--ignore-checks`)              |
+| `schema`      | str         | Path to a schema file to validate `.env` contents              |
+
+> Note: real `.env` files are frequently `.gitignore`d, so they may not be discovered
+> during a normal repository scan. Point Lintro at the file explicitly, or commit a
+> template such as `.env.example` for the linter to check.
+
 ### TOML Tools
 
 #### Taplo Configuration

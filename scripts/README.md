@@ -105,6 +105,7 @@ Scripts for GitHub Actions workflows and continuous integration.
 | `run-ai-review.sh`                   | Dogfood `lintro review` on a PR using trusted base-branch lintro      | `PR_NUMBER=123 ./scripts/ci/run-ai-review.sh`                                      |
 | `enable_review_config.py`            | Enable AI review + cost cap in `.lintro-config.yaml` for a CI run     | `python3 scripts/ci/enable_review_config.py --help`                                |
 | `classify-osv-results.py`            | Classify osv_scanner JSON as ok, vulns, or error for CI status        | `python3 scripts/ci/classify-osv-results.py osv-results.json`                      |
+| `classify-release-tag.py`            | Classify a release tag as stable or prerelease for publish gating     | `python3 scripts/ci/classify-release-tag.py v1.2.3`                                |
 | `format-security-comment.py`         | Format lintro osv_scanner JSON as security PR comment markdown        | `python3 scripts/ci/format-security-comment.py osv-results.json`                   |
 | `format-changelog.py`                | Reflow generated `CHANGELOG.md` to lintro 88-col markdown             | `python3 scripts/ci/format-changelog.py CHANGELOG.md`                              |
 | `test-install-package.sh`            | Install and verify built package in isolated venv                     | `./scripts/ci/test-install-package.sh wheel`                                       |
@@ -143,19 +144,20 @@ Scripts for building, testing, and deploying the Astro documentation site at
 
 Scripts for generating and updating Homebrew formulas.
 
-| Script                       | Purpose                                            | Usage                                                                                                           |
-| ---------------------------- | -------------------------------------------------- | --------------------------------------------------------------------------------------------------------------- |
-| `wait-for-pypi.sh`           | Poll PyPI until package version is available       | `./scripts/ci/homebrew/wait-for-pypi.sh lintro 1.0.0`                                                           |
-| `get-release-info.sh`        | Resolve release tag and prerelease metadata        | `GITHUB_EVENT_NAME=workflow_dispatch ./scripts/ci/homebrew/get-release-info.sh`                                 |
-| `create-tap-pr.sh`           | Create/update Homebrew tap PR                      | `./scripts/ci/homebrew/create-tap-pr.sh Formula/lintro.rb Formula/lintro-full.rb "chore(homebrew): update ..."` |
-| `create-lintro-tap-pr.sh`    | Create/update lintro's generated formula PR        | `./scripts/ci/homebrew/create-lintro-tap-pr.sh 1.0.0 --skip-if-empty`                                           |
-| `generate-pypi-formula.sh`   | Generate lintro.rb formula from PyPI               | `./scripts/ci/homebrew/generate-pypi-formula.sh 1.0.0 out`                                                      |
-| `generate-binary-formula.sh` | Generate `Formula/lintro.rb` for binary releases   | `./scripts/ci/homebrew/generate-binary-formula.sh ...`                                                          |
-| `pypi_utils.py`              | Shared PyPI API utilities module                   | Imported by other Python scripts                                                                                |
-| `fetch_package_info.py`      | Fetch package tarball info from PyPI               | `python3 scripts/ci/homebrew/fetch_package_info.py lintro 1.0.0`                                                |
-| `fetch_wheel_info.py`        | Fetch wheel info and generate resource stanzas     | `python3 scripts/ci/homebrew/fetch_wheel_info.py pydoclint --type universal`                                    |
-| `render_formula.py`          | Render Homebrew formula from template              | `python3 scripts/ci/homebrew/render_formula.py --tarball-url ... -o out.rb`                                     |
-| `generate_resources.py`      | Generate Homebrew resource stanzas (replaces poet) | `python3 scripts/ci/homebrew/generate_resources.py lintro --exclude pkg1 pkg2`                                  |
+| Script                       | Purpose                                                | Usage                                                                                                           |
+| ---------------------------- | ------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------- |
+| `wait-for-pypi.sh`           | Poll PyPI until package version is available           | `./scripts/ci/homebrew/wait-for-pypi.sh lintro 1.0.0`                                                           |
+| `get-release-info.sh`        | Resolve release tag and prerelease metadata            | `GITHUB_EVENT_NAME=workflow_dispatch ./scripts/ci/homebrew/get-release-info.sh`                                 |
+| `create-tap-pr.sh`           | Create/update Homebrew tap PR                          | `./scripts/ci/homebrew/create-tap-pr.sh Formula/lintro.rb Formula/lintro-full.rb "chore(homebrew): update ..."` |
+| `create-lintro-tap-pr.sh`    | Create/update lintro's generated formula PR            | `./scripts/ci/homebrew/create-lintro-tap-pr.sh 1.0.0 --skip-if-empty`                                           |
+| `generate-pypi-formula.sh`   | Generate lintro.rb formula from PyPI                   | `./scripts/ci/homebrew/generate-pypi-formula.sh 1.0.0 out`                                                      |
+| `generate-binary-formula.sh` | Generate `Formula/lintro.rb` for binary releases       | `./scripts/ci/homebrew/generate-binary-formula.sh ...`                                                          |
+| `audit-formulas.sh`          | Render both formulas and run `brew style`/`brew audit` | `./scripts/ci/homebrew/audit-formulas.sh`                                                                       |
+| `pypi_utils.py`              | Shared PyPI API utilities module                       | Imported by other Python scripts                                                                                |
+| `fetch_package_info.py`      | Fetch package tarball info from PyPI                   | `python3 scripts/ci/homebrew/fetch_package_info.py lintro 1.0.0`                                                |
+| `fetch_wheel_info.py`        | Fetch wheel info and generate resource stanzas         | `python3 scripts/ci/homebrew/fetch_wheel_info.py pydoclint --type universal`                                    |
+| `render_formula.py`          | Render Homebrew formula from template                  | `python3 scripts/ci/homebrew/render_formula.py --tarball-url ... -o out.rb`                                     |
+| `generate_resources.py`      | Generate Homebrew resource stanzas (replaces poet)     | `python3 scripts/ci/homebrew/generate_resources.py lintro --exclude pkg1 pkg2`                                  |
 
 ### 🐳 Docker Scripts (`docker/`)
 
