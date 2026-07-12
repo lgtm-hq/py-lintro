@@ -17,6 +17,7 @@ from lintro.ai.review.github import (
     MAX_COMMENT_CHARS,
     STATE_MARKER_PREFIX,
     STICKY_MARKER,
+    _cap_body,
     _format_findings_section,
     build_sticky_comment,
     format_error_comment,
@@ -472,9 +473,10 @@ def _bulky_finding(
     file: str,
     line: int,
     title: str,
+    filler_repeats: int = 260,
 ) -> ReviewFinding:
     """Build a large finding whose rendered block eats into the comment cap."""
-    filler = "detail " * 260
+    filler = "detail " * filler_repeats
     return ReviewFinding(
         severity=severity,
         category="security",
@@ -644,3 +646,110 @@ def test_sticky_state_round_trips_after_truncation(
     runs = parse_review_state(body=body)
     assert_that(runs).is_length(1)
     assert_that(runs[0]["model"]).is_equal_to("claude-sonnet-4-20250514")
+
+
+# --- section-aware _cap_body (#1315) ------------------------------------------
+
+
+def test_cap_body_leaves_under_cap_body_unchanged() -> None:
+    """Bodies under the cap pass through _cap_body untouched."""
+    body = f"{STICKY_MARKER}\n\n**Cumulative (this PR):** tokens · cost"
+
+    capped = _cap_body(body=body)
+
+    assert_that(capped).is_equal_to(body)
+
+
+def test_cap_body_elides_boilerplate_before_findings(
+    sample_review_result: ReviewResult,
+) -> None:
+    """_cap_body drops run mechanics and footer before trimming Findings."""
+    findings = tuple(
+        _bulky_finding(
+            severity=Severity.P2,
+            file=f"src/unmapped{index}.py",
+            line=900 + index,
+            title=f"CapBodyFallback{index}",
+            filler_repeats=320,
+        )
+        for index in range(10)
+    )
+    result = _result_with_findings(base=sample_review_result, findings=findings)
+    summary = format_review_summary(result=result, diff_lines=None)
+    mechanics = (
+        "<details><summary>⚙️ Run mechanics (this run)</summary>\n\n"
+        + format_run_mechanics(metadata=result.metadata)
+        + "\n\n</details>"
+    )
+    footer = (
+        "<sub>🤖 Automated review by lintro · not a substitute for human review · "
+        "`~` = approximate (estimated locally; provider did not report token "
+        "usage)</sub>"
+    )
+    body = f"{STICKY_MARKER}\n\n**Cumulative (this PR):** header\n\n{summary}\n\n{mechanics}\n\n{footer}"
+
+    assert_that(len(body)).is_greater_than(MAX_COMMENT_CHARS)
+
+    capped = _cap_body(body=body)
+
+    assert_that(len(capped)).is_less_than_or_equal_to(MAX_COMMENT_CHARS)
+    assert_that(capped).contains("### Findings")
+    assert_that(capped).contains("CapBodyFallback0")
+    assert_that(capped).does_not_contain("Run mechanics (this run)")
+    assert_that(capped).does_not_contain("Automated review by lintro")
+
+
+def test_cap_body_omits_tail_findings_with_run_log_marker(
+    sample_review_result: ReviewResult,
+) -> None:
+    """When Findings alone overflow, _cap_body names omitted findings explicitly."""
+    diff_lines: dict[str, set[int]] = {}
+    findings = tuple(
+        _bulky_finding(
+            severity=Severity.P1,
+            file=f"src/unmapped{index}.py",
+            line=100 + index,
+            title=f"OmittedFinding{index}",
+        )
+        for index in range(12)
+    )
+    result = _result_with_findings(base=sample_review_result, findings=findings)
+    summary = format_review_summary(result=result, diff_lines=diff_lines)
+    body = f"{STICKY_MARKER}\n\n**Cumulative (this PR):** header\n\n{summary}"
+
+    assert_that(len(body)).is_greater_than(MAX_COMMENT_CHARS)
+
+    capped = _cap_body(body=body)
+
+    assert_that(len(capped)).is_less_than_or_equal_to(MAX_COMMENT_CHARS)
+    assert_that(capped).contains("### Findings")
+    assert_that(capped).contains("OmittedFinding0")
+    assert_that(capped).contains("finding(s) omitted")
+    assert_that(capped).contains("workflow run log")
+    assert_that(capped).does_not_contain("Comment truncated to fit GitHub's size limit")
+
+
+def test_build_sticky_cap_body_survives_all_fallback_overflow(
+    sample_review_result: ReviewResult,
+) -> None:
+    """Integration: fallback-only overflow keeps the Findings section visible."""
+    findings = tuple(
+        _bulky_finding(
+            severity=Severity.P2,
+            file=f"src/unmapped{index}.py",
+            line=800 + index,
+            title=f"StickyFallback{index}",
+        )
+        for index in range(14)
+    )
+    result = _result_with_findings(base=sample_review_result, findings=findings)
+
+    body = build_sticky_comment(result=result, diff_lines=None)
+
+    assert_that(len(body)).is_less_than_or_equal_to(MAX_COMMENT_CHARS + 1000)
+    assert_that(body).contains("### Findings")
+    assert_that(body).contains("StickyFallback0")
+    marker_present = (
+        "finding(s) omitted" in body or "more finding(s) truncated" in body
+    )
+    assert_that(marker_present).is_true()
