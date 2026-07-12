@@ -205,6 +205,7 @@ def test_detects_parent_pytest_ini_from_subdirectory(
     monkeypatch.chdir(subdir)
     assert_that(config_addopts_enable_coverage()).is_true()
 
+
 def test_nearer_config_without_coverage_stops_walk(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -283,4 +284,3 @@ def test_pyproject_coverage_wins_over_setup_cfg_without_coverage(
         encoding="utf-8",
     )
     assert_that(config_addopts_enable_coverage(tmp_path)).is_true()
-
