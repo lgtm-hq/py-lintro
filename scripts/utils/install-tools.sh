@@ -170,7 +170,7 @@ SUPPORTED_TOOLS=(
 	"actionlint" "astro" "bandit" "black" "cargo-audit" "cargo-deny"
 	"clippy" "commitlint" "dotenv-linter" "gitleaks" "hadolint" "markdownlint" "markdownlint-cli2" "mypy" "osv-scanner"
 	"oxfmt" "oxlint" "prettier" "pydoclint" "ruff" "rustfmt" "semgrep"
-	"shellcheck" "shfmt" "sqlfluff" "svelte-check" "taplo" "tsc"
+	"shellcheck" "shfmt" "sqlfluff" "stylelint" "svelte-check" "taplo" "tsc"
 	"vale" "vue-tsc" "yamllint"
 )
 
@@ -1370,6 +1370,25 @@ main() {
 		fi
 	fi # oxfmt
 
+	if should_install "stylelint"; then
+		# Install stylelint via bun (CSS/SCSS/Less linting)
+		echo -e "${BLUE}Installing stylelint...${NC}"
+
+		if ! ensure_bun_installed; then
+			exit 1
+		fi
+
+		STYLELINT_VERSION=$(get_tool_version "stylelint") || exit 1
+		if [ $DRY_RUN -eq 1 ]; then
+			log_info "[DRY-RUN] Would install stylelint@${STYLELINT_VERSION} globally via bun"
+		elif bun add -g "stylelint@${STYLELINT_VERSION}"; then
+			echo -e "${GREEN}✓ stylelint@${STYLELINT_VERSION} installed successfully${NC}"
+		else
+			echo -e "${RED}✗ Failed to install stylelint${NC}"
+			exit 1
+		fi
+	fi # stylelint
+
 	if should_install "yamllint"; then
 		# Install yamllint (Python package)
 		echo -e "${BLUE}Installing yamllint...${NC}"
@@ -1606,6 +1625,7 @@ main() {
 		["shellcheck"]="Shell script linting"
 		["shfmt"]="Shell script formatting"
 		["sqlfluff"]="SQL linting and formatting"
+		["stylelint"]="CSS/SCSS/Less linting"
 		["svelte-check"]="Svelte type checking"
 		["taplo"]="TOML linting and formatting"
 		["tsc"]="TypeScript type checking"
@@ -1623,7 +1643,7 @@ main() {
 	# Verify installations
 	echo -e "${YELLOW}Verifying installations...${NC}"
 
-	tools_to_verify=("actionlint" "astro" "bandit" "black" "cargo-audit" "cargo-deny" "clippy" "commitlint" "dotenv-linter" "rustfmt" "gitleaks" "hadolint" "markdownlint-cli2" "mypy" "osv-scanner" "oxfmt" "oxlint" "prettier" "pydoclint" "ruff" "semgrep" "shellcheck" "shfmt" "sqlfluff" "svelte-check" "taplo" "tsc" "vale" "vue-tsc" "yamllint")
+	tools_to_verify=("actionlint" "astro" "bandit" "black" "cargo-audit" "cargo-deny" "clippy" "commitlint" "dotenv-linter" "gitleaks" "hadolint" "markdownlint-cli2" "mypy" "osv-scanner" "oxfmt" "oxlint" "prettier" "pydoclint" "ruff" "rustfmt" "semgrep" "shellcheck" "shfmt" "sqlfluff" "stylelint" "svelte-check" "taplo" "tsc" "vale" "vue-tsc" "yamllint")
 
 	# Filter verification list when --tools is set.
 	# Map aliases so e.g. --tools markdownlint verifies markdownlint-cli2.

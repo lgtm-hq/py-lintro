@@ -5,7 +5,7 @@ consistency, accuracy, and completeness.
 """
 
 import re
-import subprocess
+import subprocess  # nosec B404 - subprocess is used to drive the tool/CLI under test; invocations use shell=False
 from pathlib import Path
 
 import pytest
@@ -26,7 +26,7 @@ def test_scripts_have_help() -> None:
             continue
 
         try:
-            result = subprocess.run(
+            result = subprocess.run(  # nosec B603 - fixed argv run against a real binary in a controlled test; shell=False, no user shell input
                 [str(script_file), "--help"],
                 capture_output=True,
                 text=True,
@@ -89,7 +89,7 @@ def test_scripts_readme_coverage() -> None:
 def test_cli_help_works() -> None:
     """Test that lintro --help works and shows expected commands."""
     try:
-        result = subprocess.run(
+        result = subprocess.run(  # nosec B603 B607 - fixed argv run against a real binary in a controlled test; binary name resolved from PATH, not attacker-controlled; shell=False, no user shell input
             ["uv", "run", "python", "-m", "lintro", "--help"],
             capture_output=True,
             text=True,

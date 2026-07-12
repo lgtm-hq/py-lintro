@@ -1,4 +1,4 @@
-# syntax=docker/dockerfile:1
+# syntax=docker/dockerfile:1@sha256:87999aa3d42bdc6bea60565083ee17e86d1f3339802f543c0d03998580f9cb89
 # =============================================================================
 # Lintro Docker Image (multi-stage)
 # =============================================================================
@@ -113,6 +113,7 @@ RUN echo "=== Verifying all tools ===" && \
     pydoclint --version && ruff --version && semgrep --version && \
     shellcheck --version && shfmt --version && sqlfluff --version && \
     dotenv-linter --version && \
+    stylelint --version && \
     taplo --version && tsc --version && astro --version && \
     svelte-check --version && vue-tsc --version && yamllint --version && \
     vale --version && \
@@ -169,7 +170,7 @@ RUN echo "Verifying tools..." && \
     markdownlint-cli2 --version && tsc --version && astro --version && \
     vue-tsc --version && oxlint --version && oxfmt --version && \
     bandit --version && mypy --version && pydoclint --version && \
-    yamllint --version && sqlfluff --version && \
+    yamllint --version && sqlfluff --version && stylelint --version && \
     vale --version && \
     echo "All tools verified!"
 
@@ -185,6 +186,7 @@ RUN echo "Verifying tools as non-root user..." && \
     gosu lintro vue-tsc --version && \
     gosu lintro oxlint --version && \
     gosu lintro oxfmt --version && \
+    gosu lintro stylelint --version && \
     gosu lintro rustfmt --version && \
     gosu lintro cargo clippy --version && \
     gosu lintro cargo audit --version && \

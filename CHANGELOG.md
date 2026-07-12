@@ -21,6 +21,82 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.77.3] - 2026-07-12
+
+### Changed
+
+- **deps**: pin dependencies (#1292) (4ecf180)
+- **bench**: add comparative benchmark harness vs meta-linters (#1139) (52dfe8a)
+- **ai**: externalize prompt templates to packaged files (#1134) (505894d)
+- **deps**: update dependency fast-uri to 3.1.3 (patch) (#1291) (1aa1dbc)
+- **deps**: update dependency defu to 6.1.7 (patch) (#1290) (7372683)
+
+### Fixed
+
+- **homebrew**: harden formulas and add brew audit/style CI (#1187) (7b65ca4)
+
+## [0.77.2] - 2026-07-11
+
+### Changed
+
+- **ci**: adopt canonical emoji check names (#1283) (eb63aa7)
+- **ci**: unify lgtm-ci pins at v0.52.3 (#1281) (2ef4016)
+
+### Fixed
+
+- **ci**: pass complete egress allowlist to release version-pr job (#1288) (623fb06)
+- **ci**: grant permissions required by lgtm-ci v0.52.3 reusables (#1285) (d50428e)
+
+## [0.77.1] - 2026-07-11
+
+### Fixed
+
+- **release**: gate publish jobs on anchored prerelease classifier (#1274) (47b2225)
+
+## [0.77.0] - 2026-07-11
+
+### Added
+
+- **licenses**: add dependency license compliance checking (#1178) (83cf9a7)
+
+## [0.76.0] - 2026-07-11
+
+### Added
+
+- **reporting**: add 0-100 health score to check runs (#1173) (83ff3ef)
+
+## [0.75.0] - 2026-07-11
+
+### Added
+
+- **plugins**: support third-party tool plugins via Python entry points (#1137)
+  (d659c93)
+
+### Changed
+
+- **config**: scope subprocess lint suppressions (B404/B603/B607) (#1135) (a2b597e)
+- **ai/review**: externalize builtin checklist corpus to YAML (#1130) (9f9205c)
+
+## [0.74.0] - 2026-07-10
+
+### Added
+
+- **tools**: add stylelint for CSS/SCSS/Less linting and fixing (#1143) (a81df54)
+- **integration**: add consumer-facing pre-commit hook support (#1167) (3557eb6)
+
+## [0.73.0] - 2026-07-10
+
+### Added
+
+- **ai/review**: machine-readable JSON error contract for provider failures (#1131)
+  (c8d0aad)
+- **tools**: add commitlint for conventional commit validation (#1147) (c6030df)
+
+### Fixed
+
+- **docker**: drop USER lintro so entrypoint can match volume owner (#1170) (8ebc9b2)
+- **ci**: allow npm dist-tag for version backfills (#1208) (3fcf55c)
+
 ## [0.72.0] - 2026-07-10
 
 ### Added
