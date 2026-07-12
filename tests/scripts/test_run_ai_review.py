@@ -289,7 +289,7 @@ def test_workflow_secret_scoped_to_review_step_only() -> None:
 
     assert_that(steps_with_key).is_length(1)
     assert_that(steps_with_key[0]).is_equal_to(
-        "Run AI review (posts comment, non-blocking)"
+        "Run AI review (posts comment, non-blocking)",
     )
 
 
