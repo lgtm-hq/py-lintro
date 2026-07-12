@@ -1,10 +1,10 @@
 [build-system]
-requires = ["setuptools==80.10.2", "wheel"]
+requires = ["setuptools==83.0.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "lintro"
-version = "0.77.3"
+version = "0.78.2"
 description = "A unified CLI tool for code formatting, linting, and quality assurance"
 keywords = [
   "linting",
@@ -157,6 +157,7 @@ packages = [
   "lintro.parsers.cargo_deny",
   "lintro.parsers.clippy",
   "lintro.parsers.commitlint",
+  "lintro.parsers.dotenv_linter",
   "lintro.parsers.gitleaks",
   "lintro.parsers.hadolint",
   "lintro.parsers.idiom_review",

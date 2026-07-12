@@ -21,6 +21,40 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.78.2] - 2026-07-12
+
+### Changed
+
+- **deps**: pin dependencies (#1293) (1980fbd)
+- **docker**: allow deb.debian.org egress in docker publish builds (#1304) (8287eb7)
+
+### Fixed
+
+- **docker**: stop main-push overwriting multi-arch latest (#1323) (845531c)
+
+## [0.78.1] - 2026-07-12
+
+### Changed
+
+- **deps**: update dependency setuptools to 83.0.0 (patch) (#1294) (c426508)
+
+### Fixed
+
+- **ci**: unblock main deploy-pages egress and dogfooding black finding (#1300)
+  (70a9d48)
+
+## [0.78.0] - 2026-07-12
+
+### Added
+
+- **tools**: add dotenv-linter for .env file validation (#1144) (d428037)
+
+## [0.77.4] - 2026-07-12
+
+### Fixed
+
+- **test**: reconcile pytest addopts coverage with lintro banner (#1164) (a42b985)
+
 ## [0.77.3] - 2026-07-12
 
 ### Changed

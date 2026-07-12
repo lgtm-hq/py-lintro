@@ -29,6 +29,7 @@ class Lintro < Formula
   depends_on "bandit"
   depends_on "black"
   depends_on "commitlint"
+  depends_on "dotenv-linter"
   depends_on "gitleaks"
   depends_on "hadolint"
   depends_on "libyaml"
@@ -83,6 +84,7 @@ class Lintro < Formula
       Python quality:   ruff, black, mypy, bandit, pydoclint (bundled)
       YAML / TOML:      yamllint, taplo
       Shell:            shellcheck, shfmt
+      Dotenv:           dotenv-linter
       Markdown:         markdownlint-cli2
       Prose / docs:     vale
       JS / TS:          oxlint, oxfmt, prettier

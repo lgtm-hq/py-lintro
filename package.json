@@ -13,7 +13,7 @@
     "url": "git+https://github.com/lgtm-hq/py-lintro.git"
   },
   "engines": {
-    "node": ">=22"
+    "node": ">=24"
   },
   "devDependencies": {
     "@astrojs/check": "0.9.9",
