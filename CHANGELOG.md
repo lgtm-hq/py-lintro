@@ -21,6 +21,12 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.78.0] - 2026-07-12
+
+### Added
+
+- **tools**: add dotenv-linter for .env file validation (#1144) (d428037)
+
 ## [0.77.4] - 2026-07-12
 
 ### Fixed
