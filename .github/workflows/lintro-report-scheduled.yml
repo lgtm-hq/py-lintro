@@ -57,7 +57,8 @@ jobs:
             }}
           token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Pull lintro Docker image
+      - name: Resolve lintro Docker image
+        id: resolve-image
         env:
           LINTRO_SHA: >-
             ${{
@@ -65,9 +66,20 @@ jobs:
               && github.event.workflow_run.head_sha
               || ''
             }}
+        run: scripts/ci/testing/resolve-lintro-image.sh
+
+      - name: Pull lintro Docker image
+        env:
+          LINTRO_IMAGE: ${{ steps.resolve-image.outputs.lintro_image }}
         run: scripts/ci/testing/pull-lintro-image.sh
 
       - name: Run Lintro on codebase
+        env:
+          LINTRO_IMAGE_FALLBACK: ${{ steps.resolve-image.outputs.lintro_fallback }}
+          LINTRO_IMAGE_REQUESTED_SHA: >-
+            ${{ steps.resolve-image.outputs.lintro_requested_sha }}
+          LINTRO_IMAGE_RESOLVED_SHA: >-
+            ${{ steps.resolve-image.outputs.lintro_resolved_sha }}
         run: ./scripts/ci/testing/lintro-report-generate.sh
 
       - name: Upload report artifact

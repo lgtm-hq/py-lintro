@@ -64,11 +64,16 @@ fi
 rm -f "$LINTRO_OUTPUT"
 
 # Build step summary from the single analysis run
+container_note="py-lintro:latest (sha-pinned via pull-lintro-image.sh)"
+if [ "${LINTRO_IMAGE_FALLBACK:-}" = "true" ]; then
+	container_note="py-lintro:latest (fallback: requested \`${LINTRO_IMAGE_REQUESTED_SHA:-unknown}\`, resolved \`${LINTRO_IMAGE_RESOLVED_SHA:-unknown}\`)"
+fi
+
 {
 	echo "## 🔧 Lintro Full Codebase Report"
 	echo ""
 	echo "**Generated on:** $(date)"
-	echo "**Container:** py-lintro:latest (sha-pinned via pull-lintro-image.sh)"
+	echo "**Container:** ${container_note}"
 	echo ""
 	echo "### 📋 Available Tools"
 	echo '```'
