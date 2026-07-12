@@ -12,6 +12,7 @@ import sys
 import click
 from click.testing import CliRunner
 
+from lintro.cli_utils.diff_option import validate_diff_base_ref
 from lintro.utils.git_diff import DIFF_DEFAULT_SENTINEL
 from lintro.utils.tool_executor import run_lint_tools_simple
 
@@ -215,6 +216,8 @@ def check_command(
         from lintro.utils.file_cache import clear_all_caches
 
         clear_all_caches()
+
+    validate_diff_base_ref(diff_base=diff_base)
 
     # Add default paths if none provided
     path_list: list[str] = list(paths) if paths else list(DEFAULT_PATHS)

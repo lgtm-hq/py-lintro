@@ -88,6 +88,42 @@ def is_git_repository(path: str = ".") -> bool:
     return result.returncode == 0 and result.stdout.strip() == "true"
 
 
+def resolve_git_cwd_from_paths(paths: list[str]) -> str:
+    """Derive the git working directory from explicit target paths.
+
+    When callers pass concrete scan targets, git diff operations must run in
+    that checkout's repository rather than the process cwd. The default path
+    ``'.'`` keeps the existing process-cwd behavior.
+
+    Args:
+        paths: Target paths passed to file discovery.
+
+    Returns:
+        Directory to use as ``cwd`` for git diff helpers.
+    """
+    if paths == ["."]:
+        return "."
+
+    for path in paths:
+        abs_path = os.path.abspath(path)
+        probe = abs_path if os.path.isdir(abs_path) else os.path.dirname(abs_path)
+        root = _repo_root(probe)
+        if root:
+            return root
+
+    abs_paths = [os.path.abspath(path) for path in paths]
+    parent_dirs = {
+        path if os.path.isdir(path) else os.path.dirname(path) for path in abs_paths
+    }
+    if len(parent_dirs) == 1:
+        return parent_dirs.pop()
+
+    try:
+        return os.path.commonpath(list(parent_dirs))
+    except ValueError:
+        return abs_paths[0]
+
+
 def _repo_root(cwd: str) -> str | None:
     """Return the absolute repository root for ``cwd``, or None.
 
@@ -251,7 +287,7 @@ def get_changed_files(base: str, cwd: str = ".") -> frozenset[str]:
 
     changed: set[str] = set()
     for name in names:
-        abs_path = os.path.abspath(os.path.join(root, name))
+        abs_path = os.path.realpath(os.path.join(root, name))
         # Drop deletions / rename sources that no longer exist on disk.
         if os.path.isfile(abs_path):
             changed.add(abs_path)
@@ -276,4 +312,5 @@ def filter_files_by_diff(
     changed = get_changed_files(base, cwd)
     if not changed:
         return []
-    return [f for f in files if os.path.abspath(f) in changed]
+    changed_real = {os.path.realpath(path) for path in changed}
+    return [f for f in files if os.path.realpath(f) in changed_real]

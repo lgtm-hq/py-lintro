@@ -16,6 +16,7 @@ from lintro.utils.git_diff import (
     get_changed_files,
     is_git_repository,
     resolve_default_base,
+    resolve_git_cwd_from_paths,
 )
 
 
@@ -186,9 +187,8 @@ def test_walk_files_with_excludes_diff_base(
 ) -> None:
     """``walk_files_with_excludes`` restricts discovery to changed files.
 
-    Diff filtering resolves the repo from the current working directory, as it
-    does when lintro is invoked from a project root, so the test runs from
-    inside the repository.
+    When invoked from inside the repository, diff filtering uses the target
+    checkout rather than an unrelated process cwd.
     """
     from lintro.utils.path_filtering import walk_files_with_excludes
 
@@ -205,6 +205,45 @@ def test_walk_files_with_excludes_diff_base(
     )
 
     assert_that(_names(files)).is_equal_to(["a.py", "d.py"])
+
+
+def test_walk_files_with_excludes_diff_base_outside_process_cwd(
+    git_repo: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Diff filtering uses the target checkout when cwd is elsewhere."""
+    from lintro.utils.path_filtering import walk_files_with_excludes
+
+    (git_repo / "a.py").write_text("x = 3\n")
+    (git_repo / "d.py").write_text("d = 4\n")
+    outside_cwd = tmp_path / "outside"
+    outside_cwd.mkdir()
+    monkeypatch.chdir(outside_cwd)
+
+    files = walk_files_with_excludes(
+        paths=[str(git_repo)],
+        file_patterns=["*.py"],
+        exclude_patterns=[],
+        diff_base="main",
+    )
+
+    assert_that(_names(files)).is_equal_to(["a.py", "d.py"])
+
+
+def test_resolve_git_cwd_from_paths_uses_target_repo(
+    git_repo: Path,
+    tmp_path: Path,
+) -> None:
+    """Explicit scan targets resolve to that repository root."""
+    assert_that(resolve_git_cwd_from_paths([str(git_repo)])).is_equal_to(
+        str(git_repo.resolve()),
+    )
+
+
+def test_resolve_git_cwd_from_paths_default_dot() -> None:
+    """The default path keeps process-cwd behavior."""
+    assert_that(resolve_git_cwd_from_paths(["."])).is_equal_to(".")
 
 
 def test_walk_files_with_excludes_no_diff_base_scans_all(git_repo: Path) -> None:
