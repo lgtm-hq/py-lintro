@@ -56,19 +56,21 @@ if [ "$LINTRO_RC" -ne 0 ] && { [ ! -s "$LINTRO_OUTPUT" ] ||
 	exit 1
 fi
 
+container_note="py-lintro:latest (sha-pinned via pull-lintro-image.sh)"
+if [ "${LINTRO_IMAGE_FALLBACK:-}" = "true" ]; then
+	container_note="py-lintro:latest (fallback: requested \`${LINTRO_IMAGE_REQUESTED_SHA:-unknown}\`, resolved \`${LINTRO_IMAGE_RESOLVED_SHA:-unknown}\`)"
+fi
+
 {
 	echo "# Lintro Report - $(date)"
+	echo ""
+	echo "**Container:** ${container_note}"
 	echo ""
 	cat "$LINTRO_OUTPUT"
 } >lintro-report/report.md
 rm -f "$LINTRO_OUTPUT"
 
 # Build step summary from the single analysis run
-container_note="py-lintro:latest (sha-pinned via pull-lintro-image.sh)"
-if [ "${LINTRO_IMAGE_FALLBACK:-}" = "true" ]; then
-	container_note="py-lintro:latest (fallback: requested \`${LINTRO_IMAGE_REQUESTED_SHA:-unknown}\`, resolved \`${LINTRO_IMAGE_RESOLVED_SHA:-unknown}\`)"
-fi
-
 {
 	echo "## 🔧 Lintro Full Codebase Report"
 	echo ""
@@ -82,8 +84,8 @@ fi
 	echo ""
 	echo "### 🔍 Analysis Results"
 	echo ""
-	# Drop the first two lines (title and blank line) to keep summary heading hierarchy clean
-	tail -n +3 lintro-report/report.md
+	# Drop the title, blank line, container note, and blank line before results.
+	tail -n +5 lintro-report/report.md
 } >>"$GITHUB_STEP_SUMMARY"
 
 log_success "Lintro report generated successfully"

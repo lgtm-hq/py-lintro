@@ -52,27 +52,30 @@ image_manifest_exists() {
 
 find_newest_sha_tag() {
 	local tag=""
-	# Do not use --paginate with --jq: jq runs per page and emits one line per
-	# page that contains sha-* tags. GHCR returns newest versions first, so the
-	# first page is enough for the newest sha-* tag.
-	if ! tag=$(gh api \
-		"orgs/${ghcr_org}/packages/container/py-lintro/versions" \
-		--jq '
-			[.[]
-				| select((.metadata.container.tags // []) | any(startswith("sha-")))
-				| {
-					updated: .updated_at,
-					tag: ([.metadata.container.tags[] | select(startswith("sha-"))] | first)
-				}
-			]
-			| sort_by(.updated)
-			| reverse
-			| .[0].tag // empty
-		'); then
+	local versions_json=""
+	# Use --paginate without --jq so pages are concatenated into one array,
+	# then select the newest sha-* tag with a single jq pass.
+	if ! versions_json=$(gh api \
+		--paginate \
+		"orgs/${ghcr_org}/packages/container/py-lintro/versions"); then
 		echo "::error::Failed to list GHCR sha-* tags for fallback resolution." >&2
 		exit 1
 	fi
-	tag="${tag%%$'\n'*}"
+	if ! tag=$(printf '%s' "$versions_json" | jq -r '
+		[.[]
+			| select((.metadata.container.tags // []) | any(startswith("sha-")))
+			| {
+				updated: .updated_at,
+				tag: ([.metadata.container.tags[] | select(startswith("sha-"))] | first)
+			}
+		]
+		| sort_by(.updated)
+		| reverse
+		| .[0].tag // empty
+	'); then
+		echo "::error::Failed to parse GHCR package versions for fallback resolution." >&2
+		exit 1
+	fi
 	if [[ -z "$tag" ]]; then
 		echo "::error::No published sha-* tags found for ${registry}/py-lintro." >&2
 		exit 1

@@ -128,9 +128,20 @@ exit 1
         )
         _write_executable(
             mock_bin / "gh",
-            """#!/usr/bin/env bash
+            f"""#!/usr/bin/env bash
 if [[ "$1" == "api" ]]; then
-  echo "sha-fedcba9876543210fedcba9876543210fedcba98"
+  cat <<'JSON'
+[
+  {{
+    "updated_at": "2026-07-01T00:00:00Z",
+    "metadata": {{
+      "container": {{
+        "tags": ["sha-{fallback_sha}"]
+      }}
+    }}
+  }}
+]
+JSON
   exit 0
 fi
 if [[ "$1" == "run" && "$2" == "list" ]]; then
@@ -164,6 +175,7 @@ exit 99
         summary = summary_path.read_text(encoding="utf-8")
         assert_that(summary).contains("Docker image preflight")
         assert_that(summary).contains(fallback)
+        assert_that(summary).contains("actions/runs/1")
 
 
 def test_resolve_lintro_image_fails_when_no_sha_tags() -> None:
@@ -181,6 +193,7 @@ exit 1
             mock_bin / "gh",
             """#!/usr/bin/env bash
 if [[ "$1" == "api" ]]; then
+  echo '[]'
   exit 0
 fi
 exit 99
