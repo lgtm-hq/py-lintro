@@ -21,6 +21,12 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.77.4] - 2026-07-12
+
+### Fixed
+
+- **test**: reconcile pytest addopts coverage with lintro banner (#1164) (a42b985)
+
 ## [0.77.3] - 2026-07-12
 
 ### Changed
