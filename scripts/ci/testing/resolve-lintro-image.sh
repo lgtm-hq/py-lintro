@@ -38,6 +38,8 @@ fi
 source "$(dirname "$0")/../../utils/utils.sh"
 
 registry="${GHCR_ORG_PACKAGE:-ghcr.io/lgtm-hq}"
+# GHCR package API path uses the org segment of the registry prefix.
+ghcr_org="${registry##*/}"
 requested_sha="${LINTRO_SHA:-$(git rev-parse HEAD)}"
 primary_tag="sha-${requested_sha}"
 primary_image="${registry}/py-lintro:${primary_tag}"
@@ -50,9 +52,11 @@ image_manifest_exists() {
 
 find_newest_sha_tag() {
 	local tag=""
+	# Do not use --paginate with --jq: jq runs per page and emits one line per
+	# page that contains sha-* tags. GHCR returns newest versions first, so the
+	# first page is enough for the newest sha-* tag.
 	if ! tag=$(gh api \
-		"orgs/lgtm-hq/packages/container/py-lintro/versions" \
-		--paginate \
+		"orgs/${ghcr_org}/packages/container/py-lintro/versions" \
 		--jq '
 			[.[]
 				| select((.metadata.container.tags // []) | any(startswith("sha-")))
@@ -68,6 +72,7 @@ find_newest_sha_tag() {
 		echo "::error::Failed to list GHCR sha-* tags for fallback resolution." >&2
 		exit 1
 	fi
+	tag="${tag%%$'\n'*}"
 	if [[ -z "$tag" ]]; then
 		echo "::error::No published sha-* tags found for ${registry}/py-lintro." >&2
 		exit 1
@@ -91,6 +96,7 @@ lookup_docker_ci_run_ref() {
 
 write_fallback_summary() {
 	local docker_ci_ref="$1"
+	local resolved_image="$2"
 	if [[ -z "${GITHUB_STEP_SUMMARY:-}" ]]; then
 		return 0
 	fi
@@ -98,7 +104,7 @@ write_fallback_summary() {
 		echo "### Docker image preflight"
 		echo ""
 		echo "- **Requested:** \`${primary_image}\` (not published)"
-		echo "- **Using:** \`${fallback_image}\`"
+		echo "- **Using:** \`${resolved_image}\`"
 		if [[ -n "$docker_ci_ref" ]]; then
 			echo "- **CI - Docker:** ${docker_ci_ref}"
 		fi
@@ -138,4 +144,4 @@ set_github_output "lintro_fallback" "true"
 	fi
 } >&2
 
-write_fallback_summary "$docker_ci_ref"
+write_fallback_summary "$docker_ci_ref" "$fallback_image"
