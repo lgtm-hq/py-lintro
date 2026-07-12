@@ -166,7 +166,7 @@ def test_workflow_triggers_on_homebrew_paths() -> None:
     """The workflow only runs when Homebrew scripts or the workflow change."""
     workflow = _load_workflow()
     # ``on`` is parsed as the boolean-like key ``True`` by PyYAML.
-    on = workflow["on"] if "on" in workflow else workflow[True]
+    on = next(value for key, value in workflow.items() if key in {"on", True})
     pr_paths = on["pull_request"]["paths"]
 
     assert_that(pr_paths).contains("scripts/ci/homebrew/**")
