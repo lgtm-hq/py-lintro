@@ -29,7 +29,7 @@ scripts/ci/
 | `lintro-report-scheduled.yml` | `lintro-report-generate.sh`                                                 |
 | GHCR cleanup (docker-ci)      | `maintenance/delete-ci-ghcr-tags.sh`                                        |
 | GHCR cleanup (scheduled)      | lgtm-ci `reusable-ghcr-cleanup.yml` (`ghcr-cleanup.yml`)                    |
-| Vuln suppression check        | lgtm-ci `reusable-vuln-suppression-check.yml`                               |
+| Vuln suppression check        | lgtm-ci `reusable-vuln-suppression-check.yml`; local `security/install-osv-scanner.sh` and `security/check-vuln-suppressions.sh` |
 
 Release versioning and auto-tagging use lgtm-ci reusable workflows
 (`release-version-pr.yml`, `release-auto-tag.yml`).
