@@ -96,6 +96,8 @@ Some tools require separate installation. Their minimum versions are also manage
   releases)
 - `shellcheck` - Shell script analyzer (`brew install shellcheck` or GitHub releases)
 - `shfmt` - Shell script formatter (`brew install shfmt` or GitHub releases)
+- `dotenv-linter` - `.env` file linter and fixer (`brew install dotenv-linter`,
+  `cargo install dotenv-linter`, or GitHub releases)
 - `sqlfluff` - SQL linter and formatter (`pip install sqlfluff`)
 - `stylelint` - CSS/SCSS/Sass/Less linter and fixer (`bun add -g stylelint` or
   `npm install -g stylelint`); skips cleanly when no stylelint config is found — add one

@@ -44,6 +44,7 @@
     "yaml": ["yamllint"],
     "markdown": ["markdownlint", "vale"],
     "toml": ["taplo"],
+    "dotenv": ["dotenv_linter"],
     "css": ["stylelint"],
     "scss": ["stylelint"],
     "less": ["stylelint"],
@@ -161,6 +162,18 @@
       "version_command": ["commitlint", "--version"],
       "languages": ["git"],
       "tags": ["linter"]
+    },
+    {
+      "name": "dotenv_linter",
+      "version": "4.0.0",
+      "install": {
+        "type": "binary"
+      },
+      "tier": "tools",
+      "category": "external",
+      "version_command": ["dotenv-linter", "--version"],
+      "languages": ["dotenv"],
+      "tags": ["linter", "formatter"]
     },
     {
       "name": "gitleaks",

@@ -112,6 +112,7 @@ RUN echo "=== Verifying all tools ===" && \
     oxfmt --version && oxlint --version && prettier --version && \
     pydoclint --version && ruff --version && semgrep --version && \
     shellcheck --version && shfmt --version && sqlfluff --version && \
+    dotenv-linter --version && \
     stylelint --version && \
     taplo --version && tsc --version && astro --version && \
     typos --version && \
@@ -164,6 +165,7 @@ RUN echo "Verifying tools..." && \
     cargo deny --version && semgrep --version && ruff --version && \
     black --version && hadolint --version && actionlint --version && \
     shellcheck --version && shfmt --version && taplo --version && \
+    dotenv-linter --version && \
     gitleaks version && osv-scanner --version && prettier --version && \
     commitlint --version && \
     markdownlint-cli2 --version && tsc --version && astro --version && \
@@ -193,6 +195,7 @@ RUN echo "Verifying tools as non-root user..." && \
     gosu lintro osv-scanner --version && \
     gosu lintro semgrep --version && \
     gosu lintro typos --version && \
+    gosu lintro dotenv-linter --version && \
     echo "All tools verified for non-root user!"
 
 # No USER directive: the container starts as root so entrypoint.sh can detect
