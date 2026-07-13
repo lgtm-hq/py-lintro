@@ -154,12 +154,12 @@ def _warn_ai_fix_disabled(
     *,
     action: Action,
     ai_fix: bool,
-    ai_enabled: bool,
+    ai_lint_enabled: bool,
     logger: Any,
     output_format: str = "",
 ) -> None:
-    """Warn when users request AI fixes but AI is disabled in config."""
-    if action != Action.CHECK or not ai_fix or ai_enabled:
+    """Warn when users request AI fixes but AI lint is disabled in config."""
+    if action != Action.CHECK or not ai_fix or ai_lint_enabled:
         return
     # Suppress plain-text warnings for machine-readable output formats
     if output_format.lower() in ("json", "sarif"):
@@ -993,7 +993,7 @@ def run_lint_tools_simple(
     _warn_ai_fix_disabled(
         action=action,
         ai_fix=effective_ai_fix,
-        ai_enabled=lintro_config.ai.lint_enabled,
+        ai_lint_enabled=lintro_config.ai.lint_enabled,
         logger=logger,
         output_format=output_format,
     )
