@@ -21,6 +21,17 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.79.1] - 2026-07-13
+
+### Changed
+
+- **security**: verify ANTHROPIC_API_KEY exposure ordering for dogfood AI review (#1325)
+  (c5caf17)
+
+### Fixed
+
+- **ci**: restore OpenSSF Scorecard webapp publish (#1331) (298fb34)
+
 ## [0.79.0] - 2026-07-13
 
 ### Added
