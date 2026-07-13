@@ -285,6 +285,23 @@ def test_legacy_enabled_enables_both_with_deprecation_warning() -> None:
     assert_that(config.review_enabled).is_true()
 
 
+def test_legacy_enabled_also_logs_deprecation_via_logger(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Library DeprecationWarnings are easy to miss; also emit via loguru."""
+    logged: list[str] = []
+
+    def _capture(message: str, *args: object, **kwargs: object) -> None:
+        del args, kwargs
+        logged.append(str(message))
+
+    monkeypatch.setattr("lintro.ai.config.logger.warning", _capture)
+    with pytest.warns(DeprecationWarning, match="ai.lint/ai.review"):
+        AIConfig(enabled=True)
+    assert_that(logged).is_length(1)
+    assert_that(logged[0]).contains("ai.lint/ai.review")
+
+
 def test_explicit_sub_toggle_suppresses_legacy_default(
     recwarn: pytest.WarningsRecorder,
 ) -> None:

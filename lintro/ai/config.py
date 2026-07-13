@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import warnings
 
+from loguru import logger
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from lintro.ai.config_views import AIBudgetConfig, AIOutputConfig, AIProviderConfig
@@ -230,13 +231,15 @@ class AIConfig(BaseModel):
         if self.enabled and "lint" not in fields_set and "review" not in fields_set:
             self.lint = True
             self.review = True
-            warnings.warn(
+            message = (
                 "ai.enabled without ai.lint/ai.review is deprecated; both AI "
                 "lint summarization and AI review were enabled for backward "
-                "compatibility. Set ai.lint and/or ai.review explicitly.",
-                DeprecationWarning,
-                stacklevel=2,
+                "compatibility. Set ai.lint and/or ai.review explicitly."
             )
+            # DeprecationWarning from library code is ignored by Python's default
+            # filters; also log so installed-CLI users see the migration hint.
+            warnings.warn(message, DeprecationWarning, stacklevel=2)
+            logger.warning(message)
         return self
 
     @model_validator(mode="after")

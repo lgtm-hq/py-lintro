@@ -2275,6 +2275,8 @@ export ANTHROPIC_API_KEY=sk-ant-...
 # .lintro-config.yaml
 ai:
   enabled: true
+  lint: true # AI summaries / --fix on chk/fmt
+  review: false # lintro review (opt-in separately)
   provider: anthropic
 ```
 
@@ -2292,6 +2294,8 @@ Set `default_fix` to avoid typing the flag every time:
 ```yaml
 ai:
   enabled: true
+  lint: true
+  review: true
   default_fix: false # only run --fix when explicitly requested
 ```
 

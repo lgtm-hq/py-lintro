@@ -29,7 +29,7 @@ def test_warn_ai_fix_disabled_warns_only_for_check_when_fix_requested_and_ai_dis
     _warn_ai_fix_disabled(
         action=Action.CHECK,
         ai_fix=True,
-        ai_enabled=False,
+        ai_lint_enabled=False,
         logger=logger,
     )
 
@@ -46,19 +46,19 @@ def test_warn_ai_fix_disabled_no_warning_for_other_states():
     _warn_ai_fix_disabled(
         action=Action.FIX,
         ai_fix=True,
-        ai_enabled=False,
+        ai_lint_enabled=False,
         logger=logger,
     )
     _warn_ai_fix_disabled(
         action=Action.CHECK,
         ai_fix=False,
-        ai_enabled=False,
+        ai_lint_enabled=False,
         logger=logger,
     )
     _warn_ai_fix_disabled(
         action=Action.CHECK,
         ai_fix=True,
-        ai_enabled=True,
+        ai_lint_enabled=True,
         logger=logger,
     )
 
@@ -72,7 +72,7 @@ def test_warn_ai_fix_disabled_suppressed_for_json_output():
     _warn_ai_fix_disabled(
         action=Action.CHECK,
         ai_fix=True,
-        ai_enabled=False,
+        ai_lint_enabled=False,
         logger=logger,
         output_format="json",
     )
@@ -87,7 +87,7 @@ def test_warn_ai_fix_disabled_suppressed_for_sarif_output():
     _warn_ai_fix_disabled(
         action=Action.CHECK,
         ai_fix=True,
-        ai_enabled=False,
+        ai_lint_enabled=False,
         logger=logger,
         output_format="sarif",
     )
