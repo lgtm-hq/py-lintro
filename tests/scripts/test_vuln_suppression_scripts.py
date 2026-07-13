@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import re
 import stat
 import subprocess  # nosec B404 - subprocess is used to drive the tool/CLI under test; invocations use shell=False
 import textwrap
@@ -14,7 +15,13 @@ from assertpy import assert_that
 _REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 _INSTALL_SCRIPT = _REPO_ROOT / "scripts/ci/security/install-osv-scanner.sh"
 _CHECK_SCRIPT = _REPO_ROOT / "scripts/ci/security/check-vuln-suppressions.sh"
-_LGTM_CI_PIN = "66cad82ead0e5d119928c895c7d7da9c837989e5"
+_WORKFLOW_PATH = _REPO_ROOT / ".github/workflows/vuln-suppression-check.yml"
+_USES_PIN_RE = re.compile(
+    r"reusable-vuln-suppression-check\.yml@([0-9a-f]{40})",
+)
+_TOOLING_REF_RE = re.compile(
+    r"tooling-ref:\s*'([0-9a-f]{40})'",
+)
 
 
 @pytest.mark.parametrize(
@@ -218,8 +225,7 @@ def test_install_script_retries_transient_curl_exit_23(tmp_path: Path) -> None:
 
 def test_vuln_suppression_workflow_uses_local_scripts() -> None:
     """vuln-suppression-check.yml should wire local install/check scripts."""
-    workflow_path = _REPO_ROOT / ".github/workflows/vuln-suppression-check.yml"
-    content = workflow_path.read_text(encoding="utf-8")
+    content = _WORKFLOW_PATH.read_text(encoding="utf-8")
 
     assert_that(content).contains(
         "install-script: scripts/ci/security/install-osv-scanner.sh",
@@ -227,4 +233,11 @@ def test_vuln_suppression_workflow_uses_local_scripts() -> None:
     assert_that(content).contains(
         "check-script: scripts/ci/security/check-vuln-suppressions.sh",
     )
-    assert_that(content).contains(_LGTM_CI_PIN)
+
+    uses_match = _USES_PIN_RE.search(content)
+    tooling_match = _TOOLING_REF_RE.search(content)
+    assert_that(uses_match).is_not_none()
+    assert_that(tooling_match).is_not_none()
+    assert uses_match is not None
+    assert tooling_match is not None
+    assert_that(uses_match.group(1)).is_equal_to(tooling_match.group(1))
