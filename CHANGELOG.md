@@ -21,6 +21,13 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.79.2] - 2026-07-13
+
+### Fixed
+
+- **ci**: sync vuln-suppression workflow pin assertion (#1341) (c7208ac)
+- **ci**: harden vuln suppression install against curl exit 23 (#1328) (0d9923d)
+
 ## [0.79.1] - 2026-07-13
 
 ### Changed
