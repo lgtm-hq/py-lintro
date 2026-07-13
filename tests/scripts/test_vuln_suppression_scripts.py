@@ -20,7 +20,7 @@ _USES_PIN_RE = re.compile(
     r"reusable-vuln-suppression-check\.yml@([0-9a-f]{40})",
 )
 _TOOLING_REF_RE = re.compile(
-    r"tooling-ref:\s*'([0-9a-f]{40})'",
+    r"tooling-ref:\s*[\"']?([0-9a-f]{40})[\"']?",
 )
 
 
