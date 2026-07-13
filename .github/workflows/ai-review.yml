@@ -18,6 +18,17 @@ name: AI Review - Dogfood
 # When the ANTHROPIC_API_KEY secret is absent (not configured yet, or a fork PR
 # that cannot read secrets) the script skips gracefully. This is intentionally
 # NOT a required check.
+#
+# ACTIVATION PRECONDITION (audited #1317, follow-up to #1072/#1074):
+# Safe to add the ANTHROPIC_API_KEY repository secret only when all of the
+# following hold (structurally asserted in tests/scripts/test_run_ai_review.py):
+#   1. Job if-guard: non-draft, same-repository PRs only (fork PRs never run).
+#   2. Trusted install: checkout ref is pull_request.base.sha, never PR head.
+#   3. Secret ordering: ANTHROPIC_API_KEY is injected only into the final
+#      review step env, after the trusted base-ref checkout and uv sync.
+# No GitHub Environment gate is required once (1–3) hold; the trusted-install
+# mechanism from #1074 is the primary control. Re-audit if the checkout ref,
+# job guard, or secret injection site changes.
 
 'on':
   pull_request:

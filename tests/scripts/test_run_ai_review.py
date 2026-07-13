@@ -271,6 +271,28 @@ def test_workflow_installs_from_base_ref_not_pr_head() -> None:
     )
 
 
+def test_workflow_secret_scoped_to_review_step_only() -> None:
+    """ANTHROPIC_API_KEY is injected only into the final review step env.
+
+    The secret must not appear in earlier steps (checkout, uv sync, etc.) so
+    PR-controlled code paths never receive the key before the trusted base-ref
+    install completes. This is the ordering control audited in #1317.
+    """
+    loaded = yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))
+
+    steps = loaded["jobs"]["ai-review"]["steps"]
+    steps_with_key = [
+        step["name"]
+        for step in steps
+        if "ANTHROPIC_API_KEY" in yaml.dump(step, default_flow_style=False)
+    ]
+
+    assert_that(steps_with_key).is_length(1)
+    assert_that(steps_with_key[0]).is_equal_to(
+        "Run AI review (posts comment, non-blocking)",
+    )
+
+
 def test_workflow_reviews_pr_via_gh_not_working_tree() -> None:
     """The executable review command targets the PR and emits JSON.
 
