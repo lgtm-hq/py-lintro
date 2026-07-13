@@ -21,6 +21,13 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.79.4] - 2026-07-13
+
+### Fixed
+
+- **pytest**: honor zero coverage threshold and guard pyproject parsing (#1333)
+  (7d61362)
+
 ## [0.79.3] - 2026-07-13
 
 ### Fixed
