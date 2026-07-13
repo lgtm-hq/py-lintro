@@ -165,8 +165,9 @@ def _warn_ai_fix_disabled(
     if output_format.lower() in ("json", "sarif"):
         return
     logger.console_output(
-        "AI fixes requested with --fix, but ai.enabled is false in "
-        ".lintro-config.yaml; skipping AI enhancements.",
+        "AI fixes requested with --fix, but AI lint is disabled in "
+        ".lintro-config.yaml (set ai.enabled and ai.lint: true); "
+        "skipping AI enhancements.",
     )
 
 
@@ -992,7 +993,7 @@ def run_lint_tools_simple(
     _warn_ai_fix_disabled(
         action=action,
         ai_fix=effective_ai_fix,
-        ai_enabled=lintro_config.ai.enabled,
+        ai_enabled=lintro_config.ai.lint_enabled,
         logger=logger,
         output_format=output_format,
     )

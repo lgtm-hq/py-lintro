@@ -236,3 +236,61 @@ def test_extra_fields_forbidden() -> None:
     """Unknown fields are rejected by the model."""
     with pytest.raises(ValidationError):
         AIConfig(unknown_field="value")  # type: ignore[call-arg]  # intentionally invalid
+
+
+# -- Feature toggles (ai.lint / ai.review) ---------------------------------
+
+
+def test_feature_toggles_default_off() -> None:
+    """Both sub-toggles and effective states default to off."""
+    config = AIConfig()
+    assert_that(config.lint).is_false()
+    assert_that(config.review).is_false()
+    assert_that(config.lint_enabled).is_false()
+    assert_that(config.review_enabled).is_false()
+    assert_that(config.any_feature_enabled).is_false()
+
+
+def test_review_enabled_without_lint() -> None:
+    """Review can be enabled independently of lint summarization."""
+    config = AIConfig(enabled=True, lint=False, review=True)
+    assert_that(config.review_enabled).is_true()
+    assert_that(config.lint_enabled).is_false()
+    assert_that(config.any_feature_enabled).is_true()
+
+
+def test_lint_enabled_without_review() -> None:
+    """Lint can be enabled independently of review."""
+    config = AIConfig(enabled=True, lint=True, review=False)
+    assert_that(config.lint_enabled).is_true()
+    assert_that(config.review_enabled).is_false()
+    assert_that(config.any_feature_enabled).is_true()
+
+
+def test_master_switch_ands_with_sub_toggles() -> None:
+    """Sub-toggles are inert while the master switch is off."""
+    config = AIConfig(enabled=False, lint=True, review=True)
+    assert_that(config.lint_enabled).is_false()
+    assert_that(config.review_enabled).is_false()
+    assert_that(config.any_feature_enabled).is_false()
+
+
+def test_legacy_enabled_enables_both_with_deprecation_warning() -> None:
+    """Legacy ai.enabled-only config turns on both features and warns."""
+    with pytest.warns(DeprecationWarning, match="ai.lint/ai.review"):
+        config = AIConfig(enabled=True)
+    assert_that(config.lint).is_true()
+    assert_that(config.review).is_true()
+    assert_that(config.lint_enabled).is_true()
+    assert_that(config.review_enabled).is_true()
+
+
+def test_explicit_sub_toggle_suppresses_legacy_default(
+    recwarn: pytest.WarningsRecorder,
+) -> None:
+    """Setting any sub-toggle opts out of the legacy fallback (no warning)."""
+    config = AIConfig(enabled=True, review=True)
+    assert_that(config.lint).is_false()
+    assert_that(config.review).is_true()
+    deprecations = [w for w in recwarn if issubclass(w.category, DeprecationWarning)]
+    assert_that(deprecations).is_empty()
