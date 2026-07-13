@@ -500,9 +500,9 @@ def test_publish_npm_exposes_dist_tag_for_backfills() -> None:
     assert_that(publish_step["env"]["NPM_DIST_TAG"]).contains("inputs.dist_tag")
 
 
-# Canonical lgtm-ci pin used by all py-lintro workflows (v0.52.3).
+# Canonical lgtm-ci pin used by all py-lintro workflows (v0.52.4).
 # Pages deploy must not regress to v0.32.3 (missing GH_TOKEN in bundler).
-_LGTM_CI_PIN = "66cad82ead0e5d119928c895c7d7da9c837989e5"
+_LGTM_CI_PIN = "768a6b72f0a5346b5ecba3f4e13b90040472341c"
 
 
 def test_all_lgtm_ci_refs_use_the_canonical_pin() -> None:
@@ -572,7 +572,7 @@ def test_deploy_pages_pins_bundler_with_github_token() -> None:
 
     reusable-deploy-site-with-reports checks out tooling-ref for
     bundle-workflow-artifacts. v0.32.3 omitted GH_TOKEN; v0.32.4+ (lgtm-ci#300)
-    sets ``GH_TOKEN: ${{ github.token }}``. Stay on the repo-standard v0.52.3 pin.
+    sets ``GH_TOKEN: ${{ github.token }}``. Stay on the repo-standard v0.52.4 pin.
     """
     workflow = _load_workflow(name="deploy-pages.yml")
     deploy = workflow["jobs"]["deploy"]
@@ -582,7 +582,7 @@ def test_deploy_pages_pins_bundler_with_github_token() -> None:
     assert_that(uses).contains(_LGTM_CI_PIN)
     assert_that(uses).contains("reusable-deploy-site-with-reports.yml")
     assert_that(tooling_ref).contains(_LGTM_CI_PIN)
-    # v0.52.3 build job requests actions: write (lgtm-ci#415 rerun
+    # v0.52.4 build job requests actions: write (lgtm-ci#415 rerun
     # self-heal); a lower caller grant is a parse-time startup_failure.
     assert_that(deploy["permissions"]).contains_entry({"actions": "write"})
     assert_that(deploy["permissions"]).contains_entry({"pages": "write"})
