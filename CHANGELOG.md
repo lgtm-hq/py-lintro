@@ -21,6 +21,19 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.79.0] - 2026-07-13
+
+### Added
+
+- **config**: split ai.enabled into ai.lint / ai.review toggles (#1267) (d1ceac6)
+
+### Changed
+
+- **config**: reconcile configuration docs with runtime (#1275) (9f2c7d6)
+- **config**: derive tool-section filter from tool registry (#1257) (2520c01)
+- **node**: bump Node.js to 24 LTS everywhere it's pinned (#1271) (68c9ff3)
+- **renovate**: drop package rules redundant with org preset (#1263) (707f758)
+
 ## [0.78.2] - 2026-07-12
 
 ### Changed
