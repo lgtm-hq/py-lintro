@@ -2295,6 +2295,7 @@ Set `default_fix` to avoid typing the flag every time:
 ai:
   enabled: true
   lint: true
+  review: true
   default_fix: false # only run --fix when explicitly requested
 ```
 
