@@ -21,6 +21,12 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.79.3] - 2026-07-13
+
+### Fixed
+
+- **config**: address unresolved #1267 review threads (#1354) (dca09af)
+
 ## [0.79.2] - 2026-07-13
 
 ### Fixed
