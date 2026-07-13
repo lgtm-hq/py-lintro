@@ -28,7 +28,6 @@ scripts/ci/
 | ----------------------------- | --------------------------------------------------------------------------- |
 | `test-ci.yml`                 | lgtm-ci reusable (coverage + PR comments)                                   |
 | `docker-ci.yml`               | Fork detect, image pull/load, lgtm-ci quality, test summary, security audit |
-| `docker-ci.yml` (gate)        | `run-code-quality-gate.sh`, `evaluate-code-quality-gate.sh`, `is-infra-flake-failure.sh`, `assert-required-check.sh` |
 | `publish-pypi-on-tag.yml`     | lgtm-ci quality/SBOM; `build-artifacts` + PyPI publish + GitHub release     |
 | `pr-comment-cleanup.yml`      | `post-pr-delete-previous.sh`                                                |
 | `lintro-report-scheduled.yml` | `lintro-report-generate.sh`                                                 |
@@ -50,10 +49,14 @@ reaps ephemeral `pr-*` / `mq-*` / `dispatch-*` cache exports from `py-lintro` an
 
 `docker-ci.yml` rolls up dogfooding lint attempts through these helpers:
 
-- `evaluate-code-quality-gate.sh` — pick the effective lint attempt (retry wins on success) and normalize upstream outputs.
-- `run-code-quality-gate.sh` — orchestrate evaluation plus `assert-required-check.sh` for the required gate job.
-- `is-infra-flake-failure.sh` — classify runner infra flakes (cancelled jobs, exit 143, artifact timeouts).
-- `assert-required-check.sh` — enforce the required check contract for lintro-code-quality.
+- `evaluate-code-quality-gate.sh` — pick the effective lint attempt (retry wins on
+  success) and normalize upstream outputs.
+- `run-code-quality-gate.sh` — orchestrate evaluation plus `assert-required-check.sh`
+  for the required gate job.
+- `is-infra-flake-failure.sh` — classify runner infra flakes (cancelled jobs, exit 143,
+  artifact timeouts).
+- `assert-required-check.sh` — enforce the required check contract for
+  lintro-code-quality.
 
 ## Local Development
 
