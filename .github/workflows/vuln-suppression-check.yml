@@ -26,6 +26,8 @@ jobs:
       job-name: '🔍 Check Vulnerability Suppressions'
       tooling-ref: '768a6b72f0a5346b5ecba3f4e13b90040472341c' # v0.52.4
       workflow-file: vuln-suppression-check.yml
+      install-script: scripts/ci/security/install-osv-scanner.sh
+      check-script: scripts/ci/security/check-vuln-suppressions.sh
       runner-image: ubuntu-24.04
       egress-policy: block
       egress-preset: osv-scanner
