@@ -68,10 +68,20 @@
       "automerge": false
     },
     {
+      "description": "lintro-tools base image digest pin (FROM in Dockerfile); native docker digest support, full CI validates the bump",
+      "matchDatasources": ["docker"],
+      "matchPackageNames": [
+        "ghcr.io/lgtm-hq/lintro-tools"
+      ],
+      "matchUpdateTypes": ["digest"],
+      "automerge": false
+    },
+    {
       "description": "Regenerate _tool_versions.py when tool version sources change",
       "matchManagers": ["custom.regex"],
       "matchFileNames": [
         "Dockerfile",
+        "docker/tools.Dockerfile",
         "lintro/_tool_versions.py",
         "lintro/tools/manifest.json"
       ],
@@ -85,7 +95,8 @@
           "lintro/tools/manifest.json",
           "package.json",
           "pyproject.toml",
-          "Dockerfile"
+          "Dockerfile",
+          "docker/tools.Dockerfile"
         ],
         "executionMode": "branch"
       }
@@ -123,7 +134,10 @@
     },
     {
       "customType": "regex",
-      "managerFilePatterns": ["Dockerfile"],
+      "managerFilePatterns": [
+        "Dockerfile",
+        "docker/tools.Dockerfile"
+      ],
       "matchStrings": [
         "ARG BUN_VERSION=(?<currentValue>[0-9]+\\.[0-9]+\\.[0-9]+)"
       ],
@@ -133,7 +147,10 @@
     },
     {
       "customType": "regex",
-      "managerFilePatterns": ["Dockerfile"],
+      "managerFilePatterns": [
+        "Dockerfile",
+        "docker/tools.Dockerfile"
+      ],
       "matchStrings": [
         "ARG UV_VERSION=(?<currentValue>[0-9]+\\.[0-9]+\\.[0-9]+)"
       ],
