@@ -250,7 +250,6 @@ def test_collect_pr_context_uses_gh(
 
     assert_that(context.pr_metadata).is_not_none()
     metadata = context.pr_metadata
-    assert_that(metadata).is_not_none()
     assert metadata is not None  # narrow type for mypy
     assert_that(metadata.title).is_equal_to("Fix bug")
     assert_that(metadata.number).is_equal_to(42)
@@ -729,7 +728,6 @@ def test_collect_pr_context_accepts_repo_override_when_head_repository_null(
 
     assert_that(context.pr_metadata).is_not_none()
     metadata = context.pr_metadata
-    assert_that(metadata).is_not_none()
     assert metadata is not None  # narrow type for mypy
     assert_that(metadata.repo).is_equal_to("lgtm-hq/py-lintro")
 

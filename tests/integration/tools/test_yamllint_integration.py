@@ -203,7 +203,8 @@ def test_check_yaml_file_with_syntax_error(
     assert_that(result).is_not_none()
     assert_that(result.name).is_equal_to("yamllint")
     # Yamllint must report failure or issues for syntax errors - never silently pass
-    assert_that((not result.success) or (result.issues_count > 0)).is_true()
+    if result.success:
+        assert_that(result.issues_count).is_greater_than(0)
     # The key assertion: output should always be preserved even if parsing fails
     # to extract structured issues
     assert_that(result.output).is_not_none()
