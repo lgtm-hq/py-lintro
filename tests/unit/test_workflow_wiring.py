@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import ast
 import re
+import subprocess  # nosec B404 - subprocess runs fixed git argv against this repo
 from pathlib import Path
 from typing import Any, cast
 
@@ -697,6 +698,188 @@ def test_docker_ci_lintro_code_quality_wires_upstream_jobs() -> None:
             "|| needs.dogfooding-lint.outputs.status }}",
         ),
     )
+
+
+# --- Deny-by-default pipeline skip-list drift guard (#1369) ------------------
+#
+# docker-ci pipeline relevance is decided by
+# scripts/ci/resolve-pipeline-relevance.sh against a small skip-list instead
+# of an allow-list of relevant paths, so new top-level directories trigger
+# the pipeline by default. These tests make the categorization explicit:
+# every tracked top-level path must be listed as either skippable or
+# pipeline-relevant, and the skippable set must match the script's
+# skip-list, so a new top-level path fails CI loudly until a human
+# categorizes it (instead of silently under- or over-triggering).
+
+_RESOLVE_PIPELINE_SCRIPT = (
+    _REPO_ROOT / "scripts" / "ci" / "resolve-pipeline-relevance.sh"
+)
+
+# Top-level directories whose entire content may skip the heavy Docker
+# pipeline (pure prose/assets). Must stay in lockstep with the skip-list in
+# scripts/ci/resolve-pipeline-relevance.sh (is_skippable_path); a dedicated
+# test below enforces that. Root-level *.md files are skippable by the
+# script's '*.md' rule and need no listing here.
+_PIPELINE_SKIPPABLE_TOP_LEVEL: frozenset[str] = frozenset(
+    {
+        "assets",
+        "docs",  # except docs/.markdownlint-cli2.jsonc (script carve-out)
+    },
+)
+
+# Every other tracked top-level path: changes there run the full pipeline.
+# This list is documentation-as-test — the script does NOT consult it; any
+# path absent from the skip-list triggers by default. test_samples is
+# deliberately here despite holding *.md files: they are lint fixtures
+# feeding the integration tests (script carve-out).
+_PIPELINE_RELEVANT_TOP_LEVEL: frozenset[str] = frozenset(
+    {
+        ".actrc",
+        ".allstar",
+        ".codecov.yml",
+        ".dockerignore",
+        ".gitattributes",
+        ".github",
+        ".gitignore",
+        ".gitleaks.toml",
+        ".hadolint.yaml",
+        ".lintro-config.yaml",
+        ".lintro-ignore",
+        ".markdownlint-cli2.jsonc",
+        ".node-version",
+        ".osv-scanner.toml",
+        ".oxfmtrc.json",
+        ".pre-commit-hooks.yaml",
+        ".prettierignore",
+        ".prettierrc.json",
+        ".yamllint",
+        "apps",
+        "benchmarks",
+        "bun.lock",
+        "docker",
+        "docker-compose.yml",
+        "Dockerfile",
+        "LICENSE",
+        "lintro",
+        "Makefile",
+        "MANIFEST.in",
+        "npm",
+        "package.json",
+        "pyproject.toml",
+        "pytest.ini",
+        "renovate.json",
+        "scripts",
+        "socket.yml",
+        "test_samples",
+        "tests",
+        "tools",
+        "tox.ini",
+        "uv.lock",
+    },
+)
+
+
+def _tracked_top_level_paths() -> set[str]:
+    """Return the first path segment of every git-tracked file.
+
+    Returns:
+        set[str]: Top-level directory and file names under version control.
+    """
+    output = subprocess.run(  # nosec B603 B607 - fixed git argv against this repo
+        ["git", "-C", str(_REPO_ROOT), "ls-files"],
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout
+    return {line.split("/", 1)[0] for line in output.splitlines() if line}
+
+
+def test_every_top_level_path_is_categorized_for_pipeline_relevance() -> None:
+    """Every tracked top-level path is explicitly skippable or relevant.
+
+    Deny-by-default means an uncategorized path already triggers the
+    pipeline at runtime; this test exists so the categorization is a
+    conscious decision rather than an accident of the default.
+    """
+    top_level = _tracked_top_level_paths()
+    categorized = _PIPELINE_SKIPPABLE_TOP_LEVEL | _PIPELINE_RELEVANT_TOP_LEVEL
+    uncategorized = sorted(
+        path
+        for path in top_level
+        if path not in categorized and not path.endswith(".md")
+    )
+    assert_that(uncategorized).described_as(
+        "New top-level path(s) are not categorized for docker-ci pipeline "
+        "relevance (#1369). Add each one to _PIPELINE_RELEVANT_TOP_LEVEL in "
+        "tests/unit/test_workflow_wiring.py (the safe default: anything "
+        "that can affect the Docker image, the integration tests, or lint "
+        "behavior — it already triggers the pipeline automatically), or — "
+        "ONLY for pure prose/static assets — to _PIPELINE_SKIPPABLE_TOP_LEVEL "
+        "here AND to is_skippable_path in "
+        "scripts/ci/resolve-pipeline-relevance.sh",
+    ).is_empty()
+
+
+def test_pipeline_relevance_categories_are_disjoint() -> None:
+    """No top-level path may be both skippable and pipeline-relevant."""
+    overlap = _PIPELINE_SKIPPABLE_TOP_LEVEL & _PIPELINE_RELEVANT_TOP_LEVEL
+    assert_that(sorted(overlap)).is_empty()
+
+
+def test_skippable_categorization_matches_resolver_skip_list() -> None:
+    """The test's skippable set mirrors the script's actual skip-list.
+
+    Parses the ``is_skippable_path`` case arms out of
+    resolve-pipeline-relevance.sh: directory globs returning 0 must equal
+    _PIPELINE_SKIPPABLE_TOP_LEVEL, the '*.md' prose rule must be present,
+    and the pipeline-relevant carve-outs (test_samples/**,
+    docs/.markdownlint-cli2.jsonc) must return 1 and be categorized as
+    relevant here.
+    """
+    script = _RESOLVE_PIPELINE_SCRIPT.read_text(encoding="utf-8")
+
+    skip_dir_globs = set(re.findall(r"^\s*(\S+)/\*\)\s*return 0", script, re.M))
+    assert_that(skip_dir_globs).is_equal_to(set(_PIPELINE_SKIPPABLE_TOP_LEVEL))
+
+    skip_file_globs = re.findall(r"^\s*(\*\.\w+)\)\s*return 0", script, re.M)
+    assert_that(skip_file_globs).is_equal_to(["*.md"])
+
+    carve_outs = set(re.findall(r"^\s*(\S+)\)\s*return 1", script, re.M))
+    assert_that(carve_outs).is_equal_to(
+        {"test_samples/*", "docs/.markdownlint-cli2.jsonc"},
+    )
+    assert_that(_PIPELINE_RELEVANT_TOP_LEVEL).contains("test_samples")
+
+
+def test_docker_ci_detect_step_has_no_pipeline_allow_list() -> None:
+    """The detect-changes filter feeds lint-scope only, never pipeline.
+
+    Reintroducing a `pipeline:` dorny filter would resurrect the rotting
+    allow-list that #1369 removed; relevance must stay computed by
+    resolve-pipeline-relevance.sh from the changed-file list.
+    """
+    docker_ci = _load_workflow(name="docker-ci.yml")
+    changes_job = docker_ci["jobs"]["changes"]
+    steps = {step.get("id"): step for step in changes_job["steps"] if "id" in step}
+
+    detect_step = steps["detect"]
+    filters = detect_step["with"]["filters"]
+    filter_names = re.findall(r"^([^#\s][^:]*):\s*$", filters, re.M)
+    assert_that(filter_names).is_equal_to(["full-lint"])
+
+    resolve_step = steps["result"]
+    assert_that(resolve_step["run"]).is_equal_to(
+        "scripts/ci/resolve-pipeline-relevance.sh",
+    )
+    # The script diffs the merge commit (HEAD^1..HEAD): the changes job
+    # checkout must keep full history for that range to resolve.
+    checkout_steps = [
+        step
+        for step in changes_job["steps"]
+        if "actions/checkout" in step.get("uses", "")
+    ]
+    assert_that(checkout_steps).is_length(1)
+    assert_that(checkout_steps[0]["with"]["fetch-depth"]).is_equal_to(0)
 
 
 def test_publish_npm_exposes_dist_tag_for_backfills() -> None:
