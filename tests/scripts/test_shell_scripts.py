@@ -151,6 +151,70 @@ def test_resolve_pipeline_relevance_lint_scope(tmp_path: Path) -> None:
         assert_that(output_file.read_text().splitlines()).contains(expected)
 
 
+def test_resolve_pipeline_relevance_release_bump(tmp_path: Path) -> None:
+    """RELEASE_BUMP=true skips the pipeline on pull_request events (#1362).
+
+    The override must outrank the full-lint drift guard (bump PRs always
+    hit both filters via pyproject.toml), apply only to pull_request
+    events, and only on the exact string "true".
+
+    Args:
+        tmp_path: Pytest-provided temporary directory.
+    """
+    cases: list[tuple[dict[str, str], list[str]]] = [
+        # Verified bump PR: skip even though both filters matched.
+        (
+            {
+                "EVENT_NAME": "pull_request",
+                "CHANGES_JSON": '{"pipeline":true,"full-lint":true}',
+                "RELEASE_BUMP": "true",
+            },
+            ["pipeline=false", "skip-reason=version-bump PR"],
+        ),
+        # Non-PR events never skip, whatever RELEASE_BUMP claims.
+        (
+            {"EVENT_NAME": "push", "RELEASE_BUMP": "true"},
+            ["pipeline=true", "skip-reason="],
+        ),
+        (
+            {"EVENT_NAME": "merge_group", "RELEASE_BUMP": "true"},
+            ["pipeline=true", "skip-reason="],
+        ),
+        # Anything but the exact string "true" keeps the resolved value.
+        (
+            {
+                "EVENT_NAME": "pull_request",
+                "CHANGES_JSON": '{"pipeline":true,"full-lint":true}',
+                "RELEASE_BUMP": "false",
+            },
+            ["pipeline=true", "skip-reason="],
+        ),
+        (
+            {
+                "EVENT_NAME": "pull_request",
+                "CHANGES_JSON": '{"pipeline":true,"full-lint":true}',
+                "RELEASE_BUMP": "garbage",
+            },
+            ["pipeline=true", "skip-reason="],
+        ),
+        # Docs-only path keeps its own reason.
+        (
+            {
+                "EVENT_NAME": "pull_request",
+                "CHANGES_JSON": '{"pipeline":false,"full-lint":false}',
+            },
+            ["pipeline=false", "skip-reason=docs-only change"],
+        ),
+    ]
+    for index, (env, expected_lines) in enumerate(cases):
+        output_file = tmp_path / f"github-output-{index}"
+        result = _run_resolve_pipeline_relevance(env, output_file)
+        assert_that(result.returncode).is_equal_to(0)
+        output_lines = output_file.read_text().splitlines()
+        for expected in expected_lines:
+            assert_that(output_lines).contains(expected)
+
+
 def test_renovate_regex_manager_current_value() -> None:
     """Ensure Renovate custom managers use currentValue to satisfy schema."""
     config_path = Path("renovate.json")

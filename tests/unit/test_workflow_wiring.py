@@ -299,6 +299,62 @@ def test_semantic_pr_title_can_write_failure_comments() -> None:
     )
 
 
+def test_docker_ci_changes_job_classifies_version_bump_prs() -> None:
+    """The changes job nominates bump PRs and feeds the verdict downstream.
+
+    Nominate-then-verify (#1362): the bump step runs only on pull_request
+    events with the identity signals in env (never interpolated into the
+    run script), and the resolve step consumes its output as RELEASE_BUMP.
+    """
+    docker_ci = _load_workflow(name="docker-ci.yml")
+    changes_job = docker_ci["jobs"]["changes"]
+    steps = {step.get("id"): step for step in changes_job["steps"] if "id" in step}
+
+    bump_step = steps["bump"]
+    assert_that(bump_step["if"]).contains(_github_event_name_is_pull_request_token())
+    assert_that(bump_step["run"]).is_equal_to("scripts/ci/release-bump-only.sh")
+    assert_that(bump_step["continue-on-error"]).is_true()
+    bump_env = bump_step["env"]
+    assert_that(bump_env["PR_AUTHOR"]).contains(
+        f"github.event.{_GITHUB_PULL_REQUEST_EVENT}.user.login",
+    )
+    assert_that(bump_env["PR_TITLE"]).contains(
+        f"github.event.{_GITHUB_PULL_REQUEST_EVENT}.title",
+    )
+    assert_that(bump_env["HEAD_REF"]).contains("github.head_ref")
+
+    resolve_step = steps["result"]
+    assert_that(resolve_step["env"]["RELEASE_BUMP"]).contains(
+        "steps.bump.outputs.release-bump",
+    )
+    assert_that(changes_job["outputs"]["skip-reason"]).contains(
+        "steps.result.outputs.skip-reason",
+    )
+
+
+def test_docker_ci_heavy_jobs_log_skip_reason() -> None:
+    """docker-build, security-audit, and integration-test log skip notices.
+
+    Required-check gates must report green with a logged reason when the
+    pipeline is skipped (docs-only or version-bump PR, #1362).
+    """
+    docker_ci = _load_workflow(name="docker-ci.yml")
+    for job_name in ("docker-build", "security-audit", "integration-test"):
+        job = docker_ci["jobs"][job_name]
+        skip_steps = [
+            step
+            for step in job["steps"]
+            if step.get("if") == "needs.changes.outputs.pipeline == 'false'"
+            and "ci-log.sh" in step.get("run", "")
+        ]
+        assert_that(skip_steps).described_as(job_name).is_length(1)
+        skip_step = skip_steps[0]
+        assert_that(skip_step["run"]).contains('"skipped:"')
+        assert_that(skip_step["env"]["SKIP_REASON"]).contains(
+            "needs.changes.outputs.skip-reason",
+        )
+
+
 def test_docker_ci_dogfooding_lint_waits_on_manifest_sync() -> None:
     """Dogfooding lint depends on manifest-sync and allows draft-PR skips."""
     docker_ci = _load_workflow(name="docker-ci.yml")
