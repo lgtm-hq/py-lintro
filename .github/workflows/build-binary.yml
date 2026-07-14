@@ -343,9 +343,12 @@ jobs:
     # Stable tag releases only. The tap's formulas/lintro.yml declares a
     # binary formula, so the dispatch must carry both macOS checksums:
     # a failed binary build blocks the formula update (re-run this workflow
-    # to recover) instead of shipping a partial bump.
+    # to recover) instead of shipping a partial bump. The universal guard
+    # keeps single-arch workflow_call runs from failing on a missing
+    # checksum artifact.
     if: >-
       inputs.release_tag != '' &&
+      inputs.arch == 'universal' &&
       needs.get-release-info.outputs.release_tag != '' &&
       needs.get-release-info.outputs.is_prerelease == 'false'
 
@@ -386,16 +389,18 @@ jobs:
 
       - name: Extract version from tag
         id: version
+        env:
+          TAG: ${{ needs.get-release-info.outputs.release_tag }}
         run: |
-          TAG="${{ needs.get-release-info.outputs.release_tag }}"
           VERSION="${TAG#v}"
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
 
       - name: Wait for PyPI availability
         # The tap generates lintro-full from live PyPI metadata as soon as
         # the dispatch lands, so the sdist must be visible first.
-        # yamllint disable-line rule:line-length
-        run: scripts/ci/homebrew/wait-for-pypi.sh lintro "${{ steps.version.outputs.version }}"
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: scripts/ci/homebrew/wait-for-pypi.sh lintro "$VERSION"
 
       - name: Dispatch formula update
         # yamllint disable-line rule:line-length
