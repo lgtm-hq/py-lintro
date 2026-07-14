@@ -727,18 +727,28 @@ def test_test_ci_changes_job_resolves_pipeline_relevance() -> None:
 
 
 def test_test_ci_reusables_wire_pipeline_skip() -> None:
-    """Reusable callers always run and pass pipeline-skip for docs-only PRs."""
+    """Reusable callers fail-open on changes failure and wire pipeline-skip.
+
+    ``if: '!cancelled()'`` mirrors docker-ci's docker-build gate: a failed
+    changes job must still run the matrix (empty pipeline != 'false' →
+    pipeline-skip false) instead of collapsing to skipped → false green.
+    """
     test_ci = _load_workflow(name="test-ci.yml")
     for job_name in ("test-compat", "test-coverage"):
         job = test_ci["jobs"][job_name]
         assert_that(job["needs"]).contains("changes")
+        assert_that(job["if"]).is_equal_to("!cancelled()")
         assert_that(job["with"]["pipeline-skip"]).is_equal_to(
             "${{ needs.changes.outputs.pipeline == 'false' }}",
         )
 
 
 def test_test_ci_suite_coverage_gate_is_always_green_when_path_skipped() -> None:
-    """Required gate reports success when the matrix was path-skipped (#1359)."""
+    """Required gate greens only on intentional path-skip after changes success.
+
+    A failed changes job must never take the success shortcut — even if
+    pipeline were somehow empty/false — and must mirror test-gate instead.
+    """
     test_ci = _load_workflow(name="test-ci.yml")
     gate = test_ci["jobs"]["test-suite-coverage"]
 
@@ -746,14 +756,16 @@ def test_test_ci_suite_coverage_gate_is_always_green_when_path_skipped() -> None
     upstream = _normalize_github_expr(gate["with"]["upstream-result"])
     assert_that(upstream).is_equal_to(
         _normalize_github_expr(
-            "${{ needs.changes.outputs.pipeline == 'false' && 'success' "
+            "${{ needs.changes.result == 'success' && "
+            "needs.changes.outputs.pipeline == 'false' && 'success' "
             "|| needs.test-gate.outputs.result }}",
         ),
     )
     passed_output = _normalize_github_expr(gate["with"]["passed-output"])
     assert_that(passed_output).is_equal_to(
         _normalize_github_expr(
-            "${{ needs.changes.outputs.pipeline == 'false' && 'true' "
+            "${{ needs.changes.result == 'success' && "
+            "needs.changes.outputs.pipeline == 'false' && 'true' "
             "|| needs.test-gate.outputs.passed }}",
         ),
     )

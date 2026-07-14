@@ -13,12 +13,13 @@ name: CI - Tests
 #
 # Instead: a `changes` job classifies the PR diff (same deny-by-default
 # skip-list as docker-ci.yml via resolve-pipeline-relevance.sh) and the reusable
-# callers always run, passing pipeline-skip=true when pipeline=false so jobs
-# skip INSIDE the reusable and still report their nested contexts as skipped
-# (lgtm-ci reusable-test-python pipeline-skip input). merge_group, push, and
-# workflow_dispatch always run the full matrix. The test-suite-coverage gate
-# reports success when the matrix was path-skipped and mirrors test-gate when
-# it ran.
+# callers always run (`if: '!cancelled()'` fail-open on classifier failure —
+# empty pipeline != 'false' → full matrix), passing pipeline-skip=true when
+# pipeline=false so jobs skip INSIDE the reusable and still report their nested
+# contexts as skipped (lgtm-ci reusable-test-python pipeline-skip input).
+# merge_group, push, and workflow_dispatch always run the full matrix. The
+# test-suite-coverage gate reports success only when changes succeeded and the
+# matrix was path-skipped; otherwise it mirrors test-gate.
 #
 # Version-bump PRs (#1362): release-bump-only.sh can force pipeline=false on
 # verified bump PRs, so the matrix skips exactly like docs-only PRs once
@@ -85,9 +86,13 @@ jobs:
           RELEASE_BUMP: ${{ steps.bump.outputs.release-bump }}
         run: scripts/ci/resolve-pipeline-relevance.sh
 
-  # Compat mode: multi-runtime matrix, no coverage or PR comments
+  # Compat mode: multi-runtime matrix, no coverage or PR comments.
+  # !cancelled() fail-opens like docker-ci docker-build: a failed changes
+  # job leaves pipeline empty (!= 'false'), so pipeline-skip is false and
+  # the full matrix runs instead of collapsing to skipped → false green.
   test-compat:
     needs: [changes]
+    if: '!cancelled()'
     # yamllint disable-line rule:line-length
     uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-test-python.yml@9416eb2bf71539bcc355e1dcf463a533a0924d74 # v0.55.0
     with:
@@ -128,9 +133,11 @@ jobs:
       contents: read
       pull-requests: write
 
-  # Coverage mode: single runtime with coverage reporting
+  # Coverage mode: single runtime with coverage reporting.
+  # Same !cancelled() fail-open as test-compat (see above).
   test-coverage:
     needs: [changes]
+    if: '!cancelled()'
     # yamllint disable-line rule:line-length
     uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-test-python.yml@9416eb2bf71539bcc355e1dcf463a533a0924d74 # v0.55.0
     with:
@@ -205,8 +212,11 @@ jobs:
           fi
 
   # Org ruleset (checks-py-lintro): test-suite-coverage / 🧪 Test Suite & Coverage
-  # Always-green gate: reports success when the matrix was path-skipped
-  # (pipeline == 'false') and mirrors test-gate when it ran.
+  # Always-green gate: reports success only when changes succeeded AND the
+  # matrix was intentionally path-skipped (pipeline == 'false'). A failed
+  # changes job never takes the success shortcut — empty pipeline fails open
+  # into the full matrix via !cancelled() on the reusable callers, and this
+  # gate mirrors test-gate.
   test-suite-coverage:
     needs: [changes, test-gate]
     if: always() && !cancelled()
@@ -220,11 +230,13 @@ jobs:
       runner-image: ubuntu-24.04
       upstream-result: >-
         ${{
+          needs.changes.result == 'success' &&
           needs.changes.outputs.pipeline == 'false' && 'success'
           || needs.test-gate.outputs.result
         }}
       passed-output: >-
         ${{
+          needs.changes.result == 'success' &&
           needs.changes.outputs.pipeline == 'false' && 'true'
           || needs.test-gate.outputs.passed
         }}
