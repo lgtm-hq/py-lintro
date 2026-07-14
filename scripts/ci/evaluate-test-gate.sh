@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: MIT
 # Evaluate upstream test job results for the required org-ruleset gate.
 # Fails when any upstream job reports "failure" or "cancelled"; treats
-# "skipped" (draft PRs) as acceptable.
+# "skipped" (draft PRs, pipeline-skip) as acceptable.
 #
 # Required environment variables:
 #   COMPAT_RESULT  - needs.test-compat.result
@@ -15,7 +15,7 @@ if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
 Evaluate upstream test job results for the required org-ruleset gate.
 
 Fails when any upstream job reports "failure" or "cancelled"; treats
-"skipped" (draft PRs) as acceptable.
+"skipped" (draft PRs, pipeline-skip) as acceptable.
 
 Usage:
   COMPAT_RESULT=success COVERAGE_RESULT=success scripts/ci/evaluate-test-gate.sh
