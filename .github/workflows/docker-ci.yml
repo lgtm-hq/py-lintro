@@ -13,9 +13,19 @@ name: CI - Docker
 # on.<event>.paths filter would leave those contexts absent and deadlock
 # merges (see codeql.yml and lgtm-ci docs/workflow-contract.md,
 # "Required-check-safe conditional workflows"). Instead the `changes` job
-# maps changed paths to the `pipeline` filter and the heavy jobs early-exit
-# green when only docs changed. merge_group, push, and workflow_dispatch
-# always run the full pipeline.
+# classifies the PR diff and the heavy jobs early-exit green when only
+# docs changed. merge_group, push, and workflow_dispatch always run the
+# full pipeline.
+#
+# Deny-by-default classification (#1369): pipeline relevance is decided by
+# scripts/ci/resolve-pipeline-relevance.sh from the PR's changed-file list
+# against a small skip-list ('**/*.md', 'docs/**', 'assets/**', with
+# 'test_samples/**' and 'docs/.markdownlint-cli2.jsonc' carved out as
+# pipeline-relevant) — pipeline=false only when EVERY changed file is
+# skippable. There is no allow-list of relevant paths to rot: new
+# top-level directories, configs, and file types trigger the pipeline by
+# default, and the skip-list only grows deliberately (drift test in
+# tests/unit/test_workflow_wiring.py).
 #
 # Version-bump PRs (#1362): the `changes` job also classifies automated
 # release version-bump PRs (release-version-pr.yml) via
@@ -60,13 +70,14 @@ env:
 jobs:
   # Required-check-safe replacement for on.<event>.paths (see header
   # comment). Only pull_request events are filtered; every other event
-  # resolves pipeline=true. Every layer fails open so a filter
+  # resolves pipeline=true. Every layer fails open so a classification
   # infrastructure failure runs the full pipeline rather than silently
-  # skipping it: detect-changes reports all filters true when the diff base
-  # is unresolvable, resolve-pipeline-relevance.sh resolves true on
-  # missing/unparsable JSON, and downstream gates compare != 'false' with
-  # !cancelled() so a failed changes job (empty output) still runs
-  # everything. Only an explicit pipeline == 'false' skips work.
+  # skipping it: resolve-pipeline-relevance.sh resolves pipeline=true when
+  # the changed-file list is unavailable (non-merge HEAD, failed diff),
+  # detect-changes reports all filters true when the diff base is
+  # unresolvable (lint-scope then stays full), and downstream gates compare
+  # != 'false' with !cancelled() so a failed changes job (empty output)
+  # still runs everything. Only an explicit pipeline == 'false' skips work.
   changes:
     name: 🔎 Detect Relevant Changes
     runs-on: ubuntu-24.04
@@ -102,105 +113,28 @@ jobs:
         # yamllint disable-line rule:line-length
         uses: lgtm-hq/lgtm-ci/.github/actions/detect-changes@768a6b72f0a5346b5ecba3f4e13b90040472341c # v0.52.4
         with:
-          # Everything that can affect the image, the integration tests, or
-          # dogfooding lint behavior. Err broad: a missed path here is a
-          # silent coverage hole. Only pure docs (*.md, docs/, assets/) may
-          # skip; test_samples/ holds lint fixtures (including *.md) that
-          # feed the integration tests, and docs/.markdownlint-cli2.jsonc
-          # is lint config, so both stay in the filter via the directory
-          # and root-glob rules below.
+          # Pipeline relevance is NOT decided here (#1369): the resolve
+          # step below computes it deny-by-default from the changed-file
+          # list, so there is no allow-list of relevant paths to rot. This
+          # filter only feeds the lint-scope decision.
+          #
+          # full-lint stays an allow-list deliberately: its rot direction
+          # is soft. A missed global-impact path degrades to changed-files
+          # lint — the PR's own files are still linted with the identical
+          # tool set, and dogfood-nightly.yml runs the full repo as a
+          # backstop — whereas inverting it would require enumerating every
+          # "no global lint impact" leaf path, a larger and less stable
+          # list than this one.
           filters: |
-            pipeline:
-              - 'lintro/**'
-              - 'tests/**'
-              - 'test_samples/**'
-              - 'scripts/**'
-              - 'benchmarks/**'
-              - 'apps/**'
-              - 'npm/**'
-              - 'tools/**'
-              - '.github/**'
-              - '.allstar/**'
-              - 'Dockerfile'
-              - 'docker/**'
-              - 'docker-compose.yml'
-              - '.dockerignore'
-              - 'pyproject.toml'
-              - 'uv.lock'
-              - 'pytest.ini'
-              - 'tox.ini'
-              - 'Makefile'
-              - 'MANIFEST.in'
-              - 'LICENSE'
-              - 'package.json'
-              - 'bun.lock'
-              - '.node-version'
-              - '.actrc'
-              - '.codecov.yml'
-              - '.gitattributes'
-              - '.gitignore'
-              - '.gitleaks.toml'
-              - '.hadolint.yaml'
-              - '.lintro-config.yaml'
-              - '.lintro-ignore'
-              - '.markdownlint-cli2.jsonc'
-              - '.osv-scanner.toml'
-              - '.oxfmtrc.json'
-              - '.pre-commit-hooks.yaml'
-              - '.prettierignore'
-              - '.prettierrc.json'
-              - '.yamllint'
-              - 'renovate.json'
-              - 'socket.yml'
-              - 'docs/.markdownlint-cli2.jsonc'
-              # Catch-alls: ANY new root-level file except pure markdown
-              # triggers the full pipeline by default ('!(*.md)' is a
-              # picomatch extglob matching every root-level filename —
-              # dotfiles included, dorny sets dot:true — that does not end
-              # in .md; it has no slash so it never crosses directories).
-              # The extension globs are defense-in-depth should extglob
-              # handling ever regress upstream.
-              - '!(*.md)'
-              - '.*'
-              - '*.toml'
-              - '*.yaml'
-              - '*.yml'
-              - '*.json'
-              - '*.jsonc'
-              - '*.lock'
-              - '*.ini'
-              - '*.cfg'
-              - '*.py'
-              - '*.sh'
-              - '*.mjs'
-              - '*.cjs'
-              - '*.js'
-              - '*.ts'
-              # Nested manifests/lockfiles/tool configs at any depth: keep
-              # in lockstep with the full-lint globs below so a path can
-              # never be full-lint-relevant while pipeline-skipped
-              # (resolve-pipeline-relevance.sh enforces the same invariant
-              # as a runtime fail-safe).
-              - '**/pyproject.toml'
-              - '**/package.json'
-              - '**/tsconfig.json'
-              - '**/tsconfig.*.json'
-              - '**/*.lock'
-              - '**/package-lock.json'
-              - '**/pnpm-lock.yaml'
-              - '**/yarn.lock'
-              - '**/bun.lockb'
-              - '**/ruff.toml'
-              - '**/setup.cfg'
-              - '**/tox.ini'
-              - '**/pytest.ini'
-              - '**/Dockerfile*'
             # Paths with GLOBAL lint impact (#1361): touching any of these
             # forces full-repo dogfooding lint on the PR; PRs that miss this
             # filter lint only their changed files. Err broad — when in
             # doubt whether a path can change lint results elsewhere, it
             # belongs here. Leaf content (tests/, test_samples/, docs
             # prose, app/npm/tool sources) is covered by changed-files mode.
+            # A full-lint hit can never be pipeline-skipped:
+            # resolve-pipeline-relevance.sh forces pipeline=true when this
+            # filter matches a diff whose files were all skippable.
             full-lint:
               # The linter itself: behavior changes affect every file.
               - 'lintro/**'
@@ -269,6 +203,11 @@ jobs:
           HEAD_REF: ${{ github.head_ref }}
         run: scripts/ci/release-bump-only.sh
       - name: Resolve pipeline relevance
+        # Deny-by-default (#1369): the script derives the PR's changed-file
+        # list from the merge-commit checkout (HEAD^1..HEAD; requires the
+        # fetch-depth: 0 checkout above) and resolves pipeline=false only
+        # when every file matches the skip-list. CHANGES_JSON feeds the
+        # lint-scope decision only.
         id: result
         env:
           EVENT_NAME: ${{ github.event_name }}
@@ -327,7 +266,7 @@ jobs:
     name: 🐳 Build Docker Images
     # Required check (org ruleset checks-py-lintro): the job itself always
     # runs so the context reports; heavy steps are gated on the `pipeline`
-    # filter and the job early-exits green on docs-only PRs. !cancelled()
+    # output and the job early-exits green on docs-only PRs. !cancelled()
     # keeps it running (fail-open, full build) if the changes job failed —
     # the pipeline output is then empty, which is != 'false' at every step.
     needs: [changes]
@@ -752,7 +691,7 @@ jobs:
     name: 🔐 Security Audit
     # Required check: runs whenever docker-build reported success (real or
     # docs-only early-exit) so the context reports; heavy steps are gated on
-    # the `pipeline` filter. !cancelled() keeps it running (fail-open) if
+    # the `pipeline` output. !cancelled() keeps it running (fail-open) if
     # the changes job failed.
     needs: [changes, docker-build]
     if: >-
@@ -841,7 +780,7 @@ jobs:
     name: 🧪 Docker Integration Tests
     # Required check: runs whenever docker-build reported success (real or
     # docs-only early-exit) so the context reports; heavy steps are gated on
-    # the `pipeline` filter. !cancelled() keeps it running (fail-open) if
+    # the `pipeline` output. !cancelled() keeps it running (fail-open) if
     # the changes job failed.
     needs: [changes, docker-build]
     if: >-
