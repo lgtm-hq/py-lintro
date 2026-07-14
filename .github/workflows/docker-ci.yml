@@ -16,6 +16,14 @@ name: CI - Docker
 # maps changed paths to the `pipeline` filter and the heavy jobs early-exit
 # green when only docs changed. merge_group, push, and workflow_dispatch
 # always run the full pipeline.
+#
+# Dogfooding lint scope (#1361): the `changes` job also maps the diff to a
+# `full-lint` filter (paths with global lint impact — tool configs, the
+# Docker context, workflows, scripts, lintro itself). PRs that miss the
+# filter lint only the changed files (dogfooding-lint-changed); PRs that hit
+# it, plus merge_group and main pushes, keep the full-repo run
+# (dogfooding-lint). A nightly full-repo backstop lives in
+# dogfood-nightly.yml.
 
 'on':
   push:
@@ -54,6 +62,10 @@ jobs:
     timeout-minutes: 5
     outputs:
       pipeline: ${{ steps.result.outputs.pipeline }}
+      # full|changed — dogfooding lint scope (#1361). `changed` only when a
+      # PR diff explicitly missed the full-lint filter; every failure mode
+      # (missing JSON, failed job → empty output) resolves to full-repo lint.
+      lint-scope: ${{ steps.result.outputs.lint-scope }}
     steps:
       - name: Harden Runner
         # yamllint disable-line rule:line-length
@@ -148,6 +160,82 @@ jobs:
               - '*.cjs'
               - '*.js'
               - '*.ts'
+              # Nested manifests/lockfiles/tool configs at any depth: keep
+              # in lockstep with the full-lint globs below so a path can
+              # never be full-lint-relevant while pipeline-skipped
+              # (resolve-pipeline-relevance.sh enforces the same invariant
+              # as a runtime fail-safe).
+              - '**/pyproject.toml'
+              - '**/package.json'
+              - '**/tsconfig.json'
+              - '**/tsconfig.*.json'
+              - '**/*.lock'
+              - '**/package-lock.json'
+              - '**/pnpm-lock.yaml'
+              - '**/yarn.lock'
+              - '**/bun.lockb'
+              - '**/ruff.toml'
+              - '**/setup.cfg'
+              - '**/tox.ini'
+              - '**/pytest.ini'
+              - '**/Dockerfile*'
+            # Paths with GLOBAL lint impact (#1361): touching any of these
+            # forces full-repo dogfooding lint on the PR; PRs that miss this
+            # filter lint only their changed files. Err broad — when in
+            # doubt whether a path can change lint results elsewhere, it
+            # belongs here. Leaf content (tests/, test_samples/, docs
+            # prose, app/npm/tool sources) is covered by changed-files mode.
+            full-lint:
+              # The linter itself: behavior changes affect every file.
+              - 'lintro/**'
+              # CI scripts and workflows drive how lint runs.
+              - 'scripts/**'
+              - '.github/**'
+              # The Docker context builds the lint image and its tool stack.
+              - 'Dockerfile'
+              - 'docker/**'
+              - 'docker-compose.yml'
+              - '.dockerignore'
+              # Build/packaging metadata feeding tool resolution.
+              - 'Makefile'
+              - 'MANIFEST.in'
+              # Tool configs and manifests at any depth (pyproject.toml
+              # carries ruff/pydoclint/bandit config; package manifests and
+              # lockfiles steer prettier/osv-scanner; tsconfig steers ts
+              # tooling).
+              - '**/pyproject.toml'
+              - '**/package.json'
+              - '**/tsconfig.json'
+              - '**/tsconfig.*.json'
+              - '**/*.lock'
+              - '**/package-lock.json'
+              - '**/pnpm-lock.yaml'
+              - '**/yarn.lock'
+              - '**/bun.lockb'
+              # Nested non-dot tool configs (dotfile configs at any depth
+              # are covered by '**/.*' below).
+              - '**/ruff.toml'
+              - '**/setup.cfg'
+              - '**/tox.ini'
+              - '**/pytest.ini'
+              - '**/Dockerfile*'
+              - 'pytest.ini'
+              - 'tox.ini'
+              - '.node-version'
+              # Dotfiles are tool config by convention — root and nested
+              # (e.g. .lintro-config.yaml, .yamllint, .prettierrc.json,
+              # docs/.markdownlint-cli2.jsonc). dorny sets dot:true.
+              - '.*'
+              - '**/.*'
+              # Any config-shaped root file (defense-in-depth for new
+              # top-level configs).
+              - '*.toml'
+              - '*.yaml'
+              - '*.yml'
+              - '*.json'
+              - '*.jsonc'
+              - '*.ini'
+              - '*.cfg'
       - name: Resolve pipeline relevance
         id: result
         env:
@@ -381,10 +469,16 @@ jobs:
     # Run when docker-build succeeds even if manifest-sync was skipped (draft
     # PRs). Skipped entirely on docs-only PRs (docker-build early-exits green
     # without pushing a CI image, so there is nothing to lint with).
+    # lint-scope != 'changed' (#1361): PRs whose diff has no global lint
+    # impact hand off to dogfooding-lint-changed below; merge_group, pushes,
+    # dispatches, and any global-impact PR keep this full-repo run. A failed
+    # changes job leaves lint-scope empty, which is != 'changed' — fail-open
+    # to full-repo lint.
     if: >-
       always() &&
       !cancelled() &&
       needs.changes.outputs.pipeline != 'false' &&
+      needs.changes.outputs.lint-scope != 'changed' &&
       needs.docker-build.result == 'success' &&
       (
         needs.manifest-sync.result == 'success' ||
@@ -414,15 +508,143 @@ jobs:
         )
         || format('ghcr.io/lgtm-hq/py-lintro:ci-{0}', github.run_id) }}
 
-  dogfooding-pr-comment:
-    needs: dogfooding-lint
+  # Changed-files dogfooding (#1361): PR-only counterpart of dogfooding-lint
+  # for diffs with no global lint impact (lint-scope == 'changed'). Runs the
+  # same image with the same full tool set and --tool-options — only the
+  # path arguments narrow to the PR's changed files — so tool coverage is
+  # identical and only scope shrinks. Exactly one of dogfooding-lint /
+  # dogfooding-lint-changed runs per pipeline-relevant PR; the
+  # lintro-code-quality gate below mirrors whichever ran.
+  dogfooding-lint-changed:
+    name: 🛠️ Dogfooding Lint (Changed Files)
+    needs: [changes, docker-build, manifest-sync]
     if: >-
       always() &&
       !cancelled() &&
-      needs.dogfooding-lint.result != 'cancelled' &&
-      needs.dogfooding-lint.result != 'skipped' &&
-      needs.dogfooding-lint.outputs.exit-code != '' &&
-      needs.dogfooding-lint.outputs.status != '' &&
+      needs.changes.outputs.pipeline != 'false' &&
+      needs.changes.outputs.lint-scope == 'changed' &&
+      needs.docker-build.result == 'success' &&
+      (
+        needs.manifest-sync.result == 'success' ||
+        needs.manifest-sync.result == 'skipped'
+      )
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      packages: read # pull the CI lint image from GHCR
+    timeout-minutes: 30
+    outputs:
+      exit-code: ${{ steps.lint.outputs.exit-code }}
+      status: ${{ steps.lint.outputs.status }}
+    steps:
+      - name: Harden Runner
+        # Same allowlist as the reusable-quality-lint default: the container
+        # sets LINTRO_AUTO_INSTALL_DEPS=1 and may fetch project deps before
+        # linting.
+        # yamllint disable-line rule:line-length
+        uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
+        with:
+          egress-policy: 'block'
+          allowed-endpoints: >
+            github.com:443
+            api.github.com:443
+            codeload.github.com:443
+            release-assets.githubusercontent.com:443
+            objects.githubusercontent.com:443
+            raw.githubusercontent.com:443
+            pipelines.actions.githubusercontent.com:443
+            github-releases.githubusercontent.com:443
+            ghcr.io:443
+            pkg-containers.githubusercontent.com:443
+            docker.io:443
+            registry-1.docker.io:443
+            auth.docker.io:443
+            production.cloudflare.docker.com:443
+            production.cloudfront.docker.com:443
+            pypi.org:443
+            files.pythonhosted.org:443
+            static.rust-lang.org:443
+            bun.sh:443
+            astral.sh:443
+            releases.astral.sh:443
+            sh.rustup.rs:443
+            deb.debian.org:80
+            registry.npmjs.org:443
+            crates.io:443
+            static.crates.io:443
+            index.crates.io:443
+            semgrep.dev:443
+            metrics.semgrep.dev:443
+            api.osv.dev:443
+            api.deps.dev:443
+      - name: Checkout
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          # Full history: the script diffs against merge-base(origin/<base>).
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Log in to GitHub Container Registry
+        if: needs.docker-build.outputs.is-fork != 'true'
+        # yamllint disable-line rule:line-length
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3.7.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Run lintro on changed files
+        id: lint
+        env:
+          BASE_REF: ${{ github.base_ref }}
+          # Must stay in sync with the dogfooding-lint lintro-tool-options
+          # above: identical tool coverage is the contract of changed mode.
+          TOOL_OPTIONS: >-
+            pydoclint:timeout=120,bandit:timeout=120,prettier:timeout=120,osv_scanner:check_suppressions=false
+          # Same image selection as dogfooding-lint: CI-built image for
+          # same-repo PRs, pinned release digest for forks (no CI push).
+          # Pinned digest — keep in sync with pyproject.toml lintro pin
+          LINTRO_IMAGE: >-
+            ${{ needs.docker-build.outputs.is-fork == 'true'
+            && format(
+              'ghcr.io/lgtm-hq/py-lintro@sha256:{0}',
+              '1ff3db35939283734b859c7c5d95be87fd8fd62734b3434e0437769d50d53578'
+            )
+            || format('ghcr.io/lgtm-hq/py-lintro:ci-{0}', github.run_id) }}
+        run: scripts/ci/dogfood-changed-files.sh
+      - name: Upload linting report
+        # Same artifact name the full run uploads: dogfooding-pr-comment
+        # downloads `linting-report`, and only one dogfooding job runs per
+        # workflow run, so the name never collides.
+        if: always()
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: linting-report
+          path: |
+            .lintro/
+            chk-output.txt
+          retention-days: 7
+          if-no-files-found: ignore
+
+  dogfooding-pr-comment:
+    # Comments with the outputs of whichever dogfooding job ran (full or
+    # changed-files — they are mutually exclusive per run, see #1361).
+    needs: [changes, dogfooding-lint, dogfooding-lint-changed]
+    if: >-
+      always() &&
+      !cancelled() &&
+      (
+        (
+          needs.dogfooding-lint.result != 'cancelled' &&
+          needs.dogfooding-lint.result != 'skipped' &&
+          needs.dogfooding-lint.outputs.exit-code != '' &&
+          needs.dogfooding-lint.outputs.status != ''
+        ) ||
+        (
+          needs.dogfooding-lint-changed.result != 'cancelled' &&
+          needs.dogfooding-lint-changed.result != 'skipped' &&
+          needs.dogfooding-lint-changed.outputs.exit-code != '' &&
+          needs.dogfooding-lint-changed.outputs.status != ''
+        )
+      ) &&
       github.event_name == 'pull_request' &&
       github.event.pull_request.head.repo.fork == false &&
       github.event.pull_request.draft == false
@@ -432,7 +654,10 @@ jobs:
       contents: read
       pull-requests: write # post lintro results as PR comment
     with:
-      exit-code: ${{ needs.dogfooding-lint.outputs.exit-code }}
+      exit-code: >-
+        ${{ needs.changes.outputs.lint-scope == 'changed'
+        && needs.dogfooding-lint-changed.outputs.exit-code
+        || needs.dogfooding-lint.outputs.exit-code }}
       tooling-ref: '768a6b72f0a5346b5ecba3f4e13b90040472341c' # v0.52.4
       job-name: '🛠️ Dogfooding Lint PR Comment'
       egress-policy: block
@@ -444,7 +669,12 @@ jobs:
   # full pipeline runs, and this gate mirrors the real results — so a broken
   # filter can never skip coverage or green-light an untested merge.
   lintro-code-quality:
-    needs: [changes, docker-build, manifest-sync, dogfooding-lint]
+    needs:
+      - changes
+      - docker-build
+      - manifest-sync
+      - dogfooding-lint
+      - dogfooding-lint-changed
     if: >-
       always() &&
       !cancelled() &&
@@ -460,6 +690,9 @@ jobs:
       tooling-ref: '768a6b72f0a5346b5ecba3f4e13b90040472341c' # v0.52.4
       job-name: '🛠️ Lintro Code Quality'
       runner-image: ubuntu-24.04
+      # Mirrors whichever dogfooding job ran (#1361): lint-scope 'changed'
+      # selects the changed-files job; anything else — including an empty
+      # lint-scope from a failed changes job — selects the full run.
       upstream-result: >-
         ${{
           needs.changes.outputs.pipeline == 'false' && 'success'
@@ -468,9 +701,14 @@ jobs:
             needs.manifest-sync.result != 'success' &&
             needs.manifest-sync.result != 'skipped'
           ) && needs.manifest-sync.result
+          || needs.changes.outputs.lint-scope == 'changed'
+          && needs.dogfooding-lint-changed.result
           || needs.dogfooding-lint.result
         }}
-      status-output: ${{ needs.dogfooding-lint.outputs.status }}
+      status-output: >-
+        ${{ needs.changes.outputs.lint-scope == 'changed'
+        && needs.dogfooding-lint-changed.outputs.status
+        || needs.dogfooding-lint.outputs.status }}
       status-expected: passed
       egress-policy: block
       egress-preset: github-tooling
@@ -780,6 +1018,7 @@ jobs:
       - changes
       - docker-build
       - dogfooding-lint
+      - dogfooding-lint-changed
       - security-audit
       - integration-test
       - publish
