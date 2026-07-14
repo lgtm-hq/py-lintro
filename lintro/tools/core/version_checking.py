@@ -43,8 +43,9 @@ TOOL_VERSIONS for binary/cargo/rustup). PRs will fail if they drift.
 2. Add entry to manifest.json with install.type = "pip"
 3. Renovate tracks it automatically
 4. Note: Homebrew formula excludes bundled Python tools from the venv
-   (via generate_resources.py --exclude). They are installed as separate
-   Homebrew formulae and discovered via PATH, not python -m.
+   (configured in lgtm-hq/homebrew-tap formulas/lintro.yml). They are
+   installed as separate Homebrew formulae and discovered via PATH,
+   not python -m.
 """
 
 import os

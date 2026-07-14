@@ -21,6 +21,104 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.80.2] - 2026-07-14
+
+### Changed
+
+- **release**: dispatch Homebrew updates to the tap (#1380) (04ac4dc)
+- **ci**: unify lgtm-ci pin at v0.54.0 (#1377) (5670fc7)
+
+### Fixed
+
+- **ci**: Renovate tool-pin bumps break generated-versions check (#1387) (510bd10)
+
+## [0.80.1] - 2026-07-14
+
+### Changed
+
+- **ci**: invert docker-ci path filter to deny-by-default skip-list with drift test
+  (#1373) (7aa0d36)
+
+### Fixed
+
+- **test**: bump osv clean sample to setuptools 83.0.0 (#1375) (3d482e3)
+
+## [0.80.0] - 2026-07-14
+
+### Added
+
+- **docker**: build full image FROM published lintro-tools base (#1367) (294f252)
+- **docker**: publish lintro-tools base image with digest-pinned FROM (#1364) (ef9e24b)
+
+### Changed
+
+- **ci**: skip heavy CI on auto version-bump PRs (#1371) (fb5676e)
+- **ci**: changed-files dogfood lint on PRs with full-lint fallback and nightly full run
+  (#1370) (703fa15)
+- **ci**: promote docker images by digest instead of rebuilding in publish (#1368)
+  (cd2e9fb)
+- **ci**: add path filters to docker-ci and test-ci with always-green gates (#1363)
+  (d9ee7cf)
+
+### Fixed
+
+- **ci**: allow timestamp.sigstore.dev egress in lintro-tools publish (#1366) (5c748cb)
+
+## [0.79.4] - 2026-07-13
+
+### Fixed
+
+- **pytest**: honor zero coverage threshold and guard pyproject parsing (#1333)
+  (7d61362)
+
+## [0.79.3] - 2026-07-13
+
+### Fixed
+
+- **config**: address unresolved #1267 review threads (#1354) (dca09af)
+
+## [0.79.2] - 2026-07-13
+
+### Fixed
+
+- **ci**: sync vuln-suppression workflow pin assertion (#1341) (c7208ac)
+- **ci**: harden vuln suppression install against curl exit 23 (#1328) (0d9923d)
+
+## [0.79.1] - 2026-07-13
+
+### Changed
+
+- **security**: verify ANTHROPIC_API_KEY exposure ordering for dogfood AI review (#1325)
+  (c5caf17)
+
+### Fixed
+
+- **ci**: restore OpenSSF Scorecard webapp publish (#1331) (298fb34)
+
+## [0.79.0] - 2026-07-13
+
+### Added
+
+- **config**: split ai.enabled into ai.lint / ai.review toggles (#1267) (d1ceac6)
+
+### Changed
+
+- **config**: reconcile configuration docs with runtime (#1275) (9f2c7d6)
+- **config**: derive tool-section filter from tool registry (#1257) (2520c01)
+- **node**: bump Node.js to 24 LTS everywhere it's pinned (#1271) (68c9ff3)
+- **renovate**: drop package rules redundant with org preset (#1263) (707f758)
+
+## [0.78.2] - 2026-07-12
+
+### Changed
+
+- **deps**: pin dependencies (#1293) (1980fbd)
+- **docker**: allow deb.debian.org egress in docker publish builds (#1304) (8287eb7)
+
+### Fixed
+
+- **docker**: stop main-push overwriting multi-arch latest (#1323) (845531c)
+
 ## [0.78.1] - 2026-07-12
 
 ### Changed
