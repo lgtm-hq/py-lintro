@@ -37,7 +37,7 @@ jobs:
     # (lgtm-ci#300). v0.32.3 left gh unauthenticated and blocked Pages deploy
     # after #974 (see #1227). Pin with the repo-standard v0.52.3 tooling.
     # yamllint disable-line rule:line-length
-    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-deploy-site-with-reports.yml@768a6b72f0a5346b5ecba3f4e13b90040472341c # v0.52.4
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-deploy-site-with-reports.yml@31c25ef2e8992960e218524780e34f44f51271b5 # v0.54.0
     with:
       site-root: apps/site/dist
       build-command: bash scripts/ci/site/build.sh
@@ -47,7 +47,7 @@ jobs:
       bundle-manifest: .github/pages-bundle-manifest.json
       commit-sha: ${{ github.event.workflow_run.head_sha || github.sha }}
       fallback-ref: main
-      tooling-ref: '768a6b72f0a5346b5ecba3f4e13b90040472341c' # v0.52.4
+      tooling-ref: '31c25ef2e8992960e218524780e34f44f51271b5' # v0.54.0
       # Since lgtm-ci v0.50.0 the enforcing harden-runner step runs before
       # preset resolution, and harden-runner splits allowed-endpoints on
       # spaces, so the reusable's newline-separated per-job defaults collapse
