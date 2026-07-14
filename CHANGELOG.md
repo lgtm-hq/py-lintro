@@ -21,6 +21,17 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.80.1] - 2026-07-14
+
+### Changed
+
+- **ci**: invert docker-ci path filter to deny-by-default skip-list with drift test
+  (#1373) (7aa0d36)
+
+### Fixed
+
+- **test**: bump osv clean sample to setuptools 83.0.0 (#1375) (3d482e3)
+
 ## [0.80.0] - 2026-07-14
 
 ### Added
