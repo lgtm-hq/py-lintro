@@ -103,8 +103,8 @@ FROM ghcr.io/lgtm-hq/lintro-tools:latest@sha256:<digest>
 
 Details:
 
-- Built from [`docker/tools.Dockerfile`](../docker/tools.Dockerfile); tool versions are
-  pinned in `lintro/_tool_versions.py`.
+- Built from `docker/tools.Dockerfile` in the repository root; tool versions are pinned
+  in `lintro/_tool_versions.py`.
 - Rebuilt when the tools Dockerfile or pinned tool versions change, plus a weekly
   no-cache rebuild so tool binaries and the OS layer pick up fresh CVE patches.
 - Signed with Sigstore Cosign (keyless) and published with SBOM and build provenance

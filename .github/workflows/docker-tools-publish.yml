@@ -102,7 +102,8 @@ jobs:
       # allowed-endpoints verbatim to step-security/harden-runner, so a
       # non-empty value must include the docker preset baseline. The
       # sigstore hosts cover cosign keyless signing in the merge job;
-      # mirror.gcr.io is the Trivy vulnerability DB fallback.
+      # get.trivy.dev serves the Trivy binary download and mirror.gcr.io is
+      # the Trivy vulnerability DB fallback.
       allowed-endpoints-mode: replace
       allowed-endpoints: >
         github.com:443
@@ -138,4 +139,5 @@ jobs:
         rekor.sigstore.dev:443
         tuf-repo-cdn.sigstore.dev:443
         oauth2.sigstore.dev:443
+        get.trivy.dev:443
         mirror.gcr.io:443
