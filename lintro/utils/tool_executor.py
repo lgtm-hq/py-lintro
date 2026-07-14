@@ -672,26 +672,37 @@ def run_lint_tools_simple(
 
     # Resolve the git-diff base ref (if --diff was supplied). Non-git dirs and
     # unresolvable default refs fall back to a full scan with a warning; an
-    # explicit but unresolvable ref is a hard error.
+    # explicit but unresolvable ref is a hard error. Scan targets may span
+    # multiple repositories; each repo's diff is computed independently.
     resolved_diff_base: str | None = None
     if diff_base is not None:
         from lintro.utils.git_diff import (
             DIFF_DEFAULT_SENTINEL,
             DiffResolutionError,
-            get_changed_files,
+            get_changed_files_for_paths,
             is_git_repository,
             resolve_default_base,
+            resolve_git_cwd_from_paths,
         )
 
-        if not is_git_repository():
+        repo_groups = resolve_git_cwd_from_paths(paths)
+        has_repo_paths = any(root is not None for root in repo_groups)
+
+        if not has_repo_paths and not is_git_repository():
             logger.console_output(
                 text="--diff requested but not inside a git repository; "
                 "scanning all files.",
                 color="yellow",
             )
         elif diff_base == DIFF_DEFAULT_SENTINEL:
-            resolved_diff_base = resolve_default_base()
-            if resolved_diff_base is None:
+            default_resolvable = any(
+                resolve_default_base(repo_root) is not None
+                for repo_root in repo_groups
+                if repo_root is not None
+            ) or (is_git_repository() and resolve_default_base() is not None)
+            if default_resolvable:
+                resolved_diff_base = DIFF_DEFAULT_SENTINEL
+            else:
                 logger.console_output(
                     text="--diff: could not resolve a default base ref "
                     "(tried origin/HEAD, origin/main, main, ...); "
@@ -703,14 +714,19 @@ def run_lint_tools_simple(
 
         if resolved_diff_base is not None:
             try:
-                changed = get_changed_files(resolved_diff_base)
+                changed = get_changed_files_for_paths(resolved_diff_base, paths)
             except DiffResolutionError as exc:
                 logger.console_output(text=f"Error: {exc}", color="red")
                 return 1
+            display_base = (
+                "default base"
+                if resolved_diff_base == DIFF_DEFAULT_SENTINEL
+                else resolved_diff_base
+            )
             logger.console_output(
                 text=(
                     f"Diff mode: scanning {len(changed)} file(s) changed vs "
-                    f"{resolved_diff_base}"
+                    f"{display_base}"
                 ),
                 color="cyan",
             )
