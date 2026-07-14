@@ -39,10 +39,13 @@ env:
 jobs:
   # Required-check-safe replacement for on.<event>.paths (see header
   # comment). Only pull_request events are filtered; every other event
-  # resolves pipeline=true. detect-changes fails open (all filters true)
-  # when the diff base is unresolvable, and resolve-pipeline-relevance.sh
-  # fails open on missing/unparsable JSON, so a filter infrastructure
-  # failure runs the full pipeline rather than silently skipping it.
+  # resolves pipeline=true. Every layer fails open so a filter
+  # infrastructure failure runs the full pipeline rather than silently
+  # skipping it: detect-changes reports all filters true when the diff base
+  # is unresolvable, resolve-pipeline-relevance.sh resolves true on
+  # missing/unparsable JSON, and downstream gates compare != 'false' with
+  # !cancelled() so a failed changes job (empty output) still runs
+  # everything. Only an explicit pipeline == 'false' skips work.
   changes:
     name: 🔎 Detect Relevant Changes
     runs-on: ubuntu-24.04
@@ -160,8 +163,11 @@ jobs:
       contents: read
     timeout-minutes: 5
     # Not a required check: safe to skip the whole job on docs-only PRs.
+    # !cancelled() keeps it running (fail-open) if the changes job failed:
+    # the pipeline output is then empty, which is != 'false'.
     if: >-
-      needs.changes.outputs.pipeline == 'true' &&
+      !cancelled() &&
+      needs.changes.outputs.pipeline != 'false' &&
       (
         github.event_name != 'pull_request' ||
         github.event.pull_request.draft == false
@@ -200,8 +206,11 @@ jobs:
     name: 🐳 Build Docker Images
     # Required check (org ruleset checks-py-lintro): the job itself always
     # runs so the context reports; heavy steps are gated on the `pipeline`
-    # filter and the job early-exits green on docs-only PRs.
+    # filter and the job early-exits green on docs-only PRs. !cancelled()
+    # keeps it running (fail-open, full build) if the changes job failed —
+    # the pipeline output is then empty, which is != 'false' at every step.
     needs: [changes]
+    if: '!cancelled()'
     runs-on: ubuntu-24.04
     permissions:
       contents: read # checkout and build context
@@ -260,12 +269,12 @@ jobs:
         run: scripts/ci/detect-fork-pr.sh
       - name: Free disk space (fork fallback)
         if: >-
-          needs.changes.outputs.pipeline == 'true' &&
+          needs.changes.outputs.pipeline != 'false' &&
           steps.fork-check.outputs.is-fork == 'true'
         run: scripts/ci/free-disk-space.sh
       - name: Set up Docker Buildx (fork)
         if: >-
-          needs.changes.outputs.pipeline == 'true' &&
+          needs.changes.outputs.pipeline != 'false' &&
           steps.fork-check.outputs.is-fork == 'true'
         # yamllint disable-line rule:line-length
         uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
@@ -273,13 +282,13 @@ jobs:
           driver: docker
       - name: Set up Docker Buildx
         if: >-
-          needs.changes.outputs.pipeline == 'true' &&
+          needs.changes.outputs.pipeline != 'false' &&
           steps.fork-check.outputs.is-fork != 'true'
         # yamllint disable-line rule:line-length
         uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
       - name: Log in to GitHub Container Registry
         if: >-
-          needs.changes.outputs.pipeline == 'true' &&
+          needs.changes.outputs.pipeline != 'false' &&
           steps.fork-check.outputs.is-fork != 'true'
         # yamllint disable-line rule:line-length
         uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3.7.0
@@ -289,7 +298,7 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
       - name: Build Docker image (fork)
         if: >-
-          needs.changes.outputs.pipeline == 'true' &&
+          needs.changes.outputs.pipeline != 'false' &&
           steps.fork-check.outputs.is-fork == 'true'
         # yamllint disable-line rule:line-length
         uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
@@ -303,7 +312,7 @@ jobs:
           provenance: false
       - name: Build and push Docker image (GHCR CI tag)
         if: >-
-          needs.changes.outputs.pipeline == 'true' &&
+          needs.changes.outputs.pipeline != 'false' &&
           steps.fork-check.outputs.is-fork != 'true'
         # yamllint disable-line rule:line-length
         uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
@@ -320,7 +329,7 @@ jobs:
           provenance: false
       - name: Build Base Docker image (fork)
         if: >-
-          needs.changes.outputs.pipeline == 'true' &&
+          needs.changes.outputs.pipeline != 'false' &&
           steps.fork-check.outputs.is-fork == 'true'
         # yamllint disable-line rule:line-length
         uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
@@ -334,7 +343,7 @@ jobs:
           provenance: false
       - name: Build and push Base Docker image (GHCR CI tag)
         if: >-
-          needs.changes.outputs.pipeline == 'true' &&
+          needs.changes.outputs.pipeline != 'false' &&
           steps.fork-check.outputs.is-fork != 'true'
         # yamllint disable-line rule:line-length
         uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
@@ -351,12 +360,12 @@ jobs:
           provenance: false
       - name: Save Docker images to tarball (fork fallback)
         if: >-
-          needs.changes.outputs.pipeline == 'true' &&
+          needs.changes.outputs.pipeline != 'false' &&
           steps.fork-check.outputs.is-fork == 'true'
         run: scripts/docker/save-ci-images-tarball.sh
       - name: Upload Docker images artifact (fork fallback)
         if: >-
-          needs.changes.outputs.pipeline == 'true' &&
+          needs.changes.outputs.pipeline != 'false' &&
           steps.fork-check.outputs.is-fork == 'true'
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
         with:
@@ -364,7 +373,7 @@ jobs:
           path: /tmp/py-lintro-images.tar
           retention-days: 1
       - name: Skip heavy build (docs-only change)
-        if: needs.changes.outputs.pipeline != 'true'
+        if: needs.changes.outputs.pipeline == 'false'
         run: scripts/ci/ci-log.sh "Docs-only change; Docker build skipped"
 
   dogfooding-lint:
@@ -375,7 +384,7 @@ jobs:
     if: >-
       always() &&
       !cancelled() &&
-      needs.changes.outputs.pipeline == 'true' &&
+      needs.changes.outputs.pipeline != 'false' &&
       needs.docker-build.result == 'success' &&
       (
         needs.manifest-sync.result == 'success' ||
@@ -430,9 +439,10 @@ jobs:
 
   # Org ruleset (checks-py-lintro): lintro-code-quality / 🛠️ Lintro Code Quality
   # Always-green gate: reports success when the heavy jobs were path-skipped
-  # (docs-only PRs), mirrors their result when they ran, and fails when the
-  # `changes` detection job itself failed (so a broken filter can never
-  # green-light a merge).
+  # (docs-only PRs, pipeline == 'false') and mirrors their result when they
+  # ran. A failed changes job fails open — its pipeline output is empty, the
+  # full pipeline runs, and this gate mirrors the real results — so a broken
+  # filter can never skip coverage or green-light an untested merge.
   lintro-code-quality:
     needs: [changes, docker-build, manifest-sync, dogfooding-lint]
     if: >-
@@ -452,8 +462,7 @@ jobs:
       runner-image: ubuntu-24.04
       upstream-result: >-
         ${{
-          needs.changes.result != 'success' && needs.changes.result
-          || needs.changes.outputs.pipeline != 'true' && 'success'
+          needs.changes.outputs.pipeline == 'false' && 'success'
           || needs.docker-build.result != 'success' && needs.docker-build.result
           || (
             needs.manifest-sync.result != 'success' &&
@@ -468,9 +477,14 @@ jobs:
 
   security-audit:
     name: 🔐 Security Audit
-    # Required check: always runs so the context reports; heavy steps are
-    # gated on the `pipeline` filter (docs-only PRs early-exit green).
+    # Required check: runs whenever docker-build reported success (real or
+    # docs-only early-exit) so the context reports; heavy steps are gated on
+    # the `pipeline` filter. !cancelled() keeps it running (fail-open) if
+    # the changes job failed.
     needs: [changes, docker-build]
+    if: >-
+      !cancelled() &&
+      needs.docker-build.result == 'success'
     runs-on: ubuntu-24.04
     permissions:
       contents: read
@@ -496,7 +510,7 @@ jobs:
           persist-credentials: false
       - name: Log in to GHCR
         if: >-
-          needs.changes.outputs.pipeline == 'true' &&
+          needs.changes.outputs.pipeline != 'false' &&
           needs.docker-build.outputs.is-fork != 'true'
         # yamllint disable-line rule:line-length
         uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3.7.0
@@ -506,14 +520,14 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
       - name: Pull CI image from GHCR
         if: >-
-          needs.changes.outputs.pipeline == 'true' &&
+          needs.changes.outputs.pipeline != 'false' &&
           needs.docker-build.outputs.is-fork != 'true'
         env:
           CI_TAG: ci-${{ github.run_id }}
         run: scripts/ci/testing/pull-ci-docker-images.sh full
       - name: Download Docker images artifact (fork fallback)
         if: >-
-          needs.changes.outputs.pipeline == 'true' &&
+          needs.changes.outputs.pipeline != 'false' &&
           needs.docker-build.outputs.is-fork == 'true'
         # yamllint disable-line rule:line-length
         uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
@@ -522,17 +536,17 @@ jobs:
           path: /tmp
       - name: Load Docker images (fork fallback)
         if: >-
-          needs.changes.outputs.pipeline == 'true' &&
+          needs.changes.outputs.pipeline != 'false' &&
           needs.docker-build.outputs.is-fork == 'true'
         run: scripts/ci/testing/load-ci-docker-images.sh
       - name: Run security audit
         id: audit
-        if: needs.changes.outputs.pipeline == 'true'
+        if: needs.changes.outputs.pipeline != 'false'
         continue-on-error: true
         run: scripts/ci/security-comment.sh
       - name: Comment PR with security audit results
         if: >-
-          needs.changes.outputs.pipeline == 'true' &&
+          needs.changes.outputs.pipeline != 'false' &&
           github.event_name == 'pull_request'
         continue-on-error: true
         # yamllint disable-line rule:line-length
@@ -547,9 +561,14 @@ jobs:
 
   integration-test:
     name: 🧪 Docker Integration Tests
-    # Required check: always runs so the context reports; heavy steps are
-    # gated on the `pipeline` filter (docs-only PRs early-exit green).
+    # Required check: runs whenever docker-build reported success (real or
+    # docs-only early-exit) so the context reports; heavy steps are gated on
+    # the `pipeline` filter. !cancelled() keeps it running (fail-open) if
+    # the changes job failed.
     needs: [changes, docker-build]
+    if: >-
+      !cancelled() &&
+      needs.docker-build.result == 'success'
     runs-on: ubuntu-24.04
     permissions:
       contents: read
@@ -600,7 +619,7 @@ jobs:
           persist-credentials: false
       - name: Log in to GHCR
         if: >-
-          needs.changes.outputs.pipeline == 'true' &&
+          needs.changes.outputs.pipeline != 'false' &&
           needs.docker-build.outputs.is-fork != 'true'
         # yamllint disable-line rule:line-length
         uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3.7.0
@@ -610,14 +629,14 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
       - name: Pull CI images from GHCR
         if: >-
-          needs.changes.outputs.pipeline == 'true' &&
+          needs.changes.outputs.pipeline != 'false' &&
           needs.docker-build.outputs.is-fork != 'true'
         env:
           CI_TAG: ci-${{ github.run_id }}
         run: scripts/ci/testing/pull-ci-docker-images.sh both
       - name: Download Docker images artifact (fork fallback)
         if: >-
-          needs.changes.outputs.pipeline == 'true' &&
+          needs.changes.outputs.pipeline != 'false' &&
           needs.docker-build.outputs.is-fork == 'true'
         # yamllint disable-line rule:line-length
         uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
@@ -626,25 +645,25 @@ jobs:
           path: /tmp
       - name: Load Docker images (fork fallback)
         if: >-
-          needs.changes.outputs.pipeline == 'true' &&
+          needs.changes.outputs.pipeline != 'false' &&
           needs.docker-build.outputs.is-fork == 'true'
         run: scripts/ci/testing/load-ci-docker-images.sh
       - name: Smoke Test Docker Image
-        if: needs.changes.outputs.pipeline == 'true'
+        if: needs.changes.outputs.pipeline != 'false'
         run: ./scripts/docker/docker-build-test.sh
       - name: Smoke Test Base Image
-        if: needs.changes.outputs.pipeline == 'true'
+        if: needs.changes.outputs.pipeline != 'false'
         run: scripts/docker/smoke-test-base-image.sh
       - name: Run Docker integration tests
-        if: needs.changes.outputs.pipeline == 'true'
+        if: needs.changes.outputs.pipeline != 'false'
         run: scripts/docker/run-docker-test-suite.sh
       - name: Extract test summary
-        if: always() && needs.changes.outputs.pipeline == 'true'
+        if: always() && needs.changes.outputs.pipeline != 'false'
         run: >-
           scripts/ci/testing/extract-test-summary.sh
           test-output.log test-summary.json || true
       - name: Upload test summary artifact
-        if: always() && needs.changes.outputs.pipeline == 'true'
+        if: always() && needs.changes.outputs.pipeline != 'false'
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
         with:
           name: test-summary
@@ -776,7 +795,7 @@ jobs:
     # Nothing to clean up when the build was path-skipped (no CI tags pushed).
     if: >-
       always() &&
-      needs.changes.outputs.pipeline == 'true' &&
+      needs.changes.outputs.pipeline != 'false' &&
       needs.docker-build.outputs.is-fork != 'true'
     runs-on: ubuntu-24.04
     permissions:

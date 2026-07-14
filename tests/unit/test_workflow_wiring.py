@@ -147,6 +147,16 @@ def _evaluate_github_if(
                     token=f"needs.{job}.outputs.{output_name} != 'true'",
                     replacement=repr(output_value != "true"),
                 )
+                expr = _replace_github_token(
+                    expr,
+                    token=f"needs.{job}.outputs.{output_name} == 'false'",
+                    replacement=repr(output_value == "false"),
+                )
+                expr = _replace_github_token(
+                    expr,
+                    token=f"needs.{job}.outputs.{output_name} != 'false'",
+                    replacement=repr(output_value != "false"),
+                )
     if event_is_pull_request is not None:
         expr = _replace_github_token(
             expr,
@@ -285,7 +295,7 @@ def test_docker_ci_dogfooding_lint_waits_on_manifest_sync() -> None:
     assert_that(lint_needs).contains("changes", "docker-build", "manifest-sync")
     assert_that(lint_condition).contains("always()")
     assert_that(lint_condition).contains("!cancelled()")
-    assert_that(lint_condition).contains("needs.changes.outputs.pipeline == 'true'")
+    assert_that(lint_condition).contains("needs.changes.outputs.pipeline != 'false'")
     assert_that(lint_condition).contains("needs.docker-build.result == 'success'")
     assert_that(lint_condition).contains("manifest-sync.result == 'skipped'")
     assert_that(lint_condition).contains("manifest-sync.result == 'success'")
@@ -319,8 +329,9 @@ def test_docker_ci_dogfooding_lint_waits_on_manifest_sync() -> None:
         # Docs-only PR: docker-build early-exits green and manifest-sync is
         # path-skipped; dogfooding-lint must not run (no CI image pushed).
         ("false", "success", "skipped", False, False),
-        # Broken changes job: pipeline output is empty; never run the lint.
-        ("", "success", "success", False, False),
+        # Broken changes job fails open: pipeline output is empty (not
+        # 'false'), the full build ran, so the lint runs too.
+        ("", "success", "success", False, True),
     ],
 )
 def test_docker_ci_lint_condition_semantics(
@@ -485,8 +496,7 @@ def test_docker_ci_lintro_code_quality_wires_upstream_jobs() -> None:
     upstream = _normalize_github_expr(job["with"]["upstream-result"])
     assert_that(upstream).is_equal_to(
         _normalize_github_expr(
-            "${{ needs.changes.result != 'success' && needs.changes.result "
-            "|| needs.changes.outputs.pipeline != 'true' && 'success' "
+            "${{ needs.changes.outputs.pipeline == 'false' && 'success' "
             "|| needs.docker-build.result != 'success' && needs.docker-build.result "
             "|| ( needs.manifest-sync.result != 'success' && "
             "needs.manifest-sync.result != 'skipped' ) && needs.manifest-sync.result "

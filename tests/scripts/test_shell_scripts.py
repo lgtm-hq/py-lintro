@@ -29,6 +29,7 @@ def test_resolve_pipeline_relevance_help() -> None:
         [str(script_path), "--help"],
         capture_output=True,
         text=True,
+        check=False,
     )
     assert_that(result.returncode).is_equal_to(0)
     assert_that(result.stdout).contains("Usage:")
@@ -60,6 +61,7 @@ def test_resolve_pipeline_relevance_outputs() -> None:
             [str(script_path)],
             capture_output=True,
             text=True,
+            check=False,
             env={"PATH": "/usr/bin:/bin:/usr/local/bin", **env},
         )
         assert_that(result.returncode).is_equal_to(0)
