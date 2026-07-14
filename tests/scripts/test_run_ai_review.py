@@ -320,7 +320,7 @@ def test_workflow_reviews_pr_via_gh_not_working_tree() -> None:
 @pytest.mark.parametrize(
     "action_ref",
     [
-        "step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411",
+        "step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920",
         "actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10",
         "astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78",
     ],
