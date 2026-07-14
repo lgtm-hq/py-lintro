@@ -12,6 +12,7 @@ from assertpy import assert_that
 from lintro.utils.git_diff import (
     DIFF_DEFAULT_SENTINEL,
     DiffResolutionError,
+    all_repo_defaults_resolvable,
     filter_files_by_diff,
     filter_files_by_diff_for_paths,
     get_changed_files,
@@ -349,6 +350,34 @@ def test_filter_files_by_diff_for_paths_non_repo_fallback(tmp_path: Path) -> Non
     )
 
     assert_that(_names(filtered)).is_equal_to(["plain.py"])
+
+
+def test_all_repo_defaults_resolvable_multi_repo(
+    two_git_repos: tuple[Path, Path],
+) -> None:
+    """Every grouped repository must resolve a default base."""
+    repo_a, repo_b = two_git_repos
+
+    assert_that(
+        all_repo_defaults_resolvable([str(repo_a), str(repo_b)]),
+    ).is_true()
+
+
+def test_all_repo_defaults_resolvable_false_for_orphan_branch(
+    tmp_path: Path,
+) -> None:
+    """A repo without ``main``/``master`` fails all-repo default resolution."""
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _git(repo, "init", "-q")
+    _git(repo, "config", "user.email", "test@example.com")
+    _git(repo, "config", "user.name", "Test User")
+    (repo / "only.py").write_text("x = 1\n")
+    _git(repo, "add", ".")
+    _git(repo, "commit", "-qm", "init")
+    _git(repo, "branch", "-M", "feature")
+
+    assert_that(all_repo_defaults_resolvable([str(repo)])).is_false()
 
 
 def test_walk_files_with_excludes_multi_repo_diff(

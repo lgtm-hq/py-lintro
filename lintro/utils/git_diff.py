@@ -351,6 +351,24 @@ def _resolve_base_for_repo(base: str, repo_root: str) -> str | None:
     return base
 
 
+def all_repo_defaults_resolvable(scan_paths: list[str]) -> bool:
+    """Return whether every grouped repository can resolve a default base.
+
+    Args:
+        scan_paths: Files or directories the user asked to scan.
+
+    Returns:
+        True when each git repository in ``scan_paths`` resolves a default
+        base ref, or when there are no repo paths and the current working
+        directory resolves one.
+    """
+    groups = resolve_git_cwd_from_paths(scan_paths)
+    repo_roots = [root for root in groups if root is not None]
+    if not repo_roots:
+        return is_git_repository() and resolve_default_base() is not None
+    return all(resolve_default_base(repo_root) is not None for repo_root in repo_roots)
+
+
 def _validate_explicit_base_for_paths(base: str, scan_paths: list[str]) -> None:
     """Ensure an explicit base ref resolves in every grouped repository.
 
@@ -438,11 +456,6 @@ def filter_files_by_diff_for_paths(
 
         resolved_base = _resolve_base_for_repo(base, repo_root)
         if resolved_base is None:
-            for scan_path in group_paths:
-                for file_path in _files_under_scan_path(files, scan_path):
-                    abs_file = os.path.abspath(file_path)
-                    if _path_in_repo(abs_file, repo_root):
-                        included.add(abs_file)
             continue
 
         repo_files = [f for f in files if _path_in_repo(f, repo_root)]

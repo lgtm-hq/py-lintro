@@ -679,9 +679,9 @@ def run_lint_tools_simple(
         from lintro.utils.git_diff import (
             DIFF_DEFAULT_SENTINEL,
             DiffResolutionError,
+            all_repo_defaults_resolvable,
             get_changed_files_for_paths,
             is_git_repository,
-            resolve_default_base,
             resolve_git_cwd_from_paths,
         )
 
@@ -695,17 +695,12 @@ def run_lint_tools_simple(
                 color="yellow",
             )
         elif diff_base == DIFF_DEFAULT_SENTINEL:
-            default_resolvable = any(
-                resolve_default_base(repo_root) is not None
-                for repo_root in repo_groups
-                if repo_root is not None
-            ) or (is_git_repository() and resolve_default_base() is not None)
-            if default_resolvable:
+            if all_repo_defaults_resolvable(paths):
                 resolved_diff_base = DIFF_DEFAULT_SENTINEL
             else:
                 logger.console_output(
-                    text="--diff: could not resolve a default base ref "
-                    "(tried origin/HEAD, origin/main, main, ...); "
+                    text="--diff: could not resolve a default base ref in every "
+                    "repository (tried origin/HEAD, origin/main, main, ...); "
                     "scanning all files.",
                     color="yellow",
                 )
