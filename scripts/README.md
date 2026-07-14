@@ -159,7 +159,6 @@ itself lives in `lgtm-hq/homebrew-tap`.
 | --------------------- | -------------------------------------------- | ------------------------------------------------------------------------------- |
 | `wait-for-pypi.sh`    | Poll PyPI until package version is available | `./scripts/ci/homebrew/wait-for-pypi.sh lintro 1.0.0`                           |
 | `get-release-info.sh` | Resolve release tag and prerelease metadata  | `GITHUB_EVENT_NAME=workflow_dispatch ./scripts/ci/homebrew/get-release-info.sh` |
-| `generate_resources.py`      | Generate Homebrew resource stanzas (replaces poet)     | `python3 scripts/ci/homebrew/generate_resources.py lintro --exclude pkg1 pkg2`                                  |
 
 ### 🐳 Docker Scripts (`docker/`)
 
