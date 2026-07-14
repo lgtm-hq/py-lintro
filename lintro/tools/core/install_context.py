@@ -25,6 +25,19 @@ from lintro.enums.install_context import CISystem, InstallContext
 from lintro.tools.core.install_strategies.environment import InstallEnvironment
 
 
+def _dockerenv_exists() -> bool:
+    """Return whether the Docker container marker file is present."""
+    return Path("/.dockerenv").exists()
+
+
+def _git_root_marker_exists(install_path: str) -> bool:
+    """Return whether a ``.git`` marker exists at the inferred source root."""
+    source_root = Path(install_path)
+    for _ in range(4):
+        source_root = source_root.parent
+    return (source_root / ".git").exists()
+
+
 @dataclass(frozen=True)
 class RuntimeContext:
     """Detected runtime context for install-aware commands.
@@ -64,7 +77,7 @@ def _detect_install_context() -> InstallContext:
     """Detect how lintro was installed based on the executable path."""
     # Docker: check for Docker indicators
     if (
-        Path("/.dockerenv").exists()
+        _dockerenv_exists()
         or os.environ.get("LINTRO_DOCKER") == "1"
         or os.environ.get("CONTAINER") == "docker"
     ):
@@ -107,9 +120,7 @@ def _detect_install_context() -> InstallContext:
 
     # Development: running from a git checkout
     # install_path is lintro/tools/core/install_context.py — 4 levels to repo root
-    source_root = Path(install_path).parents[3]
-    # Use exists() (not is_dir()) to also detect .git files (worktrees/submodules)
-    if (source_root / ".git").exists():
+    if _git_root_marker_exists(install_path):
         return InstallContext.DEVELOPMENT
 
     # Default: pip/uv install

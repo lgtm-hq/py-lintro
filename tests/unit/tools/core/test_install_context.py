@@ -84,7 +84,10 @@ def test_runtime_context_environment_reflects_managers() -> None:
 
 def test_detect_docker_via_dockerenv() -> None:
     """Detect Docker context when /.dockerenv file exists."""
-    with patch.object(Path, "exists", return_value=True):
+    with patch(
+        "lintro.tools.core.install_context._dockerenv_exists",
+        return_value=True,
+    ):
         result = _detect_install_context()
 
     assert_that(result).is_equal_to(InstallContext.DOCKER)
@@ -95,7 +98,10 @@ def test_detect_docker_via_env_var(
 ) -> None:
     """Detect Docker context via LINTRO_DOCKER=1 env var."""
     monkeypatch.setenv("LINTRO_DOCKER", "1")
-    with patch.object(Path, "exists", return_value=False):
+    with patch(
+        "lintro.tools.core.install_context._dockerenv_exists",
+        return_value=False,
+    ):
         result = _detect_install_context()
 
     assert_that(result).is_equal_to(InstallContext.DOCKER)
@@ -111,7 +117,10 @@ def test_detect_docker_via_container_env_var(
     """
     monkeypatch.delenv("LINTRO_DOCKER", raising=False)
     monkeypatch.setenv("CONTAINER", "docker")
-    with patch.object(Path, "exists", return_value=False):
+    with patch(
+        "lintro.tools.core.install_context._dockerenv_exists",
+        return_value=False,
+    ):
         result = _detect_install_context()
 
     assert_that(result).is_equal_to(InstallContext.DOCKER)
@@ -130,7 +139,14 @@ def test_detect_pip_default(
     monkeypatch.delenv("CONTAINER", raising=False)
 
     with (
-        patch.object(Path, "exists", return_value=False),
+        patch(
+            "lintro.tools.core.install_context._dockerenv_exists",
+            return_value=False,
+        ),
+        patch(
+            "lintro.tools.core.install_context._git_root_marker_exists",
+            return_value=False,
+        ),
         patch(
             "lintro.tools.core.install_context.__file__",
             "/usr/lib/python3.11/site-packages/lintro/tools/core/install_context.py",
@@ -197,7 +213,14 @@ def test_detect_homebrew_install_context(
     monkeypatch.delenv("CONTAINER", raising=False)
 
     with (
-        patch.object(Path, "exists", return_value=False),
+        patch(
+            "lintro.tools.core.install_context._dockerenv_exists",
+            return_value=False,
+        ),
+        patch(
+            "lintro.tools.core.install_context._git_root_marker_exists",
+            return_value=False,
+        ),
         patch(
             "lintro.tools.core.install_context.__file__",
             install_file,
@@ -243,7 +266,14 @@ def test_detect_npm_bin_install_context(
     monkeypatch.delenv("CONTAINER", raising=False)
 
     with (
-        patch.object(Path, "exists", return_value=False),
+        patch(
+            "lintro.tools.core.install_context._dockerenv_exists",
+            return_value=False,
+        ),
+        patch(
+            "lintro.tools.core.install_context._git_root_marker_exists",
+            return_value=False,
+        ),
         patch(
             "lintro.tools.core.install_context.__file__",
             install_file,

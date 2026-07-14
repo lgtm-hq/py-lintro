@@ -24,6 +24,8 @@ import subprocess  # nosec B404 - subprocess is the core mechanism for invoking 
 from functools import lru_cache
 from pathlib import Path
 
+from lintro.utils.path_utils import absolute_path
+
 # Sentinel used by the ``--diff`` CLI option to mean "flag supplied without an
 # explicit base"; resolved to the repository's default base ref at runtime.
 DIFF_DEFAULT_SENTINEL: str = "\x00lintro-diff-default\x00"
@@ -42,21 +44,6 @@ _GIT_TIMEOUT_SECONDS: float = 30.0
 
 class DiffResolutionError(Exception):
     """Raised when an explicit ``--diff`` base ref cannot be resolved."""
-
-
-def _absolute_path(path: str) -> str:
-    """Return ``path`` as absolute without resolving symlinks.
-
-    Args:
-        path: Relative or absolute path string.
-
-    Returns:
-        Absolute path string matching ``os.path.abspath`` semantics.
-    """
-    path_obj = Path(path)
-    if path_obj.is_absolute():
-        return path
-    return str(path_obj.absolute())
 
 
 def _run_git(args: list[str], cwd: str) -> subprocess.CompletedProcess[str]:
@@ -250,7 +237,7 @@ def get_changed_files(base: str, cwd: str = ".") -> frozenset[str]:
     Raises:
         DiffResolutionError: When ``base`` does not resolve to a commit.
     """
-    root = _repo_root(cwd) or _absolute_path(cwd)
+    root = _repo_root(cwd) or absolute_path(cwd)
 
     if not _ref_exists(base, cwd):
         raise DiffResolutionError(
@@ -266,7 +253,7 @@ def get_changed_files(base: str, cwd: str = ".") -> frozenset[str]:
 
     changed: set[str] = set()
     for name in names:
-        abs_path = _absolute_path(str(Path(root) / name))
+        abs_path = absolute_path(str(Path(root) / name))
         # Drop deletions / rename sources that no longer exist on disk.
         if Path(abs_path).is_file():
             changed.add(abs_path)
@@ -324,7 +311,7 @@ def _files_under_scan_path(files: list[str], scan_path: str) -> list[str]:
     return [
         f
         for f in files
-        if Path(f).absolute() == abs_scan or abs_scan in Path(f).absolute().parents
+        if abs_scan in (abs_f := Path(f).absolute()).parents or abs_f == abs_scan
     ]
 
 
@@ -466,7 +453,7 @@ def filter_files_by_diff_for_paths(
         if repo_root is None:
             for scan_path in group_paths:
                 for file_path in _files_under_scan_path(files, scan_path):
-                    included.add(_absolute_path(file_path))
+                    included.add(absolute_path(file_path))
             continue
 
         resolved_base = _resolve_base_for_repo(base, repo_root)
@@ -475,9 +462,9 @@ def filter_files_by_diff_for_paths(
 
         repo_files = [f for f in files if _path_in_repo(f, repo_root)]
         for file_path in filter_files_by_diff(repo_files, resolved_base, repo_root):
-            included.add(_absolute_path(file_path))
+            included.add(absolute_path(file_path))
 
-    return [f for f in files if _absolute_path(f) in included]
+    return [f for f in files if absolute_path(f) in included]
 
 
 def filter_files_by_diff(
@@ -498,4 +485,4 @@ def filter_files_by_diff(
     changed = get_changed_files(base, cwd)
     if not changed:
         return []
-    return [f for f in files if _absolute_path(f) in changed]
+    return [f for f in files if absolute_path(f) in changed]

@@ -15,6 +15,8 @@ from pathlib import Path
 
 from loguru import logger
 
+from lintro.utils.path_utils import absolute_path
+
 
 @dataclass
 class LineLengthViolation:
@@ -36,24 +38,6 @@ class LineLengthViolation:
     column: int
     message: str
     code: str = "E501"
-
-
-def _absolute_path(file_path: str, cwd: str | None = None) -> str:
-    """Return ``file_path`` as an absolute path without resolving symlinks.
-
-    Args:
-        file_path: Relative or absolute file path.
-        cwd: Base directory for relative paths when supplied.
-
-    Returns:
-        Absolute path string matching ``os.path.abspath`` semantics.
-    """
-    path = Path(file_path)
-    if path.is_absolute():
-        return file_path
-    if cwd is not None:
-        return str((Path(cwd) / path).absolute())
-    return str(path.absolute())
 
 
 def check_line_length_violations(
@@ -97,7 +81,10 @@ def check_line_length_violations(
         logger.debug("Ruff not found in PATH, skipping line length check")
         return []
 
-    abs_files = [_absolute_path(file_path, cwd=cwd) for file_path in files]
+    abs_files = [
+        absolute_path(file_path, base_dir=Path(cwd) if cwd else None)
+        for file_path in files
+    ]
 
     # Build the Ruff command
     cmd: list[str] = [
@@ -143,7 +130,7 @@ def check_line_length_violations(
             # Ruff JSON format has: filename, row, column, message, code
             file_path = issue.get("filename", "")
             if not Path(file_path).is_absolute() and cwd:
-                file_path = _absolute_path(file_path, cwd=cwd)
+                file_path = absolute_path(file_path, base_dir=Path(cwd))
 
             # Handle both old and new Ruff JSON formats
             line = issue.get("location", {}).get("row") or issue.get("row", 0)
