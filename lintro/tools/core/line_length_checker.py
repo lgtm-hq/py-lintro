@@ -8,10 +8,10 @@ making the architecture more modular.
 from __future__ import annotations
 
 import json
-import os
 import shutil
 import subprocess  # nosec B404 - used safely with shell disabled
 from dataclasses import dataclass
+from pathlib import Path
 
 from loguru import logger
 
@@ -36,6 +36,24 @@ class LineLengthViolation:
     column: int
     message: str
     code: str = "E501"
+
+
+def _absolute_path(file_path: str, cwd: str | None = None) -> str:
+    """Return ``file_path`` as an absolute path without resolving symlinks.
+
+    Args:
+        file_path: Relative or absolute file path.
+        cwd: Base directory for relative paths when supplied.
+
+    Returns:
+        Absolute path string matching ``os.path.abspath`` semantics.
+    """
+    path = Path(file_path)
+    if path.is_absolute():
+        return file_path
+    if cwd is not None:
+        return str((Path(cwd) / path).absolute())
+    return str(path.absolute())
 
 
 def check_line_length_violations(
@@ -79,19 +97,7 @@ def check_line_length_violations(
         logger.debug("Ruff not found in PATH, skipping line length check")
         return []
 
-    # Convert relative paths to absolute paths
-    abs_files: list[str] = []
-    for file_path in files:
-        if cwd and not os.path.isabs(file_path):
-            abs_files.append(os.path.abspath(os.path.join(cwd, file_path)))
-        else:
-            abs_files.append(
-                (
-                    os.path.abspath(file_path)
-                    if not os.path.isabs(file_path)
-                    else file_path
-                ),
-            )
+    abs_files = [_absolute_path(file_path, cwd=cwd) for file_path in files]
 
     # Build the Ruff command
     cmd: list[str] = [
@@ -136,8 +142,8 @@ def check_line_length_violations(
         for issue in issues_data:
             # Ruff JSON format has: filename, row, column, message, code
             file_path = issue.get("filename", "")
-            if not os.path.isabs(file_path) and cwd:
-                file_path = os.path.abspath(os.path.join(cwd, file_path))
+            if not Path(file_path).is_absolute() and cwd:
+                file_path = _absolute_path(file_path, cwd=cwd)
 
             # Handle both old and new Ruff JSON formats
             line = issue.get("location", {}).get("row") or issue.get("row", 0)
