@@ -334,17 +334,19 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-  update-homebrew:
-    name: Update Homebrew Tap
+
+  homebrew-dispatch:
+    name: Notify Homebrew Tap
     needs: [get-release-info, build-macos]
     runs-on: ubuntu-24.04
     permissions:
       contents: read
+    # Stable tag releases only. The tap's formulas/lintro.yml declares a
+    # binary formula, so the dispatch must carry both macOS checksums:
+    # a failed binary build blocks the formula update (re-run this workflow
+    # to recover) instead of shipping a partial bump.
     if: >-
-      always() &&
-      !cancelled() &&
       inputs.release_tag != '' &&
-      needs.get-release-info.result == 'success' &&
       needs.get-release-info.outputs.release_tag != '' &&
       needs.get-release-info.outputs.is_prerelease == 'false'
 
@@ -357,20 +359,18 @@ jobs:
           allowed-endpoints: >
             github.com:443
             api.github.com:443
+            codeload.github.com:443
             objects.githubusercontent.com:443
+            actions.githubusercontent.com:443
             pypi.org:443
-            files.pythonhosted.org:443
 
-      - name: Checkout lintro scripts and actions
+      - name: Checkout scripts
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
         with:
-          sparse-checkout: |
-            scripts
-            .github/actions
-          path: lintro
+          sparse-checkout: scripts
+          persist-credentials: false
 
       - name: Download SHA256 artifacts
-        if: ${{ needs.build-macos.result == 'success' }}
         uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
         with:
           pattern: sha256-*
@@ -378,15 +378,12 @@ jobs:
           merge-multiple: true
 
       - name: Read checksums
-        if: ${{ needs.build-macos.result == 'success' }}
         id: checksums
         run: |
           ARM64_SHA=$(cat checksums/sha256-arm64.txt)
           X86_64_SHA=$(cat checksums/sha256-x86_64.txt)
           echo "arm64_sha256=$ARM64_SHA" >> "$GITHUB_OUTPUT"
           echo "x86_64_sha256=$X86_64_SHA" >> "$GITHUB_OUTPUT"
-          echo "ARM64 SHA256: $ARM64_SHA"
-          echo "x86_64 SHA256: $X86_64_SHA"
 
       - name: Extract version from tag
         id: version
@@ -394,70 +391,20 @@ jobs:
           TAG="${{ needs.get-release-info.outputs.release_tag }}"
           VERSION="${TAG#v}"
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
-          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
-          echo "Extracted version: $VERSION from tag: $TAG"
 
       - name: Wait for PyPI availability
+        # The tap generates lintro-full from live PyPI metadata as soon as
+        # the dispatch lands, so the sdist must be visible first.
         # yamllint disable-line rule:line-length
-        run: lintro/scripts/ci/homebrew/wait-for-pypi.sh lintro "${{ steps.version.outputs.version }}"
+        run: scripts/ci/homebrew/wait-for-pypi.sh lintro "${{ steps.version.outputs.version }}"
 
-      - name: Set up Python
-        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
-        with:
-          python-version: '3.14'
-
-      - name: Create Homebrew tap GitHub App token
-        id: homebrew-app-token
+      - name: Dispatch formula update
         # yamllint disable-line rule:line-length
-        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3
+        uses: lgtm-hq/lgtm-ci/.github/actions/trigger-homebrew-update@31c25ef2e8992960e218524780e34f44f51271b5 # v0.54.0
         with:
-          app-id: ${{ secrets.HOMEBREW_TAP_APP_ID }}
-          private-key: ${{ secrets.HOMEBREW_TAP_APP_PRIVATE_KEY }}
-          owner: lgtm-hq
-          repositories: homebrew-tap
-          permission-contents: write
-          permission-pull-requests: write
-
-      - name: Checkout homebrew-tap
-        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
-        with:
-          repository: lgtm-hq/homebrew-tap
-          token: ${{ steps.homebrew-app-token.outputs.token }}
-          path: homebrew-tap
-
-      - name: Generate PyPI formula (lintro-full)
-        run: |
-          lintro/scripts/ci/homebrew/generate-pypi-formula.sh \
-            "${{ steps.version.outputs.version }}" \
-            "homebrew-tap/Formula/lintro-full.rb"
-
-      - name: Generate binary formula (lintro)
-        if: ${{ needs.build-macos.result == 'success' }}
-        run: |
-          lintro/scripts/ci/homebrew/generate-binary-formula.sh \
-            "${{ steps.version.outputs.version }}" \
-            "${{ steps.checksums.outputs.arm64_sha256 }}" \
-            "${{ steps.checksums.outputs.x86_64_sha256 }}" \
-            "homebrew-tap/Formula/lintro.rb"
-
-      - name: Create Homebrew tap PR
-        env:
-          GH_TOKEN: ${{ steps.homebrew-app-token.outputs.token }}
-          WORKING_DIR: homebrew-tap
-          PR_BRANCH: homebrew/lintro-${{ steps.version.outputs.version }}
-          PR_TITLE: >-
-            chore(homebrew): update lintro to
-            ${{ steps.version.outputs.version }}
-          PR_BODY: |
-            Updates applicable Homebrew formulas for lintro
-            ${{ steps.version.outputs.version }}:
-
-            - `Formula/lintro.rb` (lightweight binary) when macOS binaries are available
-            - `Formula/lintro-full.rb` (PyPI + bundled tools)
-
-            The tap repository merges this PR automatically after `validate-formula`
-            succeeds (release-bot merge workflow).
-        run: >-
-          lintro/scripts/ci/homebrew/create-lintro-tap-pr.sh
-          "${{ steps.version.outputs.version }}"
-          --skip-if-empty
+          formula: lintro
+          version: ${{ steps.version.outputs.version }}
+          pypi-package: lintro
+          binary-arm64-sha: ${{ steps.checksums.outputs.arm64_sha256 }}
+          binary-x86-sha: ${{ steps.checksums.outputs.x86_64_sha256 }}
+          token: ${{ secrets.HOMEBREW_TAP_DISPATCH_TOKEN }}
