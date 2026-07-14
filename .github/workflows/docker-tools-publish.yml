@@ -64,10 +64,10 @@ jobs:
     uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-docker.yml@768a6b72f0a5346b5ecba3f4e13b90040472341c # v0.52.4
     permissions:
       contents: read
-      packages: write
-      id-token: write
-      attestations: write
-      security-events: write
+      packages: write # push image, cache, and staging tags to GHCR
+      id-token: write # OIDC token for cosign keyless signing
+      attestations: write # publish SBOM + build provenance attestations
+      security-events: write # upload Trivy SARIF to code scanning
     with:
       file: docker/tools.Dockerfile
       image-name: lgtm-hq/lintro-tools
