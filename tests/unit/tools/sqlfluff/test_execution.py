@@ -29,7 +29,7 @@ def test_check_with_mocked_subprocess_success(
         "tools",
         "sql",
         "sqlfluff",
-        "sqlfluff_violations.sql",
+        "sqlfluff_clean.sql",
         dest_name=test_file.name,
     )
 
@@ -190,7 +190,7 @@ def test_fix_with_mocked_subprocess_no_changes(
         "tools",
         "sql",
         "sqlfluff",
-        "sqlfluff_violations.sql",
+        "sqlfluff_clean.sql",
         dest_name=test_file.name,
     )
 
