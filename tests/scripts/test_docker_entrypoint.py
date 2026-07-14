@@ -15,20 +15,29 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
+import pytest
 from assertpy import assert_that
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 _DOCKERFILE = _REPO_ROOT / "Dockerfile"
+_TOOLS_DOCKERFILE = _REPO_ROOT / "docker" / "tools.Dockerfile"
 _ENTRYPOINT = _REPO_ROOT / "scripts" / "docker" / "entrypoint.sh"
+_SYNTAX_DIRECTIVE = re.compile(
+    r"^#\s*syntax=docker/dockerfile:1@sha256:[a-f0-9]{64}\s*$",
+    re.MULTILINE,
+)
 
 
-def _dockerfile_text() -> str:
-    """Read the repository Dockerfile.
+def _dockerfile_text(path: Path = _DOCKERFILE) -> str:
+    """Read a repository Dockerfile.
+
+    Args:
+        path: Dockerfile path relative to the repository root.
 
     Returns:
         The full text of the Dockerfile.
     """
-    return _DOCKERFILE.read_text(encoding="utf-8")
+    return path.read_text(encoding="utf-8")
 
 
 def _entrypoint_text() -> str:
@@ -38,6 +47,18 @@ def _entrypoint_text() -> str:
         The full text of scripts/docker/entrypoint.sh.
     """
     return _ENTRYPOINT.read_text(encoding="utf-8")
+
+
+@pytest.mark.parametrize(
+    "dockerfile",
+    [_DOCKERFILE, _TOOLS_DOCKERFILE],
+    ids=["main", "tools"],
+)
+def test_dockerfile_pins_buildkit_syntax_frontend_by_digest(
+    dockerfile: Path,
+) -> None:
+    """BuildKit syntax directives must pin docker/dockerfile:1 by digest."""
+    assert_that(_SYNTAX_DIRECTIVE.search(_dockerfile_text(dockerfile))).is_not_none()
 
 
 def test_dockerfile_has_no_user_lintro_directive() -> None:
