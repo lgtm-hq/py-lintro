@@ -24,8 +24,19 @@ _TOOLS_DOCKERFILE = _REPO_ROOT / "docker" / "tools.Dockerfile"
 _ENTRYPOINT = _REPO_ROOT / "scripts" / "docker" / "entrypoint.sh"
 _SYNTAX_DIRECTIVE = re.compile(
     r"^#\s*syntax=docker/dockerfile:1@sha256:[a-f0-9]{64}\s*$",
-    re.MULTILINE,
 )
+
+
+def _first_line(path: Path) -> str:
+    """Return the first non-empty line of a Dockerfile.
+
+    Args:
+        path: Dockerfile path relative to the repository root.
+
+    Returns:
+        The first line of the file.
+    """
+    return path.read_text(encoding="utf-8").splitlines()[0]
 
 
 def _dockerfile_text(path: Path = _DOCKERFILE) -> str:
@@ -57,8 +68,8 @@ def _entrypoint_text() -> str:
 def test_dockerfile_pins_buildkit_syntax_frontend_by_digest(
     dockerfile: Path,
 ) -> None:
-    """BuildKit syntax directives must pin docker/dockerfile:1 by digest."""
-    assert_that(_SYNTAX_DIRECTIVE.search(_dockerfile_text(dockerfile))).is_not_none()
+    """BuildKit syntax directives must pin docker/dockerfile:1 by digest on line 1."""
+    assert_that(_SYNTAX_DIRECTIVE.match(_first_line(dockerfile))).is_not_none()
 
 
 def test_dockerfile_has_no_user_lintro_directive() -> None:
