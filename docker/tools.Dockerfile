@@ -7,9 +7,10 @@
 # .github/workflows/docker-tools-publish.yml (weekly + on changes to this file
 # or the pinned tool versions).
 #
-# The root Dockerfile consumes this image via a digest-pinned FROM so the
-# slow, rarely-changing tools layer stays off the per-PR build path. Renovate
-# manages the digest bump (native Docker digest support — see renovate.json).
+# Once the first image is published, the root Dockerfile will consume it via
+# a digest-pinned FROM so the slow, rarely-changing tools layer stays off the
+# per-PR build path. Renovate manages the digest bump (native Docker digest
+# support — see renovate.json).
 #
 # Build context is the repository root:
 #   docker build -f docker/tools.Dockerfile .

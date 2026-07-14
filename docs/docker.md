@@ -90,9 +90,9 @@ The **tools base** image is published as **`ghcr.io/lgtm-hq/lintro-tools`**. It 
 the full external toolchain lintro drives — Rust toolchain (clippy, rustfmt,
 cargo-audit, cargo-deny), bun/Node tools (prettier, oxlint, tsc, stylelint, …), and
 standalone binaries (hadolint, shellcheck, shfmt, gitleaks, vale, …) — but not the
-lintro application layer. The `py-lintro` full image is built on top of it, and you can
-use it directly as a base for your own images when you want the pre-built linter
-toolchain without lintro:
+lintro application layer. After the planned digest-pinned `FROM` flip, the `py-lintro`
+full image will be built on top of it; you can also use it directly as a base for your
+own images when you want the pre-built linter toolchain without lintro:
 
 ```dockerfile
 # Pin by digest for reproducible builds (recommended)

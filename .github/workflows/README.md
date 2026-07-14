@@ -49,8 +49,8 @@ on `main` failures — hence the `actions: read` + `issues: write` job permissio
 - **docker-tools-publish.yml** — Publishes the `lintro-tools` toolchain base image
   (`docker/tools.Dockerfile`) via `reusable-docker.yml` on tool-pin changes plus a
   weekly no-cache rebuild for CVE freshness; cosign-signed with SBOM + provenance
-  attestations. The root `Dockerfile` consumes it via a Renovate-managed digest-pinned
-  `FROM`.
+  attestations. A follow-up root `Dockerfile` change will consume it via a
+  Renovate-managed digest-pinned `FROM`.
 
 ## Security & maintenance
 

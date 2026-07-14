@@ -4,8 +4,9 @@
 name: Build - Lintro Tools Image
 # Builds and publishes the pre-built external toolchain base image
 # ghcr.io/lgtm-hq/lintro-tools (Rust toolchain, bun, ~40 linter binaries)
-# via lgtm-ci reusable-docker. The root Dockerfile consumes this image
-# through a digest-pinned FROM; Renovate bumps the digest (see renovate.json).
+# via lgtm-ci reusable-docker. Once the first image is published, the root
+# Dockerfile flips to a digest-pinned FROM on it; Renovate bumps the digest
+# from then on (see renovate.json and issue #1360).
 #
 # Triggers:
 #   - push (main) / pull_request touching the tools Dockerfile, the pinned
