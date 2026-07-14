@@ -358,7 +358,7 @@ def test_prettier_builtin_defaults_applied_when_no_user_defaults(
     config_path = generate_defaults_config("prettier", lintro_config)
 
     assert_that(config_path).is_not_none()
-    assert config_path is not None
+    assert config_path is not None  # narrow type for mypy
     import json
 
     content = json.loads(config_path.read_text())
@@ -385,7 +385,7 @@ def test_prettier_user_defaults_override_builtin_defaults(
     config_path = generate_defaults_config("prettier", lintro_config)
 
     assert_that(config_path).is_not_none()
-    assert config_path is not None
+    assert config_path is not None  # narrow type for mypy
     import json
 
     content = json.loads(config_path.read_text())
@@ -411,7 +411,7 @@ def test_prettier_user_defaults_merged_with_builtin_defaults(
     config_path = generate_defaults_config("prettier", lintro_config)
 
     assert_that(config_path).is_not_none()
-    assert config_path is not None
+    assert config_path is not None  # narrow type for mypy
     import json
 
     content = json.loads(config_path.read_text())

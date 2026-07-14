@@ -484,7 +484,7 @@ def test_detect_framework_project(
     result = tsc_plugin._detect_framework_project(tmp_path)
 
     assert_that(result).is_not_none()
-    assert result is not None
+    assert result is not None  # narrow type for mypy
     framework_name, tool_name = result
     assert_that(framework_name).is_equal_to(expected_framework)
     assert_that(tool_name).is_equal_to(expected_tool)

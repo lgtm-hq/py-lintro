@@ -250,7 +250,8 @@ def test_collect_pr_context_uses_gh(
 
     assert_that(context.pr_metadata).is_not_none()
     metadata = context.pr_metadata
-    assert metadata is not None
+    assert_that(metadata).is_not_none()
+    assert metadata is not None  # narrow type for mypy
     assert_that(metadata.title).is_equal_to("Fix bug")
     assert_that(metadata.number).is_equal_to(42)
     assert_that(metadata.repo).is_equal_to("lgtm-hq/py-lintro")
@@ -728,7 +729,8 @@ def test_collect_pr_context_accepts_repo_override_when_head_repository_null(
 
     assert_that(context.pr_metadata).is_not_none()
     metadata = context.pr_metadata
-    assert metadata is not None
+    assert_that(metadata).is_not_none()
+    assert metadata is not None  # narrow type for mypy
     assert_that(metadata.repo).is_equal_to("lgtm-hq/py-lintro")
 
 
@@ -818,7 +820,8 @@ def test_collect_pr_context_uses_head_repository_for_workflow_fetch(
     context = collect_review_context(pr_number=9, repo="lgtm-hq/py-lintro")
 
     metadata = context.pr_metadata
-    assert metadata is not None
+    assert_that(metadata).is_not_none()
+    assert metadata is not None  # narrow type for mypy
     assert_that(metadata.repo).is_equal_to("lgtm-hq/py-lintro")
     assert_that(metadata.head_repo).is_equal_to("fork-owner/py-lintro")
     gh_api_calls = [

@@ -21,8 +21,10 @@ def _load_build_macos_module():
         Loaded build_macos module.
     """
     spec = importlib.util.spec_from_file_location("build_macos", _BUILD_SCRIPT)
-    assert spec is not None
-    assert spec.loader is not None
+    assert_that(spec).is_not_none()
+    assert spec is not None  # narrow type for mypy
+    assert_that(spec.loader).is_not_none()
+    assert spec.loader is not None  # narrow type for mypy
     module = importlib.util.module_from_spec(spec)
     sys.modules["build_macos"] = module
     spec.loader.exec_module(module)
