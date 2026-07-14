@@ -193,7 +193,8 @@ def test_promote_ci_docker_images_promotes_by_digest(tmp_path: Path) -> None:
     assert_that(result.returncode).is_equal_to(0)
     log = docker_log.read_text()
     assert_that(log).contains(
-        "buildx imagetools create ghcr.io/example/app@sha256:aaa111 "
+        "buildx imagetools create --prefer-index=false "
+        "ghcr.io/example/app@sha256:aaa111 "
         "--tag ghcr.io/example/app:main --tag ghcr.io/example/app:sha-abc",
     )
     # Source resolve + two per-tag verifications.
@@ -311,6 +312,10 @@ def test_delete_ci_ghcr_tags_deletes_only_sole_tag_versions(
             'if [[ "$*" == *"DELETE"* ]]; then\n'
             "  exit 0\n"
             "fi\n"
+            'if [[ "$*" == *"/versions/"* ]]; then\n'
+            '  echo "$GH_VERSION_TAGS"\n'
+            "  exit 0\n"
+            "fi\n"
             'printf "%s\\n" "$GH_VERSIONS_TSV"'
         ),
     )
@@ -325,6 +330,8 @@ def test_delete_ci_ghcr_tags_deletes_only_sole_tag_versions(
             "GH_TOKEN": "dummy",  # nosec B105 - fake token for stubbed gh
             "GH_LOG": str(gh_log),
             "GH_VERSIONS_TSV": versions_tsv,
+            # Pre-delete re-check still sees only the CI tag on 102.
+            "GH_VERSION_TAGS": "ci-123",
         },
     )
 
@@ -332,5 +339,48 @@ def test_delete_ci_ghcr_tags_deletes_only_sole_tag_versions(
     assert_that(result.stdout).contains("Skipping version 101")
     assert_that(result.stdout).contains("Deleted version 102")
     log = gh_log.read_text()
+    assert_that(log).contains("--method DELETE")
     assert_that(log).contains("versions/102")
     assert_that(log).does_not_contain("versions/101")
+
+
+def test_delete_ci_ghcr_tags_recheck_catches_new_tags(
+    tmp_path: Path,
+) -> None:
+    """A tag attached between snapshot and delete must abort the delete."""
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    gh_log = tmp_path / "gh.log"
+    _write_stub(
+        bin_dir,
+        "gh",
+        (
+            'echo "$*" >> "$GH_LOG"\n'
+            'if [[ "$*" == *"DELETE"* ]]; then\n'
+            "  exit 0\n"
+            "fi\n"
+            'if [[ "$*" == *"/versions/"* ]]; then\n'
+            '  echo "$GH_VERSION_TAGS"\n'
+            "  exit 0\n"
+            "fi\n"
+            'printf "%s\\n" "$GH_VERSIONS_TSV"'
+        ),
+    )
+
+    result = _run_with_stubs(
+        "scripts/ci/maintenance/delete-ci-ghcr-tags.sh",
+        bin_dir,
+        {
+            "CI_TAG": "ci-123",
+            "GH_TOKEN": "dummy",  # nosec B105 - fake token for stubbed gh
+            "GH_LOG": str(gh_log),
+            # Snapshot sees a sole-tag version...
+            "GH_VERSIONS_TSV": "102\tci-123",
+            # ...but a concurrent run attached a tag before the delete.
+            "GH_VERSION_TAGS": "ci-123 sha-def",
+        },
+    )
+
+    assert_that(result.returncode).is_equal_to(0)
+    assert_that(result.stdout).contains("tags changed since snapshot")
+    assert_that(gh_log.read_text()).does_not_contain("--method DELETE")

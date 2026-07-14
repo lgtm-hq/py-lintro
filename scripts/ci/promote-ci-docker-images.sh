@@ -82,7 +82,12 @@ if [[ ${#tag_list[@]} -eq 0 ]]; then
 	exit 2
 fi
 
-docker buildx imagetools create "${source_image}@${digest}" "${tag_args[@]}"
+# --prefer-index=false: with a single-manifest source (CI images are
+# built with provenance disabled), the default prefer-index=true would
+# wrap the manifest in a new one-entry index — a different digest. A
+# carbon copy keeps the promoted tags on the exact CI-validated digest.
+docker buildx imagetools create --prefer-index=false \
+	"${source_image}@${digest}" "${tag_args[@]}"
 
 # Verify the retag preserved the manifest: every promoted tag must resolve
 # to the exact digest CI validated.

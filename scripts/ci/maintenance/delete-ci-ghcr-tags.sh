@@ -89,6 +89,31 @@ delete_ci_tag() {
 				"with other tags [${version_tags}] (#1138)"
 			continue
 		fi
+		# Re-check immediately before deleting: another run may have
+		# attached a tag (promotion or a byte-identical build) between
+		# the paginated snapshot and now. This narrows the TOCTOU window
+		# to a single API round-trip; a stale-but-kept version is
+		# harmless and swept later, a deleted shared version is not.
+		local current_tags=""
+		if ! current_tags=$(gh api \
+			"orgs/lgtm-hq/packages/container/${pkg}/versions/${vid}" \
+			--jq '(.metadata.container.tags // []) | join(" ")' 2>&1); then
+			echo "::warning::Failed to re-check version ${vid}; skipping" \
+				"deletion: ${current_tags}"
+			continue
+		fi
+		local recheck_ok="true"
+		for t in $current_tags; do
+			if [[ "$t" != "$tag" ]]; then
+				recheck_ok="false"
+				break
+			fi
+		done
+		if [[ "$recheck_ok" != "true" ]]; then
+			echo "Skipping version ${vid} (${pkg}:${tag}): tags changed" \
+				"since snapshot [${current_tags}] (#1138)"
+			continue
+		fi
 		if delete_output=$(gh api --method DELETE \
 			"orgs/lgtm-hq/packages/container/${pkg}/versions/${vid}" \
 			2>&1); then
