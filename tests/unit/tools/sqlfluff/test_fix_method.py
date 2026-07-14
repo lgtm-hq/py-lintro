@@ -83,7 +83,7 @@ def test_fix_initial_issues_none_when_no_issues(
         "tools",
         "sql",
         "sqlfluff",
-        "sqlfluff_violations.sql",
+        "sqlfluff_clean.sql",
         dest_name=test_file.name,
     )
 
