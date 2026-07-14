@@ -509,7 +509,7 @@ def test_renovate_post_upgrade_tasks_cover_tool_pin_managers() -> None:
         file_names.update(rule.get("matchFileNames", []))
         commands.update(rule["postUpgradeTasks"].get("commands", []))
 
-    assert_that(managers).contains("custom.regex", "npm", "pep621")
+    assert_that(managers).contains("custom.regex", "npm", "pep621", "uv")
     assert_that(file_names).contains(
         "package.json",
         "pyproject.toml",

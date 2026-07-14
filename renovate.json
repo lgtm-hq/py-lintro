@@ -81,7 +81,8 @@
       "matchManagers": [
         "custom.regex",
         "npm",
-        "pep621"
+        "pep621",
+        "uv"
       ],
       "matchFileNames": [
         "Dockerfile",
