@@ -50,6 +50,40 @@ def _addopts_has_coverage(addopts: str | list[str] | None) -> bool:
     return any(_token_enables_coverage(token) for token in tokens)
 
 
+def _load_pyproject_toml(path: Path) -> dict[str, object] | None:
+    """Load and parse a ``pyproject.toml`` file.
+
+    Args:
+        path: Path to the ``pyproject.toml`` file to read.
+
+    Returns:
+        dict | None: Parsed TOML data, or None when unreadable.
+    """
+    try:
+        with path.open("rb") as handle:
+            return tomllib.load(handle)
+    except (tomllib.TOMLDecodeError, OSError):
+        return None
+
+
+def _pyproject_pytest_tool(data: dict[str, object]) -> dict[str, object] | None:
+    """Return the ``[tool.pytest]`` table when it is a valid mapping.
+
+    Args:
+        data: Parsed ``pyproject.toml`` data.
+
+    Returns:
+        dict | None: The pytest tool table, or None when absent or malformed.
+    """
+    tool = data.get("tool")
+    if not isinstance(tool, dict):
+        return None
+    pytest_config = tool.get("pytest")
+    if not isinstance(pytest_config, dict):
+        return None
+    return pytest_config
+
+
 def _ini_addopts_has_coverage(path: Path, section: str) -> bool:
     """Return whether an INI-style config's section enables coverage.
 
@@ -79,12 +113,15 @@ def _pyproject_addopts_has_coverage(path: Path) -> bool:
     Returns:
         bool: True if ``[tool.pytest.ini_options].addopts`` enables coverage.
     """
-    try:
-        with path.open("rb") as handle:
-            data = tomllib.load(handle)
-    except (tomllib.TOMLDecodeError, OSError):
+    data = _load_pyproject_toml(path)
+    if data is None:
         return False
-    ini_options = data.get("tool", {}).get("pytest", {}).get("ini_options", {})
+    pytest_config = _pyproject_pytest_tool(data)
+    if pytest_config is None:
+        return False
+    ini_options = pytest_config.get("ini_options")
+    if not isinstance(ini_options, dict):
+        return False
     return _addopts_has_coverage(ini_options.get("addopts"))
 
 
@@ -115,13 +152,11 @@ def _pyproject_has_pytest_config(path: Path) -> bool:
     Returns:
         bool: True when ``[tool.pytest.ini_options]`` is present.
     """
-    try:
-        with path.open("rb") as handle:
-            data = tomllib.load(handle)
-    except (tomllib.TOMLDecodeError, OSError):
+    data = _load_pyproject_toml(path)
+    if data is None:
         return False
-    pytest_tool = data.get("tool", {}).get("pytest", {})
-    return isinstance(pytest_tool, dict) and "ini_options" in pytest_tool
+    pytest_config = _pyproject_pytest_tool(data)
+    return pytest_config is not None and "ini_options" in pytest_config
 
 
 def _winning_pytest_config(base: Path) -> Path | None:
