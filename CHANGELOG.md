@@ -21,6 +21,17 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.80.2] - 2026-07-14
+
+### Changed
+
+- **release**: dispatch Homebrew updates to the tap (#1380) (04ac4dc)
+- **ci**: unify lgtm-ci pin at v0.54.0 (#1377) (5670fc7)
+
+### Fixed
+
+- **ci**: Renovate tool-pin bumps break generated-versions check (#1387) (510bd10)
+
 ## [0.80.1] - 2026-07-14
 
 ### Changed
