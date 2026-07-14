@@ -77,13 +77,20 @@
       "automerge": false
     },
     {
-      "description": "Regenerate _tool_versions.py when tool version sources change",
-      "matchManagers": ["custom.regex"],
+      "description": "Regenerate version artifacts when tool version sources change",
+      "matchManagers": [
+        "custom.regex",
+        "npm",
+        "pep621",
+        "uv"
+      ],
       "matchFileNames": [
         "Dockerfile",
         "docker/tools.Dockerfile",
         "lintro/_tool_versions.py",
-        "lintro/tools/manifest.json"
+        "lintro/tools/manifest.json",
+        "package.json",
+        "pyproject.toml"
       ],
       "postUpgradeTasks": {
         "commands": [
