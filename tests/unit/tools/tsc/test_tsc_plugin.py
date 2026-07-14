@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from typing import Any, cast
 
 import pytest
 from assertpy import assert_that
@@ -204,7 +205,6 @@ def test_create_temp_tsconfig_falls_back_to_system_temp_with_typeroots(
         tmp_path: Pytest temporary directory.
     """
     import tempfile
-    from typing import Any
     from unittest.mock import patch
 
     base_tsconfig = tmp_path / "tsconfig.json"
@@ -257,7 +257,6 @@ def test_create_temp_tsconfig_fallback_preserves_custom_typeroots(
         tmp_path: Pytest temporary directory.
     """
     import tempfile
-    from typing import Any
     from unittest.mock import patch
 
     base_tsconfig = tmp_path / "tsconfig.json"
@@ -321,7 +320,6 @@ def test_create_temp_tsconfig_fallback_honours_empty_typeroots(
         tmp_path: Pytest temporary directory.
     """
     import tempfile
-    from typing import Any
     from unittest.mock import patch
 
     base_tsconfig = tmp_path / "tsconfig.json"
@@ -375,7 +373,7 @@ def test_set_options_validates_use_project_files_type(
     """
     with pytest.raises(ValueError, match="use_project_files must be a boolean"):
         tsc_plugin.set_options(
-            use_project_files="true",  # type: ignore[arg-type]  # Intentional wrong type
+            use_project_files=cast(Any, "true"),
         )
 
 

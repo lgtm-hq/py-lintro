@@ -5,6 +5,7 @@ from __future__ import annotations
 import importlib.util
 import sys
 from pathlib import Path
+from types import ModuleType
 from unittest.mock import patch
 
 import pytest
@@ -14,7 +15,7 @@ _REPO_ROOT = Path(__file__).resolve().parents[2]
 _BUILD_SCRIPT = _REPO_ROOT / "scripts" / "build" / "build_macos.py"
 
 
-def _load_build_macos_module():
+def _load_build_macos_module() -> ModuleType:
     """Import build_macos without executing its main entry point.
 
     Returns:
