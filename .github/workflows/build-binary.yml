@@ -334,7 +334,6 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-
   homebrew-dispatch:
     name: Notify Homebrew Tap
     needs: [get-release-info, build-macos]

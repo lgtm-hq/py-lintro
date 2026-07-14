@@ -76,12 +76,11 @@ packages and (dry-run) publish them. See the
 
 ### 🍺 Homebrew Formulas (`ci/homebrew/`)
 
-Formula generation lives in `lgtm-hq/homebrew-tap` (single writer). Release
-automation sends a `repository_dispatch` with release facts (version,
-binary checksums); the tap renders, validates, and auto-merges
-`Formula/lintro.rb` (binary) and `Formula/lintro-full.rb` (PyPI full
-install). Only release-support helpers remain here (see Homebrew Scripts
-below).
+Formula generation lives in `lgtm-hq/homebrew-tap` (single writer). Release automation
+sends a `repository_dispatch` with release facts (version, binary checksums); the tap
+renders, validates, and auto-merges `Formula/lintro.rb` (binary) and
+`Formula/lintro-full.rb` (PyPI full install). Only release-support helpers remain here
+(see Homebrew Scripts below).
 
 ### 🔧 CI/CD Scripts (`ci/`)
 
@@ -152,8 +151,8 @@ Scripts for building, testing, and deploying the Astro documentation site at
 
 #### Homebrew Scripts (`ci/homebrew/`)
 
-Release-support helpers for the Homebrew tap dispatch. Formula generation
-itself lives in `lgtm-hq/homebrew-tap`.
+Release-support helpers for the Homebrew tap dispatch. Formula generation itself lives
+in `lgtm-hq/homebrew-tap`.
 
 | Script                | Purpose                                      | Usage                                                                           |
 | --------------------- | -------------------------------------------- | ------------------------------------------------------------------------------- |
