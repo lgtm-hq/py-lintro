@@ -12,6 +12,7 @@ from assertpy import assert_that
 from lintro.enums.tool_name import ToolName
 from lintro.parsers.vale.vale_issue import ValeIssue
 from lintro.tools.definitions.vale import ValePlugin
+from tests.test_samples_helpers import copy_sample
 
 from .conftest import make_ctx, vale_output
 
@@ -25,8 +26,14 @@ def _write_md(tmp_path: Path) -> str:
     Returns:
         Path to the created Markdown file as a string.
     """
-    md = tmp_path / "doc.md"
-    md.write_text("The the repeated words.\n")
+    md = copy_sample(
+        tmp_path,
+        "tools",
+        "config",
+        "vale",
+        "vale_violations.md",
+        dest_name="doc.md",
+    )
     return str(md)
 
 

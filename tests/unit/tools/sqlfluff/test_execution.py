@@ -8,6 +8,7 @@ from unittest.mock import patch
 from assertpy import assert_that
 
 from lintro.tools.definitions.sqlfluff import SqlfluffPlugin
+from tests.test_samples_helpers import copy_sample
 
 # Tests for SqlfluffPlugin.check method
 
@@ -23,7 +24,14 @@ def test_check_with_mocked_subprocess_success(
         tmp_path: Temporary directory path for test files.
     """
     test_file = tmp_path / "test_query.sql"
-    test_file.write_text("SELECT * FROM users;\n")
+    copy_sample(
+        tmp_path,
+        "tools",
+        "sql",
+        "sqlfluff",
+        "sqlfluff_violations.sql",
+        dest_name=test_file.name,
+    )
 
     # Note: verify_tool_version is already patched by the sqlfluff_plugin fixture
     with patch.object(
@@ -48,7 +56,14 @@ def test_check_with_mocked_subprocess_issues(
         tmp_path: Temporary directory path for test files.
     """
     test_file = tmp_path / "test_query.sql"
-    test_file.write_text("select * from users;\n")
+    copy_sample(
+        tmp_path,
+        "tools",
+        "sql",
+        "sqlfluff",
+        "sqlfluff_violations.sql",
+        dest_name=test_file.name,
+    )
 
     sqlfluff_output = """[
         {
@@ -113,7 +128,14 @@ def test_fix_with_mocked_subprocess_success(
         tmp_path: Temporary directory path for test files.
     """
     test_file = tmp_path / "test_query.sql"
-    test_file.write_text("select * from users;\n")
+    copy_sample(
+        tmp_path,
+        "tools",
+        "sql",
+        "sqlfluff",
+        "sqlfluff_violations.sql",
+        dest_name=test_file.name,
+    )
 
     sqlfluff_lint_output = """[
         {
@@ -163,7 +185,14 @@ def test_fix_with_mocked_subprocess_no_changes(
         tmp_path: Temporary directory path for test files.
     """
     test_file = tmp_path / "test_query.sql"
-    test_file.write_text("SELECT * FROM users;\n")
+    copy_sample(
+        tmp_path,
+        "tools",
+        "sql",
+        "sqlfluff",
+        "sqlfluff_violations.sql",
+        dest_name=test_file.name,
+    )
 
     # Note: verify_tool_version is already patched by the sqlfluff_plugin fixture
     # Initial lint check finds no issues, so fix and verify are skipped

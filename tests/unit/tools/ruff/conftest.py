@@ -10,6 +10,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from lintro.enums.tool_name import ToolName
+from tests.test_samples_helpers import copy_sample
 
 if TYPE_CHECKING:
     from lintro.tools.definitions.ruff import RuffPlugin
@@ -131,8 +132,14 @@ def temp_python_file(tmp_path: Any) -> str:
     Returns:
         str: Path to the created temporary Python file.
     """
-    test_file = tmp_path / "test_file.py"
-    test_file.write_text("import os\nx = 1\n")
+    test_file = copy_sample(
+        tmp_path,
+        "tools",
+        "python",
+        "ruff",
+        "ruff_e501_f401_violations.py",
+        dest_name="test_file.py",
+    )
     return str(test_file)
 
 
@@ -148,7 +155,13 @@ def temp_python_files(tmp_path: Any) -> list[str]:
     """
     files = []
     for i in range(3):
-        test_file = tmp_path / f"test_file_{i}.py"
-        test_file.write_text(f"x = {i}\n")
+        test_file = copy_sample(
+            tmp_path,
+            "tools",
+            "python",
+            "common",
+            "minimal_x.py",
+            dest_name=f"test_file_{i}.py",
+        )
         files.append(str(test_file))
     return files
