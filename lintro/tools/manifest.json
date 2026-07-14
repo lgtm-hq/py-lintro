@@ -152,7 +152,7 @@
     },
     {
       "name": "commitlint",
-      "version": "21.2.0",
+      "version": "21.2.1",
       "install": {
         "type": "npm",
         "package": "@commitlint/cli"
@@ -240,7 +240,7 @@
     },
     {
       "name": "oxfmt",
-      "version": "0.57.0",
+      "version": "0.58.0",
       "install": {
         "type": "npm",
         "package": "oxfmt"
@@ -253,7 +253,7 @@
     },
     {
       "name": "oxlint",
-      "version": "1.72.0",
+      "version": "1.73.0",
       "install": {
         "type": "npm",
         "package": "oxlint"
@@ -407,7 +407,7 @@
     },
     {
       "name": "svelte_check",
-      "version": "4.7.1",
+      "version": "4.7.2",
       "install": {
         "type": "npm",
         "package": "svelte-check",
@@ -459,7 +459,7 @@
     },
     {
       "name": "vue_tsc",
-      "version": "3.3.6",
+      "version": "3.3.7",
       "install": {
         "type": "npm",
         "package": "vue-tsc",
