@@ -16,6 +16,13 @@ name: CI - Tests
 # workflows"). Path-skipping this matrix needs an internal skip input in
 # lgtm-ci reusable-test-python (jobs skipped INSIDE a running reusable do
 # report their contexts as skipped, like draft-pr-skip does today).
+#
+# Version-bump PRs (#1362) are NOT skipped here for the same reason: the
+# skip signal would have to gate the reusable callers, which collapses the
+# nested required contexts and deadlocks the merge. Only docker-ci.yml
+# skips its heavy jobs on verified bump PRs; this matrix runs in full
+# until reusable-test-python grows an internal skip input (deferred like
+# the #1359 path-skip).
 'on':
   push:
     branches: [main]

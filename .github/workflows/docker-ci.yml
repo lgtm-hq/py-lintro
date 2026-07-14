@@ -17,6 +17,19 @@ name: CI - Docker
 # green when only docs changed. merge_group, push, and workflow_dispatch
 # always run the full pipeline.
 #
+# Version-bump PRs (#1362): the `changes` job also classifies automated
+# release version-bump PRs (release-version-pr.yml) via
+# scripts/ci/release-bump-only.sh — identity signals (bot author, title,
+# release/v* branch) nominate, a diff allowlist decides (only the version
+# stamp in pyproject.toml / uv.lock / lintro/__init__.py plus CHANGELOG.md
+# may change). Verified bump PRs resolve pipeline=false, so the heavy jobs
+# early-exit green exactly like the docs-only path, with skip-reason
+# "version-bump PR". Only the pull_request run is skipped: the merge push
+# to main still builds and publishes (digest promotion, #1358/#1368), and
+# the release-auto-tag → publish-pypi-on-tag chain is untouched. test-ci.yml
+# keeps running in full on bump PRs (see its header — skipping the reusable
+# callers collapses the nested required contexts, #1359).
+#
 # Dogfooding lint scope (#1361): the `changes` job also maps the diff to a
 # `full-lint` filter (paths with global lint impact — tool configs, the
 # Docker context, workflows, scripts, lintro itself). PRs that miss the
@@ -66,6 +79,9 @@ jobs:
       # PR diff explicitly missed the full-lint filter; every failure mode
       # (missing JSON, failed job → empty output) resolves to full-repo lint.
       lint-scope: ${{ steps.result.outputs.lint-scope }}
+      # Human-readable reason when pipeline=false ("docs-only change" or
+      # "version-bump PR", #1362); empty when the pipeline runs.
+      skip-reason: ${{ steps.result.outputs.skip-reason }}
     steps:
       - name: Harden Runner
         # yamllint disable-line rule:line-length
@@ -236,11 +252,28 @@ jobs:
               - '*.jsonc'
               - '*.ini'
               - '*.cfg'
+      - name: Check for release version-bump PR
+        # Nominate-then-verify (#1362): identity signals (release-bot
+        # author, chore(release) title, release/v* branch) only nominate;
+        # the script's diff allowlist decides. Fails closed to
+        # release-bump=false on anything unexpected, so the full pipeline
+        # runs. continue-on-error keeps a script failure from turning the
+        # fail-open changes job into a hard failure.
+        id: bump
+        if: github.event_name == 'pull_request'
+        continue-on-error: true
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          PR_AUTHOR: ${{ github.event.pull_request.user.login }}
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          HEAD_REF: ${{ github.head_ref }}
+        run: scripts/ci/release-bump-only.sh
       - name: Resolve pipeline relevance
         id: result
         env:
           EVENT_NAME: ${{ github.event_name }}
           CHANGES_JSON: ${{ steps.detect.outputs.changes }}
+          RELEASE_BUMP: ${{ steps.bump.outputs.release-bump }}
         run: scripts/ci/resolve-pipeline-relevance.sh
 
   manifest-sync:
@@ -460,9 +493,11 @@ jobs:
           name: docker-images
           path: /tmp/py-lintro-images.tar
           retention-days: 1
-      - name: Skip heavy build (docs-only change)
+      - name: Skip heavy build (pipeline not relevant)
         if: needs.changes.outputs.pipeline == 'false'
-        run: scripts/ci/ci-log.sh "Docs-only change; Docker build skipped"
+        env:
+          SKIP_REASON: ${{ needs.changes.outputs.skip-reason }}
+        run: scripts/ci/ci-log.sh "skipped:" "$SKIP_REASON" "(Docker build)"
 
   dogfooding-lint:
     needs: [changes, docker-build, manifest-sync]
@@ -777,6 +812,11 @@ jobs:
           needs.changes.outputs.pipeline != 'false' &&
           needs.docker-build.outputs.is-fork == 'true'
         run: scripts/ci/testing/load-ci-docker-images.sh
+      - name: Skip security audit (pipeline not relevant)
+        if: needs.changes.outputs.pipeline == 'false'
+        env:
+          SKIP_REASON: ${{ needs.changes.outputs.skip-reason }}
+        run: scripts/ci/ci-log.sh "skipped:" "$SKIP_REASON" "(security audit)"
       - name: Run security audit
         id: audit
         if: needs.changes.outputs.pipeline != 'false'
@@ -886,6 +926,12 @@ jobs:
           needs.changes.outputs.pipeline != 'false' &&
           needs.docker-build.outputs.is-fork == 'true'
         run: scripts/ci/testing/load-ci-docker-images.sh
+      - name: Skip integration tests (pipeline not relevant)
+        if: needs.changes.outputs.pipeline == 'false'
+        env:
+          SKIP_REASON: ${{ needs.changes.outputs.skip-reason }}
+        run: >-
+          scripts/ci/ci-log.sh "skipped:" "$SKIP_REASON" "(integration tests)"
       - name: Smoke Test Docker Image
         if: needs.changes.outputs.pipeline != 'false'
         run: ./scripts/docker/docker-build-test.sh
