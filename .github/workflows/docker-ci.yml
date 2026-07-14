@@ -671,6 +671,11 @@ jobs:
           retention-days: 30
           if-no-files-found: warn
 
+  # Publishes by digest promotion (#1358): the ci-${run_id} images that
+  # docker-build pushed and the downstream jobs validated are retagged to
+  # the release tags with `docker buildx imagetools create` — no rebuild,
+  # so the published image is bit-identical to the image CI tested. The
+  # promoted digests are then signed with Cosign (keyless OIDC).
   publish:
     name: 📦 Publish to GHCR
     needs: [dogfooding-lint, security-audit, integration-test]
@@ -678,13 +683,17 @@ jobs:
     runs-on: ubuntu-24.04
     permissions:
       contents: read # checkout and metadata extraction
-      packages: write # push release images to GHCR
-    timeout-minutes: 30
+      packages: write # promote (retag) release images in GHCR
+      id-token: write # OIDC token for cosign keyless signing
+    timeout-minutes: 15
     concurrency:
       group: publish-${{ github.ref }}
       cancel-in-progress: false
     steps:
       - name: Harden Runner
+        # No build happens here anymore (#1358): the allowlist covers
+        # checkout, GHCR retagging, cosign download, and sigstore keyless
+        # signing only.
         # yamllint disable-line rule:line-length
         uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
         with:
@@ -697,25 +706,13 @@ jobs:
             objects.githubusercontent.com:443
             ghcr.io:443
             pkg-containers.githubusercontent.com:443
-            docker.io:443
-            registry-1.docker.io:443
-            auth.docker.io:443
-            production.cloudflare.docker.com:443
-            production.cloudfront.docker.com:443
-            deb.debian.org:80
-            pypi.org:443
-            files.pythonhosted.org:443
-            static.rust-lang.org:443
-            bun.sh:443
-            astral.sh:443
-            releases.astral.sh:443
-            sh.rustup.rs:443
-            registry.npmjs.org:443
-            crates.io:443
-            static.crates.io:443
-            index.crates.io:443
-            semgrep.dev:443
-            metrics.semgrep.dev:443
+            token.actions.githubusercontent.com:443
+            pipelines.actions.githubusercontent.com:443
+            fulcio.sigstore.dev:443
+            rekor.sigstore.dev:443
+            tuf-repo-cdn.sigstore.dev:443
+            timestamp.sigstore.dev:443
+            oauth2.sigstore.dev:443
       - name: Checkout
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
         with:
@@ -723,13 +720,14 @@ jobs:
           fetch-tags: true
           persist-credentials: false
       - name: Setup Docker (Buildx + login)
+        # Default `docker` driver: imagetools talks to the registry from
+        # the CLI, no BuildKit container (or Docker Hub pull) needed.
         uses: ./.github/actions/setup-docker
         with:
           login: 'true'
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-          driver: docker-container
       - name: Extract metadata
         id: meta
         uses: docker/metadata-action@c299e40c65443455700f0fdfc63efafe5b349051 # v5
@@ -752,36 +750,29 @@ jobs:
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
             type=semver,pattern={{major}}
-      - name: Build and push Docker image
+      - name: Promote CI image to release tags (digest retag)
+        id: promote
+        env:
+          SOURCE_IMAGE: ghcr.io/lgtm-hq/py-lintro
+          CI_TAG: ci-${{ github.run_id }}
+          TAGS: ${{ steps.meta.outputs.tags }}
+        run: scripts/ci/promote-ci-docker-images.sh
+      - name: Promote Base CI image to release tags (digest retag)
+        id: promote-base
+        env:
+          SOURCE_IMAGE: ghcr.io/lgtm-hq/py-lintro-base
+          CI_TAG: ci-${{ github.run_id }}
+          TAGS: ${{ steps.meta-base.outputs.tags }}
+        run: scripts/ci/promote-ci-docker-images.sh
+      - name: Install Cosign
         # yamllint disable-line rule:line-length
-        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
-        with:
-          context: .
-          target: full
-          push: true
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
-          cache-from: |
-            type=registry,ref=ghcr.io/lgtm-hq/py-lintro:cache
-          cache-to: >-
-            type=registry,ref=ghcr.io/lgtm-hq/py-lintro:cache,${{ env.CACHE_OPTS }}
-          provenance: false
-          sbom: false
-      - name: Build and push Base Docker image
-        # yamllint disable-line rule:line-length
-        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
-        with:
-          context: .
-          target: base
-          push: true
-          tags: ${{ steps.meta-base.outputs.tags }}
-          labels: ${{ steps.meta-base.outputs.labels }}
-          cache-from: |
-            type=registry,ref=ghcr.io/lgtm-hq/py-lintro-base:cache
-          cache-to: >-
-            type=registry,ref=ghcr.io/lgtm-hq/py-lintro-base:cache,${{ env.CACHE_OPTS }}
-          provenance: false
-          sbom: false
+        uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+      - name: Sign promoted digests (keyless)
+        env:
+          IMAGES: |
+            ghcr.io/lgtm-hq/py-lintro@${{ steps.promote.outputs.digest }}
+            ghcr.io/lgtm-hq/py-lintro-base@${{ steps.promote-base.outputs.digest }}
+        run: scripts/ci/cosign-sign-images.sh
 
   cleanup-ci-images:
     name: 🧹 Cleanup CI Images
@@ -793,10 +784,19 @@ jobs:
       - integration-test
       - publish
     # Nothing to clean up when the build was path-skipped (no CI tags pushed).
+    # Sequencing (#1138, #1358): cleanup only runs when every consumer of the
+    # ci-${run_id} tags — including publish, which promotes them by digest —
+    # finished green or was skipped (publish is skipped on PRs). On any
+    # failure the CI tags survive so a re-run of failed jobs can still pull
+    # and promote them; re-runs share the run_id, so the eventual green
+    # re-run deletes the same tags. Cross-run digest sharing is handled
+    # inside delete-ci-ghcr-tags.sh (sole-tag versions only).
     if: >-
       always() &&
       needs.changes.outputs.pipeline != 'false' &&
-      needs.docker-build.outputs.is-fork != 'true'
+      needs.docker-build.outputs.is-fork != 'true' &&
+      !contains(needs.*.result, 'failure') &&
+      !contains(needs.*.result, 'cancelled')
     runs-on: ubuntu-24.04
     permissions:
       contents: read # checkout delete-ci-ghcr-tags.sh

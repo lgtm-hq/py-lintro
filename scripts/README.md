@@ -93,6 +93,8 @@ Scripts for GitHub Actions workflows and continuous integration.
 | `lintro-report-generate.sh`          | Generate comprehensive Lintro reports                                 | `./scripts/ci/lintro-report-generate.sh`                                           |
 | `pull-lintro-image.sh`               | Pull lintro Docker image from GHCR and log digest                     | `./scripts/ci/testing/pull-lintro-image.sh`                                        |
 | `maintenance/delete-ci-ghcr-tags.sh` | Delete ephemeral CI GHCR tags after PR merge or close                 | `./scripts/ci/maintenance/delete-ci-ghcr-tags.sh`                                  |
+| `promote-ci-docker-images.sh`        | Promote CI-validated image to release tags by digest retag            | `./scripts/ci/promote-ci-docker-images.sh --help`                                  |
+| `cosign-sign-images.sh`              | Sign promoted image digests with Cosign keyless OIDC                  | `./scripts/ci/cosign-sign-images.sh --help`                                        |
 | `coverage-badge-update.sh`           | Generate and update coverage badge                                    | `./scripts/ci/coverage-badge-update.sh --help`                                     |
 | `sbom-generate.sh`                   | Generate and export SBOMs via bomctl                                  | `./scripts/ci/sbom-generate.sh --help`                                             |
 | `egress-audit-lite.sh`               | Audit reachability of allowed endpoints                               | `./scripts/ci/egress-audit-lite.sh --help`                                         |
