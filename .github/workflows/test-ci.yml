@@ -3,6 +3,19 @@
 ---
 name: CI - Tests
 
+# No paths filter, and no job-level path-skip of test-compat/test-coverage
+# either (#1359): the org ruleset (checks-py-lintro) requires the NESTED
+# contexts reported from inside reusable-test-python (test-compat / Python
+# Compatibility, test-compat / Aggregate Python Results, test-coverage /
+# Python Coverage, test-coverage / Aggregate Python Results). A path-filtered
+# workflow never reports them, and a skipped reusable *caller* collapses to a
+# single check run named after the caller job — the nested contexts are never
+# created (verified on commit fdc94ea) — so either approach leaves required
+# checks permanently "Expected" and deadlocks merges (see codeql.yml and
+# lgtm-ci docs/workflow-contract.md, "Required-check-safe conditional
+# workflows"). Path-skipping this matrix needs an internal skip input in
+# lgtm-ci reusable-test-python (jobs skipped INSIDE a running reusable do
+# report their contexts as skipped, like draft-pr-skip does today).
 'on':
   push:
     branches: [main]

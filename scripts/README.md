@@ -98,6 +98,7 @@ Scripts for GitHub Actions workflows and continuous integration.
 | `egress-audit-lite.sh`               | Audit reachability of allowed endpoints                               | `./scripts/ci/egress-audit-lite.sh --help`                                         |
 | `detect-changes.sh`                  | Detect repo diffs and set has_changes output                          | `./scripts/ci/detect-changes.sh --help`                                            |
 | `detect-fork-pr.sh`                  | Detect fork PRs and set `is-fork` output for conditional steps        | `EVENT_NAME=pull_request ./scripts/ci/detect-fork-pr.sh`                           |
+| `resolve-pipeline-relevance.sh`      | Resolve heavy-pipeline path relevance and set `pipeline` output       | `./scripts/ci/resolve-pipeline-relevance.sh --help`                                |
 | `evaluate-test-gate.sh`              | Evaluate upstream compat/coverage results for required-check gate     | `COMPAT_RESULT=success COVERAGE_RESULT=success ./scripts/ci/evaluate-test-gate.sh` |
 | `fail-on-security-audit.sh`          | Fail CI when security audit finds vulnerabilities                     | `./scripts/ci/fail-on-security-audit.sh`                                           |
 | `free-disk-space.sh`                 | Free disk space on CI runner for Docker builds                        | `./scripts/ci/free-disk-space.sh`                                                  |
