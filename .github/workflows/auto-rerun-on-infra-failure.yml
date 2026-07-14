@@ -1,0 +1,44 @@
+# SPDX-License-Identifier: MIT
+# For license details, see the repository root LICENSE file.
+---
+name: Auto Rerun on Infra Failure
+
+# When a listed workflow fails and its failed-job logs match a known
+# GitHub-side outage signature ("Failed to resolve action download info",
+# runner shutdown signals, harden-runner allowed-domain resolution errors),
+# re-run only the failed jobs — once (run-attempt guard upstream). This repo
+# saw a ghcr.io login timeout (run 29325278849) and a runner shutdown during
+# #1370's CI, both manually rerun. See #1374 and Rustume's equivalent (#474).
+#
+# workflow_run triggers only run from the definition on the default branch,
+# so changes here take effect after merging to main.
+
+'on':
+  workflow_run:
+    workflows:
+      - Build - Docker Image & Registry
+      - Build - Lintro Tools Image
+      - CI - Docker
+      - CI - Tests
+      - Deploy - GitHub Pages
+    types: [completed]
+    branches: [main]
+
+permissions: {}
+
+jobs:
+  rerun:
+    if: github.event.workflow_run.conclusion == 'failure'
+    # yamllint disable-line rule:line-length
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-auto-rerun-on-infra-failure.yml@31c25ef2e8992960e218524780e34f44f51271b5 # v0.54.0
+    permissions:
+      actions: write
+      contents: read
+    with:
+      tooling-ref: '31c25ef2e8992960e218524780e34f44f51271b5' # v0.54.0
+      # run id/attempt are numbers in the event payload; format() passes them
+      # as the strings the reusable workflow inputs expect.
+      run-id: ${{ format('{0}', github.event.workflow_run.id) }}
+      run-attempt: ${{ format('{0}', github.event.workflow_run.run_attempt) }}
+      egress-policy: block
+      egress-preset: github-minimal

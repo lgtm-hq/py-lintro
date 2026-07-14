@@ -910,7 +910,7 @@ def test_publish_npm_exposes_dist_tag_for_backfills() -> None:
 
 # Canonical lgtm-ci pin used by all py-lintro workflows (v0.52.4).
 # Pages deploy must not regress to v0.32.3 (missing GH_TOKEN in bundler).
-_LGTM_CI_PIN = "768a6b72f0a5346b5ecba3f4e13b90040472341c"
+_LGTM_CI_PIN = "31c25ef2e8992960e218524780e34f44f51271b5"
 
 
 def test_all_lgtm_ci_refs_use_the_canonical_pin() -> None:
