@@ -46,6 +46,11 @@ on `main` failures — hence the `actions: read` + `issues: write` job permissio
   (same three-step pattern with `repository-url: https://test.pypi.org/legacy/`)
 - **docker-build-publish.yml** — Multi-arch GHCR publish via `reusable-docker.yml`
   (full + base images, registry cache at `:cache`, no-cache on version tags)
+- **docker-tools-publish.yml** — Publishes the `lintro-tools` toolchain base image
+  (`docker/tools.Dockerfile`) via `reusable-docker.yml` on tool-pin changes plus a
+  weekly no-cache rebuild for CVE freshness; cosign-signed with SBOM + provenance
+  attestations. A follow-up root `Dockerfile` change will consume it via a
+  Renovate-managed digest-pinned `FROM`.
 
 ## Security & maintenance
 

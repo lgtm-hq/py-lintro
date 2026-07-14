@@ -1,0 +1,143 @@
+# SPDX-License-Identifier: MIT
+# For license details, see the repository root LICENSE file.
+---
+name: Build - Lintro Tools Image
+# Builds and publishes the pre-built external toolchain base image
+# ghcr.io/lgtm-hq/lintro-tools (Rust toolchain, bun, ~40 linter binaries)
+# via lgtm-ci reusable-docker. Once the first image is published, the root
+# Dockerfile flips to a digest-pinned FROM on it; Renovate bumps the digest
+# from then on (see renovate.json and issue #1360).
+#
+# Triggers:
+#   - push (main) / pull_request touching the tools Dockerfile, the pinned
+#     tool versions, or the installer script. PR runs validate only (no push).
+#     Not a required check, so on.<event>.paths filtering is safe here (see
+#     docker-ci.yml header for the required-check deadlock caveat).
+#   - weekly schedule with no-cache so tool binaries and the OS layer pick up
+#     fresh CVE patches instead of stale cached layers.
+#   - workflow_dispatch with force_publish for maintainer-driven publishes
+#     from a branch (e.g. seeding the first image before the FROM flip).
+
+'on':
+  push:
+    branches: [main]
+    paths:
+      - 'docker/tools.Dockerfile'
+      - '.github/workflows/docker-tools-publish.yml'
+      - 'lintro/_tool_versions.py'
+      - 'lintro/tools/manifest.json'
+      - 'scripts/utils/install-tools.sh'
+      - 'scripts/utils/utils.sh'
+      - 'package.json'
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened, ready_for_review]
+    paths:
+      - 'docker/tools.Dockerfile'
+      - '.github/workflows/docker-tools-publish.yml'
+      - 'lintro/_tool_versions.py'
+      - 'lintro/tools/manifest.json'
+      - 'scripts/utils/install-tools.sh'
+      - 'scripts/utils/utils.sh'
+      - 'package.json'
+  schedule:
+    # Weekly rebuild (Monday 03:17 UTC) for CVE freshness in tool binaries.
+    - cron: '17 3 * * 1'
+  workflow_dispatch:
+    inputs:
+      force_publish:
+        description: 'Publish from this branch (maintainer seeding/testing)'
+        required: false
+        default: 'false'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: docker-tools-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+jobs:
+  tools-image:
+    name: 🐳 Lintro Tools Image
+    # yamllint disable-line rule:line-length
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-docker.yml@768a6b72f0a5346b5ecba3f4e13b90040472341c # v0.52.4
+    permissions:
+      contents: read
+      packages: write # push image, cache, and staging tags to GHCR
+      id-token: write # OIDC token for cosign keyless signing
+      attestations: write # publish SBOM + build provenance attestations
+      security-events: write # upload Trivy SARIF to code scanning
+    with:
+      file: docker/tools.Dockerfile
+      image-name: lgtm-hq/lintro-tools
+      # No app version: the image floats on latest/main/sha-* tags and
+      # consumers pin by digest (Renovate-managed FROM in the root
+      # Dockerfile).
+      tags: latest
+      push: >-
+        ${{ github.event_name != 'pull_request'
+        && (github.ref == 'refs/heads/main'
+        || (github.event_name == 'workflow_dispatch'
+        && inputs.force_publish == 'true')) }}
+      platforms: linux/amd64,linux/arm64
+      runner-map: '{"linux/arm64":"ubuntu-24.04-arm"}'
+      # Build-time RUN steps already verify every bundled tool; the smoke
+      # test just proves the published manifest runs on each platform.
+      smoke-test: bun --version
+      validate-on-pr: true
+      cache-registry-ref: ghcr.io/lgtm-hq/lintro-tools:cache
+      # Scheduled rebuilds must not reuse cached layers, otherwise the
+      # weekly CVE-freshness rebuild is a no-op cache hit.
+      no-cache: ${{ github.event_name == 'schedule' }}
+      provenance: true
+      sbom: true
+      cosign-sign: true
+      scan: true
+      scan-exit-code: '0'
+      tooling-ref: '768a6b72f0a5346b5ecba3f4e13b90040472341c' # v0.52.4
+      egress-policy: block
+      egress-preset: docker
+      # Full list (v0.50.0+ replace semantics): the reusable passes
+      # allowed-endpoints verbatim to step-security/harden-runner, so a
+      # non-empty value must include the docker preset baseline. The
+      # sigstore hosts cover cosign keyless signing in the merge job;
+      # get.trivy.dev serves the Trivy binary download and mirror.gcr.io is
+      # the Trivy vulnerability DB fallback.
+      allowed-endpoints-mode: replace
+      allowed-endpoints: >
+        github.com:443
+        api.github.com:443
+        codeload.github.com:443
+        objects.githubusercontent.com:443
+        raw.githubusercontent.com:443
+        release-assets.githubusercontent.com:443
+        github-releases.githubusercontent.com:443
+        pipelines.actions.githubusercontent.com:443
+        ghcr.io:443
+        pkg-containers.githubusercontent.com:443
+        docker.io:443
+        registry-1.docker.io:443
+        auth.docker.io:443
+        production.cloudflare.docker.com:443
+        production.cloudfront.docker.com:443
+        deb.debian.org:80
+        pypi.org:443
+        files.pythonhosted.org:443
+        static.rust-lang.org:443
+        bun.sh:443
+        astral.sh:443
+        releases.astral.sh:443
+        sh.rustup.rs:443
+        registry.npmjs.org:443
+        crates.io:443
+        static.crates.io:443
+        index.crates.io:443
+        semgrep.dev:443
+        metrics.semgrep.dev:443
+        fulcio.sigstore.dev:443
+        rekor.sigstore.dev:443
+        tuf-repo-cdn.sigstore.dev:443
+        oauth2.sigstore.dev:443
+        get.trivy.dev:443
+        mirror.gcr.io:443
