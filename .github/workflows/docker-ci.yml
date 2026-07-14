@@ -122,8 +122,14 @@ jobs:
               - 'renovate.json'
               - 'socket.yml'
               - 'docs/.markdownlint-cli2.jsonc'
-              # Catch-alls: any new root-level config file (dotfile or
-              # tool config) triggers the full pipeline by default.
+              # Catch-alls: ANY new root-level file except pure markdown
+              # triggers the full pipeline by default ('!(*.md)' is a
+              # picomatch extglob matching every root-level filename —
+              # dotfiles included, dorny sets dot:true — that does not end
+              # in .md; it has no slash so it never crosses directories).
+              # The extension globs are defense-in-depth should extglob
+              # handling ever regress upstream.
+              - '!(*.md)'
               - '.*'
               - '*.toml'
               - '*.yaml'
@@ -135,6 +141,10 @@ jobs:
               - '*.cfg'
               - '*.py'
               - '*.sh'
+              - '*.mjs'
+              - '*.cjs'
+              - '*.js'
+              - '*.ts'
       - name: Resolve pipeline relevance
         id: result
         env:

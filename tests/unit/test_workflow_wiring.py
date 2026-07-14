@@ -137,6 +137,16 @@ def _evaluate_github_if(
                     token=f"needs.{job}.outputs.{output_name} != ''",
                     replacement=repr(output_value != ""),
                 )
+                expr = _replace_github_token(
+                    expr,
+                    token=f"needs.{job}.outputs.{output_name} == 'true'",
+                    replacement=repr(output_value == "true"),
+                )
+                expr = _replace_github_token(
+                    expr,
+                    token=f"needs.{job}.outputs.{output_name} != 'true'",
+                    replacement=repr(output_value != "true"),
+                )
     if event_is_pull_request is not None:
         expr = _replace_github_token(
             expr,
@@ -272,9 +282,10 @@ def test_docker_ci_dogfooding_lint_waits_on_manifest_sync() -> None:
     lint_condition = lint_job["if"]
     comment_condition = comment_job["if"]
 
-    assert_that(lint_needs).contains("docker-build", "manifest-sync")
+    assert_that(lint_needs).contains("changes", "docker-build", "manifest-sync")
     assert_that(lint_condition).contains("always()")
     assert_that(lint_condition).contains("!cancelled()")
+    assert_that(lint_condition).contains("needs.changes.outputs.pipeline == 'true'")
     assert_that(lint_condition).contains("needs.docker-build.result == 'success'")
     assert_that(lint_condition).contains("manifest-sync.result == 'skipped'")
     assert_that(lint_condition).contains("manifest-sync.result == 'success'")
@@ -298,17 +309,23 @@ def test_docker_ci_dogfooding_lint_waits_on_manifest_sync() -> None:
 
 
 @pytest.mark.parametrize(
-    ("docker_build", "manifest_sync", "cancelled", "expected"),
+    ("pipeline", "docker_build", "manifest_sync", "cancelled", "expected"),
     [
-        ("success", "success", False, True),
-        ("success", "skipped", False, True),
-        ("success", "failure", False, False),
-        ("failure", "success", False, False),
-        ("success", "success", True, False),
+        ("true", "success", "success", False, True),
+        ("true", "success", "skipped", False, True),
+        ("true", "success", "failure", False, False),
+        ("true", "failure", "success", False, False),
+        ("true", "success", "success", True, False),
+        # Docs-only PR: docker-build early-exits green and manifest-sync is
+        # path-skipped; dogfooding-lint must not run (no CI image pushed).
+        ("false", "success", "skipped", False, False),
+        # Broken changes job: pipeline output is empty; never run the lint.
+        ("", "success", "success", False, False),
     ],
 )
 def test_docker_ci_lint_condition_semantics(
     *,
+    pipeline: str,
     docker_build: str,
     manifest_sync: str,
     cancelled: bool,
@@ -326,6 +343,7 @@ def test_docker_ci_lint_condition_semantics(
                 "docker-build": docker_build,
                 "manifest-sync": manifest_sync,
             },
+            outputs={"changes": {"pipeline": pipeline}},
         ),
     ).is_equal_to(expected)
 
@@ -458,6 +476,7 @@ def test_docker_ci_lintro_code_quality_wires_upstream_jobs() -> None:
     job = docker_ci["jobs"]["lintro-code-quality"]
 
     assert_that(job["needs"]).contains(
+        "changes",
         "docker-build",
         "manifest-sync",
         "dogfooding-lint",
@@ -466,7 +485,9 @@ def test_docker_ci_lintro_code_quality_wires_upstream_jobs() -> None:
     upstream = _normalize_github_expr(job["with"]["upstream-result"])
     assert_that(upstream).is_equal_to(
         _normalize_github_expr(
-            "${{ needs.docker-build.result != 'success' && needs.docker-build.result "
+            "${{ needs.changes.result != 'success' && needs.changes.result "
+            "|| needs.changes.outputs.pipeline != 'true' && 'success' "
+            "|| needs.docker-build.result != 'success' && needs.docker-build.result "
             "|| ( needs.manifest-sync.result != 'success' && "
             "needs.manifest-sync.result != 'skipped' ) && needs.manifest-sync.result "
             "|| needs.dogfooding-lint.result }}",
