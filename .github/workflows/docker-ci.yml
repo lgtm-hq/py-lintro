@@ -160,6 +160,25 @@ jobs:
               - '*.cjs'
               - '*.js'
               - '*.ts'
+              # Nested manifests/lockfiles/tool configs at any depth: keep
+              # in lockstep with the full-lint globs below so a path can
+              # never be full-lint-relevant while pipeline-skipped
+              # (resolve-pipeline-relevance.sh enforces the same invariant
+              # as a runtime fail-safe).
+              - '**/pyproject.toml'
+              - '**/package.json'
+              - '**/tsconfig.json'
+              - '**/tsconfig.*.json'
+              - '**/*.lock'
+              - '**/package-lock.json'
+              - '**/pnpm-lock.yaml'
+              - '**/yarn.lock'
+              - '**/bun.lockb'
+              - '**/ruff.toml'
+              - '**/setup.cfg'
+              - '**/tox.ini'
+              - '**/pytest.ini'
+              - '**/Dockerfile*'
             # Paths with GLOBAL lint impact (#1361): touching any of these
             # forces full-repo dogfooding lint on the PR; PRs that miss this
             # filter lint only their changed files. Err broad — when in
@@ -193,6 +212,13 @@ jobs:
               - '**/pnpm-lock.yaml'
               - '**/yarn.lock'
               - '**/bun.lockb'
+              # Nested non-dot tool configs (dotfile configs at any depth
+              # are covered by '**/.*' below).
+              - '**/ruff.toml'
+              - '**/setup.cfg'
+              - '**/tox.ini'
+              - '**/pytest.ini'
+              - '**/Dockerfile*'
               - 'pytest.ini'
               - 'tox.ini'
               - '.node-version'

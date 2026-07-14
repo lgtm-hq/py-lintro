@@ -112,14 +112,24 @@ else
 	log_info "Diffing ${merge_base}..HEAD (merge-base of ${base_commit})"
 	# ACMR excludes deletions; rename sources never appear. The existence
 	# check below drops anything that vanished since the diff was taken.
-	while IFS= read -r -d '' changed_file; do
-		if [[ -e "$changed_file" ]]; then
-			lint_paths+=("$changed_file")
-		fi
-	done < <(
-		git diff --name-only -z --diff-filter=ACMR "$merge_base" HEAD
-	)
-	if [[ "${#lint_paths[@]}" -gt "$MAX_CHANGED_FILES" ]]; then
+	# The diff is materialized to a temp file with an explicit exit-code
+	# check: a git failure inside a process substitution would silently
+	# yield an empty list (and a bogus green "nothing to lint" pass).
+	diff_file="$(mktemp)"
+	trap 'rm -f "$diff_file"' EXIT
+	if ! git diff --name-only -z --diff-filter=ACMR "$merge_base" HEAD \
+		>"$diff_file"; then
+		log_error "git diff failed; falling back to full-repo lint"
+		lint_mode="full-fallback"
+	else
+		while IFS= read -r -d '' changed_file; do
+			if [[ -e "$changed_file" ]]; then
+				lint_paths+=("$changed_file")
+			fi
+		done <"$diff_file"
+	fi
+	if [[ "$lint_mode" != "full-fallback" ]] &&
+		[[ "${#lint_paths[@]}" -gt "$MAX_CHANGED_FILES" ]]; then
 		log_info "${#lint_paths[@]} changed files exceed the" \
 			"MAX_CHANGED_FILES=${MAX_CHANGED_FILES} cap; falling back to" \
 			"full-repo lint"

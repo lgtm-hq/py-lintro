@@ -86,6 +86,14 @@ if [[ "$event_name" == "pull_request" ]]; then
 	)"; then
 		if [[ "$resolved_full_lint" == "false" ]]; then
 			lint_scope="changed"
+		elif [[ "$resolved_full_lint" == "true" && "$pipeline" == "false" ]]; then
+			# Invariant guard: a path with global lint impact must never be
+			# pipeline-skipped. The filter lists are kept in lockstep, but if
+			# they ever drift, run the full pipeline rather than skipping the
+			# dogfooding lint of a full-lint-relevant change.
+			echo "::warning::full-lint filter matched while pipeline did" \
+				"not; forcing pipeline=true (filter lists drifted)"
+			pipeline="true"
 		fi
 	fi
 fi

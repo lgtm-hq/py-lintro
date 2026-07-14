@@ -47,7 +47,9 @@ jobs:
 
   notify-failure:
     needs: [dogfood-full]
-    if: failure()
+    # Main-only: a manual dispatch from a feature branch must not open or
+    # ping the main-failure issue for the dogfood-nightly key.
+    if: failure() && github.ref == 'refs/heads/main'
     # Deduplicated failure issue (same mechanism as the release workflows):
     # first failure opens `fix(ci): main workflow failed: dogfood-nightly`,
     # repeat failures comment on the open issue instead of piling up.
