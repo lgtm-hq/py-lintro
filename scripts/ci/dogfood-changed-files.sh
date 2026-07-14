@@ -139,8 +139,20 @@ else
 	printf '  %s\n' "${lint_paths[@]}"
 fi
 
+# Pull explicitly so a registry failure still honors the output contract:
+# downstream jobs (PR comment, required-check gate) key off exit-code/status
+# and must see an explicit failure, not empty outputs.
 log_info "Pulling Lintro image: ${LINTRO_IMAGE}"
+set +e
 docker pull "$LINTRO_IMAGE"
+pull_exit_code=$?
+set -e
+if [[ "$pull_exit_code" -ne 0 ]]; then
+	log_error "Failed to pull Lintro image ${LINTRO_IMAGE}" \
+		"(exit ${pull_exit_code})"
+	write_outputs "$pull_exit_code" "$lint_mode"
+	exit "$pull_exit_code"
+fi
 
 # Same container invocation as lgtm-ci run-lintro-docker.sh (quality lint):
 # host-UID mapping keeps the workspace mount writable on GitHub Actions.

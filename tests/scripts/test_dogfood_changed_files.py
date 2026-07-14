@@ -22,6 +22,9 @@ printf '%s\\n' "$*" >>"${DOCKER_ARGS_LOG}"
 if [[ "$1" == "run" ]]; then
     exit "${DOCKER_RUN_EXIT_CODE:-0}"
 fi
+if [[ "$1" == "pull" ]]; then
+    exit "${DOCKER_PULL_EXIT_CODE:-0}"
+fi
 exit 0
 """
 
@@ -258,6 +261,32 @@ def test_oversized_change_set_falls_back_to_full_repo(
     assert_that(run_lines[0]).does_not_contain("changed.py")
     outputs = output_file.read_text()
     assert_that(outputs).contains("lint-mode=full-fallback")
+
+
+def test_pull_failure_still_writes_outputs(
+    pr_repo: Path,
+    docker_stub: tuple[Path, Path],
+    tmp_path: Path,
+) -> None:
+    """A failed image pull fails the script but keeps the output contract."""
+    bin_dir, args_log = docker_stub
+    output_file = tmp_path / "github-output"
+    result = _run_script(
+        pr_repo,
+        bin_dir,
+        args_log,
+        output_file,
+        extra_env={"DOCKER_PULL_EXIT_CODE": "3"},
+    )
+
+    assert_that(result.returncode).is_equal_to(3)
+    run_lines = [
+        line for line in args_log.read_text().splitlines() if line.startswith("run ")
+    ]
+    assert_that(run_lines).is_empty()
+    outputs = output_file.read_text()
+    assert_that(outputs).contains("exit-code=3")
+    assert_that(outputs).contains("status=failed")
 
 
 def test_lint_failure_propagates_exit_code(

@@ -51,6 +51,41 @@ def _replace_github_token(expr: str, *, token: str, replacement: str) -> str:
     return re.sub(pattern, replacement, expr)
 
 
+def _replace_output_comparison_tokens(
+    expr: str,
+    *,
+    job: str,
+    output_name: str,
+    output_value: str,
+) -> str:
+    """Substitute every equality comparison of a job output with its truth value.
+
+    Handles any ``needs.<job>.outputs.<name> ==/!= '<literal>'`` comparison
+    (including hyphenated output names such as ``lint-scope``, which cannot
+    survive AST parsing as bare identifiers).
+
+    Args:
+        expr: The workflow ``if:`` expression being reduced.
+        job: The producing job id.
+        output_name: The output name on that job.
+        output_value: The simulated output value.
+
+    Returns:
+        str: The expression with all comparisons of this output replaced by
+        boolean literals.
+    """
+    token = re.escape(f"needs.{job}.outputs.{output_name}")
+    pattern = rf"{token}\s*([!=]=)\s*'([^']*)'"
+
+    def _sub(match: re.Match[str]) -> str:
+        op, literal = match.group(1), match.group(2)
+        if op == "==":
+            return repr(output_value == literal)
+        return repr(output_value != literal)
+
+    return re.sub(pattern, _sub, expr)
+
+
 def _bool_from_ast(node: ast.AST) -> bool:
     """Evaluate a restricted AST containing only boolean literals and operators."""
     if isinstance(node, ast.Constant):
@@ -132,30 +167,11 @@ def _evaluate_github_if(
     if outputs:
         for job, job_outputs in outputs.items():
             for output_name, output_value in job_outputs.items():
-                expr = _replace_github_token(
+                expr = _replace_output_comparison_tokens(
                     expr,
-                    token=f"needs.{job}.outputs.{output_name} != ''",
-                    replacement=repr(output_value != ""),
-                )
-                expr = _replace_github_token(
-                    expr,
-                    token=f"needs.{job}.outputs.{output_name} == 'true'",
-                    replacement=repr(output_value == "true"),
-                )
-                expr = _replace_github_token(
-                    expr,
-                    token=f"needs.{job}.outputs.{output_name} != 'true'",
-                    replacement=repr(output_value != "true"),
-                )
-                expr = _replace_github_token(
-                    expr,
-                    token=f"needs.{job}.outputs.{output_name} == 'false'",
-                    replacement=repr(output_value == "false"),
-                )
-                expr = _replace_github_token(
-                    expr,
-                    token=f"needs.{job}.outputs.{output_name} != 'false'",
-                    replacement=repr(output_value != "false"),
+                    job=job,
+                    output_name=output_name,
+                    output_value=output_value,
                 )
     if event_is_pull_request is not None:
         expr = _replace_github_token(
@@ -319,24 +335,36 @@ def test_docker_ci_dogfooding_lint_waits_on_manifest_sync() -> None:
 
 
 @pytest.mark.parametrize(
-    ("pipeline", "docker_build", "manifest_sync", "cancelled", "expected"),
+    (
+        "pipeline",
+        "lint_scope",
+        "docker_build",
+        "manifest_sync",
+        "cancelled",
+        "expected",
+    ),
     [
-        ("true", "success", "success", False, True),
-        ("true", "success", "skipped", False, True),
-        ("true", "success", "failure", False, False),
-        ("true", "failure", "success", False, False),
-        ("true", "success", "success", True, False),
+        ("true", "full", "success", "success", False, True),
+        ("true", "full", "success", "skipped", False, True),
+        ("true", "full", "success", "failure", False, False),
+        ("true", "full", "failure", "success", False, False),
+        ("true", "full", "success", "success", True, False),
+        # Changed-files PR (#1361): the full-repo lint hands off to
+        # dogfooding-lint-changed.
+        ("true", "changed", "success", "success", False, False),
         # Docs-only PR: docker-build early-exits green and manifest-sync is
         # path-skipped; dogfooding-lint must not run (no CI image pushed).
-        ("false", "success", "skipped", False, False),
-        # Broken changes job fails open: pipeline output is empty (not
-        # 'false'), the full build ran, so the lint runs too.
-        ("", "success", "success", False, True),
+        ("false", "changed", "success", "skipped", False, False),
+        # Broken changes job fails open: pipeline and lint-scope outputs are
+        # empty (not 'false'/'changed'), the full build ran, so the full
+        # lint runs too.
+        ("", "", "success", "success", False, True),
     ],
 )
 def test_docker_ci_lint_condition_semantics(
     *,
     pipeline: str,
+    lint_scope: str,
     docker_build: str,
     manifest_sync: str,
     cancelled: bool,
@@ -354,7 +382,59 @@ def test_docker_ci_lint_condition_semantics(
                 "docker-build": docker_build,
                 "manifest-sync": manifest_sync,
             },
-            outputs={"changes": {"pipeline": pipeline}},
+            outputs={"changes": {"pipeline": pipeline, "lint-scope": lint_scope}},
+        ),
+    ).is_equal_to(expected)
+
+
+@pytest.mark.parametrize(
+    (
+        "pipeline",
+        "lint_scope",
+        "docker_build",
+        "manifest_sync",
+        "cancelled",
+        "expected",
+    ),
+    [
+        # Changed-scope PR with a green build runs the changed-files lint.
+        ("true", "changed", "success", "success", False, True),
+        ("true", "changed", "success", "skipped", False, True),
+        ("true", "changed", "success", "failure", False, False),
+        ("true", "changed", "failure", "success", False, False),
+        ("true", "changed", "success", "success", True, False),
+        # Full-scope runs (global-impact PRs, merge_group, pushes) belong to
+        # dogfooding-lint, not this job.
+        ("true", "full", "success", "success", False, False),
+        # Docs-only PR: nothing was built, nothing to lint.
+        ("false", "changed", "success", "skipped", False, False),
+        # Broken changes job fails open to the FULL lint job: empty
+        # lint-scope is != 'changed', so this job stays skipped.
+        ("", "", "success", "success", False, False),
+    ],
+)
+def test_docker_ci_lint_changed_condition_semantics(
+    *,
+    pipeline: str,
+    lint_scope: str,
+    docker_build: str,
+    manifest_sync: str,
+    cancelled: bool,
+    expected: bool,
+) -> None:
+    """Changed-files lint runs exactly when scope is 'changed' and build is green."""
+    docker_ci = _load_workflow(name="docker-ci.yml")
+    lint_condition = docker_ci["jobs"]["dogfooding-lint-changed"]["if"]
+
+    assert_that(
+        _evaluate_github_if(
+            lint_condition,
+            cancelled=cancelled,
+            results={
+                "docker-build": docker_build,
+                "manifest-sync": manifest_sync,
+            },
+            outputs={"changes": {"pipeline": pipeline, "lint-scope": lint_scope}},
         ),
     ).is_equal_to(expected)
 
@@ -472,11 +552,58 @@ def test_docker_ci_comment_condition_semantics(
         _evaluate_github_if(
             comment_condition,
             cancelled=cancelled,
-            results={"dogfooding-lint": dogfooding_lint},
-            outputs={"dogfooding-lint": lint_outputs},
+            results={
+                "dogfooding-lint": dogfooding_lint,
+                # Full-scope scenarios: the changed-files job did not run.
+                "dogfooding-lint-changed": "skipped",
+            },
+            outputs={
+                "dogfooding-lint": lint_outputs,
+                "dogfooding-lint-changed": {"exit-code": "", "status": ""},
+            },
             event_is_pull_request=event_is_pull_request,
             head_repo_not_fork=head_repo_not_fork,
             pull_request_not_draft=pull_request_not_draft,
+        ),
+    ).is_equal_to(expected)
+
+
+@pytest.mark.parametrize(
+    ("lint_changed", "changed_outputs", "expected"),
+    [
+        # Changed-files lint ran: the comment posts with its outputs even
+        # though the full lint job was scope-skipped.
+        ("success", {"exit-code": "0", "status": "passed"}, True),
+        ("failure", {"exit-code": "1", "status": "failed"}, True),
+        ("skipped", {"exit-code": "", "status": ""}, False),
+        ("failure", {"exit-code": "", "status": ""}, False),
+    ],
+)
+def test_docker_ci_comment_condition_changed_scope_semantics(
+    *,
+    lint_changed: str,
+    changed_outputs: dict[str, str],
+    expected: bool,
+) -> None:
+    """PR comment fires on changed-files lint results when full lint skipped."""
+    docker_ci = _load_workflow(name="docker-ci.yml")
+    comment_condition = docker_ci["jobs"]["dogfooding-pr-comment"]["if"]
+
+    assert_that(
+        _evaluate_github_if(
+            comment_condition,
+            cancelled=False,
+            results={
+                "dogfooding-lint": "skipped",
+                "dogfooding-lint-changed": lint_changed,
+            },
+            outputs={
+                "dogfooding-lint": {"exit-code": "", "status": ""},
+                "dogfooding-lint-changed": changed_outputs,
+            },
+            event_is_pull_request=True,
+            head_repo_not_fork=True,
+            pull_request_not_draft=True,
         ),
     ).is_equal_to(expected)
 
@@ -491,6 +618,7 @@ def test_docker_ci_lintro_code_quality_wires_upstream_jobs() -> None:
         "docker-build",
         "manifest-sync",
         "dogfooding-lint",
+        "dogfooding-lint-changed",
     )
     assert_that(job["if"]).contains("!cancelled()")
     upstream = _normalize_github_expr(job["with"]["upstream-result"])
@@ -500,7 +628,17 @@ def test_docker_ci_lintro_code_quality_wires_upstream_jobs() -> None:
             "|| needs.docker-build.result != 'success' && needs.docker-build.result "
             "|| ( needs.manifest-sync.result != 'success' && "
             "needs.manifest-sync.result != 'skipped' ) && needs.manifest-sync.result "
+            "|| needs.changes.outputs.lint-scope == 'changed' && "
+            "needs.dogfooding-lint-changed.result "
             "|| needs.dogfooding-lint.result }}",
+        ),
+    )
+    status_output = _normalize_github_expr(job["with"]["status-output"])
+    assert_that(status_output).is_equal_to(
+        _normalize_github_expr(
+            "${{ needs.changes.outputs.lint-scope == 'changed' && "
+            "needs.dogfooding-lint-changed.outputs.status "
+            "|| needs.dogfooding-lint.outputs.status }}",
         ),
     )
 
