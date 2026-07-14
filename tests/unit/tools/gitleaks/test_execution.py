@@ -6,8 +6,10 @@ from pathlib import Path
 from typing import Any
 from unittest.mock import patch
 
+import pytest
 from assertpy import assert_that
 
+from lintro.plugins.subprocess_executor import SubprocessResult
 from lintro.tools.definitions.gitleaks import GitleaksPlugin
 
 
@@ -27,21 +29,31 @@ def _get_report_path(cmd: list[str]) -> str | None:
         return None
 
 
-def _mock_subprocess_factory(output: str) -> Any:
-    """Create a mock subprocess function that writes output to the report file.
+def _mock_subprocess_result_factory(
+    output: str,
+    *,
+    returncode: int = 0,
+) -> Any:
+    """Create a mock that writes ``output`` to the report file.
 
     Args:
         output: The JSON output to write to the report file.
+        returncode: Subprocess return code to report.
 
     Returns:
-        A callable that can be used as a side_effect for _run_subprocess.
+        A callable usable as ``_run_subprocess_result`` side_effect.
     """
 
-    def mock_run(cmd: list[str], **kwargs: Any) -> tuple[bool, str]:
+    def mock_run(cmd: list[str], **kwargs: Any) -> SubprocessResult:
         report_path = _get_report_path(cmd)
         if report_path:
             Path(report_path).write_text(output)
-        return (True, "")
+        return SubprocessResult(
+            returncode=returncode,
+            stdout="",
+            stderr="",
+            output="",
+        )
 
     return mock_run
 
@@ -61,8 +73,8 @@ def test_check_with_mocked_subprocess_success(
 
     with patch.object(
         gitleaks_plugin,
-        "_run_subprocess",
-        side_effect=_mock_subprocess_factory("[]"),
+        "_run_subprocess_result",
+        side_effect=_mock_subprocess_result_factory("[]"),
     ):
         result = gitleaks_plugin.check([str(test_file)], {})
 
@@ -101,8 +113,8 @@ def test_check_with_mocked_subprocess_secrets_found(
 
     with patch.object(
         gitleaks_plugin,
-        "_run_subprocess",
-        side_effect=_mock_subprocess_factory(gitleaks_output),
+        "_run_subprocess_result",
+        side_effect=_mock_subprocess_result_factory(gitleaks_output),
     ):
         result = gitleaks_plugin.check([str(test_file)], {})
 
@@ -127,8 +139,8 @@ def test_check_empty_report_with_zero_exit_is_not_clean(
 
     with patch.object(
         gitleaks_plugin,
-        "_run_subprocess",
-        side_effect=_mock_subprocess_factory(""),
+        "_run_subprocess_result",
+        side_effect=_mock_subprocess_result_factory(""),
     ):
         result = gitleaks_plugin.check([str(test_file)], {})
 
@@ -154,8 +166,8 @@ def test_check_garbage_report_with_zero_exit_is_not_clean(
 
     with patch.object(
         gitleaks_plugin,
-        "_run_subprocess",
-        side_effect=_mock_subprocess_factory(garbage),
+        "_run_subprocess_result",
+        side_effect=_mock_subprocess_result_factory(garbage),
     ):
         result = gitleaks_plugin.check([str(test_file)], {})
 
@@ -179,11 +191,98 @@ def test_check_non_array_report_with_zero_exit_is_not_clean(
 
     with patch.object(
         gitleaks_plugin,
-        "_run_subprocess",
-        side_effect=_mock_subprocess_factory('{"unexpected": "object"}'),
+        "_run_subprocess_result",
+        side_effect=_mock_subprocess_result_factory('{"unexpected": "object"}'),
     ):
         result = gitleaks_plugin.check([str(test_file)], {})
 
     assert_that(result.success).is_false()
     assert_that(result.issues_count).is_equal_to(0)
     assert_that(result.parse_failures_count).is_equal_to(1)
+
+
+def test_check_passes_source_relative_to_prepared_cwd(
+    gitleaks_plugin: GitleaksPlugin,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """``--source`` must be relative to ctx.cwd for nested single-file scans.
+
+    Changed-files dogfood passes a repo-relative path; preparation sets cwd to
+    the file's parent. Using the raw input path made gitleaks look for a
+    double-prefixed path, leave an empty report, and fail closed (#1344 CI).
+
+    Args:
+        gitleaks_plugin: The GitleaksPlugin instance to test.
+        tmp_path: Temporary directory path for test files.
+        monkeypatch: Pytest monkeypatch fixture.
+    """
+    nested = tmp_path / "tests" / "scripts"
+    nested.mkdir(parents=True)
+    target = nested / "sample.py"
+    target.write_text('"""Clean module."""\n')
+    monkeypatch.chdir(tmp_path)
+
+    captured: dict[str, Any] = {}
+
+    def mock_run(cmd: list[str], **kwargs: Any) -> SubprocessResult:
+        captured["cmd"] = cmd
+        captured["cwd"] = kwargs.get("cwd")
+        report_path = _get_report_path(cmd)
+        if report_path:
+            Path(report_path).write_text("[]")
+        return SubprocessResult(
+            returncode=0,
+            stdout="",
+            stderr="",
+            output="",
+        )
+
+    with patch.object(
+        gitleaks_plugin,
+        "_run_subprocess_result",
+        side_effect=mock_run,
+    ):
+        result = gitleaks_plugin.check(["tests/scripts/sample.py"], {})
+
+    assert_that(result.success).is_true()
+    source = captured["cmd"][captured["cmd"].index("--source") + 1]
+    assert_that(source).is_equal_to("sample.py")
+    assert_that(captured["cwd"]).is_equal_to(str(nested))
+    assert_that((Path(captured["cwd"]) / source).is_file()).is_true()
+
+
+def test_check_non_zero_exit_surfaces_stderr(
+    gitleaks_plugin: GitleaksPlugin,
+    tmp_path: Path,
+) -> None:
+    """A non-zero gitleaks exit (missing source, etc.) fails with stderr.
+
+    Args:
+        gitleaks_plugin: The GitleaksPlugin instance to test.
+        tmp_path: Temporary directory path for test files.
+    """
+    test_file = tmp_path / "test_module.py"
+    test_file.write_text('"""Module."""\n')
+
+    def mock_run(cmd: list[str], **kwargs: Any) -> SubprocessResult:
+        report_path = _get_report_path(cmd)
+        if report_path:
+            Path(report_path).write_text("")
+        return SubprocessResult(
+            returncode=1,
+            stdout="",
+            stderr="stat sample.py: no such file or directory",
+            output="stat sample.py: no such file or directory",
+        )
+
+    with patch.object(
+        gitleaks_plugin,
+        "_run_subprocess_result",
+        side_effect=mock_run,
+    ):
+        result = gitleaks_plugin.check([str(test_file)], {})
+
+    assert_that(result.success).is_false()
+    assert_that(result.output).contains("no such file")
+    assert_that(result.parse_failures_count).is_none()

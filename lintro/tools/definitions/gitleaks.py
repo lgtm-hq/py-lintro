@@ -22,7 +22,7 @@ from lintro.enums.tool_name import ToolName
 from lintro.enums.tool_type import ToolType
 from lintro.models.core.tool_result import ToolResult
 from lintro.parsers.gitleaks.gitleaks_parser import parse_gitleaks_output
-from lintro.plugins.base import BaseToolPlugin
+from lintro.plugins.base import BaseToolPlugin, ExecutionContext
 from lintro.plugins.protocol import ToolDefinition
 from lintro.plugins.registry import register_tool
 from lintro.tools.core.option_validators import (
@@ -114,6 +114,42 @@ class GitleaksPlugin(BaseToolPlugin):
         )
         super().set_options(**options, **kwargs)
 
+    def _resolve_source_path(self, ctx: ExecutionContext) -> str:
+        """Resolve the gitleaks ``--source`` path from prepared execution context.
+
+        Uses paths relative to ``ctx.cwd`` (or absolute ``ctx.files``) so the
+        source exists under the subprocess working directory. Passing the raw
+        caller paths double-prefixes when cwd is already the file's parent.
+
+        Args:
+            ctx: Prepared :class:`~lintro.plugins.base.ExecutionContext`.
+
+        Returns:
+            Path string suitable for ``gitleaks detect --source``.
+        """
+        if ctx.rel_files:
+            if len(ctx.rel_files) == 1:
+                return ctx.rel_files[0]
+            # Multiple files: scan their common parent relative to cwd.
+            abs_files = ctx.files or [
+                str(Path(ctx.cwd) / rel) if ctx.cwd else rel for rel in ctx.rel_files
+            ]
+            try:
+                common = Path(os.path.commonpath(abs_files))
+            except ValueError:
+                logger.warning(
+                    "Cannot determine common path for prepared files; "
+                    "falling back to working directory.",
+                )
+                return "."
+            if ctx.cwd:
+                return str(common.relative_to(Path(ctx.cwd)))
+            return str(common)
+
+        if ctx.cwd:
+            return "."
+        return str(Path.cwd())
+
     def _build_check_command(self, source_path: str, report_path: str) -> list[str]:
         """Build the gitleaks check command.
 
@@ -177,29 +213,12 @@ class GitleaksPlugin(BaseToolPlugin):
         if ctx.should_skip:
             return ctx.early_result  # type: ignore[return-value]
 
-        # Determine source path based on provided paths
-        # Gitleaks can scan both directories and individual files
-        cwd_path = Path(ctx.cwd) if ctx.cwd else Path.cwd()
-        if paths and len(paths) == 1:
-            # Single path provided - use it directly
-            source_path = paths[0]
-        elif paths and len(paths) > 1:
-            # Multiple paths - resolve relative to ctx.cwd and find common parent
-            resolved_paths = [
-                str(Path(p) if Path(p).is_absolute() else cwd_path / p) for p in paths
-            ]
-            try:
-                source_path = str(Path(os.path.commonpath(resolved_paths)))
-            except ValueError:
-                # Paths on different drives or no common path - fall back to cwd
-                logger.warning(
-                    "Cannot determine common path for provided paths; "
-                    "falling back to working directory.",
-                )
-                source_path = str(cwd_path)
-        else:
-            # No paths provided - fall back to cwd
-            source_path = str(cwd_path)
+        # Resolve --source from prepared paths. ``_prepare_execution`` sets
+        # ``ctx.cwd`` to the common parent and ``ctx.rel_files`` relative to it;
+        # using the raw input ``paths`` here double-prefixes the directory when
+        # a single nested file is scanned (changed-files dogfood), so gitleaks
+        # cannot find the file and leaves an empty report.
+        source_path = self._resolve_source_path(ctx=ctx)
 
         # Use a temporary file for the report (gitleaks can't write to /dev/stdout
         # in subprocess environments due to permission issues)
@@ -222,15 +241,32 @@ class GitleaksPlugin(BaseToolPlugin):
             output: str
             execution_failure: bool = False
             try:
-                # Note: gitleaks with --exit-code 0 always returns success,
-                # we parse the JSON output to determine findings
-                self._run_subprocess(
+                # --exit-code 0 means leaks still exit 0; non-zero is a real
+                # tool failure (missing source, bad config, etc.).
+                proc = self._run_subprocess_result(
                     cmd=cmd,
                     timeout=ctx.timeout,
                     cwd=ctx.cwd,
                 )
                 # Read the report from the temp file
                 output = Path(report_path).read_text(encoding="utf-8").strip()
+                if proc.returncode != 0:
+                    stderr = (proc.stderr or proc.output or "").strip()
+                    logger.error(
+                        "Gitleaks exited with code %s: %s",
+                        proc.returncode,
+                        stderr[:500] if stderr else "(no stderr)",
+                    )
+                    return ToolResult(
+                        name=self.definition.name,
+                        success=False,
+                        output=(
+                            stderr
+                            if stderr
+                            else (f"Gitleaks exited with code {proc.returncode}")
+                        ),
+                        issues_count=0,
+                    )
             except subprocess.TimeoutExpired:
                 timeout_msg = (
                     f"Gitleaks execution timed out ({ctx.timeout}s limit exceeded)."
@@ -244,7 +280,7 @@ class GitleaksPlugin(BaseToolPlugin):
                     output=timeout_msg,
                     issues_count=0,
                 )
-            except (OSError, ValueError, RuntimeError) as e:
+            except (OSError, ValueError, RuntimeError, FileNotFoundError) as e:
                 logger.error(f"Failed to run Gitleaks: {e}")
                 output = f"Gitleaks failed: {e}"
                 execution_failure = True

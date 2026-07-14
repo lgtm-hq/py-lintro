@@ -27,7 +27,7 @@ def test_check_with_timeout(
 
     with patch.object(
         gitleaks_plugin,
-        "_run_subprocess",
+        "_run_subprocess_result",
         side_effect=subprocess.TimeoutExpired(cmd=["gitleaks"], timeout=60),
     ):
         result = gitleaks_plugin.check([str(test_file)], {})
@@ -51,7 +51,7 @@ def test_check_with_execution_failure(
 
     with patch.object(
         gitleaks_plugin,
-        "_run_subprocess",
+        "_run_subprocess_result",
         side_effect=OSError("Failed to execute gitleaks"),
     ):
         result = gitleaks_plugin.check([str(test_file)], {})
