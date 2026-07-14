@@ -17,7 +17,13 @@ trailing `# vX.Y.Z` comments so Renovate can track digest updates. Policy is enf
 - **docker-ci.yml** — Manifest sync, multi-stage Docker build, dogfooding quality
   (`reusable-quality-lint.yml` + PR-only `reusable-publish-quality-summary.yml`,
   CI-built image), integration tests, security audit, GHCR publish (main), CI tag
-  cleanup
+  cleanup. PRs without global-lint-impact changes lint only their changed files
+  (`dogfooding-lint-changed`, same image/tool set); merge queue, pushes, and
+  global-impact PRs keep the full-repo run (#1361)
+- **dogfood-nightly.yml** — Nightly full-repo dogfooding lint on `main`
+  (`reusable-quality-lint.yml`, pinned release image) backstopping changed-files PR
+  linting; failures open/ping a deduplicated issue via
+  `reusable-main-failure-notifier.yml`
 
 ## Release
 

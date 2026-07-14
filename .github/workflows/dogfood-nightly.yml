@@ -1,0 +1,62 @@
+# SPDX-License-Identifier: MIT
+# For license details, see the repository root LICENSE file.
+---
+name: Nightly - Dogfooding Lint
+
+# Full-repo dogfooding backstop for changed-files PR linting (#1361): PRs
+# whose diff has no global lint impact lint only their changed files in
+# docker-ci.yml, so cross-file drift (tool updates inside the pinned image,
+# environment skew, files nobody touched in a while) could go unnoticed
+# between main pushes. This nightly run lints the whole repo on main with
+# the pinned release image and, on failure, opens or pings a deduplicated
+# issue via the lgtm-ci main-failure notifier (one open issue per workflow
+# key; repeat failures comment on it).
+
+'on':
+  schedule:
+    # Nightly at 02:30 UTC — after the daily merge window, before EU morning.
+    - cron: '30 2 * * *'
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: dogfood-nightly-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  dogfood-full:
+    # Same reusable workflow and tool options as the docker-ci.yml full run
+    # (dogfooding-lint) so nightly coverage matches the pre-merge gate.
+    # yamllint disable-line rule:line-length
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-quality-lint.yml@768a6b72f0a5346b5ecba3f4e13b90040472341c # v0.52.4
+    permissions:
+      contents: read
+      packages: read # pull lintro-image from GHCR in reusable-quality-lint
+    with:
+      tooling-ref: '768a6b72f0a5346b5ecba3f4e13b90040472341c' # v0.52.4
+      job-name: '🌙 Nightly Dogfooding Lint'
+      lintro-tool-options: >-
+        pydoclint:timeout=120,bandit:timeout=120,prettier:timeout=120,osv_scanner:check_suppressions=false
+      egress-policy: block
+      # No CI build in this workflow: lint main with the pinned release
+      # image (same digest the fork-PR fallback in docker-ci.yml uses).
+      # Pinned digest — keep in sync with pyproject.toml lintro pin
+      lintro-image: >-
+        ghcr.io/lgtm-hq/py-lintro@sha256:1ff3db35939283734b859c7c5d95be87fd8fd62734b3434e0437769d50d53578
+
+  notify-failure:
+    needs: [dogfood-full]
+    if: failure()
+    # Deduplicated failure issue (same mechanism as the release workflows):
+    # first failure opens `fix(ci): main workflow failed: dogfood-nightly`,
+    # repeat failures comment on the open issue instead of piling up.
+    # yamllint disable-line rule:line-length
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-main-failure-notifier.yml@768a6b72f0a5346b5ecba3f4e13b90040472341c # v0.52.4
+    permissions:
+      actions: read # read workflow/job metadata for the failure context
+      contents: read # repository context for the issue body
+      issues: write # open or ping the deduplicated failure issue
+    with:
+      workflow-key: dogfood-nightly
+      tooling-ref: '768a6b72f0a5346b5ecba3f4e13b90040472341c' # v0.52.4

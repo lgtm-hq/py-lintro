@@ -68,6 +68,58 @@ def test_resolve_pipeline_relevance_outputs() -> None:
         assert_that(result.stdout).contains(expected)
 
 
+def test_resolve_pipeline_relevance_lint_scope() -> None:
+    """resolve-pipeline-relevance.sh should resolve lint-scope per event/JSON.
+
+    lint-scope narrows to `changed` only when a pull_request diff explicitly
+    missed the `full-lint` filter; every other case (non-PR events, filter
+    hit, missing filter, unparsable JSON) stays full-repo.
+    """
+    script_path = Path("scripts/ci/resolve-pipeline-relevance.sh").resolve()
+    cases: list[tuple[dict[str, str], str]] = [
+        # Non-PR events always lint the full repo.
+        ({"EVENT_NAME": "merge_group"}, "lint-scope=full"),
+        ({"EVENT_NAME": "push"}, "lint-scope=full"),
+        ({"EVENT_NAME": "workflow_dispatch"}, "lint-scope=full"),
+        # PRs narrow to changed files only on an explicit full-lint=false.
+        (
+            {
+                "EVENT_NAME": "pull_request",
+                "CHANGES_JSON": '{"pipeline":true,"full-lint":false}',
+            },
+            "lint-scope=changed",
+        ),
+        (
+            {
+                "EVENT_NAME": "pull_request",
+                "CHANGES_JSON": '{"pipeline":true,"full-lint":true}',
+            },
+            "lint-scope=full",
+        ),
+        # Missing filter, empty, or unparsable JSON fail safe to full.
+        (
+            {"EVENT_NAME": "pull_request", "CHANGES_JSON": '{"pipeline":true}'},
+            "lint-scope=full",
+        ),
+        ({"EVENT_NAME": "pull_request", "CHANGES_JSON": ""}, "lint-scope=full"),
+        (
+            {"EVENT_NAME": "pull_request", "CHANGES_JSON": "not json"},
+            "lint-scope=full",
+        ),
+        ({"EVENT_NAME": "pull_request", "CHANGES_JSON": "{}"}, "lint-scope=full"),
+    ]
+    for env, expected in cases:
+        result = subprocess.run(  # nosec B603 - fixed argv run against a real binary in a controlled test; shell=False, no user shell input
+            [str(script_path)],
+            capture_output=True,
+            text=True,
+            check=False,
+            env={"PATH": "/usr/bin:/bin:/usr/local/bin", **env},
+        )
+        assert_that(result.returncode).is_equal_to(0)
+        assert_that(result.stdout).contains(expected)
+
+
 def test_renovate_regex_manager_current_value() -> None:
     """Ensure Renovate custom managers use currentValue to satisfy schema."""
     config_path = Path("renovate.json")
