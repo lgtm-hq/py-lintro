@@ -11,6 +11,11 @@
 # -----------------------------------------------------------------------------
 # Stage: tools — pre-built linting toolchains
 # -----------------------------------------------------------------------------
+# NOTE: this stage is mirrored at docker/tools.Dockerfile, which publishes
+# ghcr.io/lgtm-hq/lintro-tools (see docker-tools-publish.yml). Once the first
+# lintro-tools image is on GHCR, this inline stage will be replaced by a
+# digest-pinned `FROM ghcr.io/lgtm-hq/lintro-tools@sha256:…` (issue #1360).
+# Until then, keep the two definitions in sync.
 FROM python:3.14-slim@sha256:b877e50bd90de10af8d82c57a022fc2e0dc731c5320d762a27986facfc3355c1 AS tools
 
 ARG BUN_VERSION=1.3.14
