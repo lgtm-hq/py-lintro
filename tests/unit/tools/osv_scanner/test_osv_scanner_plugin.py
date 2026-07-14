@@ -134,7 +134,7 @@ def test_check_no_vulnerabilities(
         "tools",
         "security",
         "osv_scanner",
-        "requirements_requests_2_32_3.txt",
+        "osv_scanner_fixture_requests_2_32_3.txt",
         dest_name=lockfile.name,
     )
 
@@ -160,7 +160,7 @@ def test_check_clean_scan_with_log_prefix_and_nonzero_exit(
         "tools",
         "security",
         "osv_scanner",
-        "requirements_setuptools_80_9_0.txt",
+        "osv_scanner_fixture_setuptools_80_9_0.txt",
         dest_name=lockfile.name,
     )
 
@@ -191,7 +191,7 @@ def test_check_no_package_sources_sets_parse_failures_count(
         "tools",
         "security",
         "osv_scanner",
-        "requirements_requests_2_32_3.txt",
+        "osv_scanner_fixture_requests_2_32_3.txt",
         dest_name=lockfile.name,
     )
 
@@ -222,7 +222,7 @@ def test_check_zero_packages_without_no_sources_is_not_success(
         "tools",
         "security",
         "osv_scanner",
-        "requirements_requests_2_32_3.txt",
+        "osv_scanner_fixture_requests_2_32_3.txt",
         dest_name=lockfile.name,
     )
 
@@ -250,7 +250,7 @@ def test_check_garbage_stdout_with_zero_exit_is_not_clean(
         "tools",
         "security",
         "osv_scanner",
-        "requirements_requests_2_32_3.txt",
+        "osv_scanner_fixture_requests_2_32_3.txt",
         dest_name=lockfile.name,
     )
 
@@ -279,7 +279,7 @@ def test_check_error_payload_without_results_is_not_success(
         "tools",
         "security",
         "osv_scanner",
-        "requirements_setuptools_80_9_0.txt",
+        "osv_scanner_fixture_setuptools_80_9_0.txt",
         dest_name=lockfile.name,
     )
 
@@ -315,7 +315,7 @@ def test_check_exit_zero_error_payload_fails_closed(
         "tools",
         "security",
         "osv_scanner",
-        "requirements_setuptools_80_9_0.txt",
+        "osv_scanner_fixture_setuptools_80_9_0.txt",
         dest_name=lockfile.name,
     )
 
@@ -349,7 +349,7 @@ def test_check_exit_zero_results_not_a_list_fails_closed(
         "tools",
         "security",
         "osv_scanner",
-        "requirements_setuptools_80_9_0.txt",
+        "osv_scanner_fixture_setuptools_80_9_0.txt",
         dest_name=lockfile.name,
     )
 
@@ -383,7 +383,7 @@ def test_check_exit_zero_empty_results_is_clean(
         "tools",
         "security",
         "osv_scanner",
-        "requirements_setuptools_80_9_0.txt",
+        "osv_scanner_fixture_setuptools_80_9_0.txt",
         dest_name=lockfile.name,
     )
 
@@ -433,7 +433,7 @@ def test_check_with_vulnerabilities(
         "tools",
         "security",
         "osv_scanner",
-        "requirements_requests_2_25_0.txt",
+        "osv_scanner_fixture_requests_2_25_0.txt",
         dest_name=lockfile.name,
     )
 
@@ -518,7 +518,7 @@ def test_check_timeout(
         "tools",
         "security",
         "osv_scanner",
-        "requirements_requests_2_25_0.txt",
+        "osv_scanner_fixture_requests_2_25_0.txt",
         dest_name=lockfile.name,
     )
 
@@ -597,7 +597,7 @@ def test_check_with_suppressions_detects_stale(
         "tools",
         "security",
         "osv_scanner",
-        "requirements_requests_2_32_3.txt",
+        "osv_scanner_fixture_requests_2_32_3.txt",
         dest_name=lockfile.name,
     )
 
@@ -642,7 +642,7 @@ def test_check_without_config_no_metadata(
         "tools",
         "security",
         "osv_scanner",
-        "requirements_requests_2_32_3.txt",
+        "osv_scanner_fixture_requests_2_32_3.txt",
         dest_name=lockfile.name,
     )
 
@@ -668,7 +668,7 @@ def test_check_suppressions_disabled(
         "tools",
         "security",
         "osv_scanner",
-        "requirements_requests_2_32_3.txt",
+        "osv_scanner_fixture_requests_2_32_3.txt",
         dest_name=lockfile.name,
     )
 
@@ -706,7 +706,7 @@ def test_check_suppressions_probe_timeout(
         "tools",
         "security",
         "osv_scanner",
-        "requirements_requests_2_32_3.txt",
+        "osv_scanner_fixture_requests_2_32_3.txt",
         dest_name=lockfile.name,
     )
 
