@@ -21,6 +21,27 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.80.0] - 2026-07-14
+
+### Added
+
+- **docker**: build full image FROM published lintro-tools base (#1367) (294f252)
+- **docker**: publish lintro-tools base image with digest-pinned FROM (#1364) (ef9e24b)
+
+### Changed
+
+- **ci**: skip heavy CI on auto version-bump PRs (#1371) (fb5676e)
+- **ci**: changed-files dogfood lint on PRs with full-lint fallback and nightly full run
+  (#1370) (703fa15)
+- **ci**: promote docker images by digest instead of rebuilding in publish (#1368)
+  (cd2e9fb)
+- **ci**: add path filters to docker-ci and test-ci with always-green gates (#1363)
+  (d9ee7cf)
+
+### Fixed
+
+- **ci**: allow timestamp.sigstore.dev egress in lintro-tools publish (#1366) (5c748cb)
+
 ## [0.79.4] - 2026-07-13
 
 ### Fixed
