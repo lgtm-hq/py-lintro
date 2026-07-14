@@ -232,6 +232,41 @@ def test_resolve_pipeline_relevance_deny_by_default(
         assert_that(lines).contains("skip-reason=")
 
 
+def test_resolve_pipeline_relevance_rename_into_skippable_path_triggers(
+    diff_repo: Path,
+    tmp_path: Path,
+) -> None:
+    """Renaming a relevant file into the skip-list keeps the pipeline on.
+
+    git rename detection would report only the destination path
+    (docs/core.py), classifying the move as docs-only; the script must diff
+    with --no-renames so the deleted source path (lintro/core.py) is listed
+    and keeps the pipeline running.
+
+    Args:
+        diff_repo: Fixture repository with a seed base commit.
+        tmp_path: Pytest-provided temporary directory.
+    """
+    source = diff_repo / "lintro" / "core.py"
+    source.parent.mkdir(parents=True)
+    source.write_text("".join(f"line {i}\n" for i in range(50)))
+    _git(diff_repo, "add", "-A")
+    _git(diff_repo, "commit", "-q", "-m", "add module")
+    base = _git(diff_repo, "rev-parse", "HEAD")
+    (diff_repo / "docs").mkdir()
+    _git(diff_repo, "mv", "lintro/core.py", "docs/core.py")
+    _git(diff_repo, "commit", "-q", "-m", "move module under docs")
+    head = _git(diff_repo, "rev-parse", "HEAD")
+    output_file = tmp_path / "github-output"
+    result = _run_resolve_pipeline_relevance(
+        {"EVENT_NAME": "pull_request", "BASE_SHA": base, "HEAD_SHA": head},
+        output_file,
+        cwd=diff_repo,
+    )
+    assert_that(result.returncode).is_equal_to(0)
+    assert_that(output_file.read_text().splitlines()).contains("pipeline=true")
+
+
 def test_resolve_pipeline_relevance_fails_open_without_diff(
     tmp_path: Path,
 ) -> None:

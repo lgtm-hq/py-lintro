@@ -132,6 +132,11 @@ is_skippable_path() {
 # otherwise derive from the pull_request merge ref: its first parent is the
 # base branch tip, so HEAD^1..HEAD is exactly the change the merge would
 # land. A non-merge HEAD returns nonzero so the caller fails open.
+# --no-renames: rename detection would collapse a rename to its destination
+# path only, so moving a pipeline-relevant file into a skippable location
+# (e.g. lintro/core.py -> docs/core.py) could classify as docs-only; with
+# renames disabled both the deleted source and the added destination are
+# listed and the source keeps the pipeline on.
 resolve_changed_files() {
 	local base="${BASE_SHA:-}"
 	local head="${HEAD_SHA:-}"
@@ -142,7 +147,7 @@ resolve_changed_files() {
 		base="$(git rev-parse 'HEAD^1')"
 		head="$(git rev-parse HEAD)"
 	fi
-	git diff --name-only "$base" "$head"
+	git diff --name-only --no-renames "$base" "$head"
 }
 
 if [[ "$event_name" == "pull_request" ]]; then
