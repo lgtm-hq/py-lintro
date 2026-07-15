@@ -227,7 +227,7 @@
     },
     {
       "name": "osv_scanner",
-      "version": "2.3.8",
+      "version": "2.4.0",
       "install": {
         "type": "binary",
         "package": "osv-scanner"
