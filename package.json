@@ -36,7 +36,7 @@
     "devalue": "5.8.1",
     "esbuild": "^0.28.1",
     "fast-uri": "4.1.0",
-    "js-yaml": "^5.0.0",
+    "js-yaml": "^4.2.0",
     "markdown-it": "^14.2.0",
     "postcss": "^8.5.10",
     "vite": "^8.0.16",
