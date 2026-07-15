@@ -19,7 +19,7 @@ NPM_VERSIONS: dict[str, str] = {
     "prettier": "3.9.4",
     "stylelint": "17.14.0",
     "svelte-check": "4.7.2",
-    "typescript": "5.9.3",
+    "typescript": "7.0.2",
     "vue-tsc": "3.3.7",
 }
 
