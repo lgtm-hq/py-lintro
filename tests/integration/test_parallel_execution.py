@@ -264,7 +264,7 @@ def test_parallel_check_runs_multiple_non_conflicting_tools(
     multi_tool_fixture_dir: Path,
     disable_post_checks: None,
     skip_if_tool_unavailable: Callable[[str], None],
-    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Run ruff + yamllint in parallel and assert both report issues.
 
@@ -272,9 +272,32 @@ def test_parallel_check_runs_multiple_non_conflicting_tools(
         multi_tool_fixture_dir: Fixture dir with one violation per tool.
         disable_post_checks: Ensures only selected tools appear in results.
         skip_if_tool_unavailable: Skip helper when a binary is missing.
-        capsys: Capture stdout/stderr for the parallel banner.
+        monkeypatch: Used to spy that the parallel executor path was entered.
     """
     skip_if_tool_unavailable("yamllint")
+
+    import lintro.utils.tool_executor as tool_executor
+
+    parallel_calls: list[list[str]] = []
+    original_parallel = tool_executor.run_tools_parallel
+
+    def _spy_run_tools_parallel(
+        *args: object,
+        **kwargs: object,
+    ) -> object:
+        tools_arg = kwargs.get("tools_to_run", args[0] if args else None)
+        if not isinstance(tools_arg, list):
+            raise TypeError(
+                f"expected tools_to_run list, got {type(tools_arg)!r}",
+            )
+        parallel_calls.append([str(name) for name in tools_arg])
+        return original_parallel(*args, **kwargs)
+
+    monkeypatch.setattr(
+        tool_executor,
+        "run_tools_parallel",
+        _spy_run_tools_parallel,
+    )
 
     output_path = multi_tool_fixture_dir / "results.json"
     exit_code = _run_check(
@@ -284,24 +307,41 @@ def test_parallel_check_runs_multiple_non_conflicting_tools(
         output_file=str(output_path),
     )
 
-    captured = capsys.readouterr()
-    combined = f"{captured.out}\n{captured.err}"
-    assert_that(combined).contains("Running 2 tools in parallel")
+    assert_that(parallel_calls).is_length(1)
+    assert_that(parallel_calls[0]).contains("ruff", "yamllint")
+    assert_that(len(parallel_calls[0])).is_greater_than_or_equal_to(2)
 
     assert_that(exit_code).is_not_equal_to(0)
     assert_that(output_path.exists()).is_true()
 
-    payload = json.loads(output_path.read_text())
-    results_by_tool = {item["tool"]: item for item in payload["results"]}
+    raw_output = output_path.read_text()
+    try:
+        payload = json.loads(raw_output)
+    except json.JSONDecodeError as exc:
+        raise AssertionError(
+            f"output_file was not valid JSON: {exc}; body={raw_output[:200]!r}",
+        ) from exc
+
+    assert_that(payload).contains_key("results")
+    assert_that(payload["results"]).is_instance_of(list)
+    assert_that(payload["results"]).is_not_empty()
+
+    results_by_tool = {
+        item["tool"]: item
+        for item in payload["results"]
+        if isinstance(item, dict) and "tool" in item
+    }
 
     assert_that(results_by_tool).contains_key("ruff")
     assert_that(results_by_tool).contains_key("yamllint")
+    assert_that(results_by_tool["ruff"]).contains_key("issues_count")
+    assert_that(results_by_tool["yamllint"]).contains_key("issues_count")
     assert_that(results_by_tool["ruff"]["issues_count"]).is_greater_than_or_equal_to(1)
     assert_that(
         results_by_tool["yamllint"]["issues_count"],
     ).is_greater_than_or_equal_to(1)
-    assert_that(results_by_tool["ruff"]["issues"]).is_not_empty()
-    assert_that(results_by_tool["yamllint"]["issues"]).is_not_empty()
+    assert_that(results_by_tool["ruff"].get("issues")).is_not_empty()
+    assert_that(results_by_tool["yamllint"].get("issues")).is_not_empty()
 
 
 def test_non_conflicting_tools_share_one_parallel_batch() -> None:
