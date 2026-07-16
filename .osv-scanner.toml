@@ -4,3 +4,14 @@
 # suppressions. Review periodically and add [[IgnoredVulns]] entries only when
 # necessary. Each entry is time-boxed via ignoreUntil so it cannot silently
 # outlive its rationale.
+
+[[IgnoredVulns]]
+id = "MAL-2026-10726"
+# Amazon Inspector flagged official Astro 7.1.0 as malware because it depends on
+# intentionally renamed packages (piccolore, obug, @astrojs/markdown-satteri).
+# Those names are present in the withastro/astro@7.1.0 GitHub tag and the
+# matching npm tarball; this is not a typosquat dropper. Revisit after OSV
+# rescinds or Astro renames those deps again.
+reason = "False positive: official Astro 7.1.0 dependency renames (piccolore/obug/markdown-satteri)"
+# Ignore until Astro's next minor after the advisory window; adjust if needed.
+ignoreUntil = 2026-10-16
