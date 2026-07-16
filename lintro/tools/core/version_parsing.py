@@ -39,6 +39,7 @@ TOOLS_WITH_SIMPLE_VERSION_PATTERN: set[ToolName] = {
     ToolName.CARGO_DENY,
     ToolName.COMMITLINT,
     ToolName.DJLINT,
+    ToolName.DOTENV_LINTER,
     ToolName.GITLEAKS,
     ToolName.HADOLINT,
     ToolName.OSV_SCANNER,

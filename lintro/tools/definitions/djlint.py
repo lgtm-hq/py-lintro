@@ -262,6 +262,21 @@ class DjlintPlugin(BaseToolPlugin):
             )
 
         if not check_issues:
+            # A non-zero exit with no parsed issues means the check invocation
+            # itself failed (config error, crash, or unrecognized output), not
+            # that the file is clean. Fail loudly instead of reporting success.
+            if not _check_success:
+                return FileFixResult(
+                    file_result=FileProcessingResult(
+                        success=False,
+                        output=check_output,
+                        issues=[],
+                        error="djlint check failed before fixing",
+                    ),
+                    initial_count=0,
+                    fixed_count=0,
+                    initial_issues=[],
+                )
             return FileFixResult(
                 file_result=FileProcessingResult(
                     success=True,

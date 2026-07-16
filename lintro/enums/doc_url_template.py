@@ -31,6 +31,7 @@ class DocUrlTemplate(StrEnum):
     CLIPPY = "https://rust-lang.github.io/rust-clippy/master/index.html#{code}"
     COMMITLINT = "https://commitlint.js.org/reference/rules.html"
     DJLINT = "https://www.djlint.com/docs/linter/"
+    DOTENV_LINTER = "https://dotenv-linter.github.io/#/checks/{code}"
     HADOLINT = "https://github.com/hadolint/hadolint/wiki/{code}"
     MARKDOWNLINT = "https://github.com/DavidAnson/markdownlint/blob/main/doc/{code}.md"
     MYPY = "https://mypy.readthedocs.io/en/stable/error_code_list.html"

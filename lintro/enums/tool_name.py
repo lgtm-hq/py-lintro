@@ -20,6 +20,7 @@ class ToolName(StrEnum):
     CLIPPY = auto()
     COMMITLINT = auto()
     DJLINT = auto()
+    DOTENV_LINTER = auto()
     GITLEAKS = auto()
     HADOLINT = auto()
     IDIOM_REVIEW = auto()
