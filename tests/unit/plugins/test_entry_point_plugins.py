@@ -284,19 +284,30 @@ def test_list_tools_shows_origin_for_builtin_and_external() -> None:
     import io
     import json
     from contextlib import redirect_stdout
+    from typing import Any, cast
 
     buffer = io.StringIO()
     with redirect_stdout(buffer):
         list_tools(output=None, show_conflicts=False, json_output=True)
     # Tool discovery may emit loguru lines to stdout under parallel pytest-xdist
-    # workers; locate the JSON object rather than requiring a pristine buffer.
+    # workers; decode the first JSON object that contains the expected tools.
     raw = buffer.getvalue()
-    json_start = raw.find("{")
-    assert_that(json_start).is_greater_than_or_equal_to(0)
-    data = json.loads(raw[json_start:])
-
-    assert_that(data["ruff"]["origin"]).is_equal_to("builtin")
-    assert_that(data["ext-good"]["origin"]).is_equal_to("lintro-ext-good")
+    decoder = json.JSONDecoder()
+    data: dict[str, object] | None = None
+    for index, char in enumerate(raw):
+        if char != "{":
+            continue
+        try:
+            candidate, _ = decoder.raw_decode(raw[index:])
+        except json.JSONDecodeError:
+            continue
+        if isinstance(candidate, dict) and {"ruff", "ext-good"} <= candidate.keys():
+            data = cast(dict[str, Any], candidate)
+            break
+    assert_that(data).is_not_none()
+    parsed = cast(dict[str, Any], data)
+    assert_that(parsed["ruff"]["origin"]).is_equal_to("builtin")
+    assert_that(parsed["ext-good"]["origin"]).is_equal_to("lintro-ext-good")
 
 
 # =============================================================================
