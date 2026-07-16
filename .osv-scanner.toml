@@ -5,3 +5,12 @@
 # OSV Scanner still runs in CI via lintro; this file remains as the project hook
 # for future suppressions when no patched version is available yet.
 # Review periodically and add [[IgnoredVulns]] entries only when necessary.
+
+# Amazon Inspector flagged legitimate Astro 7.1.0 (published 2026-07-16 by
+# withastro) as malware because Astro 7 renamed utility deps (piccolore, obug,
+# @astrojs/markdown-satteri). The bun.lock integrity matches registry.npmjs.org
+# /astro/7.1.0; keep until the MAL entry is withdrawn or Astro is cleared.
+[[IgnoredVulns]]
+id = "MAL-2026-10726"
+ignoreUntil = 2026-10-16
+reason = "False positive: official astro@7.1.0 from withastro; renamed deps are not typosquats"
