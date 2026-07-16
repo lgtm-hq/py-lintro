@@ -21,7 +21,7 @@ DEFAULT_EXIT_CODE: int = 0
 DEFAULT_ACTION: str = "check"
 
 
-@click.command("check")
+@click.command("check", help="Check files for issues using the specified tools.")
 @click.argument("paths", nargs=-1, type=click.Path(exists=True))
 @click.option(
     "--tools",

@@ -287,7 +287,14 @@ def _generate_native_configs(console: Console, *, force: bool) -> list[str]:
     return created
 
 
-@click.command("init")
+@click.command(
+    "init",
+    help=("""Initialize Lintro configuration for your project.
+
+Detects languages, enables appropriate tools in config, and prints
+next steps for installing tools and running checks.
+"""),
+)
 @click.option(
     "--minimal",
     "-m",

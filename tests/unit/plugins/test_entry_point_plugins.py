@@ -288,7 +288,12 @@ def test_list_tools_shows_origin_for_builtin_and_external() -> None:
     buffer = io.StringIO()
     with redirect_stdout(buffer):
         list_tools(output=None, show_conflicts=False, json_output=True)
-    data = json.loads(buffer.getvalue())
+    # Tool discovery may emit loguru lines to stdout under parallel pytest-xdist
+    # workers; locate the JSON object rather than requiring a pristine buffer.
+    raw = buffer.getvalue()
+    json_start = raw.find("{")
+    assert_that(json_start).is_greater_than_or_equal_to(0)
+    data = json.loads(raw[json_start:])
 
     assert_that(data["ruff"]["origin"]).is_equal_to("builtin")
     assert_that(data["ext-good"]["origin"]).is_equal_to("lintro-ext-good")

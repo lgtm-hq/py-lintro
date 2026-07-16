@@ -32,7 +32,12 @@ from lintro.tools.core.tool_installer import ToolInstaller
 from lintro.tools.core.tool_registry import ToolRegistry
 
 
-@click.command()
+@click.command(help=("""Install or upgrade external tools used by lintro.
+
+Without arguments, installs all missing tools for the current project.
+Specify tool names to install specific tools, or use --profile for
+predefined sets.
+"""))
 @click.argument("tools", nargs=-1)
 @click.option(
     "--profile",

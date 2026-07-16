@@ -12,7 +12,11 @@ DEFAULT_EXIT_CODE: int = 0
 DEFAULT_ACTION: str = "fmt"
 
 
-@click.command()
+@click.command(help=("""Format code using configured formatting tools.
+
+Runs code formatting tools on the specified paths to automatically fix style issues.
+Uses simplified Loguru-based logging for clean output and proper file logging.
+"""))
 @click.pass_context
 @click.argument("paths", nargs=-1, type=click.Path(exists=True))
 @click.option(

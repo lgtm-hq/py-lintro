@@ -41,7 +41,7 @@ def _resolve_conflicts(
     return conflict_names
 
 
-@click.command("list-tools")
+@click.command("list-tools", help="List all available tools and their configurations.")
 @click.option(
     "--output",
     type=click.Path(),

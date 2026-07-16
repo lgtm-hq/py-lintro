@@ -83,7 +83,11 @@ def _generate_config(
     return "\n".join(lines)
 
 
-@click.command()
+@click.command(help=("""Set up lintro for your project.
+
+Scans your project, detects languages and frameworks, recommends tools,
+installs missing ones, and generates a .lintro-config.yaml.
+"""))
 @click.option(
     "--profile",
     type=str,

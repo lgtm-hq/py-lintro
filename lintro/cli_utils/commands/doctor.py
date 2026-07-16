@@ -404,7 +404,11 @@ def _generate_markdown_report(
     return "\n".join(lines)
 
 
-@click.command()
+@click.command(help=("""Check tool installation status and version compatibility.
+
+Checks all supported tools grouped by category (bundled, npm, external).
+Shows actionable install commands for missing or outdated tools.
+"""))
 @click.option("--json", "json_output", is_flag=True, help="Output as JSON.")
 @click.option(
     "--tools",

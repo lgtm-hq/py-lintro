@@ -33,7 +33,15 @@ def _get_all_tool_names() -> list[str]:
     return ToolRegistry.get_names()
 
 
-@click.command()
+@click.command(help=("""Display Lintro configuration status.
+
+Shows the unified configuration for all tools including:
+- Config source (.lintro-config.yaml or pyproject.toml)
+- Global settings (line_length, tool ordering strategy)
+- Tool execution order based on configured strategy
+- Per-tool effective configuration
+- Configuration warnings and inconsistencies
+"""))
 @click.option(
     "--verbose",
     "-v",

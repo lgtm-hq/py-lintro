@@ -33,7 +33,13 @@ def _ensure_pytest_prefix(option_fragment: str) -> str:
     return f"pytest:{fragment}"
 
 
-@click.command("test")
+@click.command(
+    "test",
+    help=("""Run tests using pytest.
+
+This CLI command wraps pytest with lintro's output formatting.
+"""),
+)
 @click.argument("paths", nargs=-1, type=click.Path(exists=True))
 @click.option(
     "--exclude",

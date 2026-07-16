@@ -41,7 +41,13 @@ def _collect_packages(langs: tuple[str, ...]) -> list[PackageLicense]:
     return packages
 
 
-@click.command()
+@click.command(help=("""Check dependency licenses for policy compliance.
+
+Scans resolved dependencies, normalizes their licenses to SPDX
+identifiers, and evaluates them against the configured allow/deny policy
+(``[tool.lintro.licenses]`` or the ``licenses:`` section of
+``.lintro-config.yaml``).
+"""))
 @click.option(
     "--check",
     is_flag=True,

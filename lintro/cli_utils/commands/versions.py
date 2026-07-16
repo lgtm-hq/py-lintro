@@ -9,7 +9,11 @@ from rich.table import Table
 from lintro.tools.core.version_requirements import get_all_tool_versions
 
 
-@click.command()
+@click.command(help=("""Display version information for all supported tools.
+
+Shows each tool's current version, minimum required version, and status.
+Use --verbose to see installation hints for tools that don't meet requirements.
+"""))
 @click.option(
     "--verbose",
     "-v",
