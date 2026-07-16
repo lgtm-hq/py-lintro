@@ -21,6 +21,11 @@ Lintro uses a clear 5-tier configuration model that separates concerns:
 | **tools**     | Per-tool enable/disable and config source           | Always                     |
 | **ai**        | AI-powered summaries and fixes                      | When enabled + API key set |
 
+The five tiers above form the `LintroConfig` model's core configuration story
+(`lintro/config/lintro_config.py`). Two additional optional sections — `review`
+(diff-review checklist) and `score` (health-score weights, see **Health Score** below) —
+configure specific commands rather than tool resolution.
+
 ### Key Principles
 
 1. **Native configs are respected by default** - Tools use their own `.prettierrc`,
@@ -40,8 +45,9 @@ The configuration system works in a specific order:
    - `fail_fast`: Whether to stop on first tool failure
    - `parallel`: Whether to run tools in parallel (default: `true`)
    - `max_workers`: Maximum parallel workers, 1-32 (default: CPU count)
-   - `auto_install_deps`: Auto-install Node.js dependencies if missing (default:
-     `false`)
+   - `auto_install_deps`: Auto-install Node.js dependencies if missing. Unset by
+     default, in which case Lintro falls back to container auto-detection (enabled
+     inside containers, disabled otherwise)
 
 2. **Enforce Tier** - Cross-cutting settings injected as CLI flags
    - These settings override native configs via CLI arguments
@@ -355,12 +361,13 @@ Lintro automatically detects container environments (Docker, Podman, LXC, Kubern
 and enables auto-install by default when running in a container. This means Node.js
 tools work out of the box in Docker without any configuration.
 
-You can override this behavior:
+You can override this behavior explicitly via configuration or the `--auto-install` CLI
+flag:
 
-```bash
-# Disable auto-install even in a container
-docker run --rm -e LINTRO_AUTO_INSTALL_DEPS=0 -v $(pwd):/code \
-  ghcr.io/lgtm-hq/py-lintro:latest check --tools tsc
+```yaml
+# .lintro-config.yaml — disable auto-install even inside a container
+execution:
+  auto_install_deps: false
 ```
 
 See the [Docker Usage Guide](docker.md) for more details on container behavior.
@@ -380,32 +387,34 @@ lintro check --exclude "*.pyc,venv,node_modules"
 
 ### Environment Variables
 
+Lintro reads the following environment variables at runtime. Most configuration is done
+through `.lintro-config.yaml` and CLI flags; these variables cover a few runtime
+overrides.
+
 ```bash
-# Override default settings
-export LINTRO_DEFAULT_TIMEOUT=60
-export LINTRO_VERBOSE=1
+# Override the directory where run logs/artifacts are written (default: .lintro)
+export LINTRO_LOG_DIR=/tmp/lintro-runs
 
-# Default exclude patterns
-export LINTRO_EXCLUDE="*.pyc,venv,node_modules"
+# Timeout (seconds) for tool version checks (default: 30)
+export LINTRO_VERSION_TIMEOUT=60
 
-# Default output format
-export LINTRO_DEFAULT_FORMAT="grid"
-
-# Auto-install Node.js dependencies (useful in Docker/CI)
-# Set to 1 to enable, 0 to disable (overrides container auto-detection)
-export LINTRO_AUTO_INSTALL_DEPS=1
+# Force Docker install-context detection (set to 1)
+export LINTRO_DOCKER=1
 ```
 
-| Variable                   | Description                                  | Default |
-| -------------------------- | -------------------------------------------- | ------- |
-| `LINTRO_DEFAULT_TIMEOUT`   | Default timeout for tool execution (seconds) | `30`    |
-| `LINTRO_VERBOSE`           | Enable verbose logging (`1` to enable)       | `0`     |
-| `LINTRO_EXCLUDE`           | Comma-separated exclude patterns             | -       |
-| `LINTRO_DEFAULT_FORMAT`    | Default output format                        | -       |
-| `LINTRO_AUTO_INSTALL_DEPS` | Auto-install Node.js deps (`1`/`0`)          | `0`\*   |
+| Variable                 | Description                                                  | Default   |
+| ------------------------ | ------------------------------------------------------------ | --------- |
+| `LINTRO_LOG_DIR`         | Base directory for run logs and artifacts                    | `.lintro` |
+| `LINTRO_VERSION_TIMEOUT` | Timeout in seconds for tool version checks (must be `>= 1`)  | `30`      |
+| `LINTRO_DOCKER`          | Force Docker install-context detection when set to `1`       | -         |
+| `LINTRO_CONFIG`          | Shown in the `lintro` environment report; informational only | -         |
 
-\* In container environments, `LINTRO_AUTO_INSTALL_DEPS` effectively defaults to `1` via
-container auto-detection. Set to `0` to explicitly disable.
+> **Note:** There is no environment variable for tool timeouts, verbosity, exclude
+> patterns, output format, or auto-install. Use CLI flags (`--exclude`,
+> `--output-format`, `--auto-install`) or `.lintro-config.yaml` for those settings.
+> Auto-install is resolved from the `--auto-install` flag, then
+> `execution.auto_install_deps`, then container auto-detection — not from an environment
+> variable.
 
 ### Pre-Execution Summary
 
@@ -2019,6 +2028,63 @@ lintro format --tools shfmt
 lintro check scripts/ --tools shfmt
 ```
 
+### Dotenv Tools
+
+#### dotenv-linter Configuration
+
+[dotenv-linter](https://dotenv-linter.github.io/) is a fast, Rust-based linter and fixer
+for `.env` files. It detects duplicate keys, lowercase keys, incorrect delimiters,
+unordered keys, and stray whitespace, and can auto-fix most of them.
+
+**Installation:**
+
+```bash
+# macOS
+brew install dotenv-linter
+
+# Cargo
+cargo install dotenv-linter
+
+# Binary releases
+# https://github.com/dotenv-linter/dotenv-linter/releases
+```
+
+**Native config:** dotenv-linter has no config file; behavior is controlled entirely via
+CLI flags (surfaced through `--tool-options`).
+
+**Lintro options via `--tool-options`:**
+
+```bash
+# Recursively scan directories for .env files
+lintro check --tools dotenv_linter --tool-options "dotenv_linter:recursive=True"
+
+# Skip specific checks (maps to --ignore-checks)
+lintro check --tools dotenv_linter \
+  --tool-options "dotenv_linter:skip_checks=LowercaseKey|UnorderedKey"
+
+# Exclude paths from linting
+lintro check --tools dotenv_linter --tool-options "dotenv_linter:exclude=vendor"
+
+# Validate against a schema file
+lintro check --tools dotenv_linter --tool-options "dotenv_linter:schema=env.schema.json"
+
+# Auto-fix issues in place (no .env.bak backups are created)
+lintro format --tools dotenv_linter
+```
+
+**Available Options:**
+
+| Option        | Type        | Description                                                    |
+| ------------- | ----------- | -------------------------------------------------------------- |
+| `recursive`   | bool        | Recursively scan directories for `.env` files. Default `False` |
+| `exclude`     | list\[str\] | File or directory paths to exclude                             |
+| `skip_checks` | list\[str\] | Check names to bypass (maps to `--ignore-checks`)              |
+| `schema`      | str         | Path to a schema file to validate `.env` contents              |
+
+> Note: real `.env` files are frequently `.gitignore`d, so they may not be discovered
+> during a normal repository scan. Point Lintro at the file explicitly, or commit a
+> template such as `.env.example` for the linter to check.
+
 ### TOML Tools
 
 #### Taplo Configuration
@@ -2257,6 +2323,8 @@ export ANTHROPIC_API_KEY=sk-ant-...
 # .lintro-config.yaml
 ai:
   enabled: true
+  lint: true # AI summaries / --fix on chk/fmt
+  review: false # lintro review (opt-in separately)
   provider: anthropic
 ```
 
@@ -2274,6 +2342,8 @@ Set `default_fix` to avoid typing the flag every time:
 ```yaml
 ai:
   enabled: true
+  lint: true
+  review: true
   default_fix: false # only run --fix when explicitly requested
 ```
 
@@ -2281,7 +2351,9 @@ ai:
 
 | Setting                 | Type   | Default     | Description                                      |
 | ----------------------- | ------ | ----------- | ------------------------------------------------ |
-| `enabled`               | bool   | `false`     | Master toggle for all AI features                |
+| `enabled`               | bool   | `false`     | Master switch; ANDs with `lint` / `review`       |
+| `lint`                  | bool   | `false`     | Enable AI lint summaries on `chk`/`fmt`          |
+| `review`                | bool   | `false`     | Enable the `lintro review` AI diff review        |
 | `provider`              | string | `anthropic` | AI provider (`anthropic` or `openai`)            |
 | `model`                 | string | (default)   | Model override                                   |
 | `api_key_env`           | string | (default)   | Custom env var for API key                       |

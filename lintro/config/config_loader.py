@@ -296,6 +296,15 @@ def _parse_execution_config(data: dict[str, Any]) -> ExecutionConfig:
             f"got {max_fix_retries}",
         )
 
+    # max_workers and artifacts are optional; when absent, ExecutionConfig
+    # applies its own defaults (CPU count and empty list respectively). Only
+    # forward them when present so the model defaults still win on omission.
+    optional_fields: dict[str, Any] = {}
+    if "max_workers" in data:
+        optional_fields["max_workers"] = data["max_workers"]
+    if "artifacts" in data:
+        optional_fields["artifacts"] = data["artifacts"]
+
     return ExecutionConfig(
         enabled_tools=enabled_tools,
         tool_order=tool_order,
@@ -303,6 +312,7 @@ def _parse_execution_config(data: dict[str, Any]) -> ExecutionConfig:
         parallel=data.get("parallel", True),
         auto_install_deps=data.get("auto_install_deps"),
         max_fix_retries=max_fix_retries,
+        **optional_fields,
     )
 
 
@@ -564,8 +574,10 @@ def _convert_pyproject_to_config(data: dict[str, Any]) -> dict[str, Any]:
         "tool_order",
         "fail_fast",
         "parallel",
+        "max_workers",
         "auto_install_deps",
         "max_fix_retries",
+        "artifacts",
     }
 
     # Known enforce settings (formerly global)
