@@ -272,3 +272,50 @@ def test_malformed_yaml_is_error(write_config: Callable[[str], Path]) -> None:
 
     assert_that(result.is_valid).is_false()
     assert_that(result.errors[0].message).contains("parse")
+
+
+def test_pyproject_typed_error_is_reported(
+    write_config: Callable[[str], Path],
+) -> None:
+    """Typed errors in a pyproject.toml [tool.lintro] table are reported.
+
+    The explicit-path loader reads files as YAML, so validating a
+    pyproject.toml must feed the parsed TOML through the shared typed parser
+    rather than re-reading the TOML path as YAML.
+
+    Args:
+        write_config: Fixture writing config content to a temp file.
+    """
+    path = write_config(
+        """
+[tool.lintro]
+max_fix_retries = "not-an-int"
+""",
+        name="pyproject.toml",
+    )
+
+    result = validate_config_file(path)
+
+    assert_that(result.is_valid).is_false()
+    assert_that(result.errors[0].message).contains("max_fix_retries")
+
+
+def test_pyproject_valid_config_passes(
+    write_config: Callable[[str], Path],
+) -> None:
+    """A valid pyproject.toml [tool.lintro] table validates cleanly.
+
+    Args:
+        write_config: Fixture writing config content to a temp file.
+    """
+    path = write_config(
+        """
+[tool.lintro]
+max_fix_retries = 3
+""",
+        name="pyproject.toml",
+    )
+
+    result = validate_config_file(path)
+
+    assert_that(result.is_valid).is_true()

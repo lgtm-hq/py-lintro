@@ -22,6 +22,7 @@ from typing import Any
 from lintro.config.config_loader import (
     _convert_pyproject_to_config,
     _find_config_file,
+    build_config_from_dict,
     load_config,
 )
 from lintro.enums.tool_name import ToolName
@@ -348,9 +349,15 @@ def validate_config_file(path: Path | str | None = None) -> ValidationResult:
         _check_tool_names(tools, result.warnings)
 
     # Run the real loader to catch typed/value errors (max_fix_retries,
-    # auto_install, review schema, etc.) against the requested file.
+    # auto_install, review schema, etc.) against the requested file. The
+    # explicit-path loader reads files as YAML, so for pyproject.toml we feed
+    # the already-normalized TOML data through the shared typed parser instead
+    # of round-tripping the TOML path back through the YAML loader.
     try:
-        load_config(config_path=config_path)
+        if is_pyproject:
+            build_config_from_dict(parsed)
+        else:
+            load_config(config_path=config_path)
     except ValueError as exc:
         result.errors.append(ValidationMessage(message=str(exc)))
 
