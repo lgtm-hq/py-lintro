@@ -325,6 +325,118 @@ def test_execution_enabled_tools_combined_with_tool_disabled(
 
 
 # =============================================================================
+# Explicit --tools overrides execution.enabled_tools (issue #1415)
+# =============================================================================
+
+
+def test_explicit_tools_overrides_enabled_tools_filter(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Explicit --tools runs a tool absent from execution.enabled_tools.
+
+    Regression for #1415: an explicit CLI selection is higher-precedence
+    than the enabled_tools allowlist (which scopes only default runs), so
+    the named tool must run instead of being silently skipped.
+    """
+    from lintro.tools import tool_manager
+
+    monkeypatch.setattr(
+        tool_manager,
+        "is_tool_registered",
+        lambda name: name in ["ruff", "yamllint"],
+    )
+    monkeypatch.setattr(
+        tool_manager,
+        "get_tool_names",
+        lambda: ["ruff", "yamllint"],
+    )
+
+    config = LintroConfig(
+        execution=ExecutionConfig(enabled_tools=["yamllint"]),
+    )
+
+    with patch(
+        "lintro.utils.execution.tool_configuration.get_config",
+        return_value=config,
+    ):
+        result = get_tools_to_run(tools="ruff", action="check")
+
+    assert_that(result.to_run).is_equal_to(["ruff"])
+    assert_that(result.skipped).is_empty()
+
+
+def test_default_run_still_filters_by_enabled_tools(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Without --tools, enabled_tools continues to filter default runs.
+
+    Regression for #1415: the override applies only to explicit selections;
+    a default run (tools=None) must still honor the enabled_tools allowlist,
+    so ruff stays skipped when only yamllint is enabled.
+    """
+    from lintro.tools import tool_manager
+
+    monkeypatch.setattr(
+        tool_manager,
+        "get_check_tools",
+        lambda: ["ruff", "yamllint"],
+    )
+
+    config = LintroConfig(
+        execution=ExecutionConfig(enabled_tools=["yamllint"]),
+    )
+
+    with patch(
+        "lintro.utils.execution.tool_configuration.get_config",
+        return_value=config,
+    ):
+        result = get_tools_to_run(tools=None, action="check")
+
+    assert_that(result.to_run).is_equal_to(["yamllint"])
+    skipped_by_name = {s.name: s for s in result.skipped}
+    assert_that(skipped_by_name).contains_key("ruff")
+    assert_that(skipped_by_name["ruff"].reason).is_equal_to("not in enabled_tools")
+
+
+def test_explicit_disabled_tool_still_skipped_despite_override(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A per-tool ``enabled: false`` remains authoritative under --tools.
+
+    The #1415 override bypasses the enabled_tools allowlist only; a
+    deliberate per-tool disable still skips the tool with a clear reason.
+    """
+    from lintro.tools import tool_manager
+
+    monkeypatch.setattr(
+        tool_manager,
+        "is_tool_registered",
+        lambda name: name in ["ruff", "mypy"],
+    )
+    monkeypatch.setattr(
+        tool_manager,
+        "get_tool_names",
+        lambda: ["ruff", "mypy"],
+    )
+
+    config = LintroConfig(
+        execution=ExecutionConfig(enabled_tools=["yamllint"]),
+        tools={"mypy": LintroToolConfig(enabled=False)},
+    )
+
+    with patch(
+        "lintro.utils.execution.tool_configuration.get_config",
+        return_value=config,
+    ):
+        result = get_tools_to_run(tools="ruff,mypy", action="check")
+
+    assert_that(result.to_run).is_equal_to(["ruff"])
+    skipped_by_name = {s.name: s for s in result.skipped}
+    assert_that(skipped_by_name).contains_key("mypy")
+    assert_that(skipped_by_name["mypy"].reason).is_equal_to("disabled in config")
+
+
+# =============================================================================
 # Fix action
 # =============================================================================
 

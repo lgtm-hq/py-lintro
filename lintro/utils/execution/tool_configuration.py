@@ -327,10 +327,13 @@ def get_tools_to_run(
             raise ValueError(
                 f"Unknown tool '{name}'. Available tools: {available_names}",
             )
-        # Track disabled tools with reason
-        if not config.is_tool_enabled(name):
-            reason = _get_disabled_reason(config, name)
-            skipped.append(SkippedTool(name=name, reason=reason))
+        # An explicit --tools selection is a higher-precedence override than
+        # execution.enabled_tools, which scopes only *default* (no --tools)
+        # runs. So the enabled_tools allowlist is bypassed here; a per-tool
+        # `enabled: false` remains authoritative as a deliberate disable.
+        tool_config = config.get_tool_config(name)
+        if not tool_config.enabled:
+            skipped.append(SkippedTool(name=name, reason="disabled in config"))
             continue
         # Verify the tool supports the requested action
         if action == Action.FIX:
