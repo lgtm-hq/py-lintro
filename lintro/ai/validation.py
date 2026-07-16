@@ -10,7 +10,7 @@ once rather than twice.
 
 from __future__ import annotations
 
-import subprocess
+import subprocess  # nosec B404 - subprocess is the core mechanism for invoking external tools; all invocations use shell=False
 from collections import Counter, defaultdict
 from collections.abc import Sequence
 from dataclasses import dataclass, field

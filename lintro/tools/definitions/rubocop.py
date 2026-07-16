@@ -294,6 +294,25 @@ class RubocopPlugin(BaseToolPlugin):
         except subprocess.TimeoutExpired:
             return self._fix_timeout_result(ctx.timeout, ctx.cwd, initial_count)
         remaining_issues = parse_rubocop_output(output=remaining_result.stdout)
+        # A non-zero exit from the JSON re-check with no parseable report is a
+        # crash (bad config, missing gem), not a clean pass. Surface it instead
+        # of counting every initial offense as fixed and returning success.
+        if not remaining_result.success and not remaining_issues:
+            return ToolResult(
+                name=self.definition.name,
+                success=False,
+                output=(
+                    remaining_result.stderr.strip()
+                    or remaining_result.stdout.strip()
+                    or "RuboCop re-check exited with an error."
+                ),
+                issues_count=initial_count,
+                issues=initial_issues,
+                initial_issues_count=initial_count,
+                fixed_issues_count=0,
+                remaining_issues_count=initial_count,
+                cwd=ctx.cwd,
+            )
         remaining_count = len(remaining_issues)
 
         fixed_count = max(0, initial_count - remaining_count)

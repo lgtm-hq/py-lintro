@@ -12,6 +12,7 @@ from rich.table import Table
 
 from lintro.enums.action import Action
 from lintro.plugins.base import BaseToolPlugin
+from lintro.plugins.registry import ToolRegistry
 from lintro.tools import tool_manager
 from lintro.utils.console import get_tool_emoji
 from lintro.utils.unified_config import get_tool_priority, is_tool_injectable
@@ -118,6 +119,7 @@ def list_tools(
                 "capabilities": capabilities,
                 "priority": get_tool_priority(tool_name),
                 "syncable": is_tool_injectable(tool_name),
+                "origin": ToolRegistry.get_origin(tool_name),
             }
 
             # Only include file_patterns in verbose mode (consistent with table output)
@@ -154,6 +156,7 @@ def list_tools(
     table.add_column("Capabilities", style="green")
     table.add_column("Priority", justify="center", style="yellow")
     table.add_column("Type", style="magenta")
+    table.add_column("Origin", style="blue")
 
     if verbose:
         table.add_column("Extensions", style="dim", max_width=30)
@@ -178,12 +181,15 @@ def list_tools(
         injectable = is_tool_injectable(tool_name)
         tool_type = "Syncable" if injectable else "Native only"
 
+        origin = ToolRegistry.get_origin(tool_name)
+
         row = [
             f"{emoji} {tool_name}",
             tool_description,
             caps_display,
             str(priority),
             tool_type,
+            origin,
         ]
 
         # File patterns (verbose mode)
@@ -279,6 +285,7 @@ def _generate_plain_text_output(
 
         output_lines.append(f"{emoji} {tool_name}: {tool_description}")
         output_lines.append(f"  Capabilities: {capabilities_display}")
+        output_lines.append(f"  Origin: {ToolRegistry.get_origin(tool_name)}")
 
         if show_conflicts:
             conflict_names = _resolve_conflicts(

@@ -226,3 +226,38 @@ def test_fix_autocorrect_crash_surfaces_error(
     assert_that(result.success).is_false()
     assert_that(result.output).contains("undefined cop")
     assert_that(result.fixed_issues_count).is_equal_to(0)
+
+
+def test_fix_recheck_crash_surfaces_error(
+    rubocop_plugin: RubocopPlugin,
+    tmp_path: Path,
+) -> None:
+    """A crashed JSON re-check fails instead of reporting all issues fixed.
+
+    Args:
+        rubocop_plugin: The plugin under test.
+        tmp_path: Temporary directory fixture.
+    """
+    initial = make_result(rubocop_json([offense(correctable=True)]), returncode=1)
+    autocorrect = make_result(rubocop_json([]), returncode=0)
+    crash = SubprocessResult(
+        returncode=2,
+        stdout="",
+        stderr="Error: .rubocop.yml is invalid",
+        output="Error: .rubocop.yml is invalid",
+    )
+    with (
+        patch.object(rubocop_plugin, "_prepare_execution") as mock_prep,
+        patch.object(
+            rubocop_plugin,
+            "_run_subprocess_result",
+            side_effect=[initial, autocorrect, crash],
+        ),
+    ):
+        mock_prep.return_value = make_ctx(tmp_path, ["app.rb"])
+        result = rubocop_plugin.fix(["app.rb"], {})
+
+    assert_that(result.success).is_false()
+    assert_that(result.output).contains(".rubocop.yml is invalid")
+    assert_that(result.fixed_issues_count).is_equal_to(0)
+    assert_that(result.remaining_issues_count).is_equal_to(1)

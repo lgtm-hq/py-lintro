@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-import subprocess
+import subprocess  # nosec B404 - subprocess is used to drive the tool/CLI under test; invocations use shell=False
 import sys
 import time
 from collections.abc import Iterator
