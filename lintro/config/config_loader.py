@@ -564,10 +564,28 @@ def load_config(
                 "Consider migrating to .lintro-config.yaml",
             )
 
-    # Parse enforce config
-    enforce_data = data.get("enforce", {})
+    return build_config_from_dict(data, resolved_path=resolved_path)
 
-    enforce_config = _parse_enforce_config(enforce_data)
+
+def build_config_from_dict(
+    data: dict[str, Any],
+    resolved_path: str | None = None,
+) -> LintroConfig:
+    """Build a ``LintroConfig`` from an already-parsed configuration mapping.
+
+    This runs the typed section parsers (which raise ``ValueError`` on invalid
+    values) against a normalized config dict. It is shared by ``load_config``
+    and by the config validator so that pyproject-derived data can be checked
+    with the same typed logic without round-tripping through the YAML loader.
+
+    Args:
+        data: Normalized configuration mapping (post pyproject conversion).
+        resolved_path: Resolved path recorded on the returned config, if any.
+
+    Returns:
+        LintroConfig: The fully parsed configuration.
+    """
+    enforce_config = _parse_enforce_config(data.get("enforce", {}))
     execution_config = _parse_execution_config(data.get("execution", {}))
     defaults = _parse_defaults(data.get("defaults", {}))
     tools_config = _parse_tools_config(data.get("tools", {}))
