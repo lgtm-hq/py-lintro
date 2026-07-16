@@ -10,7 +10,7 @@ Google-style docstrings are used per project standards.
 from __future__ import annotations
 
 import json
-import subprocess
+import subprocess  # nosec B404 - subprocess is used to drive the tool/CLI under test; invocations use shell=False
 from pathlib import Path
 
 import pytest
@@ -60,7 +60,7 @@ def test_json_encode_simple_body(
     )
 
     # Execute the script
-    result = subprocess.run(
+    result = subprocess.run(  # nosec B603 B607 - fixed argv run against a real binary in a controlled test; binary name resolved from PATH, not attacker-controlled; shell=False, no user shell input
         ["python3", str(json_encode_script_path), str(input_file)],
         capture_output=True,
         text=True,
@@ -92,7 +92,7 @@ def test_json_encode_special_chars(
     )
 
     # Execute the script
-    result = subprocess.run(
+    result = subprocess.run(  # nosec B603 B607 - fixed argv run against a real binary in a controlled test; binary name resolved from PATH, not attacker-controlled; shell=False, no user shell input
         ["python3", str(json_encode_script_path), str(input_file)],
         capture_output=True,
         text=True,
@@ -120,7 +120,7 @@ def test_json_encode_from_stdin(json_encode_script_path: Path) -> None:
     test_body = "This is a test body from stdin.\nWith multiple lines."
 
     # Execute the script with input from stdin
-    result = subprocess.run(
+    result = subprocess.run(  # nosec B603 B607 - fixed argv run against a real binary in a controlled test; binary name resolved from PATH, not attacker-controlled; shell=False, no user shell input
         ["python3", str(json_encode_script_path)],
         input=test_body,
         capture_output=True,
@@ -145,7 +145,7 @@ def test_json_encode_nonexistent_file(json_encode_script_path: Path) -> None:
     nonexistent_file = "/tmp/nonexistent_file.txt"
 
     # Execute the script - should exit with code 1
-    result = subprocess.run(
+    result = subprocess.run(  # nosec B603 B607 - fixed argv run against a real binary in a controlled test; binary name resolved from PATH, not attacker-controlled; shell=False, no user shell input
         ["python3", str(json_encode_script_path), nonexistent_file],
         capture_output=True,
         text=True,
@@ -177,7 +177,7 @@ def test_json_encode_empty_body(json_encode_script_path: Path) -> None:
 
     try:
         # Execute the script
-        result = subprocess.run(
+        result = subprocess.run(  # nosec B603 B607 - fixed argv run against a real binary in a controlled test; binary name resolved from PATH, not attacker-controlled; shell=False, no user shell input
             ["python3", str(json_encode_script_path), empty_file],
             capture_output=True,
             text=True,

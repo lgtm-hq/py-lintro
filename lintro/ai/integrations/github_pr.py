@@ -437,13 +437,13 @@ def _detect_repo_root() -> Path | None:
         Repository root path, or ``None`` if detection fails.
     """
     import shutil
-    import subprocess
+    import subprocess  # nosec B404 - subprocess is the core mechanism for invoking external tools; all invocations use shell=False
 
     if not shutil.which("git"):
         return None
 
     try:
-        result = subprocess.run(
+        result = subprocess.run(  # nosec B603 B607 - argv is an internally-built list run with shell=False; binary name resolved from PATH, not attacker-controlled; binary resolved from a known command, no user shell input
             ["git", "rev-parse", "--show-toplevel"],
             capture_output=True,
             text=True,

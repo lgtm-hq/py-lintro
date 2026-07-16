@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import json
 import os
-import subprocess
+import subprocess  # nosec B404 - subprocess is used to drive the tool/CLI under test; invocations use shell=False
 import tempfile
 from pathlib import Path
 
@@ -21,7 +21,7 @@ SCRIPT_PATH = _REPO_ROOT / "scripts/ci/testing/extract-test-summary.sh"
 
 def test_script_help_output() -> None:
     """Script should display help and exit 0 with --help flag."""
-    result = subprocess.run(
+    result = subprocess.run(  # nosec B603 - fixed argv run against a real binary in a controlled test; shell=False, no user shell input
         [str(SCRIPT_PATH), "--help"],
         capture_output=True,
         text=True,
@@ -36,7 +36,7 @@ def test_script_help_output() -> None:
 
 def test_script_syntax_check() -> None:
     """Script should pass bash syntax check."""
-    result = subprocess.run(
+    result = subprocess.run(  # nosec B603 B607 - fixed argv run against a real binary in a controlled test; binary name resolved from PATH, not attacker-controlled; shell=False, no user shell input
         ["bash", "-n", str(SCRIPT_PATH)],
         capture_output=True,
         text=True,
@@ -68,7 +68,7 @@ tests/test_qux.py ................                                       [100%]
         output_file = Path(tmpdir) / "test-summary.json"
         input_file.write_text(pytest_output)
 
-        result = subprocess.run(
+        result = subprocess.run(  # nosec B603 - fixed argv run against a real binary in a controlled test; shell=False, no user shell input
             [str(SCRIPT_PATH), str(input_file), str(output_file)],
             capture_output=True,
             text=True,
@@ -101,7 +101,7 @@ def test_extract_from_lintro_table_format() -> None:
         output_file = Path(tmpdir) / "test-summary.json"
         input_file.write_text(lintro_output)
 
-        result = subprocess.run(
+        result = subprocess.run(  # nosec B603 - fixed argv run against a real binary in a controlled test; shell=False, no user shell input
             [str(SCRIPT_PATH), str(input_file), str(output_file)],
             capture_output=True,
             text=True,
@@ -145,7 +145,7 @@ def test_extract_with_coverage_xml() -> None:
         input_file.write_text(pytest_output)
         coverage_file.write_text(coverage_xml)
 
-        result = subprocess.run(
+        result = subprocess.run(  # nosec B603 - fixed argv run against a real binary in a controlled test; shell=False, no user shell input
             [str(SCRIPT_PATH), str(input_file), str(output_file)],
             capture_output=True,
             text=True,
@@ -175,7 +175,7 @@ def test_extract_from_environment_variables() -> None:
     with tempfile.TemporaryDirectory() as tmpdir:
         output_file = Path(tmpdir) / "test-summary.json"
 
-        result = subprocess.run(
+        result = subprocess.run(  # nosec B603 - fixed argv run against a real binary in a controlled test; shell=False, no user shell input
             [str(SCRIPT_PATH), "", str(output_file)],
             capture_output=True,
             text=True,
@@ -201,7 +201,7 @@ def test_default_output_file() -> None:
         input_file.write_text(pytest_output)
 
         # Run without specifying output file
-        result = subprocess.run(
+        result = subprocess.run(  # nosec B603 - fixed argv run against a real binary in a controlled test; shell=False, no user shell input
             [str(SCRIPT_PATH), str(input_file)],
             capture_output=True,
             text=True,
