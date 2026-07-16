@@ -242,3 +242,88 @@ def test_watch_paths_flushes_pending_on_stop(tmp_path: Path) -> None:
     assert_that(batches).is_length(1)
     assert_that(batches[0]).is_equal_to({str(target)})
 
+
+def _drive_events(
+    watch_targets: list[str],
+    event_paths: list[str],
+    *,
+    ignore_patterns: list[str] | None = None,
+) -> list[set[str]]:
+    """Run watch_paths and feed synthetic modify events to the handler.
+
+    Args:
+        watch_targets: Paths passed to watch_paths.
+        event_paths: File paths to emit as modification events after start.
+        ignore_patterns: Optional extra ignore patterns.
+
+    Returns:
+        The list of emitted batches.
+    """
+    batches: list[set[str]] = []
+    observer = _MockObserver()
+    stop_event = threading.Event()
+    handler_ref: dict[str, Any] = {}
+
+    def _capture_schedule(handler: Any, path: str, recursive: bool = False) -> None:
+        handler_ref["handler"] = handler
+        observer.scheduled.append((path, recursive))
+
+    observer.schedule = _capture_schedule  # type: ignore[method-assign]
+
+    def _fake_start() -> None:
+        observer.started = True
+        for event_path in event_paths:
+            handler_ref["handler"].on_modified(
+                type("E", (), {"is_directory": False, "src_path": event_path})(),
+            )
+        stop_event.set()
+
+    observer.start = _fake_start  # type: ignore[method-assign]
+
+    watch_paths(
+        watch_targets,
+        on_batch=batches.append,
+        debounce_ms=50_000,  # long, so only the shutdown flush emits
+        ignore_patterns=ignore_patterns,
+        stop_event=stop_event,
+        observer_factory=lambda: observer,
+    )
+    return batches
+
+
+def test_single_file_target_ignores_siblings(tmp_path: Path) -> None:
+    """Watching one file must not react to sibling files in its directory."""
+    target = tmp_path / "foo.py"
+    target.write_text("x = 1\n")
+    sibling = tmp_path / "bar.py"
+    sibling.write_text("y = 2\n")
+
+    batches = _drive_events(
+        [str(target)],
+        [str(sibling), str(target)],
+    )
+
+    assert_that(batches).is_length(1)
+    assert_that(batches[0]).is_equal_to({str(target)})
+
+
+def test_custom_ignore_patterns_extend_defaults(tmp_path: Path) -> None:
+    """A custom ignore pattern must not re-enable the built-in defaults."""
+    normal = tmp_path / "real.py"
+    normal.write_text("x = 1\n")
+    generated = tmp_path / "generated" / "api.py"
+    generated.parent.mkdir()
+    generated.write_text("gen = 1\n")
+    git_index = tmp_path / ".git" / "index"
+    git_index.parent.mkdir()
+    git_index.write_text("ref\n")
+
+    batches = _drive_events(
+        [str(tmp_path)],
+        [str(generated), str(git_index), str(normal)],
+        ignore_patterns=["**/generated/**"],
+    )
+
+    assert_that(batches).is_length(1)
+    assert_that(batches[0]).is_equal_to({str(normal)})
+
