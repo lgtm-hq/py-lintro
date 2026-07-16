@@ -74,7 +74,7 @@ migration required.
   everywhere
 - **Fallback defaults when needed** - Tools without native configs use sensible defaults
 
-See the [Configuration Guide](docs/configuration.md) for details on the 4-tier config
+See the [Configuration Guide](docs/configuration.md) for details on the 5-tier config
 system.
 
 ## 🛠️ Supported Tools
@@ -202,6 +202,18 @@ system.
 <td>🧾 TOML</td>
 <td>✅</td>
 <td><code>brew install taplo</code><br><a href="https://github.com/tamasfe/taplo/releases">GitHub Releases</a></td>
+</tr>
+<tr>
+<td><a href="https://dotenv-linter.github.io/"><img src="https://img.shields.io/badge/dotenv--linter-ecd53f?logo=dotenv&logoColor=black" alt="dotenv-linter"></a></td>
+<td>🔑 .env Files</td>
+<td>✅</td>
+<td><code>brew install dotenv-linter</code><br><a href="https://github.com/dotenv-linter/dotenv-linter/releases">GitHub Releases</a></td>
+</tr>
+<tr>
+<td><a href="https://stylelint.io/"><img src="https://img.shields.io/badge/Stylelint-263238?logo=stylelint&logoColor=white" alt="Stylelint"></a></td>
+<td>🎨 CSS/SCSS/Sass/Less</td>
+<td>✅</td>
+<td><code>bun add -g stylelint</code><br><code>npm install -g stylelint</code></td>
 </tr>
 <tr><th colspan="4">Type Checkers</th></tr>
 <tr>
@@ -352,6 +364,11 @@ lintro check --tools tsc --auto-install
 # Exclude directories
 lintro check --exclude "node_modules,dist,venv"
 
+# Only scan files changed vs a git base ref (fast PR-scoped checks)
+lintro check --diff              # vs the repo default branch (origin/HEAD)
+lintro check --diff main         # vs an explicit ref
+lintro format --diff             # format only changed files
+
 # List available tools
 lintro list-tools
 ```
@@ -378,6 +395,7 @@ docker run --rm -v $(pwd):/code ghcr.io/lgtm-hq/py-lintro-base:latest check
 | [AI Features](docs/ai-features.md)               | AI summaries, fix suggestions, config   |
 | [Docker Usage](docs/docker.md)                   | Containerized development               |
 | [GitHub Integration](docs/github-integration.md) | CI/CD setup, workflows                  |
+| [Pre-commit Integration](docs/pre-commit.md)     | Run lintro as a pre-commit hook         |
 | [Contributing](docs/contributing.md)             | Development guide, adding tools         |
 | [Troubleshooting](docs/troubleshooting.md)       | Common issues and solutions             |
 

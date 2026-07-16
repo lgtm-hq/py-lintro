@@ -8,20 +8,31 @@
   ],
   "packageRules": [
     {
-      "matchDatasources": ["docker"],
-      "matchUpdateTypes": ["digest", "patch"],
-      "automerge": true,
-      "automergeType": "branch"
+      "description": "Hold prettier 3.9.5+ until Docker integration prettier fixtures are updated",
+      "matchPackageNames": ["prettier"],
+      "allowedVersions": "<=3.9.4"
+    },
+    {
+      "description": "npm platform-binary placeholders are stamped at publish time; never bump in-repo",
+      "matchPackageNames": [
+        "/^@lgtm-hq\\/lintro(-|$)/"
+      ],
+      "enabled": false
+    },
+    {
+      "description": "Hold TypeScript 7 until Astro/@astrojs/check support it",
+      "matchPackageNames": ["typescript"],
+      "allowedVersions": "<7"
+    },
+    {
+      "description": "Hold js-yaml 5 until Astro migrates off default export / we update call sites",
+      "matchPackageNames": ["js-yaml"],
+      "allowedVersions": "<5"
     },
     {
       "matchDatasources": ["pypi"],
       "matchUpdateTypes": ["minor"],
       "automerge": false
-    },
-    {
-      "groupName": "pytest packages",
-      "groupSlug": "pytest",
-      "matchPackageNames": ["/^pytest/"]
     },
     {
       "matchManagers": [
@@ -62,6 +73,7 @@
         "@commitlint/config-conventional",
         "oxlint",
         "oxfmt",
+        "stylelint",
         "gitleaks",
         "gitleaks/gitleaks",
         "shellcheck",
@@ -80,12 +92,29 @@
       "automerge": false
     },
     {
-      "description": "Regenerate _tool_versions.py when tool version sources change",
-      "matchManagers": ["custom.regex"],
+      "description": "lintro-tools base image digest pin (FROM in Dockerfile); native docker digest support, full CI validates the bump",
+      "matchDatasources": ["docker"],
+      "matchPackageNames": [
+        "ghcr.io/lgtm-hq/lintro-tools"
+      ],
+      "matchUpdateTypes": ["digest"],
+      "automerge": false
+    },
+    {
+      "description": "Regenerate version artifacts when tool version sources change",
+      "matchManagers": [
+        "custom.regex",
+        "npm",
+        "pep621",
+        "uv"
+      ],
       "matchFileNames": [
         "Dockerfile",
+        "docker/tools.Dockerfile",
         "lintro/_tool_versions.py",
-        "lintro/tools/manifest.json"
+        "lintro/tools/manifest.json",
+        "package.json",
+        "pyproject.toml"
       ],
       "postUpgradeTasks": {
         "commands": [
@@ -97,7 +126,8 @@
           "lintro/tools/manifest.json",
           "package.json",
           "pyproject.toml",
-          "Dockerfile"
+          "Dockerfile",
+          "docker/tools.Dockerfile"
         ],
         "executionMode": "branch"
       }
@@ -135,7 +165,10 @@
     },
     {
       "customType": "regex",
-      "managerFilePatterns": ["Dockerfile"],
+      "managerFilePatterns": [
+        "Dockerfile",
+        "docker/tools.Dockerfile"
+      ],
       "matchStrings": [
         "ARG BUN_VERSION=(?<currentValue>[0-9]+\\.[0-9]+\\.[0-9]+)"
       ],
@@ -145,7 +178,10 @@
     },
     {
       "customType": "regex",
-      "managerFilePatterns": ["Dockerfile"],
+      "managerFilePatterns": [
+        "Dockerfile",
+        "docker/tools.Dockerfile"
+      ],
       "matchStrings": [
         "ARG UV_VERSION=(?<currentValue>[0-9]+\\.[0-9]+\\.[0-9]+)"
       ],
@@ -243,6 +279,19 @@
       "extractVersionTemplate": "^v(?<version>.*)$"
     },
     {
+      "description": "Update dotenv-linter version in _tool_versions.py",
+      "customType": "regex",
+      "managerFilePatterns": [
+        "lintro/_tool_versions\\.py"
+      ],
+      "matchStrings": [
+        "ToolName\\.DOTENV_LINTER:\\s*\"(?<currentValue>[0-9]+\\.[0-9]+\\.[0-9]+)\""
+      ],
+      "datasourceTemplate": "github-releases",
+      "packageNameTemplate": "dotenv-linter/dotenv-linter",
+      "extractVersionTemplate": "^v(?<version>.*)$"
+    },
+    {
       "description": "Update taplo version in _tool_versions.py",
       "customType": "regex",
       "managerFilePatterns": [
@@ -256,27 +305,29 @@
       "extractVersionTemplate": "^(?<version>[0-9]+\\.[0-9]+\\.[0-9]+)$"
     },
     {
-<<<<<<< HEAD
       "description": "Update buf version in _tool_versions.py",
-=======
-      "description": "Update vale version in _tool_versions.py",
->>>>>>> origin/main
       "customType": "regex",
       "managerFilePatterns": [
         "lintro/_tool_versions\\.py"
       ],
       "matchStrings": [
-<<<<<<< HEAD
         "ToolName\\.BUF:\\s*\"(?<currentValue>[0-9]+\\.[0-9]+\\.[0-9]+)\""
       ],
       "datasourceTemplate": "github-releases",
       "packageNameTemplate": "bufbuild/buf",
-=======
+      "extractVersionTemplate": "^v(?<version>.*)$"
+    },
+    {
+      "description": "Update vale version in _tool_versions.py",
+      "customType": "regex",
+      "managerFilePatterns": [
+        "lintro/_tool_versions\\.py"
+      ],
+      "matchStrings": [
         "ToolName\\.VALE:\\s*\"(?<currentValue>[0-9]+\\.[0-9]+\\.[0-9]+)\""
       ],
       "datasourceTemplate": "github-releases",
       "packageNameTemplate": "errata-ai/vale",
->>>>>>> origin/main
       "extractVersionTemplate": "^v(?<version>.*)$"
     },
     {
