@@ -41,13 +41,34 @@ reject_control_chars() {
 	fi
 }
 
-backfill_version="$(trim_input "${BACKFILL_VERSION:-}")"
-backfill_ref="$(trim_input "${BACKFILL_REF:-}")"
-force_publish="$(trim_input "${FORCE_PUBLISH:-false}")"
+# Docker tags and git refs must not contain embedded whitespace after trim.
+reject_embedded_whitespace() {
+	local name="$1"
+	local value="$2"
+	if [[ "$value" =~ [[:space:]] ]]; then
+		echo "::error::${name} must not contain whitespace." >&2
+		exit 1
+	fi
+}
 
-reject_control_chars BACKFILL_VERSION "$backfill_version"
-reject_control_chars BACKFILL_REF "$backfill_ref"
-reject_control_chars FORCE_PUBLISH "$force_publish"
+raw_backfill_version="${BACKFILL_VERSION:-}"
+raw_backfill_ref="${BACKFILL_REF:-}"
+raw_force_publish="${FORCE_PUBLISH:-false}"
+
+reject_control_chars BACKFILL_VERSION "$raw_backfill_version"
+reject_control_chars BACKFILL_REF "$raw_backfill_ref"
+reject_control_chars FORCE_PUBLISH "$raw_force_publish"
+
+backfill_version="$(trim_input "$raw_backfill_version")"
+backfill_ref="$(trim_input "$raw_backfill_ref")"
+force_publish="$(trim_input "$raw_force_publish")"
+
+if [[ -n "$backfill_version" ]]; then
+	reject_embedded_whitespace BACKFILL_VERSION "$backfill_version"
+fi
+if [[ -n "$backfill_ref" ]]; then
+	reject_embedded_whitespace BACKFILL_REF "$backfill_ref"
+fi
 
 if [[ -n "$backfill_version" && -z "$backfill_ref" ]]; then
 	echo "::error::BACKFILL_REF is required when BACKFILL_VERSION is set." >&2

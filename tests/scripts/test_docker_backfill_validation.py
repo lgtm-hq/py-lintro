@@ -83,6 +83,22 @@ def _run_validation(env: dict[str, str]) -> subprocess.CompletedProcess[str]:
             },
             "BACKFILL_REF must not contain control characters or newlines",
         ),
+        (
+            {
+                "BACKFILL_VERSION": "0.65.0 rc1",
+                "BACKFILL_REF": "v0.65.0",
+                "FORCE_PUBLISH": "false",
+            },
+            "BACKFILL_VERSION must not contain whitespace",
+        ),
+        (
+            {
+                "BACKFILL_VERSION": "0.65.0",
+                "BACKFILL_REF": "v0.65.0",
+                "FORCE_PUBLISH": "true\n",
+            },
+            "FORCE_PUBLISH must not contain control characters or newlines",
+        ),
     ],
     ids=[
         "missing-backfill-ref",
@@ -92,6 +108,8 @@ def _run_validation(env: dict[str, str]) -> subprocess.CompletedProcess[str]:
         "padded-backfill-pair",
         "newline-in-backfill-version",
         "newline-in-backfill-ref",
+        "embedded-whitespace-in-version",
+        "trailing-newline-in-force-publish",
     ],
 )
 def test_validate_docker_backfill_inputs_rejects_invalid(
