@@ -239,6 +239,10 @@ def get_tools_to_run(
 ) -> ToolsToRunResult:
     """Get the list of tools to run based on the tools string and action.
 
+    ``execution.enabled_tools`` filters default / ``all`` runs only. An
+    explicit ``--tools`` list bypasses that allowlist so named tools still
+    run; per-tool ``tools.<name>.enabled: false`` continues to apply.
+
     Args:
         tools: Comma-separated tool names, "all", or None.
         action: "check", "fmt", or "test".
@@ -327,10 +331,14 @@ def get_tools_to_run(
             raise ValueError(
                 f"Unknown tool '{name}'. Available tools: {available_names}",
             )
-        # Track disabled tools with reason
-        if not config.is_tool_enabled(name):
-            reason = _get_disabled_reason(config, name)
-            skipped.append(SkippedTool(name=name, reason=reason))
+        # Explicit --tools bypasses execution.enabled_tools (that allowlist
+        # scopes default / --tools all runs only). Still honor per-tool
+        # tools.<name>.enabled: false.
+        tool_config = config.get_tool_config(name)
+        if not tool_config.enabled:
+            skipped.append(
+                SkippedTool(name=name, reason="disabled in config"),
+            )
             continue
         # Verify the tool supports the requested action
         if action == Action.FIX:
