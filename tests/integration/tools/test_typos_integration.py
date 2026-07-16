@@ -98,6 +98,9 @@ def test_fix_corrects_real_typos(
     assert_that(
         result.fixed_issues_count + result.remaining_issues_count,
     ).is_equal_to(result.initial_issues_count)
+    # The fixture is fully correctable, so the fix must complete cleanly.
+    assert_that(result.remaining_issues_count).is_equal_to(0)
+    assert_that(result.success).is_true()
 
     fixed_content = Path(file_with_typos).read_text()
     assert_that(fixed_content).contains("should")

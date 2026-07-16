@@ -1704,6 +1704,7 @@ main() {
 		["svelte-check"]="Svelte type checking"
 		["taplo"]="TOML linting and formatting"
 		["tsc"]="TypeScript type checking"
+		["typos"]="Source-code spell checking"
 		["vue-tsc"]="Vue TypeScript type checking"
 		["yamllint"]="YAML linting"
 	)
@@ -1755,6 +1756,12 @@ main() {
 		elif command -v "$tool" &>/dev/null; then
 			version=$("$tool" --version 2>/dev/null || echo "installed")
 			echo -e "${GREEN}✓ $tool: $version${NC}"
+		elif [ -n "$BIN_DIR" ] && [ -x "$BIN_DIR/$tool" ]; then
+			# Local installs (e.g. typos via cargo/quickinstall) land in
+			# $BIN_DIR, which may not be on PATH in this shell yet. Verify the
+			# binary directly so a successful install is not reported missing.
+			version=$("$BIN_DIR/$tool" --version 2>/dev/null || echo "installed")
+			echo -e "${GREEN}✓ $tool: $version (in $BIN_DIR)${NC}"
 		else
 			echo -e "${RED}✗ $tool: not found in PATH${NC}"
 		fi
