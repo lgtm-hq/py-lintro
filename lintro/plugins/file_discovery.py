@@ -74,6 +74,7 @@ def discover_files(
     exclude_patterns: list[str],
     include_venv: bool = False,
     show_progress: bool = True,
+    diff_base: str | None = None,
 ) -> list[str]:
     """Discover files matching the tool's patterns.
 
@@ -83,6 +84,8 @@ def discover_files(
         exclude_patterns: Patterns to exclude.
         include_venv: Whether to include virtual environment files.
         show_progress: Whether to show a progress spinner during discovery.
+        diff_base: Resolved git base ref. When set, restricts discovery to files
+            changed relative to this ref.
 
     Returns:
         List of matching file paths.
@@ -102,6 +105,7 @@ def discover_files(
             file_patterns=definition.file_patterns,
             exclude_patterns=exclude_patterns,
             include_venv=include_venv,
+            diff_base=diff_base,
         )
         progress.update(task, description=f"Found {len(files)} files")
 

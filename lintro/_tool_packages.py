@@ -27,6 +27,8 @@ from __future__ import annotations
 from lintro.enums.tool_name import ToolName
 
 NPM_PACKAGE_OWNERS: dict[str, ToolName | None] = {
+    "@commitlint/cli": ToolName.COMMITLINT,
+    "@commitlint/config-conventional": None,
     "astro": ToolName.ASTRO_CHECK,
     "svelte-check": ToolName.SVELTE_CHECK,
     "typescript": ToolName.TSC,
@@ -35,6 +37,7 @@ NPM_PACKAGE_OWNERS: dict[str, ToolName | None] = {
     "markdownlint-cli2": ToolName.MARKDOWNLINT,
     "oxlint": ToolName.OXLINT,
     "oxfmt": ToolName.OXFMT,
+    "stylelint": ToolName.STYLELINT,
     "@astrojs/check": None,
 }
 
