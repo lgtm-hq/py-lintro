@@ -559,12 +559,17 @@ def run_lint_tools_simple(
     from lintro.utils.console import create_logger
 
     machine_readable_output = output_format.lower() in ("json", "sarif")
+    # Explicit non-grid formats that must emit a single clean, parseable
+    # document on stdout. For these we route all decorative console UI to
+    # stderr and suppress the human summary so stdout carries only the payload
+    # (grid remains the default human view).
+    clean_stdout_output = output_format.lower() in ("json", "sarif", "csv", "markdown")
     # Score-only takes priority over machine-readable formats so
     # ``--score --output-format json`` still prints only the numeric score.
     score_only = bool(score)
     logger = create_logger(
         run_dir=output_manager.run_dir,
-        route_stderr=machine_readable_output or score_only,
+        route_stderr=clean_stdout_output or score_only,
     )
 
     # Get tools to run (now returns ToolsToRunResult with skip info)
@@ -746,9 +751,11 @@ def run_lint_tools_simple(
     else:
         effective_auto_install = is_container
 
-    # Pre-execution config summary (suppress in JSON/SARIF and score-only mode)
+    # Pre-execution config summary. Suppressed for clean-stdout formats
+    # (json/sarif/csv/markdown) and score-only mode because it writes the rich
+    # Configuration box to stdout via its own Console, bypassing route_stderr.
     if (
-        output_format.lower() not in {"json", "sarif"}
+        not clean_stdout_output
         and not score_only
         and (tools_to_run or skipped_tools)
     ):
@@ -1102,6 +1109,17 @@ def run_lint_tools_simple(
                 standard_issues=standard_issues,
             )
             print(sarif_json)
+        elif output_format.lower() == "csv":
+            # Emit a single clean CSV document on stdout; decorative UI has been
+            # routed to stderr so stdout parses with csv.reader.
+            from lintro.utils.output.file_writer import render_csv_report
+
+            print(render_csv_report(all_results), end="")
+        elif output_format.lower() == "markdown":
+            # Emit a single clean Markdown report on stdout.
+            from lintro.utils.output.file_writer import render_markdown_report
+
+            print(render_markdown_report(all_results, action))
         else:
             logger.print_execution_summary(action, all_results)
 
@@ -1138,9 +1156,10 @@ def run_lint_tools_simple(
                     color=_tier_color,
                 )
 
-        # Route warnings to stderr (loguru) for machine-readable formats so
-        # plain-text messages don't corrupt JSON/SARIF output on stdout.
-        _is_machine = output_format.lower() in ("json", "sarif")
+        # Route warnings to stderr (loguru) for clean-stdout formats so
+        # plain-text messages don't corrupt the JSON/SARIF/CSV/Markdown
+        # document on stdout.
+        _is_machine = clean_stdout_output
 
         def _warn(msg: str) -> None:
             if _is_machine:
