@@ -164,15 +164,18 @@ _KNOWN_SPDX: frozenset[str] = (
 
 _SPDX_BY_LOWER: dict[str, str] = {spdx.lower(): spdx for spdx in _KNOWN_SPDX}
 
-_HAS_AND = re.compile(r"\band\b", re.IGNORECASE)
-_HAS_OR = re.compile(r"\bor\b", re.IGNORECASE)
+_HAS_AND = re.compile(r"(?<![\w-])AND(?![\w-])", re.IGNORECASE)
+_HAS_OR = re.compile(r"(?<![\w-])OR(?![\w-])", re.IGNORECASE)
 
 # Prefer these when collapsing AND expressions so denials are not dropped.
 _RESTRICTIVE_FOR_AND: frozenset[str] = (
     STRONG_COPYLEFT_LICENSES | WEAK_COPYLEFT_LICENSES | RESTRICTED_LICENSES
 )
 
-_TOKEN_RE = re.compile(r"\(|\)|\bAND\b|\bOR\b", re.IGNORECASE)
+_TOKEN_RE = re.compile(
+    r"\(|\)|(?<![\w-])AND(?![\w-])|(?<![\w-])OR(?![\w-])",
+    re.IGNORECASE,
+)
 
 
 class _TokenKind(StrEnum):

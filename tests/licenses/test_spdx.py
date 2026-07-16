@@ -81,6 +81,74 @@ def test_mixed_or_and_with_denied_operand_fails_policy() -> None:
     assert_that(result.status).is_equal_to(LicenseStatus.DENIED)
 
 
+def test_and_with_hyphenated_denied_operand_fails_policy() -> None:
+    """An AND with a hyphenated denied operand cannot false-pass.
+
+    The ``or`` inside ``GPL-3.0-or-later`` must not be tokenized as an SPDX
+    operator; ``MIT AND GPL-3.0-or-later`` must collapse to the denied GPL
+    operand so a deny policy rejects it.
+    """
+    expression = "MIT AND GPL-3.0-or-later"
+    package = PackageLicense(
+        name="hyphenated-and",
+        version="1.0.0",
+        license_id=normalize_to_spdx(expression),
+        license_name=expression,
+        ecosystem="npm",
+    )
+    engine = LicensePolicyEngine(
+        LicensesConfig(policy="custom", denied=["GPL-3.0-or-later"]),
+    )
+    result = engine.check(package)
+    assert_that(result.status).is_equal_to(LicenseStatus.DENIED)
+
+
+def test_or_with_hyphenated_operand_passes_when_permissive_allowed() -> None:
+    """An OR with a hyphenated operand resolves to the allowed branch.
+
+    ``(MIT OR GPL-3.0-or-later)`` must tokenize on the real ``OR`` operator
+    (not the ``or`` inside the hyphenated id) and select the allowed MIT
+    operand so the policy passes.
+    """
+    expression = "(MIT OR GPL-3.0-or-later)"
+    package = PackageLicense(
+        name="hyphenated-or",
+        version="1.0.0",
+        license_id=normalize_to_spdx(expression),
+        license_name=expression,
+        ecosystem="npm",
+    )
+    engine = LicensePolicyEngine(
+        LicensesConfig(policy="custom", allowed=["MIT"]),
+    )
+    result = engine.check(package)
+    assert_that(result.status).is_equal_to(LicenseStatus.ALLOWED)
+
+
+def test_or_with_hyphenated_operand_fails_when_both_denied() -> None:
+    """An OR expression fails when every operand is denied by the policy.
+
+    ``(MIT OR GPL-3.0-or-later)`` selects MIT; denying MIT alongside the
+    hyphenated GPL id leaves no allowed branch, so the policy rejects it.
+    """
+    expression = "(MIT OR GPL-3.0-or-later)"
+    package = PackageLicense(
+        name="hyphenated-or-both-denied",
+        version="1.0.0",
+        license_id=normalize_to_spdx(expression),
+        license_name=expression,
+        ecosystem="npm",
+    )
+    engine = LicensePolicyEngine(
+        LicensesConfig(
+            policy="custom",
+            denied=["MIT", "GPL-3.0-or-later"],
+        ),
+    )
+    result = engine.check(package)
+    assert_that(result.status).is_equal_to(LicenseStatus.DENIED)
+
+
 @pytest.mark.parametrize(
     "raw",
     [None, "", "   ", "UNLICENSED", "proprietary", "totally-made-up-license"],
