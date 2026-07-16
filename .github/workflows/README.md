@@ -68,6 +68,8 @@ on `main` failures — hence the `actions: read` + `issues: write` job permissio
   `secure-checkout`)
 - **lintro-report-scheduled.yml**, **pr-comment-cleanup.yml**,
   **test-built-package.yml**, **build-binary.yml**
+- **pr-size.yml** — Labels PRs `size:XS`…`size:XL` from effective diff lines
+  (`scripts/ci/pr-size-label.py`; `pull_request_target`, base-ref checkout only)
 
 ## Token patterns
 
