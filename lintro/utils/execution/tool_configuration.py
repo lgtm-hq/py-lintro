@@ -269,12 +269,24 @@ def get_tools_to_run(
         # Use tool_manager to trigger discovery before checking registration
         if not tool_manager.is_tool_registered("pytest"):
             raise ValueError("pytest tool is not available")
-        # Respect enabled/disabled config for pytest
+        # Explicit --tools pytest bypasses execution.enabled_tools; default
+        # runs (tools is None) still apply the allowlist. Per-tool
+        # tools.pytest.enabled: false always applies.
         config = lintro_config or get_config()
-        if not config.is_tool_enabled("pytest"):
-            reason = _get_disabled_reason(config, "pytest")
+        if tools is None:
+            if not config.is_tool_enabled("pytest"):
+                reason = _get_disabled_reason(config, "pytest")
+                return ToolsToRunResult(
+                    skipped=[SkippedTool(name="pytest", reason=reason)],
+                )
+        elif not config.get_tool_config("pytest").enabled:
             return ToolsToRunResult(
-                skipped=[SkippedTool(name="pytest", reason=reason)],
+                skipped=[
+                    SkippedTool(
+                        name="pytest",
+                        reason="disabled in config",
+                    ),
+                ],
             )
         return ToolsToRunResult(to_run=["pytest"])
 

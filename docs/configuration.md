@@ -40,8 +40,9 @@ configure specific commands rather than tool resolution.
 The configuration system works in a specific order:
 
 1. **Execution Tier** - Determines which tools run and in what order
-   - `enabled_tools`: Empty list means all enabled tools run. Explicit `--tools` on the
-     CLI bypasses this allowlist; it only scopes default runs.
+   - `enabled_tools`: Empty list means all enabled tools run. An explicit named
+     `--tools` list on the CLI bypasses this allowlist; default runs and `--tools all`
+     remain filtered by it.
    - `tool_order`: Controls execution order (priority, alphabetical, or custom)
    - `fail_fast`: Whether to stop on first tool failure
    - `parallel`: Whether to run tools in parallel (default: `true`)
@@ -387,13 +388,13 @@ This summary is shown for all output formats except JSON (`--output-format json`
 When tools are skipped, Lintro reports them in the summary table with a `SKIP` status
 and a note explaining the reason. Common skip reasons:
 
-| Reason                   | Description                                                                                           |
-| ------------------------ | ----------------------------------------------------------------------------------------------------- |
-| `node_modules not found` | Node.js deps missing and auto-install is disabled                                                     |
-| `disabled in config`     | Tool disabled via `tools.<name>.enabled: false`                                                       |
-| `not in enabled_tools`   | Tool not in `execution.enabled_tools` allowlist (default runs only; explicit `--tools` bypasses this) |
-| `deferred to <tool>`     | Framework tool preferred (e.g., tsc to vue-tsc)                                                       |
-| Version check messages   | Tool version below minimum required                                                                   |
+| Reason                   | Description                                                                                            |
+| ------------------------ | ------------------------------------------------------------------------------------------------------ |
+| `node_modules not found` | Node.js deps missing and auto-install is disabled                                                      |
+| `disabled in config`     | Tool disabled via `tools.<name>.enabled: false`                                                        |
+| `not in enabled_tools`   | Tool not in `execution.enabled_tools` allowlist (default/`--tools all` only; named `--tools` bypasses) |
+| `deferred to <tool>`     | Framework tool preferred (e.g., tsc to vue-tsc)                                                        |
+| Version check messages   | Tool version below minimum required                                                                    |
 
 Skipped tools do not affect exit codes — only tools that run and find issues contribute
 to a non-zero exit.
