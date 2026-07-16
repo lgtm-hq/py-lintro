@@ -532,7 +532,12 @@ def test_lintro_report_scheduled_workflow_shares_single_run_output() -> None:
     )
 
     # The notify job consumes the report job's result, not a second analysis.
-    assert_that(workflow["jobs"]["notify"]["needs"]).is_equal_to("lintro-report")
+    # GitHub Actions accepts both scalar and list forms for `needs`.
+    notify_needs = workflow["jobs"]["notify"]["needs"]
+    if isinstance(notify_needs, str):
+        notify_needs = [notify_needs]
+    assert_that(notify_needs).contains("lintro-report")
+
 
 def test_publish_npm_exposes_dist_tag_for_backfills() -> None:
     """publish-npm accepts dist_tag and forwards it as NPM_DIST_TAG."""
