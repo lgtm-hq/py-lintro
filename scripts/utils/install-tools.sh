@@ -81,6 +81,7 @@ This script installs:
   - Semgrep (Security scanner)
   - ShellCheck (Shell script linter)
   - shfmt (Shell script formatter)
+  - dotenv-linter (.env file linter and fixer)
   - SQLFluff (SQL linter and formatter)
   - Taplo (TOML linter and formatter)
   - Vale (Prose/documentation linter)
@@ -167,7 +168,7 @@ should_install() {
 # Kept in sync with the should_install blocks and tools_to_verify array.
 SUPPORTED_TOOLS=(
 	"actionlint" "astro" "bandit" "black" "cargo-audit" "cargo-deny"
-	"clippy" "commitlint" "gitleaks" "hadolint" "j2lint" "markdownlint" "markdownlint-cli2" "mypy" "osv-scanner"
+	"clippy" "commitlint" "dotenv-linter" "gitleaks" "hadolint" "j2lint" "markdownlint" "markdownlint-cli2" "mypy" "osv-scanner"
 	"oxfmt" "oxlint" "prettier" "pydoclint" "ruff" "rustfmt" "semgrep"
 	"shellcheck" "shfmt" "sqlfluff" "stylelint" "svelte-check" "taplo" "tsc"
 	"vale" "vue-tsc" "yamllint"
@@ -1278,6 +1279,72 @@ main() {
 		fi
 	fi # end shellcheck block
 
+	if should_install "dotenv-linter"; then
+		# Install dotenv-linter (.env file linter and fixer)
+		echo -e "${BLUE}Installing dotenv-linter...${NC}"
+		DOTENV_LINTER_VERSION=$(get_tool_version "dotenv-linter") || exit 1
+
+		# Helper function for dotenv-linter binary installation
+		install_dotenv_linter_binary() {
+			local tmpdir
+			tmpdir=$(mktemp -d)
+			local os arch tar_url
+			os=$(uname -s | tr '[:upper:]' '[:lower:]')
+			arch=$(uname -m)
+			# dotenv-linter uses aarch64 on linux but arm64 on darwin
+			case "$os" in
+			darwin)
+				case "$arch" in
+				x86_64 | amd64) arch="x86_64" ;;
+				aarch64 | arm64) arch="arm64" ;;
+				esac
+				;;
+			*)
+				case "$arch" in
+				x86_64 | amd64) arch="x86_64" ;;
+				aarch64 | arm64) arch="aarch64" ;;
+				esac
+				;;
+			esac
+			tar_url="https://github.com/dotenv-linter/dotenv-linter/releases/download/v${DOTENV_LINTER_VERSION}/dotenv-linter-${os}-${arch}.tar.gz"
+			if download_with_retries "$tar_url" "$tmpdir/dotenv-linter.tar.gz" 3; then
+				tar -xzf "$tmpdir/dotenv-linter.tar.gz" -C "$tmpdir"
+				cp "$tmpdir/dotenv-linter" "$BIN_DIR/dotenv-linter"
+				chmod +x "$BIN_DIR/dotenv-linter"
+				rm -rf "$tmpdir"
+				return 0
+			else
+				rm -rf "$tmpdir"
+				return 1
+			fi
+		}
+
+		if [ $DRY_RUN -eq 1 ]; then
+			log_info "[DRY-RUN] Would install dotenv-linter v${DOTENV_LINTER_VERSION}"
+		elif command -v dotenv-linter &>/dev/null; then
+			# Check if installed version meets minimum requirement
+			installed_version=$(dotenv-linter --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)
+			if [ -n "$installed_version" ] && version_ge "$installed_version" "$DOTENV_LINTER_VERSION"; then
+				echo -e "${GREEN}✓ dotenv-linter v${installed_version} already installed (>= v${DOTENV_LINTER_VERSION})${NC}"
+			else
+				echo -e "${YELLOW}⚠ Installing dotenv-linter v${DOTENV_LINTER_VERSION}...${NC}"
+				if install_dotenv_linter_binary; then
+					echo -e "${GREEN}✓ dotenv-linter installed successfully${NC}"
+				else
+					echo -e "${RED}✗ Failed to download dotenv-linter${NC}"
+					exit 1
+				fi
+			fi
+		else
+			if install_dotenv_linter_binary; then
+				echo -e "${GREEN}✓ dotenv-linter installed successfully${NC}"
+			else
+				echo -e "${RED}✗ Failed to download dotenv-linter${NC}"
+				exit 1
+			fi
+		fi
+	fi # end dotenv-linter block
+
 	if should_install "oxlint"; then
 		# Install oxlint via bun (JavaScript/TypeScript linting)
 		echo -e "${BLUE}Installing oxlint...${NC}"
@@ -1556,6 +1623,7 @@ main() {
 		["cargo-audit"]="Rust dependency vulnerability scanning"
 		["cargo-deny"]="Rust dependency license/advisory checking"
 		["clippy"]="Rust linting"
+		["dotenv-linter"]=".env file linting and fixing"
 		["gitleaks"]="Secret detection"
 		["hadolint"]="Docker linting"
 		["j2lint"]="Jinja2 template linting"
@@ -1590,7 +1658,7 @@ main() {
 	# Verify installations
 	echo -e "${YELLOW}Verifying installations...${NC}"
 
-	tools_to_verify=("actionlint" "astro" "bandit" "black" "cargo-audit" "cargo-deny" "clippy" "commitlint" "gitleaks" "hadolint" "j2lint" "markdownlint-cli2" "mypy" "osv-scanner" "oxfmt" "oxlint" "prettier" "pydoclint" "ruff" "rustfmt" "semgrep" "shellcheck" "shfmt" "sqlfluff" "stylelint" "svelte-check" "taplo" "tsc" "vale" "vue-tsc" "yamllint")
+	tools_to_verify=("actionlint" "astro" "bandit" "black" "cargo-audit" "cargo-deny" "clippy" "commitlint" "dotenv-linter" "gitleaks" "hadolint" "j2lint" "markdownlint-cli2" "mypy" "osv-scanner" "oxfmt" "oxlint" "prettier" "pydoclint" "ruff" "rustfmt" "semgrep" "shellcheck" "shfmt" "sqlfluff" "stylelint" "svelte-check" "taplo" "tsc" "vale" "vue-tsc" "yamllint")
 
 	# Filter verification list when --tools is set.
 	# Map aliases so e.g. --tools markdownlint verifies markdownlint-cli2.

@@ -17,6 +17,7 @@ from assertpy import assert_that
 
 from lintro.enums.tool_type import ToolType
 from lintro.parsers.j2lint.j2lint_issue import J2lintIssue
+from lintro.plugins.subprocess_executor import SubprocessResult
 from lintro.tools.definitions.j2lint import J2lintPlugin
 
 
@@ -127,12 +128,19 @@ def _run_check(
     template = tmp_path / "template.j2"
     template.write_text("{{ x }}\n")
 
+    subprocess_result = SubprocessResult(
+        returncode=0 if success else 1,
+        stdout=mock_output,
+        stderr="",
+        output=mock_output,
+    )
+
     with (
         patch.object(plugin, "_prepare_execution") as mock_prepare,
         patch.object(
             plugin,
-            "_run_subprocess",
-            return_value=(success, mock_output),
+            "_run_subprocess_result",
+            return_value=subprocess_result,
         ),
     ):
         mock_ctx = MagicMock()
@@ -175,6 +183,81 @@ def test_check_clean_output(j2lint_plugin: J2lintPlugin, tmp_path: Path) -> None
     result = _run_check(j2lint_plugin, tmp_path, output, success=True)
     assert_that(result.success).is_true()  # type: ignore[attr-defined]
     assert_that(result.issues_count).is_equal_to(0)  # type: ignore[attr-defined]
+
+
+def test_check_nonzero_exit_without_issues_fails(
+    j2lint_plugin: J2lintPlugin,
+    tmp_path: Path,
+) -> None:
+    """A non-zero exit with no parseable output fails instead of passing clean.
+
+    Guards against a crash, bad arguments, or malformed output being reported
+    as a clean pass because the parsed issue list happened to be empty.
+    """
+    result = _run_check(
+        j2lint_plugin,
+        tmp_path,
+        "Traceback (most recent call last): boom",
+        success=False,
+    )
+    assert_that(result.success).is_false()  # type: ignore[attr-defined]
+    assert_that(result.issues_count).is_equal_to(0)  # type: ignore[attr-defined]
+
+
+def test_check_stderr_does_not_corrupt_json_parsing(
+    j2lint_plugin: J2lintPlugin,
+    tmp_path: Path,
+) -> None:
+    """Stderr braces must not shift the stdout JSON bounds during parsing.
+
+    Only stdout is parsed, so a stderr warning containing ``{`` cannot cause
+    the parser to select the wrong JSON object and drop the real findings.
+    """
+    template = tmp_path / "template.j2"
+    template.write_text("{{ x }}\n")
+
+    stdout = _report(
+        errors=[
+            {
+                "id": "S3",
+                "message": "Bad Indentation",
+                "filename": "template.j2",
+                "line_number": 3,
+                "line": "{%- x %}",
+                "severity": "HIGH",
+            },
+        ],
+        warnings=[],
+    )
+    subprocess_result = SubprocessResult(
+        returncode=1,
+        stdout=stdout,
+        stderr="WARNING: stray brace { in stderr }",
+        output=stdout + "\nWARNING: stray brace { in stderr }",
+    )
+
+    with (
+        patch.object(j2lint_plugin, "_prepare_execution") as mock_prepare,
+        patch.object(
+            j2lint_plugin,
+            "_run_subprocess_result",
+            return_value=subprocess_result,
+        ),
+    ):
+        mock_ctx = MagicMock()
+        mock_ctx.should_skip = False
+        mock_ctx.early_result = None
+        mock_ctx.timeout = 30
+        mock_ctx.cwd = str(tmp_path)
+        mock_ctx.files = [str(template)]
+        mock_prepare.return_value = mock_ctx
+
+        result = j2lint_plugin.check([str(template)], {})
+
+    assert_that(result.success).is_false()  # type: ignore[attr-defined]
+    assert_that(result.issues_count).is_equal_to(1)  # type: ignore[attr-defined]
+    issue = cast(J2lintIssue, result.issues[0])  # type: ignore[attr-defined]
+    assert_that(issue.code).is_equal_to("S3")
 
 
 def test_check_warnings_only_succeeds(

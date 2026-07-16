@@ -160,7 +160,7 @@ class J2lintPlugin(BaseToolPlugin):
 
         cmd = self._build_command(files=ctx.files)
         try:
-            _success, output = self._run_subprocess(cmd=cmd, timeout=ctx.timeout)
+            result = self._run_subprocess_result(cmd=cmd, timeout=ctx.timeout)
         except subprocess.TimeoutExpired:
             timeout_msg = (
                 f"j2lint execution timed out ({ctx.timeout}s limit exceeded). "
@@ -181,13 +181,35 @@ class J2lintPlugin(BaseToolPlugin):
                 issues_count=0,
             )
 
-        issues = parse_j2lint_output(output)
+        # Parse stdout only: j2lint writes its ``--json`` report to stdout, and
+        # mixing in stderr (warnings or tracebacks containing braces) can shift
+        # the JSON object bounds and silently drop real findings. See #1043.
+        issues = parse_j2lint_output(result.stdout)
         error_count = sum(1 for issue in issues if issue.level == "error")
+
+        # j2lint exits non-zero when it reports lint errors, but also on a
+        # genuine failure (bad arguments, crash, malformed output). If it failed
+        # without producing any parseable issue, surface that as a tool failure
+        # rather than a clean pass.
+        if not result.success and not issues:
+            logger.error(
+                f"j2lint exited with code {result.returncode} and produced no "
+                f"parseable output. stderr: {result.stderr.strip()}",
+            )
+            return ToolResult(
+                name=self.definition.name,
+                success=False,
+                output=(
+                    result.output
+                    or "j2lint exited with an error but produced no output."
+                ),
+                issues_count=0,
+            )
 
         return ToolResult(
             name=self.definition.name,
             success=error_count == 0,
-            output=output if issues else None,
+            output=result.stdout if issues else None,
             issues_count=len(issues),
             issues=issues,
         )
