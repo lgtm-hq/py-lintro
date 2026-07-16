@@ -9,6 +9,7 @@ from loguru import logger
 from lintro.ai.prompts.review import format_lint_results_section
 from lintro.enums.action import Action
 from lintro.models.core.tool_result import ToolResult
+from lintro.parsers.base_issue import resolve_issue_code
 from lintro.tools import tool_manager
 from lintro.utils.execution.tool_configuration import (
     configure_tool_for_execution,
@@ -109,7 +110,7 @@ def format_lint_results_for_prompt(
         for issue in result.issues:
             if len(lines) >= max_entries:
                 break
-            code = getattr(issue, "code", "") or "unknown"
+            code = resolve_issue_code(issue) or "unknown"
             message = getattr(issue, "message", "") or ""
             file_path = getattr(issue, "file", "") or ""
             line_no = getattr(issue, "line", None)

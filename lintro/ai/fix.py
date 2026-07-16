@@ -49,6 +49,7 @@ from lintro.ai.sanitize import (
 )
 from lintro.ai.secrets import redact_secrets
 from lintro.ai.token_budget import estimate_tokens
+from lintro.parsers.base_issue import resolve_issue_code
 
 if TYPE_CHECKING:
     from lintro.ai.providers.base import AIResponse, BaseAIProvider
@@ -226,7 +227,7 @@ def _generate_single_fix(
         return None
     issue_file, file_content = validated
 
-    code = getattr(issue, "code", "") or ""
+    code = resolve_issue_code(issue)
 
     if enable_cache:
         cached = check_cache(
@@ -312,7 +313,7 @@ def _generate_batch_fixes(
     issues_list_parts: list[str] = []
     raw_messages: list[str] = []
     for idx, issue in enumerate(file_issues, 1):
-        code = getattr(issue, "code", "") or ""
+        code = resolve_issue_code(issue)
         raw_messages.append(issue.message)
         msg = redact_secrets(sanitize_code_content(issue.message))
         issues_list_parts.append(

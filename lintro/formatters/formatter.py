@@ -24,7 +24,7 @@ from dataclasses import dataclass
 from lintro.enums.display_column import STANDARD_COLUMNS, DisplayColumn
 from lintro.enums.output_format import OutputFormat, normalize_output_format
 from lintro.formatters.core.format_registry import TableDescriptor, get_style
-from lintro.parsers.base_issue import BaseIssue
+from lintro.parsers.base_issue import BaseIssue, resolve_issue_code
 from lintro.utils.path_utils import normalize_file_path_for_display
 
 
@@ -64,7 +64,7 @@ class IssueDedupKey:
             file=getattr(issue, "file", "") or "",
             line=getattr(issue, "line", None) or 0,
             column=getattr(issue, "column", None) or 0,
-            code=getattr(issue, "code", "") or "",
+            code=resolve_issue_code(issue),
             message=getattr(issue, "message", "") or "",
         )
 

@@ -29,6 +29,7 @@ from lintro.ai.prompts import (
 from lintro.ai.secrets import redact_secrets
 from lintro.ai.summary_params import SummaryGenParams
 from lintro.ai.token_budget import estimate_tokens
+from lintro.parsers.base_issue import resolve_issue_code
 
 if TYPE_CHECKING:
     from lintro.ai.providers.base import BaseAIProvider
@@ -101,7 +102,7 @@ def _build_issues_digest(
         # Group by code within this tool
         by_code: dict[str, list[object]] = defaultdict(list)
         for issue in issues:
-            code = getattr(issue, "code", None) or "unknown"
+            code = resolve_issue_code(issue) or "unknown"
             by_code[code].append(issue)
 
         header = f"\n## {tool_name} ({len(issues)} issues)"

@@ -6,6 +6,7 @@ duplication across the 14+ different issue dataclasses.
 The base class includes:
 - Common fields (file, line, column, message)
 - A to_display_row() method for unified formatting with configurable field mapping
+- A get_code() method for canonical rule-code access across formats
 - A get_severity() method for normalized severity access
 """
 
@@ -15,6 +16,36 @@ from dataclasses import dataclass, field
 from typing import ClassVar
 
 from lintro.enums.severity_level import SeverityLevel, normalize_severity_level
+
+
+def resolve_issue_code(issue: object) -> str:
+    """Return the canonical rule code for an issue-like object.
+
+    Prefers :meth:`BaseIssue.get_code` when available so ``DISPLAY_FIELD_MAP``
+    aliases (``rule``, ``check_id``, ``test_id``, …) resolve consistently
+    across grid, CSV, JSON, and other consumers. Falls back to a raw ``code``
+    attribute for duck-typed objects that are not ``BaseIssue`` subclasses.
+
+    Callables that return a non-string (for example ``MagicMock`` auto-attrs
+    in unit tests) are ignored so the raw ``code`` attribute still wins.
+
+    Args:
+        issue: Issue-like object.
+
+    Returns:
+        Rule code string, or empty string when unavailable.
+    """
+    get_code = getattr(issue, "get_code", None)
+    if callable(get_code):
+        value = get_code()
+        if isinstance(value, str):
+            return value
+        if value is None:
+            return ""
+        if isinstance(value, (int, float)):
+            return str(value)
+        # Non-string return (e.g. MagicMock): fall through to raw attr.
+    return str(getattr(issue, "code", "") or "")
 
 
 @dataclass
@@ -58,6 +89,22 @@ class BaseIssue:
     message: str = field(default="")
     doc_url: str = field(default="", repr=False)
 
+    def get_code(self) -> str:
+        """Return the canonical rule/check code for this issue.
+
+        Resolves the native identifier via ``DISPLAY_FIELD_MAP`` so tools that
+        store it as ``rule``, ``check_id``, ``test_id``, ``advisory_id``, etc.
+        still expose a consistent ``code`` value to formatters and writers.
+
+        Returns:
+            The rule code string, or empty string when unavailable.
+        """
+        attr_name = self.DISPLAY_FIELD_MAP.get("code", "code")
+        raw = getattr(self, attr_name, None)
+        if not raw:
+            return ""
+        return str(raw)
+
     def get_severity(self) -> SeverityLevel:
         """Return the normalized severity for this issue.
 
@@ -100,11 +147,10 @@ class BaseIssue:
         field_map = self.DISPLAY_FIELD_MAP
 
         # Resolve each mapped field
-        code_attr = field_map.get("code", "code")
         fixable_attr = field_map.get("fixable", "fixable")
         message_attr = field_map.get("message", "message")
 
-        code_val = getattr(self, code_attr, None) or ""
+        code_val = self.get_code()
         fixable_val = getattr(self, fixable_attr, False)
         message_val = getattr(self, message_attr, "") or ""
 
@@ -112,7 +158,7 @@ class BaseIssue:
             "file": self.file,
             "line": str(self.line) if self.line else "-",
             "column": str(self.column) if self.column else "-",
-            "code": str(code_val) if code_val else "",
+            "code": code_val,
             "message": message_val,
             "severity": str(self.get_severity()),
             "fixable": "Yes" if fixable_val else "",

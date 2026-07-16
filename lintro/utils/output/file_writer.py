@@ -28,7 +28,7 @@ from lintro.formatters.formatter import (
     format_issues_with_sections,
     merge_detected_and_remaining,
 )
-from lintro.parsers.base_issue import BaseIssue
+from lintro.parsers.base_issue import BaseIssue, resolve_issue_code
 from lintro.utils.json_output import serialize_tool_result
 from lintro.utils.output.helpers import sanitize_csv_value
 from lintro.utils.output.parser_registration import ParserError
@@ -62,7 +62,7 @@ def build_doc_url_map(all_results: Sequence[Any]) -> dict[str, str]:
     for result in all_results:
         if hasattr(result, "issues") and result.issues:
             for issue in result.issues:
-                code = str(getattr(issue, "code", "") or "")
+                code = resolve_issue_code(issue)
                 url = str(getattr(issue, "doc_url", "") or "")
                 if code and url:
                     doc_url_map[code] = url
@@ -99,7 +99,7 @@ def _render_markdown_issue_rows(issues: Sequence[BaseIssue]) -> list[str]:
     for issue in issues:
         file_val = str(getattr(issue, "file", "") or "").replace("|", r"\|")
         line_val = getattr(issue, "line", None) or 0
-        code_val = str(getattr(issue, "code", "") or "").replace("|", r"\|")
+        code_val = resolve_issue_code(issue).replace("|", r"\|")
         msg_val = str(getattr(issue, "message", "") or "").replace("|", r"\|")
         doc_url = str(getattr(issue, "doc_url", "") or "")
         # Percent-encode pipes in the URL so they don't break the
@@ -125,7 +125,7 @@ def _render_html_issue_rows(issues: Sequence[BaseIssue]) -> list[str]:
     for issue in issues:
         f_val = html.escape(str(getattr(issue, "file", "") or ""))
         l_val = html.escape(str(getattr(issue, "line", None) or 0))
-        c_val = html.escape(str(getattr(issue, "code", "") or ""))
+        c_val = html.escape(resolve_issue_code(issue))
         m_val = html.escape(str(getattr(issue, "message", "") or ""))
         doc_url = str(getattr(issue, "doc_url", "") or "")
         d_val = (
@@ -252,7 +252,7 @@ def write_output_file(
                             sanitize_csv_value(
                                 str(getattr(issue, "line", None) or 0),
                             ),
-                            sanitize_csv_value(str(getattr(issue, "code", "") or "")),
+                            sanitize_csv_value(resolve_issue_code(issue)),
                             sanitize_csv_value(
                                 str(getattr(issue, "message", "") or ""),
                             ),

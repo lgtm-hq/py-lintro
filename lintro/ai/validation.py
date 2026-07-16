@@ -19,6 +19,8 @@ from typing import TYPE_CHECKING
 
 from loguru import logger
 
+from lintro.parsers.base_issue import resolve_issue_code
+
 if TYPE_CHECKING:
     from lintro.ai.models import AIFixSuggestion
     from lintro.models.core.tool_result import ToolResult
@@ -183,7 +185,7 @@ def _validate_suggestions(
         # Build a multiset for accurate one-to-one matching.
         remaining_counts: Counter[IssueMatchKey] = Counter()
         for issue in remaining_issues:
-            code = getattr(issue, "code", "") or ""
+            code = resolve_issue_code(issue)
             remaining_path = _normalize_file_path(getattr(issue, "file", ""))
             line = _normalize_line(getattr(issue, "line", None))
             remaining_counts[(remaining_path, code, line)] += 1

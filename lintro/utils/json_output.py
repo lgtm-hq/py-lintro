@@ -19,6 +19,7 @@ from lintro.ai.metadata import normalize_ai_metadata
 from lintro.enums.action import Action, normalize_action
 from lintro.formatters.formatter import merge_detected_and_remaining
 from lintro.models.core.tool_result import ToolResult
+from lintro.parsers.base_issue import resolve_issue_code
 
 if TYPE_CHECKING:
     from lintro.parsers.base_issue import BaseIssue
@@ -37,7 +38,7 @@ def serialize_issue(issue: "BaseIssue") -> dict[str, Any]:
     data: dict[str, Any] = {
         "file": getattr(issue, "file", "") or "",
         "line": getattr(issue, "line", None) or 0,
-        "code": getattr(issue, "code", "") or "",
+        "code": resolve_issue_code(issue),
         "message": getattr(issue, "message", "") or "",
     }
     doc_url = getattr(issue, "doc_url", "") or ""

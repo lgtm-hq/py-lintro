@@ -245,3 +245,93 @@ def test_get_severity_passes_through_enum_instance() -> None:
 
     issue = EnumIssue(file="test.py", line=1)
     assert_that(issue.get_severity()).is_equal_to(SeverityLevel.ERROR)
+
+
+# =============================================================================
+# Tests for get_code() / resolve_issue_code()
+# =============================================================================
+
+
+def test_get_code_returns_empty_when_no_code_field() -> None:
+    """get_code returns empty string when issue has no code attr."""
+    issue = BaseIssue(file="test.py", line=1)
+    assert_that(issue.get_code()).is_equal_to("")
+
+
+def test_get_code_reads_native_code_field() -> None:
+    """get_code returns the native code attribute when mapped to code."""
+
+    @dataclass
+    class CodedIssue(BaseIssue):
+        code: str = ""
+
+    issue = CodedIssue(file="test.py", line=1, code="E501")
+    assert_that(issue.get_code()).is_equal_to("E501")
+
+
+def test_get_code_uses_display_field_map() -> None:
+    """get_code resolves the attribute via DISPLAY_FIELD_MAP."""
+
+    @dataclass
+    class MappedIssue(BaseIssue):
+        DISPLAY_FIELD_MAP: ClassVar[dict[str, str]] = {
+            **BaseIssue.DISPLAY_FIELD_MAP,
+            "code": "rule",
+        }
+        rule: str | None = None
+
+    issue = MappedIssue(file="bad.yml", line=1, rule="document-start")
+    assert_that(issue.get_code()).is_equal_to("document-start")
+
+
+def test_get_code_falls_back_on_empty_mapped_value() -> None:
+    """get_code returns empty string when the mapped attribute is empty/None."""
+
+    @dataclass
+    class MappedIssue(BaseIssue):
+        DISPLAY_FIELD_MAP: ClassVar[dict[str, str]] = {
+            **BaseIssue.DISPLAY_FIELD_MAP,
+            "code": "rule",
+        }
+        rule: str | None = None
+
+    issue = MappedIssue(file="bad.yml", line=1, rule=None)
+    assert_that(issue.get_code()).is_equal_to("")
+
+
+def test_resolve_issue_code_prefers_get_code() -> None:
+    """resolve_issue_code uses get_code for DISPLAY_FIELD_MAP aliases."""
+    from lintro.parsers.base_issue import resolve_issue_code
+
+    @dataclass
+    class MappedIssue(BaseIssue):
+        DISPLAY_FIELD_MAP: ClassVar[dict[str, str]] = {
+            **BaseIssue.DISPLAY_FIELD_MAP,
+            "code": "rule",
+        }
+        rule: str = "colons"
+
+    issue = MappedIssue(file="bad.yml", line=1, rule="colons")
+    assert_that(resolve_issue_code(issue)).is_equal_to("colons")
+
+
+def test_resolve_issue_code_falls_back_to_raw_code_attr() -> None:
+    """resolve_issue_code falls back to a raw code attribute for duck types."""
+    from lintro.parsers.base_issue import resolve_issue_code
+
+    class DuckIssue:
+        code = "F401"
+
+    assert_that(resolve_issue_code(DuckIssue())).is_equal_to("F401")
+
+
+def test_resolve_issue_code_ignores_non_string_get_code_return() -> None:
+    """resolve_issue_code ignores MagicMock-style get_code return values."""
+    from unittest.mock import MagicMock
+
+    from lintro.parsers.base_issue import resolve_issue_code
+
+    issue = MagicMock()
+    issue.code = "E501"
+    # MagicMock auto-creates a callable get_code that returns another mock.
+    assert_that(resolve_issue_code(issue)).is_equal_to("E501")

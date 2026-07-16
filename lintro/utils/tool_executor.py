@@ -15,6 +15,7 @@ from typing import TYPE_CHECKING, Any
 
 from lintro.enums.action import Action, normalize_action
 from lintro.models.core.tool_result import ToolResult
+from lintro.parsers.base_issue import resolve_issue_code
 from lintro.tools import tool_manager
 from lintro.utils.config import load_post_checks_config
 from lintro.utils.execution.exit_codes import (
@@ -373,12 +374,9 @@ def _enrich_issues_with_doc_urls(
         for issue in issues:
             if getattr(issue, "doc_url", ""):
                 continue
-            # Resolve the code attribute via DISPLAY_FIELD_MAP so tools
-            # that store their identifier under a different name (e.g.
-            # advisory_id, vuln_id, rule_id) are handled correctly.
-            field_map = getattr(issue, "DISPLAY_FIELD_MAP", {})
-            code_attr = field_map.get("code", "code")
-            code = str(getattr(issue, code_attr, "") or "")
+            # Resolve via the canonical code accessor so DISPLAY_FIELD_MAP
+            # aliases (advisory_id, vuln_id, rule_id, …) are handled correctly.
+            code = resolve_issue_code(issue)
             if code:
                 url = tool.doc_url(code)
                 if url:

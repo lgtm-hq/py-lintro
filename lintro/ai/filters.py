@@ -7,6 +7,8 @@ import re
 from pathlib import PurePosixPath
 from typing import TYPE_CHECKING
 
+from lintro.parsers.base_issue import resolve_issue_code
+
 if TYPE_CHECKING:
     from lintro.ai.config import AIConfig
     from lintro.parsers.base_issue import BaseIssue
@@ -79,7 +81,7 @@ def should_process_issue(issue: BaseIssue, config: AIConfig) -> bool:
         True if the issue should be processed by AI, False otherwise.
     """
     file_path = getattr(issue, "file", "") or ""
-    code = getattr(issue, "code", "") or ""
+    code = resolve_issue_code(issue)
 
     # Path filtering — _glob_match handles both * and ** correctly
     if config.include_paths and not any(
