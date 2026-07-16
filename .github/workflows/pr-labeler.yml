@@ -12,11 +12,11 @@ permissions: {}
 jobs:
   label:
     # yamllint disable-line rule:line-length
-    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-pr-labeler.yml@1014e3d7d5441a63215d2096545a46cff6de101c # v0.48.0
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-pr-labeler.yml@31c25ef2e8992960e218524780e34f44f51271b5 # v0.54.0
     with:
       configuration-path: .github/labeler.yml
       sync-labels: false
-      tooling-ref: '1014e3d7d5441a63215d2096545a46cff6de101c' # v0.48.0
+      tooling-ref: '31c25ef2e8992960e218524780e34f44f51271b5' # v0.54.0
       egress-policy: block
       egress-preset: github-tooling
     permissions:

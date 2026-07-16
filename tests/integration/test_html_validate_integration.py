@@ -5,7 +5,7 @@ direct binary). They exercise the plugin end-to-end against a real HTML fixture.
 """
 
 import shutil
-import subprocess
+import subprocess  # nosec B404 - subprocess is used to drive the tool/CLI under test; invocations use shell=False
 import tempfile
 from pathlib import Path
 
@@ -47,7 +47,7 @@ def _html_validate_runnable() -> bool:
         # and bunx/npx resolution can succeed from the repo root (whose
         # node_modules satisfy the CLI's dependencies) while failing anywhere
         # else. Probing from the repo would let the tests run a broken tool.
-        result = subprocess.run(
+        result = subprocess.run(  # nosec B603 B607 - fixed argv run against a real binary in a controlled test; binary name resolved from PATH, not attacker-controlled; shell=False, no user shell input
             [*cmd_base, "--version"],
             capture_output=True,
             text=True,

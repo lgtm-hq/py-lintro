@@ -6,7 +6,7 @@ import os
 import platform
 import re
 import shutil
-import subprocess
+import subprocess  # nosec B404 - subprocess is the core mechanism for invoking external tools; all invocations use shell=False
 import sys
 from pathlib import Path
 
@@ -25,7 +25,7 @@ from lintro.utils.environment.system_info import SystemInfo
 def _run_command(command: list[str], *, timeout: int = 5) -> str | None:
     """Run a command and return its output, or None on failure."""
     try:
-        result = subprocess.run(
+        result = subprocess.run(  # nosec B603 - argv is an internally-built list run with shell=False; binary resolved from a known command, no user shell input
             command,
             capture_output=True,
             text=True,
