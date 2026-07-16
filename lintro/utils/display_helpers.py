@@ -3,11 +3,11 @@
 Contains ASCII art display functions and styling constants.
 """
 
-import sys
 from collections.abc import Callable
 
 from loguru import logger
 
+from lintro.cli_utils.onboarding import is_interactive_tty
 from lintro.enums.action import Action
 from lintro.utils.formatting import read_ascii_art
 
@@ -22,14 +22,14 @@ def print_ascii_art(
 ) -> None:
     """Print ASCII art based on the issue count.
 
-    Only prints when stdout is an interactive TTY to avoid polluting
-    CI logs, piped output, and report files.
+    Only prints when stdin and stdout are interactive TTYs to avoid
+    polluting CI logs, piped output, and report files.
 
     Args:
         console_output_func: Function to output text to console
         issue_count: The number of issues (remaining, fixed, or total)
     """
-    if not sys.stdout.isatty():
+    if not is_interactive_tty():
         return
     try:
         if issue_count == 0:

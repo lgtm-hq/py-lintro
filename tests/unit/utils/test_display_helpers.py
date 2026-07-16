@@ -72,9 +72,11 @@ def console_capture() -> Generator[tuple[list[str], Callable[..., None]], None, 
         ),
     ],
 )
+@patch("lintro.utils.display_helpers.is_interactive_tty", return_value=True)
 @patch("lintro.utils.display_helpers.read_ascii_art")
 def test_print_ascii_art_selects_correct_file(
     mock_read: MagicMock,
+    _mock_tty: MagicMock,
     console_capture: tuple[list[str], Callable[..., None]],
     issue_count: int,
     expected_file: str,
@@ -85,6 +87,7 @@ def test_print_ascii_art_selects_correct_file(
 
     Args:
         mock_read: Mock for read_ascii_art function.
+        _mock_tty: Mock forcing interactive TTY precondition.
         console_capture: Fixture providing output capture.
         issue_count: Number of issues to simulate.
         expected_file: Expected filename to be loaded.
@@ -101,15 +104,18 @@ def test_print_ascii_art_selects_correct_file(
     assert_that(output[0]).contains(expected_in_output)
 
 
+@patch("lintro.utils.display_helpers.is_interactive_tty", return_value=True)
 @patch("lintro.utils.display_helpers.read_ascii_art")
 def test_print_ascii_art_no_output_when_empty(
     mock_read: MagicMock,
+    _mock_tty: MagicMock,
     console_capture: tuple[list[str], Callable[..., None]],
 ) -> None:
     """Verify no output is produced when ASCII art is empty.
 
     Args:
         mock_read: Mock for read_ascii_art function.
+        _mock_tty: Mock forcing interactive TTY precondition.
         console_capture: Fixture providing output capture.
     """
     output, mock_console = console_capture
@@ -120,15 +126,18 @@ def test_print_ascii_art_no_output_when_empty(
     assert_that(output).is_empty()
 
 
+@patch("lintro.utils.display_helpers.is_interactive_tty", return_value=True)
 @patch("lintro.utils.display_helpers.read_ascii_art")
 def test_print_ascii_art_handles_exception_gracefully(
     mock_read: MagicMock,
+    _mock_tty: MagicMock,
     console_capture: tuple[list[str], Callable[..., None]],
 ) -> None:
     """Verify exceptions are handled gracefully without crashing.
 
     Args:
         mock_read: Mock for read_ascii_art function.
+        _mock_tty: Mock forcing interactive TTY precondition.
         console_capture: Fixture providing output capture.
     """
     output, mock_console = console_capture
@@ -137,6 +146,28 @@ def test_print_ascii_art_handles_exception_gracefully(
     # Should not raise, just log debug
     print_ascii_art(mock_console, issue_count=0)
 
+    assert_that(output).is_empty()
+
+
+@patch("lintro.utils.display_helpers.is_interactive_tty", return_value=False)
+@patch("lintro.utils.display_helpers.read_ascii_art")
+def test_print_ascii_art_skips_when_not_tty(
+    mock_read: MagicMock,
+    _mock_tty: MagicMock,
+    console_capture: tuple[list[str], Callable[..., None]],
+) -> None:
+    """Verify ASCII art is skipped when not on an interactive TTY.
+
+    Args:
+        mock_read: Mock for read_ascii_art function.
+        _mock_tty: Mock forcing non-interactive TTY precondition.
+        console_capture: Fixture providing output capture.
+    """
+    output, mock_console = console_capture
+
+    print_ascii_art(mock_console, issue_count=0)
+
+    mock_read.assert_not_called()
     assert_that(output).is_empty()
 
 
