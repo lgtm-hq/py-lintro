@@ -73,7 +73,7 @@
     },
     {
       "name": "astro_check",
-      "version": "6.4.8",
+      "version": "7.0.9",
       "install": {
         "type": "npm",
         "package": "astro",

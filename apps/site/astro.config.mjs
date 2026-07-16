@@ -1,5 +1,6 @@
 // @ts-check
 import { defineConfig } from 'astro/config';
+import { unified } from '@astrojs/markdown-remark';
 import sitemap from '@astrojs/sitemap';
 import { rehypeSiteImages } from './src/lib/rehype-site-images.mjs';
 import { remarkUnwrapCrossPageLinks } from './src/lib/remark-unwrap-cross-page-links.mjs';
@@ -18,14 +19,16 @@ export default defineConfig({
   output: 'static',
   integrations: [sitemap()],
   markdown: {
+    processor: unified({
+      remarkPlugins: [remarkUnwrapCrossPageLinks],
+      rehypePlugins: [
+        [rehypeSiteImages, base],
+        rehypeUnwrapHeadingLinks,
+        rehypeUnwrapCrossPageLinks,
+        [rehypeDocLinks, base],
+      ],
+    }),
     shikiConfig: { theme: 'css-variables', wrap: true },
-    remarkPlugins: [remarkUnwrapCrossPageLinks],
-    rehypePlugins: [
-      [rehypeSiteImages, base],
-      rehypeUnwrapHeadingLinks,
-      rehypeUnwrapCrossPageLinks,
-      [rehypeDocLinks, base],
-    ],
   },
   build: { format: 'directory' },
   vite: {
