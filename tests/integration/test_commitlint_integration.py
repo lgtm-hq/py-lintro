@@ -39,7 +39,7 @@ def _git(repo: Path, *args: str) -> None:
         repo: Repository working directory.
         *args: Git arguments.
     """
-    subprocess.run(  # nosec B603 - fixed args, no shell
+    subprocess.run(  # nosec B603 B607 - fixed argv run against git in a controlled test; binary name resolved from PATH, not attacker-controlled; shell=False, no user shell input
         ["git", *args],
         cwd=str(repo),
         check=True,

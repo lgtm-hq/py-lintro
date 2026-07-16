@@ -61,15 +61,18 @@ sweep_package() {
 	local versions=""
 	local query_output=""
 
-	# Select versions where any tag starts with the prefix AND the version is
-	# older than the cutoff. .id is emitted for each match.
+	# Select versions where EVERY tag starts with the CI prefix (sole-tag /
+	# CI-only versions) AND the version is older than the cutoff. Deleting a
+	# version removes all of its tags, so mixed CI+release (or CI+other)
+	# versions must be skipped — same sole-tag rule as delete-ci-ghcr-tags.sh.
 	if ! query_output=$(gh api \
 		"orgs/${org}/packages/container/${pkg}/versions" \
 		--paginate \
 		--jq "
 			.[]
 			| select(
-				((.metadata.container.tags // []) | any(startswith(\$prefix)))
+				((.metadata.container.tags // []) | length) > 0
+				and ((.metadata.container.tags // []) | all(startswith(\$prefix)))
 				and ((.updated_at | fromdateiso8601) < (\$cutoff | tonumber))
 			)
 			| \"\(.id)\t\((.metadata.container.tags // []) | join(\",\"))\"

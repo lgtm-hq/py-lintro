@@ -123,19 +123,20 @@ fi
 if [ "${LINTRO_AUTO_INSTALL_DEPS:-0}" = "1" ] && [ -f "package.json" ] && [ ! -d "node_modules" ]; then
 	echo "[lintro] Installing Node.js dependencies (LINTRO_AUTO_INSTALL_DEPS=1)..."
 	install_success=false
-	install_output=""
+	# Stream install output (do not buffer the full log in memory). Verbose
+	# mode still surfaces the command line via log_verbose.
 	if command -v bun &>/dev/null; then
 		# Use --frozen-lockfile for reproducibility, --ignore-scripts for security
 		log_verbose "install command: bun install --frozen-lockfile --ignore-scripts"
-		if install_output=$(bun install --frozen-lockfile --ignore-scripts 2>&1) ||
-			install_output=$(bun install --ignore-scripts 2>&1); then
+		if bun install --frozen-lockfile --ignore-scripts ||
+			bun install --ignore-scripts; then
 			install_success=true
 		fi
 	elif command -v npm &>/dev/null; then
 		# Use npm ci for reproducibility (requires package-lock.json), --ignore-scripts for security
 		log_verbose "install command: npm ci --ignore-scripts"
-		if install_output=$(npm ci --ignore-scripts 2>&1) ||
-			install_output=$(npm install --ignore-scripts 2>&1); then
+		if npm ci --ignore-scripts ||
+			npm install --ignore-scripts; then
 			install_success=true
 		fi
 	else
@@ -145,8 +146,6 @@ if [ "${LINTRO_AUTO_INSTALL_DEPS:-0}" = "1" ] && [ -f "package.json" ] && [ ! -d
 		echo "[lintro] Node.js dependencies installed."
 	else
 		echo "[lintro] Warning: Failed to install Node.js dependencies (may be read-only mount)"
-		log_verbose "install output:"
-		log_verbose "${install_output}"
 	fi
 fi
 

@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import json
 import shutil
-import subprocess
+import subprocess  # nosec B404 - subprocess is the core mechanism for invoking external tools; all invocations use shell=False
 import sys
 from dataclasses import asdict, dataclass
 
@@ -108,7 +108,7 @@ def _check_tool(tool: ManifestTool, context: RuntimeContext) -> ToolCheckResult:
         )
 
     try:
-        result = subprocess.run(
+        result = subprocess.run(  # nosec B603 - argv is an internally-built list run with shell=False; binary resolved from a known command, no user shell input
             tool.version_command,
             capture_output=True,
             text=True,
