@@ -383,3 +383,81 @@ def test_check_runs_from_requirements_directory(
 
     assert_that(seen_cwd).is_length(1)
     assert_that(str(seen_cwd[0])).is_equal_to(str(sub.resolve()))
+
+
+def test_check_schema_invalid_payload_fails_closed(
+    pip_audit_plugin: PipAuditPlugin,
+    tmp_path: Path,
+) -> None:
+    """Exit 0 with JSON lacking a ``dependencies`` list is not a clean pass.
+
+    Args:
+        pip_audit_plugin: The plugin instance.
+        tmp_path: Temporary directory path.
+    """
+    req = tmp_path / "requirements.txt"
+    req.write_text("packaging==25.0\n")
+
+    with patch(
+        "lintro.plugins.execution_preparation.verify_tool_version",
+        return_value=None,
+    ):
+        with patch.object(
+            pip_audit_plugin,
+            "_run_subprocess_result",
+            return_value=_proc(success=True, stdout=json.dumps({"dependencies": {}})),
+        ):
+            result = pip_audit_plugin.check([str(req)], {})
+
+    assert_that(result.success).is_false()
+    assert_that(result.parse_failures_count).is_equal_to(1)
+
+
+def test_check_timeout_preserves_earlier_findings(
+    pip_audit_plugin: PipAuditPlugin,
+    tmp_path: Path,
+) -> None:
+    """A later target timing out must not discard earlier vulnerabilities.
+
+    Args:
+        pip_audit_plugin: The plugin instance.
+        tmp_path: Temporary directory path.
+    """
+    first = tmp_path / "a"
+    first.mkdir()
+    (first / "requirements.txt").write_text("jinja2==2.4.1\n")
+    second = tmp_path / "b"
+    second.mkdir()
+    (second / "requirements.txt").write_text("packaging==25.0\n")
+
+    calls = [
+        _proc(success=False, stdout=_VULN_OUTPUT),
+        TimeoutExpired(cmd=["pip-audit"], timeout=120),
+    ]
+
+    def _side_effect(cmd: list[str], **kwargs: object) -> SubprocessResult:
+        result = calls.pop(0)
+        if isinstance(result, TimeoutExpired):
+            raise result
+        return result
+
+    with patch(
+        "lintro.plugins.execution_preparation.verify_tool_version",
+        return_value=None,
+    ):
+        with patch.object(
+            pip_audit_plugin,
+            "_run_subprocess_result",
+            side_effect=_side_effect,
+        ):
+            result = pip_audit_plugin.check(
+                [
+                    str(first / "requirements.txt"),
+                    str(second / "requirements.txt"),
+                ],
+                {},
+            )
+
+    assert_that(result.success).is_false()
+    assert_that(result.issues_count).is_equal_to(1)
+    assert_that(result.output).contains("timed out")

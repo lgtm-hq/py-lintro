@@ -935,6 +935,10 @@ command line by upstream and are not exposed via lintro.
   `UNKNOWN`.
 - Advisory IDs (PYSEC/GHSA/CVE) link to the corresponding [osv.dev](https://osv.dev)
   page.
+- Requirements discovery is recursive: nested files such as `requirements/base.txt`
+  or `services/api/requirements.txt` are picked up, while vendored/generated trees
+  (`node_modules`, `.venv`, `venv`, `vendor`, `.git`, `__pycache__`) are skipped. To
+  audit a file outside this scope, pass it explicitly on the command line.
 
 **Usage Examples:**
 

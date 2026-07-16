@@ -35,10 +35,12 @@ def extract_pip_audit_payload(output: str | None) -> dict[str, Any] | None:
         output: Raw stdout from ``pip-audit --format json``.
 
     Returns:
-        The parsed JSON object, or ``None`` when the output is empty or cannot
-        be parsed as a JSON object. A ``None`` result on non-empty output
-        indicates a parse failure that security callers must treat as a
-        non-clean scan (see #1044).
+        The parsed JSON object, or ``None`` when the output is empty, cannot be
+        parsed as a JSON object, or lacks a valid ``dependencies`` list. A
+        ``None`` result on non-empty output indicates a parse failure that
+        security callers must treat as a non-clean scan (see #1044). Requiring a
+        ``dependencies`` list ensures a schema-invalid payload such as ``{}`` or
+        ``{"dependencies": {}}`` fails closed rather than reporting a clean scan.
     """
     if not output or not output.strip():
         return None
@@ -51,6 +53,10 @@ def extract_pip_audit_payload(output: str | None) -> dict[str, Any] | None:
 
     if not isinstance(data, dict):
         logger.warning("pip-audit output is not a JSON object")
+        return None
+
+    if not isinstance(data.get("dependencies"), list):
+        logger.warning("pip-audit output missing a valid 'dependencies' list")
         return None
 
     return data

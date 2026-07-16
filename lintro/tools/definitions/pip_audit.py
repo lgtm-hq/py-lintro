@@ -59,7 +59,11 @@ def _build_targets(files: list[str]) -> list[list[str]]:
     for raw in files:
         path = Path(raw)
         if fnmatch(path.name, PIP_AUDIT_REQUIREMENTS_GLOB):
-            requirement_targets.append(["-r", str(path)])
+            # Resolve to an absolute path so the ``-r`` argument stays valid
+            # regardless of the cwd pip-audit runs from. A relative target such
+            # as ``sub/requirements.txt`` would otherwise be re-resolved against
+            # the file's own parent directory and silently point nowhere.
+            requirement_targets.append(["-r", str(path.resolve())])
         elif path.name in PIP_AUDIT_PROJECT_FILES:
             project_dir = str(path.resolve().parent)
             if project_dir not in project_dirs:
@@ -137,9 +141,19 @@ class PipAuditPlugin(BaseToolPlugin):
         Returns:
             Command prefix for running pip-audit with JSON output. Per-target
             arguments (``-r <file>`` or a project path) are appended by
-            :meth:`check`.
+            :meth:`check`. ``--strict`` makes pip-audit exit non-zero when
+            dependency collection is incomplete (e.g. editable or unresolvable
+            requirements it would otherwise skip), so an un-audited dependency
+            fails the scan instead of passing as clean.
         """
-        return ["pip-audit", "--format", "json", "--progress-spinner", "off"]
+        return [
+            "pip-audit",
+            "--strict",
+            "--format",
+            "json",
+            "--progress-spinner",
+            "off",
+        ]
 
     def doc_url(self, code: str) -> str | None:
         """Return the OSV advisory URL for the given vulnerability ID.
@@ -203,12 +217,13 @@ class PipAuditPlugin(BaseToolPlugin):
                     cwd=target_cwd,
                 )
             except subprocess.TimeoutExpired:
-                return ToolResult(
-                    name=self.definition.name,
-                    success=False,
-                    output=f"pip-audit timed out after {ctx.timeout}s",
-                    issues_count=0,
-                )
+                # Preserve findings already collected from earlier targets: a
+                # later timeout must not erase vulnerabilities pip-audit already
+                # reported. Mark the scan unsuccessful and fall through to the
+                # aggregation path rather than returning a clean-looking result.
+                all_success = False
+                output_chunks.append(f"pip-audit timed out after {ctx.timeout}s")
+                break
 
             # pip-audit writes its JSON report to stdout; parse stdout only so a
             # stderr warning cannot corrupt parsing (see #1043).

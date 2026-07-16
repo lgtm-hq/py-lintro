@@ -9,6 +9,16 @@ integration.
   vulnerabilities (for manual/integration testing; requires network access).
 - `pip_audit_clean.txt` — pins a package with no known vulnerabilities.
 
+These follow the repo-wide `<tool>_<clean|violations>.<ext>` sample-naming
+convention, so they intentionally do **not** match pip-audit's
+`requirements*.txt` auto-discovery glob (which also keeps lintro's own
+dogfooding from network-scanning them). Pass them explicitly to audit:
+
+```bash
+lintro check test_samples/tools/security/pip_audit/pip_audit_violations.txt \
+  --tools pip_audit
+```
+
 ## Why the Unit Tests Do Not Depend on the Network
 
 pip-audit queries the PyPI Advisory Database and OSV over the network, so live
