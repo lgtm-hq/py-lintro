@@ -21,6 +21,17 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.80.5] - 2026-07-16
+
+### Changed
+
+- **site**: add missing rehype devDependencies for doc-links suite (#1446) (140fd7c)
+
+### Fixed
+
+- **security**: pin astro to 7.0.9 to drop flagged 7.1.0 (MAL-2026-10726) (#1448)
+  (491792f)
+
 ## [0.80.4] - 2026-07-16
 
 ### Changed
