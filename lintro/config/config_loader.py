@@ -141,6 +141,10 @@ def _global_contributed_paths(
         project_has = isinstance(project_data, dict) and key in project_data
         project_value = project_data.get(key) if project_has else None
         if isinstance(value, dict):
+            # Scalar project override (e.g. tools.ruff: false) replaces the
+            # whole tool mapping — do not report global child keys as active.
+            if project_has and not isinstance(project_value, dict):
+                continue
             sub_project = project_value if isinstance(project_value, dict) else {}
             paths.extend(
                 _global_contributed_paths(
