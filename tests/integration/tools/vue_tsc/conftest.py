@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import shutil
-import subprocess
+import subprocess  # nosec B404 - subprocess is used to drive the tool/CLI under test; invocations use shell=False
 from pathlib import Path
 
 import pytest
@@ -22,7 +22,7 @@ def vue_tsc_is_available() -> bool:
     # Try direct vue-tsc command first
     if shutil.which("vue-tsc") is not None:
         try:
-            result = subprocess.run(
+            result = subprocess.run(  # nosec B603 B607 - fixed argv run against a real binary in a controlled test; binary name resolved from PATH, not attacker-controlled; shell=False, no user shell input
                 ["vue-tsc", "--version"],
                 capture_output=True,
                 timeout=10,
@@ -36,7 +36,7 @@ def vue_tsc_is_available() -> bool:
     # Try bunx fallback
     if shutil.which("bunx") is not None:
         try:
-            result = subprocess.run(
+            result = subprocess.run(  # nosec B603 B607 - fixed argv run against a real binary in a controlled test; binary name resolved from PATH, not attacker-controlled; shell=False, no user shell input
                 ["bunx", "vue-tsc", "--version"],
                 capture_output=True,
                 timeout=30,
@@ -50,7 +50,7 @@ def vue_tsc_is_available() -> bool:
     # Try npx fallback
     if shutil.which("npx") is not None:
         try:
-            result = subprocess.run(
+            result = subprocess.run(  # nosec B603 B607 - fixed argv run against a real binary in a controlled test; binary name resolved from PATH, not attacker-controlled; shell=False, no user shell input
                 ["npx", "vue-tsc", "--version"],
                 capture_output=True,
                 timeout=30,

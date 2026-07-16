@@ -84,6 +84,35 @@ distinction).
 `py-lintro:vX.Y.Z-base`. Use `ghcr.io/lgtm-hq/py-lintro-base:latest` or
 `py-lintro-base:vX.Y.Z` instead.
 
+### Tools Base Image (`lintro-tools`)
+
+The **tools base** image is published as **`ghcr.io/lgtm-hq/lintro-tools`**. It contains
+the full external toolchain lintro drives — Rust toolchain (clippy, rustfmt,
+cargo-audit, cargo-deny), bun/Node tools (prettier, oxlint, tsc, stylelint, …), and
+standalone binaries (hadolint, shellcheck, shfmt, gitleaks, vale, …) — but not an
+installed lintro application (no virtualenv or entrypoint; lintro source is present
+under `/app` only because the installer reads its tool-version manifest from it). After
+the planned digest-pinned `FROM` flip, the `py-lintro` full image will be built on top
+of it; you can also use it directly as a base for your own images when you want the
+pre-built linter toolchain without lintro:
+
+```dockerfile
+# Pin by digest for reproducible builds (recommended)
+FROM ghcr.io/lgtm-hq/lintro-tools:latest@sha256:<digest>
+```
+
+Details:
+
+- Built from `docker/tools.Dockerfile` in the repository root; tool versions are pinned
+  in `lintro/_tool_versions.py`.
+- Rebuilt when the tools Dockerfile or pinned tool versions change, plus a weekly
+  no-cache rebuild so tool binaries and the OS layer pick up fresh CVE patches.
+- Signed with Sigstore Cosign (keyless) and published with SBOM and build provenance
+  attestations.
+- Tags: `latest`, `main`, and immutable `sha-<commit>` tags. Pin by digest and let
+  Renovate's native Docker digest support manage bumps (this repository does exactly
+  that for the root `Dockerfile`).
+
 ### Using the Published Image
 
 ```bash
