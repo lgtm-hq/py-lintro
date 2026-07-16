@@ -8,6 +8,11 @@
   ],
   "packageRules": [
     {
+      "description": "Hold prettier 3.9.5+ until Docker integration prettier fixtures are updated",
+      "matchPackageNames": ["prettier"],
+      "allowedVersions": "<=3.9.4"
+    },
+    {
       "description": "npm platform-binary placeholders are stamped at publish time; never bump in-repo",
       "matchPackageNames": [
         "/^@lgtm-hq\\/lintro(-|$)/"
