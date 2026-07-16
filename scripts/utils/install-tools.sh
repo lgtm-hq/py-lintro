@@ -765,11 +765,15 @@ main() {
 		elif ! command -v php &>/dev/null; then
 			# The PHAR cannot run (or be verified) without a PHP interpreter;
 			# installing it anyway would leave a broken binary on PATH and a
-			# failing verification. An explicit request for phpstan without
-			# its runtime is an error, not a skip.
-			echo -e "${RED}✗ Cannot install phpstan: no 'php' interpreter on PATH." \
-				"Install PHP (apt install php-cli / brew install php) and re-run.${NC}"
-			exit 1
+			# failing verification. Explicit --tools phpstan without PHP is an
+			# error; the default all-tools path should skip and continue.
+			if [[ -n "${TOOL_FILTER:-}" ]]; then
+				echo -e "${RED}✗ Cannot install phpstan: no 'php' interpreter on PATH." \
+					"Install PHP (apt install php-cli / brew install php) and re-run.${NC}"
+				exit 1
+			fi
+			echo -e "${YELLOW}⚠ Skipping phpstan: no 'php' interpreter on PATH." \
+				"Install PHP (apt install php-cli / brew install php) to enable it.${NC}"
 		else
 			phar_url="https://github.com/phpstan/phpstan/releases/download/${PHPSTAN_VERSION}/phpstan.phar"
 			if download_with_retries "$phar_url" "$BIN_DIR/phpstan" 3; then
