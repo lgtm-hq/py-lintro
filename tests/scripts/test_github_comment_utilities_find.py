@@ -10,7 +10,7 @@ Google-style docstrings are used per project standards.
 from __future__ import annotations
 
 import json
-import subprocess
+import subprocess  # nosec B404 - subprocess is used to drive the tool/CLI under test; invocations use shell=False
 from pathlib import Path
 
 import pytest
@@ -61,7 +61,7 @@ def test_find_comment_with_marker_success(
 
     # Execute the script with JSON via stdin
     with open(input_file) as f:
-        result = subprocess.run(
+        result = subprocess.run(  # nosec B603 B607 - fixed argv run against a real binary in a controlled test; binary name resolved from PATH, not attacker-controlled; shell=False, no user shell input
             ["python3", str(find_comment_script_path), "<!-- lintro-report -->"],
             input=f.read(),
             capture_output=True,
@@ -92,7 +92,7 @@ def test_find_comment_with_marker_paginated(
 
     # Execute the script with JSON via stdin
     with open(input_file) as f:
-        result = subprocess.run(
+        result = subprocess.run(  # nosec B603 B607 - fixed argv run against a real binary in a controlled test; binary name resolved from PATH, not attacker-controlled; shell=False, no user shell input
             ["python3", str(find_comment_script_path), "<!-- lintro-report -->"],
             input=f.read(),
             capture_output=True,
@@ -126,7 +126,7 @@ def test_find_comment_no_marker_found(
 
     # Execute the script with JSON via stdin - should exit with code 1
     with open(input_file) as f:
-        result = subprocess.run(
+        result = subprocess.run(  # nosec B603 B607 - fixed argv run against a real binary in a controlled test; binary name resolved from PATH, not attacker-controlled; shell=False, no user shell input
             ["python3", str(find_comment_script_path), "<!-- lintro-report -->"],
             input=f.read(),
             capture_output=True,
@@ -157,7 +157,7 @@ def test_find_comment_invalid_json(find_comment_script_path: Path) -> None:
     try:
         # Execute the script with invalid JSON via stdin - should exit with code 1
         with open(invalid_json_file) as f:
-            result = subprocess.run(
+            result = subprocess.run(  # nosec B603 B607 - fixed argv run against a real binary in a controlled test; binary name resolved from PATH, not attacker-controlled; shell=False, no user shell input
                 ["python3", str(find_comment_script_path), "<!-- lintro-report -->"],
                 input=f.read(),
                 capture_output=True,
@@ -190,7 +190,7 @@ def test_find_comment_empty_marker(
 
     # Execute the script with empty marker via stdin
     with open(input_file) as f:
-        result = subprocess.run(
+        result = subprocess.run(  # nosec B603 B607 - fixed argv run against a real binary in a controlled test; binary name resolved from PATH, not attacker-controlled; shell=False, no user shell input
             ["python3", str(find_comment_script_path), ""],
             input=f.read(),
             capture_output=True,

@@ -44,17 +44,24 @@ Example:
 """
 
 from lintro.plugins.file_processor import AggregatedResult, FileProcessingResult
-from lintro.plugins.protocol import LintroPlugin, ToolDefinition
+from lintro.plugins.protocol import (
+    LINTRO_PLUGIN_API_VERSION,
+    LintroPlugin,
+    ToolDefinition,
+    is_compatible_api_version,
+)
 from lintro.plugins.registry import ToolRegistry, register_tool
 
 # BaseToolPlugin is imported lazily to avoid circular imports
 # Use: from lintro.plugins.base import BaseToolPlugin
 
 __all__ = [
+    "LINTRO_PLUGIN_API_VERSION",
     "AggregatedResult",
     "FileProcessingResult",
     "LintroPlugin",
     "ToolDefinition",
     "ToolRegistry",
+    "is_compatible_api_version",
     "register_tool",
 ]

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import shutil
-import subprocess
+import subprocess  # nosec B404 - subprocess is the core mechanism for invoking external tools; all invocations use shell=False
 
 from lintro.ai.review.enums.review_context_error_code import ReviewContextErrorCode
 from lintro.ai.review.exceptions import ReviewContextError

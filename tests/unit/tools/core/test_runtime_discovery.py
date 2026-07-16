@@ -84,7 +84,7 @@ def test_discover_tool_unavailable() -> None:
 
 def test_discover_tool_handles_timeout() -> None:
     """Tool is unavailable when version probe times out."""
-    import subprocess
+    import subprocess  # nosec B404 - subprocess is used to drive the tool/CLI under test; invocations use shell=False
 
     with (
         patch("shutil.which", return_value="/usr/bin/slow_tool"),

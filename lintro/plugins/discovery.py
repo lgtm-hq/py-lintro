@@ -2,7 +2,19 @@
 
 This module handles discovering and loading Lintro tools from:
 1. Built-in tool definitions (lintro/tools/definitions/)
-2. External plugins via Python entry points (lintro.plugins)
+2. External (third-party) plugins via Python entry points (``lintro.tools``)
+
+Third-party packages register a tool plugin by advertising an entry point in
+the ``lintro.tools`` group::
+
+    [project.entry-points."lintro.tools"]
+    my-tool = "my_package.plugin:MyToolPlugin"
+
+At startup the registry discovers every such entry point, validates it against
+the public plugin contract (see :mod:`lintro.plugins.protocol`), checks API
+version compatibility, and registers well-formed plugins alongside builtins.
+A malformed plugin is logged and skipped — it never crashes lintro or blocks
+discovery of the remaining plugins.
 
 Example:
     >>> from lintro.plugins.discovery import discover_all_tools
@@ -14,19 +26,34 @@ from __future__ import annotations
 import importlib
 import importlib.metadata
 import os
+import re
 from pathlib import Path
-from typing import Any, cast
+from typing import TYPE_CHECKING, Any, cast
 
 from loguru import logger
 
 from lintro.plugins.base import BaseToolPlugin
+from lintro.plugins.protocol import (
+    LINTRO_PLUGIN_API_VERSION,
+    is_compatible_api_version,
+)
 from lintro.plugins.registry import ToolRegistry
+
+if TYPE_CHECKING:
+    from importlib.metadata import EntryPoint
 
 # Path to builtin tool definitions
 BUILTIN_DEFINITIONS_PATH = Path(__file__).parent.parent / "tools" / "definitions"
 
-# Entry point group for external plugins
-ENTRY_POINT_GROUP = "lintro.plugins"
+# Entry point group third-party packages use to register tool plugins.
+ENTRY_POINT_GROUP = "lintro.tools"
+
+# Previously documented group name, still honored so plugins packaged against
+# the old docs keep working after an upgrade. Deprecated: emits a warning.
+LEGACY_ENTRY_POINT_GROUP = "lintro.plugins"
+
+# Attributes a plugin class must expose to satisfy the LintroPlugin contract.
+_REQUIRED_PLUGIN_ATTRS = ("definition", "check", "fix", "set_options")
 
 # Environment variable that opts in to loading external (third-party) plugins.
 # Truthy values: "1", "true", "yes", "on" (case-insensitive).
@@ -79,16 +106,37 @@ def discover_builtin_tools() -> int:
     return loaded_count
 
 
-def _load_plugins_config() -> dict[str, Any]:
+def _normalize_trust_name(name: str) -> str:
+    """Normalize an entry-point or distribution name for trust comparison.
+
+    Applies PEP 503-style normalization (lowercase, runs of ``-``, ``_`` and
+    ``.`` collapsed to a single ``-``) so that a configured trusted name such
+    as ``My_Plugin`` matches installed metadata spelled ``my-plugin``.
+
+    Args:
+        name: The raw name to normalize.
+
+    Returns:
+        The normalized name.
+    """
+    return re.sub(r"[-_.]+", "-", name).strip().lower()
+
+
+def _load_plugins_config() -> dict[str, Any] | None:
     """Load the ``plugins`` configuration section for external plugin trust.
 
-    Reads the ``plugins`` mapping from ``.lintro-config.yaml`` if present,
-    otherwise falls back to ``[tool.lintro.plugins]`` in ``pyproject.toml``.
+    Reads the ``plugins`` mapping from ``.lintro-config.yaml`` if present.
+    When the primary config has no ``plugins`` section, falls back to
+    ``[tool.lintro.plugins]`` in ``pyproject.toml`` so mixed-config setups
+    (YAML for general settings, pyproject for the trust allowlist) are honored.
     This is intentionally lightweight and independent of the full config
     loader so plugin discovery never triggers heavier config parsing.
 
     Returns:
-        The raw ``plugins`` mapping, or an empty dict if none is configured.
+        The raw ``plugins`` mapping, an empty dict when none is configured, or
+        ``None`` when a config file exists but could not be read. Callers must
+        treat ``None`` as a signal to fail closed (load no external plugins)
+        rather than as an absent allowlist.
     """
     # Imported lazily to avoid pulling config parsing into module import.
     from lintro.config.config_loader import (
@@ -102,14 +150,20 @@ def _load_plugins_config() -> dict[str, Any]:
         if found_path is not None:
             data = _load_yaml_file(found_path)
             plugins = data.get("plugins")
-            return plugins if isinstance(plugins, dict) else {}
+            if isinstance(plugins, dict):
+                return plugins
 
+        # No plugins section in the primary config (or no primary config):
+        # consult the pyproject fallback before concluding none is configured.
         pyproject_data, _ = _load_pyproject_fallback()
         plugins = pyproject_data.get("plugins")
         return plugins if isinstance(plugins, dict) else {}
     except (OSError, ValueError, ImportError) as e:
-        logger.debug(f"Could not read plugins config: {e}")
-        return {}
+        # A config file exists but is unreadable/malformed. Return None so the
+        # caller fails closed instead of silently treating the allowlist as
+        # absent (which under env opt-in would load every discovered plugin).
+        logger.warning(f"Could not read plugins trust config; failing closed: {e}")
+        return None
 
 
 def _resolve_plugin_trust() -> tuple[bool, frozenset[str] | None]:
@@ -140,13 +194,26 @@ def _resolve_plugin_trust() -> tuple[bool, frozenset[str] | None]:
     trusted: frozenset[str] | None = None
 
     plugins_cfg = _load_plugins_config()
+    if plugins_cfg is None:
+        # Trust config exists but could not be read: fail closed and load no
+        # external plugins, even if env opt-in is set.
+        logger.warning(
+            "Plugins trust config could not be read; failing closed and "
+            "loading no external plugins.",
+        )
+        return False, frozenset()
+
     if plugins_cfg:
         raw_trusted = plugins_cfg.get("trusted")
         if isinstance(raw_trusted, str):
             raw_trusted = [raw_trusted]
         if isinstance(raw_trusted, list):
             # Presence of a trusted allowlist is itself an explicit opt-in.
-            trusted = frozenset(str(name) for name in raw_trusted)
+            # Names are normalized so case/separator spelling differences
+            # between config and installed metadata still match.
+            trusted = frozenset(
+                _normalize_trust_name(str(name)) for name in raw_trusted
+            )
             config_enabled = True
 
         enabled_flag = plugins_cfg.get("enabled")
@@ -172,36 +239,117 @@ def _is_trusted_entry_point(
     """
     if trusted is None:
         return True
-    if ep.name in trusted:
+    if _normalize_trust_name(str(ep.name)) in trusted:
         return True
     dist = getattr(ep, "dist", None)
     dist_name = getattr(dist, "name", None)
-    return isinstance(dist_name, str) and dist_name in trusted
+    return (
+        isinstance(dist_name, str)
+        and _normalize_trust_name(dist_name) in trusted
+    )
+
+
+def _entry_point_origin(ep: EntryPoint) -> str:
+    """Derive a human-readable origin label for an entry point.
+
+    Args:
+        ep: The entry point being loaded.
+
+    Returns:
+        The distribution (package) name that shipped the plugin when known,
+        falling back to the entry-point's module and finally its name. This is
+        what ``lintro list-tools`` shows so users can tell where a third-party
+        tool came from.
+    """
+    dist = getattr(ep, "dist", None)
+    dist_name = getattr(dist, "name", None) if dist is not None else None
+    if dist_name:
+        return str(dist_name)
+
+    value = getattr(ep, "value", "") or ""
+    module = value.split(":", 1)[0].strip()
+    if module:
+        return module
+
+    return str(getattr(ep, "name", "external"))
+
+
+def _validate_plugin_class(ep: EntryPoint, plugin_class: object) -> bool:
+    """Validate a loaded entry-point object against the plugin contract.
+
+    Performs the checks that do not require instantiating the plugin: that the
+    object is a class, exposes the required ``LintroPlugin`` surface, and
+    declares a compatible plugin-API version.
+
+    Args:
+        ep: The entry point the object was loaded from (used for diagnostics).
+        plugin_class: The object returned by ``EntryPoint.load()``.
+
+    Returns:
+        True if the object is a well-formed, API-compatible plugin class.
+    """
+    if not isinstance(plugin_class, type):
+        logger.warning(
+            f"Entry point {ep.name!r} does not point to a class, skipping",
+        )
+        return False
+
+    # Protocols with properties can't be used with issubclass reliably, so
+    # check for the required attributes that make up the LintroPlugin contract.
+    if not all(hasattr(plugin_class, attr) for attr in _REQUIRED_PLUGIN_ATTRS):
+        logger.warning(
+            f"Entry point {ep.name!r} class {plugin_class.__name__!r} does not "
+            "implement the LintroPlugin contract (missing "
+            f"{[a for a in _REQUIRED_PLUGIN_ATTRS if not hasattr(plugin_class, a)]}"
+            "), skipping",
+        )
+        return False
+
+    declared_version = getattr(plugin_class, "LINTRO_PLUGIN_API_VERSION", None)
+    if not is_compatible_api_version(declared_version):
+        logger.warning(
+            f"Plugin {ep.name!r} targets plugin API version {declared_version!r}, "
+            f"which is incompatible with this lintro "
+            f"(API version {LINTRO_PLUGIN_API_VERSION}); skipping",
+        )
+        return False
+    if declared_version is None:
+        logger.debug(
+            f"Plugin {ep.name!r} does not declare LINTRO_PLUGIN_API_VERSION; "
+            "assuming compatibility. Declaring it is recommended.",
+        )
+
+    return True
 
 
 def discover_external_plugins() -> int:
-    """Load external plugins via entry points.
+    """Load third-party plugins advertised via the ``lintro.tools`` group.
 
-    External plugin loading is opt-in and default-deny: a default installation
-    never imports or executes third-party plugin code at startup. Loading is
-    enabled only via the ``LINTRO_ENABLE_EXTERNAL_PLUGINS`` environment
-    variable or a ``plugins`` config section (see :func:`_resolve_plugin_trust`).
+    External packages register a plugin by defining an entry point in their
+    ``pyproject.toml``::
 
-    External plugins can register themselves by defining an entry point
-    in their pyproject.toml or setup.py:
-
-        [project.entry-points."lintro.plugins"]
+        [project.entry-points."lintro.tools"]
         my-tool = "my_package.plugin:MyToolPlugin"
 
-    Returns:
-        Number of external plugins loaded.
+    The legacy ``lintro.plugins`` group (documented before this group was
+    renamed) is still scanned so already-installed plugins keep working; a
+    deprecation warning is logged for each plugin found there. An entry point
+    advertised under both groups is loaded once.
 
-    Note:
-        External plugins should be classes that implement LintroPlugin.
-        They will be automatically registered with the ToolRegistry.
+    Each entry point is loaded, validated against the public plugin contract,
+    checked for API compatibility, and registered. Failure is fully isolated:
+    a plugin that fails to import, is malformed, declares an incompatible API
+    version, collides with a builtin name, or raises on instantiation is logged
+    and skipped without affecting the other plugins or crashing lintro.
+
+    Returns:
+        Number of external plugins successfully loaded.
     """
     loaded_count = 0
 
+    # External plugin loading is opt-in and default-deny. Resolve the trust
+    # decision before touching the entry-point registry so a default install
+    # never imports third-party plugin code.
     enabled, trusted = _resolve_plugin_trust()
     if not enabled:
         logger.debug(
@@ -211,53 +359,83 @@ def discover_external_plugins() -> int:
         )
         return loaded_count
 
-    try:
-        entry_points = importlib.metadata.entry_points(group=ENTRY_POINT_GROUP)
-    except (TypeError, AttributeError, KeyError) as e:
-        logger.debug(f"No entry points found or error accessing them: {e}")
-        return loaded_count
-
-    for ep in entry_points:
-        if not _is_trusted_entry_point(ep=ep, trusted=trusted):
-            logger.info(
-                f"Skipping untrusted external plugin {ep.name!r} "
-                "(not in the configured plugins.trusted allowlist)",
-            )
-            continue
+    grouped: list[tuple[str, tuple[EntryPoint, ...]]] = []
+    for group in (ENTRY_POINT_GROUP, LEGACY_ENTRY_POINT_GROUP):
         try:
-            plugin_class = ep.load()
+            grouped.append(
+                (group, tuple(importlib.metadata.entry_points(group=group))),
+            )
+        except (TypeError, AttributeError, KeyError) as e:
+            logger.debug(f"No entry points found or error accessing them: {e}")
 
-            # Validate that it's a proper plugin class
-            if not isinstance(plugin_class, type):
-                logger.warning(
-                    f"Entry point {ep.name!r} does not point to a class, skipping",
+    seen: set[tuple[str, str]] = set()
+    for group, entry_points in grouped:
+        for ep in entry_points:
+            key = (str(ep.name), str(getattr(ep, "value", "") or ""))
+            if key in seen:
+                continue
+            seen.add(key)
+            if not _is_trusted_entry_point(ep=ep, trusted=trusted):
+                logger.info(
+                    f"Skipping untrusted external plugin {ep.name!r} "
+                    "(not in the configured plugins.trusted allowlist)",
                 )
                 continue
-
-            # Check if it implements LintroPlugin protocol (without instantiating)
-            # Check for required attributes since Protocol with properties
-            # can't use issubclass reliably
-            required_attrs = ("definition", "check", "fix", "set_options")
-            if not all(hasattr(plugin_class, attr) for attr in required_attrs):
+            if group == LEGACY_ENTRY_POINT_GROUP:
                 logger.warning(
-                    f"Entry point {ep.name!r} class does not implement LintroPlugin, "
-                    "skipping",
+                    f"Plugin {ep.name!r} registers via the deprecated "
+                    f"{LEGACY_ENTRY_POINT_GROUP!r} entry-point group; update the "
+                    f"package to use {ENTRY_POINT_GROUP!r}.",
                 )
-                continue
-
-            # Register the plugin if not already registered
-            if not ToolRegistry.is_registered(ep.name):
-                ToolRegistry.register(cast(type[BaseToolPlugin], plugin_class))
-                logger.info(f"Loaded external plugin: {ep.name}")
-                loaded_count += 1
-            else:
-                logger.debug(f"Plugin {ep.name!r} already registered, skipping")
-
-        except (ImportError, AttributeError, TypeError, RuntimeError) as e:
-            logger.warning(f"Failed to load plugin {ep.name!r}: {e}")
+            loaded_count += _load_external_entry_point(ep=ep)
 
     logger.debug(f"Loaded {loaded_count} external plugins")
     return loaded_count
+
+
+def _load_external_entry_point(*, ep: EntryPoint) -> int:
+    """Load, validate, and register a single external plugin entry point.
+
+    Args:
+        ep: The entry point to load.
+
+    Returns:
+        ``1`` when the plugin was registered, ``0`` when it was skipped.
+    """
+    try:
+        plugin_class = ep.load()
+
+        if not _validate_plugin_class(ep, plugin_class):
+            return 0
+
+        plugin_type = cast("type[BaseToolPlugin]", plugin_class)
+
+        # Instantiate once to resolve the definition name. This doubles as
+        # the probe that surfaces any error raised on construction, keeping
+        # a broken plugin from taking down discovery.
+        instance = plugin_type()
+        name = instance.definition.name.lower()
+
+        # Builtins are discovered first and always win a name collision so a
+        # third-party plugin can never silently shadow a curated core tool.
+        if ToolRegistry.is_registered(name):
+            logger.warning(
+                f"Plugin {ep.name!r} defines tool {name!r}, which is already "
+                f"registered (origin: {ToolRegistry.get_origin(name)}); "
+                "skipping the external plugin to avoid shadowing it",
+            )
+            return 0
+
+        origin = _entry_point_origin(ep)
+        ToolRegistry.register(plugin_type, origin=origin, instance=instance)
+        logger.info(f"Loaded external plugin: {name} (from {origin})")
+        return 1
+
+    except Exception as e:  # noqa: BLE001 - isolate any misbehaving plugin
+        logger.warning(
+            f"Failed to load plugin {ep.name!r}: {type(e).__name__}: {e}",
+        )
+        return 0
 
 
 def discover_all_tools(force: bool = False) -> int:

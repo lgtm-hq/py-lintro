@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-import subprocess
+import subprocess  # nosec B404 - subprocess is used to drive the tool/CLI under test; invocations use shell=False
 import sys
 
 from assertpy import assert_that
@@ -15,7 +15,7 @@ def test_generator_check_passes_against_real_repo() -> None:
 
     Runs only ``--check`` so the test cannot repair drift before asserting.
     """
-    check_rc = subprocess.run(
+    check_rc = subprocess.run(  # nosec B603 - fixed argv run against a real binary in a controlled test; shell=False, no user shell input
         [sys.executable, str(SCRIPT_PATH), "--check"],
         cwd=REPO_ROOT,
         capture_output=True,
@@ -34,7 +34,7 @@ def test_generated_module_passes_black() -> None:
     and the drift gate fight each other on every PR.
     """
     generated_path = REPO_ROOT / "lintro" / "_generated_versions.py"
-    rc = subprocess.run(
+    rc = subprocess.run(  # nosec B603 - fixed argv run against a real binary in a controlled test; shell=False, no user shell input
         [sys.executable, "-m", "black", "--check", "--quiet", str(generated_path)],
         cwd=REPO_ROOT,
         capture_output=True,
@@ -47,7 +47,7 @@ def test_generated_module_passes_black() -> None:
 def test_generated_module_passes_ruff() -> None:
     """The generator's output passes ruff without modification."""
     generated_path = REPO_ROOT / "lintro" / "_generated_versions.py"
-    rc = subprocess.run(
+    rc = subprocess.run(  # nosec B603 - fixed argv run against a real binary in a controlled test; shell=False, no user shell input
         [sys.executable, "-m", "ruff", "check", str(generated_path)],
         cwd=REPO_ROOT,
         capture_output=True,
