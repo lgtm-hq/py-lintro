@@ -30,6 +30,8 @@
     "pagefind": "1.5.2",
     "@types/sanitize-html": "2.16.1",
     "@vitest/coverage-v8": "4.1.10",
+    "rehype": "13.0.2",
+    "rehype-stringify": "10.0.1",
     "typescript": "6.0.3",
     "vitest": "4.1.10",
     "yaml": "2.9.0"
