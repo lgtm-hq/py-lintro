@@ -235,8 +235,8 @@ def test_run_code_quality_gate_passes_after_infra_flake() -> None:
         Path(output_path).unlink(missing_ok=True)
 
 
-def test_run_code_quality_gate_fails_on_real_lint_failure() -> None:
-    """End-to-end gate should fail when lint reports a real failure."""
+def test_run_code_quality_gate_fails_when_retry_reports_real_lint_failure() -> None:
+    """A failed retry with real outputs must not be treated as an infra flake."""
     with tempfile.NamedTemporaryFile(mode="w+", delete=False) as output_file:
         output_path = output_file.name
 
@@ -249,8 +249,8 @@ def test_run_code_quality_gate_fails_on_real_lint_failure() -> None:
                 "MANIFEST_SYNC_RESULT": "success",
                 "PRIMARY_LINT_RESULT": "failure",
                 "RETRY_LINT_RESULT": "failure",
-                "PRIMARY_LINT_STATUS": "failed",
-                "PRIMARY_LINT_EXIT_CODE": "1",
+                "PRIMARY_LINT_STATUS": "",
+                "PRIMARY_LINT_EXIT_CODE": "",
                 "RETRY_LINT_STATUS": "failed",
                 "RETRY_LINT_EXIT_CODE": "1",
             },

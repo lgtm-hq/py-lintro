@@ -68,7 +68,10 @@ effective_exit_code="${PRIMARY_LINT_EXIT_CODE:-}"
 effective_conclusion="${PRIMARY_LINT_CONCLUSION:-}"
 effective_failure_reason="${PRIMARY_FAILURE_REASON:-}"
 
-if [[ "${RETRY_LINT_RESULT:-}" == "success" ]]; then
+# Prefer the retry attempt whenever it actually ran (success or failure).
+# Selecting only on success left a failed retry's real lint outputs unused,
+# so empty primary outputs could be misclassified as an infra flake.
+if [[ "${RETRY_LINT_RESULT:-}" == "success" || "${RETRY_LINT_RESULT:-}" == "failure" ]]; then
 	effective_result="${RETRY_LINT_RESULT}"
 	effective_status="${RETRY_LINT_STATUS:-}"
 	effective_exit_code="${RETRY_LINT_EXIT_CODE:-}"
