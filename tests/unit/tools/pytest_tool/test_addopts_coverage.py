@@ -16,6 +16,9 @@ from assertpy import assert_that
 from lintro.tools.implementations.pytest.addopts_coverage import (
     config_addopts_enable_coverage,
 )
+from lintro.tools.implementations.pytest.pytest_command_builder import (
+    add_coverage_options,
+)
 from lintro.tools.implementations.pytest.pytest_config import PytestConfiguration
 from lintro.tools.implementations.pytest.pytest_executor import PytestExecutor
 
@@ -102,6 +105,20 @@ def test_detects_coverage_in_pyproject_toml_list_addopts(tmp_path: Path) -> None
     assert_that(config_addopts_enable_coverage(tmp_path)).is_true()
 
 
+def test_malformed_pyproject_tool_value_does_not_crash(tmp_path: Path) -> None:
+    """A non-table pyproject tool value is handled as no pytest configuration.
+
+    Args:
+        tmp_path: Temporary directory provided by pytest.
+    """
+    (tmp_path / "pyproject.toml").write_text(
+        'tool = "not-a-table"\n',
+        encoding="utf-8",
+    )
+
+    assert_that(config_addopts_enable_coverage(tmp_path)).is_false()
+
+
 def test_detects_coverage_in_setup_cfg(tmp_path: Path) -> None:
     """Coverage flags in setup.cfg [tool:pytest] are detected.
 
@@ -176,6 +193,32 @@ def test_banner_reports_disabled_without_coverage_config(
     assert_that(banner).contains("Coverage: disabled")
 
 
+def test_zero_coverage_threshold_enables_collection() -> None:
+    """An explicit zero threshold enables coverage collection."""
+    command: list[str] = []
+
+    add_coverage_options(command, {"coverage_threshold": 0})
+
+    assert_that(command).contains("--cov-fail-under", "0", "--cov=.")
+
+
+def test_banner_reports_enabled_for_zero_coverage_threshold(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Banner reports coverage enabled when threshold is explicitly zero.
+
+    Args:
+        capsys: Pytest capture fixture for stdout/stderr.
+    """
+    config = PytestConfiguration(coverage_threshold=0)
+    executor = PytestExecutor(config=config, tool=None)
+
+    executor.display_run_config(total_tests=1, target_files=["."])
+
+    banner = capsys.readouterr().out
+    assert_that(banner).contains("Coverage: enabled")
+
+
 def test_report_only_cov_flags_do_not_enable_coverage(tmp_path: Path) -> None:
     """Report/config-only --cov* flags do not count as enabling coverage.
 
@@ -204,6 +247,7 @@ def test_detects_parent_pytest_ini_from_subdirectory(
     subdir.mkdir(parents=True)
     monkeypatch.chdir(subdir)
     assert_that(config_addopts_enable_coverage()).is_true()
+
 
 def test_nearer_config_without_coverage_stops_walk(
     tmp_path: Path,
@@ -283,4 +327,3 @@ def test_pyproject_coverage_wins_over_setup_cfg_without_coverage(
         encoding="utf-8",
     )
     assert_that(config_addopts_enable_coverage(tmp_path)).is_true()
-

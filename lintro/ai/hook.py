@@ -48,9 +48,10 @@ class AIPostExecutionHook:
             action: The action being performed (CHECK, FIX, TEST).
 
         Returns:
-            True if AI is enabled and action is CHECK or FIX.
+            True if AI lint summarization is enabled and action is CHECK or
+            FIX.
         """
-        return self._lintro_config.ai.enabled and action in {
+        return self._lintro_config.ai.lint_enabled and action in {
             Action.CHECK,
             Action.FIX,
         }

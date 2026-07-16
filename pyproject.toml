@@ -1,10 +1,10 @@
 [build-system]
-requires = ["setuptools==80.10.2", "wheel"]
+requires = ["setuptools==83.0.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "lintro"
-version = "0.78.0"
+version = "0.80.4"
 description = "A unified CLI tool for code formatting, linting, and quality assurance"
 keywords = [
   "linting",

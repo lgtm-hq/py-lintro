@@ -73,7 +73,7 @@
     },
     {
       "name": "astro_check",
-      "version": "6.4.8",
+      "version": "7.0.9",
       "install": {
         "type": "npm",
         "package": "astro",
@@ -139,7 +139,7 @@
     },
     {
       "name": "clippy",
-      "version": "1.96.0",
+      "version": "1.97.1",
       "install": {
         "type": "rustup",
         "component": "clippy"
@@ -152,7 +152,7 @@
     },
     {
       "name": "commitlint",
-      "version": "21.2.0",
+      "version": "21.2.1",
       "install": {
         "type": "npm",
         "package": "@commitlint/cli"
@@ -227,7 +227,7 @@
     },
     {
       "name": "osv_scanner",
-      "version": "2.3.8",
+      "version": "2.4.0",
       "install": {
         "type": "binary",
         "package": "osv-scanner"
@@ -240,7 +240,7 @@
     },
     {
       "name": "oxfmt",
-      "version": "0.57.0",
+      "version": "0.58.0",
       "install": {
         "type": "npm",
         "package": "oxfmt"
@@ -253,7 +253,7 @@
     },
     {
       "name": "oxlint",
-      "version": "1.72.0",
+      "version": "1.73.0",
       "install": {
         "type": "npm",
         "package": "oxlint"
@@ -318,7 +318,7 @@
     },
     {
       "name": "rustc",
-      "version": "1.96.1",
+      "version": "1.97.1",
       "install": {
         "type": "rustup"
       },
@@ -330,7 +330,7 @@
     },
     {
       "name": "rustfmt",
-      "version": "1.8.0",
+      "version": "1.9.0",
       "install": {
         "type": "rustup",
         "component": "rustfmt"
@@ -407,7 +407,7 @@
     },
     {
       "name": "svelte_check",
-      "version": "4.7.1",
+      "version": "4.7.2",
       "install": {
         "type": "npm",
         "package": "svelte-check",
@@ -433,7 +433,7 @@
     },
     {
       "name": "tsc",
-      "version": "5.9.3",
+      "version": "6.0.3",
       "install": {
         "type": "npm",
         "package": "typescript",
@@ -472,7 +472,7 @@
     },
     {
       "name": "vue_tsc",
-      "version": "3.3.6",
+      "version": "3.3.7",
       "install": {
         "type": "npm",
         "package": "vue-tsc",
