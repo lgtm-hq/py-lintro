@@ -5,6 +5,7 @@ from __future__ import annotations
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
+from typing import cast
 from unittest.mock import MagicMock
 
 import pytest
@@ -145,12 +146,13 @@ def test_model_is_swapped_for_each_fallback() -> None:
     provider = _make_provider("primary")
     models_seen: list[str] = []
 
-    def capture_model(*args, **kwargs):
+    def capture_model(*args: object, **kwargs: object) -> AIResponse:
         """Record the per-call model and fail until the third call."""
-        models_seen.append(kwargs["model"])
+        model = str(kwargs["model"])
+        models_seen.append(model)
         if len(models_seen) < 3:
             raise AIProviderError("fail")
-        return _ok_response(kwargs["model"])
+        return _ok_response(model)
 
     provider.complete.side_effect = capture_model
 
@@ -306,12 +308,14 @@ def test_forwards_all_kwargs() -> None:
 
 # -- TestCompleteWithFallbackConcurrency: parallel calls must not serialize.
 
+_BARRIER_TIMEOUT_SECONDS = 5.0
+
 
 def test_with_fallback_parallel_calls_overlap() -> None:
     """Prove _with_fallback does not serialize concurrent provider calls."""
     provider = _make_provider()
     worker_count = 5
-    sleep_seconds = 0.05
+    sleep_seconds = 0.10
     start_barrier = threading.Barrier(worker_count)
     active_lock = threading.Lock()
     active_calls = 0
@@ -326,7 +330,7 @@ def test_with_fallback_parallel_calls_overlap() -> None:
     ) -> str:
         """Sleep to simulate provider latency and track concurrent overlap."""
         nonlocal active_calls, max_concurrent_calls
-        start_barrier.wait()
+        start_barrier.wait(timeout=_BARRIER_TIMEOUT_SECONDS)
         with active_lock:
             active_calls += 1
             max_concurrent_calls = max(max_concurrent_calls, active_calls)
@@ -337,7 +341,10 @@ def test_with_fallback_parallel_calls_overlap() -> None:
 
     def run_fallback(_: int) -> str:
         """Invoke _with_fallback from a worker thread."""
-        return _with_fallback(provider, slow_attempt, "hello")
+        return cast(
+            str,
+            _with_fallback(provider, slow_attempt, "hello"),
+        )
 
     started_at = time.perf_counter()
     with ThreadPoolExecutor(max_workers=worker_count) as pool:
@@ -355,13 +362,22 @@ def test_complete_with_fallback_parallel_calls_overlap() -> None:
     """Prove complete_with_fallback allows concurrent provider.complete calls."""
     provider = _make_provider()
     worker_count = 5
-    sleep_seconds = 0.05
+    sleep_seconds = 0.10
     start_barrier = threading.Barrier(worker_count)
+    active_lock = threading.Lock()
+    active_calls = 0
+    max_concurrent_calls = 0
 
     def slow_complete(*_args: object, **_kwargs: object) -> AIResponse:
         """Sleep to simulate provider HTTP latency."""
-        start_barrier.wait()
+        nonlocal active_calls, max_concurrent_calls
+        start_barrier.wait(timeout=_BARRIER_TIMEOUT_SECONDS)
+        with active_lock:
+            active_calls += 1
+            max_concurrent_calls = max(max_concurrent_calls, active_calls)
         time.sleep(sleep_seconds)
+        with active_lock:
+            active_calls -= 1
         return _ok_response()
 
     provider.complete.side_effect = slow_complete
@@ -377,6 +393,7 @@ def test_complete_with_fallback_parallel_calls_overlap() -> None:
     elapsed = time.perf_counter() - started_at
 
     serialized_minimum = sleep_seconds * worker_count
+    assert_that(max_concurrent_calls).is_greater_than_or_equal_to(2)
     assert_that(elapsed).is_less_than(serialized_minimum * 0.75)
     assert_that(results).is_length(worker_count)
     for result in results:
