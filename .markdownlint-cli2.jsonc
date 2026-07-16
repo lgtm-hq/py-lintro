@@ -6,6 +6,9 @@
       "tables": false,
     },
   },
+  "ignores": [
+    "lintro/ai/prompts/templates/**",
+  ],
   "overrides": [
     {
       "globs": ["apps/site/src/content/docs/**/*.md"],
