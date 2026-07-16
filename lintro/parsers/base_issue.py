@@ -40,6 +40,7 @@ def resolve_issue_code(issue: object) -> str:
         value = get_code()
         if isinstance(value, str):
             return value
+        # Duck-typed callables may return None; BaseIssue.get_code() never does.
         if value is None:
             return ""
         if isinstance(value, (int, float)):
@@ -101,7 +102,7 @@ class BaseIssue:
         """
         attr_name = self.DISPLAY_FIELD_MAP.get("code", "code")
         raw = getattr(self, attr_name, None)
-        if not raw:
+        if raw is None or raw == "":
             return ""
         return str(raw)
 
