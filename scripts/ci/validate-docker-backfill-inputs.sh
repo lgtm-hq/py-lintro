@@ -30,9 +30,24 @@ trim_input() {
 	printf '%s' "$value"
 }
 
+# Reject control characters (including newlines) so GITHUB_OUTPUT cannot be
+# poisoned via multi-line workflow_dispatch inputs (output injection).
+reject_control_chars() {
+	local name="$1"
+	local value="$2"
+	if [[ "$value" == *$'\n'* || "$value" == *$'\r'* || "$value" =~ [[:cntrl:]] ]]; then
+		echo "::error::${name} must not contain control characters or newlines." >&2
+		exit 1
+	fi
+}
+
 backfill_version="$(trim_input "${BACKFILL_VERSION:-}")"
 backfill_ref="$(trim_input "${BACKFILL_REF:-}")"
-force_publish="${FORCE_PUBLISH:-false}"
+force_publish="$(trim_input "${FORCE_PUBLISH:-false}")"
+
+reject_control_chars BACKFILL_VERSION "$backfill_version"
+reject_control_chars BACKFILL_REF "$backfill_ref"
+reject_control_chars FORCE_PUBLISH "$force_publish"
 
 if [[ -n "$backfill_version" && -z "$backfill_ref" ]]; then
 	echo "::error::BACKFILL_REF is required when BACKFILL_VERSION is set." >&2
