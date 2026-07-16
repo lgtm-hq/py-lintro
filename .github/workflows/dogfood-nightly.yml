@@ -43,7 +43,7 @@ jobs:
       # image (same digest the fork-PR fallback in docker-ci.yml uses).
       # Pinned digest — keep in sync with pyproject.toml lintro pin
       lintro-image: >-
-        ghcr.io/lgtm-hq/py-lintro@sha256:1ff3db35939283734b859c7c5d95be87fd8fd62734b3434e0437769d50d53578
+        ghcr.io/lgtm-hq/py-lintro@sha256:0e8f3892f31f7bb6ce56a33d037d983591b82c325bf56281f9d9e2fec488aa5c
 
   notify-failure:
     needs: [dogfood-full]

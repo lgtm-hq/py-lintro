@@ -478,7 +478,7 @@ jobs:
         ${{ needs.docker-build.outputs.is-fork == 'true'
         && format(
           'ghcr.io/lgtm-hq/py-lintro@sha256:{0}',
-          '1ff3db35939283734b859c7c5d95be87fd8fd62734b3434e0437769d50d53578'
+          '0e8f3892f31f7bb6ce56a33d037d983591b82c325bf56281f9d9e2fec488aa5c'
         )
         || format('ghcr.io/lgtm-hq/py-lintro:ci-{0}', github.run_id) }}
 
@@ -580,7 +580,7 @@ jobs:
             ${{ needs.docker-build.outputs.is-fork == 'true'
             && format(
               'ghcr.io/lgtm-hq/py-lintro@sha256:{0}',
-              '1ff3db35939283734b859c7c5d95be87fd8fd62734b3434e0437769d50d53578'
+              '0e8f3892f31f7bb6ce56a33d037d983591b82c325bf56281f9d9e2fec488aa5c'
             )
             || format('ghcr.io/lgtm-hq/py-lintro:ci-{0}', github.run_id) }}
         run: scripts/ci/dogfood-changed-files.sh
