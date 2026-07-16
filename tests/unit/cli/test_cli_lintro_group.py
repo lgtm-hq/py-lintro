@@ -110,6 +110,8 @@ def test_invoke_with_comma_separated_commands() -> None:
             ignore_conflicts=False,
             transport=None,
             profile=False,
+            score=False,
+            fail_under=None,
         )
         mock_fmt.assert_any_call(
             action="fmt",

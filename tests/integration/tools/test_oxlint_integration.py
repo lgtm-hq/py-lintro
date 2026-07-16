@@ -7,7 +7,7 @@ They verify the OxlintPlugin definition, check command, fix command, and set_opt
 from __future__ import annotations
 
 import shutil
-import subprocess
+import subprocess  # nosec B404 - subprocess is used to drive the tool/CLI under test; invocations use shell=False
 from collections.abc import Callable
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -33,7 +33,7 @@ def oxlint_is_available() -> bool:
         return False
     try:
         # First check --version works
-        version_result = subprocess.run(
+        version_result = subprocess.run(  # nosec B603 B607 - fixed argv run against a real binary in a controlled test; binary name resolved from PATH, not attacker-controlled; shell=False, no user shell input
             ["oxlint", "--version"],
             capture_output=True,
             timeout=10,
@@ -45,7 +45,7 @@ def oxlint_is_available() -> bool:
         # Then verify it can actually lint code (catches missing npm packages)
         # oxlint returns 0 for clean files, non-zero for files with issues
         # Use --quiet to minimize output and lint valid code that should pass
-        lint_result = subprocess.run(
+        lint_result = subprocess.run(  # nosec B603 B607 - fixed argv run against a real binary in a controlled test; binary name resolved from PATH, not attacker-controlled; shell=False, no user shell input
             ["oxlint", "--stdin-filename", "test.js"],
             input=b"const x = 1;\n",
             capture_output=True,

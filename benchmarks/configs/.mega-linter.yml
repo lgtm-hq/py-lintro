@@ -1,0 +1,19 @@
+---
+# Pinned MegaLinter configuration used for the comparative benchmark.
+#
+# Restricted to the Python linters that overlap with the lintro and
+# sequential-native scenarios so the comparison stays apples-to-apples. Pin the
+# MegaLinter image tag when invoking (see benchmarks/README.md) for full
+# reproducibility.
+APPLY_FIXES: none
+SHOW_ELAPSED_TIME: true
+FLAVOR_SUGGESTIONS: false
+PRINT_ALPACA: false
+ENABLE_LINTERS:
+  - PYTHON_RUFF
+  - PYTHON_RUFF_FORMAT
+DISABLE:
+  - COPYPASTE
+  - SPELL
+  - REPOSITORY
+PYTHON_RUFF_CONFIG_FILE: LINTER_DEFAULT

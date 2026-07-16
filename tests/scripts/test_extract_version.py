@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-import subprocess
+import subprocess  # nosec B404 - subprocess is used to drive the tool/CLI under test; invocations use shell=False
 import sys
 from pathlib import Path
 
@@ -19,7 +19,13 @@ def run(cmd: list[str], cwd: Path) -> subprocess.CompletedProcess[str]:
     Returns:
         CompletedProcess[str]: Completed process with stdout/stderr.
     """
-    return subprocess.run(cmd, cwd=cwd, text=True, capture_output=True, check=False)
+    return subprocess.run(
+        cmd,
+        cwd=cwd,
+        text=True,
+        capture_output=True,
+        check=False,
+    )  # nosec B603 - fixed argv run against a real binary in a controlled test; shell=False, no user shell input
 
 
 def test_extract_version_from_repo_root(tmp_path: Path) -> None:
