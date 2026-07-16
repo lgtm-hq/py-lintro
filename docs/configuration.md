@@ -21,6 +21,11 @@ Lintro uses a clear 5-tier configuration model that separates concerns:
 | **tools**     | Per-tool enable/disable and config source           | Always                     |
 | **ai**        | AI-powered summaries and fixes                      | When enabled + API key set |
 
+The five tiers above form the `LintroConfig` model's core configuration story
+(`lintro/config/lintro_config.py`). Two additional optional sections — `review`
+(diff-review checklist) and `score` (health-score weights, see **Health Score** below) —
+configure specific commands rather than tool resolution.
+
 ### Key Principles
 
 1. **Native configs are respected by default** - Tools use their own `.prettierrc`,
@@ -40,8 +45,9 @@ The configuration system works in a specific order:
    - `fail_fast`: Whether to stop on first tool failure
    - `parallel`: Whether to run tools in parallel (default: `true`)
    - `max_workers`: Maximum parallel workers, 1-32 (default: CPU count)
-   - `auto_install_deps`: Auto-install Node.js dependencies if missing (default:
-     `false`)
+   - `auto_install_deps`: Auto-install Node.js dependencies if missing. Unset by
+     default, in which case Lintro falls back to container auto-detection (enabled
+     inside containers, disabled otherwise)
 
 2. **Enforce Tier** - Cross-cutting settings injected as CLI flags
    - These settings override native configs via CLI arguments
@@ -146,6 +152,85 @@ The config command shows:
 - **Per-tool configuration**: Whether enabled, native config found
 - **Defaults applied**: Which tools are using fallback defaults
 
+### Health Score
+
+`lintro check` computes a single, deterministic **0-100 health score** that aggregates
+every issue across every tool into one trackable, CI-gateable, shareable number.
+
+```bash
+lintro check                  # normal output + health score line at the end
+lintro check --score          # print ONLY the score (for scripts/badges)
+lintro check --fail-under 75  # exit 1 if the score is below 75
+lintro check --output-format json   # score included under summary.health_score
+```
+
+#### Scoring model
+
+Every issue is normalised to one of three severities (`ERROR`, `WARNING`, `INFO`) and
+weighted, then mapped onto 0-100 with a smoothly saturating penalty:
+
+```text
+weighted  = error_weight   * n_errors
+          + warning_weight * n_warnings
+          + info_weight    * n_info
+
+score     = floor( 100 * scale / (scale + weighted) )
+```
+
+With the default weights (`ERROR=10`, `WARNING=3`, `INFO=1`) and `scale=100`, this has
+the following guaranteed properties:
+
+- **Zero issues → exactly 100.** A clean run is unambiguous.
+- **Any issue → strictly below 100** (`floor` keeps it at most 99).
+- **Monotonic.** Adding an issue, or raising its severity, never raises the score.
+- **Bounded** to `[0, 100]` and **deterministic** — the result depends only on the
+  severity counts and the configured weights/scale, never on ordering or timing.
+
+The score hits 50 when the total weighted penalty equals `scale` (e.g. ten `ERROR`
+issues, or ~33 `WARNING` issues, with the defaults).
+
+#### Score tiers
+
+| Score  | Tier         |
+| ------ | ------------ |
+| 75-100 | `great`      |
+| 50-74  | `needs-work` |
+| 0-49   | `critical`   |
+
+#### Configuring the weights
+
+Weights and the smoothing scale are tunable via the `score` section:
+
+```yaml
+# .lintro-config.yaml
+score:
+  error_weight: 10 # penalty per ERROR issue
+  warning_weight: 3 # penalty per WARNING issue
+  info_weight: 1 # penalty per INFO issue
+  scale: 100 # larger = the score decays more slowly
+```
+
+#### JSON output
+
+In `--output-format json` the score is added **additively** under
+`summary.health_score`, leaving all existing keys untouched:
+
+```json
+{
+  "summary": {
+    "total_issues": 3,
+    "total_fixed": 0,
+    "total_remaining": 3,
+    "health_score": {
+      "score": 88,
+      "tier": "great",
+      "severity_counts": { "error": 1, "warning": 0, "info": 0 },
+      "weighted_penalty": 10.0
+    }
+  }
+}
+```
+
 ### Command-Line Options
 
 #### Global Options
@@ -228,12 +313,13 @@ Lintro automatically detects container environments (Docker, Podman, LXC, Kubern
 and enables auto-install by default when running in a container. This means Node.js
 tools work out of the box in Docker without any configuration.
 
-You can override this behavior:
+You can override this behavior explicitly via configuration or the `--auto-install` CLI
+flag:
 
-```bash
-# Disable auto-install even in a container
-docker run --rm -e LINTRO_AUTO_INSTALL_DEPS=0 -v $(pwd):/code \
-  ghcr.io/lgtm-hq/py-lintro:latest check --tools tsc
+```yaml
+# .lintro-config.yaml — disable auto-install even inside a container
+execution:
+  auto_install_deps: false
 ```
 
 See the [Docker Usage Guide](docker.md) for more details on container behavior.
@@ -253,32 +339,34 @@ lintro check --exclude "*.pyc,venv,node_modules"
 
 ### Environment Variables
 
+Lintro reads the following environment variables at runtime. Most configuration is done
+through `.lintro-config.yaml` and CLI flags; these variables cover a few runtime
+overrides.
+
 ```bash
-# Override default settings
-export LINTRO_DEFAULT_TIMEOUT=60
-export LINTRO_VERBOSE=1
+# Override the directory where run logs/artifacts are written (default: .lintro)
+export LINTRO_LOG_DIR=/tmp/lintro-runs
 
-# Default exclude patterns
-export LINTRO_EXCLUDE="*.pyc,venv,node_modules"
+# Timeout (seconds) for tool version checks (default: 30)
+export LINTRO_VERSION_TIMEOUT=60
 
-# Default output format
-export LINTRO_DEFAULT_FORMAT="grid"
-
-# Auto-install Node.js dependencies (useful in Docker/CI)
-# Set to 1 to enable, 0 to disable (overrides container auto-detection)
-export LINTRO_AUTO_INSTALL_DEPS=1
+# Force Docker install-context detection (set to 1)
+export LINTRO_DOCKER=1
 ```
 
-| Variable                   | Description                                  | Default |
-| -------------------------- | -------------------------------------------- | ------- |
-| `LINTRO_DEFAULT_TIMEOUT`   | Default timeout for tool execution (seconds) | `30`    |
-| `LINTRO_VERBOSE`           | Enable verbose logging (`1` to enable)       | `0`     |
-| `LINTRO_EXCLUDE`           | Comma-separated exclude patterns             | -       |
-| `LINTRO_DEFAULT_FORMAT`    | Default output format                        | -       |
-| `LINTRO_AUTO_INSTALL_DEPS` | Auto-install Node.js deps (`1`/`0`)          | `0`\*   |
+| Variable                 | Description                                                  | Default   |
+| ------------------------ | ------------------------------------------------------------ | --------- |
+| `LINTRO_LOG_DIR`         | Base directory for run logs and artifacts                    | `.lintro` |
+| `LINTRO_VERSION_TIMEOUT` | Timeout in seconds for tool version checks (must be `>= 1`)  | `30`      |
+| `LINTRO_DOCKER`          | Force Docker install-context detection when set to `1`       | -         |
+| `LINTRO_CONFIG`          | Shown in the `lintro` environment report; informational only | -         |
 
-\* In container environments, `LINTRO_AUTO_INSTALL_DEPS` effectively defaults to `1` via
-container auto-detection. Set to `0` to explicitly disable.
+> **Note:** There is no environment variable for tool timeouts, verbosity, exclude
+> patterns, output format, or auto-install. Use CLI flags (`--exclude`,
+> `--output-format`, `--auto-install`) or `.lintro-config.yaml` for those settings.
+> Auto-install is resolved from the `--auto-install` flag, then
+> `execution.auto_install_deps`, then container auto-detection — not from an environment
+> variable.
 
 ### Pre-Execution Summary
 
@@ -1064,6 +1152,74 @@ lintro check --tools oxlint --tool-options "oxlint:config=.oxlintrc.custom.json"
 
 # Specify tsconfig for TypeScript projects
 lintro check --tools oxlint --tool-options "oxlint:tsconfig=tsconfig.app.json"
+```
+
+#### Stylelint Configuration
+
+Stylelint is a mighty, configurable linter and fixer for CSS, SCSS, Sass, and Less
+stylesheets, with 100+ built-in rules and `--fix` support.
+
+> Stylelint requires a configuration to run. When no config is resolvable, Lintro skips
+> stylelint as a non-error (rather than surfacing stylelint's hard
+> `ConfigurationError`).
+
+**Native Config Detection:**
+
+Stylelint resolves configuration per file (walking upward). Lintro supports:
+
+- `.stylelintrc`, `.stylelintrc.json`, `.stylelintrc.yaml`, `.stylelintrc.yml`
+- `.stylelintrc.js`, `.stylelintrc.cjs`, `.stylelintrc.mjs`
+- `stylelint.config.js`, `stylelint.config.cjs`, `stylelint.config.mjs`
+- a `stylelint` key in `package.json`
+
+`.stylelintignore` is honored by the underlying tool.
+
+**Installation:**
+
+```bash
+# npm/bun
+npm install -g stylelint
+bun add -g stylelint
+
+# Per-project (recommended, with a shareable config)
+bun add -d stylelint stylelint-config-standard
+```
+
+**File:** `.stylelintrc.json`
+
+```json
+{
+  "extends": ["stylelint-config-standard"],
+  "rules": {
+    "color-hex-length": "short",
+    "block-no-empty": true,
+    "declaration-block-no-duplicate-properties": true
+  }
+}
+```
+
+**Available Options via `--tool-options`:**
+
+| Option               | Type    | Description                                  |
+| -------------------- | ------- | -------------------------------------------- |
+| `config`             | string  | Path to a stylelint config file (`--config`) |
+| `verbose_fix_output` | boolean | Include raw stylelint output in `fix()`      |
+| `timeout`            | integer | Execution timeout in seconds (default: 30)   |
+
+**Usage Examples:**
+
+```bash
+# Basic check
+lintro check styles/ --tools stylelint
+
+# Auto-fix issues
+lintro format styles/ --tools stylelint
+
+# Use a specific config file
+lintro check styles/ --tools stylelint --tool-options "stylelint:config=.stylelintrc.json"
+
+# Increase timeout for large stylesheets
+lintro check styles/ --tools stylelint --tool-options "stylelint:timeout=60"
 ```
 
 #### Oxfmt Configuration
@@ -1876,6 +2032,63 @@ lintro format --tools shfmt
 lintro check scripts/ --tools shfmt
 ```
 
+### Dotenv Tools
+
+#### dotenv-linter Configuration
+
+[dotenv-linter](https://dotenv-linter.github.io/) is a fast, Rust-based linter and fixer
+for `.env` files. It detects duplicate keys, lowercase keys, incorrect delimiters,
+unordered keys, and stray whitespace, and can auto-fix most of them.
+
+**Installation:**
+
+```bash
+# macOS
+brew install dotenv-linter
+
+# Cargo
+cargo install dotenv-linter
+
+# Binary releases
+# https://github.com/dotenv-linter/dotenv-linter/releases
+```
+
+**Native config:** dotenv-linter has no config file; behavior is controlled entirely via
+CLI flags (surfaced through `--tool-options`).
+
+**Lintro options via `--tool-options`:**
+
+```bash
+# Recursively scan directories for .env files
+lintro check --tools dotenv_linter --tool-options "dotenv_linter:recursive=True"
+
+# Skip specific checks (maps to --ignore-checks)
+lintro check --tools dotenv_linter \
+  --tool-options "dotenv_linter:skip_checks=LowercaseKey|UnorderedKey"
+
+# Exclude paths from linting
+lintro check --tools dotenv_linter --tool-options "dotenv_linter:exclude=vendor"
+
+# Validate against a schema file
+lintro check --tools dotenv_linter --tool-options "dotenv_linter:schema=env.schema.json"
+
+# Auto-fix issues in place (no .env.bak backups are created)
+lintro format --tools dotenv_linter
+```
+
+**Available Options:**
+
+| Option        | Type        | Description                                                    |
+| ------------- | ----------- | -------------------------------------------------------------- |
+| `recursive`   | bool        | Recursively scan directories for `.env` files. Default `False` |
+| `exclude`     | list\[str\] | File or directory paths to exclude                             |
+| `skip_checks` | list\[str\] | Check names to bypass (maps to `--ignore-checks`)              |
+| `schema`      | str         | Path to a schema file to validate `.env` contents              |
+
+> Note: real `.env` files are frequently `.gitignore`d, so they may not be discovered
+> during a normal repository scan. Point Lintro at the file explicitly, or commit a
+> template such as `.env.example` for the linter to check.
+
 ### TOML Tools
 
 #### Taplo Configuration
@@ -2114,6 +2327,8 @@ export ANTHROPIC_API_KEY=sk-ant-...
 # .lintro-config.yaml
 ai:
   enabled: true
+  lint: true # AI summaries / --fix on chk/fmt
+  review: false # lintro review (opt-in separately)
   provider: anthropic
 ```
 
@@ -2131,6 +2346,8 @@ Set `default_fix` to avoid typing the flag every time:
 ```yaml
 ai:
   enabled: true
+  lint: true
+  review: true
   default_fix: false # only run --fix when explicitly requested
 ```
 
@@ -2138,7 +2355,9 @@ ai:
 
 | Setting                 | Type   | Default     | Description                                      |
 | ----------------------- | ------ | ----------- | ------------------------------------------------ |
-| `enabled`               | bool   | `false`     | Master toggle for all AI features                |
+| `enabled`               | bool   | `false`     | Master switch; ANDs with `lint` / `review`       |
+| `lint`                  | bool   | `false`     | Enable AI lint summaries on `chk`/`fmt`          |
+| `review`                | bool   | `false`     | Enable the `lintro review` AI diff review        |
 | `provider`              | string | `anthropic` | AI provider (`anthropic` or `openai`)            |
 | `model`                 | string | (default)   | Model override                                   |
 | `api_key_env`           | string | (default)   | Custom env var for API key                       |

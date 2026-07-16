@@ -1,0 +1,1 @@
+"""dotenv-linter integration tests."""

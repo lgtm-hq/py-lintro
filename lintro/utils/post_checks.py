@@ -96,6 +96,7 @@ def execute_post_checks(
     total_issues: int,
     total_fixed: int,
     total_remaining: int,
+    diff_base: str | None = None,
 ) -> tuple[int, int, int]:
     """Execute post-check tools after primary linting.
 
@@ -113,6 +114,7 @@ def execute_post_checks(
         total_issues: Current total issues count.
         total_fixed: Current total fixed count.
         total_remaining: Current total remaining count.
+        diff_base: Optional git ref to scope post-checks to changed files.
 
     Returns:
         tuple[int, int, int]: Updated (total_issues, total_fixed, total_remaining)
@@ -205,6 +207,8 @@ def execute_post_checks(
                         p.strip() for p in exclude.split(",")
                     ]
                     tool.set_options(exclude_patterns=exclude_patterns)
+                if diff_base is not None:
+                    tool.set_options(diff_base=diff_base)
 
                 # For check: Black should run in check mode; for fmt: run fix
                 if action == Action.FIX and tool.definition.can_fix:
