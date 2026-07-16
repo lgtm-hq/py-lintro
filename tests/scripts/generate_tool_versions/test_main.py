@@ -38,6 +38,19 @@ def test_main_check_clean_exits_zero(retargeted_gen: ModuleType) -> None:
     assert_that(retargeted_gen.main(["--check"])).is_equal_to(retargeted_gen.EXIT_OK)
 
 
+def _bump_oxfmt_version(fake_repo: Path, version: str) -> None:
+    """Simulate a Renovate-style pin bump in package.json.
+
+    Args:
+        fake_repo: Fake repo fixture root.
+        version: New oxfmt version pin to write.
+    """
+    pkg = fake_repo / "package.json"
+    data = json.loads(pkg.read_text())
+    data["devDependencies"]["oxfmt"] = version
+    pkg.write_text(json.dumps(data, indent=2))
+
+
 def test_main_check_drift_exits_one(
     retargeted_gen: ModuleType,
     fake_repo: Path,
@@ -52,16 +65,34 @@ def test_main_check_drift_exits_one(
     """
     retargeted_gen.main([])
 
-    pkg = fake_repo / "package.json"
-    data = json.loads(pkg.read_text())
-    data["devDependencies"]["oxfmt"] = "0.99.0"
-    pkg.write_text(json.dumps(data, indent=2))
+    _bump_oxfmt_version(fake_repo, "0.99.0")
 
     rc = retargeted_gen.main(["--check"])
     assert_that(rc).is_equal_to(retargeted_gen.EXIT_DRIFT)
     captured = capsys.readouterr()
     assert_that(captured.out).contains("0.99.0")
     assert_that(captured.err).contains("Drift detected")
+
+
+def test_pin_bump_then_regenerate_passes_check(
+    retargeted_gen: ModuleType,
+    fake_repo: Path,
+) -> None:
+    """Simulated Renovate pin bump plus regeneration clears the drift gate.
+
+    Args:
+        retargeted_gen: Generator module pointed at the fake repo.
+        fake_repo: Fake repo fixture root.
+    """
+    retargeted_gen.main([])
+
+    _bump_oxfmt_version(fake_repo, "0.99.0")
+
+    assert_that(retargeted_gen.main(["--check"])).is_equal_to(
+        retargeted_gen.EXIT_DRIFT,
+    )
+    assert_that(retargeted_gen.main([])).is_equal_to(retargeted_gen.EXIT_OK)
+    assert_that(retargeted_gen.main(["--check"])).is_equal_to(retargeted_gen.EXIT_OK)
 
 
 def test_main_input_error_exits_two(

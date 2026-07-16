@@ -38,6 +38,7 @@ NPM_PACKAGE_OWNERS: dict[str, ToolName | None] = {
     "markdownlint-cli2": ToolName.MARKDOWNLINT,
     "oxlint": ToolName.OXLINT,
     "oxfmt": ToolName.OXFMT,
+    "stylelint": ToolName.STYLELINT,
     "@astrojs/check": None,
 }
 

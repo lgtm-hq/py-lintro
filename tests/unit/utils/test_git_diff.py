@@ -1,0 +1,226 @@
+"""Unit tests for git-diff based file selection (``--diff`` scanning)."""
+
+from __future__ import annotations
+
+import subprocess  # nosec B404 - subprocess is used to drive git under test; invocations use shell=False
+from collections.abc import Iterator
+from pathlib import Path
+
+import pytest
+from assertpy import assert_that
+
+from lintro.utils.git_diff import (
+    DIFF_DEFAULT_SENTINEL,
+    DiffResolutionError,
+    filter_files_by_diff,
+    get_changed_files,
+    is_git_repository,
+    resolve_default_base,
+)
+
+
+@pytest.fixture(autouse=True)
+def _clear_diff_cache() -> Iterator[None]:
+    """Clear the per-run changed-file cache around each test.
+
+    Yields:
+        None: Control to the test body with a clean cache before and after.
+    """
+    get_changed_files.cache_clear()
+    yield
+    get_changed_files.cache_clear()
+
+
+def _git(repo: Path, *args: str) -> None:
+    """Run a git command inside ``repo``.
+
+    Args:
+        repo: Repository working directory.
+        *args: Git arguments (without the leading ``git``).
+    """
+    subprocess.run(  # nosec B603 B607 - fixed argv run against git in a controlled test; binary name resolved from PATH, not attacker-controlled; shell=False, no user shell input
+        ["git", *args],
+        cwd=repo,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+
+@pytest.fixture
+def git_repo(tmp_path: Path) -> Path:
+    """Create a real git repository with a committed baseline on ``main``.
+
+    Args:
+        tmp_path: Pytest temporary directory.
+
+    Returns:
+        Path to the initialized repository with ``a.py`` and ``b.py`` on
+        ``main`` and an active feature branch checked out.
+    """
+    _git(tmp_path, "init", "-q")
+    _git(tmp_path, "config", "user.email", "test@example.com")
+    _git(tmp_path, "config", "user.name", "Test User")
+    (tmp_path / "a.py").write_text("x = 1\n")
+    (tmp_path / "b.py").write_text("y = 2\n")
+    _git(tmp_path, "add", ".")
+    _git(tmp_path, "commit", "-qm", "init")
+    _git(tmp_path, "branch", "-M", "main")
+    _git(tmp_path, "checkout", "-qb", "feature")
+    return tmp_path
+
+
+def _names(paths: frozenset[str] | list[str]) -> list[str]:
+    """Return sorted basenames for a collection of file paths.
+
+    Args:
+        paths: File paths to reduce to basenames.
+
+    Returns:
+        Sorted list of basenames.
+    """
+    return sorted(Path(p).name for p in paths)
+
+
+def test_is_git_repository_true(git_repo: Path) -> None:
+    """A real repo is detected as a git working tree."""
+    assert_that(is_git_repository(str(git_repo))).is_true()
+
+
+def test_is_git_repository_false(tmp_path: Path) -> None:
+    """A plain directory is not detected as a git working tree."""
+    assert_that(is_git_repository(str(tmp_path))).is_false()
+
+
+def test_resolve_default_base_prefers_main(git_repo: Path) -> None:
+    """Default base resolves to an existing local ref (``main``)."""
+    assert_that(resolve_default_base(str(git_repo))).is_equal_to("main")
+
+
+def test_get_changed_files_committed_change(git_repo: Path) -> None:
+    """Committed branch changes are reported relative to the base."""
+    (git_repo / "a.py").write_text("x = 42\n")
+    _git(git_repo, "commit", "-aqm", "change a")
+
+    changed = get_changed_files("main", str(git_repo))
+
+    assert_that(_names(changed)).is_equal_to(["a.py"])
+
+
+def test_get_changed_files_includes_working_tree_and_untracked(
+    git_repo: Path,
+) -> None:
+    """Unstaged edits and untracked files are part of the changed set."""
+    (git_repo / "a.py").write_text("x = 7\n")  # unstaged modification
+    (git_repo / "c.py").write_text("z = 3\n")  # untracked
+
+    changed = get_changed_files("main", str(git_repo))
+
+    assert_that(_names(changed)).is_equal_to(["a.py", "c.py"])
+
+
+def test_get_changed_files_staged_change(git_repo: Path) -> None:
+    """Staged (cached) changes are included."""
+    (git_repo / "a.py").write_text("x = 5\n")
+    _git(git_repo, "add", "a.py")
+
+    changed = get_changed_files("main", str(git_repo))
+
+    assert_that(_names(changed)).is_equal_to(["a.py"])
+
+
+def test_get_changed_files_rename_has_no_phantom(git_repo: Path) -> None:
+    """A rename yields the new path only; the old path is not a phantom."""
+    _git(git_repo, "mv", "b.py", "renamed.py")
+    _git(git_repo, "add", "renamed.py")
+
+    changed = get_changed_files("main", str(git_repo))
+
+    assert_that(_names(changed)).contains("renamed.py")
+    assert_that(_names(changed)).does_not_contain("b.py")
+    # No path in the set may be missing on disk.
+    for path in changed:
+        assert_that(Path(path).is_file()).is_true()
+
+
+def test_get_changed_files_deletion_excluded(git_repo: Path) -> None:
+    """A deleted file never appears in the changed set."""
+    (git_repo / "b.py").unlink()
+    _git(git_repo, "add", "-A")
+
+    changed = get_changed_files("main", str(git_repo))
+
+    assert_that(_names(changed)).does_not_contain("b.py")
+
+
+def test_get_changed_files_unresolvable_base_raises(git_repo: Path) -> None:
+    """An unknown base ref raises a clear resolution error."""
+    assert_that(get_changed_files).raises(DiffResolutionError).when_called_with(
+        "does-not-exist",
+        str(git_repo),
+    )
+
+
+def test_filter_files_by_diff_restricts_to_changed(git_repo: Path) -> None:
+    """Filtering keeps only discovered files that changed vs the base."""
+    (git_repo / "a.py").write_text("x = 9\n")  # changed
+    candidates = [str(git_repo / "a.py"), str(git_repo / "b.py")]
+
+    filtered = filter_files_by_diff(candidates, "main", str(git_repo))
+
+    assert_that(_names(filtered)).is_equal_to(["a.py"])
+
+
+def test_filter_files_by_diff_empty_changed_set(git_repo: Path) -> None:
+    """With no changes, filtering returns an empty list."""
+    candidates = [str(git_repo / "a.py"), str(git_repo / "b.py")]
+
+    filtered = filter_files_by_diff(candidates, "main", str(git_repo))
+
+    assert_that(filtered).is_empty()
+
+
+def test_walk_files_with_excludes_diff_base(
+    git_repo: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """``walk_files_with_excludes`` restricts discovery to changed files.
+
+    Diff filtering resolves the repo from the current working directory, as it
+    does when lintro is invoked from a project root, so the test runs from
+    inside the repository.
+    """
+    from lintro.utils.path_filtering import walk_files_with_excludes
+
+    (git_repo / "a.py").write_text("x = 3\n")  # changed
+    # b.py unchanged; new untracked d.py added.
+    (git_repo / "d.py").write_text("d = 4\n")
+    monkeypatch.chdir(git_repo)
+
+    files = walk_files_with_excludes(
+        paths=["."],
+        file_patterns=["*.py"],
+        exclude_patterns=[],
+        diff_base="main",
+    )
+
+    assert_that(_names(files)).is_equal_to(["a.py", "d.py"])
+
+
+def test_walk_files_with_excludes_no_diff_base_scans_all(git_repo: Path) -> None:
+    """Without ``diff_base`` all matching files are discovered."""
+    from lintro.utils.path_filtering import walk_files_with_excludes
+
+    files = walk_files_with_excludes(
+        paths=[str(git_repo)],
+        file_patterns=["*.py"],
+        exclude_patterns=[],
+    )
+
+    assert_that(_names(files)).is_equal_to(["a.py", "b.py"])
+
+
+def test_diff_default_sentinel_is_distinct() -> None:
+    """The sentinel is unlikely to collide with a real ref name."""
+    assert_that(DIFF_DEFAULT_SENTINEL).is_not_equal_to("main")
+    assert_that(DIFF_DEFAULT_SENTINEL).is_not_equal_to("")
