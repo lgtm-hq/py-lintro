@@ -155,18 +155,50 @@ Add the `ai` section to `.lintro-config.yaml`:
 
 ```yaml
 ai:
-  enabled: true
+  enabled: true # master switch (AND-ed with the toggles below)
+  lint: true # AI lint summaries during chk/fmt
+  review: true # the `lintro review` AI diff review
   provider: anthropic # or "openai"
   # model: claude-sonnet-4-6  # uses provider default if omitted
   # api_key_env: ANTHROPIC_API_KEY   # uses provider default if omitted
 ```
 
+### Feature Toggles
+
+AI features are gated by a master switch plus two per-feature toggles, all off by
+default:
+
+- `ai.enabled` — master switch for all AI features.
+- `ai.lint` — AI lint summarization injected after `chk`/`fmt` runs.
+- `ai.review` — the `lintro review` AI diff-review command.
+
+A feature is active only when the master switch **and** its own toggle are true
+(`enabled AND lint`, `enabled AND review`). This lets you, for example, enable AI diff
+review without adding AI summaries to every lint run:
+
+```yaml
+ai:
+  enabled: true
+  lint: false
+  review: true
+```
+
+**Backward compatibility:** a legacy config that sets `ai.enabled: true` without either
+sub-toggle keeps the old behaviour — both `lint` and `review` are switched on — and
+emits a deprecation warning. Set `ai.lint` and/or `ai.review` explicitly to silence it.
+
 ### Full Configuration Reference
 
 ```yaml
 ai:
-  # Master toggle — all AI features are disabled when false
+  # Master switch — all AI features are disabled when false. AND-ed with the
+  # per-feature toggles below.
   enabled: true
+
+  # Per-feature toggles (both default to false). Effective only when
+  # enabled is also true.
+  lint: true # AI lint summaries during chk/fmt
+  review: true # the `lintro review` AI diff review
 
   # Provider: "anthropic" or "openai"
   provider: anthropic

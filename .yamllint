@@ -6,6 +6,8 @@ ignore:
   - node_modules/
   - .venv/
   - venv/
+  # Checklist corpus is prose data; long question lines are intentional.
+  - lintro/ai/review/checklist/corpus/
 
 rules:
   # GitHub Actions comments often don't follow indentation expectations

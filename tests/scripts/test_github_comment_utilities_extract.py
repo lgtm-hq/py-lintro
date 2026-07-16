@@ -9,7 +9,7 @@ Google-style docstrings are used per project standards.
 
 from __future__ import annotations
 
-import subprocess
+import subprocess  # nosec B404 - subprocess is used to drive the tool/CLI under test; invocations use shell=False
 from pathlib import Path
 
 import pytest
@@ -60,7 +60,7 @@ def test_extract_comment_body_success(
 
     # Execute the script with JSON via stdin
     with open(input_file) as f:
-        result = subprocess.run(
+        result = subprocess.run(  # nosec B603 B607 - fixed argv run against a real binary in a controlled test; binary name resolved from PATH, not attacker-controlled; shell=False, no user shell input
             ["python3", str(extract_comment_script_path), "1234567890"],
             input=f.read(),
             capture_output=True,
@@ -91,7 +91,7 @@ def test_extract_comment_body_paginated(
 
     # Execute the script with JSON via stdin
     with open(input_file) as f:
-        result = subprocess.run(
+        result = subprocess.run(  # nosec B603 B607 - fixed argv run against a real binary in a controlled test; binary name resolved from PATH, not attacker-controlled; shell=False, no user shell input
             ["python3", str(extract_comment_script_path), "1234567892"],
             input=f.read(),
             capture_output=True,
@@ -123,7 +123,7 @@ def test_extract_comment_body_not_found(
 
     # Execute the script with non-existent comment ID via stdin
     with open(input_file) as f:
-        result = subprocess.run(
+        result = subprocess.run(  # nosec B603 B607 - fixed argv run against a real binary in a controlled test; binary name resolved from PATH, not attacker-controlled; shell=False, no user shell input
             ["python3", str(extract_comment_script_path), "9999999999"],
             input=f.read(),
             capture_output=True,
@@ -154,7 +154,7 @@ def test_extract_comment_body_invalid_json(extract_comment_script_path: Path) ->
     try:
         # Execute the script with invalid JSON via stdin
         with open(invalid_json_file) as f:
-            result = subprocess.run(
+            result = subprocess.run(  # nosec B603 B607 - fixed argv run against a real binary in a controlled test; binary name resolved from PATH, not attacker-controlled; shell=False, no user shell input
                 ["python3", str(extract_comment_script_path), "1234567890"],
                 input=f.read(),
                 capture_output=True,

@@ -1,5 +1,5 @@
 # This Dockerfile has multiple hadolint violations for testing
-FROM ubuntu:latest
+FROM ubuntu:latest@sha256:651ba3fe3a830441e3deaf70fafac40d808a6bd2800a6f2c43130055159f23e6
 
 RUN apt-get update
 RUN apt-get install -y curl

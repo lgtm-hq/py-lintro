@@ -8,31 +8,31 @@
   ],
   "packageRules": [
     {
-      "matchDatasources": [
-        "docker"
-      ],
-      "matchUpdateTypes": [
-        "digest",
-        "patch"
-      ],
-      "automerge": true,
-      "automergeType": "branch"
+      "description": "Hold prettier 3.9.5+ until Docker integration prettier fixtures are updated",
+      "matchPackageNames": ["prettier"],
+      "allowedVersions": "<=3.9.4"
     },
     {
-      "matchDatasources": [
-        "pypi"
-      ],
-      "matchUpdateTypes": [
-        "minor"
-      ],
-      "automerge": false
-    },
-    {
-      "groupName": "pytest packages",
-      "groupSlug": "pytest",
+      "description": "npm platform-binary placeholders are stamped at publish time; never bump in-repo",
       "matchPackageNames": [
-        "/^pytest/"
-      ]
+        "/^@lgtm-hq\\/lintro(-|$)/"
+      ],
+      "enabled": false
+    },
+    {
+      "description": "Hold TypeScript 7 until Astro/@astrojs/check support it",
+      "matchPackageNames": ["typescript"],
+      "allowedVersions": "<7"
+    },
+    {
+      "description": "Hold js-yaml 5 until Astro migrates off default export / we update call sites",
+      "matchPackageNames": ["js-yaml"],
+      "allowedVersions": "<5"
+    },
+    {
+      "matchDatasources": ["pypi"],
+      "matchUpdateTypes": ["minor"],
+      "automerge": false
     },
     {
       "matchManagers": [
@@ -45,9 +45,7 @@
         "setup-py",
         "uv"
       ],
-      "matchPackageNames": [
-        "python"
-      ],
+      "matchPackageNames": ["python"],
       "rangeStrategy": "widen"
     },
     {
@@ -73,6 +71,7 @@
         "@commitlint/config-conventional",
         "oxlint",
         "oxfmt",
+        "stylelint",
         "gitleaks",
         "gitleaks/gitleaks",
         "shellcheck",
@@ -91,14 +90,29 @@
       "automerge": false
     },
     {
-      "description": "Regenerate _tool_versions.py when tool version sources change",
+      "description": "lintro-tools base image digest pin (FROM in Dockerfile); native docker digest support, full CI validates the bump",
+      "matchDatasources": ["docker"],
+      "matchPackageNames": [
+        "ghcr.io/lgtm-hq/lintro-tools"
+      ],
+      "matchUpdateTypes": ["digest"],
+      "automerge": false
+    },
+    {
+      "description": "Regenerate version artifacts when tool version sources change",
       "matchManagers": [
-        "custom.regex"
+        "custom.regex",
+        "npm",
+        "pep621",
+        "uv"
       ],
       "matchFileNames": [
         "Dockerfile",
+        "docker/tools.Dockerfile",
         "lintro/_tool_versions.py",
-        "lintro/tools/manifest.json"
+        "lintro/tools/manifest.json",
+        "package.json",
+        "pyproject.toml"
       ],
       "postUpgradeTasks": {
         "commands": [
@@ -110,7 +124,8 @@
           "lintro/tools/manifest.json",
           "package.json",
           "pyproject.toml",
-          "Dockerfile"
+          "Dockerfile",
+          "docker/tools.Dockerfile"
         ],
         "executionMode": "branch"
       }
@@ -122,17 +137,13 @@
     ]
   },
   "lockFileMaintenance": {
-    "schedule": [
-      "before 5am on monday"
-    ],
+    "schedule": ["before 5am on monday"],
     "commitMessageAction": "update lockfile"
   },
   "customManagers": [
     {
       "customType": "regex",
-      "managerFilePatterns": [
-        "Dockerfile"
-      ],
+      "managerFilePatterns": ["Dockerfile"],
       "matchStrings": [
         "ARG HADOLINT_VERSION=(?<currentValue>[0-9]+\\.[0-9]+\\.[0-9]+)"
       ],
@@ -142,9 +153,7 @@
     },
     {
       "customType": "regex",
-      "managerFilePatterns": [
-        "Dockerfile"
-      ],
+      "managerFilePatterns": ["Dockerfile"],
       "matchStrings": [
         "ARG ACTIONLINT_VERSION=(?<currentValue>[0-9]+\\.[0-9]+\\.[0-9]+)"
       ],
@@ -155,7 +164,8 @@
     {
       "customType": "regex",
       "managerFilePatterns": [
-        "Dockerfile"
+        "Dockerfile",
+        "docker/tools.Dockerfile"
       ],
       "matchStrings": [
         "ARG BUN_VERSION=(?<currentValue>[0-9]+\\.[0-9]+\\.[0-9]+)"
@@ -167,7 +177,8 @@
     {
       "customType": "regex",
       "managerFilePatterns": [
-        "Dockerfile"
+        "Dockerfile",
+        "docker/tools.Dockerfile"
       ],
       "matchStrings": [
         "ARG UV_VERSION=(?<currentValue>[0-9]+\\.[0-9]+\\.[0-9]+)"
@@ -263,6 +274,19 @@
       ],
       "datasourceTemplate": "github-releases",
       "packageNameTemplate": "mvdan/sh",
+      "extractVersionTemplate": "^v(?<version>.*)$"
+    },
+    {
+      "description": "Update dotenv-linter version in _tool_versions.py",
+      "customType": "regex",
+      "managerFilePatterns": [
+        "lintro/_tool_versions\\.py"
+      ],
+      "matchStrings": [
+        "ToolName\\.DOTENV_LINTER:\\s*\"(?<currentValue>[0-9]+\\.[0-9]+\\.[0-9]+)\""
+      ],
+      "datasourceTemplate": "github-releases",
+      "packageNameTemplate": "dotenv-linter/dotenv-linter",
       "extractVersionTemplate": "^v(?<version>.*)$"
     },
     {
