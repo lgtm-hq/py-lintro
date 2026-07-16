@@ -72,24 +72,32 @@ class LintroEventHandler(FileSystemEventHandler):
         *,
         on_change: Callable[[str], None],
         ignore_spec: pathspec.GitIgnoreSpec,
+        path_filter: Callable[[str], bool] | None = None,
     ) -> None:
         """Initialize the handler.
 
         Args:
             on_change: Called with a path string for each relevant change.
             ignore_spec: Compiled matcher; matching paths are dropped.
+            path_filter: Optional predicate returning True for paths that are
+                in scope. When provided, events for out-of-scope paths (for
+                example siblings of an explicitly-watched single file) are
+                dropped. When ``None``, every non-ignored path is forwarded.
         """
         super().__init__()
         self._on_change = on_change
         self._ignore_spec = ignore_spec
+        self._path_filter = path_filter
 
     def _handle(self, path: str) -> None:
-        """Forward a path to ``on_change`` unless it is ignored.
+        """Forward a path to ``on_change`` unless it is ignored or out of scope.
 
         Args:
             path: Filesystem path from the event.
         """
         if self._is_ignored(path):
+            return
+        if self._path_filter is not None and not self._path_filter(path):
             return
         self._on_change(path)
 
@@ -171,19 +179,47 @@ def watch_paths(
         on_batch: Called with the set of changed paths after each debounce
             interval settles.
         debounce_ms: Debounce interval in milliseconds.
-        ignore_patterns: Gitignore-style patterns to exclude. Defaults to
-            :data:`DEFAULT_IGNORE_PATTERNS`.
+        ignore_patterns: Extra gitignore-style patterns to exclude. These are
+            appended to :data:`DEFAULT_IGNORE_PATTERNS` (the built-ins always
+            apply) rather than replacing them.
         console: Optional Rich console for status messages.
         stop_event: Optional externally-controlled stop signal. When omitted,
             a fresh event is created and the loop runs until KeyboardInterrupt.
         observer_factory: Optional factory returning a watchdog-Observer-like
             object. Injectable for tests; defaults to ``watchdog.Observer``.
     """
-    ignore_spec = _build_ignore_spec(ignore_patterns or DEFAULT_IGNORE_PATTERNS)
+    # Built-in ignores always apply; caller patterns extend them so a custom
+    # entry cannot silently re-enable noisy directories (.git, node_modules,
+    # caches, virtualenvs, *.pyc).
+    patterns = list(DEFAULT_IGNORE_PATTERNS)
+    if ignore_patterns:
+        patterns.extend(ignore_patterns)
+    ignore_spec = _build_ignore_spec(patterns)
+
+    # When a single file is watched we schedule its parent directory
+    # recursively, so restrict forwarded events to the requested files (and to
+    # anything under an explicitly-requested directory) to avoid reacting to
+    # unrelated siblings.
+    watched_files: set[Path] = set()
+    watched_dirs: set[Path] = set()
+    for path in paths:
+        resolved = Path(path).resolve()
+        if resolved.is_dir():
+            watched_dirs.add(resolved)
+        else:
+            watched_files.add(resolved)
+
+    def _in_scope(candidate: str) -> bool:
+        resolved = Path(candidate).resolve()
+        if resolved in watched_files:
+            return True
+        return any(resolved.is_relative_to(directory) for directory in watched_dirs)
+
     debouncer = Debouncer(callback=on_batch, delay_ms=debounce_ms)
     handler = LintroEventHandler(
         on_change=debouncer.on_change,
         ignore_spec=ignore_spec,
+        path_filter=_in_scope,
     )
 
     factory = observer_factory or Observer

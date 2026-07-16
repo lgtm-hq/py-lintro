@@ -37,8 +37,9 @@ class WatchConfig(BaseModel):
         clear_screen: Clear the terminal between runs.
         tools: Optional allowlist of tool names to run (empty means smart
             selection over all applicable tools).
-        ignore: Gitignore-style patterns to exclude from watching. Empty means
-            use the built-in defaults.
+        ignore: Extra gitignore-style patterns to exclude from watching. The
+            built-in defaults (VCS internals, caches, build artifacts,
+            virtualenvs) always apply; these patterns extend them.
     """
 
     model_config = ConfigDict(frozen=False, extra="forbid")
