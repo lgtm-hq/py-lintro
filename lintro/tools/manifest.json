@@ -73,7 +73,7 @@
     },
     {
       "name": "astro_check",
-      "version": "6.4.8",
+      "version": "7.0.9",
       "install": {
         "type": "npm",
         "package": "astro",
@@ -139,7 +139,7 @@
     },
     {
       "name": "clippy",
-      "version": "1.97.0",
+      "version": "1.97.1",
       "install": {
         "type": "rustup",
         "component": "clippy"
@@ -318,7 +318,7 @@
     },
     {
       "name": "rustc",
-      "version": "1.97.0",
+      "version": "1.97.1",
       "install": {
         "type": "rustup"
       },
@@ -433,7 +433,7 @@
     },
     {
       "name": "tsc",
-      "version": "7.0.2",
+      "version": "6.0.3",
       "install": {
         "type": "npm",
         "package": "typescript",
