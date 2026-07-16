@@ -17,8 +17,9 @@ def clippy_plugin() -> Generator[ClippyPlugin, None, None]:
     Yields:
         ClippyPlugin: A ClippyPlugin instance with version check mocked.
     """
-    with patch(
-        "lintro.plugins.execution_preparation.verify_tool_version",
+    with patch.object(
+        ClippyPlugin,
+        "_verify_tool_version",
         return_value=None,
     ):
         yield ClippyPlugin()
