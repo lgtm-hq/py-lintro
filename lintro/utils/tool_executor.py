@@ -154,19 +154,20 @@ def _warn_ai_fix_disabled(
     *,
     action: Action,
     ai_fix: bool,
-    ai_enabled: bool,
+    ai_lint_enabled: bool,
     logger: Any,
     output_format: str = "",
 ) -> None:
-    """Warn when users request AI fixes but AI is disabled in config."""
-    if action != Action.CHECK or not ai_fix or ai_enabled:
+    """Warn when users request AI fixes but AI lint is disabled in config."""
+    if action != Action.CHECK or not ai_fix or ai_lint_enabled:
         return
     # Suppress plain-text warnings for machine-readable output formats
     if output_format.lower() in ("json", "sarif"):
         return
     logger.console_output(
-        "AI fixes requested with --fix, but ai.enabled is false in "
-        ".lintro-config.yaml; skipping AI enhancements.",
+        "AI fixes requested with --fix, but AI lint is disabled in "
+        ".lintro-config.yaml (set ai.enabled and ai.lint: true); "
+        "skipping AI enhancements.",
     )
 
 
@@ -387,6 +388,72 @@ def _enrich_issues_with_doc_urls(
     _enrich(result.initial_issues)
 
 
+def _issue_would_be_fixed(issue: BaseIssue) -> bool:
+    """Return whether a check-mode issue is one that ``fmt`` would auto-fix.
+
+    Resolves the issue's fixability via ``DISPLAY_FIELD_MAP`` (some tools store
+    the flag under a different attribute). Tools that carry a per-issue
+    fixability signal are honored — only truthy-fixable issues count. For
+    example, ruff sets ``fixable`` from ruff's own ``fix`` field, so its
+    non-``--fix``-able lint diagnostics are excluded.
+
+    Issue types that expose no ``fixable`` attribute at all (the pure-formatter
+    parsers such as prettier, oxfmt, taplo, sqlfluff) carry no fixability
+    distinction. Because dry-run only runs fix-capable (formatter) tools, every
+    diagnostic such a tool reports in check mode represents a reformat that a
+    real ``fmt`` run would apply, so it is treated as fixable.
+
+    Args:
+        issue: The parsed issue to classify.
+
+    Returns:
+        bool: True if the issue would be fixed by a real ``fmt`` run.
+    """
+    field_map = getattr(issue, "DISPLAY_FIELD_MAP", {})
+    fixable_attr = field_map.get("fixable", "fixable")
+    if not hasattr(issue, fixable_attr):
+        return True
+    return bool(getattr(issue, fixable_attr, False))
+
+
+def _filter_result_to_fixable(result: ToolResult) -> ToolResult:
+    """Return a copy of a dry-run check result limited to would-fix issues.
+
+    Filters ``issues`` down to the auto-fixable subset (see
+    :func:`_issue_would_be_fixed`) and updates ``issues_count`` to match, so
+    dry-run counts, the summary line, and the exit code reflect only what a
+    real ``fmt`` run would actually change rather than every check-mode
+    diagnostic.
+
+    A check-mode tool sets ``success=False`` when it merely *finds* issues, but
+    in dry-run those diagnostics are informational: the exit code must derive
+    purely from the fixable issue count, not from the tool having found
+    (possibly non-fixable) issues. So any result that parsed issues is marked
+    ``success=True`` here — it ran fine. Results without parsed issues are
+    returned unchanged: a genuine execution failure carries no parsed issues
+    and must still fail the run, and dry-run only runs fix-capable tools, so a
+    reported change without structured issues is treated as fixable.
+
+    Args:
+        result: The check-mode result to filter.
+
+    Returns:
+        ToolResult: A filtered copy, or the original when there are no parsed
+        issues.
+    """
+    import dataclasses
+
+    if not result.issues:
+        return result
+    fixable = [issue for issue in result.issues if _issue_would_be_fixed(issue)]
+    return dataclasses.replace(
+        result,
+        issues=fixable,
+        issues_count=len(fixable),
+        success=True,
+    )
+
+
 def run_lint_tools_simple(
     *,
     action: str | Action,
@@ -408,6 +475,11 @@ def run_lint_tools_simple(
     yes: bool = False,
     ai_fix: bool = False,
     ignore_conflicts: bool = False,
+    transport: str | None = None,
+    dry_run: bool = False,
+    score: bool = False,
+    fail_under: float | None = None,
+    diff_base: str | None = None,
 ) -> int:
     """Simplified runner using Loguru-based logging with rich formatting.
 
@@ -437,6 +509,20 @@ def run_lint_tools_simple(
         yes: Skip confirmation prompt and proceed immediately.
         ai_fix: Enable AI fix suggestions with interactive review (check only).
         ignore_conflicts: Whether to ignore tool configuration conflicts.
+        transport: Optional CLI override for ``ai.transport`` when AI runs.
+        dry_run: Preview what ``fmt`` would fix without modifying files. When
+            set with a ``fmt`` action, tools run in read-only check mode using
+            the fixable tool set; the reported issues are exactly what a real
+            ``fmt`` run would address. Exit code mirrors check semantics: 0 when
+            nothing would be fixed, 1 when fixes are available.
+        score: When True with human-readable output, print only the 0-100
+            health score line and suppress the normal execution summary.
+        fail_under: When set, exit with code 1 if the computed health score is
+            strictly below this threshold (CI gate).
+        diff_base: Git base ref for ``--diff`` scanning. ``None`` scans all
+            files; :data:`~lintro.utils.git_diff.DIFF_DEFAULT_SENTINEL` resolves
+            the repository default base; any other value is used as the base
+            ref. Non-git directories fall back to a full scan with a warning.
 
     Returns:
         Exit code (0 for success, 1 for failures).
@@ -449,6 +535,16 @@ def run_lint_tools_simple(
     # Normalize action to enum
     action = normalize_action(action)
 
+    # Dry-run preview: show what `fmt` WOULD fix without writing. Select the
+    # fixable tool set (via the original fmt action) but execute, aggregate,
+    # and compute the exit code in read-only check mode, so no files are
+    # modified and the reported issues are exactly what a real fmt run would
+    # address.
+    selection_action = action
+    dry_run_preview = dry_run and action == Action.FIX
+    if dry_run_preview:
+        action = Action.CHECK
+
     # Initialize output manager for this run
     output_manager = OutputManager()
 
@@ -457,16 +553,25 @@ def run_lint_tools_simple(
 
     setup_execution_logging(output_manager.run_dir, debug=debug)
 
-    # Create simplified logger with rich formatting
+    # Create simplified logger with rich formatting. For machine-readable
+    # output (JSON/SARIF) route all decorative console output to stderr so
+    # stdout carries only the final parseable document.
     from lintro.utils.console import create_logger
 
-    logger = create_logger(run_dir=output_manager.run_dir)
+    machine_readable_output = output_format.lower() in ("json", "sarif")
+    # Score-only takes priority over machine-readable formats so
+    # ``--score --output-format json`` still prints only the numeric score.
+    score_only = bool(score)
+    logger = create_logger(
+        run_dir=output_manager.run_dir,
+        route_stderr=machine_readable_output or score_only,
+    )
 
     # Get tools to run (now returns ToolsToRunResult with skip info)
     try:
         tools_result = get_tools_to_run(
             tools,
-            action,
+            selection_action,
             ignore_conflicts=ignore_conflicts,
         )
     except ValueError as e:
@@ -478,7 +583,20 @@ def run_lint_tools_simple(
 
     if not tools_to_run and not skipped_tools:
         logger.console_output("No tools to run.")
-        return 0
+        from lintro.config.config_loader import get_config
+        from lintro.utils.health_score import health_score_for_results
+
+        empty_config = get_config()
+        health = health_score_for_results(
+            [],
+            getattr(empty_config, "score", None),
+        )
+        exit_code = 0
+        if fail_under is not None and health.score < fail_under:
+            exit_code = 1
+        if score_only:
+            print(health.score)
+        return exit_code
 
     if not tools_to_run and skipped_tools:
         _missing_keywords = ("not found", "missing")
@@ -531,13 +649,19 @@ def run_lint_tools_simple(
     if main_phase_empty_due_to_filter:
         logger.console_output(
             text=(
-                "All selected tools are configured as post-checks - "
-                "skipping main phase"
+                "All selected tools are configured as post-checks - skipping main phase"
             ),
         )
 
     # Print main header with output directory information
     logger.print_lintro_header()
+
+    # Announce dry-run mode so users know no files will be modified.
+    if dry_run_preview and output_format.lower() not in {"json", "sarif"}:
+        logger.console_output(
+            text="Dry run - no files modified",
+            color="yellow",
+        )
 
     # Show incremental mode message
     if incremental:
@@ -545,6 +669,51 @@ def run_lint_tools_simple(
             text="Incremental mode: only checking files changed since last run",
             color="cyan",
         )
+
+    # Resolve the git-diff base ref (if --diff was supplied). Non-git dirs and
+    # unresolvable default refs fall back to a full scan with a warning; an
+    # explicit but unresolvable ref is a hard error.
+    resolved_diff_base: str | None = None
+    if diff_base is not None:
+        from lintro.utils.git_diff import (
+            DIFF_DEFAULT_SENTINEL,
+            DiffResolutionError,
+            get_changed_files,
+            is_git_repository,
+            resolve_default_base,
+        )
+
+        if not is_git_repository():
+            logger.console_output(
+                text="--diff requested but not inside a git repository; "
+                "scanning all files.",
+                color="yellow",
+            )
+        elif diff_base == DIFF_DEFAULT_SENTINEL:
+            resolved_diff_base = resolve_default_base()
+            if resolved_diff_base is None:
+                logger.console_output(
+                    text="--diff: could not resolve a default base ref "
+                    "(tried origin/HEAD, origin/main, main, ...); "
+                    "scanning all files.",
+                    color="yellow",
+                )
+        else:
+            resolved_diff_base = diff_base
+
+        if resolved_diff_base is not None:
+            try:
+                changed = get_changed_files(resolved_diff_base)
+            except DiffResolutionError as exc:
+                logger.console_output(text=f"Error: {exc}", color="red")
+                return 1
+            logger.console_output(
+                text=(
+                    f"Diff mode: scanning {len(changed)} file(s) changed vs "
+                    f"{resolved_diff_base}"
+                ),
+                color="cyan",
+            )
 
     # Execute tools and collect results
     all_results: list[ToolResult] = []
@@ -577,9 +746,11 @@ def run_lint_tools_simple(
     else:
         effective_auto_install = is_container
 
-    # Pre-execution config summary (suppress in JSON mode)
-    if output_format.lower() not in {"json", "sarif"} and (
-        tools_to_run or skipped_tools
+    # Pre-execution config summary (suppress in JSON/SARIF and score-only mode)
+    if (
+        output_format.lower() not in {"json", "sarif"}
+        and not score_only
+        and (tools_to_run or skipped_tools)
     ):
         from lintro.utils.console.pre_execution_summary import (
             print_pre_execution_summary,
@@ -646,6 +817,7 @@ def run_lint_tools_simple(
             incremental=incremental,
             auto_install=effective_auto_install,
             max_fix_retries=lintro_config.execution.max_fix_retries,
+            diff_base=resolved_diff_base,
         )
 
         # Enrich parallel results with doc_url from each plugin
@@ -655,6 +827,11 @@ def run_lint_tools_simple(
                 _enrich_issues_with_doc_urls(tool, result)
             except (KeyError, ValueError):
                 pass  # Tool not found — skip enrichment
+
+        # Dry-run: restrict each result to would-fix issues before totals and
+        # display so non-auto-fixable diagnostics don't inflate the count.
+        if dry_run_preview:
+            all_results = [_filter_result_to_fixable(r) for r in all_results]
 
         # Calculate totals from parallel results using helper
         total_issues, total_fixed, total_remaining = aggregate_tool_results(
@@ -686,8 +863,9 @@ def run_lint_tools_simple(
                 # Print tool header before execution
                 logger.print_tool_header(tool_name=display_name, action=action)
 
-                # Configure tool using shared helper
-                configure_tool_for_execution(
+                # Configure tool using shared helper (returns a private
+                # per-invocation copy; execute against it).
+                tool = configure_tool_for_execution(
                     tool=tool,
                     tool_name=tool_name,
                     config_manager=config_manager,
@@ -699,6 +877,7 @@ def run_lint_tools_simple(
                     post_tools=post_tools_early,
                     auto_install=effective_auto_install,
                     lintro_config=lintro_config,
+                    diff_base=resolved_diff_base,
                 )
 
                 # Execute the tool
@@ -714,6 +893,13 @@ def run_lint_tools_simple(
 
                 # Populate doc_url on each issue from the plugin
                 _enrich_issues_with_doc_urls(tool, result)
+
+                # Dry-run: restrict to issues a real fmt would actually fix so
+                # the displayed tables, counts, and exit code exclude
+                # non-auto-fixable check-mode diagnostics (e.g. ruff lint rules
+                # that are not --fix-able).
+                if dry_run_preview:
+                    result = _filter_result_to_fixable(result)
 
                 all_results.append(result)
 
@@ -786,21 +972,39 @@ def run_lint_tools_simple(
         total_issues=total_issues,
         total_fixed=total_fixed,
         total_remaining=total_remaining,
+        diff_base=resolved_diff_base,
     )
+
+    # Dry-run: post-checks may append additional check-mode results. Restrict
+    # every result to its would-fix subset and re-derive the totals so the
+    # summary and exit code count only auto-fixable issues.
+    if dry_run_preview:
+        all_results[:] = [
+            r if getattr(r, "skipped", False) else _filter_result_to_fixable(r)
+            for r in all_results
+        ]
+        total_issues, total_fixed, total_remaining = aggregate_tool_results(
+            all_results,
+            action,
+        )
 
     # AI enhancement via hook pattern
     effective_ai_fix = ai_fix or lintro_config.ai.default_fix
     _warn_ai_fix_disabled(
         action=action,
         ai_fix=effective_ai_fix,
-        ai_enabled=lintro_config.ai.enabled,
+        ai_lint_enabled=lintro_config.ai.lint_enabled,
         logger=logger,
         output_format=output_format,
     )
 
     from lintro.ai.hook import AIPostExecutionHook
 
-    ai_hook = AIPostExecutionHook(lintro_config, ai_fix=effective_ai_fix)
+    ai_hook = AIPostExecutionHook(
+        lintro_config,
+        ai_fix=effective_ai_fix,
+        transport=transport,
+    )
     ai_result = None
     if ai_hook.should_run(action):
         try:
@@ -846,9 +1050,24 @@ def run_lint_tools_simple(
         if ai_config.fail_on_ai_error and ai_result.error:
             final_exit_code = 1
 
+    # Compute the deterministic 0-100 health score from the aggregated results.
+    from lintro.utils.health_score import health_score_for_results
+
+    health = health_score_for_results(
+        all_results,
+        getattr(lintro_config, "score", None),
+    )
+
+    # CI gate: fail the run when the score falls below the requested threshold.
+    if fail_under is not None and health.score < fail_under:
+        final_exit_code = 1
+
     # Display results
     if all_results:
-        if output_format.lower() == "json":
+        if score_only:
+            # Score-only wins over JSON/SARIF so stdout stays a bare number.
+            print(health.score)
+        elif output_format.lower() == "json":
             # Output JSON to stdout
             import json
 
@@ -861,21 +1080,63 @@ def run_lint_tools_simple(
                 total_fixed=total_fixed,
                 total_remaining=total_remaining,
                 exit_code=final_exit_code,
+                health_score=health.to_dict(),
             )
             print(json.dumps(json_data, indent=2))
         elif output_format.lower() == "sarif":
             from lintro.ai.output.sarif import render_fixes_sarif
             from lintro.ai.output.sarif_bridge import (
+                standard_issues_from_results,
                 suggestions_from_results,
                 summary_from_results,
             )
+            from lintro.utils.output.file_writer import build_doc_url_map
 
             suggestions = suggestions_from_results(all_results)
             summary = summary_from_results(all_results)
-            sarif_json = render_fixes_sarif(suggestions, summary)
+            standard_issues = standard_issues_from_results(all_results)
+            sarif_json = render_fixes_sarif(
+                suggestions,
+                summary,
+                doc_urls=build_doc_url_map(all_results) or None,
+                standard_issues=standard_issues,
+            )
             print(sarif_json)
         else:
             logger.print_execution_summary(action, all_results)
+
+            # Dry-run summary: state clearly what a real fmt run would fix.
+            if dry_run_preview:
+                from lintro.utils.summary_tables import count_affected_files
+
+                file_count = count_affected_files(all_results)
+                if total_issues > 0:
+                    logger.console_output(
+                        text=(
+                            f"Would fix {total_issues} "
+                            f"issue{'s' if total_issues != 1 else ''} in "
+                            f"{file_count} file{'s' if file_count != 1 else ''}"
+                        ),
+                        color="cyan",
+                    )
+                else:
+                    logger.console_output(
+                        text="Nothing to fix - no auto-fixable issues found",
+                        color="green",
+                    )
+
+            # Always-on health score line at the end of a check run.
+            if action == Action.CHECK:
+                _tier_color = {
+                    "great": "green",
+                    "needs-work": "yellow",
+                    "critical": "red",
+                }.get(health.tier.label, "cyan")
+                _tier_label = health.tier.label
+                logger.console_output(
+                    text=f"Health score: {health.score}/100 ({_tier_label})",
+                    color=_tier_color,
+                )
 
         # Route warnings to stderr (loguru) for machine-readable formats so
         # plain-text messages don't corrupt JSON/SARIF output on stdout.
@@ -930,6 +1191,7 @@ def run_lint_tools_simple(
 
                     from lintro.ai.output.sarif import write_sarif
                     from lintro.ai.output.sarif_bridge import (
+                        standard_issues_from_results,
                         suggestions_from_results,
                         summary_from_results,
                     )
@@ -937,11 +1199,13 @@ def run_lint_tools_simple(
 
                     suggestions = suggestions_from_results(all_results)
                     summary = summary_from_results(all_results)
+                    standard_issues = standard_issues_from_results(all_results)
                     write_sarif(
                         suggestions,
                         summary,
                         output_path=Path(output_file),
                         doc_urls=build_doc_url_map(all_results) or None,
+                        standard_issues=standard_issues,
                     )
                 else:
                     write_output_file(
@@ -972,5 +1236,9 @@ def run_lint_tools_simple(
             output_manager.cleanup_old_runs()
         except OSError as e:
             _warn(f"Warning: Failed to clean up old runs: {e}")
+
+    elif score_only:
+        # Empty result set (e.g. all tools skipped) still needs numeric stdout.
+        print(health.score)
 
     return final_exit_code

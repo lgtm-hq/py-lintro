@@ -15,10 +15,13 @@ is the primary interface; the grouping is for documentation only.
 
 from __future__ import annotations
 
+import warnings
+
+from loguru import logger
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from lintro.ai.config_views import AIBudgetConfig, AIOutputConfig, AIProviderConfig
-from lintro.ai.enums import ConfidenceLevel, SanitizeMode
+from lintro.ai.enums import AITransport, ConfidenceLevel, SanitizeMode
 from lintro.ai.registry import AIProvider
 
 __all__ = [
@@ -40,8 +43,37 @@ class AIConfig(BaseModel):
 
     model_config = ConfigDict(frozen=False, extra="forbid")
 
-    enabled: bool = False
+    enabled: bool = Field(
+        default=False,
+        description=(
+            "Master switch for all AI features. ANDs with the per-feature "
+            "toggles ai.lint and ai.review. When true with neither sub-toggle "
+            "set explicitly, both are enabled for backward compatibility "
+            "(deprecated: set ai.lint and/or ai.review explicitly)."
+        ),
+    )
+    lint: bool = Field(
+        default=False,
+        description=(
+            "Enable AI lint summarization after check/fix runs. Effective only "
+            "when ai.enabled is also true (the two are ANDed)."
+        ),
+    )
+    review: bool = Field(
+        default=False,
+        description=(
+            "Enable the `lintro review` AI diff-review command. Effective only "
+            "when ai.enabled is also true (the two are ANDed)."
+        ),
+    )
     provider: AIProvider = AIProvider.ANTHROPIC
+    transport: AITransport | None = Field(
+        default=None,
+        description=(
+            "Required when any AI feature (ai.lint or ai.review) is enabled. "
+            "How to invoke the provider: 'api' (SDK) or 'cli' (local binary)."
+        ),
+    )
     model: str | None = None
     api_key_env: str | None = None
     api_base_url: str | None = Field(
@@ -154,9 +186,64 @@ class AIConfig(BaseModel):
             "'off' disables detection."
         ),
     )
+    cursor_trust_workspace: bool = Field(
+        default=False,
+        description=(
+            "Pass '--trust' to the Cursor 'agent' CLI, granting it workspace "
+            "trust. Security risk: the Cursor provider is fed untrusted, "
+            "prompt-injectable content (e.g. 'lintro review --pr N' embeds "
+            "diffs from arbitrary fork PRs). Combining workspace trust with "
+            "such input could let an injected diff drive an agent operating "
+            "with full workspace trust, so this defaults to False and should "
+            "only be enabled for fully trusted local workspaces."
+        ),
+    )
+
+    review_allow_unredacted_git_native: bool = Field(
+        default=False,
+        description=(
+            "Allow the git-native (CLI transport) review path to delegate "
+            "diff retrieval to the provider by emitting a 'git diff' command "
+            "instead of embedding the diff. Security risk: a delegated diff "
+            "is produced by the provider itself and never passes through "
+            "lintro's secret-redaction choke point, so secrets present in "
+            "the diff can reach the provider's backend unredacted. Defaults "
+            "to False so redaction always wins: lintro embeds the redacted "
+            "diff in the prompt even for large diffs. Only enable this for "
+            "trusted diffs with no secrets concern when the efficiency of "
+            "delegated git retrieval on very large diffs is required."
+        ),
+    )
 
     @model_validator(mode="after")
-    def _check_retry_delays(self) -> AIConfig:
+    def _apply_legacy_enabled_default(self) -> AIConfig:
+        """Enable both sub-toggles for legacy ``ai.enabled``-only configs.
+
+        Prior to the ai.lint / ai.review split, ``ai.enabled: true`` turned on
+        both AI lint summarization and AI review. To preserve that behaviour,
+        when ``enabled`` is true but neither sub-toggle was set explicitly, both
+        are switched on and a deprecation warning is emitted.
+
+        Returns:
+            The validated configuration instance.
+        """
+        fields_set = self.model_fields_set
+        if self.enabled and "lint" not in fields_set and "review" not in fields_set:
+            self.lint = True
+            self.review = True
+            message = (
+                "ai.enabled without ai.lint/ai.review is deprecated; both AI "
+                "lint summarization and AI review were enabled for backward "
+                "compatibility. Set ai.lint and/or ai.review explicitly."
+            )
+            # DeprecationWarning from library code is ignored by Python's default
+            # filters; also log so installed-CLI users see the migration hint.
+            warnings.warn(message, DeprecationWarning, stacklevel=2)
+            logger.warning(message)
+        return self
+
+    @model_validator(mode="after")
+    def _validate_transport_and_retries(self) -> AIConfig:
         if self.retry_max_delay < self.retry_base_delay:
             msg = (
                 f"retry_max_delay ({self.retry_max_delay}) must be >= "
@@ -165,6 +252,35 @@ class AIConfig(BaseModel):
             raise ValueError(msg)
         return self
 
+    # -- Effective feature state -------------------------------------------
+
+    @property
+    def lint_enabled(self) -> bool:
+        """Whether AI lint summarization is active.
+
+        Returns:
+            True when both the master switch and the lint sub-toggle are on.
+        """
+        return self.enabled and self.lint
+
+    @property
+    def review_enabled(self) -> bool:
+        """Whether the AI review command is active.
+
+        Returns:
+            True when both the master switch and the review sub-toggle are on.
+        """
+        return self.enabled and self.review
+
+    @property
+    def any_feature_enabled(self) -> bool:
+        """Whether any AI feature (lint summary or review) is active.
+
+        Returns:
+            True when either lint_enabled or review_enabled is true.
+        """
+        return self.lint_enabled or self.review_enabled
+
     # -- Grouped views -----------------------------------------------------
 
     @property
@@ -172,6 +288,7 @@ class AIConfig(BaseModel):
         """Return a frozen snapshot of provider-related settings."""
         return AIProviderConfig(
             provider=self.provider,
+            transport=self.transport,
             model=self.model,
             api_key_env=self.api_key_env,
             api_base_url=self.api_base_url,

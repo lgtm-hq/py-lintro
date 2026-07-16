@@ -107,6 +107,46 @@ issues, the AI generates fix suggestions and presents them interactively (same U
 `--fix` in `check`). After the session, a post-fix summary wraps up what was
 accomplished.
 
+### AI Idiom Review (`idiom-review` tool)
+
+Unlike the AI summary and `--fix` flows (where AI _explains_ or _fixes_ issues that
+linters found), the `idiom-review` tool uses AI to _find_ issues that syntax-matching
+linters structurally cannot. It has no external binary — it runs through the existing AI
+provider abstraction, respecting the same retry, fallback, and cost-budget controls.
+
+It offers two modes:
+
+- **per-file** (Mode 1) — flags _idiomatic misses_: code that is correct but verbose,
+  e.g. `found = False; for x in items: ...` instead of `any(cond for x in items)`.
+- **duplication** (Mode 2) — flags the same utility logic reimplemented across files,
+  invisible to any per-file linter, with a suggested extraction point.
+
+The tool ships **disabled by default** and is a no-op until you opt in. Findings are
+cached by a content hash under `.lintro-cache/idiom`, so unchanged files cost nothing on
+repeat runs. When no AI provider is available (missing SDK, key, or credits), the tool
+degrades gracefully to a skipped result rather than failing the run.
+
+```yaml
+# .lintro-config.yaml
+ai:
+  enabled: true
+  provider: anthropic
+  transport: api
+tools:
+  idiom-review:
+    options:
+      enabled: true # opt-in gate (default: false)
+      mode: per-file # per-file | duplication | both
+      min_confidence: medium # drop findings below this confidence
+      max_files: 25 # cap files reviewed per run (cost bound)
+```
+
+Or enable it ad hoc from the CLI:
+
+```bash
+lintro chk --tools idiom-review --tool-options idiom-review:enabled=true
+```
+
 ## Configuration
 
 ### Basic Setup
@@ -115,18 +155,50 @@ Add the `ai` section to `.lintro-config.yaml`:
 
 ```yaml
 ai:
-  enabled: true
+  enabled: true # master switch (AND-ed with the toggles below)
+  lint: true # AI lint summaries during chk/fmt
+  review: true # the `lintro review` AI diff review
   provider: anthropic # or "openai"
   # model: claude-sonnet-4-6  # uses provider default if omitted
   # api_key_env: ANTHROPIC_API_KEY   # uses provider default if omitted
 ```
 
+### Feature Toggles
+
+AI features are gated by a master switch plus two per-feature toggles, all off by
+default:
+
+- `ai.enabled` — master switch for all AI features.
+- `ai.lint` — AI lint summarization injected after `chk`/`fmt` runs.
+- `ai.review` — the `lintro review` AI diff-review command.
+
+A feature is active only when the master switch **and** its own toggle are true
+(`enabled AND lint`, `enabled AND review`). This lets you, for example, enable AI diff
+review without adding AI summaries to every lint run:
+
+```yaml
+ai:
+  enabled: true
+  lint: false
+  review: true
+```
+
+**Backward compatibility:** a legacy config that sets `ai.enabled: true` without either
+sub-toggle keeps the old behaviour — both `lint` and `review` are switched on — and
+emits a deprecation warning. Set `ai.lint` and/or `ai.review` explicitly to silence it.
+
 ### Full Configuration Reference
 
 ```yaml
 ai:
-  # Master toggle — all AI features are disabled when false
+  # Master switch — all AI features are disabled when false. AND-ed with the
+  # per-feature toggles below.
   enabled: true
+
+  # Per-feature toggles (both default to false). Effective only when
+  # enabled is also true.
+  lint: true # AI lint summaries during chk/fmt
+  review: true # the `lintro review` AI diff review
 
   # Provider: "anthropic" or "openai"
   provider: anthropic

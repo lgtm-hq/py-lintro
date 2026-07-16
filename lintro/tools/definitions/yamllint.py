@@ -11,6 +11,7 @@ import fnmatch
 import os
 import subprocess  # nosec B404 - used safely with shell disabled
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
 import click
@@ -37,6 +38,7 @@ from lintro.tools.core.option_validators import (
     validate_bool,
     validate_str,
 )
+from lintro.utils.path_utils import find_file_upward
 
 # Constants for Yamllint configuration
 YAMLLINT_DEFAULT_TIMEOUT: int = 15
@@ -161,23 +163,14 @@ class YamllintPlugin(BaseToolPlugin):
             ".yamllint.yaml",
         ]
 
-        start_dir = os.path.abspath(search_dir) if search_dir else os.getcwd()
-        current_dir = start_dir
-
-        while True:
-            for config_name in config_paths:
-                config_path = os.path.join(current_dir, config_name)
-                if os.path.exists(config_path):
-                    logger.debug(
-                        f"[YamllintPlugin] Found config file: {config_path} "
-                        f"(searched from {start_dir})",
-                    )
-                    return config_path
-
-            parent_dir = os.path.dirname(current_dir)
-            if parent_dir == current_dir:
-                break
-            current_dir = parent_dir
+        start_dir = Path(search_dir).absolute() if search_dir else Path.cwd()
+        found = find_file_upward(start_dir, config_paths)
+        if found is not None:
+            logger.debug(
+                f"[YamllintPlugin] Found config file: {found} "
+                f"(searched from {start_dir})",
+            )
+            return str(found)
 
         return None
 

@@ -1,0 +1,236 @@
+# SPDX-License-Identifier: MIT
+# For license details, see the repository root LICENSE file.
+---
+name: CI - Tests
+
+# No paths filter, and no job-level path-skip of test-compat/test-coverage
+# either (#1359): the org ruleset (checks-py-lintro) requires the NESTED
+# contexts reported from inside reusable-test-python (test-compat / Python
+# Compatibility, test-compat / Aggregate Python Results, test-coverage /
+# Python Coverage, test-coverage / Aggregate Python Results). A path-filtered
+# workflow never reports them, and a skipped reusable *caller* collapses to a
+# single check run named after the caller job — the nested contexts are never
+# created (verified on commit fdc94ea) — so either approach leaves required
+# checks permanently "Expected" and deadlocks merges (see codeql.yml and
+# lgtm-ci docs/workflow-contract.md, "Required-check-safe conditional
+# workflows"). Path-skipping this matrix needs an internal skip input in
+# lgtm-ci reusable-test-python (jobs skipped INSIDE a running reusable do
+# report their contexts as skipped, like draft-pr-skip does today).
+#
+# Version-bump PRs (#1362) are NOT skipped here for the same reason: the
+# skip signal would have to gate the reusable callers, which collapses the
+# nested required contexts and deadlocks the merge. Only docker-ci.yml
+# skips its heavy jobs on verified bump PRs; this matrix runs in full
+# until reusable-test-python grows an internal skip input (deferred like
+# the #1359 path-skip).
+'on':
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened, ready_for_review]
+  merge_group:
+    types: [checks_requested]
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: test-ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+jobs:
+  # Compat mode: multi-runtime matrix, no coverage or PR comments
+  test-compat:
+    # yamllint disable-line rule:line-length
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-test-python.yml@31c25ef2e8992960e218524780e34f44f51271b5 # v0.54.0
+    with:
+      publish-test-summary: false
+      python-versions: '3.11,3.14'
+      test-path: tests
+      extras: 'full'
+      extra-args: '-x --ignore=tests/integration'
+      coverage: false
+      draft-pr-skip: true
+      job-name: Python Compatibility
+      runner-image: ubuntu-24.04
+      tooling-ref: '31c25ef2e8992960e218524780e34f44f51271b5' # v0.54.0
+      egress-policy: block
+      egress-preset: pypi
+      # Full list (v0.50.0+ replace semantics): the reusable passes
+      # allowed-endpoints verbatim to step-security/harden-runner, so a
+      # non-empty value must include the pypi preset baseline.
+      allowed-endpoints-mode: replace
+      allowed-endpoints: >
+        github.com:443
+        api.github.com:443
+        codeload.github.com:443
+        objects.githubusercontent.com:443
+        raw.githubusercontent.com:443
+        pipelines.actions.githubusercontent.com:443
+        pypi.org:443
+        files.pythonhosted.org:443
+        test.pypi.org:443
+        upload.pypi.org:443
+        upload.test.pypi.org:443
+        astral.sh:443
+        releases.astral.sh:443
+    permissions:
+      # multi-version matrix requires actions:write for artifact aggregation
+      actions: write
+      contents: read
+      pull-requests: write
+
+  # Coverage mode: single runtime with coverage reporting
+  test-coverage:
+    # yamllint disable-line rule:line-length
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-test-python.yml@31c25ef2e8992960e218524780e34f44f51271b5 # v0.54.0
+    with:
+      publish-test-summary: true
+      python-version: '3.14'
+      test-path: tests
+      extras: 'full'
+      extra-args: '-x --ignore=tests/integration'
+      coverage: true
+      coverage-threshold: 80
+      upload-coverage: true
+      draft-pr-skip: true
+      job-name: Python Coverage
+      runner-image: ubuntu-24.04
+      tooling-ref: '31c25ef2e8992960e218524780e34f44f51271b5' # v0.54.0
+      egress-policy: block
+      egress-preset: pypi
+      # Full list (v0.50.0+ replace semantics): the reusable passes
+      # allowed-endpoints verbatim to step-security/harden-runner, so a
+      # non-empty value must include the pypi preset baseline.
+      allowed-endpoints-mode: replace
+      allowed-endpoints: >
+        github.com:443
+        api.github.com:443
+        codeload.github.com:443
+        objects.githubusercontent.com:443
+        raw.githubusercontent.com:443
+        pipelines.actions.githubusercontent.com:443
+        pypi.org:443
+        files.pythonhosted.org:443
+        test.pypi.org:443
+        upload.pypi.org:443
+        upload.test.pypi.org:443
+        astral.sh:443
+        releases.astral.sh:443
+    permissions:
+      actions: write
+      contents: read
+      pull-requests: write
+
+  # Evaluate both upstream jobs into a single result for the required-check gate
+  test-gate:
+    name: 🚦 Test Gate
+    needs: [test-compat, test-coverage]
+    if: always()
+    runs-on: ubuntu-24.04
+    permissions: {}
+    outputs:
+      result: ${{ steps.gate.outputs.result }}
+      passed: ${{ steps.gate.outputs.passed }}
+    steps:
+      - name: Checkout gate script
+        # yamllint disable-line rule:line-length
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          sparse-checkout: scripts/ci/evaluate-test-gate.sh
+          sparse-checkout-cone-mode: false
+          persist-credentials: false
+      - name: Evaluate upstream results
+        id: gate
+        env:
+          COMPAT_RESULT: ${{ needs.test-compat.result }}
+          COVERAGE_RESULT: ${{ needs.test-coverage.result }}
+        run: |
+          if bash scripts/ci/evaluate-test-gate.sh; then
+            echo "result=success" >> "$GITHUB_OUTPUT"
+            echo "passed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "result=failure" >> "$GITHUB_OUTPUT"
+            echo "passed=false" >> "$GITHUB_OUTPUT"
+          fi
+
+  # Org ruleset (checks-py-lintro): test-suite-coverage / 🧪 Test Suite & Coverage
+  test-suite-coverage:
+    needs: test-gate
+    if: always()
+    # yamllint disable-line rule:line-length
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-required-check.yml@31c25ef2e8992960e218524780e34f44f51271b5 # v0.54.0
+    permissions:
+      contents: read
+    with:
+      tooling-ref: '31c25ef2e8992960e218524780e34f44f51271b5' # v0.54.0
+      job-name: '🧪 Test Suite & Coverage'
+      runner-image: ubuntu-24.04
+      upstream-result: ${{ needs.test-gate.outputs.result }}
+      passed-output: ${{ needs.test-gate.outputs.passed }}
+      egress-policy: block
+      egress-preset: github-tooling
+
+  stage-coverage-html:
+    name: Stage coverage HTML for Pages bundle
+    needs: test-coverage
+    if: >-
+      github.ref == 'refs/heads/main' &&
+      github.event_name == 'push' &&
+      needs.test-coverage.outputs.passed == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - name: Harden Runner
+        # yamllint disable-line rule:line-length
+        uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
+        with:
+          egress-policy: block
+          # raw.githubusercontent.com is required by astral-sh/setup-uv (versions
+          # manifest). Omitting it fails this job and turns CI - Tests red on
+          # main even when tests passed (see #1227).
+          allowed-endpoints: >
+            github.com:443
+            api.github.com:443
+            codeload.github.com:443
+            objects.githubusercontent.com:443
+            release-assets.githubusercontent.com:443
+            raw.githubusercontent.com:443
+            pypi.org:443
+            files.pythonhosted.org:443
+            astral.sh:443
+            releases.astral.sh:443
+
+      - name: Checkout
+        # yamllint disable-line rule:line-length
+        uses: lgtm-hq/lgtm-ci/.github/actions/secure-checkout@31c25ef2e8992960e218524780e34f44f51271b5 # v0.54.0
+
+      - name: Setup Python and uv
+        # yamllint disable-line rule:line-length
+        uses: lgtm-hq/lgtm-ci/.github/actions/setup-python@31c25ef2e8992960e218524780e34f44f51271b5 # v0.54.0
+        with:
+          python-version: '3.14'
+          install-dependencies: 'true'
+          install-extras: 'dev'
+
+      - name: Download coverage artifact
+        # yamllint disable-line rule:line-length
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: python-coverage
+          path: coverage-report
+
+      - name: Stage HTML coverage
+        run: ./scripts/ci/testing/stage-python-coverage-html.sh
+
+      - name: Upload Pages coverage HTML
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: coverage-html
+          path: coverage-html/
+          retention-days: 7
+          if-no-files-found: error

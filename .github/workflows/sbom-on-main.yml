@@ -2,30 +2,35 @@
 # For license details, see the repository root LICENSE file.
 ---
 name: Security - SBOM Generation
-# Generates Software Bill of Materials (SBOM) in CycloneDX and SPDX formats.
-# Fetches dependency information and creates signed attestations for supply chain
-# security. Calls the reusable SBOM workflow with elevated token permissions.
 
 'on':
   push:
-    branches:
-      - main
+    branches: [main]
   workflow_dispatch:
 
 permissions: {}
 
 concurrency:
   group: sbom-main-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 jobs:
   sbom:
-    uses: ./.github/workflows/reusable-sbom.yml
-    permissions:
-      contents: read
-      actions: write
-      id-token: write
+    # yamllint disable-line rule:line-length
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-sbom.yml@31c25ef2e8992960e218524780e34f44f51271b5 # v0.54.0
     with:
-      use-release-token: true
-    secrets:
-      RELEASE_TOKEN: ${{ secrets.RELEASE_TOKEN }}
+      target: .
+      target-type: dir
+      sbom-format: cyclonedx-json
+      scan-vulnerabilities: true
+      create-attestation: true
+      tooling-ref: '31c25ef2e8992960e218524780e34f44f51271b5' # v0.54.0
+      egress-policy: block
+      egress-preset: sbom
+    permissions:
+      # write: reusable-sbom v0.52.3 requests contents: write (release SBOM
+      # asset upload); a lower caller grant is a parse-time startup_failure
+      contents: write
+      security-events: write
+      id-token: write
+      attestations: write

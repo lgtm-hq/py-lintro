@@ -42,33 +42,9 @@ DOCKER_COMPOSE_CMD="docker compose"
 echo -e "${GREEN}Using Docker Compose v2${NC}"
 
 IMAGE_NAME="py-lintro-test:latest"
-TOOLS_IMAGE_TAG="${TOOLS_IMAGE:-lintro-tools:local}"
-BUILT_TOOLS_IMAGE="false"
-
-# Validate provided tools image (fail fast if missing)
-if [ -n "${TOOLS_IMAGE:-}" ]; then
-	if ! docker image inspect "$TOOLS_IMAGE" &>/dev/null; then
-		echo -e "${RED}Error: TOOLS_IMAGE '${TOOLS_IMAGE}' not found. Build or pull it first.${NC}"
-		exit 1
-	fi
-	export TOOLS_IMAGE
-fi
-
-# Build local tools image if not provided to ensure latest toolchain (e.g., astro)
-if [ -z "${TOOLS_IMAGE:-}" ]; then
-	if ! docker image inspect "$TOOLS_IMAGE_TAG" &>/dev/null; then
-		echo -e "${YELLOW}Building local tools image...${NC}"
-		docker build -f Dockerfile.tools -t "$TOOLS_IMAGE_TAG" .
-		echo -e "${GREEN}✓ Tools image built successfully${NC}"
-		BUILT_TOOLS_IMAGE="true"
-	else
-		echo -e "${GREEN}✓ Using existing tools image: ${TOOLS_IMAGE_TAG}${NC}"
-	fi
-	export TOOLS_IMAGE="$TOOLS_IMAGE_TAG"
-fi
 
 # Check if we need to build the Docker image
-if ! docker image inspect "$IMAGE_NAME" &>/dev/null || [ "$BUILT_TOOLS_IMAGE" = "true" ]; then
+if ! docker image inspect "$IMAGE_NAME" &>/dev/null; then
 	echo -e "${YELLOW}Building Docker image...${NC}"
 	$DOCKER_COMPOSE_CMD build test-integration
 	echo -e "${GREEN}✓ Docker image built successfully${NC}"

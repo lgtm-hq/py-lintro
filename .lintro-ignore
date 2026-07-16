@@ -9,6 +9,17 @@ venv
 env
 # Claude Code project memory and config (not source code)
 .claude
+# Sparse lgtm-ci tooling checkout for reusable workflow scripts (not project source)
+.lgtm-ci-tooling
 
 __pycache__
 .lintro/*
+# Astro / Vitest / turbo-themes artifacts under apps/site (generated at build or test time)
+apps/site/.astro/
+apps/site/coverage/
+apps/site/dist/
+apps/site/public/assets/css/
+apps/site/node_modules/
+# Docs content + route map generated from docs/ by migrate-docs-content.py
+apps/site/src/content/docs/
+apps/site/src/generated/

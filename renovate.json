@@ -3,38 +3,36 @@
   "extends": [
     "local>lgtm-hq/.github:renovate-config"
   ],
+  "allowedCommands": [
+    "python3 scripts/ci/generate-tool-versions.py"
+  ],
   "packageRules": [
     {
-      "matchDatasources": ["docker"],
-      "matchUpdateTypes": ["digest", "patch"],
-      "automerge": true,
-      "automergeType": "branch"
+      "description": "Hold prettier 3.9.5+ until Docker integration prettier fixtures are updated",
+      "matchPackageNames": ["prettier"],
+      "allowedVersions": "<=3.9.4"
+    },
+    {
+      "description": "npm platform-binary placeholders are stamped at publish time; never bump in-repo",
+      "matchPackageNames": [
+        "/^@lgtm-hq\\/lintro(-|$)/"
+      ],
+      "enabled": false
+    },
+    {
+      "description": "Hold TypeScript 7 until Astro/@astrojs/check support it",
+      "matchPackageNames": ["typescript"],
+      "allowedVersions": "<7"
+    },
+    {
+      "description": "Hold js-yaml 5 until Astro migrates off default export / we update call sites",
+      "matchPackageNames": ["js-yaml"],
+      "allowedVersions": "<5"
     },
     {
       "matchDatasources": ["pypi"],
       "matchUpdateTypes": ["minor"],
       "automerge": false
-    },
-    {
-      "matchDatasources": ["pypi"],
-      "matchPackageNames": ["click"],
-      "allowedVersions": "<8.2",
-      "automerge": false,
-      "labels": ["blocked-by-psr"]
-    },
-    {
-      "groupName": "click + psr",
-      "matchDatasources": ["pypi"],
-      "matchPackageNames": [
-        "click",
-        "python-semantic-release"
-      ],
-      "automerge": false
-    },
-    {
-      "groupName": "pytest packages",
-      "groupSlug": "pytest",
-      "matchPackageNames": ["/^pytest/"]
     },
     {
       "matchManagers": [
@@ -69,8 +67,11 @@
         "rhysd/actionlint",
         "prettier",
         "markdownlint-cli2",
+        "@commitlint/cli",
+        "@commitlint/config-conventional",
         "oxlint",
         "oxfmt",
+        "stylelint",
         "gitleaks",
         "gitleaks/gitleaks",
         "shellcheck",
@@ -79,12 +80,55 @@
         "mvdan/sh",
         "taplo",
         "tamasfe/taplo",
+        "vale",
+        "errata-ai/vale",
         "astro",
         "@astrojs/check",
         "svelte-check",
         "vue-tsc"
       ],
       "automerge": false
+    },
+    {
+      "description": "lintro-tools base image digest pin (FROM in Dockerfile); native docker digest support, full CI validates the bump",
+      "matchDatasources": ["docker"],
+      "matchPackageNames": [
+        "ghcr.io/lgtm-hq/lintro-tools"
+      ],
+      "matchUpdateTypes": ["digest"],
+      "automerge": false
+    },
+    {
+      "description": "Regenerate version artifacts when tool version sources change",
+      "matchManagers": [
+        "custom.regex",
+        "npm",
+        "pep621",
+        "uv"
+      ],
+      "matchFileNames": [
+        "Dockerfile",
+        "docker/tools.Dockerfile",
+        "lintro/_tool_versions.py",
+        "lintro/tools/manifest.json",
+        "package.json",
+        "pyproject.toml"
+      ],
+      "postUpgradeTasks": {
+        "commands": [
+          "python3 scripts/ci/generate-tool-versions.py"
+        ],
+        "fileFilters": [
+          "lintro/_tool_versions.py",
+          "lintro/_generated_versions.py",
+          "lintro/tools/manifest.json",
+          "package.json",
+          "pyproject.toml",
+          "Dockerfile",
+          "docker/tools.Dockerfile"
+        ],
+        "executionMode": "branch"
+      }
     }
   ],
   "pip_requirements": {
@@ -96,32 +140,7 @@
     "schedule": ["before 5am on monday"],
     "commitMessageAction": "update lockfile"
   },
-  "postUpgradeTasks": {
-    "commands": [
-      "python3 scripts/ci/generate-tool-versions.py"
-    ],
-    "fileFilters": [
-      "lintro/_tool_versions.py",
-      "package.json",
-      "pyproject.toml",
-      "Dockerfile",
-      "Dockerfile.tools",
-      "Dockerfile.base"
-    ],
-    "executionMode": "branch"
-  },
   "customManagers": [
-    {
-      "customType": "regex",
-      "managerFilePatterns": [
-        "/^\\.github/workflows/test-and-coverage\\.yml$/"
-      ],
-      "matchStrings": [
-        "CODECOV_VERSION:\\s*(?<currentValue>v[0-9]+\\.[0-9]+\\.[0-9]+)"
-      ],
-      "datasourceTemplate": "github-releases",
-      "packageNameTemplate": "codecov/uploader"
-    },
     {
       "customType": "regex",
       "managerFilePatterns": ["Dockerfile"],
@@ -145,7 +164,8 @@
     {
       "customType": "regex",
       "managerFilePatterns": [
-        "Dockerfile\\.tools"
+        "Dockerfile",
+        "docker/tools.Dockerfile"
       ],
       "matchStrings": [
         "ARG BUN_VERSION=(?<currentValue>[0-9]+\\.[0-9]+\\.[0-9]+)"
@@ -157,8 +177,8 @@
     {
       "customType": "regex",
       "managerFilePatterns": [
-        "Dockerfile\\.tools",
-        "Dockerfile\\.base"
+        "Dockerfile",
+        "docker/tools.Dockerfile"
       ],
       "matchStrings": [
         "ARG UV_VERSION=(?<currentValue>[0-9]+\\.[0-9]+\\.[0-9]+)"
@@ -169,8 +189,7 @@
     {
       "customType": "regex",
       "managerFilePatterns": [
-        "/^\\.github/workflows/reusable-sbom\\.yml$/",
-        "scripts/ci/deployment/sbom-install-binary-gh\\.sh"
+        "/^\\.github/workflows/sbom-on-main\\.yml$/"
       ],
       "matchStrings": [
         "BOMCTL_VERSION[=:]\\s*v(?<currentValue>[0-9]+\\.[0-9]+\\.[0-9]+)"
@@ -258,6 +277,19 @@
       "extractVersionTemplate": "^v(?<version>.*)$"
     },
     {
+      "description": "Update dotenv-linter version in _tool_versions.py",
+      "customType": "regex",
+      "managerFilePatterns": [
+        "lintro/_tool_versions\\.py"
+      ],
+      "matchStrings": [
+        "ToolName\\.DOTENV_LINTER:\\s*\"(?<currentValue>[0-9]+\\.[0-9]+\\.[0-9]+)\""
+      ],
+      "datasourceTemplate": "github-releases",
+      "packageNameTemplate": "dotenv-linter/dotenv-linter",
+      "extractVersionTemplate": "^v(?<version>.*)$"
+    },
+    {
       "description": "Update taplo version in _tool_versions.py",
       "customType": "regex",
       "managerFilePatterns": [
@@ -269,6 +301,19 @@
       "datasourceTemplate": "github-releases",
       "packageNameTemplate": "tamasfe/taplo",
       "extractVersionTemplate": "^(?<version>[0-9]+\\.[0-9]+\\.[0-9]+)$"
+    },
+    {
+      "description": "Update vale version in _tool_versions.py",
+      "customType": "regex",
+      "managerFilePatterns": [
+        "lintro/_tool_versions\\.py"
+      ],
+      "matchStrings": [
+        "ToolName\\.VALE:\\s*\"(?<currentValue>[0-9]+\\.[0-9]+\\.[0-9]+)\""
+      ],
+      "datasourceTemplate": "github-releases",
+      "packageNameTemplate": "errata-ai/vale",
+      "extractVersionTemplate": "^v(?<version>.*)$"
     },
     {
       "description": "Update cargo-audit version in _tool_versions.py",

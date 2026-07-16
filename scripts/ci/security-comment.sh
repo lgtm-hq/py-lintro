@@ -62,27 +62,26 @@ fi
 rm -f "$format_err"
 
 # Determine status: distinguish tool failures from actual vulnerabilities.
-# lintro exits non-zero when issues are found; check the JSON output to
-# determine whether vulnerabilities were actually reported vs a scan failure.
+# Always classify JSON output so malformed scans fail even when lintro exits 0.
 HAS_VULNS=0
 AUDIT_FAILED=$FORMAT_FAILED
-if [[ "$OSV_EXIT_CODE" -ne 0 ]]; then
-	if [[ -f osv-results.json ]] && python3 -c "
-import json, sys
-try:
-    d = json.load(open('osv-results.json'))
-    r = next((x for x in d.get('results', []) if x.get('tool') == 'osv_scanner'), None)
-    sys.exit(0 if r and r.get('issues_count', 0) > 0 else 1)
-except (json.JSONDecodeError, KeyError) as e:
-    print(f'Failed to parse osv-results.json: {e}', file=sys.stderr)
-    sys.exit(1)
-" 2>&1; then
-		HAS_VULNS=1
-	else
-		log_info "osv-scanner exited non-zero but no valid vulnerability data found in osv-results.json"
-		AUDIT_FAILED=1
+OSV_CLASS=$(
+	python3 "$SCRIPT_DIR/classify-osv-results.py" osv-results.json 2>/dev/null || echo error
+)
+case "$OSV_CLASS" in
+vulns)
+	HAS_VULNS=1
+	;;
+ok)
+	if [[ "$OSV_EXIT_CODE" -ne 0 ]]; then
+		log_info "osv-scanner exited non-zero but completed with no findings"
 	fi
-fi
+	;;
+*)
+	log_info "osv-scanner produced malformed or incomplete results ($OSV_CLASS)"
+	AUDIT_FAILED=1
+	;;
+esac
 
 if [[ "$AUDIT_FAILED" -eq 1 ]]; then
 	STATUS="⚠️ AUDIT FAILED"

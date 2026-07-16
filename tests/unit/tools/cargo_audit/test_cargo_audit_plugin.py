@@ -3,17 +3,38 @@
 from __future__ import annotations
 
 from pathlib import Path
-from subprocess import TimeoutExpired
+from subprocess import (
+    TimeoutExpired,
+)  # nosec B404 - subprocess is used to drive the tool/CLI under test; invocations use shell=False
 from unittest.mock import patch
 
 import pytest
 from assertpy import assert_that
 
 from lintro.enums.tool_type import ToolType
+from lintro.plugins.subprocess_executor import SubprocessResult
 from lintro.tools.definitions.cargo_audit import (
     CARGO_AUDIT_DEFAULT_TIMEOUT,
     CargoAuditPlugin,
 )
+
+
+def _proc(*, success: bool, stdout: str = "") -> SubprocessResult:
+    """Build a SubprocessResult for mocking ``_run_subprocess_result``.
+
+    Args:
+        success: Whether the subprocess succeeded (return code 0).
+        stdout: Captured standard output (the JSON report stream).
+
+    Returns:
+        SubprocessResult with the JSON payload on stdout.
+    """
+    return SubprocessResult(
+        returncode=0 if success else 1,
+        stdout=stdout,
+        stderr="",
+        output=stdout,
+    )
 
 
 @pytest.fixture
@@ -198,8 +219,8 @@ def test_check_no_vulnerabilities(
     ):
         with patch.object(
             cargo_audit_plugin,
-            "_run_subprocess",
-            return_value=(True, mock_output),
+            "_run_subprocess_result",
+            return_value=_proc(success=True, stdout=mock_output),
         ):
             result = cargo_audit_plugin.check([str(cargo_lock)], {})
 
@@ -245,8 +266,8 @@ def test_check_with_vulnerabilities(
     ):
         with patch.object(
             cargo_audit_plugin,
-            "_run_subprocess",
-            return_value=(False, mock_output),
+            "_run_subprocess_result",
+            return_value=_proc(success=False, stdout=mock_output),
         ):
             result = cargo_audit_plugin.check([str(cargo_lock)], {})
 
@@ -273,7 +294,7 @@ def test_check_timeout(
     ):
         with patch.object(
             cargo_audit_plugin,
-            "_run_subprocess",
+            "_run_subprocess_result",
             side_effect=TimeoutExpired(
                 cmd=["cargo", "audit"],
                 timeout=120,
@@ -283,3 +304,31 @@ def test_check_timeout(
 
     assert_that(result.success).is_false()
     assert_that(result.output).contains("timed out")
+
+
+def test_check_garbage_output_with_zero_exit_is_not_clean(
+    cargo_audit_plugin: CargoAuditPlugin,
+    tmp_path: Path,
+) -> None:
+    """Unparseable output with a zero exit must not report a clean scan (#1044)."""
+    cargo_lock = tmp_path / "Cargo.lock"
+    cargo_lock.write_text('[[package]]\nname = "test"\nversion = "1.0.0"')
+
+    garbage = "this is not json {["
+
+    with (
+        patch(
+            "lintro.plugins.execution_preparation.verify_tool_version",
+            return_value=None,
+        ),
+        patch.object(
+            cargo_audit_plugin,
+            "_run_subprocess_result",
+            return_value=_proc(success=True, stdout=garbage),
+        ),
+    ):
+        result = cargo_audit_plugin.check([str(cargo_lock)], {})
+
+    assert_that(result.success).is_false()
+    assert_that(result.issues_count).is_equal_to(0)
+    assert_that(result.parse_failures_count).is_equal_to(1)

@@ -81,8 +81,10 @@ This script installs:
   - Semgrep (Security scanner)
   - ShellCheck (Shell script linter)
   - shfmt (Shell script formatter)
+  - dotenv-linter (.env file linter and fixer)
   - SQLFluff (SQL linter and formatter)
   - Taplo (TOML linter and formatter)
+  - Vale (Prose/documentation linter)
   - TypeScript (TypeScript compiler and type checker)
   - Astro Check (Astro component type checker)
   - Gitleaks (Secret detection scanner)
@@ -166,10 +168,10 @@ should_install() {
 # Kept in sync with the should_install blocks and tools_to_verify array.
 SUPPORTED_TOOLS=(
 	"actionlint" "astro" "bandit" "black" "cargo-audit" "cargo-deny"
-	"clippy" "gitleaks" "hadolint" "markdownlint" "markdownlint-cli2" "mypy" "osv-scanner"
+	"clippy" "commitlint" "dotenv-linter" "gitleaks" "hadolint" "markdownlint" "markdownlint-cli2" "mypy" "osv-scanner"
 	"oxfmt" "oxlint" "prettier" "pydoclint" "ruff" "rustfmt" "semgrep"
-	"shellcheck" "shfmt" "sqlfluff" "svelte-check" "taplo" "tsc"
-	"vue-tsc" "yamllint"
+	"shellcheck" "shfmt" "sqlfluff" "stylelint" "svelte-check" "taplo" "tsc"
+	"vale" "vue-tsc" "yamllint"
 )
 
 # Validate --tools filter against known tool names (fail-fast on typos).
@@ -750,6 +752,84 @@ main() {
 		fi
 	fi # shfmt
 
+	if should_install "vale"; then
+		# Install vale (prose/documentation linter)
+		# Prebuilt binaries: https://github.com/errata-ai/vale/releases
+		echo -e "${BLUE}Installing vale...${NC}"
+		VALE_VERSION=$(get_tool_version "vale") || exit 1
+		if [ $DRY_RUN -eq 1 ]; then
+			log_info "[DRY-RUN] Would install vale v${VALE_VERSION}"
+		elif command -v vale &>/dev/null; then
+			echo -e "${GREEN}✓ vale already installed${NC}"
+		else
+			tmpdir=$(mktemp -d)
+			os=$(uname -s)
+			arch=$(uname -m)
+			case "$os" in
+			Darwin) os_name="macOS" ;;
+			Linux) os_name="Linux" ;;
+			*) os_name="Linux" ;;
+			esac
+			case "$arch" in
+			x86_64 | amd64) arch_name="64-bit" ;;
+			aarch64 | arm64) arch_name="arm64" ;;
+			*) echo -e "${RED}✗ Unsupported architecture: $arch${NC}" && rm -rf "$tmpdir" && exit 1 ;;
+			esac
+			tgz_name="vale_${VALE_VERSION}_${os_name}_${arch_name}.tar.gz"
+			tgz_url="https://github.com/errata-ai/vale/releases/download/v${VALE_VERSION}/${tgz_name}"
+			if download_with_retries "$tgz_url" "$tmpdir/vale.tgz" 3; then
+				# Require checksum verification before installing
+				checksum_url="https://github.com/errata-ai/vale/releases/download/v${VALE_VERSION}/vale_${VALE_VERSION}_checksums.txt"
+				if ! download_with_retries "$checksum_url" "$tmpdir/checksums.txt" 3; then
+					echo -e "${RED}✗ Failed to download checksum file for vale${NC}"
+					rm -rf "$tmpdir"
+					exit 1
+				fi
+				echo -e "${BLUE}Verifying checksum for vale...${NC}"
+				expected=$(grep "$tgz_name" "$tmpdir/checksums.txt" | awk '{print $1}')
+				if [ -z "$expected" ]; then
+					echo -e "${RED}✗ Checksum entry not found for ${tgz_name}${NC}"
+					rm -rf "$tmpdir"
+					exit 1
+				fi
+				if command -v sha256sum >/dev/null 2>&1; then
+					actual=$(sha256sum "$tmpdir/vale.tgz" | awk '{print $1}')
+				elif command -v shasum >/dev/null 2>&1; then
+					actual=$(shasum -a 256 "$tmpdir/vale.tgz" | awk '{print $1}')
+				else
+					echo -e "${RED}✗ No hash tool found (sha256sum or shasum required)${NC}"
+					rm -rf "$tmpdir"
+					exit 1
+				fi
+				if [ "$expected" != "$actual" ]; then
+					echo -e "${RED}✗ Checksum mismatch for vale (expected: $expected, got: $actual)${NC}"
+					rm -rf "$tmpdir"
+					exit 1
+				fi
+				echo -e "${GREEN}✓ Checksum verified${NC}"
+				if ! tar -xzf "$tmpdir/vale.tgz" -C "$tmpdir" >/dev/null 2>&1; then
+					echo -e "${RED}✗ Failed to extract vale archive${NC}"
+					rm -rf "$tmpdir"
+					exit 1
+				fi
+				if [ -f "$tmpdir/vale" ]; then
+					cp "$tmpdir/vale" "$BIN_DIR/vale"
+					chmod +x "$BIN_DIR/vale"
+					echo -e "${GREEN}✓ vale installed successfully${NC}"
+				else
+					echo -e "${RED}✗ Could not find extracted vale binary${NC}"
+					rm -rf "$tmpdir"
+					exit 1
+				fi
+			else
+				echo -e "${RED}✗ Failed to download vale prebuilt binary${NC}"
+				rm -rf "$tmpdir"
+				exit 1
+			fi
+			rm -rf "$tmpdir" || true
+		fi
+	fi # vale
+
 	# Shared helper: ensure Rust toolchain is installed with the required component.
 	# Called by both the rustfmt and clippy blocks to avoid duplicating toolchain setup.
 	# Usage: ensure_rust_toolchain <component>  (e.g. "rustfmt" or "clippy")
@@ -1033,6 +1113,32 @@ main() {
 		fi
 	fi # mypy
 
+	if should_install "commitlint"; then
+		# Install commitlint via bun (Conventional Commits message linting).
+		# The shared config package is installed alongside so user configs that
+		# extend @commitlint/config-conventional resolve.
+		echo -e "${BLUE}Installing commitlint...${NC}"
+
+		# Ensure bun is available
+		if ! ensure_bun_installed; then
+			exit 1
+		fi
+
+		# Read versions from _tool_versions.py (single source of truth).
+		# Package alias: "@commitlint/cli" -> ToolName.COMMITLINT
+		COMMITLINT_VERSION=$(get_tool_version "@commitlint/cli") || exit 1
+		COMMITLINT_CONFIG_VERSION=$(get_tool_version "@commitlint/config-conventional") || exit 1
+
+		if [ $DRY_RUN -eq 1 ]; then
+			log_info "[DRY-RUN] Would install @commitlint/cli@${COMMITLINT_VERSION} and @commitlint/config-conventional@${COMMITLINT_CONFIG_VERSION} globally via bun"
+		elif bun add -g "@commitlint/cli@${COMMITLINT_VERSION}" "@commitlint/config-conventional@${COMMITLINT_CONFIG_VERSION}"; then
+			echo -e "${GREEN}✓ commitlint@${COMMITLINT_VERSION} installed successfully${NC}"
+		else
+			echo -e "${RED}✗ Failed to install commitlint${NC}"
+			exit 1
+		fi
+	fi # commitlint
+
 	if should_install "prettier"; then
 		# Install prettier via bun (JavaScript/JSON formatting)
 		echo -e "${BLUE}Installing prettier...${NC}"
@@ -1159,6 +1265,72 @@ main() {
 		fi
 	fi # end shellcheck block
 
+	if should_install "dotenv-linter"; then
+		# Install dotenv-linter (.env file linter and fixer)
+		echo -e "${BLUE}Installing dotenv-linter...${NC}"
+		DOTENV_LINTER_VERSION=$(get_tool_version "dotenv-linter") || exit 1
+
+		# Helper function for dotenv-linter binary installation
+		install_dotenv_linter_binary() {
+			local tmpdir
+			tmpdir=$(mktemp -d)
+			local os arch tar_url
+			os=$(uname -s | tr '[:upper:]' '[:lower:]')
+			arch=$(uname -m)
+			# dotenv-linter uses aarch64 on linux but arm64 on darwin
+			case "$os" in
+			darwin)
+				case "$arch" in
+				x86_64 | amd64) arch="x86_64" ;;
+				aarch64 | arm64) arch="arm64" ;;
+				esac
+				;;
+			*)
+				case "$arch" in
+				x86_64 | amd64) arch="x86_64" ;;
+				aarch64 | arm64) arch="aarch64" ;;
+				esac
+				;;
+			esac
+			tar_url="https://github.com/dotenv-linter/dotenv-linter/releases/download/v${DOTENV_LINTER_VERSION}/dotenv-linter-${os}-${arch}.tar.gz"
+			if download_with_retries "$tar_url" "$tmpdir/dotenv-linter.tar.gz" 3; then
+				tar -xzf "$tmpdir/dotenv-linter.tar.gz" -C "$tmpdir"
+				cp "$tmpdir/dotenv-linter" "$BIN_DIR/dotenv-linter"
+				chmod +x "$BIN_DIR/dotenv-linter"
+				rm -rf "$tmpdir"
+				return 0
+			else
+				rm -rf "$tmpdir"
+				return 1
+			fi
+		}
+
+		if [ $DRY_RUN -eq 1 ]; then
+			log_info "[DRY-RUN] Would install dotenv-linter v${DOTENV_LINTER_VERSION}"
+		elif command -v dotenv-linter &>/dev/null; then
+			# Check if installed version meets minimum requirement
+			installed_version=$(dotenv-linter --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)
+			if [ -n "$installed_version" ] && version_ge "$installed_version" "$DOTENV_LINTER_VERSION"; then
+				echo -e "${GREEN}✓ dotenv-linter v${installed_version} already installed (>= v${DOTENV_LINTER_VERSION})${NC}"
+			else
+				echo -e "${YELLOW}⚠ Installing dotenv-linter v${DOTENV_LINTER_VERSION}...${NC}"
+				if install_dotenv_linter_binary; then
+					echo -e "${GREEN}✓ dotenv-linter installed successfully${NC}"
+				else
+					echo -e "${RED}✗ Failed to download dotenv-linter${NC}"
+					exit 1
+				fi
+			fi
+		else
+			if install_dotenv_linter_binary; then
+				echo -e "${GREEN}✓ dotenv-linter installed successfully${NC}"
+			else
+				echo -e "${RED}✗ Failed to download dotenv-linter${NC}"
+				exit 1
+			fi
+		fi
+	fi # end dotenv-linter block
+
 	if should_install "oxlint"; then
 		# Install oxlint via bun (JavaScript/TypeScript linting)
 		echo -e "${BLUE}Installing oxlint...${NC}"
@@ -1197,6 +1369,25 @@ main() {
 			exit 1
 		fi
 	fi # oxfmt
+
+	if should_install "stylelint"; then
+		# Install stylelint via bun (CSS/SCSS/Less linting)
+		echo -e "${BLUE}Installing stylelint...${NC}"
+
+		if ! ensure_bun_installed; then
+			exit 1
+		fi
+
+		STYLELINT_VERSION=$(get_tool_version "stylelint") || exit 1
+		if [ $DRY_RUN -eq 1 ]; then
+			log_info "[DRY-RUN] Would install stylelint@${STYLELINT_VERSION} globally via bun"
+		elif bun add -g "stylelint@${STYLELINT_VERSION}"; then
+			echo -e "${GREEN}✓ stylelint@${STYLELINT_VERSION} installed successfully${NC}"
+		else
+			echo -e "${RED}✗ Failed to install stylelint${NC}"
+			exit 1
+		fi
+	fi # stylelint
 
 	if should_install "yamllint"; then
 		# Install yamllint (Python package)
@@ -1418,6 +1609,7 @@ main() {
 		["cargo-audit"]="Rust dependency vulnerability scanning"
 		["cargo-deny"]="Rust dependency license/advisory checking"
 		["clippy"]="Rust linting"
+		["dotenv-linter"]=".env file linting and fixing"
 		["gitleaks"]="Secret detection"
 		["hadolint"]="Docker linting"
 		["markdownlint"]="Markdown linting"
@@ -1433,6 +1625,7 @@ main() {
 		["shellcheck"]="Shell script linting"
 		["shfmt"]="Shell script formatting"
 		["sqlfluff"]="SQL linting and formatting"
+		["stylelint"]="CSS/SCSS/Less linting"
 		["svelte-check"]="Svelte type checking"
 		["taplo"]="TOML linting and formatting"
 		["tsc"]="TypeScript type checking"
@@ -1450,7 +1643,7 @@ main() {
 	# Verify installations
 	echo -e "${YELLOW}Verifying installations...${NC}"
 
-	tools_to_verify=("actionlint" "astro" "bandit" "black" "cargo-audit" "cargo-deny" "clippy" "rustfmt" "gitleaks" "hadolint" "markdownlint-cli2" "mypy" "osv-scanner" "oxfmt" "oxlint" "prettier" "pydoclint" "ruff" "semgrep" "shellcheck" "shfmt" "sqlfluff" "svelte-check" "taplo" "tsc" "vue-tsc" "yamllint")
+	tools_to_verify=("actionlint" "astro" "bandit" "black" "cargo-audit" "cargo-deny" "clippy" "commitlint" "dotenv-linter" "gitleaks" "hadolint" "markdownlint-cli2" "mypy" "osv-scanner" "oxfmt" "oxlint" "prettier" "pydoclint" "ruff" "rustfmt" "semgrep" "shellcheck" "shfmt" "sqlfluff" "stylelint" "svelte-check" "taplo" "tsc" "vale" "vue-tsc" "yamllint")
 
 	# Filter verification list when --tools is set.
 	# Map aliases so e.g. --tools markdownlint verifies markdownlint-cli2.

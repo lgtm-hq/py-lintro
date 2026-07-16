@@ -47,31 +47,11 @@ if ! command -v docker &>/dev/null; then
 	exit 1
 fi
 
-# Pre-built tools image for faster builds
-resolve_tools_image() {
-	if [ -n "${TOOLS_IMAGE:-}" ]; then
-		echo "$TOOLS_IMAGE"
-		return
-	fi
-	local dockerfile="${SCRIPT_DIR}/../../Dockerfile"
-	if [ -f "$dockerfile" ]; then
-		local arg
-		arg=$(grep -E '^ARG TOOLS_IMAGE=' "$dockerfile" | head -n1 | cut -d= -f2)
-		if [ -n "$arg" ]; then
-			echo "$arg"
-			return
-		fi
-	fi
-	echo "ghcr.io/lgtm-hq/lintro-tools:latest"
-}
-
-TOOLS_IMAGE="$(resolve_tools_image)"
-
 # Build the Docker image if it doesn't exist
 IMAGE_NAME="py-lintro:latest"
 if ! docker image inspect "$IMAGE_NAME" &>/dev/null; then
 	echo -e "${YELLOW}Building Docker image...${NC}"
-	if ! docker build --build-arg "TOOLS_IMAGE=${TOOLS_IMAGE}" -t "$IMAGE_NAME" .; then
+	if ! docker build --target full -t "$IMAGE_NAME" .; then
 		echo -e "${RED}Error: Failed to build Docker image${NC}"
 		exit 1
 	fi

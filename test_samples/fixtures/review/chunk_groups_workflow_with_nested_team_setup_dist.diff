@@ -1,0 +1,12 @@
+diff --git a/.github/workflows/ci.yml b/.github/workflows/ci.yml
+--- a/.github/workflows/ci.yml
++++ b/.github/workflows/ci.yml
+@@ -1 +1,2 @@
+ name: CI
++- uses: ./.github/actions/team/setup
+diff --git a/.github/actions/team/setup/dist/index.js b/.github/actions/team/setup/dist/index.js
+--- a/.github/actions/team/setup/dist/index.js
++++ b/.github/actions/team/setup/dist/index.js
+@@ -1 +1,2 @@
+ module.exports = {}
++module.exports.setup = true

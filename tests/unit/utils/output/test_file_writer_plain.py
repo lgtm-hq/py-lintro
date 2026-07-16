@@ -17,26 +17,42 @@ from lintro.utils.output.file_writer import write_output_file
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-    from .conftest import MockToolResult
+    from lintro.models.core.tool_result import ToolResult
+
+    from .conftest import MockIssue
 
 
 def test_write_plain_file_creates_valid_structure(
     tmp_path: Path,
-    mock_tool_result_factory: Callable[..., MockToolResult],
+    mock_tool_result_factory: Callable[..., ToolResult],
+    mock_issue_factory: Callable[..., MockIssue],
 ) -> None:
     """Verify plain text file contains report header and summary totals.
+
+    The per-tool count is derived from the merged/deduped issue list (as the
+    JSON writer does) so every format agrees; the result therefore carries
+    matching issue objects.
 
     Args:
         tmp_path: Temporary directory path for test output.
         mock_tool_result_factory: Factory for creating mock tool results.
+        mock_issue_factory: Factory for creating mock issue objects.
     """
     output_path = tmp_path / "report.txt"
-    results = [mock_tool_result_factory(name="ruff", issues_count=5, output="5 issues")]
+    issues = [mock_issue_factory(line=n) for n in range(1, 6)]
+    results = [
+        mock_tool_result_factory(
+            name="ruff",
+            issues_count=5,
+            output="5 issues",
+            issues=issues,
+        ),
+    ]
 
     write_output_file(
         output_path=str(output_path),
         output_format=OutputFormat.PLAIN,
-        all_results=results,  # type: ignore[arg-type]
+        all_results=results,
         action=Action.CHECK,
         total_issues=5,
         total_fixed=0,
@@ -53,7 +69,7 @@ def test_write_plain_file_creates_valid_structure(
 
 def test_write_plain_file_shows_fixed_count_for_fix_action(
     tmp_path: Path,
-    sample_results_empty: list[MockToolResult],
+    sample_results_empty: list[ToolResult],
 ) -> None:
     """Verify fix action report includes 'Total Fixed' instead of just issues.
 
@@ -66,7 +82,7 @@ def test_write_plain_file_shows_fixed_count_for_fix_action(
     write_output_file(
         output_path=str(output_path),
         output_format=OutputFormat.PLAIN,
-        all_results=sample_results_empty,  # type: ignore[arg-type]
+        all_results=sample_results_empty,
         action=Action.FIX,
         total_issues=0,
         total_fixed=5,
@@ -80,7 +96,7 @@ def test_write_plain_file_shows_fixed_count_for_fix_action(
 
 def test_write_plain_fix_mode_shows_detected_and_remaining(
     tmp_path: Path,
-    mock_tool_result_factory: Callable[..., MockToolResult],
+    mock_tool_result_factory: Callable[..., ToolResult],
 ) -> None:
     """Fix-mode plain output renders Detected and Remaining tables.
 
@@ -130,7 +146,7 @@ def test_write_plain_fix_mode_shows_detected_and_remaining(
     write_output_file(
         output_path=str(output_path),
         output_format=OutputFormat.PLAIN,
-        all_results=results,  # type: ignore[arg-type]
+        all_results=results,
         action=Action.FIX,
         total_issues=1,
         total_fixed=1,

@@ -1,0 +1,63 @@
+# SPDX-License-Identifier: MIT
+# For license details, see the repository root LICENSE file.
+---
+name: Release - Version PR
+
+# Surface trigger context in the Actions history so post-merge release failures
+# are traceable at a glance (event + branch), not just via the default commit
+# subject. Guarded by test_release_workflows_define_traceable_run_names.
+run-name: >-
+  Release - Version PR (${{ github.event_name }} on ${{ github.ref_name }})
+
+'on':
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: release-version-pr-${{ github.repository }}
+  cancel-in-progress: false
+
+jobs:
+  version-pr:
+    # yamllint disable-line rule:line-length
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-release-version-pr.yml@31c25ef2e8992960e218524780e34f44f51271b5 # v0.54.0
+    with:
+      ecosystems: python
+      auto-merge: true
+      max-bump: minor
+      # Reflow the generated CHANGELOG.md to lintro's 88-column markdown budget
+      # after it is written and before the version PR is committed, so release
+      # PRs pass dogfooding-lint without CHANGELOG.md being ignored (#1117).
+      # Shell/format logic lives in the dedicated script, not an inline run.
+      version-update-script: scripts/ci/format-changelog.py
+      tooling-ref: '31c25ef2e8992960e218524780e34f44f51271b5' # v0.54.0
+      egress-policy: block
+      # Paired with release-auto-tag.yml (egress-preset: github-tooling).
+      # Guarded by test_release_workflows_use_paired_egress_presets.
+      egress-preset: pypi
+      # Since lgtm-ci v0.50.0 the enforcing harden-runner step runs before
+      # preset resolution, so the preset's extra hosts never reach it and
+      # pip is blocked from PyPI (#1287, lgtm-hq/lgtm-ci#512). Pass the
+      # complete list explicitly; harden-runner splits on spaces, so keep
+      # the folded scalar.
+      allowed-endpoints: >-
+        github.com:443
+        api.github.com:443
+        codeload.github.com:443
+        objects.githubusercontent.com:443
+        raw.githubusercontent.com:443
+        uploads.github.com:443
+        pipelines.actions.githubusercontent.com:443
+        pypi.org:443
+        files.pythonhosted.org:443
+    secrets:
+      RELEASE_APP_ID: ${{ secrets.RELEASE_APP_ID }}
+      RELEASE_APP_PRIVATE_KEY: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
+    permissions:
+      actions: read # report-release-failure reads workflow/job metadata
+      contents: write # create version bump commits and PRs
+      issues: write # report-release-failure opens deduplicated failure issues
+      pull-requests: write

@@ -41,6 +41,7 @@ class AIProviderRegistry:
 
     anthropic: ProviderInfo
     openai: ProviderInfo
+    cursor: ProviderInfo
     _cached_model_pricing: dict[str, ModelPricing] = field(
         default_factory=dict,
         init=False,
@@ -109,6 +110,14 @@ PROVIDERS = AIProviderRegistry(
             "gpt-4-turbo": ModelPricing(10.00, 30.00),
             "o1": ModelPricing(15.00, 60.00),
             "o1-mini": ModelPricing(1.10, 4.40),
+        },
+    ),
+    cursor=ProviderInfo(
+        default_model="auto",
+        default_api_key_env="CURSOR_API_KEY",
+        models={
+            "auto": ModelPricing(0.0, 0.0),
+            "gpt-5.3-codex-fast": ModelPricing(0.0, 0.0),
         },
     ),
 )

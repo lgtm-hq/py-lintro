@@ -8,6 +8,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from lintro.ai.config import AIConfig
 
 
 @dataclass(frozen=True)
@@ -15,6 +19,7 @@ class SummaryGenParams:
     """Immutable parameter bundle for summary generation.
 
     Attributes:
+        ai_config: Optional full AI config (transport, retry, fallback).
         max_tokens: Maximum tokens for the response.
         workspace_root: Root for provider-safe path redaction.
         timeout: Request timeout in seconds per API call.
@@ -25,6 +30,7 @@ class SummaryGenParams:
         fallback_models: Ordered fallback model identifiers.
     """
 
+    ai_config: AIConfig | None = None
     max_tokens: int = 2048
     workspace_root: Path | None = None
     timeout: float = 60.0

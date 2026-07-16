@@ -1,0 +1,29 @@
+{
+  "name": "@lgtm-hq/lintro-darwin-arm64",
+  "version": "0.0.0-dev",
+  "description": "macOS Apple Silicon binary for lintro. Installed automatically by the `lintro` package.",
+  "homepage": "https://github.com/lgtm-hq/py-lintro#readme",
+  "bugs": {
+    "url": "https://github.com/lgtm-hq/py-lintro/issues"
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/lgtm-hq/py-lintro.git",
+    "directory": "npm/darwin-arm64"
+  },
+  "os": [
+    "darwin"
+  ],
+  "cpu": [
+    "arm64"
+  ],
+  "main": "index.js",
+  "files": [
+    "bin/lintro",
+    "index.js"
+  ],
+  "engines": {
+    "node": ">=18"
+  }
+}

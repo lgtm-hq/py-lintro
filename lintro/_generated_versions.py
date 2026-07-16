@@ -9,15 +9,18 @@ Sources:
 """
 
 NPM_VERSIONS: dict[str, str] = {
-    "@astrojs/check": "0.9.8",
-    "astro": "6.1.10",
-    "markdownlint-cli2": "0.22.0",
-    "oxfmt": "0.43.0",
-    "oxlint": "1.58.0",
-    "prettier": "3.8.1",
-    "svelte-check": "4.4.6",
-    "typescript": "5.9.3",
-    "vue-tsc": "3.2.6",
+    "@astrojs/check": "0.9.9",
+    "@commitlint/cli": "21.2.1",
+    "@commitlint/config-conventional": "21.2.0",
+    "astro": "7.0.9",
+    "markdownlint-cli2": "0.23.0",
+    "oxfmt": "0.58.0",
+    "oxlint": "1.73.0",
+    "prettier": "3.9.4",
+    "stylelint": "17.14.0",
+    "svelte-check": "4.7.2",
+    "typescript": "6.0.3",
+    "vue-tsc": "3.3.7",
 }
 
 PYPI_VERSIONS: dict[str, str] = {

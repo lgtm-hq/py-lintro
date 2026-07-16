@@ -2,21 +2,11 @@
 # For license details, see the repository root LICENSE file.
 ---
 name: Build - Docker Image & Registry
-# Builds and tests Docker image. Called by ci-pipeline.yml for push/PR events
-# and by publish-pypi-on-tag.yml for release tag pushes (semver-tagged images).
-# Can also be triggered directly for releases or manual dispatch.
+# Builds and publishes Docker images to GHCR via lgtm-ci reusable-docker.
+# Called by publish-pypi-on-tag.yml for release tag pushes.
 
 'on':
-  # Called by orchestrator workflow (build-test-pipeline.yml)
   workflow_call:
-    inputs:
-      tools-image:
-        # yamllint disable-line rule:line-length
-        description: 'Tools image reference to use for the build (auto-resolved if empty)'
-        required: false
-        type: string
-        default: ''
-  # Direct triggers (not handled by orchestrator)
   release:
     types: [published, edited]
   workflow_dispatch:
@@ -25,280 +15,207 @@ name: Build - Docker Image & Registry
         description: 'Run publish on this branch (manual testing)'
         required: false
         default: 'false'
-      tools-image:
-        description: 'Tools image override (leave empty for auto-resolve)'
+      backfill_version:
+        description: >-
+          Backfill: version to (re)publish, e.g. 0.65.0.
+          Leave empty for normal builds. When set, builds from backfill_ref,
+          tags that version, and does NOT move the latest tag.
+        required: false
+        default: ''
+      backfill_ref:
+        description: 'Backfill: git ref to build that version from, e.g. v0.65.0.'
         required: false
         default: ''
 
-permissions: {}
-
-env:
-  CACHE_OPTS: mode=max,compression=zstd,oci-mediatypes=true,image-manifest=true
+permissions:
+  contents: read
 
 jobs:
-  build-and-test:
-    runs-on: ubuntu-24.04
-    permissions:
-      contents: read
-    timeout-minutes: 30
-    defaults:
-      run:
-        shell: bash
-    concurrency:
-      group: docker-${{ github.ref }}
-      cancel-in-progress: true
-    steps:
-      - name: Harden Runner
-        uses: step-security/harden-runner@fe104658747b27e96e4f7e80cd0a94068e53901d
-        with:
-          egress-policy: 'block'
-          allowed-endpoints: >
-            github.com:443
-            api.github.com:443
-            codeload.github.com:443
-            release-assets.githubusercontent.com:443
-            objects.githubusercontent.com:443
-            ghcr.io:443
-            pkg-containers.githubusercontent.com:443
-            docker.io:443
-            registry-1.docker.io:443
-            auth.docker.io:443
-            production.cloudflare.docker.com:443
-            production.cloudfront.docker.com:443
-            pypi.org:443
-            files.pythonhosted.org:443
-            static.rust-lang.org:443
-            bun.sh:443
-            astral.sh:443
-            releases.astral.sh:443
-            sh.rustup.rs:443
-            deb.debian.org:80
-            registry.npmjs.org:443
-            crates.io:443
-            static.crates.io:443
-            index.crates.io:443
-            semgrep.dev:443
-            metrics.semgrep.dev:443
-            api.osv.dev:443
-            api.deps.dev:443
-      - name: Checkout
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
-        with:
-          fetch-depth: 0
-          fetch-tags: true
-          persist-credentials: true
-      # Only resolve tools image when triggered directly (not via workflow_call)
-      - name: Resolve tools image (direct trigger)
-        id: tools-resolve
-        if: inputs.tools-image == ''
-        uses: ./.github/actions/resolve-tools-image
-      - name: Set tools image
-        id: tools
-        env:
-          # yamllint disable-line rule:line-length
-          INPUT_IMAGE: ${{ inputs.tools-image }}
-          RESOLVED_IMAGE: ${{ steps.tools-resolve.outputs.image }}
-        run: |
-          if [[ -n "$INPUT_IMAGE" ]]; then
-            echo "Using provided tools image: $INPUT_IMAGE"
-            echo "image=${INPUT_IMAGE}" >> "$GITHUB_OUTPUT"
-          else
-            echo "Using resolved tools image: $RESOLVED_IMAGE"
-            echo "image=${RESOLVED_IMAGE}" >> "$GITHUB_OUTPUT"
-          fi
-      - name: Set up Docker Buildx
-        # yamllint disable-line rule:line-length
-        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
-      - name: Build Docker image
-        env:
-          REPO: ghcr.io/lgtm-hq/py-lintro-buildcache
-        # yamllint disable-line rule:line-length
-        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
-        with:
-          context: .
-          push: false
-          load: true
-          tags: py-lintro:latest
-          build-args: |
-            TOOLS_IMAGE=${{ steps.tools.outputs.image }}
-          cache-from: type=registry,ref=${{ env.REPO }}:main
-          provenance: false
-      - name: Build Base Docker image
-        env:
-          REPO: ghcr.io/lgtm-hq/py-lintro-base-buildcache
-        # yamllint disable-line rule:line-length
-        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
-        with:
-          context: .
-          file: Dockerfile.base
-          push: false
-          load: true
-          tags: py-lintro:base
-          cache-from: type=registry,ref=${{ env.REPO }}:main
-          provenance: false
-      - name: Test Docker Image
-        run: ./scripts/docker/docker-build-test.sh
-      - name: Smoke Test Base Image
-        run: docker run --rm py-lintro:base lintro --version
-
-      - name: Pull tools image
-        env:
-          TOOLS_IMAGE: ${{ steps.tools.outputs.image }}
-        run: docker pull "$TOOLS_IMAGE"
-      - name: Run pytest suite inside Docker (compose)
-        env:
-          TOOLS_IMAGE: ${{ steps.tools.outputs.image }}
-        run: ./scripts/docker/docker-test.sh
-
-  publish:
-    needs: build-and-test
-    runs-on: ubuntu-24.04
+  docker-full:
+    name: 🐳 Docker Full Image
+    # yamllint disable-line rule:line-length
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-docker.yml@31c25ef2e8992960e218524780e34f44f51271b5 # v0.54.0
     permissions:
       contents: read
       packages: write
-    timeout-minutes: 30
-    defaults:
-      run:
-        shell: bash
+      id-token: write
+      attestations: write
+      security-events: write
+    with:
+      file: Dockerfile
+      target: full
+      image-name: lgtm-hq/py-lintro
+      version: >-
+        ${{ (github.event_name == 'workflow_dispatch'
+        && inputs.backfill_version != '') && inputs.backfill_version
+        || (startsWith(github.ref, 'refs/tags/')
+        && github.ref_name
+        || (github.event_name == 'release' && github.event.release.tag_name || '')) }}
+      push: >-
+        ${{ github.event_name != 'pull_request'
+        && (github.ref == 'refs/heads/main'
+        || startsWith(github.ref, 'refs/tags/')
+        || github.event_name == 'release'
+        || (github.event_name == 'workflow_dispatch'
+        && (inputs.force_publish == 'true' || inputs.backfill_version != ''))) }}
+      source-ref: >-
+        ${{ github.event_name == 'workflow_dispatch'
+        && inputs.backfill_ref || '' }}
+      tag-latest: >-
+        ${{ !(github.event_name == 'workflow_dispatch'
+        && inputs.backfill_version != '') }}
+      platforms: linux/amd64,linux/arm64
+      runner-map: '{"linux/arm64":"ubuntu-24.04-arm"}'
+      smoke-test: lintro --version
+      validate-on-pr: false
+      cache-registry-ref: ghcr.io/lgtm-hq/py-lintro:cache
+      # Release (tag) builds reuse the registry cache (#1358): BuildKit
+      # cache is content-addressed, so a tag build reassembles exactly the
+      # layers already built and validated on main instead of a cold
+      # multi-arch rebuild. Backfills stay no-cache so historical
+      # republishes remain fully cold.
+      no-cache: >-
+        ${{ github.event_name == 'workflow_dispatch'
+        && inputs.backfill_version != '' }}
+      provenance: false
+      sbom: false
+      cosign-sign: true
+      tooling-ref: '31c25ef2e8992960e218524780e34f44f51271b5' # v0.54.0
+      egress-policy: block
+      egress-preset: docker
+      # Full list (v0.50.0+ replace semantics): the reusable passes
+      # allowed-endpoints verbatim to step-security/harden-runner, so a
+      # non-empty value must include the docker preset baseline. The
+      # sigstore hosts cover cosign keyless signing in the merge job.
+      allowed-endpoints-mode: replace
+      allowed-endpoints: >
+        github.com:443
+        api.github.com:443
+        codeload.github.com:443
+        objects.githubusercontent.com:443
+        raw.githubusercontent.com:443
+        release-assets.githubusercontent.com:443
+        github-releases.githubusercontent.com:443
+        pipelines.actions.githubusercontent.com:443
+        ghcr.io:443
+        pkg-containers.githubusercontent.com:443
+        docker.io:443
+        registry-1.docker.io:443
+        auth.docker.io:443
+        production.cloudflare.docker.com:443
+        production.cloudfront.docker.com:443
+        deb.debian.org:80
+        pypi.org:443
+        files.pythonhosted.org:443
+        static.rust-lang.org:443
+        bun.sh:443
+        astral.sh:443
+        releases.astral.sh:443
+        sh.rustup.rs:443
+        registry.npmjs.org:443
+        crates.io:443
+        static.crates.io:443
+        index.crates.io:443
+        semgrep.dev:443
+        metrics.semgrep.dev:443
+        token.actions.githubusercontent.com:443
+        fulcio.sigstore.dev:443
+        rekor.sigstore.dev:443
+        tuf-repo-cdn.sigstore.dev:443
+        timestamp.sigstore.dev:443
+        oauth2.sigstore.dev:443
+
+  docker-base:
+    name: 🐳 Docker Base Image
+    needs: docker-full
     # yamllint disable-line rule:line-length
-    if: github.event_name == 'release' || github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.force_publish == 'true')
-    concurrency:
-      group: docker-publish-${{ github.ref }}
-      cancel-in-progress: true
-    steps:
-      - name: Harden Runner
-        uses: step-security/harden-runner@fe104658747b27e96e4f7e80cd0a94068e53901d
-        with:
-          egress-policy: 'block'
-          allowed-endpoints: >
-            github.com:443
-            api.github.com:443
-            codeload.github.com:443
-            release-assets.githubusercontent.com:443
-            objects.githubusercontent.com:443
-            ghcr.io:443
-            pkg-containers.githubusercontent.com:443
-            docker.io:443
-            registry-1.docker.io:443
-            auth.docker.io:443
-            production.cloudflare.docker.com:443
-            production.cloudfront.docker.com:443
-            pypi.org:443
-            files.pythonhosted.org:443
-            static.rust-lang.org:443
-            bun.sh:443
-            astral.sh:443
-            releases.astral.sh:443
-            sh.rustup.rs:443
-            deb.debian.org:80
-            registry.npmjs.org:443
-            crates.io:443
-            static.crates.io:443
-            index.crates.io:443
-            semgrep.dev:443
-            metrics.semgrep.dev:443
-
-      - name: Checkout
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
-        with:
-          fetch-depth: 0
-          fetch-tags: true
-          persist-credentials: true
-          token: ${{ secrets.GITHUB_TOKEN }}
-      # Only resolve tools image when triggered directly (not via workflow_call)
-      - name: Resolve tools image (direct trigger)
-        id: tools-resolve
-        if: inputs.tools-image == ''
-        uses: ./.github/actions/resolve-tools-image
-      - name: Set tools image
-        id: tools
-        env:
-          INPUT_IMAGE: ${{ inputs.tools-image }}
-          RESOLVED_IMAGE: ${{ steps.tools-resolve.outputs.image }}
-        run: |
-          if [[ -n "$INPUT_IMAGE" ]]; then
-            echo "Using provided tools image: $INPUT_IMAGE"
-            echo "image=${INPUT_IMAGE}" >> "$GITHUB_OUTPUT"
-          else
-            echo "Using resolved tools image: $RESOLVED_IMAGE"
-            echo "image=${RESOLVED_IMAGE}" >> "$GITHUB_OUTPUT"
-          fi
-      - name: Set job permissions
-        shell: bash
-        run: >-
-          scripts/ci/ci-log.sh
-          "Scoped permissions to packages:write via job-level permissions"
-
-      - name: Setup Docker (Buildx + login)
-        uses: ./.github/actions/setup-docker
-        with:
-          login: 'true'
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-          driver: docker-container
-      - name: Extract metadata
-        id: meta
-        uses: docker/metadata-action@c299e40c65443455700f0fdfc63efafe5b349051 # v5
-        with:
-          images: ghcr.io/lgtm-hq/py-lintro
-          tags: |
-            type=ref,event=branch
-            type=ref,event=pr
-            type=sha,prefix=sha-,format=long
-            type=semver,pattern={{version}}
-            type=semver,pattern={{major}}.{{minor}}
-            type=semver,pattern={{major}}
-            type=raw,value=latest,enable={{is_default_branch}}
-      # Base image uses a separate GHCR package so digest pins for py-lintro
-      # cannot accidentally resolve to the minimal (no bundled tools) variant.
-      - name: Extract metadata (base)
-        id: meta-base
-        uses: docker/metadata-action@c299e40c65443455700f0fdfc63efafe5b349051 # v5
-        with:
-          images: ghcr.io/lgtm-hq/py-lintro-base
-          tags: |
-            type=ref,event=branch
-            type=ref,event=pr
-            type=sha,prefix=sha-,format=long
-            type=semver,pattern={{version}}
-            type=semver,pattern={{major}}.{{minor}}
-            type=semver,pattern={{major}}
-            type=raw,value=latest,enable={{is_default_branch}}
-      - name: Build and push Docker image
-        env:
-          REPO: ghcr.io/lgtm-hq/py-lintro-buildcache
-        # yamllint disable-line rule:line-length
-        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
-        with:
-          context: .
-          push: true
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
-          build-args: |
-            TOOLS_IMAGE=${{ steps.tools.outputs.image }}
-          cache-from: type=registry,ref=${{ env.REPO }}:main
-          cache-to: >-
-            type=registry,ref=${{ env.REPO }}:main,${{ env.CACHE_OPTS }}
-          # Provenance/SBOM disabled: creates untagged OCI child manifests that
-          # ghcr_prune_untagged.py deletes, breaking tagged image indexes.
-          # Produces simple Docker v2 manifests (like ci-* tags).
-          provenance: false
-          sbom: false
-      - name: Build and push Base Docker image
-        env:
-          REPO: ghcr.io/lgtm-hq/py-lintro-base-buildcache
-        # yamllint disable-line rule:line-length
-        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
-        with:
-          context: .
-          file: Dockerfile.base
-          push: true
-          tags: ${{ steps.meta-base.outputs.tags }}
-          labels: ${{ steps.meta-base.outputs.labels }}
-          cache-from: type=registry,ref=${{ env.REPO }}:main
-          cache-to: >-
-            type=registry,ref=${{ env.REPO }}:main,${{ env.CACHE_OPTS }}
-          # Provenance/SBOM disabled: same reason as above.
-          provenance: false
-          sbom: false
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-docker.yml@31c25ef2e8992960e218524780e34f44f51271b5 # v0.54.0
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+      attestations: write
+      security-events: write
+    with:
+      file: Dockerfile
+      target: base
+      image-name: lgtm-hq/py-lintro-base
+      version: >-
+        ${{ (github.event_name == 'workflow_dispatch'
+        && inputs.backfill_version != '') && inputs.backfill_version
+        || (startsWith(github.ref, 'refs/tags/')
+        && github.ref_name
+        || (github.event_name == 'release' && github.event.release.tag_name || '')) }}
+      push: >-
+        ${{ github.event_name != 'pull_request'
+        && (github.ref == 'refs/heads/main'
+        || startsWith(github.ref, 'refs/tags/')
+        || github.event_name == 'release'
+        || (github.event_name == 'workflow_dispatch'
+        && (inputs.force_publish == 'true' || inputs.backfill_version != ''))) }}
+      source-ref: >-
+        ${{ github.event_name == 'workflow_dispatch'
+        && inputs.backfill_ref || '' }}
+      tag-latest: >-
+        ${{ !(github.event_name == 'workflow_dispatch'
+        && inputs.backfill_version != '') }}
+      platforms: linux/amd64,linux/arm64
+      runner-map: '{"linux/arm64":"ubuntu-24.04-arm"}'
+      smoke-test: lintro --version
+      validate-on-pr: false
+      cache-registry-ref: ghcr.io/lgtm-hq/py-lintro-base:cache
+      # Release (tag) builds reuse the registry cache (#1358): BuildKit
+      # cache is content-addressed, so a tag build reassembles exactly the
+      # layers already built and validated on main instead of a cold
+      # multi-arch rebuild. Backfills stay no-cache so historical
+      # republishes remain fully cold.
+      no-cache: >-
+        ${{ github.event_name == 'workflow_dispatch'
+        && inputs.backfill_version != '' }}
+      provenance: false
+      sbom: false
+      cosign-sign: true
+      tooling-ref: '31c25ef2e8992960e218524780e34f44f51271b5' # v0.54.0
+      egress-policy: block
+      egress-preset: docker
+      # Full list (v0.50.0+ replace semantics): the reusable passes
+      # allowed-endpoints verbatim to step-security/harden-runner, so a
+      # non-empty value must include the docker preset baseline. The
+      # sigstore hosts cover cosign keyless signing in the merge job.
+      allowed-endpoints-mode: replace
+      allowed-endpoints: >
+        github.com:443
+        api.github.com:443
+        codeload.github.com:443
+        objects.githubusercontent.com:443
+        raw.githubusercontent.com:443
+        release-assets.githubusercontent.com:443
+        github-releases.githubusercontent.com:443
+        pipelines.actions.githubusercontent.com:443
+        ghcr.io:443
+        pkg-containers.githubusercontent.com:443
+        docker.io:443
+        registry-1.docker.io:443
+        auth.docker.io:443
+        production.cloudflare.docker.com:443
+        production.cloudfront.docker.com:443
+        deb.debian.org:80
+        pypi.org:443
+        files.pythonhosted.org:443
+        static.rust-lang.org:443
+        bun.sh:443
+        astral.sh:443
+        releases.astral.sh:443
+        sh.rustup.rs:443
+        registry.npmjs.org:443
+        crates.io:443
+        static.crates.io:443
+        index.crates.io:443
+        semgrep.dev:443
+        metrics.semgrep.dev:443
+        token.actions.githubusercontent.com:443
+        fulcio.sigstore.dev:443
+        rekor.sigstore.dev:443
+        tuf-repo-cdn.sigstore.dev:443
+        timestamp.sigstore.dev:443
+        oauth2.sigstore.dev:443

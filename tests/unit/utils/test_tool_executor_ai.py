@@ -9,6 +9,7 @@ from assertpy import assert_that
 
 import lintro.utils.tool_executor as te
 from lintro.ai.config import AIConfig
+from lintro.ai.enums import AITransport
 from lintro.config.execution_config import ExecutionConfig
 from lintro.config.lintro_config import LintroConfig
 from lintro.enums.action import Action
@@ -28,14 +29,14 @@ def test_warn_ai_fix_disabled_warns_only_for_check_when_fix_requested_and_ai_dis
     _warn_ai_fix_disabled(
         action=Action.CHECK,
         ai_fix=True,
-        ai_enabled=False,
+        ai_lint_enabled=False,
         logger=logger,
     )
 
     assert_that(logger.console_output.call_count).is_equal_to(1)
     warning_text = logger.console_output.call_args[0][0]
     assert_that(warning_text).contains("AI fixes requested")
-    assert_that(warning_text).contains("ai.enabled is false")
+    assert_that(warning_text).contains("AI lint is disabled")
 
 
 def test_warn_ai_fix_disabled_no_warning_for_other_states():
@@ -45,19 +46,19 @@ def test_warn_ai_fix_disabled_no_warning_for_other_states():
     _warn_ai_fix_disabled(
         action=Action.FIX,
         ai_fix=True,
-        ai_enabled=False,
+        ai_lint_enabled=False,
         logger=logger,
     )
     _warn_ai_fix_disabled(
         action=Action.CHECK,
         ai_fix=False,
-        ai_enabled=False,
+        ai_lint_enabled=False,
         logger=logger,
     )
     _warn_ai_fix_disabled(
         action=Action.CHECK,
         ai_fix=True,
-        ai_enabled=True,
+        ai_lint_enabled=True,
         logger=logger,
     )
 
@@ -71,7 +72,7 @@ def test_warn_ai_fix_disabled_suppressed_for_json_output():
     _warn_ai_fix_disabled(
         action=Action.CHECK,
         ai_fix=True,
-        ai_enabled=False,
+        ai_lint_enabled=False,
         logger=logger,
         output_format="json",
     )
@@ -86,7 +87,7 @@ def test_warn_ai_fix_disabled_suppressed_for_sarif_output():
     _warn_ai_fix_disabled(
         action=Action.CHECK,
         ai_fix=True,
-        ai_enabled=False,
+        ai_lint_enabled=False,
         logger=logger,
         output_format="sarif",
     )
@@ -131,6 +132,7 @@ def test_fix_recomputes_totals_after_ai_changes(monkeypatch, fake_logger):
         execution=ExecutionConfig(parallel=False),
         ai=AIConfig(
             enabled=True,
+            transport=AITransport.API,
             auto_apply=True,
         ),
     )
@@ -148,7 +150,7 @@ def test_fix_recomputes_totals_after_ai_changes(monkeypatch, fake_logger):
     monkeypatch.setattr(
         te,
         "configure_tool_for_execution",
-        lambda **kwargs: None,
+        lambda *, tool, **kwargs: tool,
     )
     monkeypatch.setattr(
         te,
@@ -210,7 +212,7 @@ def test_fix_recomputes_totals_after_ai_changes(monkeypatch, fake_logger):
     monkeypatch.setattr(
         hook_module,
         "AIPostExecutionHook",
-        lambda lintro_config, ai_fix=False: _FakeHook(),
+        lambda lintro_config, ai_fix=False, transport=None: _FakeHook(),
     )
 
     captured: dict[str, int] = {}

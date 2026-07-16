@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-import subprocess
+import subprocess  # nosec B404 - subprocess is used to drive the tool/CLI under test; invocations use shell=False
 from typing import TYPE_CHECKING
 from unittest.mock import MagicMock, patch
 
@@ -54,6 +54,23 @@ def test_run_subprocess_failed_command(fake_tool_plugin: FakeToolPlugin) -> None
 
         assert_that(success).is_false()
         assert_that(output).is_equal_to("error")
+
+
+def test_run_subprocess_failed_command_without_output_includes_diagnostics(
+    fake_tool_plugin: FakeToolPlugin,
+) -> None:
+    """Verify empty-output failures include exit code diagnostics."""
+    with patch("subprocess.run") as mock_run:
+        mock_run.return_value = MagicMock(
+            returncode=137,
+            stdout="",
+            stderr="",
+        )
+        success, output = fake_tool_plugin._run_subprocess(["mypy", "."])
+
+        assert_that(success).is_false()
+        assert_that(output).contains("exit code 137")
+        assert_that(output).contains("Command: mypy .")
 
 
 def test_run_subprocess_timeout_expired_raises(

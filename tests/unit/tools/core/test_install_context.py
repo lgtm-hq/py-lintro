@@ -152,6 +152,131 @@ def test_detect_pip_default(
     assert_that(result).is_equal_to(InstallContext.PIP)
 
 
+@pytest.mark.parametrize(
+    ("install_file", "executable", "expected"),
+    [
+        (
+            "/usr/lib/python3.11/site-packages/lintro/tools/core/install_context.py",
+            "/opt/homebrew/Cellar/lintro/0.64.1/bin/lintro",
+            InstallContext.HOMEBREW_BIN,
+        ),
+        (
+            "/opt/homebrew/Cellar/lintro-full/0.64.1/libexec/lib/python3.14/"
+            "site-packages/lintro/tools/core/install_context.py",
+            "/opt/homebrew/Cellar/lintro-full/0.64.1/bin/lintro",
+            InstallContext.HOMEBREW_FULL,
+        ),
+        (
+            "/opt/homebrew/lib/python3.14/site-packages/lintro/tools/core/"
+            "install_context.py",
+            "/usr/bin/python3",
+            InstallContext.PIP,
+        ),
+        (
+            "/usr/lib/python3.11/site-packages/lintro/tools/core/install_context.py",
+            "/opt/homebrew/bin/lintro",
+            InstallContext.HOMEBREW_BIN,
+        ),
+        (
+            "/usr/lib/python3.11/site-packages/lintro/tools/core/install_context.py",
+            "/usr/bin/python3",
+            InstallContext.PIP,
+        ),
+    ],
+    ids=[
+        "homebrew_binary_formula",
+        "homebrew_full_formula",
+        "pip_homebrew_lib_site_packages",
+        "homebrew_bin_symlink",
+        "pip_default",
+    ],
+)
+def test_detect_homebrew_install_context(
+    install_file: str,
+    executable: str,
+    expected: InstallContext,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Detect Homebrew binary vs full formula paths from executable and module path."""
+    monkeypatch.delenv("LINTRO_DOCKER", raising=False)
+    monkeypatch.delenv("CONTAINER", raising=False)
+
+    with (
+        patch(
+            "lintro.tools.core.install_context.os.path.exists",
+            return_value=False,
+        ),
+        patch(
+            "lintro.tools.core.install_context.__file__",
+            install_file,
+            create=True,
+        ),
+        patch(
+            "lintro.tools.core.install_context.sys.executable",
+            executable,
+        ),
+        patch(
+            "lintro.tools.core.install_context.os.path.realpath",
+            side_effect=lambda path: path,
+        ),
+    ):
+        result = _detect_install_context()
+
+    assert_that(result).is_equal_to(expected)
+
+
+@pytest.mark.parametrize(
+    ("install_file", "executable"),
+    [
+        (
+            "/proj/node_modules/@lgtm-hq/lintro-darwin-arm64/bin/lintro",
+            "/usr/bin/node",
+        ),
+        (
+            "/proj/lintro/tools/core/install_context.py",
+            "/proj/node_modules/@lgtm-hq/lintro-linux-x64/bin/lintro",
+        ),
+    ],
+)
+def test_detect_npm_bin_install_context(
+    install_file: str,
+    executable: str,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Detect NPM_BIN when the resolved path is under node_modules/@lgtm-hq/lintro-.
+
+    Args:
+        install_file: Simulated module ``__file__``.
+        executable: Simulated ``sys.executable``.
+        monkeypatch: Pytest monkeypatch fixture.
+    """
+    monkeypatch.delenv("LINTRO_DOCKER", raising=False)
+    monkeypatch.delenv("CONTAINER", raising=False)
+
+    with (
+        patch(
+            "lintro.tools.core.install_context.os.path.exists",
+            return_value=False,
+        ),
+        patch(
+            "lintro.tools.core.install_context.__file__",
+            install_file,
+            create=True,
+        ),
+        patch(
+            "lintro.tools.core.install_context.sys.executable",
+            executable,
+        ),
+        patch(
+            "lintro.tools.core.install_context.os.path.realpath",
+            side_effect=lambda path: path,
+        ),
+    ):
+        result = _detect_install_context()
+
+    assert_that(result).is_equal_to(InstallContext.NPM_BIN)
+
+
 # ---------------------------------------------------------------------------
 # CI detection
 # ---------------------------------------------------------------------------

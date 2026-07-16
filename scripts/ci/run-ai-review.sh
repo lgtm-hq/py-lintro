@@ -1,0 +1,93 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# run-ai-review.sh
+#
+# Dogfood `lintro review` on py-lintro's own pull requests. Runs an AI diff
+# review over the PR, posts a rich sticky comment (and inline findings) to the
+# PR via `--post`, and prints the JSON result to the log. Non-blocking: this
+# script always exits 0 so it can never fail a pull request check.
+#
+# Trusted install: the workflow checks out the PR's BASE ref (main) before
+# invoking this script, so the lintro that runs with ANTHROPIC_API_KEY is
+# trusted code — never the PR head. The PR diff is fetched independently by
+# `lintro review --pr` via `gh` (GitHub API), so the PR's changes are reviewed
+# as data and never executed with the key.
+#
+# It gracefully skips (logs a message and exits 0) when ANTHROPIC_API_KEY is
+# empty. That covers both "the repo secret is not configured yet" and fork PRs
+# (which cannot access repository secrets), so merging the workflow never
+# breaks CI.
+#
+# Usage:
+#   PR_NUMBER=<n> ANTHROPIC_API_KEY=<key> GH_TOKEN=<token> \
+#     scripts/ci/run-ai-review.sh
+#   scripts/ci/run-ai-review.sh <pr-number>
+#
+# Environment:
+#   ANTHROPIC_API_KEY       Anthropic API key. Empty => graceful skip.
+#   PR_NUMBER               Pull request number (alternative to the argument).
+#   GH_TOKEN                Token used by `gh` to fetch the PR diff.
+#   GITHUB_TOKEN            Token used by lintro's `--post` to write comments.
+#   GITHUB_REPOSITORY       owner/name; supplies --repo for `lintro review`.
+#   AI_REVIEW_MAX_COST_USD  Optional spend cap (defaults handled downstream).
+
+if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
+	cat <<'EOF'
+Dogfood `lintro review` on a pull request (informational, non-blocking).
+
+Usage:
+  PR_NUMBER=<n> scripts/ci/run-ai-review.sh
+  scripts/ci/run-ai-review.sh <pr-number>
+
+Skips gracefully (exit 0) when ANTHROPIC_API_KEY is empty.
+EOF
+	exit 0
+fi
+
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+pr_number="${1:-${PR_NUMBER:-}}"
+
+if [[ -z "${ANTHROPIC_API_KEY:-}" ]]; then
+	echo "ANTHROPIC_API_KEY is not set — skipping AI review (informational only)."
+	echo "Add the ANTHROPIC_API_KEY repository secret to activate AI review on PRs."
+	exit 0
+fi
+
+if [[ -z "$pr_number" ]]; then
+	echo "No PR number provided (set PR_NUMBER or pass it as an argument)." >&2
+	echo "Skipping AI review — nothing to review." >&2
+	exit 0
+fi
+
+echo "Running AI review on PR #${pr_number} (posts comment, non-blocking)..."
+
+# Enable AI review in the base-ref (trusted) checkout's config. `lintro review`
+# reads ai.enabled and ai.max_cost_usd only from .lintro-config.yaml, so patch
+# it here rather than passing non-existent flags. The config comes from the base
+# ref, not the PR, so a PR cannot loosen the cost cap. Transport/provider are
+# pinned too.
+uv run python "${script_dir}/enable_review_config.py"
+
+# `--post` maintains the sticky review comment (and inline findings) on the PR.
+# It needs GITHUB_TOKEN (write) and the repo; the diff is still fetched via `gh`.
+repo_arg=()
+if [[ -n "${GITHUB_REPOSITORY:-}" ]]; then
+	repo_arg=(--repo "${GITHUB_REPOSITORY}")
+fi
+
+# Never let a P1 finding (exit 1) or any review error fail the PR check.
+set +e
+review_output="$(uv run lintro review --pr "${pr_number}" "${repo_arg[@]}" --depth 1 --post --output json 2>&1)"
+review_status=$?
+set -e
+
+printf '%s\n' "$review_output"
+
+if [[ "$review_status" -ne 0 ]]; then
+	echo "lintro review exited with status ${review_status} " \
+		"(findings or error) — informational only, not failing the PR."
+fi
+
+exit 0

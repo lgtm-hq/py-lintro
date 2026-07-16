@@ -6,12 +6,12 @@ name: Maintenance - GHCR Registry Cleanup
 # Reduces storage costs and maintains clean registry state.
 #
 # IMPORTANT: Multi-arch images have architecture-specific manifests that appear
-# as "untagged" but are referenced by the main manifest index. To protect these,
-# we only delete untagged versions older than GHCR_PRUNE_MIN_AGE_DAYS (default: 7).
+# as "untagged" but are referenced by the main manifest index. The lgtm-ci
+# reusable collects referenced digests and skips prune when collection fails.
 
 'on':
   schedule:
-    # Run weekly on Monday at 03:00 UTC (after Sunday tools-image rebuild)
+    # Run weekly on Monday at 03:00 UTC
     - cron: '0 3 * * 1'
   workflow_dispatch:
     inputs:
@@ -26,46 +26,73 @@ name: Maintenance - GHCR Registry Cleanup
         default: 7
         type: number
 
+concurrency:
+  group: ghcr-cleanup
+  cancel-in-progress: false
+
 permissions: {}
 
 jobs:
   prune-untagged:
-    runs-on: ubuntu-24.04
-    timeout-minutes: 15
+    # yamllint disable-line rule:line-length
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-ghcr-cleanup.yml@31c25ef2e8992960e218524780e34f44f51271b5 # v0.54.0
     permissions:
-      contents: read
-      packages: write
-    steps:
-      - name: Harden Runner
-        uses: step-security/harden-runner@fe104658747b27e96e4f7e80cd0a94068e53901d
-        with:
-          egress-policy: 'block'
-          allowed-endpoints: >
-            github.com:443
-            api.github.com:443
-            codeload.github.com:443
-            release-assets.githubusercontent.com:443
-            objects.githubusercontent.com:443
-            pypi.org:443
-            files.pythonhosted.org:443
-      - name: Checkout
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
-        with:
-          fetch-depth: 0
+      contents: read # checkout repo and lgtm-ci tooling sparse checkout
+      packages: write # delete untagged GHCR package versions via Packages API
+    with:
+      package-name: py-lintro
+      min-age-days: >-
+        ${{ github.event_name != 'workflow_dispatch' && 7 || inputs.min_age_days }}
+      dry-run: ${{ inputs.dry_run == true }}
+      tooling-ref: '31c25ef2e8992960e218524780e34f44f51271b5' # v0.54.0
+      egress-policy: block
+      egress-preset: github-tooling
+      # Full list (v0.50.0+ replace semantics): the reusable passes
+      # allowed-endpoints verbatim to step-security/harden-runner, so a
+      # non-empty value must include the github-tooling baseline.
+      allowed-endpoints-mode: replace
+      allowed-endpoints: >
+        github.com:443
+        api.github.com:443
+        codeload.github.com:443
+        objects.githubusercontent.com:443
+        raw.githubusercontent.com:443
+        uploads.github.com:443
+        pipelines.actions.githubusercontent.com:443
+        ghcr.io:443
+        pkg-containers.githubusercontent.com:443
+      runner-image: ubuntu-24.04
+    secrets:
+      token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Setup environment
-        uses: ./.github/actions/setup-env
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          BOOTSTRAP_SKIP_SYNC: '1'
-          BOOTSTRAP_SKIP_INSTALL_TOOLS: '1'
-        with:
-          python-version: '3.14'
-
-      - name: Prune untagged GHCR versions
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          # Protect multi-arch manifest dependencies by requiring minimum age
-          GHCR_PRUNE_MIN_AGE_DAYS: ${{ format('{0}', inputs.min_age_days) || '7' }}
-          GHCR_PRUNE_DRY_RUN: ${{ inputs.dry_run == true && '1' || '0' }}
-        run: uv run python scripts/ci/maintenance/ghcr_prune_untagged.py
+  prune-untagged-base:
+    # yamllint disable-line rule:line-length
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-ghcr-cleanup.yml@31c25ef2e8992960e218524780e34f44f51271b5 # v0.54.0
+    permissions:
+      contents: read # checkout repo and lgtm-ci tooling sparse checkout
+      packages: write # delete untagged GHCR package versions via Packages API
+    with:
+      package-name: py-lintro-base
+      min-age-days: >-
+        ${{ github.event_name != 'workflow_dispatch' && 7 || inputs.min_age_days }}
+      dry-run: ${{ inputs.dry_run == true }}
+      tooling-ref: '31c25ef2e8992960e218524780e34f44f51271b5' # v0.54.0
+      egress-policy: block
+      egress-preset: github-tooling
+      # Full list (v0.50.0+ replace semantics): the reusable passes
+      # allowed-endpoints verbatim to step-security/harden-runner, so a
+      # non-empty value must include the github-tooling baseline.
+      allowed-endpoints-mode: replace
+      allowed-endpoints: >
+        github.com:443
+        api.github.com:443
+        codeload.github.com:443
+        objects.githubusercontent.com:443
+        raw.githubusercontent.com:443
+        uploads.github.com:443
+        pipelines.actions.githubusercontent.com:443
+        ghcr.io:443
+        pkg-containers.githubusercontent.com:443
+      runner-image: ubuntu-24.04
+    secrets:
+      token: ${{ secrets.GITHUB_TOKEN }}

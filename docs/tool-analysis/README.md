@@ -80,6 +80,7 @@ implementations with the core tools themselves.
   scanning
 - ⚠️ **Limited**: Runtime rule customization, Docker Compose support, auto-fixing
 - 🚀 **Enhanced**: Issue normalization, Python integration, error parsing
+
 <!-- markdownlint-enable MD036 -->
 
 ### [Black Analysis](./black-analysis.md)

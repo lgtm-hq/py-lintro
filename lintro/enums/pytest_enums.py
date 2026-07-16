@@ -14,6 +14,8 @@ class TestStatus(StrEnum):
     Values are lower-case string identifiers (auto-generated from member names).
     """
 
+    __test__ = False
+
     PASSED = auto()
     FAILED = auto()
     ERROR = auto()

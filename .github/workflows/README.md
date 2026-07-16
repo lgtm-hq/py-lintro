@@ -1,74 +1,81 @@
 # Workflows overview
 
 This repository uses GitHub Actions for quality gates, release automation, and
-publishing.
+publishing. Shared workflows are thin callers to
+[lgtm-ci](https://github.com/lgtm-hq/lgtm-ci) reusable workflows pinned at
+`31c25ef2e8992960e218524780e34f44f51271b5` (**v0.54.0**). All workflow SHA pins include
+trailing `# vX.Y.Z` comments so Renovate can track digest updates. Policy is enforced by
+[lgtm-ci validate-action-pinning](https://github.com/lgtm-hq/lgtm-ci/pull/221) (via
+`validate-action-pinning.yml`) and automated by the
+[org Renovate preset](https://github.com/lgtm-hq/.github/pull/12)
+(`extends: local>lgtm-hq/.github:renovate-config`).
 
-## Token Usage Guidelines
+## CI (main branch)
 
-Workflows use one of two token patterns:
+- **test-ci.yml** — Python unit/component tests (3.11 + 3.14) via
+  `reusable-test-python.yml`
+- **docker-ci.yml** — Manifest sync, multi-stage Docker build, dogfooding quality
+  (`reusable-quality-lint.yml` + PR-only `reusable-publish-quality-summary.yml`,
+  CI-built image), integration tests, security audit, GHCR publish (main), CI tag
+  cleanup. PRs without global-lint-impact changes lint only their changed files
+  (`dogfooding-lint-changed`, same image/tool set); merge queue, pushes, and
+  global-impact PRs keep the full-repo run (#1361)
+- **dogfood-nightly.yml** — Nightly full-repo dogfooding lint on `main`
+  (`reusable-quality-lint.yml`, pinned release image) backstopping changed-files PR
+  linting; failures open/ping a deduplicated issue via
+  `reusable-main-failure-notifier.yml`
 
-### Standard Token (`secrets.GITHUB_TOKEN`)
+## Release
 
-Use for regular CI operations that don't require elevated permissions:
+- **release-version-pr.yml** — Opens version bump PR via
+  `reusable-release-version-pr.yml` (Python ecosystem, auto-merge, max minor)
+- **release-auto-tag.yml** — Creates tags on release commits via
+  `reusable-release-auto-tag.yml` (`create-release: false`; GitHub Release is created by
+  publish workflow)
 
-- Quality checks (linting, testing, code scanning)
-- PR comments and status updates
-- Artifact uploads
-- Dependency review
+Both callers set a dynamic `run-name` (event + branch) so post-merge release failures
+are traceable from the Actions list rather than the default commit subject. Failure
+visibility itself lives upstream: the reusables run a `report-release-failure` job that
+writes trigger context to the step summary and opens/updates a deduplicated GitHub issue
+on `main` failures — hence the `actions: read` + `issues: write` job permissions.
 
-### Release Token Fallback (`secrets.RELEASE_TOKEN || secrets.GITHUB_TOKEN`)
+## Publish
 
-Use for operations requiring elevated permissions or bypassing rate limits:
+- **publish-pypi-on-tag.yml** — Production tag publish: `reusable-sbom` →
+  `reusable-build-python-dist` → caller `pypi-upload` job (`prepare-pypi-upload` →
+  `pypa/gh-action-pypi-publish` → `attest-build-provenance`) →
+  `reusable-github-release`, then Homebrew (`build-binary.yml`) and Docker
+  (`docker-build-publish.yml`). Upload via `pypa/gh-action-pypi-publish` (OIDC trusted
+  publishing) runs in this workflow file, not in lgtm-ci reusables. Lint runs on `main`
+  via `docker-ci` only (no duplicate quality on tag).
+- **publish-testpypi.yml** — TestPyPI: `reusable-build-python-dist` + caller upload job
+  (same three-step pattern with `repository-url: https://test.pypi.org/legacy/`)
+- **docker-build-publish.yml** — Multi-arch GHCR publish via `reusable-docker.yml`
+  (full + base images, registry cache at `:cache`, no-cache on version tags)
+- **docker-tools-publish.yml** — Publishes the `lintro-tools` toolchain base image
+  (`docker/tools.Dockerfile`) via `reusable-docker.yml` on tool-pin changes plus a
+  weekly no-cache rebuild for CVE freshness; cosign-signed with SBOM + provenance
+  attestations. A follow-up root `Dockerfile` change will consume it via a
+  Renovate-managed digest-pinned `FROM`.
 
-- **Tag creation/pushing** (auto-tag-on-main.yml)
-- **Release PR creation** (semantic-release.yml)
-- **Internal reference bumping** (auto-bump-internal-refs.yml)
-- **SBOM generation on main** (sbom-on-main.yml)
+## Security & maintenance
 
-The fallback ensures workflows function with standard token when RELEASE_TOKEN is
-unavailable, while benefiting from elevated permissions when available.
+- **ghcr-cleanup.yml** — Scheduled GHCR cleanup via `reusable-ghcr-cleanup.yml`
+  (`py-lintro`, `py-lintro-base`)
+- **vuln-suppression-check.yml** — Weekly OSV suppression staleness via
+  `reusable-vuln-suppression-check.yml`
+- **renovate.yml** — Daily dependency updates (lgtm-ci `harden-runner` +
+  `secure-checkout`)
+- **lintro-report-scheduled.yml**, **pr-comment-cleanup.yml**,
+  **test-built-package.yml**, **build-binary.yml**
 
-## Concurrency Group Naming
+## Token patterns
 
-All workflows use concurrency groups to prevent duplicate runs. The standard pattern is:
+- **`secrets.GITHUB_TOKEN`** — CI, PR comments, artifacts
+- **`secrets.RELEASE_APP_*`** — Release PR and auto-tag (GitHub App installation token
+  via lgtm-ci release workflows)
 
-```yaml
-<context>-${{ github.ref }}
-```
+## Concurrency
 
-Examples:
-
-- `tests-${{ github.ref }}` - Test workflows
-- `lintro-ci-${{ github.ref }}` - Lintro CI analysis
-- `docker-${{ github.ref }}` - Docker build/test
-- `pages-deploy-${{ github.ref }}` - GitHub Pages deployment
-
-For workflows that should be unique per commit (e.g., manual TestPyPI publish), use
-`${{ github.sha }}` instead of `${{ github.ref }}`.
-
-## Quick Reference by File Name
-
-- ci-pipeline.yml: Gated CI pipeline — resolve-tools, docker-build, lint, test (with
-  coverage), smoke-test, publish, and deploy-pages (coverage to GitHub Pages on main).
-- ci-lintro-analysis.yml: Run Lintro on PRs/pushes; Docker build; PR comment.
-- lintro-report-scheduled.yml: Scheduled/manual Lintro run that uploads a markdown
-  report.
-- docker-build-publish.yml: Build/test Docker image; publish to GHCR on main/release.
-- lintro-renovate.yml: Renovate bot.
-- reusable-quality.yml: Reusable quality gate (Lintro format/check) exporting the
-  project version.
-- reusable-build.yml: Reusable build (uv sync, build sdist/wheel, twine check), uploads
-  `dist/`.
-- publish-pypi-on-tag.yml: Publish to PyPI on tag push (OIDC). Verifies pushed tag
-  matches `pyproject.toml` version.
-- publish-pypi-on-release.yml: [Removed] superseded by tag-based publishing.
-- publish-testpypi.yml: Manual dispatch to publish to TestPyPI (OIDC), reusing quality
-  and build workflows.
-- release-create.yml: [Removed] replaced by Release PR → tag flow.
-- auto-tag-on-main.yml: On push to `main` affecting `pyproject.toml`, guarded by a
-  release-commit check, if the version changed and the tag doesn't exist, create and
-  push the tag.
-- semantic-release.yml: Computes next version and opens a Release PR via uvx
-  python-semantic-release (no direct push to main).
-- semantic-pr-title.yml: Validates PR title follows Conventional Commits and
-  comments/fails if not, preventing merges until corrected.
+Standard pattern: `<workflow>-${{ github.ref }}` with
+`cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}` for CI workflows.

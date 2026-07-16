@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
-import subprocess
+import subprocess  # nosec B404 - subprocess is used to drive the tool/CLI under test; invocations use shell=False
+import sys
+import time
+from collections.abc import Iterator
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -23,11 +26,11 @@ def test_streaming_successful_command() -> None:
         mock_process.wait.return_value = 0
         mock_popen.return_value = mock_process
 
-        success, output = run_subprocess_streaming(["echo", "hello"], timeout=30)
+        result = run_subprocess_streaming(["echo", "hello"], timeout=30)
 
-        assert_that(success).is_true()
-        assert_that(output).contains("line1")
-        assert_that(output).contains("line2")
+        assert_that(result.success).is_true()
+        assert_that(result.output).contains("line1")
+        assert_that(result.output).contains("line2")
 
 
 def test_streaming_failed_command_nonzero_exit() -> None:
@@ -38,10 +41,10 @@ def test_streaming_failed_command_nonzero_exit() -> None:
         mock_process.wait.return_value = 1
         mock_popen.return_value = mock_process
 
-        success, output = run_subprocess_streaming(["false"], timeout=30)
+        result = run_subprocess_streaming(["false"], timeout=30)
 
-        assert_that(success).is_false()
-        assert_that(output).contains("error output")
+        assert_that(result.success).is_false()
+        assert_that(result.output).contains("error output")
 
 
 def test_streaming_with_line_handler() -> None:
@@ -91,6 +94,56 @@ def test_streaming_timeout_during_read() -> None:
         mock_process.kill.assert_called_once()
 
 
+def test_streaming_wait_receives_remaining_timeout_budget() -> None:
+    """process.wait() gets the remaining budget, not the full timeout.
+
+    Regression test for issue #1047: previously the reader-thread join and
+    the subsequent ``process.wait()`` each received the full timeout,
+    allowing a tool to run for up to ~2x its configured limit.
+    """
+    read_delay = 0.4
+    timeout = 2.0
+
+    def slow_stdout() -> Iterator[str]:
+        """Yield no lines but block the reader thread for ``read_delay``."""
+        time.sleep(read_delay)
+        return
+        yield  # pragma: no cover - makes this a generator
+
+    with patch("lintro.plugins.subprocess_executor.subprocess.Popen") as mock_popen:
+        mock_process = MagicMock()
+        mock_process.stdout = slow_stdout()
+        mock_process.wait.return_value = 0
+        mock_popen.return_value = mock_process
+
+        run_subprocess_streaming(["slow", "cmd"], timeout=timeout)
+
+        wait_timeout = mock_process.wait.call_args.kwargs["timeout"]
+        # The wait budget must be strictly less than the full timeout since
+        # the reader already consumed part of it.
+        assert_that(wait_timeout).is_less_than(timeout)
+        assert_that(wait_timeout).is_less_than_or_equal_to(timeout - read_delay + 0.25)
+        assert_that(wait_timeout).is_greater_than_or_equal_to(0.0)
+
+
+def test_streaming_total_walltime_stays_within_budget_on_hang() -> None:
+    """A hanging process is bounded by the configured timeout plus epsilon.
+
+    Runs a real child process that sleeps far beyond the timeout and produces
+    no output, then asserts the total wall time stays within ``timeout`` plus
+    a small epsilon rather than a multiple of it.
+    """
+    timeout = 1.0
+    start = time.monotonic()
+    with pytest.raises(subprocess.TimeoutExpired):
+        run_subprocess_streaming(
+            [sys.executable, "-c", "import time; time.sleep(10)"],
+            timeout=timeout,
+        )
+    elapsed = time.monotonic() - start
+    assert_that(elapsed).is_less_than(timeout + 2.0)
+
+
 def test_streaming_timeout_during_wait() -> None:
     """Verify TimeoutExpired is raised when process.wait times out."""
     with patch("lintro.plugins.subprocess_executor.subprocess.Popen") as mock_popen:
@@ -135,10 +188,10 @@ def test_streaming_empty_output() -> None:
         mock_process.wait.return_value = 0
         mock_popen.return_value = mock_process
 
-        success, output = run_subprocess_streaming(["true"], timeout=30)
+        result = run_subprocess_streaming(["true"], timeout=30)
 
-        assert_that(success).is_true()
-        assert_that(output).is_equal_to("")
+        assert_that(result.success).is_true()
+        assert_that(result.output).is_equal_to("")
 
 
 def test_streaming_with_cwd_and_env() -> None:

@@ -28,6 +28,7 @@ __all__ = [
     "load_lintro_tool_config",
     "get_tool_order_config",
     "load_post_checks_config",
+    "load_module_size_config",
     # Tool-specific loaders
     "load_ruff_config",
     "load_bandit_config",
@@ -146,6 +147,51 @@ def _get_lintro_section() -> dict[str, Any]:
 # Lintro Configuration Loading
 # =============================================================================
 
+# Non-tool structural sections under [tool.lintro] that are not backed by a
+# registered tool but must still be excluded from the "global" config dict
+# returned by ``load_lintro_global_config``.
+STRUCTURAL_SECTIONS: frozenset[str] = frozenset(
+    {
+        "post_checks",
+        "module_size",
+        "versions",
+    },
+)
+
+# Legacy/alternate section names that do not match a ``ToolName`` value
+# directly but have historically been treated as tool sections (e.g. the
+# underlying binary name rather than the canonical tool name).
+_LEGACY_TOOL_SECTION_ALIASES: frozenset[str] = frozenset(
+    {
+        "markdownlint-cli2",
+    },
+)
+
+
+def _get_tool_sections() -> frozenset[str]:
+    """Build the set of section names that identify tool-specific config.
+
+    Derives the set from the registered tool list (``ToolName``) instead of
+    a hardcoded, closed set, so newly registered tools are automatically
+    recognized without editing this module. Both the canonical
+    underscore-spelled name (e.g. ``astro_check``) and its hyphenated
+    equivalent (e.g. ``astro-check``) are included, since either spelling
+    may appear as a TOML table name.
+
+    Returns:
+        frozenset[str]: Section names treated as tool-specific config.
+    """
+    # Inline import: ToolName is a static StrEnum with no dependency on the
+    # plugin registry or tool definitions, avoiding a circular import
+    # between this module and the tool subsystem (tool definitions import
+    # lintro.utils.config at module level).
+    from lintro.enums.tool_name import ToolName
+
+    tool_sections = {tool.value for tool in ToolName}
+    tool_sections |= {tool.value.replace("_", "-") for tool in ToolName}
+    tool_sections |= _LEGACY_TOOL_SECTION_ALIASES
+    return frozenset(tool_sections)
+
 
 def load_lintro_global_config() -> dict[str, Any]:
     """Load global Lintro configuration from [tool.lintro].
@@ -155,26 +201,9 @@ def load_lintro_global_config() -> dict[str, Any]:
     """
     lintro_config = _get_lintro_section()
 
-    # Filter out known tool-specific sections
-    tool_sections = {
-        "ruff",
-        "black",
-        "yamllint",
-        "markdownlint",
-        "markdownlint-cli2",
-        "bandit",
-        "hadolint",
-        "actionlint",
-        "pytest",
-        "mypy",
-        "clippy",
-        "pydoclint",
-        "tsc",
-        "post_checks",
-        "versions",
-    }
+    excluded_sections = _get_tool_sections() | STRUCTURAL_SECTIONS
 
-    return {k: v for k, v in lintro_config.items() if k not in tool_sections}
+    return {k: v for k, v in lintro_config.items() if k not in excluded_sections}
 
 
 def load_lintro_tool_config(tool_name: str) -> dict[str, Any]:
@@ -220,6 +249,26 @@ def load_post_checks_config() -> dict[str, Any]:
     """
     cfg = _get_lintro_section()
     section = cfg.get("post_checks", {})
+    if isinstance(section, dict):
+        return section
+    return {}
+
+
+def load_module_size_config() -> dict[str, Any]:
+    """Load module-size gate configuration from pyproject.
+
+    Reads the ``[tool.lintro.module_size]`` table. See
+    ``lintro/utils/module_size.py`` for the ratchet-down plan.
+
+    Returns:
+        Dict with keys like:
+            - enabled: bool
+            - threshold: int
+            - baseline: list[str]
+            - exclude: list[str]
+    """
+    cfg = _get_lintro_section()
+    section = cfg.get("module_size", {})
     if isinstance(section, dict):
         return section
     return {}

@@ -18,17 +18,24 @@ from lintro.ai.cache import (
 from lintro.ai.models import AIFixSuggestion
 
 
-def _make_suggestion(**kwargs: object) -> AIFixSuggestion:
+def _make_suggestion(
+    *,
+    file: str = "test.py",
+    line: int = 1,
+    code: str = "E001",
+    original_code: str = "x",
+    suggested_code: str = "y",
+    **kwargs: str | int | float,
+) -> AIFixSuggestion:
     """Create a minimal AIFixSuggestion for tests."""
-    defaults = {
-        "file": "test.py",
-        "line": 1,
-        "code": "E001",
-        "original_code": "x",
-        "suggested_code": "y",
-    }
-    defaults.update(kwargs)
-    return AIFixSuggestion(**defaults)  # type: ignore[arg-type]
+    return AIFixSuggestion(
+        file=file,
+        line=line,
+        code=code,
+        original_code=original_code,
+        suggested_code=suggested_code,
+        **kwargs,
+    )
 
 
 # -- _cache_key --------------------------------------------------------------
@@ -170,7 +177,13 @@ def test_cache_suggestion_evicts_when_over_max(tmp_path: Path) -> None:
     # Adding one more entry should evict the oldest (old_entry_0)
     suggestion = _make_suggestion(code="E999")
     cache_suggestion(
-        root, "new", "E999", 1, "new msg", suggestion, max_entries=max_entries,
+        root,
+        "new",
+        "E999",
+        1,
+        "new msg",
+        suggestion,
+        max_entries=max_entries,
     )
 
     remaining = sorted(p.name for p in cache_dir.glob("*.json"))

@@ -12,6 +12,7 @@ import sys
 import click
 from click.testing import CliRunner
 
+from lintro.utils.git_diff import DIFF_DEFAULT_SENTINEL
 from lintro.utils.tool_executor import run_lint_tools_simple
 
 # Constants
@@ -94,6 +95,20 @@ DEFAULT_ACTION: str = "check"
     help="Clear incremental cache before running (forces full check)",
 )
 @click.option(
+    "--diff",
+    "diff_base",
+    is_flag=False,
+    flag_value=DIFF_DEFAULT_SENTINEL,
+    default=None,
+    metavar="[BASE]",
+    help=(
+        "Only check files changed vs a git base ref. With no value, diffs "
+        "against the repository default branch (origin/HEAD); pass a ref like "
+        "'main' or 'origin/dev' to override. Falls back to a full scan outside "
+        "a git repository."
+    ),
+)
+@click.option(
     "--stream/--no-stream",
     default=False,
     hidden=True,
@@ -121,6 +136,23 @@ DEFAULT_ACTION: str = "check"
     is_flag=True,
     help="Generate AI fix suggestions (safe fixes auto-apply in CI)",
 )
+@click.option(
+    "--transport",
+    type=click.Choice(["api", "cli"], case_sensitive=False),
+    default=None,
+    help="Override ai.transport for this AI invocation.",
+)
+@click.option(
+    "--score",
+    is_flag=True,
+    help="Print only the 0-100 health score (suppresses the normal summary).",
+)
+@click.option(
+    "--fail-under",
+    type=click.FloatRange(0, 100),
+    default=None,
+    help="Exit 1 if the health score is below this threshold (0-100).",
+)
 def check_command(
     paths: tuple[str, ...],
     tools: str | None,
@@ -136,11 +168,15 @@ def check_command(
     raw_output: bool,
     incremental: bool,
     no_cache: bool,
+    diff_base: str | None,
     stream: bool,
     debug: bool,
     auto_install: bool,
     yes: bool,
     ai_fix: bool,
+    transport: str | None,
+    score: bool,
+    fail_under: float | None,
 ) -> None:
     """Check files for issues using the specified tools.
 
@@ -159,11 +195,17 @@ def check_command(
         raw_output: bool: Whether to show raw tool output instead of formatted output.
         incremental: bool: Whether to only check files changed since last run.
         no_cache: bool: Whether to clear the incremental cache before running.
+        diff_base: str | None: Git base ref for ``--diff`` scanning. ``None``
+            scans all files; the default sentinel resolves the repo default
+            branch; any other value is used as the base ref.
         stream: bool: Whether to stream tool output in real-time.
         debug: bool: Whether to enable debug output on console.
         auto_install: bool: Whether to auto-install Node.js deps if missing.
         yes: bool: Skip confirmation prompt and proceed immediately.
         ai_fix: bool: Generate AI fix suggestions with interactive review.
+        transport: str | None: Override AI transport (``api`` or ``cli``).
+        score: bool: Print only the health score, suppressing the summary.
+        fail_under: float | None: Exit 1 if the health score is below this value.
 
     Raises:
         SystemExit: Process exit with the aggregated exit code from tools.
@@ -200,6 +242,7 @@ def check_command(
         raw_output=raw_output,
         output_file=output,
         incremental=incremental,
+        diff_base=diff_base,
         debug=debug,
         stream=stream,
         no_log=no_log,
@@ -207,6 +250,9 @@ def check_command(
         yes=yes,
         ai_fix=ai_fix,
         ignore_conflicts=ignore_conflicts,
+        transport=transport,
+        score=score,
+        fail_under=fail_under,
     )
 
     # Exit with code only; CLI uses this as process exit code and avoids any

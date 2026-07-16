@@ -4,7 +4,89 @@ This module provides common validation functions to reduce boilerplate
 in tool set_options() methods.
 """
 
+from collections.abc import Mapping
 from typing import Any
+
+# Human-friendly labels used when reporting an option's expected type.
+# These keep error messages consistent with the historical wording
+# (e.g. "must be a boolean" rather than "must be a bool").
+_TYPE_LABELS: dict[type, str] = {
+    bool: "boolean",
+    str: "string",
+    int: "integer",
+    float: "number",
+    list: "list",
+}
+
+# A single option's expected type. Either a bare ``type`` (whose label is
+# looked up in ``_TYPE_LABELS``) or a ``(type, label)`` tuple that overrides
+# the label used in the error message (e.g. ``(str, "string path")``).
+OptionType = type | tuple[type, str]
+
+# Mapping of option name to its expected type specification.
+OptionSchema = Mapping[str, OptionType]
+
+
+def _resolve_option_type(spec: OptionType) -> tuple[type, str]:
+    """Resolve an option type specification into a type and its label.
+
+    Args:
+        spec: Either a bare ``type`` or a ``(type, label)`` tuple.
+
+    Returns:
+        tuple[type, str]: The expected type and its human-friendly label.
+    """
+    if isinstance(spec, tuple):
+        expected_type, label = spec
+        return expected_type, label
+    return spec, _TYPE_LABELS.get(spec, spec.__name__)
+
+
+def _type_error_message(name: str, label: str) -> str:
+    """Build a type-mismatch error message with a grammatical article.
+
+    Args:
+        name: The option name.
+        label: The human-friendly type label (e.g. "boolean", "integer").
+
+    Returns:
+        str: An error message such as "name must be a boolean" or
+        "name must be an integer".
+    """
+    article = "an" if label[:1].lower() in "aeiou" else "a"
+    return f"{name} must be {article} {label}"
+
+
+def validate_option_types(
+    options: Mapping[str, Any],
+    schema: OptionSchema,
+) -> None:
+    """Validate option values against a declarative type schema.
+
+    Iterates over the schema and checks each present (non-``None``) option
+    against its expected type, raising a ``ValueError`` naming the offending
+    option on the first mismatch. Options absent from ``options`` or set to
+    ``None`` are skipped, and options not present in the schema are ignored
+    (pass-through), preserving the historical per-option validation behavior.
+
+    Args:
+        options: Mapping of option name to provided value.
+        schema: Mapping of option name to its expected type specification.
+
+    Raises:
+        ValueError: If a present option's value is not of its expected type.
+    """
+    for name, spec in schema.items():
+        value = options.get(name)
+        if value is None:
+            continue
+        expected_type, label = _resolve_option_type(spec)
+        # ``bool`` is a subclass of ``int``; reject booleans where an integer
+        # is required so numeric options do not silently accept True/False.
+        if expected_type is int and isinstance(value, bool):
+            raise ValueError(_type_error_message(name, label))
+        if not isinstance(value, expected_type):
+            raise ValueError(_type_error_message(name, label))
 
 
 def validate_bool(value: Any, name: str) -> None:

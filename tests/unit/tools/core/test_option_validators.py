@@ -8,11 +8,13 @@ import pytest
 from assertpy import assert_that
 
 from lintro.tools.core.option_validators import (
+    OptionSchema,
     filter_none_options,
     normalize_str_or_list,
     validate_bool,
     validate_int,
     validate_list,
+    validate_option_types,
     validate_positive_int,
     validate_str,
 )
@@ -346,3 +348,94 @@ def test_filter_none_options_preserves_falsy_values() -> None:
     """Preserve False, 0, empty string (not None)."""
     result = filter_none_options(a=False, b=0, c="", d=None)
     assert_that(result).is_equal_to({"a": False, "b": 0, "c": ""})
+
+
+# =============================================================================
+# validate_option_types tests
+# =============================================================================
+
+_SCHEMA: OptionSchema = {
+    "strict": bool,
+    "python_version": str,
+    "config_file": (str, "string path"),
+    "jobs": int,
+}
+
+
+def test_validate_option_types_accepts_valid_values() -> None:
+    """Accept values that match their declared types."""
+    validate_option_types(
+        {
+            "strict": True,
+            "python_version": "3.11",
+            "config_file": "mypy.ini",
+            "jobs": 4,
+        },
+        _SCHEMA,
+    )
+
+
+def test_validate_option_types_skips_none_values() -> None:
+    """Skip options whose value is None."""
+    validate_option_types(
+        {"strict": None, "python_version": None},
+        _SCHEMA,
+    )
+
+
+def test_validate_option_types_skips_absent_options() -> None:
+    """Accept an empty mapping without raising."""
+    validate_option_types({}, _SCHEMA)
+
+
+def test_validate_option_types_ignores_options_outside_schema() -> None:
+    """Pass through options not declared in the schema without raising."""
+    validate_option_types(
+        {"strict": True, "unknown_option": object()},
+        _SCHEMA,
+    )
+
+
+@pytest.mark.parametrize(
+    ("option", "value", "message"),
+    [
+        pytest.param("strict", "yes", "strict must be a boolean", id="bool"),
+        pytest.param(
+            "python_version",
+            310,
+            "python_version must be a string",
+            id="str",
+        ),
+        pytest.param(
+            "config_file",
+            123,
+            "config_file must be a string path",
+            id="str-custom-label",
+        ),
+        pytest.param("jobs", "four", "jobs must be an integer", id="int"),
+        pytest.param("jobs", True, "jobs must be an integer", id="int-rejects-bool"),
+    ],
+)
+def test_validate_option_types_rejects_wrong_type(
+    option: str,
+    value: Any,
+    message: str,
+) -> None:
+    """Raise ValueError naming the option when its type is wrong.
+
+    Args:
+        option: The option name being validated.
+        value: The invalid value supplied for the option.
+        message: The exact error message expected.
+    """
+    with pytest.raises(ValueError, match=message):
+        validate_option_types({option: value}, _SCHEMA)
+
+
+def test_validate_option_types_reports_first_mismatch() -> None:
+    """Raise for the offending option even when others are valid."""
+    with pytest.raises(ValueError, match="python_version must be a string"):
+        validate_option_types(
+            {"strict": True, "python_version": 3.11},
+            _SCHEMA,
+        )

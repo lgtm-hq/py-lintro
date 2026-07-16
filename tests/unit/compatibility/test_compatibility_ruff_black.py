@@ -75,6 +75,19 @@ class FakeTool:
         """Reset options to defaults (no-op for stub)."""
         self.options.clear()
 
+    def copy_for_execution(self) -> FakeTool:
+        """Return self as the per-invocation copy.
+
+        The real plugins return an isolated copy so parallel runs don't
+        race on shared option state; this single-threaded stub has no such
+        concern and returns itself so tests can assert on the same instance
+        the runner configures and executes.
+
+        Returns:
+            This stub instance.
+        """
+        return self
+
     def check(
         self,
         paths: list[str],

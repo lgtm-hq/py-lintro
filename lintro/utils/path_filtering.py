@@ -16,16 +16,16 @@ if TYPE_CHECKING:
 
 
 @lru_cache(maxsize=32)
-def _compile_pathspec(patterns_tuple: tuple[str, ...]) -> pathspec.PathSpec:
-    """Compile patterns into a PathSpec object (cached).
+def _compile_pathspec(patterns_tuple: tuple[str, ...]) -> pathspec.GitIgnoreSpec:
+    """Compile patterns into a GitIgnoreSpec object (cached).
 
     Args:
         patterns_tuple: Tuple of gitignore-style patterns to compile.
 
     Returns:
-        pathspec.PathSpec: Compiled pattern matcher.
+        pathspec.GitIgnoreSpec: Compiled pattern matcher.
     """
-    return pathspec.PathSpec.from_lines("gitwildmatch", patterns_tuple)
+    return pathspec.GitIgnoreSpec.from_lines(patterns_tuple)
 
 
 def should_exclude_path(
@@ -87,6 +87,7 @@ def walk_files_with_excludes(
     include_venv: bool = False,
     incremental: bool = False,
     tool_name: str | None = None,
+    diff_base: str | None = None,
 ) -> list[str]:
     """Return files under ``paths`` matching patterns and not excluded.
 
@@ -99,6 +100,9 @@ def walk_files_with_excludes(
         include_venv: Include virtual environment directories when True.
         incremental: If True, only return files changed since last run.
         tool_name: Tool name for incremental cache (required if incremental=True).
+        diff_base: Resolved git base ref. When set, the result is restricted to
+            files changed relative to this ref (``git diff <base>...HEAD`` plus
+            working-tree and untracked changes).
 
     Returns:
         Sorted file paths matching include filters and not excluded.
@@ -144,6 +148,13 @@ def walk_files_with_excludes(
                     ):
                         all_files.append(abs_file_path)
 
+    # Apply git-diff filtering if a base ref was resolved. Restricts the set to
+    # files changed relative to the base so only branch changes are scanned.
+    if diff_base:
+        from lintro.utils.git_diff import filter_files_by_diff
+
+        all_files = filter_files_by_diff(all_files, diff_base)
+
     # Apply incremental filtering if enabled
     if incremental and tool_name:
         from lintro.utils.file_cache import ToolCache
@@ -162,7 +173,7 @@ def walk_files_with_excludes(
 
 def _should_exclude_with_spec(
     path: str,
-    spec: pathspec.PathSpec | None,
+    spec: pathspec.GitIgnoreSpec | None,
 ) -> bool:
     """Check if a path should be excluded using a pre-compiled PathSpec.
 

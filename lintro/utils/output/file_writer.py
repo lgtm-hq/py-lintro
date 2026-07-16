@@ -29,6 +29,7 @@ from lintro.formatters.formatter import (
     merge_detected_and_remaining,
 )
 from lintro.parsers.base_issue import BaseIssue
+from lintro.utils.json_output import serialize_tool_result
 from lintro.utils.output.helpers import sanitize_csv_value
 from lintro.utils.output.parser_registration import ParserError
 from lintro.utils.output.parser_registry import ParserRegistry
@@ -147,25 +148,36 @@ _HTML_ISSUES_HEADER = (
 )
 
 
-def _serialize_issue(issue: BaseIssue) -> dict[str, Any]:
-    """Serialize a BaseIssue to a JSON-safe dictionary.
+def _merged_issues(result: ToolResult) -> list[BaseIssue]:
+    """Return the deduplicated issue list for a result.
+
+    Uses ``merge_detected_and_remaining(...)`` so every output format
+    reports the same issues the JSON writer does. In check mode
+    ``initial_issues`` is None and the merged list equals ``result.issues``;
+    in fix mode the merge deduplicates pre-fix and remaining issues.
 
     Args:
-        issue: BaseIssue: The issue to serialize.
+        result: Tool result to collect issues for.
 
     Returns:
-        dict[str, Any]: Serialized issue data.
+        The merged/deduplicated issue list.
     """
-    data: dict[str, Any] = {
-        "file": getattr(issue, "file", "") or "",
-        "line": getattr(issue, "line", None) or 0,
-        "code": getattr(issue, "code", "") or "",
-        "message": getattr(issue, "message", "") or "",
-    }
-    doc_url = getattr(issue, "doc_url", "") or ""
-    if doc_url:
-        data["doc_url"] = doc_url
-    return data
+    return merge_detected_and_remaining(
+        getattr(result, "initial_issues", None),
+        getattr(result, "issues", None),
+    )
+
+
+def _merged_issue_count(result: ToolResult) -> int:
+    """Return the deduplicated issue count for a result.
+
+    Args:
+        result: Tool result to count issues for.
+
+    Returns:
+        The merged/deduplicated issue count.
+    """
+    return len(_merged_issues(result))
 
 
 def write_output_file(
@@ -203,32 +215,11 @@ def write_output_file(
             "results": [],
         }
         for result in all_results:
-            # Merge pre-fix and remaining issues (deduped) so fix-mode
-            # JSON matches the CLI JSON output from format_fix_results.
-            # For check mode, initial_issues is None and the merged list
-            # equals result.issues.
-            merged_issues = merge_detected_and_remaining(
-                getattr(result, "initial_issues", None),
-                getattr(result, "issues", None),
+            # Build each per-tool object via the shared serializer so the
+            # file artifact and the stdout payload cannot drift.
+            json_data["results"].append(
+                serialize_tool_result(result, action=action),
             )
-            result_data = {
-                "tool": result.name,
-                "success": getattr(result, "success", True),
-                "issues_count": len(merged_issues),
-                "output": getattr(result, "output", ""),
-            }
-            ai_metadata = getattr(result, "ai_metadata", None)
-            if isinstance(ai_metadata, dict) and ai_metadata:
-                from lintro.ai.metadata import normalize_ai_metadata
-
-                normalized = normalize_ai_metadata(ai_metadata)
-                if normalized:
-                    result_data["ai_metadata"] = normalized
-            if merged_issues:
-                result_data["issues"] = [
-                    _serialize_issue(issue) for issue in merged_issues
-                ]
-            json_data["results"].append(result_data)
         output_file.write_text(
             json.dumps(json_data, indent=2, ensure_ascii=False),
             encoding="utf-8",
@@ -247,13 +238,15 @@ def write_output_file(
             "doc_url",
         ]
         for result in all_results:
-            if hasattr(result, "issues") and result.issues:
-                for issue in result.issues:
+            merged_issues = _merged_issues(result)
+            merged_count = len(merged_issues)
+            if merged_issues:
+                for issue in merged_issues:
                     rows.append(
                         [
                             sanitize_csv_value(result.name),
                             sanitize_csv_value(
-                                str(getattr(result, "issues_count", 0)),
+                                str(merged_count),
                             ),
                             sanitize_csv_value(str(getattr(issue, "file", "") or "")),
                             sanitize_csv_value(
@@ -272,7 +265,7 @@ def write_output_file(
                 rows.append(
                     [
                         sanitize_csv_value(result.name),
-                        sanitize_csv_value(str(getattr(result, "issues_count", 0))),
+                        sanitize_csv_value(str(merged_count)),
                         "",
                         "",
                         "",
@@ -292,10 +285,10 @@ def write_output_file(
         lines.append("| Tool | Issues |")
         lines.append("|------|--------|")
         for result in all_results:
-            lines.append(f"| {result.name} | {getattr(result, 'issues_count', 0)} |")
+            lines.append(f"| {result.name} | {_merged_issue_count(result)} |")
         lines.append("")
         for result in all_results:
-            issues_count = getattr(result, "issues_count", 0)
+            issues_count = _merged_issue_count(result)
             lines.append(f"### {result.name} ({issues_count} issues)")
             if _result_has_fix_split(result, action):
                 initial = list(result.initial_issues or [])
@@ -339,11 +332,11 @@ def write_output_file(
             safe_name = html.escape(result.name)
             html_lines.append(
                 f"<tr><td>{safe_name}</td>"
-                f"<td>{getattr(result, 'issues_count', 0)}</td></tr>",
+                f"<td>{_merged_issue_count(result)}</td></tr>",
             )
         html_lines.append("</table>")
         for result in all_results:
-            issues_count = getattr(result, "issues_count", 0)
+            issues_count = _merged_issue_count(result)
             html_lines.append(
                 f"<h3>{html.escape(result.name)} ({issues_count} issues)</h3>",
             )
@@ -379,18 +372,21 @@ def write_output_file(
     elif output_format == OutputFormat.SARIF:
         from lintro.ai.output.sarif import write_sarif
         from lintro.ai.output.sarif_bridge import (
+            standard_issues_from_results,
             suggestions_from_results,
             summary_from_results,
         )
 
         suggestions = suggestions_from_results(all_results)
         summary = summary_from_results(all_results)
+        standard_issues = standard_issues_from_results(all_results)
 
         write_sarif(
             suggestions,
             summary,
             output_path=output_file,
             doc_urls=build_doc_url_map(all_results) or None,
+            standard_issues=standard_issues,
         )
 
     else:
@@ -399,7 +395,7 @@ def write_output_file(
 
         lines = [f"Lintro {action.value.capitalize()} Report", "=" * 40, ""]
         for result in all_results:
-            issues_count = getattr(result, "issues_count", 0)
+            issues_count = _merged_issue_count(result)
             lines.append(f"{result.name}: {issues_count} issues")
             if _result_has_fix_split(result, action):
                 split_output = format_fix_results(

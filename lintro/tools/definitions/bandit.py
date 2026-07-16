@@ -30,7 +30,8 @@ from lintro.plugins.registry import register_tool
 from lintro.utils.config import load_bandit_config
 
 # Constants for Bandit configuration
-BANDIT_DEFAULT_TIMEOUT: int = 30
+# Full-repo scans with B404/B603/B607 enabled routinely exceed 30s in CI.
+BANDIT_DEFAULT_TIMEOUT: int = 90
 BANDIT_DEFAULT_PRIORITY: int = 90  # High priority for security tool
 BANDIT_FILE_PATTERNS: list[str] = ["*.py", "*.pyi"]
 BANDIT_OUTPUT_FORMAT: str = "json"
@@ -468,15 +469,19 @@ class BanditPlugin(BaseToolPlugin):
                 output=output if execution_failure else None,
                 issues_count=issues_count,
                 issues=issues,
+                parse_failures_count=0,
             )
 
         except (json.JSONDecodeError, ValueError) as e:
+            # Bandit is a security scanner: unparseable output must never be
+            # reported as a clean pass (see #1044).
             logger.error(f"Failed to parse bandit output: {e}")
             return ToolResult(
                 name=self.definition.name,
                 success=False,
-                output=(output or f"Failed to parse bandit output: {str(e)}"),
+                output=(output or f"Failed to parse bandit output: {e!s}"),
                 issues_count=0,
+                parse_failures_count=1,
             )
 
     def fix(self, paths: list[str], options: dict[str, object]) -> ToolResult:

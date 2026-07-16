@@ -40,6 +40,7 @@ def run_tools_parallel(
     incremental: bool = False,
     auto_install: bool = False,
     max_fix_retries: int = 3,
+    diff_base: str | None = None,
 ) -> list[ToolResult]:
     """Run tools in parallel using async executor.
 
@@ -56,6 +57,7 @@ def run_tools_parallel(
         incremental: Whether to only check changed files.
         auto_install: Whether to auto-install Node.js deps if missing.
         max_fix_retries: Maximum fix→verify convergence cycles.
+        diff_base: Resolved git base ref for ``--diff`` scanning, or None.
 
     Returns:
         List of ToolResult objects.
@@ -100,8 +102,10 @@ def run_tools_parallel(
                 for tool_name in batch:
                     tool = tool_manager.get_tool(tool_name)
 
-                    # Configure tool using shared helper
-                    configure_tool_for_execution(
+                    # Configure tool using shared helper. This returns a
+                    # private per-invocation copy so concurrent batch
+                    # execution never races on the shared singleton's options.
+                    tool = configure_tool_for_execution(
                         tool=tool,
                         tool_name=tool_name,
                         config_manager=config_manager,
@@ -112,6 +116,7 @@ def run_tools_parallel(
                         action=action,
                         post_tools=post_tools,
                         auto_install=auto_install,
+                        diff_base=diff_base,
                     )
 
                     tools_with_instances.append((tool_name, tool))

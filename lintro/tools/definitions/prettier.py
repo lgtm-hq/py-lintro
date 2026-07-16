@@ -9,9 +9,9 @@ re-printing code.
 from __future__ import annotations
 
 import json
-import os
 import subprocess  # nosec B404 - used safely with shell disabled
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
 from loguru import logger
@@ -30,9 +30,10 @@ from lintro.tools.core.option_validators import (
     validate_bool,
     validate_positive_int,
 )
+from lintro.utils.path_utils import find_file_upward
 
 # Constants for Prettier configuration
-PRETTIER_DEFAULT_TIMEOUT: int = 30
+PRETTIER_DEFAULT_TIMEOUT: int = 120
 PRETTIER_DEFAULT_PRIORITY: int = 80
 # Note: JS/TS/Vue files are handled by oxfmt (faster).
 # Prettier handles file types that oxfmt doesn't support.
@@ -143,43 +144,52 @@ class PrettierPlugin(BaseToolPlugin):
         """
         config_paths = [*PRETTIER_CONFIG_FILENAMES, "package.json"]
         # Search upward from search_dir (or cwd) to find config, just like prettier
-        start_dir = os.path.abspath(search_dir) if search_dir else os.getcwd()
-        current_dir = start_dir
+        start_dir = Path(search_dir).absolute() if search_dir else Path.cwd()
 
-        # Walk upward from the directory to find config
-        # Stop at filesystem root to avoid infinite loop
+        # Walk upward using the shared helper. ``package.json`` is existence-only
+        # to the helper, so its prettier-content sniffing is layered on top: a
+        # ``package.json`` without a ``prettier`` key does not count as config, so
+        # the search resumes above the directory that contained it.
+        current = start_dir
         while True:
-            for config_name in config_paths:
-                config_path = os.path.join(current_dir, config_name)
-                if os.path.exists(config_path):
-                    # For package.json, check if it contains prettier config
-                    if config_name == "package.json":
-                        try:
-                            with open(config_path, encoding="utf-8") as f:
-                                pkg_data = json.load(f)
-                                if "prettier" not in pkg_data:
-                                    continue
-                        except (
-                            json.JSONDecodeError,
-                            FileNotFoundError,
-                            PermissionError,
-                        ):
-                            # Skip invalid or unreadable package.json files
-                            continue
-                    logger.debug(
-                        f"[PrettierPlugin] Found config file: {config_path} "
-                        f"(searched from {start_dir})",
-                    )
-                    return config_path
+            found = find_file_upward(current, config_paths)
+            if found is None:
+                return None
 
-            # Move up one directory
-            parent_dir = os.path.dirname(current_dir)
-            # Stop if we've reached the filesystem root (parent == current)
-            if parent_dir == current_dir:
-                break
-            current_dir = parent_dir
+            if found.name == "package.json" and not self._package_json_has_prettier(
+                found,
+            ):
+                parent = found.parent.parent
+                if parent == found.parent:
+                    # Reached the filesystem root without a usable config.
+                    return None
+                current = parent
+                continue
 
-        return None
+            logger.debug(
+                f"[PrettierPlugin] Found config file: {found} "
+                f"(searched from {start_dir})",
+            )
+            return str(found)
+
+    @staticmethod
+    def _package_json_has_prettier(path: Path) -> bool:
+        """Report whether a package.json declares a ``prettier`` key.
+
+        Args:
+            path: Path to the package.json file to inspect.
+
+        Returns:
+            True if the file parses as JSON and contains a top-level
+            ``prettier`` key, False otherwise (including unreadable or
+            invalid files).
+        """
+        try:
+            with path.open(encoding="utf-8") as f:
+                pkg_data = json.load(f)
+        except (json.JSONDecodeError, FileNotFoundError, PermissionError):
+            return False
+        return "prettier" in pkg_data
 
     def _find_prettierignore(self, search_dir: str | None = None) -> str | None:
         """Locate .prettierignore file by walking up the directory tree.
@@ -194,23 +204,14 @@ class PrettierPlugin(BaseToolPlugin):
         Returns:
             str | None: Path to .prettierignore file if found, None otherwise.
         """
-        ignore_filename = ".prettierignore"
-        start_dir = os.path.abspath(search_dir) if search_dir else os.getcwd()
-        current_dir = start_dir
-
-        while True:
-            ignore_path = os.path.join(current_dir, ignore_filename)
-            if os.path.exists(ignore_path):
-                logger.debug(
-                    f"[PrettierPlugin] Found .prettierignore: {ignore_path} "
-                    f"(searched from {start_dir})",
-                )
-                return ignore_path
-
-            parent_dir = os.path.dirname(current_dir)
-            if parent_dir == current_dir:
-                break
-            current_dir = parent_dir
+        start_dir = Path(search_dir).absolute() if search_dir else Path.cwd()
+        found = find_file_upward(start_dir, [".prettierignore"])
+        if found is not None:
+            logger.debug(
+                f"[PrettierPlugin] Found .prettierignore: {found} "
+                f"(searched from {start_dir})",
+            )
+            return str(found)
 
         return None
 

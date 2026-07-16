@@ -1,0 +1,151 @@
+---
+name: Publish - npm
+
+# Distributes lintro as an npm package via platform-specific Nuitka binaries
+# (the esbuild/biome model). Publishing uses npm trusted publishing (OIDC):
+# no NODE_AUTH_TOKEN secret is required. The `npm` environment gates every
+# live publish behind maintainer approval, mirroring the `pypi` environment.
+#
+# Set the `dry_run` input to skip the real publish (still requires the
+# environment approval). The platform binaries are downloaded from the
+# GitHub release created earlier in the tag pipeline, so this workflow must
+# run after build-binary.yml has uploaded them.
+
+'on':
+  workflow_call:
+    inputs:
+      release_tag:
+        description: 'Release tag whose binaries to package'
+        required: true
+        type: string
+      dry_run:
+        description: 'Run npm publish with --dry-run instead of publishing'
+        required: false
+        default: false
+        type: boolean
+      dist_tag:
+        description: >-
+          npm dist-tag for the publish (default latest). Use a non-latest tag
+          such as backfill when publishing a version older than current latest.
+        required: false
+        default: latest
+        type: string
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: 'Release tag whose binaries to package'
+        required: true
+        type: string
+      dry_run:
+        description: 'Run npm publish with --dry-run instead of publishing'
+        required: false
+        default: true
+        type: boolean
+      dist_tag:
+        description: >-
+          npm dist-tag (default latest). Use backfill for versions older than
+          current latest so npm does not refuse to move the latest tag.
+        required: false
+        default: latest
+        type: string
+
+permissions: {}
+
+concurrency:
+  group: publish-npm-${{ github.event.inputs.release_tag || inputs.release_tag }}
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    name: Package and publish
+    runs-on: ubuntu-24.04
+    environment: npm
+    permissions:
+      # read: checkout and download release assets
+      contents: read
+      # write: OIDC for npm trusted publishing + provenance attestation
+      id-token: write
+
+    steps:
+      - name: Harden Runner
+        # yamllint disable-line rule:line-length
+        uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
+        with:
+          egress-policy: 'block'
+          allowed-endpoints: >
+            github.com:443
+            api.github.com:443
+            codeload.github.com:443
+            objects.githubusercontent.com:443
+            release-assets.githubusercontent.com:443
+            uploads.github.com:443
+            token.actions.githubusercontent.com:443
+            nodejs.org:443
+            registry.npmjs.org:443
+            fulcio.sigstore.dev:443
+            rekor.sigstore.dev:443
+            tuf-repo-cdn.sigstore.dev:443
+            oauth2.sigstore.dev:443
+
+      - name: Checkout code
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          persist-credentials: false
+
+      - name: Set up Node.js
+        # Node 24 ships npm ≥ 11.5.1 (required for OIDC trusted publishing).
+        # Do not run `npm install -g npm` here: in-place self-upgrade corrupts
+        # the toolcache tree and breaks `npm publish --provenance` (missing
+        # sigstore). See #1203.
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '24'
+          registry-url: 'https://registry.npmjs.org'
+
+      - name: Set up Python
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: '3.14'
+
+      - name: Download release binaries
+        run: >-
+          scripts/ci/npm/download_release_binaries.sh
+          "$RELEASE_TAG"
+          "${{ runner.temp }}/npm-binaries"
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_TAG: ${{ inputs.release_tag }}
+
+      - name: Stage binaries into npm packages
+        run: >-
+          python scripts/ci/npm/stage_binaries.py
+          --artifacts-dir "${{ runner.temp }}/npm-binaries"
+
+      - name: Inject release version into manifests
+        env:
+          RELEASE_TAG: ${{ inputs.release_tag }}
+        run: >-
+          python scripts/ci/npm/sync_npm_version.py
+          --version "$RELEASE_TAG"
+
+      - name: Verify manifests are in sync
+        env:
+          RELEASE_TAG: ${{ inputs.release_tag }}
+        run: >-
+          python scripts/ci/npm/sync_npm_version.py
+          --check --version "$RELEASE_TAG"
+
+      - name: Smoke test launcher (Linux x64)
+        run: scripts/ci/npm/smoke_test.sh
+
+      - name: Publish to npm
+        # LIVE drives publish_packages.sh: 1 for a real publish, 0 for
+        # --dry-run. Trusted publishing generates provenance automatically;
+        # disable the explicit flag on dry-runs where nothing is published.
+        # dist_tag must be non-latest when backfilling versions below current
+        # latest (npm refuses to move latest backwards without --tag).
+        env:
+          LIVE: ${{ inputs.dry_run && '0' || '1' }}
+          NPM_PROVENANCE: ${{ inputs.dry_run && '0' || '1' }}
+          NPM_DIST_TAG: ${{ inputs.dist_tag || 'latest' }}
+        run: scripts/ci/npm/publish_packages.sh

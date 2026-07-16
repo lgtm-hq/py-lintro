@@ -24,18 +24,22 @@ from lintro.utils.console.logger import ThreadSafeConsoleLogger
 
 def create_logger(
     run_dir: Path | None = None,
+    *,
+    route_stderr: bool = False,
     **kwargs: Any,
 ) -> ThreadSafeConsoleLogger:
     """Create a new ThreadSafeConsoleLogger instance.
 
     Args:
         run_dir: Optional run directory path for output location display.
+        route_stderr: When True, decorative console output is routed to stderr
+            so stdout carries only the final machine-readable document.
         **kwargs: Additional arguments (ignored for backward compatibility).
 
     Returns:
         ThreadSafeConsoleLogger: A new instance of ThreadSafeConsoleLogger.
     """
-    return ThreadSafeConsoleLogger(run_dir=run_dir)
+    return ThreadSafeConsoleLogger(run_dir=run_dir, route_stderr=route_stderr)
 
 
 __all__ = [

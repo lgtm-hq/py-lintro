@@ -7,7 +7,7 @@ from unittest.mock import patch
 from assertpy import assert_that
 from click.testing import CliRunner
 
-from lintro.cli_utils.commands.test import test_command
+from lintro.cli_utils.commands.test import test_command as pytest_cli_command
 
 
 def test_test_command_collect_only() -> None:
@@ -15,7 +15,7 @@ def test_test_command_collect_only() -> None:
     runner = CliRunner()
     with patch("lintro.cli_utils.commands.test.run_lint_tools_simple") as mock_run:
         mock_run.return_value = 0
-        runner.invoke(test_command, ["--collect-only"])
+        runner.invoke(pytest_cli_command, ["--collect-only"])
         call_args = mock_run.call_args
         assert_that(call_args.kwargs["tool_options"]).contains(
             "pytest:collect_only=True",
@@ -27,7 +27,7 @@ def test_test_command_fixtures() -> None:
     runner = CliRunner()
     with patch("lintro.cli_utils.commands.test.run_lint_tools_simple") as mock_run:
         mock_run.return_value = 0
-        runner.invoke(test_command, ["--fixtures"])
+        runner.invoke(pytest_cli_command, ["--fixtures"])
         call_args = mock_run.call_args
         assert_that(call_args.kwargs["tool_options"]).contains(
             "pytest:list_fixtures=True",
@@ -39,7 +39,7 @@ def test_test_command_fixture_info() -> None:
     runner = CliRunner()
     with patch("lintro.cli_utils.commands.test.run_lint_tools_simple") as mock_run:
         mock_run.return_value = 0
-        runner.invoke(test_command, ["--fixture-info", "sample_data"])
+        runner.invoke(pytest_cli_command, ["--fixture-info", "sample_data"])
         call_args = mock_run.call_args
         assert_that(call_args.kwargs["tool_options"]).contains(
             "pytest:fixture_info=sample_data",
@@ -51,7 +51,7 @@ def test_test_command_markers() -> None:
     runner = CliRunner()
     with patch("lintro.cli_utils.commands.test.run_lint_tools_simple") as mock_run:
         mock_run.return_value = 0
-        runner.invoke(test_command, ["--markers"])
+        runner.invoke(pytest_cli_command, ["--markers"])
         call_args = mock_run.call_args
         assert_that(call_args.kwargs["tool_options"]).contains(
             "pytest:list_markers=True",
@@ -63,7 +63,7 @@ def test_test_command_parametrize_help() -> None:
     runner = CliRunner()
     with patch("lintro.cli_utils.commands.test.run_lint_tools_simple") as mock_run:
         mock_run.return_value = 0
-        runner.invoke(test_command, ["--parametrize-help"])
+        runner.invoke(pytest_cli_command, ["--parametrize-help"])
         call_args = mock_run.call_args
         assert_that(call_args.kwargs["tool_options"]).contains(
             "pytest:parametrize_help=True",
@@ -76,7 +76,7 @@ def test_test_command_coverage_options() -> None:
     with patch("lintro.cli_utils.commands.test.run_lint_tools_simple") as mock_run:
         mock_run.return_value = 0
         runner.invoke(
-            test_command,
+            pytest_cli_command,
             [
                 "--tool-options",
                 "pytest:coverage_html=htmlcov,pytest:coverage_xml=coverage.xml",
@@ -97,7 +97,7 @@ def test_test_command_multiple_new_flags() -> None:
     with patch("lintro.cli_utils.commands.test.run_lint_tools_simple") as mock_run:
         mock_run.return_value = 0
         runner.invoke(
-            test_command,
+            pytest_cli_command,
             [
                 "--list-plugins",
                 "--markers",
@@ -117,7 +117,7 @@ def test_test_command_tool_options_without_prefix() -> None:
     with patch("lintro.cli_utils.commands.test.run_lint_tools_simple") as mock_run:
         mock_run.return_value = 0
         runner.invoke(
-            test_command,
+            pytest_cli_command,
             ["--tool-options", "verbose=true,tb=long"],
         )
         call_args = mock_run.call_args
@@ -132,7 +132,7 @@ def test_test_command_tool_options_with_prefix() -> None:
     with patch("lintro.cli_utils.commands.test.run_lint_tools_simple") as mock_run:
         mock_run.return_value = 0
         runner.invoke(
-            test_command,
+            pytest_cli_command,
             ["--tool-options", "pytest:verbose=true"],
         )
         call_args = mock_run.call_args
@@ -146,7 +146,7 @@ def test_test_command_tool_options_mixed() -> None:
     with patch("lintro.cli_utils.commands.test.run_lint_tools_simple") as mock_run:
         mock_run.return_value = 0
         runner.invoke(
-            test_command,
+            pytest_cli_command,
             ["--tool-options", "verbose=true,pytest:tb=long"],
         )
         call_args = mock_run.call_args
@@ -160,7 +160,7 @@ def test_test_command_exit_code_success() -> None:
     runner = CliRunner()
     with patch("lintro.cli_utils.commands.test.run_lint_tools_simple") as mock_run:
         mock_run.return_value = 0
-        result = runner.invoke(test_command, [])
+        result = runner.invoke(pytest_cli_command, [])
         assert_that(result.exit_code).is_equal_to(0)
 
 
@@ -169,7 +169,7 @@ def test_test_command_exit_code_failure() -> None:
     runner = CliRunner()
     with patch("lintro.cli_utils.commands.test.run_lint_tools_simple") as mock_run:
         mock_run.return_value = 1
-        result = runner.invoke(test_command, [])
+        result = runner.invoke(pytest_cli_command, [])
         assert_that(result.exit_code).is_equal_to(1)
 
 
@@ -179,7 +179,7 @@ def test_test_command_combined_options() -> None:
     with patch("lintro.cli_utils.commands.test.run_lint_tools_simple") as mock_run:
         mock_run.return_value = 0
         runner.invoke(
-            test_command,
+            pytest_cli_command,
             [
                 ".",
                 "--exclude",

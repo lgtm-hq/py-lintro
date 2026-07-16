@@ -6,4 +6,15 @@
       "tables": false,
     },
   },
+  "ignores": [
+    "lintro/ai/prompts/templates/**",
+  ],
+  "overrides": [
+    {
+      "globs": ["apps/site/src/content/docs/**/*.md"],
+      "config": {
+        "MD025": false,
+      },
+    },
+  ],
 }

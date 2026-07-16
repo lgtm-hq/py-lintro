@@ -1,77 +1,47 @@
 # CI Scripts Directory
 
-This directory contains scripts used by the CI/CD pipeline and local development.
+Scripts invoked by GitHub Actions workflows and local development helpers for CI tasks.
 
 ## Directory Structure
 
 ```bash
 scripts/ci/
-├── deployment/          # Deployment and release scripts
-│   ├── guard-release-commit.sh
-│   ├── pypi-version-exists.sh
-│   ├── pypi-verify-published.sh
-│   ├── sbom-attest-artifacts.sh
-│   ├── sbom-fetch-github-api.sh
-│   ├── sbom-generate-safe.sh
-│   ├── sbom-generate.sh
-│   ├── sbom-install-binary-gh.sh
-│   └── sbom-rename-artifacts.sh
-├── docker/              # Docker-related scripts
-│   ├── docker-build-test.sh
-│   ├── docker-lintro.sh
-│   └── docker-test.sh
-├── github/              # GitHub integration scripts
-│   ├── ci-post-pr-comment.sh
-│   ├── ci-pr-comment.sh
-│   ├── coverage-pr-comment.sh
-│   ├── post-pr-delete-previous.sh
-│   ├── semantic-pr-title-check.sh
-│   └── semantic-release-helpers.sh
-├── maintenance/         # System maintenance and automation
-│   ├── auto-tag-unified.sh
-│   ├── bomctl-help-test.sh
-│   ├── codecov-upload.sh
-│   ├── configure-git-user.sh
-│   ├── egress-audit-lite.sh
-│   ├── ensure-tag-on-main.sh
-│   ├── fail-if-semantic-invalid.sh
-│   ├── fail-on-lint.sh
-│   ├── ghcr_prune_untagged.py
-│   ├── security-audit.sh
-│   ├── semantic_release_compute_next.py
-│   └── validate-action-pinning.sh
-└── testing/             # Test execution and reporting
-    ├── ci-extract-coverage.sh
-    ├── ci-lintro.sh
-    ├── coverage-badge-update.sh
-    ├── enforce-coverage-threshold.sh
-    ├── lintro-report-generate.sh
-    └── reusable-quality-entry.sh
+├── deployment/          # SBOM helpers and PyPI release validation
+├── github/              # PR comment posting and cleanup
+├── homebrew/            # Homebrew formula generation and tap PRs
+├── maintenance/         # GHCR prune, security audit, egress checks
+├── testing/             # Test summaries, image pull helpers
+├── coverage-badge-update.sh  # Wrapper → testing/coverage-badge-update.sh
+├── classify-osv-results.py
+├── format-security-comment.py
+├── security-comment.sh
+└── …                    # Tag/version helpers, manifest sync, etc.
 ```
 
-## Usage
+## Workflow Mapping
 
-These scripts are primarily called by GitHub Actions workflows but can also be used for
-local development:
+| Workflow                      | Scripts                                                                                                                          |
+| ----------------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
+| `test-ci.yml`                 | lgtm-ci reusable (coverage + PR comments)                                                                                        |
+| `docker-ci.yml`               | Fork detect, image pull/load, lgtm-ci quality, test summary, security audit                                                      |
+| `publish-pypi-on-tag.yml`     | lgtm-ci quality/SBOM; `build-artifacts` + PyPI publish + GitHub release                                                          |
+| `pr-comment-cleanup.yml`      | `post-pr-delete-previous.sh`                                                                                                     |
+| `lintro-report-scheduled.yml` | `lintro-report-generate.sh`                                                                                                      |
+| GHCR cleanup (docker-ci)      | `maintenance/delete-ci-ghcr-tags.sh`                                                                                             |
+| GHCR cleanup (scheduled)      | lgtm-ci `reusable-ghcr-cleanup.yml` (`ghcr-cleanup.yml`)                                                                         |
+| Vuln suppression check        | lgtm-ci `reusable-vuln-suppression-check.yml`; local `security/install-osv-scanner.sh` and `security/check-vuln-suppressions.sh` |
 
-- **Deployment scripts**: Handle package publishing, SBOM generation, and release
-  validation
-- **Docker scripts**: Build and test Docker images
-- **GitHub scripts**: Manage PR comments, semantic versioning, and GitHub API
-  interactions
-- **Maintenance scripts**: Automate tagging, security checks, and system maintenance
-- **Testing scripts**: Run tests, generate coverage reports, and update badges
+Release versioning and auto-tagging use lgtm-ci reusable workflows
+(`release-version-pr.yml`, `release-auto-tag.yml`).
+
+## GHCR Cache Tags
+
+BuildKit registry cache is stored on production packages as `:cache` (not separate
+`*-buildcache` repos). Scheduled cleanup uses lgtm-ci `reusable-ghcr-cleanup.yml`, which
+reaps ephemeral `pr-*` / `mq-*` / `dispatch-*` cache exports from `py-lintro` and
+`py-lintro-base` while preserving referenced digests and the permanent `:cache` tag.
 
 ## Local Development
 
-Many scripts can be run locally for development and testing. Check individual script
-headers for usage instructions.
-
-## Adding New Scripts
-
-When adding new scripts:
-
-1. Place them in the appropriate subdirectory based on their primary function
-2. Include a header comment explaining usage and parameters
-3. Make scripts executable (`chmod +x`)
-4. Update this README if adding new subdirectories
+Many scripts support `--help`. Check individual headers for usage. Dogfooding scripts
+expect a built `py-lintro:latest` image locally or in CI.

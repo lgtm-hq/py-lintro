@@ -21,6 +21,7 @@ configuring, and contributing to Lintro.
 **Integration Guides:**
 
 - **[GitHub Integration](github-integration.md)** - CI/CD setup with GitHub Actions
+- **[Pre-commit Integration](pre-commit.md)** - Run lintro as a pre-commit hook
 - **[Tool Analysis](tool-analysis/)** - Detailed tool comparisons and capabilities
 
 ### For Developers
@@ -29,6 +30,8 @@ configuring, and contributing to Lintro.
 
 - **[Contributing Guide](contributing.md)** - Development setup and contribution
   guidelines
+- **[Testing Guide](testing.md)** - Test layout, source mapping, markers, fixtures, and
+  coverage
 
 **Architecture & Vision:**
 
@@ -38,8 +41,12 @@ configuring, and contributing to Lintro.
   success criteria
 - **[Technical Architecture](architecture/ARCHITECTURE.md)** - Design decisions and
   component relationships
+- **[Architecture Decision Records](adr/)** - Discrete, searchable records of key
+  decisions and their rationale
 - **[Roadmap](architecture/ROADMAP.md)** - Prioritized improvements and development
   phases
+- **[Design Documents](design/)** - Design and evaluation docs for larger or exploratory
+  changes
 
 **Reference Documentation:**
 

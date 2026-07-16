@@ -7,6 +7,8 @@ from pydantic import BaseModel, ConfigDict, Field
 from lintro.ai.config import AIConfig
 from lintro.config.enforce_config import EnforceConfig
 from lintro.config.execution_config import ExecutionConfig
+from lintro.config.review_config import ReviewConfig
+from lintro.config.score_config import ScoreConfig
 from lintro.config.tool_config import LintroToolConfig
 
 __all__ = [
@@ -15,6 +17,8 @@ __all__ = [
     "ExecutionConfig",
     "LintroConfig",
     "LintroToolConfig",
+    "ReviewConfig",
+    "ScoreConfig",
 ]
 
 
@@ -37,6 +41,8 @@ class LintroConfig(BaseModel):
         defaults: Fallback configs for tools without native configs.
         tools: Per-tool configuration, keyed by tool name.
         ai: AI-powered features configuration (optional, disabled by default).
+        review: Diff review command configuration (checklist items).
+        score: Health score weights and scale (0-100 metric).
         config_path: Path to the config file (set by loader).
     """
 
@@ -47,6 +53,8 @@ class LintroConfig(BaseModel):
     defaults: dict[str, dict[str, Any]] = Field(default_factory=dict)
     tools: dict[str, LintroToolConfig] = Field(default_factory=dict)
     ai: AIConfig = Field(default_factory=AIConfig)
+    review: ReviewConfig = Field(default_factory=ReviewConfig)
+    score: ScoreConfig = Field(default_factory=ScoreConfig)
     config_path: str | None = None
 
     def get_tool_config(self, tool_name: str) -> LintroToolConfig:

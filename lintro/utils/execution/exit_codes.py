@@ -71,7 +71,9 @@ def aggregate_tool_results(
         action: The action performed (determines which counts to aggregate).
 
     Returns:
-        Tuple of (total_issues, total_fixed, total_remaining).
+        Tuple of (total_issues, total_fixed, total_remaining). In CHECK/TEST
+        mode nothing is fixed, so ``total_remaining`` mirrors ``total_issues``
+        rather than the misleading constant 0.
     """
     total_issues = 0
     total_fixed = 0
@@ -88,5 +90,11 @@ def aggregate_tool_results(
             total_fixed += fixed if fixed is not None else 0
             remaining = getattr(result, "remaining_issues_count", None)
             total_remaining += remaining if remaining is not None else 0
+
+    # Outside FIX mode nothing is fixed; the remaining count is simply the
+    # total issues found. Mirroring it here keeps the check-mode JSON summary
+    # from reporting "total_remaining": 0 alongside a nonzero "total_issues".
+    if action != Action.FIX:
+        total_remaining = total_issues
 
     return total_issues, total_fixed, total_remaining

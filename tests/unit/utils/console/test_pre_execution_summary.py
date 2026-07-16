@@ -9,6 +9,8 @@ from assertpy import assert_that
 from rich.console import Console
 
 from lintro.ai.config import AIConfig
+from lintro.ai.enums import AITransport
+from lintro.ai.registry import AIProvider
 from lintro.utils.console.pre_execution_summary import print_pre_execution_summary
 
 
@@ -36,7 +38,7 @@ def test_pre_execution_summary_shows_ai_when_disabled() -> None:
     output = _render_summary(
         AIConfig(
             enabled=False,
-            provider="openai",  # type: ignore[arg-type]  # Pydantic coerces str
+            provider=AIProvider.OPENAI,
             max_parallel_calls=7,
         ),
     )
@@ -61,7 +63,8 @@ def test_pre_execution_summary_shows_ai_when_enabled(
     output = _render_summary(
         AIConfig(
             enabled=True,
-            provider="anthropic",  # type: ignore[arg-type]  # Pydantic coerces str
+            transport=AITransport.API,
+            provider=AIProvider.ANTHROPIC,
             max_parallel_calls=3,
         ),
     )

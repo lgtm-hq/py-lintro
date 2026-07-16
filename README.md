@@ -10,9 +10,13 @@ A comprehensive CLI tool that unifies various code formatting, linting, and qual
 assurance tools under a single command-line interface.
 </p>
 
+<p align="center">
+<a href="https://lgtm-hq.github.io/py-lintro/">Documentation</a>
+</p>
+
 <!-- Badges: Build & Quality -->
 <p align="center">
-<a href="https://github.com/lgtm-hq/py-lintro/actions/workflows/ci-pipeline.yml?query=branch%3Amain"><img src="https://img.shields.io/github/actions/workflow/status/lgtm-hq/py-lintro/ci-pipeline.yml?label=ci&branch=main&logo=githubactions&logoColor=white" alt="CI"></a>
+<a href="https://github.com/lgtm-hq/py-lintro/actions/workflows/docker-ci.yml?query=branch%3Amain"><img src="https://img.shields.io/github/actions/workflow/status/lgtm-hq/py-lintro/docker-ci.yml?label=ci&branch=main&logo=githubactions&logoColor=white" alt="CI"></a>
 <a href="https://github.com/lgtm-hq/py-lintro/actions/workflows/docker-build-publish.yml?query=branch%3Amain"><img src="https://img.shields.io/github/actions/workflow/status/lgtm-hq/py-lintro/docker-build-publish.yml?label=docker&logo=docker&branch=main" alt="Docker"></a>
 <a href="https://codecov.io/gh/lgtm-hq/py-lintro"><img src="https://codecov.io/gh/lgtm-hq/py-lintro/branch/main/graph/badge.svg" alt="Coverage"></a>
 </p>
@@ -38,7 +42,10 @@ assurance tools under a single command-line interface.
 ## 🚀 Quick Start
 
 ```bash
-uv pip install lintro              # Install (or: pip install lintro)
+# Install (choose one)
+uv pip install lintro              # Python / PyPI (or: pip install lintro)
+bun add -g @lgtm-hq/lintro         # Node / npm — self-contained, no Python
+
 lintro check .                     # Find issues (alias: chk)
 lintro format .                    # Fix issues (alias: fmt)
 lintro check --output-format grid  # Beautiful output
@@ -67,7 +74,7 @@ migration required.
   everywhere
 - **Fallback defaults when needed** - Tools without native configs use sensible defaults
 
-See the [Configuration Guide](docs/configuration.md) for details on the 4-tier config
+See the [Configuration Guide](docs/configuration.md) for details on the 5-tier config
 system.
 
 ## 🛠️ Supported Tools
@@ -93,6 +100,12 @@ system.
 <td><code>rustup component add clippy</code></td>
 </tr>
 <tr>
+<td><a href="https://commitlint.js.org/"><img src="https://img.shields.io/badge/commitlint-f7b93e?logo=commitlint&logoColor=black" alt="commitlint"></a></td>
+<td>🔀 Git commits</td>
+<td>-</td>
+<td><code>bun add -g @commitlint/cli @commitlint/config-conventional</code><br><code>brew install commitlint</code></td>
+</tr>
+<tr>
 <td><a href="https://github.com/hadolint/hadolint"><img src="https://img.shields.io/badge/Hadolint-2496ED?logo=docker&logoColor=white" alt="Hadolint"></a></td>
 <td>🐳 Dockerfile</td>
 <td>-</td>
@@ -103,6 +116,12 @@ system.
 <td>📝 Markdown</td>
 <td>-</td>
 <td><code>bun add -g markdownlint-cli2</code><br><code>npm install -g markdownlint-cli2</code></td>
+</tr>
+<tr>
+<td><a href="https://vale.sh/"><img src="https://img.shields.io/badge/Vale-2ea44f?logo=markdown&logoColor=white" alt="Vale"></a></td>
+<td>📝 Prose / Docs</td>
+<td>-</td>
+<td><code>brew install vale</code><br><a href="https://github.com/errata-ai/vale/releases">GitHub Releases</a></td>
 </tr>
 <tr>
 <td><a href="https://oxc.rs/"><img src="https://img.shields.io/badge/Oxlint-e05d44?logo=javascript&logoColor=white" alt="Oxlint"></a></td>
@@ -177,6 +196,18 @@ system.
 <td>🧾 TOML</td>
 <td>✅</td>
 <td><code>brew install taplo</code><br><a href="https://github.com/tamasfe/taplo/releases">GitHub Releases</a></td>
+</tr>
+<tr>
+<td><a href="https://dotenv-linter.github.io/"><img src="https://img.shields.io/badge/dotenv--linter-ecd53f?logo=dotenv&logoColor=black" alt="dotenv-linter"></a></td>
+<td>🔑 .env Files</td>
+<td>✅</td>
+<td><code>brew install dotenv-linter</code><br><a href="https://github.com/dotenv-linter/dotenv-linter/releases">GitHub Releases</a></td>
+</tr>
+<tr>
+<td><a href="https://stylelint.io/"><img src="https://img.shields.io/badge/Stylelint-263238?logo=stylelint&logoColor=white" alt="Stylelint"></a></td>
+<td>🎨 CSS/SCSS/Sass/Less</td>
+<td>✅</td>
+<td><code>bun add -g stylelint</code><br><code>npm install -g stylelint</code></td>
 </tr>
 <tr><th colspan="4">Type Checkers</th></tr>
 <tr>
@@ -327,6 +358,11 @@ lintro check --tools tsc --auto-install
 # Exclude directories
 lintro check --exclude "node_modules,dist,venv"
 
+# Only scan files changed vs a git base ref (fast PR-scoped checks)
+lintro check --diff              # vs the repo default branch (origin/HEAD)
+lintro check --diff main         # vs an explicit ref
+lintro format --diff             # format only changed files
+
 # List available tools
 lintro list-tools
 ```
@@ -353,6 +389,7 @@ docker run --rm -v $(pwd):/code ghcr.io/lgtm-hq/py-lintro-base:latest check
 | [AI Features](docs/ai-features.md)               | AI summaries, fix suggestions, config   |
 | [Docker Usage](docs/docker.md)                   | Containerized development               |
 | [GitHub Integration](docs/github-integration.md) | CI/CD setup, workflows                  |
+| [Pre-commit Integration](docs/pre-commit.md)     | Run lintro as a pre-commit hook         |
 | [Contributing](docs/contributing.md)             | Development guide, adding tools         |
 | [Troubleshooting](docs/troubleshooting.md)       | Common issues and solutions             |
 
