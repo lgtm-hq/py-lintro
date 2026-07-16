@@ -266,7 +266,7 @@
     },
     {
       "name": "prettier",
-      "version": "3.9.4",
+      "version": "3.9.5",
       "install": {
         "type": "npm",
         "package": "prettier"
