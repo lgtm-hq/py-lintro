@@ -57,6 +57,11 @@ if [[ -n "${GITHUB_OUTPUT:-}" ]]; then
 	echo "sha256=$SHA" >>"$GITHUB_OUTPUT"
 fi
 
-SIZE_HUMAN="$(ls -lh "$TARGET" | awk '{print $5}')"
+if command -v stat >/dev/null 2>&1; then
+	SIZE_BYTES="$(stat -f %z "$TARGET" 2>/dev/null || stat -c %s "$TARGET")"
+	SIZE_HUMAN="${SIZE_BYTES} bytes"
+else
+	SIZE_HUMAN="$(ls -lh "$TARGET" | awk '{print $5}')"
+fi
 log_info "SHA256 for ${LABEL}: $SHA"
 log_success "Finalized ${TARGET}: size=${SIZE_HUMAN} sha256=${SHA}"
