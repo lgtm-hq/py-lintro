@@ -4,6 +4,10 @@
 
 set -euo pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=../utils/utils.sh disable=SC1091
+source "$SCRIPT_DIR/../utils/utils.sh"
+
 if [[ "${1:-}" == "--help" || "${1:-}" == "-h" || $# -lt 1 ]]; then
 	cat <<'EOF'
 Verify a built lintro binary before packaging.
@@ -19,7 +23,7 @@ fi
 BINARY="$1"
 
 if [[ ! -f "$BINARY" ]]; then
-	echo "Binary not found: $BINARY" >&2
+	log_error "Binary not found: $BINARY"
 	exit 1
 fi
 

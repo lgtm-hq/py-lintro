@@ -83,20 +83,11 @@ if ! _load_bats_library "assert"; then
 fi
 
 setup_temp_dir() {
-	if [[ -z "${BATS_TEST_TMPDIR:-}" ]]; then
-		local tmpdir
-		if ! tmpdir="$(mktemp -d "${TMPDIR:-/tmp}/bats-test.XXXXXXXXXX")"; then
-			echo "# Failed to create BATS temp directory" >&2
-			return 1
-		fi
-		export BATS_TEST_TMPDIR="${tmpdir}"
-	fi
+	: "${BATS_TEST_TMPDIR:?BATS_TEST_TMPDIR must be set by BATS}"
 }
 
 teardown_temp_dir() {
-	if [[ -n "${BATS_TEST_TMPDIR:-}" ]] && [[ -d "${BATS_TEST_TMPDIR}" ]]; then
-		rm -rf "${BATS_TEST_TMPDIR}"
-	fi
+	:
 }
 
 setup_github_env() {
