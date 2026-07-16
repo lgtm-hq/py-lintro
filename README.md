@@ -76,7 +76,7 @@ migration required.
   everywhere
 - **Fallback defaults when needed** - Tools without native configs use sensible defaults
 
-See the [Configuration Guide](docs/configuration.md) for details on the 4-tier config
+See the [Configuration Guide](docs/configuration.md) for details on the 5-tier config
 system.
 
 ## 🛠️ Supported Tools

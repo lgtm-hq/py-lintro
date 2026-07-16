@@ -21,6 +21,138 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.80.4] - 2026-07-16
+
+### Changed
+
+- **docker**: pin BuildKit syntax frontend by digest (#1384) (b183963)
+- **deps**: update ghcr.io/lgtm-hq/lintro-tools:latest docker digest to 0024f54 (#1438)
+  (7c191f7)
+- **deps**: hold prettier >3.9.4 in Renovate (#1437) (7dc2c08)
+- **deps**: update ghcr.io/lgtm-hq/lintro-tools:latest docker digest to fb89bff (#1435)
+  (bf2e4bf)
+- **deps**: update dependency rust-lang/rust to 1.97.1 (patch) (#1429) (f921f80)
+- **deps**: hold TypeScript 7 and js-yaml 5 in Renovate (#1436) (c92445e)
+- **deps**: migrate apps/site to Astro 7 and Vite 8 (#1428) (56181e0)
+
+### Fixed
+
+- **ai/review**: preserve Findings in section-aware _cap_body truncation (#1334)
+  (f3d98f2)
+
+## [0.80.3] - 2026-07-16
+
+### Changed
+
+- **deps**: ignore Renovate bumps for lintro npm placeholders (#1426) (f93c8d8)
+- **deps**: update dependency astral-sh/uv to 0.11.29 (patch) (#1427) (25a7978)
+- **deps**: update ubuntu:latest docker digest to 651ba3f (#1414) (cd97660)
+- **deps**: update ghcr.io/lgtm-hq/lintro-tools:latest docker digest to 90978e9 (#1395)
+  (f81d76d)
+- **deps**: update all major dependencies (major) (#1402) (24faad8)
+- **deps**: update rust toolchain to 1.97.0 (minor) (#1397) (9237163)
+- **deps**: update dependency yaml to 2.9.0 (minor) (#1396) (8134abd)
+- **deps**: update dependency google/osv-scanner to 2.4.0 (minor) (#1303) (9942f74)
+- **deps**: update python:3.14-slim docker digest to d3400aa (#1393) (4a32469)
+- **deps**: update ghcr.io/lgtm-hq/lintro-tools:latest docker digest to 45aa715 (#1392)
+  (a04dcf5)
+- **deps**: pin docker/dockerfile docker tag to 87999aa (#1391) (df821a1)
+- **deps**: pin dependencies (#1254) (ce73c19)
+- **deps**: update dependency rust-lang/rustfmt to 1.9.0 (minor) (#1310) (1882c7d)
+- **deps**: update actions/cache to v6.1.0 (major) (major) (#916) (b94b0f9)
+- **deps**: update github-actions (#1295) (0f1da6a)
+
+### Fixed
+
+- **tools**: pin TypeScript to 6.0.3 for Astro CLI verify (#1431) (ceb6ef1)
+
+## [0.80.2] - 2026-07-14
+
+### Changed
+
+- **release**: dispatch Homebrew updates to the tap (#1380) (04ac4dc)
+- **ci**: unify lgtm-ci pin at v0.54.0 (#1377) (5670fc7)
+
+### Fixed
+
+- **ci**: Renovate tool-pin bumps break generated-versions check (#1387) (510bd10)
+
+## [0.80.1] - 2026-07-14
+
+### Changed
+
+- **ci**: invert docker-ci path filter to deny-by-default skip-list with drift test
+  (#1373) (7aa0d36)
+
+### Fixed
+
+- **test**: bump osv clean sample to setuptools 83.0.0 (#1375) (3d482e3)
+
+## [0.80.0] - 2026-07-14
+
+### Added
+
+- **docker**: build full image FROM published lintro-tools base (#1367) (294f252)
+- **docker**: publish lintro-tools base image with digest-pinned FROM (#1364) (ef9e24b)
+
+### Changed
+
+- **ci**: skip heavy CI on auto version-bump PRs (#1371) (fb5676e)
+- **ci**: changed-files dogfood lint on PRs with full-lint fallback and nightly full run
+  (#1370) (703fa15)
+- **ci**: promote docker images by digest instead of rebuilding in publish (#1368)
+  (cd2e9fb)
+- **ci**: add path filters to docker-ci and test-ci with always-green gates (#1363)
+  (d9ee7cf)
+
+### Fixed
+
+- **ci**: allow timestamp.sigstore.dev egress in lintro-tools publish (#1366) (5c748cb)
+
+## [0.79.4] - 2026-07-13
+
+### Fixed
+
+- **pytest**: honor zero coverage threshold and guard pyproject parsing (#1333)
+  (7d61362)
+
+## [0.79.3] - 2026-07-13
+
+### Fixed
+
+- **config**: address unresolved #1267 review threads (#1354) (dca09af)
+
+## [0.79.2] - 2026-07-13
+
+### Fixed
+
+- **ci**: sync vuln-suppression workflow pin assertion (#1341) (c7208ac)
+- **ci**: harden vuln suppression install against curl exit 23 (#1328) (0d9923d)
+
+## [0.79.1] - 2026-07-13
+
+### Changed
+
+- **security**: verify ANTHROPIC_API_KEY exposure ordering for dogfood AI review (#1325)
+  (c5caf17)
+
+### Fixed
+
+- **ci**: restore OpenSSF Scorecard webapp publish (#1331) (298fb34)
+
+## [0.79.0] - 2026-07-13
+
+### Added
+
+- **config**: split ai.enabled into ai.lint / ai.review toggles (#1267) (d1ceac6)
+
+### Changed
+
+- **config**: reconcile configuration docs with runtime (#1275) (9f2c7d6)
+- **config**: derive tool-section filter from tool registry (#1257) (2520c01)
+- **node**: bump Node.js to 24 LTS everywhere it's pinned (#1271) (68c9ff3)
+- **renovate**: drop package rules redundant with org preset (#1263) (707f758)
+
 ## [0.78.2] - 2026-07-12
 
 ### Changed
