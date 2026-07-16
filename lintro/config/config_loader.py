@@ -408,7 +408,11 @@ def _parse_deps_config(data: Any) -> DepsConfig:
         DepsConfig: Parsed dependency policy configuration.
 
     Raises:
-        ValueError: When the deps section is not a mapping.
+        ValueError: When the deps section is not a mapping, or contains an
+            unknown key. Because ``deps`` gates dependency-spec enforcement, a
+            misspelled key (for example ``pollicy`` for ``policy``) must fail
+            loudly rather than silently fall back to the default policy and let
+            specs that should fail pass in CI.
     """
     if data is None:
         return DepsConfig()
@@ -421,12 +425,13 @@ def _parse_deps_config(data: Any) -> DepsConfig:
     known_fields = set(DepsConfig.model_fields)
     unknown = set(data) - known_fields
     if unknown:
-        logger.warning(
-            "Unknown deps config keys ignored: {}",
-            ", ".join(sorted(unknown)),
+        known = ", ".join(sorted(known_fields))
+        msg = (
+            f"Unknown deps config key(s): {', '.join(sorted(unknown))}. "
+            f"Valid keys are: {known}"
         )
-    filtered = {key: value for key, value in data.items() if key in known_fields}
-    return DepsConfig(**filtered)
+        raise ValueError(msg)
+    return DepsConfig(**data)
 
 
 def _parse_score_config(data: Any) -> ScoreConfig:
