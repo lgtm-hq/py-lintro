@@ -21,6 +21,32 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.80.3] - 2026-07-16
+
+### Changed
+
+- **deps**: ignore Renovate bumps for lintro npm placeholders (#1426) (f93c8d8)
+- **deps**: update dependency astral-sh/uv to 0.11.29 (patch) (#1427) (25a7978)
+- **deps**: update ubuntu:latest docker digest to 651ba3f (#1414) (cd97660)
+- **deps**: update ghcr.io/lgtm-hq/lintro-tools:latest docker digest to 90978e9 (#1395)
+  (f81d76d)
+- **deps**: update all major dependencies (major) (#1402) (24faad8)
+- **deps**: update rust toolchain to 1.97.0 (minor) (#1397) (9237163)
+- **deps**: update dependency yaml to 2.9.0 (minor) (#1396) (8134abd)
+- **deps**: update dependency google/osv-scanner to 2.4.0 (minor) (#1303) (9942f74)
+- **deps**: update python:3.14-slim docker digest to d3400aa (#1393) (4a32469)
+- **deps**: update ghcr.io/lgtm-hq/lintro-tools:latest docker digest to 45aa715 (#1392)
+  (a04dcf5)
+- **deps**: pin docker/dockerfile docker tag to 87999aa (#1391) (df821a1)
+- **deps**: pin dependencies (#1254) (ce73c19)
+- **deps**: update dependency rust-lang/rustfmt to 1.9.0 (minor) (#1310) (1882c7d)
+- **deps**: update actions/cache to v6.1.0 (major) (major) (#916) (b94b0f9)
+- **deps**: update github-actions (#1295) (0f1da6a)
+
+### Fixed
+
+- **tools**: pin TypeScript to 6.0.3 for Astro CLI verify (#1431) (ceb6ef1)
+
 ## [0.80.2] - 2026-07-14
 
 ### Changed
