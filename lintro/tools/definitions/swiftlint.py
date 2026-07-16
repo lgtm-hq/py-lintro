@@ -167,7 +167,7 @@ class SwiftlintPlugin(BaseToolPlugin):
             if not success and not issues:
                 return FileProcessingResult(
                     success=False,
-                    output=output,
+                    output=proc.output,
                     issues=[],
                 )
             return FileProcessingResult(
