@@ -23,7 +23,7 @@ concurrency:
 jobs:
   version-pr:
     # yamllint disable-line rule:line-length
-    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-release-version-pr.yml@1014e3d7d5441a63215d2096545a46cff6de101c # v0.48.0
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-release-version-pr.yml@31c25ef2e8992960e218524780e34f44f51271b5 # v0.54.0
     with:
       ecosystems: python
       auto-merge: true
@@ -33,11 +33,26 @@ jobs:
       # PRs pass dogfooding-lint without CHANGELOG.md being ignored (#1117).
       # Shell/format logic lives in the dedicated script, not an inline run.
       version-update-script: scripts/ci/format-changelog.py
-      tooling-ref: '1014e3d7d5441a63215d2096545a46cff6de101c' # v0.48.0
+      tooling-ref: '31c25ef2e8992960e218524780e34f44f51271b5' # v0.54.0
       egress-policy: block
       # Paired with release-auto-tag.yml (egress-preset: github-tooling).
       # Guarded by test_release_workflows_use_paired_egress_presets.
       egress-preset: pypi
+      # Since lgtm-ci v0.50.0 the enforcing harden-runner step runs before
+      # preset resolution, so the preset's extra hosts never reach it and
+      # pip is blocked from PyPI (#1287, lgtm-hq/lgtm-ci#512). Pass the
+      # complete list explicitly; harden-runner splits on spaces, so keep
+      # the folded scalar.
+      allowed-endpoints: >-
+        github.com:443
+        api.github.com:443
+        codeload.github.com:443
+        objects.githubusercontent.com:443
+        raw.githubusercontent.com:443
+        uploads.github.com:443
+        pipelines.actions.githubusercontent.com:443
+        pypi.org:443
+        files.pythonhosted.org:443
     secrets:
       RELEASE_APP_ID: ${{ secrets.RELEASE_APP_ID }}
       RELEASE_APP_PRIVATE_KEY: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}

@@ -43,6 +43,31 @@ else:
 	echo "$version"
 }
 
+# Resolve a tool's minimum compatible version from manifest.json.
+# Falls back to the recommended version when min_version is unset.
+get_tool_min_version() {
+	local tool_name="$1"
+	local min_version
+	min_version=$(python3 -c "
+import json
+import sys
+
+with open('$PROJECT_ROOT/lintro/tools/manifest.json') as fh:
+    data = json.load(fh)
+for tool in data['tools']:
+    if tool['name'] == sys.argv[1]:
+        print(tool.get('min_version') or tool['version'])
+        break
+else:
+    sys.exit(1)
+" "$tool_name" 2>/dev/null)
+	if [ -z "$min_version" ]; then
+		echo "ERROR: Minimum version for '$tool_name' not found in manifest.json" >&2
+		return 1
+	fi
+	echo "$min_version"
+}
+
 # Show help if requested
 if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
 	cat <<'EOF'
@@ -82,6 +107,7 @@ This script installs:
   - Semgrep (Security scanner)
   - ShellCheck (Shell script linter)
   - shfmt (Shell script formatter)
+  - dotenv-linter (.env file linter and fixer)
   - SQLFluff (SQL linter and formatter)
   - Taplo (TOML linter and formatter)
   - Vale (Prose/documentation linter)
@@ -168,9 +194,9 @@ should_install() {
 # Kept in sync with the should_install blocks and tools_to_verify array.
 SUPPORTED_TOOLS=(
 	"actionlint" "astro" "bandit" "black" "cargo-audit" "cargo-deny"
-	"clippy" "commitlint" "cppcheck" "gitleaks" "hadolint" "markdownlint" "markdownlint-cli2" "mypy" "osv-scanner"
+	"clippy" "commitlint" "cppcheck" "dotenv-linter" "gitleaks" "hadolint" "markdownlint" "markdownlint-cli2" "mypy" "osv-scanner"
 	"oxfmt" "oxlint" "prettier" "pydoclint" "ruff" "rustfmt" "semgrep"
-	"shellcheck" "shfmt" "sqlfluff" "svelte-check" "taplo" "tsc"
+	"shellcheck" "shfmt" "sqlfluff" "stylelint" "svelte-check" "taplo" "tsc"
 	"vale" "vue-tsc" "yamllint"
 )
 
@@ -1205,6 +1231,7 @@ main() {
 	if should_install "cppcheck"; then
 		echo -e "${BLUE}Installing cppcheck...${NC}"
 		CPPCHECK_VERSION=$(get_tool_version "cppcheck") || exit 1
+		CPPCHECK_MIN_VERSION=$(get_tool_min_version "cppcheck") || exit 1
 		if [ $DRY_RUN -eq 1 ]; then
 			log_info "[DRY-RUN] Would install cppcheck v${CPPCHECK_VERSION}"
 		elif command -v cppcheck &>/dev/null; then
@@ -1235,6 +1262,23 @@ main() {
 		else
 			echo -e "${RED}✗ Cannot install cppcheck automatically; install via your package manager.${NC}"
 			exit 1
+		fi
+		# Package managers (notably apt) may provide a cppcheck older than the
+		# minimum lintro supports. Reject it here with an upgrade hint instead of
+		# reporting a successful install that the runtime version check rejects.
+		if [ $DRY_RUN -eq 0 ] && command -v cppcheck &>/dev/null; then
+			cppcheck_installed_version=$(cppcheck --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+(\.[0-9]+)?' | head -1)
+			if [ -n "$cppcheck_installed_version" ]; then
+				if version_ge "$cppcheck_installed_version" "$CPPCHECK_MIN_VERSION"; then
+					echo -e "${GREEN}✓ cppcheck v${cppcheck_installed_version} (>= v${CPPCHECK_MIN_VERSION})${NC}"
+				else
+					echo -e "${RED}✗ cppcheck v${cppcheck_installed_version} is older than the required minimum v${CPPCHECK_MIN_VERSION}.${NC}"
+					echo -e "${RED}  Upgrade cppcheck (brew upgrade cppcheck, a newer apt source, or build from source) and re-run.${NC}"
+					exit 1
+				fi
+			else
+				echo -e "${YELLOW}⚠ Could not determine cppcheck version; skipping minimum-version check.${NC}"
+			fi
 		fi
 	fi # cppcheck
 
@@ -1305,6 +1349,72 @@ main() {
 		fi
 	fi # end shellcheck block
 
+	if should_install "dotenv-linter"; then
+		# Install dotenv-linter (.env file linter and fixer)
+		echo -e "${BLUE}Installing dotenv-linter...${NC}"
+		DOTENV_LINTER_VERSION=$(get_tool_version "dotenv-linter") || exit 1
+
+		# Helper function for dotenv-linter binary installation
+		install_dotenv_linter_binary() {
+			local tmpdir
+			tmpdir=$(mktemp -d)
+			local os arch tar_url
+			os=$(uname -s | tr '[:upper:]' '[:lower:]')
+			arch=$(uname -m)
+			# dotenv-linter uses aarch64 on linux but arm64 on darwin
+			case "$os" in
+			darwin)
+				case "$arch" in
+				x86_64 | amd64) arch="x86_64" ;;
+				aarch64 | arm64) arch="arm64" ;;
+				esac
+				;;
+			*)
+				case "$arch" in
+				x86_64 | amd64) arch="x86_64" ;;
+				aarch64 | arm64) arch="aarch64" ;;
+				esac
+				;;
+			esac
+			tar_url="https://github.com/dotenv-linter/dotenv-linter/releases/download/v${DOTENV_LINTER_VERSION}/dotenv-linter-${os}-${arch}.tar.gz"
+			if download_with_retries "$tar_url" "$tmpdir/dotenv-linter.tar.gz" 3; then
+				tar -xzf "$tmpdir/dotenv-linter.tar.gz" -C "$tmpdir"
+				cp "$tmpdir/dotenv-linter" "$BIN_DIR/dotenv-linter"
+				chmod +x "$BIN_DIR/dotenv-linter"
+				rm -rf "$tmpdir"
+				return 0
+			else
+				rm -rf "$tmpdir"
+				return 1
+			fi
+		}
+
+		if [ $DRY_RUN -eq 1 ]; then
+			log_info "[DRY-RUN] Would install dotenv-linter v${DOTENV_LINTER_VERSION}"
+		elif command -v dotenv-linter &>/dev/null; then
+			# Check if installed version meets minimum requirement
+			installed_version=$(dotenv-linter --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)
+			if [ -n "$installed_version" ] && version_ge "$installed_version" "$DOTENV_LINTER_VERSION"; then
+				echo -e "${GREEN}✓ dotenv-linter v${installed_version} already installed (>= v${DOTENV_LINTER_VERSION})${NC}"
+			else
+				echo -e "${YELLOW}⚠ Installing dotenv-linter v${DOTENV_LINTER_VERSION}...${NC}"
+				if install_dotenv_linter_binary; then
+					echo -e "${GREEN}✓ dotenv-linter installed successfully${NC}"
+				else
+					echo -e "${RED}✗ Failed to download dotenv-linter${NC}"
+					exit 1
+				fi
+			fi
+		else
+			if install_dotenv_linter_binary; then
+				echo -e "${GREEN}✓ dotenv-linter installed successfully${NC}"
+			else
+				echo -e "${RED}✗ Failed to download dotenv-linter${NC}"
+				exit 1
+			fi
+		fi
+	fi # end dotenv-linter block
+
 	if should_install "oxlint"; then
 		# Install oxlint via bun (JavaScript/TypeScript linting)
 		echo -e "${BLUE}Installing oxlint...${NC}"
@@ -1343,6 +1453,25 @@ main() {
 			exit 1
 		fi
 	fi # oxfmt
+
+	if should_install "stylelint"; then
+		# Install stylelint via bun (CSS/SCSS/Less linting)
+		echo -e "${BLUE}Installing stylelint...${NC}"
+
+		if ! ensure_bun_installed; then
+			exit 1
+		fi
+
+		STYLELINT_VERSION=$(get_tool_version "stylelint") || exit 1
+		if [ $DRY_RUN -eq 1 ]; then
+			log_info "[DRY-RUN] Would install stylelint@${STYLELINT_VERSION} globally via bun"
+		elif bun add -g "stylelint@${STYLELINT_VERSION}"; then
+			echo -e "${GREEN}✓ stylelint@${STYLELINT_VERSION} installed successfully${NC}"
+		else
+			echo -e "${RED}✗ Failed to install stylelint${NC}"
+			exit 1
+		fi
+	fi # stylelint
 
 	if should_install "yamllint"; then
 		# Install yamllint (Python package)
@@ -1565,6 +1694,7 @@ main() {
 		["cargo-deny"]="Rust dependency license/advisory checking"
 		["clippy"]="Rust linting"
 		["cppcheck"]="C/C++ static analysis"
+		["dotenv-linter"]=".env file linting and fixing"
 		["gitleaks"]="Secret detection"
 		["hadolint"]="Docker linting"
 		["markdownlint"]="Markdown linting"
@@ -1580,6 +1710,7 @@ main() {
 		["shellcheck"]="Shell script linting"
 		["shfmt"]="Shell script formatting"
 		["sqlfluff"]="SQL linting and formatting"
+		["stylelint"]="CSS/SCSS/Less linting"
 		["svelte-check"]="Svelte type checking"
 		["taplo"]="TOML linting and formatting"
 		["tsc"]="TypeScript type checking"
@@ -1597,7 +1728,7 @@ main() {
 	# Verify installations
 	echo -e "${YELLOW}Verifying installations...${NC}"
 
-	tools_to_verify=("actionlint" "astro" "bandit" "black" "cargo-audit" "cargo-deny" "clippy" "commitlint" "cppcheck" "rustfmt" "gitleaks" "hadolint" "markdownlint-cli2" "mypy" "osv-scanner" "oxfmt" "oxlint" "prettier" "pydoclint" "ruff" "semgrep" "shellcheck" "shfmt" "sqlfluff" "svelte-check" "taplo" "tsc" "vale" "vue-tsc" "yamllint")
+	tools_to_verify=("actionlint" "astro" "bandit" "black" "cargo-audit" "cargo-deny" "clippy" "commitlint" "cppcheck" "dotenv-linter" "gitleaks" "hadolint" "markdownlint-cli2" "mypy" "osv-scanner" "oxfmt" "oxlint" "prettier" "pydoclint" "ruff" "rustfmt" "semgrep" "shellcheck" "shfmt" "sqlfluff" "stylelint" "svelte-check" "taplo" "tsc" "vale" "vue-tsc" "yamllint")
 
 	# Filter verification list when --tools is set.
 	# Map aliases so e.g. --tools markdownlint verifies markdownlint-cli2.

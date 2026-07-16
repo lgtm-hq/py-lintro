@@ -76,6 +76,21 @@ _FOOTER = (
 
 _MENTION_RE = re.compile(r"(?<![\w/@.-])@(?=[A-Za-z0-9])")
 
+_RUN_MECHANICS_RE = re.compile(
+    r"\n\n<details><summary>⚙️ Run mechanics[\s\S]*?</details>",
+)
+_PREVIOUS_RUNS_RE = re.compile(
+    r"\n\n<details><summary>🕔 Previous runs[\s\S]*?</details>",
+)
+_CHECKLIST_APPENDIX_RE = re.compile(
+    r"\n### Cleared checks \(\d+\)[\s\S]*?(?=\n\n<details><summary>|\Z)",
+)
+_FINDINGS_SECTION_RE = re.compile(
+    r"(\n### Findings(?: \(\d+\))?)([\s\S]*?)"
+    r"(\n\*\*Structured checks:\*\* \d+[\s\S]*?(?=\n\n<details><summary>|\Z)|\Z)",
+)
+_FINDING_BLOCK_START_RE = re.compile(r"(?=\n\n[🔴🟠🟡] \*\*P[123]\*\*)")
+
 
 def sanitize_comment_text(text: str, *, limit: int | None = None) -> str:
     """Neutralize untrusted model output for safe rendering in a PR comment.
@@ -648,13 +663,110 @@ def _format_previous_runs(*, runs: list[dict[str, Any]]) -> str:
     return "\n".join(lines)
 
 
+def _elide_low_value_sections(*, body: str) -> str:
+    """Drop collapsible boilerplate before touching the Findings section.
+
+    Args:
+        body: Sticky comment body without the state block.
+
+    Returns:
+        Body with lower-priority sections removed when over the cap.
+    """
+    trimmed = body
+    for pattern in (_PREVIOUS_RUNS_RE, _RUN_MECHANICS_RE, _CHECKLIST_APPENDIX_RE):
+        if len(trimmed) <= MAX_COMMENT_CHARS:
+            break
+        trimmed = pattern.sub("", trimmed, count=1)
+    footer = f"\n\n{_FOOTER}"
+    if len(trimmed) > MAX_COMMENT_CHARS and trimmed.endswith(footer):
+        trimmed = trimmed[: -len(footer)]
+    return trimmed
+
+
+def _findings_omission_marker(*, dropped: int) -> str:
+    """Render the explicit marker when findings are dropped by ``_cap_body``."""
+    return (
+        f"\n\n> ✂️ **{dropped} finding(s) omitted** to fit "
+        "GitHub's size limit — see the workflow run log for the full list."
+    )
+
+
+def _cap_findings_section(*, body: str) -> str:
+    """Preserve the Findings header and trim finding blocks from the tail.
+
+    Args:
+        body: Sticky comment body that is still over ``MAX_COMMENT_CHARS``.
+
+    Returns:
+        Body with as many finding blocks as fit and an explicit omission marker
+        when any findings were dropped.
+    """
+    match = _FINDINGS_SECTION_RE.search(body)
+    if not match:
+        return body
+
+    prefix = body[: match.start()]
+    findings_header = match.group(1)
+    findings_body = match.group(2)
+    suffix = match.group(3)
+
+    blocks = [
+        block for block in _FINDING_BLOCK_START_RE.split(findings_body) if block.strip()
+    ]
+    if not blocks:
+        return body
+
+    assembled_header = prefix + findings_header
+    kept: list[str] = []
+    for _index, block in enumerate(blocks):
+        trial_kept = kept + [block]
+        dropped = len(blocks) - len(trial_kept)
+        omission = _findings_omission_marker(dropped=dropped) if dropped else ""
+        trial = assembled_header + "".join(trial_kept) + omission + suffix
+        if len(trial) <= MAX_COMMENT_CHARS:
+            kept = trial_kept
+        elif not kept:
+            # Always retain at least one finding block even when oversized.
+            kept = [block]
+            break
+        else:
+            break
+
+    dropped = len(blocks) - len(kept)
+    omission = _findings_omission_marker(dropped=dropped) if dropped else ""
+    return assembled_header + "".join(kept) + omission + suffix
+
+
 def _cap_body(*, body: str) -> str:
-    """Truncate an over-long comment body, appending a notice."""
+    """Truncate an over-long comment body, preserving Findings preferentially.
+
+    When the assembled sticky comment still exceeds ``MAX_COMMENT_CHARS`` after
+    upstream budgeting, lower-value sections (previous runs, run mechanics,
+    checklist appendix, footer) are elided first. If the body is still over the
+    cap, finding blocks are trimmed from the tail with an explicit omission
+    marker rather than blunt tail truncation that can silently drop Findings.
+
+    Args:
+        body: Sticky comment body without the state block.
+
+    Returns:
+        Body trimmed to ``MAX_COMMENT_CHARS`` with explicit markers when content
+        was dropped.
+    """
     if len(body) <= MAX_COMMENT_CHARS:
         return body
+
+    trimmed = _elide_low_value_sections(body=body)
+    if len(trimmed) <= MAX_COMMENT_CHARS:
+        return trimmed
+
+    capped = _cap_findings_section(body=trimmed)
+    if len(capped) <= MAX_COMMENT_CHARS:
+        return capped
+
     notice = "\n\n> ✂️ Comment truncated to fit GitHub's size limit."
     keep = MAX_COMMENT_CHARS - len(notice)
-    return body[:keep].rstrip() + notice
+    return capped[:keep].rstrip() + notice
 
 
 def parse_review_state(*, body: str) -> list[dict[str, Any]]:

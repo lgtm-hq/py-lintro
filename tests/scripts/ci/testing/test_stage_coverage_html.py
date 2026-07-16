@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
-import subprocess
+import subprocess  # nosec B404 - subprocess used with fixed argv in controlled tests
 from pathlib import Path
 from typing import Any
 
@@ -97,7 +97,7 @@ def test_stage_script_uses_coverage_json(
     (script_dir / "stage-python-coverage-html.sh").chmod(0o755)
     (fake_root / "coverage-report").symlink_to(report)
 
-    result = subprocess.run(
+    result = subprocess.run(  # nosec B603 - fixed argv run against a real binary in a controlled test; shell=False, no user shell input
         [str(script_dir / "stage-python-coverage-html.sh")],
         cwd=fake_root,
         capture_output=True,

@@ -226,4 +226,4 @@ def test_builtin_definitions_path_is_directory() -> None:
 
 def test_entry_point_group_value() -> None:
     """Entry point group is correct."""
-    assert_that(ENTRY_POINT_GROUP).is_equal_to("lintro.plugins")
+    assert_that(ENTRY_POINT_GROUP).is_equal_to("lintro.tools")
