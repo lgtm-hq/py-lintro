@@ -290,6 +290,7 @@ def _write_artifacts(
     total_fixed: int,
     *,
     warn_func: Any = None,
+    profile_data: dict[str, Any] | None = None,
 ) -> None:
     """Write side-channel artifact files alongside primary output.
 
@@ -309,11 +310,13 @@ def _write_artifacts(
         total_fixed: Total number of issues fixed.
         warn_func: Optional callback for emitting warnings.  When ``None``,
             falls back to ``logger.console_output``.
+        profile_data: Optional performance profile payload to attach to
+            JSON artifacts so they match the primary JSON schema.
     """
     import os
     from pathlib import Path
 
-    from lintro.enums.output_format import normalize_output_format
+    from lintro.enums.output_format import OutputFormat, normalize_output_format
     from lintro.utils.output.file_writer import write_output_file
 
     artifacts: list[str] = [a.lower() for a in lintro_config.execution.artifacts]
@@ -344,6 +347,9 @@ def _write_artifacts(
                 action=action,
                 total_issues=total_issues,
                 total_fixed=total_fixed,
+                profile_data=(
+                    profile_data if fmt == OutputFormat.JSON else None
+                ),
             )
         except (OSError, ValueError, TypeError) as e:
             _emit(f"Warning: Failed to write {artifact} artifact: {e}")
@@ -477,6 +483,7 @@ def run_lint_tools_simple(
     ignore_conflicts: bool = False,
     transport: str | None = None,
     dry_run: bool = False,
+    profile: bool = False,
     score: bool = False,
     fail_under: float | None = None,
     diff_base: str | None = None,
@@ -515,6 +522,10 @@ def run_lint_tools_simple(
             the fixable tool set; the reported issues are exactly what a real
             ``fmt`` run would address. Exit code mirrors check semantics: 0 when
             nothing would be fixed, 1 when fixes are available.
+        profile: Emit a per-tool performance profile. When set, wall-clock
+            timing captured around each tool is rendered as a timing table
+            (non-machine formats) and added under a ``profile`` key in JSON
+            output. Off by default and does not affect the exit code.
         score: When True with human-readable output, print only the 0-100
             health score line and suppress the normal execution summary.
         fail_under: When set, exit with code 1 if the computed health score is
@@ -817,6 +828,7 @@ def run_lint_tools_simple(
             incremental=incremental,
             auto_install=effective_auto_install,
             max_fix_retries=lintro_config.execution.max_fix_retries,
+            profile=profile,
             diff_base=resolved_diff_base,
         )
 
@@ -856,6 +868,7 @@ def run_lint_tools_simple(
     else:
         # Sequential execution (original behavior)
         for tool_name in tools_to_run:
+            timed_duration: float | None = None
             try:
                 tool = tool_manager.get_tool(tool_name)
                 display_name = get_tool_display_name(tool_name)
@@ -880,16 +893,32 @@ def run_lint_tools_simple(
                     diff_base=resolved_diff_base,
                 )
 
-                # Execute the tool
-                if action == Action.FIX:
-                    result = _run_fix_with_retry(
-                        tool=tool,
-                        paths=paths,
-                        options={},
-                        max_retries=lintro_config.execution.max_fix_retries,
-                    )
-                else:
-                    result = tool.check(paths, {})
+                # Execute the tool. Time only when --profile is requested so
+                # normal runs avoid timer overhead and result mutation.
+                from lintro.profiling.timer import Timer
+
+                _profile_timer: Timer | None = Timer() if profile else None
+                if _profile_timer is not None:
+                    _profile_timer.__enter__()
+                try:
+                    if action == Action.FIX:
+                        result = _run_fix_with_retry(
+                            tool=tool,
+                            paths=paths,
+                            options={},
+                            max_retries=lintro_config.execution.max_fix_retries,
+                        )
+                    else:
+                        result = tool.check(paths, {})
+                    if _profile_timer is not None:
+                        _profile_timer.__exit__(None, None, None)
+                        timed_duration = _profile_timer.duration
+                        result.duration = timed_duration
+                        _profile_timer = None
+                finally:
+                    if _profile_timer is not None:
+                        _profile_timer.__exit__(None, None, None)
+                        timed_duration = _profile_timer.duration
 
                 # Populate doc_url on each issue from the plugin
                 _enrich_issues_with_doc_urls(tool, result)
@@ -943,6 +972,7 @@ def run_lint_tools_simple(
                     success=False,
                     output=f"Failed to initialize tool: {e}",
                     issues_count=0,
+                    duration=timed_duration,
                 )
                 all_results.append(failed_result)
 
@@ -1082,6 +1112,12 @@ def run_lint_tools_simple(
                 exit_code=final_exit_code,
                 health_score=health.to_dict(),
             )
+            # Attach the performance profile additively so the existing JSON
+            # schema (results/summary) is unchanged when --profile is off.
+            if profile:
+                from lintro.profiling.report import build_profile_data
+
+                json_data["profile"] = build_profile_data(all_results)
             print(json.dumps(json_data, indent=2))
         elif output_format.lower() == "sarif":
             from lintro.ai.output.sarif import render_fixes_sarif
@@ -1104,6 +1140,16 @@ def run_lint_tools_simple(
             print(sarif_json)
         else:
             logger.print_execution_summary(action, all_results)
+
+            # Performance profile: render the per-tool timing table after the
+            # execution summary. Only emitted when --profile is requested.
+            if profile:
+                from lintro.profiling.report import render_profile_report
+
+                profile_report = render_profile_report(all_results)
+                if profile_report:
+                    logger.console_output(text="")
+                    logger.console_output(text=profile_report)
 
             # Dry-run summary: state clearly what a real fmt run would fix.
             if dry_run_preview:
@@ -1208,6 +1254,11 @@ def run_lint_tools_simple(
                         standard_issues=standard_issues,
                     )
                 else:
+                    file_profile = None
+                    if profile and fmt == OutputFormat.JSON:
+                        from lintro.profiling.report import build_profile_data
+
+                        file_profile = build_profile_data(all_results)
                     write_output_file(
                         output_path=output_file,
                         output_format=fmt,
@@ -1215,12 +1266,18 @@ def run_lint_tools_simple(
                         action=action,
                         total_issues=total_issues,
                         total_fixed=total_fixed,
+                        profile_data=file_profile,
                     )
             except (OSError, ValueError, TypeError) as e:
                 _warn(f"Warning: Failed to write output file: {e}")
 
         # Write side-channel artifact files when configured or when
         # running inside GitHub Actions (SARIF auto-emit for Code Scanning).
+        artifact_profile = None
+        if profile:
+            from lintro.profiling.report import build_profile_data
+
+            artifact_profile = build_profile_data(all_results)
         _write_artifacts(
             all_results,
             lintro_config,
@@ -1229,6 +1286,7 @@ def run_lint_tools_simple(
             total_issues=total_issues,
             total_fixed=total_fixed,
             warn_func=_warn,
+            profile_data=artifact_profile,
         )
 
         # Clean up old run directories to prevent unbounded growth

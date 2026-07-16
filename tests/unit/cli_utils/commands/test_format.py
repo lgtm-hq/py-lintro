@@ -199,6 +199,40 @@ def test_format_command_dry_run_defaults_false(mock_run: MagicMock) -> None:
 
 
 @patch("lintro.cli_utils.commands.format.run_lint_tools_simple")
+def test_format_command_profile_defaults_false(mock_run: MagicMock) -> None:
+    """format_command defaults profile to False when flag absent.
+
+    Args:
+        mock_run: Mock for run_lint_tools_simple.
+    """
+    mock_run.return_value = 0
+    runner = CliRunner()
+
+    result = runner.invoke(format_command, [])
+
+    assert_that(result.exit_code).is_equal_to(0)
+    call_kwargs = mock_run.call_args.kwargs
+    assert_that(call_kwargs["profile"]).is_false()
+
+
+@patch("lintro.cli_utils.commands.format.run_lint_tools_simple")
+def test_format_command_profile_flag_sets_true(mock_run: MagicMock) -> None:
+    """format_command forwards profile=True when --profile is passed.
+
+    Args:
+        mock_run: Mock for run_lint_tools_simple.
+    """
+    mock_run.return_value = 0
+    runner = CliRunner()
+
+    result = runner.invoke(format_command, ["--profile"])
+
+    assert_that(result.exit_code).is_equal_to(0)
+    call_kwargs = mock_run.call_args.kwargs
+    assert_that(call_kwargs["profile"]).is_true()
+
+
+@patch("lintro.cli_utils.commands.format.run_lint_tools_simple")
 def test_format_command_returns_tool_exit_code(mock_run: MagicMock) -> None:
     """format_command returns exit code from tool execution.
 

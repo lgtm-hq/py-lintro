@@ -117,6 +117,11 @@ DEFAULT_ACTION: str = "fmt"
         "would be fixed and 1 when fixes are available (useful for CI checks)."
     ),
 )
+@click.option(
+    "--profile",
+    is_flag=True,
+    help="Show a per-tool performance profile (timing table + suggestions)",
+)
 def format_command(
     ctx: click.Context,
     paths: tuple[str, ...],
@@ -136,6 +141,7 @@ def format_command(
     auto_install: bool,
     yes: bool,
     dry_run: bool,
+    profile: bool,
 ) -> None:
     """Format code using configured formatting tools.
 
@@ -164,6 +170,7 @@ def format_command(
         auto_install: bool: Whether to auto-install Node.js deps if missing.
         yes: bool: Skip confirmation prompt and proceed immediately.
         dry_run: bool: Preview would-be fixes without modifying any files.
+        profile: bool: Whether to emit a per-tool performance profile.
     """
     # Default to current directory if no paths provided
     normalized_paths: list[str] = list(paths) if paths else list(DEFAULT_PATHS)
@@ -188,6 +195,7 @@ def format_command(
         auto_install=auto_install,
         yes=yes,
         dry_run=dry_run,
+        profile=profile,
     )
 
     # Exit with code from tool execution.

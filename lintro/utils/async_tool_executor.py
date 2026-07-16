@@ -79,6 +79,7 @@ class AsyncToolExecutor:
         action: Action,
         options: dict[str, Any] | None = None,
         max_fix_retries: int = 3,
+        profile: bool = False,
     ) -> ToolResult:
         """Run a single tool asynchronously.
 
@@ -88,6 +89,7 @@ class AsyncToolExecutor:
             action: The action to perform (check or fix).
             options: Additional options to pass to the tool.
             max_fix_retries: Maximum fix→verify convergence cycles.
+            profile: When True, measure and attach per-tool duration.
 
         Returns:
             ToolResult: The result of tool execution.
@@ -103,26 +105,41 @@ class AsyncToolExecutor:
         loop = asyncio.get_running_loop()
         opts = options or {}
 
-        if action == Action.FIX:
-            from lintro.utils.tool_executor import _run_fix_with_retry
+        from lintro.profiling.timer import Timer
 
-            logger.debug(f"Starting async execution of {tool.definition.name}")
-            result = await loop.run_in_executor(
-                self._executor,
-                _run_fix_with_retry,
-                tool,
-                paths,
-                opts,
-                max_fix_retries,
-            )
-        else:
-            logger.debug(f"Starting async execution of {tool.definition.name}")
-            result = await loop.run_in_executor(
-                self._executor,
-                tool.check,
-                paths,
-                opts,
-            )
+        _profile_timer: Timer | None = Timer() if profile else None
+        if _profile_timer is not None:
+            _profile_timer.__enter__()
+        try:
+            if action == Action.FIX:
+                from lintro.utils.tool_executor import _run_fix_with_retry
+
+                logger.debug(f"Starting async execution of {tool.definition.name}")
+                result = await loop.run_in_executor(
+                    self._executor,
+                    _run_fix_with_retry,
+                    tool,
+                    paths,
+                    opts,
+                    max_fix_retries,
+                )
+            else:
+                logger.debug(f"Starting async execution of {tool.definition.name}")
+                result = await loop.run_in_executor(
+                    self._executor,
+                    tool.check,
+                    paths,
+                    opts,
+                )
+            if _profile_timer is not None:
+                _profile_timer.__exit__(None, None, None)
+                result.duration = _profile_timer.duration
+                _profile_timer = None
+        except Exception as exc:
+            if _profile_timer is not None:
+                _profile_timer.__exit__(None, None, None)
+                exc.profile_duration = _profile_timer.duration  # type: ignore[attr-defined]
+            raise
         logger.debug(f"Completed async execution of {tool.definition.name}")
 
         return result
@@ -135,6 +152,7 @@ class AsyncToolExecutor:
         options_per_tool: dict[str, dict[str, Any]] | None = None,
         on_result: Callable[[str, ToolResult], None] | None = None,
         max_fix_retries: int = 3,
+        profile: bool = False,
     ) -> list[tuple[str, ToolResult]]:
         """Run multiple tools in parallel.
 
@@ -145,6 +163,7 @@ class AsyncToolExecutor:
             options_per_tool: Optional dict mapping tool names to their options.
             on_result: Optional callback called when each tool completes.
             max_fix_retries: Maximum fix→verify convergence cycles.
+            profile: When True, measure and attach per-tool duration.
 
         Returns:
             List of (tool_name, ToolResult) tuples in completion order.
@@ -171,6 +190,7 @@ class AsyncToolExecutor:
                 action,
                 tool_opts,
                 max_fix_retries=max_fix_retries,
+                profile=profile,
             )
             if on_result:
                 on_result(name, result)
@@ -193,6 +213,7 @@ class AsyncToolExecutor:
                     success=False,
                     output=f"Parallel execution failed: {result}",
                     issues_count=0,
+                    duration=getattr(result, "profile_duration", None),
                 )
                 processed_results.append((tool_name, failed_result))
             else:

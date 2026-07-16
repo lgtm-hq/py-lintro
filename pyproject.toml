@@ -184,6 +184,7 @@ packages = [
   "lintro.parsers.vale",
   "lintro.parsers.vue_tsc",
   "lintro.plugins",
+  "lintro.profiling",
   "lintro.tools",
   "lintro.tools.core",
   "lintro.tools.core.install_strategies",

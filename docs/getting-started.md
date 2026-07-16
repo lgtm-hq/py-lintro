@@ -465,6 +465,45 @@ lintro check --include-venv
 lintro check --output-format grid --group-by code
 ```
 
+### Performance Profiling
+
+Add `--profile` to `check` or `format` to see how long each tool took. Timing is
+captured with a monotonic wall clock around every tool's execution, so it reflects real
+per-tool cost (including under parallel execution). The flag is opt-in and adds no
+overhead when omitted.
+
+```bash
+# Show a per-tool timing table with optimization suggestions
+lintro check --profile
+
+# Machine-readable timings under a "profile" key in the JSON payload
+lintro check --profile --output-format json
+```
+
+Example output:
+
+```text
+Performance Profile
+
+Tool Timing (sorted by duration):
+┌───────┬──────────┬───────┬────────┐
+│ Tool  │ Duration │ Files │ Issues │
+├───────┼──────────┼───────┼────────┤
+│ mypy  │ 12.34s   │ 2     │ 3      │
+│ ruff  │ 0.42s    │ 5     │ 5      │
+├───────┼──────────┼───────┼────────┤
+│ CUMULATIVE │ 12.76s   │       │ 8      │
+└───────┴──────────┴───────┴────────┘
+
+Suggestions:
+  - mypy is slowest (97% of total time)
+  - mypy: consider incremental mode or the mypy daemon (dmypy)
+```
+
+The `Files` column counts the distinct files each tool reported issues on. In JSON mode
+the profile is added additively under a top-level `profile` key (`cumulative_tool_duration`,
+`tools[]`, `suggestions[]`) and the existing `results`/`summary` schema is unchanged.
+
 ## Tips and Tricks
 
 ### 1. Use Grid Formatting

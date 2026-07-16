@@ -143,6 +143,11 @@ DEFAULT_ACTION: str = "check"
     help="Override ai.transport for this AI invocation.",
 )
 @click.option(
+    "--profile",
+    is_flag=True,
+    help="Show a per-tool performance profile (timing table + suggestions)",
+)
+@click.option(
     "--score",
     is_flag=True,
     help="Print only the 0-100 health score (suppresses the normal summary).",
@@ -175,6 +180,7 @@ def check_command(
     yes: bool,
     ai_fix: bool,
     transport: str | None,
+    profile: bool,
     score: bool,
     fail_under: float | None,
 ) -> None:
@@ -204,6 +210,7 @@ def check_command(
         yes: bool: Skip confirmation prompt and proceed immediately.
         ai_fix: bool: Generate AI fix suggestions with interactive review.
         transport: str | None: Override AI transport (``api`` or ``cli``).
+        profile: bool: Whether to emit a per-tool performance profile.
         score: bool: Print only the health score, suppressing the summary.
         fail_under: float | None: Exit 1 if the health score is below this value.
 
@@ -251,6 +258,7 @@ def check_command(
         ai_fix=ai_fix,
         ignore_conflicts=ignore_conflicts,
         transport=transport,
+        profile=profile,
         score=score,
         fail_under=fail_under,
     )

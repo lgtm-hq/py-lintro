@@ -77,6 +77,11 @@ class ToolResult:
     # Omitted from JSON output unless the tool sets this explicitly.
     parse_failures_count: int | None = field(default=None)
 
+    # Wall-clock execution time in seconds, captured by the executor around the
+    # tool's check/fix call. ``None`` when timing was not measured (e.g. skipped
+    # tools or post-checks). Surfaced only when ``--profile`` is requested.
+    duration: float | None = field(default=None)
+
     def __post_init__(self) -> None:
         """Validate that the issue counts and skip state are consistent.
 
