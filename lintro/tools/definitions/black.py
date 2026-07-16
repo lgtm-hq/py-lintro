@@ -329,7 +329,11 @@ class BlackPlugin(BaseToolPlugin):
                     initial_count=0,
                     cwd=ctx.cwd,
                 )
-            initial_issues = parse_black_output(output=check_output)
+            # Parse the pre-fix ``--check`` output in applied context so the
+            # detected issues read as past-tense "Reformatted file" rather than
+            # the preview-tense "Would reformat file"; fix() applies the
+            # changes immediately below.
+            initial_issues = parse_black_output(output=check_output, applied=True)
             initial_line_length_issues = self._check_line_length_violations(
                 files=ctx.rel_files,
                 cwd=ctx.cwd,

@@ -414,11 +414,14 @@ def init_command(
 
     if not static:
         effective_profile = profile or ("minimal" if minimal else "recommended")
-        if detected_langs:
-            console.print(
-                f"  [dim]Detected: {', '.join(detected_langs)} | "
-                f"Profile: {effective_profile}[/dim]",
-            )
+        # Always print the Detected line so init output is consistent across
+        # runs; show "none" when language detection found nothing rather than
+        # dropping the line entirely.
+        detected_display = ", ".join(detected_langs) if detected_langs else "none"
+        console.print(
+            f"  [dim]Detected: {detected_display} | "
+            f"Profile: {effective_profile}[/dim]",
+        )
         console.print()
         console.print("  [bold]Recommended:[/bold]")
         console.print(
