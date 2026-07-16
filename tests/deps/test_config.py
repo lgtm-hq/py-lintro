@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
 from assertpy import assert_that
 
 from lintro.config.config_loader import load_config
@@ -45,3 +46,20 @@ def test_load_config_defaults_deps_when_absent(tmp_path: Path) -> None:
     config_file.write_text("execution:\n  parallel: true\n")
     config = load_config(config_path=config_file, allow_pyproject_fallback=False)
     assert_that(config.deps.policy).is_equal_to(DepsPolicy.FLEXIBLE)
+
+
+def test_load_config_rejects_unknown_deps_key(tmp_path: Path) -> None:
+    """A misspelled deps key fails loading instead of silently defaulting.
+
+    Because ``deps`` gates dependency-spec enforcement, a typo such as
+    ``pollicy`` must raise rather than fall back to the default policy and let
+    non-conforming specs pass in CI.
+
+    Args:
+        tmp_path: Temporary directory.
+    """
+    config_file = tmp_path / ".lintro-config.yaml"
+    config_file.write_text("deps:\n  pollicy: strict\n")
+
+    with pytest.raises(ValueError, match="Unknown deps config key"):
+        load_config(config_path=config_file, allow_pyproject_fallback=False)
