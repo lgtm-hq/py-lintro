@@ -313,7 +313,8 @@ def _decode_paginated_json_objects(*, raw: str) -> list[dict[str, object]]:
         Flattened list of JSON objects.
 
     Raises:
-        RuntimeError: When ``raw`` is not valid JSON.
+        RuntimeError: When ``raw`` is not valid JSON, or a top-level value is
+            neither a list nor an object.
     """
     chunks: list[dict[str, object]] = []
     decoder = json.JSONDecoder()
@@ -334,6 +335,12 @@ def _decode_paginated_json_objects(*, raw: str) -> list[dict[str, object]]:
             chunks.extend(item for item in parsed if isinstance(item, dict))
         elif isinstance(parsed, dict):
             chunks.append(parsed)
+        else:
+            msg = (
+                "unexpected GitHub API JSON value type "
+                f"{type(parsed).__name__!r}; expected list or object"
+            )
+            raise RuntimeError(msg)
     return chunks
 
 
