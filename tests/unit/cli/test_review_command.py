@@ -70,6 +70,62 @@ def test_review_requires_ai_packages() -> None:
     assert_that(result.exit_code).is_not_equal_to(0)
 
 
+def test_review_refuses_when_only_lint_enabled() -> None:
+    """Lint-only config refuses `lintro review` naming the ai.review key."""
+    runner = CliRunner()
+    mock_config = MagicMock(
+        ai=AIConfig(enabled=True, lint=True, review=False, transport=AITransport.API),
+    )
+
+    with (
+        patch("lintro.cli_utils.commands.review.require_ai"),
+        patch(
+            "lintro.cli_utils.commands.review.get_config",
+            return_value=mock_config,
+        ),
+    ):
+        result = runner.invoke(cli, ["review"])
+
+    assert_that(result.exit_code).is_not_equal_to(0)
+    assert_that(result.output).contains("ai.review: true")
+
+
+def test_review_runs_when_review_enabled_without_lint() -> None:
+    """Review-only config (lint off) passes the entry gate and runs."""
+    runner = CliRunner()
+    mock_collect = MagicMock(
+        return_value=MagicMock(changed_files=[], unified_diff=""),
+    )
+    patches = _mock_review_pipeline(mock_collect=mock_collect)
+    review_config = MagicMock(
+        ai=AIConfig(enabled=True, lint=False, review=True, transport=AITransport.API),
+    )
+    review_config.review.depth = 1
+    review_config.review.strictness = ReviewStrictness.BALANCED
+    review_config.review.sensitivity = MagicMock()
+    review_config.review.force_semantic_chunking = False
+    review_config.review.checklist_display = ChecklistDisplay.OFF
+
+    with (
+        patches["require_ai"],
+        patch(
+            "lintro.cli_utils.commands.review.get_config",
+            return_value=review_config,
+        ),
+        patches["collect_review_context"],
+        patches["classify_changed_files"],
+        patches["get_all_checklist_items"],
+        patches["select_checklist_items"],
+        patches["format_checklist_for_prompt"],
+        patches["get_provider"],
+        patches["run_review"],
+        patches["render_review_output"],
+    ):
+        result = runner.invoke(cli, ["review"])
+
+    assert_that(result.exit_code).is_equal_to(0)
+
+
 def test_review_json_output_echoes_payload() -> None:
     """Review command echoes JSON when --output json is used."""
     runner = CliRunner()

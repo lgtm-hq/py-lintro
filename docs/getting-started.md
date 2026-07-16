@@ -96,7 +96,12 @@ Some tools require separate installation. Their minimum versions are also manage
   releases)
 - `shellcheck` - Shell script analyzer (`brew install shellcheck` or GitHub releases)
 - `shfmt` - Shell script formatter (`brew install shfmt` or GitHub releases)
+- `dotenv-linter` - `.env` file linter and fixer (`brew install dotenv-linter`,
+  `cargo install dotenv-linter`, or GitHub releases)
 - `sqlfluff` - SQL linter and formatter (`pip install sqlfluff`)
+- `stylelint` - CSS/SCSS/Sass/Less linter and fixer (`bun add -g stylelint` or
+  `npm install -g stylelint`); skips cleanly when no stylelint config is found — add one
+  (e.g. `.stylelintrc.json`) to enable linting
 - `taplo` - TOML linter and formatter (`brew install taplo` or GitHub releases)
 - `phpstan` - PHP static analysis (`brew install phpstan` or
   `composer require --dev phpstan/phpstan`; requires PHP)
@@ -371,7 +376,45 @@ lintro check --output ci-results.txt
 
 # Exit with error if issues found
 lintro check || exit 1
+
+# PR-scoped check: only scan files changed vs the base branch
+lintro check --diff origin/main --output-format github
 ```
+
+### Checking Only Changed Files (`--diff`)
+
+Both `check` and `format` accept `--diff [BASE]` to limit scanning to files changed
+relative to a git base ref. On large codebases this turns full-repo scans into
+seconds-long PR-scoped checks that only surface issues you introduced.
+
+```bash
+lintro check --diff             # diff vs the repository default branch
+lintro check --diff main        # diff vs an explicit local ref
+lintro check --diff origin/dev  # diff vs a specific remote ref
+lintro format --diff            # format only changed files
+```
+
+**Default base resolution.** Bare `--diff` (no value) resolves the base in this order,
+using the first ref that exists: `origin/HEAD` (the remote's default branch), then
+`origin/main`, `origin/master`, `main`, `master`.
+
+**What counts as changed.** The scanned set is the union of:
+
+- commits on your branch since it diverged from the base (`git diff <base>...HEAD`),
+- staged changes,
+- unstaged working-tree changes, and
+- untracked (not ignored) files.
+
+Renamed files are scanned at their new path only, and deleted files are never included,
+so tools are never pointed at paths that no longer exist.
+
+**Fallbacks and errors.** Outside a git repository — or when none of the default base
+candidates can be resolved — lintro prints a warning and falls back to a full scan.
+Passing an explicit ref that does not resolve (for example, a branch that was never
+fetched) is a hard error: lintro prints the failing ref and exits with code 1.
+
+`--diff` composes with other flags, for example
+`lintro check --diff main --tools ruff --output-format github`.
 
 ## Configuration
 
