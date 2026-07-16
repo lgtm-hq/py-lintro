@@ -17,13 +17,24 @@ concurrency:
 jobs:
   scorecards:
     # yamllint disable-line rule:line-length
-    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-scorecards.yml@1014e3d7d5441a63215d2096545a46cff6de101c # v0.48.0
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-scorecards.yml@31c25ef2e8992960e218524780e34f44f51271b5 # v0.54.0
     with:
-      tooling-ref: '1014e3d7d5441a63215d2096545a46cff6de101c' # v0.48.0
+      # v0.52.4 drops lgtm-ci composites from this job so scorecard-action
+      # publish_results passes workflow verification (#518, lgtm-ci #535).
       egress-policy: block
-      egress-preset: scorecard
-      allowed-endpoints-mode: append
+      # Full list: v0.52.4 feeds allowed-endpoints verbatim to harden-runner
+      # (no preset resolution in the scorecard job).
       allowed-endpoints: >
+        github.com:443
+        api.github.com:443
+        codeload.github.com:443
+        objects.githubusercontent.com:443
+        raw.githubusercontent.com:443
+        pipelines.actions.githubusercontent.com:443
+        gcr.io:443
+        api.osv.dev:443
+        api.scorecard.dev:443
+        api.securityscorecards.dev:443
         agent.api.stepsecurity.io:443
         fulcio.sigstore.dev:443
         rekor.sigstore.dev:443

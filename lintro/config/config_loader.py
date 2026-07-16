@@ -30,6 +30,7 @@ from lintro.config.review_config import (
     ReviewChecklistItemConfig,
     ReviewConfig,
 )
+from lintro.config.score_config import ScoreConfig
 from lintro.config.watch_config import WatchConfig
 from lintro.enums.config_key import ConfigKey
 from lintro.utils.path_utils import find_file_upward
@@ -187,6 +188,15 @@ def _parse_execution_config(data: dict[str, Any]) -> ExecutionConfig:
             f"got {max_fix_retries}",
         )
 
+    # max_workers and artifacts are optional; when absent, ExecutionConfig
+    # applies its own defaults (CPU count and empty list respectively). Only
+    # forward them when present so the model defaults still win on omission.
+    optional_fields: dict[str, Any] = {}
+    if "max_workers" in data:
+        optional_fields["max_workers"] = data["max_workers"]
+    if "artifacts" in data:
+        optional_fields["artifacts"] = data["artifacts"]
+
     return ExecutionConfig(
         enabled_tools=enabled_tools,
         tool_order=tool_order,
@@ -194,6 +204,7 @@ def _parse_execution_config(data: dict[str, Any]) -> ExecutionConfig:
         parallel=data.get("parallel", True),
         auto_install_deps=data.get("auto_install_deps"),
         max_fix_retries=max_fix_retries,
+        **optional_fields,
     )
 
 
@@ -418,6 +429,34 @@ def _parse_watch_config(data: Any) -> WatchConfig:
     return WatchConfig(**filtered)
 
 
+def _parse_score_config(data: Any) -> ScoreConfig:
+    """Parse the health score configuration section.
+
+    Args:
+        data: Raw ``score`` section from config.
+
+    Returns:
+        ScoreConfig: Parsed score configuration.
+
+    Raises:
+        ValueError: When the score section is not a mapping.
+    """
+    if not data:
+        return ScoreConfig()
+    if not isinstance(data, dict):
+        msg = f"score config must be a mapping, got {type(data).__name__}"
+        raise ValueError(msg)
+    known_fields = set(ScoreConfig.model_fields.keys())
+    unknown = set(data.keys()) - known_fields
+    if unknown:
+        logger.warning(
+            "Unknown score config keys ignored: {}",
+            ", ".join(sorted(unknown)),
+        )
+    filtered = {key: value for key, value in data.items() if key in known_fields}
+    return ScoreConfig(**filtered)
+
+
 def _convert_pyproject_to_config(data: dict[str, Any]) -> dict[str, Any]:
     """Convert pyproject.toml [tool.lintro] format to .lintro-config.yaml format.
 
@@ -437,6 +476,7 @@ def _convert_pyproject_to_config(data: dict[str, Any]) -> dict[str, Any]:
         "tools": {},
         "ai": {},
         "review": {},
+        "score": {},
         "watch": {},
     }
 
@@ -458,8 +498,10 @@ def _convert_pyproject_to_config(data: dict[str, Any]) -> dict[str, Any]:
         "tool_order",
         "fail_fast",
         "parallel",
+        "max_workers",
         "auto_install_deps",
         "max_fix_retries",
+        "artifacts",
     }
 
     # Known enforce settings (formerly global)
@@ -492,6 +534,8 @@ def _convert_pyproject_to_config(data: dict[str, Any]) -> dict[str, Any]:
             result["ai"] = value
         elif key_lower == "review":
             result["review"] = value
+        elif key_lower == "score" and isinstance(value, dict):
+            result["score"] = value
         elif key_lower == "watch" and isinstance(value, dict):
             result["watch"] = value
 
@@ -560,6 +604,7 @@ def load_config(
     tools_config = _parse_tools_config(data.get("tools", {}))
     ai_config = _parse_ai_config(data.get("ai", {}))
     review_config = _parse_review_config(data.get("review", {}))
+    score_config = _parse_score_config(data.get("score", {}))
     watch_config = _parse_watch_config(data.get("watch", {}))
 
     return LintroConfig(
@@ -569,6 +614,7 @@ def load_config(
         tools=tools_config,
         ai=ai_config,
         review=review_config,
+        score=score_config,
         watch=watch_config,
         config_path=resolved_path,
     )

@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import os
 import shutil
-import subprocess
+import subprocess  # nosec B404 - subprocess is the core mechanism for invoking external tools; all invocations use shell=False
 from abc import ABC, abstractmethod
 from typing import Any
 
@@ -87,7 +87,7 @@ class CliTransport(ABC):
         )
 
         try:
-            return subprocess.run(
+            return subprocess.run(  # nosec B603 - argv is an internally-built list run with shell=False; binary resolved from a known command, no user shell input
                 cmd,
                 input=input_text,
                 capture_output=True,

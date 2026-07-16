@@ -5,7 +5,7 @@ in pyproject.toml. See docs/tool-analysis/pydoclint-analysis.md for settings.
 """
 
 import shutil
-import subprocess
+import subprocess  # nosec B404 - subprocess is used to drive the tool/CLI under test; invocations use shell=False
 from pathlib import Path
 
 import pytest
@@ -34,7 +34,7 @@ def run_pydoclint_directly(file_path: Path) -> tuple[bool, str, int]:
         "--quiet",
         str(file_path),
     ]
-    result = subprocess.run(
+    result = subprocess.run(  # nosec B603 - fixed argv run against a real binary in a controlled test; shell=False, no user shell input
         cmd,
         capture_output=True,
         text=True,
@@ -54,7 +54,7 @@ def _ensure_pydoclint_available() -> None:
     and is runnable in the current environment.
     """
     try:
-        result = subprocess.run(
+        result = subprocess.run(  # nosec B603 B607 - fixed argv run against a real binary in a controlled test; binary name resolved from PATH, not attacker-controlled; shell=False, no user shell input
             ["pydoclint", "--version"],
             capture_output=True,
             text=True,

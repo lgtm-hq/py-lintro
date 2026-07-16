@@ -1,7 +1,7 @@
 """Integration tests for markdownlint tool."""
 
 import shutil
-import subprocess
+import subprocess  # nosec B404 - subprocess is used to drive the tool/CLI under test; invocations use shell=False
 from pathlib import Path
 
 import pytest
@@ -54,7 +54,7 @@ def run_markdownlint_directly(file_path: Path) -> tuple[bool, str, int]:
         relative_path = Path(os.path.relpath(abs_file_path, repo_root))
     cmd = [*cmd_base, str(relative_path)]
 
-    result = subprocess.run(
+    result = subprocess.run(  # nosec B603 - fixed argv run against a real binary in a controlled test; shell=False, no user shell input
         cmd,
         capture_output=True,
         text=True,
@@ -81,7 +81,7 @@ def test_markdownlint_available() -> None:
         pytest.skip("markdownlint-cli2 not found in PATH")
     try:
         cmd = [*cmd_base, "--version"]
-        result = subprocess.run(
+        result = subprocess.run(  # nosec B603 - fixed argv run against a real binary in a controlled test; shell=False, no user shell input
             cmd,
             capture_output=True,
             text=True,

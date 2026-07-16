@@ -9,6 +9,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
+from lintro.tools.implementations.pytest.addopts_coverage import (
+    config_addopts_enable_coverage,
+)
 from lintro.tools.implementations.pytest.collection import get_cpu_count
 from lintro.tools.implementations.pytest.markers import collect_tests_once
 from lintro.tools.implementations.pytest.pytest_config import PytestConfiguration
@@ -110,13 +113,18 @@ class PytestExecutor:
         else:
             worker_display = "disabled"
 
-        # Get coverage configuration
+        # Get coverage configuration. Coverage may be enabled either by lintro's
+        # own options or by ``--cov`` flags declared in the project's pytest
+        # configuration ``addopts`` (which pytest injects independently). Detect
+        # both so the banner never contradicts the coverage that actually runs.
         coverage_enabled = any(
             [
                 options.get("coverage_term_missing"),
                 options.get("coverage_html"),
                 options.get("coverage_xml"),
                 options.get("coverage_report"),
+                options.get("coverage_threshold") is not None,
+                config_addopts_enable_coverage(),
             ],
         )
         coverage_display = "enabled" if coverage_enabled else "disabled"

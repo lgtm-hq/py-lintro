@@ -22,6 +22,7 @@ configuring, and contributing to Lintro.
 **Integration Guides:**
 
 - **[GitHub Integration](github-integration.md)** - CI/CD setup with GitHub Actions
+- **[Pre-commit Integration](pre-commit.md)** - Run lintro as a pre-commit hook
 - **[Tool Analysis](tool-analysis/)** - Detailed tool comparisons and capabilities
 
 ### For Developers
