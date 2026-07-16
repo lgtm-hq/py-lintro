@@ -205,7 +205,7 @@ only — the flat key layout is what the loader expects.
 ```yaml
 ai:
   # Master switch — all AI features are disabled when false. AND-ed with the
-  # per-feature toggles below.
+  # per-feature toggles below. (bool, default: false)
   enabled: true
 
   # Per-feature toggles (both default to false). Effective only when
