@@ -17,7 +17,7 @@ NPM_VERSIONS: dict[str, str] = {
     "markdownlint-cli2": "0.23.1",
     "oxfmt": "0.60.0",
     "oxlint": "1.75.0",
-    "prettier": "3.9.4",
+    "prettier": "3.9.5",
     "stylelint": "17.14.1",
     "svelte-check": "4.7.3",
     "typescript": "6.0.3",

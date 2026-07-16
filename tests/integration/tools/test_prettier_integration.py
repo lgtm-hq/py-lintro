@@ -39,7 +39,11 @@ def temp_json_file_unformatted(tmp_path: Path) -> str:
         Path to the created file as a string.
     """
     file_path = tmp_path / "unformatted.json"
-    file_path.write_text('{"name":"test","version":"1.0.0","dependencies":{}}')
+    # Spaces around ":" / "," are rejected under both Prettier defaults and
+    # configs that keep compact JSON (e.g. singleQuote via --config).
+    file_path.write_text(
+        '{ "name" : "test" , "version" : "1.0.0" , "dependencies" : {} }',
+    )
     return str(file_path)
 
 

@@ -47,7 +47,9 @@ lib/
 lib64/
 parts/
 sdist/
-var/
+# Root-only: do not use bare "var/" — that also matches macOS /var/folders
+# temp paths when Prettier resolves ignore files from the repo cwd.
+/var/
 wheels/
 share/python-wheels/
 *.egg-info/
