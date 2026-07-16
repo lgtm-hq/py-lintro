@@ -1,7 +1,16 @@
 # OSV-Scanner configuration for the lintro project.
 #
-# Suppressions were removed in this branch after upgrading transitive npm deps
-# (defu@6.1.5, yaml@2.8.3) that previously required GHSA suppressions on main.
-# OSV Scanner still runs in CI via lintro; this file remains as the project hook
-# for future suppressions when no patched version is available yet.
-# Review periodically and add [[IgnoredVulns]] entries only when necessary.
+# OSV Scanner still runs in CI via lintro; this file is the project hook for
+# suppressions when no patched version is available yet (or the advisory is a
+# confirmed false positive). Review periodically.
+
+[[IgnoredVulns]]
+id = "MAL-2026-10726"
+# Amazon Inspector flagged official Astro 7.1.0 as malware because it depends on
+# intentionally renamed packages (piccolore, obug, @astrojs/markdown-satteri).
+# Those names are present in the withastro/astro@7.1.0 GitHub tag and the
+# matching npm tarball; this is not a typosquat dropper. Revisit after OSV
+# rescinds or Astro renames those deps again.
+reason = "False positive: official Astro 7.1.0 dependency renames (piccolore/obug/markdown-satteri)"
+# Ignore until Astro's next minor after the advisory window; adjust if needed.
+ignoreUntil = 2026-10-16
