@@ -35,6 +35,8 @@ class ToolsToRunResult:
 
     to_run: list[str] = field(default_factory=list)
     skipped: list[SkippedTool] = field(default_factory=list)
+    detected_languages: list[str] = field(default_factory=list)
+    scoped_by_detection: bool = False
 
 
 def _apply_conflict_resolution(
@@ -230,6 +232,75 @@ def get_tool_lookup_keys(tool_name: str) -> set[str]:
     return {tool_name.lower()}
 
 
+def _detection_scoped_tool_names() -> tuple[list[str], set[str]]:
+    """Compute the language-scoped toolset for a no-config first run.
+
+    Detects the languages present in the current working directory and
+    resolves them to the union of recommended tool names via the manifest
+    registry's language map. Security tools are always included.
+
+    Returns:
+        Tuple of ``(detected_languages, scoped_tool_names)`` where
+        ``detected_languages`` is the sorted list of detected language
+        identifiers and ``scoped_tool_names`` is the lowercase set of tool
+        names applicable to those languages.
+    """
+    from lintro.tools.core.tool_registry import ManifestRegistry
+    from lintro.utils.project_detection import detect_project_languages
+
+    detected_languages = detect_project_languages()
+    registry = ManifestRegistry.load()
+    scoped_tools = registry.tools_for_languages(detected_languages)
+    scoped_names = {t.name.lower() for t in scoped_tools}
+    return detected_languages, scoped_names
+
+
+def format_detection_notice(
+    detected_languages: list[str],
+    to_run: list[str],
+) -> str:
+    """Build the informational line for a language-scoped no-config run.
+
+    Groups the selected tools by the detected language they belong to so the
+    user sees, e.g., ``(python: bandit, black, mypy, ruff)``.
+
+    Args:
+        detected_languages: Languages detected in the project.
+        to_run: Tool names selected for execution.
+
+    Returns:
+        A single-line notice pointing the user at ``lintro init``.
+    """
+    from lintro.tools.core.tool_registry import ManifestRegistry
+
+    registry = ManifestRegistry.load()
+    language_map = registry.language_map
+    run_set = {name.lower() for name in to_run}
+
+    groups: list[str] = []
+    seen: set[str] = set()
+    for lang in detected_languages:
+        mapped = language_map.get(lang.lower(), [])
+        lang_tools = sorted(
+            name for name in mapped if name.lower() in run_set and name not in seen
+        )
+        seen.update(lang_tools)
+        if lang_tools:
+            groups.append(f"{lang}: {', '.join(lang_tools)}")
+
+    # Include any remaining tools (e.g. always-on security tools) not tied to a
+    # detected language so the notice matches what actually runs.
+    remaining = sorted(name for name in to_run if name not in seen)
+    if remaining:
+        groups.append(f"security: {', '.join(remaining)}")
+
+    detail = "; ".join(groups) if groups else "none"
+    return (
+        f"No config found — using detected toolset ({detail}). "
+        "Run 'lintro init' to customize."
+    )
+
+
 def get_tools_to_run(
     tools: str | ToolsValue | None,
     action: str | Action,
@@ -277,21 +348,37 @@ def get_tools_to_run(
     # Get lintro config for enabled/disabled tool checking
     config = lintro_config or get_config()
 
-    if (
-        tools is None
-        or tools == ToolsValue.ALL
-        or (isinstance(tools, str) and tools.lower() == "all")
-    ):
+    is_explicit_all = tools == ToolsValue.ALL or (
+        isinstance(tools, str) and tools.lower() == "all"
+    )
+
+    if tools is None or is_explicit_all:
         # Get all available tools for the action
         if action == Action.FIX:
             available_tools = tool_manager.get_fix_tools()
         else:  # check
             available_tools = tool_manager.get_check_tools()
 
+        # On a no-config default run (``tools`` is None and no config file was
+        # discovered), scope the toolset to the languages actually present in
+        # the project. Tools not applicable to the detected languages are
+        # omitted entirely rather than surfaced as SKIP rows, so a Python-only
+        # project no longer fires (and lists) ~30 irrelevant tools. Explicit
+        # ``--tools all`` and any configured project keep the full behavior.
+        detected_languages: list[str] = []
+        scoped_names: set[str] | None = None
+        scoped_by_detection = False
+        if tools is None and config.config_path is None:
+            detected_languages, scoped_names = _detection_scoped_tool_names()
+            scoped_by_detection = True
+
         to_run: list[str] = []
         skipped: list[SkippedTool] = []
         for name in available_tools:
             if name.lower() == "pytest":
+                continue
+            # Silently drop tools that do not apply to detected languages.
+            if scoped_names is not None and name.lower() not in scoped_names:
                 continue
             if not config.is_tool_enabled(name):
                 reason = _get_disabled_reason(config, name)
@@ -305,7 +392,12 @@ def get_tools_to_run(
             ignore_conflicts=ignore_conflicts,
         )
 
-        return ToolsToRunResult(to_run=to_run, skipped=skipped)
+        return ToolsToRunResult(
+            to_run=to_run,
+            skipped=skipped,
+            detected_languages=detected_languages,
+            scoped_by_detection=scoped_by_detection,
+        )
 
     # Parse specific tools
     tool_names: list[str] = [name.strip().lower() for name in tools.split(",")]
