@@ -423,6 +423,7 @@ class NodeJSBuilder(CommandBuilder):
                 ToolName.OXFMT: "oxfmt",
                 ToolName.OXLINT: "oxlint",
                 ToolName.SPECTRAL: "@stoplight/spectral-cli",
+                ToolName.STYLELINT: "stylelint",
                 ToolName.SVELTE_CHECK: "svelte-check",
                 ToolName.TSC: "typescript",
                 ToolName.VUE_TSC: "vue-tsc",
@@ -557,6 +558,7 @@ class StandaloneBuilder(CommandBuilder):
     # Only tools whose binary name differs need an entry here.
     TOOL_BINARY_MAP: ClassVar[dict[str, str]] = {
         "osv_scanner": "osv-scanner",
+        "dotenv_linter": "dotenv-linter",
     }
 
     @property
@@ -572,6 +574,7 @@ class StandaloneBuilder(CommandBuilder):
             self._tools = frozenset(
                 {
                     ToolName.ACTIONLINT,
+                    ToolName.DOTENV_LINTER,
                     ToolName.GITLEAKS,
                     ToolName.HADOLINT,
                     ToolName.OSV_SCANNER,

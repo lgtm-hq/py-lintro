@@ -10,17 +10,18 @@ Sources:
 
 NPM_VERSIONS: dict[str, str] = {
     "@astrojs/check": "0.9.9",
-    "@commitlint/cli": "21.2.0",
+    "@commitlint/cli": "21.2.1",
     "@commitlint/config-conventional": "21.2.0",
     "@stoplight/spectral-cli": "6.16.1",
-    "astro": "6.4.8",
+    "astro": "7.0.9",
     "markdownlint-cli2": "0.23.0",
-    "oxfmt": "0.57.0",
-    "oxlint": "1.72.0",
+    "oxfmt": "0.58.0",
+    "oxlint": "1.73.0",
     "prettier": "3.9.4",
-    "svelte-check": "4.7.1",
-    "typescript": "5.9.3",
-    "vue-tsc": "3.3.6",
+    "stylelint": "17.14.0",
+    "svelte-check": "4.7.2",
+    "typescript": "6.0.3",
+    "vue-tsc": "3.3.7",
 }
 
 PYPI_VERSIONS: dict[str, str] = {

@@ -43,8 +43,9 @@ TOOL_VERSIONS for binary/cargo/rustup). PRs will fail if they drift.
 2. Add entry to manifest.json with install.type = "pip"
 3. Renovate tracks it automatically
 4. Note: Homebrew formula excludes bundled Python tools from the venv
-   (via generate_resources.py --exclude). They are installed as separate
-   Homebrew formulae and discovered via PATH, not python -m.
+   (configured in lgtm-hq/homebrew-tap formulas/lintro.yml). They are
+   installed as separate Homebrew formulae and discovered via PATH,
+   not python -m.
 """
 
 import os
@@ -168,6 +169,7 @@ def get_install_hints() -> dict[str, str]:
         "@stoplight/spectral-cli": (
             "Install via: bun add -d @stoplight/spectral-cli@>={version}"
         ),
+        "stylelint": "Install via: bun add -d stylelint@>={version}",
         "tsc": (
             "Install via: bun add -g typescript@{version}, "
             "npm install -g typescript@{version}, or brew install typescript"
@@ -183,6 +185,11 @@ def get_install_hints() -> dict[str, str]:
             "Install via: https://github.com/rhysd/actionlint/releases (v{version}+)"
         ),
         "clippy": "Install via: rustup component add clippy (requires Rust {version}+)",
+        "dotenv_linter": (
+            "Install via: brew install dotenv-linter, "
+            "cargo install dotenv-linter, or "
+            "https://github.com/dotenv-linter/dotenv-linter/releases (v{version}+)"
+        ),
         "rustc": (
             "Install via: rustup toolchain install {version} "
             "&& rustup default {version}"

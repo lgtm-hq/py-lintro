@@ -7,7 +7,7 @@ Coverage PR comments are handled by lgtm-ci reusable-test-python.yml.
 from __future__ import annotations
 
 import json
-import subprocess
+import subprocess  # nosec B404 - subprocess is used to drive the tool/CLI under test; invocations use shell=False
 import tempfile
 from pathlib import Path
 
@@ -75,7 +75,7 @@ TOTAL                       235     25    89%
         coverage_file.write_text(coverage_xml)
 
         # Run extract-test-summary.sh
-        result = subprocess.run(
+        result = subprocess.run(  # nosec B603 - fixed argv run against a real binary in a controlled test; shell=False, no user shell input
             [str(EXTRACT_SCRIPT), str(input_file), str(output_file)],
             capture_output=True,
             text=True,
@@ -140,7 +140,7 @@ def test_pipeline_handles_missing_coverage_xml() -> None:
         input_file.write_text(pytest_output)
         # Note: no coverage.xml created
 
-        result = subprocess.run(
+        result = subprocess.run(  # nosec B603 - fixed argv run against a real binary in a controlled test; shell=False, no user shell input
             [str(EXTRACT_SCRIPT), str(input_file), str(output_file)],
             capture_output=True,
             text=True,
@@ -166,7 +166,7 @@ def test_pipeline_quiet_mode_produces_valid_json() -> None:
 
         input_file.write_text(pytest_output)
 
-        result = subprocess.run(
+        result = subprocess.run(  # nosec B603 - fixed argv run against a real binary in a controlled test; shell=False, no user shell input
             [str(EXTRACT_SCRIPT), "--quiet", str(input_file), str(output_file)],
             capture_output=True,
             text=True,

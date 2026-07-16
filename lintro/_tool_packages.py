@@ -38,6 +38,7 @@ NPM_PACKAGE_OWNERS: dict[str, ToolName | None] = {
     "oxlint": ToolName.OXLINT,
     "oxfmt": ToolName.OXFMT,
     "@stoplight/spectral-cli": ToolName.SPECTRAL,
+    "stylelint": ToolName.STYLELINT,
     "@astrojs/check": None,
 }
 
