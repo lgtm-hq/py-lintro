@@ -188,6 +188,79 @@ def test_load_lintro_global_config_returns_empty_when_no_globals() -> None:
     assert_that(result).is_empty()
 
 
+def test_all_registered_tools_filtered_from_global_config(
+    mock_lintro_section: Any,
+) -> None:
+    """Verify every registered tool's section is excluded from global config.
+
+    The tool-section filter is derived from the tool registry (ToolName), so
+    a [tool.lintro.<name>] section for any registered tool must never leak
+    into the global config dict, regardless of how many tools are added to
+    the registry in the future.
+
+    Args:
+        mock_lintro_section: Factory fixture for mocking _get_lintro_section.
+    """
+    from lintro.enums.tool_name import ToolName
+
+    mock_data: dict[str, Any] = {tool.value: {"some_option": True} for tool in ToolName}
+    mock_data["global_setting"] = "value"
+
+    with mock_lintro_section(mock_data):
+        result = load_lintro_global_config()
+
+    assert_that(result).is_equal_to({"global_setting": "value"})
+    for tool in ToolName:
+        assert_that(result).does_not_contain_key(tool.value)
+
+
+def test_structural_sections_still_filtered(
+    mock_lintro_section: Any,
+) -> None:
+    """Verify non-tool structural sections are excluded from global config.
+
+    Sections like post_checks, module_size, and versions are not backed by
+    a registered tool but must still be treated as non-global config.
+
+    Args:
+        mock_lintro_section: Factory fixture for mocking _get_lintro_section.
+    """
+    mock_data = {
+        "global_setting": "value",
+        "post_checks": {"enabled": True},
+        "module_size": {"threshold": 500},
+        "versions": {"ruff": "1.0.0"},
+    }
+
+    with mock_lintro_section(mock_data):
+        result = load_lintro_global_config()
+
+    assert_that(result).is_equal_to({"global_setting": "value"})
+    assert_that(result).does_not_contain_key("post_checks")
+    assert_that(result).does_not_contain_key("module_size")
+    assert_that(result).does_not_contain_key("versions")
+
+
+def test_unknown_key_remains_global(
+    mock_lintro_section: Any,
+) -> None:
+    """Verify a non-tool, non-structural key stays in the global config.
+
+    Args:
+        mock_lintro_section: Factory fixture for mocking _get_lintro_section.
+    """
+    mock_data = {
+        "some_future_setting": "value",
+        "ruff": {"line_length": 88},
+    }
+
+    with mock_lintro_section(mock_data):
+        result = load_lintro_global_config()
+
+    assert_that(result).contains_key("some_future_setting")
+    assert_that(result.get("some_future_setting")).is_equal_to("value")
+
+
 # =============================================================================
 # Tests for load_lintro_tool_config
 # =============================================================================
