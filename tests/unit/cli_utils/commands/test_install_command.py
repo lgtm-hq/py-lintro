@@ -29,7 +29,7 @@ def _make_tool(name: str = "ruff", version: str = "0.14.0") -> ManifestTool:
 
 
 def _mock_registry() -> MagicMock:
-    """Build a mock ToolRegistry."""
+    """Build a mock ManifestRegistry."""
     registry = MagicMock()
     registry.profile_names = [
         "minimal",
@@ -52,7 +52,7 @@ def _patches() -> tuple[Any, Any]:
     registry = _mock_registry()
     return (
         patch(
-            "lintro.cli_utils.commands.install.ToolRegistry.load",
+            "lintro.cli_utils.commands.install.ManifestRegistry.load",
             return_value=registry,
         ),
         patch(

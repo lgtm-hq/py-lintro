@@ -13,7 +13,15 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Changed
 
+- **tools/core**: rename `lintro.tools.core.tool_registry.ToolRegistry` to
+  `ManifestRegistry` to disambiguate it from `lintro.plugins.registry.ToolRegistry`
+  (#1220)
+
 ### Deprecated
+
+- **tools/core**: `lintro.tools.core.tool_registry.ToolRegistry` is deprecated in favor
+  of `ManifestRegistry`; importing or using the old name now emits a
+  `DeprecationWarning` and will be removed in a future release (#1220)
 
 ### Removed
 

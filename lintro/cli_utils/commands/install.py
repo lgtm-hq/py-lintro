@@ -29,7 +29,7 @@ from lintro.tools.core.install_lock import (
     write_install_lock,
 )
 from lintro.tools.core.tool_installer import ToolInstaller
-from lintro.tools.core.tool_registry import ToolRegistry
+from lintro.tools.core.tool_registry import ManifestRegistry
 
 
 @click.command()
@@ -107,7 +107,7 @@ def install_command(
     """
     console = Console()
 
-    registry = ToolRegistry.load()
+    registry = ManifestRegistry.load()
     context = RuntimeContext.detect()
     installer = ToolInstaller(registry, context)
 
@@ -295,7 +295,7 @@ def _display_plan(console: Console, plan: object) -> None:
 
 def _interactive_select(
     console: Console,
-    registry: ToolRegistry,
+    registry: ManifestRegistry,
     profile: str | None,
     detected_langs: list[str] | None,
 ) -> tuple[list[str] | None, str | None]:
