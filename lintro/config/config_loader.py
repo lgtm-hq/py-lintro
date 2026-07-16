@@ -187,20 +187,24 @@ def _parse_execution_config(data: dict[str, Any]) -> ExecutionConfig:
             f"got {max_fix_retries}",
         )
 
-    kwargs: dict[str, Any] = {
-        "enabled_tools": enabled_tools,
-        "tool_order": tool_order,
-        "fail_fast": data.get("fail_fast", False),
-        "parallel": data.get("parallel", True),
-        "auto_install_deps": data.get("auto_install_deps"),
-        "max_fix_retries": max_fix_retries,
-    }
+    # max_workers and artifacts are optional; when absent, ExecutionConfig
+    # applies its own defaults (CPU count and empty list respectively). Only
+    # forward them when present so the model defaults still win on omission.
+    optional_fields: dict[str, Any] = {}
     if "max_workers" in data:
-        kwargs["max_workers"] = data["max_workers"]
+        optional_fields["max_workers"] = data["max_workers"]
     if "artifacts" in data:
-        kwargs["artifacts"] = data["artifacts"]
+        optional_fields["artifacts"] = data["artifacts"]
 
-    return ExecutionConfig(**kwargs)
+    return ExecutionConfig(
+        enabled_tools=enabled_tools,
+        tool_order=tool_order,
+        fail_fast=data.get("fail_fast", False),
+        parallel=data.get("parallel", True),
+        auto_install_deps=data.get("auto_install_deps"),
+        max_fix_retries=max_fix_retries,
+        **optional_fields,
+    )
 
 
 def _parse_tool_config(tool_name: str, data: dict[str, Any]) -> LintroToolConfig:
@@ -465,9 +469,9 @@ def _convert_pyproject_to_config(data: dict[str, Any]) -> dict[str, Any]:
         "tool_order",
         "fail_fast",
         "parallel",
+        "max_workers",
         "auto_install_deps",
         "max_fix_retries",
-        "max_workers",
         "artifacts",
     }
 
