@@ -55,10 +55,13 @@ scripts/
 
 Scripts for building standalone binaries and distribution packages.
 
-| Script           | Purpose                                  | Usage                                        |
-| ---------------- | ---------------------------------------- | -------------------------------------------- |
-| `build_macos.py` | Build macOS binary using Nuitka compiler | `uv run python scripts/build/build_macos.py` |
-| `build_linux.py` | Build Linux binary using Nuitka compiler | `uv run python scripts/build/build_linux.py` |
+| Script                   | Purpose                                                       | Usage                                                                 |
+| ------------------------ | ------------------------------------------------------------- | --------------------------------------------------------------------- |
+| `build_macos.py`         | Build macOS binary using Nuitka compiler                      | `uv run python scripts/build/build_macos.py`                          |
+| `build_linux.py`         | Build Linux binary using Nuitka compiler                        | `uv run python scripts/build/build_linux.py`                          |
+| `verify_built_binary.sh` | Verify a built binary responds to `--version` and `--help`    | `./scripts/build/verify_built_binary.sh dist/nuitka/lintro`           |
+| `finalize_binary.sh`     | Rename binary, compute SHA256, write GitHub Actions output    | `./scripts/build/finalize_binary.sh <source> <target> [label]`        |
+| `create_universal.sh`    | Combine arm64 and x86_64 macOS binaries into a universal fat binary | `./scripts/build/create_universal.sh <arm64> <x86_64> <output>` |
 
 ### 📦 npm Distribution Scripts (`ci/npm/`)
 

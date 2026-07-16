@@ -118,24 +118,15 @@ jobs:
           PYTHONUNBUFFERED: '1'
 
       - name: Verify binary
-        run: |
-          ls -lh dist/nuitka/
-          # Fail if binary can't execute --version (required for valid build)
-          ./dist/nuitka/lintro --version
-          # Show help output for debugging (non-fatal)
-          ./dist/nuitka/lintro --help | head -20 || echo "Help output truncated"
+        run: scripts/build/verify_built_binary.sh dist/nuitka/lintro
 
-      - name: Rename binary with architecture
-        run: |
-          mv dist/nuitka/lintro dist/nuitka/lintro-macos-${{ matrix.arch }}
-
-      - name: Calculate SHA256
+      - name: Finalize binary
         id: sha256
-        run: |
-          BINARY="dist/nuitka/lintro-macos-${{ matrix.arch }}"
-          SHA=$(shasum -a 256 "$BINARY" | cut -d' ' -f1)
-          echo "sha256=$SHA" >> "$GITHUB_OUTPUT"
-          echo "SHA256 for ${{ matrix.arch }}: $SHA"
+        run: >-
+          scripts/build/finalize_binary.sh
+          dist/nuitka/lintro
+          dist/nuitka/lintro-macos-${{ matrix.arch }}
+          ${{ matrix.arch }}
 
       - name: Upload artifact
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
@@ -227,22 +218,15 @@ jobs:
           PYTHONUNBUFFERED: '1'
 
       - name: Verify binary
-        run: |
-          ls -lh dist/nuitka/
-          ./dist/nuitka/lintro --version
-          ./dist/nuitka/lintro --help | head -20 || echo "Help output truncated"
+        run: scripts/build/verify_built_binary.sh dist/nuitka/lintro
 
-      - name: Rename binary with architecture
-        run: |
-          mv dist/nuitka/lintro dist/nuitka/lintro-linux-${{ matrix.arch }}
-
-      - name: Calculate SHA256
+      - name: Finalize binary
         id: sha256
-        run: |
-          BINARY="dist/nuitka/lintro-linux-${{ matrix.arch }}"
-          SHA=$(sha256sum "$BINARY" | cut -d' ' -f1)
-          echo "sha256=$SHA" >> "$GITHUB_OUTPUT"
-          echo "SHA256 for linux-${{ matrix.arch }}: $SHA"
+        run: >-
+          scripts/build/finalize_binary.sh
+          dist/nuitka/lintro
+          dist/nuitka/lintro-linux-${{ matrix.arch }}
+          linux-${{ matrix.arch }}
 
       - name: Upload artifact
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
@@ -306,17 +290,11 @@ jobs:
           path: binaries/
 
       - name: Create universal binary
-        run: |
-          lipo -create \
-            binaries/lintro-macos-arm64 \
-            binaries/lintro-macos-x86_64 \
-            -output binaries/lintro-macos-universal
-          chmod +x binaries/lintro-macos-universal
-
-      - name: Verify universal binary
-        run: |
-          file binaries/lintro-macos-universal
-          ls -lh binaries/lintro-macos-universal
+        run: >-
+          scripts/build/create_universal.sh
+          binaries/lintro-macos-arm64
+          binaries/lintro-macos-x86_64
+          binaries/lintro-macos-universal
 
       - name: Upload universal artifact
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
