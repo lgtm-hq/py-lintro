@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import ast
 import re
+import subprocess  # nosec B404 - subprocess runs fixed git argv against this repo
 from pathlib import Path
 from typing import Any, cast
 
@@ -49,6 +50,41 @@ def _normalize_github_expr(expr: str) -> str:
 def _replace_github_token(expr: str, *, token: str, replacement: str) -> str:
     pattern = r"\s+".join(re.escape(part) for part in token.split())
     return re.sub(pattern, replacement, expr)
+
+
+def _replace_output_comparison_tokens(
+    expr: str,
+    *,
+    job: str,
+    output_name: str,
+    output_value: str,
+) -> str:
+    """Substitute every equality comparison of a job output with its truth value.
+
+    Handles any ``needs.<job>.outputs.<name> ==/!= '<literal>'`` comparison
+    (including hyphenated output names such as ``lint-scope``, which cannot
+    survive AST parsing as bare identifiers).
+
+    Args:
+        expr: The workflow ``if:`` expression being reduced.
+        job: The producing job id.
+        output_name: The output name on that job.
+        output_value: The simulated output value.
+
+    Returns:
+        str: The expression with all comparisons of this output replaced by
+        boolean literals.
+    """
+    token = re.escape(f"needs.{job}.outputs.{output_name}")
+    pattern = rf"{token}\s*([!=]=)\s*'([^']*)'"
+
+    def _sub(match: re.Match[str]) -> str:
+        op, literal = match.group(1), match.group(2)
+        if op == "==":
+            return repr(output_value == literal)
+        return repr(output_value != literal)
+
+    return re.sub(pattern, _sub, expr)
 
 
 def _bool_from_ast(node: ast.AST) -> bool:
@@ -132,10 +168,11 @@ def _evaluate_github_if(
     if outputs:
         for job, job_outputs in outputs.items():
             for output_name, output_value in job_outputs.items():
-                expr = _replace_github_token(
+                expr = _replace_output_comparison_tokens(
                     expr,
-                    token=f"needs.{job}.outputs.{output_name} != ''",
-                    replacement=repr(output_value != ""),
+                    job=job,
+                    output_name=output_name,
+                    output_value=output_value,
                 )
     if event_is_pull_request is not None:
         expr = _replace_github_token(
@@ -263,6 +300,62 @@ def test_semantic_pr_title_can_write_failure_comments() -> None:
     )
 
 
+def test_docker_ci_changes_job_classifies_version_bump_prs() -> None:
+    """The changes job nominates bump PRs and feeds the verdict downstream.
+
+    Nominate-then-verify (#1362): the bump step runs only on pull_request
+    events with the identity signals in env (never interpolated into the
+    run script), and the resolve step consumes its output as RELEASE_BUMP.
+    """
+    docker_ci = _load_workflow(name="docker-ci.yml")
+    changes_job = docker_ci["jobs"]["changes"]
+    steps = {step.get("id"): step for step in changes_job["steps"] if "id" in step}
+
+    bump_step = steps["bump"]
+    assert_that(bump_step["if"]).contains(_github_event_name_is_pull_request_token())
+    assert_that(bump_step["run"]).is_equal_to("scripts/ci/release-bump-only.sh")
+    assert_that(bump_step["continue-on-error"]).is_true()
+    bump_env = bump_step["env"]
+    assert_that(bump_env["PR_AUTHOR"]).contains(
+        f"github.event.{_GITHUB_PULL_REQUEST_EVENT}.user.login",
+    )
+    assert_that(bump_env["PR_TITLE"]).contains(
+        f"github.event.{_GITHUB_PULL_REQUEST_EVENT}.title",
+    )
+    assert_that(bump_env["HEAD_REF"]).contains("github.head_ref")
+
+    resolve_step = steps["result"]
+    assert_that(resolve_step["env"]["RELEASE_BUMP"]).contains(
+        "steps.bump.outputs.release-bump",
+    )
+    assert_that(changes_job["outputs"]["skip-reason"]).contains(
+        "steps.result.outputs.skip-reason",
+    )
+
+
+def test_docker_ci_heavy_jobs_log_skip_reason() -> None:
+    """docker-build, security-audit, and integration-test log skip notices.
+
+    Required-check gates must report green with a logged reason when the
+    pipeline is skipped (docs-only or version-bump PR, #1362).
+    """
+    docker_ci = _load_workflow(name="docker-ci.yml")
+    for job_name in ("docker-build", "security-audit", "integration-test"):
+        job = docker_ci["jobs"][job_name]
+        skip_steps = [
+            step
+            for step in job["steps"]
+            if step.get("if") == "needs.changes.outputs.pipeline == 'false'"
+            and "ci-log.sh" in step.get("run", "")
+        ]
+        assert_that(skip_steps).described_as(job_name).is_length(1)
+        skip_step = skip_steps[0]
+        assert_that(skip_step["run"]).contains('"skipped:"')
+        assert_that(skip_step["env"]["SKIP_REASON"]).contains(
+            "needs.changes.outputs.skip-reason",
+        )
+
+
 def test_docker_ci_dogfooding_lint_waits_on_manifest_sync() -> None:
     """Dogfooding lint depends on manifest-sync and allows draft-PR skips."""
     docker_ci = _load_workflow(name="docker-ci.yml")
@@ -272,9 +365,10 @@ def test_docker_ci_dogfooding_lint_waits_on_manifest_sync() -> None:
     lint_condition = lint_job["if"]
     comment_condition = comment_job["if"]
 
-    assert_that(lint_needs).contains("docker-build", "manifest-sync")
+    assert_that(lint_needs).contains("changes", "docker-build", "manifest-sync")
     assert_that(lint_condition).contains("always()")
     assert_that(lint_condition).contains("!cancelled()")
+    assert_that(lint_condition).contains("needs.changes.outputs.pipeline != 'false'")
     assert_that(lint_condition).contains("needs.docker-build.result == 'success'")
     assert_that(lint_condition).contains("manifest-sync.result == 'skipped'")
     assert_that(lint_condition).contains("manifest-sync.result == 'success'")
@@ -298,17 +392,36 @@ def test_docker_ci_dogfooding_lint_waits_on_manifest_sync() -> None:
 
 
 @pytest.mark.parametrize(
-    ("docker_build", "manifest_sync", "cancelled", "expected"),
+    (
+        "pipeline",
+        "lint_scope",
+        "docker_build",
+        "manifest_sync",
+        "cancelled",
+        "expected",
+    ),
     [
-        ("success", "success", False, True),
-        ("success", "skipped", False, True),
-        ("success", "failure", False, False),
-        ("failure", "success", False, False),
-        ("success", "success", True, False),
+        ("true", "full", "success", "success", False, True),
+        ("true", "full", "success", "skipped", False, True),
+        ("true", "full", "success", "failure", False, False),
+        ("true", "full", "failure", "success", False, False),
+        ("true", "full", "success", "success", True, False),
+        # Changed-files PR (#1361): the full-repo lint hands off to
+        # dogfooding-lint-changed.
+        ("true", "changed", "success", "success", False, False),
+        # Docs-only PR: docker-build early-exits green and manifest-sync is
+        # path-skipped; dogfooding-lint must not run (no CI image pushed).
+        ("false", "changed", "success", "skipped", False, False),
+        # Broken changes job fails open: pipeline and lint-scope outputs are
+        # empty (not 'false'/'changed'), the full build ran, so the full
+        # lint runs too.
+        ("", "", "success", "success", False, True),
     ],
 )
 def test_docker_ci_lint_condition_semantics(
     *,
+    pipeline: str,
+    lint_scope: str,
     docker_build: str,
     manifest_sync: str,
     cancelled: bool,
@@ -326,6 +439,59 @@ def test_docker_ci_lint_condition_semantics(
                 "docker-build": docker_build,
                 "manifest-sync": manifest_sync,
             },
+            outputs={"changes": {"pipeline": pipeline, "lint-scope": lint_scope}},
+        ),
+    ).is_equal_to(expected)
+
+
+@pytest.mark.parametrize(
+    (
+        "pipeline",
+        "lint_scope",
+        "docker_build",
+        "manifest_sync",
+        "cancelled",
+        "expected",
+    ),
+    [
+        # Changed-scope PR with a green build runs the changed-files lint.
+        ("true", "changed", "success", "success", False, True),
+        ("true", "changed", "success", "skipped", False, True),
+        ("true", "changed", "success", "failure", False, False),
+        ("true", "changed", "failure", "success", False, False),
+        ("true", "changed", "success", "success", True, False),
+        # Full-scope runs (global-impact PRs, merge_group, pushes) belong to
+        # dogfooding-lint, not this job.
+        ("true", "full", "success", "success", False, False),
+        # Docs-only PR: nothing was built, nothing to lint.
+        ("false", "changed", "success", "skipped", False, False),
+        # Broken changes job fails open to the FULL lint job: empty
+        # lint-scope is != 'changed', so this job stays skipped.
+        ("", "", "success", "success", False, False),
+    ],
+)
+def test_docker_ci_lint_changed_condition_semantics(
+    *,
+    pipeline: str,
+    lint_scope: str,
+    docker_build: str,
+    manifest_sync: str,
+    cancelled: bool,
+    expected: bool,
+) -> None:
+    """Changed-files lint runs exactly when scope is 'changed' and build is green."""
+    docker_ci = _load_workflow(name="docker-ci.yml")
+    lint_condition = docker_ci["jobs"]["dogfooding-lint-changed"]["if"]
+
+    assert_that(
+        _evaluate_github_if(
+            lint_condition,
+            cancelled=cancelled,
+            results={
+                "docker-build": docker_build,
+                "manifest-sync": manifest_sync,
+            },
+            outputs={"changes": {"pipeline": pipeline, "lint-scope": lint_scope}},
         ),
     ).is_equal_to(expected)
 
@@ -445,15 +611,63 @@ def test_docker_ci_comment_condition_semantics(
             cancelled=cancelled,
             results={
                 "dogfooding-lint": dogfooding_lint,
+                # Full-scope scenarios: neither the changed-files job nor the
+                # bounded retry ran, so the full lint result decides.
+                "dogfooding-lint-changed": "skipped",
                 "dogfooding_lint_retry": "skipped",
             },
             outputs={
                 "dogfooding-lint": lint_outputs,
+                "dogfooding-lint-changed": {"exit-code": "", "status": ""},
                 "dogfooding_lint_retry": {"exit-code": "", "status": ""},
             },
             event_is_pull_request=event_is_pull_request,
             head_repo_not_fork=head_repo_not_fork,
             pull_request_not_draft=pull_request_not_draft,
+        ),
+    ).is_equal_to(expected)
+
+
+@pytest.mark.parametrize(
+    ("lint_changed", "changed_outputs", "expected"),
+    [
+        # Changed-files lint ran: the comment posts with its outputs even
+        # though the full lint job was scope-skipped.
+        ("success", {"exit-code": "0", "status": "passed"}, True),
+        ("failure", {"exit-code": "1", "status": "failed"}, True),
+        ("skipped", {"exit-code": "", "status": ""}, False),
+        ("failure", {"exit-code": "", "status": ""}, False),
+    ],
+)
+def test_docker_ci_comment_condition_changed_scope_semantics(
+    *,
+    lint_changed: str,
+    changed_outputs: dict[str, str],
+    expected: bool,
+) -> None:
+    """PR comment fires on changed-files lint results when full lint skipped."""
+    docker_ci = _load_workflow(name="docker-ci.yml")
+    comment_condition = docker_ci["jobs"]["dogfooding-pr-comment"]["if"]
+
+    assert_that(
+        _evaluate_github_if(
+            comment_condition,
+            cancelled=False,
+            results={
+                "dogfooding-lint": "skipped",
+                "dogfooding-lint-changed": lint_changed,
+                # Retry only ever runs for the full-repo lint; in changed scope
+                # the full job was skipped, so the retry is skipped too.
+                "dogfooding_lint_retry": "skipped",
+            },
+            outputs={
+                "dogfooding-lint": {"exit-code": "", "status": ""},
+                "dogfooding-lint-changed": changed_outputs,
+                "dogfooding_lint_retry": {"exit-code": "", "status": ""},
+            },
+            event_is_pull_request=True,
+            head_repo_not_fork=True,
+            pull_request_not_draft=True,
         ),
     ).is_equal_to(expected)
 
@@ -464,12 +678,37 @@ def test_docker_ci_lintro_code_quality_wires_upstream_jobs() -> None:
     gate_job = docker_ci["jobs"]["code-quality-gate"]
     job = docker_ci["jobs"]["lintro-code-quality"]
 
+    # The gate rolls up the effective dogfooding result across the full run,
+    # its retry, and the changed-files variant (#1313 + #1361).
     assert_that(gate_job["needs"]).contains(
+        "changes",
         "docker-build",
         "manifest-sync",
         "dogfooding-lint",
+        "dogfooding-lint-changed",
         "dogfooding_lint_retry",
     )
+    # The gate's primary lint selection mirrors whichever dogfooding job ran:
+    # docs-only PRs report success, lint-scope 'changed' selects the
+    # changed-files job, anything else selects the full run.
+    gate_step = next(
+        step
+        for step in gate_job["steps"]
+        if step.get("id") == "gate"
+    )
+    primary_result = _normalize_github_expr(gate_step["env"]["PRIMARY_LINT_RESULT"])
+    assert_that(primary_result).is_equal_to(
+        _normalize_github_expr(
+            "${{ needs.changes.outputs.pipeline == 'false' && 'success' "
+            "|| needs.changes.outputs.lint-scope == 'changed' && "
+            "needs.dogfooding-lint-changed.result "
+            "|| needs.dogfooding-lint.result }}",
+        ),
+    )
+    assert_that(gate_step["env"]["RETRY_LINT_RESULT"]).contains(
+        "needs.dogfooding_lint_retry.result",
+    )
+    # The required check consumes only the rolled-up gate outputs.
     assert_that(job["needs"]).contains("code-quality-gate")
     assert_that(job["if"]).contains("!cancelled()")
     assert_that(job["with"]["upstream-result"]).contains(
@@ -498,6 +737,188 @@ def test_docker_ci_retries_dogfooding_lint_on_failure() -> None:
     assert_that(retry_condition).contains("needs.docker-build.result == 'success'")
 
 
+# --- Deny-by-default pipeline skip-list drift guard (#1369) ------------------
+#
+# docker-ci pipeline relevance is decided by
+# scripts/ci/resolve-pipeline-relevance.sh against a small skip-list instead
+# of an allow-list of relevant paths, so new top-level directories trigger
+# the pipeline by default. These tests make the categorization explicit:
+# every tracked top-level path must be listed as either skippable or
+# pipeline-relevant, and the skippable set must match the script's
+# skip-list, so a new top-level path fails CI loudly until a human
+# categorizes it (instead of silently under- or over-triggering).
+
+_RESOLVE_PIPELINE_SCRIPT = (
+    _REPO_ROOT / "scripts" / "ci" / "resolve-pipeline-relevance.sh"
+)
+
+# Top-level directories whose entire content may skip the heavy Docker
+# pipeline (pure prose/assets). Must stay in lockstep with the skip-list in
+# scripts/ci/resolve-pipeline-relevance.sh (is_skippable_path); a dedicated
+# test below enforces that. Root-level *.md files are skippable by the
+# script's '*.md' rule and need no listing here.
+_PIPELINE_SKIPPABLE_TOP_LEVEL: frozenset[str] = frozenset(
+    {
+        "assets",
+        "docs",  # except docs/.markdownlint-cli2.jsonc (script carve-out)
+    },
+)
+
+# Every other tracked top-level path: changes there run the full pipeline.
+# This list is documentation-as-test — the script does NOT consult it; any
+# path absent from the skip-list triggers by default. test_samples is
+# deliberately here despite holding *.md files: they are lint fixtures
+# feeding the integration tests (script carve-out).
+_PIPELINE_RELEVANT_TOP_LEVEL: frozenset[str] = frozenset(
+    {
+        ".actrc",
+        ".allstar",
+        ".codecov.yml",
+        ".dockerignore",
+        ".gitattributes",
+        ".github",
+        ".gitignore",
+        ".gitleaks.toml",
+        ".hadolint.yaml",
+        ".lintro-config.yaml",
+        ".lintro-ignore",
+        ".markdownlint-cli2.jsonc",
+        ".node-version",
+        ".osv-scanner.toml",
+        ".oxfmtrc.json",
+        ".pre-commit-hooks.yaml",
+        ".prettierignore",
+        ".prettierrc.json",
+        ".yamllint",
+        "apps",
+        "benchmarks",
+        "bun.lock",
+        "docker",
+        "docker-compose.yml",
+        "Dockerfile",
+        "LICENSE",
+        "lintro",
+        "Makefile",
+        "MANIFEST.in",
+        "npm",
+        "package.json",
+        "pyproject.toml",
+        "pytest.ini",
+        "renovate.json",
+        "scripts",
+        "socket.yml",
+        "test_samples",
+        "tests",
+        "tools",
+        "tox.ini",
+        "uv.lock",
+    },
+)
+
+
+def _tracked_top_level_paths() -> set[str]:
+    """Return the first path segment of every git-tracked file.
+
+    Returns:
+        set[str]: Top-level directory and file names under version control.
+    """
+    output = subprocess.run(  # nosec B603 B607 - fixed git argv against this repo
+        ["git", "-C", str(_REPO_ROOT), "ls-files"],
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout
+    return {line.split("/", 1)[0] for line in output.splitlines() if line}
+
+
+def test_every_top_level_path_is_categorized_for_pipeline_relevance() -> None:
+    """Every tracked top-level path is explicitly skippable or relevant.
+
+    Deny-by-default means an uncategorized path already triggers the
+    pipeline at runtime; this test exists so the categorization is a
+    conscious decision rather than an accident of the default.
+    """
+    top_level = _tracked_top_level_paths()
+    categorized = _PIPELINE_SKIPPABLE_TOP_LEVEL | _PIPELINE_RELEVANT_TOP_LEVEL
+    uncategorized = sorted(
+        path
+        for path in top_level
+        if path not in categorized and not path.endswith(".md")
+    )
+    assert_that(uncategorized).described_as(
+        "New top-level path(s) are not categorized for docker-ci pipeline "
+        "relevance (#1369). Add each one to _PIPELINE_RELEVANT_TOP_LEVEL in "
+        "tests/unit/test_workflow_wiring.py (the safe default: anything "
+        "that can affect the Docker image, the integration tests, or lint "
+        "behavior — it already triggers the pipeline automatically), or — "
+        "ONLY for pure prose/static assets — to _PIPELINE_SKIPPABLE_TOP_LEVEL "
+        "here AND to is_skippable_path in "
+        "scripts/ci/resolve-pipeline-relevance.sh",
+    ).is_empty()
+
+
+def test_pipeline_relevance_categories_are_disjoint() -> None:
+    """No top-level path may be both skippable and pipeline-relevant."""
+    overlap = _PIPELINE_SKIPPABLE_TOP_LEVEL & _PIPELINE_RELEVANT_TOP_LEVEL
+    assert_that(sorted(overlap)).is_empty()
+
+
+def test_skippable_categorization_matches_resolver_skip_list() -> None:
+    """The test's skippable set mirrors the script's actual skip-list.
+
+    Parses the ``is_skippable_path`` case arms out of
+    resolve-pipeline-relevance.sh: directory globs returning 0 must equal
+    _PIPELINE_SKIPPABLE_TOP_LEVEL, the '*.md' prose rule must be present,
+    and the pipeline-relevant carve-outs (test_samples/**,
+    docs/.markdownlint-cli2.jsonc) must return 1 and be categorized as
+    relevant here.
+    """
+    script = _RESOLVE_PIPELINE_SCRIPT.read_text(encoding="utf-8")
+
+    skip_dir_globs = set(re.findall(r"^\s*(\S+)/\*\)\s*return 0", script, re.M))
+    assert_that(skip_dir_globs).is_equal_to(set(_PIPELINE_SKIPPABLE_TOP_LEVEL))
+
+    skip_file_globs = re.findall(r"^\s*(\*\.\w+)\)\s*return 0", script, re.M)
+    assert_that(skip_file_globs).is_equal_to(["*.md"])
+
+    carve_outs = set(re.findall(r"^\s*(\S+)\)\s*return 1", script, re.M))
+    assert_that(carve_outs).is_equal_to(
+        {"test_samples/*", "docs/.markdownlint-cli2.jsonc"},
+    )
+    assert_that(_PIPELINE_RELEVANT_TOP_LEVEL).contains("test_samples")
+
+
+def test_docker_ci_detect_step_has_no_pipeline_allow_list() -> None:
+    """The detect-changes filter feeds lint-scope only, never pipeline.
+
+    Reintroducing a `pipeline:` dorny filter would resurrect the rotting
+    allow-list that #1369 removed; relevance must stay computed by
+    resolve-pipeline-relevance.sh from the changed-file list.
+    """
+    docker_ci = _load_workflow(name="docker-ci.yml")
+    changes_job = docker_ci["jobs"]["changes"]
+    steps = {step.get("id"): step for step in changes_job["steps"] if "id" in step}
+
+    detect_step = steps["detect"]
+    filters = detect_step["with"]["filters"]
+    filter_names = re.findall(r"^([^#\s][^:]*):\s*$", filters, re.M)
+    assert_that(filter_names).is_equal_to(["full-lint"])
+
+    resolve_step = steps["result"]
+    assert_that(resolve_step["run"]).is_equal_to(
+        "scripts/ci/resolve-pipeline-relevance.sh",
+    )
+    # The script diffs the merge commit (HEAD^1..HEAD): the changes job
+    # checkout must keep full history for that range to resolve.
+    checkout_steps = [
+        step
+        for step in changes_job["steps"]
+        if "actions/checkout" in step.get("uses", "")
+    ]
+    assert_that(checkout_steps).is_length(1)
+    assert_that(checkout_steps[0]["with"]["fetch-depth"]).is_equal_to(0)
+
+
 def test_publish_npm_exposes_dist_tag_for_backfills() -> None:
     """publish-npm accepts dist_tag and forwards it as NPM_DIST_TAG."""
     workflow = _load_workflow(name="publish-npm.yml")
@@ -524,9 +945,9 @@ def test_publish_npm_exposes_dist_tag_for_backfills() -> None:
     assert_that(publish_step["env"]["NPM_DIST_TAG"]).contains("inputs.dist_tag")
 
 
-# Canonical lgtm-ci pin used by all py-lintro workflows (v0.52.3).
+# Canonical lgtm-ci pin used by all py-lintro workflows (v0.52.4).
 # Pages deploy must not regress to v0.32.3 (missing GH_TOKEN in bundler).
-_LGTM_CI_PIN = "66cad82ead0e5d119928c895c7d7da9c837989e5"
+_LGTM_CI_PIN = "31c25ef2e8992960e218524780e34f44f51271b5"
 
 
 def test_all_lgtm_ci_refs_use_the_canonical_pin() -> None:
@@ -596,7 +1017,7 @@ def test_deploy_pages_pins_bundler_with_github_token() -> None:
 
     reusable-deploy-site-with-reports checks out tooling-ref for
     bundle-workflow-artifacts. v0.32.3 omitted GH_TOKEN; v0.32.4+ (lgtm-ci#300)
-    sets ``GH_TOKEN: ${{ github.token }}``. Stay on the repo-standard v0.52.3 pin.
+    sets ``GH_TOKEN: ${{ github.token }}``. Stay on the repo-standard v0.52.4 pin.
     """
     workflow = _load_workflow(name="deploy-pages.yml")
     deploy = workflow["jobs"]["deploy"]
@@ -606,7 +1027,7 @@ def test_deploy_pages_pins_bundler_with_github_token() -> None:
     assert_that(uses).contains(_LGTM_CI_PIN)
     assert_that(uses).contains("reusable-deploy-site-with-reports.yml")
     assert_that(tooling_ref).contains(_LGTM_CI_PIN)
-    # v0.52.3 build job requests actions: write (lgtm-ci#415 rerun
+    # v0.52.4 build job requests actions: write (lgtm-ci#415 rerun
     # self-heal); a lower caller grant is a parse-time startup_failure.
     assert_that(deploy["permissions"]).contains_entry({"actions": "write"})
     assert_that(deploy["permissions"]).contains_entry({"pages": "write"})
