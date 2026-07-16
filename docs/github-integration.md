@@ -80,6 +80,22 @@ Secrets and variables → Actions**). Because reviews run using trusted base-bra
 lintro, the key is safe to enable. Until that secret exists the workflow runs but skips
 gracefully, so merging it never breaks CI.
 
+#### Activation precondition (security audit #1317)
+
+Before enabling `ANTHROPIC_API_KEY`, confirm the dogfood workflow still satisfies all
+three controls (also asserted in `tests/scripts/test_run_ai_review.py`):
+
+1. **Same-repo only** — the job `if` guard requires
+   `pull_request.head.repo.full_name == github.repository` (fork PRs never run).
+2. **Trusted install** — the checkout step uses `pull_request.base.sha`, never the PR
+   head, so code that runs with the key is always from the trusted base ref.
+3. **Secret ordering** — `ANTHROPIC_API_KEY` is injected only into the final review
+   step's `env`, after checkout and dependency install.
+
+These controls landed with #1074; #1317 verified them against current `main`. A
+dedicated GitHub Environment with required reviewers is optional once (1–3) hold. Re-run
+the audit if the checkout ref, job guard, or secret injection site changes.
+
 #### JSON error contract
 
 Under `--output json`, a **provider failure** (invalid key, rate limit, depleted

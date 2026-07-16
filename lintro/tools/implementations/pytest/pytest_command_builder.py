@@ -159,7 +159,10 @@ def add_coverage_options(cmd: list[str], options: dict[str, Any]) -> None:
 
     # Add coverage collection if any coverage options are specified
     needs_coverage = (
-        coverage_html or coverage_xml or coverage_term_missing or coverage_threshold
+        coverage_html
+        or coverage_xml
+        or coverage_term_missing
+        or coverage_threshold is not None
     )
     if needs_coverage:
         # Add --cov flag to enable coverage collection

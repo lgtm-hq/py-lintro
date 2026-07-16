@@ -36,6 +36,11 @@ fi
 
 DIST_DIR="${DIST_DIR:-dist}"
 
+# Pin the sigstore CLI so a future release changing `sign`, `--bundle`, or
+# `--overwrite` cannot break the release-only signing job after PyPI upload.
+# Renovate keeps this current (custom manager in renovate.json).
+SIGSTORE_VERSION="${SIGSTORE_VERSION:-4.4.0}"
+
 if [[ ! -d "${DIST_DIR}" ]]; then
 	echo "sign-dist-sigstore: distribution directory not found: ${DIST_DIR}" >&2
 	exit 1
@@ -59,7 +64,7 @@ for artifact in "${artifacts[@]}"; do
 	# `--bundle` pins the output path so the extension is always `.sigstore`,
 	# the pattern the Scorecard Signed-Releases check looks for. `--overwrite`
 	# keeps re-runs idempotent.
-	uvx --from sigstore sigstore sign \
+	uvx --from "sigstore==${SIGSTORE_VERSION}" sigstore sign \
 		--bundle "${bundle}" \
 		--overwrite \
 		"${artifact}"

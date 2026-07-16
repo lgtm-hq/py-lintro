@@ -59,6 +59,27 @@ def test_should_run_returns_false_when_disabled():
     assert_that(result).is_false()
 
 
+def test_should_run_true_when_lint_enabled():
+    """Lint summarization runs when ai.lint is enabled."""
+    config = LintroConfig(
+        ai=AIConfig(enabled=True, lint=True, review=False, transport=AITransport.API),
+    )
+    hook = AIPostExecutionHook(config)
+
+    assert_that(hook.should_run(Action.CHECK)).is_true()
+
+
+def test_should_run_false_when_only_review_enabled():
+    """Review-only config does not trigger the lint-summary hook."""
+    config = LintroConfig(
+        ai=AIConfig(enabled=True, lint=False, review=True, transport=AITransport.API),
+    )
+    hook = AIPostExecutionHook(config)
+
+    assert_that(hook.should_run(Action.CHECK)).is_false()
+    assert_that(hook.should_run(Action.FIX)).is_false()
+
+
 # ---------------------------------------------------------------------------
 # TestExecute
 # ---------------------------------------------------------------------------

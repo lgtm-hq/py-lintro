@@ -204,20 +204,33 @@ def format_issues(
 
 Hierarchical configuration with clear precedence.
 
-**Precedence (highest to lowest):**
+**Effective per-tool config precedence (highest to lowest):** this is how a tool's
+effective options are resolved (see `lintro/utils/unified_config.py`):
 
-1. CLI flags
-2. Environment variables
-3. `.lintro-config.yaml` / `.lintro-config.yml`
-4. `pyproject.toml` `[tool.lintro]` section (fallback)
-5. Tool native configs (`.ruff.toml`, etc.)
-6. Hardcoded defaults
+1. CLI `--tool-options` (always wins)
+2. `[tool.lintro.<tool>]` per-tool settings in `pyproject.toml`
+3. `[tool.lintro]` global settings in `pyproject.toml`
+4. Tool native config (e.g. `[tool.ruff]`)
+5. Tool defaults
+
+**Config-file source precedence (highest to lowest):** which config file supplies the
+`LintroConfig` model (see `load_config` in `lintro/config/config_loader.py`):
+
+1. Explicit `--config` path
+2. `.lintro-config.yaml` / `.lintro-config.yml` (searched upward from the cwd)
+3. `pyproject.toml` `[tool.lintro]` section (fallback)
+4. Built-in defaults (empty configuration)
+
+> Configuration loading does **not** read environment variables. A small set of runtime
+> variables (`LINTRO_LOG_DIR`, `LINTRO_VERSION_TIMEOUT`, `LINTRO_DOCKER`) affect
+> specific behaviors but are not part of config resolution.
 
 **Key Classes:**
 
-- `ConfigLoader` - Finds and loads configuration
-- `LintroConfig` - Project-wide settings
-- `ToolConfig` - Per-tool settings
+- `load_config()` - Finds and loads configuration into `LintroConfig`
+- `LintroConfig` - Project-wide settings (execution, enforce, defaults, tools, ai,
+  review, score)
+- `LintroToolConfig` - Per-tool enable/disable and config source
 
 ## Design Decisions
 
@@ -240,7 +253,7 @@ Hierarchical configuration with clear precedence.
 
 **Rationale:**
 
-- Supports concurrent access in future parallel execution
+- Supports concurrent access during parallel tool execution
 - Lazy loading reduces startup time
 - Singleton ensures consistent tool state
 
@@ -329,22 +342,29 @@ class ParserFactory:
 
 ### Parallel Tool Execution
 
-**Current:** Tools run sequentially.
-
-**Future:** Independent tools run in parallel.
+**Current (implemented, on by default):** Independent tools run in parallel. This is
+controlled by `execution.parallel` (default `true`) and bounded by
+`execution.max_workers` (default: CPU count, clamped 1-32). Tools that conflict on the
+same files are grouped into sequential batches via `get_parallel_batches`, while
+independent tools run concurrently. Parallelism only engages when more than one tool is
+selected. See `lintro/utils/execution/parallel_executor.py` and
+`lintro/utils/async_tool_executor.py`.
 
 ```python
-# Future implementation concept
-async def execute_tools(tools: list[Tool], paths: list[str]) -> list[ToolResult]:
-    independent_groups = group_by_conflicts(tools)
+# Simplified from run_tools_parallel / AsyncToolExecutor
+def run_tools_parallel(tools_to_run, ..., max_workers):
+    # Conflict-aware grouping: tools touching the same files share a batch
+    batches = get_parallel_batches(tools_to_run, tool_manager)
+    executor = AsyncToolExecutor(max_workers=max_workers)
     results = []
-    for group in independent_groups:
-        group_results = await asyncio.gather(
-            *[tool.check(paths) for tool in group]
-        )
-        results.extend(group_results)
+    for batch in batches:
+        # Tools within a batch run concurrently on a thread pool
+        results.extend(executor.run_tools_parallel(batch, ...))
     return results
 ```
+
+Disable parallelism with `execution.parallel: false` in `.lintro-config.yaml` when
+deterministic sequential ordering is required.
 
 ### Distribution Strategy
 
@@ -515,16 +535,19 @@ def test_ruff_check_finds_issues(tmp_path):
 
 ### Current Bottlenecks
 
-1. **Sequential tool execution** - Tools run one after another
-2. **Subprocess overhead** - Each tool spawns a new process
-3. **Full file discovery** - Scans all files even if unchanged
+1. **Subprocess overhead** - Each tool spawns a new process
+2. **Full file discovery** - Scans all files even if unchanged
 
 ### Optimization Roadmap
 
-1. **Parallel execution** - Run independent tools concurrently
+1. **Parallel execution** - Run independent tools concurrently — **implemented**
+   (`execution.parallel`, on by default; conflict-aware batching)
 2. **Incremental checking** - Hash files, skip unchanged
 3. **File discovery caching** - Cache glob results within session
 4. **Subprocess pooling** - Reuse processes for same tool
+
+See the [performance epic (#597–#601)](https://github.com/lgtm-hq/py-lintro/issues/597)
+for remaining performance work.
 
 ### Performance Metrics (To Establish)
 
