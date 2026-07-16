@@ -1,17 +1,35 @@
-"""Integration tests for parallel tool execution."""
+"""Integration tests for parallel tool execution.
+
+Single-tool smoke tests below exercise the sequential path only
+(``use_parallel`` requires ``len(tools_to_run) > 1``). Multi-tool tests
+exercise the asyncio + ThreadPoolExecutor path and conflict-aware batching.
+"""
 
 from __future__ import annotations
 
 import contextlib
+import json
 import os
+import shutil
 import tempfile
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
+from dataclasses import replace
+from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import MagicMock
 
 import pytest
 from assertpy import assert_that
 
 from lintro.plugins import ToolRegistry
+from lintro.tools import tool_manager
+from lintro.utils.async_tool_executor import get_parallel_batches
 from lintro.utils.tool_executor import run_lint_tools_simple
+
+pytestmark = pytest.mark.skipif(
+    shutil.which("ruff") is None,
+    reason="ruff not installed",
+)
 
 
 @pytest.fixture(autouse=True)
@@ -29,7 +47,7 @@ def set_lintro_test_mode_env(lintro_test_mode: object) -> Iterator[None]:
 
 @pytest.fixture
 def temp_python_files() -> Iterator[list[str]]:
-    """Create multiple temporary Python files for parallel testing.
+    """Create multiple temporary Python files for single-tool smoke tests.
 
     Yields:
         list[str]: List of paths to temporary Python files.
@@ -37,7 +55,6 @@ def temp_python_files() -> Iterator[list[str]]:
     files: list[str] = []
     temp_dir = tempfile.mkdtemp()
 
-    # Create multiple files with various issues
     file_contents = [
         (
             "file1.py",
@@ -61,7 +78,6 @@ def temp_python_files() -> Iterator[list[str]]:
 
     yield files
 
-    # Cleanup
     for file_path in files:
         with contextlib.suppress(FileNotFoundError):
             os.unlink(file_path)
@@ -69,87 +85,119 @@ def temp_python_files() -> Iterator[list[str]]:
         os.rmdir(temp_dir)
 
 
-def test_check_multiple_files(temp_python_files: list[str]) -> None:
-    """Test running check on multiple files.
+@pytest.fixture
+def multi_tool_fixture_dir(tmp_path: Path) -> Path:
+    """Create a fixture directory with one ruff and one yamllint violation.
 
     Args:
-        temp_python_files: Pytest fixture providing temp files.
+        tmp_path: Pytest temporary directory.
+
+    Returns:
+        Path to the fixture directory containing ``bad.py`` and ``bad.yaml``.
     """
-    exit_code = run_lint_tools_simple(
+    (tmp_path / "bad.py").write_text("import os\n")
+    # document-start present; trailing spaces is the sole yamllint finding
+    (tmp_path / "bad.yaml").write_text("---\nname: test   \n")
+    return tmp_path
+
+
+@pytest.fixture
+def disable_post_checks(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Disable post-checks so only explicitly selected tools appear in results.
+
+    Args:
+        monkeypatch: Pytest monkeypatch fixture.
+    """
+    import lintro.utils.post_checks as post_checks
+    import lintro.utils.tool_executor as tool_executor
+
+    empty_post: dict[str, object] = {"enabled": False, "tools": []}
+    monkeypatch.setattr(
+        tool_executor,
+        "load_post_checks_config",
+        lambda: empty_post,
+    )
+    monkeypatch.setattr(
+        post_checks,
+        "load_post_checks_config",
+        lambda: empty_post,
+    )
+
+
+def _run_check(
+    *,
+    paths: list[str],
+    tools: str,
+    output_format: str = "grid",
+    output_file: str | None = None,
+) -> int:
+    """Run a check via ``run_lint_tools_simple`` with shared defaults.
+
+    Args:
+        paths: Paths to lint.
+        tools: Comma-separated tool names.
+        output_format: Output format string.
+        output_file: Optional path for structured output.
+
+    Returns:
+        Process exit code.
+    """
+    return run_lint_tools_simple(
         action="check",
-        paths=temp_python_files,
-        tools="ruff",
+        paths=paths,
+        tools=tools,
         tool_options=None,
         exclude=None,
         include_venv=False,
         group_by="file",
-        output_format="grid",
+        output_format=output_format,
         verbose=False,
         raw_output=False,
+        output_file=output_file,
+        yes=True,
     )
 
-    # Should complete without crashing
+
+# =============================================================================
+# Single-tool smoke tests (sequential path only — not true parallelism)
+# =============================================================================
+
+
+def test_single_tool_check_multiple_files(temp_python_files: list[str]) -> None:
+    """Smoke: single-tool check on multiple files completes without crashing.
+
+    Args:
+        temp_python_files: Pytest fixture providing temp files.
+    """
+    exit_code = _run_check(paths=temp_python_files, tools="ruff")
     assert_that(exit_code).is_instance_of(int)
 
 
-def test_consistent_results_across_runs(temp_python_files: list[str]) -> None:
-    """Test that multiple runs produce consistent results.
+def test_single_tool_consistent_results_across_runs(
+    temp_python_files: list[str],
+) -> None:
+    """Smoke: repeated single-tool runs produce the same exit code.
 
     Args:
         temp_python_files: Pytest fixture providing temp files.
     """
-    # Run twice
-    exit_code_1 = run_lint_tools_simple(
-        action="check",
-        paths=temp_python_files,
-        tools="ruff",
-        tool_options=None,
-        exclude=None,
-        include_venv=False,
-        group_by="file",
-        output_format="grid",
-        verbose=False,
-    )
-
-    exit_code_2 = run_lint_tools_simple(
-        action="check",
-        paths=temp_python_files,
-        tools="ruff",
-        tool_options=None,
-        exclude=None,
-        include_venv=False,
-        group_by="file",
-        output_format="grid",
-        verbose=False,
-    )
-
-    # Exit codes should match
+    exit_code_1 = _run_check(paths=temp_python_files, tools="ruff")
+    exit_code_2 = _run_check(paths=temp_python_files, tools="ruff")
     assert_that(exit_code_1).is_equal_to(exit_code_2)
 
 
-def test_check_with_single_file(temp_python_files: list[str]) -> None:
-    """Test check with single file.
+def test_single_tool_check_with_one_file(temp_python_files: list[str]) -> None:
+    """Smoke: single-tool check on one file completes without crashing.
 
     Args:
         temp_python_files: Pytest fixture providing temp files.
     """
-    exit_code = run_lint_tools_simple(
-        action="check",
-        paths=[temp_python_files[0]],
-        tools="ruff",
-        tool_options=None,
-        exclude=None,
-        include_venv=False,
-        group_by="file",
-        output_format="grid",
-        verbose=False,
-    )
-
+    exit_code = _run_check(paths=[temp_python_files[0]], tools="ruff")
     assert_that(exit_code).is_instance_of(int)
 
 
-def test_format_action(temp_python_files: list[str]) -> None:
-    """Test format action.
+def test_single_tool_format_action(temp_python_files: list[str]) -> None:
+    """Smoke: single-tool format action completes without crashing.
 
     Args:
         temp_python_files: Pytest fixture providing temp files.
@@ -164,34 +212,28 @@ def test_format_action(temp_python_files: list[str]) -> None:
         group_by="file",
         output_format="grid",
         verbose=False,
+        yes=True,
     )
-
     assert_that(exit_code).is_instance_of(int)
 
 
-def test_different_output_formats(temp_python_files: list[str]) -> None:
-    """Test different output formats.
+def test_single_tool_different_output_formats(temp_python_files: list[str]) -> None:
+    """Smoke: single-tool check works across output formats.
 
     Args:
         temp_python_files: Pytest fixture providing temp files.
     """
     for fmt in ["grid", "plain", "json"]:
-        exit_code = run_lint_tools_simple(
-            action="check",
+        exit_code = _run_check(
             paths=temp_python_files,
             tools="ruff",
-            tool_options=None,
-            exclude=None,
-            include_venv=False,
-            group_by="file",
             output_format=fmt,
-            verbose=False,
         )
         assert_that(exit_code).is_instance_of(int)
 
 
-def test_tool_definition_exists() -> None:
-    """Test that ruff tool has proper definition."""
+def test_ruff_tool_definition_exists() -> None:
+    """Smoke: ruff tool is registered with a valid definition."""
     ruff_tool = ToolRegistry.get("ruff")
 
     assert_that(ruff_tool).is_not_none()
@@ -199,27 +241,119 @@ def test_tool_definition_exists() -> None:
     assert_that(ruff_tool.definition.name).is_equal_to("ruff")
 
 
-def test_tool_respects_execution_order(temp_python_files: list[str]) -> None:
-    """Test that tool execution order is predictable.
+def test_single_tool_execution_order_is_stable(temp_python_files: list[str]) -> None:
+    """Smoke: repeated single-tool runs stay exit-code stable.
 
     Args:
         temp_python_files: Pytest fixture providing temp files.
     """
-    # Run multiple times to verify consistency
-    results = []
-    for _ in range(3):
-        exit_code = run_lint_tools_simple(
-            action="check",
-            paths=temp_python_files,
-            tools="ruff",
-            tool_options=None,
-            exclude=None,
-            include_venv=False,
-            group_by="file",
-            output_format="grid",
-            verbose=False,
-        )
-        results.append(exit_code)
-
-    # All runs should produce same exit code
+    results = [_run_check(paths=temp_python_files, tools="ruff") for _ in range(3)]
     assert_that(len(set(results))).is_equal_to(1)
+
+
+# =============================================================================
+# Multi-tool parallel execution
+# =============================================================================
+
+
+def test_parallel_check_runs_multiple_non_conflicting_tools(
+    multi_tool_fixture_dir: Path,
+    disable_post_checks: None,
+    skip_if_tool_unavailable: Callable[[str], None],
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Run ruff + yamllint in parallel and assert both report issues.
+
+    Args:
+        multi_tool_fixture_dir: Fixture dir with one violation per tool.
+        disable_post_checks: Ensures only selected tools appear in results.
+        skip_if_tool_unavailable: Skip helper when a binary is missing.
+        capsys: Capture stdout/stderr for the parallel banner.
+    """
+    skip_if_tool_unavailable("yamllint")
+
+    output_path = multi_tool_fixture_dir / "results.json"
+    exit_code = _run_check(
+        paths=[str(multi_tool_fixture_dir)],
+        tools="ruff,yamllint",
+        output_format="json",
+        output_file=str(output_path),
+    )
+
+    captured = capsys.readouterr()
+    combined = f"{captured.out}\n{captured.err}"
+    assert_that(combined).contains("Running 2 tools in parallel")
+
+    assert_that(exit_code).is_not_equal_to(0)
+    assert_that(output_path.exists()).is_true()
+
+    payload = json.loads(output_path.read_text())
+    results_by_tool = {item["tool"]: item for item in payload["results"]}
+
+    assert_that(results_by_tool).contains_key("ruff")
+    assert_that(results_by_tool).contains_key("yamllint")
+    assert_that(results_by_tool["ruff"]["issues_count"]).is_greater_than_or_equal_to(1)
+    assert_that(
+        results_by_tool["yamllint"]["issues_count"],
+    ).is_greater_than_or_equal_to(1)
+    assert_that(results_by_tool["ruff"]["issues"]).is_not_empty()
+    assert_that(results_by_tool["yamllint"]["issues"]).is_not_empty()
+
+
+def test_non_conflicting_tools_share_one_parallel_batch() -> None:
+    """Real ruff + yamllint definitions have no conflicts → one batch."""
+    batches = get_parallel_batches(["ruff", "yamllint"], tool_manager)
+
+    assert_that(batches).is_length(1)
+    assert_that(batches[0]).contains("ruff", "yamllint")
+
+
+# =============================================================================
+# Conflict-aware batching
+# =============================================================================
+
+
+def test_conflicting_tools_are_batched_separately() -> None:
+    """Tools whose definitions declare conflicts_with land in separate batches.
+
+    No shipped tools currently declare conflicts, so this builds definitions
+    from the live registry (black/ruff) with synthetic ``conflicts_with`` via
+    ``dataclasses.replace``.
+    """
+    black_def = replace(
+        tool_manager.get_tool("black").definition,
+        conflicts_with=["ruff"],
+    )
+    ruff_def = replace(
+        tool_manager.get_tool("ruff").definition,
+        conflicts_with=["black"],
+    )
+    mypy_def = tool_manager.get_tool("mypy").definition
+
+    definitions = {
+        "black": black_def,
+        "ruff": ruff_def,
+        "mypy": mypy_def,
+    }
+    manager = MagicMock()
+    manager.get_tool.side_effect = lambda name: SimpleNamespace(
+        definition=definitions[name],
+    )
+
+    batches = get_parallel_batches(["black", "ruff", "mypy"], manager)
+
+    assert_that(len(batches)).is_greater_than_or_equal_to(2)
+
+    black_batch_idx: int | None = None
+    ruff_batch_idx: int | None = None
+    for index, batch in enumerate(batches):
+        if "black" in batch:
+            black_batch_idx = index
+            assert_that(batch).does_not_contain("ruff")
+        if "ruff" in batch:
+            ruff_batch_idx = index
+            assert_that(batch).does_not_contain("black")
+
+    assert_that(black_batch_idx).is_not_none()
+    assert_that(ruff_batch_idx).is_not_none()
+    assert_that(black_batch_idx).is_not_equal_to(ruff_batch_idx)
