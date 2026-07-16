@@ -311,6 +311,9 @@ def _decode_paginated_json_objects(*, raw: str) -> list[dict[str, object]]:
 
     Returns:
         Flattened list of JSON objects.
+
+    Raises:
+        RuntimeError: When ``raw`` is not valid JSON.
     """
     chunks: list[dict[str, object]] = []
     decoder = json.JSONDecoder()
