@@ -236,6 +236,13 @@ def test_parse_pr_files_payload() -> None:
     assert_that(rows[1].changed_lines).is_equal_to(0)
 
 
+def test_decode_paginated_json_raises_clean_error() -> None:
+    """Malformed paginated API text becomes RuntimeError, not raw JSON error."""
+    module = _load_module()
+    with pytest.raises(RuntimeError, match="failed to decode GitHub API response"):
+        module._decode_paginated_json_objects(raw="not-json{")
+
+
 @pytest.mark.parametrize(
     ("path", "expected"),
     [

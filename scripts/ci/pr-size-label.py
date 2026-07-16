@@ -321,7 +321,11 @@ def _decode_paginated_json_objects(*, raw: str) -> list[dict[str, object]]:
             idx += 1
         if idx >= len(text):
             break
-        parsed, offset = decoder.raw_decode(text, idx)
+        try:
+            parsed, offset = decoder.raw_decode(text, idx)
+        except json.JSONDecodeError as exc:
+            msg = f"failed to decode GitHub API response: {exc}"
+            raise RuntimeError(msg) from exc
         idx = offset
         if isinstance(parsed, list):
             chunks.extend(item for item in parsed if isinstance(item, dict))
