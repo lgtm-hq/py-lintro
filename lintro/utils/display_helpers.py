@@ -3,6 +3,7 @@
 Contains ASCII art display functions and styling constants.
 """
 
+import sys
 from collections.abc import Callable
 
 from loguru import logger
@@ -21,10 +22,15 @@ def print_ascii_art(
 ) -> None:
     """Print ASCII art based on the issue count.
 
+    Only prints when stdout is an interactive TTY to avoid polluting
+    CI logs, piped output, and report files.
+
     Args:
         console_output_func: Function to output text to console
         issue_count: The number of issues (remaining, fixed, or total)
     """
+    if not sys.stdout.isatty():
+        return
     try:
         if issue_count == 0:
             ascii_art = read_ascii_art(filename="success.txt")
