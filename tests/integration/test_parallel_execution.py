@@ -26,7 +26,7 @@ from lintro.tools import tool_manager
 from lintro.utils.async_tool_executor import get_parallel_batches
 from lintro.utils.tool_executor import run_lint_tools_simple
 
-pytestmark = pytest.mark.skipif(
+_requires_ruff = pytest.mark.skipif(
     shutil.which("ruff") is None,
     reason="ruff not installed",
 )
@@ -141,8 +141,11 @@ def _run_check(
 
     Returns:
         Process exit code.
+
+    Raises:
+        TypeError: If ``run_lint_tools_simple`` does not return an int.
     """
-    return run_lint_tools_simple(
+    exit_code = run_lint_tools_simple(
         action="check",
         paths=paths,
         tools=tools,
@@ -156,6 +159,11 @@ def _run_check(
         output_file=output_file,
         yes=True,
     )
+    # Narrow for dogfooding mypy, which type-checks this file in isolation and
+    # otherwise treats run_lint_tools_simple as returning Any (no-any-return).
+    if not isinstance(exit_code, int):
+        raise TypeError(f"expected int exit code, got {type(exit_code)!r}")
+    return exit_code
 
 
 # =============================================================================
@@ -163,6 +171,7 @@ def _run_check(
 # =============================================================================
 
 
+@_requires_ruff
 def test_single_tool_check_multiple_files(temp_python_files: list[str]) -> None:
     """Smoke: single-tool check on multiple files completes without crashing.
 
@@ -173,6 +182,7 @@ def test_single_tool_check_multiple_files(temp_python_files: list[str]) -> None:
     assert_that(exit_code).is_instance_of(int)
 
 
+@_requires_ruff
 def test_single_tool_consistent_results_across_runs(
     temp_python_files: list[str],
 ) -> None:
@@ -186,6 +196,7 @@ def test_single_tool_consistent_results_across_runs(
     assert_that(exit_code_1).is_equal_to(exit_code_2)
 
 
+@_requires_ruff
 def test_single_tool_check_with_one_file(temp_python_files: list[str]) -> None:
     """Smoke: single-tool check on one file completes without crashing.
 
@@ -196,6 +207,7 @@ def test_single_tool_check_with_one_file(temp_python_files: list[str]) -> None:
     assert_that(exit_code).is_instance_of(int)
 
 
+@_requires_ruff
 def test_single_tool_format_action(temp_python_files: list[str]) -> None:
     """Smoke: single-tool format action completes without crashing.
 
@@ -217,6 +229,7 @@ def test_single_tool_format_action(temp_python_files: list[str]) -> None:
     assert_that(exit_code).is_instance_of(int)
 
 
+@_requires_ruff
 def test_single_tool_different_output_formats(temp_python_files: list[str]) -> None:
     """Smoke: single-tool check works across output formats.
 
@@ -241,21 +254,12 @@ def test_ruff_tool_definition_exists() -> None:
     assert_that(ruff_tool.definition.name).is_equal_to("ruff")
 
 
-def test_single_tool_execution_order_is_stable(temp_python_files: list[str]) -> None:
-    """Smoke: repeated single-tool runs stay exit-code stable.
-
-    Args:
-        temp_python_files: Pytest fixture providing temp files.
-    """
-    results = [_run_check(paths=temp_python_files, tools="ruff") for _ in range(3)]
-    assert_that(len(set(results))).is_equal_to(1)
-
-
 # =============================================================================
 # Multi-tool parallel execution
 # =============================================================================
 
 
+@_requires_ruff
 def test_parallel_check_runs_multiple_non_conflicting_tools(
     multi_tool_fixture_dir: Path,
     disable_post_checks: None,
