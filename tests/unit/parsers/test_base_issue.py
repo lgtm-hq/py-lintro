@@ -335,3 +335,28 @@ def test_resolve_issue_code_ignores_non_string_get_code_return() -> None:
     issue.code = "E501"
     # MagicMock auto-creates a callable get_code that returns another mock.
     assert_that(resolve_issue_code(issue)).is_equal_to("E501")
+
+
+def test_resolve_issue_code_preserves_zero_raw_code() -> None:
+    """resolve_issue_code preserves a duck-typed numeric code of 0."""
+    from lintro.parsers.base_issue import resolve_issue_code
+
+    class DuckIssue:
+        code = 0
+
+    assert_that(resolve_issue_code(DuckIssue())).is_equal_to("0")
+
+
+def test_get_code_preserves_zero_mapped_value() -> None:
+    """get_code preserves a mapped numeric code of 0."""
+
+    @dataclass
+    class MappedIssue(BaseIssue):
+        DISPLAY_FIELD_MAP: ClassVar[dict[str, str]] = {
+            **BaseIssue.DISPLAY_FIELD_MAP,
+            "code": "rule",
+        }
+        rule: int | None = None
+
+    issue = MappedIssue(file="x.py", line=1, rule=0)
+    assert_that(issue.get_code()).is_equal_to("0")

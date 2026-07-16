@@ -63,7 +63,7 @@ def test_rule_code_consistent_across_grid_csv_json(
     issue: YamllintIssue | RuffIssue,
     expected_code: str,
 ) -> None:
-    """Grid, CSV, and JSON all emit the same non-empty rule code.
+    """Grid, CSV, JSON, Markdown, and HTML all emit the same non-empty rule code.
 
     Args:
         tmp_path: Temporary directory for CSV artifacts.
@@ -77,6 +77,12 @@ def test_rule_code_consistent_across_grid_csv_json(
     grid = format_issues([issue], output_format=OutputFormat.GRID)
     assert_that(grid).contains(expected_code)
 
+    # Markdown / HTML via unified formatter
+    markdown = format_issues([issue], output_format=OutputFormat.MARKDOWN)
+    assert_that(markdown).contains(expected_code)
+    html = format_issues([issue], output_format=OutputFormat.HTML)
+    assert_that(html).contains(expected_code)
+
     # JSON issues[].code
     json_code = serialize_issue(issue)["code"]
     assert_that(json_code).is_equal_to(expected_code)
@@ -89,29 +95,44 @@ def test_rule_code_consistent_across_grid_csv_json(
         issues=[issue],
     )
 
-    # User-specified CSV artifact (--output)
-    csv_path = tmp_path / "report.csv"
-    write_output_file(
-        output_path=str(csv_path),
-        output_format=OutputFormat.CSV,
-        all_results=[result],
-        action=Action.CHECK,
-        total_issues=1,
-        total_fixed=0,
-    )
-    with csv_path.open(newline="", encoding="utf-8") as handle:
-        rows = list(csv.DictReader(handle))
-    assert_that(rows).is_length(1)
-    assert_that(rows[0]["code"]).is_equal_to(expected_code)
+    # User-specified CSV / Markdown / HTML artifacts (--output)
+    for fmt, suffix in (
+        (OutputFormat.CSV, "csv"),
+        (OutputFormat.MARKDOWN, "md"),
+        (OutputFormat.HTML, "html"),
+    ):
+        out_path = tmp_path / f"report.{suffix}"
+        write_output_file(
+            output_path=str(out_path),
+            output_format=fmt,
+            all_results=[result],
+            action=Action.CHECK,
+            total_issues=1,
+            total_fixed=0,
+        )
+        content = out_path.read_text(encoding="utf-8")
+        assert_that(content).contains(expected_code)
+        if fmt == OutputFormat.CSV:
+            with out_path.open(newline="", encoding="utf-8") as handle:
+                rows = list(csv.DictReader(handle))
+            assert_that(rows).is_length(1)
+            assert_that(rows[0]["code"]).is_equal_to(expected_code)
 
-    # On-disk summary.csv from OutputManager
+    # On-disk summary.csv / report.md / report.html from OutputManager
     om = OutputManager(base_dir=str(tmp_path / "runs"))
     om.write_reports_from_results([result])
-    summary_path = om.get_run_dir() / "summary.csv"
+    run_dir = om.get_run_dir()
+    summary_path = run_dir / "summary.csv"
     with summary_path.open(newline="", encoding="utf-8") as handle:
         summary_rows = list(csv.DictReader(handle))
     assert_that(summary_rows).is_length(1)
     assert_that(summary_rows[0]["code"]).is_equal_to(expected_code)
+    assert_that((run_dir / "report.md").read_text(encoding="utf-8")).contains(
+        expected_code,
+    )
+    assert_that((run_dir / "report.html").read_text(encoding="utf-8")).contains(
+        expected_code,
+    )
 
     # JSON file artifact also agrees
     json_path = tmp_path / "report.json"

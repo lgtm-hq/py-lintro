@@ -46,7 +46,10 @@ def resolve_issue_code(issue: object) -> str:
         if isinstance(value, (int, float)):
             return str(value)
         # Non-string return (e.g. MagicMock): fall through to raw attr.
-    return str(getattr(issue, "code", "") or "")
+    raw_code = getattr(issue, "code", "")
+    if raw_code is None or raw_code == "":
+        return ""
+    return str(raw_code)
 
 
 @dataclass
