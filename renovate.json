@@ -92,7 +92,7 @@
     {
       "description": "Block malicious astro@7.1.0 (MAL-2026-10726); lift once a clean release ships",
       "matchPackageNames": ["astro"],
-      "allowedVersions": "!=7.1.0",
+      "allowedVersions": "<7.1.0 || >7.1.0",
       "automerge": false
     },
     {
