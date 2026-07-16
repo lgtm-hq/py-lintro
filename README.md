@@ -74,7 +74,7 @@ migration required.
   everywhere
 - **Fallback defaults when needed** - Tools without native configs use sensible defaults
 
-See the [Configuration Guide](docs/configuration.md) for details on the 4-tier config
+See the [Configuration Guide](docs/configuration.md) for details on the 5-tier config
 system.
 
 ## 🛠️ Supported Tools
@@ -196,6 +196,12 @@ system.
 <td>🧾 TOML</td>
 <td>✅</td>
 <td><code>brew install taplo</code><br><a href="https://github.com/tamasfe/taplo/releases">GitHub Releases</a></td>
+</tr>
+<tr>
+<td><a href="https://dotenv-linter.github.io/"><img src="https://img.shields.io/badge/dotenv--linter-ecd53f?logo=dotenv&logoColor=black" alt="dotenv-linter"></a></td>
+<td>🔑 .env Files</td>
+<td>✅</td>
+<td><code>brew install dotenv-linter</code><br><a href="https://github.com/dotenv-linter/dotenv-linter/releases">GitHub Releases</a></td>
 </tr>
 <tr>
 <td><a href="https://stylelint.io/"><img src="https://img.shields.io/badge/Stylelint-263238?logo=stylelint&logoColor=white" alt="Stylelint"></a></td>
