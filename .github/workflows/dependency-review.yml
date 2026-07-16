@@ -18,14 +18,28 @@ concurrency:
 jobs:
   dependency-review:
     # yamllint disable-line rule:line-length
-    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-dependency-review.yml@1014e3d7d5441a63215d2096545a46cff6de101c # v0.48.0
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-dependency-review.yml@31c25ef2e8992960e218524780e34f44f51271b5 # v0.54.0
     with:
       fail-on-severity: high
-      tooling-ref: '1014e3d7d5441a63215d2096545a46cff6de101c' # v0.48.0
+      tooling-ref: '31c25ef2e8992960e218524780e34f44f51271b5' # v0.54.0
       egress-policy: block
       egress-preset: scorecard
-      allowed-endpoints-mode: append
+      # Full list (v0.50.0+ replace semantics): the reusable passes
+      # allowed-endpoints verbatim to step-security/harden-runner, so a
+      # non-empty value must include the scorecard preset baseline.
+      allowed-endpoints-mode: replace
       allowed-endpoints: >
+        github.com:443
+        api.github.com:443
+        codeload.github.com:443
+        objects.githubusercontent.com:443
+        raw.githubusercontent.com:443
+        uploads.github.com:443
+        pipelines.actions.githubusercontent.com:443
+        gcr.io:443
+        api.osv.dev:443
+        api.scorecard.dev:443
+        api.securityscorecards.dev:443
         api.deps.dev:443
         release-assets.githubusercontent.com:443
     permissions:

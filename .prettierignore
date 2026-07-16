@@ -5,3 +5,6 @@ node_modules
 .venv
 .lintro
 
+
+# AI prompt templates (not human docs; keep verbatim)
+lintro/ai/prompts/templates/**

@@ -1,6 +1,6 @@
 """Tests for CLI module."""
 
-import subprocess
+import subprocess  # nosec B404 - subprocess is used to drive the tool/CLI under test; invocations use shell=False
 import sys
 from unittest.mock import patch
 
@@ -92,7 +92,7 @@ def test_main_module_execution() -> None:
 
 def test_main_module_as_script() -> None:
     """Test that __main__.py works when run as a script."""
-    result = subprocess.run(
+    result = subprocess.run(  # nosec B603 - fixed argv run against a real binary in a controlled test; shell=False, no user shell input
         [sys.executable, "-m", "lintro", "--help"],
         capture_output=True,
         text=True,

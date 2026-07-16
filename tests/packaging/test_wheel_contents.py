@@ -11,6 +11,7 @@ directly to catch packaging regressions such as:
 
 from __future__ import annotations
 
+import shutil
 import subprocess
 import tempfile
 import zipfile
@@ -30,6 +31,9 @@ def built_wheel_path() -> Iterator[Path]:
     Yields:
         Path: The built wheel file in a temporary output directory.
     """
+    if shutil.which("uv") is None:
+        pytest.skip("uv is not available on PATH; cannot build the wheel")
+
     with tempfile.TemporaryDirectory() as tmpdir:
         dist_dir = Path(tmpdir) / "dist"
         build_result = subprocess.run(

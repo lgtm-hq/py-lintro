@@ -6,6 +6,7 @@ include pyproject.toml
 recursive-include assets *
 recursive-include lintro/ascii-art *
 recursive-include lintro/tools *.json
+recursive-include lintro/ai/prompts/templates *.md *.json
 
 # Include any additional documentation
 recursive-include docs *.md
