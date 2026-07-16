@@ -160,10 +160,10 @@ def review_command(
     """Run AI-powered diff-based code review."""
     require_ai()
     lintro_config = get_config()
-    if not lintro_config.ai.enabled:
+    if not lintro_config.ai.review_enabled:
         raise click.UsageError(
-            "AI is disabled in configuration. Set ai.enabled: true in "
-            ".lintro-config.yaml",
+            "AI review is disabled in configuration. Set ai.review: true "
+            "(and ai.enabled: true) in .lintro-config.yaml",
         )
 
     effective_repo = repo or os.environ.get("GITHUB_REPOSITORY")
