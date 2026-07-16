@@ -102,13 +102,19 @@ def _lock_file(fh: IO[str]) -> None:
         import msvcrt
 
         # Lock the first byte of the sibling lock file.
+        # msvcrt.LK_LOCK only retries ~10s before raising OSError, so loop
+        # until the shared audit section can run (match POSIX blocking).
         fh.seek(0)
         if fh.read(1) == "":
             fh.write("0")
             fh.flush()
-        fh.seek(0)
-        msvcrt.locking(fh.fileno(), msvcrt.LK_LOCK, 1)
-        return
+        while True:
+            fh.seek(0)
+            try:
+                msvcrt.locking(fh.fileno(), msvcrt.LK_LOCK, 1)
+                return
+            except OSError:
+                time.sleep(0.05)
 
     import fcntl
 

@@ -76,7 +76,9 @@ def test_map_errors_generic_api_error(fake_anthropic_sdk: SimpleNamespace) -> No
             raise _FakeAnthropicError("boom")
 
 
-def test_map_errors_passes_through_on_success(fake_anthropic_sdk: SimpleNamespace) -> None:
+def test_map_errors_passes_through_on_success(
+    fake_anthropic_sdk: SimpleNamespace,
+) -> None:
     """The context manager is transparent when no error is raised."""
     with AnthropicProvider._map_errors():
         value = 21 * 2
