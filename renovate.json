@@ -8,6 +8,13 @@
   ],
   "packageRules": [
     {
+      "description": "npm platform-binary placeholders are stamped at publish time; never bump in-repo",
+      "matchPackageNames": [
+        "/^@lgtm-hq\\/lintro(-|$)/"
+      ],
+      "enabled": false
+    },
+    {
       "matchDatasources": ["pypi"],
       "matchUpdateTypes": ["minor"],
       "automerge": false
