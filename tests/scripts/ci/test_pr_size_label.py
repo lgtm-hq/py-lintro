@@ -16,8 +16,9 @@ ROOT = Path(__file__).resolve().parents[3]
 SCRIPT = ROOT / "scripts" / "ci" / "pr-size-label.py"
 
 
-def _load_module() -> Any:
-    """Load the hyphenated pr-size-label script as an importable module."""
+@pytest.fixture(scope="module")
+def pr_size_module() -> Any:
+    """Load the hyphenated pr-size-label script once for the module."""
     spec = importlib.util.spec_from_file_location("pr_size_label", SCRIPT)
     assert spec and spec.loader
     module = importlib.util.module_from_spec(spec)
@@ -70,146 +71,142 @@ def _file(
 )
 def test_size_label_for_lines_boundaries(
     *,
+    pr_size_module: Any,
     effective: float,
     expected: str,
 ) -> None:
     """Threshold boundaries map to the expected size label."""
-    module = _load_module()
     assert_that(
-        module.size_label_for_lines(effective_lines=effective),
+        pr_size_module.size_label_for_lines(effective_lines=effective),
     ).is_equal_to(expected)
 
 
-def test_mixed_src_and_tests_excludes_test_lines() -> None:
+def test_mixed_src_and_tests_excludes_test_lines(*, pr_size_module: Any) -> None:
     """When source and tests both change, only source lines count."""
-    module = _load_module()
     files = [
-        _file(module, path="lintro/cli.py", additions=50, deletions=10),
-        _file(module, path="tests/unit/test_cli.py", additions=400),
-        _file(module, path="tests/unit/helpers.py", additions=100),
+        _file(pr_size_module, path="lintro/cli.py", additions=50, deletions=10),
+        _file(pr_size_module, path="tests/unit/test_cli.py", additions=400),
+        _file(pr_size_module, path="tests/unit/helpers.py", additions=100),
     ]
-    effective = module.compute_effective_lines(files=files)
+    effective = pr_size_module.compute_effective_lines(files=files)
     assert_that(effective).is_equal_to(60.0)
-    assert_that(module.size_label_for_lines(effective_lines=effective)).is_equal_to(
-        "size:S",
-    )
+    assert_that(
+        pr_size_module.size_label_for_lines(effective_lines=effective),
+    ).is_equal_to("size:S")
 
 
-def test_test_only_pr_counts_test_lines() -> None:
+def test_test_only_pr_counts_test_lines(*, pr_size_module: Any) -> None:
     """A PR that only touches tests counts those test lines."""
-    module = _load_module()
     files = [
-        _file(module, path="tests/unit/test_cli.py", additions=80),
-        _file(module, path="tests/unit/test_foo.py", additions=25),
+        _file(pr_size_module, path="tests/unit/test_cli.py", additions=80),
+        _file(pr_size_module, path="tests/unit/test_foo.py", additions=25),
     ]
-    effective = module.compute_effective_lines(files=files)
+    effective = pr_size_module.compute_effective_lines(files=files)
     assert_that(effective).is_equal_to(105.0)
-    assert_that(module.size_label_for_lines(effective_lines=effective)).is_equal_to(
-        "size:M",
-    )
+    assert_that(
+        pr_size_module.size_label_for_lines(effective_lines=effective),
+    ).is_equal_to("size:M")
 
 
-def test_test_filename_pattern_is_detected() -> None:
+def test_test_filename_pattern_is_detected(*, pr_size_module: Any) -> None:
     """``test_*.py`` outside tests/ still counts as a test path."""
-    module = _load_module()
-    assert_that(module.is_test_path(path="lintro/test_helpers.py")).is_true()
-    assert_that(module.is_test_path(path="lintro/helpers.py")).is_false()
+    assert_that(pr_size_module.is_test_path(path="lintro/test_helpers.py")).is_true()
+    assert_that(pr_size_module.is_test_path(path="lintro/helpers.py")).is_false()
 
 
-def test_lockfile_heavy_pr_is_excluded() -> None:
+def test_lockfile_heavy_pr_is_excluded(*, pr_size_module: Any) -> None:
     """Lockfiles contribute zero effective lines."""
-    module = _load_module()
     files = [
-        _file(module, path="uv.lock", additions=5000),
-        _file(module, path="package-lock.json", additions=2000),
-        _file(module, path="lintro/cli.py", additions=5),
+        _file(pr_size_module, path="uv.lock", additions=5000),
+        _file(pr_size_module, path="package-lock.json", additions=2000),
+        _file(pr_size_module, path="lintro/cli.py", additions=5),
     ]
-    effective = module.compute_effective_lines(files=files)
+    effective = pr_size_module.compute_effective_lines(files=files)
     assert_that(effective).is_equal_to(5.0)
-    assert_that(module.size_label_for_lines(effective_lines=effective)).is_equal_to(
-        "size:XS",
-    )
+    assert_that(
+        pr_size_module.size_label_for_lines(effective_lines=effective),
+    ).is_equal_to("size:XS")
 
 
-def test_generated_manifest_is_excluded() -> None:
+def test_generated_manifest_is_excluded(*, pr_size_module: Any) -> None:
     """Generated manifest.json is excluded from the effective count."""
-    module = _load_module()
     files = [
-        _file(module, path="lintro/tools/manifest.json", additions=900),
-        _file(module, path="scripts/ci/generate-tool-versions.py", additions=10),
+        _file(pr_size_module, path="lintro/tools/manifest.json", additions=900),
+        _file(
+            pr_size_module,
+            path="scripts/ci/generate-tool-versions.py",
+            additions=10,
+        ),
     ]
-    effective = module.compute_effective_lines(files=files)
+    effective = pr_size_module.compute_effective_lines(files=files)
     assert_that(effective).is_equal_to(10.0)
 
 
-def test_docs_weighted_half() -> None:
+def test_docs_weighted_half(*, pr_size_module: Any) -> None:
     """``docs/**`` lines are weighted at 0.5."""
-    module = _load_module()
     files = [
-        _file(module, path="docs/guide.md", additions=100),
-        _file(module, path="docs/nested/a.md", additions=40, deletions=10),
+        _file(pr_size_module, path="docs/guide.md", additions=100),
+        _file(pr_size_module, path="docs/nested/a.md", additions=40, deletions=10),
     ]
     # 100*0.5 + 50*0.5 = 75
-    effective = module.compute_effective_lines(files=files)
+    effective = pr_size_module.compute_effective_lines(files=files)
     assert_that(effective).is_equal_to(75.0)
-    assert_that(module.size_label_for_lines(effective_lines=effective)).is_equal_to(
-        "size:S",
-    )
+    assert_that(
+        pr_size_module.size_label_for_lines(effective_lines=effective),
+    ).is_equal_to("size:S")
 
 
-def test_docs_plus_tests_excludes_tests() -> None:
+def test_docs_plus_tests_excludes_tests(*, pr_size_module: Any) -> None:
     """Docs count as non-test source, so mixed docs+tests exclude tests."""
-    module = _load_module()
     files = [
-        _file(module, path="docs/readme.md", additions=40),
-        _file(module, path="tests/unit/test_x.py", additions=500),
+        _file(pr_size_module, path="docs/readme.md", additions=40),
+        _file(pr_size_module, path="tests/unit/test_x.py", additions=500),
     ]
     # docs only: 40 * 0.5 = 20
-    effective = module.compute_effective_lines(files=files)
+    effective = pr_size_module.compute_effective_lines(files=files)
     assert_that(effective).is_equal_to(20.0)
 
 
-def test_lockfile_only_with_tests_is_test_only() -> None:
+def test_lockfile_only_with_tests_is_test_only(*, pr_size_module: Any) -> None:
     """Lockfiles alone do not make a PR 'mixed'; tests still count."""
-    module = _load_module()
     files = [
-        _file(module, path="uv.lock", additions=3000),
-        _file(module, path="tests/unit/test_x.py", additions=30),
+        _file(pr_size_module, path="uv.lock", additions=3000),
+        _file(pr_size_module, path="tests/unit/test_x.py", additions=30),
     ]
-    effective = module.compute_effective_lines(files=files)
+    effective = pr_size_module.compute_effective_lines(files=files)
     assert_that(effective).is_equal_to(30.0)
 
 
-def test_stale_size_label_removal() -> None:
+def test_stale_size_label_removal(*, pr_size_module: Any) -> None:
     """Stale size labels are listed for removal; non-size labels are kept."""
-    module = _load_module()
     current = ["ci", "size:M", "size:XS", "enhancement"]
-    stale = module.stale_size_labels(current_labels=current, desired="size:S")
+    stale = pr_size_module.stale_size_labels(
+        current_labels=current,
+        desired="size:S",
+    )
     assert_that(stale).is_equal_to(["size:M", "size:XS"])
-    to_add = module.labels_to_add(current_labels=current, desired="size:S")
+    to_add = pr_size_module.labels_to_add(current_labels=current, desired="size:S")
     assert_that(to_add).is_equal_to(["size:S"])
 
 
-def test_desired_label_already_present_adds_nothing() -> None:
+def test_desired_label_already_present_adds_nothing(*, pr_size_module: Any) -> None:
     """When the correct size label is present, add list is empty."""
-    module = _load_module()
     current = ["size:S", "ci"]
     assert_that(
-        module.stale_size_labels(current_labels=current, desired="size:S"),
+        pr_size_module.stale_size_labels(current_labels=current, desired="size:S"),
     ).is_equal_to([])
     assert_that(
-        module.labels_to_add(current_labels=current, desired="size:S"),
+        pr_size_module.labels_to_add(current_labels=current, desired="size:S"),
     ).is_equal_to([])
 
 
-def test_classify_and_plan_end_to_end() -> None:
+def test_classify_and_plan_end_to_end(*, pr_size_module: Any) -> None:
     """classify_and_plan wires effective lines to add/remove lists."""
-    module = _load_module()
     files = [
-        _file(module, path="lintro/a.py", additions=250),
-        _file(module, path="tests/unit/test_a.py", additions=900),
+        _file(pr_size_module, path="lintro/a.py", additions=250),
+        _file(pr_size_module, path="tests/unit/test_a.py", additions=900),
     ]
-    effective, desired, to_add, to_remove = module.classify_and_plan(
+    effective, desired, to_add, to_remove = pr_size_module.classify_and_plan(
         files=files,
         current_labels=["size:XS", "ci"],
     )
@@ -219,10 +216,9 @@ def test_classify_and_plan_end_to_end() -> None:
     assert_that(to_remove).is_equal_to(["size:XS"])
 
 
-def test_parse_pr_files_payload() -> None:
+def test_parse_pr_files_payload(*, pr_size_module: Any) -> None:
     """Files API JSON maps into FileDiff rows; missing counts become 0."""
-    module = _load_module()
-    rows = module.parse_pr_files_payload(
+    rows = pr_size_module.parse_pr_files_payload(
         payload=[
             {"filename": "a.py", "additions": 3, "deletions": 1},
             {"filename": "b.py"},
@@ -236,11 +232,16 @@ def test_parse_pr_files_payload() -> None:
     assert_that(rows[1].changed_lines).is_equal_to(0)
 
 
-def test_decode_paginated_json_raises_clean_error() -> None:
+def test_decode_paginated_json_raises_clean_error(*, pr_size_module: Any) -> None:
     """Malformed paginated API text becomes RuntimeError, not raw JSON error."""
-    module = _load_module()
     with pytest.raises(RuntimeError, match="failed to decode GitHub API response"):
-        module._decode_paginated_json_objects(raw="not-json{")
+        pr_size_module._decode_paginated_json_objects(raw="not-json{")
+
+
+def test_decode_paginated_json_rejects_scalar(*, pr_size_module: Any) -> None:
+    """Bare scalar top-level JSON values fail loudly."""
+    with pytest.raises(RuntimeError, match="unexpected GitHub API JSON value type"):
+        pr_size_module._decode_paginated_json_objects(raw="42")
 
 
 @pytest.mark.parametrize(
@@ -252,7 +253,6 @@ def test_decode_paginated_json_raises_clean_error() -> None:
         ("lintro/cli.py", False),
     ],
 )
-def test_is_lockfile(*, path: str, expected: bool) -> None:
+def test_is_lockfile(*, pr_size_module: Any, path: str, expected: bool) -> None:
     """Lockfile detection uses the basename only."""
-    module = _load_module()
-    assert_that(module.is_lockfile(path=path)).is_equal_to(expected)
+    assert_that(pr_size_module.is_lockfile(path=path)).is_equal_to(expected)
