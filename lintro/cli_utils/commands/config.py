@@ -66,6 +66,8 @@ def config_command(
     - Per-tool effective configuration
     - Configuration warnings and inconsistencies
 
+    \f
+
     Args:
         verbose: Show detailed configuration including native tool configs.
         json_output: Output configuration as JSON.

@@ -87,6 +87,8 @@ def licenses_command(
     (``[tool.lintro.licenses]`` or the ``licenses:`` section of
     ``.lintro-config.yaml``).
 
+    \f
+
     Args:
         check: Exit non-zero when any violation is present.
         langs: Ecosystems to scan; empty scans all supported ecosystems.

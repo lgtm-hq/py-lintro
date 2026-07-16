@@ -28,6 +28,8 @@ def versions_command(verbose: bool, json_output: bool) -> None:
     Shows each tool's current version, minimum required version, and status.
     Use --verbose to see installation hints for tools that don't meet requirements.
 
+    \f
+
     Args:
         verbose: Show detailed version information including install hints.
         json_output: Output version information as JSON.

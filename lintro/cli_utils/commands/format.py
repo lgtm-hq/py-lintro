@@ -142,6 +142,8 @@ def format_command(
     Runs code formatting tools on the specified paths to automatically fix style issues.
     Uses simplified Loguru-based logging for clean output and proper file logging.
 
+    \f
+
     Args:
         ctx: click.Context: Click context object for command execution.
         paths: tuple[str, ...]:

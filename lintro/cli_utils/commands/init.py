@@ -336,6 +336,8 @@ def init_command(
     Detects languages, enables appropriate tools in config, and prints
     next steps for installing tools and running checks.
 
+    \f
+
     Args:
         minimal: Use minimal template with fewer defaults.
         force: Overwrite existing config file if it exists.

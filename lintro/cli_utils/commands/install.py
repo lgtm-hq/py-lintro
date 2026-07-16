@@ -85,6 +85,8 @@ def install_command(
     Specify tool names to install specific tools, or use --profile for
     predefined sets.
 
+    \f
+
     Args:
         tools: Tool names to install (positional args).
         profile: Named profile to install.
