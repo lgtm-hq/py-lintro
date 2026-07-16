@@ -129,6 +129,24 @@ def test_global_contributed_paths_reports_unoverridden_leaves() -> None:
     assert_that(contributed).is_equal_to(["ai.enabled", "enforce.target_python"])
 
 
+def test_global_contributed_paths_skips_scalar_tool_override() -> None:
+    """A scalar project tool override must not report global tool children."""
+    global_data = {
+        "tools": {"ruff": {"select": ["E"], "ignore": ["E501"]}},
+        "ai": {"enabled": True},
+    }
+    project_data = {"tools": {"ruff": False}}
+
+    contributed = _global_contributed_paths(
+        global_data=global_data,
+        project_data=project_data,
+    )
+
+    assert_that(contributed).is_equal_to(["ai.enabled"])
+    assert_that(contributed).does_not_contain("tools.ruff.select")
+    assert_that(contributed).does_not_contain("tools.ruff.ignore")
+
+
 # =============================================================================
 # _find_global_config_file
 # =============================================================================
