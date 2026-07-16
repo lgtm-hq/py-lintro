@@ -277,6 +277,12 @@ jobs:
             api.github.com:443
             uploads.github.com:443
 
+      - name: Checkout scripts
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          sparse-checkout: scripts
+          persist-credentials: false
+
       - name: Download arm64 binary
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
         with:
