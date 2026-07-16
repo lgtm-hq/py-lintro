@@ -21,6 +21,25 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.80.4] - 2026-07-16
+
+### Changed
+
+- **docker**: pin BuildKit syntax frontend by digest (#1384) (b183963)
+- **deps**: update ghcr.io/lgtm-hq/lintro-tools:latest docker digest to 0024f54 (#1438)
+  (7c191f7)
+- **deps**: hold prettier >3.9.4 in Renovate (#1437) (7dc2c08)
+- **deps**: update ghcr.io/lgtm-hq/lintro-tools:latest docker digest to fb89bff (#1435)
+  (bf2e4bf)
+- **deps**: update dependency rust-lang/rust to 1.97.1 (patch) (#1429) (f921f80)
+- **deps**: hold TypeScript 7 and js-yaml 5 in Renovate (#1436) (c92445e)
+- **deps**: migrate apps/site to Astro 7 and Vite 8 (#1428) (56181e0)
+
+### Fixed
+
+- **ai/review**: preserve Findings in section-aware _cap_body truncation (#1334)
+  (f3d98f2)
+
 ## [0.80.3] - 2026-07-16
 
 ### Changed
