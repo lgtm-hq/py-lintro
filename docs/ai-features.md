@@ -155,22 +155,48 @@ Add the `ai` section to `.lintro-config.yaml`:
 
 ```yaml
 ai:
-  enabled: true
+  enabled: true # master switch (AND-ed with the toggles below)
+  lint: true # AI lint summaries during chk/fmt
+  review: true # the `lintro review` AI diff review
   provider: anthropic # or "openai"
   # model: claude-sonnet-4-6  # uses provider default if omitted
   # api_key_env: ANTHROPIC_API_KEY   # uses provider default if omitted
 ```
+
+### Feature Toggles
+
+AI features are gated by a master switch plus two per-feature toggles, all off by
+default:
+
+- `ai.enabled` — master switch for all AI features.
+- `ai.lint` — AI lint summarization injected after `chk`/`fmt` runs.
+- `ai.review` — the `lintro review` AI diff-review command.
+
+A feature is active only when the master switch **and** its own toggle are true
+(`enabled AND lint`, `enabled AND review`). This lets you, for example, enable AI diff
+review without adding AI summaries to every lint run:
+
+```yaml
+ai:
+  enabled: true
+  lint: false
+  review: true
+```
+
+**Backward compatibility:** a legacy config that sets `ai.enabled: true` without either
+sub-toggle keeps the old behaviour — both `lint` and `review` are switched on — and
+emits a deprecation warning. Set `ai.lint` and/or `ai.review` explicitly to silence it.
 
 ### Full Configuration Reference
 
 Every field below maps 1:1 to `AIConfig` in `lintro/ai/config.py`, which is the source
 of truth. Unknown keys under `ai:` are ignored with a warning, so a typo never silently
 changes behavior. All fields are optional. When `enabled: true` and `transport` is
-omitted, Anthropic and OpenAI check/fix runs fall back to API transport during
-provider creation. Diagnostics
-still report a missing `ai.transport` as incompatible, and `provider: cursor`
-resolves a missing transport to CLI (not API). Set `transport` explicitly when
-you need a deterministic transport choice.
+omitted, provider creation falls back to API transport for every provider. Anthropic and
+OpenAI accept that default; Cursor only supports CLI, so `provider: cursor` requires
+`transport: cli` explicitly (omitting it raises a provider error). Diagnostics still
+report a missing `ai.transport` as incompatible. Set `transport` explicitly when you
+need a deterministic transport choice.
 
 The block below shows every field with its type, default, and accepted range. Fields are
 grouped by concern (provider, budget, safety/filtering, output, cache) for readability
@@ -178,20 +204,24 @@ only — the flat key layout is what the loader expects.
 
 ```yaml
 ai:
-  # ── Master toggle ─────────────────────────────────────────────
-  # All AI features are disabled when false. (bool, default: false)
+  # Master switch — all AI features are disabled when false. AND-ed with the
+  # per-feature toggles below.
   enabled: true
 
-  # ── Provider ──────────────────────────────────────────────────
-  # Which backend to use: "anthropic", "openai", or "cursor".
-  # (default: anthropic)
+  # Per-feature toggles (both default to false). Effective only when
+  # enabled is also true.
+  lint: true # AI lint summaries during chk/fmt
+  review: true # the `lintro review` AI diff review
+
+  # Provider: "anthropic", "openai", or "cursor" (default: anthropic)
   provider: anthropic
 
-  # How to invoke the provider. When omitted with enabled: true,
-  # Anthropic/OpenAI check/fix fall back to API; cursor defaults to CLI.
-  # Diagnostics treat a missing transport as incompatible.
-  # "api" uses the provider SDK; "cli" shells out to a local binary
-  # (e.g. the Cursor agent). (one of: api | cli)
+  # How to invoke the provider. When omitted with enabled: true, provider
+  # creation falls back to API for every provider. Cursor does not fall
+  # back to CLI in the normal provider factory; Cursor requires
+  # `transport: cli` explicitly. Diagnostics treat a missing transport
+  # as incompatible. "api" uses the provider SDK; "cli" shells out to a
+  # local binary (e.g. the Cursor agent). (one of: api | cli)
   transport: api
 
   # Model override (uses the provider default if omitted).
