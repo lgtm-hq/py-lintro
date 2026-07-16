@@ -458,7 +458,10 @@ def test_has_native_config_prettier_detects_prettierrc(
 
 
 def test_get_defaults_injection_args_prettier(tmp_path: Path) -> None:
-    """Should return --no-config --config args for prettier.
+    """Should return --config args for prettier (not --no-config).
+
+    Prettier rejects combining --no-config with --config (prettier#12221),
+    so defaults injection uses --config alone.
 
     Args:
         tmp_path: Pytest temporary directory fixture.
@@ -467,4 +470,4 @@ def test_get_defaults_injection_args_prettier(tmp_path: Path) -> None:
     config_path.write_text("{}")
     args = get_defaults_injection_args("prettier", config_path)
 
-    assert_that(args).is_equal_to(["--no-config", "--config", str(config_path)])
+    assert_that(args).is_equal_to(["--config", str(config_path)])
