@@ -9,7 +9,9 @@
   "packageRules": [
     {
       "description": "npm platform-binary placeholders are stamped at publish time; never bump in-repo",
-      "matchPackageNames": ["/^@lgtm-hq\\/lintro(-|$)/"],
+      "matchPackageNames": [
+        "/^@lgtm-hq\\/lintro(-|$)/"
+      ],
       "enabled": false
     },
     {
