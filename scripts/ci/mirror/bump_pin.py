@@ -22,13 +22,13 @@ from __future__ import annotations
 import argparse
 import re
 import sys
+import tomllib
 from pathlib import Path
 
-# Match the pinned lintro dependency, e.g. ``"lintro==0.69.0"``. The quote style
-# and surrounding whitespace are preserved by only replacing the version token.
-_PIN_RE = re.compile(
-    r'(?P<prefix>["\']lintro==)(?P<version>[^"\']+)(?P<suffix>["\'])',
-)
+# Match the ``lintro==<version>`` requirement inside a single dependency string
+# (already extracted from the parsed TOML, so file-level comments or unrelated
+# strings can never be matched here).
+_REQUIREMENT_RE = re.compile(r"^lintro==(?P<version>.+)$")
 
 
 def _read(*, path: Path) -> str:
@@ -43,8 +43,39 @@ def _read(*, path: Path) -> str:
     return path.read_text(encoding="utf-8")
 
 
+def _iter_dependency_strings(data: dict[str, object]) -> list[str]:
+    """Return every dependency requirement string declared in ``pyproject``.
+
+    Both ``[project].dependencies`` and ``[project.optional-dependencies]`` are
+    inspected so the real pin is located regardless of where it is declared.
+
+    Args:
+        data: The parsed ``pyproject.toml`` mapping.
+
+    Returns:
+        list[str]: All requirement strings found under ``[project]``.
+    """
+    project = data.get("project", {})
+    if not isinstance(project, dict):
+        return []
+    requirements: list[str] = []
+    core = project.get("dependencies", [])
+    if isinstance(core, list):
+        requirements.extend(str(item) for item in core)
+    optional = project.get("optional-dependencies", {})
+    if isinstance(optional, dict):
+        for group in optional.values():
+            if isinstance(group, list):
+                requirements.extend(str(item) for item in group)
+    return requirements
+
+
 def _current_pin(*, content: str) -> str:
-    """Return the currently pinned lintro version.
+    """Return the currently pinned lintro version from the dependency table.
+
+    The version is read from the parsed ``[project]`` dependency requirements
+    (not a file-wide text scan), so a comment or unrelated string containing
+    ``lintro==`` cannot be mistaken for the real pin.
 
     Args:
         content: The ``pyproject.toml`` text.
@@ -53,17 +84,24 @@ def _current_pin(*, content: str) -> str:
         The pinned version string.
 
     Raises:
-        ValueError: If no ``lintro==`` pin is present.
+        ValueError: If no ``lintro==`` dependency pin is present.
     """
-    match = _PIN_RE.search(content)
-    if match is None:
-        msg = "No 'lintro==<version>' pin found in pyproject.toml"
-        raise ValueError(msg)
-    return match.group("version")
+    data = tomllib.loads(content)
+    for requirement in _iter_dependency_strings(data):
+        match = _REQUIREMENT_RE.match(requirement.strip())
+        if match is not None:
+            return match.group("version")
+    msg = "No 'lintro==<version>' dependency pin found in pyproject.toml"
+    raise ValueError(msg)
 
 
 def bump(*, path: Path, version: str) -> bool:
     """Rewrite the lintro pin in ``path`` to ``version``.
+
+    The authoritative current version is read from the parsed dependency table,
+    then that exact ``lintro==<current>`` requirement literal is rewritten in
+    the file text so the quote style and surrounding whitespace are preserved
+    and no unrelated ``lintro==`` occurrence is touched.
 
     Args:
         path: Path to the mirror ``pyproject.toml``.
@@ -76,11 +114,16 @@ def bump(*, path: Path, version: str) -> bool:
     current = _current_pin(content=content)
     if current == version:
         return False
-    updated = _PIN_RE.sub(
+    pin_re = re.compile(
+        r"(?P<prefix>[\"']lintro==)" + re.escape(current) + r"(?P<suffix>[\"'])",
+    )
+    updated, count = pin_re.subn(
         lambda m: f"{m.group('prefix')}{version}{m.group('suffix')}",
         content,
-        count=1,
     )
+    if count == 0:
+        msg = f"Could not rewrite 'lintro=={current}' pin in {path}"
+        raise ValueError(msg)
     path.write_text(updated, encoding="utf-8")
     return True
 

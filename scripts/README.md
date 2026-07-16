@@ -76,9 +76,11 @@ packages and (dry-run) publish them. See the
 
 ### 🍺 Homebrew Formulas (`ci/homebrew/`)
 
-Formula templates and generators live under `scripts/ci/homebrew/` (see Homebrew Scripts
-below). Release automation writes `Formula/lintro.rb` (binary) and
-`Formula/lintro-full.rb` (PyPI full install).
+Formula generation lives in `lgtm-hq/homebrew-tap` (single writer). Release automation
+sends a `repository_dispatch` with release facts (version, binary checksums); the tap
+renders, validates, and auto-merges `Formula/lintro.rb` (binary) and
+`Formula/lintro-full.rb` (PyPI full install). Only release-support helpers remain here
+(see Homebrew Scripts below).
 
 ### 🪞 Mirror Release Scripts (`ci/mirror/`)
 
@@ -105,18 +107,26 @@ Scripts for GitHub Actions workflows and continuous integration.
 | `lintro-report-generate.sh`          | Generate comprehensive Lintro reports                                 | `./scripts/ci/lintro-report-generate.sh`                                           |
 | `pull-lintro-image.sh`               | Pull lintro Docker image from GHCR and log digest                     | `./scripts/ci/testing/pull-lintro-image.sh`                                        |
 | `maintenance/delete-ci-ghcr-tags.sh` | Delete ephemeral CI GHCR tags after PR merge or close                 | `./scripts/ci/maintenance/delete-ci-ghcr-tags.sh`                                  |
+| `promote-ci-docker-images.sh`        | Promote CI-validated image to release tags by digest retag            | `./scripts/ci/promote-ci-docker-images.sh --help`                                  |
+| `cosign-sign-images.sh`              | Sign promoted image digests with Cosign keyless OIDC                  | `./scripts/ci/cosign-sign-images.sh --help`                                        |
 | `coverage-badge-update.sh`           | Generate and update coverage badge                                    | `./scripts/ci/coverage-badge-update.sh --help`                                     |
 | `sbom-generate.sh`                   | Generate and export SBOMs via bomctl                                  | `./scripts/ci/sbom-generate.sh --help`                                             |
 | `egress-audit-lite.sh`               | Audit reachability of allowed endpoints                               | `./scripts/ci/egress-audit-lite.sh --help`                                         |
 | `detect-changes.sh`                  | Detect repo diffs and set has_changes output                          | `./scripts/ci/detect-changes.sh --help`                                            |
 | `detect-fork-pr.sh`                  | Detect fork PRs and set `is-fork` output for conditional steps        | `EVENT_NAME=pull_request ./scripts/ci/detect-fork-pr.sh`                           |
+| `resolve-pipeline-relevance.sh`      | Resolve heavy-pipeline path relevance and set `pipeline` output       | `./scripts/ci/resolve-pipeline-relevance.sh --help`                                |
+| `release-bump-only.sh`               | Classify automated version-bump PRs via diff allowlist (#1362)        | `./scripts/ci/release-bump-only.sh --help`                                         |
+| `dogfood-changed-files.sh`           | Lint only PR-changed files via lintro Docker (full-repo fallback)     | `./scripts/ci/dogfood-changed-files.sh --help`                                     |
 | `evaluate-test-gate.sh`              | Evaluate upstream compat/coverage results for required-check gate     | `COMPAT_RESULT=success COVERAGE_RESULT=success ./scripts/ci/evaluate-test-gate.sh` |
 | `fail-on-security-audit.sh`          | Fail CI when security audit finds vulnerabilities                     | `./scripts/ci/fail-on-security-audit.sh`                                           |
 | `free-disk-space.sh`                 | Free disk space on CI runner for Docker builds                        | `./scripts/ci/free-disk-space.sh`                                                  |
 | `security-comment.sh`                | Run osv-scanner via lintro in Docker and generate security PR comment | `./scripts/ci/security-comment.sh --help`                                          |
+| `install-osv-scanner.sh`             | Download and verify osv-scanner with curl exit-23 retries             | `./scripts/ci/security/install-osv-scanner.sh`                                     |
+| `check-vuln-suppressions.sh`         | Verbose wrapper for lgtm-ci vulnerability suppression check           | `./scripts/ci/security/check-vuln-suppressions.sh`                                 |
 | `run-ai-review.sh`                   | Dogfood `lintro review` on a PR using trusted base-branch lintro      | `PR_NUMBER=123 ./scripts/ci/run-ai-review.sh`                                      |
 | `enable_review_config.py`            | Enable AI review + cost cap in `.lintro-config.yaml` for a CI run     | `python3 scripts/ci/enable_review_config.py --help`                                |
 | `classify-osv-results.py`            | Classify osv_scanner JSON as ok, vulns, or error for CI status        | `python3 scripts/ci/classify-osv-results.py osv-results.json`                      |
+| `classify-release-tag.py`            | Classify a release tag as stable or prerelease for publish gating     | `python3 scripts/ci/classify-release-tag.py v1.2.3`                                |
 | `format-security-comment.py`         | Format lintro osv_scanner JSON as security PR comment markdown        | `python3 scripts/ci/format-security-comment.py osv-results.json`                   |
 | `format-changelog.py`                | Reflow generated `CHANGELOG.md` to lintro 88-col markdown             | `python3 scripts/ci/format-changelog.py CHANGELOG.md`                              |
 | `test-install-package.sh`            | Install and verify built package in isolated venv                     | `./scripts/ci/test-install-package.sh wheel`                                       |
@@ -153,21 +163,13 @@ Scripts for building, testing, and deploying the Astro documentation site at
 
 #### Homebrew Scripts (`ci/homebrew/`)
 
-Scripts for generating and updating Homebrew formulas.
+Release-support helpers for the Homebrew tap dispatch. Formula generation itself lives
+in `lgtm-hq/homebrew-tap`.
 
-| Script                       | Purpose                                            | Usage                                                                                                           |
-| ---------------------------- | -------------------------------------------------- | --------------------------------------------------------------------------------------------------------------- |
-| `wait-for-pypi.sh`           | Poll PyPI until package version is available       | `./scripts/ci/homebrew/wait-for-pypi.sh lintro 1.0.0`                                                           |
-| `get-release-info.sh`        | Resolve release tag and prerelease metadata        | `GITHUB_EVENT_NAME=workflow_dispatch ./scripts/ci/homebrew/get-release-info.sh`                                 |
-| `create-tap-pr.sh`           | Create/update Homebrew tap PR                      | `./scripts/ci/homebrew/create-tap-pr.sh Formula/lintro.rb Formula/lintro-full.rb "chore(homebrew): update ..."` |
-| `create-lintro-tap-pr.sh`    | Create/update lintro's generated formula PR        | `./scripts/ci/homebrew/create-lintro-tap-pr.sh 1.0.0 --skip-if-empty`                                           |
-| `generate-pypi-formula.sh`   | Generate lintro.rb formula from PyPI               | `./scripts/ci/homebrew/generate-pypi-formula.sh 1.0.0 out`                                                      |
-| `generate-binary-formula.sh` | Generate `Formula/lintro.rb` for binary releases   | `./scripts/ci/homebrew/generate-binary-formula.sh ...`                                                          |
-| `pypi_utils.py`              | Shared PyPI API utilities module                   | Imported by other Python scripts                                                                                |
-| `fetch_package_info.py`      | Fetch package tarball info from PyPI               | `python3 scripts/ci/homebrew/fetch_package_info.py lintro 1.0.0`                                                |
-| `fetch_wheel_info.py`        | Fetch wheel info and generate resource stanzas     | `python3 scripts/ci/homebrew/fetch_wheel_info.py pydoclint --type universal`                                    |
-| `render_formula.py`          | Render Homebrew formula from template              | `python3 scripts/ci/homebrew/render_formula.py --tarball-url ... -o out.rb`                                     |
-| `generate_resources.py`      | Generate Homebrew resource stanzas (replaces poet) | `python3 scripts/ci/homebrew/generate_resources.py lintro --exclude pkg1 pkg2`                                  |
+| Script                | Purpose                                      | Usage                                                                           |
+| --------------------- | -------------------------------------------- | ------------------------------------------------------------------------------- |
+| `wait-for-pypi.sh`    | Poll PyPI until package version is available | `./scripts/ci/homebrew/wait-for-pypi.sh lintro 1.0.0`                           |
+| `get-release-info.sh` | Resolve release tag and prerelease metadata  | `GITHUB_EVENT_NAME=workflow_dispatch ./scripts/ci/homebrew/get-release-info.sh` |
 
 ### 🐳 Docker Scripts (`docker/`)
 

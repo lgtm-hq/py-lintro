@@ -9,7 +9,8 @@ name: Security - CodeQL Code Scanning
     paths: ['**.py', 'pyproject.toml', '.github/**']
   pull_request:
     branches: [main]
-    # No paths filter: `codeql / CodeQL` is a required status check, and a
+    # No paths filter: `codeql / 🔬 CodeQL Analysis` is a required status
+    # check, and a
     # path-filtered workflow that does not run leaves that context absent
     # (not skipped), which permanently blocks the merge queue for PRs that
     # touch only non-matching files (docs, npm/, etc.). Always run on PRs so
@@ -29,17 +30,30 @@ concurrency:
 jobs:
   codeql:
     # yamllint disable-line rule:line-length
-    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-codeql.yml@1014e3d7d5441a63215d2096545a46cff6de101c # v0.48.0
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-codeql.yml@31c25ef2e8992960e218524780e34f44f51271b5 # v0.54.0
     with:
+      # Org ruleset (checks-py-lintro): codeql / 🔬 CodeQL Analysis
+      job-name: '🔬 CodeQL Analysis'
       languages: python
       build-mode: none
       config-file: .github/codeql/codeql-config.yml
       category: '/language:all'
-      tooling-ref: '1014e3d7d5441a63215d2096545a46cff6de101c' # v0.48.0
+      tooling-ref: '31c25ef2e8992960e218524780e34f44f51271b5' # v0.54.0
       egress-policy: block
       egress-preset: github-tooling
-      allowed-endpoints-mode: append
-      allowed-endpoints: release-assets.githubusercontent.com:443
+      # Full list (v0.50.0+ replace semantics): the reusable passes
+      # allowed-endpoints verbatim to step-security/harden-runner, so a
+      # non-empty value must include the github-tooling baseline.
+      allowed-endpoints-mode: replace
+      allowed-endpoints: >
+        github.com:443
+        api.github.com:443
+        codeload.github.com:443
+        objects.githubusercontent.com:443
+        raw.githubusercontent.com:443
+        uploads.github.com:443
+        pipelines.actions.githubusercontent.com:443
+        release-assets.githubusercontent.com:443
     permissions:
       contents: read
       security-events: write

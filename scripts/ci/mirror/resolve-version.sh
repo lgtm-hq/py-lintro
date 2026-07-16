@@ -35,9 +35,15 @@ TAG="${TAG%"${TAG##*[![:space:]]}"}"
 
 VERSION="${TAG#v}"
 IS_PRERELEASE=false
-if [[ "$VERSION" =~ (a|b|rc)[0-9]+ ]]; then
+# Treat any PEP 440 pre-release or dev-release as a prerelease. This must catch
+# both compact forms (1.2.3rc1, 1.2.3a1) and separated forms (1.2.3-rc.1,
+# 1.2.3-alpha.1, 1.2.3.dev1); post-releases (1.2.3.post1) are NOT prereleases.
+# Match case-insensitively since release tags are not always canonicalised.
+shopt -s nocasematch
+if [[ "$VERSION" =~ [-._]?(a|b|c|rc|alpha|beta|pre|preview|dev)[-._]?[0-9]* ]]; then
 	IS_PRERELEASE=true
 fi
+shopt -u nocasematch
 
 if [[ -n "${GITHUB_OUTPUT:-}" ]]; then
 	{

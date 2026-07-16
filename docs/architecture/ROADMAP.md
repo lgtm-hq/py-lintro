@@ -178,17 +178,21 @@ version:
 - [ ] Migrate remaining tools
 - [ ] Update contributing guide for new tool format
 
-### P2: Parallel Tool Execution
+### P2: Parallel Tool Execution — ✅ Implemented
 
-**Issue:** Tools run sequentially, slow for large codebases.
+**Status:** Shipped and enabled by default. Independent tools run concurrently;
+conflicting tools are batched sequentially. Controlled via `execution.parallel` (default
+`true`) and `execution.max_workers` (default: CPU count, 1-32). See
+`lintro/utils/execution/parallel_executor.py` and `lintro/utils/async_tool_executor.py`.
 
 **Tasks:**
 
-- [ ] Identify independent tool groups (no conflicts)
-- [ ] Implement async/concurrent execution
-- [ ] Handle result aggregation
-- [ ] Add `--parallel` CLI flag
-- [ ] Benchmark performance improvement
+- [x] Identify independent tool groups (no conflicts) — `get_parallel_batches`
+- [x] Implement async/concurrent execution — `AsyncToolExecutor`
+- [x] Handle result aggregation
+- [x] Config-driven toggle (`execution.parallel`) instead of a `--parallel` CLI flag
+- [ ] Benchmark performance improvement — tracked under the performance epic
+      ([#597–#601](https://github.com/lgtm-hq/py-lintro/issues/597))
 
 **Design Consideration:**
 
@@ -457,7 +461,7 @@ Items marked with good entry points for new contributors:
 ### Advanced
 
 - [ ] Design tool definition YAML schema
-- [ ] Implement parallel tool execution
+- [x] Implement parallel tool execution (shipped; see Phase 2 › P2)
 - [ ] Create Nuitka build pipeline
 - [ ] Implement incremental checking
 

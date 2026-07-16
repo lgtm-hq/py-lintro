@@ -19,7 +19,7 @@ import argparse
 import json
 import platform
 import shutil
-import subprocess
+import subprocess  # nosec B404 - subprocess is the core mechanism for invoking external tools; all invocations use shell=False
 import sys
 from pathlib import Path
 
@@ -134,7 +134,7 @@ def build_macos_binary(arch: str = "arm64", verbose: bool = False) -> int:
     print(f"Running: {' '.join(cmd)}")
 
     try:
-        result = subprocess.run(
+        result = subprocess.run(  # nosec B603 - argv is an internally-built list run with shell=False; binary resolved from a known command, no user shell input
             cmd,
             cwd=PROJECT_ROOT,
             check=True,
@@ -202,7 +202,7 @@ def verify_binary() -> bool:
 
     # Check version
     try:
-        result = subprocess.run(
+        result = subprocess.run(  # nosec B603 - argv is an internally-built list run with shell=False; binary resolved from a known command, no user shell input
             [str(binary_path), "--version"],
             capture_output=True,
             text=True,
@@ -219,7 +219,7 @@ def verify_binary() -> bool:
 
     # Check help
     try:
-        result = subprocess.run(
+        result = subprocess.run(  # nosec B603 - argv is an internally-built list run with shell=False; binary resolved from a known command, no user shell input
             [str(binary_path), "--help"],
             capture_output=True,
             text=True,
@@ -236,7 +236,7 @@ def verify_binary() -> bool:
 
     # Check doctor loads manifest.json (required for tool registry)
     try:
-        result = subprocess.run(
+        result = subprocess.run(  # nosec B603 - argv is an internally-built list run with shell=False; binary resolved from a known command, no user shell input
             [str(binary_path), "doctor", "--json"],
             capture_output=True,
             text=True,

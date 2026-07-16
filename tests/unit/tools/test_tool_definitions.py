@@ -62,7 +62,7 @@ TOOL_SPECS = [
         40,
         False,
     ),
-    (ToolName.BANDIT, "lintro.tools.definitions.bandit", "BanditPlugin", 30, 90, False),
+    (ToolName.BANDIT, "lintro.tools.definitions.bandit", "BanditPlugin", 90, 90, False),
 ]
 
 
