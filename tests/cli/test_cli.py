@@ -1,5 +1,6 @@
 """Tests for CLI module."""
 
+import os
 import subprocess  # nosec B404 - subprocess is used to drive the tool/CLI under test; invocations use shell=False
 import sys
 from unittest.mock import patch
@@ -10,6 +11,52 @@ from click.testing import CliRunner
 
 from lintro.cli import cli
 
+_ASCII_LOCALE = "en_US.US-ASCII"
+
+
+def _scrubbed_ascii_env() -> dict[str, str]:
+    """Build a brew-test-like env that forces ASCII stdio encoding.
+
+    Returns:
+        Minimal environment with ``LC_ALL`` set to an ASCII locale.
+    """
+    path = os.environ.get("PATH", "/usr/bin:/bin")
+    home = os.environ.get("HOME", "/tmp")
+    env: dict[str, str] = {
+        "PATH": path,
+        "HOME": home,
+        "LC_ALL": _ASCII_LOCALE,
+        "LANG": _ASCII_LOCALE,
+    }
+    # Preserve vars needed to find the project venv / uv cache when present.
+    for key in ("VIRTUAL_ENV", "UV_PROJECT_ENVIRONMENT", "UV_CACHE_DIR", "TMPDIR"):
+        value = os.environ.get(key)
+        if value:
+            env[key] = value
+    return env
+
+
+def _ascii_locale_forces_ascii_stdio() -> bool:
+    """Return whether ``en_US.US-ASCII`` makes CPython use ASCII stdio.
+
+    Returns:
+        ``True`` when a subprocess under that locale reports ASCII encoding.
+    """
+    probe = subprocess.run(  # nosec B603 - fixed argv; encoding probe only
+        [
+            sys.executable,
+            "-c",
+            "import sys; print(sys.stdout.encoding or '')",
+        ],
+        capture_output=True,
+        text=True,
+        timeout=10,
+        env=_scrubbed_ascii_env(),
+        check=False,
+    )
+    encoding = probe.stdout.strip().lower().replace("-", "")
+    return probe.returncode == 0 and encoding in {"ascii", "usascii"}
+
 
 def test_cli_help() -> None:
     """Test that CLI shows help."""
@@ -17,6 +64,53 @@ def test_cli_help() -> None:
     result = runner.invoke(cli, ["--help"])
     assert_that(result.exit_code).is_equal_to(0)
     assert_that(result.output).contains("Lintro")
+
+
+def _assert_help_succeeds_under_ascii_stdio(*, env: dict[str, str]) -> None:
+    """Assert ``python -m lintro --help`` succeeds with ASCII stdio.
+
+    Args:
+        env: Subprocess environment that forces ASCII stdout encoding.
+    """
+    result = (
+        subprocess.run(  # nosec B603 - fixed argv run against project CLI; shell=False
+            [sys.executable, "-m", "lintro", "--help"],
+            capture_output=True,
+            text=True,
+            timeout=30,
+            env=env,
+            check=False,
+        )
+    )
+    combined = f"{result.stdout}\n{result.stderr}"
+    assert_that(combined).does_not_contain("UnicodeEncodeError")
+    assert_that(result.returncode).is_equal_to(0)
+    assert_that(result.stdout).contains("Lintro")
+    assert_that(result.stdout).contains("🔧")
+
+
+def test_cli_help_succeeds_under_ascii_locale() -> None:
+    """Regression #1379: --help must not UnicodeEncodeError under ASCII locales.
+
+    Mirrors brew-test's scrubbed environment (``env -i`` + ``LC_ALL`` ASCII).
+    Skips when the host lacks an effective ``en_US.US-ASCII`` locale.
+    """
+    if not _ascii_locale_forces_ascii_stdio():
+        pytest.skip(f"Locale {_ASCII_LOCALE} does not force ASCII stdio on this host")
+
+    _assert_help_succeeds_under_ascii_stdio(env=_scrubbed_ascii_env())
+
+
+def test_cli_help_succeeds_with_ascii_pythonioencoding() -> None:
+    """Regression #1379: --help survives PYTHONIOENCODING=ascii (portable).
+
+    Covers hosts without ``en_US.US-ASCII`` while still forcing ASCII stdio
+    the same way a non-UTF-8 locale would for the CPython package entry point.
+    """
+    env = os.environ.copy()
+    env["PYTHONIOENCODING"] = "ascii"
+    env.pop("PYTHONUTF8", None)
+    _assert_help_succeeds_under_ascii_stdio(env=env)
 
 
 def test_cli_version() -> None:
