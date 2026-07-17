@@ -21,7 +21,10 @@ def _load_module() -> Any:
         "classify_release_tag",
         CLASSIFY_SCRIPT,
     )
-    assert spec and spec.loader
+    assert_that(spec).is_not_none()
+    assert spec is not None  # narrow type for mypy
+    assert_that(spec.loader).is_not_none()
+    assert spec.loader is not None  # narrow type for mypy
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module

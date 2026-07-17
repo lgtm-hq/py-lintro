@@ -85,7 +85,8 @@ def test_grid_output_contains_docs_column_and_urls(
     Args:
         enriched_ruff_result: Enriched ToolResult fixture.
     """
-    assert enriched_ruff_result.issues is not None
+    assert_that(enriched_ruff_result.issues).is_not_none()
+    assert enriched_ruff_result.issues is not None  # narrow type for mypy
     output = format_issues(enriched_ruff_result.issues, output_format="grid")
 
     assert_that(output).contains("Docs")
