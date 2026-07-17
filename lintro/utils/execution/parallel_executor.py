@@ -7,7 +7,8 @@ from __future__ import annotations
 
 import asyncio
 import sys
-from typing import TYPE_CHECKING
+from concurrent.futures import ThreadPoolExecutor
+from typing import TYPE_CHECKING, TypeVar
 
 from rich.progress import (
     BarColumn,
@@ -24,7 +25,48 @@ from lintro.utils.execution.tool_configuration import configure_tool_for_executi
 from lintro.utils.unified_config import UnifiedConfigManager
 
 if TYPE_CHECKING:
+    from collections.abc import Coroutine
+
     from lintro.plugins.base import BaseToolPlugin
+
+_T = TypeVar("_T")
+
+
+def _run_coroutine_blocking(coro: Coroutine[object, object, _T]) -> _T:
+    """Run a coroutine to completion from a synchronous context.
+
+    This helper guarantees the parallel executor can be embedded inside an
+    environment that already owns a running event loop (Jupyter, async web
+    frameworks, or a programmatic library caller invoking lintro from async
+    code). Loop ownership is only safe to assume at the CLI boundary, so the
+    executor must never assume it can create its own loop unconditionally.
+
+    Behavior:
+        - No running loop in the current thread: the coroutine runs via
+          ``asyncio.run`` on this thread. This keeps the CLI path
+          byte-for-byte identical to the previous ``asyncio.run(...)`` call.
+        - A loop is already running in the current thread: the coroutine is
+          dispatched to a dedicated worker thread with its own fresh event
+          loop, avoiding the ``RuntimeError`` that ``asyncio.run`` raises when
+          a loop is already running.
+
+    Args:
+        coro: The coroutine to execute to completion.
+
+    Returns:
+        The value returned by the coroutine.
+    """
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        # No running loop in this thread: it is safe to own one here.
+        return asyncio.run(coro)
+
+    # A loop is already running in this thread. Run the coroutine on a fresh
+    # loop inside a dedicated worker thread and block for its result.
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        future = pool.submit(asyncio.run, coro)
+        return future.result()
 
 
 def run_tools_parallel(
@@ -149,8 +191,11 @@ def run_tools_parallel(
                         description=desc,
                     )
 
-                # Run batch in parallel with progress callback
-                batch_results = asyncio.run(
+                # Run batch in parallel with progress callback. Use the
+                # loop-aware runner so the executor works both from the CLI
+                # (no running loop) and when embedded in an already-running
+                # event loop.
+                batch_results = _run_coroutine_blocking(
                     executor.run_tools_parallel(
                         tools=tools_with_instances,
                         paths=paths,
