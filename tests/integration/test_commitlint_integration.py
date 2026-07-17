@@ -1,17 +1,20 @@
 """Integration tests for the commitlint tool (commit-message linter).
 
 These tests exercise the real ``commitlint`` binary against throwaway git
-repositories. They are skipped when ``commitlint`` or ``git`` is unavailable.
+repositories. They are skipped when ``commitlint`` or ``git`` is unavailable,
+or when the installed commitlint version is below the manifest minimum.
 """
 
 from __future__ import annotations
 
+import re
 import shutil
 import subprocess  # nosec B404 - test helper, fixed args, no shell
 from pathlib import Path
 
 import pytest
 from assertpy import assert_that
+from packaging.version import Version
 
 from lintro.models.core.tool_result import ToolResult
 from lintro.parsers.commitlint.commitlint_issue import CommitlintIssue
@@ -26,9 +29,39 @@ _SELF_CONTAINED_CONFIG = (
     "};\n"
 )
 
+_COMMITLINT_MIN_VERSION = Version("21.2.1")
+
+
+def _get_commitlint_version() -> Version | None:
+    """Return the installed commitlint version, if available.
+
+    Returns:
+        Parsed version, or None when commitlint is missing/unparseable.
+    """
+    if shutil.which("commitlint") is None:
+        return None
+    result = subprocess.run(  # nosec B603 B607 - fixed argv against commitlint on PATH
+        ["commitlint", "--version"],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    match = re.search(r"(\d+\.\d+\.\d+)", result.stdout + result.stderr)
+    if match is None:
+        return None
+    return Version(match.group(1))
+
+
+_installed_commitlint_version = _get_commitlint_version()
+
 _requires_binaries = pytest.mark.skipif(
-    shutil.which("commitlint") is None or shutil.which("git") is None,
-    reason="commitlint or git not installed on PATH; skip integration test.",
+    shutil.which("git") is None
+    or _installed_commitlint_version is None
+    or _installed_commitlint_version < _COMMITLINT_MIN_VERSION,
+    reason=(
+        f"commitlint >= {_COMMITLINT_MIN_VERSION} or git not installed "
+        f"(found: {_installed_commitlint_version})"
+    ),
 )
 
 

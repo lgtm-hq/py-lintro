@@ -14,25 +14,24 @@ from __future__ import annotations
 
 import tomllib
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-from loguru import logger
-
-from lintro.ai.config import AIConfig
 from lintro.config.lintro_config import (
     EnforceConfig,
     ExecutionConfig,
     LintroConfig,
     LintroToolConfig,
 )
-from lintro.config.review_config import (
-    ReviewChecklistConfig,
-    ReviewChecklistItemConfig,
-    ReviewConfig,
-)
 from lintro.config.score_config import ScoreConfig
 from lintro.enums.config_key import ConfigKey
+from lintro.utils.lazy_logger import logger
 from lintro.utils.path_utils import find_file_upward
+
+if TYPE_CHECKING:
+    from lintro.ai.config import AIConfig
+    from lintro.config.review_config import (
+        ReviewConfig,
+    )
 
 try:
     import yaml
@@ -291,6 +290,8 @@ def _parse_ai_config(data: dict[str, Any]) -> AIConfig:
     Returns:
         AIConfig: Parsed AI configuration.
     """
+    from lintro.ai.config import AIConfig
+
     if not data:
         return AIConfig()
 
@@ -317,6 +318,8 @@ def _parse_review_checklist_item_config(data: Any) -> dict[str, Any]:
     Raises:
         ValueError: When the checklist item entry is not a mapping.
     """
+    from lintro.config.review_config import ReviewChecklistItemConfig
+
     if not isinstance(data, dict):
         msg = "review.checklist.items entries must be mappings"
         raise ValueError(msg)
@@ -341,6 +344,8 @@ def _parse_review_checklist_config(data: Any) -> dict[str, Any]:
     Raises:
         ValueError: When the checklist section is not a mapping.
     """
+    from lintro.config.review_config import ReviewChecklistConfig
+
     if not isinstance(data, dict):
         msg = "review.checklist config must be a mapping"
         raise ValueError(msg)
@@ -375,6 +380,8 @@ def _parse_review_config(data: Any) -> ReviewConfig:
     Raises:
         ValueError: When the review section is not a mapping.
     """
+    from lintro.config.review_config import ReviewConfig
+
     if data is None:
         return ReviewConfig()
     if not isinstance(data, dict):

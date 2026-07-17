@@ -14,7 +14,8 @@ from collections.abc import Sequence
 from typing import TYPE_CHECKING
 
 import click
-from loguru import logger
+
+from lintro.utils.lazy_logger import logger
 
 if TYPE_CHECKING:
     pass

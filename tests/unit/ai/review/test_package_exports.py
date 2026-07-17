@@ -22,7 +22,7 @@ def test_package_exports_resolve(export_name: str) -> None:
 
 
 def test_lazy_exports_match_implementation() -> None:
-    """Lazy exports resolve to callables defined in their source modules."""
+    """Lazy exports resolve to objects defined in their source modules."""
     importlib.reload(review_pkg)
     for export_name, (module_name, attr_name) in review_pkg._LAZY_EXPORTS.items():
         vars(review_pkg).pop(export_name, None)
@@ -30,8 +30,10 @@ def test_lazy_exports_match_implementation() -> None:
             del sys.modules[module_name]
         assert_that(module_name in sys.modules).is_false()
         resolved = getattr(review_pkg, export_name)
-        assert_that(resolved.__module__).is_equal_to(module_name)
-        assert_that(resolved.__name__).is_equal_to(attr_name)
+        # getattr loads the source module via the package __getattr__ map.
+        assert_that(module_name in sys.modules).is_true()
+        source_module = sys.modules[module_name]
+        assert_that(resolved).is_equal_to(getattr(source_module, attr_name))
 
 
 def test_package_exports_include_changed_file_status() -> None:
@@ -42,34 +44,9 @@ def test_package_exports_include_changed_file_status() -> None:
 
 
 def test_lazy_export_names_match_runtime_map() -> None:
-    """Lazy export names are derived from the runtime lazy-import map."""
+    """Public exports are exactly the runtime lazy-import map keys."""
     importlib.reload(review_pkg)
-    static_exports = {
-        "BUILTIN_CHECKLIST_ITEMS",
-        "ChangedFile",
-        "ChangedFileStatus",
-        "ChecklistItem",
-        "ChunkingResult",
-        "FileClassification",
-        "FileDomain",
-        "PRMetadata",
-        "REL_DIRECTORY_PREFIX",
-        "REL_SINGLE_FILE",
-        "REL_SOURCE_TEST",
-        "REL_WORKFLOW_SCRIPT_TEST",
-        "RelationshipLabel",
-        "ReviewCategory",
-        "ReviewChunk",
-        "ReviewContext",
-        "ReviewContextError",
-        "ReviewContextErrorCode",
-        "format_checklist_for_prompt",
-        "get_all_checklist_items",
-        "select_checklist_items",
-    }
-    assert_that(set(review_pkg.__all__)).is_equal_to(
-        static_exports | set(review_pkg._LAZY_EXPORTS),
-    )
+    assert_that(set(review_pkg.__all__)).is_equal_to(set(review_pkg._LAZY_EXPORTS))
 
 
 def test_type_checking_lazy_exports_match_runtime_map() -> None:

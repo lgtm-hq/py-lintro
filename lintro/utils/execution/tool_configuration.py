@@ -13,7 +13,7 @@ from lintro.config.config_loader import get_config
 from lintro.enums.action import Action, normalize_action
 from lintro.enums.tool_name import ToolName
 from lintro.enums.tools_value import ToolsValue
-from lintro.tools import tool_manager
+from lintro.tools.core.tool_manager import tool_manager
 from lintro.utils.unified_config import UnifiedConfigManager
 
 if TYPE_CHECKING:

@@ -23,25 +23,57 @@ Example:
 
 from __future__ import annotations
 
-import importlib
 import importlib.metadata
 from pathlib import Path
 from typing import TYPE_CHECKING, cast
 
-from loguru import logger
-
-from lintro.plugins.base import BaseToolPlugin
-from lintro.plugins.protocol import (
-    LINTRO_PLUGIN_API_VERSION,
-    is_compatible_api_version,
-)
-from lintro.plugins.registry import ToolRegistry
+from lintro.utils.lazy_logger import logger
 
 if TYPE_CHECKING:
     from importlib.metadata import EntryPoint
 
+    from lintro.plugins.base import BaseToolPlugin
+
 # Path to builtin tool definitions
 BUILTIN_DEFINITIONS_PATH = Path(__file__).parent.parent / "tools" / "definitions"
+
+# Canonical tool name -> definition module path. Import is deferred until the
+# tool is selected (or list-tools / get_all materializes everything).
+BUILTIN_TOOL_MODULES: dict[str, str] = {
+    "actionlint": "lintro.tools.definitions.actionlint",
+    "astro-check": "lintro.tools.definitions.astro_check",
+    "bandit": "lintro.tools.definitions.bandit",
+    "black": "lintro.tools.definitions.black",
+    "cargo_audit": "lintro.tools.definitions.cargo_audit",
+    "cargo_deny": "lintro.tools.definitions.cargo_deny",
+    "clippy": "lintro.tools.definitions.clippy",
+    "commitlint": "lintro.tools.definitions.commitlint",
+    "dotenv_linter": "lintro.tools.definitions.dotenv_linter",
+    "gitleaks": "lintro.tools.definitions.gitleaks",
+    "hadolint": "lintro.tools.definitions.hadolint",
+    "idiom-review": "lintro.tools.definitions.idiom_review",
+    "markdownlint": "lintro.tools.definitions.markdownlint",
+    "mypy": "lintro.tools.definitions.mypy",
+    "osv_scanner": "lintro.tools.definitions.osv_scanner",
+    "oxfmt": "lintro.tools.definitions.oxfmt",
+    "oxlint": "lintro.tools.definitions.oxlint",
+    "prettier": "lintro.tools.definitions.prettier",
+    "pydoclint": "lintro.tools.definitions.pydoclint",
+    "pytest": "lintro.tools.definitions.pytest",
+    "ruff": "lintro.tools.definitions.ruff",
+    "rustfmt": "lintro.tools.definitions.rustfmt",
+    "semgrep": "lintro.tools.definitions.semgrep",
+    "shellcheck": "lintro.tools.definitions.shellcheck",
+    "shfmt": "lintro.tools.definitions.shfmt",
+    "sqlfluff": "lintro.tools.definitions.sqlfluff",
+    "stylelint": "lintro.tools.definitions.stylelint",
+    "svelte-check": "lintro.tools.definitions.svelte_check",
+    "taplo": "lintro.tools.definitions.taplo",
+    "tsc": "lintro.tools.definitions.tsc",
+    "vale": "lintro.tools.definitions.vale",
+    "vue-tsc": "lintro.tools.definitions.vue_tsc",
+    "yamllint": "lintro.tools.definitions.yamllint",
+}
 
 # Entry point group third-party packages use to register tool plugins.
 ENTRY_POINT_GROUP = "lintro.tools"
@@ -58,42 +90,35 @@ _discovered: bool = False
 
 
 def discover_builtin_tools() -> int:
-    """Load all builtin tool definitions.
+    """Register builtin tools as deferred name -> module mappings.
 
-    This function imports all Python modules in the tools/definitions/
-    directory, which triggers the @register_tool decorators.
+    Modules are imported only when a tool is first accessed (or when
+    ``get_all`` / ``list-tools`` materializes every tool).
 
     Returns:
-        Number of tool modules loaded.
+        Number of builtin tools registered for deferred import.
 
     Note:
         Each tool definition file should use the @register_tool decorator
-        to register itself with the ToolRegistry.
+        so importing the module registers the live plugin class.
     """
-    loaded_count = 0
+    from lintro.plugins.registry import ToolRegistry
 
     if not BUILTIN_DEFINITIONS_PATH.exists():
         logger.warning(
             f"Builtin definitions path not found: {BUILTIN_DEFINITIONS_PATH}",
         )
-        return loaded_count
+        return 0
 
-    for py_file in BUILTIN_DEFINITIONS_PATH.glob("*.py"):
-        if py_file.name.startswith("_"):
-            continue
+    for name, module_path in BUILTIN_TOOL_MODULES.items():
+        ToolRegistry.register_deferred(
+            name=name,
+            module_path=module_path,
+            origin=ToolRegistry.BUILTIN_ORIGIN,
+        )
 
-        module_name = f"lintro.tools.definitions.{py_file.stem}"
-        try:
-            # Safe: module_name from internal directory files, not user input
-            importlib.import_module(module_name)  # nosemgrep: non-literal-import
-            logger.debug(f"Loaded builtin tool: {py_file.stem}")
-            loaded_count += 1
-        except ImportError as e:
-            logger.warning(f"Failed to import {module_name}: {e}")
-        except (AttributeError, TypeError, ValueError) as e:
-            logger.error(f"Error loading {module_name}: {type(e).__name__}: {e}")
-
-    logger.debug(f"Loaded {loaded_count} builtin tool definitions")
+    loaded_count = len(BUILTIN_TOOL_MODULES)
+    logger.debug(f"Registered {loaded_count} deferred builtin tool definitions")
     return loaded_count
 
 
@@ -152,6 +177,11 @@ def _validate_plugin_class(ep: EntryPoint, plugin_class: object) -> bool:
             "), skipping",
         )
         return False
+
+    from lintro.plugins.protocol import (
+        LINTRO_PLUGIN_API_VERSION,
+        is_compatible_api_version,
+    )
 
     declared_version = getattr(plugin_class, "LINTRO_PLUGIN_API_VERSION", None)
     if not is_compatible_api_version(declared_version):
@@ -232,6 +262,8 @@ def _load_external_entry_point(*, ep: EntryPoint) -> int:
     Returns:
         ``1`` when the plugin was registered, ``0`` when it was skipped.
     """
+    from lintro.plugins.registry import ToolRegistry
+
     try:
         plugin_class = ep.load()
 

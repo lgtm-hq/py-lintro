@@ -1,47 +1,163 @@
 """Command-line interface for Lintro."""
 
+from __future__ import annotations
+
+import importlib
 from typing import Any, cast
 
 import click
-from rich.console import Console
-from rich.panel import Panel
-from rich.table import Table
-from rich.text import Text
 
 from lintro import __version__
-from lintro.cli_utils.command_chainer import CommandChainer
-from lintro.utils.logger_setup import setup_cli_logging
 
-# Configure loguru for CLI commands (help, version, etc.)
-# Only WARNING and above will show. DEBUG logs go to file when tool_executor runs.
-setup_cli_logging()
+# Canonical command name -> "module.path.attr" for lazy loading.
+# Aliases point at the same import path as their canonical command.
+_LAZY_SUBCOMMANDS: dict[str, str] = {
+    "check": "lintro.cli_utils.commands.check.check_command",
+    "chk": "lintro.cli_utils.commands.check.check_command",
+    "lint": "lintro.cli_utils.commands.check.check_command",
+    "config": "lintro.cli_utils.commands.config.config_command",
+    "cfg": "lintro.cli_utils.commands.config.config_command",
+    "doctor": "lintro.cli_utils.commands.doctor.doctor_command",
+    "format": "lintro.cli_utils.commands.format.format_command",
+    "fmt": "lintro.cli_utils.commands.format.format_command",
+    "fix": "lintro.cli_utils.commands.format.format_command",
+    "init": "lintro.cli_utils.commands.init.init_command",
+    "install": "lintro.cli_utils.commands.install.install_command",
+    "ins": "lintro.cli_utils.commands.install.install_command",
+    "licenses": "lintro.cli_utils.commands.licenses.licenses_command",
+    "lic": "lintro.cli_utils.commands.licenses.licenses_command",
+    "list-tools": "lintro.cli_utils.commands.list_tools.list_tools_command",
+    "ls": "lintro.cli_utils.commands.list_tools.list_tools_command",
+    "tools": "lintro.cli_utils.commands.list_tools.list_tools_command",
+    "review": "lintro.cli_utils.commands.review.review_command",
+    "rev": "lintro.cli_utils.commands.review.review_command",
+    "setup": "lintro.cli_utils.commands.setup.setup_command",
+    "su": "lintro.cli_utils.commands.setup.setup_command",
+    "test": "lintro.cli_utils.commands.test.test_command",
+    "tst": "lintro.cli_utils.commands.test.test_command",
+    "versions": "lintro.cli_utils.commands.versions.versions_command",
+    "ver": "lintro.cli_utils.commands.versions.versions_command",
+    "version": "lintro.cli_utils.commands.versions.versions_command",
+}
 
-# E402: Module level imports below setup_cli_logging() are intentional.
-# Logging must be configured BEFORE importing modules that use loguru,
-# otherwise log messages during import get silently dropped or misconfigured.
-from lintro.cli_utils.commands.check import check_command  # noqa: E402
-from lintro.cli_utils.commands.config import config_command  # noqa: E402
-from lintro.cli_utils.commands.doctor import doctor_command  # noqa: E402
-from lintro.cli_utils.commands.format import format_command  # noqa: E402
-from lintro.cli_utils.commands.init import init_command  # noqa: E402
-from lintro.cli_utils.commands.install import install_command  # noqa: E402
-from lintro.cli_utils.commands.licenses import licenses_command  # noqa: E402
-from lintro.cli_utils.commands.list_tools import list_tools_command  # noqa: E402
-from lintro.cli_utils.commands.review import review_command  # noqa: E402
-from lintro.cli_utils.commands.setup import setup_command  # noqa: E402
-from lintro.cli_utils.commands.test import test_command  # noqa: E402
-from lintro.cli_utils.commands.versions import versions_command  # noqa: E402
-from lintro.tools.core.runtime_discovery import clear_discovery_cache  # noqa: E402
-from lintro.utils.config import clear_pyproject_cache  # noqa: E402
+# Alias -> canonical name for help rendering.
+_CANONICAL_NAMES: dict[str, str] = {
+    "check": "check",
+    "chk": "check",
+    "lint": "check",
+    "config": "config",
+    "cfg": "config",
+    "doctor": "doctor",
+    "format": "format",
+    "fmt": "format",
+    "fix": "format",
+    "init": "init",
+    "install": "install",
+    "ins": "install",
+    "licenses": "licenses",
+    "lic": "licenses",
+    "list-tools": "list-tools",
+    "ls": "list-tools",
+    "tools": "list-tools",
+    "review": "review",
+    "rev": "review",
+    "setup": "setup",
+    "su": "setup",
+    "test": "test",
+    "tst": "test",
+    "versions": "versions",
+    "ver": "versions",
+    "version": "versions",
+}
 
 
 class LintroGroup(click.Group):
-    """Custom Click group with enhanced help rendering and command chaining.
+    """Custom Click group with lazy subcommands, aliases, and chaining.
 
-    This group prints command aliases alongside their canonical names to make
-    the CLI help output more discoverable. It also supports command chaining
-    with comma-separated commands (e.g., lintro fmt , chk , tst).
+    Subcommands are imported on first use so ``lintro --version`` / ``--help``
+    do not pay for check/format/tool_executor/plugin import costs.
     """
+
+    def __init__(
+        self,
+        *args: Any,
+        lazy_subcommands: dict[str, str] | None = None,
+        **kwargs: Any,
+    ) -> None:
+        """Initialize the group with optional lazy subcommand map.
+
+        Args:
+            *args: Positional args forwarded to ``click.Group``.
+            lazy_subcommands: Map of command name -> ``module.attr`` import path.
+            **kwargs: Keyword args forwarded to ``click.Group``.
+        """
+        super().__init__(*args, **kwargs)
+        self.lazy_subcommands = lazy_subcommands or {}
+
+    def list_commands(self, ctx: click.Context) -> list[str]:
+        """List registered and lazy subcommand names.
+
+        Args:
+            ctx: Click context.
+
+        Returns:
+            Combined command name list.
+        """
+        base = list(super().list_commands(ctx))
+        lazy = list(self.lazy_subcommands.keys())
+        # Preserve insertion order while deduplicating.
+        seen: set[str] = set()
+        result: list[str] = []
+        for name in base + lazy:
+            if name not in seen:
+                seen.add(name)
+                result.append(name)
+        return result
+
+    def get_command(
+        self,
+        ctx: click.Context,
+        cmd_name: str,
+    ) -> click.Command | None:
+        """Resolve a command, importing lazy subcommands on demand.
+
+        Args:
+            ctx: Click context.
+            cmd_name: Command or alias name.
+
+        Returns:
+            The Click command, or None if unknown.
+        """
+        if cmd_name in self.lazy_subcommands:
+            return self._lazy_load(cmd_name)
+        return super().get_command(ctx, cmd_name)
+
+    def _lazy_load(self, cmd_name: str) -> click.Command:
+        """Import and return a lazily registered subcommand.
+
+        Args:
+            cmd_name: Command or alias name present in ``lazy_subcommands``.
+
+        Returns:
+            The loaded Click command object.
+
+        Raises:
+            ValueError: If the import path does not resolve to a Click command.
+        """
+        import_path = self.lazy_subcommands[cmd_name]
+        modname, attr_name = import_path.rsplit(".", 1)
+        # Safe: import paths are a fixed internal whitelist in _LAZY_SUBCOMMANDS.
+        module = importlib.import_module(modname)  # nosemgrep: non-literal-import
+        cmd_object = getattr(module, attr_name)
+        if not isinstance(cmd_object, click.Command):
+            msg = (
+                f"Lazy loading of {import_path} failed by returning "
+                "a non-command object"
+            )
+            raise ValueError(msg)
+        canonical = _CANONICAL_NAMES.get(cmd_name, cmd_name)
+        cast(Any, cmd_object)._canonical_name = canonical
+        return cmd_object
 
     def format_help(
         self,
@@ -54,6 +170,11 @@ class LintroGroup(click.Group):
             ctx: click.Context: The Click context.
             formatter: click.HelpFormatter: The help formatter (unused, we use Rich).
         """
+        from rich.console import Console
+        from rich.panel import Panel
+        from rich.table import Table
+        from rich.text import Text
+
         console = Console()
 
         # Header panel
@@ -152,6 +273,13 @@ class LintroGroup(click.Group):
         Raises:
             SystemExit: If a command exits with a non-zero exit code.
         """
+        from lintro.cli_utils.command_chainer import CommandChainer
+        from lintro.tools.core.runtime_discovery import clear_discovery_cache
+        from lintro.utils.config import clear_pyproject_cache
+        from lintro.utils.logger_setup import setup_cli_logging
+
+        setup_cli_logging()
+
         # Clear caches at start of each invocation to ensure fresh tool
         # detection and pyproject.toml loading across working directories
         clear_discovery_cache()
@@ -180,6 +308,7 @@ class LintroGroup(click.Group):
 
 @click.group(
     cls=LintroGroup,
+    lazy_subcommands=_LAZY_SUBCOMMANDS,
     invoke_without_command=True,
     context_settings={"help_option_names": ["-h", "--help"]},
 )
@@ -187,50 +316,6 @@ class LintroGroup(click.Group):
 def cli() -> None:
     """Lintro: Unified CLI for code formatting, linting, and quality assurance."""
     pass
-
-
-# Register canonical commands and set _canonical_name for help
-cast(Any, check_command)._canonical_name = "check"
-cast(Any, config_command)._canonical_name = "config"
-cast(Any, doctor_command)._canonical_name = "doctor"
-cast(Any, format_command)._canonical_name = "format"
-cast(Any, init_command)._canonical_name = "init"
-cast(Any, install_command)._canonical_name = "install"
-cast(Any, licenses_command)._canonical_name = "licenses"
-cast(Any, setup_command)._canonical_name = "setup"
-cast(Any, test_command)._canonical_name = "test"
-cast(Any, list_tools_command)._canonical_name = "list-tools"
-cast(Any, review_command)._canonical_name = "review"
-cast(Any, versions_command)._canonical_name = "versions"
-
-cli.add_command(check_command, name="check")
-cli.add_command(config_command, name="config")
-cli.add_command(doctor_command, name="doctor")
-cli.add_command(format_command, name="format")
-cli.add_command(init_command, name="init")
-cli.add_command(install_command, name="install")
-cli.add_command(licenses_command, name="licenses")
-cli.add_command(setup_command, name="setup")
-cli.add_command(test_command, name="test")
-cli.add_command(list_tools_command, name="list-tools")
-cli.add_command(review_command, name="review")
-cli.add_command(versions_command, name="versions")
-
-# Register aliases
-cli.add_command(check_command, name="chk")
-cli.add_command(check_command, name="lint")
-cli.add_command(config_command, name="cfg")
-cli.add_command(format_command, name="fmt")
-cli.add_command(format_command, name="fix")
-cli.add_command(test_command, name="tst")
-cli.add_command(list_tools_command, name="ls")
-cli.add_command(list_tools_command, name="tools")
-cli.add_command(install_command, name="ins")
-cli.add_command(licenses_command, name="lic")
-cli.add_command(setup_command, name="su")
-cli.add_command(review_command, name="rev")
-cli.add_command(versions_command, name="ver")
-cli.add_command(versions_command, name="version")
 
 
 def main() -> None:

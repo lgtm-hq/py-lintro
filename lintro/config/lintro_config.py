@@ -1,25 +1,51 @@
 """Main Lintro configuration model."""
 
-from typing import Any
+from __future__ import annotations
+
+from typing import TYPE_CHECKING, Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from lintro.ai.config import AIConfig
 from lintro.config.enforce_config import EnforceConfig
 from lintro.config.execution_config import ExecutionConfig
-from lintro.config.review_config import ReviewConfig
 from lintro.config.score_config import ScoreConfig
 from lintro.config.tool_config import LintroToolConfig
 
+if TYPE_CHECKING:
+    from lintro.ai.config import AIConfig
+    from lintro.config.review_config import ReviewConfig
+
 __all__ = [
-    "AIConfig",
+    "AIConfig",  # noqa: F822 - resolved via module __getattr__
     "EnforceConfig",
     "ExecutionConfig",
     "LintroConfig",
     "LintroToolConfig",
-    "ReviewConfig",
+    "ReviewConfig",  # noqa: F822 - resolved via module __getattr__
     "ScoreConfig",
 ]
+
+
+def _default_ai_config() -> AIConfig:
+    """Build a default AIConfig without importing AI at module load.
+
+    Returns:
+        Default AI configuration instance.
+    """
+    from lintro.ai.config import AIConfig
+
+    return AIConfig()
+
+
+def _default_review_config() -> ReviewConfig:
+    """Build a default ReviewConfig without importing review at module load.
+
+    Returns:
+        Default review configuration instance.
+    """
+    from lintro.config.review_config import ReviewConfig
+
+    return ReviewConfig()
 
 
 class LintroConfig(BaseModel):
@@ -52,8 +78,10 @@ class LintroConfig(BaseModel):
     enforce: EnforceConfig = Field(default_factory=EnforceConfig)
     defaults: dict[str, dict[str, Any]] = Field(default_factory=dict)
     tools: dict[str, LintroToolConfig] = Field(default_factory=dict)
-    ai: AIConfig = Field(default_factory=AIConfig)
-    review: ReviewConfig = Field(default_factory=ReviewConfig)
+    # Any + lazy factories: keep cold imports free of AI/review packages.
+    # Values are still concrete AIConfig / ReviewConfig instances at runtime.
+    ai: Any = Field(default_factory=_default_ai_config)
+    review: Any = Field(default_factory=_default_review_config)
     score: ScoreConfig = Field(default_factory=ScoreConfig)
     config_path: str | None = None
 
@@ -137,3 +165,27 @@ class LintroConfig(BaseModel):
         """
         target_python: str | None = self.enforce.target_python
         return target_python
+
+
+def __getattr__(name: str) -> Any:
+    """Lazily re-export AIConfig and ReviewConfig for public API compatibility.
+
+    Args:
+        name: Attribute name being accessed.
+
+    Returns:
+        The requested config class.
+
+    Raises:
+        AttributeError: If ``name`` is not a deferred re-export.
+    """
+    if name == "AIConfig":
+        from lintro.ai.config import AIConfig
+
+        return AIConfig
+    if name == "ReviewConfig":
+        from lintro.config.review_config import ReviewConfig
+
+        return ReviewConfig
+    msg = f"module {__name__!r} has no attribute {name!r}"
+    raise AttributeError(msg)
