@@ -75,6 +75,7 @@ def discover_files(
     include_venv: bool = False,
     show_progress: bool = True,
     diff_base: str | None = None,
+    incremental: bool = False,
 ) -> list[str]:
     """Discover files matching the tool's patterns.
 
@@ -86,6 +87,9 @@ def discover_files(
         show_progress: Whether to show a progress spinner during discovery.
         diff_base: Resolved git base ref. When set, restricts discovery to files
             changed relative to this ref.
+        incremental: When True, restrict discovery to files changed since the
+            last run using the per-tool fingerprint cache. The tool name is
+            taken from ``definition.name`` for the cache key.
 
     Returns:
         List of matching file paths.
@@ -105,6 +109,8 @@ def discover_files(
             file_patterns=definition.file_patterns,
             exclude_patterns=exclude_patterns,
             include_venv=include_venv,
+            incremental=incremental,
+            tool_name=definition.name,
             diff_base=diff_base,
         )
         progress.update(task, description=f"Found {len(files)} files")
