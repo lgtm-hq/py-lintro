@@ -69,6 +69,8 @@ from lintro.utils.unified_config import UnifiedConfigManager
 if TYPE_CHECKING:
     from collections.abc import Callable
 
+    from lintro.plugins.base import BaseToolPlugin
+
 # Re-export constants and internals for backwards compatibility. The private
 # names stay importable from here because they were part of this module before
 # the execute/render split (issue #1823).
