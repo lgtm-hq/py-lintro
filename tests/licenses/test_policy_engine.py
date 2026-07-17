@@ -217,3 +217,52 @@ def test_get_preset_rules_custom_is_empty() -> None:
     allowed, denied = get_preset_rules("custom")
     assert_that(allowed).is_empty()
     assert_that(denied).is_empty()
+
+
+def test_permissive_allows_or_expression_with_permissive_branch() -> None:
+    """OR expressions pass permissive policy when any branch is allowed."""
+    engine = LicensePolicyEngine(LicensesConfig(policy="permissive"))
+    package = PackageLicense(
+        name="dual",
+        version="1",
+        license_id="MIT OR Apache-2.0",
+    )
+    result = engine.check(package)
+    assert_that(result.status).is_equal_to(LicenseStatus.ALLOWED)
+
+
+def test_permissive_denies_and_expression_with_copyleft_branch() -> None:
+    """AND expressions fail permissive policy when any branch is denied."""
+    engine = LicensePolicyEngine(LicensesConfig(policy="permissive"))
+    package = PackageLicense(
+        name="conj",
+        version="1",
+        license_id="MIT AND GPL-3.0-only",
+    )
+    result = engine.check(package)
+    assert_that(result.status).is_equal_to(LicenseStatus.DENIED)
+
+
+def test_permissive_evaluates_with_as_base_license() -> None:
+    """WITH exceptions are evaluated as the base license only."""
+    engine = LicensePolicyEngine(LicensesConfig(policy="permissive"))
+    package = PackageLicense(
+        name="classpath",
+        version="1",
+        license_id="GPL-2.0-only WITH Classpath-exception-2.0",
+    )
+    result = engine.check(package)
+    assert_that(result.status).is_equal_to(LicenseStatus.DENIED)
+    assert_that(result.reason).contains("GPL-2.0-only")
+
+
+def test_permissive_allows_parenthesized_or_expression() -> None:
+    """npm-style parenthesized OR expressions evaluate like bare OR."""
+    engine = LicensePolicyEngine(LicensesConfig(policy="permissive"))
+    package = PackageLicense(
+        name="npm-dual",
+        version="1",
+        license_id="(MIT OR Apache-2.0)",
+    )
+    result = engine.check(package)
+    assert_that(result.status).is_equal_to(LicenseStatus.ALLOWED)
