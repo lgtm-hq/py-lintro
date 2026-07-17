@@ -281,9 +281,6 @@ baseline = [
   "lintro/ai/review/orchestrator.py",
   "lintro/utils/tool_executor.py",
   "lintro/cli_utils/commands/doctor.py",
-  "lintro/tools/definitions/tsc.py",
-  "lintro/ai/review/checklist_builtin.py",
-  "lintro/tools/definitions/_ts_checker_base.py",
 ]
 exclude = [
   "test_samples/",
