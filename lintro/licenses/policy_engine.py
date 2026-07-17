@@ -2,8 +2,13 @@
 
 from __future__ import annotations
 
-from boolean.boolean import AND, OR
-from license_expression import LicenseSymbol, LicenseWithExceptionSymbol
+from license_expression import (
+    AND,
+    OR,
+    LicenseExpression,
+    LicenseSymbol,
+    LicenseWithExceptionSymbol,
+)
 
 from lintro.config.licenses_config import LicensesConfig
 from lintro.licenses.models import (
@@ -186,7 +191,7 @@ class LicensePolicyEngine:
         self,
         *,
         package: PackageLicense,
-        expression: object,
+        expression: LicenseExpression,
         display: str,
     ) -> LicenseResult:
         """Recursively evaluate a parsed SPDX expression tree.
@@ -229,8 +234,6 @@ class LicensePolicyEngine:
                             f"({result.reason})"
                         ),
                     )
-            if any(r.status is LicenseStatus.UNKNOWN for r in branch_results):
-                return self._classify_unknown(package)
             return LicenseResult(
                 package=package,
                 status=LicenseStatus.DENIED,
@@ -256,8 +259,6 @@ class LicensePolicyEngine:
                             f"({result.reason})"
                         ),
                     )
-            if any(r.status is LicenseStatus.UNKNOWN for r in branch_results):
-                return self._classify_unknown(package)
             return LicenseResult(
                 package=package,
                 status=LicenseStatus.ALLOWED,
