@@ -49,7 +49,7 @@ def test_set_options_invalid_config_file_type(
         yamllint_plugin: The YamllintPlugin instance to test.
     """
     with pytest.raises(ValueError, match="config_file must be"):
-        yamllint_plugin.set_options(config_file=123)  # type: ignore[arg-type]
+        yamllint_plugin.set_options(config_file=123)
 
 
 def test_should_ignore_file_matches_prefix(yamllint_plugin: YamllintPlugin) -> None:
