@@ -11,6 +11,7 @@ Supports parallel execution when enabled via configuration.
 
 from __future__ import annotations
 
+import contextlib
 from typing import TYPE_CHECKING, Any
 
 from lintro.enums.action import Action, normalize_action
@@ -68,6 +69,35 @@ def _get_remaining_count(result: ToolResult) -> int:
     return 0
 
 
+def _finalize_template_aware_result(
+    tool: BaseToolPlugin,
+    result: ToolResult,
+) -> ToolResult:
+    """Remap template-aware issues onto original ``*.jinja`` coordinates.
+
+    Args:
+        tool: Plugin that produced the result (may hold an active session).
+        result: Raw tool result.
+
+    Returns:
+        ToolResult with translated issues when template-aware mode is active.
+    """
+    from lintro.template_aware.api import TemplateAwareSession
+
+    # Look at the session directly. MagicMock tools auto-create
+    # ``_finalize_template_aware_result`` as a Mock, so we must not call
+    # getattr(tool, "_finalize_...") blindly.
+    session = getattr(tool, "_template_aware_session", None)
+    if not isinstance(session, TemplateAwareSession):
+        return result
+    try:
+        return session.translate_result(result)
+    finally:
+        session.cleanup()
+        with contextlib.suppress(AttributeError, TypeError):
+            tool._template_aware_session = None
+
+
 def _run_fix_with_retry(
     tool: BaseToolPlugin,
     paths: list[str],
@@ -92,7 +122,10 @@ def _run_fix_with_retry(
     """
     from loguru import logger
 
-    result = tool.fix(paths, options)
+    result = _finalize_template_aware_result(
+        tool=tool,
+        result=tool.fix(paths, options),
+    )
 
     if max_retries <= 1:
         return result
@@ -110,7 +143,10 @@ def _run_fix_with_retry(
             f"{getattr(getattr(tool, 'definition', None), 'name', 'unknown')} "
             f"({remaining} remaining issues)",
         )
-        result = tool.fix(paths, options)
+        result = _finalize_template_aware_result(
+            tool=tool,
+            result=tool.fix(paths, options),
+        )
         remaining = _get_remaining_count(result)
 
     # Merge: keep initial_issues_count and initial_issues from first pass,
@@ -889,7 +925,10 @@ def run_lint_tools_simple(
                         max_retries=lintro_config.execution.max_fix_retries,
                     )
                 else:
-                    result = tool.check(paths, {})
+                    result = _finalize_template_aware_result(
+                        tool=tool,
+                        result=tool.check(paths, {}),
+                    )
 
                 # Populate doc_url on each issue from the plugin
                 _enrich_issues_with_doc_urls(tool, result)

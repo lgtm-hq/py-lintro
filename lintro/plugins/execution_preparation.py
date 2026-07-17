@@ -190,6 +190,24 @@ def prepare_execution(
         incremental=bool(merged_options.get("incremental", False)),
     )
 
+    # Opt-in template-aware preprocessing: stub-render *.jinja templates
+    # routed to this tool and append the rendered host-language files.
+    from lintro.template_aware import (
+        merge_rendered_files,
+        prepare_templates_for_tool,
+    )
+
+    template_session = prepare_templates_for_tool(
+        tool_name=definition.name,
+        paths=paths,
+        exclude_patterns=exclude_patterns,
+        include_venv=include_venv,
+    )
+    files = merge_rendered_files(
+        discovered_files=files,
+        session=template_session,
+    )
+
     if not files:
         file_type = "files"
         patterns = definition.file_patterns
@@ -198,6 +216,7 @@ def prepare_execution(
             if extensions:
                 file_type = "/".join(extensions) + " files"
 
+        template_session.cleanup()
         return {
             "early_result": ToolResult(
                 name=definition.name,
@@ -210,6 +229,7 @@ def prepare_execution(
     # Check version requirements (only when files exist to check)
     version_result = verify_tool_version(definition)
     if version_result is not None:
+        template_session.cleanup()
         return {"early_result": version_result}
 
     logger.debug(f"Files to process: {files}")
@@ -234,6 +254,7 @@ def prepare_execution(
         "rel_files": rel_files,
         "cwd": cwd,
         "timeout": timeout,
+        "template_session": template_session,
     }
 
 
