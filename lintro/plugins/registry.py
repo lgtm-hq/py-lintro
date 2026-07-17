@@ -106,12 +106,13 @@ class ToolRegistry:
         Raises:
             ValueError: If the module imported but did not register the tool.
         """
-        module_path = cls._deferred.pop(name, None)
+        module_path = cls._deferred.get(name)
         if module_path is None:
             return
         # Safe: module paths come from the builtin whitelist or entry points.
         module = importlib.import_module(module_path)  # nosemgrep: non-literal-import
         if name in cls._tools:
+            cls._deferred.pop(name, None)
             return
 
         # Module may already have been imported earlier in the process. In that
@@ -135,12 +136,24 @@ class ToolRegistry:
                 f"tool {name!r}"
             )
             raise ValueError(msg)
+        cls._deferred.pop(name, None)
 
     @classmethod
     def _materialize_all(cls) -> None:
-        """Import every deferred tool module."""
+        """Import every deferred tool module.
+
+        Failures for individual tools are logged and skipped so one broken
+        definition cannot take down ``list-tools`` / ``get_all``.
+        """
         for name in list(cls._deferred):
-            cls._materialize(name)
+            try:
+                cls._materialize(name)
+            except (ImportError, AttributeError, TypeError, ValueError) as exc:
+                logger.error(
+                    f"Error loading deferred tool {name!r}: "
+                    f"{type(exc).__name__}: {exc}",
+                )
+                cls._deferred.pop(name, None)
 
     @classmethod
     def register(

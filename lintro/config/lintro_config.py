@@ -40,6 +40,7 @@ def _contains_tool_name_alias(tool_name: str, configured_names: list[str]) -> bo
     return not aliases.isdisjoint(configured)
 
 
+
 class LintroConfig(BaseModel):
     """Main Lintro configuration container.
 
