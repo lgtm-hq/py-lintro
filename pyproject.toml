@@ -176,6 +176,7 @@ packages = [
   "lintro.parsers.sarif",
   "lintro.parsers.shellcheck",
   "lintro.parsers.shfmt",
+  "lintro.parsers.spectral",
   "lintro.parsers.sqlfluff",
   "lintro.parsers.stylelint",
   "lintro.parsers.svelte_check",

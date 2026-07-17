@@ -71,6 +71,7 @@
         "@commitlint/config-conventional",
         "oxlint",
         "oxfmt",
+        "@stoplight/spectral-cli",
         "stylelint",
         "gitleaks",
         "gitleaks/gitleaks",

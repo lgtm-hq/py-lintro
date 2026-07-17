@@ -379,6 +379,19 @@
       "tags": ["formatter"]
     },
     {
+      "name": "spectral",
+      "version": "6.16.1",
+      "install": {
+        "type": "npm",
+        "package": "@stoplight/spectral-cli"
+      },
+      "tier": "tools",
+      "category": "npm",
+      "version_command": ["spectral", "--version"],
+      "languages": ["openapi", "asyncapi", "json", "yaml"],
+      "tags": ["linter"]
+    },
+    {
       "name": "sqlfluff",
       "version": "4.0.0",
       "install": {

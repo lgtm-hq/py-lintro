@@ -66,6 +66,7 @@ RUN echo "Verifying tools..." && \
     vue-tsc --version && oxlint --version && oxfmt --version && \
     bandit --version && mypy --version && pydoclint --version && \
     yamllint --version && sqlfluff --version && stylelint --version && \
+    spectral --version && \
     vale --version && \
     echo "All tools verified!"
 
@@ -89,6 +90,7 @@ RUN echo "Verifying tools as non-root user..." && \
     gosu lintro osv-scanner --version && \
     gosu lintro semgrep --version && \
     gosu lintro dotenv-linter --version && \
+    gosu lintro spectral --version && \
     echo "All tools verified for non-root user!"
 
 # No USER directive: the container starts as root so entrypoint.sh can detect

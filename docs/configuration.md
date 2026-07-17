@@ -1154,6 +1154,53 @@ lintro check --tools oxlint --tool-options "oxlint:config=.oxlintrc.custom.json"
 lintro check --tools oxlint --tool-options "oxlint:tsconfig=tsconfig.app.json"
 ```
 
+#### Spectral Configuration
+
+Spectral is a linter for OpenAPI (2.0/3.0/3.1), AsyncAPI, and JSON Schema documents.
+It is check-only (no autofixer) and **requires a ruleset** — lintro only runs Spectral
+when one is present and skips it gracefully otherwise, so it never lints arbitrary
+YAML/JSON files.
+
+**Native Config Detection:**
+
+Lintro detects (and Spectral requires) one of these ruleset files:
+
+- `.spectral.yaml`
+- `.spectral.yml`
+- `.spectral.json`
+- `.spectral.js`
+
+**Installation:**
+
+```bash
+# npm/bun
+bun add -d @stoplight/spectral-cli
+npm install -g @stoplight/spectral-cli
+```
+
+**File:** `.spectral.yaml`
+
+```yaml
+extends: ["spectral:oas"] # or ["spectral:asyncapi"]
+```
+
+**Available Options via `--tool-options`:**
+
+| Option    | Type    | Description                                      |
+| --------- | ------- | ------------------------------------------------ |
+| `ruleset` | string  | Explicit path to a ruleset (overrides discovery) |
+| `timeout` | integer | Execution timeout in seconds (default: 30)       |
+
+**Usage Examples:**
+
+```bash
+# Lint an OpenAPI document (requires a .spectral.yaml ruleset alongside it)
+lintro check --tools spectral openapi.yaml
+
+# Use an explicit ruleset
+lintro check --tools spectral --tool-options "spectral:ruleset=.spectral.custom.yaml"
+```
+
 #### Stylelint Configuration
 
 Stylelint is a mighty, configurable linter and fixer for CSS, SCSS, Sass, and Less

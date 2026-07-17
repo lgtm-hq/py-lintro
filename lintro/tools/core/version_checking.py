@@ -165,6 +165,10 @@ def get_install_hints() -> dict[str, str]:
         "oxfmt": "Install via: bun add -d oxfmt@>={version}",
         "oxlint": "Install via: bun add -d oxlint@>={version}",
         "prettier": "Install via: bun add -d prettier@>={version}",
+        "spectral": "Install via: bun add -d @stoplight/spectral-cli@>={version}",
+        "@stoplight/spectral-cli": (
+            "Install via: bun add -d @stoplight/spectral-cli@>={version}"
+        ),
         "stylelint": "Install via: bun add -d stylelint@>={version}",
         "tsc": (
             "Install via: bun add -g typescript@{version}, "

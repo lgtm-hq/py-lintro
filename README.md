@@ -142,6 +142,12 @@ system.
 <td><code>brew install shellcheck</code><br><a href="https://github.com/koalaman/shellcheck/releases">GitHub Releases</a></td>
 </tr>
 <tr>
+<td><a href="https://stoplight.io/open-source/spectral"><img src="https://img.shields.io/badge/Spectral-6C2FF2?logo=openapiinitiative&logoColor=white" alt="Spectral"></a></td>
+<td>📘 OpenAPI/AsyncAPI</td>
+<td>-</td>
+<td><code>bun add -d @stoplight/spectral-cli</code><br><code>npm install -g @stoplight/spectral-cli</code></td>
+</tr>
+<tr>
 <td><a href="https://github.com/adrienverge/yamllint"><img src="https://img.shields.io/badge/Yamllint-cb171e?logo=yaml&logoColor=white" alt="Yamllint"></a></td>
 <td>🧾 YAML</td>
 <td>-</td>
