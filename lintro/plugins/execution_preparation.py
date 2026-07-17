@@ -303,6 +303,9 @@ def prepare_execution(
         exclude_patterns=exclude_patterns,
         include_venv=include_venv,
     )
+    # Track ownership so a mid-flight failure cleans the temp dir, while a
+    # successful return transfers the session to the caller for later finalize.
+    session_owned = True
     try:
         files = merge_rendered_files(
             discovered_files=files,
@@ -320,6 +323,7 @@ def prepare_execution(
                     file_type = "/".join(extensions) + " files"
 
             template_session.cleanup()
+            session_owned = False
             return {
                 "early_result": ToolResult(
                     name=definition.name,
@@ -347,6 +351,7 @@ def prepare_execution(
         version_result = verify_tool_version(definition, cwd=cwd)
         if version_result is not None:
             template_session.cleanup()
+            session_owned = False
             return {"early_result": version_result}
 
         rel_files = [os.path.relpath(os.path.abspath(f), cwd) for f in files]
@@ -362,6 +367,7 @@ def prepare_execution(
         logger.debug(
             f"Prepared execution: {len(files)} files, cwd={cwd}, timeout={timeout}s",
         )
+        session_owned = False
         return {
             "files": files,
             "rel_files": rel_files,
@@ -369,9 +375,9 @@ def prepare_execution(
             "timeout": timeout,
             "template_session": template_session,
         }
-    except Exception:
-        template_session.cleanup()
-        raise
+    finally:
+        if session_owned:
+            template_session.cleanup()
 
 
 # -------------------------------------------------------------------------
