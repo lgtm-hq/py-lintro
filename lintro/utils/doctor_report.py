@@ -137,12 +137,23 @@ def tool_status_for_versions(
         return ToolStatus.UNKNOWN
 
 
-def check_tool(*, tool: ManifestTool, context: RuntimeContext) -> ToolCheckResult:
+def check_tool(
+    *,
+    tool: ManifestTool,
+    context: RuntimeContext,
+    snapshot: object | None = None,
+) -> ToolCheckResult:
     """Check a single tool's installation status and version.
+
+    When a capability ``snapshot`` is provided (from the shared probe cache),
+    version/availability come from that snapshot instead of an ad-hoc
+    subprocess. Direct subprocess probing remains as a fallback for unit
+    tests and environments where the snapshot layer is unavailable.
 
     Args:
         tool: Manifest tool entry.
         context: Runtime context for install hints.
+        snapshot: Optional ToolSnapshot from the shared probe cache.
 
     Returns:
         ToolCheckResult with status and details.
@@ -162,6 +173,46 @@ def check_tool(*, tool: ManifestTool, context: RuntimeContext) -> ToolCheckResul
     else:
         hint = f"Install {tool.name} manually"
         upgrade_hint = f"Upgrade {tool.name} manually"
+
+    if snapshot is not None:
+        available = bool(getattr(snapshot, "available", False))
+        version = getattr(snapshot, "version", None)
+        binary_path = getattr(snapshot, "binary_path", "") or None
+        probe_error = getattr(snapshot, "probe_error", None)
+        remediation = getattr(snapshot, "remediation_hint", None) or hint
+        if not available:
+            return ToolCheckResult(
+                tool=tool,
+                status=ToolStatus.MISSING,
+                error="probe_failed",
+                details=probe_error or "unavailable",
+                path=binary_path,
+                install_hint=remediation,
+                upgrade_hint=upgrade_hint,
+            )
+        if not version:
+            return ToolCheckResult(
+                tool=tool,
+                status=ToolStatus.UNKNOWN,
+                error="no_version",
+                details=probe_error or "no version",
+                path=binary_path,
+                install_hint=hint,
+                upgrade_hint=upgrade_hint,
+            )
+        status = tool_status_for_versions(
+            installed=version,
+            recommended=tool.version,
+            minimum=tool.min_version,
+        )
+        return ToolCheckResult(
+            tool=tool,
+            status=status,
+            installed_version=version,
+            path=binary_path,
+            install_hint=hint,
+            upgrade_hint=upgrade_hint,
+        )
 
     if not tool.version_command:
         return ToolCheckResult(
@@ -306,28 +357,54 @@ def collect_tool_checks(
     Returns:
         list[ToolCheckResult]: One result per selected tool, in manifest order.
     """
+    from lintro.tools.core.snapshots import probe_all_tools
+
     if tool_names:
+        tools = [registry.get(name) for name in tool_names]
+        snapshots = probe_all_tools(tool_names=[t.name for t in tools])
         return [
-            check_tool(tool=registry.get(name), context=context) for name in tool_names
+            check_tool(
+                tool=tool,
+                context=context,
+                snapshot=snapshots.get(tool.name.lower()),
+            )
+            for tool in tools
         ]
 
     all_tools = list(registry.all_tools(include_dev=True))
     if check_all or config is None:
-        return [check_tool(tool=tool, context=context) for tool in all_tools]
-
-    return [
-        (
-            check_tool(tool=tool, context=context)
-            if config.is_tool_enabled(tool.name)
-            else ToolCheckResult(
+        snapshots = probe_all_tools(tool_names=[t.name for t in all_tools])
+        return [
+            check_tool(
                 tool=tool,
-                status=ToolStatus.DISABLED,
-                install_hint="",
-                upgrade_hint="",
+                context=context,
+                snapshot=snapshots.get(tool.name.lower()),
             )
-        )
-        for tool in all_tools
-    ]
+            for tool in all_tools
+        ]
+
+    enabled = [tool for tool in all_tools if config.is_tool_enabled(tool.name)]
+    snapshots = probe_all_tools(tool_names=[t.name for t in enabled]) if enabled else {}
+    results: list[ToolCheckResult] = []
+    for tool in all_tools:
+        if config.is_tool_enabled(tool.name):
+            results.append(
+                check_tool(
+                    tool=tool,
+                    context=context,
+                    snapshot=snapshots.get(tool.name.lower()),
+                ),
+            )
+        else:
+            results.append(
+                ToolCheckResult(
+                    tool=tool,
+                    status=ToolStatus.DISABLED,
+                    install_hint="",
+                    upgrade_hint="",
+                ),
+            )
+    return results
 
 
 def mcp_extra_status() -> dict[str, str]:

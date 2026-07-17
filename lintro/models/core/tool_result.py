@@ -84,6 +84,11 @@ class ToolResult:
     # the human-readable ``output`` string.
     timed_out: bool = field(default=False)
 
+    # Capability-probe degradation: binary missing / probe failed.
+    # Distinct from ``skipped`` (conflict resolution, disabled, etc.) so
+    # consumers can render ``status: unavailable`` without silent omission.
+    unavailable: bool = field(default=False)
+
     # Parser failures (items that could not be parsed from tool output).
     # Omitted from JSON output unless the tool sets this explicitly.
     parse_failures_count: int | None = field(default=None)
@@ -99,6 +104,18 @@ class ToolResult:
         Raises:
             ValueError: If issue counts are inconsistent or skip state is invalid.
         """
+        # Unavailable tools report probe_error via skip_reason without being
+        # marked skipped (skipped is reserved for intentional non-execution).
+        if self.unavailable:
+            if not self.skip_reason:
+                raise ValueError(
+                    "skip_reason is required when unavailable=True",
+                )
+            if self.skipped:
+                raise ValueError(
+                    "unavailable and skipped cannot both be True",
+                )
+
         # Skipped tools are not failures — they just didn't run
         if self.skipped:
             self.success = True
@@ -107,9 +124,9 @@ class ToolResult:
                     "skip_reason is required when skipped=True",
                 )
 
-        if self.skip_reason and not self.skipped:
+        if self.skip_reason and not self.skipped and not self.unavailable:
             raise ValueError(
-                "skip_reason can only be set when skipped=True",
+                "skip_reason can only be set when skipped=True or unavailable=True",
             )
 
         if (
