@@ -92,15 +92,16 @@ def rendered_filename_for(template_path: Path) -> str:
     Returns:
         Filename to use inside the render temp directory.
     """
-    host_suffix = host_suffix_for_template(template_path)
-    # Preserve disambiguating stem: ``main.py.jinja`` → ``main.py``
     name = template_path.name
     lower = name.lower()
     for jinja_suffix in _HOST_SUFFIX_MAP:
         if lower.endswith(jinja_suffix):
             return name[: -len(".jinja")]
     if lower.endswith(".jinja"):
-        return name[: -len(".jinja")] + host_suffix
+        # Strip only the trailing ``.jinja`` so ``main.rs.jinja`` → ``main.rs``
+        # (do not append host_suffix again; the stem already carries it).
+        return name[: -len(".jinja")]
+    host_suffix = host_suffix_for_template(template_path)
     return f"{template_path.stem}{host_suffix}"
 
 
@@ -272,13 +273,12 @@ def _make_environment(stub_strategy: StubStrategy) -> Environment:
     Returns:
         Configured Jinja2 Environment.
     """
-    undefined: type[Undefined]
     if stub_strategy == StubStrategy.SENTINEL:
-        undefined = _SentinelUndefined
+        undefined: type[Undefined] = _SentinelUndefined
     else:
-        # Missing keys still get sentinels so rendering rarely aborts; known
-        # defaults/context values override via the context dict.
-        undefined = _SentinelUndefined
+        # DEFAULTS / CONTEXT_FILE: missing keys should surface as render errors
+        # rather than silently becoming ``__STR__`` sentinels.
+        undefined = Undefined
 
     # nosemgrep: direct-use-of-jinja2
     return Environment(

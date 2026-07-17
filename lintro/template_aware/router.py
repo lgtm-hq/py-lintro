@@ -53,14 +53,17 @@ def patterns_for_tool(
 ) -> list[str]:
     """Return template patterns routed to ``tool_name``.
 
+    Only patterns listed in ``config.patterns`` that also have a matching
+    ``config.route`` entry for ``tool_name`` are returned. Route keys that are
+    not present in ``patterns`` are ignored so ``patterns`` remains the
+    inclusion filter.
+
     Args:
         tool_name: Host tool name (e.g. ``ruff``).
         config: Template-aware configuration.
 
     Returns:
         Patterns from ``config.patterns`` whose route target is ``tool_name``.
-        Falls back to route keys when a routed pattern is absent from
-        ``patterns`` so explicit routes still take effect.
     """
     tool_lower = tool_name.lower()
     pattern_set = set(config.patterns)
@@ -68,14 +71,8 @@ def patterns_for_tool(
     for pattern, routed_tool in config.route.items():
         if routed_tool.lower() != tool_lower:
             continue
-        if pattern in pattern_set or not config.patterns:
+        if pattern in pattern_set:
             matched.append(pattern)
-        elif pattern not in matched:
-            # Route entries are authoritative even if omitted from patterns.
-            matched.append(pattern)
-    # Also include patterns listed without an explicit route when the pattern
-    # appears in both lists with a matching route (already handled). Patterns
-    # with no route are ignored — they cannot be dispatched.
     return matched
 
 

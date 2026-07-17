@@ -604,30 +604,6 @@ class BaseToolPlugin(ABC):
             template_session=template_session,
         )
 
-    def _finalize_template_aware_result(self, result: ToolResult) -> ToolResult:
-        """Remap template-aware issues onto original ``*.jinja`` coordinates.
-
-        Called by the tool executor after ``check``/``fix`` so host-linter
-        issues reported against stub-rendered temp files are rewritten to the
-        original template paths and line numbers. No-op when the feature is
-        inactive.
-
-        Args:
-            result: Tool result from the host linter.
-
-        Returns:
-            ToolResult with translated issues (or the original result).
-        """
-        session = self._template_aware_session
-        if session is None:
-            return result
-        try:
-            translated: ToolResult = session.translate_result(result)
-            return translated
-        finally:
-            session.cleanup()
-            self._template_aware_session = None
-
     def _process_files_with_progress(
         self,
         files: list[str],
