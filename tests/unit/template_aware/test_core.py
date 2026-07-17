@@ -144,6 +144,14 @@ def test_sentinel_keeps_if_true_branch(tmp_path: Path) -> None:
     assert_that(rendered).does_not_contain("enabled = False")
 
 
+def test_rendered_filename_strips_jinja_without_doubling() -> None:
+    """Custom ``*.rs.jinja`` names keep a single host extension."""
+    from lintro.template_aware.prerenderer import rendered_filename_for
+
+    assert_that(rendered_filename_for(Path("main.rs.jinja"))).is_equal_to("main.rs")
+    assert_that(rendered_filename_for(Path("app.py.jinja"))).is_equal_to("app.py")
+
+
 def test_defaults_strategy_reads_copier_yml(tmp_path: Path) -> None:
     """Defaults strategy loads values from copier.yml."""
     (tmp_path / "copier.yml").write_text(
