@@ -100,13 +100,13 @@ def detect_update_channel(
     if _is_uv_tool_path(resolved=resolved, path_lower=path_lower):
         return UpdateChannel.UV_TOOL
 
-    if _is_cargo_path(path_lower=path_lower):
+    if _is_cargo_path(resolved=resolved, path_lower=path_lower):
         return UpdateChannel.CARGO
 
     if _is_rustup_path(path_lower=path_lower, parts_lower=parts_lower):
         return UpdateChannel.RUSTUP
 
-    if _is_bun_path(path_lower=path_lower, parts_lower=parts_lower):
+    if _is_bun_path(resolved=resolved, path_lower=path_lower, parts_lower=parts_lower):
         return UpdateChannel.BUN
 
     if "node_modules" in parts_lower:
@@ -292,15 +292,17 @@ def _resolve_binary_path(binary_path: str | Path) -> Path | None:
 
 def _is_homebrew_path(*, path_lower: str, parts_lower: set[str]) -> bool:
     """Return True when the path is under a Homebrew prefix."""
-    if "cellar" in parts_lower or "linuxbrew" in parts_lower:
-        return True
     markers = (
         "/opt/homebrew/",
         "/home/linuxbrew/",
         "/usr/local/homebrew/",
         "/homebrew/",
+        "/usr/local/cellar/",
+        "/opt/homebrew/cellar/",
     )
-    return any(marker in path_lower for marker in markers)
+    if any(marker in path_lower for marker in markers):
+        return True
+    return "linuxbrew" in parts_lower
 
 
 def _is_uv_tool_path(*, resolved: Path, path_lower: str) -> bool:
@@ -316,16 +318,18 @@ def _is_uv_tool_path(*, resolved: Path, path_lower: str) -> bool:
     return False
 
 
-def _is_cargo_path(*, path_lower: str) -> bool:
+def _is_cargo_path(*, resolved: Path, path_lower: str) -> bool:
     """Return True when the path is under cargo's bin directory."""
     if "/.cargo/bin/" in path_lower or path_lower.rstrip("/").endswith("/.cargo/bin"):
         return True
     cargo_home = os.environ.get("CARGO_HOME")
     if cargo_home:
-        cargo_bin = f"{cargo_home.rstrip('/').lower()}/bin/"
-        return cargo_bin in path_lower or path_lower.rstrip("/").endswith(
-            cargo_bin.rstrip("/"),
-        )
+        try:
+            return resolved.is_relative_to(
+                Path(cargo_home).expanduser().resolve() / "bin",
+            ) or resolved.is_relative_to(Path(cargo_home).expanduser().resolve())
+        except (OSError, ValueError, RuntimeError):
+            return False
     return False
 
 
@@ -333,18 +337,24 @@ def _is_rustup_path(*, path_lower: str, parts_lower: set[str]) -> bool:
     """Return True when the path is under a rustup toolchain tree."""
     if "rustup" in parts_lower:
         return True
-    return "/toolchains/" in path_lower and (
-        "rust" in path_lower or "clippy" in path_lower or "rustc" in path_lower
-    )
+    return "/.rustup/toolchains/" in path_lower
 
 
-def _is_bun_path(*, path_lower: str, parts_lower: set[str]) -> bool:
+def _is_bun_path(
+    *,
+    resolved: Path,
+    path_lower: str,
+    parts_lower: set[str],
+) -> bool:
     """Return True when the path is under a Bun install prefix."""
     if ".bun" in parts_lower:
         return True
     bun_install = os.environ.get("BUN_INSTALL")
     if bun_install:
-        return bun_install.rstrip("/").lower() in path_lower
+        try:
+            return resolved.is_relative_to(Path(bun_install).expanduser().resolve())
+        except (OSError, ValueError, RuntimeError):
+            return False
     return "/.bun/" in path_lower
 
 
