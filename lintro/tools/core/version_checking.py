@@ -62,12 +62,9 @@ from lintro._tool_versions import (
 )
 from lintro.enums.tool_name import ToolName
 from lintro.enums.update_channel import UpdateChannel
+from lintro.tools.core import update_channels as update_channel_ops
 from lintro.tools.core.install_hints import SEMGREP_ISOLATED_INSTALL_HINT
-from lintro.tools.core.update_channels import (
-    VersionAdvisory,
-    build_version_advisory as _build_version_advisory,
-    channel_from_install_type,
-)
+from lintro.tools.core.update_channels import VersionAdvisory
 
 # Module-level set to track logged warnings and prevent duplicates
 # during parallel execution
@@ -353,9 +350,9 @@ def build_version_advisory(
 
     override = channel_override
     if override is None and binary_path is None:
-        override = channel_from_install_type(install_type)
+        override = update_channel_ops.channel_from_install_type(install_type)
 
-    advisory = _build_version_advisory(
+    advisory = update_channel_ops.build_version_advisory(
         tool=tool,
         installed=installed,
         latest_known=latest_known,
@@ -371,9 +368,9 @@ def build_version_advisory(
         and channel_override is None
         and install_type is not None
     ):
-        fallback = channel_from_install_type(install_type)
+        fallback = update_channel_ops.channel_from_install_type(install_type)
         if fallback is not None:
-            return _build_version_advisory(
+            return update_channel_ops.build_version_advisory(
                 tool=tool,
                 installed=installed,
                 latest_known=latest_known,
