@@ -2251,6 +2251,26 @@ You do not need to specify output format or file options. Each run produces:
 This ensures you always have every format available for your workflow, CI, or reporting
 needs.
 
+## Template-Aware Preprocessing
+
+Opt-in stub-rendering for source-language Jinja templates (`*.py.jinja`, `*.toml.jinja`,
+`*.yml.jinja`, …). **Disabled by default.** See the full
+[Template-Aware Guide](template-aware.md) — including the fidelity warning that this is
+a best-effort pre-pass.
+
+```yaml
+# .lintro-config.yaml
+template_aware:
+  enabled: true
+  stub_strategy: sentinel # sentinel | defaults | context_file
+  route:
+    '*.py.jinja': ruff
+    '*.toml.jinja': taplo
+    '*.yml.jinja': yamllint
+    '*.yaml.jinja': yamllint
+    '*.json.jinja': prettier
+```
+
 ## AI Configuration
 
 Lintro includes optional AI-powered features for actionable summaries and interactive
