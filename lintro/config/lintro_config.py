@@ -9,6 +9,7 @@ from lintro.config.enforce_config import EnforceConfig
 from lintro.config.execution_config import ExecutionConfig
 from lintro.config.output_config import OutputConfig
 from lintro.config.review_config import ReviewConfig
+from lintro.config.template_aware_config import TemplateAwareConfig
 from lintro.config.tool_config import LintroToolConfig
 from lintro.config.watch_config import WatchConfig
 
@@ -20,6 +21,7 @@ __all__ = [
     "LintroToolConfig",
     "OutputConfig",
     "ReviewConfig",
+    "TemplateAwareConfig",
     "WatchConfig",
 ]
 
@@ -67,6 +69,8 @@ class LintroConfig(BaseModel):
         output: Console output presentation settings (e.g. ASCII art toggle).
         watch: Watch-mode (``lintro watch``) defaults.
         deps: Dependency version policy configuration.
+        template_aware: Opt-in stub-render preprocessing for ``*.jinja``
+            source templates (disabled by default).
         config_path: Path to the project config file (set by loader).
         global_config_path: Path to the user-level global config file, if one
             was found and merged (set by loader).
@@ -86,6 +90,7 @@ class LintroConfig(BaseModel):
     output: OutputConfig = Field(default_factory=OutputConfig)
     watch: WatchConfig = Field(default_factory=WatchConfig)
     deps: DepsConfig = Field(default_factory=DepsConfig)
+    template_aware: TemplateAwareConfig = Field(default_factory=TemplateAwareConfig)
     config_path: str | None = None
     global_config_path: str | None = None
     global_contributed_keys: list[str] = Field(default_factory=list)
