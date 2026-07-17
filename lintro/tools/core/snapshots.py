@@ -8,6 +8,7 @@ mtime, and lintro version, and exposes snapshots to check/format runners,
 
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 import shutil
@@ -16,11 +17,14 @@ import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from loguru import logger
 
-from lintro import __version__ as LINTRO_VERSION
+from lintro import __version__
+
+if TYPE_CHECKING:
+    from lintro.models.core.tool_result import ToolResult
 
 # Default TTL for on-disk snapshot cache (seconds).
 DEFAULT_SNAPSHOT_TTL_SECONDS: int = 600
@@ -200,7 +204,11 @@ def clear_snapshot_cache(*, cache_root: Path | None = None) -> None:
                 cache_file.unlink()
                 logger.debug("Deleted tool snapshot cache: {}", cache_file)
             except OSError as exc:
-                logger.warning("Could not delete snapshot cache {}: {}", cache_file, exc)
+                logger.warning(
+                    "Could not delete snapshot cache {}: {}",
+                    cache_file,
+                    exc,
+                )
 
 
 def get_snapshot_ttl() -> int:
@@ -526,15 +534,13 @@ def _load_disk_cache(
         raw = json.loads(cache_file.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError, UnicodeDecodeError) as exc:
         logger.debug("Corrupt tool snapshot cache {}; re-probing: {}", cache_file, exc)
-        try:
+        with contextlib.suppress(OSError):
             cache_file.unlink(missing_ok=True)
-        except OSError:
-            pass
         return None
 
     if not isinstance(raw, dict):
         return None
-    if raw.get("lintro_version") != LINTRO_VERSION:
+    if raw.get("lintro_version") != __version__:
         logger.debug("Snapshot cache lintro version mismatch; re-probing")
         return None
     probed_at = raw.get("probed_at")
@@ -598,7 +604,7 @@ def _write_disk_cache(
         ttl: TTL recorded in the cache metadata.
     """
     payload = {
-        "lintro_version": LINTRO_VERSION,
+        "lintro_version": __version__,
         "probed_at": time.time(),
         "ttl_seconds": ttl,
         "snapshots": {name: snap.to_dict() for name, snap in snapshots.items()},
@@ -767,7 +773,7 @@ def snapshot_to_unavailable_result(
     snapshot: ToolSnapshot,
     *,
     strict: bool | None = None,
-) -> "ToolResult":
+) -> ToolResult:
     """Build a ToolResult representing an unavailable tool.
 
     Args:
@@ -786,7 +792,7 @@ def snapshot_to_unavailable_result(
     if hint:
         message = f"{message}. {hint}"
 
-    return ToolResult(
+    result: ToolResult = ToolResult(
         name=snapshot.name,
         success=not strict_missing,
         output=message,
@@ -794,3 +800,4 @@ def snapshot_to_unavailable_result(
         unavailable=True,
         skip_reason=error,
     )
+    return result
