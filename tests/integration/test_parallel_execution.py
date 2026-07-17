@@ -441,7 +441,7 @@ def test_parallel_preserves_input_ordering_contract() -> None:
     executor must still return results positionally aligned with the input
     tool list (the ordering contract callers rely on for display).
     """
-    slow = _FakeTool(name="slow", sleep_for=0.20, issues_count=1)
+    slow = _FakeTool(name="slow", sleep_for=0.01, issues_count=1)
     fast = _FakeTool(name="fast", sleep_for=0.0, issues_count=2)
 
     with AsyncToolExecutor(max_workers=4) as executor:
@@ -478,7 +478,7 @@ def test_parallel_isolates_tool_failures() -> None:
             ),
         )
 
-    by_name = {name: result for name, result in results}
+    by_name = dict(results)
     assert_that(sorted(by_name.keys())).is_equal_to(["boom", "healthy"])
 
     # Failing tool is isolated into a failed result, not propagated.
