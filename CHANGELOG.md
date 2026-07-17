@@ -21,6 +21,19 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.80.10] - 2026-07-17
+
+### Changed
+
+- **repo**: add root CONTRIBUTING.md pointer and remove stray findings.md (#1455)
+  (504e31d)
+- replace bare assert with assertpy assert_that across test suite (#1389) (4fc76f4)
+- move inline tool sample inputs to test_samples fixtures (#1382) (9f75984)
+
+### Fixed
+
+- **mypy**: run mypy from project root for individual files (#1270) (75ffacb)
+
 ## [0.80.9] - 2026-07-17
 
 ### Fixed
