@@ -14,6 +14,8 @@ _FORBIDDEN_AFTER_CLI_IMPORT = (
     "lintro.utils.tool_executor",
     "lintro.plugins.base",
     "lintro.tools.definitions.ruff",
+    "lintro.cli_utils.commands.check",
+    "rich",
     "pydantic",
     "loguru",
 )
@@ -34,7 +36,7 @@ loaded = [name for name in forbidden if name in sys.modules]
 if loaded:
     raise SystemExit("unexpected modules after import lintro.cli: " + ", ".join(loaded))
 """
-    result = subprocess.run(  # nosec B404 B603 - fixed argv: sys.executable -c with literal script; shell=False
+    result = subprocess.run(  # nosec B603 - fixed argv: sys.executable -c with literal script; shell=False
         [sys.executable, "-c", script],
         check=False,
         capture_output=True,
@@ -42,6 +44,35 @@ if loaded:
     )
     assert_that(result.returncode).is_equal_to(0)
     assert_that(result.stderr).is_equal_to("")
+
+
+def test_lintro_version_avoids_heavy_modules() -> None:
+    """``lintro --version`` must not import check/AI/plugin trees or rich.
+
+    Uses Click's programmatic invocation so the assertion stays in-process of
+    the subprocess under test without requiring a PATH entry for ``lintro``.
+    """
+    forbidden_repr = ", ".join(repr(name) for name in _FORBIDDEN_AFTER_CLI_IMPORT)
+    script = f"""
+import sys
+from lintro.cli import cli
+cli.main(args=["--version"], standalone_mode=False)
+forbidden = [{forbidden_repr}]
+loaded = [name for name in forbidden if name in sys.modules]
+if loaded:
+    raise SystemExit(
+        "unexpected modules after lintro --version: " + ", ".join(loaded)
+    )
+"""
+    result = subprocess.run(  # nosec B603 - fixed argv: sys.executable -c with literal script; shell=False
+        [sys.executable, "-c", script],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    assert_that(result.returncode).is_equal_to(0)
+    assert_that(result.stderr).is_equal_to("")
+    assert_that(result.stdout).contains("0.")
 
 
 def test_import_config_loader_avoids_ai_review() -> None:
@@ -63,7 +94,7 @@ if loaded:
         "unexpected modules after import config_loader: " + ", ".join(loaded)
     )
 """
-    result = subprocess.run(  # nosec B404 B603 - fixed argv: sys.executable -c with literal script; shell=False
+    result = subprocess.run(  # nosec B603 - fixed argv: sys.executable -c with literal script; shell=False
         [sys.executable, "-c", script],
         check=False,
         capture_output=True,

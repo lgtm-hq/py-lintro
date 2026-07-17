@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from lintro.config.enforce_config import EnforceConfig
 from lintro.config.execution_config import ExecutionConfig
@@ -48,6 +48,46 @@ def _default_review_config() -> ReviewConfig:
     return ReviewConfig()
 
 
+def _coerce_ai_config(value: Any) -> Any:
+    """Coerce raw AI config mappings into AIConfig.
+
+    Args:
+        value: Raw field value from construction or validation.
+
+    Returns:
+        An AIConfig instance (or the original value when already typed).
+    """
+    from lintro.ai.config import AIConfig
+
+    if isinstance(value, AIConfig):
+        return value
+    if value is None:
+        return AIConfig()
+    if isinstance(value, dict):
+        return AIConfig(**value)
+    return value
+
+
+def _coerce_review_config(value: Any) -> Any:
+    """Coerce raw review config mappings into ReviewConfig.
+
+    Args:
+        value: Raw field value from construction or validation.
+
+    Returns:
+        A ReviewConfig instance (or the original value when already typed).
+    """
+    from lintro.config.review_config import ReviewConfig
+
+    if isinstance(value, ReviewConfig):
+        return value
+    if value is None:
+        return ReviewConfig()
+    if isinstance(value, dict):
+        return ReviewConfig(**value)
+    return value
+
+
 class LintroConfig(BaseModel):
     """Main Lintro configuration container.
 
@@ -78,12 +118,38 @@ class LintroConfig(BaseModel):
     enforce: EnforceConfig = Field(default_factory=EnforceConfig)
     defaults: dict[str, dict[str, Any]] = Field(default_factory=dict)
     tools: dict[str, LintroToolConfig] = Field(default_factory=dict)
-    # Any + lazy factories: keep cold imports free of AI/review packages.
-    # Values are still concrete AIConfig / ReviewConfig instances at runtime.
+    # Lazy factories + before-validators keep cold imports free of AI/review
+    # packages while still coercing dict inputs into the nested models.
     ai: Any = Field(default_factory=_default_ai_config)
     review: Any = Field(default_factory=_default_review_config)
     score: ScoreConfig = Field(default_factory=ScoreConfig)
     config_path: str | None = None
+
+    @field_validator("ai", mode="before")
+    @classmethod
+    def _validate_ai_config(cls, value: Any) -> Any:
+        """Coerce AI config values before assignment.
+
+        Args:
+            value: Raw AI field value.
+
+        Returns:
+            Coerced AIConfig instance.
+        """
+        return _coerce_ai_config(value)
+
+    @field_validator("review", mode="before")
+    @classmethod
+    def _validate_review_config(cls, value: Any) -> Any:
+        """Coerce review config values before assignment.
+
+        Args:
+            value: Raw review field value.
+
+        Returns:
+            Coerced ReviewConfig instance.
+        """
+        return _coerce_review_config(value)
 
     def get_tool_config(self, tool_name: str) -> LintroToolConfig:
         """Get configuration for a specific tool.

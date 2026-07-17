@@ -70,6 +70,22 @@ _CANONICAL_NAMES: dict[str, str] = {
     "version": "versions",
 }
 
+# Canonical command -> short help for ``--help`` without importing subcommands.
+_COMMAND_SHORT_HELP: dict[str, str] = {
+    "check": "Check files for issues using the specified tools.",
+    "config": "Display Lintro configuration status.",
+    "doctor": "Check tool installation status and version compatibility.",
+    "format": "Format code using configured formatting tools.",
+    "init": "Initialize Lintro for this project.",
+    "install": "Install or upgrade external tools used by lintro.",
+    "licenses": "Check dependency licenses for policy compliance.",
+    "list-tools": "List all available tools and their configurations.",
+    "review": "Run AI-powered diff-based code review.",
+    "setup": "Set up lintro for your project.",
+    "test": "Run tests using pytest.",
+    "versions": "Display version information for all supported tools.",
+}
+
 
 class LintroGroup(click.Group):
     """Custom Click group with lazy subcommands, aliases, and chaining.
@@ -144,6 +160,11 @@ class LintroGroup(click.Group):
         Raises:
             ValueError: If the import path does not resolve to a Click command.
         """
+        # Cache under the requested name so aliases do not re-import/mutate.
+        existing = self.commands.get(cmd_name)
+        if existing is not None:
+            return existing
+
         import_path = self.lazy_subcommands[cmd_name]
         modname, attr_name = import_path.rsplit(".", 1)
         # Safe: import paths are a fixed internal whitelist in _LAZY_SUBCOMMANDS.
@@ -157,6 +178,7 @@ class LintroGroup(click.Group):
             raise ValueError(msg)
         canonical = _CANONICAL_NAMES.get(cmd_name, cmd_name)
         cast(Any, cmd_object)._canonical_name = canonical
+        self.add_command(cmd_object, name=cmd_name)
         return cmd_object
 
     def format_help(
@@ -197,30 +219,25 @@ class LintroGroup(click.Group):
         console.print("  lintro COMMAND1 , COMMAND2 , ...  [dim](chain commands)[/dim]")
         console.print()
 
-        # Commands table
+        # Commands table from static metadata — do not import subcommands.
         commands = self.list_commands(ctx)
-        canonical_map: dict[str, tuple[click.Command, list[str]]] = {}
+        canonical_map: dict[str, list[str]] = {}
         for name in commands:
-            cmd = self.get_command(ctx, name)
-            if cmd is None:
-                continue
-            cmd_any = cast(Any, cmd)
-            if not hasattr(cmd_any, "_canonical_name"):
-                cmd_any._canonical_name = name
-            canonical = cast(str, getattr(cmd_any, "_canonical_name", name))
+            canonical = _CANONICAL_NAMES.get(name, name)
             if canonical not in canonical_map:
-                canonical_map[canonical] = (cmd, [])
+                canonical_map[canonical] = []
             if name != canonical:
-                canonical_map[canonical][1].append(name)
+                canonical_map[canonical].append(name)
 
         table = Table(title="Commands", show_header=True, header_style="bold cyan")
         table.add_column("Command", style="cyan", no_wrap=True)
         table.add_column("Alias", style="yellow", no_wrap=True)
         table.add_column("Description", style="white")
 
-        for canonical, (cmd, aliases) in sorted(canonical_map.items()):
+        for canonical, aliases in sorted(canonical_map.items()):
             alias_str = ", ".join(aliases) if aliases else "-"
-            table.add_row(canonical, alias_str, cmd.get_short_help_str())
+            description = _COMMAND_SHORT_HELP.get(canonical, "")
+            table.add_row(canonical, alias_str, description)
 
         console.print(table)
         console.print()
