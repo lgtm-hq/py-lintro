@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import time
 from pathlib import Path
+from collections.abc import Iterator
 from typing import Any
 from unittest.mock import MagicMock, patch
 
@@ -25,7 +26,10 @@ from lintro.tools.core.snapshots import (
 
 
 @pytest.fixture(autouse=True)
-def _reset_snapshot_cache(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def _reset_snapshot_cache(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> Iterator[None]:
     """Isolate snapshot cache to a temp directory for every test."""
     monkeypatch.chdir(tmp_path)
     clear_snapshot_cache(cache_root=tmp_path)
@@ -360,6 +364,36 @@ def test_verify_tool_version_uses_unavailable_snapshot() -> None:
     assert_that(result).is_not_none()
     assert_that(result.unavailable).is_true()
     assert_that(result.success).is_true()
+
+
+def test_verify_tool_version_warns_when_below_recommended() -> None:
+    """Below-recommended versions still pass but emit a warning."""
+    from lintro.plugins.execution_preparation import verify_tool_version
+    from lintro.plugins.protocol import ToolDefinition
+
+    snap = ToolSnapshot(
+        name="ruff",
+        available=True,
+        version="0.10.0",
+        version_check_passed=True,
+        min_version="0.9.0",
+        recommended_version="0.14.0",
+        below_recommended=True,
+    )
+    definition = ToolDefinition(name="ruff", description="lint")
+
+    with (
+        patch(
+            "lintro.tools.core.snapshots.get_tool_snapshot",
+            return_value=snap,
+        ),
+        patch("lintro.plugins.execution_preparation.logger") as mock_logger,
+    ):
+        result = verify_tool_version(definition)
+
+    assert_that(result).is_none()
+    mock_logger.warning.assert_called_once()
+    assert_that(str(mock_logger.warning.call_args)).contains("below recommended")
 
 
 def test_serialize_tool_result_emits_unavailable_status() -> None:
