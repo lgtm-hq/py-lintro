@@ -203,59 +203,65 @@ def prepare_execution(
         exclude_patterns=exclude_patterns,
         include_venv=include_venv,
     )
-    files = merge_rendered_files(
-        discovered_files=files,
-        session=template_session,
-    )
+    try:
+        files = merge_rendered_files(
+            discovered_files=files,
+            session=template_session,
+        )
 
-    if not files:
-        file_type = "files"
-        patterns = definition.file_patterns
-        if patterns:
-            extensions = [p.replace("*", "") for p in patterns if p.startswith("*.")]
-            if extensions:
-                file_type = "/".join(extensions) + " files"
+        if not files:
+            file_type = "files"
+            patterns = definition.file_patterns
+            if patterns:
+                extensions = [
+                    p.replace("*", "") for p in patterns if p.startswith("*.")
+                ]
+                if extensions:
+                    file_type = "/".join(extensions) + " files"
 
-        template_session.cleanup()
+            template_session.cleanup()
+            return {
+                "early_result": ToolResult(
+                    name=definition.name,
+                    success=True,
+                    output=f"No {file_type} found to check.",
+                    issues_count=0,
+                ),
+            }
+
+        # Check version requirements (only when files exist to check)
+        version_result = verify_tool_version(definition)
+        if version_result is not None:
+            template_session.cleanup()
+            return {"early_result": version_result}
+
+        logger.debug(f"Files to process: {files}")
+
+        # Compute cwd and relative paths
+        cwd = get_cwd(files)
+        rel_files = [os.path.relpath(f, cwd) if cwd else f for f in files]
+
+        # Get timeout (keep as float to preserve precision)
+        timeout_value = merged_options.get("timeout")
+        timeout = get_effective_timeout(
+            timeout_value if isinstance(timeout_value, (int, float)) else None,
+            merged_options,
+            definition.default_timeout,
+        )
+
+        logger.debug(
+            f"Prepared execution: {len(files)} files, cwd={cwd}, timeout={timeout}s",
+        )
         return {
-            "early_result": ToolResult(
-                name=definition.name,
-                success=True,
-                output=f"No {file_type} found to check.",
-                issues_count=0,
-            ),
+            "files": files,
+            "rel_files": rel_files,
+            "cwd": cwd,
+            "timeout": timeout,
+            "template_session": template_session,
         }
-
-    # Check version requirements (only when files exist to check)
-    version_result = verify_tool_version(definition)
-    if version_result is not None:
+    except Exception:
         template_session.cleanup()
-        return {"early_result": version_result}
-
-    logger.debug(f"Files to process: {files}")
-
-    # Compute cwd and relative paths
-    cwd = get_cwd(files)
-    rel_files = [os.path.relpath(f, cwd) if cwd else f for f in files]
-
-    # Get timeout (keep as float to preserve precision)
-    timeout_value = merged_options.get("timeout")
-    timeout = get_effective_timeout(
-        timeout_value if isinstance(timeout_value, (int, float)) else None,
-        merged_options,
-        definition.default_timeout,
-    )
-
-    logger.debug(
-        f"Prepared execution: {len(files)} files, cwd={cwd}, timeout={timeout}s",
-    )
-    return {
-        "files": files,
-        "rel_files": rel_files,
-        "cwd": cwd,
-        "timeout": timeout,
-        "template_session": template_session,
-    }
+        raise
 
 
 # -------------------------------------------------------------------------
