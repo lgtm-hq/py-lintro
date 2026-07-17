@@ -102,7 +102,18 @@ def test_detect_update_channel(
     assert_that(detect_update_channel(path)).is_equal_to(expected)
 
 
-def test_detect_update_channel_homebrew_bin_prefix() -> None:
+def test_detect_update_channel_rejects_unrelated_cellar_path() -> None:
+    """Bare ``cellar`` path components are not treated as Homebrew."""
+    channel = detect_update_channel("/home/user/wine-cellar/bin/tool")
+    assert_that(channel).is_not_equal_to(UpdateChannel.HOMEBREW)
+
+
+def test_detect_update_channel_rejects_project_toolchains_path() -> None:
+    """Project ``toolchains`` dirs are not treated as rustup."""
+    channel = detect_update_channel(
+        "/home/user/my-rust-project/toolchains/bin/mytool",
+    )
+    assert_that(channel).is_not_equal_to(UpdateChannel.RUSTUP)
     """Binaries under the Homebrew bin prefix resolve as homebrew."""
     # On Homebrew Macs /usr/local/bin often symlinks to /opt/homebrew/bin.
     channel = detect_update_channel("/opt/homebrew/bin/some-tool")
