@@ -12,6 +12,7 @@ scripts/
 ├── ci/           # CI/CD and GitHub Actions scripts
 ├── docker/       # Docker-related scripts
 ├── local/        # Local development scripts
+├── release/      # Release Version-PR artifact generators
 └── utils/        # Utility scripts and shared functions
 ```
 
@@ -91,6 +92,7 @@ renders, validates, and auto-merges `Formula/lintro.rb` (binary) and
 
 Scripts for GitHub Actions workflows and continuous integration.
 
+
 | Script                               | Purpose                                                                    | Usage                                                                                                                      |
 | ------------------------------------ | -------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
 | `coverage-manager.sh`                | Unified coverage ops (extract/badge/comment/threshold)                     | `./scripts/utils/coverage-manager.sh --help`                                                                               |
@@ -146,6 +148,8 @@ Scripts for GitHub Actions workflows and continuous integration.
 | `format-changelog.py`                | Reflow generated `CHANGELOG.md` to lintro 88-col markdown                  | `python3 scripts/ci/format-changelog.py CHANGELOG.md`                                                                      |
 | `update-security-support.py`         | Stamp `SECURITY.md` support table to the current `major.minor` line        | `python3 scripts/ci/update-security-support.py 0.81.0`                                                                     |
 | `finalize-version-pr.py`             | Finalize the release Version-PR (reflow CHANGELOG + stamp SECURITY)        | `python3 scripts/ci/finalize-version-pr.py`                                                                                |
+| `generate_spdx_data.py`              | Generate `lintro/licenses/_spdx_data.py` from SPDX licenses.json           | `python scripts/release/generate_spdx_data.py [--check]`                                                                   |
+| `prepare_version_artifacts.py`       | Version-PR hook: CHANGELOG, SECURITY.md, SPDX refresh                      | `python scripts/release/prepare_version_artifacts.py`                                                                      |
 | `test-install-package.sh`            | Install and verify built package in isolated venv                          | `./scripts/ci/test-install-package.sh wheel`                                                                               |
 | `test-built-package-integration.sh`  | Run integration tests for built package in isolated venv                   | `./scripts/ci/test-built-package-integration.sh`                                                                           |
 | `test-venv-setup.sh`                 | Create isolated Python 3.13 virtual environment                            | `./scripts/ci/test-venv-setup.sh`                                                                                          |
