@@ -97,6 +97,33 @@ def load_licenses_json(path: Path) -> dict[str, Any]:
     return data
 
 
+def _require_bool_field(
+    item: dict[str, Any],
+    key: str,
+    *,
+    default: bool | None,
+) -> bool | None:
+    """Read a boolean SPDX JSON field with strict typing.
+
+    Args:
+        item: One SPDX license entry.
+        key: Field name.
+        default: Value when the field is omitted.
+
+    Returns:
+        bool | None: Field value, or ``default`` when omitted.
+
+    Raises:
+        RuntimeError: If the field is present but not a boolean.
+    """
+    if key not in item:
+        return default
+    value = item[key]
+    if not isinstance(value, bool):
+        raise RuntimeError(f"SPDX field {key!r} must be a boolean")
+    return value
+
+
 def render_spdx_data_module(data: dict[str, Any]) -> str:
     """Render the deterministic ``_spdx_data.py`` module text.
 
@@ -115,6 +142,10 @@ def render_spdx_data_module(data: dict[str, Any]) -> str:
 
     version = data.get("licenseListVersion", "unknown")
     release_date = data.get("releaseDate", "unknown")
+    if not isinstance(version, str):
+        raise RuntimeError("SPDX licenseListVersion must be a string")
+    if not isinstance(release_date, str):
+        raise RuntimeError("SPDX releaseDate must be a string")
 
     entries: list[tuple[str, bool, bool | None, bool]] = []
     for item in licenses:
@@ -123,13 +154,17 @@ def render_spdx_data_module(data: dict[str, Any]) -> str:
         license_id = item.get("licenseId")
         if not isinstance(license_id, str) or not license_id:
             raise RuntimeError("SPDX license entry missing licenseId")
-        is_osi = bool(item.get("isOsiApproved", False))
-        is_deprecated = bool(item.get("isDeprecatedLicenseId", False))
+        is_osi_raw = _require_bool_field(item, "isOsiApproved", default=False)
+        is_deprecated_raw = _require_bool_field(
+            item,
+            "isDeprecatedLicenseId",
+            default=False,
+        )
         # isFsfLibre is omitted by upstream for many IDs; preserve None vs bool.
-        if "isFsfLibre" in item:
-            is_fsf: bool | None = bool(item["isFsfLibre"])
-        else:
-            is_fsf = None
+        is_fsf = _require_bool_field(item, "isFsfLibre", default=None)
+        # Defaults above are bools, so these are never None when present/defaulted.
+        is_osi = False if is_osi_raw is None else is_osi_raw
+        is_deprecated = False if is_deprecated_raw is None else is_deprecated_raw
         entries.append((license_id, is_osi, is_fsf, is_deprecated))
 
     entries.sort(key=lambda row: row[0])
@@ -138,22 +173,22 @@ def render_spdx_data_module(data: dict[str, Any]) -> str:
         '"""Auto-generated SPDX license identifiers. Do not edit by hand.',
         "",
         "Run ``python3 scripts/release/generate_spdx_data.py`` to regenerate.",
-        "",
-        f"Source: {SPDX_LICENSES_URL}",
-        f"licenseListVersion: {version}",
-        f"releaseDate: {release_date}",
         '"""',
+        "",
+        f"# Source: {SPDX_LICENSES_URL}",
+        f"# licenseListVersion: {json.dumps(version)}",
+        f"# releaseDate: {json.dumps(release_date)}",
         "",
         "from __future__ import annotations",
         "",
-        f'SPDX_LIST_VERSION: str = "{version}"',
-        f'SPDX_LIST_RELEASE_DATE: str = "{release_date}"',
+        f"SPDX_LIST_VERSION: str = {json.dumps(version)}",
+        f"SPDX_LIST_RELEASE_DATE: str = {json.dumps(release_date)}",
         "",
         "SPDX_LICENSE_IDS: frozenset[str] = frozenset(",
         "    {",
     ]
     for license_id, _, _, _ in entries:
-        lines.append(f'        "{license_id}",')
+        lines.append(f"        {json.dumps(license_id)},")
     lines.extend(
         [
             "    },",
@@ -165,9 +200,9 @@ def render_spdx_data_module(data: dict[str, Any]) -> str:
         ],
     )
     for license_id, is_osi, is_fsf, is_deprecated in entries:
-        fsf_repr = "None" if is_fsf is None else str(is_fsf)
+        fsf_repr = "None" if is_fsf is None else ("True" if is_fsf else "False")
         lines.append(
-            f'    "{license_id}": ({is_osi}, {fsf_repr}, {is_deprecated}),',
+            f"    {json.dumps(license_id)}: ({is_osi}, {fsf_repr}, {is_deprecated}),",
         )
     lines.extend(
         [
