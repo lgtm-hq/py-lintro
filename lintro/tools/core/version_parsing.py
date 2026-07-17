@@ -1,6 +1,7 @@
 """Version parsing utilities for tool version checking and validation."""
 
 import re
+import shutil
 import subprocess  # nosec B404 - used safely with shell disabled
 from dataclasses import dataclass, field
 from functools import lru_cache
@@ -12,8 +13,10 @@ from lintro.enums.tool_name import ToolName, normalize_tool_name
 
 # Import actual implementations from version_checking with aliases
 # to avoid name conflicts
+from lintro.tools.core.update_channels import VersionAdvisory
 from lintro.tools.core.version_checking import (
     VERSION_CHECK_TIMEOUT,
+    build_version_advisory,
 )
 from lintro.tools.core.version_checking import (
     get_install_hints as _get_install_hints_impl,
@@ -114,6 +117,8 @@ class ToolVersionInfo:
     version_check_passed: bool = field(default=False)
     below_recommended: bool = field(default=False)
     error_message: str | None = field(default=None)
+    binary_path: str | None = field(default=None)
+    advisory: VersionAdvisory | None = field(default=None)
 
 
 def parse_version(version_str: str) -> Version:
@@ -240,6 +245,7 @@ def check_tool_version(
         install_hint=install_hint,
         # If no requirements, assume check passes
         version_check_passed=not has_requirements,
+        binary_path=shutil.which(command[0]) if command else None,
     )
 
     try:
@@ -305,6 +311,43 @@ def check_tool_version(
                     info.below_recommended = True
             except ValueError:
                 pass
+
+        latest_known = (
+            rec_version
+            if rec_version and rec_version != VERSION_UNKNOWN
+            else min_version
+        )
+        if (
+            info.current_version
+            and latest_known
+            and latest_known != VERSION_UNKNOWN
+            and (not info.version_check_passed or info.below_recommended)
+        ):
+            install_type = None
+            install_package = None
+            try:
+                from lintro.tools.core.tool_registry import ManifestRegistry
+
+                registry = ManifestRegistry.load()
+                if tool_name in registry:
+                    manifest_tool = registry.get(tool_name)
+                    install_type = manifest_tool.install_type
+                    install_package = manifest_tool.install_package
+                    channel_override = manifest_tool.update_channel
+                else:
+                    channel_override = None
+            except (OSError, KeyError, RuntimeError, ValueError):
+                channel_override = None
+
+            info.advisory = build_version_advisory(
+                tool=tool_name,
+                installed=info.current_version,
+                latest_known=latest_known,
+                binary_path=info.binary_path,
+                install_package=install_package,
+                install_type=install_type,
+                channel_override=channel_override,
+            )
 
     except (subprocess.TimeoutExpired, OSError) as e:
         info.error_message = f"Failed to run version check: {e}"

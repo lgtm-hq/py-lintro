@@ -50,14 +50,24 @@ TOOL_VERSIONS for binary/cargo/rustup). PRs will fail if they drift.
 
 import os
 import threading
+from pathlib import Path
 
 from loguru import logger
+from packaging.version import InvalidVersion, Version
 
 from lintro._tool_versions import (
     _NPM_PACKAGE_TO_TOOL,
     get_all_minimum_versions,
 )
 from lintro.enums.tool_name import ToolName
+from lintro.enums.update_channel import UpdateChannel
+from lintro.tools.core.update_channels import (
+    VersionAdvisory,
+    channel_from_install_type,
+)
+from lintro.tools.core.update_channels import (
+    build_version_advisory as _build_version_advisory,
+)
 
 # Module-level set to track logged warnings and prevent duplicates
 # during parallel execution
@@ -263,3 +273,94 @@ def get_install_hints() -> dict[str, str]:
                 )
 
     return hints
+
+
+def build_version_advisory(
+    *,
+    tool: str,
+    installed: str,
+    latest_known: str,
+    binary_path: str | Path | None = None,
+    install_package: str | None = None,
+    install_type: str | None = None,
+    channel_override: UpdateChannel | str | None = None,
+) -> VersionAdvisory | None:
+    """Build a version advisory when installed is below the known pin.
+
+    Uses pinned manifest / tool-versions expectations only — no network
+    calls. When path detection yields ``UNKNOWN``, falls back to a soft
+    mapping from the manifest ``install.type``.
+
+    Args:
+        tool: Canonical tool name.
+        installed: Currently installed version string.
+        latest_known: Pinned expected/recommended version.
+        binary_path: Path to the installed binary for channel detection.
+        install_package: Manifest package name override.
+        install_type: Manifest install type used as a soft channel fallback.
+        channel_override: Explicit channel (e.g. from manifest).
+
+    Returns:
+        :class:`VersionAdvisory` when ``installed < latest_known``, else None.
+    """
+    try:
+        if _is_at_least(installed, latest_known):
+            return None
+    except ValueError:
+        return None
+
+    override = channel_override
+    if override is None and binary_path is None:
+        override = channel_from_install_type(install_type)
+
+    advisory = _build_version_advisory(
+        tool=tool,
+        installed=installed,
+        latest_known=latest_known,
+        binary_path=binary_path,
+        install_package=install_package,
+        channel_override=override,
+    )
+
+    # Path said UNKNOWN/STANDALONE but manifest install.type is known —
+    # prefer that for a usable update command.
+    if (
+        advisory.channel in (UpdateChannel.UNKNOWN, UpdateChannel.STANDALONE)
+        and channel_override is None
+        and install_type is not None
+    ):
+        fallback = channel_from_install_type(install_type)
+        if fallback is not None:
+            return _build_version_advisory(
+                tool=tool,
+                installed=installed,
+                latest_known=latest_known,
+                binary_path=binary_path,
+                install_package=install_package,
+                channel_override=fallback,
+            )
+
+    return advisory
+
+
+def _is_at_least(installed: str, latest_known: str) -> bool:
+    """Return True when installed version is >= latest_known.
+
+    Args:
+        installed: Installed version string.
+        latest_known: Expected version string.
+
+    Returns:
+        True when installed meets or exceeds latest_known.
+
+    Raises:
+        ValueError: If either version string cannot be parsed.
+    """
+    try:
+        left = Version(installed.lstrip("vV").split("-", 1)[0].split("+", 1)[0])
+        right = Version(latest_known.lstrip("vV").split("-", 1)[0].split("+", 1)[0])
+    except InvalidVersion as exc:
+        raise ValueError(
+            f"Unable to compare versions: {installed!r} vs {latest_known!r}",
+        ) from exc
+    return left >= right
