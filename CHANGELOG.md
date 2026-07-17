@@ -21,6 +21,18 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.80.7] - 2026-07-17
+
+### Changed
+
+- **deps**: update ubuntu:latest docker digest to 3131b4c (#1468) (6fd6e6b)
+- **ai**: remove process-global os.chdir from rerun path (#1265) (9103dbc)
+
+### Fixed
+
+- **execution**: handle BaseException in gather results and nested event loops (#1264)
+  (7252969)
+
 ## [0.80.6] - 2026-07-16
 
 ### Changed
