@@ -19,9 +19,23 @@ import os
 import platform
 import sys
 from dataclasses import dataclass
+from pathlib import Path
 
 from lintro.enums.install_context import CISystem, InstallContext
 from lintro.tools.core.install_strategies.environment import InstallEnvironment
+
+
+def _dockerenv_exists() -> bool:
+    """Return whether the Docker container marker file is present."""
+    return Path("/.dockerenv").exists()
+
+
+def _git_root_marker_exists(install_path: str) -> bool:
+    """Return whether a ``.git`` marker exists at the inferred source root."""
+    source_root = Path(install_path)
+    for _ in range(4):
+        source_root = source_root.parent
+    return (source_root / ".git").exists()
 
 
 @dataclass(frozen=True)
@@ -63,7 +77,7 @@ def _detect_install_context() -> InstallContext:
     """Detect how lintro was installed based on the executable path."""
     # Docker: check for Docker indicators
     if (
-        os.path.exists("/.dockerenv")
+        _dockerenv_exists()
         or os.environ.get("LINTRO_DOCKER") == "1"
         or os.environ.get("CONTAINER") == "docker"
     ):
@@ -71,8 +85,8 @@ def _detect_install_context() -> InstallContext:
 
     # Resolve symlinks so pip installs under /opt/homebrew/lib aren't
     # misclassified as Homebrew formula installs.
-    exe_path = os.path.realpath(sys.executable)
-    install_path = os.path.realpath(__file__)
+    exe_path = str(Path(sys.executable).resolve())
+    install_path = str(Path(__file__).resolve())
 
     # npm binary: the launcher resolves the platform package, so the running
     # executable lives under node_modules/@lgtm-hq/lintro-<platform>/. Check before
@@ -99,18 +113,14 @@ def _detect_install_context() -> InstallContext:
             continue
         if "lintro-full" in lower:
             return InstallContext.HOMEBREW_FULL
-        name = os.path.basename(lower)
-        parent = os.path.basename(os.path.dirname(lower))
+        name = Path(lower).name
+        parent = Path(lower).parent.name
         if name == "lintro" and parent in {"bin", "sbin"}:
             return InstallContext.HOMEBREW_BIN
 
     # Development: running from a git checkout
     # install_path is lintro/tools/core/install_context.py — 4 levels to repo root
-    source_root = os.path.dirname(
-        os.path.dirname(os.path.dirname(os.path.dirname(install_path))),
-    )
-    # Use os.path.exists (not isdir) to also detect .git files (worktrees/submodules)
-    if os.path.exists(os.path.join(source_root, ".git")):
+    if _git_root_marker_exists(install_path):
         return InstallContext.DEVELOPMENT
 
     # Default: pip/uv install

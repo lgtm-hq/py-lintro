@@ -8,12 +8,14 @@ making the architecture more modular.
 from __future__ import annotations
 
 import json
-import os
 import shutil
 import subprocess  # nosec B404 - used safely with shell disabled
 from dataclasses import dataclass
+from pathlib import Path
 
 from loguru import logger
+
+from lintro.utils.path_utils import absolute_path
 
 
 @dataclass
@@ -79,19 +81,10 @@ def check_line_length_violations(
         logger.debug("Ruff not found in PATH, skipping line length check")
         return []
 
-    # Convert relative paths to absolute paths
-    abs_files: list[str] = []
-    for file_path in files:
-        if cwd and not os.path.isabs(file_path):
-            abs_files.append(os.path.abspath(os.path.join(cwd, file_path)))
-        else:
-            abs_files.append(
-                (
-                    os.path.abspath(file_path)
-                    if not os.path.isabs(file_path)
-                    else file_path
-                ),
-            )
+    abs_files = [
+        absolute_path(file_path, base_dir=Path(cwd) if cwd else None)
+        for file_path in files
+    ]
 
     # Build the Ruff command
     cmd: list[str] = [
@@ -136,8 +129,8 @@ def check_line_length_violations(
         for issue in issues_data:
             # Ruff JSON format has: filename, row, column, message, code
             file_path = issue.get("filename", "")
-            if not os.path.isabs(file_path) and cwd:
-                file_path = os.path.abspath(os.path.join(cwd, file_path))
+            if not Path(file_path).is_absolute() and cwd:
+                file_path = absolute_path(file_path, base_dir=Path(cwd))
 
             # Handle both old and new Ruff JSON formats
             line = issue.get("location", {}).get("row") or issue.get("row", 0)

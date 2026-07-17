@@ -15,6 +15,45 @@ from loguru import logger
 _IGNORE_SEARCH_MAX_DEPTH = 20
 
 
+def absolute_path(path: str | Path, *, base_dir: Path | None = None) -> str:
+    """Return an absolute path without resolving symlinks.
+
+    Matches ``os.path.abspath`` normalization of ``.`` and ``..`` components.
+
+    Args:
+        path: Relative or absolute path.
+        base_dir: Base directory for relative paths when supplied.
+
+    Returns:
+        Absolute normalized path string.
+    """
+    candidate = Path(path).expanduser()
+    if not candidate.is_absolute():
+        candidate = (base_dir or Path.cwd()) / candidate
+    return str(_normalize_absolute(candidate))
+
+
+def _normalize_absolute(path: Path) -> Path:
+    """Collapse ``.`` and ``..`` parts without resolving symlinks."""
+    parts: list[str] = []
+    for part in path.parts:
+        if part in (".", ""):
+            continue
+        if part == "..":
+            if path.is_absolute():
+                if len(parts) > 1:
+                    parts.pop()
+            elif parts and parts[-1] != "..":
+                parts.pop()
+            else:
+                parts.append("..")
+            continue
+        parts.append(part)
+    if not parts:
+        return Path(path.anchor)
+    return Path(*parts)
+
+
 def find_file_upward(
     start: Path,
     filenames: Sequence[str],

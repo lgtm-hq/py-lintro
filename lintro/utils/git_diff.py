@@ -19,10 +19,12 @@ produce phantom paths that would break downstream tools.
 
 from __future__ import annotations
 
-import os
 import shutil
 import subprocess  # nosec B404 - subprocess is the core mechanism for invoking git; all invocations use shell=False
 from functools import lru_cache
+from pathlib import Path
+
+from lintro.utils.path_utils import absolute_path
 
 # Sentinel used by the ``--diff`` CLI option to mean "flag supplied without an
 # explicit base"; resolved to the repository's default base ref at runtime.
@@ -235,7 +237,7 @@ def get_changed_files(base: str, cwd: str = ".") -> frozenset[str]:
     Raises:
         DiffResolutionError: When ``base`` does not resolve to a commit.
     """
-    root = _repo_root(cwd) or os.path.abspath(cwd)
+    root = _repo_root(cwd) or absolute_path(cwd)
 
     if not _ref_exists(base, cwd):
         raise DiffResolutionError(
@@ -251,9 +253,9 @@ def get_changed_files(base: str, cwd: str = ".") -> frozenset[str]:
 
     changed: set[str] = set()
     for name in names:
-        abs_path = os.path.abspath(os.path.join(root, name))
+        abs_path = absolute_path(str(Path(root) / name))
         # Drop deletions / rename sources that no longer exist on disk.
-        if os.path.isfile(abs_path):
+        if Path(abs_path).is_file():
             changed.add(abs_path)
     return frozenset(changed)
 
@@ -267,13 +269,13 @@ def _probe_path_for_repo(path: str) -> str:
     Returns:
         Directory path suitable for ``git rev-parse``.
     """
-    abs_path = os.path.abspath(path)
-    if os.path.isfile(abs_path):
-        return os.path.dirname(abs_path) or abs_path
-    if os.path.isdir(abs_path):
-        return abs_path
-    parent = os.path.dirname(abs_path)
-    return parent if parent else "."
+    abs_path = Path(path).absolute()
+    if abs_path.is_file():
+        return str(abs_path.parent) or str(abs_path)
+    if abs_path.is_dir():
+        return str(abs_path)
+    parent = abs_path.parent
+    return str(parent) if str(parent) != str(abs_path) else "."
 
 
 def _path_in_repo(path: str, repo_root: str) -> bool:
@@ -286,9 +288,11 @@ def _path_in_repo(path: str, repo_root: str) -> bool:
     Returns:
         True when ``path`` is the root itself or a path beneath it.
     """
-    abs_path = os.path.abspath(path)
-    abs_root = os.path.abspath(repo_root)
-    return abs_path == abs_root or abs_path.startswith(abs_root + os.sep)
+    abs_path = Path(path).absolute()
+    abs_root = Path(repo_root).absolute()
+    if abs_path == abs_root:
+        return True
+    return abs_root in abs_path.parents
 
 
 def _files_under_scan_path(files: list[str], scan_path: str) -> list[str]:
@@ -301,15 +305,13 @@ def _files_under_scan_path(files: list[str], scan_path: str) -> list[str]:
     Returns:
         Files contained in or equal to ``scan_path``.
     """
-    abs_scan = os.path.abspath(scan_path)
-    if os.path.isfile(abs_scan):
-        return [f for f in files if os.path.abspath(f) == abs_scan]
-    prefix = abs_scan if abs_scan.endswith(os.sep) else abs_scan + os.sep
+    abs_scan = Path(scan_path).absolute()
+    if abs_scan.is_file():
+        return [f for f in files if Path(f).absolute() == abs_scan]
     return [
         f
         for f in files
-        if os.path.abspath(f).startswith(prefix)
-        or os.path.abspath(f) == abs_scan.rstrip(os.sep)
+        if abs_scan in (abs_f := Path(f).absolute()).parents or abs_f == abs_scan
     ]
 
 
@@ -451,7 +453,7 @@ def filter_files_by_diff_for_paths(
         if repo_root is None:
             for scan_path in group_paths:
                 for file_path in _files_under_scan_path(files, scan_path):
-                    included.add(os.path.abspath(file_path))
+                    included.add(absolute_path(file_path))
             continue
 
         resolved_base = _resolve_base_for_repo(base, repo_root)
@@ -460,9 +462,9 @@ def filter_files_by_diff_for_paths(
 
         repo_files = [f for f in files if _path_in_repo(f, repo_root)]
         for file_path in filter_files_by_diff(repo_files, resolved_base, repo_root):
-            included.add(os.path.abspath(file_path))
+            included.add(absolute_path(file_path))
 
-    return [f for f in files if os.path.abspath(f) in included]
+    return [f for f in files if absolute_path(f) in included]
 
 
 def filter_files_by_diff(
@@ -483,4 +485,4 @@ def filter_files_by_diff(
     changed = get_changed_files(base, cwd)
     if not changed:
         return []
-    return [f for f in files if os.path.abspath(f) in changed]
+    return [f for f in files if absolute_path(f) in changed]
