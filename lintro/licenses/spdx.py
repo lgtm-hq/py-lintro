@@ -11,11 +11,12 @@ from __future__ import annotations
 
 import re
 from functools import lru_cache
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING
 
 from license_expression import (
     ExpressionError,
     ExpressionParseError,
+    LicenseExpression,
     get_spdx_licensing,
 )
 
@@ -184,11 +185,36 @@ def _licensing() -> Licensing:
     return get_spdx_licensing()
 
 
+def _has_wrapping_parens(value: str) -> bool:
+    """Return True when ``value`` is wrapped by one matched outer paren pair.
+
+    Args:
+        value: Candidate string (already stripped).
+
+    Returns:
+        bool: Whether the outermost parentheses enclose the whole string.
+    """
+    if len(value) < 2 or not value.startswith("(") or not value.endswith(")"):
+        return False
+    depth = 0
+    for index, char in enumerate(value):
+        if char == "(":
+            depth += 1
+        elif char == ")":
+            depth -= 1
+            if depth == 0:
+                return index == len(value) - 1
+            if depth < 0:
+                return False
+    return False
+
+
 def _clean(raw: str) -> str:
     """Lower-case and collapse whitespace/punctuation noise in a license string.
 
-    Only strips *balanced* outer parentheses so names that embed a parenthetical
-    (e.g. ``Mozilla Public License 2.0 (MPL 2.0)``) keep their inner markers.
+    Only strips *matched* outer parentheses so names that embed a parenthetical
+    (e.g. ``Mozilla Public License 2.0 (MPL 2.0)``) keep their inner markers,
+    and expressions like ``(MIT) OR (Apache-2.0)`` are not mangled.
 
     Args:
         raw: Raw license string.
@@ -197,7 +223,7 @@ def _clean(raw: str) -> str:
         str: Normalized comparison key.
     """
     value = raw.strip()
-    while len(value) >= 2 and value.startswith("(") and value.endswith(")"):
+    while _has_wrapping_parens(value):
         value = value[1:-1].strip()
     value = re.sub(r"\s+", " ", value)
     return value.lower()
@@ -293,18 +319,22 @@ def normalize_to_spdx(license_string: str | None) -> str | None:
     return None
 
 
-def parse_license_expression(license_id: str) -> object | None:
+def parse_license_expression(license_id: str) -> LicenseExpression | None:
     """Parse a normalized SPDX id/expression into a ``license-expression`` tree.
 
     Args:
         license_id: Normalized SPDX identifier or expression.
 
     Returns:
-        object | None: Parsed expression tree, or None if parsing fails.
+        LicenseExpression | None: Parsed expression tree, or None if parsing fails.
     """
     licensing = _licensing()
     try:
         parsed = licensing.parse(license_id, validate=True, strict=True)
     except (ExpressionError, ExpressionParseError):
         return None
-    return cast(object | None, parsed)
+    if parsed is None:
+        return None
+    if not isinstance(parsed, LicenseExpression):
+        return None
+    return parsed
