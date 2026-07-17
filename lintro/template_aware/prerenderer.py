@@ -9,7 +9,7 @@ from typing import Any
 
 import yaml
 from jinja2 import BaseLoader, Environment, Undefined
-from jinja2.exceptions import TemplateSyntaxError, UndefinedError
+from jinja2.exceptions import TemplateError
 from loguru import logger
 
 from lintro.config.template_aware_config import (
@@ -373,7 +373,10 @@ def render_template(
     try:
         template = env.from_string(render_source)
         rendered_text = template.render(**context)
-    except (TemplateSyntaxError, UndefinedError, TypeError, ValueError) as exc:
+    except (TemplateError, TypeError, ValueError) as exc:
+        # TemplateError covers TemplateSyntaxError, UndefinedError,
+        # TemplateRuntimeError, TemplateAssertionError, and related Jinja
+        # failures so a bad template cannot crash the lint run.
         logger.warning(
             "Template-aware render failed for {}: {}; using original text",
             template_path,
