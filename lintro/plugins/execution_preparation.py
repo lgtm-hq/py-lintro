@@ -102,6 +102,14 @@ def verify_tool_version(definition: ToolDefinition) -> ToolResult | None:
         )
 
     if snapshot.version_check_passed:
+        if snapshot.below_recommended:
+            logger.warning(
+                "{} {} is below recommended version {} (minimum {} met)",
+                definition.name,
+                snapshot.version,
+                snapshot.recommended_version,
+                snapshot.min_version,
+            )
         return None
 
     # Binary exists and responded but version could not be parsed — proceed
