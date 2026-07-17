@@ -49,6 +49,7 @@ dependencies = [
   "defusedxml>=0.7.1",
   "identify>=2.6.19",
   "watchdog>=6.0.0",
+  "license-expression>=30.4.4",
 ]
 authors = [{ name = "lgtm-hq", email = "turbocoder13@gmail.com" }]
 license = "MIT"

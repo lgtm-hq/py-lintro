@@ -1,0 +1,38 @@
+{
+  "licenseListVersion": "test-0.1",
+  "releaseDate": "2020-01-01",
+  "licenses": [
+    {
+      "reference": "https://spdx.org/licenses/MIT.html",
+      "isDeprecatedLicenseId": false,
+      "detailsUrl": "https://spdx.org/licenses/MIT.json",
+      "referenceNumber": 1,
+      "name": "MIT License",
+      "licenseId": "MIT",
+      "seeAlso": ["https://opensource.org/licenses/MIT"],
+      "isOsiApproved": true,
+      "isFsfLibre": true
+    },
+    {
+      "reference": "https://spdx.org/licenses/Apache-2.0.html",
+      "isDeprecatedLicenseId": false,
+      "detailsUrl": "https://spdx.org/licenses/Apache-2.0.json",
+      "referenceNumber": 2,
+      "name": "Apache License 2.0",
+      "licenseId": "Apache-2.0",
+      "seeAlso": ["https://www.apache.org/licenses/LICENSE-2.0"],
+      "isOsiApproved": true,
+      "isFsfLibre": true
+    },
+    {
+      "reference": "https://spdx.org/licenses/GPL-1.0.html",
+      "isDeprecatedLicenseId": true,
+      "detailsUrl": "https://spdx.org/licenses/GPL-1.0.json",
+      "referenceNumber": 3,
+      "name": "GNU General Public License v1.0 only",
+      "licenseId": "GPL-1.0",
+      "seeAlso": ["https://www.gnu.org/licenses/old-licenses/gpl-1.0-standalone.html"],
+      "isOsiApproved": false
+    }
+  ]
+}
