@@ -13,6 +13,20 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Changed
 
+### Deprecated
+
+### Removed
+
+### Fixed
+
+### Security
+
+## [0.80.6] - 2026-07-16
+
+### Changed
+
+- **tools**: rename manifest ToolRegistry to ManifestRegistry (#1260) (f729796)
+
 - **tools/core**: rename `lintro.tools.core.tool_registry.ToolRegistry` to
   `ManifestRegistry` to disambiguate it from `lintro.plugins.registry.ToolRegistry`
   (#1220)
@@ -23,11 +37,9 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   of `ManifestRegistry`; importing or using the old name now emits a
   `DeprecationWarning` and will be removed in a future release (#1220)
 
-### Removed
-
 ### Fixed
 
-### Security
+- **ci**: use valid npm range syntax for astro allowedVersions (#1454) (e012d9d)
 
 ## [0.80.5] - 2026-07-16
 
