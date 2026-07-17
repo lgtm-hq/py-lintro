@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 import subprocess  # nosec B404 - subprocess used only with fixed sys.executable -c argv in tests
 import sys
 
@@ -72,7 +73,7 @@ if loaded:
     )
     assert_that(result.returncode).is_equal_to(0)
     assert_that(result.stderr).is_equal_to("")
-    assert_that(result.stdout).contains("0.")
+    assert_that(bool(re.search(r"\d+\.\d+\.\d+", result.stdout))).is_true()
 
 
 def test_import_config_loader_avoids_ai_review() -> None:
