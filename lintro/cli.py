@@ -30,8 +30,8 @@ def _is_utf8_encoding(encoding: str | None) -> bool:
     try:
         return codecs.lookup(encoding).name == "utf-8"
     except LookupError:
-        normalized = encoding.lower().replace("-", "").replace("_", "")
-        return normalized == "utf8"
+        # Unknown codec name — cannot be a UTF-8 alias.
+        return False
 
 
 def _reconfigure_stream_utf8(stream: TextIO) -> None:

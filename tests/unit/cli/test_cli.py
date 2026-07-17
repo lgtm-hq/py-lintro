@@ -77,7 +77,6 @@ def test_main_entry_point() -> None:
         patch("lintro.cli.ensure_utf8_stdio") as mock_ensure,
         patch("lintro.cli.cli") as mock_cli,
     ):
-        mock_cli.return_value = None
         # Fail if cli() runs before UTF-8 stdio is forced.
         mock_cli.side_effect = lambda: mock_ensure.assert_called_once_with()
         # main() calls cli() which is a Click command

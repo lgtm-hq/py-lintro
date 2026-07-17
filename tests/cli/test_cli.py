@@ -29,7 +29,13 @@ def _scrubbed_ascii_env() -> dict[str, str]:
         "LANG": _ASCII_LOCALE,
     }
     # Preserve vars needed to find the project venv / uv cache when present.
-    for key in ("VIRTUAL_ENV", "UV_PROJECT_ENVIRONMENT", "UV_CACHE_DIR", "TMPDIR"):
+    for key in (
+        "VIRTUAL_ENV",
+        "UV_PROJECT_ENVIRONMENT",
+        "UV_CACHE_DIR",
+        "TMPDIR",
+        "PYTHONPATH",
+    ):
         value = os.environ.get(key)
         if value:
             env[key] = value
