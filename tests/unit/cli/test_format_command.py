@@ -342,14 +342,8 @@ def test_format_command_uses_fmt_action(
 
 
 def test_format_code_function_calls_command() -> None:
-    """Verify format_code() function invokes the format_command."""
-    with patch("lintro.cli_utils.commands.format.CliRunner") as mock_runner_cls:
-        mock_runner = MagicMock()
-        mock_result = MagicMock()
-        mock_result.exit_code = 0
-        mock_runner.invoke.return_value = mock_result
-        mock_runner_cls.return_value = mock_runner
-
+    """Verify format_code() routes through the library API."""
+    with patch("lintro.api.core.run_lint_tools_simple", return_value=0) as mock_run:
         format_code(
             paths=["src"],
             tools="ruff",
@@ -361,19 +355,12 @@ def test_format_code_function_calls_command() -> None:
             verbose=False,
         )
 
-        mock_runner.invoke.assert_called_once()
+        mock_run.assert_called_once()
 
 
 def test_format_code_function_raises_on_failure() -> None:
     """Verify format_code() function raises RuntimeError on failure."""
-    with patch("lintro.cli_utils.commands.format.CliRunner") as mock_runner_cls:
-        mock_runner = MagicMock()
-        mock_result = MagicMock()
-        mock_result.exit_code = 1
-        mock_result.output = "Error occurred"
-        mock_runner.invoke.return_value = mock_result
-        mock_runner_cls.return_value = mock_runner
-
+    with patch("lintro.api.core.run_lint_tools_simple", return_value=1):
         with pytest.raises(RuntimeError) as exc_info:
             format_code(
                 paths=["src"],
@@ -385,33 +372,18 @@ def test_format_code_function_raises_on_failure() -> None:
 
 def test_format_code_function_default_parameters() -> None:
     """Verify format_code() function uses default parameters."""
-    with patch("lintro.cli_utils.commands.format.CliRunner") as mock_runner_cls:
-        mock_runner = MagicMock()
-        mock_result = MagicMock()
-        mock_result.exit_code = 0
-        mock_runner.invoke.return_value = mock_result
-        mock_runner_cls.return_value = mock_runner
-
+    with patch("lintro.api.core.run_lint_tools_simple", return_value=0) as mock_run:
         # Call with only required parameters (all have defaults)
         format_code()
 
-        mock_runner.invoke.assert_called_once()
-        # Verify defaults were used (no paths means empty args)
-        call_args = mock_runner.invoke.call_args
-        args = call_args[0][1]  # Second positional arg is the args list
-        # Should not contain --tools if tools=None
-        assert_that("--tools" not in args).is_true()
+        mock_run.assert_called_once()
+        # Verify defaults were used (no tools means tools=None)
+        assert_that(mock_run.call_args.kwargs["tools"]).is_none()
 
 
 def test_format_code_function_with_all_options() -> None:
     """Verify format_code() passes all options correctly."""
-    with patch("lintro.cli_utils.commands.format.CliRunner") as mock_runner_cls:
-        mock_runner = MagicMock()
-        mock_result = MagicMock()
-        mock_result.exit_code = 0
-        mock_runner.invoke.return_value = mock_result
-        mock_runner_cls.return_value = mock_runner
-
+    with patch("lintro.api.core.run_lint_tools_simple", return_value=0) as mock_run:
         format_code(
             paths=["src", "tests"],
             tools="ruff,black",
@@ -423,16 +395,14 @@ def test_format_code_function_with_all_options() -> None:
             verbose=True,
         )
 
-        mock_runner.invoke.assert_called_once()
-        call_args = mock_runner.invoke.call_args
-        args = call_args[0][1]
+        mock_run.assert_called_once()
+        call_kwargs = mock_run.call_args.kwargs
 
-        assert_that(args).contains("src")
-        assert_that(args).contains("tests")
-        assert_that(args).contains("--tools")
-        assert_that(args).contains("ruff,black")
-        assert_that(args).contains("--include-venv")
-        assert_that(args).contains("--verbose")
+        assert_that(call_kwargs["paths"]).contains("src")
+        assert_that(call_kwargs["paths"]).contains("tests")
+        assert_that(call_kwargs["tools"]).is_equal_to("ruff,black")
+        assert_that(call_kwargs["include_venv"]).is_true()
+        assert_that(call_kwargs["verbose"]).is_true()
 
 
 # =============================================================================

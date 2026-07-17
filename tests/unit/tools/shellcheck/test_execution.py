@@ -10,6 +10,7 @@ from assertpy import assert_that
 
 from lintro.parsers.shellcheck.shellcheck_parser import parse_shellcheck_output
 from lintro.tools.definitions.shellcheck import ShellcheckPlugin
+from tests.test_samples_helpers import copy_sample
 
 # Tests for ShellcheckPlugin.check method
 
@@ -25,8 +26,14 @@ def test_check_with_mocked_subprocess_success(
         tmp_path: Temporary directory path for test files.
     """
     # Create a test shell file
-    test_file = tmp_path / "test_script.sh"
-    test_file.write_text('#!/bin/bash\necho "Hello World"\n')
+    test_file = copy_sample(
+        tmp_path,
+        "tools",
+        "shell",
+        "shellcheck",
+        "shellcheck_hello_world.sh",
+        dest_name="test_script.sh",
+    )
 
     with patch.object(
         shellcheck_plugin,
@@ -49,8 +56,14 @@ def test_check_with_mocked_subprocess_issues(
         shellcheck_plugin: The ShellcheckPlugin instance to test.
         tmp_path: Temporary directory path for test files.
     """
-    test_file = tmp_path / "test_script.sh"
-    test_file.write_text("#!/bin/bash\necho $var\n")
+    test_file = copy_sample(
+        tmp_path,
+        "tools",
+        "shell",
+        "shellcheck",
+        "shellcheck_unquoted_var.sh",
+        dest_name="test_script.sh",
+    )
 
     shellcheck_output = """[
         {

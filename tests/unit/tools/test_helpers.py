@@ -264,7 +264,7 @@ def patch_plugin_for_check_test(
     Example:
         with patch_plugin_for_check_test(ruff_plugin, (True, "")) as ctx:
             result = ruff_plugin.check(["test.py"], {})
-            assert result.success
+            assert_that(result.success).is_true()
     """
     from lintro.plugins.base import ExecutionContext
 
@@ -308,7 +308,7 @@ def patch_plugin_for_fix_test(
     Example:
         with patch_plugin_for_fix_test(ruff_plugin, (True, "1 fixed")) as ctx:
             result = ruff_plugin.fix(["test.py"], {})
-            assert result.success
+            assert_that(result.success).is_true()
     """
     from lintro.plugins.base import ExecutionContext
 

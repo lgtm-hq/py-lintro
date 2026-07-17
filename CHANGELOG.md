@@ -13,6 +13,58 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Changed
 
+### Deprecated
+
+### Removed
+
+### Fixed
+
+### Security
+
+## [0.80.10] - 2026-07-17
+
+### Changed
+
+- **repo**: add root CONTRIBUTING.md pointer and remove stray findings.md (#1455)
+  (504e31d)
+- replace bare assert with assertpy assert_that across test suite (#1389) (4fc76f4)
+- move inline tool sample inputs to test_samples fixtures (#1382) (9f75984)
+
+### Fixed
+
+- **mypy**: run mypy from project root for individual files (#1270) (75ffacb)
+
+## [0.80.9] - 2026-07-17
+
+### Fixed
+
+- **core**: route programmatic execution through real library API (#1269) (6e5cda4)
+
+## [0.80.8] - 2026-07-17
+
+### Fixed
+
+- **tools**: preserve explicit timeout=0 and route ruff through _prepare_execution
+  (#1266) (ca1b013)
+
+## [0.80.7] - 2026-07-17
+
+### Changed
+
+- **deps**: update ubuntu:latest docker digest to 3131b4c (#1468) (6fd6e6b)
+- **ai**: remove process-global os.chdir from rerun path (#1265) (9103dbc)
+
+### Fixed
+
+- **execution**: handle BaseException in gather results and nested event loops (#1264)
+  (7252969)
+
+## [0.80.6] - 2026-07-16
+
+### Changed
+
+- **tools**: rename manifest ToolRegistry to ManifestRegistry (#1260) (f729796)
+
 - **tools/core**: rename `lintro.tools.core.tool_registry.ToolRegistry` to
   `ManifestRegistry` to disambiguate it from `lintro.plugins.registry.ToolRegistry`
   (#1220)
@@ -23,11 +75,9 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   of `ManifestRegistry`; importing or using the old name now emits a
   `DeprecationWarning` and will be removed in a future release (#1220)
 
-### Removed
-
 ### Fixed
 
-### Security
+- **ci**: use valid npm range syntax for astro allowedVersions (#1454) (e012d9d)
 
 ## [0.80.5] - 2026-07-16
 

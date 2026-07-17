@@ -57,7 +57,7 @@ def hooks() -> list[dict[str, object]]:
     content = HOOKS_FILE.read_text(encoding="utf-8")
     loaded = yaml.safe_load(content)
     assert_that(loaded).is_type_of(list)
-    assert isinstance(loaded, list)
+    assert isinstance(loaded, list)  # narrow type for mypy
     return cast(list[dict[str, object]], loaded)
 
 
