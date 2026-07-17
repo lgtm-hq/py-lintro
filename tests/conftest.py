@@ -392,6 +392,18 @@ def generated_version_artifacts(
     return out_dir
 
 
+@pytest.fixture(autouse=True)
+def _clear_tool_snapshot_cache() -> Generator[None]:
+    """Clear capability-probe caches so tests do not share stale snapshots."""
+    from lintro.tools.core.snapshots import clear_snapshot_cache, set_force_fresh_probes
+
+    clear_snapshot_cache()
+    set_force_fresh_probes(False)
+    yield
+    clear_snapshot_cache()
+    set_force_fresh_probes(False)
+
+
 """Shared fixtures used across tests in this repository."""
 
 

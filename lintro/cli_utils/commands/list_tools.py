@@ -106,6 +106,8 @@ def list_tools(
         json_output: Output tool list as JSON.
         verbose: Show verbose output including file extensions and patterns.
     """
+    from lintro.tools.core.snapshots import probe_all_tools
+
     available_tools = tool_manager.get_all_tools()
     check_tools = tool_manager.get_check_tools()
     fix_tools = tool_manager.get_fix_tools()
@@ -118,6 +120,7 @@ def list_tools(
             start=1,
         )
     }
+    snapshots = probe_all_tools(tool_names=list(available_tools.keys()))
 
     # JSON output mode
     if json_output:
@@ -130,6 +133,7 @@ def list_tools(
                 fix_tools=fix_tools,
             )
 
+            snap = snapshots.get(tool_name.lower())
             tool_info: dict[str, object] = {
                 "description": plugin.definition.description,
                 "capabilities": capabilities,
@@ -137,7 +141,15 @@ def list_tools(
                 "position": order_positions[tool_name],
                 "syncable": is_tool_injectable(tool_name),
                 "origin": ToolRegistry.get_origin(tool_name),
+                "available": bool(snap.available) if snap else False,
+                "version": snap.version if snap else None,
+                "probe_error": snap.probe_error if snap else None,
             }
+            if snap is not None:
+                tool_info["runtime_capabilities"] = snap.capabilities.to_dict()
+                if not snap.available:
+                    tool_info["status"] = "unavailable"
+                    tool_info["remediation_hint"] = snap.remediation_hint
 
             # Only include file_patterns in verbose mode (consistent with table output)
             if verbose:
@@ -162,6 +174,7 @@ def list_tools(
     # Main tools table
     table = Table(title="Tool Details")
     table.add_column("Tool", style="cyan", no_wrap=True)
+    table.add_column("Status", style="yellow")
     table.add_column("Description", style="white", max_width=40)
     table.add_column("Capabilities", style="green")
     table.add_column("Order", justify="center", style="yellow")
@@ -174,6 +187,14 @@ def list_tools(
     for tool_name, plugin in available_tools.items():
         tool_description = plugin.definition.description
         emoji = get_tool_emoji(tool_name)
+        snap = snapshots.get(tool_name.lower())
+        if snap is None:
+            status_display = "unknown"
+        elif snap.available:
+            version = snap.version or "?"
+            status_display = f"ok ({version})"
+        else:
+            status_display = "unavailable"
 
         # Capabilities
         tool_capabilities = _tool_capabilities(
@@ -193,6 +214,7 @@ def list_tools(
 
         row = [
             f"{emoji} {tool_name}",
+            status_display,
             tool_description,
             caps_display,
             str(position),
@@ -222,7 +244,9 @@ def list_tools(
     summary_table.add_column("Metric", style="cyan", width=20)
     summary_table.add_column("Count", style="yellow", justify="right")
 
+    available_count = sum(1 for s in snapshots.values() if s.available)
     summary_table.add_row("📊 Total tools", str(len(available_tools)))
+    summary_table.add_row("✅ Runtime available", str(available_count))
     summary_table.add_row("🔍 Check tools", str(len(check_tools)))
     summary_table.add_row("🔧 Fix tools", str(len(fix_tools)))
 
@@ -236,6 +260,7 @@ def list_tools(
                 available_tools=available_tools,
                 check_tools=check_tools,
                 fix_tools=fix_tools,
+                snapshots=snapshots,
             )
             with open(output, "w", encoding="utf-8") as f:
                 f.write("\n".join(output_lines) + "\n")
@@ -249,6 +274,7 @@ def _generate_plain_text_output(
     available_tools: dict[str, BaseToolPlugin],
     check_tools: dict[str, BaseToolPlugin],
     fix_tools: dict[str, BaseToolPlugin],
+    snapshots: dict[str, object] | None = None,
 ) -> list[str]:
     """Generate plain text output for file writing.
 
@@ -256,12 +282,14 @@ def _generate_plain_text_output(
         available_tools: Dictionary of available tools.
         check_tools: Dictionary of check-capable tools.
         fix_tools: Dictionary of fix-capable tools.
+        snapshots: Optional capability snapshots keyed by tool name.
 
     Returns:
         List of output lines.
     """
     output_lines: list[str] = []
     border = "=" * 70
+    snapshots = snapshots or {}
 
     output_lines.append(border)
     output_lines.append("Available Tools")
@@ -280,8 +308,16 @@ def _generate_plain_text_output(
         )
 
         capabilities_display = ", ".join(capabilities) if capabilities else "-"
+        snap = snapshots.get(tool_name.lower())
+        if snap is None:
+            runtime_status = "unknown"
+        elif getattr(snap, "available", False):
+            runtime_status = f"ok ({getattr(snap, 'version', None) or '?'})"
+        else:
+            runtime_status = "unavailable"
 
         output_lines.append(f"{emoji} {tool_name}: {tool_description}")
+        output_lines.append(f"  Status: {runtime_status}")
         output_lines.append(f"  Capabilities: {capabilities_display}")
         output_lines.append(f"  Origin: {ToolRegistry.get_origin(tool_name)}")
 
