@@ -229,6 +229,34 @@ def test_prepare_templates_for_ruff_renders_py_jinja(tmp_path: Path) -> None:
         session.cleanup()
 
 
+def test_translate_issue_skips_ambiguous_basename(
+    tmp_path: Path,
+) -> None:
+    """Ambiguous basename matches leave the issue unmapped."""
+    from lintro.template_aware.source_map import SourceMap
+    from lintro.template_aware.translator import translate_issue
+
+    map_a = SourceMap(
+        original_path=str((tmp_path / "a" / "main.py.jinja").resolve()),
+        rendered_path=str((tmp_path / "t0" / "main.py").resolve()),
+        rendered_to_original={1: 1},
+    )
+    map_b = SourceMap(
+        original_path=str((tmp_path / "b" / "main.py.jinja").resolve()),
+        rendered_path=str((tmp_path / "t1" / "main.py").resolve()),
+        rendered_to_original={1: 1},
+    )
+    issue = BaseIssue(file="main.py", line=1, message="x")
+    translated = translate_issue(
+        issue=issue,
+        source_maps={
+            map_a.rendered_path: map_a,
+            map_b.rendered_path: map_b,
+        },
+    )
+    assert_that(translated.file).is_equal_to("main.py")
+
+
 def test_render_translate_round_trip(tmp_path: Path) -> None:
     """Render → fake lint issue → translate restores original line."""
     template = tmp_path / "svc.py.jinja"
