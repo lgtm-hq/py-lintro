@@ -20,7 +20,11 @@ from lintro.ai.doctor_checks import AICheckResult, check_ai_configuration
 from lintro.enums.tool_status import ToolStatus
 from lintro.tools.core.install_context import RuntimeContext
 from lintro.tools.core.install_strategies import get_strategy
-from lintro.tools.core.tool_registry import CATEGORY_LABELS, ManifestTool, ToolRegistry
+from lintro.tools.core.tool_registry import (
+    CATEGORY_LABELS,
+    ManifestRegistry,
+    ManifestTool,
+)
 from lintro.tools.core.version_parsing import (
     compare_versions,
     extract_version_from_output,
@@ -468,7 +472,7 @@ def doctor_command(
     """
     display_console = Console()
 
-    registry = ToolRegistry.load()
+    registry = ManifestRegistry.load()
     context = RuntimeContext.detect()
 
     env_report = None
@@ -837,7 +841,7 @@ def _run_fix(
     console: Console,
     results: list[ToolCheckResult],
     context: RuntimeContext,
-    registry: ToolRegistry,
+    registry: ManifestRegistry,
 ) -> None:
     """Attempt to install missing/outdated tools via the central installer."""
     from lintro.tools.core.tool_installer import ToolInstaller

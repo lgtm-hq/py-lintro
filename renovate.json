@@ -90,6 +90,12 @@
       "automerge": false
     },
     {
+      "description": "Block malicious astro@7.1.0 (MAL-2026-10726); lift once a clean release ships",
+      "matchPackageNames": ["astro"],
+      "allowedVersions": "<7.1.0 || >7.1.0",
+      "automerge": false
+    },
+    {
       "description": "lintro-tools base image digest pin (FROM in Dockerfile); native docker digest support, full CI validates the bump",
       "matchDatasources": ["docker"],
       "matchPackageNames": [
