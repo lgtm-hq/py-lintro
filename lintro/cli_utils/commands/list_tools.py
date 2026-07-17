@@ -3,7 +3,11 @@
 This module provides the core logic for the 'list_tools' command.
 """
 
+from __future__ import annotations
+
 import json as json_lib
+from collections.abc import Mapping
+from typing import TYPE_CHECKING
 
 import click
 from rich.console import Console
@@ -17,6 +21,10 @@ from lintro.tools import tool_manager
 from lintro.tools.core.scheduler import derive_execution_order
 from lintro.utils.console import get_tool_emoji
 from lintro.utils.unified_config import is_tool_injectable
+
+if TYPE_CHECKING:
+    from lintro.tools.core.snapshots import ToolSnapshot
+
 
 #: Capability label reported for advisory AI finders, which run under
 #: ``lintro review`` instead of ``chk``/``fmt`` (#1308).
@@ -274,7 +282,7 @@ def _generate_plain_text_output(
     available_tools: dict[str, BaseToolPlugin],
     check_tools: dict[str, BaseToolPlugin],
     fix_tools: dict[str, BaseToolPlugin],
-    snapshots: dict[str, object] | None = None,
+    snapshots: Mapping[str, ToolSnapshot] | None = None,
 ) -> list[str]:
     """Generate plain text output for file writing.
 

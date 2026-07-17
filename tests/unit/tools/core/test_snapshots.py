@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import json
 import time
-from pathlib import Path
 from collections.abc import Iterator
+from pathlib import Path
 from typing import Any
 from unittest.mock import MagicMock, patch
 
@@ -362,6 +362,7 @@ def test_verify_tool_version_uses_unavailable_snapshot() -> None:
         result = verify_tool_version(definition)
 
     assert_that(result).is_not_none()
+    assert result is not None
     assert_that(result.unavailable).is_true()
     assert_that(result.success).is_true()
 
