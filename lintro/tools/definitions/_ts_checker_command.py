@@ -173,14 +173,13 @@ def _build_command(
     return cmd
 
 
-def doc_url(plugin: TypeScriptCheckerPlugin, code: str) -> str | None:
+def doc_url(code: str) -> str | None:
     """Return TypeScript error documentation URL.
 
     Uses typescript.tv, a third-party error reference, since the
     official TypeScript handbook does not provide per-error pages.
 
     Args:
-        plugin: TypeScript-checker plugin instance.
         code: TypeScript error code (e.g., "TS2307" or "2307").
 
     Returns:

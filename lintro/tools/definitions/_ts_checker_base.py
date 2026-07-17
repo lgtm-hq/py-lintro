@@ -192,7 +192,6 @@ class TypeScriptCheckerPlugin(BaseToolPlugin):
             URL to the TypeScript error documentation, or None if invalid.
         """
         return ts_cmd.doc_url(
-            plugin=self,
             code=code,
         )
 
