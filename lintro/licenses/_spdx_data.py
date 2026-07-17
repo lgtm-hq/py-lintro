@@ -1,11 +1,11 @@
 """Auto-generated SPDX license identifiers. Do not edit by hand.
 
 Run ``python3 scripts/release/generate_spdx_data.py`` to regenerate.
-
-Source: https://spdx.org/licenses/licenses.json
-licenseListVersion: 3.28.0
-releaseDate: 2026-02-20T00:00:00Z
 """
+
+# Source: https://spdx.org/licenses/licenses.json
+# licenseListVersion: "3.28.0"
+# releaseDate: "2026-02-20T00:00:00Z"
 
 from __future__ import annotations
 

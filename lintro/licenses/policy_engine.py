@@ -170,9 +170,11 @@ class LicensePolicyEngine:
         """
         expression = parse_license_expression(license_id)
         if expression is None:
-            # Already-normalized single ids that license-expression rejects
-            # (e.g. policy-only markers) still use the flat classifier.
-            return self._classify_single(package=package, license_id=license_id)
+            # Policy-only markers (e.g. Commons-Clause) may be allow/deny listed
+            # without being parseable SPDX; everything else follows unknown_policy.
+            if license_id in self.allowed or license_id in self.denied:
+                return self._classify_single(package=package, license_id=license_id)
+            return self._classify_unknown(package)
 
         return self._evaluate_parsed(
             package=package,
