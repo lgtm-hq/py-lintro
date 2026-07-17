@@ -21,6 +21,13 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.80.8] - 2026-07-17
+
+### Fixed
+
+- **tools**: preserve explicit timeout=0 and route ruff through _prepare_execution
+  (#1266) (ca1b013)
+
 ## [0.80.7] - 2026-07-17
 
 ### Changed
