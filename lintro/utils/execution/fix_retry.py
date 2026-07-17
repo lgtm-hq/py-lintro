@@ -39,8 +39,12 @@ def run_fix_with_retry(
         ToolResult: Merged result across all passes.
     """
     from loguru import logger
+    from lintro.utils.tool_executor import _finalize_template_aware_result
 
-    result = tool.fix(paths, options)
+    result = _finalize_template_aware_result(
+        tool=tool,
+        result=tool.fix(paths, options),
+    )
 
     if max_retries <= 1:
         return result
@@ -58,7 +62,10 @@ def run_fix_with_retry(
             f"{getattr(getattr(tool, 'definition', None), 'name', 'unknown')} "
             f"({remaining} remaining issues)",
         )
-        result = tool.fix(paths, options)
+        result = _finalize_template_aware_result(
+            tool=tool,
+            result=tool.fix(paths, options),
+        )
         remaining = get_remaining_count(result)
 
     # Merge: keep initial_issues_count and initial_issues from first pass,
