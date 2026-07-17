@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
 from assertpy import assert_that
 
 from lintro.config.template_aware_config import (
@@ -142,6 +143,42 @@ def test_sentinel_keeps_if_true_branch(tmp_path: Path) -> None:
 
     assert_that(rendered).contains("enabled = True")
     assert_that(rendered).does_not_contain("enabled = False")
+
+
+def test_render_template_swallows_runtime_error(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """TemplateRuntimeError falls back to original text instead of crashing."""
+    from jinja2 import Template
+    from jinja2.exceptions import TemplateRuntimeError
+
+    template = tmp_path / "bad.py.jinja"
+    original = "VALUE = '{{ project_name }}'\n"
+    template.write_text(original, encoding="utf-8")
+    config = TemplateAwareConfig(enabled=True, stub_strategy=StubStrategy.SENTINEL)
+
+    def _boom(self: Template, *args: object, **kwargs: object) -> str:
+        raise TemplateRuntimeError("simulated runtime failure")
+
+    monkeypatch.setattr(Template, "render", _boom)
+
+    rendered, source_map = render_template(template_path=template, config=config)
+
+    assert_that(rendered).is_equal_to(original)
+    assert_that(source_map.lookup_line(1)).is_equal_to(1)
+
+
+def test_render_template_swallows_missing_include(tmp_path: Path) -> None:
+    """Missing {% include %} (TemplateError) degrades to original text."""
+    template = tmp_path / "inc.py.jinja"
+    original = "{% include 'missing-fragment.j2' %}\nx = 1\n"
+    template.write_text(original, encoding="utf-8")
+    config = TemplateAwareConfig(enabled=True, stub_strategy=StubStrategy.SENTINEL)
+
+    rendered, _source_map = render_template(template_path=template, config=config)
+
+    assert_that(rendered).is_equal_to(original)
 
 
 def test_rendered_filename_strips_jinja_without_doubling() -> None:
