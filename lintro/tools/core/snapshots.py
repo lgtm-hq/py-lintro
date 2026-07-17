@@ -91,6 +91,8 @@ class ToolSnapshot:
         binary_mtime: mtime of the binary when probed (0.0 when missing).
         version_check_passed: Whether the installed version meets the minimum.
         min_version: Minimum required version used during the probe.
+        recommended_version: Recommended version from requirements, if any.
+        below_recommended: True when installed version is below recommended.
     """
 
     name: str
@@ -103,6 +105,8 @@ class ToolSnapshot:
     binary_mtime: float = 0.0
     version_check_passed: bool = False
     min_version: str = ""
+    recommended_version: str = ""
+    below_recommended: bool = False
 
     def to_dict(self) -> dict[str, Any]:
         """Serialize the snapshot for JSON cache / API output.
@@ -121,6 +125,8 @@ class ToolSnapshot:
             "binary_mtime": self.binary_mtime,
             "version_check_passed": self.version_check_passed,
             "min_version": self.min_version,
+            "recommended_version": self.recommended_version,
+            "below_recommended": self.below_recommended,
         }
 
     @classmethod
@@ -144,6 +150,8 @@ class ToolSnapshot:
             binary_mtime=float(data.get("binary_mtime", 0.0) or 0.0),
             version_check_passed=bool(data.get("version_check_passed", False)),
             min_version=str(data.get("min_version", "") or ""),
+            recommended_version=str(data.get("recommended_version", "") or ""),
+            below_recommended=bool(data.get("below_recommended", False)),
         )
 
     def cache_key_matches(
@@ -376,6 +384,8 @@ def probe_tool(
             binary_mtime=0.0,
             version_check_passed=True,
             min_version="",
+            recommended_version="",
+            below_recommended=False,
         )
 
     command = get_executable_command(definition.name)
@@ -391,6 +401,8 @@ def probe_tool(
         command,
         append_version=True,
     )
+    recommended = version_info.recommended_version or ""
+    below_rec = bool(version_info.below_recommended)
 
     if (
         version_info.current_version is None
@@ -411,6 +423,8 @@ def probe_tool(
             binary_mtime=binary_mtime,
             version_check_passed=True,
             min_version=version_info.min_version,
+            recommended_version=recommended,
+            below_recommended=below_rec,
         )
 
     if version_info.version_check_passed:
@@ -451,6 +465,8 @@ def probe_tool(
             binary_mtime=binary_mtime,
             version_check_passed=True,
             min_version=version_info.min_version,
+            recommended_version=recommended,
+            below_recommended=below_rec,
         )
 
     # Version below minimum: still "available" so consumers can skip with
@@ -471,6 +487,8 @@ def probe_tool(
             binary_mtime=binary_mtime,
             version_check_passed=False,
             min_version=version_info.min_version,
+            recommended_version=recommended,
+            below_recommended=below_rec,
         )
 
     probe_error = version_info.error_message or f"{main_cmd} not found in PATH"
@@ -624,7 +642,7 @@ def _probe_all_fresh(
             name = futures[future]
             try:
                 results[name.lower()] = future.result()
-            except (OSError, RuntimeError, ValueError) as exc:
+            except Exception as exc:  # noqa: BLE001 - keep probing other tools
                 logger.debug("Probe failed for {}: {}", name, exc)
                 results[name.lower()] = _unavailable_snapshot(
                     name.lower(),
@@ -668,6 +686,7 @@ def probe_all_tools(
     except (ImportError, OSError, ValueError, AttributeError, RuntimeError):
         max_workers = 8
 
+    force_effective = False
     with _cache_lock:
         force_effective = force or _force_fresh
         if (
@@ -680,13 +699,27 @@ def probe_all_tools(
         ):
             return {n: _memory_cache[n] for n in names}
 
-        if not force_effective:
-            disk = _load_disk_cache(cache_file, ttl=ttl)
-            if disk is not None and all(n in disk for n in names):
-                _memory_cache = disk
-                _memory_cache_path = cache_file
-                _memory_probed_at = time.time()
-                return {n: disk[n] for n in names}
+    # Disk I/O outside the lock so slow mounts do not block other callers.
+    disk: dict[str, ToolSnapshot] | None = None
+    if not force_effective:
+        disk = _load_disk_cache(cache_file, ttl=ttl)
+
+    with _cache_lock:
+        # Re-check memory: another thread may have filled the cache.
+        if (
+            not force_effective
+            and _memory_cache is not None
+            and _memory_cache_path == cache_file
+            and _memory_probed_at is not None
+            and time.time() - _memory_probed_at <= ttl
+            and all(n in _memory_cache for n in names)
+        ):
+            return {n: _memory_cache[n] for n in names}
+        if disk is not None and all(n in disk for n in names):
+            _memory_cache = disk
+            _memory_cache_path = cache_file
+            _memory_probed_at = time.time()
+            return {n: disk[n] for n in names}
 
     fresh = _probe_all_fresh(names, search_root=root, max_workers=max_workers)
 
@@ -697,8 +730,10 @@ def probe_all_tools(
         _memory_cache_path = cache_file
         _memory_probed_at = time.time()
         _force_fresh = False
-        _write_disk_cache(cache_file, merged, ttl=ttl)
-        return {n: fresh[n] for n in names if n in fresh}
+        to_write = dict(merged)
+
+    _write_disk_cache(cache_file, to_write, ttl=ttl)
+    return {n: fresh[n] for n in names if n in fresh}
 
 
 def get_tool_snapshot(

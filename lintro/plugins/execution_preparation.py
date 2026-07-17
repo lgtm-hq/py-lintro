@@ -176,12 +176,12 @@ def verify_tool_version(
         )
 
     if snapshot.version_check_passed:
-        if getattr(snapshot, "below_recommended", False):
+        if snapshot.below_recommended:
             logger.warning(
                 "{} {} is below recommended version {} (minimum {} met)",
                 definition.name,
                 snapshot.version,
-                getattr(snapshot, "recommended_version", None),
+                snapshot.recommended_version,
                 snapshot.min_version,
             )
         return None
