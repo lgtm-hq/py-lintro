@@ -17,6 +17,7 @@ from lintro.tools.definitions.mypy import (
     MypyPlugin,
     _has_no_python_files_error,
 )
+from tests.test_samples_helpers import copy_sample
 
 
 @pytest.mark.parametrize(
@@ -113,7 +114,14 @@ def test_check_no_python_files_error_output_skips_cleanly(
     # A real Python file makes lintro's pre-flight discovery pass so that mypy
     # is actually invoked; the mocked subprocess then simulates mypy resolving
     # an empty scope on its own.
-    (tmp_path / "module.py").write_text('"""Module."""\n')
+    copy_sample(
+        tmp_path,
+        "tools",
+        "python",
+        "mypy",
+        "mypy_module.py",
+        dest_name="module.py",
+    )
 
     with patch(
         "lintro.plugins.execution_preparation.verify_tool_version",
@@ -142,7 +150,14 @@ def test_check_python_file_clean_run_unchanged(
         mypy_plugin: The MypyPlugin instance to test.
         tmp_path: Temporary directory path for test files.
     """
-    (tmp_path / "module.py").write_text('"""Module."""\n')
+    copy_sample(
+        tmp_path,
+        "tools",
+        "python",
+        "mypy",
+        "mypy_module.py",
+        dest_name="module.py",
+    )
 
     with patch(
         "lintro.plugins.execution_preparation.verify_tool_version",
@@ -169,7 +184,14 @@ def test_check_python_file_with_issue_still_fails(
         mypy_plugin: The MypyPlugin instance to test.
         tmp_path: Temporary directory path for test files.
     """
-    (tmp_path / "module.py").write_text('"""Module."""\n')
+    copy_sample(
+        tmp_path,
+        "tools",
+        "python",
+        "mypy",
+        "mypy_module.py",
+        dest_name="module.py",
+    )
     payload = (
         '[{"path": "module.py", "line": 1, "column": 0, '
         '"severity": "error", "message": "boom", "code": "misc"}]'
@@ -203,7 +225,14 @@ def test_check_marker_text_with_issue_does_not_suppress(
         mypy_plugin: The MypyPlugin instance to test.
         tmp_path: Temporary directory path for test files.
     """
-    (tmp_path / "module.py").write_text('"""Module."""\n')
+    copy_sample(
+        tmp_path,
+        "tools",
+        "python",
+        "mypy",
+        "mypy_module.py",
+        dest_name="module.py",
+    )
     payload = (
         '[{"path": "module.py", "line": 1, "column": 0, '
         '"severity": "error", "message": "no .py[i] files", "code": "misc"}]'

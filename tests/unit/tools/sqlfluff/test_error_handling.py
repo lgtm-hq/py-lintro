@@ -12,6 +12,7 @@ from lintro.tools.definitions.sqlfluff import (
     SQLFLUFF_DEFAULT_TIMEOUT,
     SqlfluffPlugin,
 )
+from tests.test_samples_helpers import copy_sample
 
 # Tests for check method error handling
 
@@ -27,7 +28,14 @@ def test_check_with_timeout(
         tmp_path: Temporary directory path for test files.
     """
     test_file = tmp_path / "test_query.sql"
-    test_file.write_text("SELECT * FROM users;\n")
+    copy_sample(
+        tmp_path,
+        "tools",
+        "sql",
+        "sqlfluff",
+        "sqlfluff_violations.sql",
+        dest_name=test_file.name,
+    )
 
     # Note: verify_tool_version is already patched by the sqlfluff_plugin fixture
     with patch.object(
@@ -54,7 +62,14 @@ def test_check_with_empty_output(
         tmp_path: Temporary directory path for test files.
     """
     test_file = tmp_path / "test_query.sql"
-    test_file.write_text("SELECT * FROM users;\n")
+    copy_sample(
+        tmp_path,
+        "tools",
+        "sql",
+        "sqlfluff",
+        "sqlfluff_violations.sql",
+        dest_name=test_file.name,
+    )
 
     # Note: verify_tool_version is already patched by the sqlfluff_plugin fixture
     with patch.object(
@@ -82,7 +97,14 @@ def test_fix_with_timeout(
         tmp_path: Temporary directory path for test files.
     """
     test_file = tmp_path / "test_query.sql"
-    test_file.write_text("select * from users;\n")
+    copy_sample(
+        tmp_path,
+        "tools",
+        "sql",
+        "sqlfluff",
+        "sqlfluff_violations.sql",
+        dest_name=test_file.name,
+    )
 
     # Note: verify_tool_version is already patched by the sqlfluff_plugin fixture
     with patch.object(
