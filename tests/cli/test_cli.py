@@ -76,7 +76,7 @@ def _assert_help_succeeds_under_ascii_stdio(*, env: dict[str, str]) -> None:
         subprocess.run(  # nosec B603 - fixed argv run against project CLI; shell=False
             [sys.executable, "-m", "lintro", "--help"],
             capture_output=True,
-            text=True,
+            encoding="utf-8",
             timeout=30,
             env=env,
             check=False,

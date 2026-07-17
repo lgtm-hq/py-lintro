@@ -78,6 +78,8 @@ def test_main_entry_point() -> None:
         patch("lintro.cli.cli") as mock_cli,
     ):
         mock_cli.return_value = None
+        # Fail if cli() runs before UTF-8 stdio is forced.
+        mock_cli.side_effect = lambda: mock_ensure.assert_called_once_with()
         # main() calls cli() which is a Click command
         with contextlib.suppress(SystemExit):
             main()
@@ -92,6 +94,8 @@ def test_main_entry_point() -> None:
         ("UTF-8", True),
         ("utf8", True),
         ("UTF8", True),
+        ("utf_8", True),
+        ("UTF_8", True),
         ("ascii", False),
         ("US-ASCII", False),
         ("latin-1", False),
@@ -102,6 +106,8 @@ def test_main_entry_point() -> None:
         "UTF-8",
         "utf8",
         "UTF8",
+        "utf_8",
+        "UTF_8",
         "ascii",
         "US-ASCII",
         "latin-1",

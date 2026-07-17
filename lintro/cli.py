@@ -1,5 +1,6 @@
 """Command-line interface for Lintro."""
 
+import codecs
 import contextlib
 import sys
 from typing import Any, TextIO, cast
@@ -26,7 +27,11 @@ def _is_utf8_encoding(encoding: str | None) -> bool:
     """
     if encoding is None:
         return False
-    return encoding.lower().replace("-", "") == "utf8"
+    try:
+        return codecs.lookup(encoding).name == "utf-8"
+    except LookupError:
+        normalized = encoding.lower().replace("-", "").replace("_", "")
+        return normalized == "utf8"
 
 
 def _reconfigure_stream_utf8(stream: TextIO) -> None:
@@ -38,10 +43,10 @@ def _reconfigure_stream_utf8(stream: TextIO) -> None:
     if _is_utf8_encoding(getattr(stream, "encoding", None)):
         return
     reconfigure = getattr(stream, "reconfigure", None)
-    if reconfigure is None:
+    if not callable(reconfigure):
         return
     # Closed streams or non-reconfigurable wrappers — leave as-is.
-    with contextlib.suppress(OSError, ValueError, AttributeError):
+    with contextlib.suppress(OSError, ValueError, AttributeError, TypeError):
         reconfigure(encoding="utf-8", errors="replace")
 
 
