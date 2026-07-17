@@ -383,66 +383,107 @@ def probe_tool(
     binary_path = shutil.which(main_cmd) or ""
     binary_mtime = _binary_mtime(binary_path)
 
-    if not binary_path:
-        return _unavailable_snapshot(
-            name,
-            probe_error=f"{main_cmd} not found in PATH",
-            remediation_hint=remediation,
-            capabilities=capabilities,
-        )
-
-    # Match verify_tool_version's historical probe: use the resolved
-    # executable command (python -m / bunx / cargo wrappers) rather than the
-    # raw manifest version_command, which may name a binary not on PATH.
+    # Always run the version probe — do not gate on shutil.which alone.
+    # Wrappers (bunx/npx/python -m) and test mocks of subprocess.run can
+    # succeed even when the bare binary name is absent from PATH.
     version_info = check_tool_version(
         definition.name,
         command,
         append_version=True,
     )
 
-    if version_info.current_version is None and version_info.error_message:
-        # Binary exists but version probe failed — still mark unavailable so
-        # consumers can degrade gracefully instead of mid-run errors.
-        parse_ok = "Could not parse version" in (version_info.error_message or "")
-        if parse_ok and binary_path:
-            # Unparseable version with a live binary: treat as available but
-            # note that the version check could not be completed.
-            return ToolSnapshot(
-                name=name,
-                available=True,
-                version=None,
-                capabilities=capabilities,
-                probe_error=version_info.error_message,
-                remediation_hint=remediation,
-                binary_path=binary_path,
-                binary_mtime=binary_mtime,
-                version_check_passed=True,
-                min_version=version_info.min_version,
-            )
-        return _unavailable_snapshot(
-            name,
+    if (
+        version_info.current_version is None
+        and version_info.error_message
+        and "Could not parse version" in version_info.error_message
+        and binary_path
+    ):
+        # Unparseable version with a live binary: treat as available but
+        # note that the version check could not be completed.
+        return ToolSnapshot(
+            name=name,
+            available=True,
+            version=None,
+            capabilities=capabilities,
             probe_error=version_info.error_message,
             remediation_hint=remediation,
             binary_path=binary_path,
             binary_mtime=binary_mtime,
-            capabilities=capabilities,
+            version_check_passed=True,
             min_version=version_info.min_version,
         )
 
-    return ToolSnapshot(
-        name=name,
-        available=True,
-        version=version_info.current_version,
-        capabilities=capabilities,
-        probe_error=(
-            None
-            if version_info.version_check_passed
-            else version_info.error_message
-        ),
+    if version_info.version_check_passed:
+        # Tools without a declared minimum still set version_check_passed on
+        # OSError. Treat a failed probe with no parsed version as unavailable
+        # so missing binaries degrade visibly instead of proceeding.
+        if (
+            version_info.current_version is None
+            and version_info.error_message
+            and (
+                "Failed to run version check" in version_info.error_message
+                or "Command failed" in version_info.error_message
+                or "not found" in version_info.error_message.lower()
+            )
+        ):
+            probe_error = (
+                f"{main_cmd} not found in PATH"
+                if not binary_path
+                else version_info.error_message
+            )
+            return _unavailable_snapshot(
+                name,
+                probe_error=probe_error,
+                remediation_hint=remediation,
+                binary_path=binary_path,
+                binary_mtime=binary_mtime,
+                capabilities=capabilities,
+                min_version=version_info.min_version,
+            )
+        return ToolSnapshot(
+            name=name,
+            available=True,
+            version=version_info.current_version,
+            capabilities=capabilities,
+            probe_error=None,
+            remediation_hint=remediation,
+            binary_path=binary_path,
+            binary_mtime=binary_mtime,
+            version_check_passed=True,
+            min_version=version_info.min_version,
+        )
+
+    # Version below minimum: still "available" so consumers can skip with
+    # the same remediation messaging as before.
+    if (
+        version_info.current_version is not None
+        and version_info.error_message
+        and "below minimum" in version_info.error_message
+    ):
+        return ToolSnapshot(
+            name=name,
+            available=True,
+            version=version_info.current_version,
+            capabilities=capabilities,
+            probe_error=version_info.error_message,
+            remediation_hint=remediation,
+            binary_path=binary_path,
+            binary_mtime=binary_mtime,
+            version_check_passed=False,
+            min_version=version_info.min_version,
+        )
+
+    probe_error = version_info.error_message or f"{main_cmd} not found in PATH"
+    if not binary_path and not version_info.error_message:
+        probe_error = f"{main_cmd} not found in PATH"
+
+    return _unavailable_snapshot(
+        name,
+        probe_error=probe_error,
         remediation_hint=remediation,
         binary_path=binary_path,
         binary_mtime=binary_mtime,
-        version_check_passed=version_info.version_check_passed,
+        capabilities=capabilities,
         min_version=version_info.min_version,
     )
 
