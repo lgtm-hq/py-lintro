@@ -362,7 +362,7 @@ def test_markdown_report_contains_headers() -> None:
 
 
 def _patch_doctor_deps() -> tuple[Any, Any]:
-    """Patch ToolRegistry.load and RuntimeContext.detect for CLI tests.
+    """Patch ManifestRegistry.load and RuntimeContext.detect for CLI tests.
 
     Returns:
         Tuple of two context-manager patches.
@@ -376,7 +376,7 @@ def _patch_doctor_deps() -> tuple[Any, Any]:
 
     return (
         patch(
-            "lintro.cli_utils.commands.doctor.ToolRegistry.load",
+            "lintro.cli_utils.commands.doctor.ManifestRegistry.load",
             return_value=registry,
         ),
         patch(

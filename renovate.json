@@ -8,6 +8,28 @@
   ],
   "packageRules": [
     {
+      "description": "Hold prettier 3.9.5+ until Docker integration prettier fixtures are updated",
+      "matchPackageNames": ["prettier"],
+      "allowedVersions": "<=3.9.4"
+    },
+    {
+      "description": "npm platform-binary placeholders are stamped at publish time; never bump in-repo",
+      "matchPackageNames": [
+        "/^@lgtm-hq\\/lintro(-|$)/"
+      ],
+      "enabled": false
+    },
+    {
+      "description": "Hold TypeScript 7 until Astro/@astrojs/check support it",
+      "matchPackageNames": ["typescript"],
+      "allowedVersions": "<7"
+    },
+    {
+      "description": "Hold js-yaml 5 until Astro migrates off default export / we update call sites",
+      "matchPackageNames": ["js-yaml"],
+      "allowedVersions": "<5"
+    },
+    {
       "matchDatasources": ["pypi"],
       "matchUpdateTypes": ["minor"],
       "automerge": false
@@ -68,6 +90,12 @@
       "automerge": false
     },
     {
+      "description": "Block malicious astro@7.1.0 (MAL-2026-10726); lift once a clean release ships",
+      "matchPackageNames": ["astro"],
+      "allowedVersions": "<7.1.0 || >7.1.0",
+      "automerge": false
+    },
+    {
       "description": "lintro-tools base image digest pin (FROM in Dockerfile); native docker digest support, full CI validates the bump",
       "matchDatasources": ["docker"],
       "matchPackageNames": [
@@ -77,13 +105,20 @@
       "automerge": false
     },
     {
-      "description": "Regenerate _tool_versions.py when tool version sources change",
-      "matchManagers": ["custom.regex"],
+      "description": "Regenerate version artifacts when tool version sources change",
+      "matchManagers": [
+        "custom.regex",
+        "npm",
+        "pep621",
+        "uv"
+      ],
       "matchFileNames": [
         "Dockerfile",
         "docker/tools.Dockerfile",
         "lintro/_tool_versions.py",
-        "lintro/tools/manifest.json"
+        "lintro/tools/manifest.json",
+        "package.json",
+        "pyproject.toml"
       ],
       "postUpgradeTasks": {
         "commands": [

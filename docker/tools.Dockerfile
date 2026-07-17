@@ -1,4 +1,4 @@
-# syntax=docker/dockerfile:1
+# syntax=docker/dockerfile:1@sha256:87999aa3d42bdc6bea60565083ee17e86d1f3339802f543c0d03998580f9cb89
 # =============================================================================
 # Lintro Tools Base Image
 # =============================================================================
@@ -20,10 +20,10 @@
 # root Dockerfile until the FROM flip lands (see issue #1360).
 # =============================================================================
 
-FROM python:3.14-slim@sha256:b877e50bd90de10af8d82c57a022fc2e0dc731c5320d762a27986facfc3355c1 AS tools
+FROM python:3.14-slim@sha256:d3400aa122fa42cf0af0dbe8ec3091b047eac5c8f7e3539f7135e86d855dc015 AS tools
 
 ARG BUN_VERSION=1.3.14
-ARG UV_VERSION=0.11.28
+ARG UV_VERSION=0.11.29
 
 LABEL maintainer="lgtm-hq"
 LABEL org.opencontainers.image.source="https://github.com/lgtm-hq/py-lintro"
