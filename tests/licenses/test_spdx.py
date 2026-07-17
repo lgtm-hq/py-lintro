@@ -59,6 +59,13 @@ def test_normalize_parenthesized_npm_expression() -> None:
     )
 
 
+def test_normalize_does_not_mangle_sibling_parentheticals() -> None:
+    """Sibling parentheticals are not stripped as a fake outer pair."""
+    assert_that(normalize_to_spdx("(MIT) OR (Apache-2.0)")).is_equal_to(
+        "MIT OR Apache-2.0",
+    )
+
+
 def test_normalize_and_expression_preserves_operands() -> None:
     """AND expressions are preserved in normalized SPDX form."""
     assert_that(normalize_to_spdx("MIT AND GPL-3.0-only")).is_equal_to(
