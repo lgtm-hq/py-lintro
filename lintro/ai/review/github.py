@@ -28,7 +28,9 @@ from lintro.ai.review.github_constants import (
 )
 from lintro.ai.review.github_errors import format_error_comment
 from lintro.ai.review.github_render import (
-    _format_findings_section,
+    _format_findings_section as _format_findings_section,
+)
+from lintro.ai.review.github_render import (
     _partition_findings,
     format_finding_comment,
     format_review_summary,
@@ -36,7 +38,9 @@ from lintro.ai.review.github_render import (
     sanitize_comment_text,
 )
 from lintro.ai.review.github_sticky import (
-    _cap_body,
+    _cap_body as _cap_body,
+)
+from lintro.ai.review.github_sticky import (
     build_sticky_comment,
     parse_review_state,
 )
@@ -48,8 +52,6 @@ __all__ = [
     "STATE_MARKER_PREFIX",
     "STICKY_MARKER",
     "MAX_COMMENT_CHARS",
-    "_cap_body",
-    "_format_findings_section",
     "build_sticky_comment",
     "format_error_comment",
     "format_finding_comment",
