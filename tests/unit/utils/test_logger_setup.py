@@ -14,7 +14,7 @@ from lintro.utils.logger_setup import setup_cli_logging, setup_execution_logging
 # =============================================================================
 
 
-@patch("lintro.utils.logger_setup.logger")
+@patch("loguru.logger")
 def test_setup_cli_logging_removes_handlers(mock_logger: MagicMock) -> None:
     """setup_cli_logging removes existing handlers.
 
@@ -26,7 +26,7 @@ def test_setup_cli_logging_removes_handlers(mock_logger: MagicMock) -> None:
     mock_logger.remove.assert_called_once()
 
 
-@patch("lintro.utils.logger_setup.logger")
+@patch("loguru.logger")
 def test_setup_cli_logging_adds_stderr_handler(mock_logger: MagicMock) -> None:
     """setup_cli_logging adds stderr handler.
 
@@ -46,7 +46,7 @@ def test_setup_cli_logging_adds_stderr_handler(mock_logger: MagicMock) -> None:
 # =============================================================================
 
 
-@patch("lintro.utils.logger_setup.logger")
+@patch("loguru.logger")
 def test_setup_execution_logging_removes_handlers(
     mock_logger: MagicMock,
     tmp_path: Path,
@@ -62,7 +62,7 @@ def test_setup_execution_logging_removes_handlers(
     mock_logger.remove.assert_called_once()
 
 
-@patch("lintro.utils.logger_setup.logger")
+@patch("loguru.logger")
 def test_setup_execution_logging_adds_console_and_file_handlers(
     mock_logger: MagicMock,
     tmp_path: Path,
@@ -79,7 +79,7 @@ def test_setup_execution_logging_adds_console_and_file_handlers(
     assert_that(mock_logger.add.call_count).is_equal_to(2)
 
 
-@patch("lintro.utils.logger_setup.logger")
+@patch("loguru.logger")
 def test_setup_execution_logging_debug_false_uses_warning(
     mock_logger: MagicMock,
     tmp_path: Path,
@@ -97,7 +97,7 @@ def test_setup_execution_logging_debug_false_uses_warning(
     assert_that(first_call.kwargs["level"]).is_equal_to("WARNING")
 
 
-@patch("lintro.utils.logger_setup.logger")
+@patch("loguru.logger")
 def test_setup_execution_logging_debug_true_uses_debug(
     mock_logger: MagicMock,
     tmp_path: Path,
@@ -115,7 +115,7 @@ def test_setup_execution_logging_debug_true_uses_debug(
     assert_that(first_call.kwargs["level"]).is_equal_to("DEBUG")
 
 
-@patch("lintro.utils.logger_setup.logger")
+@patch("loguru.logger")
 def test_setup_execution_logging_file_handler_uses_debug(
     mock_logger: MagicMock,
     tmp_path: Path,
@@ -133,7 +133,7 @@ def test_setup_execution_logging_file_handler_uses_debug(
     assert_that(second_call.kwargs["level"]).is_equal_to("DEBUG")
 
 
-@patch("lintro.utils.logger_setup.logger")
+@patch("loguru.logger")
 def test_setup_execution_logging_creates_run_dir(
     mock_logger: MagicMock,
     tmp_path: Path,
