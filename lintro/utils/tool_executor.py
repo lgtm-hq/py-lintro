@@ -581,6 +581,13 @@ def run_lint_tools_simple(
     tools_to_run = tools_result.to_run
     skipped_tools = tools_result.skipped
 
+    # Warm the shared capability snapshot cache in parallel so per-tool
+    # verify_tool_version calls hit memory/disk instead of re-probing.
+    if tools_to_run:
+        from lintro.tools.core.snapshots import probe_all_tools
+
+        probe_all_tools(tool_names=list(tools_to_run))
+
     if not tools_to_run and not skipped_tools:
         logger.console_output("No tools to run.")
         from lintro.config.config_loader import get_config

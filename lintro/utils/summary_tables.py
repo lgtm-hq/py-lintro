@@ -114,17 +114,22 @@ def _get_ai_unverified_count(result: object) -> int:
 
 
 def _is_result_skipped(result: object) -> tuple[bool, str]:
-    """Check if a tool result represents a skipped tool.
+    """Check if a tool result represents a skipped or unavailable tool.
 
-    Uses the first-class ``skipped`` field if available, falling back to
-    legacy output string matching for backward compatibility.
+    Uses the first-class ``unavailable`` / ``skipped`` fields if available,
+    falling back to legacy output string matching for backward compatibility.
 
     Args:
         result: Tool result object.
 
     Returns:
-        Tuple of (is_skipped, skip_reason).
+        Tuple of (is_non_run, reason). Unavailable tools are treated as
+        non-run so they appear in the summary instead of being silent.
     """
+    if getattr(result, "unavailable", False):
+        reason = getattr(result, "skip_reason", None) or ""
+        return True, reason or "unavailable"
+
     # First-class field (preferred)
     skipped = getattr(result, "skipped", False)
     if skipped:
@@ -142,6 +147,22 @@ def _is_result_skipped(result: object) -> tuple[bool, str]:
         return True, _extract_skip_reason(result_output)
 
     return False, ""
+
+
+def _non_run_status_label(result: object, reason: str) -> str:
+    """Format the summary-table status cell for skipped/unavailable tools.
+
+    Args:
+        result: Tool result object.
+        reason: Human-readable reason string (unused; notes column shows it).
+
+    Returns:
+        Colored status label string.
+    """
+    del reason  # notes column carries the reason
+    if getattr(result, "unavailable", False):
+        return f"{_YELLOW}⚠️  UNAVAIL{_RESET}"
+    return f"{_YELLOW}⏭️  SKIP{_RESET}"
 
 
 def count_affected_files(tool_results: Sequence[object]) -> int:
@@ -233,7 +254,7 @@ def print_summary_table(
                     summary_data.append(
                         [
                             tool_display,
-                            f"{_YELLOW}⏭️  SKIP{_RESET}",
+                            _non_run_status_label(result, skip_reason),
                             "-",
                             "-",
                             "-",
@@ -284,7 +305,7 @@ def print_summary_table(
                     summary_data.append(
                         [
                             tool_display,
-                            f"{_YELLOW}⏭️  SKIP{_RESET}",
+                            _non_run_status_label(result, skip_reason),
                             "-",
                             "-",
                             "-",
@@ -323,7 +344,7 @@ def print_summary_table(
                     summary_data.append(
                         [
                             tool_display,
-                            f"{_YELLOW}⏭️  SKIP{_RESET}",
+                            _non_run_status_label(result, skip_reason),
                             "-",  # Fixed
                             "-",  # AI-Applied
                             "-",  # AI-Resolved
@@ -423,7 +444,7 @@ def print_summary_table(
                     summary_data.append(
                         [
                             tool_display,
-                            f"{_YELLOW}⏭️  SKIP{_RESET}",
+                            _non_run_status_label(result, skip_reason),
                             "-",  # Issues
                             f"{_YELLOW}{skip_reason}{_RESET}" if skip_reason else "",
                         ],

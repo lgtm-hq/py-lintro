@@ -247,9 +247,20 @@ def test_verify_tool_version_passes_returns_none(
     Args:
         fake_tool_plugin: Fixture providing a FakeToolPlugin instance.
     """
-    with patch("lintro.tools.core.version_requirements.check_tool_version") as mock:
-        mock.return_value = MagicMock(version_check_passed=True)
+    from lintro.tools.core.snapshots import ToolCapabilities, ToolSnapshot
 
+    snap = ToolSnapshot(
+        name="fake-tool",
+        available=True,
+        version="1.0.0",
+        capabilities=ToolCapabilities(),
+        version_check_passed=True,
+        min_version="1.0.0",
+    )
+    with patch(
+        "lintro.tools.core.snapshots.get_tool_snapshot",
+        return_value=snap,
+    ):
         result = fake_tool_plugin._verify_tool_version()
 
         assert_that(result).is_none()
@@ -263,14 +274,22 @@ def test_verify_tool_version_fails_returns_skip_result(
     Args:
         fake_tool_plugin: Fixture providing a FakeToolPlugin instance.
     """
-    with patch("lintro.tools.core.version_requirements.check_tool_version") as mock:
-        mock.return_value = MagicMock(
-            version_check_passed=False,
-            error_message="Version too old",
-            min_version="1.0.0",
-            install_hint="pip install tool",
-        )
+    from lintro.tools.core.snapshots import ToolCapabilities, ToolSnapshot
 
+    snap = ToolSnapshot(
+        name="fake-tool",
+        available=True,
+        version="0.1.0",
+        capabilities=ToolCapabilities(),
+        probe_error="Version too old",
+        remediation_hint="pip install tool",
+        version_check_passed=False,
+        min_version="1.0.0",
+    )
+    with patch(
+        "lintro.tools.core.snapshots.get_tool_snapshot",
+        return_value=snap,
+    ):
         result = fake_tool_plugin._verify_tool_version()
 
         assert_that(result).is_not_none()

@@ -77,49 +77,52 @@ def get_executable_command(tool_name: str) -> list[str]:
 def verify_tool_version(definition: ToolDefinition) -> ToolResult | None:
     """Verify that the tool meets minimum version requirements.
 
+    Uses the cached capability snapshot so version data comes from a single
+    probe per binary (path + mtime + TTL). Unavailable tools return an
+    ``unavailable`` result instead of raising mid-run.
+
     Args:
         definition: Tool definition with name.
 
     Returns:
-        None if version check passes, or a skip result if it fails.
+        None if version check passes, or a skip/unavailable result if it fails.
     """
-    from lintro.tools.core.version_requirements import check_tool_version
+    from lintro.tools.core.snapshots import (
+        get_tool_snapshot,
+        is_strict_missing_tools,
+        snapshot_to_unavailable_result,
+    )
 
-    command = get_executable_command(definition.name)
-    version_info = check_tool_version(definition.name, command)
+    snapshot = get_tool_snapshot(definition.name)
 
-    if version_info.version_check_passed:
-        if version_info.below_recommended:
-            logger.warning(
-                "{} {} is below recommended version {} (minimum {} met)",
-                definition.name,
-                version_info.current_version,
-                version_info.recommended_version,
-                version_info.min_version,
-            )
+    if not snapshot.available:
+        return snapshot_to_unavailable_result(
+            snapshot,
+            strict=is_strict_missing_tools(),
+        )
+
+    if snapshot.version_check_passed:
         return None
 
     # Binary exists and responded but version could not be parsed — proceed
     if (
-        version_info.current_version is None
-        and version_info.error_message
-        and "Could not parse version" in version_info.error_message
+        snapshot.version is None
+        and snapshot.probe_error
+        and "Could not parse version" in snapshot.probe_error
     ):
-        import shutil
+        logger.debug(
+            "Could not parse version for {}, proceeding anyway",
+            definition.name,
+        )
+        return None
 
-        main_cmd = command[0] if command else definition.name
-        if shutil.which(main_cmd):
-            logger.debug(
-                "Could not parse version for {}, proceeding anyway",
-                definition.name,
-            )
-            return None
-
+    error = snapshot.probe_error or "version check failed"
+    hint = snapshot.remediation_hint or ""
     skip_message = (
-        f"Skipping {definition.name}: {version_info.error_message}. "
-        f"Minimum required: {version_info.min_version}. "
-        f"{version_info.install_hint}"
-    )
+        f"Skipping {definition.name}: {error}. "
+        f"Minimum required: {snapshot.min_version}. "
+        f"{hint}"
+    ).strip()
 
     return ToolResult(
         name=definition.name,
@@ -127,7 +130,7 @@ def verify_tool_version(definition: ToolDefinition) -> ToolResult | None:
         output=skip_message,
         issues_count=0,
         skipped=True,
-        skip_reason=version_info.error_message,
+        skip_reason=error,
     )
 
 

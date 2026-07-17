@@ -48,6 +48,13 @@ The configuration system works in a specific order:
    - `auto_install_deps`: Auto-install Node.js dependencies if missing. Unset by
      default, in which case Lintro falls back to container auto-detection (enabled
      inside containers, disabled otherwise)
+   - `tool_snapshot_ttl`: Seconds to cache tool capability probes under
+     `.lintro-cache/tool-snapshots.json` (default: `600`). Binary path + mtime
+     changes invalidate immediately. Use `lintro check --no-cache` to force a fresh
+     probe.
+   - `strict_missing_tools`: When `true`, unavailable tools fail the run (exit 1).
+     Default `false` — missing tools report `status: unavailable` with a
+     remediation hint and do not count as a lint failure.
 
 2. **Enforce Tier** - Cross-cutting settings injected as CLI flags
    - These settings override native configs via CLI arguments

@@ -85,6 +85,13 @@ def serialize_tool_result(
         "skip_reason": getattr(result, "skip_reason", None),
         "output": getattr(result, "output", ""),
     }
+    if getattr(result, "unavailable", False):
+        data["status"] = "unavailable"
+        data["unavailable"] = True
+    elif getattr(result, "skipped", False):
+        data["status"] = "skipped"
+    else:
+        data["status"] = "ok" if data["success"] else "failed"
     if result.parse_failures_count is not None:
         data["parse_failures_count"] = result.parse_failures_count
     if action == Action.FIX:

@@ -209,7 +209,7 @@ class ToolCache:
 
 
 def clear_all_caches() -> None:
-    """Clear all tool caches."""
+    """Clear all tool caches (incremental fingerprints + capability snapshots)."""
     if CACHE_DIR.exists():
         for cache_file in CACHE_DIR.glob("*.json"):
             try:
@@ -220,6 +220,14 @@ def clear_all_caches() -> None:
         logger.info("Cleared all incremental check caches")
     else:
         logger.debug("No cache directory to clear")
+
+    try:
+        from lintro.tools.core.snapshots import clear_snapshot_cache, set_force_fresh_probes
+
+        clear_snapshot_cache()
+        set_force_fresh_probes(True)
+    except ImportError:
+        pass
 
 
 def get_cache_stats() -> dict[str, int]:

@@ -92,7 +92,7 @@ DEFAULT_ACTION: str = "check"
 @click.option(
     "--no-cache",
     is_flag=True,
-    help="Clear incremental cache before running (forces full check)",
+    help="Clear incremental and tool-snapshot caches before running",
 )
 @click.option(
     "--diff",
