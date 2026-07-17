@@ -117,14 +117,22 @@ class ToolRegistry:
 
         # Module may already have been imported earlier in the process. In that
         # case ``@register_tool`` does not re-run, so register explicitly.
+        import inspect
+
         from lintro.plugins.base import BaseToolPlugin
 
         for obj in vars(module).values():
             if not isinstance(obj, type) or obj is BaseToolPlugin:
                 continue
-            if not issubclass(obj, BaseToolPlugin):
+            if getattr(obj, "__module__", None) != module.__name__:
                 continue
-            instance = obj()
+            if not issubclass(obj, BaseToolPlugin) or inspect.isabstract(obj):
+                continue
+            try:
+                instance = obj()
+            except TypeError:
+                # Skip non-instantiable intermediates that slipped past isabstract.
+                continue
             if instance.definition.name.lower() != name:
                 continue
             cls.register(obj, instance=instance)
