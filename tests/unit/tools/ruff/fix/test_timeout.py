@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import subprocess  # nosec B404 - subprocess is used to drive the tool/CLI under test; invocations use shell=False
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 from assertpy import assert_that
 
@@ -18,17 +18,12 @@ def test_execute_ruff_fix_timeout_on_initial_check(
     Args:
         mock_ruff_tool: Mock RuffTool instance for testing.
     """
-    with patch(
-        "lintro.tools.implementations.ruff.fix.walk_files_with_excludes",
-    ) as mock_walk:
-        mock_walk.return_value = ["test.py"]
+    mock_ruff_tool._run_subprocess.side_effect = subprocess.TimeoutExpired(
+        cmd=["ruff", "check"],
+        timeout=30,
+    )
 
-        mock_ruff_tool._run_subprocess.side_effect = subprocess.TimeoutExpired(
-            cmd=["ruff", "check"],
-            timeout=30,
-        )
-
-        result = execute_ruff_fix(mock_ruff_tool, ["test.py"])
+    result = execute_ruff_fix(mock_ruff_tool, ["test.py"])
 
     assert_that(result.success).is_false()
     assert_that(result.output).contains("timed out")
@@ -54,17 +49,12 @@ def test_execute_ruff_fix_timeout_on_fix_command(
         }
     ]"""
 
-    with patch(
-        "lintro.tools.implementations.ruff.fix.walk_files_with_excludes",
-    ) as mock_walk:
-        mock_walk.return_value = ["test.py"]
+    mock_ruff_tool._run_subprocess.side_effect = [
+        (False, single_issue_output),  # Initial check: 1 issue
+        subprocess.TimeoutExpired(cmd=["ruff", "check", "--fix"], timeout=30),
+    ]
 
-        mock_ruff_tool._run_subprocess.side_effect = [
-            (False, single_issue_output),  # Initial check: 1 issue
-            subprocess.TimeoutExpired(cmd=["ruff", "check", "--fix"], timeout=30),
-        ]
-
-        result = execute_ruff_fix(mock_ruff_tool, ["test.py"])
+    result = execute_ruff_fix(mock_ruff_tool, ["test.py"])
 
     assert_that(result.success).is_false()
     assert_that(result.output).contains("timed out")
@@ -91,17 +81,12 @@ def test_execute_ruff_fix_timeout_on_format_check(
         }
     ]"""
 
-    with patch(
-        "lintro.tools.implementations.ruff.fix.walk_files_with_excludes",
-    ) as mock_walk:
-        mock_walk.return_value = ["test.py"]
+    mock_ruff_tool._run_subprocess.side_effect = [
+        (False, single_issue_output),  # Initial lint check: 1 issue
+        subprocess.TimeoutExpired(cmd=["ruff", "format", "--check"], timeout=30),
+    ]
 
-        mock_ruff_tool._run_subprocess.side_effect = [
-            (False, single_issue_output),  # Initial lint check: 1 issue
-            subprocess.TimeoutExpired(cmd=["ruff", "format", "--check"], timeout=30),
-        ]
-
-        result = execute_ruff_fix(mock_ruff_tool, ["test.py"])
+    result = execute_ruff_fix(mock_ruff_tool, ["test.py"])
 
     assert_that(result.success).is_false()
     assert_that(result.output).contains("timed out")
@@ -122,19 +107,14 @@ def test_execute_ruff_fix_timeout_on_format_command(
     # Only 1 format issue so validation passes (1 = 0 + 1)
     single_format_issue = "Would reformat: test.py\n"
 
-    with patch(
-        "lintro.tools.implementations.ruff.fix.walk_files_with_excludes",
-    ) as mock_walk:
-        mock_walk.return_value = ["test.py"]
+    mock_ruff_tool._run_subprocess.side_effect = [
+        (True, sample_ruff_json_empty_output),  # Initial lint check: 0 issues
+        (False, single_format_issue),  # Format check: 1 file needs formatting
+        (True, sample_ruff_json_empty_output),  # Lint fix
+        subprocess.TimeoutExpired(cmd=["ruff", "format"], timeout=30),  # Format fix
+    ]
 
-        mock_ruff_tool._run_subprocess.side_effect = [
-            (True, sample_ruff_json_empty_output),  # Initial lint check: 0 issues
-            (False, single_format_issue),  # Format check: 1 file needs formatting
-            (True, sample_ruff_json_empty_output),  # Lint fix
-            subprocess.TimeoutExpired(cmd=["ruff", "format"], timeout=30),  # Format fix
-        ]
-
-        result = execute_ruff_fix(mock_ruff_tool, ["test.py"])
+    result = execute_ruff_fix(mock_ruff_tool, ["test.py"])
 
     assert_that(result.success).is_false()
     assert_that(result.output).contains("timed out")
@@ -159,18 +139,13 @@ def test_execute_ruff_fix_timeout_on_unsafe_check_continues(
         }
     ]"""
 
-    with patch(
-        "lintro.tools.implementations.ruff.fix.walk_files_with_excludes",
-    ) as mock_walk:
-        mock_walk.return_value = ["test.py"]
+    mock_ruff_tool._run_subprocess.side_effect = [
+        (False, remaining_output),  # Initial check
+        (False, remaining_output),  # Fix attempt
+        subprocess.TimeoutExpired(cmd=["ruff"], timeout=30),  # Unsafe check timeout
+    ]
 
-        mock_ruff_tool._run_subprocess.side_effect = [
-            (False, remaining_output),  # Initial check
-            (False, remaining_output),  # Fix attempt
-            subprocess.TimeoutExpired(cmd=["ruff"], timeout=30),  # Unsafe check timeout
-        ]
-
-        result = execute_ruff_fix(mock_ruff_tool, ["test.py"])
+    result = execute_ruff_fix(mock_ruff_tool, ["test.py"])
 
     # Should still complete with remaining issues
     assert_that(result.success).is_false()

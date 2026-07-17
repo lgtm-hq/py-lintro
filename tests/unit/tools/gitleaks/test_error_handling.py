@@ -10,6 +10,7 @@ import pytest
 from assertpy import assert_that
 
 from lintro.tools.definitions.gitleaks import GitleaksPlugin
+from tests.test_samples_helpers import copy_sample
 
 
 def test_check_with_timeout(
@@ -22,8 +23,14 @@ def test_check_with_timeout(
         gitleaks_plugin: The GitleaksPlugin instance to test.
         tmp_path: Temporary directory path for test files.
     """
-    test_file = tmp_path / "test_module.py"
-    test_file.write_text('"""Test module."""\n')
+    test_file = copy_sample(
+        tmp_path,
+        "tools",
+        "security",
+        "gitleaks",
+        "gitleaks_test_module.py",
+        dest_name="test_module.py",
+    )
 
     with patch.object(
         gitleaks_plugin,
@@ -46,8 +53,14 @@ def test_check_with_execution_failure(
         gitleaks_plugin: The GitleaksPlugin instance to test.
         tmp_path: Temporary directory path for test files.
     """
-    test_file = tmp_path / "test_module.py"
-    test_file.write_text('"""Test module."""\n')
+    test_file = copy_sample(
+        tmp_path,
+        "tools",
+        "security",
+        "gitleaks",
+        "gitleaks_test_module.py",
+        dest_name="test_module.py",
+    )
 
     with patch.object(
         gitleaks_plugin,
@@ -70,8 +83,14 @@ def test_fix_raises_not_implemented_error(
         gitleaks_plugin: The GitleaksPlugin instance to test.
         tmp_path: Temporary directory path for test files.
     """
-    test_file = tmp_path / "test_module.py"
-    test_file.write_text('API_KEY = "secret123"\n')
+    test_file = copy_sample(
+        tmp_path,
+        "tools",
+        "security",
+        "gitleaks",
+        "gitleaks_generic_secret.py",
+        dest_name="test_module.py",
+    )
 
     with pytest.raises(NotImplementedError, match="cannot automatically fix"):
         gitleaks_plugin.fix([str(test_file)], {})

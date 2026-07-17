@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 from assertpy import assert_that
 
@@ -21,19 +21,14 @@ def test_execute_ruff_fix_with_fixable_issues(
         sample_ruff_json_output: Sample JSON output from ruff with issues.
         sample_ruff_json_empty_output: Sample empty JSON output from ruff.
     """
-    with patch(
-        "lintro.tools.implementations.ruff.fix.walk_files_with_excludes",
-    ) as mock_walk:
-        mock_walk.return_value = ["test.py"]
+    # First call: check (finds 2 issues)
+    # Second call: fix (returns empty - all fixed)
+    mock_ruff_tool._run_subprocess.side_effect = [
+        (False, sample_ruff_json_output),  # Initial check finds issues
+        (True, sample_ruff_json_empty_output),  # After fix, no remaining
+    ]
 
-        # First call: check (finds 2 issues)
-        # Second call: fix (returns empty - all fixed)
-        mock_ruff_tool._run_subprocess.side_effect = [
-            (False, sample_ruff_json_output),  # Initial check finds issues
-            (True, sample_ruff_json_empty_output),  # After fix, no remaining
-        ]
-
-        result = execute_ruff_fix(mock_ruff_tool, ["test.py"])
+    result = execute_ruff_fix(mock_ruff_tool, ["test.py"])
 
     assert_that(result.success).is_true()
     assert_that(result.initial_issues_count).is_equal_to(2)
@@ -52,17 +47,12 @@ def test_execute_ruff_fix_with_no_issues(
         mock_ruff_tool: Mock RuffTool instance for testing.
         sample_ruff_json_empty_output: Sample empty JSON output from ruff.
     """
-    with patch(
-        "lintro.tools.implementations.ruff.fix.walk_files_with_excludes",
-    ) as mock_walk:
-        mock_walk.return_value = ["test.py"]
+    mock_ruff_tool._run_subprocess.side_effect = [
+        (True, sample_ruff_json_empty_output),  # Initial check: no issues
+        (True, sample_ruff_json_empty_output),  # Fix: no issues
+    ]
 
-        mock_ruff_tool._run_subprocess.side_effect = [
-            (True, sample_ruff_json_empty_output),  # Initial check: no issues
-            (True, sample_ruff_json_empty_output),  # Fix: no issues
-        ]
-
-        result = execute_ruff_fix(mock_ruff_tool, ["test.py"])
+    result = execute_ruff_fix(mock_ruff_tool, ["test.py"])
 
     assert_that(result.success).is_true()
     assert_that(result.output).is_equal_to("No fixes applied.")
@@ -88,18 +78,13 @@ def test_execute_ruff_fix_with_unfixable_issues(
         }
     ]"""
 
-    with patch(
-        "lintro.tools.implementations.ruff.fix.walk_files_with_excludes",
-    ) as mock_walk:
-        mock_walk.return_value = ["test.py"]
+    mock_ruff_tool._run_subprocess.side_effect = [
+        (False, unfixable_output),  # Initial check
+        (False, unfixable_output),  # After fix attempt (still has issues)
+        (False, unfixable_output),  # Unsafe fix check
+    ]
 
-        mock_ruff_tool._run_subprocess.side_effect = [
-            (False, unfixable_output),  # Initial check
-            (False, unfixable_output),  # After fix attempt (still has issues)
-            (False, unfixable_output),  # Unsafe fix check
-        ]
-
-        result = execute_ruff_fix(mock_ruff_tool, ["test.py"])
+    result = execute_ruff_fix(mock_ruff_tool, ["test.py"])
 
     assert_that(result.success).is_false()
     assert_that(result.remaining_issues_count).is_equal_to(1)

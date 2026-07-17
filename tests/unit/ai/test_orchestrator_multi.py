@@ -12,7 +12,7 @@ from lintro.ai.config import AIConfig
 from lintro.ai.enums import AITransport
 from lintro.ai.models import AIFixSuggestion
 from lintro.ai.orchestrator import run_ai_enhancement
-from lintro.ai.rerun import _rerun_cwd_lock, paths_for_context, rerun_tools
+from lintro.ai.rerun import absolute_paths_for_context, rerun_tools
 from lintro.ai.validation import ValidationResult
 from lintro.config.lintro_config import LintroConfig
 from lintro.enums.action import Action
@@ -277,8 +277,8 @@ def test_run_ai_enhancement_fix_action_json_uses_fresh_rerun_results(
 # ---------------------------------------------------------------------------
 
 
-def test_rerun_context_paths_for_context_relativizes_to_tool_cwd(tmp_path):
-    """Paths inside tool cwd become relative; outside stay absolute."""
+def test_rerun_context_absolute_paths_for_context_resolves_targets(tmp_path):
+    """Target paths are resolved to absolute form for cwd-explicit rerun."""
     tool_cwd = tmp_path / "tool"
     tool_cwd.mkdir(parents=True)
     inside = tool_cwd / "src" / "main.py"
@@ -287,18 +287,28 @@ def test_rerun_context_paths_for_context_relativizes_to_tool_cwd(tmp_path):
     outside = tmp_path / "outside.py"
     outside.write_text("x = 1\n", encoding="utf-8")
 
-    rerun_paths = paths_for_context(
+    rerun_paths = absolute_paths_for_context(
         file_paths=[str(inside), str(outside)],
-        cwd=str(tool_cwd),
     )
 
-    assert_that(rerun_paths[0]).is_equal_to("src/main.py")
+    assert_that(rerun_paths[0]).is_equal_to(str(inside.resolve()))
     assert_that(rerun_paths[1]).is_equal_to(str(outside.resolve()))
 
 
 @patch("lintro.tools.tool_manager.get_tool")
-def test_rerun_context_rerun_uses_original_tool_cwd(mock_get_tool, tmp_path):
-    """Verify rerun_tools changes cwd to the original tool working directory."""
+def test_rerun_context_rerun_passes_absolute_paths_without_chdir(
+    mock_get_tool,
+    tmp_path,
+    monkeypatch,
+):
+    """rerun_tools hands absolute paths to the tool without any os.chdir."""
+    import os
+
+    def _fail_chdir(*_args: Any, **_kwargs: Any) -> None:
+        raise AssertionError("rerun_tools must not call os.chdir")
+
+    monkeypatch.setattr(os, "chdir", _fail_chdir)
+
     tool_cwd = tmp_path / "tool"
     tool_cwd.mkdir(parents=True)
     source = tool_cwd / "src" / "main.py"
@@ -327,8 +337,6 @@ def test_rerun_context_rerun_uses_original_tool_cwd(mock_get_tool, tmp_path):
 
     class _FakeTool:
         def check(self, paths: Any, options: Any) -> ToolResult:
-            import os
-
             captured["cwd"] = os.getcwd()
             captured["paths"] = paths
             return ToolResult(
@@ -339,19 +347,13 @@ def test_rerun_context_rerun_uses_original_tool_cwd(mock_get_tool, tmp_path):
             )
 
     mock_get_tool.return_value = _FakeTool()
+
+    before = os.getcwd()
     rerun_results = rerun_tools(by_tool)
 
     assert_that(rerun_results).is_length(1)
-    assert_that(captured.get("cwd")).is_equal_to(str(tool_cwd))
-    assert_that(captured.get("paths")).is_equal_to(["src/main.py"])
-
-
-def test_rerun_context_rerun_cwd_lock_exists():
-    """Verify the module-level threading lock is a Lock instance."""
-    # threading.Lock() returns a _thread.lock instance; verify it has
-    # the acquire/release protocol rather than comparing type identity.
-    assert_that(hasattr(_rerun_cwd_lock, "acquire")).is_true()
-    assert_that(hasattr(_rerun_cwd_lock, "release")).is_true()
+    assert_that(captured.get("cwd")).is_equal_to(before)
+    assert_that(captured.get("paths")).is_equal_to([str(source.resolve())])
 
 
 @patch("lintro.tools.tool_manager.get_tool")

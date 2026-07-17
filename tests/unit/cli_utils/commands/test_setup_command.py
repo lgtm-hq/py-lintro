@@ -206,7 +206,7 @@ def _patch_setup_deps() -> tuple[Any, Any, Any, Any]:
 
     return (
         patch(
-            "lintro.cli_utils.commands.setup.ToolRegistry.load",
+            "lintro.cli_utils.commands.setup.ManifestRegistry.load",
             return_value=registry,
         ),
         patch(

@@ -35,10 +35,20 @@ def run_subprocess_with_timeout(
     This is a wrapper around tool._run_subprocess that provides consistent
     timeout error handling and messaging across different tools.
 
+    Timeout resolution policy:
+        Only ``None`` triggers the fallback to the tool's configured/default
+        timeout. Any explicit numeric value provided by the caller is
+        preserved verbatim, including ``0``. A ``timeout`` of ``0`` is treated
+        as a valid caller-provided value (an effectively immediate deadline)
+        and is reported as-is in error messages rather than being silently
+        replaced by the default. Callers that want no timeout must pass
+        ``None`` explicitly.
+
     Args:
         tool: Tool instance with _run_subprocess method.
         cmd: Command to run.
-        timeout: Timeout in seconds. If None, uses tool's default timeout.
+        timeout: Timeout in seconds. If None, uses tool's configured or default
+            timeout. An explicit ``0`` is preserved (not treated as missing).
         cwd: Working directory for command execution.
         tool_name: Name of the tool for error messages. If None, uses tool.name.
 
@@ -56,8 +66,15 @@ def run_subprocess_with_timeout(
         success, output = tool._run_subprocess(cmd=cmd, timeout=timeout, cwd=cwd)
         return bool(success), str(output)
     except subprocess.TimeoutExpired as e:
-        # Re-raise with more context for the calling tool
-        actual_timeout = timeout or tool.options.get("timeout", tool._default_timeout)
+        # Re-raise with more context for the calling tool. Only ``None`` falls
+        # back to the configured/default timeout; an explicit ``0`` (or any
+        # other numeric value) is preserved so the message reflects the actual
+        # deadline that was enforced.
+        actual_timeout = (
+            timeout
+            if timeout is not None
+            else tool.options.get("timeout", tool._default_timeout)
+        )
         timeout_msg = (
             f"{tool_name} execution timed out ({actual_timeout}s limit exceeded).\n\n"
             "This may indicate:\n"

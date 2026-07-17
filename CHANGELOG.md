@@ -21,6 +21,81 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.80.9] - 2026-07-17
+
+### Fixed
+
+- **core**: route programmatic execution through real library API (#1269) (6e5cda4)
+
+## [0.80.8] - 2026-07-17
+
+### Fixed
+
+- **tools**: preserve explicit timeout=0 and route ruff through _prepare_execution
+  (#1266) (ca1b013)
+
+## [0.80.7] - 2026-07-17
+
+### Changed
+
+- **deps**: update ubuntu:latest docker digest to 3131b4c (#1468) (6fd6e6b)
+- **ai**: remove process-global os.chdir from rerun path (#1265) (9103dbc)
+
+### Fixed
+
+- **execution**: handle BaseException in gather results and nested event loops (#1264)
+  (7252969)
+
+## [0.80.6] - 2026-07-16
+
+### Changed
+
+- **tools**: rename manifest ToolRegistry to ManifestRegistry (#1260) (f729796)
+
+- **tools/core**: rename `lintro.tools.core.tool_registry.ToolRegistry` to
+  `ManifestRegistry` to disambiguate it from `lintro.plugins.registry.ToolRegistry`
+  (#1220)
+
+### Deprecated
+
+- **tools/core**: `lintro.tools.core.tool_registry.ToolRegistry` is deprecated in favor
+  of `ManifestRegistry`; importing or using the old name now emits a
+  `DeprecationWarning` and will be removed in a future release (#1220)
+
+### Fixed
+
+- **ci**: use valid npm range syntax for astro allowedVersions (#1454) (e012d9d)
+
+## [0.80.5] - 2026-07-16
+
+### Changed
+
+- **site**: add missing rehype devDependencies for doc-links suite (#1446) (140fd7c)
+
+### Fixed
+
+- **security**: pin astro to 7.0.9 to drop flagged 7.1.0 (MAL-2026-10726) (#1448)
+  (491792f)
+
+## [0.80.4] - 2026-07-16
+
+### Changed
+
+- **docker**: pin BuildKit syntax frontend by digest (#1384) (b183963)
+- **deps**: update ghcr.io/lgtm-hq/lintro-tools:latest docker digest to 0024f54 (#1438)
+  (7c191f7)
+- **deps**: hold prettier >3.9.4 in Renovate (#1437) (7dc2c08)
+- **deps**: update ghcr.io/lgtm-hq/lintro-tools:latest docker digest to fb89bff (#1435)
+  (bf2e4bf)
+- **deps**: update dependency rust-lang/rust to 1.97.1 (patch) (#1429) (f921f80)
+- **deps**: hold TypeScript 7 and js-yaml 5 in Renovate (#1436) (c92445e)
+- **deps**: migrate apps/site to Astro 7 and Vite 8 (#1428) (56181e0)
+
+### Fixed
+
+- **ai/review**: preserve Findings in section-aware _cap_body truncation (#1334)
+  (f3d98f2)
+
 ## [0.80.3] - 2026-07-16
 
 ### Changed
