@@ -1,16 +1,26 @@
 """SPDX license identifier normalization and license category sets.
 
-This module provides a curated, offline mapping from common raw license
-strings (as found in package metadata across ecosystems) to canonical SPDX
-identifiers, plus category sets used by the policy presets. It intentionally
-avoids a network dependency so license checks are deterministic in CI.
+Canonical SPDX identifiers come from build-time codegen
+(``lintro.licenses._spdx_data``). Compound expressions and known SPDX keys are
+parsed via ``license-expression``. A residual alias table covers metadata
+spellings that ScanCode's SPDX key set does not resolve. Category frozensets
+remain hand-curated policy judgment (SPDX has no copyleft-strength field).
 """
 
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass
-from enum import StrEnum, auto
+from functools import lru_cache
+from typing import TYPE_CHECKING, cast
+
+from license_expression import (
+    ExpressionError,
+    ExpressionParseError,
+    get_spdx_licensing,
+)
+
+if TYPE_CHECKING:
+    from license_expression import Licensing
 
 # Canonical SPDX identifiers that are broadly considered "permissive".
 PERMISSIVE_LICENSES: frozenset[str] = frozenset(
@@ -75,18 +85,15 @@ NO_LICENSE_MARKERS: frozenset[str] = frozenset(
     },
 )
 
-# Raw string (lower-cased, normalized) -> SPDX identifier.
-# Covers the most common metadata spellings across PyPI and npm.
+# Residual aliases for spellings ``license-expression`` does not resolve to the
+# SPDX id we want. Exact SPDX keys that the library already handles are omitted.
 _ALIASES: dict[str, str] = {
-    "mit": "MIT",
     "mit license": "MIT",
-    "mit-0": "MIT-0",
     "expat": "MIT",
     "apache": "Apache-2.0",
     "apache 2": "Apache-2.0",
     "apache 2.0": "Apache-2.0",
     "apache-2": "Apache-2.0",
-    "apache-2.0": "Apache-2.0",
     "apache license 2.0": "Apache-2.0",
     "apache license, version 2.0": "Apache-2.0",
     "apache-2.0 license": "Apache-2.0",
@@ -94,170 +101,94 @@ _ALIASES: dict[str, str] = {
     "asl 2.0": "Apache-2.0",
     "bsd": "BSD-3-Clause",
     "bsd license": "BSD-3-Clause",
-    "bsd-2": "BSD-2-Clause",
-    "bsd-2-clause": "BSD-2-Clause",
     "bsd 2-clause": "BSD-2-Clause",
     "bsd-3": "BSD-3-Clause",
-    "bsd-3-clause": "BSD-3-Clause",
     "bsd 3-clause": "BSD-3-Clause",
     "new bsd": "BSD-3-Clause",
-    "isc": "ISC",
     "isc license": "ISC",
-    "0bsd": "0BSD",
     "zero-clause bsd": "0BSD",
-    "zlib": "Zlib",
     "cc0": "CC0-1.0",
-    "cc0-1.0": "CC0-1.0",
     "cc0 1.0 universal": "CC0-1.0",
-    "unlicense": "Unlicense",
     "the unlicense": "Unlicense",
     "psf": "PSF-2.0",
-    "psf-2.0": "PSF-2.0",
     "psfl": "PSF-2.0",
     "python software foundation license": "PSF-2.0",
-    "python-2.0": "Python-2.0",
     "python 2.0": "Python-2.0",
     "mpl": "MPL-2.0",
-    "mpl-2.0": "MPL-2.0",
     "mpl 2.0": "MPL-2.0",
     "mozilla public license 2.0": "MPL-2.0",
     "mozilla public license 2.0 (mpl 2.0)": "MPL-2.0",
-    "epl-2.0": "EPL-2.0",
     "eclipse public license 2.0": "EPL-2.0",
-    "cddl-1.0": "CDDL-1.0",
     "lgpl": "LGPL-3.0-or-later",
-    "lgpl-2.1": "LGPL-2.1-only",
-    "lgpl-2.1-only": "LGPL-2.1-only",
-    "lgpl-2.1-or-later": "LGPL-2.1-or-later",
-    "lgpl-3.0": "LGPL-3.0-only",
-    "lgpl-3.0-only": "LGPL-3.0-only",
-    "lgpl-3.0-or-later": "LGPL-3.0-or-later",
     "lgplv3": "LGPL-3.0-only",
+    # license-expression maps bare "gpl" to GPL-1.0-or-later; keep our policy.
     "gpl": "GPL-3.0-or-later",
     "gplv2": "GPL-2.0-only",
-    "gpl-2.0": "GPL-2.0-only",
-    "gpl-2.0-only": "GPL-2.0-only",
-    "gpl-2.0+": "GPL-2.0-or-later",
-    "gpl-2.0-or-later": "GPL-2.0-or-later",
     "gplv3": "GPL-3.0-only",
-    "gpl-3.0": "GPL-3.0-only",
-    "gpl-3.0-only": "GPL-3.0-only",
-    "gpl-3.0+": "GPL-3.0-or-later",
-    "gpl-3.0-or-later": "GPL-3.0-or-later",
     "gnu general public license v3": "GPL-3.0-only",
     "agpl": "AGPL-3.0-or-later",
-    "agpl-3.0": "AGPL-3.0-only",
-    "agpl-3.0-only": "AGPL-3.0-only",
-    "agpl-3.0-or-later": "AGPL-3.0-or-later",
-    "sspl-1.0": "SSPL-1.0",
-    "busl-1.1": "BUSL-1.1",
-    "elastic-2.0": "Elastic-2.0",
 }
 
-# Canonical SPDX ids we recognize directly (case-insensitive match).
-_KNOWN_SPDX: frozenset[str] = (
-    PERMISSIVE_LICENSES
-    | WEAK_COPYLEFT_LICENSES
-    | STRONG_COPYLEFT_LICENSES
-    | RESTRICTED_LICENSES
-)
-
-_SPDX_BY_LOWER: dict[str, str] = {spdx.lower(): spdx for spdx in _KNOWN_SPDX}
-
-# Match the AND/OR operators only when whitespace/paren-delimited. A plain
-# ``\b`` word boundary treats ``-`` as a boundary, so ``\bOR\b`` would match
-# the literal ``or`` inside hyphenated SPDX ids such as ``GPL-3.0-or-later``,
-# splitting the operand and letting a copyleft license collapse away. Using
-# ``(?<![\w-])``/``(?![\w-])`` keeps hyphenated ids intact.
-_HAS_AND = re.compile(r"(?<![\w-])AND(?![\w-])", re.IGNORECASE)
-_HAS_OR = re.compile(r"(?<![\w-])OR(?![\w-])", re.IGNORECASE)
-
-# Prefer these when collapsing AND expressions so denials are not dropped.
-_RESTRICTIVE_FOR_AND: frozenset[str] = (
-    STRONG_COPYLEFT_LICENSES | WEAK_COPYLEFT_LICENSES | RESTRICTED_LICENSES
-)
-
-# Tokenize on parentheses and the whitespace/paren-delimited AND/OR operators.
-# The operator boundaries deliberately exclude ``-`` (see ``_HAS_AND``) so the
-# ``or``/``and`` inside hyphenated SPDX ids like ``GPL-3.0-or-later`` are never
-# mistaken for expression operators.
-_TOKEN_RE = re.compile(
-    r"\(|\)|(?<![\w-])AND(?![\w-])|(?<![\w-])OR(?![\w-])",
-    re.IGNORECASE,
+_SPDX_DATA_ERROR = (
+    "SPDX license data is missing. Run "
+    "`python3 scripts/release/generate_spdx_data.py` to generate "
+    "`lintro/licenses/_spdx_data.py`."
 )
 
 
-class _TokenKind(StrEnum):
-    """Token kinds for SPDX expression parsing."""
-
-    LPAREN = auto()
-    RPAREN = auto()
-    AND = auto()
-    OR = auto()
-    ATOM = auto()
-    EOF = auto()
-
-
-@dataclass(frozen=True)
-class _Token:
-    """A single SPDX expression token."""
-
-    kind: _TokenKind
-    value: str = ""
-
-
-@dataclass(frozen=True)
-class _LicenseAtom:
-    """Leaf license identifier in an SPDX expression."""
-
-    raw: str
-
-
-@dataclass(frozen=True)
-class _AndNode:
-    """AND conjunction of SPDX sub-expressions."""
-
-    children: tuple[_ExprNode, ...]
-
-
-@dataclass(frozen=True)
-class _OrNode:
-    """OR disjunction of SPDX sub-expressions."""
-
-    children: tuple[_ExprNode, ...]
-
-
-_ExprNode = _LicenseAtom | _AndNode | _OrNode
-
-
-def _parens_balanced(raw: str) -> bool:
-    """Report whether parentheses in ``raw`` are properly balanced and nested.
-
-    A simple count comparison is insufficient: ``)(`` has matching counts but
-    is malformed. This scans left to right and rejects any point where a
-    closing paren appears before a matching opener, as well as any unclosed
-    openers at the end.
-
-    Args:
-        raw: Raw license string.
+def _load_spdx_ids() -> frozenset[str]:
+    """Load the generated SPDX identifier set.
 
     Returns:
-        bool: True when every ``)`` has a preceding unmatched ``(`` and no
-            ``(`` is left unclosed.
+        frozenset[str]: Canonical SPDX license identifiers.
+
+    Raises:
+        RuntimeError: If the generated data module is missing or empty.
     """
-    depth = 0
-    for ch in raw:
-        if ch == "(":
-            depth += 1
-        elif ch == ")":
-            depth -= 1
-            if depth < 0:
-                return False
-    return depth == 0
+    try:
+        from lintro.licenses._spdx_data import SPDX_LICENSE_IDS
+    except ImportError as exc:
+        raise RuntimeError(_SPDX_DATA_ERROR) from exc
+    if not SPDX_LICENSE_IDS:
+        raise RuntimeError(_SPDX_DATA_ERROR)
+    return SPDX_LICENSE_IDS
+
+
+@lru_cache(maxsize=1)
+def _spdx_ids() -> frozenset[str]:
+    """Cached accessor for generated SPDX IDs.
+
+    Returns:
+        frozenset[str]: Canonical SPDX license identifiers.
+    """
+    return _load_spdx_ids()
+
+
+@lru_cache(maxsize=1)
+def _spdx_by_lower() -> dict[str, str]:
+    """Cached lowercased SPDX id lookup.
+
+    Returns:
+        dict[str, str]: Lowercased id -> canonical id.
+    """
+    return {spdx_id.lower(): spdx_id for spdx_id in _spdx_ids()}
+
+
+@lru_cache(maxsize=1)
+def _licensing() -> Licensing:
+    """Cached ``license-expression`` SPDX licensing helper.
+
+    Returns:
+        Licensing: Parser/validator loaded with SPDX keys.
+    """
+    return get_spdx_licensing()
 
 
 def _clean(raw: str) -> str:
     """Lower-case and collapse whitespace/punctuation noise in a license string.
+
+    Only strips *balanced* outer parentheses so names that embed a parenthetical
+    (e.g. ``Mozilla Public License 2.0 (MPL 2.0)``) keep their inner markers.
 
     Args:
         raw: Raw license string.
@@ -265,276 +196,115 @@ def _clean(raw: str) -> str:
     Returns:
         str: Normalized comparison key.
     """
-    value = raw.strip().strip("()").strip()
+    value = raw.strip()
+    while len(value) >= 2 and value.startswith("(") and value.endswith(")"):
+        value = value[1:-1].strip()
     value = re.sub(r"\s+", " ", value)
     return value.lower()
 
 
-def _normalize_atom(raw: str) -> str | None:
-    """Normalize a single license operand without expression parsing.
+def _validate_expression_keys(expression: object) -> bool:
+    """Return True when every non-exception license key is in generated SPDX data.
 
     Args:
-        raw: Raw license operand text.
+        expression: Parsed ``license-expression`` tree.
 
     Returns:
-        str | None: Canonical SPDX identifier when recognized.
+        bool: Whether all license symbols are known SPDX IDs.
     """
-    cleaned = _clean(raw)
-    if not cleaned or cleaned in NO_LICENSE_MARKERS:
+    known = _spdx_ids()
+    licensing = _licensing()
+    for key in licensing.license_keys(expression, unique=True):
+        # Exceptions (WITH right-hand side) are not in licenses.json.
+        symbol = licensing.known_symbols.get(key)
+        if symbol is not None and getattr(symbol, "is_exception", False):
+            continue
+        if key not in known:
+            return False
+    return True
+
+
+def _try_parse_expression(raw: str) -> str | None:
+    """Parse ``raw`` with license-expression and return a rendered SPDX string.
+
+    Args:
+        raw: License string to parse.
+
+    Returns:
+        str | None: Normalized SPDX expression/id, or None if unrecognized.
+    """
+    licensing = _licensing()
+    try:
+        expression = licensing.parse(raw, validate=True, strict=True)
+    except (ExpressionError, ExpressionParseError):
         return None
-    if cleaned in _SPDX_BY_LOWER:
-        return _SPDX_BY_LOWER[cleaned]
-    if cleaned in _ALIASES:
-        return _ALIASES[cleaned]
-    return None
-
-
-def _tokenize(expression: str) -> list[_Token]:
-    """Tokenize an SPDX license expression.
-
-    Args:
-        expression: Cleaned SPDX expression text.
-
-    Returns:
-        list[_Token]: Token stream terminated by EOF.
-    """
-    tokens: list[_Token] = []
-    cursor = 0
-    for match in _TOKEN_RE.finditer(expression):
-        atom = expression[cursor : match.start()].strip()
-        if atom:
-            tokens.append(_Token(kind=_TokenKind.ATOM, value=atom))
-        token = match.group(0)
-        if len(token) == 1 and ord(token) == 40:
-            tokens.append(_Token(kind=_TokenKind.LPAREN))
-        elif len(token) == 1 and ord(token) == 41:
-            tokens.append(_Token(kind=_TokenKind.RPAREN))
-        elif token.upper() == "AND":
-            tokens.append(_Token(kind=_TokenKind.AND))
-        else:
-            tokens.append(_Token(kind=_TokenKind.OR))
-        cursor = match.end()
-    trailing = expression[cursor:].strip()
-    if trailing:
-        tokens.append(_Token(kind=_TokenKind.ATOM, value=trailing))
-    tokens.append(_Token(kind=_TokenKind.EOF))
-    return tokens
-
-
-class _SpdxExpressionParser:
-    """Recursive-descent parser for SPDX license expressions."""
-
-    def __init__(self, tokens: list[_Token]) -> None:
-        """Initialize the parser.
-
-        Args:
-            tokens: Token stream produced by ``_tokenize``.
-        """
-        self._tokens = tokens
-        self._index = 0
-
-    def parse(self) -> _ExprNode | None:
-        """Parse the token stream into an expression tree.
-
-        Returns:
-            _ExprNode | None: Parsed expression, or None when empty.
-        """
-        if self._current().kind is _TokenKind.EOF:
-            return None
-        return self._parse_or()
-
-    def _current(self) -> _Token:
-        """Return the current token.
-
-        Returns:
-            _Token: Token at the parser cursor.
-        """
-        return self._tokens[self._index]
-
-    def _advance(self) -> _Token:
-        """Consume and return the current token.
-
-        Returns:
-            _Token: Token that was consumed.
-        """
-        token = self._current()
-        self._index += 1
-        return token
-
-    def _parse_or(self) -> _ExprNode:
-        """Parse an OR expression (lowest precedence).
-
-        Returns:
-            _ExprNode: Parsed OR node or a single lower-precedence node.
-        """
-        children = [self._parse_and()]
-        while self._current().kind is _TokenKind.OR:
-            self._advance()
-            children.append(self._parse_and())
-        if len(children) == 1:
-            return children[0]
-        return _OrNode(children=tuple(children))
-
-    def _parse_and(self) -> _ExprNode:
-        """Parse an AND expression (higher precedence than OR).
-
-        Returns:
-            _ExprNode: Parsed AND node or a single primary node.
-        """
-        children = [self._parse_primary()]
-        while self._current().kind is _TokenKind.AND:
-            self._advance()
-            children.append(self._parse_primary())
-        if len(children) == 1:
-            return children[0]
-        return _AndNode(children=tuple(children))
-
-    def _parse_primary(self) -> _ExprNode:
-        """Parse a parenthesized sub-expression or license atom.
-
-        Returns:
-            _ExprNode: Parsed primary expression.
-
-        Raises:
-            ValueError: When the token stream is malformed.
-        """
-        token = self._current()
-        if token.kind is _TokenKind.LPAREN:
-            self._advance()
-            node = self._parse_or()
-            if self._current().kind is not _TokenKind.RPAREN:
-                msg = "Expected ')' after grouped SPDX expression"
-                raise ValueError(msg)
-            self._advance()
-            return node
-        if token.kind is _TokenKind.ATOM:
-            self._advance()
-            return _LicenseAtom(raw=token.value)
-        msg = f"Unexpected token in SPDX expression: {token.kind}"
-        raise ValueError(msg)
-
-
-def _parse_expression(expression: str) -> _ExprNode | None:
-    """Parse a cleaned SPDX expression into an AST.
-
-    Args:
-        expression: Cleaned SPDX expression text.
-
-    Returns:
-        _ExprNode | None: Parsed expression tree, or None when empty or invalid.
-    """
-    parser = _SpdxExpressionParser(tokens=_tokenize(expression))
-    node = parser.parse()
-    if node is not None and parser._current().kind is not _TokenKind.EOF:
+    if expression is None:
         return None
-    return node
-
-
-def _normalize_and_node(node: _AndNode) -> str | None:
-    """Collapse an AND node to a single SPDX identifier.
-
-    Every operand is normalized. When any operand maps to a restrictive
-    license class, that identifier is returned so deny policies cannot be
-    bypassed by a permissive conjunct.
-
-    Args:
-        node: AND expression node.
-
-    Returns:
-        str | None: Collapsed SPDX identifier, or None when unrecognized.
-    """
-    resolved_ids: list[str] = []
-    for child in node.children:
-        resolved = _normalize_expr(child)
-        if resolved is not None:
-            resolved_ids.append(resolved)
-    if not resolved_ids:
+    if not _validate_expression_keys(expression):
         return None
-    for spdx_id in resolved_ids:
-        if spdx_id in _RESTRICTIVE_FOR_AND:
-            return spdx_id
-    return resolved_ids[0]
-
-
-def _normalize_or_node(node: _OrNode) -> str | None:
-    """Collapse an OR node to the first recognized SPDX identifier.
-
-    Args:
-        node: OR expression node.
-
-    Returns:
-        str | None: Collapsed SPDX identifier, or None when unrecognized.
-    """
-    for child in node.children:
-        resolved = _normalize_expr(child)
-        if resolved is not None:
-            return resolved
-    return None
-
-
-def _normalize_expr(node: _ExprNode) -> str | None:
-    """Normalize a parsed SPDX expression node.
-
-    Args:
-        node: Parsed expression subtree.
-
-    Returns:
-        str | None: Canonical SPDX identifier when recognized.
-    """
-    if isinstance(node, _LicenseAtom):
-        return _normalize_atom(node.raw)
-    if isinstance(node, _AndNode):
-        return _normalize_and_node(node)
-    return _normalize_or_node(node)
+    return str(expression)
 
 
 def normalize_to_spdx(license_string: str | None) -> str | None:
-    """Normalize an arbitrary license string to a canonical SPDX identifier.
+    """Normalize an arbitrary license string to a canonical SPDX id or expression.
 
-    Handles direct SPDX identifiers, common metadata aliases, and SPDX
-    expressions. ``AND`` binds tighter than ``OR``. ``AND`` expressions
-    resolve every operand and prefer a restrictive / denied-class license so
-    a conjunction cannot collapse to only the permissive side (e.g.
-    ``MIT AND GPL-3.0-only`` → ``GPL-3.0-only``). ``OR`` expressions select
-    the first recognized operand, evaluating each branch with the precedence
-    rules above (e.g. ``MIT OR Apache-2.0 AND GPL-3.0`` → ``MIT``;
-    ``Apache-2.0 AND GPL-3.0 OR MIT`` → ``GPL-3.0-only``).
+    Handles direct SPDX identifiers (via generated data), residual metadata
+    aliases, and compound SPDX expressions (``OR`` / ``AND`` / ``WITH`` /
+    parentheses) via ``license-expression``. Expressions are preserved in
+    normalized form so the policy engine can evaluate them per-branch.
 
     Args:
         license_string: Raw license string from package metadata, or None.
 
     Returns:
-        str | None: The SPDX identifier if recognized, otherwise None.
+        str | None: SPDX identifier or expression if recognized, else None.
     """
     if not license_string:
         return None
 
-    # Reject malformed expressions with mismatched parentheses before cleaning.
-    # ``_clean()`` strips leading/trailing parens, so inputs like
-    # ``(MIT OR GPL-3.0`` (unbalanced) or ``)(MIT OR GPL-3.0)(`` (balanced
-    # count but improperly nested) would otherwise be silently repaired to a
-    # valid-looking ``MIT OR GPL-3.0`` and false-pass a deny policy by
-    # collapsing to the permissive ``MIT`` operand. A depth scan rejects both.
-    if not _parens_balanced(license_string):
-        return None
+    # Ensure generated data is loadable before any normalization work.
+    _ = _spdx_ids()
 
     cleaned = _clean(license_string)
     if not cleaned or cleaned in NO_LICENSE_MARKERS:
         return None
 
-    if cleaned in _SPDX_BY_LOWER:
-        return _SPDX_BY_LOWER[cleaned]
-
+    # Residual aliases first so policy-specific mappings (e.g. bare "gpl") win
+    # over license-expression's default key choice.
     if cleaned in _ALIASES:
         return _ALIASES[cleaned]
 
-    if not _HAS_AND.search(cleaned) and not _HAS_OR.search(cleaned):
-        return None
+    # Parse via license-expression (covers expressions and deprecated-ID remaps
+    # such as GPL-3.0 → GPL-3.0-only) before falling back to the generated set.
+    parsed = _try_parse_expression(license_string.strip())
+    if parsed is not None:
+        return parsed
 
+    if cleaned != license_string.strip().lower():
+        parsed = _try_parse_expression(cleaned)
+        if parsed is not None:
+            return parsed
+
+    # Direct case-insensitive SPDX id match against generated data.
+    by_lower = _spdx_by_lower()
+    if cleaned in by_lower:
+        return by_lower[cleaned]
+
+    return None
+
+
+def parse_license_expression(license_id: str) -> object | None:
+    """Parse a normalized SPDX id/expression into a ``license-expression`` tree.
+
+    Args:
+        license_id: Normalized SPDX identifier or expression.
+
+    Returns:
+        object | None: Parsed expression tree, or None if parsing fails.
+    """
+    licensing = _licensing()
     try:
-        parsed = _parse_expression(cleaned)
-    except ValueError:
+        parsed = licensing.parse(license_id, validate=True, strict=True)
+    except (ExpressionError, ExpressionParseError):
         return None
-    if parsed is None:
-        return None
-    return _normalize_expr(parsed)
+    return cast(object | None, parsed)
