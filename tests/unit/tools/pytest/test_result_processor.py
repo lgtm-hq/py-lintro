@@ -96,7 +96,7 @@ def test_build_result_filters_skipped(
     # SKIPPED issues should not be in the result.issues
     assert_that(result.issues).is_not_none()
     issue_statuses = {
-        cast(PytestIssue, issue).test_status for issue in result.issues  # type: ignore[union-attr]
+        cast(PytestIssue, issue).test_status for issue in result.issues
     }
     assert_that(issue_statuses).does_not_contain("SKIPPED")
 
@@ -123,4 +123,4 @@ def test_build_result_has_pytest_summary(
         all_issues=[],
     )
     assert_that(result.pytest_summary).is_not_none()
-    assert_that(result.pytest_summary.get("passed")).is_equal_to(10)  # type: ignore[union-attr]
+    assert_that(result.pytest_summary.get("passed")).is_equal_to(10)
