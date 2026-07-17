@@ -15,6 +15,14 @@ if TYPE_CHECKING:
     from lintro.ai.config import AIConfig
     from lintro.config.review_config import ReviewConfig
 
+    # Static types for LintroConfig fields; runtime stays Any so pydantic does
+    # not resolve (and import) AI/review packages at LintroConfig definition.
+    _AiField = AIConfig
+    _ReviewField = ReviewConfig
+else:
+    _AiField = Any
+    _ReviewField = Any
+
 __all__ = [
     "AIConfig",  # noqa: F822 - resolved via module __getattr__
     "EnforceConfig",
@@ -120,8 +128,9 @@ class LintroConfig(BaseModel):
     tools: dict[str, LintroToolConfig] = Field(default_factory=dict)
     # Lazy factories + before-validators keep cold imports free of AI/review
     # packages while still coercing dict inputs into the nested models.
-    ai: Any = Field(default_factory=_default_ai_config)
-    review: Any = Field(default_factory=_default_review_config)
+    # `_AiField` / `_ReviewField` are AIConfig / ReviewConfig under TYPE_CHECKING.
+    ai: _AiField = Field(default_factory=_default_ai_config)
+    review: _ReviewField = Field(default_factory=_default_review_config)
     score: ScoreConfig = Field(default_factory=ScoreConfig)
     config_path: str | None = None
 
