@@ -1,5 +1,8 @@
 # Configuration for actions/labeler
 # Maps file paths to labels for automatic PR labeling
+#
+# Note: Some files intentionally match multiple labels. For example, CHANGELOG.md
+# matches both "documentation" and "release" because both are relevant contexts.
 ---
 enhancement:
   - changed-files:
@@ -67,18 +70,10 @@ release:
           - '.github/workflows/publish-*.yml'
           - '.github/workflows/build-binary.yml'
           - 'CHANGELOG.md'
-          - 'scripts/ci/release/**'
+          - 'scripts/ci/release-*'
+          - 'scripts/ci/classify-release-tag.py'
           - 'scripts/ci/homebrew/**'
-
-docker:
-  - changed-files:
-      - any-glob-to-any-file:
-          - 'Dockerfile'
-          - 'docker-compose.yml'
-          - '.dockerignore'
-          - '.github/workflows/docker-*.yml'
-          - '.github/workflows/ghcr-*.yml'
-          - 'scripts/docker/**'
+          - 'scripts/ci/npm/**'
 
 infrastructure:
   - changed-files:
