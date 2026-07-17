@@ -52,11 +52,11 @@ documentation of their purposes and security considerations.
 
 ### Required Secrets
 
-| Secret Name                   | Purpose                                            | Scope                                     | Rotation                  |
-| ----------------------------- | -------------------------------------------------- | ----------------------------------------- | ------------------------- |
-| `GITHUB_TOKEN`                | Built-in token for GitHub API access               | Automatic                                 | Per-workflow              |
+| Secret Name                   | Purpose                                             | Scope                                      | Rotation                  |
+| ----------------------------- | --------------------------------------------------- | ------------------------------------------ | ------------------------- |
+| `GITHUB_TOKEN`                | Built-in token for GitHub API access                | Automatic                                  | Per-workflow              |
 | `HOMEBREW_TAP_DISPATCH_TOKEN` | Trigger tap formula updates via repository_dispatch | Dispatch-only on `homebrew-tap` (no write) | On compromise or key roll |
-| `CODECOV_TOKEN`               | Upload coverage reports                            | Codecov org                               | As needed                 |
+| `CODECOV_TOKEN`               | Upload coverage reports                             | Codecov org                                | As needed                 |
 
 ### Optional Secrets
 
@@ -74,12 +74,21 @@ documentation of their purposes and security considerations.
    publishing instead of API tokens. This eliminates long-lived credentials.
 
 3. **Token Rotation Schedule**:
-   - `HOMEBREW_TAP_DISPATCH_TOKEN`: Rotate if compromised; dispatch-only, cannot write to the tap
+   - `HOMEBREW_TAP_DISPATCH_TOKEN`: Rotate if compromised; dispatch-only, cannot write
+     to the tap
    - `CODECOV_TOKEN`: Rotate if Codecov reports suspicious activity
    - `GITHUB_TOKEN`: Automatic, no rotation needed
 
 4. **Secret Scanning**: GitHub secret scanning is enabled to detect accidentally
    committed credentials.
+
+5. **Retired App Credentials**: The organization-level GitHub App that formerly held
+   direct write access to `homebrew-tap` has been decommissioned. Retiring the
+   `HOMEBREW_TAP_DISPATCH_TOKEN` row above does not remove the App itself. An
+   organization admin must verify that no other repository still depends on the App,
+   then manually delete the former org-level `HOMEBREW_TAP_APP_ID` and
+   `HOMEBREW_TAP_APP_PRIVATE_KEY` secrets and rotate (or delete) the underlying GitHub
+   App private key.
 
 ## Workflow Security
 
