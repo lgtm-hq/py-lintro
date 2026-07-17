@@ -39,6 +39,7 @@ from lintro.tools.core.tool_registry import (
     CATEGORY_LABELS,
     ManifestRegistry,
 )
+<<<<<<< HEAD
 from lintro.tools.definitions.oxlint_doctor import (
     OxlintCheckResult,
     check_oxlint_type_aware,
@@ -47,6 +48,16 @@ from lintro.utils.doctor_report import (
     ToolCheckResult,
     collect_tool_checks,
     mcp_extra_status,
+=======
+from lintro.tools.core.update_channels import (
+    VersionAdvisory,
+    format_advisory_line,
+)
+from lintro.tools.core.version_checking import build_version_advisory
+from lintro.tools.core.version_parsing import (
+    compare_versions,
+    extract_version_from_output,
+>>>>>>> 74653b25 (feat(cli): surface update advisories in doctor and versions)
 )
 from lintro.utils.environment import (
     EnvironmentReport,
@@ -55,6 +66,186 @@ from lintro.utils.environment import (
 )
 
 
+<<<<<<< HEAD
+=======
+@dataclass
+class ToolCheckResult:
+    """Result of a tool health check.
+
+    Attributes:
+        tool: The manifest tool entry.
+        status: ToolStatus value (OK, MISSING, OUTDATED, UNKNOWN).
+        installed_version: Detected version string, or None.
+        error: Error type if check failed.
+        details: Additional error details.
+        path: Filesystem path where the tool was found.
+        install_hint: Context-aware install command.
+        upgrade_hint: Context-aware upgrade command for outdated tools.
+        advisory: Structured update advisory when outdated/incompatible.
+    """
+
+    tool: ManifestTool
+    status: ToolStatus
+    installed_version: str | None = None
+    error: str | None = None
+    details: str | None = None
+    path: str | None = None
+    install_hint: str = ""
+    upgrade_hint: str = ""
+    advisory: VersionAdvisory | None = None
+
+
+def _check_tool(tool: ManifestTool, context: RuntimeContext) -> ToolCheckResult:
+    """Check a single tool's installation status and version.
+
+    Args:
+        tool: Manifest tool entry.
+        context: Runtime context for install hints.
+
+    Returns:
+        ToolCheckResult with status and details.
+    """
+    strategy = get_strategy(tool.install_type)
+    env = context.environment
+    if strategy:
+        _args = (
+            env,
+            tool.name,
+            tool.version,
+            tool.install_package,
+            tool.install_component,
+        )
+        hint = strategy.install_hint(*_args)
+        upgrade_hint = strategy.upgrade_hint(*_args)
+    else:
+        hint = f"Install {tool.name} manually"
+        upgrade_hint = f"Upgrade {tool.name} manually"
+
+    if not tool.version_command:
+        return ToolCheckResult(
+            tool=tool,
+            status=ToolStatus.MISSING,
+            error="no_command",
+            details="No version command defined",
+            install_hint=hint,
+            upgrade_hint=upgrade_hint,
+        )
+
+    # Find the main executable (may be a wrapper like "sh", "cargo", etc.)
+    main_cmd = tool.version_command[0]
+    tool_path = shutil.which(main_cmd)
+
+    if not tool_path:
+        return ToolCheckResult(
+            tool=tool,
+            status=ToolStatus.MISSING,
+            error="not_in_path",
+            details=main_cmd,
+            install_hint=hint,
+            upgrade_hint=upgrade_hint,
+        )
+
+    try:
+        result = subprocess.run(  # nosec B603 - argv is an internally-built list run with shell=False; binary resolved from a known command, no user shell input
+            tool.version_command,
+            capture_output=True,
+            text=True,
+            timeout=10,
+            check=False,
+        )
+        output = result.stdout + result.stderr
+
+        if result.returncode != 0:
+            return ToolCheckResult(
+                tool=tool,
+                status=ToolStatus.MISSING,
+                error="command_failed",
+                details=f"Exit {result.returncode}: {output[:100]}",
+                path=tool_path,
+                install_hint=hint,
+            )
+
+        version = extract_version_from_output(output, tool.name)
+        if not version:
+            return ToolCheckResult(
+                tool=tool,
+                status=ToolStatus.UNKNOWN,
+                error="no_version",
+                details=f"Output: {output[:100]}",
+                path=tool_path,
+                install_hint=hint,
+            )
+
+        status = _compare_versions(version, tool.version, tool.min_version)
+        advisory = None
+        final_upgrade = upgrade_hint
+        if status in (ToolStatus.OUTDATED, ToolStatus.INCOMPATIBLE):
+            advisory = build_version_advisory(
+                tool=tool.name,
+                installed=version,
+                latest_known=tool.version,
+                binary_path=tool_path,
+                install_package=tool.install_package,
+                install_type=tool.install_type,
+                channel_override=tool.update_channel,
+            )
+            if advisory and advisory.update_command:
+                final_upgrade = advisory.update_command
+        return ToolCheckResult(
+            tool=tool,
+            status=status,
+            installed_version=version,
+            path=tool_path,
+            install_hint=hint,
+            upgrade_hint=final_upgrade,
+            advisory=advisory,
+        )
+    except subprocess.TimeoutExpired:
+        return ToolCheckResult(
+            tool=tool,
+            status=ToolStatus.MISSING,
+            error="timeout",
+            path=tool_path,
+            install_hint=hint,
+            upgrade_hint=upgrade_hint,
+        )
+    except (FileNotFoundError, OSError) as e:
+        return ToolCheckResult(
+            tool=tool,
+            status=ToolStatus.MISSING,
+            error="os_error",
+            details=str(e),
+            install_hint=hint,
+            upgrade_hint=upgrade_hint,
+        )
+
+
+def _compare_versions(
+    installed: str,
+    recommended: str,
+    minimum: str,
+) -> ToolStatus:
+    """Compare installed version against recommended and minimum versions.
+
+    Args:
+        installed: Installed version string.
+        recommended: Recommended/tested version from manifest.
+        minimum: Hard minimum compatible version from manifest.
+
+    Returns:
+        ToolStatus.OK, OUTDATED, INCOMPATIBLE, or UNKNOWN.
+    """
+    try:
+        if compare_versions(installed, minimum) < 0:
+            return ToolStatus.INCOMPATIBLE
+        if compare_versions(installed, recommended) < 0:
+            return ToolStatus.OUTDATED
+        return ToolStatus.OK
+    except ValueError:
+        return ToolStatus.UNKNOWN
+
+
+>>>>>>> 74653b25 (feat(cli): surface update advisories in doctor and versions)
 def _render_category(
     console: Console,
     category_label: str,
@@ -119,7 +310,10 @@ def _render_tool_line(
         line.append(f"{r.installed_version:<10}", style="yellow")
         line.append(f"(>= {r.tool.min_version}, rec. {r.tool.version})", style="dim")
         console.print(line)
-        console.print(f"         [dim]Upgrade: {r.upgrade_hint}[/dim]")
+        if r.advisory:
+            console.print(f"         [dim]{format_advisory_line(r.advisory)}[/dim]")
+        else:
+            console.print(f"         [dim]Upgrade: {r.upgrade_hint}[/dim]")
 
     elif r.status == ToolStatus.INCOMPATIBLE:
         line = Text("    ")
@@ -128,7 +322,10 @@ def _render_tool_line(
         line.append(f"{r.installed_version or '?':<10}", style="red")
         line.append(f"(>= {r.tool.min_version})", style="dim")
         console.print(line)
-        console.print(f"         [dim]Upgrade: {r.upgrade_hint}[/dim]")
+        if r.advisory:
+            console.print(f"         [dim]{format_advisory_line(r.advisory)}[/dim]")
+        else:
+            console.print(f"         [dim]Upgrade: {r.upgrade_hint}[/dim]")
 
     elif r.status == ToolStatus.DISABLED:
         line = Text("    ")
@@ -605,6 +802,21 @@ def doctor_command(
     _render_oxlint_checks(display_console, oxlint_checks)
     _render_mcp_extra(display_console)
 
+    advisories = [
+        r.advisory
+        for r in prod_results
+        if r.advisory is not None
+        and r.status in (ToolStatus.OUTDATED, ToolStatus.INCOMPATIBLE)
+    ]
+    if advisories:
+        display_console.print()
+        display_console.print("  [bold]Update advisories[/bold]")
+        for advisory in advisories:
+            line = Text("    ")
+            line.append("⚠ ", style="yellow")
+            line.append(format_advisory_line(advisory))
+            display_console.print(line)
+
     # Summary
     display_console.print()
     summary_parts: list[str] = []
@@ -683,11 +895,11 @@ def _output_json(
         for r in all_results
         if r.status == ToolStatus.DISABLED and r.tool.tier != "dev"
     )
-    tools_json: dict[str, dict[str, str | None]] = {}
+    tools_json: dict[str, dict[str, object]] = {}
     issues: list[dict[str, str]] = []
 
     for r in all_results:
-        tools_json[r.tool.name] = {
+        tool_entry: dict[str, object] = {
             "recommended": r.tool.version,
             "min_version": r.tool.min_version,
             "expected": r.tool.min_version,
@@ -702,6 +914,9 @@ def _output_json(
             "install_hint": r.install_hint,
             "upgrade_hint": r.upgrade_hint,
         }
+        if r.advisory is not None:
+            tool_entry["advisory"] = r.advisory.to_dict()
+        tools_json[r.tool.name] = tool_entry
         if r.status == ToolStatus.MISSING and r.tool.tier != "dev":
             issues.append(
                 {

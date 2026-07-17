@@ -79,6 +79,215 @@ def _make_context(*, has_brew: bool = False) -> RuntimeContext:
     )
 
 
+<<<<<<< HEAD
+=======
+# ── _compare_versions ────────────────────────────────────────────────
+
+
+@pytest.mark.parametrize(
+    ("installed", "expected", "want"),
+    [
+        ("1.2.3", "1.0.0", ToolStatus.OK),
+        ("1.0.0", "1.0.0", ToolStatus.OK),
+        ("1.0.0", "1.2.0", ToolStatus.OUTDATED),
+        ("0.14.0", "0.15.0", ToolStatus.OUTDATED),
+        ("0.0.1", "2.0.0", ToolStatus.INCOMPATIBLE),
+        ("invalid", "1.0.0", ToolStatus.UNKNOWN),
+    ],
+    ids=["above", "equal", "below", "minor_below", "incompatible", "invalid"],
+)
+def test_compare_versions(installed: str, expected: str, want: ToolStatus) -> None:
+    """Compare two version strings and return the correct ToolStatus."""
+    minimum = expected if want == ToolStatus.INCOMPATIBLE else "0.0.0"
+    assert_that(_compare_versions(installed, expected, minimum)).is_equal_to(want)
+
+
+# ── _check_tool ──────────────────────────────────────────────────────
+
+
+def test_check_tool_ok() -> None:
+    """Tool found in PATH with version meeting minimum."""
+    tool = _make_tool(version="0.14.0")
+    ctx = _make_context()
+
+    with (
+        patch("shutil.which", return_value="/usr/bin/ruff"),
+        patch("subprocess.run") as mock_run,
+    ):
+        mock_run.return_value = MagicMock(
+            returncode=0,
+            stdout="ruff 0.14.4",
+            stderr="",
+        )
+        result = _check_tool(tool, ctx)
+
+    assert_that(result.status).is_equal_to(ToolStatus.OK)
+    assert_that(result.installed_version).is_equal_to("0.14.4")
+    assert_that(result.path).is_equal_to("/usr/bin/ruff")
+
+
+def test_check_tool_outdated_enriches_advisory_from_path() -> None:
+    """Outdated tools get a path-based update advisory."""
+    tool = _make_tool(version="1.0.0", min_version="0.3.0")
+    ctx = _make_context()
+
+    with (
+        patch(
+            "shutil.which",
+            return_value="/Users/me/.local/share/uv/tools/ruff/bin/ruff",
+        ),
+        patch("subprocess.run") as mock_run,
+    ):
+        mock_run.return_value = MagicMock(
+            returncode=0,
+            stdout="ruff 0.5.0",
+            stderr="",
+        )
+        result = _check_tool(tool, ctx)
+
+    assert_that(result.status).is_equal_to(ToolStatus.OUTDATED)
+    assert_that(result.advisory).is_not_none()
+    assert result.advisory is not None
+    assert_that(result.advisory.channel.value).is_equal_to("uv_tool")
+    assert_that(result.upgrade_hint).is_equal_to("uv tool upgrade ruff")
+
+
+def test_check_tool_incompatible() -> None:
+    """Tool found but version below hard minimum."""
+    tool = _make_tool(version="1.0.0", min_version="1.0.0")
+    ctx = _make_context()
+
+    with (
+        patch("shutil.which", return_value="/usr/bin/ruff"),
+        patch("subprocess.run") as mock_run,
+    ):
+        mock_run.return_value = MagicMock(
+            returncode=0,
+            stdout="ruff 0.5.0",
+            stderr="",
+        )
+        result = _check_tool(tool, ctx)
+
+    assert_that(result.status).is_equal_to(ToolStatus.INCOMPATIBLE)
+
+
+def test_check_tool_missing_not_in_path() -> None:
+    """Tool executable not found in PATH."""
+    tool = _make_tool()
+    ctx = _make_context()
+
+    with patch("shutil.which", return_value=None):
+        result = _check_tool(tool, ctx)
+
+    assert_that(result.status).is_equal_to(ToolStatus.MISSING)
+    assert_that(result.error).is_equal_to("not_in_path")
+
+
+def test_check_tool_missing_command_failed() -> None:
+    """Tool found but version command exits non-zero."""
+    tool = _make_tool()
+    ctx = _make_context()
+
+    with (
+        patch("shutil.which", return_value="/usr/bin/ruff"),
+        patch("subprocess.run") as mock_run,
+    ):
+        mock_run.return_value = MagicMock(
+            returncode=1,
+            stdout="",
+            stderr="error",
+        )
+        result = _check_tool(tool, ctx)
+
+    assert_that(result.status).is_equal_to(ToolStatus.MISSING)
+    assert_that(result.error).is_equal_to("command_failed")
+
+
+def test_check_tool_missing_timeout() -> None:
+    """Tool version command times out."""
+    tool = _make_tool()
+    ctx = _make_context()
+
+    with (
+        patch("shutil.which", return_value="/usr/bin/ruff"),
+        patch(
+            "subprocess.run",
+            side_effect=subprocess.TimeoutExpired(cmd=["ruff"], timeout=10),
+        ),
+    ):
+        result = _check_tool(tool, ctx)
+
+    assert_that(result.status).is_equal_to(ToolStatus.MISSING)
+    assert_that(result.error).is_equal_to("timeout")
+
+
+def test_check_tool_missing_os_error() -> None:
+    """Tool version command raises OSError."""
+    tool = _make_tool()
+    ctx = _make_context()
+
+    with (
+        patch("shutil.which", return_value="/usr/bin/ruff"),
+        patch("subprocess.run", side_effect=OSError("exec format error")),
+    ):
+        result = _check_tool(tool, ctx)
+
+    assert_that(result.status).is_equal_to(ToolStatus.MISSING)
+    assert_that(result.error).is_equal_to("os_error")
+
+
+def test_check_tool_unknown_no_version() -> None:
+    """Tool runs but output has no parseable version."""
+    tool = _make_tool()
+    ctx = _make_context()
+
+    with (
+        patch("shutil.which", return_value="/usr/bin/ruff"),
+        patch("subprocess.run") as mock_run,
+    ):
+        mock_run.return_value = MagicMock(
+            returncode=0,
+            stdout="no version here",
+            stderr="",
+        )
+        result = _check_tool(tool, ctx)
+
+    assert_that(result.status).is_equal_to(ToolStatus.UNKNOWN)
+    assert_that(result.error).is_equal_to("no_version")
+
+
+def test_check_tool_no_version_command() -> None:
+    """Tool has no version_command defined."""
+    tool = _make_tool(version_command=())
+    ctx = _make_context()
+
+    result = _check_tool(tool, ctx)
+
+    assert_that(result.status).is_equal_to(ToolStatus.MISSING)
+    assert_that(result.error).is_equal_to("no_command")
+
+
+def test_check_tool_upgrade_hint_populated() -> None:
+    """Both install_hint and upgrade_hint are populated."""
+    tool = _make_tool()
+    ctx = _make_context()
+
+    with (
+        patch("shutil.which", return_value="/usr/bin/ruff"),
+        patch("subprocess.run") as mock_run,
+    ):
+        mock_run.return_value = MagicMock(
+            returncode=0,
+            stdout="ruff 0.14.4",
+            stderr="",
+        )
+        result = _check_tool(tool, ctx)
+
+    assert_that(result.install_hint).is_not_empty()
+    assert_that(result.upgrade_hint).is_not_empty()
+
+
+>>>>>>> 74653b25 (feat(cli): surface update advisories in doctor and versions)
 # ── _output_json ─────────────────────────────────────────────────────
 
 
