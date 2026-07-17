@@ -21,6 +21,17 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.80.11] - 2026-07-17
+
+### Changed
+
+- format CONTRIBUTING.md with prettier (#1475) (5b1e8f3)
+- **deps**: pin dependencies (#1472) (06bc820)
+
+### Fixed
+
+- **ci**: bump pinned lintro image past identify dependency (#1462) (4a1609a)
+
 ## [0.80.10] - 2026-07-17
 
 ### Changed
