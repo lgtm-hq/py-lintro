@@ -40,7 +40,7 @@ def test_set_options_invalid_line_length_type(black_plugin: BlackPlugin) -> None
         black_plugin: The BlackPlugin instance to test.
     """
     with pytest.raises(ValueError, match="line_length must be"):
-        black_plugin.set_options(line_length="wide")  # type: ignore[arg-type]
+        black_plugin.set_options(line_length="wide")
 
 
 def test_set_options_fast(black_plugin: BlackPlugin) -> None:
