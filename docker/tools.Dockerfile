@@ -122,6 +122,7 @@ RUN echo "=== Verifying all tools ===" && \
     pydoclint --version && ruff --version && semgrep --version && \
     shellcheck --version && shfmt --version && sqlfluff --version && \
     dotenv-linter --version && \
+    j2lint --version && \
     stylelint --version && \
     taplo --version && tsc --version && astro --version && \
     svelte-check --version && vue-tsc --version && yamllint --version && \

@@ -200,6 +200,19 @@
       "tags": ["linter"]
     },
     {
+      "name": "j2lint",
+      "version": "1.2.0",
+      "install": {
+        "type": "pip",
+        "package": "j2lint"
+      },
+      "tier": "tools",
+      "category": "bundled",
+      "version_command": ["j2lint", "--version"],
+      "languages": ["jinja2"],
+      "tags": ["linter"]
+    },
+    {
       "name": "markdownlint",
       "version": "0.23.0",
       "install": {

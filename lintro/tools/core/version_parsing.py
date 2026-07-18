@@ -333,6 +333,17 @@ def extract_version_from_output(output: str, tool_name: str | ToolName) -> str |
         if match:
             return match.group(1)
 
+    elif tool_name == ToolName.J2LINT:
+        # j2lint: "Jinja2-Linter Version v1.2.0" — the leading "Jinja2" would
+        # trip the generic pattern, so anchor on the "Version" label.
+        match = re.search(
+            r"version\s+v?(\d+(?:\.\d+)*)",
+            output,
+            re.IGNORECASE,
+        )
+        if match:
+            return match.group(1)
+
     elif tool_name in TOOLS_WITH_SIMPLE_VERSION_PATTERN:
         # Tools with simple version output (see TOOLS_WITH_SIMPLE_VERSION_PATTERN)
         match = re.search(VERSION_NUMBER_PATTERN, output)

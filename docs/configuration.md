@@ -547,6 +547,7 @@ tool_priorities = { ruff = 5, black = 10, prettier = 1 }
 | bandit       | 45       | Security         |
 | hadolint     | 50       | Infrastructure   |
 | actionlint   | 55       | Infrastructure   |
+| j2lint       | 60       | Linter (Jinja2)  |
 | pytest       | 100      | Test Runner      |
 
 Lower priority values run first. This ensures formatters run before linters, avoiding
@@ -2150,6 +2151,38 @@ lintro check --tools actionlint
 # Validate workflows along with other tools
 lintro check --tools ruff,actionlint
 ```
+
+#### j2lint Configuration
+
+[j2lint](https://github.com/aristanetworks/j2lint) lints non-HTML Jinja2 templates (for
+example `*.j2` files used to render YAML, TOML, or config output) against a set of
+best-practice rules covering indentation, delimiter spacing, statement layout, and
+variable naming. It is a lint-only tool and cannot auto-fix.
+
+- File patterns: `*.j2`, `*.jinja`, `*.jinja2`
+- Bundled as a Python dependency (`pip install j2lint` / `uv add j2lint`); also
+  installable via `scripts/utils/install-tools.sh --tools j2lint`.
+- Priority `60` — runs after djlint-style HTML template linters so complementary
+  rulesets both apply to shared `*.jinja` files.
+
+**Available `--tool-options`:**
+
+| Option    | Type        | Description                                    |
+| --------- | ----------- | ---------------------------------------------- |
+| `ignore`  | list of str | Rule IDs to ignore entirely (e.g. `S3`, `V1`). |
+| `warn`    | list of str | Rule IDs to demote from errors to warnings.    |
+| `timeout` | int         | Per-run timeout in seconds (default `30`).     |
+
+```bash
+# Lint Jinja2 templates only
+lintro check --tools j2lint
+
+# Ignore the indentation rule and demote the delimiter rule to a warning
+lintro check --tools j2lint --tool-options "j2lint:ignore=S3 j2lint:warn=S6"
+```
+
+Rule IDs and descriptions are documented in the
+[j2lint rules reference](https://github.com/aristanetworks/j2lint#rules).
 
 ### Git Tools
 

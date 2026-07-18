@@ -58,6 +58,14 @@ implementations with the core tools themselves.
 
 ### [Hadolint Analysis](./hadolint-analysis.md)
 
+### [j2lint Analysis](./j2lint-analysis.md)
+
+**Jinja2 Template Linter**
+
+- ✅ **Preserved**: Best-practice rules, `ignore`/`warn` rule control, JSON parsing
+- ⚠️ **Limited**: No auto-fix, no custom rules dir or STDIN mode via Lintro
+- 🚀 **Enhanced**: Normalized issues, robust JSON extraction, configurable timeout
+
 ### [Bandit Analysis](./bandit-analysis.md)
 
 **Python Security Linter**
