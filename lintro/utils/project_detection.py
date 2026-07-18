@@ -48,7 +48,10 @@ def detect_project_languages() -> list[str]:
         or next(
             (
                 p
-                for p in cwd.glob("**/requirements*.txt")
+                for p in chain(
+                    cwd.glob("**/requirements*.txt"),
+                    cwd.glob("**/requirements/*.txt"),
+                )
                 if not _VENDOR_SKIP_DIRS.intersection(p.parts)
             ),
             None,
