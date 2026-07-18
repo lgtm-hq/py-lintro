@@ -545,6 +545,7 @@ tool_priorities = { ruff = 5, black = 10, prettier = 1 }
 | vale         | 50       | Linter (docs)    |
 | pydoclint    | 40       | Linter           |
 | bandit       | 45       | Security         |
+| buf          | 50       | Linter/Formatter |
 | hadolint     | 50       | Infrastructure   |
 | actionlint   | 55       | Infrastructure   |
 | pytest       | 100      | Test Runner      |
@@ -2100,6 +2101,50 @@ lintro format --tools taplo --tool-options taplo:indent_string="    "
 # Use custom schema for validation
 lintro check --tools taplo --tool-options taplo:schema=pyproject.schema.json
 ```
+
+#### Buf Configuration
+
+**File:** `buf.yaml` (or `buf.work.yaml` for multi-module workspaces)
+
+buf works with or without a `buf.yaml`. When no config is present, buf lints against its
+`STANDARD` default rule set with the current directory as the module root. Add a
+`buf.yaml` to select rule categories (`MINIMAL`, `BASIC`, `STANDARD`) or to opt into
+`COMMENTS`/`UNARY_RPC`:
+
+```yaml
+version: v2
+lint:
+  use:
+    - STANDARD
+  except:
+    - PACKAGE_VERSION_SUFFIX
+```
+
+**Available Options:**
+
+| Option             | Type    | Description                                     |
+| ------------------ | ------- | ----------------------------------------------- |
+| `config`           | string  | Path to a `buf.yaml` file or inline config data |
+| `disable_symlinks` | boolean | Do not follow symlinks when reading sources     |
+
+**Usage Examples:**
+
+```bash
+# Lint Protocol Buffer files (buf lint)
+lintro check --tools buf
+
+# Format .proto files in place (buf format --write)
+lintro format --tools buf
+
+# Use an explicit buf.yaml
+lintro check --tools buf --tool-options buf:config=proto/buf.yaml
+```
+
+> **Note on module roots:** lintro runs buf from the common parent directory of the
+> `.proto` files it selects. buf's directory-based rules (e.g.
+> `PACKAGE_DIRECTORY_MATCH`) resolve package paths relative to that directory, so run
+> lintro from the module root (or add a `buf.yaml`) when your packages are laid out as
+> nested directories.
 
 ### Infrastructure Tools
 

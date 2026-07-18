@@ -180,6 +180,12 @@ system.
 </tr>
 <tr><th colspan="4">Lint + Format</th></tr>
 <tr>
+<td><a href="https://buf.build/"><img src="https://img.shields.io/badge/buf-161b22?logo=buffer&logoColor=white" alt="buf"></a></td>
+<td>🧩 Protobuf</td>
+<td>✅</td>
+<td><code>brew install bufbuild/buf/buf</code><br><a href="https://github.com/bufbuild/buf/releases">GitHub Releases</a></td>
+</tr>
+<tr>
 <td><a href="https://github.com/astral-sh/ruff"><img src="https://img.shields.io/badge/Ruff-000?logo=ruff&logoColor=white" alt="Ruff"></a></td>
 <td>🐍 Python</td>
 <td>✅</td>

@@ -26,6 +26,7 @@ class DocUrlTemplate(StrEnum):
     ACTIONLINT = "https://github.com/rhysd/actionlint/blob/main/docs/checks.md"
     ASTRO_CHECK = "https://docs.astro.build/en/guides/typescript/"
     BANDIT = "https://bandit.readthedocs.io/en/latest/plugins/index.html"
+    BUF = "https://buf.build/docs/lint/rules/"
     CARGO_AUDIT = "https://rustsec.org/advisories/{code}"
     CARGO_DENY = "https://embarkstudios.github.io/cargo-deny/"
     CLIPPY = "https://rust-lang.github.io/rust-clippy/master/index.html#{code}"

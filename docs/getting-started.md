@@ -89,6 +89,8 @@ Some tools require separate installation. Their minimum versions are also manage
   (`bun add -g @commitlint/cli @commitlint/config-conventional` or
   `brew install commitlint`); requires a commitlint config, skipped otherwise
 - `hadolint` - Dockerfile linter (download from GitHub releases)
+- `buf` - Protocol Buffer linter and formatter (`brew install bufbuild/buf/buf` or
+  GitHub releases)
 - `actionlint` - GitHub Actions linter (download from GitHub releases)
 - `semgrep` - Security scanner and code analyzer (`pipx install semgrep`,
   `pip install semgrep`, or `brew install semgrep`)

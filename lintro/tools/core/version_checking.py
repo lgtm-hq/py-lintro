@@ -144,6 +144,10 @@ def get_install_hints() -> dict[str, str]:
         "black": (
             "Install via: pip install black>={version} or uv add black>={version}"
         ),
+        "buf": (
+            "Install via: brew install bufbuild/buf/buf "
+            "or download from https://github.com/bufbuild/buf/releases (v{version}+)"
+        ),
         "mypy": ("Install via: pip install mypy>={version} or uv add mypy>={version}"),
         "pydoclint": (
             "Install via: pip install pydoclint>={version} "

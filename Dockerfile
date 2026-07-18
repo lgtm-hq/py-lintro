@@ -60,6 +60,7 @@ RUN echo "Verifying tools..." && \
     black --version && hadolint --version && actionlint --version && \
     shellcheck --version && shfmt --version && taplo --version && \
     dotenv-linter --version && \
+    buf --version && \
     gitleaks version && osv-scanner --version && prettier --version && \
     commitlint --version && \
     markdownlint-cli2 --version && tsc --version && astro --version && \

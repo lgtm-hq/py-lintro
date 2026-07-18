@@ -60,6 +60,7 @@ _MANIFEST_PATH = Path(__file__).parent / "tools" / "manifest.json"
 # (seeds) and ``_generated_versions.py`` (versions).
 TOOL_VERSIONS: dict[ToolName | str, str] = {
     ToolName.ACTIONLINT: "1.7.12",
+    ToolName.BUF: "1.71.0",
     ToolName.CARGO_AUDIT: "0.22.0",
     ToolName.CARGO_DENY: "0.20.0",
     ToolName.CLIPPY: "1.97.1",
