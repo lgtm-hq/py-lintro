@@ -28,6 +28,7 @@ class DocUrlTemplate(StrEnum):
     BANDIT = "https://bandit.readthedocs.io/en/latest/plugins/index.html"
     CARGO_AUDIT = "https://rustsec.org/advisories/{code}"
     CARGO_DENY = "https://embarkstudios.github.io/cargo-deny/"
+    CHECKOV = "https://www.checkov.io/5.Policy%20Index/all.html"
     CLIPPY = "https://rust-lang.github.io/rust-clippy/master/index.html#{code}"
     COMMITLINT = "https://commitlint.js.org/reference/rules.html"
     DOTENV_LINTER = "https://dotenv-linter.github.io/#/checks/{code}"

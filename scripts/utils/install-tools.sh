@@ -75,6 +75,7 @@ This script installs:
   - Rustfmt (Rust formatter; requires Rust toolchain)
   - Cargo-audit (Rust dependency vulnerability scanner; requires Rust toolchain)
   - Cargo-deny (Rust dependency license/advisory checker; requires Rust toolchain)
+  - Checkov (Infrastructure-as-Code security scanner)
   - OSV-Scanner (Multi-ecosystem vulnerability scanner)
   - Oxlint (JavaScript/TypeScript linter)
   - Oxfmt (JavaScript/TypeScript formatter)
@@ -167,7 +168,7 @@ should_install() {
 # Supported tool names for --tools validation.
 # Kept in sync with the should_install blocks and tools_to_verify array.
 SUPPORTED_TOOLS=(
-	"actionlint" "astro" "bandit" "black" "cargo-audit" "cargo-deny"
+	"actionlint" "astro" "bandit" "black" "cargo-audit" "cargo-deny" "checkov"
 	"clippy" "commitlint" "dotenv-linter" "gitleaks" "hadolint" "markdownlint" "markdownlint-cli2" "mypy" "osv-scanner"
 	"oxfmt" "oxlint" "prettier" "pydoclint" "ruff" "rustfmt" "semgrep"
 	"shellcheck" "shfmt" "sqlfluff" "stylelint" "svelte-check" "taplo" "tsc"
@@ -1184,6 +1185,39 @@ main() {
 		fi
 	fi # markdownlint
 
+	if should_install "checkov"; then
+		# Install checkov (Infrastructure-as-Code security scanner).
+		# Installed in an isolated environment via `uv tool install` because
+		# checkov pulls a large dependency tree (boto3, cyclonedx, spdx-tools,
+		# ...) that must not pollute lintro's own runtime environment.
+		echo -e "${BLUE}Installing checkov...${NC}"
+		CHECKOV_VERSION=$(get_tool_version "checkov") || exit 1
+		# Docker images verify tools as the non-root `lintro` user via gosu.
+		# Keep the uv tool env on a shared path (not /root/...) so that user
+		# can execute the shim in BIN_DIR.
+		if [ "$INSTALL_MODE" = "--docker" ] || [ "$INSTALL_MODE" = "docker" ]; then
+			CHECKOV_UV_TOOL_DIR="/opt/uv-tools"
+		else
+			CHECKOV_UV_TOOL_DIR="${UV_TOOL_DIR:-$HOME/.local/share/uv/tools}"
+		fi
+		if [ $DRY_RUN -eq 1 ]; then
+			log_info "[DRY-RUN] Would install checkov==${CHECKOV_VERSION}"
+		elif command -v uv &>/dev/null &&
+			mkdir -p "$CHECKOV_UV_TOOL_DIR" &&
+			UV_TOOL_DIR="$CHECKOV_UV_TOOL_DIR" UV_TOOL_BIN_DIR="$BIN_DIR" \
+				uv tool install "checkov==${CHECKOV_VERSION}" &&
+			chmod -R a+rX "$CHECKOV_UV_TOOL_DIR"; then
+			# UV_TOOL_BIN_DIR places the checkov shim in BIN_DIR (on PATH for
+			# both local and Docker installs) while keeping deps isolated.
+			echo -e "${GREEN}✓ checkov installed successfully${NC}"
+		elif install_python_package "checkov" "$CHECKOV_VERSION"; then
+			echo -e "${GREEN}✓ checkov installed successfully${NC}"
+		else
+			echo -e "${RED}✗ Failed to install checkov${NC}"
+			exit 1
+		fi
+	fi # checkov
+
 	if should_install "semgrep"; then
 		# Install semgrep (security scanner)
 		echo -e "${BLUE}Installing semgrep...${NC}"
@@ -1614,6 +1648,7 @@ main() {
 		["hadolint"]="Docker linting"
 		["markdownlint"]="Markdown linting"
 		["mypy"]="Python type checking"
+		["checkov"]="Infrastructure-as-Code security scanning"
 		["osv-scanner"]="Multi-ecosystem vulnerability scanning"
 		["oxfmt"]="JavaScript/TypeScript formatting"
 		["oxlint"]="JavaScript/TypeScript linting"
@@ -1643,7 +1678,7 @@ main() {
 	# Verify installations
 	echo -e "${YELLOW}Verifying installations...${NC}"
 
-	tools_to_verify=("actionlint" "astro" "bandit" "black" "cargo-audit" "cargo-deny" "clippy" "commitlint" "dotenv-linter" "gitleaks" "hadolint" "markdownlint-cli2" "mypy" "osv-scanner" "oxfmt" "oxlint" "prettier" "pydoclint" "ruff" "rustfmt" "semgrep" "shellcheck" "shfmt" "sqlfluff" "stylelint" "svelte-check" "taplo" "tsc" "vale" "vue-tsc" "yamllint")
+	tools_to_verify=("actionlint" "astro" "bandit" "black" "cargo-audit" "cargo-deny" "checkov" "clippy" "commitlint" "dotenv-linter" "gitleaks" "hadolint" "markdownlint-cli2" "mypy" "osv-scanner" "oxfmt" "oxlint" "prettier" "pydoclint" "ruff" "rustfmt" "semgrep" "shellcheck" "shfmt" "sqlfluff" "stylelint" "svelte-check" "taplo" "tsc" "vale" "vue-tsc" "yamllint")
 
 	# Filter verification list when --tools is set.
 	# Map aliases so e.g. --tools markdownlint verifies markdownlint-cli2.

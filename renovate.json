@@ -231,6 +231,18 @@
       "extractVersionTemplate": "^v(?<version>.*)$"
     },
     {
+      "description": "Update checkov version in _tool_versions.py",
+      "customType": "regex",
+      "managerFilePatterns": [
+        "lintro/_tool_versions\\.py"
+      ],
+      "matchStrings": [
+        "ToolName\\.CHECKOV:\\s*\"(?<currentValue>[0-9]+\\.[0-9]+\\.[0-9]+)\""
+      ],
+      "datasourceTemplate": "pypi",
+      "packageNameTemplate": "checkov"
+    },
+    {
       "description": "Update gitleaks version in _tool_versions.py",
       "customType": "regex",
       "managerFilePatterns": [

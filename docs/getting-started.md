@@ -92,6 +92,8 @@ Some tools require separate installation. Their minimum versions are also manage
 - `actionlint` - GitHub Actions linter (download from GitHub releases)
 - `semgrep` - Security scanner and code analyzer (`pipx install semgrep`,
   `pip install semgrep`, or `brew install semgrep`)
+- `checkov` - Infrastructure-as-Code security scanner for Terraform
+  (`uv tool install checkov`, `pip install checkov`, or `brew install checkov`)
 - `gitleaks` - Secret detection in git repos (`brew install gitleaks` or GitHub
   releases)
 - `shellcheck` - Shell script analyzer (`brew install shellcheck` or GitHub releases)
