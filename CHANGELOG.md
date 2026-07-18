@@ -21,6 +21,12 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.81.2] - 2026-07-18
+
+### Fixed
+
+- **deps**: exclude test_samples fixtures from Renovate tracking (#1504) (a8e051e)
+
 ## [0.81.1] - 2026-07-18
 
 ### Changed
