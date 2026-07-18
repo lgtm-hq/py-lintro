@@ -57,6 +57,7 @@ RUN getent group tools >/dev/null || groupadd -r tools && \
     mkdir -p /code && \
     chown -R lintro:lintro /app /code
 
+<<<<<<< HEAD
 # Minimal cross-ecosystem smoke check. Comprehensive manifest-vs-image tool
 # verification now runs in CI against this image
 # (scripts/ci/verify-image-manifest-tools.sh, wired into docker-ci.yml, #1511),
@@ -69,6 +70,22 @@ RUN echo "Smoke-testing tool stack..." && \
     ruff --version && prettier --version && rustfmt --version && \
     shellcheck --version && \
     echo "Tool stack smoke check passed."
+=======
+RUN echo "Verifying tools..." && \
+    rustfmt --version && cargo clippy --version && cargo audit --version && \
+    cargo deny --version && semgrep --version && ruff --version && \
+    black --version && hadolint --version && actionlint --version && \
+    shellcheck --version && shfmt --version && taplo --version && \
+    dotenv-linter --version && \
+    gitleaks version && osv-scanner --version && prettier --version && \
+    commitlint --version && \
+    markdownlint-cli2 --version && tsc --version && astro --version && \
+    vue-tsc --version && oxlint --version && oxfmt --version && \
+    bandit --version && mypy --version && pydoclint --version && \
+    yamllint --version && sqlfluff --version && stylelint --version && \
+    vale --version && \
+    echo "All tools verified!"
+>>>>>>> e445445c (build(terraform): defer runtime image terraform verification to digest bump)
 
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
     CMD /app/.venv/bin/python -m lintro --version || exit 1
@@ -80,7 +97,16 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
 RUN echo "Smoke-testing tools as non-root user..." && \
     gosu lintro prettier --version && \
     gosu lintro cargo clippy --version && \
+<<<<<<< HEAD
     echo "Non-root tool smoke check passed."
+=======
+    gosu lintro cargo audit --version && \
+    gosu lintro cargo deny --version && \
+    gosu lintro osv-scanner --version && \
+    gosu lintro semgrep --version && \
+    gosu lintro dotenv-linter --version && \
+    echo "All tools verified for non-root user!"
+>>>>>>> e445445c (build(terraform): defer runtime image terraform verification to digest bump)
 
 # No USER directive: the container starts as root so entrypoint.sh can detect
 # the UID/GID that owns the mounted /code volume and drop privileges to it via
