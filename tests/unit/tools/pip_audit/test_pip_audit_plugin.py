@@ -430,7 +430,7 @@ def test_check_timeout_preserves_earlier_findings(
     second.mkdir()
     (second / "requirements.txt").write_text("packaging==25.0\n")
 
-    calls = [
+    calls: list[SubprocessResult | TimeoutExpired] = [
         _proc(success=False, stdout=_VULN_OUTPUT),
         TimeoutExpired(cmd=["pip-audit"], timeout=120),
     ]
