@@ -83,9 +83,8 @@ oxlint_plugin.set_options(quiet=True, exclude_patterns=["node_modules"])
 
 ### Type-aware linting (Oxlint)
 
-Oxlint supports **type-aware** linting via `--type-aware`. Lintro exposes this as
-the boolean `type_aware` option, which appends `--type-aware` to the underlying
-command:
+Oxlint supports **type-aware** linting via `--type-aware`. Lintro exposes this as the
+boolean `type_aware` option, which appends `--type-aware` to the underlying command:
 
 ```python
 oxlint_plugin = get_plugin("oxlint")
@@ -95,23 +94,23 @@ result = oxlint_plugin.check(["src/"])
 
 **Requirements:**
 
-- **`oxlint-tsgolint`**: the type-aware companion binary must be resolvable, either
-  from the project's `node_modules` or via `bunx`. Install it with
+- **`oxlint-tsgolint`**: the type-aware companion binary must be resolvable, either from
+  the project's `node_modules` or via `bunx`. Install it with
   `bun add -d oxlint-tsgolint@latest`.
 - **TypeScript >= 7.0**: type-aware rules rely on the TypeScript-Go (`tsgolint`)
   toolchain and require TypeScript 7.0 or newer.
 - **No legacy `tsconfig` `baseUrl`**: projects that depend on the legacy
-  `compilerOptions.baseUrl` path resolution are not supported by the type-aware
-  backend; migrate to `paths`/relative imports first.
+  `compilerOptions.baseUrl` path resolution are not supported by the type-aware backend;
+  migrate to `paths`/relative imports first.
 
-**Status:** type-aware linting is currently **alpha** in oxlint. Rules that require
-type information live under the `typescript/*` rule namespace.
+**Status:** type-aware linting is currently **alpha** in oxlint. Rules that require type
+information live under the `typescript/*` rule namespace.
 
-`lintro doctor` verifies these prerequisites automatically whenever type-aware
-linting is enabled — either through the `type_aware` option or via
-`options.typeAware` in the discovered `.oxlintrc.json`. When `oxlint-tsgolint`
-cannot be resolved it emits the hint `bun add -d oxlint-tsgolint@latest`, and it
-flags TypeScript installs older than 7.0 as incompatible.
+`lintro doctor` verifies these prerequisites automatically whenever type-aware linting
+is enabled — either through the `type_aware` option or via `options.typeAware` in the
+discovered `.oxlintrc.json`. When `oxlint-tsgolint` cannot be resolved it emits the hint
+`bun add -d oxlint-tsgolint@latest`, and it flags TypeScript installs older than 7.0 as
+incompatible.
 
 Example `.oxlintrc.json` enabling type-aware linting:
 
@@ -128,9 +127,9 @@ Example `.oxlintrc.json` enabling type-aware linting:
 
 ### JavaScript plugins (Oxlint)
 
-Oxlint can load **ESLint v9+ JavaScript plugins** declared in `.oxlintrc.json`.
-These plugins pass through Lintro unchanged: Lintro does not intercept, rewrite, or
-re-declare plugin configuration, so any plugins listed in your `.oxlintrc.json`
+Oxlint can load **ESLint v9+ JavaScript plugins** declared in `.oxlintrc.json`. These
+plugins pass through Lintro unchanged: Lintro does not intercept, rewrite, or re-declare
+plugin configuration, so any plugins listed in your `.oxlintrc.json`
 `plugins`/`jsPlugins` arrays are honored exactly as oxlint resolves them. This is a
 documentation-only guarantee — there is no Lintro-specific code path for JS plugins;
 configure them natively:
