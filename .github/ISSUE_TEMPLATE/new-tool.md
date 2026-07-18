@@ -38,8 +38,8 @@ would this tool run against the Lintro codebase?
 
 - [ ] I can add a repo config file so the tool checks existing source files
 - [ ] The tool targets a language not present in this repo — I will add a rationale
-  entry to the dogfood skip allowlist (see
-  [#1510](https://github.com/lgtm-hq/py-lintro/issues/1510))
+      entry to the dogfood skip allowlist (see
+      [#1510](https://github.com/lgtm-hq/py-lintro/issues/1510))
 
 ## Implementation notes (optional)
 
@@ -51,4 +51,5 @@ format, known parser edge cases, etc.
 - [ ] I have searched existing issues to avoid duplicates
 - [ ] This tool would benefit the broader Lintro community
 - [ ] I am willing to help implement or test this if needed
-- [ ] I have read the [adding-a-new-tool guide](../../docs/contributing/adding-a-new-tool.md)
+- [ ] I have read the
+      [adding-a-new-tool guide](../../docs/contributing/adding-a-new-tool.md)

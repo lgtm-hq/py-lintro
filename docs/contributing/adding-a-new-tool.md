@@ -17,12 +17,12 @@ guides.
 **Pick a reference implementation.** Do not write plugin/parser code from scratch.
 Mirror the closest existing tool:
 
-| Tool type              | Reference                                          |
-| ---------------------- | -------------------------------------------------- |
-| Simple linter (no fix) | `lintro/tools/definitions/actionlint.py`           |
-| Linter + formatter     | `lintro/tools/definitions/ruff.py`                 |
-| Security scanner       | `lintro/tools/definitions/bandit.py`               |
-| Shell tool             | `lintro/tools/definitions/shellcheck.py`           |
+| Tool type              | Reference                                |
+| ---------------------- | ---------------------------------------- |
+| Simple linter (no fix) | `lintro/tools/definitions/actionlint.py` |
+| Linter + formatter     | `lintro/tools/definitions/ruff.py`       |
+| Security scanner       | `lintro/tools/definitions/bandit.py`     |
+| Shell tool             | `lintro/tools/definitions/shellcheck.py` |
 
 Read all files for that reference tool (definition, parser package, unit tests,
 integration test, test samples) before writing any new code.
@@ -37,18 +37,17 @@ integration test, test samples) before writing any new code.
 In the **same PR** that adds the tool, do one of the following:
 
 1. **Add repo configuration** — create or extend the tool's config file (e.g.
-   `.shellcheckrc`, `.hadolint.yaml`) so the tool runs against the relevant source
-   files in CI dogfooding jobs without errors.
+   `.shellcheckrc`, `.hadolint.yaml`) so the tool runs against the relevant source files
+   in CI dogfooding jobs without errors.
 2. **Add an allowlist entry** — if the tool genuinely cannot lint any file in this
-   repository (e.g. it targets a language not present here), add an entry with a
-   written rationale to the dogfood skip allowlist introduced in
+   repository (e.g. it targets a language not present here), add an entry with a written
+   rationale to the dogfood skip allowlist introduced in
    [#1510](https://github.com/lgtm-hq/py-lintro/issues/1510). A rationale-free entry
    will be rejected in review.
 
-The dogfooding jobs (`docker-ci.yml` `dogfooding-quality` job and
-`dogfood-nightly.yml`) verify this at merge time. See
-[`docs/lintro-self-use.md`](../lintro-self-use.md) for an overview of how Lintro
-dogfoods its own codebase.
+The dogfooding jobs (`docker-ci.yml` `dogfooding-quality` job and `dogfood-nightly.yml`)
+verify this at merge time. See [`docs/lintro-self-use.md`](../lintro-self-use.md) for an
+overview of how Lintro dogfoods its own codebase.
 
 ---
 
@@ -89,27 +88,27 @@ class <Tool>Plugin(BaseToolPlugin):
 
 **ToolType values** (may be combined with `|`):
 
-| Value                         | When to use                              |
-| ----------------------------- | ---------------------------------------- |
-| `ToolType.LINTER`             | Code quality checker                     |
-| `ToolType.FORMATTER`          | Code formatter                           |
-| `ToolType.TYPE_CHECKER`       | Static type checker (mypy, tsc)          |
-| `ToolType.DOCUMENTATION`      | Docstring/doc checker                    |
-| `ToolType.SECURITY`           | Security scanner (bandit, semgrep)       |
-| `ToolType.INFRASTRUCTURE`     | IaC/CI linter (hadolint, actionlint)     |
-| `ToolType.TEST_RUNNER`        | Test framework (pytest)                  |
+| Value                     | When to use                          |
+| ------------------------- | ------------------------------------ |
+| `ToolType.LINTER`         | Code quality checker                 |
+| `ToolType.FORMATTER`      | Code formatter                       |
+| `ToolType.TYPE_CHECKER`   | Static type checker (mypy, tsc)      |
+| `ToolType.DOCUMENTATION`  | Docstring/doc checker                |
+| `ToolType.SECURITY`       | Security scanner (bandit, semgrep)   |
+| `ToolType.INFRASTRUCTURE` | IaC/CI linter (hadolint, actionlint) |
+| `ToolType.TEST_RUNNER`    | Test framework (pytest)              |
 
 **Key implementation notes:**
 
-- `check()` must return a `ToolResult`; call
-  `self._prepare_execution(paths, options)` and check `ctx.should_skip` first.
+- `check()` must return a `ToolResult`; call `self._prepare_execution(paths, options)`
+  and check `ctx.should_skip` first.
 - `fix()` raises `NotImplementedError` when `can_fix=False`.
-- Always use list args in subprocess calls, never `shell=True`; add `# nosec B404`
-  on the `import subprocess` line.
-- `_prepare_execution()` handles file discovery and filtering by `file_patterns`.
-  Use `ctx.rel_files` for the filtered list.
-- If the tool has per-rule documentation URLs, implement `doc_url(self, code)` and
-  add a `DocUrlTemplate` entry (see Step 3).
+- Always use list args in subprocess calls, never `shell=True`; add `# nosec B404` on
+  the `import subprocess` line.
+- `_prepare_execution()` handles file discovery and filtering by `file_patterns`. Use
+  `ctx.rel_files` for the filtered list.
+- If the tool has per-rule documentation URLs, implement `doc_url(self, code)` and add a
+  `DocUrlTemplate` entry (see Step 3).
 
 ---
 
@@ -130,8 +129,8 @@ def parse_<tool>_output(output: str | None) -> list[<Tool>Issue]:
     ...
 ```
 
-Issue classes inherit from `BaseIssue` and define `DISPLAY_FIELD_MAP` for custom
-column labels. Mirror the issue and parser files from your reference tool exactly.
+Issue classes inherit from `BaseIssue` and define `DISPLAY_FIELD_MAP` for custom column
+labels. Mirror the issue and parser files from your reference tool exactly.
 
 ---
 
@@ -196,9 +195,9 @@ Choose the path that matches the tool's distribution mechanism.
    ```
 
 3. **`renovate.json`** — add **two** custom manager entries (one for
-   `_tool_versions.py`, one for `manifest.json`), copying the pattern from an
-   existing binary tool. Both entries must reference the same upstream package on
-   the same datasource so Renovate keeps them in sync.
+   `_tool_versions.py`, one for `manifest.json`), copying the pattern from an existing
+   binary tool. Both entries must reference the same upstream package on the same
+   datasource so Renovate keeps them in sync.
 
 4. **`scripts/utils/install-tools.sh`** — four sync points (see Step 8).
 
@@ -216,8 +215,8 @@ Choose the path that matches the tool's distribution mechanism.
    }
    ```
 
-   If the tool requires companion packages (plugins that ship alongside it), add
-   them too with `None` as the value.
+   If the tool requires companion packages (plugins that ship alongside it), add them
+   too with `None` as the value.
 
 3. **`package.json`** — pin the package in `devDependencies` using a caret prefix:
 
@@ -225,8 +224,8 @@ Choose the path that matches the tool's distribution mechanism.
    "<npm-package>": "^x.y.z"
    ```
 
-4. **Run the generator** (see Step 9) to regenerate `lintro/_generated_versions.py`
-   and sync version fields in `manifest.json`.
+4. **Run the generator** (see Step 9) to regenerate `lintro/_generated_versions.py` and
+   sync version fields in `manifest.json`.
 
 5. **`lintro/tools/manifest.json`** — the generator writes the `version` field; verify
    the entry has the correct `install.type = "npm"` and `install.package`.
@@ -266,9 +265,9 @@ Choose the path that matches the tool's distribution mechanism.
 ### TOOLS_WITH_SIMPLE_VERSION_PATTERN
 
 If the tool prints a plain version number (e.g. `1.2.3`) to stdout, add it to
-`TOOLS_WITH_SIMPLE_VERSION_PATTERN` in `lintro/tools/core/version_parsing.py`.
-Tools with non-standard version output (e.g. a multi-line header) require a
-custom extraction branch in that same module.
+`TOOLS_WITH_SIMPLE_VERSION_PATTERN` in `lintro/tools/core/version_parsing.py`. Tools
+with non-standard version output (e.g. a multi-line header) require a custom extraction
+branch in that same module.
 
 ### Install hints
 
@@ -281,15 +280,15 @@ Add the tool to `get_install_hints()` in `lintro/tools/core/version_checking.py`
 
 The default priority for all tools is `50`. Only add an entry to
 `DEFAULT_TOOL_PRIORITIES` in `lintro/utils/config_priority.py` if the tool needs a
-non-default priority (e.g. formatters run first, type checkers run last). Check
-existing entries before deciding on a value.
+non-default priority (e.g. formatters run first, type checkers run last). Check existing
+entries before deciding on a value.
 
 ---
 
 ## Step 7 — pyproject.toml: package list
 
-Add the new parser package to the `packages` list in `pyproject.toml` so it is
-included in the wheel:
+Add the new parser package to the `packages` list in `pyproject.toml` so it is included
+in the wheel:
 
 ```toml
 [tool.setuptools]
@@ -309,8 +308,8 @@ Four places require editing (keep alphabetical order throughout):
 1. **Help text** — add the tool to the description block in the `--help` section.
 2. **`SUPPORTED_TOOLS` array** — add the tool's binary name.
 3. **Installation block** — add a `should_install` block that reads the version via
-   `get_tool_version "<tool>"` and installs from the appropriate upstream source.
-   Copy the pattern from an existing tool of the same distribution type.
+   `get_tool_version "<tool>"` and installs from the appropriate upstream source. Copy
+   the pattern from an existing tool of the same distribution type.
 4. **`tools_to_verify` array** (near end of file) — add the binary name so the
    post-install verification step checks it.
 
@@ -325,8 +324,8 @@ python3 scripts/ci/generate-tool-versions.py
 ```
 
 This regenerates `lintro/_generated_versions.py` and syncs version fields in
-`lintro/tools/manifest.json`. Verify the output is consistent and commit it
-alongside the other changes.
+`lintro/tools/manifest.json`. Verify the output is consistent and commit it alongside
+the other changes.
 
 To check without writing (useful before pushing):
 
@@ -342,8 +341,8 @@ CI fails the PR if `_generated_versions.py` or `manifest.json` are out of sync.
 
 ### `docker/tools.Dockerfile`
 
-Add the tool's version verification to the `RUN` block at the end of the file
-(the block that verifies every installed binary):
+Add the tool's version verification to the `RUN` block at the end of the file (the block
+that verifies every installed binary):
 
 ```dockerfile
 <tool> --version && \
@@ -354,13 +353,13 @@ Add the tool's version verification to the `RUN` block at the end of the file
 Add the tool's binary to **both** verify blocks in the root `Dockerfile`:
 
 - **Root-user block** (around line 60): `<tool> --version && \`
-- **Non-root block** (around line 78): `gosu lintro <tool> --version && \`
-  (only needed for npm/bun-managed tools that install under a user prefix)
+- **Non-root block** (around line 78): `gosu lintro <tool> --version && \` (only needed
+  for npm/bun-managed tools that install under a user prefix)
 
-> **Note:** The root `Dockerfile` pulls the pre-built `lintro-tools` image
-> (built from `docker/tools.Dockerfile`) via a digest-pinned `FROM`. Adding a
-> tool to `tools.Dockerfile` is the primary change; the root `Dockerfile`'s
-> verify blocks are a second guard.
+> **Note:** The root `Dockerfile` pulls the pre-built `lintro-tools` image (built from
+> `docker/tools.Dockerfile`) via a digest-pinned `FROM`. Adding a tool to
+> `tools.Dockerfile` is the primary change; the root `Dockerfile`'s verify blocks are a
+> second guard.
 
 ---
 
@@ -373,8 +372,8 @@ tests/unit/parsers/test_<tool>_parser.py
 ```
 
 Cover at minimum: single-issue output, multi-issue output, empty/None output,
-`to_display_row()` format, and at least one edge case (e.g. truncated line,
-unknown severity). Mirror the structure from your reference tool's parser test.
+`to_display_row()` format, and at least one edge case (e.g. truncated line, unknown
+severity). Mirror the structure from your reference tool's parser test.
 
 ### Unit tests — plugin
 
@@ -415,8 +414,8 @@ tests/integration/tools/<tool>/
 ```
 
 Use `pytest.mark.skipif(shutil.which("<tool>") is None, reason="<tool> not installed")`
-(or the `skip_if_tool_unavailable` fixture) to gate integration tests. Integration
-tests must pass in CI/Docker where every tool is installed.
+(or the `skip_if_tool_unavailable` fixture) to gate integration tests. Integration tests
+must pass in CI/Docker where every tool is installed.
 
 ### Test samples
 
@@ -429,8 +428,8 @@ The violations file must trigger real tool errors when run directly:
 `<tool> <violations_file>`. The clean file must pass without errors.
 
 `test_samples/` is listed in `.lintro-ignore` so Lintro never lints it during
-dogfooding; tests that scan a sample file must stage a copy into a temp directory
-(see the staging pattern in [`docs/testing.md`](../testing.md)).
+dogfooding; tests that scan a sample file must stage a copy into a temp directory (see
+the staging pattern in [`docs/testing.md`](../testing.md)).
 
 ---
 
@@ -453,8 +452,8 @@ Add a full configuration section covering:
 
 ### docs/getting-started.md
 
-Add the tool to the **Optional External Tools** section with install instructions and
-a short usage example.
+Add the tool to the **Optional External Tools** section with install instructions and a
+short usage example.
 
 ### docs/tool-analysis/\<tool\>-analysis.md
 
@@ -480,17 +479,16 @@ The docs website at `apps/site` is **auto-mirrored** from `docs/` by
 If the tool is available as a Homebrew formula and its version matches what
 `_tool_versions.py` pins:
 
-1. Add `depends_on "<tool>"` to
-   `scripts/ci/homebrew/templates/lintro.rb.template` in alphabetical order under
-   the appropriate category.
+1. Add `depends_on "<tool>"` to `scripts/ci/homebrew/templates/lintro.rb.template` in
+   alphabetical order under the appropriate category.
 2. Update the caveats section in the same file to list the new tool.
 3. Bundled Python tools (ruff, black, mypy, bandit, yamllint) are excluded from the
    Homebrew venv — they install as separate Homebrew formulae and are discovered via
    `PATH`, not `python -m`.
 
 > If the Homebrew package version does not match the pinned version in
-> `_tool_versions.py`, omit `depends_on` and document alternative install
-> instructions in `docs/configuration.md`.
+> `_tool_versions.py`, omit `depends_on` and document alternative install instructions
+> in `docs/configuration.md`.
 
 ---
 
@@ -498,11 +496,11 @@ If the tool is available as a Homebrew formula and its version matches what
 
 A new-tool PR is **not mergeable** until all three gates pass:
 
-| Gate | What it checks |
-| ---- | -------------- |
-| [**#1509**](https://github.com/lgtm-hq/py-lintro/issues/1509) — plugin completeness | Parametrized test suite asserts that every registered plugin has an integration surface, `tool_type`/manifest tags agree, `DEFAULT_TOOL_PRIORITIES` entry is consistent, and docs references exist |
-| [**#1510**](https://github.com/lgtm-hq/py-lintro/issues/1510) — dogfood skip allowlist | Dogfooding CI fails if any enabled tool reports SKIP without an entry in the committed allowlist; every allowlist entry must have a written rationale |
-| [**#1511**](https://github.com/lgtm-hq/py-lintro/issues/1511) — manifest vs image | `scripts/ci/verify-manifest-tools.py` runs inside the freshly built CI image; if the manifest declares the tool but the image cannot execute its `version_command`, the build fails |
+| Gate                                                                                   | What it checks                                                                                                                                                                                     |
+| -------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| [**#1509**](https://github.com/lgtm-hq/py-lintro/issues/1509) — plugin completeness    | Parametrized test suite asserts that every registered plugin has an integration surface, `tool_type`/manifest tags agree, `DEFAULT_TOOL_PRIORITIES` entry is consistent, and docs references exist |
+| [**#1510**](https://github.com/lgtm-hq/py-lintro/issues/1510) — dogfood skip allowlist | Dogfooding CI fails if any enabled tool reports SKIP without an entry in the committed allowlist; every allowlist entry must have a written rationale                                              |
+| [**#1511**](https://github.com/lgtm-hq/py-lintro/issues/1511) — manifest vs image      | `scripts/ci/verify-manifest-tools.py` runs inside the freshly built CI image; if the manifest declares the tool but the image cannot execute its `version_command`, the build fails                |
 
 Until those gates are live, satisfy their intent manually using the
 [`lintro-verify` checklist](https://github.com/lgtm-hq/py-lintro/blob/main/skills-ref/lintro-verify/SKILL.md)
@@ -535,24 +533,23 @@ python3 scripts/ci/generate-tool-versions.py --check
 Implementation checklist:
 
 - [ ] `lintro/tools/definitions/<tool>.py` — `@register_tool`, `BaseToolPlugin`,
-  `ToolDefinition`
-- [ ] `lintro/parsers/<tool>/` — `__init__.py`, `<tool>_issue.py`,
-  `<tool>_parser.py`
+      `ToolDefinition`
+- [ ] `lintro/parsers/<tool>/` — `__init__.py`, `<tool>_issue.py`, `<tool>_parser.py`
 - [ ] `lintro/enums/tool_name.py` — `ToolName.<TOOL>` (alphabetical)
 - [ ] `lintro/enums/doc_url_template.py` — `DocUrlTemplate.<TOOL>` (if applicable)
 - [ ] Version registration (Path A / B / C, see Step 4)
 - [ ] `lintro/tools/manifest.json` — tool entry with correct version and install type
-- [ ] `lintro/tools/core/version_parsing.py` — `TOOLS_WITH_SIMPLE_VERSION_PATTERN`
-  (if applicable)
+- [ ] `lintro/tools/core/version_parsing.py` — `TOOLS_WITH_SIMPLE_VERSION_PATTERN` (if
+      applicable)
 - [ ] `lintro/tools/core/version_checking.py` — install hints
 - [ ] `lintro/utils/config_priority.py` — `DEFAULT_TOOL_PRIORITIES` (if non-default)
 - [ ] `pyproject.toml` — parser package added to `packages` list
-- [ ] `scripts/utils/install-tools.sh` — 4 sync points (help, SUPPORTED_TOOLS,
-  install block, tools_to_verify)
+- [ ] `scripts/utils/install-tools.sh` — 4 sync points (help, SUPPORTED_TOOLS, install
+      block, tools_to_verify)
 - [ ] `docker/tools.Dockerfile` — verify step
 - [ ] `Dockerfile` — root block and non-root block (for npm/bun tools)
 - [ ] `renovate.json` — custom managers for `_tool_versions.py` and `manifest.json`
-  (binary tools only)
+      (binary tools only)
 - [ ] `scripts/ci/generate-tool-versions.py --check` passes
 - [ ] Unit tests (parser + plugin) added
 - [ ] Integration tests added (with `skipif` guard)

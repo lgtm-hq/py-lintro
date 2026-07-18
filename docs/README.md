@@ -223,7 +223,8 @@ docker run --rm -v "$(pwd):/code" lintro:latest check
 - **Configuration:** [Configuration Guide](configuration.md)
 - **Docker:** [Docker Usage](docker.md)
 - **CI/CD:** [GitHub Integration](github-integration.md)
-- **Contributing:** [Contributing Guide](contributing.md), [Adding a New Tool](contributing/adding-a-new-tool.md)
+- **Contributing:** [Contributing Guide](contributing.md),
+  [Adding a New Tool](contributing/adding-a-new-tool.md)
 - **Tool Comparison:** [Tool Analysis](tool-analysis/)
 
 ### Search by Error/Issue
