@@ -283,6 +283,12 @@ system.
 <td>-</td>
 <td><code>pipx install semgrep</code><br><code>pip install semgrep</code><br><code>brew install semgrep</code></td>
 </tr>
+<tr>
+<td><a href="https://github.com/trufflesecurity/trufflehog"><img src="https://img.shields.io/badge/TruffleHog-800000?logo=trufflesecurity&logoColor=white" alt="TruffleHog"></a></td>
+<td>🔐 Secret Detection</td>
+<td>-</td>
+<td><code>brew install trufflehog</code><br><a href="https://github.com/trufflesecurity/trufflehog/releases">GitHub Releases</a></td>
+</tr>
 </tbody>
 </table>
 

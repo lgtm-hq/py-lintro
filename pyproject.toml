@@ -181,6 +181,7 @@ packages = [
   "lintro.parsers.stylelint",
   "lintro.parsers.svelte_check",
   "lintro.parsers.taplo",
+  "lintro.parsers.trufflehog",
   "lintro.parsers.pydoclint",
   "lintro.parsers.tsc",
   "lintro.parsers.vale",

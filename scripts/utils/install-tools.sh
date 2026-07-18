@@ -170,7 +170,8 @@ SUPPORTED_TOOLS=(
 	"actionlint" "astro" "bandit" "black" "cargo-audit" "cargo-deny"
 	"clippy" "commitlint" "dotenv-linter" "gitleaks" "hadolint" "markdownlint" "markdownlint-cli2" "mypy" "osv-scanner"
 	"oxfmt" "oxlint" "pip-audit" "prettier" "pydoclint" "ruff" "rustfmt" "semgrep"
-	"shellcheck" "shfmt" "sqlfluff" "stylelint" "svelte-check" "taplo" "tsc"
+	"shellcheck" "shfmt" "sqlfluff" "stylelint" "svelte-check" "taplo"
+	"trufflehog" "tsc"
 	"vale" "vue-tsc" "yamllint"
 )
 
@@ -649,6 +650,67 @@ main() {
 			fi
 		fi
 	fi # osv-scanner
+
+	# Install trufflehog (secret detection with optional verification)
+	if should_install "trufflehog"; then
+		echo -e "${BLUE}Installing trufflehog...${NC}"
+		TRUFFLEHOG_VERSION=$(get_tool_version "trufflehog") || exit 1
+		if [ $DRY_RUN -eq 1 ]; then
+			log_info "[DRY-RUN] Would install trufflehog v${TRUFFLEHOG_VERSION}"
+		elif command -v trufflehog &>/dev/null; then
+			echo -e "${GREEN}✓ trufflehog already installed${NC}"
+		else
+			tmpdir=$(mktemp -d)
+			os=$(uname -s | tr '[:upper:]' '[:lower:]')
+			arch=$(uname -m)
+			case "$arch" in
+			x86_64 | amd64) arch_name="amd64" ;;
+			aarch64 | arm64) arch_name="arm64" ;;
+			*) echo -e "${RED}✗ Unsupported architecture: $arch${NC}" && exit 1 ;;
+			esac
+			tgz_url="https://github.com/trufflesecurity/trufflehog/releases/download/v${TRUFFLEHOG_VERSION}/trufflehog_${TRUFFLEHOG_VERSION}_${os}_${arch_name}.tar.gz"
+			checksum_url="https://github.com/trufflesecurity/trufflehog/releases/download/v${TRUFFLEHOG_VERSION}/trufflehog_${TRUFFLEHOG_VERSION}_checksums.txt"
+			if download_with_retries "$tgz_url" "$tmpdir/trufflehog.tar.gz" 3; then
+				# Require checksum verification before installing
+				if ! download_with_retries "$checksum_url" "$tmpdir/checksums.txt" 3; then
+					echo -e "${RED}✗ Failed to download checksum file for trufflehog${NC}"
+					rm -rf "$tmpdir"
+					exit 1
+				fi
+				echo -e "${BLUE}Verifying checksum for trufflehog...${NC}"
+				expected=$(grep "trufflehog_${TRUFFLEHOG_VERSION}_${os}_${arch_name}.tar.gz" "$tmpdir/checksums.txt" | awk '{print $1}')
+				if [ -z "$expected" ]; then
+					echo -e "${RED}✗ Checksum entry not found for trufflehog_${TRUFFLEHOG_VERSION}_${os}_${arch_name}.tar.gz in ${tmpdir}/checksums.txt${NC}"
+					rm -rf "$tmpdir"
+					exit 1
+				fi
+				if command -v sha256sum >/dev/null 2>&1; then
+					actual=$(sha256sum "$tmpdir/trufflehog.tar.gz" | awk '{print $1}')
+				elif command -v shasum >/dev/null 2>&1; then
+					actual=$(shasum -a 256 "$tmpdir/trufflehog.tar.gz" | awk '{print $1}')
+				else
+					echo -e "${RED}✗ Unable to compute checksum: no hash tool found (sha256sum or shasum required)${NC}"
+					rm -rf "$tmpdir"
+					exit 1
+				fi
+				if [ "$expected" != "$actual" ]; then
+					echo -e "${RED}✗ Checksum mismatch for trufflehog (expected: $expected, got: $actual)${NC}"
+					rm -rf "$tmpdir"
+					exit 1
+				fi
+				echo -e "${GREEN}✓ Checksum verified${NC}"
+				tar -xzf "$tmpdir/trufflehog.tar.gz" -C "$tmpdir"
+				cp "$tmpdir/trufflehog" "$BIN_DIR/trufflehog"
+				chmod +x "$BIN_DIR/trufflehog"
+				echo -e "${GREEN}✓ trufflehog installed successfully${NC}"
+			else
+				echo -e "${RED}✗ Failed to download trufflehog${NC}"
+				rm -rf "$tmpdir"
+				exit 1
+			fi
+			rm -rf "$tmpdir"
+		fi
+	fi # trufflehog
 
 	if should_install "actionlint"; then
 		# Install actionlint (GitHub Actions workflow linter)
@@ -1643,6 +1705,7 @@ main() {
 		["stylelint"]="CSS/SCSS/Less linting"
 		["svelte-check"]="Svelte type checking"
 		["taplo"]="TOML linting and formatting"
+		["trufflehog"]="Secret detection with verification"
 		["tsc"]="TypeScript type checking"
 		["vue-tsc"]="Vue TypeScript type checking"
 		["yamllint"]="YAML linting"
@@ -1658,7 +1721,7 @@ main() {
 	# Verify installations
 	echo -e "${YELLOW}Verifying installations...${NC}"
 
-	tools_to_verify=("actionlint" "astro" "bandit" "black" "cargo-audit" "cargo-deny" "clippy" "commitlint" "dotenv-linter" "gitleaks" "hadolint" "markdownlint-cli2" "mypy" "osv-scanner" "oxfmt" "oxlint" "pip-audit" "prettier" "pydoclint" "ruff" "rustfmt" "semgrep" "shellcheck" "shfmt" "sqlfluff" "stylelint" "svelte-check" "taplo" "tsc" "vale" "vue-tsc" "yamllint")
+	tools_to_verify=("actionlint" "astro" "bandit" "black" "cargo-audit" "cargo-deny" "clippy" "commitlint" "dotenv-linter" "gitleaks" "hadolint" "markdownlint-cli2" "mypy" "osv-scanner" "oxfmt" "oxlint" "pip-audit" "prettier" "pydoclint" "ruff" "rustfmt" "semgrep" "shellcheck" "shfmt" "sqlfluff" "stylelint" "svelte-check" "taplo" "trufflehog" "tsc" "vale" "vue-tsc" "yamllint")
 
 	# Filter verification list when --tools is set.
 	# Map aliases so e.g. --tools markdownlint verifies markdownlint-cli2.

@@ -858,6 +858,48 @@ lintro check --tools gitleaks --tool-options gitleaks:baseline_path=gitleaks-bas
 lintro check --tools gitleaks --tool-options gitleaks:max_target_megabytes=10
 ```
 
+#### TruffleHog Configuration
+
+TruffleHog is a secrets scanner with 800+ provider-specific detectors and optional
+live credential verification. Lintro runs it in `filesystem` mode. **Verification is
+disabled by default** (`--no-verification`) so scans never make outbound network calls
+to third-party providers; it can be re-enabled per run if you accept that trade-off.
+TruffleHog is configured via CLI options (there is no default config file).
+
+**Install:** `brew install trufflehog` or
+[GitHub Releases](https://github.com/trufflesecurity/trufflehog/releases)
+
+**Available Options:**
+
+| Option            | Type    | Description                                          |
+| ----------------- | ------- | ---------------------------------------------------- |
+| `no_verification` | boolean | Disable live credential verification (default: true) |
+| `results`         | string  | Filter result type — single value (see note below)   |
+| `config`          | string  | Path to a custom detector configuration file         |
+| `exclude_paths`   | string  | Path to a file of newline-separated exclude regexes  |
+| `concurrency`     | integer | Number of concurrent workers                         |
+
+> **Note:** `--tool-options` uses commas to separate options, so a
+> comma-separated `results` value (e.g. `verified,unverified`) cannot be passed
+> on the CLI. Use a single value such as `results=unverified`, or leave it unset
+> to report every result type.
+
+**Usage Examples:**
+
+```bash
+# Basic scan (verification disabled by default)
+lintro check --tools trufflehog
+
+# Raise worker concurrency
+lintro check --tools trufflehog --tool-options trufflehog:concurrency=8
+
+# Only report unverified results (single value; commas are not CLI-safe here)
+lintro check --tools trufflehog --tool-options trufflehog:results=unverified
+
+# Explicitly enable live verification (makes network calls — off by default)
+lintro check --tools trufflehog --tool-options trufflehog:no_verification=False
+```
+
 #### OSV-Scanner Configuration
 
 OSV-Scanner is Google's vulnerability scanner using the Open-Source Vulnerabilities

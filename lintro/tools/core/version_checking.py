@@ -222,6 +222,11 @@ def get_install_hints() -> dict[str, str]:
             "Install via: cargo install taplo-cli "
             "or download from https://github.com/tamasfe/taplo/releases (v{version}+)"
         ),
+        "trufflehog": (
+            "Install via: brew install trufflehog "
+            "or download from "
+            "https://github.com/trufflesecurity/trufflehog/releases (v{version}+)"
+        ),
         "vale": (
             "Install via: brew install vale "
             "or download from https://github.com/errata-ai/vale/releases (v{version}+)"

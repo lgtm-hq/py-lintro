@@ -445,6 +445,18 @@
       "tags": ["linter", "formatter"]
     },
     {
+      "name": "trufflehog",
+      "version": "3.95.8",
+      "install": {
+        "type": "binary"
+      },
+      "tier": "tools",
+      "category": "external",
+      "version_command": ["trufflehog", "--version"],
+      "languages": ["security"],
+      "tags": ["security"]
+    },
+    {
       "name": "tsc",
       "version": "6.0.3",
       "install": {
