@@ -315,13 +315,14 @@ class PipAuditPlugin(BaseToolPlugin):
                     cwd=target_cwd,
                 )
             except subprocess.TimeoutExpired:
-                # Preserve findings already collected from earlier targets: a
-                # later timeout must not erase vulnerabilities pip-audit already
-                # reported. Mark the scan unsuccessful and fall through to the
-                # aggregation path rather than returning a clean-looking result.
+                # A slow target must not end the scan: record the timeout as a
+                # failure for this target and keep auditing the rest, so a
+                # timeout can never silently skip coverage of later targets.
                 all_success = False
-                output_chunks.append(f"pip-audit timed out after {timeout}s")
-                break
+                output_chunks.append(
+                    f"pip-audit timed out after {timeout}s for {source}",
+                )
+                continue
 
             # pip-audit writes its JSON report to stdout; parse stdout only so a
             # stderr warning cannot corrupt parsing (see #1043).
