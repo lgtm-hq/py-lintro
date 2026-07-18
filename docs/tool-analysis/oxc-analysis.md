@@ -41,6 +41,8 @@ This analysis compares Lintro's wrapper implementations with the core tools.
 - `verbose_fix_output`: Include raw output in fix results
 - `config`: Path to Oxlint config file (--config)
 - `tsconfig`: Path to tsconfig.json for TypeScript support (--tsconfig)
+- `type_aware`: Enable type-aware linting (--type-aware); see
+  [Type-aware linting](#type-aware-linting-oxlint)
 - `allow`: Rules to allow/turn off (--allow)
 - `deny`: Rules to deny/report as errors (--deny)
 - `warn`: Rules to warn on (--warn)
@@ -78,6 +80,67 @@ oxlint_plugin.set_options(quiet=True, exclude_patterns=["node_modules"])
 | **jsx-a11y**            | Accessibility rules for JSX   |
 | **unicorn**             | Various helpful rules         |
 | **import**              | Import/export validation      |
+
+### Type-aware linting (Oxlint)
+
+Oxlint supports **type-aware** linting via `--type-aware`. Lintro exposes this as
+the boolean `type_aware` option, which appends `--type-aware` to the underlying
+command:
+
+```python
+oxlint_plugin = get_plugin("oxlint")
+oxlint_plugin.set_options(type_aware=True)
+result = oxlint_plugin.check(["src/"])
+```
+
+**Requirements:**
+
+- **`oxlint-tsgolint`**: the type-aware companion binary must be resolvable, either
+  from the project's `node_modules` or via `bunx`. Install it with
+  `bun add -d oxlint-tsgolint@latest`.
+- **TypeScript >= 7.0**: type-aware rules rely on the TypeScript-Go (`tsgolint`)
+  toolchain and require TypeScript 7.0 or newer.
+- **No legacy `tsconfig` `baseUrl`**: projects that depend on the legacy
+  `compilerOptions.baseUrl` path resolution are not supported by the type-aware
+  backend; migrate to `paths`/relative imports first.
+
+**Status:** type-aware linting is currently **alpha** in oxlint. Rules that require
+type information live under the `typescript/*` rule namespace.
+
+`lintro doctor` verifies these prerequisites automatically whenever type-aware
+linting is enabled — either through the `type_aware` option or via
+`options.typeAware` in the discovered `.oxlintrc.json`. When `oxlint-tsgolint`
+cannot be resolved it emits the hint `bun add -d oxlint-tsgolint@latest`, and it
+flags TypeScript installs older than 7.0 as incompatible.
+
+Example `.oxlintrc.json` enabling type-aware linting:
+
+```json
+{
+  "options": {
+    "typeAware": true
+  },
+  "rules": {
+    "typescript/no-floating-promises": "error"
+  }
+}
+```
+
+### JavaScript plugins (Oxlint)
+
+Oxlint can load **ESLint v9+ JavaScript plugins** declared in `.oxlintrc.json`.
+These plugins pass through Lintro unchanged: Lintro does not intercept, rewrite, or
+re-declare plugin configuration, so any plugins listed in your `.oxlintrc.json`
+`plugins`/`jsPlugins` arrays are honored exactly as oxlint resolves them. This is a
+documentation-only guarantee — there is no Lintro-specific code path for JS plugins;
+configure them natively:
+
+```json
+{
+  "plugins": ["react", "unicorn"],
+  "jsPlugins": ["eslint-plugin-example"]
+}
+```
 
 ---
 
@@ -297,7 +360,7 @@ invocation in a linting/formatting workflow.
 | `--max-warnings`    | ❌ Not exposed | Use CI exit codes instead                             |
 | `--print-config`    | ❌ Not exposed | Debugging tool, use `oxlint --print-config` directly  |
 | `--threads`         | ❌ Not exposed | Auto-tuned, rarely needs manual control               |
-| `--type-aware`      | ❌ Not exposed | Advanced feature, may add in future                   |
+| `--type-aware`      | ✅ Supported   | Type-aware linting via the `type_aware` option        |
 | `--lsp`             | ❌ Not exposed | LSP mode not applicable to CLI wrapper                |
 | `--watch`           | ❌ Not exposed | Development workflow, not batch processing            |
 | Non-JSON formats    | ❌ Not exposed | Lintro normalizes all output to structured format     |
@@ -384,7 +447,6 @@ oxlint --watch src/
 1. Plugin enable/disable flags at runtime (`--react-perf-plugin`, etc.)
 2. Watch mode integration
 3. Cache control options
-4. Type-aware linting support (`--type-aware`)
 
 ### Oxfmt Enhancements
 
