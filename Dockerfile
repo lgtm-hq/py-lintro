@@ -67,7 +67,6 @@ RUN echo "Verifying tools..." && \
     markdownlint-cli2 --version && tsc --version && astro --version && \
     vue-tsc --version && oxlint --version && oxfmt --version && \
     bandit --version && mypy --version && pydoclint --version && \
-    pip-audit --version && \
     yamllint --version && sqlfluff --version && stylelint --version && \
     vale --version && \
     echo "All tools verified!"
