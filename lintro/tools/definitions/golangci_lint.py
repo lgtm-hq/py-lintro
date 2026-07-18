@@ -97,11 +97,7 @@ def _rebase_issue_paths(
     """
     for issue in issues:
         file_path = issue.file
-        if (
-            file_path
-            and file_path != "(module)"
-            and not Path(file_path).is_absolute()
-        ):
+        if file_path and file_path != "(module)" and not Path(file_path).is_absolute():
             issue.file = str(module_root / file_path)
 
 

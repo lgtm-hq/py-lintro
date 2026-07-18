@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-import subprocess
+import subprocess  # nosec B404 - subprocess is used for TimeoutExpired in mocked tool execution tests
 from pathlib import Path
 from typing import Any, cast
 from unittest.mock import patch
@@ -331,7 +331,7 @@ def test_check_disambiguates_paths_across_modules(
             {},
         )
 
-    files = {issue.file for issue in result.issues}
+    files = {issue.file for issue in (result.issues or [])}
     assert_that(files).is_length(2)
     for file_path in files:
         assert_that(Path(file_path).is_absolute()).is_true()
