@@ -59,6 +59,7 @@ RUN echo "Verifying tools..." && \
     cargo deny --version && semgrep --version && ruff --version && \
     black --version && hadolint --version && actionlint --version && \
     shellcheck --version && shfmt --version && taplo --version && \
+    ktlint --version && \
     dotenv-linter --version && \
     gitleaks version && osv-scanner --version && prettier --version && \
     commitlint --version && \

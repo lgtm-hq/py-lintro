@@ -168,7 +168,7 @@ should_install() {
 # Kept in sync with the should_install blocks and tools_to_verify array.
 SUPPORTED_TOOLS=(
 	"actionlint" "astro" "bandit" "black" "cargo-audit" "cargo-deny"
-	"clippy" "commitlint" "dotenv-linter" "gitleaks" "hadolint" "markdownlint" "markdownlint-cli2" "mypy" "osv-scanner"
+	"clippy" "commitlint" "dotenv-linter" "gitleaks" "hadolint" "ktlint" "markdownlint" "markdownlint-cli2" "mypy" "osv-scanner"
 	"oxfmt" "oxlint" "prettier" "pydoclint" "ruff" "rustfmt" "semgrep"
 	"shellcheck" "shfmt" "sqlfluff" "stylelint" "svelte-check" "taplo" "tsc"
 	"vale" "vue-tsc" "yamllint"
@@ -752,6 +752,30 @@ main() {
 		fi
 	fi # shfmt
 
+	if should_install "ktlint"; then
+		# Install ktlint (Kotlin linter and formatter).
+		# ktlint ships a single self-executing launcher (same asset for every
+		# platform) that requires a JVM (Java 8+) at runtime.
+		echo -e "${BLUE}Installing ktlint...${NC}"
+		KTLINT_VERSION=$(get_tool_version "ktlint") || exit 1
+		if [ $DRY_RUN -eq 1 ]; then
+			log_info "[DRY-RUN] Would install ktlint v${KTLINT_VERSION}"
+		elif command -v ktlint &>/dev/null; then
+			echo -e "${GREEN}✓ ktlint already installed${NC}"
+		else
+			if ! command -v java &>/dev/null; then
+				echo -e "${YELLOW}⚠ java not found on PATH; ktlint requires a JVM (Java 8+) at runtime${NC}"
+			fi
+			binary_url="https://github.com/pinterest/ktlint/releases/download/${KTLINT_VERSION}/ktlint"
+			if download_with_retries "$binary_url" "$BIN_DIR/ktlint" 3; then
+				chmod +x "$BIN_DIR/ktlint"
+				echo -e "${GREEN}✓ ktlint installed successfully${NC}"
+			else
+				echo -e "${RED}✗ Failed to download ktlint${NC}"
+				exit 1
+			fi
+		fi
+	fi # ktlint
 	if should_install "vale"; then
 		# Install vale (prose/documentation linter)
 		# Prebuilt binaries: https://github.com/errata-ai/vale/releases
@@ -1612,6 +1636,7 @@ main() {
 		["dotenv-linter"]=".env file linting and fixing"
 		["gitleaks"]="Secret detection"
 		["hadolint"]="Docker linting"
+		["ktlint"]="Kotlin linting and formatting"
 		["markdownlint"]="Markdown linting"
 		["mypy"]="Python type checking"
 		["osv-scanner"]="Multi-ecosystem vulnerability scanning"
@@ -1643,7 +1668,7 @@ main() {
 	# Verify installations
 	echo -e "${YELLOW}Verifying installations...${NC}"
 
-	tools_to_verify=("actionlint" "astro" "bandit" "black" "cargo-audit" "cargo-deny" "clippy" "commitlint" "dotenv-linter" "gitleaks" "hadolint" "markdownlint-cli2" "mypy" "osv-scanner" "oxfmt" "oxlint" "prettier" "pydoclint" "ruff" "rustfmt" "semgrep" "shellcheck" "shfmt" "sqlfluff" "stylelint" "svelte-check" "taplo" "tsc" "vale" "vue-tsc" "yamllint")
+	tools_to_verify=("actionlint" "astro" "bandit" "black" "cargo-audit" "cargo-deny" "clippy" "commitlint" "dotenv-linter" "gitleaks" "hadolint" "ktlint" "markdownlint-cli2" "mypy" "osv-scanner" "oxfmt" "oxlint" "prettier" "pydoclint" "ruff" "rustfmt" "semgrep" "shellcheck" "shfmt" "sqlfluff" "stylelint" "svelte-check" "taplo" "tsc" "vale" "vue-tsc" "yamllint")
 
 	# Filter verification list when --tools is set.
 	# Map aliases so e.g. --tools markdownlint verifies markdownlint-cli2.

@@ -32,6 +32,7 @@ class DocUrlTemplate(StrEnum):
     COMMITLINT = "https://commitlint.js.org/reference/rules.html"
     DOTENV_LINTER = "https://dotenv-linter.github.io/#/checks/{code}"
     HADOLINT = "https://github.com/hadolint/hadolint/wiki/{code}"
+    KTLINT = "https://pinterest.github.io/ktlint/latest/rules/{ruleset}/"
     MARKDOWNLINT = "https://github.com/DavidAnson/markdownlint/blob/main/doc/{code}.md"
     MYPY = "https://mypy.readthedocs.io/en/stable/error_code_list.html"
     OSV = "https://osv.dev/vulnerability/{code}"

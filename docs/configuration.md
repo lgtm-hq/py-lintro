@@ -1980,6 +1980,63 @@ lintro format --tools shfmt
 lintro check scripts/ --tools shfmt
 ```
 
+### Kotlin Tools
+
+#### ktlint Configuration
+
+[ktlint](https://pinterest.github.io/ktlint/) is an anti-bikeshedding Kotlin linter with
+a built-in formatter. It lints and formats Kotlin (`.kt`) and Kotlin Script (`.kts`)
+files, enforces the official Kotlin conventions with no dedicated config file, and
+requires a JVM (Java 8+) at runtime.
+
+**Installation:**
+
+```bash
+# macOS
+brew install ktlint
+
+# SDKMAN!
+sdk install ktlint
+
+# Manual (download launcher; requires Java 8+)
+# https://github.com/pinterest/ktlint/releases
+```
+
+**File:** `.editorconfig` (ktlint respects EditorConfig)
+
+```ini
+[*.{kt,kts}]
+ktlint_code_style = ktlint_official
+max_line_length = 120
+# Disable an individual standard rule:
+ktlint_standard_filename = disabled
+```
+
+**Lintro options via `--tool-options`:**
+
+```bash
+# Select a code style (android_studio, intellij_idea, ktlint_official)
+lintro check --tools ktlint --tool-options "ktlint:code_style=intellij_idea"
+
+# Point ktlint at a default .editorconfig
+lintro check --tools ktlint --tool-options "ktlint:editorconfig=/path/.editorconfig"
+
+# Auto-format Kotlin sources
+lintro format --tools ktlint
+```
+
+**Available Options:**
+
+| Option         | Type | Description                                          |
+| -------------- | ---- | ---------------------------------------------------- |
+| `code_style`   | str  | android_studio, intellij_idea, or ktlint_official    |
+| `editorconfig` | str  | Path to a default `.editorconfig` used as a fallback |
+
+Note: ktlint reports every finding as an error, and its JSON reporter does not expose
+per-issue auto-correctability. Lintro determines what was fixed by re-checking after
+`--format`, so the fixed/remaining split is accurate (rules such as `standard:filename`
+are not auto-correctable and remain after formatting).
+
 ### Dotenv Tools
 
 #### dotenv-linter Configuration

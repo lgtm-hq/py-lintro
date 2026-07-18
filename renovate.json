@@ -74,6 +74,8 @@
         "stylelint",
         "gitleaks",
         "gitleaks/gitleaks",
+        "ktlint",
+        "pinterest/ktlint",
         "shellcheck",
         "koalaman/shellcheck",
         "shfmt",
@@ -216,6 +218,18 @@
       "datasourceTemplate": "github-releases",
       "packageNameTemplate": "hadolint/hadolint",
       "extractVersionTemplate": "^v(?<version>.*)$"
+    },
+    {
+      "description": "Update ktlint version in _tool_versions.py",
+      "customType": "regex",
+      "managerFilePatterns": [
+        "lintro/_tool_versions\\.py"
+      ],
+      "matchStrings": [
+        "ToolName\\.KTLINT:\\s*\"(?<currentValue>[0-9]+\\.[0-9]+\\.[0-9]+)\""
+      ],
+      "datasourceTemplate": "github-releases",
+      "packageNameTemplate": "pinterest/ktlint"
     },
     {
       "description": "Update actionlint version in _tool_versions.py",
