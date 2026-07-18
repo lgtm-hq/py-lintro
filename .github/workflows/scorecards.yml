@@ -17,7 +17,7 @@ concurrency:
 jobs:
   scorecards:
     # yamllint disable-line rule:line-length
-    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-scorecards.yml@31c25ef2e8992960e218524780e34f44f51271b5 # v0.54.0
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-scorecards.yml@9416eb2bf71539bcc355e1dcf463a533a0924d74 # v0.55.0
     with:
       # v0.52.4 drops lgtm-ci composites from this job so scorecard-action
       # publish_results passes workflow verification (#518, lgtm-ci #535).

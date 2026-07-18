@@ -23,7 +23,7 @@ concurrency:
 jobs:
   version-pr:
     # yamllint disable-line rule:line-length
-    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-release-version-pr.yml@31c25ef2e8992960e218524780e34f44f51271b5 # v0.54.0
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-release-version-pr.yml@9416eb2bf71539bcc355e1dcf463a533a0924d74 # v0.55.0
     with:
       ecosystems: python
       auto-merge: true
@@ -33,7 +33,7 @@ jobs:
       # PRs pass dogfooding-lint without CHANGELOG.md being ignored (#1117).
       # Shell/format logic lives in the dedicated script, not an inline run.
       version-update-script: scripts/ci/format-changelog.py
-      tooling-ref: '31c25ef2e8992960e218524780e34f44f51271b5' # v0.54.0
+      tooling-ref: '9416eb2bf71539bcc355e1dcf463a533a0924d74' # v0.55.0
       egress-policy: block
       # Paired with release-auto-tag.yml (egress-preset: github-tooling).
       # Guarded by test_release_workflows_use_paired_egress_presets.

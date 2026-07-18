@@ -3,26 +3,28 @@
 ---
 name: CI - Tests
 
-# No paths filter, and no job-level path-skip of test-compat/test-coverage
-# either (#1359): the org ruleset (checks-py-lintro) requires the NESTED
-# contexts reported from inside reusable-test-python (test-compat / Python
-# Compatibility, test-compat / Aggregate Python Results, test-coverage /
-# Python Coverage, test-coverage / Aggregate Python Results). A path-filtered
-# workflow never reports them, and a skipped reusable *caller* collapses to a
-# single check run named after the caller job — the nested contexts are never
-# created (verified on commit fdc94ea) — so either approach leaves required
-# checks permanently "Expected" and deadlocks merges (see codeql.yml and
-# lgtm-ci docs/workflow-contract.md, "Required-check-safe conditional
-# workflows"). Path-skipping this matrix needs an internal skip input in
-# lgtm-ci reusable-test-python (jobs skipped INSIDE a running reusable do
-# report their contexts as skipped, like draft-pr-skip does today).
+# Path filtering (#1359): the org ruleset (checks-py-lintro) requires NESTED
+# contexts from inside reusable-test-python (test-compat / Python Compatibility,
+# test-compat / Aggregate Python Results, test-coverage / Python Coverage,
+# test-coverage / Aggregate Python Results). A path-filtered workflow or a
+# skipped reusable *caller* collapses to a single check run — nested contexts
+# are never created and merges deadlock (see codeql.yml and lgtm-ci
+# docs/workflow-contract.md, "Required-check-safe conditional workflows").
 #
-# Version-bump PRs (#1362) are NOT skipped here for the same reason: the
-# skip signal would have to gate the reusable callers, which collapses the
-# nested required contexts and deadlocks the merge. Only docker-ci.yml
-# skips its heavy jobs on verified bump PRs; this matrix runs in full
-# until reusable-test-python grows an internal skip input (deferred like
-# the #1359 path-skip).
+# Instead: a `changes` job classifies the PR diff (same deny-by-default
+# skip-list as docker-ci.yml via resolve-pipeline-relevance.sh) and the reusable
+# callers always run (`if: '!cancelled()'` fail-open on classifier failure —
+# empty pipeline != 'false' → full matrix), passing pipeline-skip=true when
+# pipeline=false so jobs skip INSIDE the reusable and still report their nested
+# contexts as skipped (lgtm-ci reusable-test-python pipeline-skip input).
+# merge_group, push, and workflow_dispatch always run the full matrix. The
+# test-suite-coverage gate reports success only when changes succeeded and the
+# matrix was path-skipped; otherwise it mirrors test-gate.
+#
+# Version-bump PRs (#1362): release-bump-only.sh can force pipeline=false on
+# verified bump PRs, so the matrix skips exactly like docs-only PRs once
+# pipeline-skip is wired (previously blocked on the nested-context constraint).
+
 'on':
   push:
     branches: [main]
@@ -40,10 +42,59 @@ concurrency:
   cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 jobs:
-  # Compat mode: multi-runtime matrix, no coverage or PR comments
+  # Required-check-safe replacement for on.<event>.paths (see header). Only
+  # pull_request events are filtered; every other event resolves pipeline=true.
+  # Fails open on classification errors so a broken filter runs the full
+  # matrix rather than silently skipping it.
+  changes:
+    name: 🔎 Detect Relevant Changes
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    timeout-minutes: 5
+    outputs:
+      pipeline: ${{ steps.result.outputs.pipeline }}
+      skip-reason: ${{ steps.result.outputs.skip-reason }}
+    steps:
+      - name: Harden Runner
+        # yamllint disable-line rule:line-length
+        uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
+        with:
+          egress-policy: 'block'
+          allowed-endpoints: >
+            github.com:443
+            api.github.com:443
+      - name: Checkout
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Check for release version-bump PR
+        id: bump
+        if: github.event_name == 'pull_request'
+        continue-on-error: true
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          PR_AUTHOR: ${{ github.event.pull_request.user.login }}
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          HEAD_REF: ${{ github.head_ref }}
+        run: scripts/ci/release-bump-only.sh
+      - name: Resolve pipeline relevance
+        id: result
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          RELEASE_BUMP: ${{ steps.bump.outputs.release-bump }}
+        run: scripts/ci/resolve-pipeline-relevance.sh
+
+  # Compat mode: multi-runtime matrix, no coverage or PR comments.
+  # !cancelled() fail-opens like docker-ci docker-build: a failed changes
+  # job leaves pipeline empty (!= 'false'), so pipeline-skip is false and
+  # the full matrix runs instead of collapsing to skipped → false green.
   test-compat:
+    needs: [changes]
+    if: '!cancelled()'
     # yamllint disable-line rule:line-length
-    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-test-python.yml@31c25ef2e8992960e218524780e34f44f51271b5 # v0.54.0
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-test-python.yml@9416eb2bf71539bcc355e1dcf463a533a0924d74 # v0.55.0
     with:
       publish-test-summary: false
       python-versions: '3.11,3.14'
@@ -52,9 +103,10 @@ jobs:
       extra-args: '-x --ignore=tests/integration'
       coverage: false
       draft-pr-skip: true
+      pipeline-skip: ${{ needs.changes.outputs.pipeline == 'false' }}
       job-name: Python Compatibility
       runner-image: ubuntu-24.04
-      tooling-ref: '31c25ef2e8992960e218524780e34f44f51271b5' # v0.54.0
+      tooling-ref: '9416eb2bf71539bcc355e1dcf463a533a0924d74' # v0.55.0
       egress-policy: block
       egress-preset: pypi
       # Full list (v0.50.0+ replace semantics): the reusable passes
@@ -81,10 +133,13 @@ jobs:
       contents: read
       pull-requests: write
 
-  # Coverage mode: single runtime with coverage reporting
+  # Coverage mode: single runtime with coverage reporting.
+  # Same !cancelled() fail-open as test-compat (see above).
   test-coverage:
+    needs: [changes]
+    if: '!cancelled()'
     # yamllint disable-line rule:line-length
-    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-test-python.yml@31c25ef2e8992960e218524780e34f44f51271b5 # v0.54.0
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-test-python.yml@9416eb2bf71539bcc355e1dcf463a533a0924d74 # v0.55.0
     with:
       publish-test-summary: true
       python-version: '3.14'
@@ -95,9 +150,10 @@ jobs:
       coverage-threshold: 80
       upload-coverage: true
       draft-pr-skip: true
+      pipeline-skip: ${{ needs.changes.outputs.pipeline == 'false' }}
       job-name: Python Coverage
       runner-image: ubuntu-24.04
-      tooling-ref: '31c25ef2e8992960e218524780e34f44f51271b5' # v0.54.0
+      tooling-ref: '9416eb2bf71539bcc355e1dcf463a533a0924d74' # v0.55.0
       egress-policy: block
       egress-preset: pypi
       # Full list (v0.50.0+ replace semantics): the reusable passes
@@ -126,8 +182,8 @@ jobs:
   # Evaluate both upstream jobs into a single result for the required-check gate
   test-gate:
     name: 🚦 Test Gate
-    needs: [test-compat, test-coverage]
-    if: always()
+    needs: [changes, test-compat, test-coverage]
+    if: always() && !cancelled()
     runs-on: ubuntu-24.04
     permissions: {}
     outputs:
@@ -156,26 +212,43 @@ jobs:
           fi
 
   # Org ruleset (checks-py-lintro): test-suite-coverage / 🧪 Test Suite & Coverage
+  # Always-green gate: reports success only when changes succeeded AND the
+  # matrix was intentionally path-skipped (pipeline == 'false'). A failed
+  # changes job never takes the success shortcut — empty pipeline fails open
+  # into the full matrix via !cancelled() on the reusable callers, and this
+  # gate mirrors test-gate.
   test-suite-coverage:
-    needs: test-gate
-    if: always()
+    needs: [changes, test-gate]
+    if: always() && !cancelled()
     # yamllint disable-line rule:line-length
-    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-required-check.yml@31c25ef2e8992960e218524780e34f44f51271b5 # v0.54.0
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-required-check.yml@9416eb2bf71539bcc355e1dcf463a533a0924d74 # v0.55.0
     permissions:
       contents: read
     with:
-      tooling-ref: '31c25ef2e8992960e218524780e34f44f51271b5' # v0.54.0
+      tooling-ref: '9416eb2bf71539bcc355e1dcf463a533a0924d74' # v0.55.0
       job-name: '🧪 Test Suite & Coverage'
       runner-image: ubuntu-24.04
-      upstream-result: ${{ needs.test-gate.outputs.result }}
-      passed-output: ${{ needs.test-gate.outputs.passed }}
+      upstream-result: >-
+        ${{
+          needs.changes.result == 'success' &&
+          needs.changes.outputs.pipeline == 'false' && 'success'
+          || needs.test-gate.outputs.result
+        }}
+      passed-output: >-
+        ${{
+          needs.changes.result == 'success' &&
+          needs.changes.outputs.pipeline == 'false' && 'true'
+          || needs.test-gate.outputs.passed
+        }}
       egress-policy: block
       egress-preset: github-tooling
 
   stage-coverage-html:
     name: Stage coverage HTML for Pages bundle
-    needs: test-coverage
+    needs: [changes, test-coverage]
     if: >-
+      !cancelled() &&
+      needs.changes.outputs.pipeline != 'false' &&
       github.ref == 'refs/heads/main' &&
       github.event_name == 'push' &&
       needs.test-coverage.outputs.passed == 'true'
@@ -207,11 +280,11 @@ jobs:
 
       - name: Checkout
         # yamllint disable-line rule:line-length
-        uses: lgtm-hq/lgtm-ci/.github/actions/secure-checkout@31c25ef2e8992960e218524780e34f44f51271b5 # v0.54.0
+        uses: lgtm-hq/lgtm-ci/.github/actions/secure-checkout@9416eb2bf71539bcc355e1dcf463a533a0924d74 # v0.55.0
 
       - name: Setup Python and uv
         # yamllint disable-line rule:line-length
-        uses: lgtm-hq/lgtm-ci/.github/actions/setup-python@31c25ef2e8992960e218524780e34f44f51271b5 # v0.54.0
+        uses: lgtm-hq/lgtm-ci/.github/actions/setup-python@9416eb2bf71539bcc355e1dcf463a533a0924d74 # v0.55.0
         with:
           python-version: '3.14'
           install-dependencies: 'true'
