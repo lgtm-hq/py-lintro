@@ -21,6 +21,18 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.81.0] - 2026-07-18
+
+### Added
+
+- **tools**: add pip-audit for Python dependency vulnerability scanning (#1145)
+  (8d37f54)
+
+### Changed
+
+- **deps**: update python:3.14-slim docker digest to cea0e60 (#1489) (0ca34b1)
+- **deps**: update dependency svelte to 5.56.5 (patch) (#1488) (9b19881)
+
 ## [0.80.11] - 2026-07-17
 
 ### Changed
