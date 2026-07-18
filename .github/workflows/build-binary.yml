@@ -62,6 +62,7 @@ jobs:
     permissions:
       contents: write
     strategy:
+      fail-fast: false
       matrix:
         arch: >-
           ${{
@@ -101,6 +102,17 @@ jobs:
           python-version: '3.14'
 
       - name: Install uv
+        id: setup-uv
+        continue-on-error: true
+        uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990 # v8.3.2
+        with:
+          version: 'latest'
+
+      # First connections after the harden-runner network extension activates
+      # can stall past setup-uv's manifest-fetch timeout (macOS especially);
+      # one retry runs on a warm network path. See #1513.
+      - name: Install uv (retry)
+        if: steps.setup-uv.outcome == 'failure'
         uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990 # v8.3.2
         with:
           version: 'latest'
@@ -171,6 +183,7 @@ jobs:
     permissions:
       contents: write
     strategy:
+      fail-fast: false
       matrix:
         include:
           - arch: x64
@@ -209,6 +222,17 @@ jobs:
           python-version: '3.14'
 
       - name: Install uv
+        id: setup-uv
+        continue-on-error: true
+        uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990 # v8.3.2
+        with:
+          version: 'latest'
+
+      # First connections after the harden-runner network extension activates
+      # can stall past setup-uv's manifest-fetch timeout (macOS especially);
+      # one retry runs on a warm network path. See #1513.
+      - name: Install uv (retry)
+        if: steps.setup-uv.outcome == 'failure'
         uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990 # v8.3.2
         with:
           version: 'latest'
