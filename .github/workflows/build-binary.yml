@@ -228,8 +228,8 @@ jobs:
         with:
           version: 'latest'
 
-      # First connections after the harden-runner network extension activates
-      # can stall past setup-uv's manifest-fetch timeout (macOS especially);
+      # First connections after harden-runner's egress filtering activates
+      # can stall past setup-uv's manifest-fetch timeout;
       # one retry runs on a warm network path. See #1513.
       - name: Install uv (retry)
         if: steps.setup-uv.outcome == 'failure'
