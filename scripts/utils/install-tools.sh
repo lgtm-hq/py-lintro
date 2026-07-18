@@ -1768,7 +1768,7 @@ main() {
 				filtered+=("$tool")
 			fi
 		done
-		tools_to_verify=("${filtered[@]}" "dotenv-linter" "stylelint")
+		tools_to_verify=("${filtered[@]}")
 	fi
 
 	for tool in "${tools_to_verify[@]}"; do
