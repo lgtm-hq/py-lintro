@@ -446,6 +446,12 @@ def test_nodejs_builder_handles_markdownlint() -> None:
     assert_that(builder.can_handle(ToolName.MARKDOWNLINT)).is_true()
 
 
+def test_nodejs_builder_handles_prettier() -> None:
+    """NodeJSBuilder can handle prettier."""
+    builder = NodeJSBuilder()
+    assert_that(builder.can_handle(ToolName.PRETTIER)).is_true()
+
+
 def test_nodejs_builder_handles_astro_check() -> None:
     """NodeJSBuilder can handle astro-check."""
     builder = NodeJSBuilder()
@@ -458,10 +464,31 @@ def test_nodejs_builder_does_not_handle_ruff() -> None:
     assert_that(builder.can_handle(ToolName.RUFF)).is_false()
 
 
+def test_nodejs_builder_prefers_local_node_bin() -> None:
+    """NodeJSBuilder prefers project-local node_modules/.bin over bunx."""
+    builder = NodeJSBuilder()
+    local = "/proj/node_modules/.bin/prettier"
+    with (
+        patch(
+            "lintro.tools.core.command_builders.find_local_node_bin",
+            return_value=local,
+        ),
+        patch("shutil.which", return_value="/usr/local/bin/bunx"),
+    ):
+        cmd = builder.get_command("prettier", ToolName.PRETTIER)
+        assert_that(cmd).is_equal_to([local])
+
+
 def test_nodejs_builder_uses_bunx_when_available() -> None:
     """NodeJSBuilder uses bunx when available."""
     builder = NodeJSBuilder()
-    with patch("shutil.which", return_value="/usr/local/bin/bunx"):
+    with (
+        patch(
+            "lintro.tools.core.command_builders.find_local_node_bin",
+            return_value=None,
+        ),
+        patch("shutil.which", return_value="/usr/local/bin/bunx"),
+    ):
         cmd = builder.get_command("markdownlint", ToolName.MARKDOWNLINT)
         assert_that(cmd).is_equal_to(["bunx", "markdownlint-cli2"])
 
@@ -469,7 +496,13 @@ def test_nodejs_builder_uses_bunx_when_available() -> None:
 def test_nodejs_builder_falls_back_to_package_name() -> None:
     """NodeJSBuilder falls back to package name when bunx not available."""
     builder = NodeJSBuilder()
-    with patch("shutil.which", return_value=None):
+    with (
+        patch(
+            "lintro.tools.core.command_builders.find_local_node_bin",
+            return_value=None,
+        ),
+        patch("shutil.which", return_value=None),
+    ):
         cmd = builder.get_command("markdownlint", ToolName.MARKDOWNLINT)
         assert_that(cmd).is_equal_to(["markdownlint-cli2"])
 
@@ -477,7 +510,13 @@ def test_nodejs_builder_falls_back_to_package_name() -> None:
 def test_nodejs_builder_astro_check_uses_astro_binary() -> None:
     """NodeJSBuilder resolves astro-check to astro binary."""
     builder = NodeJSBuilder()
-    with patch("shutil.which", return_value="/usr/local/bin/bunx"):
+    with (
+        patch(
+            "lintro.tools.core.command_builders.find_local_node_bin",
+            return_value=None,
+        ),
+        patch("shutil.which", return_value="/usr/local/bin/bunx"),
+    ):
         cmd = builder.get_command("astro-check", ToolName.ASTRO_CHECK)
         assert_that(cmd).is_equal_to(["bunx", "astro"])
 
@@ -491,7 +530,13 @@ def test_nodejs_builder_handles_vue_tsc() -> None:
 def test_nodejs_builder_vue_tsc_uses_vue_tsc_binary() -> None:
     """NodeJSBuilder resolves vue-tsc to vue-tsc binary."""
     builder = NodeJSBuilder()
-    with patch("shutil.which", return_value="/usr/local/bin/bunx"):
+    with (
+        patch(
+            "lintro.tools.core.command_builders.find_local_node_bin",
+            return_value=None,
+        ),
+        patch("shutil.which", return_value="/usr/local/bin/bunx"),
+    ):
         cmd = builder.get_command("vue-tsc", ToolName.VUE_TSC)
         assert_that(cmd).is_equal_to(["bunx", "vue-tsc"])
 

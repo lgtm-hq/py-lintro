@@ -447,7 +447,13 @@ def test_get_executable_command_nodejs_tool_with_bunx(
     """
     from lintro.enums.tool_name import ToolName
 
-    with patch("shutil.which", return_value="/usr/bin/bunx"):
+    with (
+        patch(
+            "lintro.tools.core.command_builders.find_local_node_bin",
+            return_value=None,
+        ),
+        patch("shutil.which", return_value="/usr/bin/bunx"),
+    ):
         result = fake_tool_plugin._get_executable_command(ToolName.MARKDOWNLINT)
 
         assert_that(result).contains("bunx", "markdownlint-cli2")
@@ -457,7 +463,13 @@ def test_get_executable_command_astro_check_with_bunx(
     fake_tool_plugin: FakeToolPlugin,
 ) -> None:
     """Verify astro-check resolves to bunx astro command."""
-    with patch("shutil.which", return_value="/usr/bin/bunx"):
+    with (
+        patch(
+            "lintro.tools.core.command_builders.find_local_node_bin",
+            return_value=None,
+        ),
+        patch("shutil.which", return_value="/usr/bin/bunx"),
+    ):
         result = fake_tool_plugin._get_executable_command("astro-check")
 
         assert_that(result).is_equal_to(["bunx", "astro"])
@@ -467,7 +479,13 @@ def test_get_executable_command_vue_tsc_with_bunx(
     fake_tool_plugin: FakeToolPlugin,
 ) -> None:
     """Verify vue-tsc resolves to bunx vue-tsc command."""
-    with patch("shutil.which", return_value="/usr/bin/bunx"):
+    with (
+        patch(
+            "lintro.tools.core.command_builders.find_local_node_bin",
+            return_value=None,
+        ),
+        patch("shutil.which", return_value="/usr/bin/bunx"),
+    ):
         result = fake_tool_plugin._get_executable_command("vue-tsc")
 
         assert_that(result).is_equal_to(["bunx", "vue-tsc"])
@@ -483,7 +501,13 @@ def test_get_executable_command_nodejs_tool_without_bunx(
     """
     from lintro.enums.tool_name import ToolName
 
-    with patch("shutil.which", return_value=None):
+    with (
+        patch(
+            "lintro.tools.core.command_builders.find_local_node_bin",
+            return_value=None,
+        ),
+        patch("shutil.which", return_value=None),
+    ):
         result = fake_tool_plugin._get_executable_command(ToolName.MARKDOWNLINT)
 
         assert_that(result).is_equal_to(["markdownlint-cli2"])

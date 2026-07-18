@@ -29,6 +29,7 @@ import shutil
 import sys
 import sysconfig
 from abc import ABC, abstractmethod
+from pathlib import Path
 from typing import TYPE_CHECKING, ClassVar
 
 from loguru import logger
@@ -37,6 +38,51 @@ from lintro.plugins.subprocess_executor import is_compiled_binary
 
 if TYPE_CHECKING:
     from lintro.enums.tool_name import ToolName
+
+
+def find_local_node_bin(
+    binary_name: str,
+    *,
+    start: Path | None = None,
+    max_depth: int = 20,
+) -> str | None:
+    """Return an absolute path to a project-local ``node_modules/.bin`` shim.
+
+    Walks upward from *start* (default: ``Path.cwd()``) looking for
+    ``node_modules/.bin/<binary>``. Preferring the project-pinned binary
+    avoids Docker/CI images whose global install lags behind
+    ``package.json`` (e.g. global prettier 3.9.4 vs local 3.9.5), which
+    otherwise fails lintro's minimum-version gate and silently skips the
+    tool.
+
+    On Windows, npm's ``.bin/<name>`` shim is not executable with
+    ``shell=False``; the ``.cmd`` wrapper is used instead.
+
+    Args:
+        binary_name: Executable name (e.g. ``prettier``, ``astro``).
+        start: Directory to begin the upward search from.
+        max_depth: Maximum directories to inspect, including *start*.
+
+    Returns:
+        Absolute POSIX path to a runnable local binary, or ``None``.
+    """
+    current = (start or Path.cwd()).resolve()
+    for _ in range(max_depth):
+        bin_dir = current / "node_modules" / ".bin"
+        if sys.platform == "win32":
+            cmd = bin_dir / f"{binary_name}.cmd"
+            if cmd.is_file():
+                return str(cmd.resolve())
+        else:
+            shim = bin_dir / binary_name
+            if shim.is_file():
+                # POSIX path: backslashes in cmd[0] fail validate_subprocess_command
+                return shim.resolve().as_posix()
+        parent = current.parent
+        if parent == current:
+            break
+        current = parent
+    return None
 
 
 class CommandBuilder(ABC):
@@ -397,10 +443,12 @@ class PytestBuilder(CommandBuilder):
 
 @register_command_builder
 class NodeJSBuilder(CommandBuilder):
-    """Builder for Node.js tools (Astro, Markdownlint, TypeScript, Vue-tsc).
+    """Builder for Node.js tools (Astro, Markdownlint, Prettier, TypeScript, …).
 
-    Uses bunx to run Node.js tools when available, falling back to
-    direct tool invocation if bunx is not found.
+    Prefers a project-local ``node_modules/.bin`` shim (absolute path) so
+    version checks and execution use the package.json-pinned binary even when
+    a stale global install is earlier on PATH. Falls back to bunx, then npx,
+    then the bare binary name.
     """
 
     _package_names: dict[ToolName, str] | None = None
@@ -422,6 +470,7 @@ class NodeJSBuilder(CommandBuilder):
                 ToolName.MARKDOWNLINT: "markdownlint-cli2",
                 ToolName.OXFMT: "oxfmt",
                 ToolName.OXLINT: "oxlint",
+                ToolName.PRETTIER: "prettier",
                 ToolName.STYLELINT: "stylelint",
                 ToolName.SVELTE_CHECK: "svelte-check",
                 ToolName.TSC: "typescript",
@@ -470,7 +519,7 @@ class NodeJSBuilder(CommandBuilder):
             tool_name_enum: Tool name enum.
 
         Returns:
-            Command list to execute the tool via bunx or directly.
+            Command list to execute the tool via local bin, bunx, or directly.
         """
         if tool_name_enum is None:
             return [tool_name]
@@ -480,6 +529,16 @@ class NodeJSBuilder(CommandBuilder):
             tool_name_enum,
             self.package_names.get(tool_name_enum, tool_name),
         )
+
+        # Prefer project-pinned binary over a stale global PATH install.
+        local_bin = find_local_node_bin(binary_name)
+        if local_bin is not None:
+            logger.debug(
+                "Using project-local {} binary: {}",
+                binary_name,
+                local_bin,
+            )
+            return [local_bin]
 
         # Prefer bunx (bun), fall back to npx (npm), then direct tool invocation
         if shutil.which("bunx"):
