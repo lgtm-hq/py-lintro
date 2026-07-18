@@ -39,6 +39,7 @@
     "go": ["semgrep"],
     "ruby": ["semgrep"],
     "sql": ["sqlfluff"],
+    "jinja": ["djlint"],
     "shell": ["shellcheck", "shfmt"],
     "docker": ["hadolint"],
     "yaml": ["yamllint"],
@@ -162,6 +163,19 @@
       "version_command": ["commitlint", "--version"],
       "languages": ["git"],
       "tags": ["linter"]
+    },
+    {
+      "name": "djlint",
+      "version": "1.39.2",
+      "install": {
+        "type": "pip",
+        "package": "djlint"
+      },
+      "tier": "tools",
+      "category": "bundled",
+      "version_command": ["djlint", "--version"],
+      "languages": ["jinja"],
+      "tags": ["linter", "formatter"]
     },
     {
       "name": "dotenv_linter",

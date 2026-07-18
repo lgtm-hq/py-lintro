@@ -83,7 +83,11 @@ full = [
   "yamllint>=1.37.1",
 ]
 ai = ["anthropic>=0.39.0", "openai>=1.50.0"]
-tools = ["semgrep>=1.151.0", "sqlfluff>=4.0.0"]
+# djlint is capped below 1.39.3: from 1.39.3 onward djlint requires click>=8.2,
+# which conflicts with semgrep's click~=8.1.8 pin in the same environment.
+# 1.39.2 is the newest djlint that runs under click 8.1.x. Revisit when semgrep
+# relaxes its click ceiling.
+tools = ["djlint>=1.39.2,<1.39.3", "semgrep>=1.151.0", "sqlfluff>=4.0.0"]
 
 [project.scripts]
 lintro = "lintro.cli:main"
@@ -158,6 +162,7 @@ packages = [
   "lintro.parsers.cargo_deny",
   "lintro.parsers.clippy",
   "lintro.parsers.commitlint",
+  "lintro.parsers.djlint",
   "lintro.parsers.dotenv_linter",
   "lintro.parsers.gitleaks",
   "lintro.parsers.hadolint",

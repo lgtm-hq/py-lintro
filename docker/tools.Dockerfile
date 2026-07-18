@@ -121,6 +121,7 @@ RUN echo "=== Verifying all tools ===" && \
     oxfmt --version && oxlint --version && prettier --version && \
     pydoclint --version && ruff --version && semgrep --version && \
     shellcheck --version && shfmt --version && sqlfluff --version && \
+    djlint --version && \
     dotenv-linter --version && \
     stylelint --version && \
     taplo --version && tsc --version && astro --version && \

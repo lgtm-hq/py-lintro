@@ -192,6 +192,12 @@ system.
 <td><code>pipx install sqlfluff</code></td>
 </tr>
 <tr>
+<td><a href="https://www.djlint.com/"><img src="https://img.shields.io/badge/djLint-3776ab?logo=jinja&logoColor=white" alt="djLint"></a></td>
+<td>🧩 Jinja/Django templates</td>
+<td>✅</td>
+<td><code>brew install djlint</code><br><code>pipx install djlint</code></td>
+</tr>
+<tr>
 <td><a href="https://taplo.tamasfe.dev/"><img src="https://img.shields.io/badge/Taplo-9b4dca?logo=toml&logoColor=white" alt="Taplo"></a></td>
 <td>🧾 TOML</td>
 <td>✅</td>

@@ -1,0 +1,10 @@
+<div>
+    <p>Welcome, {{ user.name }}</p>
+    {% if items %}
+        <ul>
+            {% for item in items %}
+                <li>{{ item }}</li>
+            {% endfor %}
+        </ul>
+    {% endif %}
+</div>

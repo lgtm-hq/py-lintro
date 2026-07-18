@@ -168,7 +168,7 @@ should_install() {
 # Kept in sync with the should_install blocks and tools_to_verify array.
 SUPPORTED_TOOLS=(
 	"actionlint" "astro" "bandit" "black" "cargo-audit" "cargo-deny"
-	"clippy" "commitlint" "dotenv-linter" "gitleaks" "hadolint" "markdownlint" "markdownlint-cli2" "mypy" "osv-scanner"
+	"clippy" "commitlint" "djlint" "dotenv-linter" "gitleaks" "hadolint" "markdownlint" "markdownlint-cli2" "mypy" "osv-scanner"
 	"oxfmt" "oxlint" "prettier" "pydoclint" "ruff" "rustfmt" "semgrep"
 	"shellcheck" "shfmt" "sqlfluff" "stylelint" "svelte-check" "taplo" "tsc"
 	"vale" "vue-tsc" "yamllint"
@@ -1418,6 +1418,20 @@ main() {
 		fi
 	fi # pydoclint
 
+	if should_install "djlint"; then
+		# Install djlint (HTML template linter and formatter)
+		echo -e "${BLUE}Installing djlint...${NC}"
+		DJLINT_VERSION=$(get_tool_version "djlint") || exit 1
+		if [ $DRY_RUN -eq 1 ]; then
+			log_info "[DRY-RUN] Would install djlint==${DJLINT_VERSION}"
+		elif install_python_package "djlint" "$DJLINT_VERSION"; then
+			echo -e "${GREEN}✓ djlint installed successfully${NC}"
+		else
+			echo -e "${RED}✗ Failed to install djlint${NC}"
+			exit 1
+		fi
+	fi # djlint
+
 	if should_install "sqlfluff"; then
 		# Install sqlfluff (SQL linter and formatter)
 		echo -e "${BLUE}Installing sqlfluff...${NC}"
@@ -1609,6 +1623,7 @@ main() {
 		["cargo-audit"]="Rust dependency vulnerability scanning"
 		["cargo-deny"]="Rust dependency license/advisory checking"
 		["clippy"]="Rust linting"
+		["djlint"]="HTML template linting and formatting"
 		["dotenv-linter"]=".env file linting and fixing"
 		["gitleaks"]="Secret detection"
 		["hadolint"]="Docker linting"
@@ -1643,7 +1658,7 @@ main() {
 	# Verify installations
 	echo -e "${YELLOW}Verifying installations...${NC}"
 
-	tools_to_verify=("actionlint" "astro" "bandit" "black" "cargo-audit" "cargo-deny" "clippy" "commitlint" "dotenv-linter" "gitleaks" "hadolint" "markdownlint-cli2" "mypy" "osv-scanner" "oxfmt" "oxlint" "prettier" "pydoclint" "ruff" "rustfmt" "semgrep" "shellcheck" "shfmt" "sqlfluff" "stylelint" "svelte-check" "taplo" "tsc" "vale" "vue-tsc" "yamllint")
+	tools_to_verify=("actionlint" "astro" "bandit" "black" "cargo-audit" "cargo-deny" "clippy" "commitlint" "djlint" "dotenv-linter" "gitleaks" "hadolint" "markdownlint-cli2" "mypy" "osv-scanner" "oxfmt" "oxlint" "prettier" "pydoclint" "ruff" "rustfmt" "semgrep" "shellcheck" "shfmt" "sqlfluff" "stylelint" "svelte-check" "taplo" "tsc" "vale" "vue-tsc" "yamllint")
 
 	# Filter verification list when --tools is set.
 	# Map aliases so e.g. --tools markdownlint verifies markdownlint-cli2.

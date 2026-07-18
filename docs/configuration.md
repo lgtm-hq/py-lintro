@@ -1517,6 +1517,64 @@ lintro check --tools sqlfluff --tool-options sqlfluff:exclude_rules=L010,L014
 lintro check --tools sqlfluff --tool-options sqlfluff:templater=jinja
 ```
 
+### Template Tools
+
+#### djLint Configuration
+
+djLint lints and formats HTML templates written in template languages such as Jinja,
+Django, Nunjucks, Handlebars, and Go templates. In lintro it runs in formatting mode:
+`check` reports reformat diffs and `format` applies them.
+
+**File:** `.djlintrc`
+
+```json
+{
+  "profile": "jinja",
+  "indent": 4,
+  "max_line_length": 120,
+  "ignore": "H014,H017"
+}
+```
+
+**File:** `pyproject.toml`
+
+```toml
+[tool.djlint]
+profile = "jinja"
+indent = 4
+max_line_length = 120
+ignore = "H014,H017"
+```
+
+**Available Options (via `--tool-options`):**
+
+| Option            | Type    | Description                                                    |
+| ----------------- | ------- | -------------------------------------------------------------- |
+| `profile`         | string  | Template language: jinja, django, handlebars, nunjucks, golang |
+| `indent`          | integer | Number of spaces used for indentation                          |
+| `max_line_length` | integer | Maximum line length before wrapping                            |
+| `ignore`          | string  | Comma-separated rule codes to ignore (e.g. `H014,H017`)        |
+| `extend_exclude`  | string  | Additional comma-separated paths to exclude                    |
+
+**File Patterns:** `*.jinja`, `*.jinja2`, `*.j2`, `*.twig`, `*.nj`. Plain `*.html` is
+intentionally not claimed by djLint so it does not conflict with prettier.
+
+**Usage Examples:**
+
+```bash
+# Check template formatting
+lintro check --tools djlint
+
+# Reformat templates
+lintro format --tools djlint
+
+# Use the Django profile
+lintro check --tools djlint --tool-options djlint:profile=django
+
+# Ignore specific rule codes
+lintro check --tools djlint --tool-options djlint:ignore=H014,H017
+```
+
 ### YAML Tools
 
 #### Yamllint Configuration
