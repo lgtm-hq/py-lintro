@@ -846,14 +846,14 @@ def _output_json(
                 },
             )
 
-    for check in oxlint_checks or []:
-        if _oxlint_check_is_failure(check):
+    for oxlint_check in oxlint_checks or []:
+        if _oxlint_check_is_failure(oxlint_check):
             issues.append(
                 {
-                    "tool": check.name,
+                    "tool": oxlint_check.name,
                     "severity": "error",
-                    "message": check.message,
-                    "install_hint": check.hint,
+                    "message": oxlint_check.message,
+                    "install_hint": oxlint_check.hint,
                 },
             )
 

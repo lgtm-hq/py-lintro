@@ -2,14 +2,17 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from unittest.mock import patch
 
+import pytest
 from assertpy import assert_that
 
 from lintro.enums.tool_status import ToolStatus
 from lintro.tools.definitions import oxlint_doctor
 from lintro.tools.definitions.oxlint_doctor import (
     TSGOLINT_INSTALL_HINT,
+    OxlintCheckResult,
     check_oxlint_type_aware,
     oxlintrc_type_aware_enabled,
 )
@@ -17,7 +20,7 @@ from lintro.tools.definitions.oxlint_doctor import (
 MODULE = "lintro.tools.definitions.oxlint_doctor"
 
 
-def _status(results: list, name: str) -> ToolStatus:
+def _status(results: list[OxlintCheckResult], name: str) -> ToolStatus:
     """Return the status for the check with the given name.
 
     Args:
@@ -185,7 +188,10 @@ def test_check_typescript_unparseable_is_unknown() -> None:
 # =============================================================================
 
 
-def test_resolve_tsgolint_prefers_node_modules(tmp_path, monkeypatch) -> None:
+def test_resolve_tsgolint_prefers_node_modules(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """node_modules/.bin/oxlint-tsgolint is preferred when present.
 
     Args:
@@ -201,7 +207,10 @@ def test_resolve_tsgolint_prefers_node_modules(tmp_path, monkeypatch) -> None:
     assert_that(resolved).contains("oxlint-tsgolint")
 
 
-def test_resolve_tsgolint_bunx_fallback(tmp_path, monkeypatch) -> None:
+def test_resolve_tsgolint_bunx_fallback(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """Bunx is used as a fallback when no local/PATH binary exists.
 
     Args:
@@ -219,7 +228,10 @@ def test_resolve_tsgolint_bunx_fallback(tmp_path, monkeypatch) -> None:
     assert_that(resolved).is_equal_to("bunx oxlint-tsgolint")
 
 
-def test_resolve_tsgolint_none_when_unavailable(tmp_path, monkeypatch) -> None:
+def test_resolve_tsgolint_none_when_unavailable(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """None is returned when nothing resolves.
 
     Args:

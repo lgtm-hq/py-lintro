@@ -122,7 +122,8 @@ def _detect_typescript_version() -> str | None:
             )
             if result.returncode == 0:
                 match = re.search(
-                    r"(\d+\.\d+(?:\.\d+)?)", result.stdout + result.stderr
+                    r"(\d+\.\d+(?:\.\d+)?)",
+                    result.stdout + result.stderr,
                 )
                 if match:
                     return match.group(1)
@@ -210,7 +211,9 @@ def check_oxlint_type_aware(*, option_enabled: bool = False) -> list[OxlintCheck
                     OxlintCheckResult(
                         name="oxlint.type-aware.typescript",
                         status=ToolStatus.OK,
-                        message=f"TypeScript {ts_version} (>= {TYPESCRIPT_MIN_VERSION})",
+                        message=(
+                            f"TypeScript {ts_version} " f"(>= {TYPESCRIPT_MIN_VERSION})"
+                        ),
                     ),
                 )
 
