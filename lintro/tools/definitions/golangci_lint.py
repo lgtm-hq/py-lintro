@@ -14,7 +14,6 @@ v1 ``--out-format`` flag with ``--output.<format>.path`` options.
 
 from __future__ import annotations
 
-import os
 import subprocess  # nosec B404 - used safely with shell disabled
 from dataclasses import dataclass
 from pathlib import Path
@@ -73,18 +72,9 @@ def _find_go_module_roots(paths: list[str]) -> list[Path]:
     if not roots:
         return []
 
-    unique_roots = sorted(set(roots))
-    if len(unique_roots) == 1:
-        return unique_roots
-
-    try:
-        common = Path(os.path.commonpath([str(r) for r in unique_roots]))
-    except ValueError:
-        return unique_roots
-
     # Even when a parent module exists, nested modules are distinct
     # go.mod roots and must each be linted independently.
-    return unique_roots
+    return sorted(set(roots))
 
 
 def _merge_fix_results(*, name: str, results: list[ToolResult]) -> ToolResult:
