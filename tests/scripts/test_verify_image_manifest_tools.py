@@ -205,7 +205,11 @@ def test_tiers_override_passed_through(
         extra_env={"TIERS": "tools,dev"},
     )
     assert_that(result.returncode).is_equal_to(0)
-    invocation = args_log.read_text().splitlines()[0]
+    run_lines = [
+        line for line in args_log.read_text().splitlines() if line.startswith("run ")
+    ]
+    assert_that(run_lines).is_length(1)
+    invocation = run_lines[0]
     assert_that(invocation).contains("--tiers tools,dev")
 
 

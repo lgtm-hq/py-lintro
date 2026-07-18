@@ -64,7 +64,12 @@ def _versions_match(tool_name: str, expected: str, actual: str) -> bool:
     # is unobservable from the binary, while any real minor/major drift is
     # still caught.
     if tool_name == "clippy":
-        return expected.split(".")[:2] == actual.split(".")[:2]
+        # Compare only over the segments the manifest actually declares (still
+        # capped at major.minor), so a major-only manifest version like "1"
+        # matches "1.97.0" instead of erroring on a missing minor segment.
+        expected_parts = expected.split(".")[:2]
+        actual_parts = actual.split(".")[: len(expected_parts)]
+        return actual_parts == expected_parts
     return expected == actual
 
 
