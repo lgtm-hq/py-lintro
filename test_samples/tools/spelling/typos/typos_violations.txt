@@ -1,0 +1,2 @@
+This is a testt fixture with intentional typos.
+We seperate teh wrods to trigger the spell cheker.

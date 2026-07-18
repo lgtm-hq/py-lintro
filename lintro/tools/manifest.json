@@ -446,6 +446,19 @@
       "tags": ["linter", "type_checker"]
     },
     {
+      "name": "typos",
+      "version": "1.48.0",
+      "install": {
+        "type": "cargo",
+        "package": "typos-cli"
+      },
+      "tier": "tools",
+      "category": "external",
+      "version_command": ["typos", "--version"],
+      "languages": ["text"],
+      "tags": ["linter"]
+    },
+    {
       "name": "vale",
       "version": "3.15.1",
       "install": {

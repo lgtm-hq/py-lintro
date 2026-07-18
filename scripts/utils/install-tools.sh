@@ -167,11 +167,11 @@ should_install() {
 # Supported tool names for --tools validation.
 # Kept in sync with the should_install blocks and tools_to_verify array.
 SUPPORTED_TOOLS=(
-	"actionlint" "astro" "bandit" "black" "cargo-audit" "cargo-deny"
-	"clippy" "commitlint" "dotenv-linter" "gitleaks" "hadolint" "markdownlint" "markdownlint-cli2" "mypy" "osv-scanner"
-	"oxfmt" "oxlint" "prettier" "pydoclint" "ruff" "rustfmt" "semgrep"
-	"shellcheck" "shfmt" "sqlfluff" "stylelint" "svelte-check" "taplo" "tsc"
-	"vale" "vue-tsc" "yamllint"
+	"actionlint" "astro" "bandit" "black" "cargo-audit" "cargo-deny" "clippy" "commitlint"
+	"dotenv-linter" "gitleaks" "hadolint" "markdownlint" "markdownlint-cli2" "mypy" "osv-scanner" "oxfmt"
+	"oxlint" "prettier" "pydoclint" "ruff" "rustfmt" "semgrep" "shellcheck" "shfmt"
+	"sqlfluff" "stylelint" "svelte-check" "taplo" "tsc" "typos" "vale" "vue-tsc"
+	"yamllint"
 )
 
 # Validate --tools filter against known tool names (fail-fast on typos).
@@ -1044,6 +1044,81 @@ main() {
 		fi
 	fi # cargo-deny
 
+	if should_install "typos"; then
+		# Install typos (source-code spell checker; crate "typos-cli", binary "typos")
+		# Prefer pre-built binary from cargo-quickinstall to avoid long compile times
+		echo -e "${BLUE}Installing typos...${NC}"
+		TYPOS_VERSION=$(get_tool_version "typos") || exit 1
+		if [ $DRY_RUN -eq 1 ]; then
+			log_info "[DRY-RUN] Would install typos-cli==${TYPOS_VERSION}"
+		elif command -v typos &>/dev/null; then
+			echo -e "${GREEN}✓ typos already installed${NC}"
+		else
+			typos_installed=false
+			# Try pre-built binary from cargo-quickinstall first (much faster than cargo install)
+			tmpdir=$(mktemp -d)
+			os=$(uname -s | tr '[:upper:]' '[:lower:]')
+			arch=$(uname -m)
+			case "$arch" in
+			x86_64 | amd64) target="x86_64-unknown-linux-gnu" ;;
+			aarch64 | arm64) target="aarch64-unknown-linux-gnu" ;;
+			*) target="" ;;
+			esac
+			# cargo-quickinstall only provides linux binaries
+			if [[ "$os" == "linux" ]] && [[ -n "$target" ]]; then
+				tgz_url="https://github.com/cargo-bins/cargo-quickinstall/releases/download/typos-cli-${TYPOS_VERSION}/typos-cli-${TYPOS_VERSION}-${target}.tar.gz"
+				echo -e "${YELLOW}Trying pre-built binary from cargo-quickinstall...${NC}"
+				if download_with_retries "$tgz_url" "$tmpdir/typos.tar.gz" 3; then
+					tar -xzf "$tmpdir/typos.tar.gz" -C "$tmpdir"
+					if [ -f "$tmpdir/typos" ]; then
+						cp "$tmpdir/typos" "$BIN_DIR/typos"
+						chmod +x "$BIN_DIR/typos"
+						echo -e "${GREEN}✓ typos installed from pre-built binary${NC}"
+						typos_installed=true
+					fi
+				fi
+			fi
+			rm -rf "$tmpdir"
+
+			# Fallback to cargo install if pre-built binary not available
+			if [ "$typos_installed" = false ] && command -v cargo &>/dev/null; then
+				echo -e "${YELLOW}Pre-built binary not available, falling back to cargo install...${NC}"
+				if cargo install typos-cli --locked --version "$TYPOS_VERSION"; then
+					# cargo install writes to $CARGO_HOME/bin; copy into BIN_DIR
+					# so later verification via command -v / PATH finds it.
+					cargo_bin="${CARGO_HOME:-$HOME/.cargo}/bin/typos"
+					if [ -x "$cargo_bin" ]; then
+						cp "$cargo_bin" "$BIN_DIR/typos"
+						chmod +x "$BIN_DIR/typos"
+					fi
+					if command -v typos &>/dev/null || [ -x "$BIN_DIR/typos" ]; then
+						echo -e "${GREEN}✓ typos installed via cargo${NC}"
+						typos_installed=true
+					else
+						echo -e "${YELLOW}⚠ cargo install succeeded but typos not on PATH${NC}"
+					fi
+				fi
+			fi
+
+			# Homebrew fallback for macOS hosts without a Rust toolchain.
+			if [ "$typos_installed" = false ] && command -v brew &>/dev/null; then
+				echo -e "${YELLOW}Falling back to Homebrew...${NC}"
+				if brew install typos-cli; then
+					echo -e "${GREEN}✓ typos installed via Homebrew${NC}"
+					typos_installed=true
+				fi
+			fi
+
+			if [ "$typos_installed" = false ]; then
+				# typos is part of the default toolset; a silent miss would
+				# leave every subsequent lintro run degraded and the
+				# verification step reporting a missing tool.
+				echo -e "${RED}✗ Failed to install typos (pre-built binary, cargo, and brew all unavailable)${NC}"
+				exit 1
+			fi
+		fi
+	fi # typos
+
 	if should_install "ruff"; then
 		# Install ruff (Python linting and formatting)
 		echo -e "${BLUE}Installing ruff...${NC}"
@@ -1629,6 +1704,7 @@ main() {
 		["svelte-check"]="Svelte type checking"
 		["taplo"]="TOML linting and formatting"
 		["tsc"]="TypeScript type checking"
+		["typos"]="Source-code spell checking"
 		["vue-tsc"]="Vue TypeScript type checking"
 		["yamllint"]="YAML linting"
 	)
@@ -1643,7 +1719,7 @@ main() {
 	# Verify installations
 	echo -e "${YELLOW}Verifying installations...${NC}"
 
-	tools_to_verify=("actionlint" "astro" "bandit" "black" "cargo-audit" "cargo-deny" "clippy" "commitlint" "dotenv-linter" "gitleaks" "hadolint" "markdownlint-cli2" "mypy" "osv-scanner" "oxfmt" "oxlint" "prettier" "pydoclint" "ruff" "rustfmt" "semgrep" "shellcheck" "shfmt" "sqlfluff" "stylelint" "svelte-check" "taplo" "tsc" "vale" "vue-tsc" "yamllint")
+	tools_to_verify=("actionlint" "astro" "bandit" "black" "cargo-audit" "cargo-deny" "clippy" "commitlint" "dotenv-linter" "gitleaks" "hadolint" "markdownlint-cli2" "mypy" "osv-scanner" "oxfmt" "oxlint" "prettier" "pydoclint" "ruff" "rustfmt" "semgrep" "shellcheck" "shfmt" "sqlfluff" "stylelint" "svelte-check" "taplo" "tsc" "vale" "vue-tsc" "yamllint" "typos")
 
 	# Filter verification list when --tools is set.
 	# Map aliases so e.g. --tools markdownlint verifies markdownlint-cli2.
@@ -1680,6 +1756,12 @@ main() {
 		elif command -v "$tool" &>/dev/null; then
 			version=$("$tool" --version 2>/dev/null || echo "installed")
 			echo -e "${GREEN}✓ $tool: $version${NC}"
+		elif [ -n "$BIN_DIR" ] && [ -x "$BIN_DIR/$tool" ]; then
+			# Local installs (e.g. typos via cargo/quickinstall) land in
+			# $BIN_DIR, which may not be on PATH in this shell yet. Verify the
+			# binary directly so a successful install is not reported missing.
+			version=$("$BIN_DIR/$tool" --version 2>/dev/null || echo "installed")
+			echo -e "${GREEN}✓ $tool: $version (in $BIN_DIR)${NC}"
 		else
 			echo -e "${RED}✗ $tool: not found in PATH${NC}"
 		fi

@@ -17,6 +17,8 @@
 FROM ghcr.io/lgtm-hq/lintro-tools:latest@sha256:0024f54a75d4cf7f2ba6563c8f18e05bb825affc37885bfe5fa10cc789df12aa AS tools
 
 # -----------------------------------------------------------------------------
+# Stage: full — lintro application (default target)
+# -----------------------------------------------------------------------------
 FROM tools AS full
 
 LABEL org.opencontainers.image.description="Making Linters Play Nice... Mostly."
@@ -65,7 +67,7 @@ RUN echo "Verifying tools..." && \
     markdownlint-cli2 --version && tsc --version && astro --version && \
     vue-tsc --version && oxlint --version && oxfmt --version && \
     bandit --version && mypy --version && pydoclint --version && \
-    yamllint --version && sqlfluff --version && stylelint --version && \
+    yamllint --version && sqlfluff --version && stylelint --version && typos --version && \
     vale --version && \
     echo "All tools verified!"
 
@@ -88,6 +90,7 @@ RUN echo "Verifying tools as non-root user..." && \
     gosu lintro cargo deny --version && \
     gosu lintro osv-scanner --version && \
     gosu lintro semgrep --version && \
+    gosu lintro typos --version && \
     gosu lintro dotenv-linter --version && \
     echo "All tools verified for non-root user!"
 

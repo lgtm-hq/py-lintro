@@ -198,6 +198,12 @@ system.
 <td><code>brew install taplo</code><br><a href="https://github.com/tamasfe/taplo/releases">GitHub Releases</a></td>
 </tr>
 <tr>
+<td><a href="https://github.com/crate-ci/typos"><img src="https://img.shields.io/badge/typos-000000?logo=rust&logoColor=white" alt="typos"></a></td>
+<td>🔤 Spelling</td>
+<td>✅</td>
+<td><code>brew install typos-cli</code><br><code>cargo install typos-cli</code></td>
+</tr>
+<tr>
 <td><a href="https://dotenv-linter.github.io/"><img src="https://img.shields.io/badge/dotenv--linter-ecd53f?logo=dotenv&logoColor=black" alt="dotenv-linter"></a></td>
 <td>🔑 .env Files</td>
 <td>✅</td>

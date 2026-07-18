@@ -103,6 +103,8 @@ Some tools require separate installation. Their minimum versions are also manage
   `npm install -g stylelint`); skips cleanly when no stylelint config is found — add one
   (e.g. `.stylelintrc.json`) to enable linting
 - `taplo` - TOML linter and formatter (`brew install taplo` or GitHub releases)
+- `typos` - Source-code spell checker with auto-fix (`brew install typos-cli` or
+  `cargo install typos-cli`)
 - `vale` - Prose/documentation linter (`brew install vale` or GitHub releases); requires
   a `.vale.ini`, otherwise lintro skips it as a non-error
 - `cargo-audit` - Rust dependency vulnerability scanner (`cargo install cargo-audit`)

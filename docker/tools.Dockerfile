@@ -124,6 +124,7 @@ RUN echo "=== Verifying all tools ===" && \
     dotenv-linter --version && \
     stylelint --version && \
     taplo --version && tsc --version && astro --version && \
+    typos --version && \
     svelte-check --version && vue-tsc --version && yamllint --version && \
     vale --version && \
     echo "=== All tools verified! ==="
