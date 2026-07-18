@@ -45,8 +45,54 @@ jobs:
       lintro-image: >-
         ghcr.io/lgtm-hq/py-lintro@sha256:0e8f3892f31f7bb6ce56a33d037d983591b82c325bf56281f9d9e2fec488aa5c
 
+  verify-pinned-image-tools:
+    name: 🔎 Verify Pinned Image Tools
+    # Digest-lag gate (#1511, epic #1508): the nightly dogfood run and the
+    # docker-ci fork-PR fallback both lint with the pinned release image
+    # below. Verifying that image against the CURRENT manifest turns pin
+    # staleness (e.g. the pip-audit gap in #1505, where the manifest declared
+    # a tool the pinned image lacked) into a failed check that opens a
+    # deduplicated issue via notify-failure — instead of a silent dogfooding
+    # SKIP. Kept in the nightly (not the required docker-ci gate) so a manifest
+    # tool added ahead of a release pin bump surfaces loudly without wedging
+    # every PR on the release-pin chicken-and-egg.
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read # checkout the verifier script + manifest
+      packages: read # anonymous/authenticated GHCR pull of the pinned image
+    timeout-minutes: 10
+    steps:
+      - name: Harden Runner
+        # yamllint disable-line rule:line-length
+        uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
+        with:
+          egress-policy: 'block'
+          allowed-endpoints: >
+            github.com:443
+            api.github.com:443
+            ghcr.io:443
+            pkg-containers.githubusercontent.com:443
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+      - name: Log in to GitHub Container Registry
+        # yamllint disable-line rule:line-length
+        uses: docker/login-action@af1e73f918a031802d376d3c8bbc3fe56130a9b0 # v4.4.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Verify pinned digest tools against manifest
+        env:
+          # Pinned digest — keep in sync with the dogfood-full job above, the
+          # docker-ci.yml fork-PR fallback, and the pyproject.toml lintro pin.
+          IMAGE: >-
+            ghcr.io/lgtm-hq/py-lintro@sha256:0e8f3892f31f7bb6ce56a33d037d983591b82c325bf56281f9d9e2fec488aa5c
+        run: scripts/ci/verify-image-manifest-tools.sh
+
   notify-failure:
-    needs: [dogfood-full]
+    needs: [dogfood-full, verify-pinned-image-tools]
     # Main-only: a manual dispatch from a feature branch must not open or
     # ping the main-failure issue for the dogfood-nightly key.
     if: failure() && github.ref == 'refs/heads/main'
