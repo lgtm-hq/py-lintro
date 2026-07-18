@@ -84,4 +84,5 @@ def test_check_empty_directory(
 
     assert_that(result).is_not_none()
     assert_that(result.name).is_equal_to("pip_audit")
+    assert_that(result.success).is_true()
     assert_that(result.issues_count).is_equal_to(0)
