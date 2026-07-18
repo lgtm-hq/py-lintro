@@ -58,6 +58,10 @@ Create `lintro/tools/definitions/<tool>.py`.
 Structure (mirrored from your reference tool):
 
 ```python
+from __future__ import annotations
+
+from dataclasses import dataclass
+
 from lintro._tool_versions import get_min_version
 from lintro.enums.tool_name import ToolName
 from lintro.enums.tool_type import ToolType
@@ -502,9 +506,8 @@ A new-tool PR is **not mergeable** until all three gates pass:
 | [**#1510**](https://github.com/lgtm-hq/py-lintro/issues/1510) — dogfood skip allowlist | Dogfooding CI fails if any enabled tool reports SKIP without an entry in the committed allowlist; every allowlist entry must have a written rationale                                              |
 | [**#1511**](https://github.com/lgtm-hq/py-lintro/issues/1511) — manifest vs image      | `scripts/ci/verify-manifest-tools.py` runs inside the freshly built CI image; if the manifest declares the tool but the image cannot execute its `version_command`, the build fails                |
 
-Until those gates are live, satisfy their intent manually using the
-[`lintro-verify` checklist](https://github.com/lgtm-hq/py-lintro/blob/main/skills-ref/lintro-verify/SKILL.md)
-and the [pre-submit checklist](#pre-submit-checklist) below.
+Until those gates are live, satisfy their intent manually by working through the
+[pre-submit checklist](#pre-submit-checklist) below.
 
 ---
 
