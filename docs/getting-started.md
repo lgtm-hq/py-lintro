@@ -105,8 +105,9 @@ Some tools require separate installation. Their minimum versions are also manage
 - `pip-audit` - Python dependency vulnerability scanner (`pip install pip-audit`,
   `uv add pip-audit`, or `brew install pip-audit`)
 - `taplo` - TOML linter and formatter (`brew install taplo` or GitHub releases)
-- `terraform` - Terraform formatter (`terraform fmt`) and validator (`terraform validate`)
-  (`brew install terraform` or [HashiCorp releases](https://releases.hashicorp.com/terraform))
+- `terraform` - Terraform formatter (`terraform fmt`) and validator
+  (`terraform validate`) (`brew install terraform` or
+  [HashiCorp releases](https://releases.hashicorp.com/terraform))
 - `vale` - Prose/documentation linter (`brew install vale` or GitHub releases); requires
   a `.vale.ini`, otherwise lintro skips it as a non-error
 - `cargo-audit` - Rust dependency vulnerability scanner (`cargo install cargo-audit`)
