@@ -64,7 +64,11 @@ export const NAV_GROUP_BY_ID: Partial<Record<string, string>> = {
   'tools/markdownlint': 'config',
   'tools/actionlint': 'ci-ops',
   'tools/hadolint': 'ci-ops',
+<<<<<<< HEAD
   'tools/idiom-review': 'python',
+=======
+  'tools/terraform': 'ci-ops',
+>>>>>>> fef23d6e (docs(terraform): document Terraform tool and mirror on site)
   'tools/osv-scanner': 'security',
   'tools/pip-audit': 'security',
   'tools/trufflehog': 'security',
