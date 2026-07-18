@@ -127,6 +127,7 @@ Scripts for GitHub Actions workflows and continuous integration.
 | `pull-ci-docker-images.sh`           | Pull CI Docker images from GHCR for testing                           | `./scripts/ci/testing/pull-ci-docker-images.sh`                                    |
 | `resolve-vue-tsc-version.sh`         | Read installed vue-tsc version from bun's global install root         | `./scripts/ci/resolve-vue-tsc-version.sh --help`                                   |
 | `verify-manifest-tools.py`           | Verify tools in image match manifest versions                         | `python scripts/ci/verify-manifest-tools.py --help`                                |
+| `verify-image-manifest-tools.sh`     | Run verify-manifest-tools.py inside a container image vs the manifest | `IMAGE=py-lintro:latest scripts/ci/verify-image-manifest-tools.sh`                 |
 | `generate-tool-versions.py`          | Generate `_generated_versions.py` and sync `manifest.json` versions   | `python scripts/ci/generate-tool-versions.py [--check]`                            |
 | `stage-python-coverage-html.sh`      | Stage flat HTML coverage for GitHub Pages bundling                    | `./scripts/ci/testing/stage-python-coverage-html.sh --help`                        |
 | `render-coverage-json-html.py`       | Render a simple HTML index from CI `coverage.json` for Pages bundling | `python scripts/ci/testing/render-coverage-json-html.py --help`                    |
