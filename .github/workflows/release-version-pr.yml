@@ -28,11 +28,10 @@ jobs:
       ecosystems: python
       auto-merge: true
       max-bump: minor
-      # Reflow the generated CHANGELOG.md to lintro's 88-column markdown budget
-      # after it is written and before the version PR is committed, so release
-      # PRs pass dogfooding-lint without CHANGELOG.md being ignored (#1117).
-      # Shell/format logic lives in the dedicated script, not an inline run.
-      version-update-script: scripts/ci/format-changelog.py
+      # Reflow CHANGELOG.md and refresh embedded SPDX license data after the
+      # version bump is prepared and before the version PR is committed
+      # (#1117, #1306). Logic lives in dedicated scripts, not an inline run.
+      version-update-script: scripts/release/prepare_version_artifacts.py
       tooling-ref: '31c25ef2e8992960e218524780e34f44f51271b5' # v0.54.0
       egress-policy: block
       # Paired with release-auto-tag.yml (egress-preset: github-tooling).
@@ -42,7 +41,7 @@ jobs:
       # preset resolution, so the preset's extra hosts never reach it and
       # pip is blocked from PyPI (#1287, lgtm-hq/lgtm-ci#512). Pass the
       # complete list explicitly; harden-runner splits on spaces, so keep
-      # the folded scalar.
+      # the folded scalar. spdx.org is needed to refresh SPDX license data.
       allowed-endpoints: >-
         github.com:443
         api.github.com:443
@@ -53,6 +52,8 @@ jobs:
         pipelines.actions.githubusercontent.com:443
         pypi.org:443
         files.pythonhosted.org:443
+        spdx.org:443
+
     secrets:
       RELEASE_APP_ID: ${{ secrets.RELEASE_APP_ID }}
       RELEASE_APP_PRIVATE_KEY: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}

@@ -223,13 +223,22 @@ def test_release_workflows_use_paired_egress_presets() -> None:
     )
 
 
-def test_version_pr_formats_changelog_via_dedicated_script() -> None:
-    """Version-PR workflow reflows the generated CHANGELOG via a repo script."""
+def test_version_pr_prepares_artifacts_via_dedicated_script() -> None:
+    """Version-PR workflow refreshes CHANGELOG + SPDX data via a repo script."""
     version_pr = _load_workflow(name="release-version-pr.yml")
 
     script = version_pr["jobs"]["version-pr"]["with"]["version-update-script"]
-    assert_that(script).is_equal_to("scripts/ci/format-changelog.py")
+    assert_that(script).is_equal_to("scripts/release/prepare_version_artifacts.py")
     assert_that((_REPO_ROOT / script).is_file()).is_true()
+    assert_that(
+        (_REPO_ROOT / "scripts" / "release" / "generate_spdx_data.py").is_file(),
+    ).is_true()
+    assert_that(
+        (_REPO_ROOT / "scripts" / "ci" / "format-changelog.py").is_file(),
+    ).is_true()
+
+    endpoints = version_pr["jobs"]["version-pr"]["with"]["allowed-endpoints"]
+    assert_that(endpoints).contains("spdx.org:443")
 
 
 def test_changelog_no_longer_ignored_by_lintro() -> None:

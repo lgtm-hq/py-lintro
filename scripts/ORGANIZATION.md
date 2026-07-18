@@ -103,6 +103,21 @@ local scripts.
 - ✅ Container-based execution environments
 - ✅ Docker Compose orchestration
 
+### `scripts/release/` - Release Artifact Generators
+
+**Purpose**: Scripts invoked by the release Version-PR workflow to refresh committed
+derived artifacts (CHANGELOG formatting, SPDX license data).
+
+**Responsibilities**:
+
+- ✅ Deterministic codegen of release-time data modules
+- ✅ Orchestrating multiple version-update steps via a single entry script
+
+**Examples**:
+
+- `generate_spdx_data.py` - Embed official SPDX license list into the package
+- `prepare_version_artifacts.py` - Version-PR hook for changelog + SPDX refresh
+
 ## 🚫 Anti-Patterns to Avoid
 
 ### Cross-Boundary Violations

@@ -12,6 +12,7 @@ scripts/
 ├── ci/           # CI/CD and GitHub Actions scripts
 ├── docker/       # Docker-related scripts
 ├── local/        # Local development scripts
+├── release/      # Release Version-PR artifact generators
 └── utils/        # Utility scripts and shared functions
 ```
 
@@ -117,6 +118,8 @@ Scripts for GitHub Actions workflows and continuous integration.
 | `classify-release-tag.py`            | Classify a release tag as stable or prerelease for publish gating     | `python3 scripts/ci/classify-release-tag.py v1.2.3`                                |
 | `format-security-comment.py`         | Format lintro osv_scanner JSON as security PR comment markdown        | `python3 scripts/ci/format-security-comment.py osv-results.json`                   |
 | `format-changelog.py`                | Reflow generated `CHANGELOG.md` to lintro 88-col markdown             | `python3 scripts/ci/format-changelog.py CHANGELOG.md`                              |
+| `generate_spdx_data.py`              | Generate `lintro/licenses/_spdx_data.py` from SPDX licenses.json      | `python3 scripts/release/generate_spdx_data.py [--check] [--from-file PATH]`       |
+| `prepare_version_artifacts.py`       | Version-PR hook: format CHANGELOG then refresh SPDX license data      | `python3 scripts/release/prepare_version_artifacts.py`                             |
 | `test-install-package.sh`            | Install and verify built package in isolated venv                     | `./scripts/ci/test-install-package.sh wheel`                                       |
 | `test-built-package-integration.sh`  | Run integration tests for built package in isolated venv              | `./scripts/ci/test-built-package-integration.sh`                                   |
 | `test-venv-setup.sh`                 | Create isolated Python 3.13 virtual environment                       | `./scripts/ci/test-venv-setup.sh`                                                  |
