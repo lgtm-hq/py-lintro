@@ -31,6 +31,7 @@ Follows the meta-gate pattern in ``tests/unit/core/test_version_requirements.py`
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 
 import pytest
@@ -349,11 +350,13 @@ def _heading_mentions(path: Path, needles: set[str]) -> bool:
     if not path.exists():
         return False
     for line in path.read_text(encoding="utf-8").splitlines():
-        stripped = line.strip()
-        if stripped.startswith("#"):
-            lowered = stripped.lower()
-            if any(needle in lowered for needle in needles):
-                return True
+        # Match genuine ATX Markdown headings only (``#``..``######`` followed
+        # by whitespace), never shebangs or ``#``-prefixed comments.
+        if not re.match(r"^#{1,6}\s", line.strip()):
+            continue
+        lowered = line.strip().lower()
+        if any(needle in lowered for needle in needles):
+            return True
     return False
 
 
@@ -405,7 +408,11 @@ def test_manifest_tags_match_tool_type(tool: str) -> None:
     """
     _skip_if_exempt(tool, MANIFEST_EXEMPT)
     _skip_if_exempt(tool, TAGS_EXEMPT)
-    entry = _MANIFEST_TOOLS[_canonical(tool)]
+    canonical = _canonical(tool)
+    assert_that(_MANIFEST_TOOLS).described_as(
+        f"{tool}: missing manifest.json entry",
+    ).contains_key(canonical)
+    entry = _MANIFEST_TOOLS[canonical]
     raw_tags = entry.get("tags", [])
     manifest_tags = set(raw_tags) if isinstance(raw_tags, list) else set()
     expected = _expected_tags(_DEFINITIONS[tool].tool_type)  # type: ignore[attr-defined]
@@ -512,6 +519,9 @@ def test_sample_fixtures_exist(tool: str) -> None:
         tool: Registry tool name (parametrized).
     """
     _skip_if_exempt(tool, SAMPLES_EXEMPT)
+    assert_that(SAMPLES_DIR.is_dir()).described_as(
+        f"sample fixtures root is missing: {SAMPLES_DIR}",
+    ).is_true()
     canonical = _canonical(tool)
     matches = [p for p in SAMPLES_DIR.rglob(canonical) if p.is_dir()]
     assert_that(matches).described_as(
