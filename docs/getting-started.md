@@ -349,6 +349,9 @@ lintro check
 # Auto-fix what can be fixed
 lintro format
 
+# Preview fixes without writing files
+lintro format --dry-run
+
 # Check again to see remaining issues
 lintro check
 ```
@@ -413,6 +416,22 @@ fetched) is a hard error: lintro prints the failing ref and exits with code 1.
 
 `--diff` composes with other flags, for example
 `lintro check --diff main --tools ruff --output-format github`.
+
+### Preview fixes without writing (`format --dry-run`)
+
+`lintro format --dry-run` runs formatter tools in read-only mode and reports which
+issues would be fixed without modifying any files. This is useful for CI gates that
+should fail when auto-fixable drift exists, or when you want to review the fix list
+before applying changes.
+
+```bash
+lintro format --dry-run                 # preview all would-be fixes
+lintro format --dry-run src/ --tools ruff
+lintro format --dry-run --output-format json
+```
+
+Exit codes follow check semantics: **0** when nothing would be fixed, **1** when one or
+more fixable issues are available. Only formatter-capable tools run in dry-run mode.
 
 ## Configuration
 

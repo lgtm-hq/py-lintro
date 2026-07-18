@@ -32,7 +32,7 @@ jobs:
       # after it is written and before the version PR is committed, so release
       # PRs pass dogfooding-lint without CHANGELOG.md being ignored (#1117).
       # Shell/format logic lives in the dedicated script, not an inline run.
-      version-update-script: scripts/ci/format-changelog.py
+      version-update-script: scripts/ci/version-update.py
       tooling-ref: '31c25ef2e8992960e218524780e34f44f51271b5' # v0.54.0
       egress-policy: block
       # Paired with release-auto-tag.yml (egress-preset: github-tooling).

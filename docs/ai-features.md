@@ -481,6 +481,38 @@ persistent rate limiting:
 
 ## Data & Privacy
 
+### Prompt templates
+
+AI prompt bodies live as packaged markdown files under
+`lintro/ai/prompts/templates/**/*.md`, externalized from Python modules in #1134. Each
+feature area has its own subdirectory:
+
+| Directory   | Used by                                                                                   |
+| ----------- | ----------------------------------------------------------------------------------------- |
+| `summary/`  | `lintro check` AI summary (`system.md`, `prompt.md`)                                      |
+| `fix/`      | Interactive fix generation (`system.md`, `prompt.md`, `batch_prompt.md`, `refinement.md`) |
+| `post_fix/` | Post-fix session summary (`summary_prompt.md`)                                            |
+| `review/`   | AI diff review (`system.md`, `user.md`, git-native variants, adversarial sweep)           |
+
+Templates are loaded at import time by `lintro.ai.prompts._loader.load_prompt_template`
+and re-exported from the `lintro.ai.prompts.*` modules. Placeholders use Python
+`str.format` syntax (for example `{issue_count}`); literal braces in template text must
+be doubled (`{{` / `}}`).
+
+### Customizing prompts today
+
+- **Contributors**: edit the packaged `.md` files under `lintro/ai/prompts/templates/`
+  and run the test suite — there is no separate runtime override path yet.
+- **Forks and vendored installs**: patch the template files in your installed package
+  tree (or maintain a fork) to change production prompt copy without touching Python
+  orchestration code.
+- **Future override hook**: keep custom copies alongside your config (for example
+  `.lintro/prompts/review/system.md`) if/when a config-driven override lands; until
+  then, treat the packaged paths above as the single source of truth.
+
+When adding a new prompt, place the markdown next to related templates, load it through
+`load_prompt_template`, and document any new placeholders in the module docstring.
+
 ### What is sent to the AI provider
 
 - **Summary mode** (`lintro check`): An issue digest containing error codes, counts,

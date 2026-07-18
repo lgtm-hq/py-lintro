@@ -4,8 +4,8 @@
 
 | Version | Supported          |
 | ------- | ------------------ |
-| 0.64.x  | :white_check_mark: |
-| < 0.64  | :x:                |
+| 0.80.x  | :white_check_mark: |
+| < 0.80  | :x:                |
 
 ## Reporting a Vulnerability
 
@@ -36,11 +36,18 @@ disclosure:
 
 ### Vulnerability Disclosure Timeline
 
-- **Acknowledgment**: Within 48 hours of receiving your report
-- **Investigation & Fix**: Within 30 days, we will assess severity and develop a fix
-- **Release**: Critical vulnerabilities are patched as soon as possible; other fixes are
-  released within 90 days
-- **Public Disclosure**: Coordinated with the reporter after a fix is available
+We follow a coordinated vulnerability disclosure process:
+
+- **Acknowledgment**: Within 48 hours of receiving your report, we will acknowledge
+  receipt and begin our initial assessment.
+- **Investigation**: Within 30 days, we will investigate the vulnerability, determine
+  its severity, and develop a fix.
+- **Fix & Release**: Critical vulnerabilities are patched as soon as possible; other
+  fixes are released within 90 days of the initial report.
+- **Public Disclosure**: After a fix is available, we will coordinate public disclosure
+  with the reporter. We request that reporters refrain from public disclosure until a
+  fix is available to protect users.
+- **Updates**: You will be kept informed of progress throughout the process.
 
 We appreciate responsible disclosure and will credit reporters (unless anonymity is
 requested) in our security advisories and release notes.
