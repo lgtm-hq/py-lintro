@@ -77,6 +77,34 @@ def _find_go_module_roots(paths: list[str]) -> list[Path]:
     return sorted(set(roots))
 
 
+def _rebase_issue_paths(
+    *,
+    issues: list[GolangciLintIssue],
+    module_root: Path,
+) -> None:
+    """Anchor each issue's relative file path to its module root, in place.
+
+    golangci-lint reports ``Pos.Filename`` relative to the module root it ran
+    in. When findings from several module roots are merged, identical relative
+    names (e.g. ``main.go`` in two sibling modules) become ambiguous, so each
+    path is rewritten to an absolute path under its module root. The synthetic
+    ``(module)`` placeholder used for position-less findings and paths that are
+    already absolute are left untouched.
+
+    Args:
+        issues: Parsed issues to rewrite in place.
+        module_root: Directory golangci-lint ran in for these issues.
+    """
+    for issue in issues:
+        file_path = issue.file
+        if (
+            file_path
+            and file_path != "(module)"
+            and not Path(file_path).is_absolute()
+        ):
+            issue.file = str(module_root / file_path)
+
+
 def _merge_fix_results(*, name: str, results: list[ToolResult]) -> ToolResult:
     """Merge per-module fix results into a single aggregate result.
 
@@ -244,21 +272,23 @@ class GolangciLintPlugin(BaseToolPlugin):
                     tool_name="golangci_lint",
                 )
             except subprocess.TimeoutExpired:
+                # A single module timing out must not discard findings already
+                # collected from earlier roots or skip the remaining roots.
+                # Aggregate the timeout as a failure and continue.
                 timeout_result = create_timeout_result(
                     tool=self,
                     timeout=ctx.timeout,
                     cmd=cmd,
                     tool_name="golangci_lint",
                 )
-                return ToolResult(
-                    name=self.definition.name,
-                    success=timeout_result.success,
-                    output=timeout_result.output,
-                    issues_count=timeout_result.issues_count,
-                    issues=timeout_result.issues,
-                )
+                overall_success = False
+                all_issues.extend(timeout_result.issues or [])
+                if timeout_result.output:
+                    failure_outputs.append(timeout_result.output)
+                continue
 
             issues = parse_golangci_lint_output(output=output)
+            _rebase_issue_paths(issues=issues, module_root=module_root)
             all_issues.extend(issues)
             overall_success = overall_success and bool(success_cmd)
 
@@ -341,6 +371,9 @@ class GolangciLintPlugin(BaseToolPlugin):
                 cmd=check_cmd,
                 tool_name="golangci_lint",
             )
+            # The initial check never completed, so no issues were parsed.
+            # Report zero remaining issues rather than inventing a phantom
+            # finding that would corrupt multi-module fix totals.
             return ToolResult(
                 name=self.definition.name,
                 success=timeout_result.success,
@@ -349,10 +382,11 @@ class GolangciLintPlugin(BaseToolPlugin):
                 issues=timeout_result.issues,
                 initial_issues_count=0,
                 fixed_issues_count=0,
-                remaining_issues_count=1,
+                remaining_issues_count=0,
             )
 
         initial_issues = parse_golangci_lint_output(output=output_check)
+        _rebase_issue_paths(issues=initial_issues, module_root=module_root)
         initial_count = len(initial_issues)
 
         # Run fix.
@@ -413,6 +447,7 @@ class GolangciLintPlugin(BaseToolPlugin):
             )
 
         remaining_issues = parse_golangci_lint_output(output=output_after)
+        _rebase_issue_paths(issues=remaining_issues, module_root=module_root)
         remaining_count = len(remaining_issues)
         fixed_count = max(0, initial_count - remaining_count)
 

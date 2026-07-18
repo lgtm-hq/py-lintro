@@ -47,8 +47,7 @@ lossless for the tool, and golangci-lint is not among its SARIF-native candidate
 - Autofix path runs `golangci-lint run --fix ./...`, then re-checks
 - Parses JSON `Issues[]` into structured issues (linter, position, message, severity,
   fixable)
-- Discovers the Go module root (`go.mod`) from provided paths; respects lintro exclude
-  patterns
+- Discovers the Go module root (`go.mod`) from provided paths
 - Per-linter documentation links via `https://golangci-lint.run/usage/linters/#<linter>`
 
 ### ⚠️ Defaults and Notes
@@ -56,7 +55,10 @@ lossless for the tool, and golangci-lint is not among its SARIF-native candidate
 - Requires `go.mod` and the Go toolchain; otherwise returns success with a skip message
   ("No go.mod found; skipping golangci-lint.")
 - Whole-module scan (`./...`), mirroring the compiled-language pattern used by the
-  Clippy plugin
+  Clippy plugin. Because execution changes to the module root and runs `./...`,
+  golangci-lint analyzes every file in each selected module — file-level lintro
+  exclude patterns do not scope the scan (golangci-lint's own `.golangci.yml`
+  `issues.exclude`/`skip-files` settings are the way to exclude paths)
 - Times out after a configurable default (120s)
 - A blank `Severity` normalizes to `WARNING`; an explicit `Severity` is kept
 - The parser tolerates a trailing human-readable stats footer and ANSI codes
@@ -80,8 +82,8 @@ golangci-lint run --fix ./...
 
 ```python
 tool = GolangciLintPlugin()
-result = tool.check(["path/to/go/module"])
-result = tool.fix(["path/to/go/module"])
+result = tool.check(["path/to/go/module"], {})
+result = tool.fix(["path/to/go/module"], {})
 ```
 
 ## Configuration Strategy

@@ -596,11 +596,11 @@ main() {
 	if should_install "golangci-lint"; then
 		echo -e "${BLUE}Installing golangci-lint...${NC}"
 		GOLANGCI_LINT_VERSION=$(get_tool_version "golangci_lint") || exit 1
-		if [ $DRY_RUN -eq 1 ]; then
-			log_info "[DRY-RUN] Would install golangci-lint v${GOLANGCI_LINT_VERSION}"
-		elif command -v golangci-lint &>/dev/null; then
-			echo -e "${GREEN}✓ golangci-lint already installed${NC}"
-		else
+
+		# Download, verify, and install the pinned golangci-lint binary.
+		install_golangci_lint_binary() {
+			local tmpdir os arch arch_name asset base_url tgz_url checksum_url
+			local expected actual
 			tmpdir=$(mktemp -d)
 			os=$(uname -s | tr '[:upper:]' '[:lower:]')
 			arch=$(uname -m)
@@ -613,46 +613,75 @@ main() {
 			base_url="https://github.com/golangci/golangci-lint/releases/download/v${GOLANGCI_LINT_VERSION}"
 			tgz_url="${base_url}/${asset}.tar.gz"
 			checksum_url="${base_url}/golangci-lint-${GOLANGCI_LINT_VERSION}-checksums.txt"
-			if download_with_retries "$tgz_url" "$tmpdir/golangci-lint.tar.gz" 3; then
-				# Require checksum verification before installing
-				if ! download_with_retries "$checksum_url" "$tmpdir/checksums.txt" 3; then
-					echo -e "${RED}✗ Failed to download checksum file for golangci-lint${NC}"
-					rm -rf "$tmpdir"
-					exit 1
-				fi
-				echo -e "${BLUE}Verifying checksum for golangci-lint...${NC}"
-				# Exact filename match — avoid also matching *.tar.gz.sbom.json.
-				expected=$(awk -v f="${asset}.tar.gz" '$2 == f { print $1; exit }' "$tmpdir/checksums.txt")
-				if [ -z "$expected" ]; then
-					echo -e "${RED}✗ Checksum entry not found for ${asset}.tar.gz${NC}"
-					rm -rf "$tmpdir"
-					exit 1
-				fi
-				if command -v sha256sum >/dev/null 2>&1; then
-					actual=$(sha256sum "$tmpdir/golangci-lint.tar.gz" | awk '{print $1}')
-				elif command -v shasum >/dev/null 2>&1; then
-					actual=$(shasum -a 256 "$tmpdir/golangci-lint.tar.gz" | awk '{print $1}')
-				else
-					echo -e "${RED}✗ Unable to compute checksum: no hash tool found (sha256sum or shasum required)${NC}"
-					rm -rf "$tmpdir"
-					exit 1
-				fi
-				if [ "$expected" != "$actual" ]; then
-					echo -e "${RED}✗ Checksum mismatch for golangci-lint (expected: $expected, got: $actual)${NC}"
-					rm -rf "$tmpdir"
-					exit 1
-				fi
-				echo -e "${GREEN}✓ Checksum verified${NC}"
-				tar -xzf "$tmpdir/golangci-lint.tar.gz" -C "$tmpdir"
-				cp "$tmpdir/${asset}/golangci-lint" "$BIN_DIR/golangci-lint"
-				chmod +x "$BIN_DIR/golangci-lint"
-				echo -e "${GREEN}✓ golangci-lint installed successfully${NC}"
-			else
+			if ! download_with_retries "$tgz_url" "$tmpdir/golangci-lint.tar.gz" 3; then
 				echo -e "${RED}✗ Failed to download golangci-lint${NC}"
+				rm -rf "$tmpdir"
+				return 1
+			fi
+			# Require checksum verification before installing
+			if ! download_with_retries "$checksum_url" "$tmpdir/checksums.txt" 3; then
+				echo -e "${RED}✗ Failed to download checksum file for golangci-lint${NC}"
 				rm -rf "$tmpdir"
 				exit 1
 			fi
+			echo -e "${BLUE}Verifying checksum for golangci-lint...${NC}"
+			# Exact filename match — avoid also matching *.tar.gz.sbom.json.
+			expected=$(awk -v f="${asset}.tar.gz" '$2 == f { print $1; exit }' "$tmpdir/checksums.txt")
+			if [ -z "$expected" ]; then
+				echo -e "${RED}✗ Checksum entry not found for ${asset}.tar.gz${NC}"
+				rm -rf "$tmpdir"
+				exit 1
+			fi
+			if command -v sha256sum >/dev/null 2>&1; then
+				actual=$(sha256sum "$tmpdir/golangci-lint.tar.gz" | awk '{print $1}')
+			elif command -v shasum >/dev/null 2>&1; then
+				actual=$(shasum -a 256 "$tmpdir/golangci-lint.tar.gz" | awk '{print $1}')
+			else
+				echo -e "${RED}✗ Unable to compute checksum: no hash tool found (sha256sum or shasum required)${NC}"
+				rm -rf "$tmpdir"
+				exit 1
+			fi
+			if [ "$expected" != "$actual" ]; then
+				echo -e "${RED}✗ Checksum mismatch for golangci-lint (expected: $expected, got: $actual)${NC}"
+				rm -rf "$tmpdir"
+				exit 1
+			fi
+			echo -e "${GREEN}✓ Checksum verified${NC}"
+			tar -xzf "$tmpdir/golangci-lint.tar.gz" -C "$tmpdir"
+			cp "$tmpdir/${asset}/golangci-lint" "$BIN_DIR/golangci-lint"
+			chmod +x "$BIN_DIR/golangci-lint"
 			rm -rf "$tmpdir"
+			return 0
+		}
+
+		if [ $DRY_RUN -eq 1 ]; then
+			log_info "[DRY-RUN] Would install golangci-lint v${GOLANGCI_LINT_VERSION}"
+		elif command -v golangci-lint &>/dev/null; then
+			# Honor the pinned version: a stale binary (notably a v1 binary that
+			# cannot parse the v2 config this plugin targets) must be upgraded
+			# rather than silently accepted.
+			installed_version=$(golangci-lint version 2>/dev/null |
+				grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)
+			if [ -n "$installed_version" ] && version_ge "$installed_version" "$GOLANGCI_LINT_VERSION"; then
+				echo -e "${GREEN}✓ golangci-lint v${installed_version} already installed (>= v${GOLANGCI_LINT_VERSION})${NC}"
+			else
+				if [ -n "$installed_version" ]; then
+					echo -e "${YELLOW}⚠ golangci-lint v${installed_version} is older than required v${GOLANGCI_LINT_VERSION}, upgrading...${NC}"
+				else
+					echo -e "${YELLOW}⚠ Could not determine golangci-lint version, installing v${GOLANGCI_LINT_VERSION}...${NC}"
+				fi
+				if install_golangci_lint_binary; then
+					echo -e "${GREEN}✓ golangci-lint installed successfully${NC}"
+				else
+					exit 1
+				fi
+			fi
+		else
+			if install_golangci_lint_binary; then
+				echo -e "${GREEN}✓ golangci-lint installed successfully${NC}"
+			else
+				exit 1
+			fi
 		fi
 	fi # golangci-lint
 
@@ -1691,6 +1720,7 @@ main() {
 		["clippy"]="Rust linting"
 		["dotenv-linter"]=".env file linting and fixing"
 		["gitleaks"]="Secret detection"
+		["golangci-lint"]="Go meta-linter (requires the Go toolchain)"
 		["hadolint"]="Docker linting"
 		["markdownlint"]="Markdown linting"
 		["mypy"]="Python type checking"
@@ -1738,7 +1768,7 @@ main() {
 				filtered+=("$tool")
 			fi
 		done
-		tools_to_verify=("${filtered[@]}" "dotenv-linter" "golangci-lint" "stylelint")
+		tools_to_verify=("${filtered[@]}" "dotenv-linter" "stylelint")
 	fi
 
 	for tool in "${tools_to_verify[@]}"; do

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import subprocess
 from pathlib import Path
 from typing import Any, cast
 from unittest.mock import patch
@@ -299,3 +300,100 @@ def test_check_covers_all_selected_modules(
     assert_that(calls).is_length(2)
     assert_that(result.issues_count).is_equal_to(4)
     assert_that(result.success).is_false()
+
+
+def test_check_disambiguates_paths_across_modules(
+    golangci_lint_plugin: GolangciLintPlugin,
+    tmp_path: Path,
+) -> None:
+    """Findings from different module roots carry distinct absolute paths.
+
+    Both modules report a relative ``main.go``; without rebasing they would
+    collide. Each finding must be anchored to its own module root.
+
+    Args:
+        golangci_lint_plugin: Plugin under test.
+        tmp_path: Temporary directory hosting two sibling modules.
+    """
+    mod_a = tmp_path / "svc-a"
+    mod_b = tmp_path / "svc-b"
+    mod_a.mkdir()
+    mod_b.mkdir()
+    _make_go_module(mod_a)
+    _make_go_module(mod_b)
+
+    with patch(
+        "lintro.tools.definitions.golangci_lint.run_subprocess_with_timeout",
+        side_effect=lambda **kwargs: (False, GOLANGCI_JSON_ONE_ISSUE),
+    ):
+        result = golangci_lint_plugin.check(
+            [str(mod_a / "main.go"), str(mod_b / "main.go")],
+            {},
+        )
+
+    files = {issue.file for issue in result.issues}
+    assert_that(files).is_length(2)
+    for file_path in files:
+        assert_that(Path(file_path).is_absolute()).is_true()
+    assert_that(files).contains(str(mod_a / "main.go"), str(mod_b / "main.go"))
+
+
+def test_check_timeout_in_one_module_preserves_others(
+    golangci_lint_plugin: GolangciLintPlugin,
+    tmp_path: Path,
+) -> None:
+    """A timeout in one module does not discard earlier modules' findings.
+
+    Args:
+        golangci_lint_plugin: Plugin under test.
+        tmp_path: Temporary directory hosting two sibling modules.
+    """
+    mod_a = tmp_path / "svc-a"
+    mod_b = tmp_path / "svc-b"
+    mod_a.mkdir()
+    mod_b.mkdir()
+    _make_go_module(mod_a)
+    _make_go_module(mod_b)
+
+    def _fake_run(**kwargs: Any) -> tuple[bool, str]:
+        # svc-a sorts before svc-b, so svc-a runs first and yields findings;
+        # svc-b then times out.
+        if "svc-a" in kwargs["cwd"]:
+            return (False, GOLANGCI_JSON_TWO_ISSUES)
+        raise subprocess.TimeoutExpired(cmd="golangci-lint", timeout=1)
+
+    with patch(
+        "lintro.tools.definitions.golangci_lint.run_subprocess_with_timeout",
+        side_effect=lambda **kwargs: _fake_run(**kwargs),
+    ):
+        result = golangci_lint_plugin.check(
+            [str(mod_a / "main.go"), str(mod_b / "main.go")],
+            {},
+        )
+
+    assert_that(result.success).is_false()
+    assert_that(result.issues_count).is_equal_to(2)
+    assert_that(result.output).contains("timed out")
+
+
+def test_fix_initial_check_timeout_reports_no_phantom_issue(
+    golangci_lint_plugin: GolangciLintPlugin,
+    tmp_path: Path,
+) -> None:
+    """A timeout on the initial check must not invent a remaining issue.
+
+    Args:
+        golangci_lint_plugin: Plugin under test.
+        tmp_path: Temporary directory for the Go module.
+    """
+    _make_go_module(tmp_path)
+
+    with patch(
+        "lintro.tools.definitions.golangci_lint.run_subprocess_with_timeout",
+        side_effect=subprocess.TimeoutExpired(cmd="golangci-lint", timeout=1),
+    ):
+        result = golangci_lint_plugin.fix([str(tmp_path)], {})
+
+    assert_that(result.success).is_false()
+    assert_that(result.initial_issues_count).is_equal_to(0)
+    assert_that(result.remaining_issues_count).is_equal_to(0)
