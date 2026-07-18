@@ -2191,6 +2191,42 @@ lintro check --tools actionlint
 lintro check --tools ruff,actionlint
 ```
 
+#### Terraform Configuration
+
+Terraform wraps two subcommands: `terraform fmt` (a formatter that Lintro can auto-fix)
+and `terraform validate` (a check-only configuration validator).
+
+- Discovery: `*.tf` and `*.tfvars` files; validation runs per directory containing `.tf`
+  files (the `.terraform` provider cache is ignored).
+- `check` runs `terraform fmt -check` and reports each unformatted file, then (when
+  `validate` is enabled) runs `terraform init -backend=false -input=false` followed by
+  `terraform validate -json` per module directory and maps the JSON diagnostics
+  (severity, range, summary, detail) to issues.
+- `format` applies `terraform fmt` in place. Validation diagnostics are not auto-fixable
+  and are reported as remaining issues.
+- Terraform respects its own native configuration; Lintro does not inject any.
+- Install: `brew install terraform` or download from
+  [HashiCorp releases](https://releases.hashicorp.com/terraform).
+
+**Available Options:**
+
+| Option     | Type    | Description                                                     |
+| ---------- | ------- | --------------------------------------------------------------- |
+| `validate` | boolean | Run `terraform validate` in addition to `fmt` (default: `true`) |
+
+**Usage Examples:**
+
+```bash
+# Check formatting and validate configuration
+lintro check --tools terraform
+
+# Format Terraform files in place
+lintro format --tools terraform
+
+# Only check formatting (skip terraform init + validate)
+lintro check --tools terraform --tool-options terraform:validate=False
+```
+
 ### Git Tools
 
 #### Commitlint Configuration
