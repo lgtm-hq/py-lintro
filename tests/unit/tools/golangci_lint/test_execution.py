@@ -227,6 +227,39 @@ def test_fix_failure_output_preserved_with_remaining_issues(
     assert_that(result.output).contains("build error")
 
 
+def test_fix_aborts_when_initial_check_fails_without_issues(
+    golangci_lint_plugin: GolangciLintPlugin,
+    tmp_path: Path,
+) -> None:
+    """A failed initial check with no parseable issues aborts before --fix.
+
+    When ``golangci-lint run`` errors (config/build failure) and emits no JSON,
+    the baseline is not clean, so the mutating ``--fix`` phase must not run. The
+    diagnostic output is surfaced and no phantom counts are reported.
+
+    Args:
+        golangci_lint_plugin: Plugin under test.
+        tmp_path: Temporary directory for the Go module.
+    """
+    _make_go_module(tmp_path)
+
+    check_error = 'level=error msg="can\'t run linter: build error"'
+    with patch.object(
+        golangci_lint_plugin,
+        "_run_subprocess",
+        return_value=(False, check_error),
+    ) as mock_run:
+        result = golangci_lint_plugin.fix([str(tmp_path)], {})
+
+    # Only the initial check runs; --fix and the re-check are never invoked.
+    assert_that(mock_run.call_count).is_equal_to(1)
+    assert_that(result.success).is_false()
+    assert_that(result.initial_issues_count).is_equal_to(0)
+    assert_that(result.fixed_issues_count).is_equal_to(0)
+    assert_that(result.remaining_issues_count).is_equal_to(0)
+    assert_that(result.output).contains("build error")
+
+
 def test_fix_skips_without_go_mod(
     golangci_lint_plugin: GolangciLintPlugin,
     tmp_path: Path,
@@ -344,6 +377,10 @@ def test_check_timeout_in_one_module_preserves_others(
 ) -> None:
     """A timeout in one module does not discard earlier modules' findings.
 
+    The timed-out module is aggregated as one execution failure (matching
+    ``create_timeout_result``'s standardized timeout contract), so the total
+    count is the earlier module's two findings plus one for the timeout.
+
     Args:
         golangci_lint_plugin: Plugin under test.
         tmp_path: Temporary directory hosting two sibling modules.
@@ -372,7 +409,7 @@ def test_check_timeout_in_one_module_preserves_others(
         )
 
     assert_that(result.success).is_false()
-    assert_that(result.issues_count).is_equal_to(2)
+    assert_that(result.issues_count).is_equal_to(3)
     assert_that(result.output).contains("timed out")
 
 

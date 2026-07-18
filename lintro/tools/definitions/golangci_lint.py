@@ -257,6 +257,7 @@ class GolangciLintPlugin(BaseToolPlugin):
 
         all_issues: list[GolangciLintIssue] = []
         failure_outputs: list[str] = []
+        timeout_failures = 0
         overall_success = True
         for module_root in module_roots:
             try:
@@ -278,6 +279,11 @@ class GolangciLintPlugin(BaseToolPlugin):
                     tool_name="golangci_lint",
                 )
                 overall_success = False
+                # create_timeout_result() counts a timeout as one execution
+                # failure (issues_count=1) with an intentionally empty issues
+                # list. Preserve that count so a lone module timeout is not
+                # silently reported as issues_count=0.
+                timeout_failures += timeout_result.issues_count or 0
                 all_issues.extend(timeout_result.issues or [])
                 if timeout_result.output:
                     failure_outputs.append(timeout_result.output)
@@ -297,7 +303,7 @@ class GolangciLintPlugin(BaseToolPlugin):
             name=self.definition.name,
             success=overall_success,
             output="\n".join(failure_outputs) if failure_outputs else None,
-            issues_count=len(all_issues),
+            issues_count=len(all_issues) + timeout_failures,
             issues=all_issues,
         )
 
@@ -353,7 +359,7 @@ class GolangciLintPlugin(BaseToolPlugin):
 
         # Count issues before fixing.
         try:
-            _success_check, output_check = run_subprocess_with_timeout(
+            success_check, output_check = run_subprocess_with_timeout(
                 tool=self,
                 cmd=check_cmd,
                 timeout=timeout,
@@ -382,6 +388,20 @@ class GolangciLintPlugin(BaseToolPlugin):
             )
 
         initial_issues = parse_golangci_lint_output(output=output_check)
+        # A failed initial check with no parseable JSON means golangci-lint
+        # errored (config/build failure) rather than reporting a clean baseline.
+        # Abort before the mutating --fix phase and surface the diagnostic.
+        if not success_check and not initial_issues:
+            return ToolResult(
+                name=self.definition.name,
+                success=False,
+                output=output_check,
+                issues_count=0,
+                issues=[],
+                initial_issues_count=0,
+                fixed_issues_count=0,
+                remaining_issues_count=0,
+            )
         _rebase_issue_paths(issues=initial_issues, module_root=module_root)
         initial_count = len(initial_issues)
 
