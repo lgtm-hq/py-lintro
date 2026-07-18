@@ -179,6 +179,7 @@ packages = [
   "lintro.parsers.sqlfluff",
   "lintro.parsers.stylelint",
   "lintro.parsers.svelte_check",
+  "lintro.parsers.swiftlint",
   "lintro.parsers.taplo",
   "lintro.parsers.pydoclint",
   "lintro.parsers.tsc",

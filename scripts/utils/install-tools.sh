@@ -83,6 +83,7 @@ This script installs:
   - shfmt (Shell script formatter)
   - dotenv-linter (.env file linter and fixer)
   - SQLFluff (SQL linter and formatter)
+  - SwiftLint (Swift linter)
   - Taplo (TOML linter and formatter)
   - Vale (Prose/documentation linter)
   - TypeScript (TypeScript compiler and type checker)
@@ -170,7 +171,7 @@ SUPPORTED_TOOLS=(
 	"actionlint" "astro" "bandit" "black" "cargo-audit" "cargo-deny"
 	"clippy" "commitlint" "dotenv-linter" "gitleaks" "hadolint" "markdownlint" "markdownlint-cli2" "mypy" "osv-scanner"
 	"oxfmt" "oxlint" "prettier" "pydoclint" "ruff" "rustfmt" "semgrep"
-	"shellcheck" "shfmt" "sqlfluff" "stylelint" "svelte-check" "taplo" "tsc"
+	"shellcheck" "shfmt" "sqlfluff" "stylelint" "svelte-check" "swiftlint" "taplo" "tsc"
 	"vale" "vue-tsc" "yamllint"
 )
 
@@ -752,6 +753,53 @@ main() {
 		fi
 	fi # shfmt
 
+	if should_install "swiftlint"; then
+		# Install SwiftLint (Swift linter).
+		# Linux uses the fully static binary shipped in the release zip
+		# (swiftlint-static), which needs no Swift runtime. macOS uses Homebrew,
+		# which provides the Swift runtime already present on the platform.
+		echo -e "${BLUE}Installing swiftlint...${NC}"
+		SWIFTLINT_VERSION=$(get_tool_version "swiftlint") || exit 1
+		if [ $DRY_RUN -eq 1 ]; then
+			log_info "[DRY-RUN] Would install swiftlint v${SWIFTLINT_VERSION}"
+		elif command -v swiftlint &>/dev/null; then
+			echo -e "${GREEN}✓ swiftlint already installed${NC}"
+		else
+			os=$(uname -s | tr '[:upper:]' '[:lower:]')
+			if [ "$os" = "darwin" ]; then
+				if command -v brew &>/dev/null && brew install swiftlint; then
+					echo -e "${GREEN}✓ swiftlint installed successfully via Homebrew${NC}"
+				else
+					echo -e "${RED}✗ Failed to install swiftlint (requires Homebrew: brew install swiftlint)${NC}"
+					exit 1
+				fi
+			else
+				arch=$(uname -m)
+				case "$arch" in
+				x86_64 | amd64) arch="amd64" ;;
+				aarch64 | arm64) arch="arm64" ;;
+				*)
+					echo -e "${RED}✗ swiftlint: unsupported architecture '$arch' (release binaries cover amd64/arm64)${NC}"
+					exit 1
+					;;
+				esac
+				swiftlint_tmp=$(mktemp -d)
+				swiftlint_zip="${swiftlint_tmp}/swiftlint.zip"
+				binary_url="https://github.com/realm/SwiftLint/releases/download/${SWIFTLINT_VERSION}/swiftlint_linux_${arch}.zip"
+				if download_with_retries "$binary_url" "$swiftlint_zip" 3 &&
+					unzip -q -o "$swiftlint_zip" -d "$swiftlint_tmp"; then
+					mv "${swiftlint_tmp}/swiftlint-static" "$BIN_DIR/swiftlint"
+					chmod +x "$BIN_DIR/swiftlint"
+					echo -e "${GREEN}✓ swiftlint installed successfully${NC}"
+				else
+					echo -e "${RED}✗ Failed to download swiftlint${NC}"
+					rm -rf "$swiftlint_tmp"
+					exit 1
+				fi
+				rm -rf "$swiftlint_tmp"
+			fi
+		fi
+	fi # swiftlint
 	if should_install "vale"; then
 		# Install vale (prose/documentation linter)
 		# Prebuilt binaries: https://github.com/errata-ai/vale/releases
@@ -1627,6 +1675,7 @@ main() {
 		["sqlfluff"]="SQL linting and formatting"
 		["stylelint"]="CSS/SCSS/Less linting"
 		["svelte-check"]="Svelte type checking"
+		["swiftlint"]="Swift linting"
 		["taplo"]="TOML linting and formatting"
 		["tsc"]="TypeScript type checking"
 		["vue-tsc"]="Vue TypeScript type checking"
@@ -1643,7 +1692,7 @@ main() {
 	# Verify installations
 	echo -e "${YELLOW}Verifying installations...${NC}"
 
-	tools_to_verify=("actionlint" "astro" "bandit" "black" "cargo-audit" "cargo-deny" "clippy" "commitlint" "dotenv-linter" "gitleaks" "hadolint" "markdownlint-cli2" "mypy" "osv-scanner" "oxfmt" "oxlint" "prettier" "pydoclint" "ruff" "rustfmt" "semgrep" "shellcheck" "shfmt" "sqlfluff" "stylelint" "svelte-check" "taplo" "tsc" "vale" "vue-tsc" "yamllint")
+	tools_to_verify=("actionlint" "astro" "bandit" "black" "cargo-audit" "cargo-deny" "clippy" "commitlint" "dotenv-linter" "gitleaks" "hadolint" "markdownlint-cli2" "mypy" "osv-scanner" "oxfmt" "oxlint" "prettier" "pydoclint" "ruff" "rustfmt" "semgrep" "shellcheck" "shfmt" "sqlfluff" "stylelint" "svelte-check" "swiftlint" "taplo" "tsc" "vale" "vue-tsc" "yamllint")
 
 	# Filter verification list when --tools is set.
 	# Map aliases so e.g. --tools markdownlint verifies markdownlint-cli2.

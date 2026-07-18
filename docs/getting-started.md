@@ -99,6 +99,8 @@ Some tools require separate installation. Their minimum versions are also manage
 - `dotenv-linter` - `.env` file linter and fixer (`brew install dotenv-linter`,
   `cargo install dotenv-linter`, or GitHub releases)
 - `sqlfluff` - SQL linter and formatter (`pip install sqlfluff`)
+- `swiftlint` - Swift linter (`brew install swiftlint`; Linux uses the static release
+  binary)
 - `stylelint` - CSS/SCSS/Sass/Less linter and fixer (`bun add -g stylelint` or
   `npm install -g stylelint`); skips cleanly when no stylelint config is found — add one
   (e.g. `.stylelintrc.json`) to enable linting

@@ -40,6 +40,7 @@
     "ruby": ["semgrep"],
     "sql": ["sqlfluff"],
     "shell": ["shellcheck", "shfmt"],
+    "swift": ["swiftlint"],
     "docker": ["hadolint"],
     "yaml": ["yamllint"],
     "markdown": ["markdownlint", "vale"],
@@ -417,6 +418,18 @@
       "category": "npm",
       "version_command": ["svelte-check", "--version"],
       "languages": ["svelte"],
+      "tags": ["linter"]
+    },
+    {
+      "name": "swiftlint",
+      "version": "0.65.0",
+      "install": {
+        "type": "binary"
+      },
+      "tier": "tools",
+      "category": "external",
+      "version_command": ["swiftlint", "version"],
+      "languages": ["swift"],
       "tags": ["linter"]
     },
     {

@@ -78,6 +78,8 @@
         "koalaman/shellcheck",
         "shfmt",
         "mvdan/sh",
+        "swiftlint",
+        "realm/SwiftLint",
         "taplo",
         "tamasfe/taplo",
         "vale",
@@ -281,6 +283,19 @@
       "datasourceTemplate": "github-releases",
       "packageNameTemplate": "mvdan/sh",
       "extractVersionTemplate": "^v(?<version>.*)$"
+    },
+    {
+      "description": "Update swiftlint version in _tool_versions.py",
+      "customType": "regex",
+      "managerFilePatterns": [
+        "lintro/_tool_versions\\.py"
+      ],
+      "matchStrings": [
+        "ToolName\\.SWIFTLINT:\\s*\"(?<currentValue>[0-9]+\\.[0-9]+\\.[0-9]+)\""
+      ],
+      "datasourceTemplate": "github-releases",
+      "packageNameTemplate": "realm/SwiftLint",
+      "extractVersionTemplate": "^(?<version>[0-9]+\\.[0-9]+\\.[0-9]+)$"
     },
     {
       "description": "Update dotenv-linter version in _tool_versions.py",

@@ -142,6 +142,12 @@ system.
 <td><code>brew install shellcheck</code><br><a href="https://github.com/koalaman/shellcheck/releases">GitHub Releases</a></td>
 </tr>
 <tr>
+<td><a href="https://github.com/realm/SwiftLint"><img src="https://img.shields.io/badge/SwiftLint-F05138?logo=swift&logoColor=white" alt="SwiftLint"></a></td>
+<td>🕊️ Swift</td>
+<td>✅</td>
+<td><code>brew install swiftlint</code><br><a href="https://github.com/realm/SwiftLint/releases">GitHub Releases</a></td>
+</tr>
+<tr>
 <td><a href="https://github.com/adrienverge/yamllint"><img src="https://img.shields.io/badge/Yamllint-cb171e?logo=yaml&logoColor=white" alt="Yamllint"></a></td>
 <td>🧾 YAML</td>
 <td>-</td>

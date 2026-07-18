@@ -210,6 +210,11 @@ def get_install_hints() -> dict[str, str]:
         "sqlfluff": (
             "Install via: pip install sqlfluff>={version} or uv add sqlfluff>={version}"
         ),
+        "swiftlint": (
+            "Install via: brew install swiftlint (macOS) or download the static "
+            "Linux binary from "
+            "https://github.com/realm/SwiftLint/releases (v{version}+)"
+        ),
         "taplo": (
             "Install via: cargo install taplo-cli "
             "or download from https://github.com/tamasfe/taplo/releases (v{version}+)"
