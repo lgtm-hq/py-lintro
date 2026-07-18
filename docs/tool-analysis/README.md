@@ -108,6 +108,16 @@ implementations with the core tools themselves.
 - ⚠️ **Limited**: No impact analysis or mutation testing; plugin install not managed
 - 🚀 **Enhanced**: Coverage helpers, parallel presets, plugin/marker/fixture listings
 
+### [Idiom Review Analysis](./idiom-review-analysis.md)
+
+**AI-Powered Idiomatic Code Reviewer (built-in plugin)**
+
+- ✅ **Preserved**: Native `ToolDefinition` plugin, shared AI provider abstraction,
+  content-hash caching, cost controls
+- ⚠️ **Limitations**: No auto-fix, non-deterministic, API cost per uncached file
+- 🚀 **Notes**: No external binary; participates in `--diff` scoping; graceful skip on
+  provider unavailability
+
 ## Analysis Framework
 
 Each analysis follows a consistent structure:

@@ -283,6 +283,13 @@ system.
 <td>-</td>
 <td><code>pipx install semgrep</code><br><code>pip install semgrep</code><br><code>brew install semgrep</code></td>
 </tr>
+<tr><th colspan="4">AI Tools</th></tr>
+<tr>
+<td><a href="docs/ai-features.md#ai-idiom-review-idiom-review-tool"><img src="https://img.shields.io/badge/idiom--review-6941c6?logo=openai&logoColor=white" alt="idiom-review"></a></td>
+<td>🤖 AI · Multi-language</td>
+<td>-</td>
+<td><code>uv pip install 'lintro[ai]'</code> + API key</td>
+</tr>
 </tbody>
 </table>
 
