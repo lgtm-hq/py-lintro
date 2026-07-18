@@ -14,9 +14,9 @@ Terraform provides the following relevant capabilities:
 
 - **Formatting**: `terraform fmt` rewrites configuration files to a canonical layout;
   `-check` reports which files are not formatted without modifying them.
-- **Validation**: `terraform validate` checks that a configuration is syntactically valid
-  and internally consistent (declared variables, references, types), independent of any
-  provider APIs or remote state.
+- **Validation**: `terraform validate` checks that a configuration is syntactically
+  valid and internally consistent (declared variables, references, types), independent
+  of any provider APIs or remote state.
 - **Structured output**: `terraform validate -json` emits machine-readable diagnostics
   with severity, summary, detail, and a source range.
 - **Recursive operation**: `terraform fmt -recursive` walks directories.
@@ -75,8 +75,8 @@ cmd = ["terraform", "fmt", *rel_files]
 
 **Enhanced Error Processing:**
 
-- ✅ **fmt parsing**: Each offending file path from `terraform fmt -check` stdout becomes
-  a formatting issue.
+- ✅ **fmt parsing**: Each offending file path from `terraform fmt -check` stdout
+  becomes a formatting issue.
 - ✅ **validate parsing**: JSON diagnostics are mapped to issues, preserving severity,
   line/column, summary, and detail.
 
@@ -148,7 +148,8 @@ errors. **Workaround**: Run `terraform plan` in a dedicated pipeline stage when 
 ### Initialization cost
 
 **Problem**: `validate` requires `terraform init` per module directory. **Workaround**:
-Disable validation with `terraform:validate=False` to run formatting-only checks quickly.
+Disable validation with `terraform:validate=False` to run formatting-only checks
+quickly.
 
 ## Future Enhancement Opportunities
 
