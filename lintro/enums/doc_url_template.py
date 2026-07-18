@@ -37,6 +37,7 @@ class DocUrlTemplate(StrEnum):
     OSV = "https://osv.dev/vulnerability/{code}"
     OXLINT = "https://oxc.rs/docs/guide/usage/linter/rules/{code}"
     PYDOCLINT = "https://jsh9.github.io/pydoclint/how_to_config.html"
+    RUBOCOP = "https://docs.rubocop.org/rubocop/cops_{department}.html"
     RUFF = "https://docs.astral.sh/ruff/rules/{code}/"
     SEMGREP = "https://semgrep.dev/r/{code}"
     SHELLCHECK = "https://www.shellcheck.net/wiki/{code}"

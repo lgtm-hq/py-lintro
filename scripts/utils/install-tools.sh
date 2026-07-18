@@ -169,7 +169,7 @@ should_install() {
 SUPPORTED_TOOLS=(
 	"actionlint" "astro" "bandit" "black" "cargo-audit" "cargo-deny"
 	"clippy" "commitlint" "dotenv-linter" "gitleaks" "hadolint" "markdownlint" "markdownlint-cli2" "mypy" "osv-scanner"
-	"oxfmt" "oxlint" "prettier" "pydoclint" "ruff" "rustfmt" "semgrep"
+	"oxfmt" "oxlint" "prettier" "pydoclint" "rubocop" "ruff" "rustfmt" "semgrep"
 	"shellcheck" "shfmt" "sqlfluff" "stylelint" "svelte-check" "taplo" "tsc"
 	"vale" "vue-tsc" "yamllint"
 )
@@ -1198,6 +1198,23 @@ main() {
 		fi
 	fi # semgrep
 
+	if should_install "rubocop"; then
+		# Install rubocop (Ruby linter/formatter) as a Ruby gem.
+		echo -e "${BLUE}Installing rubocop...${NC}"
+		RUBOCOP_VERSION=$(get_tool_version "rubocop") || exit 1
+		if [ $DRY_RUN -eq 1 ]; then
+			log_info "[DRY-RUN] Would install rubocop v${RUBOCOP_VERSION}"
+		elif ! command -v gem &>/dev/null; then
+			echo -e "${RED}✗ 'gem' (Ruby) not found; cannot install rubocop${NC}"
+			exit 1
+		elif gem install rubocop --version "${RUBOCOP_VERSION}" --no-document --bindir "$BIN_DIR"; then
+			echo -e "${GREEN}✓ rubocop installed successfully${NC}"
+		else
+			echo -e "${RED}✗ Failed to install rubocop${NC}"
+			exit 1
+		fi
+	fi # rubocop
+
 	if should_install "shellcheck"; then
 		# Install shellcheck (shell script linter)
 		echo -e "${BLUE}Installing shellcheck...${NC}"
@@ -1643,7 +1660,7 @@ main() {
 	# Verify installations
 	echo -e "${YELLOW}Verifying installations...${NC}"
 
-	tools_to_verify=("actionlint" "astro" "bandit" "black" "cargo-audit" "cargo-deny" "clippy" "commitlint" "dotenv-linter" "gitleaks" "hadolint" "markdownlint-cli2" "mypy" "osv-scanner" "oxfmt" "oxlint" "prettier" "pydoclint" "ruff" "rustfmt" "semgrep" "shellcheck" "shfmt" "sqlfluff" "stylelint" "svelte-check" "taplo" "tsc" "vale" "vue-tsc" "yamllint")
+	tools_to_verify=("actionlint" "astro" "bandit" "black" "cargo-audit" "cargo-deny" "clippy" "commitlint" "dotenv-linter" "gitleaks" "hadolint" "markdownlint-cli2" "mypy" "osv-scanner" "oxfmt" "oxlint" "prettier" "pydoclint" "rubocop" "ruff" "rustfmt" "semgrep" "shellcheck" "shfmt" "sqlfluff" "stylelint" "svelte-check" "taplo" "tsc" "vale" "vue-tsc" "yamllint")
 
 	# Filter verification list when --tools is set.
 	# Map aliases so e.g. --tools markdownlint verifies markdownlint-cli2.

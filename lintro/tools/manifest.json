@@ -37,7 +37,7 @@
     "typescript": ["oxlint", "oxfmt", "prettier", "tsc"],
     "rust": ["clippy", "rustfmt", "rustc", "cargo_audit", "cargo_deny"],
     "go": ["semgrep"],
-    "ruby": ["semgrep"],
+    "ruby": ["rubocop", "semgrep"],
     "sql": ["sqlfluff"],
     "shell": ["shellcheck", "shfmt"],
     "docker": ["hadolint"],
@@ -302,6 +302,19 @@
       "version_command": ["pytest", "--version"],
       "languages": ["python"],
       "tags": ["testing"]
+    },
+    {
+      "name": "rubocop",
+      "version": "1.88.1",
+      "install": {
+        "type": "gem",
+        "package": "rubocop"
+      },
+      "tier": "tools",
+      "category": "external",
+      "version_command": ["rubocop", "--version"],
+      "languages": ["ruby"],
+      "tags": ["linter", "formatter"]
     },
     {
       "name": "ruff",
