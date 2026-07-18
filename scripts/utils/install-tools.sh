@@ -169,7 +169,7 @@ should_install() {
 SUPPORTED_TOOLS=(
 	"actionlint" "astro" "bandit" "black" "cargo-audit" "cargo-deny"
 	"clippy" "commitlint" "dotenv-linter" "gitleaks" "hadolint" "markdownlint" "markdownlint-cli2" "mypy" "osv-scanner"
-	"oxfmt" "oxlint" "prettier" "pydoclint" "ruff" "rustfmt" "semgrep"
+	"oxfmt" "oxlint" "phpstan" "prettier" "pydoclint" "ruff" "rustfmt" "semgrep"
 	"shellcheck" "shfmt" "sqlfluff" "stylelint" "svelte-check" "taplo" "tsc"
 	"vale" "vue-tsc" "yamllint"
 )
@@ -752,6 +752,40 @@ main() {
 		fi
 	fi # shfmt
 
+	if should_install "phpstan"; then
+		# Install PHPStan (PHP static analysis) as a standalone PHAR.
+		# PHPStan requires a PHP runtime at execution time; PHP itself is
+		# provided by the system package manager (apt php-cli in Docker,
+		# `brew install php` locally).
+		echo -e "${BLUE}Installing phpstan...${NC}"
+		PHPSTAN_VERSION=$(get_tool_version "phpstan") || exit 1
+		if [ $DRY_RUN -eq 1 ]; then
+			log_info "[DRY-RUN] Would install phpstan v${PHPSTAN_VERSION}"
+		elif command -v phpstan &>/dev/null && command -v php &>/dev/null; then
+			echo -e "${GREEN}✓ phpstan already installed${NC}"
+		elif ! command -v php &>/dev/null; then
+			# The PHAR cannot run (or be verified) without a PHP interpreter;
+			# installing it anyway would leave a broken binary on PATH and a
+			# failing verification. Explicit --tools phpstan without PHP is an
+			# error; the default all-tools path should skip and continue.
+			if [[ -n "${TOOL_FILTER:-}" ]]; then
+				echo -e "${RED}✗ Cannot install phpstan: no 'php' interpreter on PATH." \
+					"Install PHP (apt install php-cli / brew install php) and re-run.${NC}"
+				exit 1
+			fi
+			echo -e "${YELLOW}⚠ Skipping phpstan: no 'php' interpreter on PATH." \
+				"Install PHP (apt install php-cli / brew install php) to enable it.${NC}"
+		else
+			phar_url="https://github.com/phpstan/phpstan/releases/download/${PHPSTAN_VERSION}/phpstan.phar"
+			if download_with_retries "$phar_url" "$BIN_DIR/phpstan" 3; then
+				chmod +x "$BIN_DIR/phpstan"
+				echo -e "${GREEN}✓ phpstan installed successfully${NC}"
+			else
+				echo -e "${RED}✗ Failed to download phpstan${NC}"
+				exit 1
+			fi
+		fi
+	fi # phpstan
 	if should_install "vale"; then
 		# Install vale (prose/documentation linter)
 		# Prebuilt binaries: https://github.com/errata-ai/vale/releases
@@ -1617,6 +1651,7 @@ main() {
 		["osv-scanner"]="Multi-ecosystem vulnerability scanning"
 		["oxfmt"]="JavaScript/TypeScript formatting"
 		["oxlint"]="JavaScript/TypeScript linting"
+		["phpstan"]="PHP static analysis"
 		["prettier"]="JavaScript/JSON formatting"
 		["pydoclint"]="Python docstring validation"
 		["ruff"]="Python linting and formatting"
@@ -1643,7 +1678,7 @@ main() {
 	# Verify installations
 	echo -e "${YELLOW}Verifying installations...${NC}"
 
-	tools_to_verify=("actionlint" "astro" "bandit" "black" "cargo-audit" "cargo-deny" "clippy" "commitlint" "dotenv-linter" "gitleaks" "hadolint" "markdownlint-cli2" "mypy" "osv-scanner" "oxfmt" "oxlint" "prettier" "pydoclint" "ruff" "rustfmt" "semgrep" "shellcheck" "shfmt" "sqlfluff" "stylelint" "svelte-check" "taplo" "tsc" "vale" "vue-tsc" "yamllint")
+	tools_to_verify=("actionlint" "astro" "bandit" "black" "cargo-audit" "cargo-deny" "clippy" "commitlint" "dotenv-linter" "gitleaks" "hadolint" "markdownlint-cli2" "mypy" "osv-scanner" "oxfmt" "oxlint" "phpstan" "prettier" "pydoclint" "ruff" "rustfmt" "semgrep" "shellcheck" "shfmt" "sqlfluff" "stylelint" "svelte-check" "taplo" "tsc" "vale" "vue-tsc" "yamllint")
 
 	# Filter verification list when --tools is set.
 	# Map aliases so e.g. --tools markdownlint verifies markdownlint-cli2.

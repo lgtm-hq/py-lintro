@@ -203,6 +203,10 @@ def get_install_hints() -> dict[str, str]:
         "osv_scanner": (
             "Install via: https://github.com/google/osv-scanner/releases (v{version}+)"
         ),
+        "phpstan": (
+            "Install via: composer require --dev phpstan/phpstan (>={version}) "
+            "or brew install phpstan (requires PHP)"
+        ),
         "shellcheck": (
             "Install via: https://github.com/koalaman/shellcheck/releases (v{version}+)"
         ),

@@ -44,6 +44,7 @@
     "yaml": ["yamllint"],
     "markdown": ["markdownlint", "vale"],
     "toml": ["taplo"],
+    "php": ["phpstan"],
     "dotenv": ["dotenv_linter"],
     "css": ["stylelint"],
     "scss": ["stylelint"],
@@ -263,6 +264,18 @@
       "version_command": ["oxlint", "--version"],
       "languages": ["javascript", "typescript"],
       "tags": ["linter"]
+    },
+    {
+      "name": "phpstan",
+      "version": "2.2.5",
+      "install": {
+        "type": "binary"
+      },
+      "tier": "tools",
+      "category": "external",
+      "version_command": ["phpstan", "--version"],
+      "languages": ["php"],
+      "tags": ["linter", "type_checker"]
     },
     {
       "name": "prettier",
