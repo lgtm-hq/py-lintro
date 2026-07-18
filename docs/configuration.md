@@ -2423,7 +2423,7 @@ tools:
 Or enable ad hoc from the CLI without modifying config:
 
 ```bash
-lintro chk --tools idiom-review --tool-options idiom-review:enabled=true
+lintro check --tools idiom-review --tool-options idiom-review:enabled=true
 ```
 
 ## Advanced Configuration
