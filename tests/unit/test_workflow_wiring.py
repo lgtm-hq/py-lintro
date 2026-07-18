@@ -756,6 +756,7 @@ _PIPELINE_RELEVANT_TOP_LEVEL: frozenset[str] = frozenset(
         "apps",
         "benchmarks",
         "bun.lock",
+        "commitlint.config.js",
         "docker",
         "docker-compose.yml",
         "Dockerfile",
