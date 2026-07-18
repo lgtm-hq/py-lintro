@@ -62,6 +62,7 @@ export const NAV_GROUP_BY_ID: Partial<Record<string, string>> = {
   'tools/actionlint': 'ci-ops',
   'tools/hadolint': 'ci-ops',
   'tools/osv-scanner': 'security',
+  'tools/pip-audit': 'security',
   'architecture/architecture': 'design',
   'architecture/vision': 'design',
   'architecture/roadmap': 'design',
