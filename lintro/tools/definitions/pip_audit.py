@@ -24,6 +24,7 @@ from lintro.parsers.pip_audit.pip_audit_parser import (
     extract_pip_audit_payload,
     parse_pip_audit_output,
 )
+from lintro.plugins import execution_preparation
 from lintro.plugins.base import BaseToolPlugin
 from lintro.plugins.protocol import ToolDefinition
 from lintro.plugins.registry import register_tool
@@ -38,6 +39,51 @@ PIP_AUDIT_FILE_PATTERNS: list[str] = [
 ]
 PIP_AUDIT_REQUIREMENTS_GLOB: str = "requirements*.txt"
 PIP_AUDIT_PROJECT_FILES: frozenset[str] = frozenset({"pyproject.toml", "setup.py"})
+# Directory name for the pip-tools-style ``requirements/base.txt`` layout.
+PIP_AUDIT_REQUIREMENTS_DIR: str = "requirements"
+# Vendored/generated trees never carry first-party requirements; skip them
+# when walking for the ``requirements/`` directory layout (mirrors project
+# detection in lintro.utils.project_detection).
+_VENDOR_SKIP_DIRS: frozenset[str] = frozenset(
+    {"node_modules", ".venv", "venv", "vendor", ".git", "__pycache__"},
+)
+
+
+def _collect_requirements_dir_files(paths: list[str]) -> list[str]:
+    """Find ``requirements/<name>.txt`` files under the given input paths.
+
+    lintro's shared file discovery matches basenames only, so the common
+    pip-tools ``requirements/base.txt`` layout (filename ``base.txt``) is not
+    picked up by the ``requirements*.txt`` glob — even when passed explicitly.
+    This walks the input paths for ``*.txt`` files whose parent directory is
+    named ``requirements`` so that layout is still audited, keeping the tool
+    consistent with project detection (which already recognizes it).
+
+    Args:
+        paths: Original input paths (files or directories).
+
+    Returns:
+        Sorted, de-duplicated absolute paths to requirements-directory files.
+    """
+    found: set[str] = set()
+    for raw in paths:
+        candidate = Path(raw)
+        if candidate.is_file():
+            if (
+                candidate.suffix == ".txt"
+                and candidate.parent.name == PIP_AUDIT_REQUIREMENTS_DIR
+            ):
+                found.add(str(candidate.resolve()))
+            continue
+        if not candidate.is_dir():
+            continue
+        for nested in candidate.rglob("*.txt"):
+            if nested.parent.name != PIP_AUDIT_REQUIREMENTS_DIR:
+                continue
+            if _VENDOR_SKIP_DIRS.intersection(nested.parts):
+                continue
+            found.add(str(nested.resolve()))
+    return sorted(found)
 
 
 def _build_targets(files: list[str]) -> list[list[str]]:
@@ -171,6 +217,27 @@ class PipAuditPlugin(BaseToolPlugin):
             return None
         return DocUrlTemplate.OSV.format(code=code)
 
+    def _effective_timeout(self, options: dict[str, object]) -> float:
+        """Resolve the per-invocation timeout from options and defaults.
+
+        Used on the requirements-directory fast path, where the shared
+        execution context is skipped (no basename-matched files) and therefore
+        carries no computed timeout.
+
+        Args:
+            options: Runtime options passed to :meth:`check`.
+
+        Returns:
+            Timeout in seconds.
+        """
+        merged = dict(self.options)
+        merged.update(options)
+        return execution_preparation.get_effective_timeout(
+            timeout=None,
+            options=merged,
+            default_timeout=PIP_AUDIT_DEFAULT_TIMEOUT,
+        )
+
     def check(self, paths: list[str], options: dict[str, object]) -> ToolResult:
         """Check Python dependencies for security vulnerabilities.
 
@@ -182,11 +249,42 @@ class PipAuditPlugin(BaseToolPlugin):
             ToolResult with security scan results.
         """
         ctx = self._prepare_execution(paths, options)
-        if ctx.should_skip:
-            # early_result is guaranteed non-None when should_skip is True
-            return ctx.early_result  # type: ignore[return-value]
+        # Requirements files in a ``requirements/`` directory (e.g.
+        # ``requirements/base.txt``) are not matched by lintro's basename-only
+        # discovery, so collect them separately and audit them via ``-r``.
+        extra_req_files = _collect_requirements_dir_files(paths)
 
-        targets = _build_targets(ctx.files)
+        if ctx.should_skip:
+            early_result = ctx.early_result
+            # A version-check failure (tool missing or too old) must short-circuit
+            # even when requirements-directory files were found; that skip result
+            # is flagged via ``skipped``. A plain "no files" skip is not.
+            if not extra_req_files or (
+                early_result is not None and early_result.skipped
+            ):
+                return early_result  # type: ignore[return-value]
+            # No basename-matched files, but ``requirements/<name>.txt`` files
+            # exist: run the version gate ourselves (it was skipped when no files
+            # matched), then audit those files.
+            version_skip = execution_preparation.verify_tool_version(self.definition)
+            if version_skip is not None:
+                return version_skip
+            framework_files: list[str] = []
+            timeout = self._effective_timeout(options)
+        else:
+            framework_files = ctx.files
+            timeout = ctx.timeout
+
+        targets = _build_targets(framework_files)
+        # Append requirements-directory files not already covered by framework
+        # discovery (a ``requirements/requirements.txt`` matches both paths).
+        covered = {target[1] for target in targets if target[:1] == ["-r"]}
+        for req_file in extra_req_files:
+            resolved = str(Path(req_file).resolve())
+            if resolved not in covered:
+                targets.append(["-r", resolved])
+                covered.add(resolved)
+
         if not targets:
             return ToolResult(
                 name=self.definition.name,
@@ -213,7 +311,7 @@ class PipAuditPlugin(BaseToolPlugin):
             try:
                 proc = self._run_subprocess_result(
                     base_cmd + target,
-                    timeout=ctx.timeout,
+                    timeout=timeout,
                     cwd=target_cwd,
                 )
             except subprocess.TimeoutExpired:
@@ -222,7 +320,7 @@ class PipAuditPlugin(BaseToolPlugin):
                 # reported. Mark the scan unsuccessful and fall through to the
                 # aggregation path rather than returning a clean-looking result.
                 all_success = False
-                output_chunks.append(f"pip-audit timed out after {ctx.timeout}s")
+                output_chunks.append(f"pip-audit timed out after {timeout}s")
                 break
 
             # pip-audit writes its JSON report to stdout; parse stdout only so a

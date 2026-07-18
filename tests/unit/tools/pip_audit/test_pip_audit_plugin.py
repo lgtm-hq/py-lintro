@@ -18,6 +18,7 @@ import pytest
 from assertpy import assert_that
 
 from lintro.enums.tool_type import ToolType
+from lintro.models.core.tool_result import ToolResult
 from lintro.parsers.pip_audit.pip_audit_issue import PipAuditIssue
 from lintro.plugins.subprocess_executor import SubprocessResult
 from lintro.tools.definitions.pip_audit import (
@@ -229,6 +230,86 @@ def test_check_no_vulnerabilities(
 
     assert_that(result.success).is_true()
     assert_that(result.issues_count).is_equal_to(0)
+
+
+def test_check_audits_requirements_directory_layout(
+    pip_audit_plugin: PipAuditPlugin,
+    tmp_path: Path,
+) -> None:
+    """Files in a ``requirements/`` directory are audited via ``-r``.
+
+    lintro's shared discovery matches basenames only, so ``requirements/
+    base.txt`` (filename ``base.txt``) is not found by the ``requirements*.txt``
+    glob. The plugin collects them separately and passes each to pip-audit.
+
+    Args:
+        pip_audit_plugin: The plugin instance.
+        tmp_path: Temporary directory path.
+    """
+    reqs = tmp_path / "requirements"
+    reqs.mkdir()
+    (reqs / "base.txt").write_text("packaging==25.0\n")
+    (reqs / "prod.txt").write_text("-r base.txt\n")
+
+    captured: list[list[str]] = []
+
+    def _capture(cmd: list[str], **kwargs: object) -> SubprocessResult:
+        captured.append(cmd)
+        return _proc(success=True, stdout=_CLEAN_OUTPUT)
+
+    with patch(
+        "lintro.plugins.execution_preparation.verify_tool_version",
+        return_value=None,
+    ):
+        with patch.object(
+            pip_audit_plugin,
+            "_run_subprocess_result",
+            side_effect=_capture,
+        ):
+            result = pip_audit_plugin.check([str(tmp_path)], {})
+
+    assert_that(result.success).is_true()
+    assert_that(result.issues_count).is_equal_to(0)
+    audited = {cmd[-1] for cmd in captured}
+    assert_that(audited).contains(str((reqs / "base.txt").resolve()))
+    assert_that(audited).contains(str((reqs / "prod.txt").resolve()))
+
+
+def test_check_requirements_directory_respects_version_skip(
+    pip_audit_plugin: PipAuditPlugin,
+    tmp_path: Path,
+) -> None:
+    """A version-check failure still short-circuits the requirements-dir path.
+
+    Args:
+        pip_audit_plugin: The plugin instance.
+        tmp_path: Temporary directory path.
+    """
+    reqs = tmp_path / "requirements"
+    reqs.mkdir()
+    (reqs / "base.txt").write_text("packaging==25.0\n")
+
+    skip_result = ToolResult(
+        name="pip_audit",
+        success=True,
+        output="pip-audit not installed",
+        issues_count=0,
+        skipped=True,
+        skip_reason="not installed",
+    )
+
+    with patch(
+        "lintro.plugins.execution_preparation.verify_tool_version",
+        return_value=skip_result,
+    ):
+        with patch.object(
+            pip_audit_plugin,
+            "_run_subprocess_result",
+        ) as mock_run:
+            result = pip_audit_plugin.check([str(tmp_path)], {})
+
+    assert_that(result.skipped).is_true()
+    assert_that(mock_run.called).is_false()
 
 
 def test_check_with_vulnerabilities(
