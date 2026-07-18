@@ -56,6 +56,18 @@ def _parse_version(output: str, tool_name: str) -> str | None:
     return match.group(0)
 
 
+def _versions_match(tool_name: str, expected: str, actual: str) -> bool:
+    # `cargo clippy --version` reports only `clippy 0.1.<minor>`; it never
+    # exposes the toolchain patch level, so `_parse_version` synthesizes a
+    # trailing `.0`. Comparing that against a manifest patch (e.g. 1.97.1)
+    # would always fail. Match clippy at major.minor granularity — the patch
+    # is unobservable from the binary, while any real minor/major drift is
+    # still caught.
+    if tool_name == "clippy":
+        return expected.split(".")[:2] == actual.split(".")[:2]
+    return expected == actual
+
+
 def _tool_command(
     tool_name: str,
     tool_entry: dict[str, Any],
@@ -165,7 +177,7 @@ def main() -> int:
             failures.append(f"{name}: failed to parse version from '{output}'")
             continue
 
-        if actual != expected:
+        if not _versions_match(name, expected, actual):
             failures.append(
                 f"{name}: version mismatch (expected {expected}, got {actual})",
             )
