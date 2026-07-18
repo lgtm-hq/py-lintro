@@ -21,7 +21,7 @@ from loguru import logger
 
 from lintro.enums.tool_status import ToolStatus
 from lintro.tools.core.version_parsing import compare_versions
-from lintro.utils.native_parsers import _load_native_tool_config
+from lintro.utils.native_parsers import load_native_tool_config
 
 __all__ = [
     "OxlintCheckResult",
@@ -60,7 +60,7 @@ def oxlintrc_type_aware_enabled() -> bool:
         bool: True if the discovered oxlint native config sets
             ``options.typeAware`` to a truthy value.
     """
-    config = _load_native_tool_config("oxlint")
+    config = load_native_tool_config("oxlint")
     options = config.get("options")
     if isinstance(options, dict):
         return bool(options.get("typeAware"))
@@ -86,6 +86,9 @@ def _resolve_tsgolint() -> str | None:
         return found
 
     if shutil.which("bunx"):
+        # Display-only: this space-joined string documents the bunx fallback
+        # command for doctor output. It must NOT be passed to subprocess as a
+        # single argument; split it (e.g. ``shlex.split``) before use.
         return "bunx oxlint-tsgolint"
 
     return None

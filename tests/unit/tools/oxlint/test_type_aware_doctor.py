@@ -41,7 +41,7 @@ def _status(results: list[OxlintCheckResult], name: str) -> ToolStatus:
 def test_oxlintrc_type_aware_enabled_true() -> None:
     """options.typeAware=true in .oxlintrc.json enables type-aware."""
     with patch(
-        f"{MODULE}._load_native_tool_config",
+        f"{MODULE}.load_native_tool_config",
         return_value={"options": {"typeAware": True}},
     ):
         assert_that(oxlintrc_type_aware_enabled()).is_true()
@@ -49,14 +49,14 @@ def test_oxlintrc_type_aware_enabled_true() -> None:
 
 def test_oxlintrc_type_aware_enabled_false_when_absent() -> None:
     """Missing options.typeAware does not enable type-aware."""
-    with patch(f"{MODULE}._load_native_tool_config", return_value={"rules": {}}):
+    with patch(f"{MODULE}.load_native_tool_config", return_value={"rules": {}}):
         assert_that(oxlintrc_type_aware_enabled()).is_false()
 
 
 def test_oxlintrc_type_aware_enabled_non_dict_options() -> None:
     """Non-dict options key does not enable type-aware."""
     with patch(
-        f"{MODULE}._load_native_tool_config",
+        f"{MODULE}.load_native_tool_config",
         return_value={"options": "nope"},
     ):
         assert_that(oxlintrc_type_aware_enabled()).is_false()
