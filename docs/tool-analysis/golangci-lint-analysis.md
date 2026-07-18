@@ -57,8 +57,9 @@ lossless for the tool, and golangci-lint is not among its SARIF-native candidate
 - Whole-module scan (`./...`), mirroring the compiled-language pattern used by the
   Clippy plugin. Because execution changes to the module root and runs `./...`,
   golangci-lint analyzes every file in each selected module — file-level lintro exclude
-  patterns do not scope the scan (golangci-lint's own `.golangci.yml`
-  `issues.exclude`/`skip-files` settings are the way to exclude paths)
+  patterns do not scope the scan (golangci-lint v2's own `.golangci.yml`
+  `linters.exclusions.paths`/`formatters.exclusions.paths` settings are the way to
+  exclude paths, and `linters.exclusions.rules` suppresses specific findings)
 - Times out after a configurable default (120s)
 - A blank `Severity` normalizes to `WARNING`; an explicit `Severity` is kept
 - The parser tolerates a trailing human-readable stats footer and ANSI codes
