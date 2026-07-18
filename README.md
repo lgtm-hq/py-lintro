@@ -100,6 +100,10 @@ system.
 <td><code>rustup component add clippy</code></td>
 </tr>
 <tr>
+<td><a href="https://cppcheck.sourceforge.io/"><img src="https://img.shields.io/badge/Cppcheck-00599C?logo=cplusplus&logoColor=white" alt="Cppcheck"></a></td>
+<td>🔧 C/C++</td>
+<td>-</td>
+<td><code>brew install cppcheck</code><br><code>apt-get install cppcheck</code></td>
 <td><a href="https://commitlint.js.org/"><img src="https://img.shields.io/badge/commitlint-f7b93e?logo=commitlint&logoColor=black" alt="commitlint"></a></td>
 <td>🔀 Git commits</td>
 <td>-</td>

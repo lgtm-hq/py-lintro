@@ -181,6 +181,10 @@ def get_install_hints() -> dict[str, str]:
             "Install via: https://github.com/rhysd/actionlint/releases (v{version}+)"
         ),
         "clippy": "Install via: rustup component add clippy (requires Rust {version}+)",
+        "cppcheck": (
+            "Install via: brew install cppcheck (macOS) or "
+            "apt-get install cppcheck (Debian/Ubuntu) (v{version}+)"
+        ),
         "dotenv_linter": (
             "Install via: brew install dotenv-linter, "
             "cargo install dotenv-linter, or "

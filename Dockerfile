@@ -57,7 +57,8 @@ RUN getent group tools >/dev/null || groupadd -r tools && \
 RUN echo "Verifying tools..." && \
     rustfmt --version && cargo clippy --version && cargo audit --version && \
     cargo deny --version && semgrep --version && ruff --version && \
-    black --version && hadolint --version && actionlint --version && \
+    black --version && cppcheck --version && hadolint --version && \
+    actionlint --version && \
     shellcheck --version && shfmt --version && taplo --version && \
     dotenv-linter --version && \
     gitleaks version && osv-scanner --version && prettier --version && \

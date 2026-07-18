@@ -38,6 +38,7 @@ TOOLS_WITH_SIMPLE_VERSION_PATTERN: set[ToolName] = {
     ToolName.CARGO_AUDIT,
     ToolName.CARGO_DENY,
     ToolName.COMMITLINT,
+    ToolName.CPPCHECK,
     ToolName.DOTENV_LINTER,
     ToolName.GITLEAKS,
     ToolName.HADOLINT,

@@ -43,6 +43,31 @@ else:
 	echo "$version"
 }
 
+# Resolve a tool's minimum compatible version from manifest.json.
+# Falls back to the recommended version when min_version is unset.
+get_tool_min_version() {
+	local tool_name="$1"
+	local min_version
+	min_version=$(python3 -c "
+import json
+import sys
+
+with open('$PROJECT_ROOT/lintro/tools/manifest.json') as fh:
+    data = json.load(fh)
+for tool in data['tools']:
+    if tool['name'] == sys.argv[1]:
+        print(tool.get('min_version') or tool['version'])
+        break
+else:
+    sys.exit(1)
+" "$tool_name" 2>/dev/null)
+	if [ -z "$min_version" ]; then
+		echo "ERROR: Minimum version for '$tool_name' not found in manifest.json" >&2
+		return 1
+	fi
+	echo "$min_version"
+}
+
 # Show help if requested
 if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
 	cat <<'EOF'
@@ -71,6 +96,7 @@ This script installs:
   - Actionlint (GitHub Actions workflow linter)
   - Bandit (Python security linter)
   - Mypy (Python static type checker)
+  - Cppcheck (C/C++ static analysis)
   - Clippy (Rust linter; requires Rust toolchain)
   - Rustfmt (Rust formatter; requires Rust toolchain)
   - Cargo-audit (Rust dependency vulnerability scanner; requires Rust toolchain)
@@ -168,7 +194,7 @@ should_install() {
 # Kept in sync with the should_install blocks and tools_to_verify array.
 SUPPORTED_TOOLS=(
 	"actionlint" "astro" "bandit" "black" "cargo-audit" "cargo-deny"
-	"clippy" "commitlint" "dotenv-linter" "gitleaks" "hadolint" "markdownlint" "markdownlint-cli2" "mypy" "osv-scanner"
+	"clippy" "commitlint" "cppcheck" "dotenv-linter" "gitleaks" "hadolint" "markdownlint" "markdownlint-cli2" "mypy" "osv-scanner"
 	"oxfmt" "oxlint" "prettier" "pydoclint" "ruff" "rustfmt" "semgrep"
 	"shellcheck" "shfmt" "sqlfluff" "stylelint" "svelte-check" "taplo" "tsc"
 	"vale" "vue-tsc" "yamllint"
@@ -1198,6 +1224,64 @@ main() {
 		fi
 	fi # semgrep
 
+	# Install cppcheck (C/C++ static analysis) via system package manager.
+	# cppcheck ships no portable single binary; it is provided by Homebrew
+	# (macOS) and apt (Debian/Ubuntu). In Docker it is pre-installed via the
+	# Dockerfile apt layer, so the command check below short-circuits.
+	if should_install "cppcheck"; then
+		echo -e "${BLUE}Installing cppcheck...${NC}"
+		CPPCHECK_VERSION=$(get_tool_version "cppcheck") || exit 1
+		CPPCHECK_MIN_VERSION=$(get_tool_min_version "cppcheck") || exit 1
+		if [ $DRY_RUN -eq 1 ]; then
+			log_info "[DRY-RUN] Would install cppcheck v${CPPCHECK_VERSION}"
+		elif command -v cppcheck &>/dev/null; then
+			echo -e "${GREEN}✓ cppcheck already installed${NC}"
+		elif command -v brew &>/dev/null; then
+			if brew install cppcheck; then
+				echo -e "${GREEN}✓ cppcheck installed successfully via Homebrew${NC}"
+			else
+				echo -e "${RED}✗ Failed to install cppcheck via Homebrew${NC}"
+				exit 1
+			fi
+		elif command -v apt-get &>/dev/null; then
+			cppcheck_apt="apt-get"
+			if [ "$(id -u)" -ne 0 ]; then
+				if command -v sudo &>/dev/null; then
+					cppcheck_apt="sudo apt-get"
+				else
+					echo -e "${RED}✗ cppcheck needs apt-get but sudo is unavailable${NC}"
+					exit 1
+				fi
+			fi
+			if $cppcheck_apt update && $cppcheck_apt install -y --no-install-recommends cppcheck; then
+				echo -e "${GREEN}✓ cppcheck installed successfully via apt${NC}"
+			else
+				echo -e "${RED}✗ Failed to install cppcheck via apt${NC}"
+				exit 1
+			fi
+		else
+			echo -e "${RED}✗ Cannot install cppcheck automatically; install via your package manager.${NC}"
+			exit 1
+		fi
+		# Package managers (notably apt) may provide a cppcheck older than the
+		# minimum lintro supports. Reject it here with an upgrade hint instead of
+		# reporting a successful install that the runtime version check rejects.
+		if [ $DRY_RUN -eq 0 ] && command -v cppcheck &>/dev/null; then
+			cppcheck_installed_version=$(cppcheck --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+(\.[0-9]+)?' | head -1)
+			if [ -n "$cppcheck_installed_version" ]; then
+				if version_ge "$cppcheck_installed_version" "$CPPCHECK_MIN_VERSION"; then
+					echo -e "${GREEN}✓ cppcheck v${cppcheck_installed_version} (>= v${CPPCHECK_MIN_VERSION})${NC}"
+				else
+					echo -e "${RED}✗ cppcheck v${cppcheck_installed_version} is older than the required minimum v${CPPCHECK_MIN_VERSION}.${NC}"
+					echo -e "${RED}  Upgrade cppcheck (brew upgrade cppcheck, a newer apt source, or build from source) and re-run.${NC}"
+					exit 1
+				fi
+			else
+				echo -e "${YELLOW}⚠ Could not determine cppcheck version; skipping minimum-version check.${NC}"
+			fi
+		fi
+	fi # cppcheck
+
 	if should_install "shellcheck"; then
 		# Install shellcheck (shell script linter)
 		echo -e "${BLUE}Installing shellcheck...${NC}"
@@ -1609,6 +1693,7 @@ main() {
 		["cargo-audit"]="Rust dependency vulnerability scanning"
 		["cargo-deny"]="Rust dependency license/advisory checking"
 		["clippy"]="Rust linting"
+		["cppcheck"]="C/C++ static analysis"
 		["dotenv-linter"]=".env file linting and fixing"
 		["gitleaks"]="Secret detection"
 		["hadolint"]="Docker linting"
@@ -1643,7 +1728,7 @@ main() {
 	# Verify installations
 	echo -e "${YELLOW}Verifying installations...${NC}"
 
-	tools_to_verify=("actionlint" "astro" "bandit" "black" "cargo-audit" "cargo-deny" "clippy" "commitlint" "dotenv-linter" "gitleaks" "hadolint" "markdownlint-cli2" "mypy" "osv-scanner" "oxfmt" "oxlint" "prettier" "pydoclint" "ruff" "rustfmt" "semgrep" "shellcheck" "shfmt" "sqlfluff" "stylelint" "svelte-check" "taplo" "tsc" "vale" "vue-tsc" "yamllint")
+	tools_to_verify=("actionlint" "astro" "bandit" "black" "cargo-audit" "cargo-deny" "clippy" "commitlint" "cppcheck" "dotenv-linter" "gitleaks" "hadolint" "markdownlint-cli2" "mypy" "osv-scanner" "oxfmt" "oxlint" "prettier" "pydoclint" "ruff" "rustfmt" "semgrep" "shellcheck" "shfmt" "sqlfluff" "stylelint" "svelte-check" "taplo" "tsc" "vale" "vue-tsc" "yamllint")
 
 	# Filter verification list when --tools is set.
 	# Map aliases so e.g. --tools markdownlint verifies markdownlint-cli2.
