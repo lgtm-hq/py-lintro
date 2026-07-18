@@ -110,6 +110,9 @@ Some tools require separate installation. Their minimum versions are also manage
 - `osv-scanner` - Multi-ecosystem vulnerability scanner using the OSV database
   (`go install github.com/google/osv-scanner/v2/cmd/osv-scanner@latest` or GitHub
   releases)
+- `trivy` - Dependency-vulnerability scanner for lockfiles/manifests using Aqua's
+  aggregated advisory database (`brew install trivy` or GitHub releases). Needs a
+  local vulnerability DB; lintro runs it hermetically with `--skip-db-update`
 - `typescript` - TypeScript compiler for type checking (`brew install typescript`,
   `bun add -g typescript`, or `npm install -g typescript`)
 - `astro` - Astro type checker for `.astro` files (install locally with

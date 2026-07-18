@@ -50,7 +50,7 @@
     "less": ["stylelint"],
     "sass": ["stylelint"],
     "github_actions": ["actionlint"],
-    "security": ["gitleaks", "osv_scanner", "semgrep"],
+    "security": ["gitleaks", "osv_scanner", "semgrep", "trivy"],
     "astro": ["astro_check", "prettier"],
     "svelte": ["svelte_check", "prettier"],
     "vue": ["vue_tsc", "prettier"],
@@ -430,6 +430,18 @@
       "version_command": ["taplo", "--version"],
       "languages": ["toml"],
       "tags": ["linter", "formatter"]
+    },
+    {
+      "name": "trivy",
+      "version": "0.72.0",
+      "install": {
+        "type": "binary"
+      },
+      "tier": "tools",
+      "category": "external",
+      "version_command": ["trivy", "--version"],
+      "languages": ["security"],
+      "tags": ["security"]
     },
     {
       "name": "tsc",

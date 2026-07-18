@@ -805,6 +805,48 @@ lintro check --tools semgrep --tool-options "semgrep:severity=ERROR"
 lintro check --tools semgrep --tool-options "semgrep:exclude=tests/*|vendor/*"
 ```
 
+#### Trivy Configuration
+
+Trivy scans **dependency lockfiles and manifests** (`requirements.txt`,
+`poetry.lock`, `uv.lock`, `package-lock.json`, `yarn.lock`, `pnpm-lock.yaml`,
+`bun.lock`, `go.mod`, `Cargo.lock`, `Gemfile.lock`, `composer.lock`,
+`gradle.lockfile`, `pom.xml`) for known vulnerable dependencies using
+`trivy fs --scanners vuln`. Secret scanning is left to gitleaks and IaC
+misconfiguration to checkov, so Trivy never double-reports another tool's
+findings. It complements osv-scanner by drawing on a different aggregated
+advisory database (GHSA, NVD, and vendor advisories), so the two catch
+overlapping but non-identical sets of CVEs.
+
+- Discovery: dependency lockfiles / manifests (see list above)
+- Native config: `trivy.yaml` / `.trivy.yaml`
+- Local install: `brew install trivy` or via
+  `scripts/utils/install-tools.sh --local`
+
+**Hermeticity / vulnerability database:** Trivy needs a local vulnerability
+database. To keep runs hermetic, lintro invokes it with `--skip-db-update` (never
+downloads during a run) and `--offline-scan` (never calls external advisory
+APIs), and bounds every invocation with a timeout (default 300s). If the DB is
+absent, Trivy reports a clear, non-blocking skip instead of hanging on a large
+download. Populate it once with `trivy fs --download-db-only`, or run:
+
+```bash
+# One-time DB download for this run (requires network)
+lintro check --tools trivy --tool-options "trivy:skip_db_update=false"
+```
+
+**Tool options:**
+
+```bash
+# Only report CRITICAL / HIGH severities
+lintro check --tools trivy --tool-options "trivy:severity=CRITICAL|HIGH"
+
+# Only report vulnerabilities that have a fix available
+lintro check --tools trivy --tool-options "trivy:ignore_unfixed=true"
+```
+
+> Note: Trivy does not autofix. It reports vulnerable pins and the version(s)
+> that resolve them; remediation is a dependency upgrade.
+
 #### Gitleaks Configuration
 
 **File:** `.gitleaks.toml`
