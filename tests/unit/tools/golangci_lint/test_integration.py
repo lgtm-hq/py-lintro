@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import shutil
 from pathlib import Path
+from typing import cast
 
 import pytest
 from assertpy import assert_that
@@ -16,7 +17,6 @@ from assertpy import assert_that
 from lintro.parsers.golangci_lint.golangci_lint_issue import GolangciLintIssue
 from lintro.tools.definitions.golangci_lint import GolangciLintPlugin
 from tests.unit.tools.golangci_lint.conftest import golangci_lint_available
-from typing import cast
 
 _FIXTURE = (
     Path(__file__).resolve().parents[4]

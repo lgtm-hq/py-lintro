@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import cast,  Any
+from typing import Any, cast
 from unittest.mock import patch
 
 from assertpy import assert_that
@@ -170,7 +170,7 @@ def test_fix_failure_is_not_masked_as_success(
 
     # Sequence: initial check (2 issues), fix run FAILS (config/build error with
     # non-JSON output), re-check yields no parseable issues.
-    fix_error = "level=error msg=\"can't run linter: build error\""
+    fix_error = 'level=error msg="can\'t run linter: build error"'
     outputs = [
         (False, GOLANGCI_JSON_TWO_ISSUES),
         (False, fix_error),
@@ -207,7 +207,7 @@ def test_fix_failure_output_preserved_with_remaining_issues(
 
     # Sequence: initial check (2 issues), fix run FAILS (build error), re-check
     # still parses one remaining issue.
-    fix_error = "level=error msg=\"can't run linter: build error\""
+    fix_error = 'level=error msg="can\'t run linter: build error"'
     outputs = [
         (False, GOLANGCI_JSON_TWO_ISSUES),
         (False, fix_error),
