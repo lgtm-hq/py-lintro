@@ -2367,10 +2367,10 @@ ai:
 
 ### Idiom Review Tool (`idiom-review`)
 
-The `idiom-review` tool uses AI to find issues that syntax-matching linters cannot:
-code that is syntactically correct but non-idiomatic or redundantly duplicated across
-files. Unlike the AI summary and `--fix` flows, it is a first-class `ToolDefinition`
-plugin that runs as part of the normal `lintro check` pipeline — distinct from the
+The `idiom-review` tool uses AI to find issues that syntax-matching linters cannot: code
+that is syntactically correct but non-idiomatic or redundantly duplicated across files.
+Unlike the AI summary and `--fix` flows, it is a first-class `ToolDefinition` plugin
+that runs as part of the normal `lintro check` pipeline — distinct from the
 `lintro review` diff-review command.
 
 **Install:**
@@ -2381,19 +2381,19 @@ export ANTHROPIC_API_KEY=sk-ant-...   # or OPENAI_API_KEY for OpenAI
 ```
 
 The tool is **disabled by default** and is a no-op until explicitly opted in. When no AI
-provider is available (missing SDK, key, or credits), it degrades gracefully to a skipped
-result rather than failing the run. Findings are cached by content hash under
+provider is available (missing SDK, key, or credits), it degrades gracefully to a
+skipped result rather than failing the run. Findings are cached by content hash under
 `.lintro-cache/idiom`, so unchanged files cost nothing on repeat runs.
 
 **Options:**
 
-| Option           | Type   | Default     | Description                                          |
-| ---------------- | ------ | ----------- | ---------------------------------------------------- |
-| `enabled`        | bool   | `false`     | Opt-in gate — must be `true` to run                  |
-| `mode`           | string | `per-file`  | `per-file` · `duplication` · `both`                  |
-| `min_confidence` | string | `medium`    | Drop findings below this level (`low`/`medium`/`high`) |
-| `max_files`      | int    | `25`        | Cap on files reviewed per run (cost bound)           |
-| `language`       | string | (auto)      | Restrict review to a specific language               |
+| Option           | Type   | Default    | Description                                            |
+| ---------------- | ------ | ---------- | ------------------------------------------------------ |
+| `enabled`        | bool   | `false`    | Opt-in gate — must be `true` to run                    |
+| `mode`           | string | `per-file` | `per-file` · `duplication` · `both`                    |
+| `min_confidence` | string | `medium`   | Drop findings below this level (`low`/`medium`/`high`) |
+| `max_files`      | int    | `25`       | Cap on files reviewed per run (cost bound)             |
+| `language`       | string | (auto)     | Restrict review to a specific language                 |
 
 **Modes:**
 
@@ -2414,10 +2414,10 @@ ai:
 tools:
   idiom-review:
     options:
-      enabled: true        # opt-in gate (default: false)
-      mode: per-file       # per-file | duplication | both
+      enabled: true # opt-in gate (default: false)
+      mode: per-file # per-file | duplication | both
       min_confidence: medium
-      max_files: 25        # cap files reviewed per run (cost bound)
+      max_files: 25 # cap files reviewed per run (cost bound)
 ```
 
 Or enable ad hoc from the CLI without modifying config:

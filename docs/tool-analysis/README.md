@@ -110,7 +110,7 @@ implementations with the core tools themselves.
 
 ### [Idiom Review Analysis](./idiom-review-analysis.md)
 
-**AI-Powered Idiomatic Code Reviewer (built-in plugin)**
+### AI-Powered Idiomatic Code Reviewer (built-in plugin)
 
 - ✅ **Preserved**: Native `ToolDefinition` plugin, shared AI provider abstraction,
   content-hash caching, cost controls

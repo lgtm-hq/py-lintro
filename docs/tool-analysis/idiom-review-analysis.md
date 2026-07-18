@@ -5,12 +5,12 @@
 `idiom-review` is a first-class `ToolDefinition` plugin that uses the configured AI
 provider to find issues that syntax-matching linters structurally cannot. It is
 **distinct from the `lintro review` diff-review command** — it participates in the
-normal `lintro check` pipeline like any other tool and produces standard
-`ToolResult` / `Issue` objects.
+normal `lintro check` pipeline like any other tool and produces standard `ToolResult` /
+`Issue` objects.
 
 It has no external binary; all work is done through the existing AI provider
-abstraction, respecting the same retry, fallback, and cost-budget controls used by
-other AI features.
+abstraction, respecting the same retry, fallback, and cost-budget controls used by other
+AI features.
 
 ## Core Tool Capabilities
 
@@ -19,8 +19,7 @@ native to Lintro. Its capabilities are:
 
 - **Two analysis modes:**
   - **`per-file`** (Mode 1) — finds idiomatic misses per file: correct but verbose code
-    (e.g. `found = False; for x in items: ...` instead of
-    `any(cond for x in items)`).
+    (e.g. `found = False; for x in items: ...` instead of `any(cond for x in items)`).
   - **`duplication`** (Mode 2) — finds the same utility logic reimplemented across
     multiple files, invisible to per-file linters, with a suggested extraction point.
   - **`both`** — runs both modes in a single pass.
@@ -56,8 +55,8 @@ native to Lintro. Its capabilities are:
   configured AI provider
 - ⚠️ **Non-deterministic** — AI responses may vary across runs for the same input;
   caching mitigates this for unchanged files
-- ⚠️ **API cost** — each uncached file incurs one or more API calls; use `max_files`
-  and caching to bound costs in large repos
+- ⚠️ **API cost** — each uncached file incurs one or more API calls; use `max_files` and
+  caching to bound costs in large repos
 
 ### 🚀 Enhancements vs. a hypothetical standalone tool
 
@@ -98,8 +97,8 @@ lintro chk --tools idiom-review \
 
 ## Configuration Strategy
 
-- Requires `ai.enabled: true` and a valid API key in the environment before any
-  analysis runs.
+- Requires `ai.enabled: true` and a valid API key in the environment before any analysis
+  runs.
 - Tool-level `enabled` option (default `false`) acts as a second opt-in gate so that
   `lintro chk` does not silently incur API costs.
 - `max_files` (default 25) is the primary cost-control knob for large repos.
