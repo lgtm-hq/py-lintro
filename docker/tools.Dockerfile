@@ -126,5 +126,5 @@ RUN echo "=== Verifying all tools ===" && \
     stylelint --version && \
     taplo --version && tsc --version && astro --version && \
     svelte-check --version && vue-tsc --version && yamllint --version && \
-    vale --version && \
+    vale --version && terraform version && \
     echo "=== All tools verified! ==="
