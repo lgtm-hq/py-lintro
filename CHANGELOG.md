@@ -21,6 +21,13 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.81.3] - 2026-07-18
+
+### Fixed
+
+- **pip-audit**: continue auditing remaining targets after a per-target timeout (#1507)
+  (d0211ce)
+
 ## [0.81.2] - 2026-07-18
 
 ### Fixed
