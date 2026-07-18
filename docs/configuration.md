@@ -2393,7 +2393,7 @@ skipped result rather than failing the run. Findings are cached by content hash 
 | `mode`           | string | `per-file` | `per-file` · `duplication` · `both`                    |
 | `min_confidence` | string | `medium`   | Drop findings below this level (`low`/`medium`/`high`) |
 | `max_files`      | int    | `25`       | Cap on files reviewed per run (cost bound)             |
-| `language`       | string | (auto)     | Restrict review to a specific language                 |
+| `language`       | string | `python`   | Language to review; set explicitly for other languages |
 
 **Modes:**
 
