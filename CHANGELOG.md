@@ -21,6 +21,16 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.81.1] - 2026-07-18
+
+### Changed
+
+- add AGENTS.md with Cursor Cloud dev environment instructions (#1503) (ff00551)
+
+### Fixed
+
+- **ci**: retry setup-uv in binary builds and disable matrix fail-fast (#1514) (2e24483)
+
 ## [0.81.0] - 2026-07-18
 
 ### Added
