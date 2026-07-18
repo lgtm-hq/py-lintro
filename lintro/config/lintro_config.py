@@ -10,6 +10,7 @@ from lintro.config.execution_config import ExecutionConfig
 from lintro.config.review_config import ReviewConfig
 from lintro.config.score_config import ScoreConfig
 from lintro.config.tool_config import LintroToolConfig
+from lintro.config.watch_config import WatchConfig
 
 __all__ = [
     "AIConfig",
@@ -19,6 +20,7 @@ __all__ = [
     "LintroToolConfig",
     "ReviewConfig",
     "ScoreConfig",
+    "WatchConfig",
 ]
 
 
@@ -43,6 +45,7 @@ class LintroConfig(BaseModel):
         ai: AI-powered features configuration (optional, disabled by default).
         review: Diff review command configuration (checklist items).
         score: Health score weights and scale (0-100 metric).
+        watch: Watch-mode (``lintro watch``) defaults.
         config_path: Path to the config file (set by loader).
     """
 
@@ -55,6 +58,7 @@ class LintroConfig(BaseModel):
     ai: AIConfig = Field(default_factory=AIConfig)
     review: ReviewConfig = Field(default_factory=ReviewConfig)
     score: ScoreConfig = Field(default_factory=ScoreConfig)
+    watch: WatchConfig = Field(default_factory=WatchConfig)
     config_path: str | None = None
 
     def get_tool_config(self, tool_name: str) -> LintroToolConfig:

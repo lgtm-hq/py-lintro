@@ -14,6 +14,7 @@ configuring, and contributing to Lintro.
 
 - **[Getting Started](getting-started.md)** - Installation, first steps, and basic usage
 - **[Configuration Guide](configuration.md)** - Tool configuration and customization
+- **[Watch Mode](watch-mode.md)** - Continuous linting on file changes
 - **[AI Features](ai-features.md)** - AI-powered summaries, explanations, and fix
   suggestions
 - **[Docker Usage](docker.md)** - Using Lintro with Docker

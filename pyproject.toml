@@ -42,6 +42,7 @@ dependencies = [
   "httpx>=0.28.1",
   "defusedxml>=0.7.1",
   "identify>=2.6.19",
+  "watchdog>=6.0.0",
 ]
 authors = [{ name = "lgtm-hq", email = "turbocoder13@gmail.com" }]
 license = "MIT"
@@ -198,6 +199,7 @@ packages = [
   "lintro.utils.environment",
   "lintro.utils.execution",
   "lintro.utils.output",
+  "lintro.watch",
 ]
 
 [tool.setuptools.package-data]
