@@ -1761,6 +1761,55 @@ lintro format --tools clippy
 lintro check src/ --tools clippy
 ```
 
+#### golangci-lint Configuration
+
+golangci-lint is the de-facto Go meta-linter, running 100+ sub-linters in parallel.
+Lintro targets golangci-lint **v2** and automatically discovers Go modules by finding
+`go.mod` files; non-Go projects are skipped. It requires the Go toolchain to be
+installed. Linter selection and rule tuning are configured through the project's
+native config file.
+
+**Installation:**
+
+```bash
+brew install golangci-lint
+# or see https://golangci-lint.run/welcome/install/
+```
+
+**File:** `.golangci.yml` (also `.golangci.yaml`, `.golangci.toml`, `.golangci.json`)
+
+```yaml
+version: "2"
+linters:
+  enable:
+    - errcheck
+    - staticcheck
+    - ineffassign
+    - govet
+```
+
+**Available Options:**
+
+| Option    | Type    | Description                          |
+| --------- | ------- | ------------------------------------ |
+| `timeout` | integer | Execution timeout in seconds (120)   |
+
+Linter enable/disable and per-linter settings live in the native `.golangci.*`
+config file rather than as lintro `--tool-options`.
+
+**Lintro usage:**
+
+```bash
+# Check Go code with golangci-lint
+lintro check --tools golangci_lint
+
+# Auto-fix issues where the underlying linters support it
+lintro format --tools golangci_lint
+
+# Increase the timeout for a large module
+lintro check --tools golangci_lint --tool-options golangci_lint:timeout=300
+```
+
 #### Cargo-deny Configuration
 
 Cargo-deny checks Rust dependencies for license compliance, security advisories, banned

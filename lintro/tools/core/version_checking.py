@@ -208,6 +208,11 @@ def get_install_hints() -> dict[str, str]:
         "gitleaks": (
             "Install via: https://github.com/gitleaks/gitleaks/releases (v{version}+)"
         ),
+        "golangci_lint": (
+            "Install via: brew install golangci-lint or "
+            "https://golangci-lint.run/welcome/install/ (v{version}+); "
+            "requires the Go toolchain"
+        ),
         "osv_scanner": (
             "Install via: https://github.com/google/osv-scanner/releases (v{version}+)"
         ),

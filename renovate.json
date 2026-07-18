@@ -244,6 +244,19 @@
       "extractVersionTemplate": "^v(?<version>.*)$"
     },
     {
+      "description": "Update golangci-lint in _tool_versions.py (manifest follows via generator)",
+      "customType": "regex",
+      "managerFilePatterns": [
+        "lintro/_tool_versions\\.py"
+      ],
+      "matchStrings": [
+        "ToolName\\.GOLANGCI_LINT:\\s*\"(?<currentValue>[0-9]+\\.[0-9]+\\.[0-9]+)\""
+      ],
+      "datasourceTemplate": "github-releases",
+      "packageNameTemplate": "golangci/golangci-lint",
+      "extractVersionTemplate": "^v(?<version>.*)$"
+    },
+    {
       "description": "Update osv-scanner version in _tool_versions.py",
       "customType": "regex",
       "managerFilePatterns": [
