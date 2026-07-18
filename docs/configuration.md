@@ -1766,8 +1766,8 @@ lintro check src/ --tools clippy
 golangci-lint is the de-facto Go meta-linter, running 100+ sub-linters in parallel.
 Lintro targets golangci-lint **v2** and automatically discovers Go modules by finding
 `go.mod` files; non-Go projects are skipped. It requires the Go toolchain to be
-installed. Linter selection and rule tuning are configured through the project's
-native config file.
+installed. Linter selection and rule tuning are configured through the project's native
+config file.
 
 **Installation:**
 
@@ -1779,7 +1779,7 @@ brew install golangci-lint
 **File:** `.golangci.yml` (also `.golangci.yaml`, `.golangci.toml`, `.golangci.json`)
 
 ```yaml
-version: "2"
+version: '2'
 linters:
   enable:
     - errcheck
@@ -1790,12 +1790,12 @@ linters:
 
 **Available Options:**
 
-| Option    | Type    | Description                          |
-| --------- | ------- | ------------------------------------ |
-| `timeout` | integer | Execution timeout in seconds (120)   |
+| Option    | Type    | Description                        |
+| --------- | ------- | ---------------------------------- |
+| `timeout` | integer | Execution timeout in seconds (120) |
 
-Linter enable/disable and per-linter settings live in the native `.golangci.*`
-config file rather than as lintro `--tool-options`.
+Linter enable/disable and per-linter settings live in the native `.golangci.*` config
+file rather than as lintro `--tool-options`.
 
 **Lintro usage:**
 
