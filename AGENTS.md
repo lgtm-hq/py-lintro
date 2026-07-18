@@ -1,30 +1,29 @@
-# AGENTS.md
-
-## Cursor Cloud specific instructions
+# Agent Dev Environment Guide
 
 Lintro is a single-product **Python CLI** (package `lintro`, managed with `uv`). It
 wraps many third-party linters/formatters and runs as a command that exits — there is
 **no long-running service, server, or database** to start. "Running the app" means
 invoking the `lintro` CLI (e.g. `uv run lintro check .`, `uv run lintro format .`).
 
-### Environment already provided by the update script
+## Cursor Cloud specific instructions
 
-The update script runs `uv sync --dev --extra full`, which creates `.venv` with all
-Python dependencies plus the Python-based wrapped tools (ruff, black, mypy, bandit,
-pydoclint, yamllint). `uv` is installed at `~/.local/bin` (add it to `PATH` if a fresh
-shell can't find `uv`).
+The Cursor Cloud update script runs `uv sync --dev --extra full`, which creates `.venv`
+with all Python dependencies plus the Python-based wrapped tools (ruff, black, mypy,
+bandit, pydoclint, yamllint). `uv` is installed at `~/.local/bin` (add it to `PATH` if a
+fresh shell can't find `uv`).
 
-### Running / linting / testing / building
+## Running / linting / testing / building
 
 Standard commands live in the `Makefile` and `docs/contributing.md`; prefer those. All
 commands run through `uv` (do not call bare `python`/`pytest`):
 
-- Run the CLI: `uv run lintro check .`, `uv run lintro format .`, `uv run lintro list-tools`.
+- Run the CLI: `uv run lintro check .`, `uv run lintro format .`,
+  `uv run lintro list-tools`.
 - Lint: `make lint` (runs `mypy` then `lintro check .`); type-check only: `make mypy`.
 - Test: `uv run pytest` (or `make test`, which wraps pytest via lintro with coverage).
 - Build a wheel/sdist: `uv build`.
 
-### Non-obvious gotchas
+## Non-obvious gotchas
 
 - **`pytest.ini` sets `--maxfail=3`**, so a full `uv run pytest` run aborts after the
   first few failures. When triaging, pass `--maxfail=0` to see the full picture. The
@@ -49,7 +48,7 @@ commands run through `uv` (do not call bare `python`/`pytest`):
 - The interpreter is the system Python (3.12); `requires-python` is `>=3.11`.
 - Set `UV_LINK_MODE=copy` to avoid uv hardlink warnings when running commands.
 
-### Docs site (optional secondary product)
+## Docs site (optional secondary product)
 
 `apps/site` is an Astro + Pagefind docs site built with `bun` (`make site-dev`,
 `make site-build`). It is not required to develop or test the CLI.
