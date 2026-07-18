@@ -102,6 +102,8 @@ Some tools require separate installation. Their minimum versions are also manage
 - `stylelint` - CSS/SCSS/Sass/Less linter and fixer (`bun add -g stylelint` or
   `npm install -g stylelint`); skips cleanly when no stylelint config is found — add one
   (e.g. `.stylelintrc.json`) to enable linting
+- `pip-audit` - Python dependency vulnerability scanner (`pip install pip-audit`,
+  `uv add pip-audit`, or `brew install pip-audit`)
 - `taplo` - TOML linter and formatter (`brew install taplo` or GitHub releases)
 - `vale` - Prose/documentation linter (`brew install vale` or GitHub releases); requires
   a `.vale.ini`, otherwise lintro skips it as a non-error

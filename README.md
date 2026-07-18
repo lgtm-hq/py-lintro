@@ -272,6 +272,12 @@ system.
 <td><a href="https://github.com/google/osv-scanner/releases">GitHub Releases</a></td>
 </tr>
 <tr>
+<td><a href="https://github.com/pypa/pip-audit"><img src="https://img.shields.io/badge/pip--audit-3775a9?logo=python&logoColor=white" alt="pip-audit"></a></td>
+<td>🐍 Python</td>
+<td>-</td>
+<td><code>pip install pip-audit</code><br><code>uv add pip-audit</code><br><code>brew install pip-audit</code></td>
+</tr>
+<tr>
 <td><a href="https://semgrep.dev/"><img src="https://img.shields.io/badge/Semgrep-5b21b6?logo=semgrep&logoColor=white" alt="Semgrep"></a></td>
 <td>🔒 Multi-language</td>
 <td>-</td>

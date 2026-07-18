@@ -17,6 +17,8 @@
 FROM ghcr.io/lgtm-hq/lintro-tools:latest@sha256:0024f54a75d4cf7f2ba6563c8f18e05bb825affc37885bfe5fa10cc789df12aa AS tools
 
 # -----------------------------------------------------------------------------
+# Stage: full — lintro application (default target)
+# -----------------------------------------------------------------------------
 FROM tools AS full
 
 LABEL org.opencontainers.image.description="Making Linters Play Nice... Mostly."
