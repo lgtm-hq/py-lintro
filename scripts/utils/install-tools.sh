@@ -1539,18 +1539,22 @@ main() {
 		# Prebuilt binaries: https://releases.hashicorp.com/terraform
 		echo -e "${BLUE}Installing terraform...${NC}"
 		TERRAFORM_VERSION=$(get_tool_version "terraform") || exit 1
-		if [ $DRY_RUN -eq 1 ]; then
-			log_info "[DRY-RUN] Would install terraform v${TERRAFORM_VERSION}"
-		elif command -v terraform &>/dev/null; then
-			echo -e "${GREEN}✓ terraform already installed${NC}"
-		else
+
+		# Helper function for terraform binary installation
+		install_terraform_binary() {
+			local tmpdir os arch arch_name base_url zip_url checksum_url
+			local expected actual
 			tmpdir=$(mktemp -d)
 			os=$(uname -s | tr '[:upper:]' '[:lower:]')
 			arch=$(uname -m)
 			case "$arch" in
 			x86_64 | amd64) arch_name="amd64" ;;
 			aarch64 | arm64) arch_name="arm64" ;;
-			*) echo -e "${RED}✗ Unsupported architecture: $arch${NC}" && exit 1 ;;
+			*)
+				echo -e "${RED}✗ Unsupported architecture: $arch${NC}"
+				rm -rf "$tmpdir"
+				return 1
+				;;
 			esac
 			base_url="https://releases.hashicorp.com/terraform/${TERRAFORM_VERSION}"
 			zip_url="${base_url}/terraform_${TERRAFORM_VERSION}_${os}_${arch_name}.zip"
@@ -1560,14 +1564,14 @@ main() {
 				if ! download_with_retries "$checksum_url" "$tmpdir/checksums.txt" 3; then
 					echo -e "${RED}✗ Failed to download checksum file for terraform${NC}"
 					rm -rf "$tmpdir"
-					exit 1
+					return 1
 				fi
 				echo -e "${BLUE}Verifying checksum for terraform...${NC}"
 				expected=$(grep "terraform_${TERRAFORM_VERSION}_${os}_${arch_name}.zip" "$tmpdir/checksums.txt" | awk '{print $1}')
 				if [ -z "$expected" ]; then
 					echo -e "${RED}✗ Checksum entry not found for terraform_${TERRAFORM_VERSION}_${os}_${arch_name}.zip${NC}"
 					rm -rf "$tmpdir"
-					exit 1
+					return 1
 				fi
 				if command -v sha256sum >/dev/null 2>&1; then
 					actual=$(sha256sum "$tmpdir/terraform.zip" | awk '{print $1}')
@@ -1576,12 +1580,12 @@ main() {
 				else
 					echo -e "${RED}✗ Unable to compute checksum: no hash tool found (sha256sum or shasum required)${NC}"
 					rm -rf "$tmpdir"
-					exit 1
+					return 1
 				fi
 				if [ "$expected" != "$actual" ]; then
 					echo -e "${RED}✗ Checksum mismatch for terraform (expected: $expected, got: $actual)${NC}"
 					rm -rf "$tmpdir"
-					exit 1
+					return 1
 				fi
 				echo -e "${GREEN}✓ Checksum verified${NC}"
 				if command -v unzip >/dev/null 2>&1; then
@@ -1592,18 +1596,55 @@ main() {
 				if [ -f "$tmpdir/terraform" ]; then
 					cp "$tmpdir/terraform" "$BIN_DIR/terraform"
 					chmod +x "$BIN_DIR/terraform"
-					echo -e "${GREEN}✓ terraform installed successfully${NC}"
+					rm -rf "$tmpdir"
+					return 0
 				else
 					echo -e "${RED}✗ Could not find extracted terraform binary${NC}"
 					rm -rf "$tmpdir"
-					exit 1
+					return 1
 				fi
 			else
 				echo -e "${RED}✗ Failed to download terraform${NC}"
 				rm -rf "$tmpdir"
+				return 1
+			fi
+		}
+
+		if [ $DRY_RUN -eq 1 ]; then
+			log_info "[DRY-RUN] Would install terraform v${TERRAFORM_VERSION}"
+		elif command -v terraform &>/dev/null; then
+			# Check if installed version meets minimum requirement
+			installed_version=$(terraform version 2>/dev/null | head -n1 | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -n1)
+			if [ -n "$installed_version" ]; then
+				# Compare versions using portable version_ge function from utils.sh
+				if version_ge "$installed_version" "$TERRAFORM_VERSION"; then
+					echo -e "${GREEN}✓ terraform v${installed_version} already installed (>= v${TERRAFORM_VERSION})${NC}"
+				else
+					echo -e "${YELLOW}⚠ terraform v${installed_version} is older than required v${TERRAFORM_VERSION}, upgrading...${NC}"
+					if install_terraform_binary; then
+						echo -e "${GREEN}✓ terraform upgraded to v${TERRAFORM_VERSION}${NC}"
+					else
+						echo -e "${RED}✗ Failed to download terraform${NC}"
+						exit 1
+					fi
+				fi
+			else
+				# Could not parse version, treat as not installed
+				echo -e "${YELLOW}⚠ Could not determine terraform version, installing v${TERRAFORM_VERSION}...${NC}"
+				if install_terraform_binary; then
+					echo -e "${GREEN}✓ terraform installed successfully${NC}"
+				else
+					echo -e "${RED}✗ Failed to download terraform${NC}"
+					exit 1
+				fi
+			fi
+		else
+			if install_terraform_binary; then
+				echo -e "${GREEN}✓ terraform installed successfully${NC}"
+			else
+				echo -e "${RED}✗ Failed to download terraform${NC}"
 				exit 1
 			fi
-			rm -rf "$tmpdir"
 		fi
 	fi # terraform
 
