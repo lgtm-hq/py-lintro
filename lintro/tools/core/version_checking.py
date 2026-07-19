@@ -145,6 +145,14 @@ def get_install_hints() -> dict[str, str]:
             "Install via: pip install black>={version} or uv add black>={version}"
         ),
         "mypy": ("Install via: pip install mypy>={version} or uv add mypy>={version}"),
+        "pip_audit": (
+            "Install via: pip install 'pip-audit>={version}' "
+            "or uv add 'pip-audit>={version}'"
+        ),
+        "pip-audit": (
+            "Install via: pip install 'pip-audit>={version}' "
+            "or uv add 'pip-audit>={version}'"
+        ),
         "pydoclint": (
             "Install via: pip install pydoclint>={version} "
             "or uv add pydoclint>={version}"

@@ -17,6 +17,8 @@
 FROM ghcr.io/lgtm-hq/lintro-tools:latest@sha256:0024f54a75d4cf7f2ba6563c8f18e05bb825affc37885bfe5fa10cc789df12aa AS tools
 
 # -----------------------------------------------------------------------------
+# Stage: full — lintro application (default target)
+# -----------------------------------------------------------------------------
 FROM tools AS full
 
 LABEL org.opencontainers.image.description="Making Linters Play Nice... Mostly."
@@ -101,7 +103,7 @@ CMD ["--help"]
 # -----------------------------------------------------------------------------
 # Stage: base — minimal runtime without external toolchains
 # -----------------------------------------------------------------------------
-FROM python:3.14-slim@sha256:d3400aa122fa42cf0af0dbe8ec3091b047eac5c8f7e3539f7135e86d855dc015 AS base
+FROM python:3.14-slim@sha256:cea0e6040540fb2b965b6e7fb5ffa00871e632eef63719f0ea54bca189ce14a6 AS base
 
 LABEL org.opencontainers.image.description="Lintro base image (no external tools); GHCR package py-lintro-base"
 

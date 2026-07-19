@@ -910,6 +910,46 @@ lintro check --tools osv_scanner --tool-options "osv_scanner:timeout=300"
 lintro check --tools osv_scanner --tool-options "osv_scanner:check_suppressions=false"
 ```
 
+#### pip-audit Configuration
+
+pip-audit is the Python Packaging Authority (PyPA) scanner for Python dependencies with
+known vulnerabilities. It queries the PyPI Advisory Database and OSV, complementing
+bandit (which scans source code) by scanning the dependency surface. It audits
+`requirements*.txt` files (via `-r`) and Python projects declared in `pyproject.toml` /
+`setup.py`.
+
+**Install:** `pip install pip-audit`, `uv add pip-audit`, or `brew install pip-audit`.
+
+**File:** none. pip-audit has no native config file; suppressions are passed on the
+command line by upstream and are not exposed via lintro.
+
+**Available Options:**
+
+| Option    | Type    | Description                            |
+| --------- | ------- | -------------------------------------- |
+| `timeout` | integer | Scan timeout in seconds (default: 120) |
+
+**Notes:**
+
+- pip-audit's JSON output carries no severity field, so lintro reports severity as
+  `UNKNOWN`.
+- Advisory IDs (PYSEC/GHSA/CVE) link to the corresponding [osv.dev](https://osv.dev)
+  page.
+- Requirements discovery is recursive: nested files such as `requirements/base.txt` or
+  `services/api/requirements.txt` are picked up, while vendored/generated trees
+  (`node_modules`, `.venv`, `venv`, `vendor`, `.git`, `__pycache__`) are skipped. To
+  audit a file outside this scope, pass it explicitly on the command line.
+
+**Usage Examples:**
+
+```bash
+# Scan requirements and project manifests for vulnerable dependencies
+lintro check --tools pip_audit
+
+# With a longer timeout for slow networks
+lintro check --tools pip_audit --tool-options "pip_audit:timeout=300"
+```
+
 #### pydoclint Configuration
 
 **File:** `pyproject.toml`

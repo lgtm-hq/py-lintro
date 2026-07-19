@@ -761,6 +761,7 @@ _PIPELINE_RELEVANT_TOP_LEVEL: frozenset[str] = frozenset(
         "apps",
         "benchmarks",
         "bun.lock",
+        "commitlint.config.js",
         "docker",
         "docker-compose.yml",
         "Dockerfile",
@@ -909,7 +910,7 @@ def test_publish_npm_exposes_dist_tag_for_backfills() -> None:
     assert_that(publish_step).described_as(
         "'Publish to npm' step not found",
     ).is_not_none()
-    assert publish_step is not None
+    assert publish_step is not None  # narrow type for mypy
     assert_that(publish_step["env"]["NPM_DIST_TAG"]).contains("inputs.dist_tag")
 
 

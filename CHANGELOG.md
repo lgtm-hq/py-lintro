@@ -13,6 +13,104 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Changed
 
+### Deprecated
+
+### Removed
+
+### Fixed
+
+### Security
+
+## [0.81.3] - 2026-07-18
+
+### Fixed
+
+- **pip-audit**: continue auditing remaining targets after a per-target timeout (#1507)
+  (d0211ce)
+
+## [0.81.2] - 2026-07-18
+
+### Fixed
+
+- **deps**: exclude test_samples fixtures from Renovate tracking (#1504) (a8e051e)
+
+## [0.81.1] - 2026-07-18
+
+### Changed
+
+- add AGENTS.md with Cursor Cloud dev environment instructions (#1503) (ff00551)
+
+### Fixed
+
+- **ci**: retry setup-uv in binary builds and disable matrix fail-fast (#1514) (2e24483)
+
+## [0.81.0] - 2026-07-18
+
+### Added
+
+- **tools**: add pip-audit for Python dependency vulnerability scanning (#1145)
+  (8d37f54)
+
+### Changed
+
+- **deps**: update python:3.14-slim docker digest to cea0e60 (#1489) (0ca34b1)
+- **deps**: update dependency svelte to 5.56.5 (patch) (#1488) (9b19881)
+
+## [0.80.11] - 2026-07-17
+
+### Changed
+
+- format CONTRIBUTING.md with prettier (#1475) (5b1e8f3)
+- **deps**: pin dependencies (#1472) (06bc820)
+
+### Fixed
+
+- **ci**: bump pinned lintro image past identify dependency (#1462) (4a1609a)
+
+## [0.80.10] - 2026-07-17
+
+### Changed
+
+- **repo**: add root CONTRIBUTING.md pointer and remove stray findings.md (#1455)
+  (504e31d)
+- replace bare assert with assertpy assert_that across test suite (#1389) (4fc76f4)
+- move inline tool sample inputs to test_samples fixtures (#1382) (9f75984)
+
+### Fixed
+
+- **mypy**: run mypy from project root for individual files (#1270) (75ffacb)
+
+## [0.80.9] - 2026-07-17
+
+### Fixed
+
+- **core**: route programmatic execution through real library API (#1269) (6e5cda4)
+
+## [0.80.8] - 2026-07-17
+
+### Fixed
+
+- **tools**: preserve explicit timeout=0 and route ruff through _prepare_execution
+  (#1266) (ca1b013)
+
+## [0.80.7] - 2026-07-17
+
+### Changed
+
+- **deps**: update ubuntu:latest docker digest to 3131b4c (#1468) (6fd6e6b)
+- **ai**: remove process-global os.chdir from rerun path (#1265) (9103dbc)
+
+### Fixed
+
+- **execution**: handle BaseException in gather results and nested event loops (#1264)
+  (7252969)
+
+## [0.80.6] - 2026-07-16
+
+### Changed
+
+- **tools**: rename manifest ToolRegistry to ManifestRegistry (#1260) (f729796)
+
 - **tools/core**: rename `lintro.tools.core.tool_registry.ToolRegistry` to
   `ManifestRegistry` to disambiguate it from `lintro.plugins.registry.ToolRegistry`
   (#1220)
@@ -23,11 +121,9 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   of `ManifestRegistry`; importing or using the old name now emits a
   `DeprecationWarning` and will be removed in a future release (#1220)
 
-### Removed
-
 ### Fixed
 
-### Security
+- **ci**: use valid npm range syntax for astro allowedVersions (#1454) (e012d9d)
 
 ## [0.80.5] - 2026-07-16
 

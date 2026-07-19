@@ -1,8 +1,8 @@
 """Format command implementation using simplified Loguru-based approach."""
 
 import click
-from click.testing import CliRunner
 
+from lintro.api import core as api
 from lintro.utils.git_diff import DIFF_DEFAULT_SENTINEL
 from lintro.utils.tool_executor import run_lint_tools_simple
 
@@ -230,32 +230,20 @@ def format_code(
     Raises:
         RuntimeError: If format fails for any reason.
     """
-    args: list[str] = []
-    if paths:
-        args.extend(paths)
-    if tools:
-        args.extend(["--tools", tools])
-    if tool_options:
-        args.extend(["--tool-options", tool_options])
-    if exclude:
-        args.extend(["--exclude", exclude])
-    if include_venv:
-        args.append("--include-venv")
-    if group_by:
-        args.extend(["--group-by", group_by])
-    if output_format:
-        args.extend(["--output-format", output_format])
-    if verbose:
-        args.append("--verbose")
-    if auto_install:
-        args.append("--auto-install")
-    if yes:
-        args.append("--yes")
-
-    runner = CliRunner()
-    result = runner.invoke(format_command, args)
+    result = api.format(
+        paths=paths,
+        tools=tools,
+        tool_options=tool_options,
+        exclude=exclude,
+        include_venv=include_venv,
+        group_by=group_by,
+        output_format=output_format,
+        verbose=verbose,
+        auto_install=auto_install,
+        yes=yes,
+    )
     if result.exit_code != DEFAULT_EXIT_CODE:
-        raise RuntimeError(f"Format failed: {result.output}")
+        raise RuntimeError(f"Format failed with exit code {result.exit_code}")
     return None
 
 

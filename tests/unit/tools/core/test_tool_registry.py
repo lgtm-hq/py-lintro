@@ -306,7 +306,7 @@ def test_get_or_none_existing(registry: ManifestRegistry) -> None:
     tool = registry.get_or_none("mypy")
     assert_that(tool).is_not_none()
     # narrow Optional for mypy — assertpy does not perform type narrowing
-    assert tool is not None  # noqa: S101
+    assert tool is not None  # narrow type for mypy
     assert_that(tool.name).is_equal_to("mypy")
 
 

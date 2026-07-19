@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "lintro"
-version = "0.80.5"
+version = "0.81.3"
 description = "A unified CLI tool for code formatting, linting, and quality assurance"
 keywords = [
   "linting",
@@ -83,7 +83,7 @@ full = [
   "yamllint>=1.37.1",
 ]
 ai = ["anthropic>=0.39.0", "openai>=1.50.0"]
-tools = ["semgrep>=1.151.0", "sqlfluff>=4.0.0"]
+tools = ["semgrep>=1.151.0", "sqlfluff>=4.0.0", "pip-audit>=2.10.1"]
 
 [project.scripts]
 lintro = "lintro.cli:main"
@@ -120,6 +120,7 @@ build = ["nuitka>=2.8.9", "ordered-set>=4.1.0", "zstandard>=0.25.0"]
 [tool.setuptools]
 packages = [
   "lintro",
+  "lintro.api",
   "lintro.ai",
   "lintro.ai.display",
   "lintro.ai.enums",
@@ -169,6 +170,7 @@ packages = [
   "lintro.parsers.yamllint",
   "lintro.parsers.mypy",
   "lintro.parsers.osv_scanner",
+  "lintro.parsers.pip_audit",
   "lintro.parsers.oxfmt",
   "lintro.parsers.oxlint",
   "lintro.parsers.prettier",

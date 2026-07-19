@@ -558,6 +558,7 @@ class StandaloneBuilder(CommandBuilder):
     TOOL_BINARY_MAP: ClassVar[dict[str, str]] = {
         "osv_scanner": "osv-scanner",
         "dotenv_linter": "dotenv-linter",
+        "pip_audit": "pip-audit",
     }
 
     @property
@@ -577,6 +578,7 @@ class StandaloneBuilder(CommandBuilder):
                     ToolName.GITLEAKS,
                     ToolName.HADOLINT,
                     ToolName.OSV_SCANNER,
+                    ToolName.PIP_AUDIT,
                     ToolName.SHELLCHECK,
                     ToolName.SHFMT,
                     ToolName.SEMGREP,

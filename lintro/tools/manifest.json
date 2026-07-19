@@ -32,7 +32,7 @@
     }
   },
   "language_map": {
-    "python": ["ruff", "black", "mypy", "bandit", "pydoclint", "semgrep"],
+    "python": ["ruff", "black", "mypy", "bandit", "pydoclint", "semgrep", "pip_audit"],
     "javascript": ["oxlint", "oxfmt", "prettier"],
     "typescript": ["oxlint", "oxfmt", "prettier", "tsc"],
     "rust": ["clippy", "rustfmt", "rustc", "cargo_audit", "cargo_deny"],
@@ -263,6 +263,19 @@
       "version_command": ["oxlint", "--version"],
       "languages": ["javascript", "typescript"],
       "tags": ["linter"]
+    },
+    {
+      "name": "pip_audit",
+      "version": "2.10.1",
+      "install": {
+        "type": "pip",
+        "package": "pip-audit"
+      },
+      "tier": "tools",
+      "category": "bundled",
+      "version_command": ["pip-audit", "--version"],
+      "languages": ["python"],
+      "tags": ["security"]
     },
     {
       "name": "prettier",

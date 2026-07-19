@@ -8,6 +8,7 @@ from unittest.mock import patch
 from assertpy import assert_that
 
 from lintro.tools.definitions.sqlfluff import SqlfluffPlugin
+from tests.test_samples_helpers import copy_sample
 
 SQLFLUFF_LINT_OUTPUT_WITH_ISSUES = """[
     {
@@ -38,7 +39,14 @@ def test_fix_populates_initial_issues(
         tmp_path: Temporary directory path for test files.
     """
     test_file = tmp_path / "test_query.sql"
-    test_file.write_text("select * from users;\n")
+    copy_sample(
+        tmp_path,
+        "tools",
+        "sql",
+        "sqlfluff",
+        "sqlfluff_violations.sql",
+        dest_name=test_file.name,
+    )
 
     with patch.object(
         sqlfluff_plugin,
@@ -70,7 +78,14 @@ def test_fix_initial_issues_none_when_no_issues(
         tmp_path: Temporary directory path for test files.
     """
     test_file = tmp_path / "test_query.sql"
-    test_file.write_text("SELECT * FROM users;\n")
+    copy_sample(
+        tmp_path,
+        "tools",
+        "sql",
+        "sqlfluff",
+        "sqlfluff_clean.sql",
+        dest_name=test_file.name,
+    )
 
     with patch.object(
         sqlfluff_plugin,
@@ -94,7 +109,14 @@ def test_fix_partial_fix_preserves_initial_issues(
         tmp_path: Temporary directory path for test files.
     """
     test_file = tmp_path / "test_query.sql"
-    test_file.write_text("select * from users;\n")
+    copy_sample(
+        tmp_path,
+        "tools",
+        "sql",
+        "sqlfluff",
+        "sqlfluff_violations.sql",
+        dest_name=test_file.name,
+    )
 
     remaining_output = """[
         {
@@ -147,7 +169,14 @@ def test_fix_runs_verify_even_when_fix_exits_nonzero(
         tmp_path: Temporary directory path for test files.
     """
     test_file = tmp_path / "test_query.sql"
-    test_file.write_text("select * from users;\n")
+    copy_sample(
+        tmp_path,
+        "tools",
+        "sql",
+        "sqlfluff",
+        "sqlfluff_violations.sql",
+        dest_name=test_file.name,
+    )
 
     two_issues_output = """[
         {

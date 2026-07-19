@@ -28,6 +28,7 @@ class ToolName(StrEnum):
     OSV_SCANNER = auto()
     OXFMT = auto()
     OXLINT = auto()
+    PIP_AUDIT = auto()
     PRETTIER = auto()
     PYDOCLINT = auto()
     PYTEST = auto()
