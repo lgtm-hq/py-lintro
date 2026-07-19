@@ -25,18 +25,13 @@ def completions_command(shell: str) -> None:
 
     Args:
         shell: The shell completion script to generate.
-
-    Raises:
-        click.ClickException: If Click cannot generate the requested script.
     """
     from lintro.cli import cli
 
-    exit_code = shell_complete(
+    shell_complete(
         cli=cli,
         ctx_args={},
         prog_name="lintro",
         complete_var=_COMPLETION_VAR,
         instruction=_COMPLETION_INSTRUCTIONS[shell],
     )
-    if exit_code != 0:
-        raise click.ClickException(f"Unable to generate {shell} completions")

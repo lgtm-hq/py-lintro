@@ -1,6 +1,5 @@
 include LICENSE
 include README.md
-include lintro.1
 include pyproject.toml
 
 # Include assets directory and its contents

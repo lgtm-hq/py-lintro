@@ -766,7 +766,6 @@ _PIPELINE_RELEVANT_TOP_LEVEL: frozenset[str] = frozenset(
         "docker-compose.yml",
         "Dockerfile",
         "LICENSE",
-        "lintro.1",
         "lintro",
         "Makefile",
         "MANIFEST.in",

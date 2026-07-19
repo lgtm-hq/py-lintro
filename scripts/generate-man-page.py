@@ -13,7 +13,7 @@ from lintro import __version__
 from lintro.cli import cli
 
 _REPO_ROOT = Path(__file__).resolve().parents[1]
-_DEFAULT_OUTPUT = _REPO_ROOT / "lintro.1"
+_DEFAULT_OUTPUT = _REPO_ROOT / "dist" / "lintro.1"
 
 
 def parse_args() -> argparse.Namespace:
