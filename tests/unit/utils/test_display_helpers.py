@@ -72,9 +72,11 @@ def console_capture() -> Generator[tuple[list[str], Callable[..., None]], None, 
         ),
     ],
 )
+@patch("lintro.utils.display_helpers.sys.stdout.isatty", return_value=True)
 @patch("lintro.utils.display_helpers.read_ascii_art")
 def test_print_ascii_art_selects_correct_file(
     mock_read: MagicMock,
+    _mock_isatty: MagicMock,
     console_capture: tuple[list[str], Callable[..., None]],
     issue_count: int,
     expected_file: str,
@@ -85,6 +87,7 @@ def test_print_ascii_art_selects_correct_file(
 
     Args:
         mock_read: Mock for read_ascii_art function.
+        _mock_isatty: Mock forcing stdout.isatty() to True (interactive).
         console_capture: Fixture providing output capture.
         issue_count: Number of issues to simulate.
         expected_file: Expected filename to be loaded.
@@ -101,15 +104,18 @@ def test_print_ascii_art_selects_correct_file(
     assert_that(output[0]).contains(expected_in_output)
 
 
+@patch("lintro.utils.display_helpers.sys.stdout.isatty", return_value=True)
 @patch("lintro.utils.display_helpers.read_ascii_art")
 def test_print_ascii_art_no_output_when_empty(
     mock_read: MagicMock,
+    _mock_isatty: MagicMock,
     console_capture: tuple[list[str], Callable[..., None]],
 ) -> None:
     """Verify no output is produced when ASCII art is empty.
 
     Args:
         mock_read: Mock for read_ascii_art function.
+        _mock_isatty: Mock forcing stdout.isatty() to True (interactive).
         console_capture: Fixture providing output capture.
     """
     output, mock_console = console_capture
@@ -120,15 +126,18 @@ def test_print_ascii_art_no_output_when_empty(
     assert_that(output).is_empty()
 
 
+@patch("lintro.utils.display_helpers.sys.stdout.isatty", return_value=True)
 @patch("lintro.utils.display_helpers.read_ascii_art")
 def test_print_ascii_art_handles_exception_gracefully(
     mock_read: MagicMock,
+    _mock_isatty: MagicMock,
     console_capture: tuple[list[str], Callable[..., None]],
 ) -> None:
     """Verify exceptions are handled gracefully without crashing.
 
     Args:
         mock_read: Mock for read_ascii_art function.
+        _mock_isatty: Mock forcing stdout.isatty() to True (interactive).
         console_capture: Fixture providing output capture.
     """
     output, mock_console = console_capture
@@ -138,6 +147,58 @@ def test_print_ascii_art_handles_exception_gracefully(
     print_ascii_art(mock_console, issue_count=0)
 
     assert_that(output).is_empty()
+
+
+@patch("lintro.utils.display_helpers.sys.stdout.isatty", return_value=False)
+@patch("lintro.utils.display_helpers.read_ascii_art")
+def test_print_ascii_art_suppressed_when_not_a_tty(
+    mock_read: MagicMock,
+    _mock_isatty: MagicMock,
+    console_capture: tuple[list[str], Callable[..., None]],
+) -> None:
+    """Verify no art is emitted (or even loaded) when stdout is not a TTY.
+
+    Piped output, CI logs, and captured report streams are non-interactive,
+    so the braille art must be gated out entirely.
+
+    Args:
+        mock_read: Mock for read_ascii_art function.
+        _mock_isatty: Mock forcing stdout.isatty() to False (non-interactive).
+        console_capture: Fixture providing output capture.
+    """
+    output, mock_console = console_capture
+    mock_read.return_value = ["⣿⣿⣿", "⣿ ⣿"]
+
+    print_ascii_art(mock_console, issue_count=0)
+
+    assert_that(output).is_empty()
+    mock_read.assert_not_called()
+
+
+@patch("lintro.utils.display_helpers.sys.stdout.isatty", return_value=True)
+@patch("lintro.utils.display_helpers.read_ascii_art")
+def test_print_ascii_art_suppressed_when_disabled(
+    mock_read: MagicMock,
+    _mock_isatty: MagicMock,
+    console_capture: tuple[list[str], Callable[..., None]],
+) -> None:
+    """Verify no art is emitted when explicitly disabled, even on a TTY.
+
+    ``enabled=False`` models config ``output.art: false`` and the
+    ``--no-art`` flag; it must win over an interactive terminal.
+
+    Args:
+        mock_read: Mock for read_ascii_art function.
+        _mock_isatty: Mock forcing stdout.isatty() to True (interactive).
+        console_capture: Fixture providing output capture.
+    """
+    output, mock_console = console_capture
+    mock_read.return_value = ["⣿⣿⣿", "⣿ ⣿"]
+
+    print_ascii_art(mock_console, issue_count=0, enabled=False)
+
+    assert_that(output).is_empty()
+    mock_read.assert_not_called()
 
 
 # --- Tests for print_final_status ---

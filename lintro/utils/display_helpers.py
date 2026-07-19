@@ -3,6 +3,7 @@
 Contains ASCII art display functions and styling constants.
 """
 
+import sys
 from collections.abc import Callable
 
 from loguru import logger
@@ -18,13 +19,30 @@ INFO_BORDER_LENGTH: int = 40
 def print_ascii_art(
     console_output_func: Callable[..., None],
     issue_count: int,
+    *,
+    enabled: bool = True,
 ) -> None:
-    """Print ASCII art based on the issue count.
+    """Print decorative ASCII art based on the issue count.
+
+    The art is purely cosmetic, so it is only emitted to an interactive
+    terminal. It is suppressed when ``enabled`` is ``False`` (config
+    ``output.art: false`` or the ``--no-art`` flag) and whenever stdout is not
+    a TTY (piped output, CI logs, or captured report streams). This keeps the
+    non-ASCII braille blob out of ``report.md`` and any ``--output-format``
+    document.
 
     Args:
-        console_output_func: Function to output text to console
-        issue_count: The number of issues (remaining, fixed, or total)
+        console_output_func: Function to output text to console.
+        issue_count: The number of issues (remaining, fixed, or total).
+        enabled: Whether art display is enabled by config/CLI. Defaults to
+            ``True``.
     """
+    if not enabled:
+        return
+
+    if not sys.stdout.isatty():
+        return
+
     try:
         if issue_count == 0:
             ascii_art = read_ascii_art(filename="success.txt")
