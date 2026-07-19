@@ -247,14 +247,14 @@ terminal. It is always suppressed when:
 
 - stdout is not a TTY (piped output, CI logs, redirected files), or
 - `output.art: false` is set in config, or
-- the `--no-art` flag is passed to `lintro check` / `lintro fmt`.
+- the `--no-art` flag is passed to `lintro check` / `lintro format`.
 
 The art is never written to `.lintro/run-*/report.md`, `console.log`, or any
 `--output-format` stream regardless of these settings.
 
 ```bash
 lintro check --no-art   # suppress art for this run only
-lintro fmt --no-art
+lintro format --no-art
 ```
 
 ### Command-Line Options
