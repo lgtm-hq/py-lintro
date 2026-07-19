@@ -21,6 +21,12 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.82.1] - 2026-07-19
+
+### Fixed
+
+- **release**: stamp SECURITY.md support table on minor bumps (#1467) (bf46365)
+
 ## [0.82.0] - 2026-07-18
 
 ### Added
