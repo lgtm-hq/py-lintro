@@ -97,14 +97,15 @@ declare -a lintro_args=(chk .)
 if [[ -n "$TOOL_OPTIONS" ]]; then
 	lintro_args+=(--tool-options "$TOOL_OPTIONS")
 fi
-lintro_args+=(--output-format json)
+lintro_args+=(--output-format json --output "$REPORT_JSON")
 
 # lintro exits non-zero when it finds real issues; the gate only cares about
-# skips, so capture stdout (pure JSON for machine formats) and ignore the exit
-# code. Warnings go to stderr and are streamed to the log.
+# skips, so ask lintro to write the machine-readable report directly. Stdout can
+# contain operational messages from the CLI and must not be parsed as JSON.
 log_info "Running lintro check (JSON) in container to derive skip state..."
+rm -f "$REPORT_JSON" "${REPORT_JSON}.stdout"
 set +e
-"${docker_args[@]}" "${LINTRO_IMAGE}" "${lintro_args[@]}" >"$REPORT_JSON"
+"${docker_args[@]}" "${LINTRO_IMAGE}" "${lintro_args[@]}" >"${REPORT_JSON}.stdout"
 lintro_exit_code=$?
 set -e
 log_info "lintro exited ${lintro_exit_code} (ignored; gate checks skips only)"
