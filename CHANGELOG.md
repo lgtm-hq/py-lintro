@@ -21,6 +21,17 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.82.0] - 2026-07-18
+
+### Added
+
+- **commitlint**: add root commitlint.config.js extending config-conventional (#1518)
+  (69de320)
+
+### Changed
+
+- **idiom-review**: remove dead DEFAULT_ENABLED ClassVar (#1520) (fd4ad29)
+
 ## [0.81.3] - 2026-07-18
 
 ### Fixed
