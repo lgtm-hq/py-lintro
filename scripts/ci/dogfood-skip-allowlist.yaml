@@ -70,3 +70,13 @@ interim:
       TODO(1505): pip-audit missing from the pinned tools image (silent SKIP).
       Interim only — remove once the tools-image bump and the Dockerfile
       `pip-audit --version` verification land so it can never regress silently.
+
+  # TODO(1510): decide whether the repository should run raw tsc in dogfood CI
+  # or keep delegating site TypeScript checks to astro-check/vue-tsc.
+  - tool: tsc
+    reason_class: other
+    issue: 1510
+    rationale: >-
+      TODO(1510): tsc currently self-skips because repository TypeScript
+      coverage is delegated to astro-check/vue-tsc. Interim only — remove once
+      dogfood CI either runs tsc directly or disables it explicitly.
