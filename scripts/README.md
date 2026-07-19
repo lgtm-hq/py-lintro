@@ -105,6 +105,8 @@ Scripts for GitHub Actions workflows and continuous integration.
 | `resolve-pipeline-relevance.sh`      | Resolve heavy-pipeline path relevance and set `pipeline` output       | `./scripts/ci/resolve-pipeline-relevance.sh --help`                                |
 | `release-bump-only.sh`               | Classify automated version-bump PRs via diff allowlist (#1362)        | `./scripts/ci/release-bump-only.sh --help`                                         |
 | `dogfood-changed-files.sh`           | Lint only PR-changed files via lintro Docker (full-repo fallback)     | `./scripts/ci/dogfood-changed-files.sh --help`                                     |
+| `dogfood-skip-gate.sh`               | Fail dogfood CI on non-allowlisted skipped tools                      | `LINTRO_IMAGE=<image> ./scripts/ci/dogfood-skip-gate.sh`                           |
+| `check-dogfood-skips.py`             | Validate dogfood skip JSON against the committed allowlist            | `python3 scripts/ci/check-dogfood-skips.py --help`                                 |
 | `evaluate-test-gate.sh`              | Evaluate upstream compat/coverage results for required-check gate     | `COMPAT_RESULT=success COVERAGE_RESULT=success ./scripts/ci/evaluate-test-gate.sh` |
 | `fail-on-security-audit.sh`          | Fail CI when security audit finds vulnerabilities                     | `./scripts/ci/fail-on-security-audit.sh`                                           |
 | `free-disk-space.sh`                 | Free disk space on CI runner for Docker builds                        | `./scripts/ci/free-disk-space.sh`                                                  |
