@@ -81,10 +81,7 @@ class ParserError(Exception):
 # a successful, zero-issue run. These are not diagnostic output and must not be
 # treated as parse failures (#1534). Real unparseable bandit output (e.g. from
 # an actual bandit run) is still surfaced as an error to preserve #1044.
-_BANDIT_INFORMATIONAL_SENTINELS: tuple[str, ...] = (
-    "No .py/.pyi files found",
-    "Bandit ran successfully and found no issues",
-)
+_BANDIT_INFORMATIONAL_SENTINELS: tuple[str, ...] = ("No .py/.pyi files found",)
 
 
 def _parse_bandit_output(output: str) -> list[Any]:

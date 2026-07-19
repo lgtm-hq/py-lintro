@@ -16,9 +16,8 @@ from lintro.utils.output.parser_registration import (
     [
         ("No .py/.pyi files found to check.",),
         ("No .py/.pyi files found",),
-        ("Bandit ran successfully and found no issues",),
     ],
-    ids=["no-files-message", "no-files-sentinel", "clean-pass-sentinel"],
+    ids=["no-files-message", "no-files-sentinel"],
 )
 def test_parse_bandit_output_treats_sentinels_as_no_issues(
     informational: str,

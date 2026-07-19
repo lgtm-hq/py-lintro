@@ -7,6 +7,7 @@ tool outputs into various display formats.
 from __future__ import annotations
 
 import json
+from unittest.mock import patch
 
 import pytest
 from assertpy import assert_that
@@ -238,6 +239,26 @@ def test_format_tool_output_skips_reparse_for_clean_pass() -> None:
 
     assert_that(result).is_equal_to(informational)
     assert_that(result).does_not_contain("Error:")
+
+
+def test_format_tool_output_clean_pass_shortcut_is_bandit_specific() -> None:
+    """Verify other tools still use parser dispatch for clean-pass output."""
+    informational = "informational output"
+
+    with patch(
+        "lintro.utils.output.file_writer.ParserRegistry.parse",
+        return_value=[],
+    ) as mock_parse:
+        result = format_tool_output(
+            "ruff",
+            informational,
+            output_format="plain",
+            success=True,
+            issues_count=0,
+        )
+
+    mock_parse.assert_called_once_with("ruff", informational)
+    assert_that(result).is_equal_to(informational)
 
 
 def test_format_tool_output_still_errors_on_failed_bandit_run() -> None:
