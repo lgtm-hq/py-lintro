@@ -175,6 +175,23 @@ def test_print_ascii_art_suppressed_when_not_a_tty(
     mock_read.assert_not_called()
 
 
+@patch("lintro.utils.display_helpers.read_ascii_art")
+def test_print_ascii_art_checks_requested_output_stream(
+    mock_read: MagicMock,
+    console_capture: tuple[list[str], Callable[..., None]],
+) -> None:
+    """Verify the TTY gate uses the explicitly routed output stream."""
+    output, mock_console = console_capture
+    output_stream = MagicMock()
+    output_stream.isatty.return_value = False
+
+    print_ascii_art(mock_console, issue_count=0, output_stream=output_stream)
+
+    output_stream.isatty.assert_called_once_with()
+    assert_that(output).is_empty()
+    mock_read.assert_not_called()
+
+
 @patch("lintro.utils.display_helpers.sys.stdout.isatty", return_value=True)
 @patch("lintro.utils.display_helpers.read_ascii_art")
 def test_print_ascii_art_suppressed_when_disabled(

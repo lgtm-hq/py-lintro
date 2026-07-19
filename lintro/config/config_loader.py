@@ -411,11 +411,13 @@ def _parse_output_config(data: Any) -> OutputConfig:
         ValueError: When the output section is not a mapping or ``art`` is not
             a boolean.
     """
-    if not data:
+    if data is None:
         return OutputConfig()
     if not isinstance(data, dict):
         msg = f"output config must be a mapping, got {type(data).__name__}"
         raise ValueError(msg)
+    if not data:
+        return OutputConfig()
 
     known_fields = set(OutputConfig.model_fields)
     unknown = set(data) - known_fields

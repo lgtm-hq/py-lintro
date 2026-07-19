@@ -55,6 +55,33 @@ def test_output_art_rejects_non_boolean(
         load_config(config_path=config_file)
 
 
+@pytest.mark.parametrize(
+    ("raw_output", "expected_type"),
+    [
+        ("false", "bool"),
+        ("[]", "list"),
+        ('""', "str"),
+    ],
+)
+def test_output_rejects_falsey_non_mapping(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    raw_output: str,
+    expected_type: str,
+) -> None:
+    """False-y non-mapping ``output`` sections raise the mapping error."""
+    config_file = tmp_path / ".lintro-config.yaml"
+    config_file.write_text(f"output: {raw_output}\n", encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+    clear_config_cache()
+
+    with pytest.raises(
+        ValueError,
+        match=escape(f"output config must be a mapping, got {expected_type}"),
+    ):
+        load_config(config_path=config_file)
+
+
 def test_output_unknown_keys_are_ignored(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

@@ -136,6 +136,26 @@ def test_invoke_with_comma_separated_commands() -> None:
         )
 
 
+def test_invoke_forwards_no_art_flag() -> None:
+    """Test that chained commands forward the enabled --no-art flag."""
+    runner = CliRunner()
+    with (
+        patch("lintro.cli_utils.commands.check.run_lint_tools_simple") as mock_check,
+        patch("lintro.cli_utils.commands.format.run_lint_tools_simple") as mock_fmt,
+    ):
+        mock_check.return_value = 0
+        mock_fmt.return_value = 0
+
+        result = runner.invoke(
+            cli,
+            ["check", "--no-art", ".", ",", "format", "--no-art", "."],
+        )
+
+        assert_that(result.exit_code).is_equal_to(0)
+        assert_that(mock_check.call_args.kwargs["no_art"]).is_true()
+        assert_that(mock_fmt.call_args.kwargs["no_art"]).is_true()
+
+
 def test_invoke_aggregates_exit_codes_success() -> None:
     """Test that invoke aggregates exit codes from chained commands."""
     runner = CliRunner()

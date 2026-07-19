@@ -7,6 +7,7 @@ including summary table, final status, and ASCII art delegation.
 
 from __future__ import annotations
 
+import sys
 from typing import TYPE_CHECKING
 from unittest.mock import patch
 
@@ -338,6 +339,7 @@ def test_print_ascii_art_delegates_correctly() -> None:
             console_output_func=logger._emit_untracked,
             issue_count=5,
             enabled=True,
+            output_stream=sys.stdout,
         )
 
 
@@ -360,6 +362,7 @@ def test_print_ascii_art_various_counts(issue_count: int) -> None:
             console_output_func=logger._emit_untracked,
             issue_count=issue_count,
             enabled=True,
+            output_stream=sys.stdout,
         )
 
 
@@ -378,6 +381,21 @@ def test_print_ascii_art_delegates_disabled_flag() -> None:
             console_output_func=logger._emit_untracked,
             issue_count=0,
             enabled=False,
+            output_stream=sys.stdout,
+        )
+
+
+def test_print_ascii_art_uses_stderr_tty_gate_when_routed() -> None:
+    """Verify stderr routing checks stderr for interactive output."""
+    logger = ThreadSafeConsoleLogger(route_stderr=True)
+
+    with patch("lintro.utils.console.logger.print_ascii_art") as mock_print:
+        logger._print_ascii_art(0)
+        mock_print.assert_called_once_with(
+            console_output_func=logger._emit_untracked,
+            issue_count=0,
+            enabled=True,
+            output_stream=sys.stderr,
         )
 
 

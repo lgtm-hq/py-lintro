@@ -7,6 +7,7 @@ with thread-safe message tracking for parallel execution.
 from __future__ import annotations
 
 import re
+import sys
 import threading
 from collections.abc import Sequence
 from pathlib import Path
@@ -445,6 +446,7 @@ class ThreadSafeConsoleLogger:
             console_output_func=self._emit_untracked,
             issue_count=total_issues,
             enabled=self.art_enabled,
+            output_stream=sys.stderr if self.route_stderr else sys.stdout,
         )
 
     def print_lintro_header(self) -> None:

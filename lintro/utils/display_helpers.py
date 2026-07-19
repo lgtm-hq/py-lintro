@@ -5,6 +5,7 @@ Contains ASCII art display functions and styling constants.
 
 import sys
 from collections.abc import Callable
+from typing import TextIO
 
 from loguru import logger
 
@@ -21,26 +22,29 @@ def print_ascii_art(
     issue_count: int,
     *,
     enabled: bool = True,
+    output_stream: TextIO | None = None,
 ) -> None:
     """Print decorative ASCII art based on the issue count.
 
     The art is purely cosmetic, so it is only emitted to an interactive
     terminal. It is suppressed when ``enabled`` is ``False`` (config
-    ``output.art: false`` or the ``--no-art`` flag) and whenever stdout is not
-    a TTY (piped output, CI logs, or captured report streams). This keeps the
-    non-ASCII braille blob out of ``report.md`` and any ``--output-format``
-    document.
+    ``output.art: false`` or the ``--no-art`` flag) and whenever the target
+    stream is not a TTY (piped output, CI logs, or captured report streams).
+    This keeps the non-ASCII braille blob out of ``report.md`` and any
+    ``--output-format`` document.
 
     Args:
         console_output_func: Function to output text to console.
         issue_count: The number of issues (remaining, fixed, or total).
         enabled: Whether art display is enabled by config/CLI. Defaults to
             ``True``.
+        output_stream: Stream used for the TTY gate. Defaults to stdout.
     """
     if not enabled:
         return
 
-    if not sys.stdout.isatty():
+    target_stream = output_stream or sys.stdout
+    if not target_stream.isatty():
         return
 
     try:
