@@ -24,6 +24,8 @@ import subprocess  # nosec B404 - subprocess is the core mechanism for invoking 
 from functools import lru_cache
 from pathlib import Path
 
+from lintro.utils.path_utils import absolute_path_without_resolving
+
 # Sentinel used by the ``--diff`` CLI option to mean "flag supplied without an
 # explicit base"; resolved to the repository's default base ref at runtime.
 DIFF_DEFAULT_SENTINEL: str = "\x00lintro-diff-default\x00"
@@ -42,33 +44,6 @@ _GIT_TIMEOUT_SECONDS: float = 30.0
 
 class DiffResolutionError(Exception):
     """Raised when an explicit ``--diff`` base ref cannot be resolved."""
-
-
-def _absolute_path_without_resolving(path: Path) -> str:
-    """Return an absolute path without resolving symlinks.
-
-    Args:
-        path: Path to convert.
-
-    Returns:
-        Absolute path with ``..`` segments normalized, matching
-        ``os.path.abspath`` semantics without following symlinks.
-    """
-    absolute_path = path if path.is_absolute() else Path.cwd() / path
-    normalized_parts: list[str] = []
-
-    for part in absolute_path.parts:
-        if part in {absolute_path.anchor, ""}:
-            continue
-        if part == "..":
-            if normalized_parts:
-                normalized_parts.pop()
-            continue
-        normalized_parts.append(part)
-
-    if absolute_path.anchor:
-        return str(Path(absolute_path.anchor, *normalized_parts))
-    return str(Path(*normalized_parts))
 
 
 def _run_git(args: list[str], cwd: str) -> subprocess.CompletedProcess[str]:
@@ -262,7 +237,7 @@ def get_changed_files(base: str, cwd: str = ".") -> frozenset[str]:
     Raises:
         DiffResolutionError: When ``base`` does not resolve to a commit.
     """
-    root = _repo_root(cwd) or _absolute_path_without_resolving(Path(cwd))
+    root = _repo_root(cwd) or absolute_path_without_resolving(Path(cwd))
 
     if not _ref_exists(base, cwd):
         raise DiffResolutionError(
@@ -278,7 +253,7 @@ def get_changed_files(base: str, cwd: str = ".") -> frozenset[str]:
 
     changed: set[str] = set()
     for name in names:
-        abs_path = _absolute_path_without_resolving(Path(root) / name)
+        abs_path = absolute_path_without_resolving(Path(root) / name)
         # Drop deletions / rename sources that no longer exist on disk.
         if Path(abs_path).is_file():
             changed.add(abs_path)
@@ -303,4 +278,4 @@ def filter_files_by_diff(
     changed = get_changed_files(base, cwd)
     if not changed:
         return []
-    return [f for f in files if _absolute_path_without_resolving(Path(f)) in changed]
+    return [f for f in files if absolute_path_without_resolving(Path(f)) in changed]

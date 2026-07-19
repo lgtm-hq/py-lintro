@@ -15,6 +15,8 @@ from pathlib import Path
 
 from loguru import logger
 
+from lintro.utils.path_utils import absolute_path_without_resolving
+
 
 @dataclass
 class LineLengthViolation:
@@ -38,33 +40,6 @@ class LineLengthViolation:
     code: str = "E501"
 
 
-def _absolute_path_without_resolving(path: Path) -> str:
-    """Return an absolute path without resolving symlinks.
-
-    Args:
-        path: Path to convert.
-
-    Returns:
-        Absolute path with ``..`` segments normalized, matching
-        ``os.path.abspath`` semantics without following symlinks.
-    """
-    absolute_path = path if path.is_absolute() else Path.cwd() / path
-    normalized_parts: list[str] = []
-
-    for part in absolute_path.parts:
-        if part in {absolute_path.anchor, ""}:
-            continue
-        if part == "..":
-            if normalized_parts:
-                normalized_parts.pop()
-            continue
-        normalized_parts.append(part)
-
-    if absolute_path.anchor:
-        return str(Path(absolute_path.anchor, *normalized_parts))
-    return str(Path(*normalized_parts))
-
-
 def _file_arg_path(file_path: str, cwd: str | None) -> str:
     """Return the path to pass to Ruff for an input file.
 
@@ -77,9 +52,9 @@ def _file_arg_path(file_path: str, cwd: str | None) -> str:
     """
     path = Path(file_path)
     if cwd and not path.is_absolute():
-        return _absolute_path_without_resolving(Path(cwd) / path)
+        return absolute_path_without_resolving(Path(cwd) / path)
     if not path.is_absolute():
-        return _absolute_path_without_resolving(path)
+        return absolute_path_without_resolving(path)
     return file_path
 
 
@@ -95,7 +70,7 @@ def _ruff_output_path(file_path: str, cwd: str | None) -> str:
     """
     path = Path(file_path)
     if cwd and not path.is_absolute():
-        return _absolute_path_without_resolving(Path(cwd) / path)
+        return absolute_path_without_resolving(Path(cwd) / path)
     return file_path
 
 
