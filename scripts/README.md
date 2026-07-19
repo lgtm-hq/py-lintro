@@ -55,10 +55,11 @@ scripts/
 
 Scripts for building standalone binaries and distribution packages.
 
-| Script           | Purpose                                  | Usage                                        |
-| ---------------- | ---------------------------------------- | -------------------------------------------- |
-| `build_macos.py` | Build macOS binary using Nuitka compiler | `uv run python scripts/build/build_macos.py` |
-| `build_linux.py` | Build Linux binary using Nuitka compiler | `uv run python scripts/build/build_linux.py` |
+| Script                   | Purpose                                            | Usage                                                   |
+| ------------------------ | -------------------------------------------------- | ------------------------------------------------------- |
+| `build_macos.py`         | Build macOS binary using Nuitka compiler           | `uv run python scripts/build/build_macos.py`            |
+| `build_linux.py`         | Build Linux binary using Nuitka compiler           | `uv run python scripts/build/build_linux.py`            |
+| `generate-man-page.py`   | Generate the lintro(1) man page from Click help    | `uv run python scripts/generate-man-page.py`            |
 
 ### 📦 npm Distribution Scripts (`ci/npm/`)
 
