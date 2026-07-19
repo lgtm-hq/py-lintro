@@ -69,7 +69,7 @@ def _sample_message(name: str) -> str:
         name: Filename under the commitlint git sample directory.
 
     Returns:
-        Commit message text with fixture trailing whitespace removed.
+        Commit message text with fixture leading/trailing whitespace removed.
     """
     return (
         sample_path("tools", "git", "commitlint", name)
