@@ -425,6 +425,9 @@ def format_tool_output(
     output: str,
     output_format: str | OutputFormat = "grid",
     issues: Sequence[BaseIssue] | None = None,
+    *,
+    success: bool | None = None,
+    issues_count: int | None = None,
 ) -> str:
     """Format tool output using the specified format.
 
@@ -433,6 +436,12 @@ def format_tool_output(
         output: str: Raw output from the tool.
         output_format: str: Output format (plain, grid, markdown, html, json, csv).
         issues: Sequence[BaseIssue] | None: List of parsed issue objects (optional).
+        success: bool | None: Whether the tool run succeeded. When a run is a
+            success with zero issues, informational (non-JSON) tool output is
+            returned as-is instead of being re-parsed, avoiding parse-error
+            noise for clean passes (#1534).
+        issues_count: int | None: The tool-reported issue count, used together
+            with ``success`` to detect a clean zero-issue pass.
 
     Returns:
         str: Formatted output string.
@@ -463,6 +472,14 @@ def format_tool_output(
 
     if not output or not output.strip():
         return "No issues found."
+
+    # A successful, zero-issue run with no parsed issues carries only
+    # informational (non-JSON) text. Return it verbatim rather than feeding it
+    # to the JSON parser, which would raise and print parse-error noise for a
+    # clean pass (#1534). Real failures (success is False) still get parsed so
+    # unparseable diagnostic output surfaces as an error (#1044).
+    if success and issues_count == 0:
+        return output
 
     # Try to parse the output using registered parser (O(1) lookup)
     # Note: pytest output is already formatted by build_output_with_failures
