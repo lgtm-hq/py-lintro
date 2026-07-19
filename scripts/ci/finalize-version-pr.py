@@ -28,7 +28,6 @@ Run standalone to finalize the repository in place::
 from __future__ import annotations
 
 import importlib.util
-import sys
 from pathlib import Path
 from types import ModuleType
 
@@ -66,10 +65,10 @@ def main() -> int:
     changelog = _load("format_changelog", "format-changelog.py")
     security = _load("update_security_support", "update-security-support.py")
 
-    result = changelog.main([])
+    result = int(changelog.main([]))
     if result != 0:
         return result
-    return security.main([])
+    return int(security.main([]))
 
 
 if __name__ == "__main__":
