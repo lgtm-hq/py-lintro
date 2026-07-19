@@ -44,6 +44,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import sys
 from dataclasses import dataclass, field
 from enum import StrEnum
@@ -94,8 +95,8 @@ def normalize_tool_name(name: str) -> str:
 def classify_skip_reason(reason: str | None) -> SkipClass:
     """Classify a skip reason string into a :class:`SkipClass`.
 
-    Matching is case-insensitive and substring-based, checked in priority
-    order so the most dangerous class (a missing binary) wins.
+    Matching is case-insensitive and pattern-based, checked in priority order
+    so the most dangerous class (a missing binary) wins.
 
     Args:
         reason: The ``skip_reason`` string from a lintro tool result.
@@ -108,16 +109,17 @@ def classify_skip_reason(reason: str | None) -> SkipClass:
     if not text:
         return SkipClass.OTHER
 
-    binary_markers = (
-        "version check",
-        "no such file or directory",
-        "command not found",
-        "not found in path",
-        "is not installed",
-        "not installed",
-        "executable not found",
+    binary_patterns = (
+        r"\bfailed to run version check\b",
+        r"\bversion check failed\b",
+        r"\bno such file or directory\b",
+        r"\bcommand not found\b",
+        r"\bnot found in path\b",
+        r"\bis not installed\b",
+        r"\bnot installed\b",
+        r"\bexecutable not found\b",
     )
-    if any(marker in text for marker in binary_markers):
+    if any(re.search(pattern, text) for pattern in binary_patterns):
         return SkipClass.BINARY_MISSING
 
     opt_in_markers = (
@@ -129,15 +131,13 @@ def classify_skip_reason(reason: str | None) -> SkipClass:
     if any(marker in text for marker in opt_in_markers):
         return SkipClass.OPT_IN_DISABLED
 
-    config_markers = (
-        "no config",
-        "no configuration",
-        "configuration found",
-        "configuration provided",
-        "config found",
-        ".vale.ini",
+    config_patterns = (
+        r"\bno\b.*\bconfig(?:uration)?\b.*\b(?:found|provided)\b",
+        r"\bno\b.*\bconfig(?:uration)?\b",
+        r"\bconfig(?:uration)?(?: file)?\b.*\b(?:not found|missing|required)\b",
+        r"\b\.vale\.ini\b.*\b(?:not found|missing|required)\b",
     )
-    if any(marker in text for marker in config_markers):
+    if any(re.search(pattern, text) for pattern in config_patterns):
         return SkipClass.NO_CONFIG
 
     return SkipClass.OTHER

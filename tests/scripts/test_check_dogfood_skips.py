@@ -80,10 +80,28 @@ def test_classify_binary_missing_from_version_check() -> None:
     )
 
 
+def test_classify_version_check_without_failure_is_other() -> None:
+    """A bare version-check mention is not enough to imply a missing binary."""
+    reason = "Skipping tool because version check is disabled by configuration"
+    assert_that(mod.classify_skip_reason(reason)).is_equal_to(mod.SkipClass.OTHER)
+
+
 def test_classify_no_config_from_stylelint_reason() -> None:
     """A "no configuration found" reason classifies as no_config."""
     reason = "Skipping stylelint: no stylelint configuration found (e.g. .stylelintrc)."
     assert_that(mod.classify_skip_reason(reason)).is_equal_to(mod.SkipClass.NO_CONFIG)
+
+
+@pytest.mark.parametrize(
+    "reason",
+    [
+        "Skipping tool because configuration found is true",
+        "Skipping tool because configuration provided by the user is invalid",
+    ],
+)
+def test_classify_positive_configuration_mentions_are_other(reason: str) -> None:
+    """Positive config phrases do not imply a no-config skip."""
+    assert_that(mod.classify_skip_reason(reason)).is_equal_to(mod.SkipClass.OTHER)
 
 
 def test_classify_opt_in_disabled_from_idiom_review_reason() -> None:
