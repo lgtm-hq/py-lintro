@@ -20,8 +20,9 @@ Skip reasons are classified into one of:
   self-skips (e.g. stylelint/vale/commitlint). Allowlistable via the file.
 - ``opt_in_disabled`` — an opt-in tool (idiom-review) is disabled by default.
   Allowlistable via the file.
-- ``other`` — an unrecognised skip reason; treated like ``no_config`` for
-  allowlisting purposes (must be explicitly listed to be tolerated).
+- ``other`` — an unrecognised skip reason. Not permanently allowlistable
+  (like ``binary_missing``); it must be explicitly tolerated via an
+  ``interim`` entry with a tracking issue.
 
 Usage:
     python3 scripts/ci/check-dogfood-skips.py \
