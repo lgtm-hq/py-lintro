@@ -455,7 +455,7 @@
       "category": "external",
       "version_command": ["terraform", "version"],
       "languages": ["terraform"],
-      "tags": ["linter", "formatter"]
+      "tags": ["linter", "formatter", "infrastructure"]
     },
     {
       "name": "tsc",
