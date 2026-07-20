@@ -199,8 +199,10 @@ main() {
 		install_system_deps
 	fi
 
-	install_binary_tools
+	# Rust before binary tools: taplo's GitHub checksum often 404s and falls
+	# back to `cargo install`, which needs rustup/cargo already on PATH.
 	install_rust_tools
+	install_binary_tools
 	install_python_tools
 	install_node_tools
 
