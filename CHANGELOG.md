@@ -21,6 +21,16 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.87.1] - 2026-07-20
+
+### Changed
+
+- **deps**: update actions/setup-python action to v7.0.0 (major) (#1547) (511a54d)
+
+### Fixed
+
+- **markdownlint**: forward nested defaults.markdownlint rule options (#1554) (c2df0c2)
+
 ## [0.87.0] - 2026-07-20
 
 ### Added
