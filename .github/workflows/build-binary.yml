@@ -55,6 +55,79 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           WORKFLOW_CALL_RELEASE_TAG: ${{ inputs.release_tag }}
 
+  generate-man-page:
+    name: Generate Man Page
+    needs: get-release-info
+    runs-on: ubuntu-24.04
+    permissions:
+      # Required by softprops/action-gh-release to upload dist/lintro.1.
+      contents: write
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      inputs.release_tag != ''
+
+    steps:
+      - name: Harden Runner
+        # yamllint disable-line rule:line-length
+        uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
+        with:
+          egress-policy: 'block'
+          allowed-endpoints: >
+            github.com:443
+            api.github.com:443
+            objects.githubusercontent.com:443
+            pypi.org:443
+            files.pythonhosted.org:443
+            astral.sh:443
+            releases.astral.sh:443
+            uploads.github.com:443
+
+      - name: Checkout code
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: '3.14'
+
+      - name: Install uv
+        id: setup-uv
+        continue-on-error: true
+        uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990 # v8.3.2
+        with:
+          version: 'latest'
+
+      - name: Install uv (retry)
+        if: steps.setup-uv.outcome == 'failure'
+        uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990 # v8.3.2
+        with:
+          version: 'latest'
+
+      - name: Install dependencies
+        run: uv sync --group dev
+
+      - name: Generate man page
+        run: uv run python scripts/generate-man-page.py --output dist/lintro.1
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: lintro-man-page
+          path: dist/lintro.1
+          retention-days: 7
+
+      - name: Upload to release
+        if: inputs.release_tag != ''
+        # yamllint disable-line rule:line-length
+        uses: softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228 # v3
+        with:
+          tag_name: ${{ needs.get-release-info.outputs.release_tag }}
+          files: dist/lintro.1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
   build-macos:
     name: Build macOS Binary
     needs: get-release-info
@@ -360,7 +433,7 @@ jobs:
 
   homebrew-dispatch:
     name: Notify Homebrew Tap
-    needs: [get-release-info, build-macos]
+    needs: [get-release-info, build-macos, generate-man-page]
     runs-on: ubuntu-24.04
     permissions:
       contents: read
