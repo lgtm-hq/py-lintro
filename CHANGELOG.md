@@ -21,6 +21,12 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.84.0] - 2026-07-20
+
+### Added
+
+- **cli**: add shell completions and man page generation (#1541) (a5ba92a)
+
 ## [0.83.0] - 2026-07-20
 
 ### Added
