@@ -217,7 +217,11 @@ Shared utilities and helper scripts.
 | `extract-version.py`                 | Print `version=X.Y.Z` from TOML                     | `python scripts/utils/extract-version.py`                               |
 | `find_comment_with_marker.py`        | Find GitHub comment ID containing a specific marker | `python scripts/utils/find_comment_with_marker.py <json> <marker>`      |
 | `generate_docs.py`                   | Generate documentation from docstrings              | `python scripts/utils/generate_docs.py`                                 |
-| `install-tools.sh`                   | Install external tools (hadolint, prettier, etc.)   | `./scripts/utils/install-tools.sh [--dry-run] [--verbose] --local`      |
+| `install-tools.sh`                   | Install external tools (orchestrator)               | `./scripts/utils/install-tools.sh [--dry-run] [--verbose] --local`      |
+| `binary-tools.sh`                    | Install binary tools (hadolint, osv-scanner, ...)   | `./scripts/utils/installers/binary-tools.sh`                            |
+| `node-tools.sh`                      | Install Node/bun tools (prettier, oxlint, ...)      | `./scripts/utils/installers/node-tools.sh`                              |
+| `python-tools.sh`                    | Install Python tools (ruff, black, mypy, ...)       | `./scripts/utils/installers/python-tools.sh`                            |
+| `rust-tools.sh`                      | Install Rust tools (rustfmt, clippy, cargo-*)       | `./scripts/utils/installers/rust-tools.sh`                              |
 | `install.sh`                         | Install Lintro with dependencies                    | `./scripts/utils/install.sh`                                            |
 | `json_encode_body.py`                | JSON encode comment body for GitHub API requests    | `python scripts/utils/json_encode_body.py <file_or_stdin>`              |
 | `update-version.py`                  | Update version in pyproject.toml                    | `python scripts/utils/update-version.py <version>`                      |
@@ -463,13 +467,17 @@ Updates the coverage badge based on current coverage.xml file.
 
 #### `install-tools.sh`
 
-Installs all external tools required by Lintro.
+Orchestrator that installs all external tools required by Lintro. Flag parsing,
+`--tools` filtering, and verification live here; per-ecosystem install logic is in
+`scripts/utils/installers/`.
 
 **Features:**
 
-- Installs hadolint, prettier, ruff, yamllint, pydoclint
+- Installs hadolint, prettier, ruff, yamllint, pydoclint, and other tools
 - Supports local and Docker installation modes
-- Uses consistent installation methods
+- Supports `--tools tool1,tool2` for targeted installs
+- Uses modular group installers (`binary-tools.sh`, `python-tools.sh`, `node-tools.sh`,
+  `rust-tools.sh`)
 - Verifies installations
 
 **Usage:**
@@ -480,7 +488,22 @@ Installs all external tools required by Lintro.
 
 # Docker installation
 ./scripts/utils/install-tools.sh --docker
+
+# Install a single tool (e.g. CI vuln-suppression checks)
+./scripts/utils/install-tools.sh --tools osv-scanner
 ```
+
+#### Group installers (`installers/`)
+
+| Script            | Purpose                                               |
+| ----------------- | ----------------------------------------------------- |
+| `binary-tools.sh` | Prebuilt binaries (hadolint, osv-scanner, shellcheck) |
+| `node-tools.sh`   | bun/npm tools (prettier, oxlint, tsc, …)              |
+| `python-tools.sh` | pip/uv tools (ruff, black, mypy, …)                   |
+| `rust-tools.sh`   | Rust toolchain + cargo tools (rustfmt, clippy, …)     |
+
+Each group installer sources shared helpers (`_helpers.sh`), can be run directly for a
+single ecosystem, or is invoked by `install-tools.sh`.
 
 #### `utils.sh`
 
