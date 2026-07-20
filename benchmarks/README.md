@@ -2,10 +2,11 @@
 
 Two complementary suites live here:
 
-1. **Hyperfine CLI overhead** ([#598](https://github.com/lgtm-hq/py-lintro/issues/598)) —
-   measures lintro's orchestration cost versus running the same tools directly.
-2. **Comparative meta-linter harness** ([#1055](https://github.com/lgtm-hq/py-lintro/issues/1055)) —
-   wall-clock comparison against MegaLinter, pre-commit, and sequential natives.
+1. **Hyperfine CLI overhead** ([#598](https://github.com/lgtm-hq/py-lintro/issues/598))
+   — measures lintro's orchestration cost versus running the same tools directly.
+2. **Comparative meta-linter harness**
+   ([#1055](https://github.com/lgtm-hq/py-lintro/issues/1055)) — wall-clock comparison
+   against MegaLinter, pre-commit, and sequential natives.
 
 CI regression tracking for hyperfine JSON is intentionally out of scope here
 ([#599](https://github.com/lgtm-hq/py-lintro/issues/599)).
@@ -49,9 +50,9 @@ All runs target `benchmarks/fixtures/small-python/` and use:
 
 - `--shell=none` (`-N`) so an intermediate shell is not timed
 - `--yes` so lintro never blocks on confirmation prompts
-- `uv run --project <repo>` with `env -C <fixture>` so the fixture's
-  `pyproject.toml` applies (repo-root `post_checks` / black are disabled there for
-  fair single-tool isolation)
+- `uv run --project <repo>` with `env -C <fixture>` so the fixture's `pyproject.toml`
+  applies (repo-root `post_checks` / black are disabled there for fair single-tool
+  isolation)
 - repo `.venv` binaries for direct `ruff` / `mypy` on `PATH`
 
 ### Results
@@ -84,7 +85,7 @@ tool invocation**. It turns "lintro is fast" into a number you can reproduce and
 
 This implements [#1055](https://github.com/lgtm-hq/py-lintro/issues/1055).
 
-### Quick start
+### Quick start (comparative harness)
 
 ```bash
 # Benchmark lintro against every competitor available on this machine.
@@ -204,5 +205,5 @@ print(render_markdown_table(report))
   reflects startup and traversal cost rather than variable diagnostic volume. Includes a
   fixture-local `pyproject.toml` that disables lintro `post_checks` for overhead runs.
 
-Add medium-polyglot and large-monorepo fixtures (or a pinned public OSS repo) by dropping
-new directories under `fixtures/`; the comparative harness auto-discovers them.
+Add medium-polyglot and large-monorepo fixtures (or a pinned public OSS repo) by
+dropping new directories under `fixtures/`; the comparative harness auto-discovers them.
