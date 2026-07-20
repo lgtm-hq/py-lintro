@@ -35,6 +35,8 @@ __pycache__/
 build/
 !scripts/build/
 !scripts/build/**
+!tests/bats/unit/build/
+!tests/bats/unit/build/**
 scripts/build/__pycache__/
 develop-eggs/
 dist/
