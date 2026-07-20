@@ -12,8 +12,8 @@ uv pip install 'lintro[mcp]'
 pip install 'lintro[mcp]'
 ```
 
-`lintro doctor` reports whether the `mcp` extra is available under **Optional
-extras** (missing is informational, not a failure).
+`lintro doctor` reports whether the `mcp` extra is available under **Optional extras**
+(missing is informational, not a failure).
 
 ## Start the server
 
@@ -22,18 +22,18 @@ lintro mcp
 lintro mcp --workspace /path/to/repo
 ```
 
-`--workspace` defaults to the current working directory. All path arguments
-accepted by future toolkit tools are resolved with realpath containment under
-this root (symlink-escape safe).
+`--workspace` defaults to the current working directory. All path arguments accepted by
+future toolkit tools are resolved with realpath containment under this root
+(symlink-escape safe).
 
 ## Built-in tool
 
-| Tool | Annotations | Result |
-| --- | --- | --- |
+| Tool          | Annotations           | Result                                |
+| ------------- | --------------------- | ------------------------------------- |
 | `lintro_ping` | read-only, idempotent | `{status, lintro_version, workspace}` |
 
-Additional toolkits (check, format, review, and so on) register through the
-internal `McpToolRegistry` and ship in follow-up issues.
+Additional toolkits (check, format, review, and so on) register through the internal
+`McpToolRegistry` and ship in follow-up issues.
 
 ## Agent configuration example
 
@@ -62,5 +62,4 @@ Tool failures use a stable envelope:
 }
 ```
 
-Codes: `workspace_violation`, `tool_unavailable`, `invalid_input`,
-`execution_error`.
+Codes: `workspace_violation`, `tool_unavailable`, `invalid_input`, `execution_error`.
