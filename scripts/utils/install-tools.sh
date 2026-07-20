@@ -84,6 +84,7 @@ This script installs:
   - dotenv-linter (.env file linter and fixer)
   - SQLFluff (SQL linter and formatter)
   - Taplo (TOML linter and formatter)
+  - Terraform (Infrastructure-as-code formatter and validator)
   - Vale (Prose/documentation linter)
   - TypeScript (TypeScript compiler and type checker)
   - Astro Check (Astro component type checker)
@@ -170,7 +171,7 @@ SUPPORTED_TOOLS=(
 	"actionlint" "astro" "bandit" "black" "cargo-audit" "cargo-deny"
 	"clippy" "commitlint" "dotenv-linter" "gitleaks" "hadolint" "markdownlint" "markdownlint-cli2" "mypy" "osv-scanner"
 	"oxfmt" "oxlint" "pip-audit" "prettier" "pydoclint" "ruff" "rustfmt" "semgrep"
-	"shellcheck" "shfmt" "sqlfluff" "stylelint" "svelte-check" "taplo" "tsc"
+	"shellcheck" "shfmt" "sqlfluff" "stylelint" "svelte-check" "taplo" "terraform" "tsc"
 	"vale" "vue-tsc" "yamllint"
 )
 
@@ -1533,6 +1534,120 @@ main() {
 		fi
 	fi # taplo
 
+	if should_install "terraform"; then
+		# Install terraform (infrastructure-as-code formatter and validator)
+		# Prebuilt binaries: https://releases.hashicorp.com/terraform
+		echo -e "${BLUE}Installing terraform...${NC}"
+		TERRAFORM_VERSION=$(get_tool_version "terraform") || exit 1
+
+		# Helper function for terraform binary installation
+		install_terraform_binary() {
+			local tmpdir os arch arch_name base_url zip_url checksum_url
+			local expected actual
+			tmpdir=$(mktemp -d)
+			os=$(uname -s | tr '[:upper:]' '[:lower:]')
+			arch=$(uname -m)
+			case "$arch" in
+			x86_64 | amd64) arch_name="amd64" ;;
+			aarch64 | arm64) arch_name="arm64" ;;
+			*)
+				echo -e "${RED}✗ Unsupported architecture: $arch${NC}"
+				rm -rf "$tmpdir"
+				return 1
+				;;
+			esac
+			base_url="https://releases.hashicorp.com/terraform/${TERRAFORM_VERSION}"
+			zip_url="${base_url}/terraform_${TERRAFORM_VERSION}_${os}_${arch_name}.zip"
+			checksum_url="${base_url}/terraform_${TERRAFORM_VERSION}_SHA256SUMS"
+			if download_with_retries "$zip_url" "$tmpdir/terraform.zip" 3; then
+				# Require checksum verification before installing
+				if ! download_with_retries "$checksum_url" "$tmpdir/checksums.txt" 3; then
+					echo -e "${RED}✗ Failed to download checksum file for terraform${NC}"
+					rm -rf "$tmpdir"
+					return 1
+				fi
+				echo -e "${BLUE}Verifying checksum for terraform...${NC}"
+				expected=$(grep "terraform_${TERRAFORM_VERSION}_${os}_${arch_name}.zip" "$tmpdir/checksums.txt" | awk '{print $1}')
+				if [ -z "$expected" ]; then
+					echo -e "${RED}✗ Checksum entry not found for terraform_${TERRAFORM_VERSION}_${os}_${arch_name}.zip${NC}"
+					rm -rf "$tmpdir"
+					return 1
+				fi
+				if command -v sha256sum >/dev/null 2>&1; then
+					actual=$(sha256sum "$tmpdir/terraform.zip" | awk '{print $1}')
+				elif command -v shasum >/dev/null 2>&1; then
+					actual=$(shasum -a 256 "$tmpdir/terraform.zip" | awk '{print $1}')
+				else
+					echo -e "${RED}✗ Unable to compute checksum: no hash tool found (sha256sum or shasum required)${NC}"
+					rm -rf "$tmpdir"
+					return 1
+				fi
+				if [ "$expected" != "$actual" ]; then
+					echo -e "${RED}✗ Checksum mismatch for terraform (expected: $expected, got: $actual)${NC}"
+					rm -rf "$tmpdir"
+					return 1
+				fi
+				echo -e "${GREEN}✓ Checksum verified${NC}"
+				if command -v unzip >/dev/null 2>&1; then
+					unzip -o -q "$tmpdir/terraform.zip" -d "$tmpdir"
+				else
+					python3 -c "import sys, zipfile; zipfile.ZipFile(sys.argv[1]).extractall(sys.argv[2])" "$tmpdir/terraform.zip" "$tmpdir"
+				fi
+				if [ -f "$tmpdir/terraform" ]; then
+					cp "$tmpdir/terraform" "$BIN_DIR/terraform"
+					chmod +x "$BIN_DIR/terraform"
+					rm -rf "$tmpdir"
+					return 0
+				else
+					echo -e "${RED}✗ Could not find extracted terraform binary${NC}"
+					rm -rf "$tmpdir"
+					return 1
+				fi
+			else
+				echo -e "${RED}✗ Failed to download terraform${NC}"
+				rm -rf "$tmpdir"
+				return 1
+			fi
+		}
+
+		if [ $DRY_RUN -eq 1 ]; then
+			log_info "[DRY-RUN] Would install terraform v${TERRAFORM_VERSION}"
+		elif command -v terraform &>/dev/null; then
+			# Check if installed version meets minimum requirement
+			installed_version=$(terraform version 2>/dev/null | head -n1 | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -n1)
+			if [ -n "$installed_version" ]; then
+				# Compare versions using portable version_ge function from utils.sh
+				if version_ge "$installed_version" "$TERRAFORM_VERSION"; then
+					echo -e "${GREEN}✓ terraform v${installed_version} already installed (>= v${TERRAFORM_VERSION})${NC}"
+				else
+					echo -e "${YELLOW}⚠ terraform v${installed_version} is older than required v${TERRAFORM_VERSION}, upgrading...${NC}"
+					if install_terraform_binary; then
+						echo -e "${GREEN}✓ terraform upgraded to v${TERRAFORM_VERSION}${NC}"
+					else
+						echo -e "${RED}✗ Failed to download terraform${NC}"
+						exit 1
+					fi
+				fi
+			else
+				# Could not parse version, treat as not installed
+				echo -e "${YELLOW}⚠ Could not determine terraform version, installing v${TERRAFORM_VERSION}...${NC}"
+				if install_terraform_binary; then
+					echo -e "${GREEN}✓ terraform installed successfully${NC}"
+				else
+					echo -e "${RED}✗ Failed to download terraform${NC}"
+					exit 1
+				fi
+			fi
+		else
+			if install_terraform_binary; then
+				echo -e "${GREEN}✓ terraform installed successfully${NC}"
+			else
+				echo -e "${RED}✗ Failed to download terraform${NC}"
+				exit 1
+			fi
+		fi
+	fi # terraform
+
 	if should_install "tsc"; then
 		# Install typescript via bun (TypeScript compiler)
 		echo -e "${BLUE}Installing typescript...${NC}"
@@ -1643,6 +1758,7 @@ main() {
 		["stylelint"]="CSS/SCSS/Less linting"
 		["svelte-check"]="Svelte type checking"
 		["taplo"]="TOML linting and formatting"
+		["terraform"]="Terraform formatting and validation"
 		["tsc"]="TypeScript type checking"
 		["vue-tsc"]="Vue TypeScript type checking"
 		["yamllint"]="YAML linting"
@@ -1658,7 +1774,7 @@ main() {
 	# Verify installations
 	echo -e "${YELLOW}Verifying installations...${NC}"
 
-	tools_to_verify=("actionlint" "astro" "bandit" "black" "cargo-audit" "cargo-deny" "clippy" "commitlint" "dotenv-linter" "gitleaks" "hadolint" "markdownlint-cli2" "mypy" "osv-scanner" "oxfmt" "oxlint" "pip-audit" "prettier" "pydoclint" "ruff" "rustfmt" "semgrep" "shellcheck" "shfmt" "sqlfluff" "stylelint" "svelte-check" "taplo" "tsc" "vale" "vue-tsc" "yamllint")
+	tools_to_verify=("actionlint" "astro" "bandit" "black" "cargo-audit" "cargo-deny" "clippy" "commitlint" "dotenv-linter" "gitleaks" "hadolint" "markdownlint-cli2" "mypy" "osv-scanner" "oxfmt" "oxlint" "pip-audit" "prettier" "pydoclint" "ruff" "rustfmt" "semgrep" "shellcheck" "shfmt" "sqlfluff" "stylelint" "svelte-check" "taplo" "terraform" "tsc" "vale" "vue-tsc" "yamllint")
 
 	# Filter verification list when --tools is set.
 	# Map aliases so e.g. --tools markdownlint verifies markdownlint-cli2.

@@ -582,6 +582,7 @@ class StandaloneBuilder(CommandBuilder):
                     ToolName.SHELLCHECK,
                     ToolName.SHFMT,
                     ToolName.SEMGREP,
+                    ToolName.TERRAFORM,
                 },
             )
         return self._tools

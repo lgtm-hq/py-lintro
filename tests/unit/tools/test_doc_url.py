@@ -30,6 +30,7 @@ from lintro.tools.definitions.semgrep import SemgrepPlugin
 from lintro.tools.definitions.shellcheck import ShellcheckPlugin
 from lintro.tools.definitions.sqlfluff import SqlfluffPlugin
 from lintro.tools.definitions.taplo import TaploPlugin
+from lintro.tools.definitions.terraform import TerraformPlugin
 from lintro.tools.definitions.tsc import TscPlugin
 from lintro.tools.definitions.vue_tsc import VueTscPlugin
 from lintro.tools.definitions.yamllint import YamllintPlugin
@@ -121,6 +122,13 @@ from lintro.tools.definitions.yamllint import YamllintPlugin
         # taplo — single-page docs
         (TaploPlugin, "invalid_value", "https://taplo.tamasfe.dev/"),
         (TaploPlugin, "", None),
+        # terraform — single-page language docs
+        (
+            TerraformPlugin,
+            "validate",
+            "https://developer.hashicorp.com/terraform/language",
+        ),
+        (TerraformPlugin, "", None),
         # yamllint — rules anchor
         (
             YamllintPlugin,
@@ -156,6 +164,8 @@ from lintro.tools.definitions.yamllint import YamllintPlugin
         "sqlfluff-empty",
         "taplo-valid",
         "taplo-empty",
+        "terraform-valid",
+        "terraform-empty",
         "yamllint-valid",
         "yamllint-empty",
     ],

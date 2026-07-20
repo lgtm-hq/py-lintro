@@ -326,6 +326,19 @@
       "extractVersionTemplate": "^(?<version>[0-9]+\\.[0-9]+\\.[0-9]+)$"
     },
     {
+      "description": "Update terraform version in _tool_versions.py (manifest follows via generator)",
+      "customType": "regex",
+      "managerFilePatterns": [
+        "lintro/_tool_versions\\.py"
+      ],
+      "matchStrings": [
+        "ToolName\\.TERRAFORM:\\s*\"(?<currentValue>[0-9]+\\.[0-9]+\\.[0-9]+)\""
+      ],
+      "datasourceTemplate": "github-releases",
+      "packageNameTemplate": "hashicorp/terraform",
+      "extractVersionTemplate": "^v(?<version>.*)$"
+    },
+    {
       "description": "Update vale version in _tool_versions.py",
       "customType": "regex",
       "managerFilePatterns": [

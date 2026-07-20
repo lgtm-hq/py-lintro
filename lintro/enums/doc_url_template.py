@@ -43,5 +43,6 @@ class DocUrlTemplate(StrEnum):
     SQLFLUFF = "https://docs.sqlfluff.com/en/stable/rules.html#{code}"
     STYLELINT = "https://stylelint.io/user-guide/rules/{code}"
     TAPLO = "https://taplo.tamasfe.dev/"
+    TERRAFORM = "https://developer.hashicorp.com/terraform/language"
     TSC = "https://typescript.tv/errors/#ts{code}"
     YAMLLINT = "https://yamllint.readthedocs.io/en/stable/rules.html#{code}"

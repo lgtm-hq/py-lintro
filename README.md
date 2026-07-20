@@ -198,6 +198,12 @@ system.
 <td><code>brew install taplo</code><br><a href="https://github.com/tamasfe/taplo/releases">GitHub Releases</a></td>
 </tr>
 <tr>
+<td><a href="https://developer.hashicorp.com/terraform"><img src="https://img.shields.io/badge/Terraform-7b42bc?logo=terraform&logoColor=white" alt="Terraform"></a></td>
+<td>🏗️ Terraform</td>
+<td>✅</td>
+<td><code>brew install terraform</code><br><a href="https://releases.hashicorp.com/terraform">HashiCorp Releases</a></td>
+</tr>
+<tr>
 <td><a href="https://dotenv-linter.github.io/"><img src="https://img.shields.io/badge/dotenv--linter-ecd53f?logo=dotenv&logoColor=black" alt="dotenv-linter"></a></td>
 <td>🔑 .env Files</td>
 <td>✅</td>

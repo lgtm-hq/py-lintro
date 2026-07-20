@@ -126,7 +126,12 @@ RUN --mount=type=cache,target=/opt/cargo/registry,sharing=locked \
     find /app/scripts -type f -name "*.sh" -exec chmod +x {} \; && \
     /app/scripts/utils/install-tools.sh --docker && \
     rustup default stable && \
-    rustup component add clippy
+    rustup component add clippy && \
+    # Rust ships thousands of tiny HTML doc files under share/doc. They
+    # carry no runtime value and dominate the Trivy filesystem walk, which
+    # can push the image security scan past its fixed timeout. Vulnerability
+    # coverage is unaffected — the docs contain no packages or binaries.
+    rm -rf /opt/rustup/toolchains/*/share/doc
 
 RUN chgrp -R tools /opt/cargo /opt/rustup /opt/bun && \
     chmod -R g+rwX /opt/cargo /opt/rustup /opt/bun && \
@@ -148,5 +153,5 @@ RUN echo "=== Verifying all tools ===" && \
     stylelint --version && \
     taplo --version && tsc --version && astro --version && \
     svelte-check --version && vue-tsc --version && yamllint --version && \
-    vale --version && \
+    vale --version && terraform version && \
     echo "=== All tools verified! ==="

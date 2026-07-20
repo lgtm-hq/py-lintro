@@ -74,6 +74,16 @@ implementations with the core tools themselves.
 - ⚠️ **Defaults**: No flags; filtered to `/.github/workflows/`
 - 🚀 **Notes**: Normalized parsing and formatting
 
+### [Terraform Analysis](./terraform-analysis.md)
+
+**Infrastructure-as-Code Formatter and Validator**
+
+- ✅ **Preserved**: `terraform fmt` formatting (fixable) and `terraform validate`
+  per-module validation via JSON diagnostics
+- ⚠️ **Limited**: No `plan`/provider-backed checks; validation runs with
+  `-backend=false`
+- 🚀 **Notes**: fmt file-list and validate JSON diagnostics normalized to Lintro issues
+
 **Dockerfile Linter for Best Practices**
 
 - ✅ **Preserved**: Dockerfile analysis, shell script linting, best practices, security
