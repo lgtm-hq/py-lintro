@@ -21,6 +21,18 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.85.0] - 2026-07-20
+
+### Added
+
+- **vale**: add repo-root .vale.ini for prose linting (#1522) (39e953c)
+
+### Changed
+
+- add adding-a-new-tool guide, issue template, and PR checklist (#1530) (08a0512)
+- add idiom-review documentation across README, configuration, and tool analysis (#1527)
+  (5a7ce54)
+
 ## [0.84.1] - 2026-07-20
 
 ### Changed
