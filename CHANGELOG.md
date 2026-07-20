@@ -21,6 +21,18 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.82.3] - 2026-07-20
+
+### Changed
+
+- **deps**: update dependency svelte to 5.56.6 (patch) (#1544) (437ddf5)
+- **deps**: update renovatebot/github-action action to v46.1.20 (patch) (#1545)
+  (61a8087)
+
+### Fixed
+
+- **output**: gate ASCII art on TTY and add --no-art (#1539) (5ed0ad3)
+
 ## [0.82.2] - 2026-07-20
 
 ### Changed
