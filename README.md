@@ -106,6 +106,12 @@ system.
 <td><code>bun add -g @commitlint/cli @commitlint/config-conventional</code><br><code>brew install commitlint</code></td>
 </tr>
 <tr>
+<td><a href="https://github.com/golangci/golangci-lint"><img src="https://img.shields.io/badge/golangci--lint-00ADD8?logo=go&logoColor=white" alt="golangci-lint"></a></td>
+<td>🐹 Go</td>
+<td>✅</td>
+<td><code>brew install golangci-lint</code><br><a href="https://golangci-lint.run/welcome/install/">Install docs</a></td>
+</tr>
+<tr>
 <td><a href="https://github.com/hadolint/hadolint"><img src="https://img.shields.io/badge/Hadolint-2496ED?logo=docker&logoColor=white" alt="Hadolint"></a></td>
 <td>🐳 Dockerfile</td>
 <td>-</td>

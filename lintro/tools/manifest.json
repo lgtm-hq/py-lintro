@@ -36,7 +36,7 @@
     "javascript": ["oxlint", "oxfmt", "prettier"],
     "typescript": ["oxlint", "oxfmt", "prettier", "tsc"],
     "rust": ["clippy", "rustfmt", "rustc", "cargo_audit", "cargo_deny"],
-    "go": ["semgrep"],
+    "go": ["golangci_lint", "semgrep"],
     "ruby": ["semgrep"],
     "sql": ["sqlfluff"],
     "shell": ["shellcheck", "shfmt"],
@@ -186,6 +186,18 @@
       "version_command": ["gitleaks", "version"],
       "languages": ["security"],
       "tags": ["security"]
+    },
+    {
+      "name": "golangci_lint",
+      "version": "2.12.2",
+      "install": {
+        "type": "binary"
+      },
+      "tier": "tools",
+      "category": "external",
+      "version_command": ["golangci-lint", "version"],
+      "languages": ["go"],
+      "tags": ["linter"]
     },
     {
       "name": "hadolint",

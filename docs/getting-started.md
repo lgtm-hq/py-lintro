@@ -94,6 +94,8 @@ Some tools require separate installation. Their minimum versions are also manage
   `pip install semgrep`, or `brew install semgrep`)
 - `gitleaks` - Secret detection in git repos (`brew install gitleaks` or GitHub
   releases)
+- `golangci-lint` - Go meta-linter running 100+ linters (`brew install golangci-lint` or
+  <https://golangci-lint.run/welcome/install/>; requires the Go toolchain)
 - `shellcheck` - Shell script analyzer (`brew install shellcheck` or GitHub releases)
 - `shfmt` - Shell script formatter (`brew install shfmt` or GitHub releases)
 - `dotenv-linter` - `.env` file linter and fixer (`brew install dotenv-linter`,

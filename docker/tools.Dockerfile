@@ -138,6 +138,7 @@ RUN echo "=== Verifying all tools ===" && \
     rustfmt --version && cargo clippy --version && cargo audit --version && \
     cargo deny --version && actionlint --version && bandit --version && \
     black --version && commitlint --version && gitleaks version && \
+    golangci-lint version && \
     hadolint --version && \
     markdownlint-cli2 --version && mypy --version && osv-scanner --version && \
     oxfmt --version && oxlint --version && prettier --version && \

@@ -21,6 +21,7 @@ class ToolName(StrEnum):
     COMMITLINT = auto()
     DOTENV_LINTER = auto()
     GITLEAKS = auto()
+    GOLANGCI_LINT = auto()
     HADOLINT = auto()
     IDIOM_REVIEW = auto()
     MARKDOWNLINT = auto()
