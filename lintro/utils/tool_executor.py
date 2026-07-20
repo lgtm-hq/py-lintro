@@ -482,6 +482,7 @@ def run_lint_tools_simple(
     score: bool = False,
     fail_under: float | None = None,
     diff_base: str | None = None,
+    no_art: bool = False,
 ) -> int:
     """Simplified runner using Loguru-based logging with rich formatting.
 
@@ -525,6 +526,9 @@ def run_lint_tools_simple(
             files; :data:`~lintro.utils.git_diff.DIFF_DEFAULT_SENTINEL` resolves
             the repository default base; any other value is used as the base
             ref. Non-git directories fall back to a full scan with a warning.
+        no_art: When True, suppress decorative ASCII art regardless of the
+            ``output.art`` config value. Art is also suppressed automatically
+            when ``output.art`` is ``False`` or stdout is not a TTY.
 
     Returns:
         Exit code (0 for success, 1 for failures).
@@ -564,9 +568,18 @@ def run_lint_tools_simple(
     # Score-only takes priority over machine-readable formats so
     # ``--score --output-format json`` still prints only the numeric score.
     score_only = bool(score)
+
+    # Resolve whether decorative ASCII art may be shown. Either the ``--no-art``
+    # flag or ``output.art: false`` in config disables it; the TTY guard in
+    # print_ascii_art still applies on top of this.
+    from lintro.config.config_loader import get_config as _get_config
+
+    art_enabled = bool(_get_config().output.art) and not no_art
+
     logger = create_logger(
         run_dir=output_manager.run_dir,
         route_stderr=machine_readable_output or score_only,
+        art_enabled=art_enabled,
     )
 
     # Get tools to run (now returns ToolsToRunResult with skip info)

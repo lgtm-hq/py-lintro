@@ -72,7 +72,6 @@ jobs:
         files.pythonhosted.org:443
         test.pypi.org:443
         upload.pypi.org:443
-        upload.test.pypi.org:443
         astral.sh:443
         releases.astral.sh:443
     permissions:
@@ -115,7 +114,6 @@ jobs:
         files.pythonhosted.org:443
         test.pypi.org:443
         upload.pypi.org:443
-        upload.test.pypi.org:443
         astral.sh:443
         releases.astral.sh:443
     permissions:

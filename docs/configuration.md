@@ -231,6 +231,32 @@ In `--output-format json` the score is added **additively** under
 }
 ```
 
+### Output Presentation
+
+Purely cosmetic console output is controlled by the `output` section. These settings
+never affect machine-readable documents (JSON/SARIF) or on-disk artifacts.
+
+```yaml
+# .lintro-config.yaml
+output:
+  art: true # Show decorative ASCII art after a run (default: true)
+```
+
+The decorative ASCII art printed after `check`/`fmt` is only emitted to an interactive
+terminal. It is always suppressed when:
+
+- stdout is not a TTY (piped output, CI logs, redirected files), or
+- `output.art: false` is set in config, or
+- the `--no-art` flag is passed to `lintro check` / `lintro format`.
+
+The art is never written to `.lintro/run-*/report.md`, `console.log`, or any
+`--output-format` stream regardless of these settings.
+
+```bash
+lintro check --no-art   # suppress art for this run only
+lintro format --no-art
+```
+
 ### Command-Line Options
 
 #### Global Options
