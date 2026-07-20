@@ -103,12 +103,12 @@ trap 'rm -f "$old_manifest"' EXIT
 # as added, which is the correct fail-open-to-tolerance for that rare case.
 if ! git show "${merge_base}:${MANIFEST}" >"$old_manifest" 2>/dev/null; then
 	log_info "No manifest at merge-base ${merge_base}; treating all tools as new"
-	: >"$old_manifest"
+	rm -f "$old_manifest"
 fi
 
 added=""
 if ! added="$(python3 "${script_dir}/compute-new-manifest-tools.py" \
-	--old "$old_manifest" --new "$MANIFEST" 2>/dev/null)"; then
+	--old "$old_manifest" --new "$MANIFEST")"; then
 	log_warn "Name diff failed; failing closed (empty set)"
 	emit ""
 fi

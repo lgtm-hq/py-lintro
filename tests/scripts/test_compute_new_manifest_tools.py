@@ -239,6 +239,30 @@ def test_sh_no_manifest_change_is_empty(tmp_path: Path) -> None:
     assert_that(result.stdout.strip()).is_equal_to("")
 
 
+def test_sh_new_manifest_treats_all_as_added(tmp_path: Path) -> None:
+    """No manifest at the merge-base reports every current tool as added.
+
+    Regression test for #1566: ``git show`` failing (no manifest blob at the
+    merge-base) must make the Python helper see a *non-existent* old-manifest
+    path, not an existing-but-empty one -- an empty file fails JSON parsing
+    and flips the result to fail-closed (empty allowlist), the opposite of
+    the documented "brand-new manifest" intent.
+    """
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _git(repo, "init", "--initial-branch=main")
+    (repo / "README.md").write_text("docs\n")
+    _git(repo, "add", ".")
+    _git(repo, "commit", "-m", "base without a manifest")
+    _git(repo, "checkout", "-b", "feature")
+    _write_manifest_file(repo, ["ruff", "terraform"])
+    _git(repo, "add", ".")
+    _git(repo, "commit", "-m", "introduce manifest")
+    result = _run_sh(repo, base_ref="main")
+    assert_that(result.returncode).is_equal_to(0)
+    assert_that(result.stdout.strip()).is_equal_to("ruff,terraform")
+
+
 def test_sh_unresolvable_base_fails_closed(tmp_path: Path) -> None:
     """An unresolvable base ref fails closed: empty allowlist, exit 0."""
     repo = _init_repo_with_base(tmp_path)
