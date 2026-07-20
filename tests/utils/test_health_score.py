@@ -258,6 +258,7 @@ def test_tier_for_representative_counts(
     """
     assert_that(compute_health_score(counts).tier).is_equal_to(expected_tier)
 
+
 @pytest.mark.parametrize(
     ("tier", "expected_color"),
     [
