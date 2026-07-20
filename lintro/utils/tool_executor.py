@@ -809,6 +809,28 @@ def run_lint_tools_simple(
                 logger.console_output(text="Aborted.", color="yellow")
                 return int(DEFAULT_EXIT_CODE_SUCCESS)
 
+    # Optional git checkpoint before fmt mutates files.
+    if (
+        selection_action == Action.FIX
+        and not dry_run_preview
+        and lintro_config.ai.checkpoint_fmt
+    ):
+        from pathlib import Path as _Path
+
+        from lintro.ai.undo import prepare_path_batch
+
+        prepare_path_batch(
+            paths,
+            _Path.cwd(),
+            retention=lintro_config.ai.checkpoint_retention,
+        )
+        if output_format.lower() not in {"json", "sarif"} and not score_only:
+            logger.console_output(
+                text="Captured fmt checkpoint for rollback "
+                f"(retention={lintro_config.ai.checkpoint_retention})",
+                color="cyan",
+            )
+
     # Define success_func once before the loop
     def success_func(message: str) -> None:
         logger.console_output(text=message, color="green")

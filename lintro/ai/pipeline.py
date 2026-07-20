@@ -26,7 +26,7 @@ from lintro.ai.refinement import refine_unverified_fixes
 from lintro.ai.risk import is_safe_style_fix
 from lintro.ai.summary import generate_post_fix_summary
 from lintro.ai.telemetry import AITelemetry
-from lintro.ai.undo import save_undo_patch
+from lintro.ai.undo import prepare_fix_batch
 from lintro.ai.validation import ValidationResult, validate_applied_fixes, verify_fixes
 from lintro.enums.output_format import OutputFormat
 
@@ -192,6 +192,7 @@ def _apply_or_review(
     risky_suggestions = [s for s in all_suggestions if not is_safe_style_fix(s)]
     safe_failed = 0
     safe_fast_path_applied = False
+    retention = ai_config.checkpoint_retention
 
     # Fast path: auto-apply deterministic style-only fixes when non-interactive.
     if (
@@ -200,12 +201,17 @@ def _apply_or_review(
         and (is_json or not sys.stdin.isatty())
     ):
         safe_fast_path_applied = True
-        save_undo_patch(safe_suggestions, workspace_root)
+        undo_state = prepare_fix_batch(
+            safe_suggestions,
+            workspace_root,
+            retention=retention,
+        )
         applied_safe = apply_fixes(
             safe_suggestions,
             workspace_root=workspace_root,
             auto_apply=True,
             search_radius=ai_config.fix_search_radius,
+            undo_state=undo_state,
         )
         applied_suggestions.extend(applied_safe)
         applied += len(applied_safe)
@@ -223,12 +229,17 @@ def _apply_or_review(
         auto_apply_candidates = (
             risky_suggestions if safe_fast_path_applied else all_suggestions
         )
-        save_undo_patch(auto_apply_candidates, workspace_root)
+        undo_state = prepare_fix_batch(
+            auto_apply_candidates,
+            workspace_root,
+            retention=retention,
+        )
         auto_applied = apply_fixes(
             auto_apply_candidates,
             workspace_root=workspace_root,
             auto_apply=True,
             search_radius=ai_config.fix_search_radius,
+            undo_state=undo_state,
         )
         applied_suggestions.extend(auto_applied)
         applied += len(auto_applied)
@@ -241,12 +252,17 @@ def _apply_or_review(
         review_candidates = (
             risky_suggestions if safe_fast_path_applied else all_suggestions
         )
-        save_undo_patch(review_candidates, workspace_root)
+        undo_state = prepare_fix_batch(
+            review_candidates,
+            workspace_root,
+            retention=retention,
+        )
         accepted_count, rejected_count, interactive_applied = review_fixes_interactive(
             review_candidates,
             validate_after_group=ai_config.validate_after_group,
             workspace_root=workspace_root,
             search_radius=ai_config.fix_search_radius,
+            undo_state=undo_state,
         )
         applied += accepted_count
         rejected += rejected_count + safe_failed
