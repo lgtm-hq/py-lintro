@@ -21,6 +21,16 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.83.0] - 2026-07-20
+
+### Added
+
+- **ci**: fail dogfooding when an enabled tool silently skips (#1536) (89a9e5b)
+
+### Changed
+
+- **tests**: normalize new-tool test and fixture placements (#1538) (2dd1d42)
+
 ## [0.82.3] - 2026-07-20
 
 ### Changed
