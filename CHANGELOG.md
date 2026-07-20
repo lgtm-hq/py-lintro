@@ -21,6 +21,12 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.86.0] - 2026-07-20
+
+### Added
+
+- **ci**: add repo-root .stylelintrc.json and fix hex violations (#1519) (4aa2234)
+
 ## [0.85.2] - 2026-07-20
 
 ### Fixed
