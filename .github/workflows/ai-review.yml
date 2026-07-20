@@ -95,7 +95,7 @@ jobs:
         # code that runs with ANTHROPIC_API_KEY must be trusted; the PR diff is
         # fetched separately via `gh` in the review step. base.sha is the exact
         # commit the PR targets and is already merged into main, so it is safe.
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           ref: ${{ github.event.pull_request.base.sha }}
           fetch-depth: 1
