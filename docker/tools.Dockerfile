@@ -100,7 +100,7 @@ RUN ARCH=$(uname -m) && \
 # Multi-arch with SHA256 verification, mirroring the bun/uv blocks. The
 # checksum is fetched from the vendor sibling ".sha256" so Renovate only needs
 # to bump GO_VERSION (no hand-maintained hashes to drift).
-# hadolint ignore=DL3003,SC2086
+# hadolint ignore=SC2086
 RUN ARCH=$(uname -m) && \
     if [ "$ARCH" = "x86_64" ]; then GO_ARCH="amd64"; \
     elif [ "$ARCH" = "aarch64" ]; then GO_ARCH="arm64"; \
