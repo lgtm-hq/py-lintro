@@ -341,6 +341,11 @@ dist
 .lintro/
 coverage.json
 
+# Hyperfine local scratch exports (committed baselines omit the .local suffix)
+benchmarks/results/hyperfine/*.local.json
+benchmarks/fixtures/**/.mypy_cache/
+benchmarks/fixtures/**/.ruff_cache/
+
 # act secrets file (DO NOT COMMIT)
 .secrets
 __pycache__/
