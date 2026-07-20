@@ -39,14 +39,22 @@ Run verify-manifest-tools.py inside a container image, checking the image's
 installed tools against the current repository manifest.
 
 Environment:
-  IMAGE      Required. Image ref to verify (CI tag, local tag, or @sha256
-             digest). Registry refs are auto-pulled by `docker run`.
-  TIERS      Optional. Comma-separated manifest tiers to verify
-             (default: tools).
-  MANIFEST   Optional. Manifest path relative to the repo root
-             (default: lintro/tools/manifest.json).
-  DRY_RUN    Optional. When "1"/"true", print the docker command and exit 0
-             without invoking docker (used by unit tests).
+  IMAGE          Required. Image ref to verify (CI tag, local tag, or @sha256
+                 digest). Registry refs are auto-pulled by `docker run`.
+  TIERS          Optional. Comma-separated manifest tiers to verify
+                 (default: tools).
+  MANIFEST       Optional. Manifest path relative to the repo root
+                 (default: lintro/tools/manifest.json).
+  BASE_REF       Optional. PR base branch (github.base_ref). When set, tools
+                 the PR newly adds to the manifest are computed (diff vs the
+                 merge-base) and passed as --allow-missing, so their absent
+                 binary in the digest-pinned base image downgrades to a
+                 warning instead of failing the gate (#1565). Unset on
+                 main/nightly -> empty allowlist -> full enforcement.
+  ALLOW_MISSING  Optional. Explicit comma-separated allow-missing tool names.
+                 Overrides the BASE_REF-derived set (used by unit tests).
+  DRY_RUN        Optional. When "1"/"true", print the docker command and exit 0
+                 without invoking docker (used by unit tests).
 
 Exit codes:
   0  all verified tiers match the manifest
@@ -63,10 +71,14 @@ fi
 : "${IMAGE:?IMAGE is required (e.g. ghcr.io/lgtm-hq/py-lintro:ci-123)}"
 : "${TIERS:=tools}"
 : "${MANIFEST:=lintro/tools/manifest.json}"
+: "${BASE_REF:=}"
+: "${ALLOW_MISSING:=}"
 : "${DRY_RUN:=}"
 
 log_info() { echo "[INFO] $*"; }
 log_error() { echo "[ERROR] $*" >&2; }
+
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # Resolve the repository root to mount: prefer git, fall back to the script's
 # grandparent (scripts/ci/ -> repo root).
@@ -81,6 +93,14 @@ if [[ ! -f "${repo_root}/${MANIFEST}" ]]; then
 	exit 2
 fi
 
+# Compute the newly-added-tool allowlist (#1565). An explicit ALLOW_MISSING
+# wins (tests); otherwise derive it from BASE_REF via the fail-closed helper.
+# On main/nightly (no BASE_REF) the helper returns empty -> full enforcement.
+if [[ -z "$ALLOW_MISSING" ]]; then
+	ALLOW_MISSING="$(BASE_REF="$BASE_REF" MANIFEST="$MANIFEST" \
+		"${script_dir}/compute-new-manifest-tools.sh")"
+fi
+
 # Bypass the image entrypoint so the container's baked ENV is used verbatim and
 # the checkout is mounted read-only outside /code (the entrypoint's gosu path).
 declare -a docker_args=(
@@ -93,6 +113,10 @@ declare -a docker_args=(
 	--manifest "$MANIFEST"
 	--tiers "$TIERS"
 )
+if [[ -n "$ALLOW_MISSING" ]]; then
+	docker_args+=(--allow-missing "$ALLOW_MISSING")
+	log_info "Tolerating newly-added tool(s): ${ALLOW_MISSING}"
+fi
 
 if [[ "$DRY_RUN" == "1" || "$DRY_RUN" == "true" ]]; then
 	log_info "[DRY-RUN] ${docker_args[*]}"
