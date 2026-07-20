@@ -27,6 +27,7 @@ name: Build - Lintro Tools Image
       - 'lintro/_tool_versions.py'
       - 'lintro/tools/manifest.json'
       - 'scripts/utils/install-tools.sh'
+      - 'scripts/utils/installers/**'
       - 'scripts/utils/utils.sh'
       - 'package.json'
   pull_request:
@@ -38,6 +39,7 @@ name: Build - Lintro Tools Image
       - 'lintro/_tool_versions.py'
       - 'lintro/tools/manifest.json'
       - 'scripts/utils/install-tools.sh'
+      - 'scripts/utils/installers/**'
       - 'scripts/utils/utils.sh'
       - 'package.json'
   schedule:
