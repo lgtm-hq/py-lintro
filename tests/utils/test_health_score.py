@@ -13,10 +13,13 @@ from lintro.utils.health_score import (
     HealthScore,
     ScoreTier,
     SeverityCounts,
+    build_shields_badge_markdown,
+    build_shields_badge_url,
     compute_health_score,
     compute_health_score_from_config,
     count_severities,
     health_score_for_results,
+    shields_color_for_tier,
     tier_for_score,
 )
 
@@ -254,3 +257,37 @@ def test_tier_for_representative_counts(
         expected_tier: Tier the score should fall into.
     """
     assert_that(compute_health_score(counts).tier).is_equal_to(expected_tier)
+
+@pytest.mark.parametrize(
+    ("tier", "expected_color"),
+    [
+        (ScoreTier.GREAT, "brightgreen"),
+        (ScoreTier.NEEDS_WORK, "yellow"),
+        (ScoreTier.CRITICAL, "red"),
+    ],
+)
+def test_shields_color_for_tier(
+    tier: ScoreTier,
+    expected_color: str,
+) -> None:
+    """Each score tier maps to the documented shields.io color.
+
+    Args:
+        tier: Qualitative score tier.
+        expected_color: Expected shields.io color token.
+    """
+    assert_that(shields_color_for_tier(tier)).is_equal_to(expected_color)
+
+
+def test_build_shields_badge_url_and_markdown() -> None:
+    """Badge helpers encode the score and optional style correctly."""
+    url = build_shields_badge_url(84)
+    markdown = build_shields_badge_markdown(84, style="flat")
+
+    assert_that(url).is_equal_to(
+        "https://img.shields.io/badge/lintro-84%2F100-brightgreen",
+    )
+    assert_that(markdown).is_equal_to(
+        "![Lintro Score](https://img.shields.io/badge/lintro-84%2F100-brightgreen"
+        "?style=flat)",
+    )

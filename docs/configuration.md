@@ -162,7 +162,16 @@ lintro check                  # normal output + health score line at the end
 lintro check --score          # print ONLY the score (for scripts/badges)
 lintro check --fail-under 75  # exit 1 if the score is below 75
 lintro check --output-format json   # score included under summary.health_score
+lintro badge                  # markdown shields.io badge for the score
+lintro badge --style flat     # shields.io style variant
+lintro badge --url            # bare badge URL
+lintro badge --json           # score, tier, color, url, and markdown as JSON
 ```
+
+`lintro badge` runs a score-only check (or accepts `--score N` to skip the run) and
+prints a shields.io snippet such as
+`![Lintro Score](https://img.shields.io/badge/lintro-84%2F100-brightgreen)`.
+Badge color follows the tiers below: bright green (75+), yellow (50–74), red (<50).
 
 #### Scoring model
 
