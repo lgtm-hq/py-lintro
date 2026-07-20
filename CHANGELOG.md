@@ -21,6 +21,16 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.89.0] - 2026-07-20
+
+### Added
+
+- **tools**: add golangci-lint Go meta-linter plugin (#1148) (700b595)
+
+### Fixed
+
+- **tools**: complete golangci-lint registration to unbreak main (#1581) (b3bd671)
+
 ## [0.88.1] - 2026-07-20
 
 ### Fixed
