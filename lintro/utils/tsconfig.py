@@ -34,6 +34,7 @@ __all__ = [
     "TsconfigInfo",
     "create_temp_tsconfig",
     "discover_tsconfigs",
+    "enables_check_js",
     "has_explicit_scoping",
     "parse_tsconfig",
     "partition_files",
@@ -520,6 +521,80 @@ def partition_files(
         result.append((None, fallback_files))
 
     return result
+
+
+# ---------------------------------------------------------------------------
+# Compiler-option helpers
+# ---------------------------------------------------------------------------
+
+
+def enables_check_js(
+    path: Path,
+    *,
+    _seen: set[str] | None = None,
+) -> bool:
+    """Return whether effective ``compilerOptions.checkJs`` is ``true``.
+
+    Walks the ``extends`` chain using TypeScript's per-key override semantics:
+    a child's explicit ``checkJs`` wins; otherwise the nearest parent value is
+    used. Circular ``extends`` graphs are short-circuited.
+
+    Args:
+        path: Path to a tsconfig.json (or extended config) file.
+        _seen: Internal set for cycle detection.
+
+    Returns:
+        ``True`` when the effective ``checkJs`` option is enabled.
+    """
+    return _resolve_check_js_option(path, _seen=_seen) is True
+
+
+def _resolve_check_js_option(
+    path: Path,
+    *,
+    _seen: set[str] | None = None,
+) -> bool | None:
+    """Resolve effective ``checkJs`` from a tsconfig and its extends chain.
+
+    Args:
+        path: Path to a tsconfig file.
+        _seen: Internal set for cycle detection.
+
+    Returns:
+        ``True``/``False`` when ``checkJs`` is set anywhere in the effective
+        chain, or ``None`` when the option is unset.
+    """
+    if _seen is None:
+        _seen = set()
+
+    abs_path = str(path.resolve())
+    if abs_path in _seen:
+        return None
+    _seen.add(abs_path)
+
+    info = parse_tsconfig(path)
+    parent_value: bool | None = None
+    extends_val = info.raw_config.get("extends") if info.raw_config else None
+
+    extends_list: list[str] = []
+    if isinstance(extends_val, str):
+        extends_list = [extends_val]
+    elif isinstance(extends_val, list):
+        extends_list = [v for v in extends_val if isinstance(v, str)]
+
+    for ext in extends_list:
+        parent_path = _resolve_extends_path(ext, info.project_dir)
+        if parent_path is None:
+            continue
+        # Later parents override earlier ones (TS 5.0+ array extends).
+        resolved = _resolve_check_js_option(parent_path, _seen=set(_seen))
+        if resolved is not None:
+            parent_value = resolved
+
+    comp_opts = info.raw_config.get("compilerOptions") if info.raw_config else None
+    if isinstance(comp_opts, dict) and "checkJs" in comp_opts:
+        return bool(comp_opts["checkJs"])
+    return parent_value
 
 
 # ---------------------------------------------------------------------------

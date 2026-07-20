@@ -343,6 +343,11 @@ class TypeScriptCheckerPlugin(BaseToolPlugin):
         # Determine project configuration strategy
         cwd_path = Path(ctx.cwd) if ctx.cwd else Path.cwd()
 
+        # Optional per-tool early skip (e.g. tsc JS-only without checkJs).
+        early_skip = self._pre_run_skip(ctx, paths, cwd_path, merged_options)
+        if early_skip is not None:
+            return early_skip
+
         # Check if dependencies need installing
         from lintro.utils.node_deps import install_node_deps, should_install_deps
 
@@ -1016,3 +1021,27 @@ class TypeScriptCheckerPlugin(BaseToolPlugin):
             Directory to scan for tsconfigs.
         """
         return cwd_path
+
+    def _pre_run_skip(
+        self,
+        ctx: ExecutionContext,
+        paths: list[str],
+        cwd_path: Path,
+        merged_options: dict[str, object],
+    ) -> ToolResult | None:
+        """Optionally skip the check after file discovery.
+
+        The default implementation never skips. ``tsc`` overrides this to
+        avoid running on JavaScript-only inputs when no discovered tsconfig
+        enables ``checkJs``.
+
+        Args:
+            ctx: Prepared execution context with discovered files.
+            paths: Original input paths passed to ``check``.
+            cwd_path: Prepared execution working directory.
+            merged_options: Merged runtime options.
+
+        Returns:
+            A ToolResult to return immediately, or ``None`` to continue.
+        """
+        return None
