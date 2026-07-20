@@ -21,6 +21,17 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.82.2] - 2026-07-20
+
+### Changed
+
+- **deps**: update pypa/gh-action-pypi-publish action to v1.14.1 (patch) (#1542)
+  (888e926)
+
+### Fixed
+
+- **output**: stop routing bandit no-files message through JSON parser (#1540) (a4640e5)
+
 ## [0.82.1] - 2026-07-19
 
 ### Fixed
