@@ -921,6 +921,10 @@ jobs:
       - name: Checkout
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
+          # Full history: the manifest gate diffs the manifest against the
+          # merge-base with the base branch to tolerate a newly-added tool's
+          # missing binary (#1565); a shallow checkout breaks merge-base.
+          fetch-depth: 0
           persist-credentials: false
       - name: Log in to GHCR
         if: >-
@@ -973,9 +977,19 @@ jobs:
         # fork PRs this verifies the tarball-loaded fork-built image (also
         # tagged py-lintro:latest by load-ci-docker-images.sh), so forks gate
         # on the exact image their integration tests run.
+        #
+        # New-binary-tool tolerance (#1565): BASE_REF lets the wrapper compute
+        # the tools this PR newly adds to the manifest (diff vs the merge-base)
+        # and pass them as --allow-missing, so their absent binary in the
+        # digest-pinned base image downgrades to a warning instead of failing
+        # this required check structurally. BASE_REF is empty for non-PR events
+        # (github.base_ref is only set on pull_request), so main pushes keep
+        # full enforcement; the fail-closed diff also yields an empty allowlist
+        # if the merge-base cannot be computed.
         if: needs.changes.outputs.pipeline != 'false'
         env:
           IMAGE: py-lintro:latest
+          BASE_REF: ${{ github.base_ref }}
         run: scripts/ci/verify-image-manifest-tools.sh
       - name: Run Docker integration tests
         if: needs.changes.outputs.pipeline != 'false'

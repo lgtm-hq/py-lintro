@@ -243,3 +243,38 @@ def test_drift_failure_propagates_exit_code(
         extra_env={"DOCKER_RUN_EXIT_CODE": "1"},
     )
     assert_that(result.returncode).is_equal_to(1)
+
+
+def test_explicit_allow_missing_passes_through(
+    image_repo: Path,
+    docker_stub: tuple[Path, Path],
+) -> None:
+    """An explicit ALLOW_MISSING flows through as --allow-missing (#1565)."""
+    bin_dir, args_log = docker_stub
+    result = _run_script(
+        image_repo,
+        bin_dir,
+        args_log,
+        extra_env={"ALLOW_MISSING": "terraform"},
+    )
+    assert_that(result.returncode).is_equal_to(0)
+    run_lines = [
+        line for line in args_log.read_text().splitlines() if line.startswith("run ")
+    ]
+    assert_that(run_lines).is_length(1)
+    assert_that(run_lines[0]).contains("--allow-missing terraform")
+
+
+def test_no_allow_missing_without_base_ref(
+    image_repo: Path,
+    docker_stub: tuple[Path, Path],
+) -> None:
+    """With no BASE_REF and no manifest change, no --allow-missing is passed."""
+    bin_dir, args_log = docker_stub
+    result = _run_script(image_repo, bin_dir, args_log)
+    assert_that(result.returncode).is_equal_to(0)
+    run_lines = [
+        line for line in args_log.read_text().splitlines() if line.startswith("run ")
+    ]
+    assert_that(run_lines).is_length(1)
+    assert_that(run_lines[0]).does_not_contain("--allow-missing")
