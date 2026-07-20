@@ -14,6 +14,7 @@ class GroupBy(StrEnum):
     CODE = auto()
     NONE = auto()
     AUTO = auto()
+    CATEGORY = auto()
 
 
 def normalize_group_by(value: str | GroupBy) -> GroupBy:

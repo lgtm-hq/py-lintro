@@ -18,13 +18,16 @@ Example:
 
 from __future__ import annotations
 
+from collections import defaultdict
 from collections.abc import Sequence
 from dataclasses import dataclass
 
 from lintro.enums.display_column import STANDARD_COLUMNS, DisplayColumn
+from lintro.enums.issue_category import ISSUE_CATEGORY_ORDER
 from lintro.enums.output_format import OutputFormat, normalize_output_format
 from lintro.formatters.core.format_registry import TableDescriptor, get_style
 from lintro.parsers.base_issue import BaseIssue
+from lintro.utils.issue_category import enrich_issue_category
 from lintro.utils.path_utils import normalize_file_path_for_display
 
 
@@ -206,6 +209,62 @@ def format_issues(
     rows = descriptor.get_rows(list(issues))
 
     return style.format(columns=cols, rows=rows, tool_name=tool_name)
+
+
+def format_issues_by_category(
+    issues: Sequence[BaseIssue],
+    output_format: OutputFormat | str = OutputFormat.GRID,
+    *,
+    tool_name: str | None = None,
+) -> str:
+    """Format issues grouped into concern-category sections.
+
+    Thin grouping hook for ``--group-by category``. Issues are enriched with
+    a resolved ``category`` and rendered under titled sections. JSON/GitHub
+    formats stay a single table for machine-readable compatibility.
+
+    Args:
+        issues: List of issues (any BaseIssue subclass).
+        output_format: Output format (grid, json, plain, etc.).
+        tool_name: Tool name used for taxonomy fallback and JSON output.
+
+    Returns:
+        Formatted string with category sections (or a single table).
+    """
+    if not issues:
+        return "No issues found."
+
+    normalized_format = normalize_output_format(output_format)
+    buckets: dict[str, list[BaseIssue]] = defaultdict(list)
+    for issue in issues:
+        category = enrich_issue_category(issue, tool_name=tool_name)
+        buckets[category.value].append(issue)
+
+    if normalized_format in {OutputFormat.JSON, OutputFormat.GITHUB}:
+        return format_issues(
+            issues,
+            output_format=normalized_format,
+            tool_name=tool_name,
+        )
+
+    ordered_labels: list[str] = [
+        cat.value for cat in ISSUE_CATEGORY_ORDER if cat.value in buckets
+    ]
+    ordered_labels.extend(
+        sorted(label for label in buckets if label not in ordered_labels),
+    )
+
+    sections: list[str] = []
+    for label in ordered_labels:
+        section_issues = buckets[label]
+        section_output = format_issues(
+            section_issues,
+            output_format=normalized_format,
+            tool_name=tool_name,
+        )
+        sections.append(f"{label} ({len(section_issues)})\n{section_output}")
+
+    return "\n\n".join(sections) if sections else "No issues found."
 
 
 def format_issues_with_sections(

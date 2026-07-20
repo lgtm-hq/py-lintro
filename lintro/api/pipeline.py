@@ -233,6 +233,7 @@ def run_lint_artifact(
         debug=debug,
         no_art=no_art,
         dry_run=dry_run,
+        group_by=group_by,
     )
     _capture_fmt_checkpoint(ctx=ctx, paths=paths)
     artifact = execute_run(
@@ -258,6 +259,7 @@ def run_lint_artifact(
             output_format=output_format,
             raw_output=raw_output,
             action=ctx.action,
+            group_by=group_by,
         ),
     )
 
