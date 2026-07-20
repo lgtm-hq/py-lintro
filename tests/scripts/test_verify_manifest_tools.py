@@ -56,3 +56,34 @@ def test_tool_command_rejects_missing_version_command() -> None:
         "astro_check",
         {"name": "astro_check", "install": {"type": "npm"}},
     )
+
+
+def test_clippy_versions_match_ignores_unobservable_patch() -> None:
+    """Clippy matches at major.minor since its binary never reports a patch.
+
+    `cargo clippy --version` emits `clippy 0.1.<minor>`, which the parser maps
+    to `1.<minor>.0`. A manifest that pins a real toolchain patch (e.g. 1.97.1)
+    must still match that synthesized `.0`.
+    """
+    module = _load_verify_manifest_tools_module()
+
+    versions_match = module._versions_match  # noqa: SLF001
+    assert_that(versions_match("clippy", "1.97.1", "1.97.0")).is_true()
+    assert_that(versions_match("clippy", "1.97.0", "1.97.0")).is_true()
+
+
+def test_clippy_versions_mismatch_on_minor_drift() -> None:
+    """Clippy still fails when the observable major.minor genuinely drifts."""
+    module = _load_verify_manifest_tools_module()
+
+    versions_match = module._versions_match  # noqa: SLF001
+    assert_that(versions_match("clippy", "1.97.1", "1.96.0")).is_false()
+
+
+def test_non_clippy_versions_require_exact_match() -> None:
+    """Non-clippy tools keep strict, patch-level version equality."""
+    module = _load_verify_manifest_tools_module()
+
+    versions_match = module._versions_match  # noqa: SLF001
+    assert_that(versions_match("ruff", "1.97.1", "1.97.1")).is_true()
+    assert_that(versions_match("ruff", "1.97.1", "1.97.0")).is_false()

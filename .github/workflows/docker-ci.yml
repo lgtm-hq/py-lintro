@@ -965,6 +965,18 @@ jobs:
       - name: Smoke Test Base Image
         if: needs.changes.outputs.pipeline != 'false'
         run: scripts/docker/smoke-test-base-image.sh
+      - name: Verify CI image tools against manifest
+        # Manifest-vs-image drift gate (#1511): run verify-manifest-tools.py
+        # inside the freshly built CI image so a manifest entry the image
+        # cannot execute (missing binary or version mismatch) fails the build
+        # instead of surfacing later as a silent dogfooding SKIP (#1505). For
+        # fork PRs this verifies the tarball-loaded fork-built image (also
+        # tagged py-lintro:latest by load-ci-docker-images.sh), so forks gate
+        # on the exact image their integration tests run.
+        if: needs.changes.outputs.pipeline != 'false'
+        env:
+          IMAGE: py-lintro:latest
+        run: scripts/ci/verify-image-manifest-tools.sh
       - name: Run Docker integration tests
         if: needs.changes.outputs.pipeline != 'false'
         run: scripts/docker/run-docker-test-suite.sh
