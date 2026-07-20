@@ -47,6 +47,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from enum import auto
 from typing import TYPE_CHECKING, Any
+from urllib.parse import quote
 
 from lintro.enums.severity_level import SeverityLevel
 from lintro.enums.uppercase_str_enum import UppercaseStrEnum
@@ -290,3 +291,65 @@ def health_score_for_results(
     """
     counts = count_severities(tool_results)
     return compute_health_score_from_config(counts, config)
+
+def shields_color_for_tier(tier: ScoreTier) -> str:
+    """Return the shields.io color name for a qualitative score tier.
+
+    Mapping follows the README badge convention: bright green for healthy
+    projects, yellow for middling scores, and red for critical ones.
+
+    Args:
+        tier: Qualitative :class:`ScoreTier` for the numeric score.
+
+    Returns:
+        str: shields.io color token (``brightgreen``, ``yellow``, or ``red``).
+    """
+    if tier is ScoreTier.GREAT:
+        return "brightgreen"
+    if tier is ScoreTier.NEEDS_WORK:
+        return "yellow"
+    return "red"
+
+
+def build_shields_badge_url(
+    score: int,
+    *,
+    style: str | None = None,
+) -> str:
+    """Build a shields.io static badge URL for a health score.
+
+    Args:
+        score: Integer health score in ``[0, 100]`` (clamped if out of range).
+        style: Optional shields.io style (e.g. ``flat``); omitted when ``None``.
+
+    Returns:
+        str: Absolute shields.io badge URL.
+    """
+    clamped = max(MIN_SCORE, min(MAX_SCORE, score))
+    message = quote(f"{clamped}/100", safe="")
+    color = shields_color_for_tier(tier_for_score(clamped))
+    url = f"https://img.shields.io/badge/lintro-{message}-{color}"
+    if style:
+        url = f"{url}?style={quote(style, safe='')}"
+    return url
+
+
+def build_shields_badge_markdown(
+    score: int,
+    *,
+    style: str | None = None,
+    alt_text: str = "Lintro Score",
+) -> str:
+    """Build a markdown image snippet for a health-score shields.io badge.
+
+    Args:
+        score: Integer health score in ``[0, 100]``.
+        style: Optional shields.io style forwarded to the URL builder.
+        alt_text: Alt text for the markdown image.
+
+    Returns:
+        str: Markdown such as
+        ``![Lintro Score](https://img.shields.io/badge/lintro-84%2F100-brightgreen)``.
+    """
+    url = build_shields_badge_url(score, style=style)
+    return f"![{alt_text}]({url})"
