@@ -21,6 +21,42 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.88.1] - 2026-07-20
+
+### Fixed
+
+- **ci**: tolerate PR-introduced tools in the docker-ci manifest gate (#1566) (b9fa926)
+
+## [0.88.0] - 2026-07-20
+
+### Added
+
+- **docker**: bundle pinned Go toolchain in lintro-tools image (#1553) (87a7c6f)
+
+## [0.87.1] - 2026-07-20
+
+### Changed
+
+- **deps**: update actions/setup-python action to v7.0.0 (major) (#1547) (511a54d)
+
+### Fixed
+
+- **markdownlint**: forward nested defaults.markdownlint rule options (#1554) (c2df0c2)
+
+## [0.87.0] - 2026-07-20
+
+### Added
+
+- **oxlint**: add type-aware linting support with doctor checks (#1526) (1f6a979)
+- **pip_audit**: close parity gaps with osv_scanner (#1525) (1171941)
+- **ci**: run verify-manifest-tools inside built and pinned images to catch
+  manifest-vs-image drift (#1528) (1ee3b3b)
+
+### Changed
+
+- **tools**: add parametrized tool-completeness gate over the plugin registry (#1524)
+  (06f203c)
+
 ## [0.86.0] - 2026-07-20
 
 ### Added

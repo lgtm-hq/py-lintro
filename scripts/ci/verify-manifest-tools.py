@@ -127,6 +127,34 @@ def _iter_tools(
     return selected
 
 
+# Exit code returned by `_run` when the binary itself cannot be found on PATH
+# (FileNotFoundError). This is the ONLY failure mode tolerated for an
+# allow-missing tool: the tool the PR introduces is not yet baked into the
+# digest-pinned base image, so its binary is simply absent. Any other non-zero
+# exit means the binary IS present but misbehaving, which stays a hard failure
+# even for an allow-missing tool.
+_MISSING_BINARY_EXIT = 127
+
+
+def _parse_allow_missing(values: list[str] | None) -> set[str]:
+    """Parse repeated/comma-separated --allow-missing values into a name set.
+
+    Args:
+        values: Raw ``--allow-missing`` argument values, each of which may
+            itself be a comma-separated list of tool names. ``None`` when the
+            flag was never supplied.
+
+    Returns:
+        The set of tool names whose missing binary should be tolerated.
+    """
+    if not values:
+        return set()
+    names: set[str] = set()
+    for value in values:
+        names.update(part.strip() for part in value.split(",") if part.strip())
+    return names
+
+
 def main() -> int:
     """Verify tools in manifest.json are installed with correct versions."""
     parser = argparse.ArgumentParser()
@@ -140,9 +168,22 @@ def main() -> int:
         default=os.environ.get("LINTRO_MANIFEST_TIERS", "tools"),
         help="Comma-separated tiers to verify (default: tools)",
     )
+    parser.add_argument(
+        "--allow-missing",
+        action="append",
+        default=None,
+        help=(
+            "Tool name(s) whose missing binary downgrades to a warning instead "
+            "of failing. Repeatable and/or comma-separated. Intended for the "
+            "tool a PR introduces, which is not yet in the digest-pinned base "
+            "image. An allow-missing tool that IS present must still "
+            "version-match; every other tool keeps hard-fail behavior."
+        ),
+    )
     args = parser.parse_args()
 
     tiers = [t.strip() for t in args.tiers.split(",")]
+    allow_missing = _parse_allow_missing(args.allow_missing)
     try:
         all_tools = _load_manifest(args.manifest)
     except (ValueError, OSError, json.JSONDecodeError) as exc:
@@ -155,6 +196,7 @@ def main() -> int:
         return 2
 
     failures: list[str] = []
+    warnings: list[str] = []
     for tool in tools:
         name = str(tool.get("name", "")).strip()
         expected = str(tool.get("version", "")).strip()
@@ -170,6 +212,19 @@ def main() -> int:
         code, output = _run(cmd)
         if code != 0:
             cmd_str = " ".join(cmd)
+            # Tolerate ONLY a genuinely-absent binary (127) for a tool the PR
+            # introduces: the digest-pinned base image cannot yet contain it,
+            # so downgrade to a loud warning instead of a hard failure. The
+            # post-merge tools-image republish + digest bump restores full
+            # coverage. Any other exit code means the binary is present but
+            # broken, which stays a failure even for an allow-missing tool.
+            if name in allow_missing and code == _MISSING_BINARY_EXIT:
+                warnings.append(
+                    f"{name}: binary not found in image ({cmd_str}); tolerated "
+                    f"because this tool is newly added by the PR and is not yet "
+                    f"in the digest-pinned base image",
+                )
+                continue
             diagnostic = output.strip()
             message = f"{name}: command failed with exit code {code} ({cmd_str})"
             if diagnostic:
@@ -187,13 +242,27 @@ def main() -> int:
                 f"{name}: version mismatch (expected {expected}, got {actual})",
             )
 
+    if warnings:
+        # GitHub Actions annotation (::warning::) plus a human-readable block so
+        # the tolerated tool is prominent in both the checks UI and raw logs.
+        print("::warning::Tool verification tolerated newly-added tool(s):")
+        for item in warnings:
+            print(f"::warning::{item}")
+        print("Tolerated missing tool(s) (newly added by this PR):")
+        for item in warnings:
+            print(f"  - {item}")
+
     if failures:
         print("Tool verification failed:")
         for item in failures:
             print(f"  - {item}")
         return 1
 
-    print(f"Verified {len(tools)} tool(s) against manifest tiers: {', '.join(tiers)}")
+    tiers_str = ", ".join(tiers)
+    summary = f"Verified {len(tools)} tool(s) against manifest tiers: {tiers_str}"
+    if warnings:
+        summary = f"{summary} ({len(warnings)} newly-added tool(s) tolerated)"
+    print(summary)
     return 0
 
 
