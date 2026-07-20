@@ -21,6 +21,12 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.85.2] - 2026-07-20
+
+### Fixed
+
+- **docker**: deliver and verify pip-audit in runtime image (#1523) (3714ed6)
+
 ## [0.85.1] - 2026-07-20
 
 ### Fixed
