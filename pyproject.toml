@@ -83,6 +83,7 @@ full = [
   "yamllint>=1.37.1",
 ]
 ai = ["anthropic>=0.39.0", "openai>=1.50.0"]
+mcp = ["mcp>=1.0.0"]
 tools = ["semgrep>=1.151.0", "sqlfluff>=4.0.0", "pip-audit>=2.10.1"]
 
 [project.scripts]
@@ -140,6 +141,7 @@ packages = [
   "lintro.ai.review.models",
   "lintro.cli_utils",
   "lintro.cli_utils.commands",
+  "lintro.mcp",
   "lintro.config",
   "lintro.enums",
   "lintro.exceptions",
@@ -323,6 +325,10 @@ exclude = [
 
 [[tool.mypy.overrides]]
 module = ["assertpy"]
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = ["mcp", "mcp.*"]
 ignore_missing_imports = true
 
 [[tool.mypy.overrides]]
