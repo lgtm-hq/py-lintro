@@ -1,0 +1,17 @@
+[project]
+name = "small-python-fixture"
+version = "0.0.0"
+description = "Pinned fixture for CLI overhead and comparative benchmarks"
+requires-python = ">=3.11"
+
+# Isolate this fixture from the repo-root [tool.lintro.post_checks] / module_size
+# gates so single-tool overhead measurements are not inflated by follow-up tools.
+[tool.lintro.post_checks]
+enabled = false
+
+[tool.mypy]
+python_version = "3.12"
+ignore_missing_imports = true
+pretty = false
+show_error_codes = false
+strict = false

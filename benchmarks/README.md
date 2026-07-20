@@ -1,4 +1,82 @@
-# Comparative benchmarks
+# Benchmarks
+
+Two complementary suites live here:
+
+1. **Hyperfine CLI overhead** ([#598](https://github.com/lgtm-hq/py-lintro/issues/598)) —
+   measures lintro's orchestration cost versus running the same tools directly.
+2. **Comparative meta-linter harness** ([#1055](https://github.com/lgtm-hq/py-lintro/issues/1055)) —
+   wall-clock comparison against MegaLinter, pre-commit, and sequential natives.
+
+CI regression tracking for hyperfine JSON is intentionally out of scope here
+([#599](https://github.com/lgtm-hq/py-lintro/issues/599)).
+
+---
+
+## 1. Hyperfine CLI overhead (recommended for "how much slower is lintro?")
+
+### Quick start
+
+```bash
+# Install hyperfine once (pick one):
+#   brew install hyperfine
+#   cargo install hyperfine
+
+make bench
+# equivalent:
+./benchmarks/run-hyperfine.sh
+```
+
+Smoke / iterate faster:
+
+```bash
+./benchmarks/run-hyperfine.sh --quick
+./benchmarks/run-hyperfine.sh --suite ruff
+WARMUP=5 RUNS=20 ./benchmarks/run-hyperfine.sh
+```
+
+If `hyperfine` is missing, the script exits with a clear install hint (exit 127).
+
+### What is measured
+
+| Suite    | Lintro command                       | Direct reference              |
+| -------- | ------------------------------------ | ----------------------------- |
+| `ruff`   | `lintro chk --tools ruff --yes`      | `ruff check`                  |
+| `mypy`   | `lintro chk --tools mypy --yes`      | `mypy`                        |
+| `format` | `lintro fmt --tools ruff --yes`      | `ruff format --check`         |
+| `multi`  | `lintro chk --tools ruff,mypy --yes` | sequential `ruff` then `mypy` |
+
+All runs target `benchmarks/fixtures/small-python/` and use:
+
+- `--shell=none` (`-N`) so an intermediate shell is not timed
+- `--yes` so lintro never blocks on confirmation prompts
+- `uv run --project <repo>` with `env -C <fixture>` so the fixture's
+  `pyproject.toml` applies (repo-root `post_checks` / black are disabled there for
+  fair single-tool isolation)
+- repo `.venv` binaries for direct `ruff` / `mypy` on `PATH`
+
+### Results
+
+JSON exports (hyperfine native schema) land in `benchmarks/results/hyperfine/`:
+
+- `ruff-check-overhead.json`
+- `mypy-overhead.json`
+- `ruff-format-overhead.json`
+- `multi-tool-overhead.json`
+- `baseline-meta.json` (host + git metadata)
+
+Committed files under that directory are reference baselines. Re-running `make bench`
+overwrites them. Interpret **relative** columns (hyperfine prints ratios vs
+`--reference`) as the portable signal; absolute times vary by CPU and OS.
+
+### Interpreting overhead
+
+On a tiny fixture, lintro's Python startup + plugin discovery dominates — especially
+against a fast Rust tool like ruff. Against mypy the same fixed cost is a smaller
+fraction of total time. That is expected and exactly why both tools are in the matrix.
+
+---
+
+## 2. Comparative meta-linter harness
 
 A reproducible, locally-runnable harness that measures lintro's wall-clock performance
 against other meta-linters — **MegaLinter**, **pre-commit**, and raw **sequential native
@@ -6,7 +84,7 @@ tool invocation**. It turns "lintro is fast" into a number you can reproduce and
 
 This implements [#1055](https://github.com/lgtm-hq/py-lintro/issues/1055).
 
-## Quick start
+### Quick start
 
 ```bash
 # Benchmark lintro against every competitor available on this machine.
@@ -25,7 +103,7 @@ Outputs are written to `benchmarks/results/`:
 - `latest.json` — full report (metadata + per-run samples), stable schema.
 - `latest.md` — markdown comparison table (also printed to stdout).
 
-## Graceful degradation
+### Graceful degradation
 
 Competitor tools are frequently not installed. The harness **detects what is available
 and benchmarks only that**, always including lintro as the baseline. Skipped competitors
@@ -42,7 +120,7 @@ Concretely:
 So on a machine with only lintro installed you still get a valid — if lintro-only —
 report, and the notes tell you exactly what was left out.
 
-## Methodology
+### Methodology
 
 - **Timing** — `time.perf_counter()` around a captured subprocess. Each command runs
   `--runs` times (default 5); we report **min, max, mean, median, and sample standard
@@ -61,17 +139,7 @@ report, and the notes tell you exactly what was left out.
 - **Reproducibility metadata** — every report records the git SHA, platform, Python
   version, CPU count, run count, and skipped competitors.
 
-## Fixtures
-
-`benchmarks/fixtures/` holds pinned, self-contained target projects. Today:
-
-- `small-python/` — a small, clean Python-only project (passes ruff), so timing reflects
-  startup and traversal cost rather than variable diagnostic volume.
-
-Add medium-polyglot and large-monorepo fixtures (or a pinned public OSS repo, as the
-issue suggests) by dropping new directories under `fixtures/`; they are auto-discovered.
-
-## Running the full comparison
+### Running the full comparison
 
 The reference numbers in this repo were taken with lintro and sequential-native only,
 because MegaLinter and pre-commit are not installed in CI's default image. To reproduce
@@ -94,7 +162,7 @@ Pinned competitor versions:
 
 Bump these deliberately and re-run to refresh the published numbers.
 
-## Sample results
+### Sample results
 
 Illustrative run on Apple Silicon (macOS, 10 logical CPUs, `--runs 3`, lintro +
 sequential-native only). **Timings are machine-specific** — treat the _relative_ column
@@ -114,7 +182,7 @@ medium/polyglot and large/monorepo fixtures (and the MegaLinter/pre-commit compe
 which carry their own heavier startup) are the interesting comparisons to run next. The
 harness reports these losses without spin, per the issue's requirement.
 
-## Programmatic use
+### Programmatic use
 
 ```python
 from benchmarks.harness import summarize, render_markdown_table, BenchmarkReport
@@ -125,3 +193,16 @@ print(stats.median_s)  # 0.50
 report = BenchmarkReport.from_json(open("benchmarks/results/latest.json").read())
 print(render_markdown_table(report))
 ```
+
+---
+
+## Fixtures
+
+`benchmarks/fixtures/` holds pinned, self-contained target projects. Today:
+
+- `small-python/` — a small, clean Python-only project (passes ruff/mypy), so timing
+  reflects startup and traversal cost rather than variable diagnostic volume. Includes a
+  fixture-local `pyproject.toml` that disables lintro `post_checks` for overhead runs.
+
+Add medium-polyglot and large-monorepo fixtures (or a pinned public OSS repo) by dropping
+new directories under `fixtures/`; the comparative harness auto-discovers them.
