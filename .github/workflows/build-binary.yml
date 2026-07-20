@@ -27,6 +27,14 @@ name: Publish - Homebrew Tap
 
 permissions: {}
 
+# Exact uv pin so setup-uv's ExactVersionResolver skips resolving "latest"
+# via astral-sh/versions uv.ndjson (the dominant tag-publish flake under
+# harden-runner). Keep in sync with docker/tools.Dockerfile ARG UV_VERSION.
+# Artifact URL lookup may still consult the manifest, so the continue-on-error
+# retry below remains as belt-and-suspenders (#1487, #1513).
+env:
+  UV_VERSION: '0.11.29'
+
 jobs:
   get-release-info:
     name: Get Release Info
@@ -98,13 +106,13 @@ jobs:
         continue-on-error: true
         uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990 # v8.3.2
         with:
-          version: 'latest'
+          version: ${{ env.UV_VERSION }}
 
       - name: Install uv (retry)
         if: steps.setup-uv.outcome == 'failure'
         uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990 # v8.3.2
         with:
-          version: 'latest'
+          version: ${{ env.UV_VERSION }}
 
       - name: Install dependencies
         run: uv sync --group dev
@@ -180,16 +188,16 @@ jobs:
         continue-on-error: true
         uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990 # v8.3.2
         with:
-          version: 'latest'
+          version: ${{ env.UV_VERSION }}
 
       # First connections after the harden-runner network extension activates
       # can stall past setup-uv's manifest-fetch timeout (macOS especially);
-      # one retry runs on a warm network path. See #1513.
+      # one retry runs on a warm network path. See #1513 / #1487.
       - name: Install uv (retry)
         if: steps.setup-uv.outcome == 'failure'
         uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990 # v8.3.2
         with:
-          version: 'latest'
+          version: ${{ env.UV_VERSION }}
 
       - name: Install dependencies
         run: |
@@ -300,16 +308,16 @@ jobs:
         continue-on-error: true
         uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990 # v8.3.2
         with:
-          version: 'latest'
+          version: ${{ env.UV_VERSION }}
 
       # First connections after harden-runner's egress filtering activates
       # can stall past setup-uv's manifest-fetch timeout;
-      # one retry runs on a warm network path. See #1513.
+      # one retry runs on a warm network path. See #1513 / #1487.
       - name: Install uv (retry)
         if: steps.setup-uv.outcome == 'failure'
         uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990 # v8.3.2
         with:
-          version: 'latest'
+          version: ${{ env.UV_VERSION }}
 
       - name: Install dependencies
         run: |
