@@ -135,14 +135,6 @@ RUN --mount=type=cache,target=/opt/cargo/registry,sharing=locked \
     /app/scripts/utils/install-tools.sh --docker && \
     rustup toolchain install stable --profile minimal --component clippy,rustfmt && \
     rustup default stable && \
-<<<<<<< HEAD
-=======
-    rustup component add clippy && \
-    # Rust ships thousands of tiny HTML doc files under share/doc. They
-    # carry no runtime value and dominate the Trivy filesystem walk, which
-    # can push the image security scan past its fixed timeout. Vulnerability
-    # coverage is unaffected — the docs contain no packages or binaries.
->>>>>>> b4487a72 (build(docker): drop Rust HTML docs from tools image)
     rm -rf /opt/rustup/toolchains/*/share/doc
 
 RUN chgrp -R tools /opt/cargo /opt/rustup /opt/bun && \
