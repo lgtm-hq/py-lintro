@@ -20,6 +20,7 @@ setup_cli_logging()
 # Logging must be configured BEFORE importing modules that use loguru,
 # otherwise log messages during import get silently dropped or misconfigured.
 from lintro.cli_utils.commands.check import check_command  # noqa: E402
+from lintro.cli_utils.commands.completions import completions_command  # noqa: E402
 from lintro.cli_utils.commands.config import config_command  # noqa: E402
 from lintro.cli_utils.commands.doctor import doctor_command  # noqa: E402
 from lintro.cli_utils.commands.format import format_command  # noqa: E402
@@ -191,6 +192,7 @@ def cli() -> None:
 
 # Register canonical commands and set _canonical_name for help
 cast(Any, check_command)._canonical_name = "check"
+cast(Any, completions_command)._canonical_name = "completions"
 cast(Any, config_command)._canonical_name = "config"
 cast(Any, doctor_command)._canonical_name = "doctor"
 cast(Any, format_command)._canonical_name = "format"
@@ -204,6 +206,7 @@ cast(Any, review_command)._canonical_name = "review"
 cast(Any, versions_command)._canonical_name = "versions"
 
 cli.add_command(check_command, name="check")
+cli.add_command(completions_command, name="completions")
 cli.add_command(config_command, name="config")
 cli.add_command(doctor_command, name="doctor")
 cli.add_command(format_command, name="format")
@@ -219,6 +222,7 @@ cli.add_command(versions_command, name="versions")
 # Register aliases
 cli.add_command(check_command, name="chk")
 cli.add_command(check_command, name="lint")
+cli.add_command(completions_command, name="comp")
 cli.add_command(config_command, name="cfg")
 cli.add_command(format_command, name="fmt")
 cli.add_command(format_command, name="fix")

@@ -60,6 +60,41 @@ requires-dist = [{{ name = "click", specifier = "=={click_version}" }}]
 
 INIT_TEMPLATE = '"""Lintro."""\n\n__version__ = "{version}"\n'
 
+SECURITY_TEMPLATE = """\
+# Security Policy
+
+## Supported Versions
+
+| Version | Supported |
+| ------- | --------- |
+| {line}.x  | ✅        |
+| < {line}  | ❌        |
+
+## Reporting
+
+Report privately via a security advisory.
+"""
+
+
+def _write_security(
+    repo: Path,
+    line: str,
+    path: str = "SECURITY.md",
+    extra: str = "",
+) -> None:
+    """Write a SECURITY.md with the support table stamped to ``line``.
+
+    Args:
+        repo: Repository working directory.
+        line: The ``major.minor`` support line (e.g. ``"0.1"``).
+        path: Repo-relative SECURITY.md path.
+        extra: Optional trailing prose appended outside the support table
+            (used to simulate a non-conforming edit).
+    """
+    target = repo / path
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(SECURITY_TEMPLATE.format(line=line) + extra)
+
 
 def _git(repo: Path, *args: str) -> str:
     """Run a git command inside the fixture repository.
@@ -329,6 +364,86 @@ def test_init_change_beyond_version_fails(
     verdict, log = _classify(bump_repo, tmp_path)
     assert_that(verdict).is_equal_to("false")
     assert_that(log).contains("__init__.py changed beyond __version__")
+
+
+def test_security_table_bump_qualifies(bump_repo: Path, tmp_path: Path) -> None:
+    """A minor bump that only restamps the SECURITY.md tables resolves true.
+
+    The version PR now rewrites the supported-versions rows on minor/major
+    bumps (#1372); such a diff must stay bump-only (#1362).
+
+    Args:
+        bump_repo: Fixture repository at version 0.1.0.
+        tmp_path: Pytest-provided temporary directory.
+    """
+    # Seed both SECURITY.md files at the base line and fold them into the base.
+    _write_security(bump_repo, line="0.1")
+    _write_security(bump_repo, line="0.1", path=".github/SECURITY.md")
+    _git(bump_repo, "add", "-A")
+    _git(bump_repo, "commit", "-q", "-m", "seed security policy")
+
+    # Minor bump: version stamp + CHANGELOG + support-table rows only.
+    _write_release_files(
+        bump_repo,
+        version="0.2.0",
+        changelog="# Changelog\n\n## 0.2.0\n",
+    )
+    _write_security(bump_repo, line="0.2")
+    _write_security(bump_repo, line="0.2", path=".github/SECURITY.md")
+
+    verdict, log = _classify(bump_repo, tmp_path)
+    assert_that(verdict).is_equal_to("true")
+    assert_that(log).contains("SECURITY table")
+
+
+def test_security_edit_beyond_table_fails(
+    bump_repo: Path,
+    tmp_path: Path,
+) -> None:
+    """A SECURITY.md edit outside the support table rows resolves false.
+
+    Args:
+        bump_repo: Fixture repository at version 0.1.0.
+        tmp_path: Pytest-provided temporary directory.
+    """
+    _write_security(bump_repo, line="0.1")
+    _git(bump_repo, "add", "-A")
+    _git(bump_repo, "commit", "-q", "-m", "seed security policy")
+
+    _write_release_files(bump_repo, version="0.2.0")
+    # Restamp the table *and* sneak in unrelated prose beyond the rows.
+    _write_security(bump_repo, line="0.2", extra="\nInjected policy change.\n")
+
+    verdict, log = _classify(bump_repo, tmp_path)
+    assert_that(verdict).is_equal_to("false")
+    assert_that(log).contains("SECURITY.md changed beyond the support table")
+
+
+def test_github_security_edit_beyond_table_fails(
+    bump_repo: Path,
+    tmp_path: Path,
+) -> None:
+    """A .github/SECURITY.md edit outside the support table resolves false.
+
+    Args:
+        bump_repo: Fixture repository at version 0.1.0.
+        tmp_path: Pytest-provided temporary directory.
+    """
+    _write_security(bump_repo, line="0.1", path=".github/SECURITY.md")
+    _git(bump_repo, "add", "-A")
+    _git(bump_repo, "commit", "-q", "-m", "seed github security policy")
+
+    _write_release_files(bump_repo, version="0.2.0")
+    _write_security(
+        bump_repo,
+        line="0.2",
+        path=".github/SECURITY.md",
+        extra="\nUnauthorized addition.\n",
+    )
+
+    verdict, log = _classify(bump_repo, tmp_path)
+    assert_that(verdict).is_equal_to("false")
+    assert_that(log).contains(".github/SECURITY.md changed beyond the support table")
 
 
 def test_empty_diff_fails(bump_repo: Path, tmp_path: Path) -> None:

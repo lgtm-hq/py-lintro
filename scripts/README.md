@@ -55,10 +55,11 @@ scripts/
 
 Scripts for building standalone binaries and distribution packages.
 
-| Script           | Purpose                                  | Usage                                        |
-| ---------------- | ---------------------------------------- | -------------------------------------------- |
-| `build_macos.py` | Build macOS binary using Nuitka compiler | `uv run python scripts/build/build_macos.py` |
-| `build_linux.py` | Build Linux binary using Nuitka compiler | `uv run python scripts/build/build_linux.py` |
+| Script                 | Purpose                                         | Usage                                        |
+| ---------------------- | ----------------------------------------------- | -------------------------------------------- |
+| `build_macos.py`       | Build macOS binary using Nuitka compiler        | `uv run python scripts/build/build_macos.py` |
+| `build_linux.py`       | Build Linux binary using Nuitka compiler        | `uv run python scripts/build/build_linux.py` |
+| `generate-man-page.py` | Generate the lintro(1) man page from Click help | `uv run python scripts/generate-man-page.py` |
 
 ### 📦 npm Distribution Scripts (`ci/npm/`)
 
@@ -105,6 +106,8 @@ Scripts for GitHub Actions workflows and continuous integration.
 | `resolve-pipeline-relevance.sh`      | Resolve heavy-pipeline path relevance and set `pipeline` output       | `./scripts/ci/resolve-pipeline-relevance.sh --help`                                |
 | `release-bump-only.sh`               | Classify automated version-bump PRs via diff allowlist (#1362)        | `./scripts/ci/release-bump-only.sh --help`                                         |
 | `dogfood-changed-files.sh`           | Lint only PR-changed files via lintro Docker (full-repo fallback)     | `./scripts/ci/dogfood-changed-files.sh --help`                                     |
+| `dogfood-skip-gate.sh`               | Fail dogfood CI on non-allowlisted skipped tools                      | `LINTRO_IMAGE=<image> ./scripts/ci/dogfood-skip-gate.sh`                           |
+| `check-dogfood-skips.py`             | Validate dogfood skip JSON against the committed allowlist            | `python3 scripts/ci/check-dogfood-skips.py --help`                                 |
 | `evaluate-test-gate.sh`              | Evaluate upstream compat/coverage results for required-check gate     | `COMPAT_RESULT=success COVERAGE_RESULT=success ./scripts/ci/evaluate-test-gate.sh` |
 | `fail-on-security-audit.sh`          | Fail CI when security audit finds vulnerabilities                     | `./scripts/ci/fail-on-security-audit.sh`                                           |
 | `free-disk-space.sh`                 | Free disk space on CI runner for Docker builds                        | `./scripts/ci/free-disk-space.sh`                                                  |
@@ -117,6 +120,8 @@ Scripts for GitHub Actions workflows and continuous integration.
 | `classify-release-tag.py`            | Classify a release tag as stable or prerelease for publish gating     | `python3 scripts/ci/classify-release-tag.py v1.2.3`                                |
 | `format-security-comment.py`         | Format lintro osv_scanner JSON as security PR comment markdown        | `python3 scripts/ci/format-security-comment.py osv-results.json`                   |
 | `format-changelog.py`                | Reflow generated `CHANGELOG.md` to lintro 88-col markdown             | `python3 scripts/ci/format-changelog.py CHANGELOG.md`                              |
+| `update-security-support.py`         | Stamp `SECURITY.md` support table to the current `major.minor` line   | `python3 scripts/ci/update-security-support.py 0.81.0`                             |
+| `finalize-version-pr.py`             | Finalize the release Version-PR (reflow CHANGELOG + stamp SECURITY)   | `python3 scripts/ci/finalize-version-pr.py`                                        |
 | `test-install-package.sh`            | Install and verify built package in isolated venv                     | `./scripts/ci/test-install-package.sh wheel`                                       |
 | `test-built-package-integration.sh`  | Run integration tests for built package in isolated venv              | `./scripts/ci/test-built-package-integration.sh`                                   |
 | `test-venv-setup.sh`                 | Create isolated Python 3.13 virtual environment                       | `./scripts/ci/test-venv-setup.sh`                                                  |

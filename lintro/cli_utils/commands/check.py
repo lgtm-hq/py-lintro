@@ -153,6 +153,11 @@ DEFAULT_ACTION: str = "check"
     default=None,
     help="Exit 1 if the health score is below this threshold (0-100).",
 )
+@click.option(
+    "--no-art",
+    is_flag=True,
+    help="Suppress the decorative ASCII art printed after the run.",
+)
 def check_command(
     paths: tuple[str, ...],
     tools: str | None,
@@ -177,6 +182,7 @@ def check_command(
     transport: str | None,
     score: bool,
     fail_under: float | None,
+    no_art: bool,
 ) -> None:
     """Check files for issues using the specified tools.
 
@@ -206,6 +212,7 @@ def check_command(
         transport: str | None: Override AI transport (``api`` or ``cli``).
         score: bool: Print only the health score, suppressing the summary.
         fail_under: float | None: Exit 1 if the health score is below this value.
+        no_art: bool: Suppress the decorative ASCII art printed after the run.
 
     Raises:
         SystemExit: Process exit with the aggregated exit code from tools.
@@ -253,6 +260,7 @@ def check_command(
         transport=transport,
         score=score,
         fail_under=fail_under,
+        no_art=no_art,
     )
 
     # Exit with code only; CLI uses this as process exit code and avoids any
