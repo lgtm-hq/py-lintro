@@ -198,6 +198,18 @@
       "packageNameTemplate": "astral-sh/uv"
     },
     {
+      "description": "Bundled Go toolchain in the lintro-tools image (checksum fetched at build time, so only the version pins here)",
+      "customType": "regex",
+      "managerFilePatterns": [
+        "docker/tools.Dockerfile"
+      ],
+      "matchStrings": [
+        "ARG GO_VERSION=(?<currentValue>[0-9]+\\.[0-9]+\\.[0-9]+)"
+      ],
+      "datasourceTemplate": "golang-version",
+      "packageNameTemplate": "golang"
+    },
+    {
       "customType": "regex",
       "managerFilePatterns": [
         "/^\\.github/workflows/sbom-on-main\\.yml$/"
