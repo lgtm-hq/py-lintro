@@ -236,6 +236,8 @@ def _display_fix_result(
             output=result.output or "",
             output_format=output_format,
             issues=list(result.issues) if result.issues else None,
+            success=result.success,
+            issues_count=result.issues_count,
         )
     if result.output and raw_output:
         display_output = result.output
