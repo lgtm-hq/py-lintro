@@ -21,6 +21,97 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.85.0] - 2026-07-20
+
+### Added
+
+- **vale**: add repo-root .vale.ini for prose linting (#1522) (39e953c)
+
+### Changed
+
+- add adding-a-new-tool guide, issue template, and PR checklist (#1530) (08a0512)
+- add idiom-review documentation across README, configuration, and tool analysis (#1527)
+  (5a7ce54)
+
+## [0.84.1] - 2026-07-20
+
+### Changed
+
+- **core**: migrate os.path usage to pathlib in core modules (#1537) (ac761d9)
+
+### Fixed
+
+- **manifest**: drop formatter tag from dotenv-linter entry (#1521) (858ddac)
+
+## [0.84.0] - 2026-07-20
+
+### Added
+
+- **cli**: add shell completions and man page generation (#1541) (a5ba92a)
+
+## [0.83.0] - 2026-07-20
+
+### Added
+
+- **ci**: fail dogfooding when an enabled tool silently skips (#1536) (89a9e5b)
+
+### Changed
+
+- **tests**: normalize new-tool test and fixture placements (#1538) (2dd1d42)
+
+## [0.82.3] - 2026-07-20
+
+### Changed
+
+- **deps**: update dependency svelte to 5.56.6 (patch) (#1544) (437ddf5)
+- **deps**: update renovatebot/github-action action to v46.1.20 (patch) (#1545)
+  (61a8087)
+
+### Fixed
+
+- **output**: gate ASCII art on TTY and add --no-art (#1539) (5ed0ad3)
+
+## [0.82.2] - 2026-07-20
+
+### Changed
+
+- **deps**: update pypa/gh-action-pypi-publish action to v1.14.1 (patch) (#1542)
+  (888e926)
+
+### Fixed
+
+- **output**: stop routing bandit no-files message through JSON parser (#1540) (a4640e5)
+
+## [0.82.1] - 2026-07-19
+
+### Fixed
+
+- **release**: stamp SECURITY.md support table on minor bumps (#1467) (bf46365)
+
+## [0.82.0] - 2026-07-18
+
+### Added
+
+- **commitlint**: add root commitlint.config.js extending config-conventional (#1518)
+  (69de320)
+
+### Changed
+
+- **idiom-review**: remove dead DEFAULT_ENABLED ClassVar (#1520) (fd4ad29)
+
+## [0.81.3] - 2026-07-18
+
+### Fixed
+
+- **pip-audit**: continue auditing remaining targets after a per-target timeout (#1507)
+  (d0211ce)
+
+## [0.81.2] - 2026-07-18
+
+### Fixed
+
+- **deps**: exclude test_samples fixtures from Renovate tracking (#1504) (a8e051e)
+
 ## [0.81.1] - 2026-07-18
 
 ### Changed

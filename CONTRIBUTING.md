@@ -8,3 +8,6 @@ testing, and the review process.
 
 Please read [`docs/contributing.md`](docs/contributing.md) before opening a pull
 request.
+
+**Adding a new linting or formatting tool?** See the dedicated guide:
+[`docs/contributing/adding-a-new-tool.md`](docs/contributing/adding-a-new-tool.md)

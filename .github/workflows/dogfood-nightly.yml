@@ -91,10 +91,86 @@ jobs:
             ghcr.io/lgtm-hq/py-lintro@sha256:0e8f3892f31f7bb6ce56a33d037d983591b82c325bf56281f9d9e2fec488aa5c
         run: scripts/ci/verify-image-manifest-tools.sh
 
+  # No-silent-skip gate (#1510, epic #1508): dogfood-full runs an external
+  # reusable workflow, so this dedicated job re-derives the structured skip
+  # state from the same pinned image and fails when an enabled tool silently
+  # skips for a reason not covered by the committed allowlist.
+  dogfood-skip-gate:
+    name: 🚦 Dogfood No-Silent-Skip Gate
+    needs: [dogfood-full]
+    # Run even when dogfood-full failed on real issues — a silent skip is an
+    # independent regression class — but not when it was cancelled.
+    if: always() && !cancelled()
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      packages: read # pull the pinned release image from GHCR
+    timeout-minutes: 30
+    steps:
+      - name: Harden Runner
+        # yamllint disable-line rule:line-length
+        uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
+        with:
+          egress-policy: 'block'
+          allowed-endpoints: >
+            github.com:443
+            api.github.com:443
+            codeload.github.com:443
+            release-assets.githubusercontent.com:443
+            objects.githubusercontent.com:443
+            raw.githubusercontent.com:443
+            pipelines.actions.githubusercontent.com:443
+            github-releases.githubusercontent.com:443
+            ghcr.io:443
+            pkg-containers.githubusercontent.com:443
+            docker.io:443
+            registry-1.docker.io:443
+            auth.docker.io:443
+            production.cloudflare.docker.com:443
+            production.cloudfront.docker.com:443
+            pypi.org:443
+            files.pythonhosted.org:443
+            static.rust-lang.org:443
+            bun.sh:443
+            astral.sh:443
+            releases.astral.sh:443
+            sh.rustup.rs:443
+            deb.debian.org:80
+            registry.npmjs.org:443
+            crates.io:443
+            static.crates.io:443
+            index.crates.io:443
+            semgrep.dev:443
+            metrics.semgrep.dev:443
+            api.osv.dev:443
+            api.deps.dev:443
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+      - name: Log in to GitHub Container Registry
+        # yamllint disable-line rule:line-length
+        uses: docker/login-action@af1e73f918a031802d376d3c8bbc3fe56130a9b0 # v4.4.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Check for silent tool skips
+        env:
+          # Same tool coverage as dogfood-full so skip behaviour matches.
+          TOOL_OPTIONS: >-
+            pydoclint:timeout=120,bandit:timeout=120,prettier:timeout=120,osv_scanner:check_suppressions=false
+          # Same pinned release image dogfood-full lints with.
+          # Pinned digest — keep in sync with pyproject.toml lintro pin
+          LINTRO_IMAGE: >-
+            ghcr.io/lgtm-hq/py-lintro@sha256:0e8f3892f31f7bb6ce56a33d037d983591b82c325bf56281f9d9e2fec488aa5c
+        run: scripts/ci/dogfood-skip-gate.sh
+
   notify-failure:
-    needs: [dogfood-full, verify-pinned-image-tools]
+    needs: [dogfood-full, verify-pinned-image-tools, dogfood-skip-gate]
     # Main-only: a manual dispatch from a feature branch must not open or
-    # ping the main-failure issue for the dogfood-nightly key.
+    # ping the main-failure issue for the dogfood-nightly key. Fires when the
+    # full lint OR the no-silent-skip gate regresses.
     if: failure() && github.ref == 'refs/heads/main'
     # Deduplicated failure issue (same mechanism as the release workflows):
     # first failure opens `fix(ci): main workflow failed: dogfood-nightly`,
