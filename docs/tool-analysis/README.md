@@ -37,7 +37,7 @@ implementations with the core tools themselves.
 **Fast Rust-based JavaScript/TypeScript Linter and Formatter**
 
 - ✅ **Preserved**: Linting, formatting, auto-fix, native config discovery, JSON output
-- ⚠️ **Limited**: Plugin control, stdin piping, type-aware linting
+- ⚠️ **Limited**: Plugin control, stdin piping
 - 🚀 **Enhanced**: Normalized issues, unified API, much faster than traditional tools
 
 ### [Yamllint Analysis](./yamllint-analysis.md)
