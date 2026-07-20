@@ -1,4 +1,4 @@
-.PHONY: setup install test test-integration lint format clean help site-dev site-build site-test site-preview
+.PHONY: setup install test test-integration lint format bench clean help site-dev site-build site-test site-preview
 
 # Include .env file if it exists
 -include .env
@@ -68,6 +68,12 @@ mypy:
 	@echo "Running mypy type checking via lintro..."
 	uv run lintro check . --tools mypy
 
+# Hyperfine CLI overhead benchmarks (lintro vs direct tools). See #598.
+# Requires hyperfine on PATH: brew/cargo install hyperfine
+bench:
+	@echo "Running hyperfine CLI overhead benchmarks..."
+	./benchmarks/run-hyperfine.sh
+
 # Clean up build artifacts
 clean:
 	@echo "Cleaning up build artifacts..."
@@ -110,6 +116,7 @@ help:
 	@echo "                    - Runs mypy before lintro"
 	@echo "  format          - Run lintro format"
 	@echo "  mypy            - Run type checking"
+	@echo "  bench           - Run hyperfine CLI overhead benchmarks (#598)"
 	@echo "  docker-build    - Build Docker image"
 	@echo "  docker-test     - Run tests in Docker"
 	@echo "  clean           - Clean up build artifacts"

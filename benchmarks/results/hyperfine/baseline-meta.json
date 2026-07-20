@@ -1,0 +1,29 @@
+{
+  "schema_version": 1,
+  "suite": "hyperfine-cli-overhead",
+  "issue": "https://github.com/lgtm-hq/py-lintro/issues/598",
+  "generated_at": "2026-07-20T18:11:45.311762+00:00",
+  "git_sha": "f6e939b4",
+  "platform": "Linux-6.12.94+-x86_64-with-glibc2.39",
+  "python_version": "3.12.3",
+  "hyperfine_version": "hyperfine 1.20.0",
+  "warmup": 3,
+  "runs": 10,
+  "fixture": "small-python",
+  "methodology": {
+    "shell": "none",
+    "lintro_invocation": "uv run --project <repo> lintro ...",
+    "cwd": "benchmarks/fixtures/small-python (via env -C)",
+    "notes": [
+      "Fixture pyproject disables post_checks so single-tool runs are isolated.",
+      "Direct tools use the repo .venv binaries on PATH.",
+      "Relative overhead is most meaningful on the same machine/OS."
+    ]
+  },
+  "result_files": [
+    "multi-tool-overhead.json",
+    "mypy-overhead.json",
+    "ruff-check-overhead.json",
+    "ruff-format-overhead.json"
+  ]
+}
