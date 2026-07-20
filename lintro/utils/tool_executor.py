@@ -94,6 +94,7 @@ def build_run_context(
     debug: bool = False,
     no_art: bool = False,
     dry_run: bool = False,
+    group_by: str = "auto",
 ) -> RunContext:
     """Create the run-scoped state shared by the execute and render phases.
 
@@ -165,6 +166,7 @@ def build_run_context(
         lintro_config=lintro_config,
         clean_stdout_output=clean_stdout_output,
         score_only=score_only,
+        group_by=group_by,
     )
 
 
@@ -746,6 +748,7 @@ def run_lint_tools_simple(
         debug=debug,
         no_art=no_art,
         dry_run=dry_run,
+        group_by=group_by,
     )
     from lintro.utils.execution.run_renderer import make_result_display
 
@@ -771,6 +774,7 @@ def run_lint_tools_simple(
             output_format=output_format,
             raw_output=raw_output,
             action=ctx.action,
+            group_by=group_by,
         ),
     )
     render_run(

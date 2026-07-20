@@ -222,8 +222,8 @@ def test_format_command_group_by_option(
 
 @pytest.mark.parametrize(
     "group_by_option",
-    ["file", "code", "none", "auto"],
-    ids=["file", "code", "none", "auto"],
+    ["file", "code", "none", "auto", "category"],
+    ids=["file", "code", "none", "auto", "category"],
 )
 def test_format_command_group_by_valid_choices(
     cli_runner: CliRunner,

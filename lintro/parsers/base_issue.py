@@ -40,6 +40,8 @@ class BaseIssue:
         column: Column number where the issue was found (1-based, 0 means unknown).
         message: Human-readable description of the issue.
         doc_url: URL to the rule's documentation page (empty when unavailable).
+        category: Optional concern category (Security, Style, …) used by
+            ``--group-by category``; empty until taxonomy enrichment.
     """
 
     # Default field mapping - subclasses can override specific keys
@@ -48,6 +50,7 @@ class BaseIssue:
         "severity": "severity",
         "fixable": "fixable",
         "message": "message",
+        "category": "category",
     }
 
     DEFAULT_SEVERITY: ClassVar[SeverityLevel] = SeverityLevel.WARNING
@@ -57,6 +60,7 @@ class BaseIssue:
     column: int = field(default=0)
     message: str = field(default="")
     doc_url: str = field(default="", repr=False)
+    category: str = field(default="")
 
     def get_severity(self) -> SeverityLevel:
         """Return the normalized severity for this issue.
@@ -109,7 +113,7 @@ class BaseIssue:
 
         Returns:
             Dictionary with keys: file, line, column, code, message, severity,
-            fixable, doc_url.
+            fixable, doc_url, category.
         """
         # Get the field mapping (supports inheritance)
         field_map = self.DISPLAY_FIELD_MAP
@@ -117,9 +121,11 @@ class BaseIssue:
         # Resolve each mapped field
         fixable_attr = field_map.get("fixable", "fixable")
         message_attr = field_map.get("message", "message")
+        category_attr = field_map.get("category", "category")
 
         fixable_val = getattr(self, fixable_attr, False)
         message_val = getattr(self, message_attr, "") or ""
+        category_val = getattr(self, category_attr, None) or ""
 
         return {
             "file": self.file,
@@ -130,4 +136,5 @@ class BaseIssue:
             "severity": str(self.get_severity()),
             "fixable": "Yes" if fixable_val else "",
             "doc_url": self.doc_url,
+            "category": str(category_val) if category_val else "",
         }

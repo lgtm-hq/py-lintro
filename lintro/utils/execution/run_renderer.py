@@ -79,6 +79,7 @@ def _display_fix_result(
     console_output_func: Callable[..., None],
     success_func: Callable[..., None],
     action: Action,
+    group_by: str = "auto",
 ) -> None:
     """Display a single tool result, with initial issue details when available.
 
@@ -93,6 +94,7 @@ def _display_fix_result(
         console_output_func: Function to output text to console.
         success_func: Function to display success message.
         action: The action being performed.
+        group_by: How to group issues in formatted output.
     """
     from lintro.formatters import format_fix_results
     from lintro.utils.output import format_tool_output
@@ -138,6 +140,7 @@ def _display_fix_result(
             issues=list(result.issues) if result.issues else None,
             success=result.success,
             issues_count=result.issues_count,
+            group_by=group_by,
         )
     if result.output and raw_output:
         display_output = result.output
@@ -179,6 +182,7 @@ def make_result_display(
     output_format: str,
     raw_output: bool,
     action: Action,
+    group_by: str = "auto",
 ) -> Callable[[ToolResult], None]:
     """Build the per-tool display callback the execute phase streams through.
 
@@ -191,6 +195,7 @@ def make_result_display(
         output_format: Output format for formatting issues.
         raw_output: Whether to show raw tool output.
         action: The action being performed.
+        group_by: How to group issues in formatted output.
 
     Returns:
         Callable[[ToolResult], None]: Callback that renders one tool result.
@@ -207,6 +212,7 @@ def make_result_display(
             console_output_func=logger.console_output,
             success_func=_success,
             action=action,
+            group_by=group_by,
         )
 
     return _display
@@ -352,7 +358,20 @@ def _render_stdout_document(
     if fmt == "json":
         import json
 
+        from lintro.enums.group_by import GroupBy, normalize_group_by
+        from lintro.utils.issue_category import enrich_issues_with_categories
         from lintro.utils.json_output import create_json_output
+
+        if normalize_group_by(ctx.group_by) == GroupBy.CATEGORY:
+            for result in all_results:
+                enrich_issues_with_categories(
+                    list(result.issues) if result.issues else None,
+                    tool_name=result.name,
+                )
+                enrich_issues_with_categories(
+                    list(result.initial_issues) if result.initial_issues else None,
+                    tool_name=result.name,
+                )
 
         json_data = create_json_output(
             action=str(artifact.action),
