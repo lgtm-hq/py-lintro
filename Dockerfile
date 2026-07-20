@@ -14,7 +14,7 @@
 # Built from docker/tools.Dockerfile and published by docker-tools-publish.yml
 # (cosign-signed, SBOM + provenance). Renovate manages the digest bump (#1360).
 # yamllint / hadolint: pin is immutable by digest; tag is informational.
-FROM ghcr.io/lgtm-hq/lintro-tools:latest@sha256:0024f54a75d4cf7f2ba6563c8f18e05bb825affc37885bfe5fa10cc789df12aa AS tools
+FROM ghcr.io/lgtm-hq/lintro-tools:latest@sha256:ff07b5f356126d8d5c8701db95fba7e248d7db7c41da6ec662b5b34137da7672 AS tools
 
 # -----------------------------------------------------------------------------
 # Stage: full — lintro application (default target)
@@ -66,7 +66,8 @@ RUN echo "Verifying tools..." && \
     commitlint --version && \
     markdownlint-cli2 --version && tsc --version && astro --version && \
     vue-tsc --version && oxlint --version && oxfmt --version && \
-    bandit --version && mypy --version && pydoclint --version && \
+    bandit --version && pip-audit --version && mypy --version && \
+    pydoclint --version && \
     yamllint --version && sqlfluff --version && stylelint --version && \
     vale --version && \
     echo "All tools verified!"
@@ -90,6 +91,7 @@ RUN echo "Verifying tools as non-root user..." && \
     gosu lintro cargo deny --version && \
     gosu lintro osv-scanner --version && \
     gosu lintro semgrep --version && \
+    gosu lintro pip-audit --version && \
     gosu lintro dotenv-linter --version && \
     echo "All tools verified for non-root user!"
 
