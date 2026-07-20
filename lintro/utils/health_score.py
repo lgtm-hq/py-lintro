@@ -292,6 +292,7 @@ def health_score_for_results(
     counts = count_severities(tool_results)
     return compute_health_score_from_config(counts, config)
 
+
 def shields_color_for_tier(tier: ScoreTier) -> str:
     """Return the shields.io color name for a qualitative score tier.
 
