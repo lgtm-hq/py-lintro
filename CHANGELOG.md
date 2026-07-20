@@ -21,6 +21,16 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.84.1] - 2026-07-20
+
+### Changed
+
+- **core**: migrate os.path usage to pathlib in core modules (#1537) (ac761d9)
+
+### Fixed
+
+- **manifest**: drop formatter tag from dotenv-linter entry (#1521) (858ddac)
+
 ## [0.84.0] - 2026-07-20
 
 ### Added
