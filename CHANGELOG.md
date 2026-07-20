@@ -21,6 +21,13 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.85.1] - 2026-07-20
+
+### Fixed
+
+- **ci**: allow raw.githubusercontent.com in generate-man-page egress allowlist (#1557)
+  (76c4b1a)
+
 ## [0.85.0] - 2026-07-20
 
 ### Added
