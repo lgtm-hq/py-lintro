@@ -32,6 +32,7 @@ from lintro.ai.providers.constants import (
     DEFAULT_TIMEOUT,
 )
 from lintro.ai.registry import PROVIDERS, AIProvider
+from lintro.ai.transcript import TranscriptDirection, log_transcript_event
 
 _has_anthropic = False
 try:
@@ -65,6 +66,7 @@ class _AnthropicCliTransport(CliTransport):
             binary_name="Claude",
             install_hint="Install Claude Code: https://code.claude.com/docs/en/setup",
             api_key_env=DEFAULT_API_KEY_ENV,
+            provider_name=AIProvider.ANTHROPIC.value,
         )
         self._model = model
 
@@ -359,6 +361,19 @@ class AnthropicProvider(BaseAIProvider):
             if system:
                 kwargs["system"] = system
 
+            log_transcript_event(
+                provider=AIProvider.ANTHROPIC.value,
+                transport="api",
+                direction=TranscriptDirection.REQUEST,
+                payload={
+                    "model": effective_model,
+                    "max_tokens": effective_max,
+                    "system": system,
+                    "messages": kwargs["messages"],
+                    "timeout": timeout,
+                },
+            )
+
             response = client.messages.create(**kwargs)
 
             content = ""
@@ -369,6 +384,19 @@ class AnthropicProvider(BaseAIProvider):
             input_tokens = response.usage.input_tokens
             output_tokens = response.usage.output_tokens
             cost = estimate_cost(effective_model, input_tokens, output_tokens)
+
+            log_transcript_event(
+                provider=AIProvider.ANTHROPIC.value,
+                transport="api",
+                direction=TranscriptDirection.RESPONSE,
+                payload={
+                    "model": effective_model,
+                    "content": content,
+                    "input_tokens": input_tokens,
+                    "output_tokens": output_tokens,
+                    "cost_estimate": cost,
+                },
+            )
 
             return AIResponse(
                 content=content,

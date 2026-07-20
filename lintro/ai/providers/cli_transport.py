@@ -16,6 +16,7 @@ from lintro.ai.exceptions import (
     AINotAvailableError,
     AIProviderError,
 )
+from lintro.ai.transcript import TranscriptDirection, log_transcript_event
 
 __all__ = ["CliTransport"]
 
@@ -30,6 +31,7 @@ class CliTransport(ABC):
         binary_name: str,
         install_hint: str,
         api_key_env: str | None = None,
+        provider_name: str | None = None,
     ) -> None:
         """Initialize CLI transport metadata.
 
@@ -38,11 +40,13 @@ class CliTransport(ABC):
             binary_name: Human-readable binary name for error messages.
             install_hint: Installation guidance shown when the binary is missing.
             api_key_env: Optional environment variable forwarded to subprocesses.
+            provider_name: Provider id used for transcript logging.
         """
         self._binary_path = binary_path
         self._binary_name = binary_name
         self._install_hint = install_hint
         self._api_key_env = api_key_env
+        self._provider_name = provider_name or binary_name.lower()
 
     @staticmethod
     def find_binary(name: str) -> str | None:
@@ -86,8 +90,20 @@ class CliTransport(ABC):
             f"timeout={timeout:.0f}s, cwd={cwd}",
         )
 
+        log_transcript_event(
+            provider=self._provider_name,
+            transport="cli",
+            direction=TranscriptDirection.REQUEST,
+            payload={
+                "cmd": list(cmd),
+                "cwd": cwd,
+                "timeout": timeout,
+                "stdin": input_text,
+            },
+        )
+
         try:
-            return subprocess.run(  # nosec B603 - argv is an internally-built list run with shell=False; binary resolved from a known command, no user shell input
+            result = subprocess.run(  # nosec B603 - argv is an internally-built list run with shell=False; binary resolved from a known command, no user shell input
                 cmd,
                 input=input_text,
                 capture_output=True,
@@ -98,13 +114,42 @@ class CliTransport(ABC):
                 cwd=cwd,
             )
         except subprocess.TimeoutExpired as exc:
+            log_transcript_event(
+                provider=self._provider_name,
+                transport="cli",
+                direction=TranscriptDirection.RESPONSE,
+                payload={
+                    "error": "timeout",
+                    "timeout": timeout,
+                    "stdout": getattr(exc, "stdout", None),
+                    "stderr": getattr(exc, "stderr", None),
+                },
+            )
             raise AIProviderError(
                 f"{self._binary_name} CLI timed out after {timeout:.0f}s",
             ) from exc
         except FileNotFoundError as exc:
+            log_transcript_event(
+                provider=self._provider_name,
+                transport="cli",
+                direction=TranscriptDirection.RESPONSE,
+                payload={"error": "not_found", "message": str(exc)},
+            )
             raise AINotAvailableError(
                 f"{self._binary_name} CLI not found on PATH. {self._install_hint}",
             ) from exc
+
+        log_transcript_event(
+            provider=self._provider_name,
+            transport="cli",
+            direction=TranscriptDirection.RESPONSE,
+            payload={
+                "returncode": result.returncode,
+                "stdout": result.stdout,
+                "stderr": result.stderr,
+            },
+        )
+        return result
 
     def check_exit_code(
         self,

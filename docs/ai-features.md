@@ -499,6 +499,17 @@ persistent rate limiting:
 AI fix suggestions are validated against the workspace root. Fixes targeting files
 outside the workspace are rejected and never applied.
 
+### Local transcript logging (opt-in)
+
+Raw provider request/response traffic can be written as NDJSON under
+`.lintro-cache/ai/transcripts/` for debugging. This is **off by default**. Enable with
+`ai.transcript_logging: true` or `LINTRO_AI_TRANSCRIPT=1`.
+
+- Transcripts stay on the local machine only (not uploaded by lintro)
+- Payloads are secret-redacted before write; API keys and auth headers are never logged
+- Older transcript files are pruned (default: keep last 10 runs via
+  `ai.transcript_retention`)
+
 ### Important notes
 
 - AI suggestions can hallucinate incorrect fixes — always review before accepting

@@ -214,6 +214,24 @@ class AIConfig(BaseModel):
             "delegated git retrieval on very large diffs is required."
         ),
     )
+    transcript_logging: bool = Field(
+        default=False,
+        description=(
+            "Write raw AI provider request/response traffic as NDJSON under "
+            ".lintro-cache/ai/transcripts/. Off by default. Can also be "
+            "enabled with LINTRO_AI_TRANSCRIPT=1. Payloads are secret-redacted "
+            "before write; auth headers and API keys are never logged."
+        ),
+    )
+    transcript_retention: int = Field(
+        default=10,
+        ge=1,
+        description=(
+            "Maximum number of AI transcript NDJSON files to retain under "
+            ".lintro-cache/ai/transcripts/. Older files are pruned when a "
+            "new transcript writer starts."
+        ),
+    )
 
     @model_validator(mode="after")
     def _apply_legacy_enabled_default(self) -> AIConfig:
