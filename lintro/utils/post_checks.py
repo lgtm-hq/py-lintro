@@ -8,7 +8,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from lintro.enums.action import Action
-from lintro.enums.group_by import normalize_group_by
+from lintro.enums.group_by import GroupBy, normalize_group_by
 from lintro.enums.output_format import OutputFormat, normalize_output_format
 from lintro.plugins.registry import ToolRegistry
 from lintro.tools import tool_manager
@@ -125,7 +125,7 @@ def execute_post_checks(
 
     # Normalize enums while maintaining backward compatibility
     output_fmt_enum: OutputFormat = normalize_output_format(output_format)
-    _ = normalize_group_by(group_by)  # Normalize for validation, return value unused
+    group_by_enum: GroupBy = normalize_group_by(group_by)
     json_output_mode = output_fmt_enum == OutputFormat.JSON
 
     # Load post-checks config
@@ -237,6 +237,7 @@ def execute_post_checks(
                         issues=issues,
                         success=getattr(result, "success", None),
                         issues_count=issues_count,
+                        group_by=group_by_enum,
                     )
 
                 if not json_output_mode:

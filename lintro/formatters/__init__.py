@@ -13,6 +13,7 @@ from lintro.formatters.formatter import (
     UnifiedTableDescriptor,
     format_fix_results,
     format_issues,
+    format_issues_by_category,
     format_issues_with_sections,
     format_tool_result,
 )
@@ -20,6 +21,7 @@ from lintro.formatters.formatter import (
 __all__ = [
     # Unified formatter (primary API)
     "format_issues",
+    "format_issues_by_category",
     "format_issues_with_sections",
     "format_fix_results",
     "format_tool_result",

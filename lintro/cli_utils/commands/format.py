@@ -39,7 +39,7 @@ DEFAULT_ACTION: str = "fmt"
 @click.option(
     "--group-by",
     default="auto",
-    type=click.Choice(["file", "code", "none", "auto"]),
+    type=click.Choice(["file", "code", "none", "auto", "category"]),
     help="How to group issues in output.",
 )
 @click.option(
