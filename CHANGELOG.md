@@ -21,6 +21,20 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.87.0] - 2026-07-20
+
+### Added
+
+- **oxlint**: add type-aware linting support with doctor checks (#1526) (1f6a979)
+- **pip_audit**: close parity gaps with osv_scanner (#1525) (1171941)
+- **ci**: run verify-manifest-tools inside built and pinned images to catch
+  manifest-vs-image drift (#1528) (1ee3b3b)
+
+### Changed
+
+- **tools**: add parametrized tool-completeness gate over the plugin registry (#1524)
+  (06f203c)
+
 ## [0.86.0] - 2026-07-20
 
 ### Added
