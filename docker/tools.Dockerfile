@@ -24,6 +24,7 @@ FROM python:3.14-slim@sha256:cea0e6040540fb2b965b6e7fb5ffa00871e632eef63719f0ea5
 
 ARG BUN_VERSION=1.3.14
 ARG UV_VERSION=0.11.29
+ARG GO_VERSION=1.26.5
 
 LABEL maintainer="lgtm-hq"
 LABEL org.opencontainers.image.source="https://github.com/lgtm-hq/py-lintro"
@@ -36,7 +37,8 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     BUN_INSTALL="/opt/bun" \
     CARGO_HOME="/opt/cargo" \
     RUSTUP_HOME="/opt/rustup" \
-    PATH="/usr/local/bin:/opt/cargo/bin:/opt/bun/bin:${PATH}"
+    GOTOOLCHAIN=local \
+    PATH="/usr/local/go/bin:/usr/local/bin:/opt/cargo/bin:/opt/bun/bin:${PATH}"
 
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 
@@ -92,6 +94,25 @@ RUN ARCH=$(uname -m) && \
     chmod +x /usr/local/bin/uv && \
     rm -rf /tmp/uv*
 
+# Bundle a pinned Go toolchain so Go-based linters (e.g. golangci-lint) have a
+# working compiler. GOTOOLCHAIN=local (set above) keeps this toolchain
+# authoritative — Go never auto-downloads a different version at runtime.
+# Multi-arch with SHA256 verification, mirroring the bun/uv blocks. The
+# checksum is fetched from the vendor sibling ".sha256" so Renovate only needs
+# to bump GO_VERSION (no hand-maintained hashes to drift).
+# hadolint ignore=DL3003,SC2086
+RUN ARCH=$(uname -m) && \
+    if [ "$ARCH" = "x86_64" ]; then GO_ARCH="amd64"; \
+    elif [ "$ARCH" = "aarch64" ]; then GO_ARCH="arm64"; \
+    else echo "Unsupported arch: $ARCH" && exit 1; fi && \
+    GO_TAR="go${GO_VERSION}.linux-${GO_ARCH}.tar.gz" && \
+    GO_URL="https://dl.google.com/go/${GO_TAR}" && \
+    curl -fsSL "$GO_URL" -o "/tmp/${GO_TAR}" && \
+    curl -fsSL "${GO_URL}.sha256" -o "/tmp/${GO_TAR}.sha256" && \
+    echo "$(cat /tmp/${GO_TAR}.sha256)  /tmp/${GO_TAR}" | sha256sum -c - && \
+    tar -C /usr/local -xzf "/tmp/${GO_TAR}" && \
+    rm -rf /tmp/go*
+
 COPY lintro/ /app/lintro/
 COPY scripts/ /app/scripts/
 COPY package.json /app/package.json
@@ -112,7 +133,8 @@ RUN chgrp -R tools /opt/cargo /opt/rustup /opt/bun && \
     chmod -R a+rX /opt/cargo /opt/rustup /opt/bun
 
 RUN echo "=== Verifying all tools ===" && \
-    bun --version && uv --version && cargo --version && rustc --version && \
+    bun --version && uv --version && go version && \
+    cargo --version && rustc --version && \
     rustfmt --version && cargo clippy --version && cargo audit --version && \
     cargo deny --version && actionlint --version && bandit --version && \
     black --version && commitlint --version && gitleaks version && \
