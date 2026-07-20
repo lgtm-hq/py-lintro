@@ -63,6 +63,7 @@ if TYPE_CHECKING:
     from collections.abc import Callable
 
     from lintro.plugins.file_processor import AggregatedResult, FileProcessingResult
+    from lintro.template_aware import TemplateAwareSession
 
 
 @dataclass
@@ -78,6 +79,7 @@ class ExecutionContext:
         cwd: Working directory for command execution.
         early_result: If set, return this result immediately.
         timeout: Timeout value for subprocess execution.
+        template_session: Optional template-aware render session (source maps).
     """
 
     files: list[str] = field(default_factory=list)
@@ -85,6 +87,7 @@ class ExecutionContext:
     cwd: str | None = None
     early_result: ToolResult | None = None
     timeout: int = DEFAULT_TIMEOUT
+    template_session: TemplateAwareSession | None = None
 
     @property
     def should_skip(self) -> bool:
@@ -136,6 +139,7 @@ class BaseToolPlugin(ABC):
     options: dict[str, object] = field(default_factory=dict, init=False)
     exclude_patterns: list[str] = field(default_factory=list, init=False)
     include_venv: bool = field(default=False, init=False)
+    _template_aware_session: Any = field(default=None, init=False, repr=False)
 
     def __post_init__(self) -> None:
         """Initialize plugin with defaults from definition."""
@@ -583,10 +587,13 @@ class BaseToolPlugin(ABC):
         if "early_result" in result:
             early_result = result["early_result"]
             logger.debug(f"[{self.name}] Early exit: {early_result.output}")
+            self._template_aware_session = None
             return ExecutionContext(early_result=early_result)
 
         files = result.get("files", [])
         timeout = result.get("timeout", DEFAULT_TIMEOUT)
+        template_session = result.get("template_session")
+        self._template_aware_session = template_session
         logger.debug(f"[{self.name}] Ready: {len(files)} files, timeout={timeout}s")
 
         return ExecutionContext(
@@ -594,6 +601,7 @@ class BaseToolPlugin(ABC):
             rel_files=result.get("rel_files", []),
             cwd=result.get("cwd"),
             timeout=timeout,
+            template_session=template_session,
         )
 
     def _process_files_with_progress(

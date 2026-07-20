@@ -190,51 +190,84 @@ def prepare_execution(
         incremental=bool(merged_options.get("incremental", False)),
     )
 
-    if not files:
-        file_type = "files"
-        patterns = definition.file_patterns
-        if patterns:
-            extensions = [p.replace("*", "") for p in patterns if p.startswith("*.")]
-            if extensions:
-                file_type = "/".join(extensions) + " files"
+    # Opt-in template-aware preprocessing: stub-render *.jinja templates
+    # routed to this tool and append the rendered host-language files.
+    from lintro.template_aware import (
+        merge_rendered_files,
+        prepare_templates_for_tool,
+    )
 
+    template_session = prepare_templates_for_tool(
+        tool_name=definition.name,
+        paths=paths,
+        exclude_patterns=exclude_patterns,
+        include_venv=include_venv,
+    )
+    # Track ownership so a mid-flight failure cleans the temp dir, while a
+    # successful return transfers the session to the caller for later finalize.
+    session_owned = True
+    try:
+        files = merge_rendered_files(
+            discovered_files=files,
+            session=template_session,
+        )
+
+        if not files:
+            file_type = "files"
+            patterns = definition.file_patterns
+            if patterns:
+                extensions = [
+                    p.replace("*", "") for p in patterns if p.startswith("*.")
+                ]
+                if extensions:
+                    file_type = "/".join(extensions) + " files"
+
+            template_session.cleanup()
+            session_owned = False
+            return {
+                "early_result": ToolResult(
+                    name=definition.name,
+                    success=True,
+                    output=f"No {file_type} found to check.",
+                    issues_count=0,
+                ),
+            }
+
+        # Check version requirements (only when files exist to check)
+        version_result = verify_tool_version(definition)
+        if version_result is not None:
+            template_session.cleanup()
+            session_owned = False
+            return {"early_result": version_result}
+
+        logger.debug(f"Files to process: {files}")
+
+        # Compute cwd and relative paths
+        cwd = get_cwd(files)
+        rel_files = [os.path.relpath(f, cwd) if cwd else f for f in files]
+
+        # Get timeout (keep as float to preserve precision)
+        timeout_value = merged_options.get("timeout")
+        timeout = get_effective_timeout(
+            timeout_value if isinstance(timeout_value, (int, float)) else None,
+            merged_options,
+            definition.default_timeout,
+        )
+
+        logger.debug(
+            f"Prepared execution: {len(files)} files, cwd={cwd}, timeout={timeout}s",
+        )
+        session_owned = False
         return {
-            "early_result": ToolResult(
-                name=definition.name,
-                success=True,
-                output=f"No {file_type} found to check.",
-                issues_count=0,
-            ),
+            "files": files,
+            "rel_files": rel_files,
+            "cwd": cwd,
+            "timeout": timeout,
+            "template_session": template_session,
         }
-
-    # Check version requirements (only when files exist to check)
-    version_result = verify_tool_version(definition)
-    if version_result is not None:
-        return {"early_result": version_result}
-
-    logger.debug(f"Files to process: {files}")
-
-    # Compute cwd and relative paths
-    cwd = get_cwd(files)
-    rel_files = [os.path.relpath(f, cwd) if cwd else f for f in files]
-
-    # Get timeout (keep as float to preserve precision)
-    timeout_value = merged_options.get("timeout")
-    timeout = get_effective_timeout(
-        timeout_value if isinstance(timeout_value, (int, float)) else None,
-        merged_options,
-        definition.default_timeout,
-    )
-
-    logger.debug(
-        f"Prepared execution: {len(files)} files, cwd={cwd}, timeout={timeout}s",
-    )
-    return {
-        "files": files,
-        "rel_files": rel_files,
-        "cwd": cwd,
-        "timeout": timeout,
-    }
+    finally:
+        if session_owned:
+            template_session.cleanup()
 
 
 # -------------------------------------------------------------------------

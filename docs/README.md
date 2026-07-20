@@ -16,6 +16,8 @@ configuring, and contributing to Lintro.
 - **[Configuration Guide](configuration.md)** - Tool configuration and customization
 - **[AI Features](ai-features.md)** - AI-powered summaries, explanations, and fix
   suggestions
+- **[Template-Aware Preprocessing](template-aware.md)** - Opt-in linting of `*.py.jinja`
+  / `*.toml.jinja` / `*.yml.jinja` source templates
 - **[Docker Usage](docker.md)** - Using Lintro with Docker
 
 **Integration Guides:**
@@ -65,6 +67,7 @@ configuring, and contributing to Lintro.
 | **Docker setup**        | [Docker Usage → Quick Start](docker.md#quick-start)                       |
 | **GitHub Actions**      | [GitHub Integration → Quick Setup](github-integration.md#quick-setup)     |
 | **AI features**         | [AI Features → Quick Start](ai-features.md#quick-start)                   |
+| **Template-aware lint** | [Template-Aware → Quick Start](template-aware.md#quick-start)             |
 | **Configure tools**     | [Configuration → Tool Configuration](configuration.md#tool-configuration) |
 | **Add new tool**        | [Contributing → How to Add a Tool](contributing.md#how-to-add-a-new-tool) |
 | **Project vision**      | [Architecture → Vision](architecture/VISION.md)                           |

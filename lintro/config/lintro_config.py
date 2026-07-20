@@ -9,6 +9,7 @@ from lintro.config.enforce_config import EnforceConfig
 from lintro.config.execution_config import ExecutionConfig
 from lintro.config.review_config import ReviewConfig
 from lintro.config.score_config import ScoreConfig
+from lintro.config.template_aware_config import TemplateAwareConfig
 from lintro.config.tool_config import LintroToolConfig
 
 __all__ = [
@@ -19,6 +20,7 @@ __all__ = [
     "LintroToolConfig",
     "ReviewConfig",
     "ScoreConfig",
+    "TemplateAwareConfig",
 ]
 
 
@@ -43,6 +45,8 @@ class LintroConfig(BaseModel):
         ai: AI-powered features configuration (optional, disabled by default).
         review: Diff review command configuration (checklist items).
         score: Health score weights and scale (0-100 metric).
+        template_aware: Opt-in stub-render preprocessing for ``*.jinja``
+            source templates (disabled by default).
         config_path: Path to the config file (set by loader).
     """
 
@@ -55,6 +59,7 @@ class LintroConfig(BaseModel):
     ai: AIConfig = Field(default_factory=AIConfig)
     review: ReviewConfig = Field(default_factory=ReviewConfig)
     score: ScoreConfig = Field(default_factory=ScoreConfig)
+    template_aware: TemplateAwareConfig = Field(default_factory=TemplateAwareConfig)
     config_path: str | None = None
 
     def get_tool_config(self, tool_name: str) -> LintroToolConfig:
