@@ -21,6 +21,12 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.88.0] - 2026-07-20
+
+### Added
+
+- **docker**: bundle pinned Go toolchain in lintro-tools image (#1553) (87a7c6f)
+
 ## [0.87.1] - 2026-07-20
 
 ### Changed
