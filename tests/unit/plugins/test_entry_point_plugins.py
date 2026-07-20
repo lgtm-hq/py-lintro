@@ -177,12 +177,14 @@ def preserve_registry() -> Iterator[None]:
     tools = dict(ToolRegistry._tools)
     instances = dict(ToolRegistry._instances)
     origins = dict(ToolRegistry._origins)
+    deferred = dict(ToolRegistry._deferred)
     try:
         yield
     finally:
         ToolRegistry._tools = tools
         ToolRegistry._instances = instances
         ToolRegistry._origins = origins
+        ToolRegistry._deferred = deferred
         reset_discovery()
 
 

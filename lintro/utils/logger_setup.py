@@ -6,8 +6,6 @@ Provides centralized logging setup for both CLI and tool execution contexts.
 import sys
 from pathlib import Path
 
-from loguru import logger
-
 
 def setup_cli_logging() -> None:
     """Configure minimal logging for CLI commands (help, version, etc.).
@@ -15,6 +13,8 @@ def setup_cli_logging() -> None:
     Only shows WARNING and ERROR level messages on console.
     No file logging - this is for lightweight CLI operations.
     """
+    from loguru import logger
+
     logger.remove()
     logger.add(
         sys.stderr,
@@ -31,6 +31,8 @@ def setup_execution_logging(run_dir: Path, debug: bool = False) -> None:
         run_dir: Directory for log files.
         debug: If True, show DEBUG messages on console. Otherwise only WARNING+.
     """
+    from loguru import logger
+
     logger.remove()
 
     # Console handler - DEBUG if flag set, else WARNING only

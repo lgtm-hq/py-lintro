@@ -5,6 +5,9 @@ both built-in tools and external plugins discovered via entry points. It
 owns *live plugin instances* (registered ``BaseToolPlugin`` subclasses) and
 handles registration, lazy instantiation, and lookup by name.
 
+Builtin tools can be registered as deferred ``name -> module`` entries so
+cold paths (``lintro --version``) never import every tool plugin.
+
 This is distinct from :class:`lintro.tools.core.tool_registry.ManifestRegistry`
 (formerly also named ``ToolRegistry``), which owns static tool *metadata*
 (versions, install commands, language mappings, profiles) parsed from
@@ -24,14 +27,14 @@ Example:
 
 from __future__ import annotations
 
+import importlib
 import threading
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
-from loguru import logger
-
-from lintro.plugins.base import BaseToolPlugin
+from lintro.utils.lazy_logger import logger
 
 if TYPE_CHECKING:
+    from lintro.plugins.base import BaseToolPlugin
     from lintro.plugins.protocol import ToolDefinition
 
 
@@ -43,6 +46,8 @@ class ToolRegistry:
     and listing tools.
 
     The registry is thread-safe and uses lazy instantiation for tool instances.
+    Builtin tools may be registered as deferred module paths and imported only
+    when that tool is first accessed.
 
     Not to be confused with
     :class:`lintro.tools.core.tool_registry.ManifestRegistry`, which manages
@@ -55,7 +60,108 @@ class ToolRegistry:
     _tools: dict[str, type[BaseToolPlugin]] = {}
     _instances: dict[str, BaseToolPlugin] = {}
     _origins: dict[str, str] = {}
+    _deferred: dict[str, str] = {}
     _lock: threading.RLock = threading.RLock()  # Reentrant lock for nested calls
+
+    @classmethod
+    def register_deferred(
+        cls,
+        name: str,
+        module_path: str,
+        *,
+        origin: str = BUILTIN_ORIGIN,
+    ) -> None:
+        """Register a tool by name and module path without importing it yet.
+
+        Args:
+            name: Canonical tool name (case-insensitive).
+            module_path: Dotted module path that registers the tool on import
+                (via ``@register_tool``).
+            origin: Where the tool came from — ``"builtin"`` or a distribution
+                name for third-party plugins.
+        """
+        with cls._lock:
+            name_lower = name.lower()
+            if name_lower in cls._tools or name_lower in cls._deferred:
+                existing_origin = cls._origins.get(name_lower, "unknown")
+                logger.warning(
+                    f"Tool '{name_lower}' already registered "
+                    f"(origin={existing_origin}), "
+                    f"overwriting deferred entry with {module_path}",
+                )
+            cls._deferred[name_lower] = module_path
+            cls._origins[name_lower] = origin
+            logger.debug(
+                f"Deferred tool registration: {name_lower} -> {module_path} "
+                f"(origin={origin})",
+            )
+
+    @classmethod
+    def _materialize(cls, name: str) -> None:
+        """Import a deferred tool module so ``@register_tool`` can run.
+
+        Args:
+            name: Lowercased tool name present in ``_deferred``.
+
+        Raises:
+            ValueError: If the module imported but did not register the tool.
+        """
+        module_path = cls._deferred.get(name)
+        if module_path is None:
+            return
+        # Safe: module paths come from the builtin whitelist or entry points.
+        module = importlib.import_module(module_path)  # nosemgrep: non-literal-import
+        if name in cls._tools:
+            cls._deferred.pop(name, None)
+            return
+
+        # Module may already have been imported earlier in the process. In that
+        # case ``@register_tool`` does not re-run, so register explicitly.
+        import inspect
+
+        from lintro.plugins.base import BaseToolPlugin
+
+        for obj in vars(module).values():
+            if not isinstance(obj, type) or obj is BaseToolPlugin:
+                continue
+            if getattr(obj, "__module__", None) != module.__name__:
+                continue
+            if not issubclass(obj, BaseToolPlugin) or inspect.isabstract(obj):
+                continue
+            try:
+                instance = obj()
+            except TypeError:
+                # Skip non-instantiable intermediates that slipped past isabstract.
+                continue
+            if instance.definition.name.lower() != name:
+                continue
+            cls.register(obj, instance=instance)
+            break
+
+        if name not in cls._tools:
+            msg = (
+                f"Deferred tool module {module_path!r} did not register "
+                f"tool {name!r}"
+            )
+            raise ValueError(msg)
+        cls._deferred.pop(name, None)
+
+    @classmethod
+    def _materialize_all(cls) -> None:
+        """Import every deferred tool module.
+
+        Failures for individual tools are logged and skipped so one broken
+        definition cannot take down ``list-tools`` / ``get_all``.
+        """
+        for name in list(cls._deferred):
+            try:
+                cls._materialize(name)
+            except (ImportError, AttributeError, TypeError, ValueError) as exc:
+                logger.error(
+                    f"Error loading deferred tool {name!r}: "
+                    f"{type(exc).__name__}: {exc}",
+                )
+                cls._deferred.pop(name, None)
 
     @classmethod
     def register(
@@ -103,6 +209,7 @@ class ToolRegistry:
                     f"{plugin_class.__name__}",
                 )
 
+            cls._deferred.pop(name, None)
             cls._tools[name] = plugin_class
             # Store the instance we created for get() calls
             cls._instances[name] = instance
@@ -116,13 +223,15 @@ class ToolRegistry:
         """Ensure tools have been discovered.
 
         This is called automatically when accessing tools to support
-        lazy discovery when the package is imported.
+        lazy discovery when the package is imported. If the registry was
+        cleared after an earlier discovery (common in tests), force a
+        rediscovery so deferred builtins are registered again.
         """
-        if not cls._tools:
+        if not cls._tools and not cls._deferred:
             # Auto-discover tools if registry is empty
             from lintro.plugins.discovery import discover_all_tools
 
-            discover_all_tools()
+            discover_all_tools(force=True)
 
     @classmethod
     def get(cls, name: str) -> BaseToolPlugin:
@@ -147,9 +256,12 @@ class ToolRegistry:
             # Auto-discover tools if not yet done
             cls._ensure_discovered()
 
+            if name_lower in cls._deferred:
+                cls._materialize(name_lower)
+
             if name_lower not in cls._instances:
                 if name_lower not in cls._tools:
-                    available = ", ".join(sorted(cls._tools.keys()))
+                    available = ", ".join(sorted(cls._known_names()))
                     raise ValueError(
                         f"Unknown tool: {name!r}. "
                         f"Available tools: {available or 'none'}",
@@ -157,6 +269,15 @@ class ToolRegistry:
                 cls._instances[name_lower] = cls._tools[name_lower]()
 
             return cls._instances[name_lower]
+
+    @classmethod
+    def _known_names(cls) -> set[str]:
+        """Return materialized and deferred tool names.
+
+        Returns:
+            Set of known tool names (lowercase).
+        """
+        return set(cls._tools) | set(cls._deferred)
 
     @classmethod
     def get_all(cls) -> dict[str, BaseToolPlugin]:
@@ -172,6 +293,7 @@ class ToolRegistry:
         """
         with cls._lock:
             cls._ensure_discovered()
+            cls._materialize_all()
             return {name: cls.get(name) for name in cls._tools}
 
     @classmethod
@@ -188,6 +310,7 @@ class ToolRegistry:
         """
         with cls._lock:
             cls._ensure_discovered()
+            cls._materialize_all()
             return {name: cls.get(name).definition for name in cls._tools}
 
     @classmethod
@@ -199,7 +322,7 @@ class ToolRegistry:
         """
         with cls._lock:
             cls._ensure_discovered()
-            return sorted(cls._tools.keys())
+            return sorted(cls._known_names())
 
     @classmethod
     def get_origin(cls, name: str) -> str:
@@ -229,7 +352,7 @@ class ToolRegistry:
         """
         with cls._lock:
             cls._ensure_discovered()
-            return name.lower() in cls._tools
+            return name.lower() in cls._known_names()
 
     @classmethod
     def clear(cls) -> None:
@@ -241,6 +364,7 @@ class ToolRegistry:
             cls._tools.clear()
             cls._instances.clear()
             cls._origins.clear()
+            cls._deferred.clear()
             logger.debug("Cleared tool registry")
 
     @classmethod
@@ -287,3 +411,23 @@ def register_tool(cls: type[BaseToolPlugin]) -> type[BaseToolPlugin]:
         ...         return ToolDefinition(name="hadolint", description="...")
     """
     return ToolRegistry.register(cls)
+
+
+def __getattr__(name: str) -> Any:
+    """Provide BaseToolPlugin for type-checkers / rare runtime imports.
+
+    Args:
+        name: Attribute name being accessed.
+
+    Returns:
+        The requested attribute.
+
+    Raises:
+        AttributeError: If ``name`` is unknown.
+    """
+    if name == "BaseToolPlugin":
+        from lintro.plugins.base import BaseToolPlugin
+
+        return BaseToolPlugin
+    msg = f"module {__name__!r} has no attribute {name!r}"
+    raise AttributeError(msg)

@@ -102,12 +102,21 @@ def get_plugin(lintro_test_mode: str) -> Callable[[str], object]:
 
         Returns:
             A fresh plugin instance (not the cached singleton).
+
+        Raises:
+            KeyError: If the tool name is not registered.
         """
         name_lower = name.lower()
         # Get the class from the registry and create a new instance
         # to avoid test pollution from modified options on the cached instance
+        ToolRegistry._ensure_discovered()
+        if name_lower in ToolRegistry._deferred:
+            ToolRegistry._materialize(name_lower)
         if name_lower not in ToolRegistry._tools:
-            ToolRegistry._ensure_discovered()
+            available = ", ".join(sorted(ToolRegistry._known_names()))
+            raise KeyError(
+                f"Unknown tool: {name_lower!r}. Available: {available or 'none'}",
+            )
         plugin_class = ToolRegistry._tools[name_lower]
         return plugin_class()
 

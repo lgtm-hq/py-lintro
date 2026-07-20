@@ -75,11 +75,15 @@ def clean_registry() -> Generator[None]:
     """
     original_tools = dict(ToolRegistry._tools)
     original_instances = dict(ToolRegistry._instances)
+    original_origins = dict(ToolRegistry._origins)
+    original_deferred = dict(ToolRegistry._deferred)
     try:
         yield
     finally:
         ToolRegistry._tools = original_tools
         ToolRegistry._instances = original_instances
+        ToolRegistry._origins = original_origins
+        ToolRegistry._deferred = original_deferred
 
 
 @pytest.fixture
@@ -93,12 +97,16 @@ def empty_registry() -> Generator[None]:
     """
     original_tools = dict(ToolRegistry._tools)
     original_instances = dict(ToolRegistry._instances)
+    original_origins = dict(ToolRegistry._origins)
+    original_deferred = dict(ToolRegistry._deferred)
     ToolRegistry.clear()
     try:
         yield
     finally:
         ToolRegistry._tools = original_tools
         ToolRegistry._instances = original_instances
+        ToolRegistry._origins = original_origins
+        ToolRegistry._deferred = original_deferred
 
 
 @pytest.fixture
