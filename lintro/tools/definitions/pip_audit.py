@@ -111,7 +111,19 @@ def _build_targets(files: list[str]) -> list[list[str]]:
             # the file's own parent directory and silently point nowhere.
             requirement_targets.append(["-r", str(path.resolve())])
         elif path.name in PIP_AUDIT_PROJECT_FILES:
-            project_dir = str(path.resolve().parent)
+            resolved = path.resolve()
+            # A ``setup.py`` inside an importable package (its directory has an
+            # ``__init__.py``) is a source module coincidentally named
+            # ``setup.py`` — e.g. lintro's own ``lintro setup`` command — not a
+            # packaging manifest. pip-audit rejects such a directory with
+            # "couldn't find a supported project file", so skip it. A
+            # ``pyproject.toml`` is always a real manifest and is never skipped.
+            if (
+                resolved.name == "setup.py"
+                and (resolved.parent / "__init__.py").exists()
+            ):
+                continue
+            project_dir = str(resolved.parent)
             if project_dir not in project_dirs:
                 project_dirs.append(project_dir)
 
@@ -315,13 +327,14 @@ class PipAuditPlugin(BaseToolPlugin):
                     cwd=target_cwd,
                 )
             except subprocess.TimeoutExpired:
-                # Preserve findings already collected from earlier targets: a
-                # later timeout must not erase vulnerabilities pip-audit already
-                # reported. Mark the scan unsuccessful and fall through to the
-                # aggregation path rather than returning a clean-looking result.
+                # A slow target must not end the scan: record the timeout as a
+                # failure for this target and keep auditing the rest, so a
+                # timeout can never silently skip coverage of later targets.
                 all_success = False
-                output_chunks.append(f"pip-audit timed out after {timeout}s")
-                break
+                output_chunks.append(
+                    f"pip-audit timed out after {timeout}s for {source}",
+                )
+                continue
 
             # pip-audit writes its JSON report to stdout; parse stdout only so a
             # stderr warning cannot corrupt parsing (see #1043).

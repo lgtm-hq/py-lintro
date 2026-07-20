@@ -8,6 +8,11 @@
   ],
   "packageRules": [
     {
+      "description": "test_samples are fixed tool-test inputs; never update them",
+      "matchFileNames": ["test_samples/**"],
+      "enabled": false
+    },
+    {
       "description": "Hold prettier 3.9.5+ until Docker integration prettier fixtures are updated",
       "matchPackageNames": ["prettier"],
       "allowedVersions": "<=3.9.4"

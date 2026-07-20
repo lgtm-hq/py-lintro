@@ -598,6 +598,94 @@ jobs:
           retention-days: 7
           if-no-files-found: ignore
 
+  # No-silent-skip gate (#1510, epic #1508): the dogfooding jobs above run an
+  # external reusable workflow (no place to add a post-lint step), so this
+  # dedicated job re-derives the structured skip state from the same image and
+  # fails when an enabled tool silently skips for a reason not in the committed
+  # allowlist. Runs whenever a CI image exists (not docs-only) so both the
+  # full-repo and changed-files PR paths are covered.
+  dogfood-skip-gate:
+    name: 🚦 Dogfood No-Silent-Skip Gate
+    needs: [changes, docker-build, dogfooding-lint, dogfooding-lint-changed]
+    if: >-
+      always() &&
+      !cancelled() &&
+      needs.changes.outputs.pipeline != 'false' &&
+      needs.docker-build.result == 'success'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      packages: read # pull the CI lint image from GHCR
+    timeout-minutes: 30
+    steps:
+      - name: Harden Runner
+        # Same allowlist as dogfooding-lint-changed: the container sets
+        # LINTRO_AUTO_INSTALL_DEPS=1 and may fetch project deps before linting.
+        # yamllint disable-line rule:line-length
+        uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
+        with:
+          egress-policy: 'block'
+          allowed-endpoints: >
+            github.com:443
+            api.github.com:443
+            codeload.github.com:443
+            release-assets.githubusercontent.com:443
+            objects.githubusercontent.com:443
+            raw.githubusercontent.com:443
+            pipelines.actions.githubusercontent.com:443
+            github-releases.githubusercontent.com:443
+            ghcr.io:443
+            pkg-containers.githubusercontent.com:443
+            docker.io:443
+            registry-1.docker.io:443
+            auth.docker.io:443
+            production.cloudflare.docker.com:443
+            production.cloudfront.docker.com:443
+            pypi.org:443
+            files.pythonhosted.org:443
+            static.rust-lang.org:443
+            bun.sh:443
+            astral.sh:443
+            releases.astral.sh:443
+            sh.rustup.rs:443
+            deb.debian.org:80
+            registry.npmjs.org:443
+            crates.io:443
+            static.crates.io:443
+            index.crates.io:443
+            semgrep.dev:443
+            metrics.semgrep.dev:443
+            api.osv.dev:443
+            api.deps.dev:443
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+      - name: Log in to GitHub Container Registry
+        if: needs.docker-build.outputs.is-fork != 'true'
+        # yamllint disable-line rule:line-length
+        uses: docker/login-action@af1e73f918a031802d376d3c8bbc3fe56130a9b0 # v4.4.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Check for silent tool skips
+        env:
+          # Same tool coverage as the dogfooding run so skip behaviour matches.
+          TOOL_OPTIONS: >-
+            pydoclint:timeout=120,bandit:timeout=120,prettier:timeout=120,osv_scanner:check_suppressions=false
+          # Same image selection as dogfooding-lint: CI-built image for
+          # same-repo PRs, pinned release digest for forks (no CI push).
+          # Pinned digest — keep in sync with pyproject.toml lintro pin
+          LINTRO_IMAGE: >-
+            ${{ needs.docker-build.outputs.is-fork == 'true'
+            && format(
+              'ghcr.io/lgtm-hq/py-lintro@sha256:{0}',
+              '0e8f3892f31f7bb6ce56a33d037d983591b82c325bf56281f9d9e2fec488aa5c'
+            )
+            || format('ghcr.io/lgtm-hq/py-lintro:ci-{0}', github.run_id) }}
+        run: scripts/ci/dogfood-skip-gate.sh
+
   dogfooding-pr-comment:
     # Comments with the outputs of whichever dogfooding job ran (full or
     # changed-files — they are mutually exclusive per run, see #1361).
@@ -877,6 +965,18 @@ jobs:
       - name: Smoke Test Base Image
         if: needs.changes.outputs.pipeline != 'false'
         run: scripts/docker/smoke-test-base-image.sh
+      - name: Verify CI image tools against manifest
+        # Manifest-vs-image drift gate (#1511): run verify-manifest-tools.py
+        # inside the freshly built CI image so a manifest entry the image
+        # cannot execute (missing binary or version mismatch) fails the build
+        # instead of surfacing later as a silent dogfooding SKIP (#1505). For
+        # fork PRs this verifies the tarball-loaded fork-built image (also
+        # tagged py-lintro:latest by load-ci-docker-images.sh), so forks gate
+        # on the exact image their integration tests run.
+        if: needs.changes.outputs.pipeline != 'false'
+        env:
+          IMAGE: py-lintro:latest
+        run: scripts/ci/verify-image-manifest-tools.sh
       - name: Run Docker integration tests
         if: needs.changes.outputs.pipeline != 'false'
         run: scripts/docker/run-docker-test-suite.sh

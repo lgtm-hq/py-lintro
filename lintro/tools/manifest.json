@@ -174,7 +174,7 @@
       "category": "external",
       "version_command": ["dotenv-linter", "--version"],
       "languages": ["dotenv"],
-      "tags": ["linter", "formatter"]
+      "tags": ["linter"]
     },
     {
       "name": "gitleaks",
