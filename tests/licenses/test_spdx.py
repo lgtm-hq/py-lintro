@@ -90,6 +90,9 @@ def test_normalize_unbalanced_parentheses_rejected() -> None:
     assert_that(normalize_to_spdx("(MIT OR GPL-3.0")).is_none()
     assert_that(normalize_to_spdx("MIT OR GPL-3.0)")).is_none()
     assert_that(normalize_to_spdx("(MIT AND GPL-3.0-only")).is_none()
+    # Balanced count but improperly nested must also be rejected.
+    assert_that(normalize_to_spdx(")(MIT OR GPL-3.0)(")).is_none()
+    assert_that(normalize_to_spdx(")MIT(")).is_none()
 
 
 def test_normalize_unbalanced_parens_denied_expression_not_bypassed() -> None:

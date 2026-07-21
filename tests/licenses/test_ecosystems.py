@@ -327,3 +327,38 @@ def test_npm_adapter_classifies_optional_and_peer_children_of_dev(
     assert_that(by_name["opt-child"].is_dev).is_true()
     assert_that(by_name["peer-child"].is_dev).is_true()
     assert_that(by_name["bundled-child"].is_dev).is_true()
+
+
+def test_npm_adapter_terminates_on_dependency_cycle(tmp_path: Path) -> None:
+    """The dev/prod walk terminates on a circular dependency graph.
+
+    npm permits cycles (notably via peer/optional edges). The walk must not
+    loop forever; a dev-side cycle ``a -> b -> a`` should classify both as dev.
+
+    Args:
+        tmp_path: Temporary project directory.
+    """
+    (tmp_path / "package.json").write_text(
+        json.dumps({"name": "root", "devDependencies": {"a": "1.0.0"}}),
+    )
+    node_modules = tmp_path / "node_modules"
+    for name, peer in (("a", "b"), ("b", "a")):
+        pkg = node_modules / name
+        pkg.mkdir(parents=True)
+        pkg.joinpath("package.json").write_text(
+            json.dumps(
+                {
+                    "name": name,
+                    "version": "1.0.0",
+                    "license": "MIT",
+                    "dependencies": {peer: "1.0.0"},
+                },
+            ),
+        )
+
+    packages = NpmLicenseAdapter().get_licenses_from_package_json(
+        tmp_path / "package.json",
+    )
+    by_name = {p.name: p for p in packages}
+    assert_that(by_name["a"].is_dev).is_true()
+    assert_that(by_name["b"].is_dev).is_true()

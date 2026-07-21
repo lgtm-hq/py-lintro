@@ -230,6 +230,32 @@ class _OrNode:
 _ExprNode = _LicenseAtom | _AndNode | _OrNode
 
 
+def _parens_balanced(raw: str) -> bool:
+    """Report whether parentheses in ``raw`` are properly balanced and nested.
+
+    A simple count comparison is insufficient: ``)(`` has matching counts but
+    is malformed. This scans left to right and rejects any point where a
+    closing paren appears before a matching opener, as well as any unclosed
+    openers at the end.
+
+    Args:
+        raw: Raw license string.
+
+    Returns:
+        bool: True when every ``)`` has a preceding unmatched ``(`` and no
+            ``(`` is left unclosed.
+    """
+    depth = 0
+    for ch in raw:
+        if ch == "(":
+            depth += 1
+        elif ch == ")":
+            depth -= 1
+            if depth < 0:
+                return False
+    return depth == 0
+
+
 def _clean(raw: str) -> str:
     """Lower-case and collapse whitespace/punctuation noise in a license string.
 
@@ -483,12 +509,13 @@ def normalize_to_spdx(license_string: str | None) -> str | None:
     if not license_string:
         return None
 
-    # Reject malformed expressions with unbalanced parentheses before cleaning.
-    # ``_clean()`` strips leading/trailing parens, so an input like
-    # ``(MIT OR GPL-3.0`` would otherwise be silently repaired to a
+    # Reject malformed expressions with mismatched parentheses before cleaning.
+    # ``_clean()`` strips leading/trailing parens, so inputs like
+    # ``(MIT OR GPL-3.0`` (unbalanced) or ``)(MIT OR GPL-3.0)(`` (balanced
+    # count but improperly nested) would otherwise be silently repaired to a
     # valid-looking ``MIT OR GPL-3.0`` and false-pass a deny policy by
-    # collapsing to the permissive ``MIT`` operand.
-    if license_string.count("(") != license_string.count(")"):
+    # collapsing to the permissive ``MIT`` operand. A depth scan rejects both.
+    if not _parens_balanced(license_string):
         return None
 
     cleaned = _clean(license_string)

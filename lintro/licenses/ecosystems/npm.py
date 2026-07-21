@@ -93,6 +93,11 @@ def _resolve_dependency_manifest(
     """
     search_roots: list[Path] = []
     seen: set[Path] = set()
+    # A package's own nested node_modules shadows any hoisted install, so it
+    # must be searched before walking up to ancestor node_modules roots.
+    nested_node_modules = parent_manifest.parent / "node_modules"
+    search_roots.append(nested_node_modules)
+    seen.add(nested_node_modules)
     for ancestor in parent_manifest.parents:
         if ancestor.name == "node_modules" and ancestor not in seen:
             search_roots.append(ancestor)
@@ -139,12 +144,22 @@ def _build_dev_prod_map(
 
     while queue:
         manifest, is_dev = queue.popleft()
-        if manifest in classification and not classification[manifest]:
-            continue
-        if is_dev and manifest not in classification:
-            classification[manifest] = True
-        elif not is_dev:
+        # Process each node at most twice: once when first seen, and once more
+        # only to downgrade dev -> prod. npm permits circular dependencies
+        # (notably via peer/optional edges), so without this guard a dev-side
+        # cycle (A -> B -> A) would re-enqueue forever and acyclic diamonds
+        # would re-process exponentially.
+        if manifest in classification:
+            if not classification[manifest]:
+                # Already finalized as production; nothing more to do.
+                continue
+            if is_dev:
+                # Already dev and re-seen as dev; do not reprocess.
+                continue
+            # Downgrade dev -> prod, then reprocess children as production.
             classification[manifest] = False
+        else:
+            classification[manifest] = is_dev
 
         try:
             data = json.loads(manifest.read_text())
