@@ -7,6 +7,7 @@ from unittest.mock import patch
 
 from assertpy import assert_that
 
+from lintro.parsers.trufflehog.trufflehog_issue import TrufflehogIssue
 from lintro.tools.definitions.trufflehog import TrufflehogPlugin
 from tests.unit.tools.trufflehog.conftest import (
     make_subprocess_result,
@@ -62,7 +63,11 @@ def test_check_detects_secret(
     assert_that(result.success).is_true()
     assert_that(result.issues_count).is_equal_to(1)
     assert_that(result.issues).is_length(1)
-    assert_that(result.issues[0].detector_name).is_equal_to("Github")
+    issues = result.issues
+    assert issues is not None  # nosec B101 - narrows Optional for type checkers
+    issue = issues[0]
+    assert isinstance(issue, TrufflehogIssue)
+    assert_that(issue.detector_name).is_equal_to("Github")
 
 
 def test_check_passes_absolute_paths_to_command(

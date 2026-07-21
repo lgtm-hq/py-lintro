@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-import subprocess
+import subprocess  # nosec B404 - stdlib subprocess used only to build mock result types in tests
 from pathlib import Path
 from unittest.mock import patch
 

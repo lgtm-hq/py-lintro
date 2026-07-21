@@ -132,6 +132,8 @@ def test_build_check_command_defaults(trufflehog_plugin: TrufflehogPlugin) -> No
     assert_that(cmd).contains("/abs/path")
     assert_that(cmd).contains("--json")
     assert_that(cmd).contains("--no-verification")
+    # The self-updater must never run against the baked-in binary.
+    assert_that(cmd).contains("--no-update")
 
 
 def test_build_check_command_verification_enabled(

@@ -141,6 +141,12 @@ class TrufflehogPlugin(BaseToolPlugin):
         # Machine-readable JSONL output on stdout.
         cmd.append("--json")
 
+        # Never let trufflehog self-update at scan time: the binary is baked
+        # into the (read-only) tools image, so the updater's "cannot move
+        # binary" failure would surface as a spurious tool error. Also keeps
+        # scans hermetic (no outbound update check).
+        cmd.append("--no-update")
+
         # Disable network verification by default (hermetic scans).
         if self.options.get("no_verification", True):
             cmd.append("--no-verification")
@@ -182,13 +188,17 @@ class TrufflehogPlugin(BaseToolPlugin):
         if ctx.should_skip:
             return ctx.early_result  # type: ignore[return-value]
 
-        # Resolve every provided path to an absolute path. TruffleHog resolves
-        # relative paths against its own working directory, which differs from
-        # the caller's cwd; an unresolved path makes TruffleHog exit 0 with no
-        # output, which a security scanner must never treat as a clean pass.
-        # TruffleHog's filesystem mode accepts multiple explicit paths, so scan
-        # exactly what was requested rather than a broad common parent.
-        if paths:
+        # Scan the discovered, filtered file set — not the raw CLI paths — so
+        # that .lintro-ignore exclusions (test_samples/, .venv, build dirs, …)
+        # and the venv filter are honored exactly like every other tool. Using
+        # the prepared absolute file list also preserves the security guarantee
+        # below: TruffleHog resolves relative paths against its own working
+        # directory, and an unresolved path makes it exit 0 with no output,
+        # which a secrets scanner must never treat as a clean pass. TruffleHog's
+        # filesystem mode accepts multiple explicit paths, so pass each file.
+        if ctx.files:
+            source_paths = [str(Path(f).resolve()) for f in ctx.files]
+        elif paths:
             source_paths = [str(Path(p).resolve()) for p in paths]
         else:
             source_paths = [str(Path.cwd())]
