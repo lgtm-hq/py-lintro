@@ -284,3 +284,166 @@ def test_sh_help_exits_zero() -> None:
     assert_that(result.returncode).is_equal_to(0)
     assert_that(result.stdout).contains("Usage:")
     assert_that(result.stdout).contains("BASE_REF")
+
+
+def _manifest_versions(entries: list[tuple[str, str]]) -> str:
+    """Render a manifest JSON string with explicit name/version pairs.
+
+    Args:
+        entries: (name, version) pairs to declare.
+
+    Returns:
+        str: The manifest JSON.
+    """
+    return json.dumps(
+        {
+            "version": 2,
+            "tools": [{"name": n, "version": v} for n, v in entries],
+        },
+    )
+
+
+def _run_py_emit(
+    old: Path,
+    new: Path,
+    *,
+    emit: str,
+) -> subprocess.CompletedProcess[str]:
+    """Run the python diff helper with an explicit --emit mode.
+
+    Args:
+        old: Old manifest path.
+        new: New manifest path.
+        emit: ``added`` or ``version-changed``.
+
+    Returns:
+        subprocess.CompletedProcess[str]: The completed run.
+    """
+    return subprocess.run(  # nosec B603 B607 - fixed argv, shell=False, controlled test
+        [
+            "python3",
+            str(_PY_SCRIPT),
+            "--old",
+            str(old),
+            "--new",
+            str(new),
+            "--emit",
+            emit,
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+
+def test_py_version_changed_reports_bumped_tools(tmp_path: Path) -> None:
+    """Version-changed emit lists tools whose version string differs."""
+    old = tmp_path / "old.json"
+    new = tmp_path / "new.json"
+    old.write_text(_manifest_versions([("ruff", "0.9.0"), ("astro_check", "7.0.9")]))
+    new.write_text(_manifest_versions([("ruff", "0.9.0"), ("astro_check", "7.1.3")]))
+    result = _run_py_emit(old, new, emit="version-changed")
+    assert_that(result.returncode).is_equal_to(0)
+    assert_that(result.stdout.strip()).is_equal_to("astro_check")
+
+
+def test_py_version_changed_ignores_newly_added(tmp_path: Path) -> None:
+    """Newly-added tools are not reported as version-changed."""
+    old = tmp_path / "old.json"
+    new = tmp_path / "new.json"
+    old.write_text(_manifest_versions([("ruff", "0.9.0")]))
+    new.write_text(
+        _manifest_versions([("ruff", "0.9.0"), ("terraform", "1.9.0")]),
+    )
+    result = _run_py_emit(old, new, emit="version-changed")
+    assert_that(result.returncode).is_equal_to(0)
+    assert_that(result.stdout.strip()).is_equal_to("")
+
+
+def test_py_version_changed_no_change_is_empty(tmp_path: Path) -> None:
+    """Identical versions print an empty version-changed set."""
+    old = tmp_path / "old.json"
+    new = tmp_path / "new.json"
+    payload = _manifest_versions([("ruff", "0.9.0"), ("black", "25.1.0")])
+    old.write_text(payload)
+    new.write_text(payload)
+    result = _run_py_emit(old, new, emit="version-changed")
+    assert_that(result.returncode).is_equal_to(0)
+    assert_that(result.stdout.strip()).is_equal_to("")
+
+
+def test_py_version_changed_invalid_exits_two(tmp_path: Path) -> None:
+    """Malformed manifests fail closed (exit 2) for version-changed too."""
+    old = tmp_path / "old.json"
+    new = tmp_path / "new.json"
+    old.write_text(_manifest_versions([("ruff", "0.9.0")]))
+    new.write_text("not json")
+    result = _run_py_emit(old, new, emit="version-changed")
+    assert_that(result.returncode).is_equal_to(2)
+
+
+def _run_sh_emit(
+    repo: Path,
+    *,
+    base_ref: str,
+    emit: str,
+) -> subprocess.CompletedProcess[str]:
+    """Run the shell wrapper with an explicit EMIT mode.
+
+    Args:
+        repo: Repository to run in (cwd).
+        base_ref: BASE_REF value.
+        emit: ``added`` or ``version-changed``.
+
+    Returns:
+        subprocess.CompletedProcess[str]: The completed run.
+    """
+    return subprocess.run(  # nosec B603 - fixed argv against a real binary; shell=False
+        [str(_SH_SCRIPT)],
+        capture_output=True,
+        text=True,
+        check=False,
+        cwd=repo,
+        env={
+            "PATH": os.environ.get("PATH", "/usr/bin:/bin"),
+            "HOME": os.environ.get("HOME", "/tmp"),  # nosec B108 - test fallback
+            "BASE_REF": base_ref,
+            "EMIT": emit,
+        },
+    )
+
+
+def _write_manifest_versions(repo: Path, entries: list[tuple[str, str]]) -> None:
+    """Write the repo manifest with explicit name/version pairs.
+
+    Args:
+        repo: Repository root.
+        entries: (name, version) pairs.
+    """
+    manifest = repo / "lintro" / "tools" / "manifest.json"
+    manifest.parent.mkdir(parents=True, exist_ok=True)
+    manifest.write_text(_manifest_versions(entries))
+
+
+def test_sh_version_changed_reports_bump(tmp_path: Path) -> None:
+    """A version bump on the branch is reported under EMIT=version-changed."""
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _git(repo, "init", "--initial-branch=main")
+    _write_manifest_versions(repo, [("ruff", "0.9.0"), ("astro_check", "7.0.9")])
+    _git(repo, "add", ".")
+    _git(repo, "commit", "-m", "base")
+    _git(repo, "checkout", "-b", "feature")
+    _write_manifest_versions(repo, [("ruff", "0.9.0"), ("astro_check", "7.1.3")])
+    _git(repo, "commit", "-am", "bump astro")
+    result = _run_sh_emit(repo, base_ref="main", emit="version-changed")
+    assert_that(result.returncode).is_equal_to(0)
+    assert_that(result.stdout.strip()).is_equal_to("astro_check")
+
+
+def test_sh_version_changed_unresolvable_fails_closed(tmp_path: Path) -> None:
+    """Unresolvable base ref fails closed for version-changed emit too."""
+    repo = _init_repo_with_base(tmp_path)
+    result = _run_sh_emit(repo, base_ref="does-not-exist", emit="version-changed")
+    assert_that(result.returncode).is_equal_to(0)
+    assert_that(result.stdout.strip()).is_equal_to("")
