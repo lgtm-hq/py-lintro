@@ -21,6 +21,12 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.91.0] - 2026-07-21
+
+### Added
+
+- **tools**: add html-validate for HTML validation (#1153) (266e94e)
+
 ## [0.90.1] - 2026-07-21
 
 ### Changed
