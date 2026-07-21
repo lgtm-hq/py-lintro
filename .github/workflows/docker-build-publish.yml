@@ -34,7 +34,7 @@ jobs:
   docker-full:
     name: 🐳 Docker Full Image
     # yamllint disable-line rule:line-length
-    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-docker.yml@31c25ef2e8992960e218524780e34f44f51271b5 # v0.54.0
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-docker.yml@ee8484ca71db3a2c2c33da6128bbf2330fcd7c88 # v0.59.2
     permissions:
       contents: read
       packages: write
@@ -80,7 +80,7 @@ jobs:
       provenance: false
       sbom: false
       cosign-sign: true
-      tooling-ref: '31c25ef2e8992960e218524780e34f44f51271b5' # v0.54.0
+      tooling-ref: 'ee8484ca71db3a2c2c33da6128bbf2330fcd7c88'  # v0.59.2
       egress-policy: block
       egress-preset: docker
       # Full list (v0.50.0+ replace semantics): the reusable passes
@@ -129,7 +129,7 @@ jobs:
     name: 🐳 Docker Base Image
     needs: docker-full
     # yamllint disable-line rule:line-length
-    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-docker.yml@31c25ef2e8992960e218524780e34f44f51271b5 # v0.54.0
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-docker.yml@ee8484ca71db3a2c2c33da6128bbf2330fcd7c88 # v0.59.2
     permissions:
       contents: read
       packages: write
@@ -175,7 +175,7 @@ jobs:
       provenance: false
       sbom: false
       cosign-sign: true
-      tooling-ref: '31c25ef2e8992960e218524780e34f44f51271b5' # v0.54.0
+      tooling-ref: 'ee8484ca71db3a2c2c33da6128bbf2330fcd7c88'  # v0.59.2
       egress-policy: block
       egress-preset: docker
       # Full list (v0.50.0+ replace semantics): the reusable passes
