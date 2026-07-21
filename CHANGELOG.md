@@ -21,6 +21,12 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.89.1] - 2026-07-21
+
+### Fixed
+
+- **security**: time-box suppression for astro GHSA-4g3v-8h47-v7g6 (#1585) (f0dae4a)
+
 ## [0.89.0] - 2026-07-20
 
 ### Added
