@@ -1533,6 +1533,48 @@ lintro check src/ --tools vue-tsc --tool-options "vue-tsc:strict=true"
 lintro check src/ --tools vue-tsc --auto-install
 ```
 
+#### html-validate Configuration
+
+html-validate is an offline HTML validator that checks documents for standards
+compliance, best practices, and accessibility (WCAG) issues. It is check-only — the tool
+ships no autofixer. By default it inspects `*.html`, `*.htm`, `*.vue`, and `*.svelte`
+files.
+
+**Installation:**
+
+```bash
+# bun (recommended)
+bun add -D html-validate
+
+# npm
+npm install -D html-validate
+```
+
+**Native Config:** `.htmlvalidate.json`, `.htmlvalidate.js`, `.htmlvalidate.cjs`, or
+`.htmlvalidate.mjs`
+
+html-validate reads its rule configuration from the project's native config file when
+present. No additional configuration is required for Lintro.
+
+**Available Options via `--tool-options`:**
+
+| Option    | Type    | Description                                 |
+| --------- | ------- | ------------------------------------------- |
+| `timeout` | integer | Execution timeout in seconds (default: 120) |
+
+**Usage Examples:**
+
+```bash
+# Check HTML files
+lintro check src/ --tools html-validate
+
+# Check the whole project
+lintro check . --tools html-validate
+
+# Auto-install dependencies before checking
+lintro check src/ --tools html-validate --auto-install
+```
+
 ### SQL Tools
 
 #### SQLFluff Configuration

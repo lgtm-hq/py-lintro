@@ -43,6 +43,7 @@
     "docker": ["hadolint"],
     "yaml": ["yamllint"],
     "markdown": ["markdownlint", "vale"],
+    "html": ["html_validate"],
     "toml": ["taplo"],
     "dotenv": ["dotenv_linter"],
     "css": ["stylelint"],
