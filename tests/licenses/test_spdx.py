@@ -81,6 +81,73 @@ def test_mixed_or_and_with_denied_operand_fails_policy() -> None:
     assert_that(result.status).is_equal_to(LicenseStatus.DENIED)
 
 
+def test_normalize_or_later_operand_not_split_by_hyphen() -> None:
+    """Hyphenated ``-or-later`` ids must not tokenize their inner ``or``/``and``.
+
+    A prior tokenizer matched the literal ``or`` inside ids like
+    ``GPL-3.0-or-later`` (``-`` is a regex word boundary), splitting the
+    operand so a copyleft conjunct collapsed to the permissive side.
+    """
+    assert_that(normalize_to_spdx("MIT AND GPL-3.0-or-later")).is_equal_to(
+        "GPL-3.0-or-later",
+    )
+    assert_that(normalize_to_spdx("GPL-3.0-or-later AND MIT")).is_equal_to(
+        "GPL-3.0-or-later",
+    )
+    assert_that(normalize_to_spdx("MIT AND LGPL-2.1-or-later")).is_equal_to(
+        "LGPL-2.1-or-later",
+    )
+    assert_that(normalize_to_spdx("MIT AND AGPL-3.0-or-later")).is_equal_to(
+        "AGPL-3.0-or-later",
+    )
+    assert_that(normalize_to_spdx("(MIT OR GPL-3.0-or-later)")).is_equal_to("MIT")
+
+
+def test_or_later_and_operand_fails_deny_policy() -> None:
+    """A copyleft ``-or-later`` AND operand cannot false-pass a deny policy."""
+    expression = "MIT AND GPL-3.0-or-later"
+    package = PackageLicense(
+        name="copyleft-conjunct",
+        version="1.0.0",
+        license_id=normalize_to_spdx(expression),
+        license_name=expression,
+        ecosystem="npm",
+    )
+    engine = LicensePolicyEngine(LicensesConfig(policy="permissive"))
+    result = engine.check(package)
+    assert_that(result.status).is_equal_to(LicenseStatus.DENIED)
+
+
+def test_or_later_or_operand_passes_policy_allowing_mit() -> None:
+    """An OR expression with a copyleft ``-or-later`` branch resolves to MIT."""
+    expression = "(MIT OR GPL-3.0-or-later)"
+    package = PackageLicense(
+        name="permissive-disjunct",
+        version="1.0.0",
+        license_id=normalize_to_spdx(expression),
+        license_name=expression,
+        ecosystem="npm",
+    )
+    engine = LicensePolicyEngine(LicensesConfig(policy="permissive"))
+    result = engine.check(package)
+    assert_that(result.status).is_equal_to(LicenseStatus.ALLOWED)
+
+
+def test_or_later_denied_both_operands_fails_deny_policy() -> None:
+    """When both AND operands are denied, the conjunction stays denied."""
+    expression = "GPL-3.0-or-later AND AGPL-3.0-or-later"
+    package = PackageLicense(
+        name="copyleft-both",
+        version="1.0.0",
+        license_id=normalize_to_spdx(expression),
+        license_name=expression,
+        ecosystem="npm",
+    )
+    engine = LicensePolicyEngine(LicensesConfig(policy="permissive"))
+    result = engine.check(package)
+    assert_that(result.status).is_equal_to(LicenseStatus.DENIED)
+
+
 @pytest.mark.parametrize(
     "raw",
     [None, "", "   ", "UNLICENSED", "proprietary", "totally-made-up-license"],

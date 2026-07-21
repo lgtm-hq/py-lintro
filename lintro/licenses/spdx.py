@@ -164,15 +164,24 @@ _KNOWN_SPDX: frozenset[str] = (
 
 _SPDX_BY_LOWER: dict[str, str] = {spdx.lower(): spdx for spdx in _KNOWN_SPDX}
 
-_HAS_AND = re.compile(r"\band\b", re.IGNORECASE)
-_HAS_OR = re.compile(r"\bor\b", re.IGNORECASE)
+# Match the AND/OR operators only when whitespace/paren-delimited. A plain
+# ``\b`` word boundary treats ``-`` as a boundary, so ``\bOR\b`` would match
+# the literal ``or`` inside hyphenated SPDX ids such as ``GPL-3.0-or-later``,
+# splitting the operand and letting a copyleft license collapse away. Using
+# ``(?<![\w-])``/``(?![\w-])`` keeps hyphenated ids intact.
+_HAS_AND = re.compile(r"(?<![\w-])and(?![\w-])", re.IGNORECASE)
+_HAS_OR = re.compile(r"(?<![\w-])or(?![\w-])", re.IGNORECASE)
 
 # Prefer these when collapsing AND expressions so denials are not dropped.
 _RESTRICTIVE_FOR_AND: frozenset[str] = (
     STRONG_COPYLEFT_LICENSES | WEAK_COPYLEFT_LICENSES | RESTRICTED_LICENSES
 )
 
-_TOKEN_RE = re.compile(r"\(|\)|\bAND\b|\bOR\b", re.IGNORECASE)
+# Tokenize on parentheses and the whitespace/paren-delimited AND/OR operators.
+# The operator boundaries deliberately exclude ``-`` (see ``_HAS_AND``) so the
+# ``or``/``and`` inside hyphenated SPDX ids like ``GPL-3.0-or-later`` are never
+# mistaken for expression operators.
+_TOKEN_RE = re.compile(r"[()]|(?<![\w-])(?:AND|OR)(?![\w-])", re.IGNORECASE)
 
 
 class _TokenKind(StrEnum):
