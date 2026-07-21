@@ -49,10 +49,14 @@ Environment:
                  the PR newly adds to the manifest are computed (diff vs the
                  merge-base) and passed as --allow-missing, so their absent
                  binary in the digest-pinned base image downgrades to a
-                 warning instead of failing the gate (#1565). Unset on
-                 main/nightly -> empty allowlist -> full enforcement.
+                 warning instead of failing the gate (#1565). Tools whose
+                 manifest *version* the PR bumps are likewise computed and
+                 passed as --allow-version-lag (#1582). Unset on main/nightly
+                 -> empty allowlists -> full enforcement.
   ALLOW_MISSING  Optional. Explicit comma-separated allow-missing tool names.
                  Overrides the BASE_REF-derived set (used by unit tests).
+  ALLOW_VERSION_LAG  Optional. Explicit comma-separated allow-version-lag
+                 tool names. Overrides the BASE_REF-derived set (unit tests).
   DRY_RUN        Optional. When "1"/"true", print the docker command and exit 0
                  without invoking docker (used by unit tests).
 
@@ -73,6 +77,7 @@ fi
 : "${MANIFEST:=lintro/tools/manifest.json}"
 : "${BASE_REF:=}"
 : "${ALLOW_MISSING:=}"
+: "${ALLOW_VERSION_LAG:=}"
 : "${DRY_RUN:=}"
 
 log_info() { echo "[INFO] $*"; }
@@ -93,12 +98,18 @@ if [[ ! -f "${repo_root}/${MANIFEST}" ]]; then
 	exit 2
 fi
 
-# Compute the newly-added-tool allowlist (#1565). An explicit ALLOW_MISSING
-# wins (tests); otherwise derive it from BASE_REF via the fail-closed helper.
-# On main/nightly (no BASE_REF) the helper returns empty -> full enforcement.
+# Compute allowlists (#1565 / #1582). Explicit ALLOW_* wins (tests); otherwise
+# derive from BASE_REF via the fail-closed helper. On main/nightly (no
+# BASE_REF) the helper returns empty -> full enforcement.
 if [[ -z "$ALLOW_MISSING" ]]; then
-	ALLOW_MISSING="$(BASE_REF="$BASE_REF" MANIFEST="$MANIFEST" \
+	ALLOW_MISSING="$(BASE_REF="$BASE_REF" MANIFEST="$MANIFEST" EMIT=added \
 		"${script_dir}/compute-new-manifest-tools.sh")"
+fi
+if [[ -z "$ALLOW_VERSION_LAG" ]]; then
+	ALLOW_VERSION_LAG="$(
+		BASE_REF="$BASE_REF" MANIFEST="$MANIFEST" EMIT=version-changed \
+			"${script_dir}/compute-new-manifest-tools.sh"
+	)"
 fi
 
 # Bypass the image entrypoint so the container's baked ENV is used verbatim and
@@ -116,6 +127,10 @@ declare -a docker_args=(
 if [[ -n "$ALLOW_MISSING" ]]; then
 	docker_args+=(--allow-missing "$ALLOW_MISSING")
 	log_info "Tolerating newly-added tool(s): ${ALLOW_MISSING}"
+fi
+if [[ -n "$ALLOW_VERSION_LAG" ]]; then
+	docker_args+=(--allow-version-lag "$ALLOW_VERSION_LAG")
+	log_info "Tolerating version-lag tool(s): ${ALLOW_VERSION_LAG}"
 fi
 
 if [[ "$DRY_RUN" == "1" || "$DRY_RUN" == "true" ]]; then

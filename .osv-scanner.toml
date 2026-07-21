@@ -4,17 +4,3 @@
 # suppressions. Review periodically and add [[IgnoredVulns]] entries only when
 # necessary. Each entry is time-boxed via ignoreUntil so it cannot silently
 # outlive its rationale.
-
-# astro <= 7.0.9 — GHSA-4g3v-8h47-v7g6 (severity 5.3). Patched in astro 7.1.0.
-# The straightforward bump is blocked by CI: astro backs the `astro_check`
-# tool (tier `tools`), so bumping it forces a manifest version change that the
-# required `Docker Integration Tests` manifest gate hard-fails against the
-# digest-pinned lintro-tools base image (which still ships astro 7.0.9). The
-# patched tools image cannot exist until after merge + republish, so the bump
-# is not achievable in a single mergeable PR. This time-boxed suppression keeps
-# the security audit (and main) green in the interim; the coordinated
-# bump + tools-image republish + Dockerfile digest bump is tracked in #1582.
-[[IgnoredVulns]]
-id = "GHSA-4g3v-8h47-v7g6"
-ignoreUntil = 2026-09-15
-reason = "astro dev/build dependency; patched in 7.1.0 but the bump is blocked by the docker manifest gate digest-lag (see #1582). Time-boxed interim suppression."
