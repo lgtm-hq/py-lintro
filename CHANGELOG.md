@@ -21,6 +21,12 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.91.3] - 2026-07-21
+
+### Fixed
+
+- **licenses**: SPDX/npm evaluation gaps can false-pass a deny policy (#1330) (e03b71b)
+
 ## [0.91.2] - 2026-07-21
 
 ### Fixed
