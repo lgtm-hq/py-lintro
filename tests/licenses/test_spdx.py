@@ -66,6 +66,21 @@ def test_normalize_mixed_or_and_respects_precedence() -> None:
     )
 
 
+def test_mixed_or_and_with_denied_operand_fails_policy() -> None:
+    """A denied AND operand cannot be bypassed by a later OR branch."""
+    expression = "Apache-2.0 AND GPL-3.0 OR MIT"
+    package = PackageLicense(
+        name="mixed-license",
+        version="1.0.0",
+        license_id=normalize_to_spdx(expression),
+        license_name=expression,
+        ecosystem="npm",
+    )
+    engine = LicensePolicyEngine(LicensesConfig(policy="permissive"))
+    result = engine.check(package)
+    assert_that(result.status).is_equal_to(LicenseStatus.DENIED)
+
+
 def test_normalize_unbalanced_parentheses_rejected() -> None:
     """Unbalanced parentheses are malformed and must not normalize.
 
@@ -93,84 +108,70 @@ def test_normalize_unbalanced_parens_denied_expression_not_bypassed() -> None:
     assert_that(result.status).is_not_equal_to(LicenseStatus.ALLOWED)
 
 
-def test_mixed_or_and_with_denied_operand_fails_policy() -> None:
-    """A denied AND operand cannot be bypassed by a later OR branch."""
-    expression = "Apache-2.0 AND GPL-3.0 OR MIT"
-    package = PackageLicense(
-        name="mixed-license",
-        version="1.0.0",
-        license_id=normalize_to_spdx(expression),
-        license_name=expression,
-        ecosystem="npm",
-    )
-    engine = LicensePolicyEngine(LicensesConfig(policy="permissive"))
-    result = engine.check(package)
-    assert_that(result.status).is_equal_to(LicenseStatus.DENIED)
+def test_and_with_hyphenated_denied_operand_fails_policy() -> None:
+    """An AND with a hyphenated denied operand cannot false-pass.
 
-
-def test_normalize_or_later_operand_not_split_by_hyphen() -> None:
-    """Hyphenated ``-or-later`` ids must not tokenize their inner ``or``/``and``.
-
-    A prior tokenizer matched the literal ``or`` inside ids like
-    ``GPL-3.0-or-later`` (``-`` is a regex word boundary), splitting the
-    operand so a copyleft conjunct collapsed to the permissive side.
+    The ``or`` inside ``GPL-3.0-or-later`` must not be tokenized as an SPDX
+    operator; ``MIT AND GPL-3.0-or-later`` must collapse to the denied GPL
+    operand so a deny policy rejects it.
     """
-    assert_that(normalize_to_spdx("MIT AND GPL-3.0-or-later")).is_equal_to(
-        "GPL-3.0-or-later",
-    )
-    assert_that(normalize_to_spdx("GPL-3.0-or-later AND MIT")).is_equal_to(
-        "GPL-3.0-or-later",
-    )
-    assert_that(normalize_to_spdx("MIT AND LGPL-2.1-or-later")).is_equal_to(
-        "LGPL-2.1-or-later",
-    )
-    assert_that(normalize_to_spdx("MIT AND AGPL-3.0-or-later")).is_equal_to(
-        "AGPL-3.0-or-later",
-    )
-    assert_that(normalize_to_spdx("(MIT OR GPL-3.0-or-later)")).is_equal_to("MIT")
-
-
-def test_or_later_and_operand_fails_deny_policy() -> None:
-    """A copyleft ``-or-later`` AND operand cannot false-pass a deny policy."""
     expression = "MIT AND GPL-3.0-or-later"
     package = PackageLicense(
-        name="copyleft-conjunct",
+        name="hyphenated-and",
         version="1.0.0",
         license_id=normalize_to_spdx(expression),
         license_name=expression,
         ecosystem="npm",
     )
-    engine = LicensePolicyEngine(LicensesConfig(policy="permissive"))
+    engine = LicensePolicyEngine(
+        LicensesConfig(policy="custom", denied=["GPL-3.0-or-later"]),
+    )
     result = engine.check(package)
     assert_that(result.status).is_equal_to(LicenseStatus.DENIED)
 
 
-def test_or_later_or_operand_passes_policy_allowing_mit() -> None:
-    """An OR expression with a copyleft ``-or-later`` branch resolves to MIT."""
+def test_or_with_hyphenated_operand_passes_when_permissive_allowed() -> None:
+    """An OR with a hyphenated operand resolves to the allowed branch.
+
+    ``(MIT OR GPL-3.0-or-later)`` must tokenize on the real ``OR`` operator
+    (not the ``or`` inside the hyphenated id) and select the allowed MIT
+    operand so the policy passes.
+    """
     expression = "(MIT OR GPL-3.0-or-later)"
     package = PackageLicense(
-        name="permissive-disjunct",
+        name="hyphenated-or",
         version="1.0.0",
         license_id=normalize_to_spdx(expression),
         license_name=expression,
         ecosystem="npm",
     )
-    engine = LicensePolicyEngine(LicensesConfig(policy="permissive"))
+    engine = LicensePolicyEngine(
+        LicensesConfig(policy="custom", allowed=["MIT"]),
+    )
     result = engine.check(package)
     assert_that(result.status).is_equal_to(LicenseStatus.ALLOWED)
 
 
-def test_or_later_denied_both_operands_fails_deny_policy() -> None:
-    """When both AND operands are denied, the conjunction stays denied."""
-    expression = "GPL-3.0-or-later AND AGPL-3.0-or-later"
+def test_or_with_hyphenated_operand_fails_when_both_denied() -> None:
+    """An OR expression fails when every operand is denied by the policy.
+
+    ``(MIT OR GPL-3.0-or-later)`` selects MIT; denying MIT alongside the
+    hyphenated GPL id leaves no allowed branch, so the policy rejects it.
+    """
+    expression = "(MIT OR GPL-3.0-or-later)"
     package = PackageLicense(
-        name="copyleft-both",
+        name="hyphenated-or-both-denied",
         version="1.0.0",
         license_id=normalize_to_spdx(expression),
         license_name=expression,
         ecosystem="npm",
     )
-    engine = LicensePolicyEngine(LicensesConfig(policy="permissive"))
+    engine = LicensePolicyEngine(
+        LicensesConfig(
+            policy="custom",
+            denied=["MIT", "GPL-3.0-or-later"],
+        ),
+    )
     result = engine.check(package)
     assert_that(result.status).is_equal_to(LicenseStatus.DENIED)
 

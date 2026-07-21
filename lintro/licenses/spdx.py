@@ -169,8 +169,8 @@ _SPDX_BY_LOWER: dict[str, str] = {spdx.lower(): spdx for spdx in _KNOWN_SPDX}
 # the literal ``or`` inside hyphenated SPDX ids such as ``GPL-3.0-or-later``,
 # splitting the operand and letting a copyleft license collapse away. Using
 # ``(?<![\w-])``/``(?![\w-])`` keeps hyphenated ids intact.
-_HAS_AND = re.compile(r"(?<![\w-])and(?![\w-])", re.IGNORECASE)
-_HAS_OR = re.compile(r"(?<![\w-])or(?![\w-])", re.IGNORECASE)
+_HAS_AND = re.compile(r"(?<![\w-])AND(?![\w-])", re.IGNORECASE)
+_HAS_OR = re.compile(r"(?<![\w-])OR(?![\w-])", re.IGNORECASE)
 
 # Prefer these when collapsing AND expressions so denials are not dropped.
 _RESTRICTIVE_FOR_AND: frozenset[str] = (
@@ -181,7 +181,10 @@ _RESTRICTIVE_FOR_AND: frozenset[str] = (
 # The operator boundaries deliberately exclude ``-`` (see ``_HAS_AND``) so the
 # ``or``/``and`` inside hyphenated SPDX ids like ``GPL-3.0-or-later`` are never
 # mistaken for expression operators.
-_TOKEN_RE = re.compile(r"[()]|(?<![\w-])(?:AND|OR)(?![\w-])", re.IGNORECASE)
+_TOKEN_RE = re.compile(
+    r"\(|\)|(?<![\w-])AND(?![\w-])|(?<![\w-])OR(?![\w-])",
+    re.IGNORECASE,
+)
 
 
 class _TokenKind(StrEnum):
