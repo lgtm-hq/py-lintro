@@ -372,6 +372,19 @@ def test_py_version_changed_no_change_is_empty(tmp_path: Path) -> None:
     assert_that(result.stdout.strip()).is_equal_to("")
 
 
+def test_version_tuple_stops_at_prerelease_tag() -> None:
+    """A pre-release tag stops parsing so "7.1.0-rc.1" is (7, 1, 0)."""
+    module = _load_module()
+    version_tuple = module._version_tuple  # noqa: SLF001
+    assert_that(version_tuple("7.1.0-rc.1")).is_equal_to((7, 1, 0))
+    assert_that(version_tuple("7.1.3")).is_equal_to((7, 1, 3))
+    # Pre-release tags collapse to their release base, so ordering is decided
+    # by the numeric segments only.
+    is_upward = module._is_upward_bump  # noqa: SLF001
+    assert_that(is_upward("7.1.0-rc.1", "7.2.0")).is_true()
+    assert_that(is_upward("7.2.0", "7.1.0-rc.1")).is_false()
+
+
 def test_py_version_changed_excludes_downgrades(tmp_path: Path) -> None:
     """A downgrade must not enter the version-lag allowlist (fail closed).
 

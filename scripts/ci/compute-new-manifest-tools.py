@@ -121,6 +121,11 @@ def _version_tuple(version: str) -> tuple[int, ...]:
         if not digits:
             break
         parts.append(int(digits))
+        if len(digits) != len(segment):
+            # Segment had trailing non-digit content (e.g. "0-rc"): stop
+            # entirely so a pre-release tag drops everything after it and
+            # "7.1.0-rc.1" compares as (7, 1, 0), per the documented contract.
+            break
     return tuple(parts)
 
 

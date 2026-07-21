@@ -274,6 +274,18 @@ def test_is_image_older_than_manifest_ordering() -> None:
     assert_that(older(expected="7.1", actual="7.0.9")).is_true()
 
 
+def test_version_tuple_stops_at_prerelease_tag() -> None:
+    """A pre-release tag stops parsing so "7.1.0-rc.1" is (7, 1, 0)."""
+    module = _load_verify_manifest_tools_module()
+
+    version_tuple = module._version_tuple  # noqa: SLF001
+    assert_that(version_tuple("7.1.0-rc.1")).is_equal_to((7, 1, 0))
+    assert_that(version_tuple("7.1.3")).is_equal_to((7, 1, 3))
+    # A pre-release build must not read as newer than its release.
+    older = module._is_image_older_than_manifest  # noqa: SLF001
+    assert_that(older(expected="7.1.0", actual="7.1.0-rc.1")).is_false()
+
+
 def test_allow_version_lag_older_image_passes_with_warning(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
