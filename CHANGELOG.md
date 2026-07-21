@@ -21,6 +21,16 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.90.1] - 2026-07-21
+
+### Changed
+
+- **deps**: update dependency astral-sh/uv to 0.11.30 (patch) (#1587) (a8f4790)
+
+### Fixed
+
+- **ci**: tolerate baked-tool version lag and bump astro to 7.1.3 (#1591) (3bfe08b)
+
 ## [0.90.0] - 2026-07-21
 
 ### Added
