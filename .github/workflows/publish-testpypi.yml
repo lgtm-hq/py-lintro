@@ -18,7 +18,7 @@ jobs:
   pypi-build:
     name: Build Python distribution
     # yamllint disable-line rule:line-length
-    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-build-python-dist.yml@1014e3d7d5441a63215d2096545a46cff6de101c # v0.48.0
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-build-python-dist.yml@31c25ef2e8992960e218524780e34f44f51271b5 # v0.54.0
     permissions:
       # read: checkout and build sdist/wheel (reusable-build-python-dist)
       contents: read
@@ -27,11 +27,25 @@ jobs:
       verify-tag-version: false
       ensure-tag-on-default-branch: false
       artifact-name: python-dist
-      tooling-ref: '1014e3d7d5441a63215d2096545a46cff6de101c' # v0.48.0
+      tooling-ref: '31c25ef2e8992960e218524780e34f44f51271b5' # v0.54.0
       egress-policy: block
       egress-preset: pypi
-      allowed-endpoints-mode: append
+      # Full list (v0.50.0+ replace semantics): the reusable passes
+      # allowed-endpoints verbatim to step-security/harden-runner, so a
+      # non-empty value must include the pypi preset baseline.
+      allowed-endpoints-mode: replace
       allowed-endpoints: >
+        github.com:443
+        api.github.com:443
+        codeload.github.com:443
+        objects.githubusercontent.com:443
+        raw.githubusercontent.com:443
+        pipelines.actions.githubusercontent.com:443
+        pypi.org:443
+        files.pythonhosted.org:443
+        test.pypi.org:443
+        upload.pypi.org:443
+        upload.test.pypi.org:443
         astral.sh:443
         releases.astral.sh:443
         github-releases.githubusercontent.com:443
@@ -53,7 +67,7 @@ jobs:
     steps:
       - name: Harden runner
         # yamllint disable-line rule:line-length
-        uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
+        uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
         with:
           egress-policy: block
           # lgtm-ci workflow-contract.md § PyPI upload (OIDC)
@@ -80,14 +94,14 @@ jobs:
       - name: Prepare PyPI upload
         id: prepare
         # yamllint disable-line rule:line-length
-        uses: lgtm-hq/lgtm-ci/.github/actions/prepare-pypi-upload@1014e3d7d5441a63215d2096545a46cff6de101c # v0.48.0
+        uses: lgtm-hq/lgtm-ci/.github/actions/prepare-pypi-upload@31c25ef2e8992960e218524780e34f44f51271b5 # v0.54.0
         with:
           artifact-name: python-dist
           python-version: '3.14'
-          tooling-ref: '1014e3d7d5441a63215d2096545a46cff6de101c' # v0.48.0
+          tooling-ref: '31c25ef2e8992960e218524780e34f44f51271b5' # v0.54.0
       - name: Upload to TestPyPI
         # yamllint disable-line rule:line-length
-        uses: pypa/gh-action-pypi-publish@cef221092ed1bacb1cc03d23a2d87d1d172e277b # v1.14.0
+        uses: pypa/gh-action-pypi-publish@ba38be9e461d3875417946c167d0b5f3d385a247 # v1.14.1
         with:
           repository-url: https://test.pypi.org/legacy/
           packages-dir: ${{ steps.prepare.outputs.dist-path }}

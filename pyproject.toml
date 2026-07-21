@@ -1,10 +1,10 @@
 [build-system]
-requires = ["setuptools==80.10.2", "wheel"]
+requires = ["setuptools==83.0.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "lintro"
-version = "0.74.0"
+version = "0.91.0"
 description = "A unified CLI tool for code formatting, linting, and quality assurance"
 keywords = [
   "linting",
@@ -83,7 +83,7 @@ full = [
   "yamllint>=1.37.1",
 ]
 ai = ["anthropic>=0.39.0", "openai>=1.50.0"]
-tools = ["semgrep>=1.151.0", "sqlfluff>=4.0.0"]
+tools = ["semgrep>=1.151.0", "sqlfluff>=4.0.0", "pip-audit>=2.10.1"]
 
 [project.scripts]
 lintro = "lintro.cli:main"
@@ -114,12 +114,14 @@ dev = [
   "types-tabulate>=0.9.0.20241207",
   "types-defusedxml>=0.7.0.20250822",
   "tomlkit>=0.13.3",
+  "click-man>=0.5.1",
 ]
 build = ["nuitka>=2.8.9", "ordered-set>=4.1.0", "zstandard>=0.25.0"]
 
 [tool.setuptools]
 packages = [
   "lintro",
+  "lintro.api",
   "lintro.ai",
   "lintro.ai.display",
   "lintro.ai.enums",
@@ -128,6 +130,7 @@ packages = [
   "lintro.ai.models",
   "lintro.ai.output",
   "lintro.ai.prompts",
+  "lintro.ai.prompts.templates",
   "lintro.ai.providers",
   "lintro.ai.review",
   "lintro.ai.review.checklist",
@@ -143,6 +146,8 @@ packages = [
   "lintro.formatters",
   "lintro.formatters.core",
   "lintro.formatters.styles",
+  "lintro.licenses",
+  "lintro.licenses.ecosystems",
   "lintro.models",
   "lintro.models.core",
   "lintro.parsers",
@@ -154,8 +159,11 @@ packages = [
   "lintro.parsers.cargo_deny",
   "lintro.parsers.clippy",
   "lintro.parsers.commitlint",
+  "lintro.parsers.dotenv_linter",
   "lintro.parsers.gitleaks",
+  "lintro.parsers.golangci_lint",
   "lintro.parsers.hadolint",
+  "lintro.parsers.html_validate",
   "lintro.parsers.idiom_review",
   "lintro.parsers.markdownlint",
   "lintro.parsers.pytest",
@@ -165,6 +173,7 @@ packages = [
   "lintro.parsers.yamllint",
   "lintro.parsers.mypy",
   "lintro.parsers.osv_scanner",
+  "lintro.parsers.pip_audit",
   "lintro.parsers.oxfmt",
   "lintro.parsers.oxlint",
   "lintro.parsers.prettier",
@@ -175,6 +184,7 @@ packages = [
   "lintro.parsers.stylelint",
   "lintro.parsers.svelte_check",
   "lintro.parsers.taplo",
+  "lintro.parsers.trufflehog",
   "lintro.parsers.pydoclint",
   "lintro.parsers.tsc",
   "lintro.parsers.vale",
@@ -197,6 +207,7 @@ packages = [
 
 [tool.setuptools.package-data]
 lintro = ["tools/*.json"]
+"lintro.ai.prompts.templates" = ["**/*.md", "**/*.json"]
 "lintro.ai.review.checklist" = ["corpus/*.yaml"]
 
 [tool.ruff]
@@ -240,14 +251,18 @@ exclude = "/(\n    \\.git\n    | \\.venv\n    | venv\n    | build\n    | dist\n 
 
 [tool.bandit]
 exclude_dirs = ["test_samples"]
-# Global skips for rules that are unavoidable or noisy in a tool-runner codebase.
-# Prefer inline ``# nosec Bxxx - reason`` at call sites when removing a skip.
+# Suppression policy (see issue #1026):
+#   - Global skips are reserved for rules that are genuinely universal noise
+#     across the whole codebase and cannot be meaningfully scoped.
+#   - Subprocess rules (B404/B603/B607) are NOT skipped globally: subprocess is
+#     the core execution mechanism, but each call site must be reviewed and
+#     suppressed inline with a justification, e.g.
+#       ``subprocess.run(...)  # nosec B603 - resolved binary, shell=False, no user shell input``
+#   - Use a file-top / per-call-site ``# nosec Bxxx - <specific reason>`` rather
+#     than a broad global skip whenever the rule can apply to new code.
 skips = [
-  "B101", # assert_used — pytest and test helpers rely on ``assert``
-  "B404", # import_subprocess — subprocess is the core execution mechanism
-  "B603", # subprocess_without_shell_equals_true — every tool invocation uses subprocess; mitigate with ``shell=False`` and resolved binaries
-  "B607", # start_process_with_a_partial_path — ``shutil.which`` often returns bare command names (``git``, ``ruff``)
-  "B108", # hardcoded_tmp_directory — ``/tmp`` appears in fixtures and temp-path examples
+  "B101", # assert_used — pytest and test helpers rely on ``assert`` across all of tests/; genuinely universal, cannot be scoped meaningfully
+  "B108", # hardcoded_tmp_directory — ``/tmp`` appears in fixtures and temp-path examples throughout tests; universal noise
 ]
 
 [tool.lintro]
@@ -311,6 +326,10 @@ exclude = [
 
 [[tool.mypy.overrides]]
 module = ["assertpy"]
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = ["click_man", "click_man.*"]
 ignore_missing_imports = true
 
 [[tool.mypy.overrides]]

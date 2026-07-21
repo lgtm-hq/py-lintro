@@ -1,4 +1,4 @@
-# syntax=docker/dockerfile:1
+# syntax=docker/dockerfile:1@sha256:87999aa3d42bdc6bea60565083ee17e86d1f3339802f543c0d03998580f9cb89
 # =============================================================================
 # Lintro Docker Image (multi-stage)
 # =============================================================================
@@ -9,114 +9,12 @@
 # =============================================================================
 
 # -----------------------------------------------------------------------------
-# Stage: tools — pre-built linting toolchains
+# Stage: tools — published lintro-tools base image (digest-pinned)
 # -----------------------------------------------------------------------------
-FROM python:3.14-slim@sha256:b877e50bd90de10af8d82c57a022fc2e0dc731c5320d762a27986facfc3355c1 AS tools
-
-ARG BUN_VERSION=1.3.14
-ARG UV_VERSION=0.11.28
-
-LABEL maintainer="lgtm-hq"
-LABEL org.opencontainers.image.source="https://github.com/lgtm-hq/py-lintro"
-LABEL org.opencontainers.image.description="Pre-built tools layer for lintro"
-LABEL org.opencontainers.image.licenses="MIT"
-
-ENV PYTHONDONTWRITEBYTECODE=1 \
-    PYTHONUNBUFFERED=1 \
-    UV_SYSTEM_PYTHON=1 \
-    BUN_INSTALL="/opt/bun" \
-    CARGO_HOME="/opt/cargo" \
-    RUSTUP_HOME="/opt/rustup" \
-    PATH="/usr/local/bin:/opt/cargo/bin:/opt/bun/bin:${PATH}"
-
-SHELL ["/bin/bash", "-o", "pipefail", "-c"]
-
-WORKDIR /app
-
-# hadolint ignore=DL3008
-RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
-    --mount=type=cache,target=/var/lib/apt,sharing=locked \
-    apt-get update && apt-get install -y --no-install-recommends \
-    curl \
-    ca-certificates \
-    build-essential \
-    git \
-    libssl-dev \
-    pkg-config \
-    unzip \
-    jq && \
-    apt-get clean && \
-    rm -rf /var/lib/apt/lists/*
-
-# hadolint ignore=DL3003,SC2086
-RUN --mount=type=cache,target=/root/.cache/bun,sharing=locked \
-    ARCH=$(uname -m) && \
-    if [ "$ARCH" = "x86_64" ]; then BUN_ARCH="x64"; \
-    elif [ "$ARCH" = "aarch64" ]; then BUN_ARCH="aarch64"; \
-    else echo "Unsupported arch: $ARCH" && exit 1; fi && \
-    BUN_ZIP="bun-linux-${BUN_ARCH}.zip" && \
-    BUN_URL="https://github.com/oven-sh/bun/releases/download/bun-v${BUN_VERSION}/${BUN_ZIP}" && \
-    CHECKSUM_URL="https://github.com/oven-sh/bun/releases/download/bun-v${BUN_VERSION}/SHASUMS256.txt" && \
-    curl -fsSL "$BUN_URL" -o "/tmp/${BUN_ZIP}" && \
-    curl -fsSL "$CHECKSUM_URL" -o /tmp/SHASUMS256.txt && \
-    cd /tmp && grep "${BUN_ZIP}" SHASUMS256.txt | sha256sum -c - && \
-    unzip -q "${BUN_ZIP}" && \
-    mv "bun-linux-${BUN_ARCH}/bun" /usr/local/bin/bun && \
-    chmod +x /usr/local/bin/bun && \
-    ln -sf /usr/local/bin/bun /usr/local/bin/bunx && \
-    ln -sf /usr/local/bin/bun /usr/local/bin/node && \
-    rm -rf /tmp/bun* /tmp/SHASUMS256.txt
-
-# hadolint ignore=DL3003,SC2086
-RUN ARCH=$(uname -m) && \
-    if [ "$ARCH" = "x86_64" ]; then UV_ARCH="x86_64"; \
-    elif [ "$ARCH" = "aarch64" ]; then UV_ARCH="aarch64"; \
-    else echo "Unsupported arch: $ARCH" && exit 1; fi && \
-    UV_TAR="uv-${UV_ARCH}-unknown-linux-gnu.tar.gz" && \
-    UV_URL="https://github.com/astral-sh/uv/releases/download/${UV_VERSION}/${UV_TAR}" && \
-    CHECKSUM_URL="https://github.com/astral-sh/uv/releases/download/${UV_VERSION}/${UV_TAR}.sha256" && \
-    curl -fsSL "$UV_URL" -o "/tmp/${UV_TAR}" && \
-    curl -fsSL "$CHECKSUM_URL" -o "/tmp/${UV_TAR}.sha256" && \
-    cd /tmp && sha256sum -c "${UV_TAR}.sha256" && \
-    tar -xzf "${UV_TAR}" && \
-    mv "uv-${UV_ARCH}-unknown-linux-gnu/uv" /usr/local/bin/uv && \
-    chmod +x /usr/local/bin/uv && \
-    rm -rf /tmp/uv*
-
-COPY lintro/ /app/lintro/
-COPY scripts/ /app/scripts/
-COPY package.json /app/package.json
-
-RUN groupadd -r tools && \
-    mkdir -p /opt/bun /opt/cargo /opt/rustup
-
-RUN --mount=type=cache,target=/opt/cargo/registry,sharing=locked \
-    --mount=type=cache,target=/opt/cargo/git,sharing=locked \
-    --mount=type=cache,target=/root/.cache/uv,sharing=locked \
-    find /app/scripts -type f -name "*.sh" -exec chmod +x {} \; && \
-    /app/scripts/utils/install-tools.sh --docker && \
-    rustup default stable && \
-    rustup component add clippy
-
-RUN chgrp -R tools /opt/cargo /opt/rustup /opt/bun && \
-    chmod -R g+rwX /opt/cargo /opt/rustup /opt/bun && \
-    chmod -R a+rX /opt/cargo /opt/rustup /opt/bun
-
-RUN echo "=== Verifying all tools ===" && \
-    bun --version && uv --version && cargo --version && rustc --version && \
-    rustfmt --version && cargo clippy --version && cargo audit --version && \
-    cargo deny --version && actionlint --version && bandit --version && \
-    black --version && commitlint --version && gitleaks version && \
-    hadolint --version && \
-    markdownlint-cli2 --version && mypy --version && osv-scanner --version && \
-    oxfmt --version && oxlint --version && prettier --version && \
-    pydoclint --version && ruff --version && semgrep --version && \
-    shellcheck --version && shfmt --version && sqlfluff --version && \
-    stylelint --version && \
-    taplo --version && tsc --version && astro --version && \
-    svelte-check --version && vue-tsc --version && yamllint --version && \
-    vale --version && \
-    echo "=== All tools verified! ==="
+# Built from docker/tools.Dockerfile and published by docker-tools-publish.yml
+# (cosign-signed, SBOM + provenance). Renovate manages the digest bump (#1360).
+# yamllint / hadolint: pin is immutable by digest; tag is informational.
+FROM ghcr.io/lgtm-hq/lintro-tools:latest@sha256:a80e276dff8bb4f2bc33fce8d03f9ea1b6ee8cd1cc5008941cbdd751138378fe AS tools
 
 # -----------------------------------------------------------------------------
 # Stage: full — lintro application (default target)
@@ -158,40 +56,30 @@ RUN getent group tools >/dev/null || groupadd -r tools && \
     mkdir -p /code && \
     chown -R lintro:lintro /app /code
 
-RUN echo "Verifying tools..." && \
-    rustfmt --version && cargo clippy --version && cargo audit --version && \
-    cargo deny --version && semgrep --version && ruff --version && \
-    black --version && hadolint --version && actionlint --version && \
-    shellcheck --version && shfmt --version && taplo --version && \
-    gitleaks version && osv-scanner --version && prettier --version && \
-    commitlint --version && \
-    markdownlint-cli2 --version && tsc --version && astro --version && \
-    vue-tsc --version && oxlint --version && oxfmt --version && \
-    bandit --version && mypy --version && pydoclint --version && \
-    yamllint --version && sqlfluff --version && stylelint --version && \
-    vale --version && \
-    echo "All tools verified!"
+# Minimal cross-ecosystem smoke check. Comprehensive manifest-vs-image tool
+# verification now runs in CI against this image
+# (scripts/ci/verify-image-manifest-tools.sh, wired into docker-ci.yml, #1511),
+# so the exhaustive hand-maintained per-tool --version list that used to live
+# here is reduced to a representative smoke. That hand-maintained list was the
+# exact edit that got forgotten for pip-audit (#1505); the manifest-driven gate
+# self-updates as manifest entries change, no per-tool edit to forget. The full
+# tool set is still enforced at tools-image build time in docker/tools.Dockerfile.
+RUN echo "Smoke-testing tool stack..." && \
+    ruff --version && prettier --version && rustfmt --version && \
+    shellcheck --version && \
+    echo "Tool stack smoke check passed."
 
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
     CMD /app/.venv/bin/python -m lintro --version || exit 1
 
-RUN echo "Verifying tools as non-root user..." && \
+# Minimal non-root smoke: confirm the gosu privilege drop works and the tools
+# group can execute the permission-sensitive toolchains under /opt/bun and
+# /opt/cargo. The CI manifest gate runs as root, so it would not catch a
+# non-root permission regression on these dirs — this stays as a targeted smoke.
+RUN echo "Smoke-testing tools as non-root user..." && \
     gosu lintro prettier --version && \
-    gosu lintro commitlint --version && \
-    gosu lintro markdownlint-cli2 --version && \
-    gosu lintro tsc --version && \
-    gosu lintro astro --version && \
-    gosu lintro vue-tsc --version && \
-    gosu lintro oxlint --version && \
-    gosu lintro oxfmt --version && \
-    gosu lintro stylelint --version && \
-    gosu lintro rustfmt --version && \
     gosu lintro cargo clippy --version && \
-    gosu lintro cargo audit --version && \
-    gosu lintro cargo deny --version && \
-    gosu lintro osv-scanner --version && \
-    gosu lintro semgrep --version && \
-    echo "All tools verified for non-root user!"
+    echo "Non-root tool smoke check passed."
 
 # No USER directive: the container starts as root so entrypoint.sh can detect
 # the UID/GID that owns the mounted /code volume and drop privileges to it via
@@ -203,7 +91,7 @@ CMD ["--help"]
 # -----------------------------------------------------------------------------
 # Stage: base — minimal runtime without external toolchains
 # -----------------------------------------------------------------------------
-FROM python:3.14-slim@sha256:b877e50bd90de10af8d82c57a022fc2e0dc731c5320d762a27986facfc3355c1 AS base
+FROM python:3.14-slim@sha256:cea0e6040540fb2b965b6e7fb5ffa00871e632eef63719f0ea54bca189ce14a6 AS base
 
 LABEL org.opencontainers.image.description="Lintro base image (no external tools); GHCR package py-lintro-base"
 

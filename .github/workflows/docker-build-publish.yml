@@ -34,7 +34,7 @@ jobs:
   docker-full:
     name: 🐳 Docker Full Image
     # yamllint disable-line rule:line-length
-    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-docker.yml@1014e3d7d5441a63215d2096545a46cff6de101c # v0.48.0
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-docker.yml@31c25ef2e8992960e218524780e34f44f51271b5 # v0.54.0
     permissions:
       contents: read
       packages: write
@@ -69,25 +69,67 @@ jobs:
       smoke-test: lintro --version
       validate-on-pr: false
       cache-registry-ref: ghcr.io/lgtm-hq/py-lintro:cache
+      # Release (tag) builds reuse the registry cache (#1358): BuildKit
+      # cache is content-addressed, so a tag build reassembles exactly the
+      # layers already built and validated on main instead of a cold
+      # multi-arch rebuild. Backfills stay no-cache so historical
+      # republishes remain fully cold.
       no-cache: >-
-        ${{ startsWith(github.ref, 'refs/tags/')
-        || (github.event_name == 'workflow_dispatch'
-        && inputs.backfill_version != '') }}
+        ${{ github.event_name == 'workflow_dispatch'
+        && inputs.backfill_version != '' }}
       provenance: false
       sbom: false
-      tooling-ref: '1014e3d7d5441a63215d2096545a46cff6de101c' # v0.48.0
+      cosign-sign: true
+      tooling-ref: '31c25ef2e8992960e218524780e34f44f51271b5' # v0.54.0
       egress-policy: block
       egress-preset: docker
-      allowed-endpoints-mode: append
+      # Full list (v0.50.0+ replace semantics): the reusable passes
+      # allowed-endpoints verbatim to step-security/harden-runner, so a
+      # non-empty value must include the docker preset baseline. The
+      # sigstore hosts cover cosign keyless signing in the merge job.
+      allowed-endpoints-mode: replace
       allowed-endpoints: >
+        github.com:443
+        api.github.com:443
+        codeload.github.com:443
+        objects.githubusercontent.com:443
+        raw.githubusercontent.com:443
+        release-assets.githubusercontent.com:443
+        github-releases.githubusercontent.com:443
+        pipelines.actions.githubusercontent.com:443
+        ghcr.io:443
+        pkg-containers.githubusercontent.com:443
+        docker.io:443
+        registry-1.docker.io:443
+        auth.docker.io:443
+        production.cloudflare.docker.com:443
+        production.cloudfront.docker.com:443
+        deb.debian.org:80
+        pypi.org:443
+        files.pythonhosted.org:443
+        static.rust-lang.org:443
+        bun.sh:443
+        astral.sh:443
+        releases.astral.sh:443
+        sh.rustup.rs:443
+        registry.npmjs.org:443
+        crates.io:443
+        static.crates.io:443
+        index.crates.io:443
         semgrep.dev:443
         metrics.semgrep.dev:443
+        token.actions.githubusercontent.com:443
+        fulcio.sigstore.dev:443
+        rekor.sigstore.dev:443
+        tuf-repo-cdn.sigstore.dev:443
+        timestamp.sigstore.dev:443
+        oauth2.sigstore.dev:443
 
   docker-base:
     name: 🐳 Docker Base Image
     needs: docker-full
     # yamllint disable-line rule:line-length
-    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-docker.yml@1014e3d7d5441a63215d2096545a46cff6de101c # v0.48.0
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-docker.yml@31c25ef2e8992960e218524780e34f44f51271b5 # v0.54.0
     permissions:
       contents: read
       packages: write
@@ -122,16 +164,58 @@ jobs:
       smoke-test: lintro --version
       validate-on-pr: false
       cache-registry-ref: ghcr.io/lgtm-hq/py-lintro-base:cache
+      # Release (tag) builds reuse the registry cache (#1358): BuildKit
+      # cache is content-addressed, so a tag build reassembles exactly the
+      # layers already built and validated on main instead of a cold
+      # multi-arch rebuild. Backfills stay no-cache so historical
+      # republishes remain fully cold.
       no-cache: >-
-        ${{ startsWith(github.ref, 'refs/tags/')
-        || (github.event_name == 'workflow_dispatch'
-        && inputs.backfill_version != '') }}
+        ${{ github.event_name == 'workflow_dispatch'
+        && inputs.backfill_version != '' }}
       provenance: false
       sbom: false
-      tooling-ref: '1014e3d7d5441a63215d2096545a46cff6de101c' # v0.48.0
+      cosign-sign: true
+      tooling-ref: '31c25ef2e8992960e218524780e34f44f51271b5' # v0.54.0
       egress-policy: block
       egress-preset: docker
-      allowed-endpoints-mode: append
+      # Full list (v0.50.0+ replace semantics): the reusable passes
+      # allowed-endpoints verbatim to step-security/harden-runner, so a
+      # non-empty value must include the docker preset baseline. The
+      # sigstore hosts cover cosign keyless signing in the merge job.
+      allowed-endpoints-mode: replace
       allowed-endpoints: >
+        github.com:443
+        api.github.com:443
+        codeload.github.com:443
+        objects.githubusercontent.com:443
+        raw.githubusercontent.com:443
+        release-assets.githubusercontent.com:443
+        github-releases.githubusercontent.com:443
+        pipelines.actions.githubusercontent.com:443
+        ghcr.io:443
+        pkg-containers.githubusercontent.com:443
+        docker.io:443
+        registry-1.docker.io:443
+        auth.docker.io:443
+        production.cloudflare.docker.com:443
+        production.cloudfront.docker.com:443
+        deb.debian.org:80
+        pypi.org:443
+        files.pythonhosted.org:443
+        static.rust-lang.org:443
+        bun.sh:443
+        astral.sh:443
+        releases.astral.sh:443
+        sh.rustup.rs:443
+        registry.npmjs.org:443
+        crates.io:443
+        static.crates.io:443
+        index.crates.io:443
         semgrep.dev:443
         metrics.semgrep.dev:443
+        token.actions.githubusercontent.com:443
+        fulcio.sigstore.dev:443
+        rekor.sigstore.dev:443
+        tuf-repo-cdn.sigstore.dev:443
+        timestamp.sigstore.dev:443
+        oauth2.sigstore.dev:443

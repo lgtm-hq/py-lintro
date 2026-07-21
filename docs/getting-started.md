@@ -94,12 +94,20 @@ Some tools require separate installation. Their minimum versions are also manage
   `pip install semgrep`, or `brew install semgrep`)
 - `gitleaks` - Secret detection in git repos (`brew install gitleaks` or GitHub
   releases)
+- `trufflehog` - Secret detection with 800+ credential detectors, verification disabled
+  by default (`brew install trufflehog` or GitHub releases)
+- `golangci-lint` - Go meta-linter running 100+ linters (`brew install golangci-lint` or
+  <https://golangci-lint.run/welcome/install/>; requires the Go toolchain)
 - `shellcheck` - Shell script analyzer (`brew install shellcheck` or GitHub releases)
 - `shfmt` - Shell script formatter (`brew install shfmt` or GitHub releases)
+- `dotenv-linter` - `.env` file linter and fixer (`brew install dotenv-linter`,
+  `cargo install dotenv-linter`, or GitHub releases)
 - `sqlfluff` - SQL linter and formatter (`pip install sqlfluff`)
 - `stylelint` - CSS/SCSS/Sass/Less linter and fixer (`bun add -g stylelint` or
   `npm install -g stylelint`); skips cleanly when no stylelint config is found — add one
   (e.g. `.stylelintrc.json`) to enable linting
+- `pip-audit` - Python dependency vulnerability scanner (`pip install pip-audit`,
+  `uv add pip-audit`, or `brew install pip-audit`)
 - `taplo` - TOML linter and formatter (`brew install taplo` or GitHub releases)
 - `vale` - Prose/documentation linter (`brew install vale` or GitHub releases); requires
   a `.vale.ini`, otherwise lintro skips it as a non-error

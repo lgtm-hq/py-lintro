@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import os
-import subprocess
+import subprocess  # nosec B404 - subprocess is used to drive the tool/CLI under test; invocations use shell=False
 from pathlib import Path
 from typing import cast
 from unittest.mock import patch
@@ -20,6 +20,7 @@ from lintro.tools.definitions.osv_scanner import (
     OSV_SCANNER_DEFAULT_TIMEOUT,
     OsvScannerPlugin,
 )
+from tests.test_samples_helpers import copy_sample
 
 
 def _proc(
@@ -128,7 +129,14 @@ def test_check_no_vulnerabilities(
         tmp_path: Temporary directory path for test files.
     """
     lockfile = tmp_path / "requirements.txt"
-    lockfile.write_text("requests==2.32.3\n")
+    copy_sample(
+        tmp_path,
+        "tools",
+        "security",
+        "osv_scanner",
+        "osv_scanner_fixture_requests_2_32_3.txt",
+        dest_name=lockfile.name,
+    )
 
     with patch.object(
         osv_scanner_plugin,
@@ -147,7 +155,14 @@ def test_check_clean_scan_with_log_prefix_and_nonzero_exit(
 ) -> None:
     """Check treats empty parsed results as success despite non-zero exit."""
     lockfile = tmp_path / "requirements.txt"
-    lockfile.write_text("setuptools==80.9.0\n")
+    copy_sample(
+        tmp_path,
+        "tools",
+        "security",
+        "osv_scanner",
+        "osv_scanner_fixture_setuptools_80_9_0.txt",
+        dest_name=lockfile.name,
+    )
 
     osv_output = (
         "Scanning dir /tmp/example\n"
@@ -171,7 +186,14 @@ def test_check_no_package_sources_sets_parse_failures_count(
 ) -> None:
     """Plain-text no-op scans report parse_failures_count=0 for CI classification."""
     lockfile = tmp_path / "requirements.txt"
-    lockfile.write_text("requests==2.32.3\n")
+    copy_sample(
+        tmp_path,
+        "tools",
+        "security",
+        "osv_scanner",
+        "osv_scanner_fixture_requests_2_32_3.txt",
+        dest_name=lockfile.name,
+    )
 
     osv_output = (
         "Scanned 0 packages and found 0 vulnerabilities\nNo package sources found\n"
@@ -195,7 +217,14 @@ def test_check_zero_packages_without_no_sources_is_not_success(
 ) -> None:
     """Ambiguous zero-package output without the no-sources signal stays a failure."""
     lockfile = tmp_path / "requirements.txt"
-    lockfile.write_text("requests==2.32.3\n")
+    copy_sample(
+        tmp_path,
+        "tools",
+        "security",
+        "osv_scanner",
+        "osv_scanner_fixture_requests_2_32_3.txt",
+        dest_name=lockfile.name,
+    )
 
     osv_output = "Scanned 0 packages and found 0 vulnerabilities\n"
 
@@ -216,7 +245,14 @@ def test_check_garbage_stdout_with_zero_exit_is_not_clean(
 ) -> None:
     """Unparseable stdout with a zero exit must not report a clean scan (#1044)."""
     lockfile = tmp_path / "requirements.txt"
-    lockfile.write_text("requests==2.32.3\n")
+    copy_sample(
+        tmp_path,
+        "tools",
+        "security",
+        "osv_scanner",
+        "osv_scanner_fixture_requests_2_32_3.txt",
+        dest_name=lockfile.name,
+    )
 
     garbage = "}{ this is not valid json at all"
 
@@ -238,7 +274,14 @@ def test_check_error_payload_without_results_is_not_success(
 ) -> None:
     """Check does not treat error-only JSON payloads as clean scans."""
     lockfile = tmp_path / "requirements.txt"
-    lockfile.write_text("setuptools==80.9.0\n")
+    copy_sample(
+        tmp_path,
+        "tools",
+        "security",
+        "osv_scanner",
+        "osv_scanner_fixture_setuptools_80_9_0.txt",
+        dest_name=lockfile.name,
+    )
 
     osv_output = '{"error": "failed to load config"}\n'
 
@@ -267,7 +310,14 @@ def test_check_exit_zero_error_payload_fails_closed(
         tmp_path: Temporary directory path for test files.
     """
     lockfile = tmp_path / "requirements.txt"
-    lockfile.write_text("setuptools==80.9.0\n")
+    copy_sample(
+        tmp_path,
+        "tools",
+        "security",
+        "osv_scanner",
+        "osv_scanner_fixture_setuptools_80_9_0.txt",
+        dest_name=lockfile.name,
+    )
 
     osv_output = '{"error": "failed to load config"}\n'
 
@@ -294,7 +344,14 @@ def test_check_exit_zero_results_not_a_list_fails_closed(
         tmp_path: Temporary directory path for test files.
     """
     lockfile = tmp_path / "requirements.txt"
-    lockfile.write_text("setuptools==80.9.0\n")
+    copy_sample(
+        tmp_path,
+        "tools",
+        "security",
+        "osv_scanner",
+        "osv_scanner_fixture_setuptools_80_9_0.txt",
+        dest_name=lockfile.name,
+    )
 
     osv_output = '{"results": "not-a-list"}\n'
 
@@ -321,7 +378,14 @@ def test_check_exit_zero_empty_results_is_clean(
         tmp_path: Temporary directory path for test files.
     """
     lockfile = tmp_path / "requirements.txt"
-    lockfile.write_text("setuptools==80.9.0\n")
+    copy_sample(
+        tmp_path,
+        "tools",
+        "security",
+        "osv_scanner",
+        "osv_scanner_fixture_setuptools_80_9_0.txt",
+        dest_name=lockfile.name,
+    )
 
     osv_output = '{"results": []}\n'
 
@@ -364,7 +428,14 @@ def test_check_with_vulnerabilities(
         tmp_path: Temporary directory path for test files.
     """
     lockfile = tmp_path / "requirements.txt"
-    lockfile.write_text("requests==2.25.0\n")
+    copy_sample(
+        tmp_path,
+        "tools",
+        "security",
+        "osv_scanner",
+        "osv_scanner_fixture_requests_2_25_0.txt",
+        dest_name=lockfile.name,
+    )
 
     osv_output = json.dumps(
         {
@@ -442,7 +513,14 @@ def test_check_timeout(
         tmp_path: Temporary directory path for test files.
     """
     lockfile = tmp_path / "requirements.txt"
-    lockfile.write_text("requests==2.25.0\n")
+    copy_sample(
+        tmp_path,
+        "tools",
+        "security",
+        "osv_scanner",
+        "osv_scanner_fixture_requests_2_25_0.txt",
+        dest_name=lockfile.name,
+    )
 
     with patch.object(
         osv_scanner_plugin,
@@ -514,7 +592,14 @@ def test_check_with_suppressions_detects_stale(
 ) -> None:
     """Check classifies suppressions when .osv-scanner.toml exists."""
     lockfile = tmp_path / "requirements.txt"
-    lockfile.write_text("requests==2.32.3\n")
+    copy_sample(
+        tmp_path,
+        "tools",
+        "security",
+        "osv_scanner",
+        "osv_scanner_fixture_requests_2_32_3.txt",
+        dest_name=lockfile.name,
+    )
 
     # Create a config with one suppression
     config = tmp_path / ".osv-scanner.toml"
@@ -552,7 +637,14 @@ def test_check_without_config_no_metadata(
 ) -> None:
     """Check returns no ai_metadata when no .osv-scanner.toml exists."""
     lockfile = tmp_path / "requirements.txt"
-    lockfile.write_text("requests==2.32.3\n")
+    copy_sample(
+        tmp_path,
+        "tools",
+        "security",
+        "osv_scanner",
+        "osv_scanner_fixture_requests_2_32_3.txt",
+        dest_name=lockfile.name,
+    )
 
     with patch.object(
         osv_scanner_plugin,
@@ -571,7 +663,14 @@ def test_check_suppressions_disabled(
 ) -> None:
     """No probe scan when check_suppressions is False."""
     lockfile = tmp_path / "requirements.txt"
-    lockfile.write_text("requests==2.32.3\n")
+    copy_sample(
+        tmp_path,
+        "tools",
+        "security",
+        "osv_scanner",
+        "osv_scanner_fixture_requests_2_32_3.txt",
+        dest_name=lockfile.name,
+    )
 
     config = tmp_path / ".osv-scanner.toml"
     config.write_text(
@@ -602,7 +701,14 @@ def test_check_suppressions_probe_timeout(
 ) -> None:
     """Graceful fallback when probe scan times out."""
     lockfile = tmp_path / "requirements.txt"
-    lockfile.write_text("requests==2.32.3\n")
+    copy_sample(
+        tmp_path,
+        "tools",
+        "security",
+        "osv_scanner",
+        "osv_scanner_fixture_requests_2_32_3.txt",
+        dest_name=lockfile.name,
+    )
 
     config = tmp_path / ".osv-scanner.toml"
     config.write_text(

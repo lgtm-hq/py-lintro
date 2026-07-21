@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 import json
-import subprocess
+import subprocess  # nosec B404 - subprocess is used to drive the tool/CLI under test; invocations use shell=False
+from pathlib import Path
 from typing import TYPE_CHECKING
 from unittest.mock import MagicMock, patch
 
@@ -213,6 +214,30 @@ def test_check_line_length_relative_paths_converted_to_absolute(
     cmd = call_args[0][0]
     assert_that(cmd).contains("/project/src/module.py")
     assert_that(cmd).contains("/project/tests/test_module.py")
+
+
+def test_check_line_length_cwd_symlink_is_not_resolved(
+    tmp_path: Path,
+    mock_ruff_available: MagicMock,
+    mock_subprocess: MagicMock,
+) -> None:
+    """Relative input paths preserve ``abspath`` symlink semantics.
+
+    Args:
+        tmp_path: Temporary directory fixture.
+        mock_ruff_available: Mock fixture ensuring ruff is available.
+        mock_subprocess: Mock fixture for subprocess operations.
+    """
+    real_dir = tmp_path / "real"
+    real_dir.mkdir()
+    symlink_dir = tmp_path / "link"
+    symlink_dir.symlink_to(real_dir, target_is_directory=True)
+
+    check_line_length_violations(files=["src/module.py"], cwd=str(symlink_dir))
+
+    cmd = mock_subprocess.call_args[0][0]
+    assert_that(cmd).contains(str(symlink_dir / "src" / "module.py"))
+    assert_that(cmd).does_not_contain(str(real_dir / "src" / "module.py"))
 
 
 def test_check_line_length_old_ruff_json_format(

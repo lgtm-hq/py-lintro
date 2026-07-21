@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from loguru import logger
 
-from lintro.tools.core.tool_registry import ToolRegistry
+from lintro.tools.core.tool_registry import ManifestRegistry
 from lintro.tools.core.version_checking import (
     get_install_hints,
     get_minimum_versions,
@@ -32,13 +32,13 @@ __all__ = [
 def get_all_tool_versions() -> dict[str, ToolVersionInfo]:
     """Get version information for all supported tools.
 
-    Uses the unified ToolRegistry (manifest.json) as the single source of truth
+    Uses the unified ManifestRegistry (manifest.json) as the single source of truth
     for tool commands and version requirements.
 
     Returns:
         dict[str, ToolVersionInfo]: Dictionary mapping tool names to version info.
     """
-    registry = ToolRegistry.load()
+    registry = ManifestRegistry.load()
     results = {}
     minimum_versions = get_minimum_versions()
     install_hints = get_install_hints()

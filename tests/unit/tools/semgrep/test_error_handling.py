@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-import subprocess
+import subprocess  # nosec B404 - subprocess is used to drive the tool/CLI under test; invocations use shell=False
 from pathlib import Path
 from typing import TYPE_CHECKING
 from unittest.mock import patch
@@ -12,6 +12,7 @@ from assertpy import assert_that
 
 from lintro.parsers.semgrep.semgrep_parser import parse_semgrep_output
 from lintro.tools.definitions.semgrep import SemgrepPlugin
+from tests.test_samples_helpers import copy_sample
 
 if TYPE_CHECKING:
     pass
@@ -32,8 +33,14 @@ def test_check_with_timeout(
         semgrep_plugin: The SemgrepPlugin instance to test.
         tmp_path: Temporary directory path for test files.
     """
-    test_file = tmp_path / "large_file.py"
-    test_file.write_text('"""Large file that takes too long."""\n')
+    test_file = copy_sample(
+        tmp_path,
+        "tools",
+        "python",
+        "semgrep",
+        "semgrep_large_file.py",
+        dest_name="large_file.py",
+    )
 
     with patch(
         "lintro.plugins.execution_preparation.verify_tool_version",
@@ -60,8 +67,14 @@ def test_check_with_json_parse_error(
         semgrep_plugin: The SemgrepPlugin instance to test.
         tmp_path: Temporary directory path for test files.
     """
-    test_file = tmp_path / "test_module.py"
-    test_file.write_text('"""Test module."""\n')
+    test_file = copy_sample(
+        tmp_path,
+        "tools",
+        "python",
+        "semgrep",
+        "semgrep_test_module.py",
+        dest_name="test_module.py",
+    )
 
     # Invalid JSON output
     invalid_output = "Error: Something went wrong\n{invalid json"
@@ -91,8 +104,14 @@ def test_check_with_semgrep_errors(
         semgrep_plugin: The SemgrepPlugin instance to test.
         tmp_path: Temporary directory path for test files.
     """
-    test_file = tmp_path / "test_module.py"
-    test_file.write_text('"""Test module."""\n')
+    test_file = copy_sample(
+        tmp_path,
+        "tools",
+        "python",
+        "semgrep",
+        "semgrep_test_module.py",
+        dest_name="test_module.py",
+    )
 
     # Semgrep JSON output with errors
     semgrep_output = json.dumps(

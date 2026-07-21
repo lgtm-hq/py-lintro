@@ -8,6 +8,7 @@ your code is type-safe.
 from __future__ import annotations
 
 import fnmatch
+import os
 import subprocess  # nosec B404 - used safely with shell disabled
 from dataclasses import dataclass
 from pathlib import Path
@@ -459,9 +460,21 @@ class MypyPlugin(BaseToolPlugin):
                 ),
             )
         else:
-            # For individual files, use the computed cwd and relative paths
-            effective_cwd = ctx.cwd
-            mypy_targets = ctx.rel_files if ctx.rel_files else target_paths
+            # For individual files, run mypy from the project root (where the
+            # config file lives) rather than from each file's parent directory.
+            # Running from the file's directory (the previous behavior) broke
+            # Python package resolution: imports like ``from lintro.plugins.base
+            # import BaseToolPlugin`` resolved to ``Any`` and every ``type:
+            # ignore`` comment was reported as unused (#492). Paths are made
+            # relative to the project root so mypy resolves the full module
+            # path (e.g. ``lintro.tools.definitions.clippy``).
+            project_root = str(Path.cwd())
+            effective_cwd = project_root
+            mypy_targets = [
+                os.path.relpath(os.path.abspath(f), project_root) for f in ctx.files
+            ]
+            if not mypy_targets:
+                mypy_targets = target_paths
 
         cmd = self._build_command(
             files=mypy_targets,

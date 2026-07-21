@@ -2,13 +2,14 @@
 
 from __future__ import annotations
 
-import subprocess
+import subprocess  # nosec B404 - subprocess is used to drive git under test; invocations use shell=False
 from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
 from assertpy import assert_that
 
+import lintro.utils.git_diff as git_diff
 from lintro.utils.git_diff import (
     DIFF_DEFAULT_SENTINEL,
     DiffResolutionError,
@@ -38,7 +39,7 @@ def _git(repo: Path, *args: str) -> None:
         repo: Repository working directory.
         *args: Git arguments (without the leading ``git``).
     """
-    subprocess.run(
+    subprocess.run(  # nosec B603 B607 - fixed argv run against git in a controlled test; binary name resolved from PATH, not attacker-controlled; shell=False, no user shell input
         ["git", *args],
         cwd=repo,
         check=True,
@@ -117,6 +118,38 @@ def test_get_changed_files_includes_working_tree_and_untracked(
     changed = get_changed_files("main", str(git_repo))
 
     assert_that(_names(changed)).is_equal_to(["a.py", "c.py"])
+
+
+def test_get_changed_files_fallback_root_preserves_cwd_symlink(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Fallback absolute root keeps ``abspath`` symlink semantics.
+
+    Args:
+        tmp_path: Temporary directory fixture.
+        monkeypatch: Pytest monkeypatch fixture.
+    """
+    real_repo = tmp_path / "real"
+    real_repo.mkdir()
+    symlink_repo = tmp_path / "link"
+    symlink_repo.symlink_to(real_repo, target_is_directory=True)
+    (symlink_repo / "changed.py").write_text("x = 1\n")
+
+    monkeypatch.setattr(git_diff, "_repo_root", lambda cwd: None)
+    monkeypatch.setattr(git_diff, "_ref_exists", lambda base, cwd: True)
+    monkeypatch.setattr(
+        git_diff,
+        "_merge_base_diff_names",
+        lambda base, cwd: ["changed.py"],
+    )
+    monkeypatch.setattr(git_diff, "_worktree_diff_names", lambda cwd, *, cached: [])
+    monkeypatch.setattr(git_diff, "_untracked_names", lambda cwd: [])
+
+    changed = get_changed_files("main", str(symlink_repo))
+
+    assert_that(changed).contains(str(symlink_repo / "changed.py"))
+    assert_that(changed).does_not_contain(str(real_repo / "changed.py"))
 
 
 def test_get_changed_files_staged_change(git_repo: Path) -> None:

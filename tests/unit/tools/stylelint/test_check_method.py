@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-import subprocess
+import subprocess  # nosec B404 - subprocess is used for TimeoutExpired in mocked tool execution tests
 from pathlib import Path
 from typing import cast
 from unittest.mock import patch
@@ -11,6 +11,7 @@ from assertpy import assert_that
 
 from lintro.parsers.stylelint.stylelint_issue import StylelintIssue
 from lintro.tools.definitions.stylelint import StylelintPlugin
+from tests.test_samples_helpers import copy_sample
 from tests.unit.tools.stylelint.conftest import make_ctx
 
 WARNINGS_JSON = (
@@ -27,7 +28,14 @@ def test_check_with_issues(
     tmp_path: Path,
 ) -> None:
     """Check reports issues and fails when stylelint finds violations."""
-    (tmp_path / "a.css").write_text("a { color: #FFFFFF; }\n")
+    copy_sample(
+        tmp_path,
+        "tools",
+        "web",
+        "stylelint",
+        "stylelint_violations.css",
+        dest_name="a.css",
+    )
 
     with (
         patch.object(stylelint_plugin, "_prepare_execution") as prep,
@@ -59,7 +67,14 @@ def test_check_without_issues(
     tmp_path: Path,
 ) -> None:
     """Check succeeds and suppresses output when no issues are found."""
-    (tmp_path / "a.css").write_text("a { color: #fff; }\n")
+    copy_sample(
+        tmp_path,
+        "tools",
+        "web",
+        "stylelint",
+        "stylelint_clean.css",
+        dest_name="a.css",
+    )
 
     with (
         patch.object(stylelint_plugin, "_prepare_execution") as prep,
@@ -87,7 +102,14 @@ def test_check_skips_when_no_config(
     tmp_path: Path,
 ) -> None:
     """Check returns a non-error skip when no stylelint config exists."""
-    (tmp_path / "a.css").write_text("a { color: red; }\n")
+    copy_sample(
+        tmp_path,
+        "tools",
+        "web",
+        "stylelint",
+        "stylelint_red.css",
+        dest_name="a.css",
+    )
 
     with (
         patch.object(stylelint_plugin, "_prepare_execution") as prep,
@@ -115,7 +137,14 @@ def test_check_timeout(
     tmp_path: Path,
 ) -> None:
     """Check handles subprocess timeouts gracefully."""
-    (tmp_path / "a.css").write_text("a { color: red; }\n")
+    copy_sample(
+        tmp_path,
+        "tools",
+        "web",
+        "stylelint",
+        "stylelint_red.css",
+        dest_name="a.css",
+    )
 
     with (
         patch.object(stylelint_plugin, "_prepare_execution") as prep,
@@ -142,7 +171,14 @@ def test_check_passes_config_option(
     tmp_path: Path,
 ) -> None:
     """An explicit config option is threaded into the command."""
-    (tmp_path / "a.css").write_text("a { color: #fff; }\n")
+    copy_sample(
+        tmp_path,
+        "tools",
+        "web",
+        "stylelint",
+        "stylelint_clean.css",
+        dest_name="a.css",
+    )
     stylelint_plugin.set_options(config="my.stylelintrc.json")
 
     with (
@@ -191,7 +227,14 @@ def test_check_runtime_error_is_not_clean(
     tmp_path: Path,
 ) -> None:
     """A non-zero exit with nothing parsed fails instead of passing."""
-    (tmp_path / "a.css").write_text("a { color: #fff; }\n")
+    copy_sample(
+        tmp_path,
+        "tools",
+        "web",
+        "stylelint",
+        "stylelint_clean.css",
+        dest_name="a.css",
+    )
 
     with (
         patch.object(stylelint_plugin, "_prepare_execution") as prep,
@@ -219,7 +262,14 @@ def test_check_per_call_config_reaches_command(
     tmp_path: Path,
 ) -> None:
     """A config passed per-call (not via set_options) lands on the command."""
-    (tmp_path / "a.css").write_text("a { color: #fff; }\n")
+    copy_sample(
+        tmp_path,
+        "tools",
+        "web",
+        "stylelint",
+        "stylelint_clean.css",
+        dest_name="a.css",
+    )
     seen_cmds: list[list[str]] = []
 
     def _capture(cmd: list[str], **kwargs: object) -> tuple[bool, str]:

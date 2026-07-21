@@ -21,6 +21,11 @@ Lintro uses a clear 5-tier configuration model that separates concerns:
 | **tools**     | Per-tool enable/disable and config source           | Always                     |
 | **ai**        | AI-powered summaries and fixes                      | When enabled + API key set |
 
+The five tiers above form the `LintroConfig` model's core configuration story
+(`lintro/config/lintro_config.py`). Two additional optional sections — `review`
+(diff-review checklist) and `score` (health-score weights, see **Health Score** below) —
+configure specific commands rather than tool resolution.
+
 ### Key Principles
 
 1. **Native configs are respected by default** - Tools use their own `.prettierrc`,
@@ -40,8 +45,9 @@ The configuration system works in a specific order:
    - `fail_fast`: Whether to stop on first tool failure
    - `parallel`: Whether to run tools in parallel (default: `true`)
    - `max_workers`: Maximum parallel workers, 1-32 (default: CPU count)
-   - `auto_install_deps`: Auto-install Node.js dependencies if missing (default:
-     `false`)
+   - `auto_install_deps`: Auto-install Node.js dependencies if missing. Unset by
+     default, in which case Lintro falls back to container auto-detection (enabled
+     inside containers, disabled otherwise)
 
 2. **Enforce Tier** - Cross-cutting settings injected as CLI flags
    - These settings override native configs via CLI arguments
@@ -146,6 +152,111 @@ The config command shows:
 - **Per-tool configuration**: Whether enabled, native config found
 - **Defaults applied**: Which tools are using fallback defaults
 
+### Health Score
+
+`lintro check` computes a single, deterministic **0-100 health score** that aggregates
+every issue across every tool into one trackable, CI-gateable, shareable number.
+
+```bash
+lintro check                  # normal output + health score line at the end
+lintro check --score          # print ONLY the score (for scripts/badges)
+lintro check --fail-under 75  # exit 1 if the score is below 75
+lintro check --output-format json   # score included under summary.health_score
+```
+
+#### Scoring model
+
+Every issue is normalised to one of three severities (`ERROR`, `WARNING`, `INFO`) and
+weighted, then mapped onto 0-100 with a smoothly saturating penalty:
+
+```text
+weighted  = error_weight   * n_errors
+          + warning_weight * n_warnings
+          + info_weight    * n_info
+
+score     = floor( 100 * scale / (scale + weighted) )
+```
+
+With the default weights (`ERROR=10`, `WARNING=3`, `INFO=1`) and `scale=100`, this has
+the following guaranteed properties:
+
+- **Zero issues → exactly 100.** A clean run is unambiguous.
+- **Any issue → strictly below 100** (`floor` keeps it at most 99).
+- **Monotonic.** Adding an issue, or raising its severity, never raises the score.
+- **Bounded** to `[0, 100]` and **deterministic** — the result depends only on the
+  severity counts and the configured weights/scale, never on ordering or timing.
+
+The score hits 50 when the total weighted penalty equals `scale` (e.g. ten `ERROR`
+issues, or ~33 `WARNING` issues, with the defaults).
+
+#### Score tiers
+
+| Score  | Tier         |
+| ------ | ------------ |
+| 75-100 | `great`      |
+| 50-74  | `needs-work` |
+| 0-49   | `critical`   |
+
+#### Configuring the weights
+
+Weights and the smoothing scale are tunable via the `score` section:
+
+```yaml
+# .lintro-config.yaml
+score:
+  error_weight: 10 # penalty per ERROR issue
+  warning_weight: 3 # penalty per WARNING issue
+  info_weight: 1 # penalty per INFO issue
+  scale: 100 # larger = the score decays more slowly
+```
+
+#### JSON output
+
+In `--output-format json` the score is added **additively** under
+`summary.health_score`, leaving all existing keys untouched:
+
+```json
+{
+  "summary": {
+    "total_issues": 3,
+    "total_fixed": 0,
+    "total_remaining": 3,
+    "health_score": {
+      "score": 88,
+      "tier": "great",
+      "severity_counts": { "error": 1, "warning": 0, "info": 0 },
+      "weighted_penalty": 10.0
+    }
+  }
+}
+```
+
+### Output Presentation
+
+Purely cosmetic console output is controlled by the `output` section. These settings
+never affect machine-readable documents (JSON/SARIF) or on-disk artifacts.
+
+```yaml
+# .lintro-config.yaml
+output:
+  art: true # Show decorative ASCII art after a run (default: true)
+```
+
+The decorative ASCII art printed after `check`/`fmt` is only emitted to an interactive
+terminal. It is always suppressed when:
+
+- stdout is not a TTY (piped output, CI logs, redirected files), or
+- `output.art: false` is set in config, or
+- the `--no-art` flag is passed to `lintro check` / `lintro format`.
+
+The art is never written to `.lintro/run-*/report.md`, `console.log`, or any
+`--output-format` stream regardless of these settings.
+
+```bash
+lintro check --no-art   # suppress art for this run only
+lintro format --no-art
+```
+
 ### Command-Line Options
 
 #### Global Options
@@ -228,12 +339,13 @@ Lintro automatically detects container environments (Docker, Podman, LXC, Kubern
 and enables auto-install by default when running in a container. This means Node.js
 tools work out of the box in Docker without any configuration.
 
-You can override this behavior:
+You can override this behavior explicitly via configuration or the `--auto-install` CLI
+flag:
 
-```bash
-# Disable auto-install even in a container
-docker run --rm -e LINTRO_AUTO_INSTALL_DEPS=0 -v $(pwd):/code \
-  ghcr.io/lgtm-hq/py-lintro:latest check --tools tsc
+```yaml
+# .lintro-config.yaml — disable auto-install even inside a container
+execution:
+  auto_install_deps: false
 ```
 
 See the [Docker Usage Guide](docker.md) for more details on container behavior.
@@ -253,36 +365,38 @@ lintro check --exclude "*.pyc,venv,node_modules"
 
 ### Environment Variables
 
+Lintro reads the following environment variables at runtime. Most configuration is done
+through `.lintro-config.yaml` and CLI flags; these variables cover a few runtime
+overrides.
+
 ```bash
-# Override default settings
-export LINTRO_DEFAULT_TIMEOUT=60
-export LINTRO_VERBOSE=1
+# Override the directory where run logs/artifacts are written (default: .lintro)
+export LINTRO_LOG_DIR=/tmp/lintro-runs
 
-# Default exclude patterns
-export LINTRO_EXCLUDE="*.pyc,venv,node_modules"
+# Timeout (seconds) for tool version checks (default: 30)
+export LINTRO_VERSION_TIMEOUT=60
 
-# Default output format
-export LINTRO_DEFAULT_FORMAT="grid"
-
-# Auto-install Node.js dependencies (useful in Docker/CI)
-# Set to 1 to enable, 0 to disable (overrides container auto-detection)
-export LINTRO_AUTO_INSTALL_DEPS=1
+# Force Docker install-context detection (set to 1)
+export LINTRO_DOCKER=1
 
 # Opt in to loading external (third-party) plugins. Disabled by default.
 export LINTRO_ENABLE_EXTERNAL_PLUGINS=1
 ```
 
-| Variable                         | Description                                  | Default |
-| -------------------------------- | -------------------------------------------- | ------- |
-| `LINTRO_DEFAULT_TIMEOUT`         | Default timeout for tool execution (seconds) | `30`    |
-| `LINTRO_VERBOSE`                 | Enable verbose logging (`1` to enable)       | `0`     |
-| `LINTRO_EXCLUDE`                 | Comma-separated exclude patterns             | -       |
-| `LINTRO_DEFAULT_FORMAT`          | Default output format                        | -       |
-| `LINTRO_AUTO_INSTALL_DEPS`       | Auto-install Node.js deps (`1`/`0`)          | `0`\*   |
-| `LINTRO_ENABLE_EXTERNAL_PLUGINS` | Opt in to external plugins (`1`/`0`)         | `0`     |
+| Variable                         | Description                                                  | Default   |
+| -------------------------------- | ------------------------------------------------------------ | --------- |
+| `LINTRO_LOG_DIR`                 | Base directory for run logs and artifacts                    | `.lintro` |
+| `LINTRO_VERSION_TIMEOUT`         | Timeout in seconds for tool version checks (must be `>= 1`)  | `30`      |
+| `LINTRO_DOCKER`                  | Force Docker install-context detection when set to `1`       | -         |
+| `LINTRO_CONFIG`                  | Shown in the `lintro` environment report; informational only | -         |
+| `LINTRO_ENABLE_EXTERNAL_PLUGINS` | Opt in to loading external (third-party) plugins (`1`/`0`)   | `0`       |
 
-\* In container environments, `LINTRO_AUTO_INSTALL_DEPS` effectively defaults to `1` via
-container auto-detection. Set to `0` to explicitly disable.
+> **Note:** There is no environment variable for tool timeouts, verbosity, exclude
+> patterns, output format, or auto-install. Use CLI flags (`--exclude`,
+> `--output-format`, `--auto-install`) or `.lintro-config.yaml` for those settings.
+> Auto-install is resolved from the `--auto-install` flag, then
+> `execution.auto_install_deps`, then container auto-detection — not from an environment
+> variable.
 
 ### External Plugins (Trust Model)
 
@@ -501,19 +615,20 @@ tool_priorities = { ruff = 5, black = 10, prettier = 1 }
 
 **Default Tool Priorities:**
 
-| Tool         | Priority | Type             |
-| ------------ | -------- | ---------------- |
-| prettier     | 10       | Formatter        |
-| black        | 15       | Formatter        |
-| ruff         | 20       | Linter/Formatter |
-| markdownlint | 30       | Linter           |
-| yamllint     | 35       | Linter           |
-| vale         | 50       | Linter (docs)    |
-| pydoclint    | 40       | Linter           |
-| bandit       | 45       | Security         |
-| hadolint     | 50       | Infrastructure   |
-| actionlint   | 55       | Infrastructure   |
-| pytest       | 100      | Test Runner      |
+| Tool          | Priority | Type             |
+| ------------- | -------- | ---------------- |
+| prettier      | 10       | Formatter        |
+| black         | 15       | Formatter        |
+| ruff          | 20       | Linter/Formatter |
+| markdownlint  | 30       | Linter           |
+| html_validate | 30       | Linter           |
+| yamllint      | 35       | Linter           |
+| pydoclint     | 40       | Linter           |
+| bandit        | 45       | Security         |
+| hadolint      | 50       | Infrastructure   |
+| vale          | 50       | Linter (docs)    |
+| actionlint    | 55       | Infrastructure   |
+| pytest        | 100      | Test Runner      |
 
 Lower priority values run first. This ensures formatters run before linters, avoiding
 false positives from linters detecting issues that formatters would fix.
@@ -824,6 +939,48 @@ lintro check --tools gitleaks --tool-options gitleaks:baseline_path=gitleaks-bas
 lintro check --tools gitleaks --tool-options gitleaks:max_target_megabytes=10
 ```
 
+#### TruffleHog Configuration
+
+TruffleHog is a secrets scanner with 800+ provider-specific detectors and optional live
+credential verification. Lintro runs it in `filesystem` mode. **Verification is disabled
+by default** (`--no-verification`) so default scans make no outbound network calls;
+verification can be re-enabled per run, in which case TruffleHog may contact third-party
+providers to test candidate credentials (accept that trade-off before enabling it).
+TruffleHog is configured via CLI options (there is no default config file).
+
+**Install:** `brew install trufflehog` or
+[GitHub Releases](https://github.com/trufflesecurity/trufflehog/releases)
+
+**Available Options:**
+
+| Option            | Type    | Description                                          |
+| ----------------- | ------- | ---------------------------------------------------- |
+| `no_verification` | boolean | Disable live credential verification (default: true) |
+| `results`         | string  | Filter result type — single value (see note below)   |
+| `config`          | string  | Path to a custom detector configuration file         |
+| `exclude_paths`   | string  | Path to a file of newline-separated exclude regexes  |
+| `concurrency`     | integer | Number of concurrent workers                         |
+
+> **Note:** `--tool-options` uses commas to separate options, so a comma-separated
+> `results` value (e.g. `verified,unverified`) cannot be passed on the CLI. Use a single
+> value such as `results=unverified`, or leave it unset to report every result type.
+
+**Usage Examples:**
+
+```bash
+# Basic scan (verification disabled by default)
+lintro check --tools trufflehog
+
+# Raise worker concurrency
+lintro check --tools trufflehog --tool-options trufflehog:concurrency=8
+
+# Only report unverified results (single value; commas are not CLI-safe here)
+lintro check --tools trufflehog --tool-options trufflehog:results=unverified
+
+# Explicitly enable live verification (makes network calls — off by default)
+lintro check --tools trufflehog --tool-options trufflehog:no_verification=False
+```
+
 #### OSV-Scanner Configuration
 
 OSV-Scanner is Google's vulnerability scanner using the Open-Source Vulnerabilities
@@ -874,6 +1031,46 @@ lintro check --tools osv_scanner --tool-options "osv_scanner:timeout=300"
 
 # Skip suppression staleness check
 lintro check --tools osv_scanner --tool-options "osv_scanner:check_suppressions=false"
+```
+
+#### pip-audit Configuration
+
+pip-audit is the Python Packaging Authority (PyPA) scanner for Python dependencies with
+known vulnerabilities. It queries the PyPI Advisory Database and OSV, complementing
+bandit (which scans source code) by scanning the dependency surface. It audits
+`requirements*.txt` files (via `-r`) and Python projects declared in `pyproject.toml` /
+`setup.py`.
+
+**Install:** `pip install pip-audit`, `uv add pip-audit`, or `brew install pip-audit`.
+
+**File:** none. pip-audit has no native config file; suppressions are passed on the
+command line by upstream and are not exposed via lintro.
+
+**Available Options:**
+
+| Option    | Type    | Description                            |
+| --------- | ------- | -------------------------------------- |
+| `timeout` | integer | Scan timeout in seconds (default: 120) |
+
+**Notes:**
+
+- pip-audit's JSON output carries no severity field, so lintro reports severity as
+  `UNKNOWN`.
+- Advisory IDs (PYSEC/GHSA/CVE) link to the corresponding [osv.dev](https://osv.dev)
+  page.
+- Requirements discovery is recursive: nested files such as `requirements/base.txt` or
+  `services/api/requirements.txt` are picked up, while vendored/generated trees
+  (`node_modules`, `.venv`, `venv`, `vendor`, `.git`, `__pycache__`) are skipped. To
+  audit a file outside this scope, pass it explicitly on the command line.
+
+**Usage Examples:**
+
+```bash
+# Scan requirements and project manifests for vulnerable dependencies
+lintro check --tools pip_audit
+
+# With a longer timeout for slow networks
+lintro check --tools pip_audit --tool-options "pip_audit:timeout=300"
 ```
 
 #### pydoclint Configuration
@@ -1390,6 +1587,48 @@ lintro check src/ --tools vue-tsc --tool-options "vue-tsc:strict=true"
 lintro check src/ --tools vue-tsc --auto-install
 ```
 
+#### html-validate Configuration
+
+html-validate is an offline HTML validator that checks documents for standards
+compliance, best practices, and accessibility (WCAG) issues. It is check-only — the tool
+ships no autofixer. By default it inspects `*.html`, `*.htm`, `*.vue`, and `*.svelte`
+files.
+
+**Installation:**
+
+```bash
+# bun (recommended)
+bun add -D html-validate
+
+# npm
+npm install -D html-validate
+```
+
+**Native Config:** `.htmlvalidate.json`, `.htmlvalidate.js`, `.htmlvalidate.cjs`, or
+`.htmlvalidate.mjs`
+
+html-validate reads its rule configuration from the project's native config file when
+present. No additional configuration is required for Lintro.
+
+**Available Options via `--tool-options`:**
+
+| Option    | Type    | Description                                 |
+| --------- | ------- | ------------------------------------------- |
+| `timeout` | integer | Execution timeout in seconds (default: 120) |
+
+**Usage Examples:**
+
+```bash
+# Check HTML files
+lintro check src/ --tools html-validate
+
+# Check the whole project
+lintro check . --tools html-validate
+
+# Auto-install dependencies before checking
+lintro check src/ --tools html-validate --auto-install
+```
+
 ### SQL Tools
 
 #### SQLFluff Configuration
@@ -1687,6 +1926,55 @@ lintro format --tools clippy
 lintro check src/ --tools clippy
 ```
 
+#### golangci-lint Configuration
+
+golangci-lint is the de-facto Go meta-linter, running 100+ sub-linters in parallel.
+Lintro targets golangci-lint **v2** and automatically discovers Go modules by finding
+`go.mod` files; non-Go projects are skipped. It requires the Go toolchain to be
+installed. Linter selection and rule tuning are configured through the project's native
+config file.
+
+**Installation:**
+
+```bash
+brew install golangci-lint
+# or see https://golangci-lint.run/welcome/install/
+```
+
+**File:** `.golangci.yml` (also `.golangci.yaml`, `.golangci.toml`, `.golangci.json`)
+
+```yaml
+version: '2'
+linters:
+  enable:
+    - errcheck
+    - staticcheck
+    - ineffassign
+    - govet
+```
+
+**Available Options:**
+
+| Option    | Type    | Description                        |
+| --------- | ------- | ---------------------------------- |
+| `timeout` | integer | Execution timeout in seconds (120) |
+
+Linter enable/disable and per-linter settings live in the native `.golangci.*` config
+file rather than as lintro `--tool-options`.
+
+**Lintro usage:**
+
+```bash
+# Check Go code with golangci-lint
+lintro check --tools golangci_lint
+
+# Auto-fix issues where the underlying linters support it
+lintro format --tools golangci_lint
+
+# Increase the timeout for a large module
+lintro check --tools golangci_lint --tool-options golangci_lint:timeout=300
+```
+
 #### Cargo-deny Configuration
 
 Cargo-deny checks Rust dependencies for license compliance, security advisories, banned
@@ -1946,6 +2234,63 @@ lintro format --tools shfmt
 lintro check scripts/ --tools shfmt
 ```
 
+### Dotenv Tools
+
+#### dotenv-linter Configuration
+
+[dotenv-linter](https://dotenv-linter.github.io/) is a fast, Rust-based linter and fixer
+for `.env` files. It detects duplicate keys, lowercase keys, incorrect delimiters,
+unordered keys, and stray whitespace, and can auto-fix most of them.
+
+**Installation:**
+
+```bash
+# macOS
+brew install dotenv-linter
+
+# Cargo
+cargo install dotenv-linter
+
+# Binary releases
+# https://github.com/dotenv-linter/dotenv-linter/releases
+```
+
+**Native config:** dotenv-linter has no config file; behavior is controlled entirely via
+CLI flags (surfaced through `--tool-options`).
+
+**Lintro options via `--tool-options`:**
+
+```bash
+# Recursively scan directories for .env files
+lintro check --tools dotenv_linter --tool-options "dotenv_linter:recursive=True"
+
+# Skip specific checks (maps to --ignore-checks)
+lintro check --tools dotenv_linter \
+  --tool-options "dotenv_linter:skip_checks=LowercaseKey|UnorderedKey"
+
+# Exclude paths from linting
+lintro check --tools dotenv_linter --tool-options "dotenv_linter:exclude=vendor"
+
+# Validate against a schema file
+lintro check --tools dotenv_linter --tool-options "dotenv_linter:schema=env.schema.json"
+
+# Auto-fix issues in place (no .env.bak backups are created)
+lintro format --tools dotenv_linter
+```
+
+**Available Options:**
+
+| Option        | Type        | Description                                                    |
+| ------------- | ----------- | -------------------------------------------------------------- |
+| `recursive`   | bool        | Recursively scan directories for `.env` files. Default `False` |
+| `exclude`     | list\[str\] | File or directory paths to exclude                             |
+| `skip_checks` | list\[str\] | Check names to bypass (maps to `--ignore-checks`)              |
+| `schema`      | str         | Path to a schema file to validate `.env` contents              |
+
+> Note: real `.env` files are frequently `.gitignore`d, so they may not be discovered
+> during a normal repository scan. Point Lintro at the file explicitly, or commit a
+> template such as `.env.example` for the linter to check.
+
 ### TOML Tools
 
 #### Taplo Configuration
@@ -2184,6 +2529,8 @@ export ANTHROPIC_API_KEY=sk-ant-...
 # .lintro-config.yaml
 ai:
   enabled: true
+  lint: true # AI summaries / --fix on chk/fmt
+  review: false # lintro review (opt-in separately)
   provider: anthropic
 ```
 
@@ -2201,6 +2548,8 @@ Set `default_fix` to avoid typing the flag every time:
 ```yaml
 ai:
   enabled: true
+  lint: true
+  review: true
   default_fix: false # only run --fix when explicitly requested
 ```
 
@@ -2208,7 +2557,9 @@ ai:
 
 | Setting                 | Type   | Default     | Description                                      |
 | ----------------------- | ------ | ----------- | ------------------------------------------------ |
-| `enabled`               | bool   | `false`     | Master toggle for all AI features                |
+| `enabled`               | bool   | `false`     | Master switch; ANDs with `lint` / `review`       |
+| `lint`                  | bool   | `false`     | Enable AI lint summaries on `chk`/`fmt`          |
+| `review`                | bool   | `false`     | Enable the `lintro review` AI diff review        |
 | `provider`              | string | `anthropic` | AI provider (`anthropic` or `openai`)            |
 | `model`                 | string | (default)   | Model override                                   |
 | `api_key_env`           | string | (default)   | Custom env var for API key                       |
@@ -2227,6 +2578,67 @@ ai:
 | `retry_base_delay`      | float  | `1.0`       | Initial retry delay in seconds (min 0.1)         |
 | `retry_max_delay`       | float  | `30.0`      | Maximum retry delay in seconds (min 1.0)         |
 | `retry_backoff_factor`  | float  | `2.0`       | Retry delay multiplier (min 1.0)                 |
+
+### Idiom Review Tool (`idiom-review`)
+
+The `idiom-review` tool uses AI to find issues that syntax-matching linters cannot: code
+that is syntactically correct but non-idiomatic or redundantly duplicated across files.
+Unlike the AI summary and `--fix` flows, it is a first-class `ToolDefinition` plugin
+that runs as part of the normal `lintro check` pipeline — distinct from the
+`lintro review` diff-review command.
+
+**Install:**
+
+```bash
+uv pip install 'lintro[ai]'
+export ANTHROPIC_API_KEY=sk-ant-...   # or OPENAI_API_KEY for OpenAI
+```
+
+The tool is **disabled by default** and is a no-op until explicitly opted in. When no AI
+provider is available (missing SDK, key, or credits), it degrades gracefully to a
+skipped result rather than failing the run. Findings are cached by content hash under
+`.lintro-cache/idiom`, so unchanged files cost nothing on repeat runs.
+
+**Options:**
+
+| Option           | Type   | Default    | Description                                            |
+| ---------------- | ------ | ---------- | ------------------------------------------------------ |
+| `enabled`        | bool   | `false`    | Opt-in gate — must be `true` to run                    |
+| `mode`           | string | `per-file` | `per-file` · `duplication` · `both`                    |
+| `min_confidence` | string | `medium`   | Drop findings below this level (`low`/`medium`/`high`) |
+| `max_files`      | int    | `25`       | Cap on files reviewed per run (cost bound)             |
+| `language`       | string | `python`   | Language to review; set explicitly for other languages |
+
+**Modes:**
+
+- **`per-file`** — flags idiomatic misses per file (e.g. verbose loops instead of
+  `any()`/`all()` comprehensions).
+- **`duplication`** — flags the same utility logic reimplemented across files, invisible
+  to per-file linters, with a suggested extraction point.
+- **`both`** — runs both modes in one pass.
+
+**Usage example:**
+
+```yaml
+# .lintro-config.yaml
+ai:
+  enabled: true
+  provider: anthropic
+  transport: api
+tools:
+  idiom-review:
+    options:
+      enabled: true # opt-in gate (default: false)
+      mode: per-file # per-file | duplication | both
+      min_confidence: medium
+      max_files: 25 # cap files reviewed per run (cost bound)
+```
+
+Or enable ad hoc from the CLI without modifying config:
+
+```bash
+lintro check --tools idiom-review --tool-options idiom-review:enabled=true
+```
 
 ## Advanced Configuration
 

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
-import subprocess
+import subprocess  # nosec B404 - subprocess used with fixed argv in controlled tests
 from pathlib import Path
 from typing import Any
 
@@ -25,8 +25,10 @@ def _load_render_module() -> Any:
         "render_coverage_json_html",
         RENDER_SCRIPT,
     )
-    assert spec is not None
-    assert spec.loader is not None
+    assert_that(spec).is_not_none()
+    assert spec is not None  # narrow type for mypy
+    assert_that(spec.loader).is_not_none()
+    assert spec.loader is not None  # narrow type for mypy
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
@@ -97,7 +99,7 @@ def test_stage_script_uses_coverage_json(
     (script_dir / "stage-python-coverage-html.sh").chmod(0o755)
     (fake_root / "coverage-report").symlink_to(report)
 
-    result = subprocess.run(
+    result = subprocess.run(  # nosec B603 - fixed argv run against a real binary in a controlled test; shell=False, no user shell input
         [str(script_dir / "stage-python-coverage-html.sh")],
         cwd=fake_root,
         capture_output=True,

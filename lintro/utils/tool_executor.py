@@ -154,19 +154,20 @@ def _warn_ai_fix_disabled(
     *,
     action: Action,
     ai_fix: bool,
-    ai_enabled: bool,
+    ai_lint_enabled: bool,
     logger: Any,
     output_format: str = "",
 ) -> None:
-    """Warn when users request AI fixes but AI is disabled in config."""
-    if action != Action.CHECK or not ai_fix or ai_enabled:
+    """Warn when users request AI fixes but AI lint is disabled in config."""
+    if action != Action.CHECK or not ai_fix or ai_lint_enabled:
         return
     # Suppress plain-text warnings for machine-readable output formats
     if output_format.lower() in ("json", "sarif"):
         return
     logger.console_output(
-        "AI fixes requested with --fix, but ai.enabled is false in "
-        ".lintro-config.yaml; skipping AI enhancements.",
+        "AI fixes requested with --fix, but AI lint is disabled in "
+        ".lintro-config.yaml (set ai.enabled and ai.lint: true); "
+        "skipping AI enhancements.",
     )
 
 
@@ -235,6 +236,8 @@ def _display_fix_result(
             output=result.output or "",
             output_format=output_format,
             issues=list(result.issues) if result.issues else None,
+            success=result.success,
+            issues_count=result.issues_count,
         )
     if result.output and raw_output:
         display_output = result.output
@@ -476,7 +479,10 @@ def run_lint_tools_simple(
     ignore_conflicts: bool = False,
     transport: str | None = None,
     dry_run: bool = False,
+    score: bool = False,
+    fail_under: float | None = None,
     diff_base: str | None = None,
+    no_art: bool = False,
 ) -> int:
     """Simplified runner using Loguru-based logging with rich formatting.
 
@@ -512,10 +518,17 @@ def run_lint_tools_simple(
             the fixable tool set; the reported issues are exactly what a real
             ``fmt`` run would address. Exit code mirrors check semantics: 0 when
             nothing would be fixed, 1 when fixes are available.
+        score: When True with human-readable output, print only the 0-100
+            health score line and suppress the normal execution summary.
+        fail_under: When set, exit with code 1 if the computed health score is
+            strictly below this threshold (CI gate).
         diff_base: Git base ref for ``--diff`` scanning. ``None`` scans all
             files; :data:`~lintro.utils.git_diff.DIFF_DEFAULT_SENTINEL` resolves
             the repository default base; any other value is used as the base
             ref. Non-git directories fall back to a full scan with a warning.
+        no_art: When True, suppress decorative ASCII art regardless of the
+            ``output.art`` config value. Art is also suppressed automatically
+            when ``output.art`` is ``False`` or stdout is not a TTY.
 
     Returns:
         Exit code (0 for success, 1 for failures).
@@ -552,9 +565,21 @@ def run_lint_tools_simple(
     from lintro.utils.console import create_logger
 
     machine_readable_output = output_format.lower() in ("json", "sarif")
+    # Score-only takes priority over machine-readable formats so
+    # ``--score --output-format json`` still prints only the numeric score.
+    score_only = bool(score)
+
+    # Resolve whether decorative ASCII art may be shown. Either the ``--no-art``
+    # flag or ``output.art: false`` in config disables it; the TTY guard in
+    # print_ascii_art still applies on top of this.
+    from lintro.config.config_loader import get_config as _get_config
+
+    art_enabled = bool(_get_config().output.art) and not no_art
+
     logger = create_logger(
         run_dir=output_manager.run_dir,
-        route_stderr=machine_readable_output,
+        route_stderr=machine_readable_output or score_only,
+        art_enabled=art_enabled,
     )
 
     # Get tools to run (now returns ToolsToRunResult with skip info)
@@ -573,7 +598,20 @@ def run_lint_tools_simple(
 
     if not tools_to_run and not skipped_tools:
         logger.console_output("No tools to run.")
-        return 0
+        from lintro.config.config_loader import get_config
+        from lintro.utils.health_score import health_score_for_results
+
+        empty_config = get_config()
+        health = health_score_for_results(
+            [],
+            getattr(empty_config, "score", None),
+        )
+        exit_code = 0
+        if fail_under is not None and health.score < fail_under:
+            exit_code = 1
+        if score_only:
+            print(health.score)
+        return exit_code
 
     if not tools_to_run and skipped_tools:
         _missing_keywords = ("not found", "missing")
@@ -723,9 +761,11 @@ def run_lint_tools_simple(
     else:
         effective_auto_install = is_container
 
-    # Pre-execution config summary (suppress in JSON mode)
-    if output_format.lower() not in {"json", "sarif"} and (
-        tools_to_run or skipped_tools
+    # Pre-execution config summary (suppress in JSON/SARIF and score-only mode)
+    if (
+        output_format.lower() not in {"json", "sarif"}
+        and not score_only
+        and (tools_to_run or skipped_tools)
     ):
         from lintro.utils.console.pre_execution_summary import (
             print_pre_execution_summary,
@@ -968,7 +1008,7 @@ def run_lint_tools_simple(
     _warn_ai_fix_disabled(
         action=action,
         ai_fix=effective_ai_fix,
-        ai_enabled=lintro_config.ai.enabled,
+        ai_lint_enabled=lintro_config.ai.lint_enabled,
         logger=logger,
         output_format=output_format,
     )
@@ -1025,9 +1065,24 @@ def run_lint_tools_simple(
         if ai_config.fail_on_ai_error and ai_result.error:
             final_exit_code = 1
 
+    # Compute the deterministic 0-100 health score from the aggregated results.
+    from lintro.utils.health_score import health_score_for_results
+
+    health = health_score_for_results(
+        all_results,
+        getattr(lintro_config, "score", None),
+    )
+
+    # CI gate: fail the run when the score falls below the requested threshold.
+    if fail_under is not None and health.score < fail_under:
+        final_exit_code = 1
+
     # Display results
     if all_results:
-        if output_format.lower() == "json":
+        if score_only:
+            # Score-only wins over JSON/SARIF so stdout stays a bare number.
+            print(health.score)
+        elif output_format.lower() == "json":
             # Output JSON to stdout
             import json
 
@@ -1040,6 +1095,7 @@ def run_lint_tools_simple(
                 total_fixed=total_fixed,
                 total_remaining=total_remaining,
                 exit_code=final_exit_code,
+                health_score=health.to_dict(),
             )
             print(json.dumps(json_data, indent=2))
         elif output_format.lower() == "sarif":
@@ -1083,6 +1139,19 @@ def run_lint_tools_simple(
                         text="Nothing to fix - no auto-fixable issues found",
                         color="green",
                     )
+
+            # Always-on health score line at the end of a check run.
+            if action == Action.CHECK:
+                _tier_color = {
+                    "great": "green",
+                    "needs-work": "yellow",
+                    "critical": "red",
+                }.get(health.tier.label, "cyan")
+                _tier_label = health.tier.label
+                logger.console_output(
+                    text=f"Health score: {health.score}/100 ({_tier_label})",
+                    color=_tier_color,
+                )
 
         # Route warnings to stderr (loguru) for machine-readable formats so
         # plain-text messages don't corrupt JSON/SARIF output on stdout.
@@ -1182,5 +1251,9 @@ def run_lint_tools_simple(
             output_manager.cleanup_old_runs()
         except OSError as e:
             _warn(f"Warning: Failed to clean up old runs: {e}")
+
+    elif score_only:
+        # Empty result set (e.g. all tools skipped) still needs numeric stdout.
+        print(health.score)
 
     return final_exit_code

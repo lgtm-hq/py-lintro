@@ -1,7 +1,6 @@
 # OSV-Scanner configuration for the lintro project.
 #
-# Suppressions were removed in this branch after upgrading transitive npm deps
-# (defu@6.1.5, yaml@2.8.3) that previously required GHSA suppressions on main.
-# OSV Scanner still runs in CI via lintro; this file remains as the project hook
-# for future suppressions when no patched version is available yet.
-# Review periodically and add [[IgnoredVulns]] entries only when necessary.
+# OSV Scanner runs in CI via lintro; this file is the project hook for
+# suppressions. Review periodically and add [[IgnoredVulns]] entries only when
+# necessary. Each entry is time-boxed via ignoreUntil so it cannot silently
+# outlive its rationale.

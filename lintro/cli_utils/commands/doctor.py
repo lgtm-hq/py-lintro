@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import json
 import shutil
-import subprocess
+import subprocess  # nosec B404 - subprocess is the core mechanism for invoking external tools; all invocations use shell=False
 import sys
 from dataclasses import asdict, dataclass
 
@@ -20,10 +20,18 @@ from lintro.ai.doctor_checks import AICheckResult, check_ai_configuration
 from lintro.enums.tool_status import ToolStatus
 from lintro.tools.core.install_context import RuntimeContext
 from lintro.tools.core.install_strategies import get_strategy
-from lintro.tools.core.tool_registry import CATEGORY_LABELS, ManifestTool, ToolRegistry
+from lintro.tools.core.tool_registry import (
+    CATEGORY_LABELS,
+    ManifestRegistry,
+    ManifestTool,
+)
 from lintro.tools.core.version_parsing import (
     compare_versions,
     extract_version_from_output,
+)
+from lintro.tools.definitions.oxlint_doctor import (
+    OxlintCheckResult,
+    check_oxlint_type_aware,
 )
 from lintro.utils.environment import (
     EnvironmentReport,
@@ -108,7 +116,7 @@ def _check_tool(tool: ManifestTool, context: RuntimeContext) -> ToolCheckResult:
         )
 
     try:
-        result = subprocess.run(
+        result = subprocess.run(  # nosec B603 - argv is an internally-built list run with shell=False; binary resolved from a known command, no user shell input
             tool.version_command,
             capture_output=True,
             text=True,
@@ -337,6 +345,48 @@ def _render_ai_checks(console: Console, checks: list[AICheckResult]) -> None:
             console.print(f"         [dim]{check.hint}[/dim]")
 
 
+def _oxlint_check_is_failure(check: OxlintCheckResult) -> bool:
+    return check.status in (
+        ToolStatus.MISSING,
+        ToolStatus.INCOMPATIBLE,
+    )
+
+
+def _render_oxlint_checks(console: Console, checks: list[OxlintCheckResult]) -> None:
+    """Render oxlint type-aware dependency checks.
+
+    Args:
+        console: Rich console for output.
+        checks: Oxlint type-aware check results (empty renders nothing).
+    """
+    if not checks:
+        return
+
+    ok_count = sum(1 for check in checks if check.status == ToolStatus.OK)
+    console.print()
+    header = Text("  Oxlint type-aware ", style="bold")
+    header.append(f"({ok_count}/{len(checks)} OK)", style="dim")
+    console.print(header)
+
+    for check in checks:
+        line = Text("    ")
+        if check.status == ToolStatus.OK:
+            line.append("[OK] ", style="green")
+            line.append(f"{check.name:<30}", style="cyan")
+            line.append(check.message, style="dim")
+        elif check.status in (ToolStatus.MISSING, ToolStatus.INCOMPATIBLE):
+            line.append("[!!] ", style="red bold")
+            line.append(f"{check.name:<30}", style="cyan")
+            line.append(check.message, style="red")
+        else:
+            line.append("[??] ", style="yellow")
+            line.append(f"{check.name:<30}", style="cyan")
+            line.append(check.message, style="dim")
+        console.print(line)
+        if check.hint:
+            console.print(f"         [dim]{check.hint}[/dim]")
+
+
 def _generate_markdown_report(
     env: EnvironmentReport,
     context: RuntimeContext,
@@ -468,7 +518,7 @@ def doctor_command(
     """
     display_console = Console()
 
-    registry = ToolRegistry.load()
+    registry = ManifestRegistry.load()
     context = RuntimeContext.detect()
 
     env_report = None
@@ -480,6 +530,12 @@ def doctor_command(
     config = get_config()
     ai_checks = check_ai_configuration(config.ai)
     ai_failure_count = sum(1 for check in ai_checks if _ai_check_is_failure(check))
+
+    oxlint_type_aware = bool(config.get_tool_defaults("oxlint").get("type_aware"))
+    oxlint_checks = check_oxlint_type_aware(option_enabled=oxlint_type_aware)
+    oxlint_failure_count = sum(
+        1 for check in oxlint_checks if _oxlint_check_is_failure(check)
+    )
 
     # Determine which tools to check
     if tools:
@@ -568,6 +624,7 @@ def doctor_command(
             or incompatible_count > 0
             or unknown_count > 0
             or ai_failure_count > 0
+            or oxlint_failure_count > 0
         ):
             sys.exit(1)
         return
@@ -584,6 +641,7 @@ def doctor_command(
             incompatible_count,
             unknown_count,
             ai_checks=ai_checks,
+            oxlint_checks=oxlint_checks,
         )
         if (
             missing_count > 0
@@ -591,6 +649,7 @@ def doctor_command(
             or incompatible_count > 0
             or unknown_count > 0
             or ai_failure_count > 0
+            or oxlint_failure_count > 0
         ):
             sys.exit(1)
         return
@@ -634,6 +693,7 @@ def doctor_command(
         )
 
     _render_ai_checks(display_console, ai_checks)
+    _render_oxlint_checks(display_console, oxlint_checks)
 
     # Summary
     display_console.print()
@@ -693,6 +753,7 @@ def doctor_command(
         or incompatible_count > 0
         or unknown_count > 0
         or ai_failure_count > 0
+        or oxlint_failure_count > 0
     ):
         raise SystemExit(1)
 
@@ -708,6 +769,7 @@ def _output_json(
     unknown_count: int,
     *,
     ai_checks: list[AICheckResult] | None = None,
+    oxlint_checks: list[OxlintCheckResult] | None = None,
 ) -> None:
     """Output doctor results as JSON."""
     disabled_count = sum(
@@ -784,6 +846,27 @@ def _output_json(
                 },
             )
 
+    for oxlint_check in oxlint_checks or []:
+        if _oxlint_check_is_failure(oxlint_check):
+            issues.append(
+                {
+                    "tool": oxlint_check.name,
+                    "severity": "error",
+                    "message": oxlint_check.message,
+                    "install_hint": oxlint_check.hint,
+                },
+            )
+
+    oxlint_json = [
+        {
+            "name": check.name,
+            "status": check.status.value,
+            "message": check.message,
+            "hint": check.hint,
+        }
+        for check in (oxlint_checks or [])
+    ]
+
     ai_json = [
         {
             "name": check.name,
@@ -803,6 +886,7 @@ def _output_json(
         "tools": tools_json,
         "issues": issues,
         "ai": ai_json,
+        "oxlint": oxlint_json,
         "summary": {
             "total": (
                 ok_count
@@ -837,7 +921,7 @@ def _run_fix(
     console: Console,
     results: list[ToolCheckResult],
     context: RuntimeContext,
-    registry: ToolRegistry,
+    registry: ManifestRegistry,
 ) -> None:
     """Attempt to install missing/outdated tools via the central installer."""
     from lintro.tools.core.tool_installer import ToolInstaller

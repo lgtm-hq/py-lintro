@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-import subprocess
+import subprocess  # nosec B404 - subprocess is used to drive the tool/CLI under test; invocations use shell=False
 from collections.abc import Callable
 from unittest.mock import MagicMock, patch
 
@@ -80,10 +80,10 @@ def context() -> RuntimeContext:
 
 @pytest.fixture()
 def registry() -> MagicMock:
-    """Return a mock ToolRegistry.
+    """Return a mock ManifestRegistry.
 
     Returns:
-        A MagicMock standing in for ToolRegistry.
+        A MagicMock standing in for ManifestRegistry.
     """
     return MagicMock()
 
@@ -93,7 +93,7 @@ def installer(registry: MagicMock, context: RuntimeContext) -> ToolInstaller:
     """Return a ToolInstaller wired to mock registry and real context.
 
     Args:
-        registry: Mock ToolRegistry.
+        registry: Mock ManifestRegistry.
         context: RuntimeContext fixture.
 
     Returns:
@@ -408,7 +408,7 @@ def test_plan_tool_manual_no_cargo(
     """Place cargo tool in manual when cargo is not available.
 
     Args:
-        registry: Mock ToolRegistry.
+        registry: Mock ManifestRegistry.
         make_tool: ManifestTool factory.
     """
     from lintro.tools.core.install_strategies.environment import InstallEnvironment
@@ -447,7 +447,7 @@ def test_plan_tool_manual_no_npm(
     """Place npm tool in manual when bun and npm are both unavailable.
 
     Args:
-        registry: Mock ToolRegistry.
+        registry: Mock ManifestRegistry.
         make_tool: ManifestTool factory.
     """
     from lintro.tools.core.install_strategies.environment import InstallEnvironment
@@ -493,7 +493,7 @@ def test_plan_with_tools_list(
 
     Args:
         installer: ToolInstaller fixture.
-        registry: Mock ToolRegistry.
+        registry: Mock ManifestRegistry.
         make_tool: ManifestTool factory.
     """
     tool_a = make_tool(name="tool_a")
@@ -518,7 +518,7 @@ def test_plan_deduplicates_tools(
 
     Args:
         installer: ToolInstaller fixture.
-        registry: Mock ToolRegistry.
+        registry: Mock ManifestRegistry.
         make_tool: ManifestTool factory.
     """
     tool_a = make_tool(name="tool_a")
@@ -540,7 +540,7 @@ def test_plan_with_profile(
 
     Args:
         installer: ToolInstaller fixture.
-        registry: Mock ToolRegistry.
+        registry: Mock ManifestRegistry.
         make_tool: ManifestTool factory.
     """
     tool_a = make_tool(name="profiled_tool")
@@ -562,7 +562,7 @@ def test_plan_with_upgrade_flag(
 
     Args:
         installer: ToolInstaller fixture.
-        registry: Mock ToolRegistry.
+        registry: Mock ManifestRegistry.
         make_tool: ManifestTool factory.
     """
     tool_a = make_tool(name="upgradable")
@@ -588,7 +588,7 @@ def test_check_prerequisites_cargo_missing(
     """Return skip reason when cargo is not available for a cargo tool.
 
     Args:
-        registry: Mock ToolRegistry.
+        registry: Mock ManifestRegistry.
         make_tool: ManifestTool factory.
     """
     from lintro.tools.core.install_strategies.environment import InstallEnvironment
@@ -625,7 +625,7 @@ def test_check_prerequisites_npm_missing(
     """Return skip reason when npm and bun are both unavailable for npm tool.
 
     Args:
-        registry: Mock ToolRegistry.
+        registry: Mock ManifestRegistry.
         make_tool: ManifestTool factory.
     """
     from lintro.tools.core.install_strategies.environment import InstallEnvironment
@@ -662,7 +662,7 @@ def test_check_prerequisites_pip_missing(
     """Return skip reason when uv and pip are both unavailable for pip tool.
 
     Args:
-        registry: Mock ToolRegistry.
+        registry: Mock ManifestRegistry.
         make_tool: ManifestTool factory.
     """
     from lintro.tools.core.install_strategies.environment import InstallEnvironment

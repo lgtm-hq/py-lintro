@@ -26,23 +26,59 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  classify-tag:
+    name: Classify release tag
+    if: ${{ !startsWith(github.ref_name, 'actions-v') }}
+    runs-on: ubuntu-latest
+    permissions:
+      # read: sparse checkout of scripts for the classifier
+      contents: read
+    outputs:
+      # true when github.ref_name is a prerelease (alpha/beta/rc or any
+      # non-``X.Y.Z`` suffix); false for stable releases including +build
+      # metadata. Consumed by Homebrew/npm/Docker gating below.
+      is_prerelease: ${{ steps.classify.outputs.is_prerelease }}
+    steps:
+      - name: Harden runner
+        # yamllint disable-line rule:line-length
+        uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
+        with:
+          egress-policy: block
+          allowed-endpoints: >
+            github.com:443
+            api.github.com:443
+            codeload.github.com:443
+            objects.githubusercontent.com:443
+      - name: Checkout scripts
+        # yamllint disable-line rule:line-length
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          sparse-checkout: scripts/ci/classify-release-tag.py
+          sparse-checkout-cone-mode: false
+      - name: Classify tag
+        id: classify
+        env:
+          TAG_NAME: ${{ github.ref_name }}
+        run: python3 scripts/ci/classify-release-tag.py "$TAG_NAME"
+
   sbom:
     name: Generate and verify SBOM
     if: ${{ !startsWith(github.ref_name, 'actions-v') }}
     # yamllint disable-line rule:line-length
-    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-sbom.yml@1014e3d7d5441a63215d2096545a46cff6de101c # v0.48.0
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-sbom.yml@31c25ef2e8992960e218524780e34f44f51271b5 # v0.54.0
     with:
       target: .
       target-type: dir
       sbom-format: cyclonedx-json
       scan-vulnerabilities: true
       create-attestation: true
-      tooling-ref: '1014e3d7d5441a63215d2096545a46cff6de101c' # v0.48.0
+      tooling-ref: '31c25ef2e8992960e218524780e34f44f51271b5' # v0.54.0
       egress-policy: block
       egress-preset: sbom
     permissions:
-      # read: checkout repo for SBOM generation
-      contents: read
+      # write: reusable-sbom v0.52.3 requests contents: write (attach SBOM to
+      # release assets, lgtm-ci#505); a lower grant is a startup_failure
+      contents: write
       # write: upload vulnerability findings to GitHub Security tab
       security-events: write
       # write: OIDC for SBOM attestation signing
@@ -57,18 +93,32 @@ jobs:
       github.ref_type == 'tag' &&
       !startsWith(github.ref_name, 'actions-v')
     # yamllint disable-line rule:line-length
-    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-build-python-dist.yml@1014e3d7d5441a63215d2096545a46cff6de101c # v0.48.0
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-build-python-dist.yml@31c25ef2e8992960e218524780e34f44f51271b5 # v0.54.0
     permissions:
       # read: checkout and build sdist/wheel (reusable-build-python-dist)
       contents: read
     with:
       python-version: '3.14'
       artifact-name: python-dist
-      tooling-ref: '1014e3d7d5441a63215d2096545a46cff6de101c' # v0.48.0
+      tooling-ref: '31c25ef2e8992960e218524780e34f44f51271b5' # v0.54.0
       egress-policy: block
       egress-preset: pypi
-      allowed-endpoints-mode: append
+      # Full list (v0.50.0+ replace semantics): the reusable passes
+      # allowed-endpoints verbatim to step-security/harden-runner, so a
+      # non-empty value must include the pypi preset baseline.
+      allowed-endpoints-mode: replace
       allowed-endpoints: >
+        github.com:443
+        api.github.com:443
+        codeload.github.com:443
+        objects.githubusercontent.com:443
+        raw.githubusercontent.com:443
+        pipelines.actions.githubusercontent.com:443
+        pypi.org:443
+        files.pythonhosted.org:443
+        test.pypi.org:443
+        upload.pypi.org:443
+        upload.test.pypi.org:443
         astral.sh:443
         releases.astral.sh:443
         github-releases.githubusercontent.com:443
@@ -91,7 +141,7 @@ jobs:
     steps:
       - name: Harden runner
         # yamllint disable-line rule:line-length
-        uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
+        uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
         with:
           egress-policy: block
           # lgtm-ci workflow-contract.md § PyPI upload (OIDC)
@@ -116,14 +166,14 @@ jobs:
       - name: Prepare PyPI upload
         id: prepare
         # yamllint disable-line rule:line-length
-        uses: lgtm-hq/lgtm-ci/.github/actions/prepare-pypi-upload@1014e3d7d5441a63215d2096545a46cff6de101c # v0.48.0
+        uses: lgtm-hq/lgtm-ci/.github/actions/prepare-pypi-upload@31c25ef2e8992960e218524780e34f44f51271b5 # v0.54.0
         with:
           artifact-name: python-dist
           python-version: '3.14'
-          tooling-ref: '1014e3d7d5441a63215d2096545a46cff6de101c' # v0.48.0
+          tooling-ref: '31c25ef2e8992960e218524780e34f44f51271b5' # v0.54.0
       - name: Upload to PyPI
         # yamllint disable-line rule:line-length
-        uses: pypa/gh-action-pypi-publish@cef221092ed1bacb1cc03d23a2d87d1d172e277b # v1.14.0
+        uses: pypa/gh-action-pypi-publish@ba38be9e461d3875417946c167d0b5f3d385a247 # v1.14.1
         with:
           repository-url: https://upload.pypi.org/legacy/
           packages-dir: ${{ steps.prepare.outputs.dist-path }}
@@ -139,27 +189,35 @@ jobs:
     needs: [pypi-upload]
     if: ${{ !startsWith(github.ref_name, 'actions-v') }}
     # yamllint disable-line rule:line-length
-    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-github-release.yml@1014e3d7d5441a63215d2096545a46cff6de101c # v0.48.0
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-github-release.yml@31c25ef2e8992960e218524780e34f44f51271b5 # v0.54.0
     permissions:
       # write: create GitHub Release and upload dist assets
       contents: write
     with:
       artifact-name: python-dist
       generate-release-notes: true
-      tooling-ref: '1014e3d7d5441a63215d2096545a46cff6de101c' # v0.48.0
+      tooling-ref: '31c25ef2e8992960e218524780e34f44f51271b5' # v0.54.0
       egress-policy: block
       egress-preset: github-tooling
-      allowed-endpoints-mode: append
-      allowed-endpoints: uploads.github.com:443
+      # Full list (v0.50.0+ replace semantics): the reusable passes
+      # allowed-endpoints verbatim to step-security/harden-runner, so a
+      # non-empty value must include the github-tooling baseline.
+      allowed-endpoints-mode: replace
+      allowed-endpoints: >
+        github.com:443
+        api.github.com:443
+        codeload.github.com:443
+        objects.githubusercontent.com:443
+        raw.githubusercontent.com:443
+        uploads.github.com:443
+        pipelines.actions.githubusercontent.com:443
 
   homebrew-tap:
     name: Publish Homebrew Tap
-    needs: [pypi-upload, github-release]
+    needs: [classify-tag, pypi-upload, github-release]
     if: >-
       !startsWith(github.ref_name, 'actions-v') &&
-      !contains(github.ref_name, 'a') &&
-      !contains(github.ref_name, 'b') &&
-      !contains(github.ref_name, 'rc')
+      needs.classify-tag.outputs.is_prerelease == 'false'
     uses: ./.github/workflows/build-binary.yml
     permissions:
       # write: push formula updates to Homebrew tap repository
@@ -175,12 +233,10 @@ jobs:
     # platform binaries to the GitHub release, which publish-npm.yml
     # downloads. Gated to stable releases only, since build-binary does not
     # run for prereleases.
-    needs: [homebrew-tap]
+    needs: [classify-tag, homebrew-tap]
     if: >-
       !startsWith(github.ref_name, 'actions-v') &&
-      !contains(github.ref_name, 'a') &&
-      !contains(github.ref_name, 'b') &&
-      !contains(github.ref_name, 'rc')
+      needs.classify-tag.outputs.is_prerelease == 'false'
     uses: ./.github/workflows/publish-npm.yml
     permissions:
       # read: checkout and download release assets
@@ -195,13 +251,11 @@ jobs:
 
   docker-publish:
     name: Publish Docker Images to GHCR
-    needs: [pypi-upload]
+    needs: [classify-tag, pypi-upload]
     # yamllint disable-line rule:line-length
     if: >-
       !startsWith(github.ref_name, 'actions-v') &&
-      !contains(github.ref_name, 'a') &&
-      !contains(github.ref_name, 'b') &&
-      !contains(github.ref_name, 'rc')
+      needs.classify-tag.outputs.is_prerelease == 'false'
     uses: ./.github/workflows/docker-build-publish.yml
     permissions:
       # read: checkout for Docker build context

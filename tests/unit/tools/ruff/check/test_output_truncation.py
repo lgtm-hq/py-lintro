@@ -26,10 +26,6 @@ def test_check_failure_logs_output_to_debug_only(
 
     with (
         patch(
-            "lintro.tools.implementations.ruff.check.walk_files_with_excludes",
-            return_value=["test.py"],
-        ),
-        patch(
             "lintro.tools.implementations.ruff.check.run_subprocess_with_timeout",
             return_value=(False, long_output),
         ),
@@ -76,10 +72,6 @@ def test_format_check_failure_logs_output_to_debug_only(
     long_format_output = "Would reformat: " + "x" * 3000
 
     with (
-        patch(
-            "lintro.tools.implementations.ruff.check.walk_files_with_excludes",
-            return_value=["test.py"],
-        ),
         patch(
             "lintro.tools.implementations.ruff.check.run_subprocess_with_timeout",
         ) as mock_subprocess,
@@ -132,10 +124,6 @@ def test_check_success_does_not_log_output(
         mock_ruff_tool: Mock RuffTool instance for testing.
     """
     with (
-        patch(
-            "lintro.tools.implementations.ruff.check.walk_files_with_excludes",
-            return_value=["test.py"],
-        ),
         patch(
             "lintro.tools.implementations.ruff.check.run_subprocess_with_timeout",
             return_value=(True, "[]"),

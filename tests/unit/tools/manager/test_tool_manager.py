@@ -95,8 +95,8 @@ def test_tool_manager_get_tool_execution_order_with_conflicts() -> None:
     tm = ToolManager()
 
     # Verify tools exist before testing conflict resolution
-    assert tm.get_tool(ToolName.RUFF) is not None
-    assert tm.get_tool(ToolName.BLACK) is not None
+    assert_that(tm.get_tool(ToolName.RUFF)).is_not_none()
+    assert_that(tm.get_tool(ToolName.BLACK)).is_not_none()
 
     try:
         # Temporarily modify conflicts (note: ToolDefinition is frozen, so we need

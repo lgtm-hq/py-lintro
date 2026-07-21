@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-import subprocess
+import subprocess  # nosec B404 - subprocess is used to drive the tool/CLI under test; invocations use shell=False
 from pathlib import Path
 from typing import Any
 from unittest.mock import patch
@@ -12,6 +12,7 @@ import pytest
 from assertpy import assert_that
 
 from lintro.tools.definitions.tsc import TscPlugin
+from tests.test_samples_helpers import copy_sample
 
 # =============================================================================
 # Tests for TscPlugin.check method
@@ -28,8 +29,14 @@ def test_check_with_mocked_subprocess_success(
         tsc_plugin: The TscPlugin instance to test.
         tmp_path: Temporary directory path for test files.
     """
-    test_file = tmp_path / "main.ts"
-    test_file.write_text("const x: number = 42;\n")
+    test_file = copy_sample(
+        tmp_path,
+        "tools",
+        "typescript",
+        "tsc",
+        "tsc_const_x_clean.ts",
+        dest_name="main.ts",
+    )
 
     with patch(
         "lintro.plugins.execution_preparation.verify_tool_version",
@@ -56,8 +63,14 @@ def test_check_with_mocked_subprocess_issues(
         tsc_plugin: The TscPlugin instance to test.
         tmp_path: Temporary directory path for test files.
     """
-    test_file = tmp_path / "main.ts"
-    test_file.write_text("const x: number = 'string';\n")
+    test_file = copy_sample(
+        tmp_path,
+        "tools",
+        "typescript",
+        "tsc",
+        "tsc_const_x_string.ts",
+        dest_name="main.ts",
+    )
 
     tsc_output = f"{test_file}(1,7): error TS2322: Type 'string' is not assignable to type 'number'."
 
@@ -86,8 +99,14 @@ def test_check_with_timeout(
         tsc_plugin: The TscPlugin instance to test.
         tmp_path: Temporary directory path for test files.
     """
-    test_file = tmp_path / "main.ts"
-    test_file.write_text("const x: number = 42;\n")
+    test_file = copy_sample(
+        tmp_path,
+        "tools",
+        "typescript",
+        "tsc",
+        "tsc_const_x_clean.ts",
+        dest_name="main.ts",
+    )
 
     with patch(
         "lintro.plugins.execution_preparation.verify_tool_version",
@@ -137,8 +156,14 @@ def test_check_parses_multiple_issues(
         tsc_plugin: The TscPlugin instance to test.
         tmp_path: Temporary directory path for test files.
     """
-    test_file = tmp_path / "main.ts"
-    test_file.write_text("const x: number = 'a';\nconst y: string = 42;\n")
+    test_file = copy_sample(
+        tmp_path,
+        "tools",
+        "typescript",
+        "tsc",
+        "tsc_dual_type_errors.ts",
+        dest_name="main.ts",
+    )
 
     tsc_output = f"""{test_file}(1,7): error TS2322: Type 'string' is not assignable to type 'number'.
 {test_file}(2,7): error TS2322: Type 'number' is not assignable to type 'string'."""
@@ -183,8 +208,14 @@ def test_check_respects_tsconfig_include(
     )
 
     # Create a .ts file alongside the tsconfig
-    test_file = tmp_path / "app.ts"
-    test_file.write_text("const x: number = 42;\n")
+    test_file = copy_sample(
+        tmp_path,
+        "tools",
+        "typescript",
+        "tsc",
+        "tsc_const_x_clean.ts",
+        dest_name="app.ts",
+    )
 
     with patch(
         "lintro.plugins.execution_preparation.verify_tool_version",
@@ -222,8 +253,14 @@ def test_check_creates_temp_when_no_include(
         json.dumps({"compilerOptions": {"strict": True}}),
     )
 
-    test_file = tmp_path / "app.ts"
-    test_file.write_text("const x: number = 42;\n")
+    test_file = copy_sample(
+        tmp_path,
+        "tools",
+        "typescript",
+        "tsc",
+        "tsc_const_x_clean.ts",
+        dest_name="app.ts",
+    )
 
     temp_created = False
     original_create = tsc_plugin._create_temp_tsconfig
@@ -293,10 +330,22 @@ def test_check_multi_project_runs_per_project(
     # Create test files
     (api_dir / "src").mkdir()
     (web_dir / "src").mkdir()
-    api_file = api_dir / "src" / "server.ts"
-    web_file = web_dir / "src" / "app.ts"
-    api_file.write_text("const x: number = 42;\n")
-    web_file.write_text("const y: string = 'hello';\n")
+    copy_sample(
+        api_dir / "src",
+        "tools",
+        "typescript",
+        "tsc",
+        "tsc_const_x_clean.ts",
+        dest_name="server.ts",
+    )
+    copy_sample(
+        web_dir / "src",
+        "tools",
+        "typescript",
+        "tsc",
+        "tsc_const_y_hello.ts",
+        dest_name="app.ts",
+    )
 
     run_count = 0
     observed_cwds: list[str] = []
@@ -364,10 +413,22 @@ def test_check_multi_project_aggregates_issues(
 
     (api_dir / "src").mkdir()
     (web_dir / "src").mkdir()
-    api_file = api_dir / "src" / "server.ts"
-    web_file = web_dir / "src" / "app.ts"
-    api_file.write_text("const x: number = 42;\n")
-    web_file.write_text("const y: string = 'hello';\n")
+    api_file = copy_sample(
+        api_dir / "src",
+        "tools",
+        "typescript",
+        "tsc",
+        "tsc_const_x_clean.ts",
+        dest_name="server.ts",
+    )
+    web_file = copy_sample(
+        web_dir / "src",
+        "tools",
+        "typescript",
+        "tsc",
+        "tsc_const_y_hello.ts",
+        dest_name="app.ts",
+    )
 
     def mock_run(
         cmd: list[str],
@@ -401,8 +462,14 @@ def test_check_single_project_backward_compat(
         tsc_plugin: The TscPlugin instance to test.
         tmp_path: Temporary directory path for test files.
     """
-    test_file = tmp_path / "main.ts"
-    test_file.write_text("const x: number = 42;\n")
+    test_file = copy_sample(
+        tmp_path,
+        "tools",
+        "typescript",
+        "tsc",
+        "tsc_const_x_clean.ts",
+        dest_name="main.ts",
+    )
 
     with patch(
         "lintro.plugins.execution_preparation.verify_tool_version",

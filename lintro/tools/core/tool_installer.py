@@ -6,10 +6,10 @@ install-tools.sh for binary downloads) based on the tool's install type.
 
 Usage:
     from lintro.tools.core.tool_installer import ToolInstaller
-    from lintro.tools.core.tool_registry import ToolRegistry
+    from lintro.tools.core.tool_registry import ManifestRegistry
     from lintro.tools.core.install_context import RuntimeContext
 
-    registry = ToolRegistry.load()
+    registry = ManifestRegistry.load()
     context = RuntimeContext.detect()
     installer = ToolInstaller(registry, context)
 
@@ -21,7 +21,7 @@ from __future__ import annotations
 
 import shlex
 import shutil
-import subprocess
+import subprocess  # nosec B404 - subprocess is the core mechanism for invoking external tools; all invocations use shell=False
 import time
 from pathlib import Path
 
@@ -30,7 +30,7 @@ from loguru import logger
 from lintro.tools.core.install_context import RuntimeContext
 from lintro.tools.core.install_plan import InstallPlan, InstallResult
 from lintro.tools.core.install_strategies import get_strategy
-from lintro.tools.core.tool_registry import ManifestTool, ToolRegistry
+from lintro.tools.core.tool_registry import ManifestRegistry, ManifestTool
 from lintro.tools.core.version_parsing import (
     compare_versions,
     extract_version_from_output,
@@ -54,7 +54,7 @@ class ToolInstaller:
 
     def __init__(
         self,
-        registry: ToolRegistry,
+        registry: ManifestRegistry,
         context: RuntimeContext,
     ) -> None:
         """Initialize the installer with registry and context."""
@@ -215,7 +215,7 @@ class ToolInstaller:
             return None
 
         try:
-            result = subprocess.run(
+            result = subprocess.run(  # nosec B603 - argv is an internally-built list run with shell=False; binary resolved from a known command, no user shell input
                 tool.version_command,
                 capture_output=True,
                 text=True,
@@ -310,7 +310,7 @@ class ToolInstaller:
         if not shutil.which("brew"):
             return False
         try:
-            result = subprocess.run(
+            result = subprocess.run(  # nosec B603 B607 - argv is an internally-built list run with shell=False; binary name resolved from PATH, not attacker-controlled; binary resolved from a known command, no user shell input
                 ["brew", "list", "--formula", package],
                 capture_output=True,
                 timeout=10,
@@ -387,7 +387,7 @@ class ToolInstaller:
                 )
 
             # Otherwise run the command directly
-            proc = subprocess.run(
+            proc = subprocess.run(  # nosec B603 - argv is an internally-built list run with shell=False; binary resolved from a known command, no user shell input
                 shlex.split(command),
                 capture_output=True,
                 text=True,
@@ -483,7 +483,7 @@ class ToolInstaller:
 
         start = time.monotonic()
         try:
-            proc = subprocess.run(
+            proc = subprocess.run(  # nosec B603 - argv is an internally-built list run with shell=False; binary resolved from a known command, no user shell input
                 cmd,
                 capture_output=True,
                 text=True,

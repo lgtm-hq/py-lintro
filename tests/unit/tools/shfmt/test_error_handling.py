@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-import subprocess
+import subprocess  # nosec B404 - subprocess is used to drive the tool/CLI under test; invocations use shell=False
 from pathlib import Path
 from typing import TYPE_CHECKING
 from unittest.mock import patch
@@ -11,6 +11,7 @@ from assertpy import assert_that
 
 from lintro.parsers.shfmt.shfmt_parser import parse_shfmt_output
 from lintro.tools.definitions.shfmt import ShfmtPlugin
+from tests.test_samples_helpers import copy_sample
 
 if TYPE_CHECKING:
     pass
@@ -31,8 +32,14 @@ def test_check_with_timeout(
         shfmt_plugin: The ShfmtPlugin instance to test.
         tmp_path: Temporary directory path for test files.
     """
-    test_file = tmp_path / "test_script.sh"
-    test_file.write_text('#!/bin/bash\necho "hello"\n')
+    test_file = copy_sample(
+        tmp_path,
+        "tools",
+        "shell",
+        "shfmt",
+        "shfmt_hello.sh",
+        dest_name="test_script.sh",
+    )
 
     with patch(
         "lintro.plugins.execution_preparation.verify_tool_version",
@@ -58,8 +65,14 @@ def test_fix_with_timeout(
         shfmt_plugin: The ShfmtPlugin instance to test.
         tmp_path: Temporary directory path for test files.
     """
-    test_file = tmp_path / "test_script.sh"
-    test_file.write_text('#!/bin/bash\necho "hello"\n')
+    test_file = copy_sample(
+        tmp_path,
+        "tools",
+        "shell",
+        "shfmt",
+        "shfmt_hello.sh",
+        dest_name="test_script.sh",
+    )
 
     with patch(
         "lintro.plugins.execution_preparation.verify_tool_version",

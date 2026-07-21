@@ -25,8 +25,10 @@ def _load_module() -> ModuleType:
         The loaded module.
     """
     spec = importlib.util.spec_from_file_location("sync_npm_version", _SCRIPT)
-    assert spec is not None
-    assert spec.loader is not None
+    assert_that(spec).is_not_none()
+    assert spec is not None  # narrow type for mypy
+    assert_that(spec.loader).is_not_none()
+    assert spec.loader is not None  # narrow type for mypy
     module = importlib.util.module_from_spec(spec)
     sys.modules["sync_npm_version"] = module
     spec.loader.exec_module(module)

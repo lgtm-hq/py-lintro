@@ -19,10 +19,12 @@ produce phantom paths that would break downstream tools.
 
 from __future__ import annotations
 
-import os
 import shutil
-import subprocess
+import subprocess  # nosec B404 - subprocess is the core mechanism for invoking git; all invocations use shell=False
 from functools import lru_cache
+from pathlib import Path
+
+from lintro.utils.path_utils import absolute_path_without_resolving
 
 # Sentinel used by the ``--diff`` CLI option to mean "flag supplied without an
 # explicit base"; resolved to the repository's default base ref at runtime.
@@ -53,9 +55,15 @@ def _run_git(args: list[str], cwd: str) -> subprocess.CompletedProcess[str]:
 
     Returns:
         The completed process (never raises on non-zero exit).
+
+    Raises:
+        FileNotFoundError: When ``git`` is not installed or not on ``PATH``.
     """
-    return subprocess.run(
-        ["git", *args],
+    git_bin = shutil.which("git")
+    if git_bin is None:
+        raise FileNotFoundError("git is not installed or not on PATH")
+    return subprocess.run(  # nosec B603 - argv is [resolved git binary, *args]; shell=False; args are git subcommands only, not user shell input
+        [git_bin, *args],
         cwd=cwd,
         capture_output=True,
         text=True,
@@ -229,7 +237,7 @@ def get_changed_files(base: str, cwd: str = ".") -> frozenset[str]:
     Raises:
         DiffResolutionError: When ``base`` does not resolve to a commit.
     """
-    root = _repo_root(cwd) or os.path.abspath(cwd)
+    root = _repo_root(cwd) or absolute_path_without_resolving(Path(cwd))
 
     if not _ref_exists(base, cwd):
         raise DiffResolutionError(
@@ -245,9 +253,9 @@ def get_changed_files(base: str, cwd: str = ".") -> frozenset[str]:
 
     changed: set[str] = set()
     for name in names:
-        abs_path = os.path.abspath(os.path.join(root, name))
+        abs_path = absolute_path_without_resolving(Path(root) / name)
         # Drop deletions / rename sources that no longer exist on disk.
-        if os.path.isfile(abs_path):
+        if Path(abs_path).is_file():
             changed.add(abs_path)
     return frozenset(changed)
 
@@ -270,4 +278,4 @@ def filter_files_by_diff(
     changed = get_changed_files(base, cwd)
     if not changed:
         return []
-    return [f for f in files if os.path.abspath(f) in changed]
+    return [f for f in files if absolute_path_without_resolving(Path(f)) in changed]

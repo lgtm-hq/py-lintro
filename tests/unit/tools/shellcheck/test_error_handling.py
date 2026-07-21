@@ -2,13 +2,14 @@
 
 from __future__ import annotations
 
-import subprocess
+import subprocess  # nosec B404 - subprocess is used to drive the tool/CLI under test; invocations use shell=False
 from pathlib import Path
 from unittest.mock import patch
 
 from assertpy import assert_that
 
 from lintro.tools.definitions.shellcheck import ShellcheckPlugin
+from tests.test_samples_helpers import copy_sample
 
 # Tests for timeout handling
 
@@ -23,8 +24,14 @@ def test_check_with_timeout(
         shellcheck_plugin: The ShellcheckPlugin instance to test.
         tmp_path: Temporary directory path for test files.
     """
-    test_file = tmp_path / "test_script.sh"
-    test_file.write_text('#!/bin/bash\necho "Hello"\n')
+    test_file = copy_sample(
+        tmp_path,
+        "tools",
+        "shell",
+        "shellcheck",
+        "shellcheck_hello_world.sh",
+        dest_name="test_script.sh",
+    )
 
     with patch.object(
         shellcheck_plugin,

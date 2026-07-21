@@ -109,6 +109,7 @@ def create_json_output(
     total_fixed: int,
     total_remaining: int,
     exit_code: int,
+    health_score: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Create JSON output data structure from tool results.
 
@@ -121,6 +122,9 @@ def create_json_output(
             the post-fix remaining count; in CHECK/TEST mode nothing is fixed,
             so it mirrors ``total_issues``.
         exit_code: Exit code for the run.
+        health_score: Optional serialized health score dictionary. When
+            provided it is added additively under ``summary.health_score``
+            without altering any existing keys.
 
     Returns:
         Dictionary containing JSON-serializable results and summary data.
@@ -140,6 +144,10 @@ def create_json_output(
             ),
         },
     }
+    # Additive: include the health score under summary when supplied so the
+    # existing schema keys remain untouched.
+    if health_score is not None:
+        json_data["summary"]["health_score"] = health_score
     for result in results:
         result_data = serialize_tool_result(result, action=action_enum)
         # Extract AI summary from the first result that has one.

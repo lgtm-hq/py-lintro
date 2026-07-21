@@ -249,6 +249,71 @@ def test_allowlist_filters_untrusted(
     assert_that(ep_b.load.called).is_false()
 
 
+def test_malformed_yaml_config_fails_closed(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """A malformed ``.lintro-config.yaml`` disables external plugins.
+
+    A YAML parse error must not crash discovery or be swallowed into a
+    load-everything state; it must fail closed and load no external plugins.
+
+    Args:
+        monkeypatch: Pytest monkeypatch fixture.
+        tmp_path: Temporary working directory.
+    """
+    monkeypatch.setenv(ENV_ENABLE_EXTERNAL_PLUGINS, "1")
+    monkeypatch.chdir(tmp_path)
+    # Unbalanced brackets: invalid YAML that raises yaml.YAMLError.
+    (tmp_path / ".lintro-config.yaml").write_text(
+        "plugins:\n  trusted: [unterminated\n",
+        encoding="utf-8",
+    )
+
+    ep = MagicMock()
+    ep.name = "evil"
+    ep.load.return_value = "not-a-class"
+
+    with patch("importlib.metadata.entry_points", return_value=[ep]):
+        result = discover_external_plugins()
+
+    assert_that(result).is_equal_to(0)
+    assert_that(ep.load.called).is_false()
+
+
+def test_malformed_pyproject_config_fails_closed(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """A malformed ``pyproject.toml`` disables external plugins.
+
+    When ``pyproject.toml`` is the only trust-config source and it cannot be
+    parsed, discovery must fail closed rather than treat the allowlist as
+    absent (which would load every discovered plugin).
+
+    Args:
+        monkeypatch: Pytest monkeypatch fixture.
+        tmp_path: Temporary working directory.
+    """
+    monkeypatch.setenv(ENV_ENABLE_EXTERNAL_PLUGINS, "1")
+    monkeypatch.chdir(tmp_path)
+    # Invalid TOML: raises tomllib.TOMLDecodeError.
+    (tmp_path / "pyproject.toml").write_text(
+        "[tool.lintro.plugins]\ntrusted = [\n",
+        encoding="utf-8",
+    )
+
+    ep = MagicMock()
+    ep.name = "evil"
+    ep.load.return_value = "not-a-class"
+
+    with patch("importlib.metadata.entry_points", return_value=[ep]):
+        result = discover_external_plugins()
+
+    assert_that(result).is_equal_to(0)
+    assert_that(ep.load.called).is_false()
+
+
 # =============================================================================
 # Tests for discover_all_tools
 # =============================================================================
@@ -330,4 +395,4 @@ def test_builtin_definitions_path_is_directory() -> None:
 
 def test_entry_point_group_value() -> None:
     """Entry point group is correct."""
-    assert_that(ENTRY_POINT_GROUP).is_equal_to("lintro.plugins")
+    assert_that(ENTRY_POINT_GROUP).is_equal_to("lintro.tools")
