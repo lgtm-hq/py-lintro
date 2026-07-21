@@ -378,14 +378,18 @@ export LINTRO_VERSION_TIMEOUT=60
 
 # Force Docker install-context detection (set to 1)
 export LINTRO_DOCKER=1
+
+# Opt in to loading external (third-party) plugins. Disabled by default.
+export LINTRO_ENABLE_EXTERNAL_PLUGINS=1
 ```
 
-| Variable                 | Description                                                  | Default   |
-| ------------------------ | ------------------------------------------------------------ | --------- |
-| `LINTRO_LOG_DIR`         | Base directory for run logs and artifacts                    | `.lintro` |
-| `LINTRO_VERSION_TIMEOUT` | Timeout in seconds for tool version checks (must be `>= 1`)  | `30`      |
-| `LINTRO_DOCKER`          | Force Docker install-context detection when set to `1`       | -         |
-| `LINTRO_CONFIG`          | Shown in the `lintro` environment report; informational only | -         |
+| Variable                         | Description                                                  | Default   |
+| -------------------------------- | ------------------------------------------------------------ | --------- |
+| `LINTRO_LOG_DIR`                 | Base directory for run logs and artifacts                    | `.lintro` |
+| `LINTRO_VERSION_TIMEOUT`         | Timeout in seconds for tool version checks (must be `>= 1`)  | `30`      |
+| `LINTRO_DOCKER`                  | Force Docker install-context detection when set to `1`       | -         |
+| `LINTRO_CONFIG`                  | Shown in the `lintro` environment report; informational only | -         |
+| `LINTRO_ENABLE_EXTERNAL_PLUGINS` | Opt in to loading external (third-party) plugins (`1`/`0`)   | `0`       |
 
 > **Note:** There is no environment variable for tool timeouts, verbosity, exclude
 > patterns, output format, or auto-install. Use CLI flags (`--exclude`,
@@ -393,6 +397,56 @@ export LINTRO_DOCKER=1
 > Auto-install is resolved from the `--auto-install` flag, then
 > `execution.auto_install_deps`, then container auto-detection — not from an environment
 > variable.
+
+### External Plugins (Trust Model)
+
+Lintro can load third-party tool plugins published as Python packages that expose a
+`lintro.plugins` entry point. Because loading a plugin imports and executes its code,
+**external plugins are disabled by default** — a default installation never runs
+third-party plugin code at startup. This is a security boundary: any package installed
+in the same environment could otherwise execute arbitrary code every time Lintro runs.
+See [SECURITY.md](../SECURITY.md) for the full threat model.
+
+Enable external plugins only after you have reviewed and trust them, using either
+mechanism:
+
+```yaml
+# .lintro-config.yaml
+plugins:
+  # Opt in and restrict loading to an explicit allowlist (recommended).
+  # Names match the entry-point name or the distribution (package) name.
+  trusted:
+    - my-org-tool
+    - another-plugin
+  # Optional: enable loading of ALL discovered plugins (no allowlist).
+  # Prefer 'trusted' over this blanket toggle.
+  enabled: false
+```
+
+Equivalent `pyproject.toml`:
+
+```toml
+[tool.lintro.plugins]
+trusted = ["my-org-tool", "another-plugin"]
+enabled = false
+```
+
+Or, for a one-off/CI run, the environment variable:
+
+```bash
+export LINTRO_ENABLE_EXTERNAL_PLUGINS=1
+```
+
+Resolution rules:
+
+- Loading is enabled when `LINTRO_ENABLE_EXTERNAL_PLUGINS` is truthy **or** the
+  `plugins` config opts in (a `trusted` allowlist is itself an opt-in, as is
+  `enabled: true`).
+- When a `trusted` allowlist is present, only plugins whose entry-point name or
+  distribution name is listed are loaded; all others are skipped and logged, regardless
+  of how loading was enabled.
+- With no allowlist configured, enabling loads all discovered `lintro.plugins` entry
+  points — use this only in fully trusted environments.
 
 ### Pre-Execution Summary
 

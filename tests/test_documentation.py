@@ -215,6 +215,7 @@ _DOCUMENTED_LINTRO_ENV_VARS = {
     "LINTRO_VERSION_TIMEOUT",
     "LINTRO_DOCKER",
     "LINTRO_CONFIG",
+    "LINTRO_ENABLE_EXTERNAL_PLUGINS",
 }
 
 # Env vars that were historically documented but are NOT read by the runtime.
