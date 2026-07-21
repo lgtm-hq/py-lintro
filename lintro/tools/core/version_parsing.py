@@ -40,6 +40,7 @@ TOOLS_WITH_SIMPLE_VERSION_PATTERN: set[ToolName] = {
     ToolName.COMMITLINT,
     ToolName.DOTENV_LINTER,
     ToolName.GITLEAKS,
+    ToolName.GOLANGCI_LINT,
     ToolName.HADOLINT,
     ToolName.OSV_SCANNER,
     ToolName.OXFMT,

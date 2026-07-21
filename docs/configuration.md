@@ -231,6 +231,32 @@ In `--output-format json` the score is added **additively** under
 }
 ```
 
+### Output Presentation
+
+Purely cosmetic console output is controlled by the `output` section. These settings
+never affect machine-readable documents (JSON/SARIF) or on-disk artifacts.
+
+```yaml
+# .lintro-config.yaml
+output:
+  art: true # Show decorative ASCII art after a run (default: true)
+```
+
+The decorative ASCII art printed after `check`/`fmt` is only emitted to an interactive
+terminal. It is always suppressed when:
+
+- stdout is not a TTY (piped output, CI logs, redirected files), or
+- `output.art: false` is set in config, or
+- the `--no-art` flag is passed to `lintro check` / `lintro format`.
+
+The art is never written to `.lintro/run-*/report.md`, `console.log`, or any
+`--output-format` stream regardless of these settings.
+
+```bash
+lintro check --no-art   # suppress art for this run only
+lintro format --no-art
+```
+
 ### Command-Line Options
 
 #### Global Options
@@ -1803,6 +1829,55 @@ lintro format --tools clippy
 lintro check src/ --tools clippy
 ```
 
+#### golangci-lint Configuration
+
+golangci-lint is the de-facto Go meta-linter, running 100+ sub-linters in parallel.
+Lintro targets golangci-lint **v2** and automatically discovers Go modules by finding
+`go.mod` files; non-Go projects are skipped. It requires the Go toolchain to be
+installed. Linter selection and rule tuning are configured through the project's native
+config file.
+
+**Installation:**
+
+```bash
+brew install golangci-lint
+# or see https://golangci-lint.run/welcome/install/
+```
+
+**File:** `.golangci.yml` (also `.golangci.yaml`, `.golangci.toml`, `.golangci.json`)
+
+```yaml
+version: '2'
+linters:
+  enable:
+    - errcheck
+    - staticcheck
+    - ineffassign
+    - govet
+```
+
+**Available Options:**
+
+| Option    | Type    | Description                        |
+| --------- | ------- | ---------------------------------- |
+| `timeout` | integer | Execution timeout in seconds (120) |
+
+Linter enable/disable and per-linter settings live in the native `.golangci.*` config
+file rather than as lintro `--tool-options`.
+
+**Lintro usage:**
+
+```bash
+# Check Go code with golangci-lint
+lintro check --tools golangci_lint
+
+# Auto-fix issues where the underlying linters support it
+lintro format --tools golangci_lint
+
+# Increase the timeout for a large module
+lintro check --tools golangci_lint --tool-options golangci_lint:timeout=300
+```
+
 #### Cargo-deny Configuration
 
 Cargo-deny checks Rust dependencies for license compliance, security advisories, banned
@@ -2406,6 +2481,67 @@ ai:
 | `retry_base_delay`      | float  | `1.0`       | Initial retry delay in seconds (min 0.1)         |
 | `retry_max_delay`       | float  | `30.0`      | Maximum retry delay in seconds (min 1.0)         |
 | `retry_backoff_factor`  | float  | `2.0`       | Retry delay multiplier (min 1.0)                 |
+
+### Idiom Review Tool (`idiom-review`)
+
+The `idiom-review` tool uses AI to find issues that syntax-matching linters cannot: code
+that is syntactically correct but non-idiomatic or redundantly duplicated across files.
+Unlike the AI summary and `--fix` flows, it is a first-class `ToolDefinition` plugin
+that runs as part of the normal `lintro check` pipeline — distinct from the
+`lintro review` diff-review command.
+
+**Install:**
+
+```bash
+uv pip install 'lintro[ai]'
+export ANTHROPIC_API_KEY=sk-ant-...   # or OPENAI_API_KEY for OpenAI
+```
+
+The tool is **disabled by default** and is a no-op until explicitly opted in. When no AI
+provider is available (missing SDK, key, or credits), it degrades gracefully to a
+skipped result rather than failing the run. Findings are cached by content hash under
+`.lintro-cache/idiom`, so unchanged files cost nothing on repeat runs.
+
+**Options:**
+
+| Option           | Type   | Default    | Description                                            |
+| ---------------- | ------ | ---------- | ------------------------------------------------------ |
+| `enabled`        | bool   | `false`    | Opt-in gate — must be `true` to run                    |
+| `mode`           | string | `per-file` | `per-file` · `duplication` · `both`                    |
+| `min_confidence` | string | `medium`   | Drop findings below this level (`low`/`medium`/`high`) |
+| `max_files`      | int    | `25`       | Cap on files reviewed per run (cost bound)             |
+| `language`       | string | `python`   | Language to review; set explicitly for other languages |
+
+**Modes:**
+
+- **`per-file`** — flags idiomatic misses per file (e.g. verbose loops instead of
+  `any()`/`all()` comprehensions).
+- **`duplication`** — flags the same utility logic reimplemented across files, invisible
+  to per-file linters, with a suggested extraction point.
+- **`both`** — runs both modes in one pass.
+
+**Usage example:**
+
+```yaml
+# .lintro-config.yaml
+ai:
+  enabled: true
+  provider: anthropic
+  transport: api
+tools:
+  idiom-review:
+    options:
+      enabled: true # opt-in gate (default: false)
+      mode: per-file # per-file | duplication | both
+      min_confidence: medium
+      max_files: 25 # cap files reviewed per run (cost bound)
+```
+
+Or enable ad hoc from the CLI without modifying config:
+
+```bash
+lintro check --tools idiom-review --tool-options idiom-review:enabled=true
+```
 
 ## Advanced Configuration
 

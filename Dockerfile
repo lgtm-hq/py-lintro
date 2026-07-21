@@ -14,7 +14,7 @@
 # Built from docker/tools.Dockerfile and published by docker-tools-publish.yml
 # (cosign-signed, SBOM + provenance). Renovate manages the digest bump (#1360).
 # yamllint / hadolint: pin is immutable by digest; tag is informational.
-FROM ghcr.io/lgtm-hq/lintro-tools:latest@sha256:0024f54a75d4cf7f2ba6563c8f18e05bb825affc37885bfe5fa10cc789df12aa AS tools
+FROM ghcr.io/lgtm-hq/lintro-tools:latest@sha256:0a96f7bb70ff844c0fb5dec32ccb861c23a663b1efa34238ac9ec33bc566c5aa AS tools
 
 # -----------------------------------------------------------------------------
 # Stage: full — lintro application (default target)
@@ -56,42 +56,30 @@ RUN getent group tools >/dev/null || groupadd -r tools && \
     mkdir -p /code && \
     chown -R lintro:lintro /app /code
 
-RUN echo "Verifying tools..." && \
-    rustfmt --version && cargo clippy --version && cargo audit --version && \
-    cargo deny --version && semgrep --version && ruff --version && \
-    black --version && hadolint --version && actionlint --version && \
-    shellcheck --version && shfmt --version && taplo --version && \
-    dotenv-linter --version && \
-    gitleaks version && osv-scanner --version && prettier --version && \
-    commitlint --version && \
-    markdownlint-cli2 --version && tsc --version && astro --version && \
-    vue-tsc --version && oxlint --version && oxfmt --version && \
-    bandit --version && mypy --version && pydoclint --version && \
-    yamllint --version && sqlfluff --version && stylelint --version && \
-    vale --version && \
-    echo "All tools verified!"
+# Minimal cross-ecosystem smoke check. Comprehensive manifest-vs-image tool
+# verification now runs in CI against this image
+# (scripts/ci/verify-image-manifest-tools.sh, wired into docker-ci.yml, #1511),
+# so the exhaustive hand-maintained per-tool --version list that used to live
+# here is reduced to a representative smoke. That hand-maintained list was the
+# exact edit that got forgotten for pip-audit (#1505); the manifest-driven gate
+# self-updates as manifest entries change, no per-tool edit to forget. The full
+# tool set is still enforced at tools-image build time in docker/tools.Dockerfile.
+RUN echo "Smoke-testing tool stack..." && \
+    ruff --version && prettier --version && rustfmt --version && \
+    shellcheck --version && \
+    echo "Tool stack smoke check passed."
 
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
     CMD /app/.venv/bin/python -m lintro --version || exit 1
 
-RUN echo "Verifying tools as non-root user..." && \
+# Minimal non-root smoke: confirm the gosu privilege drop works and the tools
+# group can execute the permission-sensitive toolchains under /opt/bun and
+# /opt/cargo. The CI manifest gate runs as root, so it would not catch a
+# non-root permission regression on these dirs — this stays as a targeted smoke.
+RUN echo "Smoke-testing tools as non-root user..." && \
     gosu lintro prettier --version && \
-    gosu lintro commitlint --version && \
-    gosu lintro markdownlint-cli2 --version && \
-    gosu lintro tsc --version && \
-    gosu lintro astro --version && \
-    gosu lintro vue-tsc --version && \
-    gosu lintro oxlint --version && \
-    gosu lintro oxfmt --version && \
-    gosu lintro stylelint --version && \
-    gosu lintro rustfmt --version && \
     gosu lintro cargo clippy --version && \
-    gosu lintro cargo audit --version && \
-    gosu lintro cargo deny --version && \
-    gosu lintro osv-scanner --version && \
-    gosu lintro semgrep --version && \
-    gosu lintro dotenv-linter --version && \
-    echo "All tools verified for non-root user!"
+    echo "Non-root tool smoke check passed."
 
 # No USER directive: the container starts as root so entrypoint.sh can detect
 # the UID/GID that owns the mounted /code volume and drop privileges to it via

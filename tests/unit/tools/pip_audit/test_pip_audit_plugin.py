@@ -204,6 +204,34 @@ def test_build_targets_groups_requirements_and_projects(tmp_path: Path) -> None:
     assert_that(_target_source(project_targets[0])).is_equal_to(str(tmp_path))
 
 
+def test_build_targets_skips_package_internal_setup_py(tmp_path: Path) -> None:
+    """A ``setup.py`` module inside a package is not treated as a manifest.
+
+    A source module coincidentally named ``setup.py`` (its directory has an
+    ``__init__.py``) must not become a pip-audit project target — pip-audit
+    would reject its directory with "couldn't find a supported project file".
+    """
+    pkg = tmp_path / "commands"
+    pkg.mkdir()
+    (pkg / "__init__.py").write_text("")
+    (pkg / "setup.py").write_text('"""lintro setup command."""\n')
+
+    targets = _build_targets([str(pkg / "setup.py")])
+
+    assert_that(targets).is_empty()
+
+
+def test_build_targets_keeps_root_setup_py(tmp_path: Path) -> None:
+    """A packaging ``setup.py`` at a non-package project root is still audited."""
+    setup = tmp_path / "setup.py"
+    setup.write_text("from setuptools import setup\n")
+
+    targets = _build_targets([str(setup)])
+
+    assert_that(targets).is_length(1)
+    assert_that(_target_source(targets[0])).is_equal_to(str(tmp_path))
+
+
 def test_check_no_vulnerabilities(
     pip_audit_plugin: PipAuditPlugin,
     tmp_path: Path,
@@ -542,3 +570,54 @@ def test_check_timeout_preserves_earlier_findings(
     assert_that(result.success).is_false()
     assert_that(result.issues_count).is_equal_to(1)
     assert_that(result.output).contains("timed out")
+
+
+def test_check_timeout_continues_to_remaining_targets(
+    pip_audit_plugin: PipAuditPlugin,
+    tmp_path: Path,
+) -> None:
+    """An early target timing out must not skip auditing later targets.
+
+    Args:
+        pip_audit_plugin: The plugin instance.
+        tmp_path: Temporary directory path.
+    """
+    first = tmp_path / "a"
+    first.mkdir()
+    (first / "requirements.txt").write_text("packaging==25.0\n")
+    second = tmp_path / "b"
+    second.mkdir()
+    (second / "requirements.txt").write_text("jinja2==2.4.1\n")
+
+    calls: list[SubprocessResult | TimeoutExpired] = [
+        TimeoutExpired(cmd=["pip-audit"], timeout=120),
+        _proc(success=False, stdout=_VULN_OUTPUT),
+    ]
+
+    def _side_effect(cmd: list[str], **kwargs: object) -> SubprocessResult:
+        result = calls.pop(0)
+        if isinstance(result, TimeoutExpired):
+            raise result
+        return result
+
+    with patch(
+        "lintro.plugins.execution_preparation.verify_tool_version",
+        return_value=None,
+    ):
+        with patch.object(
+            pip_audit_plugin,
+            "_run_subprocess_result",
+            side_effect=_side_effect,
+        ):
+            result = pip_audit_plugin.check(
+                [
+                    str(first / "requirements.txt"),
+                    str(second / "requirements.txt"),
+                ],
+                {},
+            )
+
+    assert_that(result.success).is_false()
+    assert_that(result.issues_count).is_equal_to(1)
+    assert_that(result.output).contains("timed out")
+    assert_that(result.output).contains(str(first / "requirements.txt"))

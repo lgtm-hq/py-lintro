@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "lintro"
-version = "0.81.0"
+version = "0.89.1"
 description = "A unified CLI tool for code formatting, linting, and quality assurance"
 keywords = [
   "linting",
@@ -114,6 +114,7 @@ dev = [
   "types-tabulate>=0.9.0.20241207",
   "types-defusedxml>=0.7.0.20250822",
   "tomlkit>=0.13.3",
+  "click-man>=0.5.1",
 ]
 build = ["nuitka>=2.8.9", "ordered-set>=4.1.0", "zstandard>=0.25.0"]
 
@@ -160,6 +161,7 @@ packages = [
   "lintro.parsers.commitlint",
   "lintro.parsers.dotenv_linter",
   "lintro.parsers.gitleaks",
+  "lintro.parsers.golangci_lint",
   "lintro.parsers.hadolint",
   "lintro.parsers.idiom_review",
   "lintro.parsers.markdownlint",
@@ -323,6 +325,10 @@ exclude = [
 
 [[tool.mypy.overrides]]
 module = ["assertpy"]
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = ["click_man", "click_man.*"]
 ignore_missing_imports = true
 
 [[tool.mypy.overrides]]

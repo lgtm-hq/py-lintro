@@ -168,7 +168,7 @@ should_install() {
 # Kept in sync with the should_install blocks and tools_to_verify array.
 SUPPORTED_TOOLS=(
 	"actionlint" "astro" "bandit" "black" "cargo-audit" "cargo-deny"
-	"clippy" "commitlint" "dotenv-linter" "gitleaks" "hadolint" "markdownlint" "markdownlint-cli2" "mypy" "osv-scanner"
+	"clippy" "commitlint" "dotenv-linter" "gitleaks" "golangci-lint" "hadolint" "markdownlint" "markdownlint-cli2" "mypy" "osv-scanner"
 	"oxfmt" "oxlint" "pip-audit" "prettier" "pydoclint" "ruff" "rustfmt" "semgrep"
 	"shellcheck" "shfmt" "sqlfluff" "stylelint" "svelte-check" "taplo"
 	"trufflehog" "tsc"
@@ -590,6 +590,101 @@ main() {
 			rm -rf "$tmpdir"
 		fi
 	fi # gitleaks
+
+	# Install golangci-lint (Go meta-linter).
+	# Note: golangci-lint requires the Go toolchain to be present to analyze a
+	# module; this block installs only the golangci-lint binary.
+	if should_install "golangci-lint"; then
+		echo -e "${BLUE}Installing golangci-lint...${NC}"
+		GOLANGCI_LINT_VERSION=$(get_tool_version "golangci_lint") || exit 1
+
+		# Download, verify, and install the pinned golangci-lint binary.
+		install_golangci_lint_binary() {
+			local tmpdir os arch arch_name asset base_url tgz_url checksum_url
+			local expected actual
+			tmpdir=$(mktemp -d)
+			os=$(uname -s | tr '[:upper:]' '[:lower:]')
+			arch=$(uname -m)
+			case "$arch" in
+			x86_64 | amd64) arch_name="amd64" ;;
+			aarch64 | arm64) arch_name="arm64" ;;
+			*) echo -e "${RED}✗ Unsupported architecture: $arch${NC}" && exit 1 ;;
+			esac
+			asset="golangci-lint-${GOLANGCI_LINT_VERSION}-${os}-${arch_name}"
+			base_url="https://github.com/golangci/golangci-lint/releases/download/v${GOLANGCI_LINT_VERSION}"
+			tgz_url="${base_url}/${asset}.tar.gz"
+			checksum_url="${base_url}/golangci-lint-${GOLANGCI_LINT_VERSION}-checksums.txt"
+			if ! download_with_retries "$tgz_url" "$tmpdir/golangci-lint.tar.gz" 3; then
+				echo -e "${RED}✗ Failed to download golangci-lint${NC}"
+				rm -rf "$tmpdir"
+				return 1
+			fi
+			# Require checksum verification before installing
+			if ! download_with_retries "$checksum_url" "$tmpdir/checksums.txt" 3; then
+				echo -e "${RED}✗ Failed to download checksum file for golangci-lint${NC}"
+				rm -rf "$tmpdir"
+				exit 1
+			fi
+			echo -e "${BLUE}Verifying checksum for golangci-lint...${NC}"
+			# Exact filename match — avoid also matching *.tar.gz.sbom.json.
+			expected=$(awk -v f="${asset}.tar.gz" '$2 == f { print $1; exit }' "$tmpdir/checksums.txt")
+			if [ -z "$expected" ]; then
+				echo -e "${RED}✗ Checksum entry not found for ${asset}.tar.gz${NC}"
+				rm -rf "$tmpdir"
+				exit 1
+			fi
+			if command -v sha256sum >/dev/null 2>&1; then
+				actual=$(sha256sum "$tmpdir/golangci-lint.tar.gz" | awk '{print $1}')
+			elif command -v shasum >/dev/null 2>&1; then
+				actual=$(shasum -a 256 "$tmpdir/golangci-lint.tar.gz" | awk '{print $1}')
+			else
+				echo -e "${RED}✗ Unable to compute checksum: no hash tool found (sha256sum or shasum required)${NC}"
+				rm -rf "$tmpdir"
+				exit 1
+			fi
+			if [ "$expected" != "$actual" ]; then
+				echo -e "${RED}✗ Checksum mismatch for golangci-lint (expected: $expected, got: $actual)${NC}"
+				rm -rf "$tmpdir"
+				exit 1
+			fi
+			echo -e "${GREEN}✓ Checksum verified${NC}"
+			tar -xzf "$tmpdir/golangci-lint.tar.gz" -C "$tmpdir"
+			cp "$tmpdir/${asset}/golangci-lint" "$BIN_DIR/golangci-lint"
+			chmod +x "$BIN_DIR/golangci-lint"
+			rm -rf "$tmpdir"
+			return 0
+		}
+
+		if [ $DRY_RUN -eq 1 ]; then
+			log_info "[DRY-RUN] Would install golangci-lint v${GOLANGCI_LINT_VERSION}"
+		elif command -v golangci-lint &>/dev/null; then
+			# Honor the pinned version: a stale binary (notably a v1 binary that
+			# cannot parse the v2 config this plugin targets) must be upgraded
+			# rather than silently accepted.
+			installed_version=$(golangci-lint version 2>/dev/null |
+				grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)
+			if [ -n "$installed_version" ] && version_ge "$installed_version" "$GOLANGCI_LINT_VERSION"; then
+				echo -e "${GREEN}✓ golangci-lint v${installed_version} already installed (>= v${GOLANGCI_LINT_VERSION})${NC}"
+			else
+				if [ -n "$installed_version" ]; then
+					echo -e "${YELLOW}⚠ golangci-lint v${installed_version} is older than required v${GOLANGCI_LINT_VERSION}, upgrading...${NC}"
+				else
+					echo -e "${YELLOW}⚠ Could not determine golangci-lint version, installing v${GOLANGCI_LINT_VERSION}...${NC}"
+				fi
+				if install_golangci_lint_binary; then
+					echo -e "${GREEN}✓ golangci-lint installed successfully${NC}"
+				else
+					exit 1
+				fi
+			fi
+		else
+			if install_golangci_lint_binary; then
+				echo -e "${GREEN}✓ golangci-lint installed successfully${NC}"
+			else
+				exit 1
+			fi
+		fi
+	fi # golangci-lint
 
 	# Install osv-scanner (multi-ecosystem vulnerability scanner)
 	if should_install "osv-scanner"; then
@@ -1687,6 +1782,7 @@ main() {
 		["clippy"]="Rust linting"
 		["dotenv-linter"]=".env file linting and fixing"
 		["gitleaks"]="Secret detection"
+		["golangci-lint"]="Go meta-linter (requires the Go toolchain)"
 		["hadolint"]="Docker linting"
 		["markdownlint"]="Markdown linting"
 		["mypy"]="Python type checking"
@@ -1721,7 +1817,7 @@ main() {
 	# Verify installations
 	echo -e "${YELLOW}Verifying installations...${NC}"
 
-	tools_to_verify=("actionlint" "astro" "bandit" "black" "cargo-audit" "cargo-deny" "clippy" "commitlint" "dotenv-linter" "gitleaks" "hadolint" "markdownlint-cli2" "mypy" "osv-scanner" "oxfmt" "oxlint" "pip-audit" "prettier" "pydoclint" "ruff" "rustfmt" "semgrep" "shellcheck" "shfmt" "sqlfluff" "stylelint" "svelte-check" "taplo" "trufflehog" "tsc" "vale" "vue-tsc" "yamllint")
+	tools_to_verify=("actionlint" "astro" "bandit" "black" "cargo-audit" "cargo-deny" "clippy" "commitlint" "dotenv-linter" "gitleaks" "golangci-lint" "hadolint" "markdownlint-cli2" "mypy" "osv-scanner" "oxfmt" "oxlint" "pip-audit" "prettier" "pydoclint" "ruff" "rustfmt" "semgrep" "shellcheck" "shfmt" "sqlfluff" "stylelint" "svelte-check" "taplo" "trufflehog" "tsc" "vale" "vue-tsc" "yamllint")
 
 	# Filter verification list when --tools is set.
 	# Map aliases so e.g. --tools markdownlint verifies markdownlint-cli2.

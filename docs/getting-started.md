@@ -96,6 +96,8 @@ Some tools require separate installation. Their minimum versions are also manage
   releases)
 - `trufflehog` - Secret detection with 800+ credential detectors, verification
   disabled by default (`brew install trufflehog` or GitHub releases)
+- `golangci-lint` - Go meta-linter running 100+ linters (`brew install golangci-lint` or
+  <https://golangci-lint.run/welcome/install/>; requires the Go toolchain)
 - `shellcheck` - Shell script analyzer (`brew install shellcheck` or GitHub releases)
 - `shfmt` - Shell script formatter (`brew install shfmt` or GitHub releases)
 - `dotenv-linter` - `.env` file linter and fixer (`brew install dotenv-linter`,

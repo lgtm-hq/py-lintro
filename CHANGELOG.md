@@ -21,6 +21,178 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.89.1] - 2026-07-21
+
+### Fixed
+
+- **security**: time-box suppression for astro GHSA-4g3v-8h47-v7g6 (#1585) (f0dae4a)
+
+## [0.89.0] - 2026-07-20
+
+### Added
+
+- **tools**: add golangci-lint Go meta-linter plugin (#1148) (700b595)
+
+### Fixed
+
+- **tools**: complete golangci-lint registration to unbreak main (#1581) (b3bd671)
+
+## [0.88.1] - 2026-07-20
+
+### Fixed
+
+- **ci**: tolerate PR-introduced tools in the docker-ci manifest gate (#1566) (b9fa926)
+
+## [0.88.0] - 2026-07-20
+
+### Added
+
+- **docker**: bundle pinned Go toolchain in lintro-tools image (#1553) (87a7c6f)
+
+## [0.87.1] - 2026-07-20
+
+### Changed
+
+- **deps**: update actions/setup-python action to v7.0.0 (major) (#1547) (511a54d)
+
+### Fixed
+
+- **markdownlint**: forward nested defaults.markdownlint rule options (#1554) (c2df0c2)
+
+## [0.87.0] - 2026-07-20
+
+### Added
+
+- **oxlint**: add type-aware linting support with doctor checks (#1526) (1f6a979)
+- **pip_audit**: close parity gaps with osv_scanner (#1525) (1171941)
+- **ci**: run verify-manifest-tools inside built and pinned images to catch
+  manifest-vs-image drift (#1528) (1ee3b3b)
+
+### Changed
+
+- **tools**: add parametrized tool-completeness gate over the plugin registry (#1524)
+  (06f203c)
+
+## [0.86.0] - 2026-07-20
+
+### Added
+
+- **ci**: add repo-root .stylelintrc.json and fix hex violations (#1519) (4aa2234)
+
+## [0.85.2] - 2026-07-20
+
+### Fixed
+
+- **docker**: deliver and verify pip-audit in runtime image (#1523) (3714ed6)
+
+## [0.85.1] - 2026-07-20
+
+### Fixed
+
+- **ci**: allow raw.githubusercontent.com in generate-man-page egress allowlist (#1557)
+  (76c4b1a)
+
+## [0.85.0] - 2026-07-20
+
+### Added
+
+- **vale**: add repo-root .vale.ini for prose linting (#1522) (39e953c)
+
+### Changed
+
+- add adding-a-new-tool guide, issue template, and PR checklist (#1530) (08a0512)
+- add idiom-review documentation across README, configuration, and tool analysis (#1527)
+  (5a7ce54)
+
+## [0.84.1] - 2026-07-20
+
+### Changed
+
+- **core**: migrate os.path usage to pathlib in core modules (#1537) (ac761d9)
+
+### Fixed
+
+- **manifest**: drop formatter tag from dotenv-linter entry (#1521) (858ddac)
+
+## [0.84.0] - 2026-07-20
+
+### Added
+
+- **cli**: add shell completions and man page generation (#1541) (a5ba92a)
+
+## [0.83.0] - 2026-07-20
+
+### Added
+
+- **ci**: fail dogfooding when an enabled tool silently skips (#1536) (89a9e5b)
+
+### Changed
+
+- **tests**: normalize new-tool test and fixture placements (#1538) (2dd1d42)
+
+## [0.82.3] - 2026-07-20
+
+### Changed
+
+- **deps**: update dependency svelte to 5.56.6 (patch) (#1544) (437ddf5)
+- **deps**: update renovatebot/github-action action to v46.1.20 (patch) (#1545)
+  (61a8087)
+
+### Fixed
+
+- **output**: gate ASCII art on TTY and add --no-art (#1539) (5ed0ad3)
+
+## [0.82.2] - 2026-07-20
+
+### Changed
+
+- **deps**: update pypa/gh-action-pypi-publish action to v1.14.1 (patch) (#1542)
+  (888e926)
+
+### Fixed
+
+- **output**: stop routing bandit no-files message through JSON parser (#1540) (a4640e5)
+
+## [0.82.1] - 2026-07-19
+
+### Fixed
+
+- **release**: stamp SECURITY.md support table on minor bumps (#1467) (bf46365)
+
+## [0.82.0] - 2026-07-18
+
+### Added
+
+- **commitlint**: add root commitlint.config.js extending config-conventional (#1518)
+  (69de320)
+
+### Changed
+
+- **idiom-review**: remove dead DEFAULT_ENABLED ClassVar (#1520) (fd4ad29)
+
+## [0.81.3] - 2026-07-18
+
+### Fixed
+
+- **pip-audit**: continue auditing remaining targets after a per-target timeout (#1507)
+  (d0211ce)
+
+## [0.81.2] - 2026-07-18
+
+### Fixed
+
+- **deps**: exclude test_samples fixtures from Renovate tracking (#1504) (a8e051e)
+
+## [0.81.1] - 2026-07-18
+
+### Changed
+
+- add AGENTS.md with Cursor Cloud dev environment instructions (#1503) (ff00551)
+
+### Fixed
+
+- **ci**: retry setup-uv in binary builds and disable matrix fail-fast (#1514) (2e24483)
+
 ## [0.81.0] - 2026-07-18
 
 ### Added

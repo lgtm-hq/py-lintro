@@ -8,6 +8,11 @@
   ],
   "packageRules": [
     {
+      "description": "test_samples are fixed tool-test inputs; never update them",
+      "matchFileNames": ["test_samples/**"],
+      "enabled": false
+    },
+    {
       "description": "Hold prettier 3.9.5+ until Docker integration prettier fixtures are updated",
       "matchPackageNames": ["prettier"],
       "allowedVersions": "<=3.9.4"
@@ -195,6 +200,18 @@
       "packageNameTemplate": "astral-sh/uv"
     },
     {
+      "description": "Bundled Go toolchain in the lintro-tools image (checksum fetched at build time, so only the version pins here)",
+      "customType": "regex",
+      "managerFilePatterns": [
+        "docker/tools.Dockerfile"
+      ],
+      "matchStrings": [
+        "ARG GO_VERSION=(?<currentValue>[0-9]+\\.[0-9]+\\.[0-9]+)"
+      ],
+      "datasourceTemplate": "golang-version",
+      "packageNameTemplate": "golang"
+    },
+    {
       "customType": "regex",
       "managerFilePatterns": [
         "/^\\.github/workflows/sbom-on-main\\.yml$/"
@@ -243,6 +260,19 @@
       ],
       "datasourceTemplate": "github-releases",
       "packageNameTemplate": "gitleaks/gitleaks",
+      "extractVersionTemplate": "^v(?<version>.*)$"
+    },
+    {
+      "description": "Update golangci-lint in _tool_versions.py (manifest follows via generator)",
+      "customType": "regex",
+      "managerFilePatterns": [
+        "lintro/_tool_versions\\.py"
+      ],
+      "matchStrings": [
+        "ToolName\\.GOLANGCI_LINT:\\s*\"(?<currentValue>[0-9]+\\.[0-9]+\\.[0-9]+)\""
+      ],
+      "datasourceTemplate": "github-releases",
+      "packageNameTemplate": "golangci/golangci-lint",
       "extractVersionTemplate": "^v(?<version>.*)$"
     },
     {
