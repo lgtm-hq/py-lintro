@@ -113,9 +113,9 @@ def _build_dev_prod_map(
 
     Walks the installed dependency graph from root ``dependencies`` and
     ``devDependencies``. Transitive ``dependencies``, ``optionalDependencies``,
-    and ``peerDependencies`` inherit the classification of their parent.
-    Production classification wins when a package is reachable via both prod
-    and dev paths.
+    ``peerDependencies``, and ``bundled``/``bundleDependencies`` inherit the
+    classification of their parent. Production classification wins when a
+    package is reachable via both prod and dev paths.
 
     Args:
         root_data: Parsed root ``package.json`` contents.
@@ -153,16 +153,26 @@ def _build_dev_prod_map(
 
         parent_is_dev = classification[manifest]
         # Follow every edge that installs a nested package, not just runtime
-        # ``dependencies``. An ``optionalDependencies`` or ``peerDependencies``
-        # child of a dev-only tool is installed under node_modules and must
-        # inherit its parent's dev classification; otherwise it falls back to
-        # production and ``ignore_dev_dependencies=True`` would still evaluate
-        # (and can fail) a dev-only package against the deny policy.
-        child_dep_names = {
-            *data.get("dependencies", {}),
-            *data.get("optionalDependencies", {}),
-            *data.get("peerDependencies", {}),
-        }
+        # ``dependencies``. An ``optionalDependencies``, ``peerDependencies``,
+        # or ``bundled``/``bundleDependencies`` child of a dev-only tool is
+        # installed under node_modules and must inherit its parent's dev
+        # classification; otherwise it falls back to production and
+        # ``ignore_dev_dependencies=True`` would still evaluate (and can fail)
+        # a dev-only package against the deny policy.
+        child_dep_names: set[str] = set()
+        for mapping_key in (
+            "dependencies",
+            "optionalDependencies",
+            "peerDependencies",
+        ):
+            mapping = data.get(mapping_key)
+            if isinstance(mapping, dict):
+                child_dep_names.update(str(name) for name in mapping)
+        # ``bundledDependencies``/``bundleDependencies`` are a list of names.
+        for bundled_key in ("bundledDependencies", "bundleDependencies"):
+            bundled = data.get(bundled_key)
+            if isinstance(bundled, list):
+                child_dep_names.update(str(name) for name in bundled)
         for dep_name in child_dep_names:
             child_manifest = _resolve_dependency_manifest(
                 parent_manifest=manifest,

@@ -306,10 +306,11 @@ def test_npm_adapter_classifies_optional_and_peer_children_of_dev(
                 "license": "MIT",
                 "optionalDependencies": {"opt-child": "1.0.0"},
                 "peerDependencies": {"peer-child": "1.0.0"},
+                "bundledDependencies": ["bundled-child"],
             },
         ),
     )
-    for child in ("opt-child", "peer-child"):
+    for child in ("opt-child", "peer-child", "bundled-child"):
         child_dir = tmp_path / "node_modules" / child
         child_dir.mkdir(parents=True)
         child_dir.joinpath("package.json").write_text(
@@ -325,3 +326,4 @@ def test_npm_adapter_classifies_optional_and_peer_children_of_dev(
     assert_that(by_name["toolkit"].is_dev).is_true()
     assert_that(by_name["opt-child"].is_dev).is_true()
     assert_that(by_name["peer-child"].is_dev).is_true()
+    assert_that(by_name["bundled-child"].is_dev).is_true()
