@@ -558,7 +558,9 @@ class StandaloneBuilder(CommandBuilder):
     # Only tools whose binary name differs need an entry here.
     TOOL_BINARY_MAP: ClassVar[dict[str, str]] = {
         "osv_scanner": "osv-scanner",
+        "golangci_lint": "golangci-lint",
         "dotenv_linter": "dotenv-linter",
+        "pip_audit": "pip-audit",
     }
 
     @property
@@ -576,8 +578,10 @@ class StandaloneBuilder(CommandBuilder):
                     ToolName.ACTIONLINT,
                     ToolName.DOTENV_LINTER,
                     ToolName.GITLEAKS,
+                    ToolName.GOLANGCI_LINT,
                     ToolName.HADOLINT,
                     ToolName.OSV_SCANNER,
+                    ToolName.PIP_AUDIT,
                     ToolName.SHELLCHECK,
                     ToolName.SHFMT,
                     ToolName.SEMGREP,

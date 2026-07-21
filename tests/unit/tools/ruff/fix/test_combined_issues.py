@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 from assertpy import assert_that
 
@@ -23,19 +23,14 @@ def test_execute_ruff_fix_combined_lint_and_format_issues(
     """
     mock_ruff_tool.options["format"] = True
 
-    with patch(
-        "lintro.tools.implementations.ruff.fix.walk_files_with_excludes",
-    ) as mock_walk:
-        mock_walk.return_value = ["test.py"]
+    mock_ruff_tool._run_subprocess.side_effect = [
+        (False, sample_ruff_json_output),  # Initial lint: 2 issues
+        (False, sample_ruff_format_check_output),  # Format check: 2 files
+        (True, "[]"),  # Lint fix: all fixed
+        (True, ""),  # Format fix: success
+    ]
 
-        mock_ruff_tool._run_subprocess.side_effect = [
-            (False, sample_ruff_json_output),  # Initial lint: 2 issues
-            (False, sample_ruff_format_check_output),  # Format check: 2 files
-            (True, "[]"),  # Lint fix: all fixed
-            (True, ""),  # Format fix: success
-        ]
-
-        result = execute_ruff_fix(mock_ruff_tool, ["test.py"])
+    result = execute_ruff_fix(mock_ruff_tool, ["test.py"])
 
     assert_that(result.success).is_true()
     # 2 lint + 2 format = 4 total initial
@@ -67,20 +62,15 @@ def test_execute_ruff_fix_partial_fix_with_format(
         }
     ]"""
 
-    with patch(
-        "lintro.tools.implementations.ruff.fix.walk_files_with_excludes",
-    ) as mock_walk:
-        mock_walk.return_value = ["test.py"]
+    mock_ruff_tool._run_subprocess.side_effect = [
+        (False, lint_with_unfixable),  # Initial lint: 1 unfixable
+        (False, sample_ruff_format_check_output),  # Format check: 2 files
+        (False, lint_with_unfixable),  # Lint fix: still 1 remaining
+        (False, lint_with_unfixable),  # Unsafe check
+        (True, ""),  # Format fix
+    ]
 
-        mock_ruff_tool._run_subprocess.side_effect = [
-            (False, lint_with_unfixable),  # Initial lint: 1 unfixable
-            (False, sample_ruff_format_check_output),  # Format check: 2 files
-            (False, lint_with_unfixable),  # Lint fix: still 1 remaining
-            (False, lint_with_unfixable),  # Unsafe check
-            (True, ""),  # Format fix
-        ]
-
-        result = execute_ruff_fix(mock_ruff_tool, ["test.py"])
+    result = execute_ruff_fix(mock_ruff_tool, ["test.py"])
 
     assert_that(result.success).is_false()
     # 1 lint + 2 format initial

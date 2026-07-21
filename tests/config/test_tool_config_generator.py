@@ -1,5 +1,6 @@
 """Tests for tool_config_generator module."""
 
+import json
 from pathlib import Path
 
 import pytest
@@ -9,6 +10,7 @@ from lintro.config.enforce_config import EnforceConfig
 from lintro.config.lintro_config import LintroConfig
 from lintro.config.tool_config_generator import (
     NATIVE_KEY_MAPPINGS,
+    TOOL_CONFIG_WRAPPER_KEYS,
     _convert_python_version_for_mypy,
     _transform_keys_for_native_config,
     _write_defaults_config,
@@ -156,6 +158,79 @@ def test_generic_tool_config_uses_json_suffix() -> None:
         assert_that(config_path.exists()).is_true()
     finally:
         config_path.unlink(missing_ok=True)
+
+
+def test_markdownlint_has_config_wrapper_key() -> None:
+    """Markdownlint must be registered to wrap defaults under 'config'."""
+    assert_that(TOOL_CONFIG_WRAPPER_KEYS).contains_key("markdownlint")
+    assert_that(TOOL_CONFIG_WRAPPER_KEYS["markdownlint"]).is_equal_to("config")
+
+
+def test_markdownlint_defaults_wrapped_under_config() -> None:
+    """Markdownlint rule options must be nested under a top-level 'config' key.
+
+    Regression for #1549: markdownlint-cli2 silently ignores rule options that
+    are not wrapped under 'config', so nested defaults (e.g. MD024.siblings_only)
+    were never applied.
+    """
+    config_path = _write_defaults_config(
+        defaults={"MD024": {"siblings_only": True}},
+        tool_name="markdownlint",
+        config_format=ConfigFormat.JSON,
+    )
+
+    try:
+        parsed = json.loads(config_path.read_text(encoding="utf-8"))
+        assert_that(parsed).contains_key("config")
+        assert_that(parsed).does_not_contain_key("MD024")
+        assert_that(parsed["config"]).contains_key("MD024")
+        assert_that(parsed["config"]["MD024"]).is_equal_to({"siblings_only": True})
+    finally:
+        config_path.unlink(missing_ok=True)
+
+
+def test_non_wrapped_tool_defaults_stay_top_level() -> None:
+    """Tools without a wrapper key keep their defaults at the top level."""
+    config_path = _write_defaults_config(
+        defaults={"printWidth": 100},
+        tool_name="prettier",
+        config_format=ConfigFormat.JSON,
+    )
+
+    try:
+        parsed = json.loads(config_path.read_text(encoding="utf-8"))
+        assert_that(parsed).contains_key("printWidth")
+        assert_that(parsed).does_not_contain_key("config")
+    finally:
+        config_path.unlink(missing_ok=True)
+
+
+def test_generate_defaults_config_forwards_nested_markdownlint_rules(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """End-to-end: nested markdownlint defaults reach the generated config file.
+
+    Regression for #1549 covering the full ``generate_defaults_config`` path,
+    including native-config discovery (none present in ``tmp_path``).
+    """
+    monkeypatch.chdir(tmp_path)
+    lintro_config = LintroConfig(
+        defaults={"markdownlint": {"MD024": {"siblings_only": True}}},
+    )
+
+    config_path = generate_defaults_config(
+        tool_name="markdownlint",
+        lintro_config=lintro_config,
+    )
+
+    assert_that(config_path).is_not_none()
+    if config_path is not None:
+        try:
+            parsed = json.loads(config_path.read_text(encoding="utf-8"))
+            assert_that(parsed["config"]["MD024"]["siblings_only"]).is_true()
+        finally:
+            config_path.unlink(missing_ok=True)
 
 
 # =============================================================================
@@ -358,7 +433,7 @@ def test_prettier_builtin_defaults_applied_when_no_user_defaults(
     config_path = generate_defaults_config("prettier", lintro_config)
 
     assert_that(config_path).is_not_none()
-    assert config_path is not None
+    assert config_path is not None  # narrow type for mypy
     import json
 
     content = json.loads(config_path.read_text())
@@ -385,7 +460,7 @@ def test_prettier_user_defaults_override_builtin_defaults(
     config_path = generate_defaults_config("prettier", lintro_config)
 
     assert_that(config_path).is_not_none()
-    assert config_path is not None
+    assert config_path is not None  # narrow type for mypy
     import json
 
     content = json.loads(config_path.read_text())
@@ -411,7 +486,7 @@ def test_prettier_user_defaults_merged_with_builtin_defaults(
     config_path = generate_defaults_config("prettier", lintro_config)
 
     assert_that(config_path).is_not_none()
-    assert config_path is not None
+    assert config_path is not None  # narrow type for mypy
     import json
 
     content = json.loads(config_path.read_text())

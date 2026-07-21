@@ -145,6 +145,14 @@ def get_install_hints() -> dict[str, str]:
             "Install via: pip install black>={version} or uv add black>={version}"
         ),
         "mypy": ("Install via: pip install mypy>={version} or uv add mypy>={version}"),
+        "pip_audit": (
+            "Install via: pip install 'pip-audit>={version}' "
+            "or uv add 'pip-audit>={version}'"
+        ),
+        "pip-audit": (
+            "Install via: pip install 'pip-audit>={version}' "
+            "or uv add 'pip-audit>={version}'"
+        ),
         "pydoclint": (
             "Install via: pip install pydoclint>={version} "
             "or uv add pydoclint>={version}"
@@ -202,6 +210,11 @@ def get_install_hints() -> dict[str, str]:
         "gitleaks": (
             "Install via: https://github.com/gitleaks/gitleaks/releases (v{version}+)"
         ),
+        "golangci_lint": (
+            "Install via: brew install golangci-lint or "
+            "https://golangci-lint.run/welcome/install/ (v{version}+); "
+            "requires the Go toolchain"
+        ),
         "osv_scanner": (
             "Install via: https://github.com/google/osv-scanner/releases (v{version}+)"
         ),
@@ -215,6 +228,11 @@ def get_install_hints() -> dict[str, str]:
         "taplo": (
             "Install via: cargo install taplo-cli "
             "or download from https://github.com/tamasfe/taplo/releases (v{version}+)"
+        ),
+        "trufflehog": (
+            "Install via: brew install trufflehog "
+            "or download from "
+            "https://github.com/trufflesecurity/trufflehog/releases (v{version}+)"
         ),
         "vale": (
             "Install via: brew install vale "

@@ -72,6 +72,14 @@ TOOL_CONFIG_FORMATS: dict[str, ConfigFormat] = {
     "prettier": ConfigFormat.JSON,
 }
 
+# Tools whose native config format nests all settings under a top-level key.
+# markdownlint-cli2 config files (e.g. ``.markdownlint-cli2.jsonc``) require rule
+# options to live under a ``"config"`` object; options written at the top level are
+# silently ignored. Mapping a tool here wraps its generated defaults accordingly.
+TOOL_CONFIG_WRAPPER_KEYS: dict[str, str] = {
+    "markdownlint": "config",
+}
+
 # Key mappings for tools that use different naming conventions in their native configs.
 # Maps lintro config keys (snake_case) to native tool keys (often camelCase).
 NATIVE_KEY_MAPPINGS: dict[str, dict[str, str]] = {
@@ -391,6 +399,15 @@ def _write_defaults_config(
 
     # Transform keys to native format before writing
     native_defaults = _transform_keys_for_native_config(defaults, tool_lower)
+
+    # Some tools nest all settings under a top-level key in their native config
+    # format (e.g. markdownlint-cli2 requires rule options under "config").
+    wrapper_key = TOOL_CONFIG_WRAPPER_KEYS.get(tool_lower)
+    if wrapper_key is not None:
+        native_defaults = {wrapper_key: native_defaults}
+        logger.debug(
+            f"Wrapped {tool_name} defaults under top-level '{wrapper_key}' key",
+        )
 
     if config_format == ConfigFormat.YAML:
         if yaml is None:

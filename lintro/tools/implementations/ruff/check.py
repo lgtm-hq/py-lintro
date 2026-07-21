@@ -16,17 +16,19 @@ from lintro.parsers.ruff.ruff_parser import (
 )
 from lintro.tools.core.timeout_utils import (
     create_timeout_result,
-    get_timeout_value,
     run_subprocess_with_timeout,
 )
-from lintro.utils.path_filtering import walk_files_with_excludes
+
+# Re-exported so callers keep a single source of truth for the default Ruff
+# timeout (defined in lintro.tools.definitions.ruff). Importing here preserves
+# the historical ``from ...ruff.check import RUFF_DEFAULT_TIMEOUT`` entry point.
+from lintro.tools.definitions.ruff import RUFF_DEFAULT_TIMEOUT
 
 if TYPE_CHECKING:
     from lintro.models.core.tool_result import ToolResult
     from lintro.tools.definitions.ruff import RuffPlugin
 
-# Default timeout for Ruff operations
-RUFF_DEFAULT_TIMEOUT: int = 30
+__all__ = ["RUFF_DEFAULT_TIMEOUT", "execute_ruff_check"]
 
 
 def execute_ruff_check(
@@ -48,62 +50,23 @@ def execute_ruff_check(
         build_ruff_format_command,
     )
 
-    # Check version requirements
-    version_result = tool._verify_tool_version()
-    if version_result is not None:
-        return version_result
-
-    tool._validate_paths(paths=paths)
-    if not paths:
-        return ToolResult(
-            name=tool.definition.name,
-            success=True,
-            output="No files to check.",
-            issues_count=0,
-        )
-
-    # Use shared utility for file discovery
-    diff_base_opt = tool.options.get("diff_base")
-    diff_base = diff_base_opt if isinstance(diff_base_opt, str) else None
-    python_files: list[str] = walk_files_with_excludes(
+    # Delegate file discovery, version checking, cwd/rel-path computation, and
+    # timeout resolution to the shared preparation pipeline so ruff behaves
+    # consistently with every other tool plugin.
+    ctx = tool._prepare_execution(
         paths=paths,
-        file_patterns=tool.definition.file_patterns,
-        exclude_patterns=tool.exclude_patterns,
-        include_venv=tool.include_venv,
-        incremental=bool(tool.options.get("incremental", False)),
-        tool_name="ruff",
-        diff_base=diff_base,
+        options={},
+        no_files_message="No files to check.",
     )
+    if ctx.should_skip:
+        return ctx.early_result  # type: ignore[return-value]
 
-    if not python_files:
-        return ToolResult(
-            name=tool.definition.name,
-            success=True,
-            output="No Python files found to check.",
-            issues_count=0,
-        )
-
-    # Ensure Ruff discovers the correct configuration by setting the
-    # working directory to the common parent of the target files and by
-    # passing file paths relative to that directory.
-    cwd: str | None = tool._get_cwd(paths=python_files)
-    rel_files: list[str] = []
-    for f in python_files:
-        if cwd:
-            try:
-                # Try to get relative path; may fail on Windows
-                # if paths are on different drives
-                rel_path = os.path.relpath(f, cwd)
-                rel_files.append(rel_path)
-            except ValueError:
-                # Paths are on different drives (Windows) or other error
-                # - use absolute path
-                rel_files.append(os.path.abspath(f))
-        else:
-            # No common directory - use absolute paths
-            rel_files.append(os.path.abspath(f))
-
-    timeout: int = get_timeout_value(tool, RUFF_DEFAULT_TIMEOUT)
+    # Ruff must run from the common parent directory of the target files (so it
+    # discovers the correct configuration) and receive file paths relative to
+    # that directory.
+    cwd: str | None = ctx.cwd
+    rel_files: list[str] = ctx.rel_files
+    timeout: int = int(ctx.timeout)
     # Lint check
     cmd: list[str] = build_ruff_check_command(tool=tool, files=rel_files, fix=False)
     success_lint: bool

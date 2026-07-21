@@ -28,6 +28,7 @@ PYPI_VERSIONS: dict[str, str] = {
     "bandit": "1.9.4",
     "black": "26.3.1",
     "mypy": "1.19.1",
+    "pip-audit": "2.10.1",
     "pydoclint": "0.8.3",
     "pytest": "9.0.3",
     "ruff": "0.15.9",

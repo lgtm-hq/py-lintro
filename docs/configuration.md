@@ -231,6 +231,32 @@ In `--output-format json` the score is added **additively** under
 }
 ```
 
+### Output Presentation
+
+Purely cosmetic console output is controlled by the `output` section. These settings
+never affect machine-readable documents (JSON/SARIF) or on-disk artifacts.
+
+```yaml
+# .lintro-config.yaml
+output:
+  art: true # Show decorative ASCII art after a run (default: true)
+```
+
+The decorative ASCII art printed after `check`/`fmt` is only emitted to an interactive
+terminal. It is always suppressed when:
+
+- stdout is not a TTY (piped output, CI logs, redirected files), or
+- `output.art: false` is set in config, or
+- the `--no-art` flag is passed to `lintro check` / `lintro format`.
+
+The art is never written to `.lintro/run-*/report.md`, `console.log`, or any
+`--output-format` stream regardless of these settings.
+
+```bash
+lintro check --no-art   # suppress art for this run only
+lintro format --no-art
+```
+
 ### Command-Line Options
 
 #### Global Options
@@ -859,6 +885,48 @@ lintro check --tools gitleaks --tool-options gitleaks:baseline_path=gitleaks-bas
 lintro check --tools gitleaks --tool-options gitleaks:max_target_megabytes=10
 ```
 
+#### TruffleHog Configuration
+
+TruffleHog is a secrets scanner with 800+ provider-specific detectors and optional live
+credential verification. Lintro runs it in `filesystem` mode. **Verification is disabled
+by default** (`--no-verification`) so default scans make no outbound network calls;
+verification can be re-enabled per run, in which case TruffleHog may contact third-party
+providers to test candidate credentials (accept that trade-off before enabling it).
+TruffleHog is configured via CLI options (there is no default config file).
+
+**Install:** `brew install trufflehog` or
+[GitHub Releases](https://github.com/trufflesecurity/trufflehog/releases)
+
+**Available Options:**
+
+| Option            | Type    | Description                                          |
+| ----------------- | ------- | ---------------------------------------------------- |
+| `no_verification` | boolean | Disable live credential verification (default: true) |
+| `results`         | string  | Filter result type — single value (see note below)   |
+| `config`          | string  | Path to a custom detector configuration file         |
+| `exclude_paths`   | string  | Path to a file of newline-separated exclude regexes  |
+| `concurrency`     | integer | Number of concurrent workers                         |
+
+> **Note:** `--tool-options` uses commas to separate options, so a comma-separated
+> `results` value (e.g. `verified,unverified`) cannot be passed on the CLI. Use a single
+> value such as `results=unverified`, or leave it unset to report every result type.
+
+**Usage Examples:**
+
+```bash
+# Basic scan (verification disabled by default)
+lintro check --tools trufflehog
+
+# Raise worker concurrency
+lintro check --tools trufflehog --tool-options trufflehog:concurrency=8
+
+# Only report unverified results (single value; commas are not CLI-safe here)
+lintro check --tools trufflehog --tool-options trufflehog:results=unverified
+
+# Explicitly enable live verification (makes network calls — off by default)
+lintro check --tools trufflehog --tool-options trufflehog:no_verification=False
+```
+
 #### OSV-Scanner Configuration
 
 OSV-Scanner is Google's vulnerability scanner using the Open-Source Vulnerabilities
@@ -909,6 +977,46 @@ lintro check --tools osv_scanner --tool-options "osv_scanner:timeout=300"
 
 # Skip suppression staleness check
 lintro check --tools osv_scanner --tool-options "osv_scanner:check_suppressions=false"
+```
+
+#### pip-audit Configuration
+
+pip-audit is the Python Packaging Authority (PyPA) scanner for Python dependencies with
+known vulnerabilities. It queries the PyPI Advisory Database and OSV, complementing
+bandit (which scans source code) by scanning the dependency surface. It audits
+`requirements*.txt` files (via `-r`) and Python projects declared in `pyproject.toml` /
+`setup.py`.
+
+**Install:** `pip install pip-audit`, `uv add pip-audit`, or `brew install pip-audit`.
+
+**File:** none. pip-audit has no native config file; suppressions are passed on the
+command line by upstream and are not exposed via lintro.
+
+**Available Options:**
+
+| Option    | Type    | Description                            |
+| --------- | ------- | -------------------------------------- |
+| `timeout` | integer | Scan timeout in seconds (default: 120) |
+
+**Notes:**
+
+- pip-audit's JSON output carries no severity field, so lintro reports severity as
+  `UNKNOWN`.
+- Advisory IDs (PYSEC/GHSA/CVE) link to the corresponding [osv.dev](https://osv.dev)
+  page.
+- Requirements discovery is recursive: nested files such as `requirements/base.txt` or
+  `services/api/requirements.txt` are picked up, while vendored/generated trees
+  (`node_modules`, `.venv`, `venv`, `vendor`, `.git`, `__pycache__`) are skipped. To
+  audit a file outside this scope, pass it explicitly on the command line.
+
+**Usage Examples:**
+
+```bash
+# Scan requirements and project manifests for vulnerable dependencies
+lintro check --tools pip_audit
+
+# With a longer timeout for slow networks
+lintro check --tools pip_audit --tool-options "pip_audit:timeout=300"
 ```
 
 #### pydoclint Configuration
@@ -1722,6 +1830,55 @@ lintro format --tools clippy
 lintro check src/ --tools clippy
 ```
 
+#### golangci-lint Configuration
+
+golangci-lint is the de-facto Go meta-linter, running 100+ sub-linters in parallel.
+Lintro targets golangci-lint **v2** and automatically discovers Go modules by finding
+`go.mod` files; non-Go projects are skipped. It requires the Go toolchain to be
+installed. Linter selection and rule tuning are configured through the project's native
+config file.
+
+**Installation:**
+
+```bash
+brew install golangci-lint
+# or see https://golangci-lint.run/welcome/install/
+```
+
+**File:** `.golangci.yml` (also `.golangci.yaml`, `.golangci.toml`, `.golangci.json`)
+
+```yaml
+version: '2'
+linters:
+  enable:
+    - errcheck
+    - staticcheck
+    - ineffassign
+    - govet
+```
+
+**Available Options:**
+
+| Option    | Type    | Description                        |
+| --------- | ------- | ---------------------------------- |
+| `timeout` | integer | Execution timeout in seconds (120) |
+
+Linter enable/disable and per-linter settings live in the native `.golangci.*` config
+file rather than as lintro `--tool-options`.
+
+**Lintro usage:**
+
+```bash
+# Check Go code with golangci-lint
+lintro check --tools golangci_lint
+
+# Auto-fix issues where the underlying linters support it
+lintro format --tools golangci_lint
+
+# Increase the timeout for a large module
+lintro check --tools golangci_lint --tool-options golangci_lint:timeout=300
+```
+
 #### Cargo-deny Configuration
 
 Cargo-deny checks Rust dependencies for license compliance, security advisories, banned
@@ -2325,6 +2482,67 @@ ai:
 | `retry_base_delay`      | float  | `1.0`       | Initial retry delay in seconds (min 0.1)         |
 | `retry_max_delay`       | float  | `30.0`      | Maximum retry delay in seconds (min 1.0)         |
 | `retry_backoff_factor`  | float  | `2.0`       | Retry delay multiplier (min 1.0)                 |
+
+### Idiom Review Tool (`idiom-review`)
+
+The `idiom-review` tool uses AI to find issues that syntax-matching linters cannot: code
+that is syntactically correct but non-idiomatic or redundantly duplicated across files.
+Unlike the AI summary and `--fix` flows, it is a first-class `ToolDefinition` plugin
+that runs as part of the normal `lintro check` pipeline — distinct from the
+`lintro review` diff-review command.
+
+**Install:**
+
+```bash
+uv pip install 'lintro[ai]'
+export ANTHROPIC_API_KEY=sk-ant-...   # or OPENAI_API_KEY for OpenAI
+```
+
+The tool is **disabled by default** and is a no-op until explicitly opted in. When no AI
+provider is available (missing SDK, key, or credits), it degrades gracefully to a
+skipped result rather than failing the run. Findings are cached by content hash under
+`.lintro-cache/idiom`, so unchanged files cost nothing on repeat runs.
+
+**Options:**
+
+| Option           | Type   | Default    | Description                                            |
+| ---------------- | ------ | ---------- | ------------------------------------------------------ |
+| `enabled`        | bool   | `false`    | Opt-in gate — must be `true` to run                    |
+| `mode`           | string | `per-file` | `per-file` · `duplication` · `both`                    |
+| `min_confidence` | string | `medium`   | Drop findings below this level (`low`/`medium`/`high`) |
+| `max_files`      | int    | `25`       | Cap on files reviewed per run (cost bound)             |
+| `language`       | string | `python`   | Language to review; set explicitly for other languages |
+
+**Modes:**
+
+- **`per-file`** — flags idiomatic misses per file (e.g. verbose loops instead of
+  `any()`/`all()` comprehensions).
+- **`duplication`** — flags the same utility logic reimplemented across files, invisible
+  to per-file linters, with a suggested extraction point.
+- **`both`** — runs both modes in one pass.
+
+**Usage example:**
+
+```yaml
+# .lintro-config.yaml
+ai:
+  enabled: true
+  provider: anthropic
+  transport: api
+tools:
+  idiom-review:
+    options:
+      enabled: true # opt-in gate (default: false)
+      mode: per-file # per-file | duplication | both
+      min_confidence: medium
+      max_files: 25 # cap files reviewed per run (cost bound)
+```
+
+Or enable ad hoc from the CLI without modifying config:
+
+```bash
+lintro check --tools idiom-review --tool-options idiom-review:enabled=true
+```
 
 ## Advanced Configuration
 

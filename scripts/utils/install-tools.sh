@@ -168,9 +168,10 @@ should_install() {
 # Kept in sync with the should_install blocks and tools_to_verify array.
 SUPPORTED_TOOLS=(
 	"actionlint" "astro" "bandit" "black" "cargo-audit" "cargo-deny"
-	"clippy" "commitlint" "dotenv-linter" "gitleaks" "hadolint" "html-validate" "markdownlint" "markdownlint-cli2" "mypy" "osv-scanner"
-	"oxfmt" "oxlint" "prettier" "pydoclint" "ruff" "rustfmt" "semgrep"
-	"shellcheck" "shfmt" "sqlfluff" "stylelint" "svelte-check" "taplo" "tsc"
+	"clippy" "commitlint" "dotenv-linter" "gitleaks" "golangci-lint" "hadolint" "html-validate" "markdownlint" "markdownlint-cli2" "mypy" "osv-scanner"
+	"oxfmt" "oxlint" "pip-audit" "prettier" "pydoclint" "ruff" "rustfmt" "semgrep"
+	"shellcheck" "shfmt" "sqlfluff" "stylelint" "svelte-check" "taplo"
+	"trufflehog" "tsc"
 	"vale" "vue-tsc" "yamllint"
 )
 
@@ -590,6 +591,101 @@ main() {
 		fi
 	fi # gitleaks
 
+	# Install golangci-lint (Go meta-linter).
+	# Note: golangci-lint requires the Go toolchain to be present to analyze a
+	# module; this block installs only the golangci-lint binary.
+	if should_install "golangci-lint"; then
+		echo -e "${BLUE}Installing golangci-lint...${NC}"
+		GOLANGCI_LINT_VERSION=$(get_tool_version "golangci_lint") || exit 1
+
+		# Download, verify, and install the pinned golangci-lint binary.
+		install_golangci_lint_binary() {
+			local tmpdir os arch arch_name asset base_url tgz_url checksum_url
+			local expected actual
+			tmpdir=$(mktemp -d)
+			os=$(uname -s | tr '[:upper:]' '[:lower:]')
+			arch=$(uname -m)
+			case "$arch" in
+			x86_64 | amd64) arch_name="amd64" ;;
+			aarch64 | arm64) arch_name="arm64" ;;
+			*) echo -e "${RED}✗ Unsupported architecture: $arch${NC}" && exit 1 ;;
+			esac
+			asset="golangci-lint-${GOLANGCI_LINT_VERSION}-${os}-${arch_name}"
+			base_url="https://github.com/golangci/golangci-lint/releases/download/v${GOLANGCI_LINT_VERSION}"
+			tgz_url="${base_url}/${asset}.tar.gz"
+			checksum_url="${base_url}/golangci-lint-${GOLANGCI_LINT_VERSION}-checksums.txt"
+			if ! download_with_retries "$tgz_url" "$tmpdir/golangci-lint.tar.gz" 3; then
+				echo -e "${RED}✗ Failed to download golangci-lint${NC}"
+				rm -rf "$tmpdir"
+				return 1
+			fi
+			# Require checksum verification before installing
+			if ! download_with_retries "$checksum_url" "$tmpdir/checksums.txt" 3; then
+				echo -e "${RED}✗ Failed to download checksum file for golangci-lint${NC}"
+				rm -rf "$tmpdir"
+				exit 1
+			fi
+			echo -e "${BLUE}Verifying checksum for golangci-lint...${NC}"
+			# Exact filename match — avoid also matching *.tar.gz.sbom.json.
+			expected=$(awk -v f="${asset}.tar.gz" '$2 == f { print $1; exit }' "$tmpdir/checksums.txt")
+			if [ -z "$expected" ]; then
+				echo -e "${RED}✗ Checksum entry not found for ${asset}.tar.gz${NC}"
+				rm -rf "$tmpdir"
+				exit 1
+			fi
+			if command -v sha256sum >/dev/null 2>&1; then
+				actual=$(sha256sum "$tmpdir/golangci-lint.tar.gz" | awk '{print $1}')
+			elif command -v shasum >/dev/null 2>&1; then
+				actual=$(shasum -a 256 "$tmpdir/golangci-lint.tar.gz" | awk '{print $1}')
+			else
+				echo -e "${RED}✗ Unable to compute checksum: no hash tool found (sha256sum or shasum required)${NC}"
+				rm -rf "$tmpdir"
+				exit 1
+			fi
+			if [ "$expected" != "$actual" ]; then
+				echo -e "${RED}✗ Checksum mismatch for golangci-lint (expected: $expected, got: $actual)${NC}"
+				rm -rf "$tmpdir"
+				exit 1
+			fi
+			echo -e "${GREEN}✓ Checksum verified${NC}"
+			tar -xzf "$tmpdir/golangci-lint.tar.gz" -C "$tmpdir"
+			cp "$tmpdir/${asset}/golangci-lint" "$BIN_DIR/golangci-lint"
+			chmod +x "$BIN_DIR/golangci-lint"
+			rm -rf "$tmpdir"
+			return 0
+		}
+
+		if [ $DRY_RUN -eq 1 ]; then
+			log_info "[DRY-RUN] Would install golangci-lint v${GOLANGCI_LINT_VERSION}"
+		elif command -v golangci-lint &>/dev/null; then
+			# Honor the pinned version: a stale binary (notably a v1 binary that
+			# cannot parse the v2 config this plugin targets) must be upgraded
+			# rather than silently accepted.
+			installed_version=$(golangci-lint version 2>/dev/null |
+				grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)
+			if [ -n "$installed_version" ] && version_ge "$installed_version" "$GOLANGCI_LINT_VERSION"; then
+				echo -e "${GREEN}✓ golangci-lint v${installed_version} already installed (>= v${GOLANGCI_LINT_VERSION})${NC}"
+			else
+				if [ -n "$installed_version" ]; then
+					echo -e "${YELLOW}⚠ golangci-lint v${installed_version} is older than required v${GOLANGCI_LINT_VERSION}, upgrading...${NC}"
+				else
+					echo -e "${YELLOW}⚠ Could not determine golangci-lint version, installing v${GOLANGCI_LINT_VERSION}...${NC}"
+				fi
+				if install_golangci_lint_binary; then
+					echo -e "${GREEN}✓ golangci-lint installed successfully${NC}"
+				else
+					exit 1
+				fi
+			fi
+		else
+			if install_golangci_lint_binary; then
+				echo -e "${GREEN}✓ golangci-lint installed successfully${NC}"
+			else
+				exit 1
+			fi
+		fi
+	fi # golangci-lint
+
 	# Install osv-scanner (multi-ecosystem vulnerability scanner)
 	if should_install "osv-scanner"; then
 		echo -e "${BLUE}Installing osv-scanner...${NC}"
@@ -649,6 +745,67 @@ main() {
 			fi
 		fi
 	fi # osv-scanner
+
+	# Install trufflehog (secret detection with optional verification)
+	if should_install "trufflehog"; then
+		echo -e "${BLUE}Installing trufflehog...${NC}"
+		TRUFFLEHOG_VERSION=$(get_tool_version "trufflehog") || exit 1
+		if [ $DRY_RUN -eq 1 ]; then
+			log_info "[DRY-RUN] Would install trufflehog v${TRUFFLEHOG_VERSION}"
+		elif command -v trufflehog &>/dev/null; then
+			echo -e "${GREEN}✓ trufflehog already installed${NC}"
+		else
+			tmpdir=$(mktemp -d)
+			os=$(uname -s | tr '[:upper:]' '[:lower:]')
+			arch=$(uname -m)
+			case "$arch" in
+			x86_64 | amd64) arch_name="amd64" ;;
+			aarch64 | arm64) arch_name="arm64" ;;
+			*) echo -e "${RED}✗ Unsupported architecture: $arch${NC}" && exit 1 ;;
+			esac
+			tgz_url="https://github.com/trufflesecurity/trufflehog/releases/download/v${TRUFFLEHOG_VERSION}/trufflehog_${TRUFFLEHOG_VERSION}_${os}_${arch_name}.tar.gz"
+			checksum_url="https://github.com/trufflesecurity/trufflehog/releases/download/v${TRUFFLEHOG_VERSION}/trufflehog_${TRUFFLEHOG_VERSION}_checksums.txt"
+			if download_with_retries "$tgz_url" "$tmpdir/trufflehog.tar.gz" 3; then
+				# Require checksum verification before installing
+				if ! download_with_retries "$checksum_url" "$tmpdir/checksums.txt" 3; then
+					echo -e "${RED}✗ Failed to download checksum file for trufflehog${NC}"
+					rm -rf "$tmpdir"
+					exit 1
+				fi
+				echo -e "${BLUE}Verifying checksum for trufflehog...${NC}"
+				expected=$(grep "trufflehog_${TRUFFLEHOG_VERSION}_${os}_${arch_name}.tar.gz" "$tmpdir/checksums.txt" | awk '{print $1}')
+				if [ -z "$expected" ]; then
+					echo -e "${RED}✗ Checksum entry not found for trufflehog_${TRUFFLEHOG_VERSION}_${os}_${arch_name}.tar.gz in ${tmpdir}/checksums.txt${NC}"
+					rm -rf "$tmpdir"
+					exit 1
+				fi
+				if command -v sha256sum >/dev/null 2>&1; then
+					actual=$(sha256sum "$tmpdir/trufflehog.tar.gz" | awk '{print $1}')
+				elif command -v shasum >/dev/null 2>&1; then
+					actual=$(shasum -a 256 "$tmpdir/trufflehog.tar.gz" | awk '{print $1}')
+				else
+					echo -e "${RED}✗ Unable to compute checksum: no hash tool found (sha256sum or shasum required)${NC}"
+					rm -rf "$tmpdir"
+					exit 1
+				fi
+				if [ "$expected" != "$actual" ]; then
+					echo -e "${RED}✗ Checksum mismatch for trufflehog (expected: $expected, got: $actual)${NC}"
+					rm -rf "$tmpdir"
+					exit 1
+				fi
+				echo -e "${GREEN}✓ Checksum verified${NC}"
+				tar -xzf "$tmpdir/trufflehog.tar.gz" -C "$tmpdir"
+				cp "$tmpdir/trufflehog" "$BIN_DIR/trufflehog"
+				chmod +x "$BIN_DIR/trufflehog"
+				echo -e "${GREEN}✓ trufflehog installed successfully${NC}"
+			else
+				echo -e "${RED}✗ Failed to download trufflehog${NC}"
+				rm -rf "$tmpdir"
+				exit 1
+			fi
+			rm -rf "$tmpdir"
+		fi
+	fi # trufflehog
 
 	if should_install "actionlint"; then
 		# Install actionlint (GitHub Actions workflow linter)
@@ -1220,6 +1377,20 @@ main() {
 		fi
 	fi # semgrep
 
+	if should_install "pip-audit"; then
+		# Install pip-audit (Python dependency vulnerability scanner)
+		echo -e "${BLUE}Installing pip-audit...${NC}"
+		PIP_AUDIT_VERSION=$(get_tool_version "pip-audit") || exit 1
+		if [ $DRY_RUN -eq 1 ]; then
+			log_info "[DRY-RUN] Would install pip-audit==${PIP_AUDIT_VERSION}"
+		elif install_python_package "pip-audit" "$PIP_AUDIT_VERSION"; then
+			echo -e "${GREEN}✓ pip-audit installed successfully${NC}"
+		else
+			echo -e "${RED}✗ Failed to install pip-audit${NC}"
+			exit 1
+		fi
+	fi # pip-audit
+
 	if should_install "shellcheck"; then
 		# Install shellcheck (shell script linter)
 		echo -e "${BLUE}Installing shellcheck...${NC}"
@@ -1633,12 +1804,14 @@ main() {
 		["clippy"]="Rust linting"
 		["dotenv-linter"]=".env file linting and fixing"
 		["gitleaks"]="Secret detection"
+		["golangci-lint"]="Go meta-linter (requires the Go toolchain)"
 		["hadolint"]="Docker linting"
 		["markdownlint"]="Markdown linting"
 		["mypy"]="Python type checking"
 		["osv-scanner"]="Multi-ecosystem vulnerability scanning"
 		["oxfmt"]="JavaScript/TypeScript formatting"
 		["oxlint"]="JavaScript/TypeScript linting"
+		["pip-audit"]="Python dependency vulnerability scanning"
 		["prettier"]="JavaScript/JSON formatting"
 		["pydoclint"]="Python docstring validation"
 		["ruff"]="Python linting and formatting"
@@ -1650,6 +1823,7 @@ main() {
 		["stylelint"]="CSS/SCSS/Less linting"
 		["svelte-check"]="Svelte type checking"
 		["taplo"]="TOML linting and formatting"
+		["trufflehog"]="Secret detection with verification"
 		["tsc"]="TypeScript type checking"
 		["vue-tsc"]="Vue TypeScript type checking"
 		["yamllint"]="YAML linting"
@@ -1665,7 +1839,7 @@ main() {
 	# Verify installations
 	echo -e "${YELLOW}Verifying installations...${NC}"
 
-	tools_to_verify=("actionlint" "astro" "bandit" "black" "cargo-audit" "cargo-deny" "clippy" "commitlint" "dotenv-linter" "gitleaks" "hadolint" "html-validate" "markdownlint-cli2" "mypy" "osv-scanner" "oxfmt" "oxlint" "prettier" "pydoclint" "ruff" "rustfmt" "semgrep" "shellcheck" "shfmt" "sqlfluff" "stylelint" "svelte-check" "taplo" "tsc" "vale" "vue-tsc" "yamllint")
+	tools_to_verify=("actionlint" "astro" "bandit" "black" "cargo-audit" "cargo-deny" "clippy" "commitlint" "dotenv-linter" "gitleaks" "golangci-lint" "hadolint" "html-validate" "markdownlint-cli2" "mypy" "osv-scanner" "oxfmt" "oxlint" "pip-audit" "prettier" "pydoclint" "ruff" "rustfmt" "semgrep" "shellcheck" "shfmt" "sqlfluff" "stylelint" "svelte-check" "taplo" "trufflehog" "tsc" "vale" "vue-tsc" "yamllint")
 
 	# Filter verification list when --tools is set.
 	# Map aliases so e.g. --tools markdownlint verifies markdownlint-cli2.

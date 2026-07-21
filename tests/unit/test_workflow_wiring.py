@@ -223,13 +223,18 @@ def test_release_workflows_use_paired_egress_presets() -> None:
     )
 
 
-def test_version_pr_formats_changelog_via_dedicated_script() -> None:
-    """Version-PR workflow reflows the generated CHANGELOG via a repo script."""
+def test_version_pr_finalizes_docs_via_dedicated_script() -> None:
+    """Version-PR workflow finalizes CHANGELOG and SECURITY.md via a repo script."""
     version_pr = _load_workflow(name="release-version-pr.yml")
 
     script = version_pr["jobs"]["version-pr"]["with"]["version-update-script"]
-    assert_that(script).is_equal_to("scripts/ci/format-changelog.py")
+    assert_that(script).is_equal_to("scripts/ci/finalize-version-pr.py")
     assert_that((_REPO_ROOT / script).is_file()).is_true()
+    # The finalizer orchestrates the changelog and security-table scripts.
+    assert_that((_REPO_ROOT / "scripts/ci/format-changelog.py").is_file()).is_true()
+    assert_that(
+        (_REPO_ROOT / "scripts/ci/update-security-support.py").is_file(),
+    ).is_true()
 
 
 def test_changelog_no_longer_ignored_by_lintro() -> None:
@@ -752,10 +757,13 @@ _PIPELINE_RELEVANT_TOP_LEVEL: frozenset[str] = frozenset(
         ".pre-commit-hooks.yaml",
         ".prettierignore",
         ".prettierrc.json",
+        ".stylelintrc.json",
+        ".vale.ini",
         ".yamllint",
         "apps",
         "benchmarks",
         "bun.lock",
+        "commitlint.config.js",
         "docker",
         "docker-compose.yml",
         "Dockerfile",
@@ -904,13 +912,15 @@ def test_publish_npm_exposes_dist_tag_for_backfills() -> None:
     assert_that(publish_step).described_as(
         "'Publish to npm' step not found",
     ).is_not_none()
-    assert publish_step is not None
+    assert publish_step is not None  # narrow type for mypy
     assert_that(publish_step["env"]["NPM_DIST_TAG"]).contains("inputs.dist_tag")
 
 
 # Canonical lgtm-ci pin used by all py-lintro workflows (v0.52.4).
 # Pages deploy must not regress to v0.32.3 (missing GH_TOKEN in bundler).
-_LGTM_CI_PIN = "31c25ef2e8992960e218524780e34f44f51271b5"
+# The 40-hex git SHA trips trufflehog's Github legacy-token detector under
+# --no-verification; it is a commit pin, not a credential.
+_LGTM_CI_PIN = "31c25ef2e8992960e218524780e34f44f51271b5"  # trufflehog:ignore
 
 
 def test_all_lgtm_ci_refs_use_the_canonical_pin() -> None:
@@ -995,3 +1005,52 @@ def test_deploy_pages_pins_bundler_with_github_token() -> None:
     assert_that(deploy["permissions"]).contains_entry({"actions": "write"})
     assert_that(deploy["permissions"]).contains_entry({"pages": "write"})
     assert_that(deploy["permissions"]).contains_entry({"id-token": "write"})
+
+
+# --- Manifest-vs-image drift gate (#1511, epic #1508) -----------------------
+#
+# verify-manifest-tools.py is run *inside* the images CI actually uses so a
+# manifest entry the image cannot execute (missing binary or version mismatch)
+# fails loudly instead of surfacing as a silent dogfooding SKIP (#1505). The
+# freshly built CI image is gated in docker-ci.yml; the pinned release digest
+# (fork-PR / nightly fallback) is gated in dogfood-nightly.yml.
+
+
+def test_docker_ci_integration_verifies_ci_image_tools() -> None:
+    """integration-test runs the manifest-vs-image gate on the built CI image."""
+    docker_ci = _load_workflow(name="docker-ci.yml")
+    steps = docker_ci["jobs"]["integration-test"]["steps"]
+    verify_steps = [
+        step
+        for step in steps
+        if step.get("run") == "scripts/ci/verify-image-manifest-tools.sh"
+    ]
+    assert_that(verify_steps).is_length(1)
+    verify = verify_steps[0]
+    # Gated like the other heavy steps so docs-only PRs still report green.
+    assert_that(verify["if"]).is_equal_to("needs.changes.outputs.pipeline != 'false'")
+    # The CI image is retagged py-lintro:latest by both the GHCR pull and the
+    # fork tarball load, so forks gate on their own built image.
+    assert_that(verify["env"]["IMAGE"]).is_equal_to("py-lintro:latest")
+
+
+def test_dogfood_nightly_gates_pinned_digest_tools() -> None:
+    """dogfood-nightly verifies the pinned release digest and notifies on fail."""
+    nightly = _load_workflow(name="dogfood-nightly.yml")
+    jobs = nightly["jobs"]
+    assert_that(jobs).contains_key("verify-pinned-image-tools")
+
+    verify_job = jobs["verify-pinned-image-tools"]
+    verify_steps = [
+        step
+        for step in verify_job["steps"]
+        if step.get("run") == "scripts/ci/verify-image-manifest-tools.sh"
+    ]
+    assert_that(verify_steps).is_length(1)
+    # Verifies the same pinned release digest the nightly dogfood run lints with.
+    assert_that(verify_steps[0]["env"]["IMAGE"]).contains(
+        "ghcr.io/lgtm-hq/py-lintro@sha256:",
+    )
+
+    # A pinned-digest failure must reach the deduplicated failure notifier.
+    assert_that(jobs["notify-failure"]["needs"]).contains("verify-pinned-image-tools")

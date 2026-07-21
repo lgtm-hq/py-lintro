@@ -103,7 +103,8 @@ jobs:
       # non-empty value must include the docker preset baseline. The
       # sigstore hosts cover cosign keyless signing in the merge job;
       # get.trivy.dev serves the Trivy binary download and mirror.gcr.io is
-      # the Trivy vulnerability DB fallback.
+      # the Trivy vulnerability DB fallback. dl.google.com serves the
+      # bundled Go toolchain tarball + checksum (#1500).
       allowed-endpoints-mode: replace
       allowed-endpoints: >
         github.com:443
@@ -125,6 +126,7 @@ jobs:
         pypi.org:443
         files.pythonhosted.org:443
         static.rust-lang.org:443
+        dl.google.com:443
         bun.sh:443
         astral.sh:443
         releases.astral.sh:443

@@ -32,11 +32,11 @@
     }
   },
   "language_map": {
-    "python": ["ruff", "black", "mypy", "bandit", "pydoclint", "semgrep"],
+    "python": ["ruff", "black", "mypy", "bandit", "pydoclint", "semgrep", "pip_audit"],
     "javascript": ["oxlint", "oxfmt", "prettier"],
     "typescript": ["oxlint", "oxfmt", "prettier", "tsc"],
     "rust": ["clippy", "rustfmt", "rustc", "cargo_audit", "cargo_deny"],
-    "go": ["semgrep"],
+    "go": ["golangci_lint", "semgrep"],
     "ruby": ["semgrep"],
     "sql": ["sqlfluff"],
     "shell": ["shellcheck", "shfmt"],
@@ -50,7 +50,7 @@
     "less": ["stylelint"],
     "sass": ["stylelint"],
     "github_actions": ["actionlint"],
-    "security": ["gitleaks", "osv_scanner", "semgrep"],
+    "security": ["gitleaks", "osv_scanner", "semgrep", "trufflehog"],
     "astro": ["astro_check", "prettier"],
     "svelte": ["svelte_check", "prettier"],
     "vue": ["vue_tsc", "prettier"],
@@ -173,7 +173,7 @@
       "category": "external",
       "version_command": ["dotenv-linter", "--version"],
       "languages": ["dotenv"],
-      "tags": ["linter", "formatter"]
+      "tags": ["linter"]
     },
     {
       "name": "gitleaks",
@@ -186,6 +186,18 @@
       "version_command": ["gitleaks", "version"],
       "languages": ["security"],
       "tags": ["security"]
+    },
+    {
+      "name": "golangci_lint",
+      "version": "2.12.2",
+      "install": {
+        "type": "binary"
+      },
+      "tier": "tools",
+      "category": "external",
+      "version_command": ["golangci-lint", "version"],
+      "languages": ["go"],
+      "tags": ["linter"]
     },
     {
       "name": "hadolint",
@@ -276,6 +288,19 @@
       "version_command": ["oxlint", "--version"],
       "languages": ["javascript", "typescript"],
       "tags": ["linter"]
+    },
+    {
+      "name": "pip_audit",
+      "version": "2.10.1",
+      "install": {
+        "type": "pip",
+        "package": "pip-audit"
+      },
+      "tier": "tools",
+      "category": "bundled",
+      "version_command": ["pip-audit", "--version"],
+      "languages": ["python"],
+      "tags": ["security"]
     },
     {
       "name": "prettier",
@@ -443,6 +468,18 @@
       "version_command": ["taplo", "--version"],
       "languages": ["toml"],
       "tags": ["linter", "formatter"]
+    },
+    {
+      "name": "trufflehog",
+      "version": "3.95.8",
+      "install": {
+        "type": "binary"
+      },
+      "tier": "tools",
+      "category": "external",
+      "version_command": ["trufflehog", "--version"],
+      "languages": ["security"],
+      "tags": ["security"]
     },
     {
       "name": "tsc",
