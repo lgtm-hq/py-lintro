@@ -480,6 +480,14 @@ def normalize_to_spdx(license_string: str | None) -> str | None:
     if not license_string:
         return None
 
+    # Reject malformed expressions with unbalanced parentheses before cleaning.
+    # ``_clean()`` strips leading/trailing parens, so an input like
+    # ``(MIT OR GPL-3.0`` would otherwise be silently repaired to a
+    # valid-looking ``MIT OR GPL-3.0`` and false-pass a deny policy by
+    # collapsing to the permissive ``MIT`` operand.
+    if license_string.count("(") != license_string.count(")"):
+        return None
+
     cleaned = _clean(license_string)
     if not cleaned or cleaned in NO_LICENSE_MARKERS:
         return None

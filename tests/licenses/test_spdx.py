@@ -66,6 +66,33 @@ def test_normalize_mixed_or_and_respects_precedence() -> None:
     )
 
 
+def test_normalize_unbalanced_parentheses_rejected() -> None:
+    """Unbalanced parentheses are malformed and must not normalize.
+
+    ``_clean()`` strips outer parens, so ``(MIT OR GPL-3.0`` would otherwise be
+    repaired to ``MIT OR GPL-3.0`` and false-pass by collapsing to ``MIT``.
+    """
+    assert_that(normalize_to_spdx("(MIT OR GPL-3.0")).is_none()
+    assert_that(normalize_to_spdx("MIT OR GPL-3.0)")).is_none()
+    assert_that(normalize_to_spdx("(MIT AND GPL-3.0-only")).is_none()
+
+
+def test_normalize_unbalanced_parens_denied_expression_not_bypassed() -> None:
+    """A malformed expression hiding a denied operand does not false-pass."""
+    expression = "(GPL-3.0-only OR MIT"
+    package = PackageLicense(
+        name="malformed-license",
+        version="1.0.0",
+        license_id=normalize_to_spdx(expression),
+        license_name=expression,
+        ecosystem="npm",
+    )
+    engine = LicensePolicyEngine(LicensesConfig(policy="permissive"))
+    result = engine.check(package)
+    # Unrecognized/malformed license must not be silently allowed as MIT.
+    assert_that(result.status).is_not_equal_to(LicenseStatus.ALLOWED)
+
+
 def test_mixed_or_and_with_denied_operand_fails_policy() -> None:
     """A denied AND operand cannot be bypassed by a later OR branch."""
     expression = "Apache-2.0 AND GPL-3.0 OR MIT"

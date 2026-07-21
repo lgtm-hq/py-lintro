@@ -274,3 +274,54 @@ def test_npm_adapter_classifies_transitive_dev_dependencies(tmp_path: Path) -> N
     by_name = {p.name: p for p in packages}
     assert_that(by_name["eslint"].is_dev).is_true()
     assert_that(by_name["lodash"].is_dev).is_true()
+
+
+def test_npm_adapter_classifies_optional_and_peer_children_of_dev(
+    tmp_path: Path,
+) -> None:
+    """Optional/peer children of a dev dependency inherit dev classification.
+
+    A dev-only tool's ``optionalDependencies`` and ``peerDependencies`` are
+    installed under node_modules; they must inherit the parent's dev flag so
+    ``ignore_dev_dependencies=True`` does not evaluate them as production.
+
+    Args:
+        tmp_path: Temporary project directory.
+    """
+    (tmp_path / "package.json").write_text(
+        json.dumps(
+            {
+                "name": "root",
+                "devDependencies": {"toolkit": "1.0.0"},
+            },
+        ),
+    )
+    toolkit = tmp_path / "node_modules" / "toolkit"
+    toolkit.mkdir(parents=True)
+    toolkit.joinpath("package.json").write_text(
+        json.dumps(
+            {
+                "name": "toolkit",
+                "version": "1.0.0",
+                "license": "MIT",
+                "optionalDependencies": {"opt-child": "1.0.0"},
+                "peerDependencies": {"peer-child": "1.0.0"},
+            },
+        ),
+    )
+    for child in ("opt-child", "peer-child"):
+        child_dir = tmp_path / "node_modules" / child
+        child_dir.mkdir(parents=True)
+        child_dir.joinpath("package.json").write_text(
+            json.dumps(
+                {"name": child, "version": "1.0.0", "license": "GPL-3.0-only"},
+            ),
+        )
+
+    packages = NpmLicenseAdapter().get_licenses_from_package_json(
+        tmp_path / "package.json",
+    )
+    by_name = {p.name: p for p in packages}
+    assert_that(by_name["toolkit"].is_dev).is_true()
+    assert_that(by_name["opt-child"].is_dev).is_true()
+    assert_that(by_name["peer-child"].is_dev).is_true()

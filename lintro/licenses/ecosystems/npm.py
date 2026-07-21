@@ -112,9 +112,10 @@ def _build_dev_prod_map(
     """Classify installed manifests as production or development dependencies.
 
     Walks the installed dependency graph from root ``dependencies`` and
-    ``devDependencies``. Transitive ``dependencies`` inherit the
-    classification of their parent. Production classification wins when a
-    package is reachable via both prod and dev paths.
+    ``devDependencies``. Transitive ``dependencies``, ``optionalDependencies``,
+    and ``peerDependencies`` inherit the classification of their parent.
+    Production classification wins when a package is reachable via both prod
+    and dev paths.
 
     Args:
         root_data: Parsed root ``package.json`` contents.
@@ -151,7 +152,18 @@ def _build_dev_prod_map(
             continue
 
         parent_is_dev = classification[manifest]
-        for dep_name in data.get("dependencies", {}):
+        # Follow every edge that installs a nested package, not just runtime
+        # ``dependencies``. An ``optionalDependencies`` or ``peerDependencies``
+        # child of a dev-only tool is installed under node_modules and must
+        # inherit its parent's dev classification; otherwise it falls back to
+        # production and ``ignore_dev_dependencies=True`` would still evaluate
+        # (and can fail) a dev-only package against the deny policy.
+        child_dep_names = {
+            *data.get("dependencies", {}),
+            *data.get("optionalDependencies", {}),
+            *data.get("peerDependencies", {}),
+        }
+        for dep_name in child_dep_names:
             child_manifest = _resolve_dependency_manifest(
                 parent_manifest=manifest,
                 dep_name=dep_name,
