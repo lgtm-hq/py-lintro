@@ -43,6 +43,7 @@
     "docker": ["hadolint"],
     "yaml": ["yamllint"],
     "markdown": ["markdownlint", "vale"],
+    "html": ["html_validate"],
     "toml": ["taplo"],
     "dotenv": ["dotenv_linter"],
     "css": ["stylelint"],
@@ -209,6 +210,19 @@
       "category": "external",
       "version_command": ["hadolint", "--version"],
       "languages": ["docker"],
+      "tags": ["linter"]
+    },
+    {
+      "name": "html_validate",
+      "version": "11.5.5",
+      "install": {
+        "type": "npm",
+        "package": "html-validate"
+      },
+      "tier": "tools",
+      "category": "npm",
+      "version_command": ["html-validate", "--version"],
+      "languages": ["html"],
       "tags": ["linter"]
     },
     {

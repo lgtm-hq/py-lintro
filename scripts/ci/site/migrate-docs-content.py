@@ -79,6 +79,7 @@ DOC_NAV: dict[str, tuple[str, str | None]] = {
     "tools/clippy": ("clippy", "rust"),
     "tools/golangci-lint": ("golangci-lint", "go"),
     "tools/hadolint": ("hadolint", "ci-ops"),
+    "tools/html-validate": ("html-validate", "frameworks"),
     "tools/idiom-review": ("idiom-review", "python"),
     "tools/markdownlint": ("markdownlint", "config"),
     "tools/mypy": ("mypy", "python"),

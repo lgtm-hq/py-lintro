@@ -561,19 +561,20 @@ tool_priorities = { ruff = 5, black = 10, prettier = 1 }
 
 **Default Tool Priorities:**
 
-| Tool         | Priority | Type             |
-| ------------ | -------- | ---------------- |
-| prettier     | 10       | Formatter        |
-| black        | 15       | Formatter        |
-| ruff         | 20       | Linter/Formatter |
-| markdownlint | 30       | Linter           |
-| yamllint     | 35       | Linter           |
-| vale         | 50       | Linter (docs)    |
-| pydoclint    | 40       | Linter           |
-| bandit       | 45       | Security         |
-| hadolint     | 50       | Infrastructure   |
-| actionlint   | 55       | Infrastructure   |
-| pytest       | 100      | Test Runner      |
+| Tool          | Priority | Type             |
+| ------------- | -------- | ---------------- |
+| prettier      | 10       | Formatter        |
+| black         | 15       | Formatter        |
+| ruff          | 20       | Linter/Formatter |
+| markdownlint  | 30       | Linter           |
+| html_validate | 30       | Linter           |
+| yamllint      | 35       | Linter           |
+| pydoclint     | 40       | Linter           |
+| bandit        | 45       | Security         |
+| hadolint      | 50       | Infrastructure   |
+| vale          | 50       | Linter (docs)    |
+| actionlint    | 55       | Infrastructure   |
+| pytest        | 100      | Test Runner      |
 
 Lower priority values run first. This ensures formatters run before linters, avoiding
 false positives from linters detecting issues that formatters would fix.
@@ -1530,6 +1531,48 @@ lintro check src/ --tools vue-tsc --tool-options "vue-tsc:strict=true"
 
 # Auto-install dependencies before checking
 lintro check src/ --tools vue-tsc --auto-install
+```
+
+#### html-validate Configuration
+
+html-validate is an offline HTML validator that checks documents for standards
+compliance, best practices, and accessibility (WCAG) issues. It is check-only — the tool
+ships no autofixer. By default it inspects `*.html`, `*.htm`, `*.vue`, and `*.svelte`
+files.
+
+**Installation:**
+
+```bash
+# bun (recommended)
+bun add -D html-validate
+
+# npm
+npm install -D html-validate
+```
+
+**Native Config:** `.htmlvalidate.json`, `.htmlvalidate.js`, `.htmlvalidate.cjs`, or
+`.htmlvalidate.mjs`
+
+html-validate reads its rule configuration from the project's native config file when
+present. No additional configuration is required for Lintro.
+
+**Available Options via `--tool-options`:**
+
+| Option    | Type    | Description                                 |
+| --------- | ------- | ------------------------------------------- |
+| `timeout` | integer | Execution timeout in seconds (default: 120) |
+
+**Usage Examples:**
+
+```bash
+# Check HTML files
+lintro check src/ --tools html-validate
+
+# Check the whole project
+lintro check . --tools html-validate
+
+# Auto-install dependencies before checking
+lintro check src/ --tools html-validate --auto-install
 ```
 
 ### SQL Tools

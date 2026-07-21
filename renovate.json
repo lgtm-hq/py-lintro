@@ -74,6 +74,7 @@
         "markdownlint-cli2",
         "@commitlint/cli",
         "@commitlint/config-conventional",
+        "html-validate",
         "oxlint",
         "oxfmt",
         "stylelint",

@@ -23,6 +23,7 @@ class ToolName(StrEnum):
     GITLEAKS = auto()
     GOLANGCI_LINT = auto()
     HADOLINT = auto()
+    HTML_VALIDATE = auto()
     IDIOM_REVIEW = auto()
     MARKDOWNLINT = auto()
     MYPY = auto()
