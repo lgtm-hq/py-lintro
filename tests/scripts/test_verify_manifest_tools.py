@@ -250,3 +250,116 @@ def test_empty_allow_missing_leaves_behavior_unchanged(
     code = _run_main(module, monkeypatch, ["--manifest", str(manifest)])
 
     assert_that(code).is_equal_to(0)
+
+
+def test_parse_allow_version_lag_splits_and_dedupes() -> None:
+    """--allow-version-lag uses the same comma-split parsing as allow-missing."""
+    module = _load_verify_manifest_tools_module()
+
+    parse = module._parse_allow_version_lag  # noqa: SLF001
+    assert_that(parse(None)).is_equal_to(set())
+    assert_that(parse(["astro_check, ruff", "ruff"])).is_equal_to(
+        {"astro_check", "ruff"},
+    )
+
+
+def test_is_image_older_than_manifest_ordering() -> None:
+    """Numeric segment ordering distinguishes older / equal / newer images."""
+    module = _load_verify_manifest_tools_module()
+
+    older = module._is_image_older_than_manifest  # noqa: SLF001
+    assert_that(older(expected="7.1.3", actual="7.0.9")).is_true()
+    assert_that(older(expected="7.1.3", actual="7.1.3")).is_false()
+    assert_that(older(expected="7.1.0", actual="7.1.3")).is_false()
+    assert_that(older(expected="7.1", actual="7.0.9")).is_true()
+
+
+def test_version_tuple_stops_at_prerelease_tag() -> None:
+    """A pre-release tag stops parsing so "7.1.0-rc.1" is (7, 1, 0)."""
+    module = _load_verify_manifest_tools_module()
+
+    version_tuple = module._version_tuple  # noqa: SLF001
+    assert_that(version_tuple("7.1.0-rc.1")).is_equal_to((7, 1, 0))
+    assert_that(version_tuple("7.1.3")).is_equal_to((7, 1, 3))
+    # A pre-release build must not read as newer than its release.
+    older = module._is_image_older_than_manifest  # noqa: SLF001
+    assert_that(older(expected="7.1.0", actual="7.1.0-rc.1")).is_false()
+
+
+def test_allow_version_lag_older_image_passes_with_warning(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """An allow-version-lag tool with an older installed version warns, not fails."""
+    module = _load_verify_manifest_tools_module()
+    _, output = module._run(["git", "--version"])  # noqa: SLF001
+    actual = module._parse_version(output, "git")  # noqa: SLF001
+    assert_that(actual).is_not_none()
+    # Declare a version strictly newer than whatever git reports on this runner.
+    parts = [int(p) for p in str(actual).split(".")]
+    parts[0] += 1
+    expected = ".".join(str(p) for p in parts)
+    manifest = _write_manifest(
+        tmp_path,
+        name="git",
+        version=expected,
+        version_command=["git", "--version"],
+    )
+
+    code = _run_main(
+        module,
+        monkeypatch,
+        ["--manifest", str(manifest), "--allow-version-lag", "git"],
+    )
+
+    assert_that(code).is_equal_to(0)
+    out = capsys.readouterr().out
+    assert_that(out).contains("::warning::")
+    assert_that(out).contains("version lag")
+    assert_that(out).contains("git")
+
+
+def test_allow_version_lag_newer_image_still_fails(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Image-newer-than-manifest stays a hard failure even with version-lag."""
+    module = _load_verify_manifest_tools_module()
+    # Manifest declares an impossibly old version so the real git binary is newer.
+    manifest = _write_manifest(
+        tmp_path,
+        name="git",
+        version="0.0.1",
+        version_command=["git", "--version"],
+    )
+
+    code = _run_main(
+        module,
+        monkeypatch,
+        ["--manifest", str(manifest), "--allow-version-lag", "git"],
+    )
+
+    assert_that(code).is_equal_to(1)
+
+
+def test_allow_version_lag_missing_binary_still_fails(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Version-lag does not tolerate a missing binary (unlike allow-missing)."""
+    module = _load_verify_manifest_tools_module()
+    manifest = _write_manifest(
+        tmp_path,
+        name="brandnew",
+        version="1.0.0",
+        version_command=["definitely-not-a-real-binary-xyz", "--version"],
+    )
+
+    code = _run_main(
+        module,
+        monkeypatch,
+        ["--manifest", str(manifest), "--allow-version-lag", "brandnew"],
+    )
+
+    assert_that(code).is_equal_to(1)

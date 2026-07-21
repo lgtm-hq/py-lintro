@@ -978,13 +978,14 @@ jobs:
         # tagged py-lintro:latest by load-ci-docker-images.sh), so forks gate
         # on the exact image their integration tests run.
         #
-        # New-binary-tool tolerance (#1565): BASE_REF lets the wrapper compute
-        # the tools this PR newly adds to the manifest (diff vs the merge-base)
-        # and pass them as --allow-missing, so their absent binary in the
-        # digest-pinned base image downgrades to a warning instead of failing
-        # this required check structurally. BASE_REF is empty for non-PR events
+        # New-binary-tool tolerance (#1565) and baked-tool version-bump
+        # tolerance (#1582): BASE_REF lets the wrapper compute tools this PR
+        # newly adds (--allow-missing) or whose manifest version it bumps
+        # (--allow-version-lag) vs the merge-base, so digest-lag in the
+        # pinned base image downgrades to a warning instead of failing this
+        # required check structurally. BASE_REF is empty for non-PR events
         # (github.base_ref is only set on pull_request), so main pushes keep
-        # full enforcement; the fail-closed diff also yields an empty allowlist
+        # full enforcement; the fail-closed diff also yields empty allowlists
         # if the merge-base cannot be computed.
         if: needs.changes.outputs.pipeline != 'false'
         env:
