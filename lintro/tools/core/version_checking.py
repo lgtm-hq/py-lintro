@@ -276,7 +276,7 @@ def get_install_hints() -> dict[str, str]:
         with _logged_warnings_lock:
             if warning_key not in _logged_warnings:
                 _logged_warnings.add(warning_key)
-                logger.warning(
+                logger.debug(
                     f"Missing install hints for tools: {', '.join(sorted(missing))}",
                 )
 
