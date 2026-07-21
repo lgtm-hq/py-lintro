@@ -96,26 +96,85 @@ def _tool_versions(manifest_path: Path) -> dict[str, str]:
     return versions
 
 
+def _version_tuple(version: str) -> tuple[int, ...]:
+    """Parse a dotted numeric version into a comparable integer tuple.
+
+    Non-numeric trailing segments (pre-release tags) stop parsing, so
+    ``7.1.0-rc.1`` compares as ``(7, 1, 0)``. Mirrors the helper in
+    ``verify-manifest-tools.py`` so both sides order versions identically.
+
+    Args:
+        version: A dotted version string.
+
+    Returns:
+        Integer segments for lexicographic comparison. Empty when no leading
+        digits are found.
+    """
+    parts: list[int] = []
+    for segment in version.split("."):
+        digits = ""
+        for char in segment:
+            if char.isdigit():
+                digits += char
+            else:
+                break
+        if not digits:
+            break
+        parts.append(int(digits))
+    return tuple(parts)
+
+
+def _is_upward_bump(old_version: str, new_version: str) -> bool:
+    """Return True only when *new* is strictly newer than *old*.
+
+    ``--allow-version-lag`` exists solely for upward bumps: the digest-pinned
+    image still ships the pre-bump (older) build, so an image-older-than-
+    manifest mismatch is expected until the tools image republishes. A
+    downgrade must NOT enter the allowlist — the pinned image would then be
+    *newer* than the manifest, which is a real drift the gate must hard-fail
+    (fail closed). Unparseable versions on either side also fail closed.
+
+    Args:
+        old_version: Version declared in the base-branch manifest.
+        new_version: Version declared in the current manifest.
+
+    Returns:
+        True when both versions parse and ``new > old``; False otherwise.
+    """
+    old_parts = _version_tuple(old_version)
+    new_parts = _version_tuple(new_version)
+    if not old_parts or not new_parts:
+        return False
+    width = max(len(old_parts), len(new_parts))
+    old_padded = old_parts + (0,) * (width - len(old_parts))
+    new_padded = new_parts + (0,) * (width - len(new_parts))
+    return new_padded > old_padded
+
+
 def _version_changed_names(
     old_versions: dict[str, str],
     new_versions: dict[str, str],
 ) -> list[str]:
-    """Return sorted names whose version string changed between manifests.
+    """Return sorted names whose version was bumped *upward* between manifests.
 
     Only tools present in *both* manifests are considered. Newly-added tools
-    are handled by ``--emit added`` / ``--allow-missing`` instead.
+    are handled by ``--emit added`` / ``--allow-missing`` instead. Downgrades
+    and unparseable version changes are deliberately excluded so they fail
+    closed: ``--allow-version-lag`` is meant for upward bumps only, and a
+    downgrade leaves the pinned image *newer* than the manifest — a real drift
+    the gate must still hard-fail.
 
     Args:
         old_versions: Name → version from the base-branch manifest.
         new_versions: Name → version from the current manifest.
 
     Returns:
-        Sorted list of tool names whose version string differs.
+        Sorted list of tool names whose version was bumped upward.
     """
     changed: list[str] = []
     for name, new_version in new_versions.items():
         old_version = old_versions.get(name)
-        if old_version is not None and old_version != new_version:
+        if old_version is not None and _is_upward_bump(old_version, new_version):
             changed.append(name)
     return sorted(changed)
 

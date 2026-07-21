@@ -372,6 +372,32 @@ def test_py_version_changed_no_change_is_empty(tmp_path: Path) -> None:
     assert_that(result.stdout.strip()).is_equal_to("")
 
 
+def test_py_version_changed_excludes_downgrades(tmp_path: Path) -> None:
+    """A downgrade must not enter the version-lag allowlist (fail closed).
+
+    ``--allow-version-lag`` is for upward bumps only; a downgrade leaves the
+    pinned image newer than the manifest, which the gate must hard-fail.
+    """
+    old = tmp_path / "old.json"
+    new = tmp_path / "new.json"
+    old.write_text(_manifest_versions([("ruff", "0.9.0"), ("astro_check", "7.1.3")]))
+    new.write_text(_manifest_versions([("ruff", "0.9.0"), ("astro_check", "7.0.9")]))
+    result = _run_py_emit(old, new, emit="version-changed")
+    assert_that(result.returncode).is_equal_to(0)
+    assert_that(result.stdout.strip()).is_equal_to("")
+
+
+def test_py_version_changed_excludes_unparseable_change(tmp_path: Path) -> None:
+    """A change to/from an unparseable version fails closed (excluded)."""
+    old = tmp_path / "old.json"
+    new = tmp_path / "new.json"
+    old.write_text(_manifest_versions([("astro_check", "7.0.9")]))
+    new.write_text(_manifest_versions([("astro_check", "latest")]))
+    result = _run_py_emit(old, new, emit="version-changed")
+    assert_that(result.returncode).is_equal_to(0)
+    assert_that(result.stdout.strip()).is_equal_to("")
+
+
 def test_py_version_changed_invalid_exits_two(tmp_path: Path) -> None:
     """Malformed manifests fail closed (exit 2) for version-changed too."""
     old = tmp_path / "old.json"
