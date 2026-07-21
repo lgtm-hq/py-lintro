@@ -21,6 +21,12 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.90.0] - 2026-07-21
+
+### Added
+
+- **tools**: add trufflehog for secrets detection (#1149) (7ad74bf)
+
 ## [0.89.1] - 2026-07-21
 
 ### Fixed
