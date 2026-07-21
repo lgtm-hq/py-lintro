@@ -888,8 +888,9 @@ lintro check --tools gitleaks --tool-options gitleaks:max_target_megabytes=10
 
 TruffleHog is a secrets scanner with 800+ provider-specific detectors and optional live
 credential verification. Lintro runs it in `filesystem` mode. **Verification is disabled
-by default** (`--no-verification`) so scans never make outbound network calls to
-third-party providers; it can be re-enabled per run if you accept that trade-off.
+by default** (`--no-verification`) so default scans make no outbound network calls;
+verification can be re-enabled per run, in which case TruffleHog may contact third-party
+providers to test candidate credentials (accept that trade-off before enabling it).
 TruffleHog is configured via CLI options (there is no default config file).
 
 **Install:** `brew install trufflehog` or
