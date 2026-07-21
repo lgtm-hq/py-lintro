@@ -20,7 +20,6 @@ from lintro.models.core.tool_result import ToolResult
 from lintro.plugins.base import BaseToolPlugin
 from lintro.plugins.discovery import (
     ENTRY_POINT_GROUP,
-    ENV_ENABLE_EXTERNAL_PLUGINS,
     LEGACY_ENTRY_POINT_GROUP,
     discover_external_plugins,
     reset_discovery,
@@ -172,17 +171,20 @@ class _NotAPlugin:
 
 
 @pytest.fixture(autouse=True)
-def _enable_external_plugins(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Opt in to external plugin loading for entry-point tests.
+def enable_external_plugins() -> Iterator[None]:
+    """Opt in to external plugin loading for entry-point discovery tests.
 
-    External plugin loading is default-deny under the trust model; these tests
-    exercise the loading/validation path, so they enable it via the opt-in
-    environment variable.
-
-    Args:
-        monkeypatch: Pytest monkeypatch fixture.
+    External plugin loading is opt-in and default-deny (see the plugin trust
+    model). These tests exercise the discovery/registration mechanics with a
+    permissive trust decision (enabled, no allowlist) so they focus on the
+    entry-point contract rather than the trust gate, which is covered
+    separately in ``test_discovery``.
     """
-    monkeypatch.setenv(ENV_ENABLE_EXTERNAL_PLUGINS, "1")
+    with patch(
+        "lintro.plugins.discovery._resolve_plugin_trust",
+        return_value=(True, None),
+    ):
+        yield
 
 
 @pytest.fixture(autouse=True)
