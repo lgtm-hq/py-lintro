@@ -19,6 +19,7 @@ from lintro.tools.definitions.dotenv_linter import (
     DOTENV_LINTER_DEFAULT_TIMEOUT,
     DotenvLinterPlugin,
 )
+from tests.test_samples_helpers import copy_sample
 
 # Real ``dotenv-linter check --plain`` output for a file with issues.
 CHECK_OUTPUT_WITH_ISSUES = (
@@ -90,8 +91,14 @@ def test_check_success_on_clean_file(
     tmp_path: Path,
 ) -> None:
     """Check reports success when dotenv-linter finds no problems."""
-    env_file = tmp_path / ".env"
-    env_file.write_text("ABC=1\n")
+    env_file = copy_sample(
+        tmp_path,
+        "tools",
+        "dotenv",
+        "dotenv_linter",
+        "dotenv_linter_clean.env",
+        dest_name=".env",
+    )
 
     with (
         patch(
@@ -115,8 +122,14 @@ def test_check_reports_issues(
     tmp_path: Path,
 ) -> None:
     """Check surfaces parsed issues when dotenv-linter finds problems."""
-    env_file = tmp_path / ".env"
-    env_file.write_text("foo=bar\n")
+    env_file = copy_sample(
+        tmp_path,
+        "tools",
+        "dotenv",
+        "dotenv_linter",
+        "dotenv_linter_violations.env",
+        dest_name=".env",
+    )
 
     with (
         patch(
@@ -140,8 +153,14 @@ def test_check_timeout_returns_failure(
     tmp_path: Path,
 ) -> None:
     """Check handles a subprocess timeout without raising."""
-    env_file = tmp_path / ".env"
-    env_file.write_text("ABC=1\n")
+    env_file = copy_sample(
+        tmp_path,
+        "tools",
+        "dotenv",
+        "dotenv_linter",
+        "dotenv_linter_clean.env",
+        dest_name=".env",
+    )
 
     with (
         patch(
@@ -164,8 +183,14 @@ def test_check_nonzero_exit_without_issues_is_failure(
     tmp_path: Path,
 ) -> None:
     """A non-zero exit with no parsed issues is treated as a real failure."""
-    env_file = tmp_path / ".env"
-    env_file.write_text("ABC=1\n")
+    env_file = copy_sample(
+        tmp_path,
+        "tools",
+        "dotenv",
+        "dotenv_linter",
+        "dotenv_linter_clean.env",
+        dest_name=".env",
+    )
 
     with (
         patch(
@@ -189,8 +214,14 @@ def test_fix_preserves_issue_count_invariant(
     tmp_path: Path,
 ) -> None:
     """Fix satisfies initial == fixed + remaining after auto-fixing."""
-    env_file = tmp_path / ".env"
-    env_file.write_text("foo=bar\n")
+    env_file = copy_sample(
+        tmp_path,
+        "tools",
+        "dotenv",
+        "dotenv_linter",
+        "dotenv_linter_violations.env",
+        dest_name=".env",
+    )
 
     # First check finds 2 issues; fix succeeds; re-check finds none.
     subprocess_returns = [
@@ -226,8 +257,14 @@ def test_fix_reports_remaining_when_not_all_fixed(
     tmp_path: Path,
 ) -> None:
     """Fix counts issues that remain after the fix pass."""
-    env_file = tmp_path / ".env"
-    env_file.write_text("foo=bar\n")
+    env_file = copy_sample(
+        tmp_path,
+        "tools",
+        "dotenv",
+        "dotenv_linter",
+        "dotenv_linter_violations.env",
+        dest_name=".env",
+    )
 
     remaining_output = (
         "Checking .env\n"
@@ -265,8 +302,14 @@ def test_fix_marks_surviving_issues_not_fixable(
     tmp_path: Path,
 ) -> None:
     """Issues that survive an attempted fix are reported as non-fixable."""
-    env_file = tmp_path / ".env"
-    env_file.write_text("foo=bar\n")
+    env_file = copy_sample(
+        tmp_path,
+        "tools",
+        "dotenv",
+        "dotenv_linter",
+        "dotenv_linter_violations.env",
+        dest_name=".env",
+    )
 
     remaining_output = (
         "Checking .env\n"

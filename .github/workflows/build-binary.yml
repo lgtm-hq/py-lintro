@@ -44,7 +44,7 @@ jobs:
 
     steps:
       - name: Checkout scripts
-        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           sparse-checkout: scripts
 
@@ -55,6 +55,80 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           WORKFLOW_CALL_RELEASE_TAG: ${{ inputs.release_tag }}
 
+  generate-man-page:
+    name: Generate Man Page
+    needs: get-release-info
+    runs-on: ubuntu-24.04
+    permissions:
+      # Required by softprops/action-gh-release to upload dist/lintro.1.
+      contents: write
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      inputs.release_tag != ''
+
+    steps:
+      - name: Harden Runner
+        # yamllint disable-line rule:line-length
+        uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
+        with:
+          egress-policy: 'block'
+          allowed-endpoints: >
+            github.com:443
+            api.github.com:443
+            objects.githubusercontent.com:443
+            raw.githubusercontent.com:443
+            pypi.org:443
+            files.pythonhosted.org:443
+            astral.sh:443
+            releases.astral.sh:443
+            uploads.github.com:443
+
+      - name: Checkout code
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
+        with:
+          python-version: '3.14'
+
+      - name: Install uv
+        id: setup-uv
+        continue-on-error: true
+        uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990 # v8.3.2
+        with:
+          version: 'latest'
+
+      - name: Install uv (retry)
+        if: steps.setup-uv.outcome == 'failure'
+        uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990 # v8.3.2
+        with:
+          version: 'latest'
+
+      - name: Install dependencies
+        run: uv sync --group dev
+
+      - name: Generate man page
+        run: uv run python scripts/generate-man-page.py --output dist/lintro.1
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: lintro-man-page
+          path: dist/lintro.1
+          retention-days: 7
+
+      - name: Upload to release
+        if: inputs.release_tag != ''
+        # yamllint disable-line rule:line-length
+        uses: softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228 # v3
+        with:
+          tag_name: ${{ needs.get-release-info.outputs.release_tag }}
+          files: dist/lintro.1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
   build-macos:
     name: Build macOS Binary
     needs: get-release-info
@@ -62,6 +136,7 @@ jobs:
     permissions:
       contents: write
     strategy:
+      fail-fast: false
       matrix:
         arch: >-
           ${{
@@ -73,7 +148,7 @@ jobs:
     steps:
       - name: Harden Runner
         # yamllint disable-line rule:line-length
-        uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
+        uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
         with:
           egress-policy: 'block'
           allowed-endpoints: >
@@ -91,17 +166,28 @@ jobs:
             nuitka.net:443
 
       - name: Checkout code
-        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           persist-credentials: false
 
       - name: Set up Python
-        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
         with:
-          python-version: '3.11'
+          python-version: '3.14'
 
       - name: Install uv
-        uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7
+        id: setup-uv
+        continue-on-error: true
+        uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990 # v8.3.2
+        with:
+          version: 'latest'
+
+      # First connections after the harden-runner network extension activates
+      # can stall past setup-uv's manifest-fetch timeout (macOS especially);
+      # one retry runs on a warm network path. See #1513.
+      - name: Install uv (retry)
+        if: steps.setup-uv.outcome == 'failure'
+        uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990 # v8.3.2
         with:
           version: 'latest'
 
@@ -138,7 +224,7 @@ jobs:
           echo "SHA256 for ${{ matrix.arch }}: $SHA"
 
       - name: Upload artifact
-        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: lintro-macos-${{ matrix.arch }}
           path: dist/nuitka/lintro-macos-${{ matrix.arch }}
@@ -149,7 +235,7 @@ jobs:
           echo "${{ steps.sha256.outputs.sha256 }}" > sha256-${{ matrix.arch }}.txt
 
       - name: Upload SHA256 file
-        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: sha256-${{ matrix.arch }}
           path: sha256-${{ matrix.arch }}.txt
@@ -157,7 +243,7 @@ jobs:
 
       - name: Upload to release
         if: inputs.release_tag != ''
-        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
+        uses: softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228 # v3
         with:
           tag_name: ${{ needs.get-release-info.outputs.release_tag }}
           files: dist/nuitka/lintro-macos-${{ matrix.arch }}
@@ -171,6 +257,7 @@ jobs:
     permissions:
       contents: write
     strategy:
+      fail-fast: false
       matrix:
         include:
           - arch: x64
@@ -181,7 +268,7 @@ jobs:
     steps:
       - name: Harden Runner
         # yamllint disable-line rule:line-length
-        uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
+        uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
         with:
           egress-policy: 'block'
           allowed-endpoints: >
@@ -199,17 +286,28 @@ jobs:
             nuitka.net:443
 
       - name: Checkout code
-        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           persist-credentials: false
 
       - name: Set up Python
-        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
         with:
-          python-version: '3.11'
+          python-version: '3.14'
 
       - name: Install uv
-        uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7
+        id: setup-uv
+        continue-on-error: true
+        uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990 # v8.3.2
+        with:
+          version: 'latest'
+
+      # First connections after harden-runner's egress filtering activates
+      # can stall past setup-uv's manifest-fetch timeout;
+      # one retry runs on a warm network path. See #1513.
+      - name: Install uv (retry)
+        if: steps.setup-uv.outcome == 'failure'
+        uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990 # v8.3.2
         with:
           version: 'latest'
 
@@ -245,7 +343,7 @@ jobs:
           echo "SHA256 for linux-${{ matrix.arch }}: $SHA"
 
       - name: Upload artifact
-        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: lintro-linux-${{ matrix.arch }}
           path: dist/nuitka/lintro-linux-${{ matrix.arch }}
@@ -258,7 +356,7 @@ jobs:
           echo "$SHA256" > sha256-linux-${{ matrix.arch }}.txt
 
       - name: Upload SHA256 file
-        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: sha256-linux-${{ matrix.arch }}
           path: sha256-linux-${{ matrix.arch }}.txt
@@ -267,7 +365,7 @@ jobs:
       - name: Upload to release
         if: inputs.release_tag != ''
         # yamllint disable-line rule:line-length
-        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
+        uses: softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228 # v3
         with:
           tag_name: ${{ needs.get-release-info.outputs.release_tag }}
           files: dist/nuitka/lintro-linux-${{ matrix.arch }}
@@ -285,7 +383,7 @@ jobs:
     steps:
       - name: Harden Runner
         # yamllint disable-line rule:line-length
-        uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
+        uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
         with:
           egress-policy: 'block'
           allowed-endpoints: >
@@ -294,13 +392,13 @@ jobs:
             uploads.github.com:443
 
       - name: Download arm64 binary
-        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
         with:
           name: lintro-macos-arm64
           path: binaries/
 
       - name: Download x86_64 binary
-        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
         with:
           name: lintro-macos-x86_64
           path: binaries/
@@ -319,7 +417,7 @@ jobs:
           ls -lh binaries/lintro-macos-universal
 
       - name: Upload universal artifact
-        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: lintro-macos-universal
           path: binaries/lintro-macos-universal
@@ -327,137 +425,88 @@ jobs:
 
       - name: Upload to release
         if: inputs.release_tag != ''
-        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
+        uses: softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228 # v3
         with:
           tag_name: ${{ needs.get-release-info.outputs.release_tag }}
           files: binaries/lintro-macos-universal
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-  update-homebrew:
-    name: Update Homebrew Tap
-    needs: [get-release-info, build-macos]
+  homebrew-dispatch:
+    name: Notify Homebrew Tap
+    needs: [get-release-info, build-macos, generate-man-page]
     runs-on: ubuntu-24.04
     permissions:
       contents: read
+    # Stable tag releases only. The tap's formulas/lintro.yml declares a
+    # binary formula, so the dispatch must carry both macOS checksums:
+    # a failed binary build blocks the formula update (re-run this workflow
+    # to recover) instead of shipping a partial bump. The universal guard
+    # keeps single-arch workflow_call runs from failing on a missing
+    # checksum artifact.
     if: >-
-      always() &&
-      !cancelled() &&
       inputs.release_tag != '' &&
-      needs.get-release-info.result == 'success' &&
+      inputs.arch == 'universal' &&
       needs.get-release-info.outputs.release_tag != '' &&
       needs.get-release-info.outputs.is_prerelease == 'false'
 
     steps:
       - name: Harden Runner
         # yamllint disable-line rule:line-length
-        uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
+        uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
         with:
           egress-policy: 'block'
           allowed-endpoints: >
             github.com:443
             api.github.com:443
+            codeload.github.com:443
             objects.githubusercontent.com:443
+            actions.githubusercontent.com:443
             pypi.org:443
-            files.pythonhosted.org:443
 
-      - name: Checkout lintro scripts and actions
-        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+      - name: Checkout scripts
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
-          sparse-checkout: |
-            scripts
-            .github/actions
-          path: lintro
+          sparse-checkout: scripts
+          persist-credentials: false
 
       - name: Download SHA256 artifacts
-        if: ${{ needs.build-macos.result == 'success' }}
-        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
         with:
           pattern: sha256-*
           path: checksums/
           merge-multiple: true
 
       - name: Read checksums
-        if: ${{ needs.build-macos.result == 'success' }}
         id: checksums
         run: |
           ARM64_SHA=$(cat checksums/sha256-arm64.txt)
           X86_64_SHA=$(cat checksums/sha256-x86_64.txt)
           echo "arm64_sha256=$ARM64_SHA" >> "$GITHUB_OUTPUT"
           echo "x86_64_sha256=$X86_64_SHA" >> "$GITHUB_OUTPUT"
-          echo "ARM64 SHA256: $ARM64_SHA"
-          echo "x86_64 SHA256: $X86_64_SHA"
 
       - name: Extract version from tag
         id: version
+        env:
+          TAG: ${{ needs.get-release-info.outputs.release_tag }}
         run: |
-          TAG="${{ needs.get-release-info.outputs.release_tag }}"
           VERSION="${TAG#v}"
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
-          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
-          echo "Extracted version: $VERSION from tag: $TAG"
 
       - name: Wait for PyPI availability
-        # yamllint disable-line rule:line-length
-        run: lintro/scripts/ci/homebrew/wait-for-pypi.sh lintro "${{ steps.version.outputs.version }}"
-
-      - name: Set up Python
-        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
-        with:
-          python-version: '3.14'
-
-      - name: Create Homebrew tap GitHub App token
-        id: homebrew-app-token
-        # yamllint disable-line rule:line-length
-        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3
-        with:
-          app-id: ${{ secrets.HOMEBREW_TAP_APP_ID }}
-          private-key: ${{ secrets.HOMEBREW_TAP_APP_PRIVATE_KEY }}
-          owner: lgtm-hq
-          repositories: homebrew-tap
-          permission-contents: write
-          permission-pull-requests: write
-
-      - name: Checkout homebrew-tap
-        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
-        with:
-          repository: lgtm-hq/homebrew-tap
-          token: ${{ steps.homebrew-app-token.outputs.token }}
-          path: homebrew-tap
-
-      - name: Generate PyPI formula (lintro-full)
-        run: |
-          lintro/scripts/ci/homebrew/generate-pypi-formula.sh \
-            "${{ steps.version.outputs.version }}" \
-            "homebrew-tap/Formula/lintro-full.rb"
-
-      - name: Generate binary formula (lintro)
-        if: ${{ needs.build-macos.result == 'success' }}
-        run: |
-          lintro/scripts/ci/homebrew/generate-binary-formula.sh \
-            "${{ steps.version.outputs.version }}" \
-            "${{ steps.checksums.outputs.arm64_sha256 }}" \
-            "${{ steps.checksums.outputs.x86_64_sha256 }}" \
-            "homebrew-tap/Formula/lintro.rb"
-
-      - name: Create Homebrew tap PR
+        # The tap generates lintro-full from live PyPI metadata as soon as
+        # the dispatch lands, so the sdist must be visible first.
         env:
-          GH_TOKEN: ${{ steps.homebrew-app-token.outputs.token }}
-          WORKING_DIR: homebrew-tap
-          PR_BRANCH: homebrew/lintro-${{ steps.version.outputs.version }}
-          PR_TITLE: >-
-            chore(homebrew): update lintro to
-            ${{ steps.version.outputs.version }}
-          PR_BODY: |
-            Updates applicable Homebrew formulas for lintro
-            ${{ steps.version.outputs.version }}:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: scripts/ci/homebrew/wait-for-pypi.sh lintro "$VERSION"
 
-            - `Formula/lintro.rb` (lightweight binary) when macOS binaries are available
-            - `Formula/lintro-full.rb` (PyPI + bundled tools)
-
-            The tap repository merges this PR automatically after `validate-formula`
-            succeeds (release-bot merge workflow).
-        run: >-
-          lintro/scripts/ci/homebrew/create-lintro-tap-pr.sh
-          "${{ steps.version.outputs.version }}"
-          --skip-if-empty
+      - name: Dispatch formula update
+        # yamllint disable-line rule:line-length
+        uses: lgtm-hq/lgtm-ci/.github/actions/trigger-homebrew-update@31c25ef2e8992960e218524780e34f44f51271b5 # v0.54.0
+        with:
+          formula: lintro
+          version: ${{ steps.version.outputs.version }}
+          pypi-package: lintro
+          binary-arm64-sha: ${{ steps.checksums.outputs.arm64_sha256 }}
+          binary-x86-sha: ${{ steps.checksums.outputs.x86_64_sha256 }}
+          token: ${{ secrets.HOMEBREW_TAP_DISPATCH_TOKEN }}

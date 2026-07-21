@@ -9,8 +9,9 @@ detected by a syntax-matching linter. Two modes are offered:
 * **duplication** (Mode 2) — flag the same utility logic reimplemented
   across files, invisible to any per-file linter.
 
-The tool ships disabled by default (``DEFAULT_ENABLED = False``): it is a
-no-op unless the user opts in via ``tools.idiom-review`` config or
+The tool ships disabled by default via the ``enabled: False`` option in
+``default_options``: ``check()`` returns a skipped result immediately unless
+the caller opts in via ``tools.idiom-review`` config or
 ``--tool-options idiom-review:enabled=true``. When no AI provider is
 available (missing SDK, key, or credits) it degrades gracefully to a
 skipped result rather than failing the run.
@@ -19,7 +20,7 @@ skipped result rather than failing the run.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import ClassVar, cast
+from typing import cast
 
 from loguru import logger
 
@@ -69,9 +70,6 @@ def _confidence_rank(value: str) -> int:
 @dataclass
 class IdiomReviewPlugin(BaseToolPlugin):
     """AI idiom-review plugin (idiomatic-miss + cross-file duplication)."""
-
-    #: Ships disabled: only runs when explicitly opted in.
-    DEFAULT_ENABLED: ClassVar[bool] = False
 
     @property
     def definition(self) -> ToolDefinition:

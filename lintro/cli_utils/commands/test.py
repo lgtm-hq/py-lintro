@@ -3,8 +3,8 @@
 from typing import Any, cast
 
 import click
-from click.testing import CliRunner
 
+from lintro.api import core as api
 from lintro.utils.tool_executor import run_lint_tools_simple
 
 # Constants
@@ -305,31 +305,18 @@ def test(
     Returns:
         None: This function does not return a value.
     """
-    # Build arguments for the click command
-    args: list[str] = []
-    if paths:
-        args.extend(list(paths))
-    if exclude:
-        args.extend(["--exclude", exclude])
-    if include_venv:
-        args.append("--include-venv")
-    if output:
-        args.extend(["--output", output])
-    if output_format:
-        args.extend(["--output-format", output_format])
-    if group_by:
-        args.extend(["--group-by", group_by])
-    if verbose:
-        args.append("--verbose")
-    if raw_output:
-        args.append("--raw-output")
-    if tool_options:
-        args.extend(["--tool-options", tool_options])
-    if yes:
-        args.append("--yes")
-
-    runner = CliRunner()
-    result = runner.invoke(test_command, args)
+    result = api.test(
+        paths=paths,
+        exclude=exclude,
+        include_venv=include_venv,
+        output=output,
+        output_format=output_format,
+        group_by=group_by,
+        verbose=verbose,
+        raw_output=raw_output,
+        tool_options=tool_options,
+        yes=yes,
+    )
 
     if result.exit_code != DEFAULT_EXIT_CODE:
         import sys

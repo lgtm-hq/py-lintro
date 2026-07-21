@@ -8,6 +8,33 @@
   ],
   "packageRules": [
     {
+      "description": "test_samples are fixed tool-test inputs; never update them",
+      "matchFileNames": ["test_samples/**"],
+      "enabled": false
+    },
+    {
+      "description": "Hold prettier 3.9.5+ until Docker integration prettier fixtures are updated",
+      "matchPackageNames": ["prettier"],
+      "allowedVersions": "<=3.9.4"
+    },
+    {
+      "description": "npm platform-binary placeholders are stamped at publish time; never bump in-repo",
+      "matchPackageNames": [
+        "/^@lgtm-hq\\/lintro(-|$)/"
+      ],
+      "enabled": false
+    },
+    {
+      "description": "Hold TypeScript 7 until Astro/@astrojs/check support it",
+      "matchPackageNames": ["typescript"],
+      "allowedVersions": "<7"
+    },
+    {
+      "description": "Hold js-yaml 5 until Astro migrates off default export / we update call sites",
+      "matchPackageNames": ["js-yaml"],
+      "allowedVersions": "<5"
+    },
+    {
       "matchDatasources": ["pypi"],
       "matchUpdateTypes": ["minor"],
       "automerge": false
@@ -47,6 +74,7 @@
         "markdownlint-cli2",
         "@commitlint/cli",
         "@commitlint/config-conventional",
+        "html-validate",
         "oxlint",
         "oxfmt",
         "stylelint",
@@ -58,6 +86,8 @@
         "mvdan/sh",
         "taplo",
         "tamasfe/taplo",
+        "trufflehog",
+        "trufflesecurity/trufflehog",
         "vale",
         "errata-ai/vale",
         "astro",
@@ -68,12 +98,35 @@
       "automerge": false
     },
     {
-      "description": "Regenerate _tool_versions.py when tool version sources change",
-      "matchManagers": ["custom.regex"],
+      "description": "Block malicious astro@7.1.0 (MAL-2026-10726); lift once a clean release ships",
+      "matchPackageNames": ["astro"],
+      "allowedVersions": "<7.1.0 || >7.1.0",
+      "automerge": false
+    },
+    {
+      "description": "lintro-tools base image digest pin (FROM in Dockerfile); native docker digest support, full CI validates the bump",
+      "matchDatasources": ["docker"],
+      "matchPackageNames": [
+        "ghcr.io/lgtm-hq/lintro-tools"
+      ],
+      "matchUpdateTypes": ["digest"],
+      "automerge": false
+    },
+    {
+      "description": "Regenerate version artifacts when tool version sources change",
+      "matchManagers": [
+        "custom.regex",
+        "npm",
+        "pep621",
+        "uv"
+      ],
       "matchFileNames": [
         "Dockerfile",
+        "docker/tools.Dockerfile",
         "lintro/_tool_versions.py",
-        "lintro/tools/manifest.json"
+        "lintro/tools/manifest.json",
+        "package.json",
+        "pyproject.toml"
       ],
       "postUpgradeTasks": {
         "commands": [
@@ -85,7 +138,8 @@
           "lintro/tools/manifest.json",
           "package.json",
           "pyproject.toml",
-          "Dockerfile"
+          "Dockerfile",
+          "docker/tools.Dockerfile"
         ],
         "executionMode": "branch"
       }
@@ -123,7 +177,10 @@
     },
     {
       "customType": "regex",
-      "managerFilePatterns": ["Dockerfile"],
+      "managerFilePatterns": [
+        "Dockerfile",
+        "docker/tools.Dockerfile"
+      ],
       "matchStrings": [
         "ARG BUN_VERSION=(?<currentValue>[0-9]+\\.[0-9]+\\.[0-9]+)"
       ],
@@ -133,12 +190,27 @@
     },
     {
       "customType": "regex",
-      "managerFilePatterns": ["Dockerfile"],
+      "managerFilePatterns": [
+        "Dockerfile",
+        "docker/tools.Dockerfile"
+      ],
       "matchStrings": [
         "ARG UV_VERSION=(?<currentValue>[0-9]+\\.[0-9]+\\.[0-9]+)"
       ],
       "datasourceTemplate": "github-releases",
       "packageNameTemplate": "astral-sh/uv"
+    },
+    {
+      "description": "Bundled Go toolchain in the lintro-tools image (checksum fetched at build time, so only the version pins here)",
+      "customType": "regex",
+      "managerFilePatterns": [
+        "docker/tools.Dockerfile"
+      ],
+      "matchStrings": [
+        "ARG GO_VERSION=(?<currentValue>[0-9]+\\.[0-9]+\\.[0-9]+)"
+      ],
+      "datasourceTemplate": "golang-version",
+      "packageNameTemplate": "golang"
     },
     {
       "customType": "regex",
@@ -189,6 +261,19 @@
       ],
       "datasourceTemplate": "github-releases",
       "packageNameTemplate": "gitleaks/gitleaks",
+      "extractVersionTemplate": "^v(?<version>.*)$"
+    },
+    {
+      "description": "Update golangci-lint in _tool_versions.py (manifest follows via generator)",
+      "customType": "regex",
+      "managerFilePatterns": [
+        "lintro/_tool_versions\\.py"
+      ],
+      "matchStrings": [
+        "ToolName\\.GOLANGCI_LINT:\\s*\"(?<currentValue>[0-9]+\\.[0-9]+\\.[0-9]+)\""
+      ],
+      "datasourceTemplate": "github-releases",
+      "packageNameTemplate": "golangci/golangci-lint",
       "extractVersionTemplate": "^v(?<version>.*)$"
     },
     {
@@ -255,6 +340,19 @@
       "datasourceTemplate": "github-releases",
       "packageNameTemplate": "tamasfe/taplo",
       "extractVersionTemplate": "^(?<version>[0-9]+\\.[0-9]+\\.[0-9]+)$"
+    },
+    {
+      "description": "Update trufflehog version in _tool_versions.py (manifest follows via generator)",
+      "customType": "regex",
+      "managerFilePatterns": [
+        "lintro/_tool_versions\\.py"
+      ],
+      "matchStrings": [
+        "ToolName\\.TRUFFLEHOG:\\s*\"(?<currentValue>[0-9]+\\.[0-9]+\\.[0-9]+)\""
+      ],
+      "datasourceTemplate": "github-releases",
+      "packageNameTemplate": "trufflesecurity/trufflehog",
+      "extractVersionTemplate": "^v(?<version>.*)$"
     },
     {
       "description": "Update vale version in _tool_versions.py",

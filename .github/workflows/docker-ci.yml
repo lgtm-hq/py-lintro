@@ -6,6 +6,47 @@ name: CI - Docker
 # Docker build once → dogfooding quality (reusable-quality-lint + CI image) →
 # integration tests → security audit → publish (main).
 # manifest-sync runs in parallel (no Docker).
+#
+# Path filtering: 🐳 Build Docker Images, 🔐 Security Audit, and
+# 🧪 Docker Integration Tests are required checks (org ruleset
+# checks-py-lintro), so this workflow must report on every PR — an
+# on.<event>.paths filter would leave those contexts absent and deadlock
+# merges (see codeql.yml and lgtm-ci docs/workflow-contract.md,
+# "Required-check-safe conditional workflows"). Instead the `changes` job
+# classifies the PR diff and the heavy jobs early-exit green when only
+# docs changed. merge_group, push, and workflow_dispatch always run the
+# full pipeline.
+#
+# Deny-by-default classification (#1369): pipeline relevance is decided by
+# scripts/ci/resolve-pipeline-relevance.sh from the PR's changed-file list
+# against a small skip-list ('**/*.md', 'docs/**', 'assets/**', with
+# 'test_samples/**' and 'docs/.markdownlint-cli2.jsonc' carved out as
+# pipeline-relevant) — pipeline=false only when EVERY changed file is
+# skippable. There is no allow-list of relevant paths to rot: new
+# top-level directories, configs, and file types trigger the pipeline by
+# default, and the skip-list only grows deliberately (drift test in
+# tests/unit/test_workflow_wiring.py).
+#
+# Version-bump PRs (#1362): the `changes` job also classifies automated
+# release version-bump PRs (release-version-pr.yml) via
+# scripts/ci/release-bump-only.sh — identity signals (bot author, title,
+# release/v* branch) nominate, a diff allowlist decides (only the version
+# stamp in pyproject.toml / uv.lock / lintro/__init__.py plus CHANGELOG.md
+# may change). Verified bump PRs resolve pipeline=false, so the heavy jobs
+# early-exit green exactly like the docs-only path, with skip-reason
+# "version-bump PR". Only the pull_request run is skipped: the merge push
+# to main still builds and publishes (digest promotion, #1358/#1368), and
+# the release-auto-tag → publish-pypi-on-tag chain is untouched. test-ci.yml
+# keeps running in full on bump PRs (see its header — skipping the reusable
+# callers collapses the nested required contexts, #1359).
+#
+# Dogfooding lint scope (#1361): the `changes` job also maps the diff to a
+# `full-lint` filter (paths with global lint impact — tool configs, the
+# Docker context, workflows, scripts, lintro itself). PRs that miss the
+# filter lint only the changed files (dogfooding-lint-changed); PRs that hit
+# it, plus merge_group and main pushes, keep the full-repo run
+# (dogfooding-lint). A nightly full-repo backstop lives in
+# dogfood-nightly.yml.
 
 'on':
   push:
@@ -27,19 +68,174 @@ env:
   CACHE_OPTS: mode=max,compression=zstd,oci-mediatypes=true,image-manifest=true
 
 jobs:
-  manifest-sync:
-    name: 📋 Manifest Sync
+  # Required-check-safe replacement for on.<event>.paths (see header
+  # comment). Only pull_request events are filtered; every other event
+  # resolves pipeline=true. Every layer fails open so a classification
+  # infrastructure failure runs the full pipeline rather than silently
+  # skipping it: resolve-pipeline-relevance.sh resolves pipeline=true when
+  # the changed-file list is unavailable (non-merge HEAD, failed diff),
+  # detect-changes reports all filters true when the diff base is
+  # unresolvable (lint-scope then stays full), and downstream gates compare
+  # != 'false' with !cancelled() so a failed changes job (empty output)
+  # still runs everything. Only an explicit pipeline == 'false' skips work.
+  changes:
+    name: 🔎 Detect Relevant Changes
     runs-on: ubuntu-24.04
     permissions:
       contents: read
     timeout-minutes: 5
-    if: >-
-      github.event_name != 'pull_request' ||
-      github.event.pull_request.draft == false
+    outputs:
+      pipeline: ${{ steps.result.outputs.pipeline }}
+      # full|changed — dogfooding lint scope (#1361). `changed` only when a
+      # PR diff explicitly missed the full-lint filter; every failure mode
+      # (missing JSON, failed job → empty output) resolves to full-repo lint.
+      lint-scope: ${{ steps.result.outputs.lint-scope }}
+      # Human-readable reason when pipeline=false ("docs-only change" or
+      # "version-bump PR", #1362); empty when the pipeline runs.
+      skip-reason: ${{ steps.result.outputs.skip-reason }}
     steps:
       - name: Harden Runner
         # yamllint disable-line rule:line-length
-        uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
+        uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
+        with:
+          egress-policy: 'block'
+          allowed-endpoints: >
+            github.com:443
+            api.github.com:443
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Detect changed paths
+        id: detect
+        if: github.event_name == 'pull_request'
+        # yamllint disable-line rule:line-length
+        uses: lgtm-hq/lgtm-ci/.github/actions/detect-changes@31c25ef2e8992960e218524780e34f44f51271b5 # v0.54.0
+        with:
+          # Pipeline relevance is NOT decided here (#1369): the resolve
+          # step below computes it deny-by-default from the changed-file
+          # list, so there is no allow-list of relevant paths to rot. This
+          # filter only feeds the lint-scope decision.
+          #
+          # full-lint stays an allow-list deliberately: its rot direction
+          # is soft. A missed global-impact path degrades to changed-files
+          # lint — the PR's own files are still linted with the identical
+          # tool set, and dogfood-nightly.yml runs the full repo as a
+          # backstop — whereas inverting it would require enumerating every
+          # "no global lint impact" leaf path, a larger and less stable
+          # list than this one.
+          filters: |
+            # Paths with GLOBAL lint impact (#1361): touching any of these
+            # forces full-repo dogfooding lint on the PR; PRs that miss this
+            # filter lint only their changed files. Err broad — when in
+            # doubt whether a path can change lint results elsewhere, it
+            # belongs here. Leaf content (tests/, test_samples/, docs
+            # prose, app/npm/tool sources) is covered by changed-files mode.
+            # A full-lint hit can never be pipeline-skipped:
+            # resolve-pipeline-relevance.sh forces pipeline=true when this
+            # filter matches a diff whose files were all skippable.
+            full-lint:
+              # The linter itself: behavior changes affect every file.
+              - 'lintro/**'
+              # CI scripts and workflows drive how lint runs.
+              - 'scripts/**'
+              - '.github/**'
+              # The Docker context builds the lint image and its tool stack.
+              - 'Dockerfile'
+              - 'docker/**'
+              - 'docker-compose.yml'
+              - '.dockerignore'
+              # Build/packaging metadata feeding tool resolution.
+              - 'Makefile'
+              - 'MANIFEST.in'
+              # Tool configs and manifests at any depth (pyproject.toml
+              # carries ruff/pydoclint/bandit config; package manifests and
+              # lockfiles steer prettier/osv-scanner; tsconfig steers ts
+              # tooling).
+              - '**/pyproject.toml'
+              - '**/package.json'
+              - '**/tsconfig.json'
+              - '**/tsconfig.*.json'
+              - '**/*.lock'
+              - '**/package-lock.json'
+              - '**/pnpm-lock.yaml'
+              - '**/yarn.lock'
+              - '**/bun.lockb'
+              # Nested non-dot tool configs (dotfile configs at any depth
+              # are covered by '**/.*' below).
+              - '**/ruff.toml'
+              - '**/setup.cfg'
+              - '**/tox.ini'
+              - '**/pytest.ini'
+              - '**/Dockerfile*'
+              - 'pytest.ini'
+              - 'tox.ini'
+              - '.node-version'
+              # Dotfiles are tool config by convention — root and nested
+              # (e.g. .lintro-config.yaml, .yamllint, .prettierrc.json,
+              # docs/.markdownlint-cli2.jsonc). dorny sets dot:true.
+              - '.*'
+              - '**/.*'
+              # Any config-shaped root file (defense-in-depth for new
+              # top-level configs).
+              - '*.toml'
+              - '*.yaml'
+              - '*.yml'
+              - '*.json'
+              - '*.jsonc'
+              - '*.ini'
+              - '*.cfg'
+      - name: Check for release version-bump PR
+        # Nominate-then-verify (#1362): identity signals (release-bot
+        # author, chore(release) title, release/v* branch) only nominate;
+        # the script's diff allowlist decides. Fails closed to
+        # release-bump=false on anything unexpected, so the full pipeline
+        # runs. continue-on-error keeps a script failure from turning the
+        # fail-open changes job into a hard failure.
+        id: bump
+        if: github.event_name == 'pull_request'
+        continue-on-error: true
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          PR_AUTHOR: ${{ github.event.pull_request.user.login }}
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          HEAD_REF: ${{ github.head_ref }}
+        run: scripts/ci/release-bump-only.sh
+      - name: Resolve pipeline relevance
+        # Deny-by-default (#1369): the script derives the PR's changed-file
+        # list from the merge-commit checkout (HEAD^1..HEAD; requires the
+        # fetch-depth: 0 checkout above) and resolves pipeline=false only
+        # when every file matches the skip-list. CHANGES_JSON feeds the
+        # lint-scope decision only.
+        id: result
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          CHANGES_JSON: ${{ steps.detect.outputs.changes }}
+          RELEASE_BUMP: ${{ steps.bump.outputs.release-bump }}
+        run: scripts/ci/resolve-pipeline-relevance.sh
+
+  manifest-sync:
+    name: 📋 Manifest Sync
+    needs: [changes]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    timeout-minutes: 5
+    # Not a required check: safe to skip the whole job on docs-only PRs.
+    # !cancelled() keeps it running (fail-open) if the changes job failed:
+    # the pipeline output is then empty, which is != 'false'.
+    if: >-
+      !cancelled() &&
+      needs.changes.outputs.pipeline != 'false' &&
+      (
+        github.event_name != 'pull_request' ||
+        github.event.pull_request.draft == false
+      )
+    steps:
+      - name: Harden Runner
+        # yamllint disable-line rule:line-length
+        uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
         with:
           egress-policy: 'block'
           allowed-endpoints: >
@@ -53,7 +249,7 @@ jobs:
             astral.sh:443
             releases.astral.sh:443
       - name: Checkout
-        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           persist-credentials: false
       - name: Environment setup
@@ -68,6 +264,13 @@ jobs:
 
   docker-build:
     name: 🐳 Build Docker Images
+    # Required check (org ruleset checks-py-lintro): the job itself always
+    # runs so the context reports; heavy steps are gated on the `pipeline`
+    # output and the job early-exits green on docs-only PRs. !cancelled()
+    # keeps it running (fail-open, full build) if the changes job failed —
+    # the pipeline output is then empty, which is != 'false' at every step.
+    needs: [changes]
+    if: '!cancelled()'
     runs-on: ubuntu-24.04
     permissions:
       contents: read # checkout and build context
@@ -84,7 +287,7 @@ jobs:
     steps:
       - name: Harden Runner
         # yamllint disable-line rule:line-length
-        uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
+        uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
         with:
           egress-policy: 'block'
           allowed-endpoints: >
@@ -115,7 +318,7 @@ jobs:
             semgrep.dev:443
             metrics.semgrep.dev:443
       - name: Checkout
-        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           persist-credentials: false
       - name: Check if fork PR
@@ -125,30 +328,40 @@ jobs:
           IS_FORK_PR: ${{ github.event.pull_request.head.repo.fork }}
         run: scripts/ci/detect-fork-pr.sh
       - name: Free disk space (fork fallback)
-        if: steps.fork-check.outputs.is-fork == 'true'
+        if: >-
+          needs.changes.outputs.pipeline != 'false' &&
+          steps.fork-check.outputs.is-fork == 'true'
         run: scripts/ci/free-disk-space.sh
       - name: Set up Docker Buildx (fork)
-        if: steps.fork-check.outputs.is-fork == 'true'
+        if: >-
+          needs.changes.outputs.pipeline != 'false' &&
+          steps.fork-check.outputs.is-fork == 'true'
         # yamllint disable-line rule:line-length
-        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+        uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4
         with:
           driver: docker
       - name: Set up Docker Buildx
-        if: steps.fork-check.outputs.is-fork != 'true'
+        if: >-
+          needs.changes.outputs.pipeline != 'false' &&
+          steps.fork-check.outputs.is-fork != 'true'
         # yamllint disable-line rule:line-length
-        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+        uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4
       - name: Log in to GitHub Container Registry
-        if: steps.fork-check.outputs.is-fork != 'true'
+        if: >-
+          needs.changes.outputs.pipeline != 'false' &&
+          steps.fork-check.outputs.is-fork != 'true'
         # yamllint disable-line rule:line-length
-        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3.7.0
+        uses: docker/login-action@af1e73f918a031802d376d3c8bbc3fe56130a9b0 # v4.4.0
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
       - name: Build Docker image (fork)
-        if: steps.fork-check.outputs.is-fork == 'true'
+        if: >-
+          needs.changes.outputs.pipeline != 'false' &&
+          steps.fork-check.outputs.is-fork == 'true'
         # yamllint disable-line rule:line-length
-        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7
         with:
           context: .
           target: full
@@ -158,9 +371,11 @@ jobs:
           cache-from: type=gha
           provenance: false
       - name: Build and push Docker image (GHCR CI tag)
-        if: steps.fork-check.outputs.is-fork != 'true'
+        if: >-
+          needs.changes.outputs.pipeline != 'false' &&
+          steps.fork-check.outputs.is-fork != 'true'
         # yamllint disable-line rule:line-length
-        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7
         with:
           context: .
           target: full
@@ -173,9 +388,11 @@ jobs:
             type=registry,ref=ghcr.io/lgtm-hq/py-lintro:cache,${{ env.CACHE_OPTS }}
           provenance: false
       - name: Build Base Docker image (fork)
-        if: steps.fork-check.outputs.is-fork == 'true'
+        if: >-
+          needs.changes.outputs.pipeline != 'false' &&
+          steps.fork-check.outputs.is-fork == 'true'
         # yamllint disable-line rule:line-length
-        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7
         with:
           context: .
           target: base
@@ -185,9 +402,11 @@ jobs:
           cache-from: type=gha
           provenance: false
       - name: Build and push Base Docker image (GHCR CI tag)
-        if: steps.fork-check.outputs.is-fork != 'true'
+        if: >-
+          needs.changes.outputs.pipeline != 'false' &&
+          steps.fork-check.outputs.is-fork != 'true'
         # yamllint disable-line rule:line-length
-        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7
         with:
           context: .
           target: base
@@ -200,37 +419,55 @@ jobs:
             type=registry,ref=ghcr.io/lgtm-hq/py-lintro-base:cache,${{ env.CACHE_OPTS }}
           provenance: false
       - name: Save Docker images to tarball (fork fallback)
-        if: steps.fork-check.outputs.is-fork == 'true'
+        if: >-
+          needs.changes.outputs.pipeline != 'false' &&
+          steps.fork-check.outputs.is-fork == 'true'
         run: scripts/docker/save-ci-images-tarball.sh
       - name: Upload Docker images artifact (fork fallback)
-        if: steps.fork-check.outputs.is-fork == 'true'
-        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        if: >-
+          needs.changes.outputs.pipeline != 'false' &&
+          steps.fork-check.outputs.is-fork == 'true'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: docker-images
           path: /tmp/py-lintro-images.tar
           retention-days: 1
+      - name: Skip heavy build (pipeline not relevant)
+        if: needs.changes.outputs.pipeline == 'false'
+        env:
+          SKIP_REASON: ${{ needs.changes.outputs.skip-reason }}
+        run: scripts/ci/ci-log.sh "skipped:" "$SKIP_REASON" "(Docker build)"
 
   dogfooding-lint:
-    needs: [docker-build, manifest-sync]
-    # Run when docker-build succeeds even if manifest-sync was skipped (draft PRs).
+    needs: [changes, docker-build, manifest-sync]
+    # Run when docker-build succeeds even if manifest-sync was skipped (draft
+    # PRs). Skipped entirely on docs-only PRs (docker-build early-exits green
+    # without pushing a CI image, so there is nothing to lint with).
+    # lint-scope != 'changed' (#1361): PRs whose diff has no global lint
+    # impact hand off to dogfooding-lint-changed below; merge_group, pushes,
+    # dispatches, and any global-impact PR keep this full-repo run. A failed
+    # changes job leaves lint-scope empty, which is != 'changed' — fail-open
+    # to full-repo lint.
     if: >-
       always() &&
       !cancelled() &&
+      needs.changes.outputs.pipeline != 'false' &&
+      needs.changes.outputs.lint-scope != 'changed' &&
       needs.docker-build.result == 'success' &&
       (
         needs.manifest-sync.result == 'success' ||
         needs.manifest-sync.result == 'skipped'
       )
     # yamllint disable-line rule:line-length
-    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-quality-lint.yml@66cad82ead0e5d119928c895c7d7da9c837989e5 # v0.52.3
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-quality-lint.yml@31c25ef2e8992960e218524780e34f44f51271b5 # v0.54.0
     permissions:
       contents: read
       packages: read # pull lintro-image from GHCR in reusable-quality-lint
     with:
-      tooling-ref: '66cad82ead0e5d119928c895c7d7da9c837989e5' # v0.52.3
+      tooling-ref: '31c25ef2e8992960e218524780e34f44f51271b5' # v0.54.0
       job-name: '🛠️ Dogfooding Lint'
       lintro-tool-options: >-
-        pydoclint:timeout=120,bandit:timeout=120,osv_scanner:check_suppressions=false
+        pydoclint:timeout=120,bandit:timeout=120,prettier:timeout=120,osv_scanner:check_suppressions=false
       egress-policy: block
       # Same-repo PRs: lint with the image built in this workflow run.
       # Fork PRs: CI images are not pushed to GHCR (artifact tarball only), so
@@ -241,36 +478,265 @@ jobs:
         ${{ needs.docker-build.outputs.is-fork == 'true'
         && format(
           'ghcr.io/lgtm-hq/py-lintro@sha256:{0}',
-          '1ff3db35939283734b859c7c5d95be87fd8fd62734b3434e0437769d50d53578'
+          '0e8f3892f31f7bb6ce56a33d037d983591b82c325bf56281f9d9e2fec488aa5c'
         )
         || format('ghcr.io/lgtm-hq/py-lintro:ci-{0}', github.run_id) }}
 
-  dogfooding-pr-comment:
-    needs: dogfooding-lint
+  # Changed-files dogfooding (#1361): PR-only counterpart of dogfooding-lint
+  # for diffs with no global lint impact (lint-scope == 'changed'). Runs the
+  # same image with the same full tool set and --tool-options — only the
+  # path arguments narrow to the PR's changed files — so tool coverage is
+  # identical and only scope shrinks. Exactly one of dogfooding-lint /
+  # dogfooding-lint-changed runs per pipeline-relevant PR; the
+  # lintro-code-quality gate below mirrors whichever ran.
+  dogfooding-lint-changed:
+    name: 🛠️ Dogfooding Lint (Changed Files)
+    needs: [changes, docker-build, manifest-sync]
     if: >-
       always() &&
       !cancelled() &&
-      needs.dogfooding-lint.result != 'cancelled' &&
-      needs.dogfooding-lint.result != 'skipped' &&
-      needs.dogfooding-lint.outputs.exit-code != '' &&
-      needs.dogfooding-lint.outputs.status != '' &&
+      needs.changes.outputs.pipeline != 'false' &&
+      needs.changes.outputs.lint-scope == 'changed' &&
+      needs.docker-build.result == 'success' &&
+      (
+        needs.manifest-sync.result == 'success' ||
+        needs.manifest-sync.result == 'skipped'
+      )
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      packages: read # pull the CI lint image from GHCR
+    timeout-minutes: 30
+    outputs:
+      exit-code: ${{ steps.lint.outputs.exit-code }}
+      status: ${{ steps.lint.outputs.status }}
+    steps:
+      - name: Harden Runner
+        # Same allowlist as the reusable-quality-lint default: the container
+        # sets LINTRO_AUTO_INSTALL_DEPS=1 and may fetch project deps before
+        # linting.
+        # yamllint disable-line rule:line-length
+        uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
+        with:
+          egress-policy: 'block'
+          allowed-endpoints: >
+            github.com:443
+            api.github.com:443
+            codeload.github.com:443
+            release-assets.githubusercontent.com:443
+            objects.githubusercontent.com:443
+            raw.githubusercontent.com:443
+            pipelines.actions.githubusercontent.com:443
+            github-releases.githubusercontent.com:443
+            ghcr.io:443
+            pkg-containers.githubusercontent.com:443
+            docker.io:443
+            registry-1.docker.io:443
+            auth.docker.io:443
+            production.cloudflare.docker.com:443
+            production.cloudfront.docker.com:443
+            pypi.org:443
+            files.pythonhosted.org:443
+            static.rust-lang.org:443
+            bun.sh:443
+            astral.sh:443
+            releases.astral.sh:443
+            sh.rustup.rs:443
+            deb.debian.org:80
+            registry.npmjs.org:443
+            crates.io:443
+            static.crates.io:443
+            index.crates.io:443
+            semgrep.dev:443
+            metrics.semgrep.dev:443
+            api.osv.dev:443
+            api.deps.dev:443
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          # Full history: the script diffs against merge-base(origin/<base>).
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Log in to GitHub Container Registry
+        if: needs.docker-build.outputs.is-fork != 'true'
+        # yamllint disable-line rule:line-length
+        uses: docker/login-action@af1e73f918a031802d376d3c8bbc3fe56130a9b0 # v4.4.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Run lintro on changed files
+        id: lint
+        env:
+          BASE_REF: ${{ github.base_ref }}
+          # Must stay in sync with the dogfooding-lint lintro-tool-options
+          # above: identical tool coverage is the contract of changed mode.
+          TOOL_OPTIONS: >-
+            pydoclint:timeout=120,bandit:timeout=120,prettier:timeout=120,osv_scanner:check_suppressions=false
+          # Same image selection as dogfooding-lint: CI-built image for
+          # same-repo PRs, pinned release digest for forks (no CI push).
+          # Pinned digest — keep in sync with pyproject.toml lintro pin
+          LINTRO_IMAGE: >-
+            ${{ needs.docker-build.outputs.is-fork == 'true'
+            && format(
+              'ghcr.io/lgtm-hq/py-lintro@sha256:{0}',
+              '0e8f3892f31f7bb6ce56a33d037d983591b82c325bf56281f9d9e2fec488aa5c'
+            )
+            || format('ghcr.io/lgtm-hq/py-lintro:ci-{0}', github.run_id) }}
+        run: scripts/ci/dogfood-changed-files.sh
+      - name: Upload linting report
+        # Same artifact name the full run uploads: dogfooding-pr-comment
+        # downloads `linting-report`, and only one dogfooding job runs per
+        # workflow run, so the name never collides.
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: linting-report
+          path: |
+            .lintro/
+            chk-output.txt
+          retention-days: 7
+          if-no-files-found: ignore
+
+  # No-silent-skip gate (#1510, epic #1508): the dogfooding jobs above run an
+  # external reusable workflow (no place to add a post-lint step), so this
+  # dedicated job re-derives the structured skip state from the same image and
+  # fails when an enabled tool silently skips for a reason not in the committed
+  # allowlist. Runs whenever a CI image exists (not docs-only) so both the
+  # full-repo and changed-files PR paths are covered.
+  dogfood-skip-gate:
+    name: 🚦 Dogfood No-Silent-Skip Gate
+    needs: [changes, docker-build, dogfooding-lint, dogfooding-lint-changed]
+    if: >-
+      always() &&
+      !cancelled() &&
+      needs.changes.outputs.pipeline != 'false' &&
+      needs.docker-build.result == 'success'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      packages: read # pull the CI lint image from GHCR
+    timeout-minutes: 30
+    steps:
+      - name: Harden Runner
+        # Same allowlist as dogfooding-lint-changed: the container sets
+        # LINTRO_AUTO_INSTALL_DEPS=1 and may fetch project deps before linting.
+        # yamllint disable-line rule:line-length
+        uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
+        with:
+          egress-policy: 'block'
+          allowed-endpoints: >
+            github.com:443
+            api.github.com:443
+            codeload.github.com:443
+            release-assets.githubusercontent.com:443
+            objects.githubusercontent.com:443
+            raw.githubusercontent.com:443
+            pipelines.actions.githubusercontent.com:443
+            github-releases.githubusercontent.com:443
+            ghcr.io:443
+            pkg-containers.githubusercontent.com:443
+            docker.io:443
+            registry-1.docker.io:443
+            auth.docker.io:443
+            production.cloudflare.docker.com:443
+            production.cloudfront.docker.com:443
+            pypi.org:443
+            files.pythonhosted.org:443
+            static.rust-lang.org:443
+            bun.sh:443
+            astral.sh:443
+            releases.astral.sh:443
+            sh.rustup.rs:443
+            deb.debian.org:80
+            registry.npmjs.org:443
+            crates.io:443
+            static.crates.io:443
+            index.crates.io:443
+            semgrep.dev:443
+            metrics.semgrep.dev:443
+            api.osv.dev:443
+            api.deps.dev:443
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+      - name: Log in to GitHub Container Registry
+        if: needs.docker-build.outputs.is-fork != 'true'
+        # yamllint disable-line rule:line-length
+        uses: docker/login-action@af1e73f918a031802d376d3c8bbc3fe56130a9b0 # v4.4.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Check for silent tool skips
+        env:
+          # Same tool coverage as the dogfooding run so skip behaviour matches.
+          TOOL_OPTIONS: >-
+            pydoclint:timeout=120,bandit:timeout=120,prettier:timeout=120,osv_scanner:check_suppressions=false
+          # Same image selection as dogfooding-lint: CI-built image for
+          # same-repo PRs, pinned release digest for forks (no CI push).
+          # Pinned digest — keep in sync with pyproject.toml lintro pin
+          LINTRO_IMAGE: >-
+            ${{ needs.docker-build.outputs.is-fork == 'true'
+            && format(
+              'ghcr.io/lgtm-hq/py-lintro@sha256:{0}',
+              '0e8f3892f31f7bb6ce56a33d037d983591b82c325bf56281f9d9e2fec488aa5c'
+            )
+            || format('ghcr.io/lgtm-hq/py-lintro:ci-{0}', github.run_id) }}
+        run: scripts/ci/dogfood-skip-gate.sh
+
+  dogfooding-pr-comment:
+    # Comments with the outputs of whichever dogfooding job ran (full or
+    # changed-files — they are mutually exclusive per run, see #1361).
+    needs: [changes, dogfooding-lint, dogfooding-lint-changed]
+    if: >-
+      always() &&
+      !cancelled() &&
+      (
+        (
+          needs.dogfooding-lint.result != 'cancelled' &&
+          needs.dogfooding-lint.result != 'skipped' &&
+          needs.dogfooding-lint.outputs.exit-code != '' &&
+          needs.dogfooding-lint.outputs.status != ''
+        ) ||
+        (
+          needs.dogfooding-lint-changed.result != 'cancelled' &&
+          needs.dogfooding-lint-changed.result != 'skipped' &&
+          needs.dogfooding-lint-changed.outputs.exit-code != '' &&
+          needs.dogfooding-lint-changed.outputs.status != ''
+        )
+      ) &&
       github.event_name == 'pull_request' &&
       github.event.pull_request.head.repo.fork == false &&
       github.event.pull_request.draft == false
     # yamllint disable-line rule:line-length
-    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-publish-quality-summary.yml@66cad82ead0e5d119928c895c7d7da9c837989e5 # v0.52.3
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-publish-quality-summary.yml@31c25ef2e8992960e218524780e34f44f51271b5 # v0.54.0
     permissions:
       contents: read
       pull-requests: write # post lintro results as PR comment
     with:
-      exit-code: ${{ needs.dogfooding-lint.outputs.exit-code }}
-      tooling-ref: '66cad82ead0e5d119928c895c7d7da9c837989e5' # v0.52.3
+      exit-code: >-
+        ${{ needs.changes.outputs.lint-scope == 'changed'
+        && needs.dogfooding-lint-changed.outputs.exit-code
+        || needs.dogfooding-lint.outputs.exit-code }}
+      tooling-ref: '31c25ef2e8992960e218524780e34f44f51271b5' # v0.54.0
       job-name: '🛠️ Dogfooding Lint PR Comment'
       egress-policy: block
 
   # Org ruleset (checks-py-lintro): lintro-code-quality / 🛠️ Lintro Code Quality
+  # Always-green gate: reports success when the heavy jobs were path-skipped
+  # (docs-only PRs, pipeline == 'false') and mirrors their result when they
+  # ran. A failed changes job fails open — its pipeline output is empty, the
+  # full pipeline runs, and this gate mirrors the real results — so a broken
+  # filter can never skip coverage or green-light an untested merge.
   lintro-code-quality:
-    needs: [docker-build, manifest-sync, dogfooding-lint]
+    needs:
+      - changes
+      - docker-build
+      - manifest-sync
+      - dogfooding-lint
+      - dogfooding-lint-changed
     if: >-
       always() &&
       !cancelled() &&
@@ -279,30 +745,46 @@ jobs:
         github.event.pull_request.draft == false
       )
     # yamllint disable-line rule:line-length
-    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-required-check.yml@66cad82ead0e5d119928c895c7d7da9c837989e5 # v0.52.3
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-required-check.yml@31c25ef2e8992960e218524780e34f44f51271b5 # v0.54.0
     permissions:
       contents: read
     with:
-      tooling-ref: '66cad82ead0e5d119928c895c7d7da9c837989e5' # v0.52.3
+      tooling-ref: '31c25ef2e8992960e218524780e34f44f51271b5' # v0.54.0
       job-name: '🛠️ Lintro Code Quality'
       runner-image: ubuntu-24.04
+      # Mirrors whichever dogfooding job ran (#1361): lint-scope 'changed'
+      # selects the changed-files job; anything else — including an empty
+      # lint-scope from a failed changes job — selects the full run.
       upstream-result: >-
         ${{
-          needs.docker-build.result != 'success' && needs.docker-build.result
+          needs.changes.outputs.pipeline == 'false' && 'success'
+          || needs.docker-build.result != 'success' && needs.docker-build.result
           || (
             needs.manifest-sync.result != 'success' &&
             needs.manifest-sync.result != 'skipped'
           ) && needs.manifest-sync.result
+          || needs.changes.outputs.lint-scope == 'changed'
+          && needs.dogfooding-lint-changed.result
           || needs.dogfooding-lint.result
         }}
-      status-output: ${{ needs.dogfooding-lint.outputs.status }}
+      status-output: >-
+        ${{ needs.changes.outputs.lint-scope == 'changed'
+        && needs.dogfooding-lint-changed.outputs.status
+        || needs.dogfooding-lint.outputs.status }}
       status-expected: passed
       egress-policy: block
       egress-preset: github-tooling
 
   security-audit:
     name: 🔐 Security Audit
-    needs: [docker-build]
+    # Required check: runs whenever docker-build reported success (real or
+    # docs-only early-exit) so the context reports; heavy steps are gated on
+    # the `pipeline` output. !cancelled() keeps it running (fail-open) if
+    # the changes job failed.
+    needs: [changes, docker-build]
+    if: >-
+      !cancelled() &&
+      needs.docker-build.result == 'success'
     runs-on: ubuntu-24.04
     permissions:
       contents: read
@@ -312,7 +794,7 @@ jobs:
     steps:
       - name: Harden Runner
         # yamllint disable-line rule:line-length
-        uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
+        uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
         with:
           egress-policy: 'block'
           allowed-endpoints: >
@@ -323,41 +805,57 @@ jobs:
             api.osv.dev:443
             api.deps.dev:443
       - name: Checkout
-        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           persist-credentials: false
       - name: Log in to GHCR
-        if: needs.docker-build.outputs.is-fork != 'true'
+        if: >-
+          needs.changes.outputs.pipeline != 'false' &&
+          needs.docker-build.outputs.is-fork != 'true'
         # yamllint disable-line rule:line-length
-        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3.7.0
+        uses: docker/login-action@af1e73f918a031802d376d3c8bbc3fe56130a9b0 # v4.4.0
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
       - name: Pull CI image from GHCR
-        if: needs.docker-build.outputs.is-fork != 'true'
+        if: >-
+          needs.changes.outputs.pipeline != 'false' &&
+          needs.docker-build.outputs.is-fork != 'true'
         env:
           CI_TAG: ci-${{ github.run_id }}
         run: scripts/ci/testing/pull-ci-docker-images.sh full
       - name: Download Docker images artifact (fork fallback)
-        if: needs.docker-build.outputs.is-fork == 'true'
+        if: >-
+          needs.changes.outputs.pipeline != 'false' &&
+          needs.docker-build.outputs.is-fork == 'true'
         # yamllint disable-line rule:line-length
-        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
         with:
           name: docker-images
           path: /tmp
       - name: Load Docker images (fork fallback)
-        if: needs.docker-build.outputs.is-fork == 'true'
+        if: >-
+          needs.changes.outputs.pipeline != 'false' &&
+          needs.docker-build.outputs.is-fork == 'true'
         run: scripts/ci/testing/load-ci-docker-images.sh
+      - name: Skip security audit (pipeline not relevant)
+        if: needs.changes.outputs.pipeline == 'false'
+        env:
+          SKIP_REASON: ${{ needs.changes.outputs.skip-reason }}
+        run: scripts/ci/ci-log.sh "skipped:" "$SKIP_REASON" "(security audit)"
       - name: Run security audit
         id: audit
+        if: needs.changes.outputs.pipeline != 'false'
         continue-on-error: true
         run: scripts/ci/security-comment.sh
       - name: Comment PR with security audit results
-        if: github.event_name == 'pull_request'
+        if: >-
+          needs.changes.outputs.pipeline != 'false' &&
+          github.event_name == 'pull_request'
         continue-on-error: true
         # yamllint disable-line rule:line-length
-        uses: lgtm-hq/lgtm-ci/.github/actions/post-pr-comment@66cad82ead0e5d119928c895c7d7da9c837989e5 # v0.52.3
+        uses: lgtm-hq/lgtm-ci/.github/actions/post-pr-comment@31c25ef2e8992960e218524780e34f44f51271b5 # v0.54.0
         with:
           file: security-audit-comment.txt
           marker: security-audit-report
@@ -368,7 +866,14 @@ jobs:
 
   integration-test:
     name: 🧪 Docker Integration Tests
-    needs: [docker-build]
+    # Required check: runs whenever docker-build reported success (real or
+    # docs-only early-exit) so the context reports; heavy steps are gated on
+    # the `pipeline` output. !cancelled() keeps it running (fail-open) if
+    # the changes job failed.
+    needs: [changes, docker-build]
+    if: >-
+      !cancelled() &&
+      needs.docker-build.result == 'success'
     runs-on: ubuntu-24.04
     permissions:
       contents: read
@@ -380,7 +885,7 @@ jobs:
     steps:
       - name: Harden Runner
         # yamllint disable-line rule:line-length
-        uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
+        uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
         with:
           egress-policy: 'block'
           allowed-endpoints: >
@@ -414,52 +919,101 @@ jobs:
             api.osv.dev:443
             api.deps.dev:443
       - name: Checkout
-        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
+          # Full history: the manifest gate diffs the manifest against the
+          # merge-base with the base branch to tolerate a newly-added tool's
+          # missing binary (#1565); a shallow checkout breaks merge-base.
+          fetch-depth: 0
           persist-credentials: false
       - name: Log in to GHCR
-        if: needs.docker-build.outputs.is-fork != 'true'
+        if: >-
+          needs.changes.outputs.pipeline != 'false' &&
+          needs.docker-build.outputs.is-fork != 'true'
         # yamllint disable-line rule:line-length
-        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3.7.0
+        uses: docker/login-action@af1e73f918a031802d376d3c8bbc3fe56130a9b0 # v4.4.0
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
       - name: Pull CI images from GHCR
-        if: needs.docker-build.outputs.is-fork != 'true'
+        if: >-
+          needs.changes.outputs.pipeline != 'false' &&
+          needs.docker-build.outputs.is-fork != 'true'
         env:
           CI_TAG: ci-${{ github.run_id }}
         run: scripts/ci/testing/pull-ci-docker-images.sh both
       - name: Download Docker images artifact (fork fallback)
-        if: needs.docker-build.outputs.is-fork == 'true'
+        if: >-
+          needs.changes.outputs.pipeline != 'false' &&
+          needs.docker-build.outputs.is-fork == 'true'
         # yamllint disable-line rule:line-length
-        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
         with:
           name: docker-images
           path: /tmp
       - name: Load Docker images (fork fallback)
-        if: needs.docker-build.outputs.is-fork == 'true'
+        if: >-
+          needs.changes.outputs.pipeline != 'false' &&
+          needs.docker-build.outputs.is-fork == 'true'
         run: scripts/ci/testing/load-ci-docker-images.sh
+      - name: Skip integration tests (pipeline not relevant)
+        if: needs.changes.outputs.pipeline == 'false'
+        env:
+          SKIP_REASON: ${{ needs.changes.outputs.skip-reason }}
+        run: >-
+          scripts/ci/ci-log.sh "skipped:" "$SKIP_REASON" "(integration tests)"
       - name: Smoke Test Docker Image
+        if: needs.changes.outputs.pipeline != 'false'
         run: ./scripts/docker/docker-build-test.sh
       - name: Smoke Test Base Image
+        if: needs.changes.outputs.pipeline != 'false'
         run: scripts/docker/smoke-test-base-image.sh
+      - name: Verify CI image tools against manifest
+        # Manifest-vs-image drift gate (#1511): run verify-manifest-tools.py
+        # inside the freshly built CI image so a manifest entry the image
+        # cannot execute (missing binary or version mismatch) fails the build
+        # instead of surfacing later as a silent dogfooding SKIP (#1505). For
+        # fork PRs this verifies the tarball-loaded fork-built image (also
+        # tagged py-lintro:latest by load-ci-docker-images.sh), so forks gate
+        # on the exact image their integration tests run.
+        #
+        # New-binary-tool tolerance (#1565) and baked-tool version-bump
+        # tolerance (#1582): BASE_REF lets the wrapper compute tools this PR
+        # newly adds (--allow-missing) or whose manifest version it bumps
+        # (--allow-version-lag) vs the merge-base, so digest-lag in the
+        # pinned base image downgrades to a warning instead of failing this
+        # required check structurally. BASE_REF is empty for non-PR events
+        # (github.base_ref is only set on pull_request), so main pushes keep
+        # full enforcement; the fail-closed diff also yields empty allowlists
+        # if the merge-base cannot be computed.
+        if: needs.changes.outputs.pipeline != 'false'
+        env:
+          IMAGE: py-lintro:latest
+          BASE_REF: ${{ github.base_ref }}
+        run: scripts/ci/verify-image-manifest-tools.sh
       - name: Run Docker integration tests
+        if: needs.changes.outputs.pipeline != 'false'
         run: scripts/docker/run-docker-test-suite.sh
       - name: Extract test summary
-        if: always()
+        if: always() && needs.changes.outputs.pipeline != 'false'
         run: >-
           scripts/ci/testing/extract-test-summary.sh
           test-output.log test-summary.json || true
       - name: Upload test summary artifact
-        if: always()
-        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        if: always() && needs.changes.outputs.pipeline != 'false'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: test-summary
           path: test-summary.json
           retention-days: 30
           if-no-files-found: warn
 
+  # Publishes by digest promotion (#1358): the ci-${run_id} images that
+  # docker-build pushed and the downstream jobs validated are retagged to
+  # the release tags with `docker buildx imagetools create` — no rebuild,
+  # so the published image is bit-identical to the image CI tested. The
+  # promoted digests are then signed with Cosign (keyless OIDC).
   publish:
     name: 📦 Publish to GHCR
     needs: [dogfooding-lint, security-audit, integration-test]
@@ -467,15 +1021,19 @@ jobs:
     runs-on: ubuntu-24.04
     permissions:
       contents: read # checkout and metadata extraction
-      packages: write # push release images to GHCR
-    timeout-minutes: 30
+      packages: write # promote (retag) release images in GHCR
+      id-token: write # OIDC token for cosign keyless signing
+    timeout-minutes: 15
     concurrency:
       group: publish-${{ github.ref }}
       cancel-in-progress: false
     steps:
       - name: Harden Runner
+        # No build happens here anymore (#1358): the allowlist covers
+        # checkout, GHCR retagging, cosign download, and sigstore keyless
+        # signing only.
         # yamllint disable-line rule:line-length
-        uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
+        uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
         with:
           egress-policy: 'block'
           allowed-endpoints: >
@@ -486,42 +1044,31 @@ jobs:
             objects.githubusercontent.com:443
             ghcr.io:443
             pkg-containers.githubusercontent.com:443
-            docker.io:443
-            registry-1.docker.io:443
-            auth.docker.io:443
-            production.cloudflare.docker.com:443
-            production.cloudfront.docker.com:443
-            deb.debian.org:80
-            pypi.org:443
-            files.pythonhosted.org:443
-            static.rust-lang.org:443
-            bun.sh:443
-            astral.sh:443
-            releases.astral.sh:443
-            sh.rustup.rs:443
-            registry.npmjs.org:443
-            crates.io:443
-            static.crates.io:443
-            index.crates.io:443
-            semgrep.dev:443
-            metrics.semgrep.dev:443
+            token.actions.githubusercontent.com:443
+            pipelines.actions.githubusercontent.com:443
+            fulcio.sigstore.dev:443
+            rekor.sigstore.dev:443
+            tuf-repo-cdn.sigstore.dev:443
+            timestamp.sigstore.dev:443
+            oauth2.sigstore.dev:443
       - name: Checkout
-        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           fetch-depth: 0
           fetch-tags: true
           persist-credentials: false
       - name: Setup Docker (Buildx + login)
+        # Default `docker` driver: imagetools talks to the registry from
+        # the CLI, no BuildKit container (or Docker Hub pull) needed.
         uses: ./.github/actions/setup-docker
         with:
           login: 'true'
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-          driver: docker-container
       - name: Extract metadata
         id: meta
-        uses: docker/metadata-action@c299e40c65443455700f0fdfc63efafe5b349051 # v5
+        uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6
         with:
           images: ghcr.io/lgtm-hq/py-lintro
           tags: |
@@ -532,7 +1079,7 @@ jobs:
             type=semver,pattern={{major}}
       - name: Extract metadata (base)
         id: meta-base
-        uses: docker/metadata-action@c299e40c65443455700f0fdfc63efafe5b349051 # v5
+        uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6
         with:
           images: ghcr.io/lgtm-hq/py-lintro-base
           tags: |
@@ -541,43 +1088,54 @@ jobs:
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
             type=semver,pattern={{major}}
-      - name: Build and push Docker image
+      - name: Promote CI image to release tags (digest retag)
+        id: promote
+        env:
+          SOURCE_IMAGE: ghcr.io/lgtm-hq/py-lintro
+          CI_TAG: ci-${{ github.run_id }}
+          TAGS: ${{ steps.meta.outputs.tags }}
+        run: scripts/ci/promote-ci-docker-images.sh
+      - name: Promote Base CI image to release tags (digest retag)
+        id: promote-base
+        env:
+          SOURCE_IMAGE: ghcr.io/lgtm-hq/py-lintro-base
+          CI_TAG: ci-${{ github.run_id }}
+          TAGS: ${{ steps.meta-base.outputs.tags }}
+        run: scripts/ci/promote-ci-docker-images.sh
+      - name: Install Cosign
         # yamllint disable-line rule:line-length
-        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
-        with:
-          context: .
-          target: full
-          push: true
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
-          cache-from: |
-            type=registry,ref=ghcr.io/lgtm-hq/py-lintro:cache
-          cache-to: >-
-            type=registry,ref=ghcr.io/lgtm-hq/py-lintro:cache,${{ env.CACHE_OPTS }}
-          provenance: false
-          sbom: false
-      - name: Build and push Base Docker image
-        # yamllint disable-line rule:line-length
-        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
-        with:
-          context: .
-          target: base
-          push: true
-          tags: ${{ steps.meta-base.outputs.tags }}
-          labels: ${{ steps.meta-base.outputs.labels }}
-          cache-from: |
-            type=registry,ref=ghcr.io/lgtm-hq/py-lintro-base:cache
-          cache-to: >-
-            type=registry,ref=ghcr.io/lgtm-hq/py-lintro-base:cache,${{ env.CACHE_OPTS }}
-          provenance: false
-          sbom: false
+        uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+      - name: Sign promoted digests (keyless)
+        env:
+          IMAGES: |
+            ghcr.io/lgtm-hq/py-lintro@${{ steps.promote.outputs.digest }}
+            ghcr.io/lgtm-hq/py-lintro-base@${{ steps.promote-base.outputs.digest }}
+        run: scripts/ci/cosign-sign-images.sh
 
   cleanup-ci-images:
     name: 🧹 Cleanup CI Images
-    needs: [docker-build, dogfooding-lint, security-audit, integration-test, publish]
+    needs:
+      - changes
+      - docker-build
+      - dogfooding-lint
+      - dogfooding-lint-changed
+      - security-audit
+      - integration-test
+      - publish
+    # Nothing to clean up when the build was path-skipped (no CI tags pushed).
+    # Sequencing (#1138, #1358): cleanup only runs when every consumer of the
+    # ci-${run_id} tags — including publish, which promotes them by digest —
+    # finished green or was skipped (publish is skipped on PRs). On any
+    # failure the CI tags survive so a re-run of failed jobs can still pull
+    # and promote them; re-runs share the run_id, so the eventual green
+    # re-run deletes the same tags. Cross-run digest sharing is handled
+    # inside delete-ci-ghcr-tags.sh (sole-tag versions only).
     if: >-
       always() &&
-      needs.docker-build.outputs.is-fork != 'true'
+      needs.changes.outputs.pipeline != 'false' &&
+      needs.docker-build.outputs.is-fork != 'true' &&
+      !contains(needs.*.result, 'failure') &&
+      !contains(needs.*.result, 'cancelled')
     runs-on: ubuntu-24.04
     permissions:
       contents: read # checkout delete-ci-ghcr-tags.sh
@@ -586,14 +1144,14 @@ jobs:
     steps:
       - name: Harden Runner
         # yamllint disable-line rule:line-length
-        uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
+        uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
         with:
           egress-policy: 'block'
           allowed-endpoints: >
             github.com:443
             api.github.com:443
       - name: Checkout
-        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           persist-credentials: false
       - name: Delete CI-tagged images

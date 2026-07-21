@@ -6,10 +6,10 @@ install-tools.sh for binary downloads) based on the tool's install type.
 
 Usage:
     from lintro.tools.core.tool_installer import ToolInstaller
-    from lintro.tools.core.tool_registry import ToolRegistry
+    from lintro.tools.core.tool_registry import ManifestRegistry
     from lintro.tools.core.install_context import RuntimeContext
 
-    registry = ToolRegistry.load()
+    registry = ManifestRegistry.load()
     context = RuntimeContext.detect()
     installer = ToolInstaller(registry, context)
 
@@ -30,7 +30,7 @@ from loguru import logger
 from lintro.tools.core.install_context import RuntimeContext
 from lintro.tools.core.install_plan import InstallPlan, InstallResult
 from lintro.tools.core.install_strategies import get_strategy
-from lintro.tools.core.tool_registry import ManifestTool, ToolRegistry
+from lintro.tools.core.tool_registry import ManifestRegistry, ManifestTool
 from lintro.tools.core.version_parsing import (
     compare_versions,
     extract_version_from_output,
@@ -54,7 +54,7 @@ class ToolInstaller:
 
     def __init__(
         self,
-        registry: ToolRegistry,
+        registry: ManifestRegistry,
         context: RuntimeContext,
     ) -> None:
         """Initialize the installer with registry and context."""

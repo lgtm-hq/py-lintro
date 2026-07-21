@@ -37,9 +37,10 @@ def check_ai_configuration(config: AIConfig) -> list[AICheckResult]:
         config: Parsed AI configuration.
 
     Returns:
-        List of check results (empty when ``ai.enabled`` is false).
+        List of check results (empty when no AI feature -- ai.lint or
+        ai.review -- is enabled).
     """
-    if not config.enabled:
+    if not config.any_feature_enabled:
         return []
 
     results: list[AICheckResult] = []
@@ -49,7 +50,9 @@ def check_ai_configuration(config: AIConfig) -> list[AICheckResult]:
             AICheckResult(
                 name="ai.transport",
                 status=ToolStatus.INCOMPATIBLE,
-                message="ai.transport is required when ai.enabled is true",
+                message=(
+                    "ai.transport is required when ai.lint or ai.review is enabled"
+                ),
                 hint="Add `transport: api` or `transport: cli` under `ai:` in config",
             ),
         )

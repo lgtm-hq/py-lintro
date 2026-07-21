@@ -32,6 +32,27 @@ def test_doctor_reports_missing_transport_when_ai_enabled() -> None:
     assert_that(results[0].status).is_equal_to(ToolStatus.INCOMPATIBLE)
 
 
+def test_doctor_reports_missing_transport_when_only_lint_enabled() -> None:
+    """Doctor validates transport when only ai.lint is enabled."""
+    results = check_ai_configuration(AIConfig(enabled=True, lint=True, review=False))
+    assert_that(results).is_length(1)
+    assert_that(results[0].name).is_equal_to("ai.transport")
+    assert_that(results[0].message).contains("ai.lint or ai.review")
+
+
+def test_doctor_reports_missing_transport_when_only_review_enabled() -> None:
+    """Doctor validates transport when only ai.review is enabled."""
+    results = check_ai_configuration(AIConfig(enabled=True, lint=False, review=True))
+    assert_that(results).is_length(1)
+    assert_that(results[0].name).is_equal_to("ai.transport")
+
+
+def test_doctor_skips_when_master_switch_off() -> None:
+    """Sub-toggles alone (master off) produce no doctor checks."""
+    results = check_ai_configuration(AIConfig(enabled=False, lint=True, review=True))
+    assert_that(results).is_empty()
+
+
 def test_doctor_reports_cursor_api_combo_when_enabled() -> None:
     """Doctor surfaces invalid cursor+api instead of raw config validation."""
     results = check_ai_configuration(

@@ -326,19 +326,12 @@ def test_check_command_output_file(
 # =============================================================================
 
 
-def test_check_function_calls_command(mock_run_lint_tools_check: MagicMock) -> None:
-    """Verify check() function invokes the check_command.
-
-    Args:
-        mock_run_lint_tools_check: Mock for the run_lint_tools_check function.
-    """
-    with patch("lintro.cli_utils.commands.check.CliRunner") as mock_runner_cls:
-        mock_runner = MagicMock()
-        mock_result = MagicMock()
-        mock_result.exit_code = 0
-        mock_runner.invoke.return_value = mock_result
-        mock_runner_cls.return_value = mock_runner
-
+def test_check_function_calls_command() -> None:
+    """Verify check() routes through the library API."""
+    with patch(
+        "lintro.api.core.run_lint_tools_simple",
+        return_value=0,
+    ) as mock_run:
         check(
             paths=("src",),
             tools="ruff",
@@ -353,18 +346,12 @@ def test_check_function_calls_command(mock_run_lint_tools_check: MagicMock) -> N
             no_log=False,
         )
 
-        mock_runner.invoke.assert_called_once()
+        mock_run.assert_called_once()
 
 
 def test_check_function_exits_on_failure() -> None:
     """Verify check() function exits with non-zero code on failure."""
-    with patch("lintro.cli_utils.commands.check.CliRunner") as mock_runner_cls:
-        mock_runner = MagicMock()
-        mock_result = MagicMock()
-        mock_result.exit_code = 1
-        mock_runner.invoke.return_value = mock_result
-        mock_runner_cls.return_value = mock_runner
-
+    with patch("lintro.api.core.run_lint_tools_simple", return_value=1):
         with pytest.raises(SystemExit) as exc_info:
             check(
                 paths=("src",),

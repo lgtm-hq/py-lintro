@@ -7,6 +7,7 @@ with thread-safe message tracking for parallel execution.
 from __future__ import annotations
 
 import re
+import sys
 import threading
 from collections.abc import Sequence
 from pathlib import Path
@@ -44,6 +45,7 @@ class ThreadSafeConsoleLogger:
         run_dir: Path | None = None,
         *,
         route_stderr: bool = False,
+        art_enabled: bool = True,
     ) -> None:
         """Initialize the ThreadSafeConsoleLogger.
 
@@ -53,9 +55,13 @@ class ThreadSafeConsoleLogger:
                 to stderr instead of stdout. Used for machine-readable output
                 formats (JSON/SARIF) so stdout carries only the final
                 parseable document.
+            art_enabled: When True (default), decorative ASCII art may be
+                printed to an interactive TTY. When False (config
+                ``output.art: false`` or ``--no-art``), art is suppressed.
         """
         self.run_dir = run_dir
         self.route_stderr = route_stderr
+        self.art_enabled = art_enabled
         self._messages: list[str] = []
         self._lock = threading.Lock()
 
@@ -408,18 +414,39 @@ class ThreadSafeConsoleLogger:
             total_remaining=total_remaining,
         )
 
+    def _emit_untracked(self, text: str) -> None:
+        """Write text to the console without tracking it in the buffer.
+
+        Decorative output such as ASCII art must reach an interactive
+        terminal but must never be captured into ``self._messages``, which
+        backs ``console.log`` and the ``report.md`` console dump. Writing
+        directly with :func:`click.echo` keeps the art off those
+        machine-facing artifacts.
+
+        Args:
+            text: Text to display on the console.
+        """
+        click.echo(text, err=self.route_stderr)
+
     def _print_ascii_art(
         self,
         total_issues: int,
     ) -> None:
         """Print ASCII art based on the number of issues.
 
+        Art is emitted via an untracked writer so it never lands in the
+        captured console buffer (``report.md`` / ``console.log``), and only
+        when enabled and stdout is an interactive TTY (enforced by
+        :func:`print_ascii_art`).
+
         Args:
             total_issues: The total number of issues found.
         """
         print_ascii_art(
-            console_output_func=self.console_output,
+            console_output_func=self._emit_untracked,
             issue_count=total_issues,
+            enabled=self.art_enabled,
+            output_stream=sys.stderr if self.route_stderr else sys.stdout,
         )
 
     def print_lintro_header(self) -> None:

@@ -12,16 +12,12 @@ from lintro.tools.implementations.ruff.check import execute_ruff_check
 def test_execute_ruff_check_uses_cwd_for_config_discovery(
     mock_ruff_tool: MagicMock,
 ) -> None:
-    """Use cwd for config file discovery.
+    """Use cwd from the prepared execution context for config discovery.
 
     Args:
         mock_ruff_tool: Mock RuffTool instance for testing.
     """
     with (
-        patch(
-            "lintro.tools.implementations.ruff.check.walk_files_with_excludes",
-            return_value=["/test/project/test.py"],
-        ),
         patch(
             "lintro.tools.implementations.ruff.check.run_subprocess_with_timeout",
             return_value=(True, "[]"),
@@ -33,10 +29,10 @@ def test_execute_ruff_check_uses_cwd_for_config_discovery(
     ):
         execute_ruff_check(mock_ruff_tool, ["/test/project"])
 
-        # Verify _get_cwd was called to determine working directory
-        mock_ruff_tool._get_cwd.assert_called()
+        # Verify the shared preparation pipeline resolved the working directory
+        mock_ruff_tool._prepare_execution.assert_called()
 
-        # Verify subprocess was called with cwd
+        # Verify subprocess was called with cwd from the execution context
         mock_subprocess.assert_called()
         call_kwargs = mock_subprocess.call_args
         assert_that(call_kwargs.kwargs.get("cwd")).is_equal_to("/test/project")
@@ -56,10 +52,6 @@ def test_execute_ruff_check_with_config_args(
     ]
 
     with (
-        patch(
-            "lintro.tools.implementations.ruff.check.walk_files_with_excludes",
-            return_value=["test.py"],
-        ),
         patch(
             "lintro.tools.implementations.ruff.check.run_subprocess_with_timeout",
             return_value=(True, "[]"),

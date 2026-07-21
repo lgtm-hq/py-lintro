@@ -11,6 +11,7 @@ from assertpy import assert_that
 from lintro.enums.tool_name import ToolName
 from lintro.parsers.hadolint.hadolint_issue import HadolintIssue
 from lintro.tools.definitions.hadolint import HadolintPlugin
+from tests.test_samples_helpers import copy_sample
 
 # =============================================================================
 # Tests for HadolintPlugin.check method with mocked subprocess
@@ -27,7 +28,14 @@ def test_check_with_issues(hadolint_plugin: HadolintPlugin, tmp_path: Path) -> N
     import pathlib
 
     dockerfile = pathlib.Path(tmp_path) / "Dockerfile"
-    dockerfile.write_text("FROM python\n")
+    dockerfile = copy_sample(
+        tmp_path,
+        "tools",
+        "config",
+        "docker",
+        "Dockerfile.simple",
+        dest_name="Dockerfile",
+    )
 
     mock_output = "Dockerfile:1 DL3006 warning: Always tag the version of an image"
     mock_result = (False, mock_output)
@@ -102,7 +110,14 @@ def test_parse_single_issue(hadolint_plugin: HadolintPlugin, tmp_path: Path) -> 
     import pathlib
 
     dockerfile = pathlib.Path(tmp_path) / "Dockerfile"
-    dockerfile.write_text("FROM python\n")
+    dockerfile = copy_sample(
+        tmp_path,
+        "tools",
+        "config",
+        "docker",
+        "Dockerfile.simple",
+        dest_name="Dockerfile",
+    )
 
     mock_output = (
         "Dockerfile:1 DL3006 error: Always tag the version of an image explicitly"
@@ -143,7 +158,14 @@ def test_parse_multiple_issues(hadolint_plugin: HadolintPlugin, tmp_path: Path) 
     import pathlib
 
     dockerfile = pathlib.Path(tmp_path) / "Dockerfile"
-    dockerfile.write_text("FROM python\nRUN apt-get update\n")
+    dockerfile = copy_sample(
+        tmp_path,
+        "tools",
+        "config",
+        "docker",
+        "Dockerfile.with_apt_update",
+        dest_name="Dockerfile",
+    )
 
     mock_output = (
         "Dockerfile:1 DL3006 error: Always tag the version of an image explicitly\n"
