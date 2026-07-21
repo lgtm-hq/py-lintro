@@ -104,5 +104,6 @@ DEFAULT_TOOL_PRIORITIES: dict[str, int] = {
     ToolName.GOLANGCI_LINT: 85,
     ToolName.OSV_SCANNER: 90,
     ToolName.PIP_AUDIT: 90,
+    ToolName.TRUFFLEHOG: 90,
     ToolName.PYTEST: 100,
 }

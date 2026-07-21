@@ -94,6 +94,8 @@ Some tools require separate installation. Their minimum versions are also manage
   `pip install semgrep`, or `brew install semgrep`)
 - `gitleaks` - Secret detection in git repos (`brew install gitleaks` or GitHub
   releases)
+- `trufflehog` - Secret detection with 800+ credential detectors, verification disabled
+  by default (`brew install trufflehog` or GitHub releases)
 - `golangci-lint` - Go meta-linter running 100+ linters (`brew install golangci-lint` or
   <https://golangci-lint.run/welcome/install/>; requires the Go toolchain)
 - `shellcheck` - Shell script analyzer (`brew install shellcheck` or GitHub releases)

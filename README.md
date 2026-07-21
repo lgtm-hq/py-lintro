@@ -289,6 +289,12 @@ system.
 <td>-</td>
 <td><code>pipx install semgrep</code><br><code>pip install semgrep</code><br><code>brew install semgrep</code></td>
 </tr>
+<tr>
+<td><a href="https://github.com/trufflesecurity/trufflehog"><img src="https://img.shields.io/badge/TruffleHog-800000?logo=trufflesecurity&logoColor=white" alt="TruffleHog"></a></td>
+<td>🔐 Secret Detection</td>
+<td>-</td>
+<td><code>brew install trufflehog</code><br><a href="https://github.com/trufflesecurity/trufflehog/releases">GitHub Releases</a></td>
+</tr>
 <tr><th colspan="4">AI Tools</th></tr>
 <tr>
 <td><a href="docs/ai-features.md#ai-idiom-review-idiom-review-tool"><img src="https://img.shields.io/badge/idiom--review-6941c6?logo=openai&logoColor=white" alt="idiom-review"></a></td>
