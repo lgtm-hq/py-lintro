@@ -21,6 +21,12 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.91.2] - 2026-07-21
+
+### Fixed
+
+- **security**: bump fast-uri and svgo past new advisories (#1597) (bb991c0)
+
 ## [0.91.1] - 2026-07-21
 
 ### Fixed
