@@ -15,7 +15,7 @@ This analysis describes Lintro's TruffleHog wrapper and how it complements the e
 
 - **800+ detectors**: provider-specific patterns (GitHub, AWS, GCP, Slack, ...)
 - **Verification**: `--no-verification` toggles live credential checking
-- **Scan sources**: `filesystem`, `git`, `github`, `s3`, `gcs`, Docker images
+- **Scan sources**: `filesystem`, `git`, `GitHub`, `s3`, `gcs`, Docker images
 - **Result filtering**: `--results verified,unverified,unknown`
 - **Custom detectors**: `--config`
 - **Path filtering**: `--include-paths` / `--exclude-paths`
@@ -53,15 +53,16 @@ name/type, verification status, decoder, source metadata (file + line), and dete
 ### Safety hardening
 
 TruffleHog exits `0` for clean scans, for findings (unless `--fail` is passed), **and
-even when it cannot read a scan target** (it logs `encountered errors during scan` and
-produces no findings). A secrets scanner must never report a clean pass from a scan that
-did not run. The wrapper therefore:
+even when it cannot read a scan target** (it logs `encountered errors during scan`;
+other targets in the same run may still emit partial findings). A secrets scanner must
+never report a clean pass from a scan that did not run. The wrapper therefore:
 
 - Resolves every requested path to an **absolute path** before scanning, because a
   relative path that does not resolve against TruffleHog's working directory yields a
   silent empty result.
 - Treats non-empty-but-unparseable stdout as a **parse failure** (see #1044).
-- Treats `encountered errors during scan` with empty stdout as a **failure**.
+- Treats `encountered errors during scan` as a **failure**, even when partial findings
+  were emitted for other targets.
 
 ### Options
 

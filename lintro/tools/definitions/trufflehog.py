@@ -16,6 +16,7 @@ secrets.
 
 from __future__ import annotations
 
+import os
 import subprocess  # nosec B404 - used safely with shell disabled
 from dataclasses import dataclass
 from pathlib import Path
@@ -42,6 +43,79 @@ from lintro.tools.core.option_validators import (
 TRUFFLEHOG_DEFAULT_TIMEOUT: int = 60
 TRUFFLEHOG_DEFAULT_PRIORITY: int = 90  # High priority for security tool
 TRUFFLEHOG_FILE_PATTERNS: list[str] = ["*"]  # Scans all files
+
+# TruffleHog's ``filesystem`` mode takes explicit file paths in argv. A large
+# repository can hold tens of thousands of files, and expanding them all into a
+# single invocation would exceed the OS ``ARG_MAX`` limit, making ``execve``
+# fail with ``E2BIG`` (surfaced as an ``OSError`` that fails the whole scan). We
+# batch the paths under a byte budget derived from ``ARG_MAX`` with headroom for
+# the environment block and the fixed command prefix.
+_ARGV_SAFETY_HEADROOM_BYTES: int = 4096
+_ARGV_FALLBACK_LIMIT_BYTES: int = 131072  # POSIX-guaranteed ARG_MAX minimum.
+
+
+def _argv_byte_budget() -> int:
+    """Return a safe byte budget for path arguments on one command line.
+
+    The budget is derived from the OS ``ARG_MAX`` limit, reserving room for the
+    current environment block (``execve`` counts it against the same limit) and
+    a fixed safety margin. Falls back to the POSIX-guaranteed minimum when
+    ``ARG_MAX`` cannot be queried.
+
+    Returns:
+        The maximum number of argument-data bytes to place on one command line.
+    """
+    try:
+        arg_max = os.sysconf("SC_ARG_MAX")
+    except (ValueError, OSError, AttributeError):
+        arg_max = _ARGV_FALLBACK_LIMIT_BYTES
+    if not isinstance(arg_max, int) or arg_max <= 0:
+        arg_max = _ARGV_FALLBACK_LIMIT_BYTES
+
+    env_bytes = sum(len(k) + len(v) + 2 for k, v in os.environ.items())
+    budget = arg_max - env_bytes - _ARGV_SAFETY_HEADROOM_BYTES
+    # Always leave room for at least a moderately long single path per batch.
+    return max(budget, _ARGV_SAFETY_HEADROOM_BYTES)
+
+
+def _chunk_source_paths(
+    source_paths: list[str],
+    *,
+    fixed_arg_bytes: int,
+) -> list[list[str]]:
+    """Split resolved file paths into ARG_MAX-safe batches.
+
+    Batches preserve input order so scan output is deterministic. A single path
+    that alone exceeds the budget is still placed in its own batch (the OS, not
+    lintro, then decides whether it is too long); this keeps the function total
+    and never silently drops a file from the scan.
+
+    Args:
+        source_paths: Absolute file paths to scan, in a stable order.
+        fixed_arg_bytes: Byte length of the non-path portion of the command
+            (executable, subcommand, flags), which counts against the same
+            OS limit.
+
+    Returns:
+        A list of path batches, each safe to place on one command line.
+    """
+    budget = max(_argv_byte_budget() - fixed_arg_bytes, 1)
+
+    batches: list[list[str]] = []
+    current: list[str] = []
+    current_bytes = 0
+    for path in source_paths:
+        # +1 for the argv NUL terminator the kernel accounts per argument.
+        path_bytes = len(path.encode("utf-8", "surrogatepass")) + 1
+        if current and current_bytes + path_bytes > budget:
+            batches.append(current)
+            current = []
+            current_bytes = 0
+        current.append(path)
+        current_bytes += path_bytes
+    if current:
+        batches.append(current)
+    return batches
 
 
 @register_tool
@@ -188,21 +262,81 @@ class TrufflehogPlugin(BaseToolPlugin):
         if ctx.should_skip:
             return ctx.early_result  # type: ignore[return-value]
 
-        # Scan the discovered, filtered file set — not the raw CLI paths — so
+        # Scan the discovered, filtered file set — never the raw CLI paths — so
         # that .lintro-ignore exclusions (test_samples/, .venv, build dirs, …)
-        # and the venv filter are honored exactly like every other tool. Using
-        # the prepared absolute file list also preserves the security guarantee
-        # below: TruffleHog resolves relative paths against its own working
-        # directory, and an unresolved path makes it exit 0 with no output,
-        # which a secrets scanner must never treat as a clean pass. TruffleHog's
-        # filesystem mode accepts multiple explicit paths, so pass each file.
-        if ctx.files:
-            source_paths = [str(Path(f).resolve()) for f in ctx.files]
-        elif paths:
-            source_paths = [str(Path(p).resolve()) for p in paths]
-        else:
-            source_paths = [str(Path.cwd())]
+        # and the venv filter are honored exactly like every other tool. When
+        # filtering removes every file, ``_prepare_execution`` already returned
+        # a no-files result above, so ``ctx.files`` is guaranteed non-empty here
+        # and there is no unfiltered fallback that could reintroduce excluded
+        # targets.
+        #
+        # Absolute paths are required: TruffleHog resolves relative paths
+        # against its own working directory, and an unresolved path makes it
+        # exit 0 with no output, which a secrets scanner must never treat as a
+        # clean pass. A stable sort keeps batch boundaries and aggregated output
+        # deterministic.
+        source_paths = sorted(str(Path(f).resolve()) for f in ctx.files)
 
+        # Expanding every file into one invocation can exceed ARG_MAX on large
+        # repositories, so batch the paths under a byte budget and merge the
+        # per-batch results into a single ToolResult.
+        fixed_args = self._build_check_command(source_paths=[])
+        fixed_arg_bytes = sum(
+            len(a.encode("utf-8", "surrogatepass")) + 1 for a in fixed_args
+        )
+        batches = _chunk_source_paths(source_paths, fixed_arg_bytes=fixed_arg_bytes)
+        logger.debug(
+            f"[trufflehog] Scanning {len(source_paths)} files in "
+            f"{len(batches)} batch(es) (cwd={ctx.cwd})",
+        )
+
+        all_issues: list[Any] = []
+        failures: list[ToolResult] = []
+        for batch in batches:
+            batch_result = self._scan_batch(source_paths=batch, ctx=ctx)
+            if batch_result.issues:
+                all_issues.extend(batch_result.issues)
+            if not batch_result.success:
+                failures.append(batch_result)
+
+        if failures:
+            combined = "\n".join(f.output for f in failures if f.output)
+            return ToolResult(
+                name=self.definition.name,
+                success=False,
+                output=combined or "TruffleHog failed with a non-zero exit code.",
+                issues=all_issues,
+                issues_count=len(all_issues),
+                parse_failures_count=sum(
+                    (f.parse_failures_count or 0) for f in failures
+                ),
+            )
+
+        return ToolResult(
+            name=self.definition.name,
+            success=True,
+            output=None,
+            issues=all_issues,
+            issues_count=len(all_issues),
+            parse_failures_count=0,
+        )
+
+    def _scan_batch(
+        self,
+        *,
+        source_paths: list[str],
+        ctx: Any,
+    ) -> ToolResult:
+        """Scan one ARG_MAX-safe batch of files and interpret the result.
+
+        Args:
+            source_paths: Absolute file paths for this batch.
+            ctx: The prepared execution context (supplies timeout and cwd).
+
+        Returns:
+            A ToolResult for the batch: ``success`` False on any execution,
+            scan, or parse failure, with any emitted findings preserved.
+        """
         cmd = self._build_check_command(source_paths=source_paths)
         logger.debug(
             f"[trufflehog] Running: {' '.join(cmd[:10])}... (cwd={ctx.cwd})",
@@ -266,7 +400,7 @@ class TrufflehogPlugin(BaseToolPlugin):
         # run — even if other targets produced findings — so surface this as a
         # failure while keeping any findings that were emitted (see #1044).
         if "encountered errors during scan" in stderr:
-            logger.error("TruffleHog reported scan errors: %s", stderr[:500])
+            logger.error(f"TruffleHog reported scan errors: {stderr[:500]}")
             partial = parse_trufflehog_output(output=stdout) if stdout else []
             return ToolResult(
                 name=self.definition.name,
