@@ -21,6 +21,12 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.91.1] - 2026-07-21
+
+### Fixed
+
+- **security**: make external plugin loading opt-in with a trust model (#1256) (29e47df)
+
 ## [0.91.0] - 2026-07-21
 
 ### Added
