@@ -886,10 +886,10 @@ lintro check --tools gitleaks --tool-options gitleaks:max_target_megabytes=10
 
 #### TruffleHog Configuration
 
-TruffleHog is a secrets scanner with 800+ provider-specific detectors and optional
-live credential verification. Lintro runs it in `filesystem` mode. **Verification is
-disabled by default** (`--no-verification`) so scans never make outbound network calls
-to third-party providers; it can be re-enabled per run if you accept that trade-off.
+TruffleHog is a secrets scanner with 800+ provider-specific detectors and optional live
+credential verification. Lintro runs it in `filesystem` mode. **Verification is disabled
+by default** (`--no-verification`) so scans never make outbound network calls to
+third-party providers; it can be re-enabled per run if you accept that trade-off.
 TruffleHog is configured via CLI options (there is no default config file).
 
 **Install:** `brew install trufflehog` or
@@ -905,10 +905,9 @@ TruffleHog is configured via CLI options (there is no default config file).
 | `exclude_paths`   | string  | Path to a file of newline-separated exclude regexes  |
 | `concurrency`     | integer | Number of concurrent workers                         |
 
-> **Note:** `--tool-options` uses commas to separate options, so a
-> comma-separated `results` value (e.g. `verified,unverified`) cannot be passed
-> on the CLI. Use a single value such as `results=unverified`, or leave it unset
-> to report every result type.
+> **Note:** `--tool-options` uses commas to separate options, so a comma-separated
+> `results` value (e.g. `verified,unverified`) cannot be passed on the CLI. Use a single
+> value such as `results=unverified`, or leave it unset to report every result type.
 
 **Usage Examples:**
 
