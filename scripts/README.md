@@ -83,6 +83,18 @@ renders, validates, and auto-merges `Formula/lintro.rb` (binary) and
 `Formula/lintro-full.rb` (PyPI full install). Only release-support helpers remain here
 (see Homebrew Scripts below).
 
+### 🪞 Mirror Release Scripts (`ci/mirror/`)
+
+Scripts that sync the `lgtm-hq/lintro-pre-commit` pre-commit mirror on each
+py-lintro release (see [pre-commit integration](../docs/pre-commit.md)). Driven
+by `.github/workflows/mirror-release.yml`.
+
+| Script                      | Purpose                                                    | Usage                                                                              |
+| --------------------------- | ---------------------------------------------------------- | ---------------------------------------------------------------------------------- |
+| `resolve-version.sh`        | Resolve the release tag/version and prerelease flag        | `RELEASE_TAG=v1.2.3 ./scripts/ci/mirror/resolve-version.sh`                        |
+| `bump_pin.py`               | Rewrite/verify the `lintro==X.Y.Z` pin in mirror pyproject | `python3 scripts/ci/mirror/bump_pin.py --pyproject pyproject.toml --version 1.2.3` |
+| `publish-mirror-release.sh` | Bump pin, merge the version-bump PR, and tag the mirror    | `GH_TOKEN=… ./scripts/ci/mirror/publish-mirror-release.sh 1.2.3`                   |
+
 ### 🔧 CI/CD Scripts (`ci/`)
 
 Scripts for GitHub Actions workflows and continuous integration.

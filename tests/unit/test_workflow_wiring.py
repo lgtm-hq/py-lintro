@@ -890,6 +890,118 @@ def test_docker_ci_detect_step_has_no_pipeline_allow_list() -> None:
     assert_that(checkout_steps[0]["with"]["fetch-depth"]).is_equal_to(0)
 
 
+_SHA_PIN_RE = re.compile(r"@[0-9a-f]{40}$")
+
+
+def _job_steps(workflow: dict[str, Any], *, job: str) -> list[dict[str, Any]]:
+    """Return the ordered steps of a workflow job.
+
+    Args:
+        workflow: Parsed workflow document.
+        job: Job key.
+
+    Returns:
+        The job's ``steps`` list.
+    """
+    return cast(list[dict[str, Any]], workflow["jobs"][job]["steps"])
+
+
+def test_mirror_release_triggers_on_published_release() -> None:
+    """Mirror bump runs on release publish plus a manual dispatch fallback."""
+    workflow = _load_workflow(name="mirror-release.yml")
+    triggers = workflow["on"]
+
+    assert_that(triggers).contains_key("release", "workflow_dispatch")
+    assert_that(triggers["release"]["types"]).contains("published")
+    assert_that(triggers["workflow_dispatch"]["inputs"]).contains_key("release_tag")
+
+
+def test_mirror_release_job_is_read_only_in_source_repo() -> None:
+    """Cross-repo writes use MIRROR_REPO_TOKEN; source-repo perms stay read-only."""
+    workflow = _load_workflow(name="mirror-release.yml")
+
+    assert_that(workflow["permissions"]).is_equal_to({})
+    assert_that(workflow["jobs"]["mirror-bump"]["permissions"]).is_equal_to(
+        {"contents": "read"},
+    )
+
+
+def test_mirror_release_hardens_runner_with_blocked_egress() -> None:
+    """First step hardens the runner and blocks egress to an allowlist."""
+    workflow = _load_workflow(name="mirror-release.yml")
+    first = _job_steps(workflow, job="mirror-bump")[0]
+
+    assert_that(first["uses"]).starts_with("step-security/harden-runner@")
+    assert_that(first["with"]["egress-policy"]).is_equal_to("block")
+    endpoints = first["with"]["allowed-endpoints"]
+    assert_that(endpoints).contains("pypi.org:443")
+    assert_that(endpoints).contains("files.pythonhosted.org:443")
+    assert_that(endpoints).contains("api.github.com:443")
+
+
+def test_mirror_release_actions_are_sha_pinned() -> None:
+    """Every third-party action in the mirror workflow is pinned to a commit SHA."""
+    workflow = _load_workflow(name="mirror-release.yml")
+    uses = [
+        step["uses"]
+        for step in _job_steps(workflow, job="mirror-bump")
+        if "uses" in step
+    ]
+
+    assert_that(uses).is_not_empty()
+    for ref in uses:
+        assert_that(_SHA_PIN_RE.search(ref)).described_as(ref).is_not_none()
+
+
+def test_mirror_release_uses_cross_repo_token() -> None:
+    """The mirror checkout and publish step authenticate with MIRROR_REPO_TOKEN."""
+    workflow = _load_workflow(name="mirror-release.yml")
+    steps = _job_steps(workflow, job="mirror-bump")
+
+    checkout = next(
+        step
+        for step in steps
+        if step.get("with", {}).get("repository") == "lgtm-hq/lintro-pre-commit"
+    )
+    assert_that(checkout["with"]["token"]).contains("secrets.MIRROR_REPO_TOKEN")
+
+    publish = next(
+        step for step in steps if "publish-mirror-release.sh" in step.get("run", "")
+    )
+    assert_that(publish["env"]["GH_TOKEN"]).contains("secrets.MIRROR_REPO_TOKEN")
+
+
+def test_mirror_release_skips_prereleases() -> None:
+    """Wheel-dependent steps are guarded on a non-prerelease resolution."""
+    workflow = _load_workflow(name="mirror-release.yml")
+    steps = _job_steps(workflow, job="mirror-bump")
+    guard = "steps.resolve.outputs.is_prerelease == 'false'"
+
+    for needle in ("wait-for-pypi.sh", "publish-mirror-release.sh"):
+        step = next(s for s in steps if needle in s.get("run", ""))
+        assert_that(step["if"]).contains(guard)
+
+    mirror_checkout = next(
+        s
+        for s in steps
+        if s.get("with", {}).get("repository") == "lgtm-hq/lintro-pre-commit"
+    )
+    assert_that(mirror_checkout["if"]).contains(guard)
+
+
+def test_mirror_release_scripts_are_executable() -> None:
+    """The CI scripts referenced by the mirror workflow exist and are executable."""
+    scripts = (
+        _REPO_ROOT / "scripts" / "ci" / "mirror" / "resolve-version.sh",
+        _REPO_ROOT / "scripts" / "ci" / "mirror" / "publish-mirror-release.sh",
+        _REPO_ROOT / "scripts" / "ci" / "mirror" / "bump_pin.py",
+    )
+    for script in scripts:
+        assert_that(script.exists()).described_as(str(script)).is_true()
+        assert_that(script.stat().st_mode & 0o111).described_as(
+            f"{script} is not executable",
+        ).is_not_zero()
+
 def test_publish_npm_exposes_dist_tag_for_backfills() -> None:
     """publish-npm accepts dist_tag and forwards it as NPM_DIST_TAG."""
     workflow = _load_workflow(name="publish-npm.yml")

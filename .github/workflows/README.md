@@ -32,6 +32,10 @@ trailing `# vX.Y.Z` comments so Renovate can track digest updates. Policy is enf
 - **release-auto-tag.yml** — Creates tags on release commits via
   `reusable-release-auto-tag.yml` (`create-release: false`; GitHub Release is created by
   publish workflow)
+- **mirror-release.yml** — On `release: published`, bumps the `lintro` pin in the
+  `lgtm-hq/lintro-pre-commit` mirror, merges the version-bump PR, and tags the
+  mirror `vX.Y.Z` so pre-commit consumers install the matching wheel (scripts under
+  `scripts/ci/mirror/`; see `docs/pre-commit.md`)
 
 Both callers set a dynamic `run-name` (event + branch) so post-merge release failures
 are traceable from the Actions list rather than the default commit subject. Failure
@@ -74,6 +78,9 @@ on `main` failures — hence the `actions: read` + `issues: write` job permissio
 - **`secrets.GITHUB_TOKEN`** — CI, PR comments, artifacts
 - **`secrets.RELEASE_APP_*`** — Release PR and auto-tag (GitHub App installation token
   via lgtm-ci release workflows)
+- **`secrets.MIRROR_REPO_TOKEN`** — Cross-repo write to `lgtm-hq/lintro-pre-commit`
+  (fine-grained PAT or GitHub App token with contents + pull-requests write on that
+  repo) used by `mirror-release.yml`
 
 ## Concurrency
 
