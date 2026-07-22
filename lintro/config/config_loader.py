@@ -208,12 +208,13 @@ def _parse_execution_config(data: dict[str, Any]) -> ExecutionConfig:
     )
 
 
-def _parse_tool_config(data: dict[str, Any]) -> LintroToolConfig:
+def _parse_tool_config(tool_name: str, data: dict[str, Any]) -> LintroToolConfig:
     """Parse a single tool configuration.
 
     In the tiered model, tools only have enabled and optional config_source.
 
     Args:
+        tool_name: Name of the tool being parsed (used in error messages).
         data: Raw tool configuration dict.
 
     Returns:
@@ -231,7 +232,7 @@ def _parse_tool_config(data: dict[str, Any]) -> LintroToolConfig:
     elif auto_install_raw is not None:
         type_name = type(auto_install_raw).__name__
         raise ValueError(
-            f"tools.<name>.auto_install must be a boolean, got {type_name}",
+            f"tools.{tool_name}.auto_install must be a boolean, got {type_name}",
         )
 
     return LintroToolConfig(
@@ -254,7 +255,10 @@ def _parse_tools_config(data: dict[str, Any]) -> dict[str, LintroToolConfig]:
 
     for tool_name, tool_data in data.items():
         if isinstance(tool_data, dict):
-            tools[tool_name.lower()] = _parse_tool_config(tool_data)
+            tools[tool_name.lower()] = _parse_tool_config(
+                tool_name.lower(),
+                tool_data,
+            )
         elif isinstance(tool_data, bool):
             # Simple enabled/disabled flag
             tools[tool_name.lower()] = LintroToolConfig(enabled=tool_data)
@@ -602,10 +606,28 @@ def load_config(
                 "Consider migrating to .lintro-config.yaml",
             )
 
-    # Parse enforce config
-    enforce_data = data.get("enforce", {})
+    return build_config_from_dict(data, resolved_path=resolved_path)
 
-    enforce_config = _parse_enforce_config(enforce_data)
+
+def build_config_from_dict(
+    data: dict[str, Any],
+    resolved_path: str | None = None,
+) -> LintroConfig:
+    """Build a ``LintroConfig`` from an already-parsed configuration mapping.
+
+    This runs the typed section parsers (which raise ``ValueError`` on invalid
+    values) against a normalized config dict. It is shared by ``load_config``
+    and by the config validator so that pyproject-derived data can be checked
+    with the same typed logic without round-tripping through the YAML loader.
+
+    Args:
+        data: Normalized configuration mapping (post pyproject conversion).
+        resolved_path: Resolved path recorded on the returned config, if any.
+
+    Returns:
+        LintroConfig: The fully parsed configuration.
+    """
+    enforce_config = _parse_enforce_config(data.get("enforce", {}))
     execution_config = _parse_execution_config(data.get("execution", {}))
     defaults = _parse_defaults(data.get("defaults", {}))
     tools_config = _parse_tools_config(data.get("tools", {}))
