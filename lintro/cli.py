@@ -1,5 +1,7 @@
 """Command-line interface for Lintro."""
 
+import os
+from pathlib import Path
 from typing import Any, cast
 
 import click
@@ -34,6 +36,100 @@ from lintro.cli_utils.commands.test import test_command  # noqa: E402
 from lintro.cli_utils.commands.versions import versions_command  # noqa: E402
 from lintro.tools.core.runtime_discovery import clear_discovery_cache  # noqa: E402
 from lintro.utils.config import clear_pyproject_cache  # noqa: E402
+
+# Lintro-specific config files that live in the current working directory and
+# feed the discovery/pyproject caches. `pyproject.toml` is handled separately
+# because it may live in a parent directory.
+_LINTRO_CONFIG_FILENAMES: tuple[str, ...] = (
+    ".lintro-config.yaml",
+    ".lintro-config.yml",
+    "lintro-config.yaml",
+    "lintro-config.yml",
+    ".lintro-ignore",
+)
+
+# Truthy values accepted for the LINTRO_NO_CACHE escape hatch.
+_TRUTHY_ENV_VALUES: frozenset[str] = frozenset({"1", "true", "yes", "on"})
+
+# Fingerprint of the config inputs seen during the previous in-process
+# invocation. `None` means no invocation has run yet, so the first call in a
+# process always clears the caches and starts fresh.
+_last_config_fingerprint: tuple[Any, ...] | None = None
+
+
+def _stat_signature(path: Path) -> tuple[str, int, int] | None:
+    """Return a stat-based signature for a config file.
+
+    Args:
+        path: Path: The candidate config file to inspect.
+
+    Returns:
+        tuple[str, int, int] | None: A ``(path, size, mtime_ns)`` tuple when the
+        file exists and is readable, otherwise ``None``.
+    """
+    try:
+        stat_result = path.stat()
+    except OSError:
+        return None
+    return (str(path), stat_result.st_size, stat_result.st_mtime_ns)
+
+
+def _compute_config_fingerprint() -> tuple[Any, ...]:
+    """Compute a fingerprint of the config inputs for the current directory.
+
+    The fingerprint combines the resolved working directory with the size and
+    modification time of the ``pyproject.toml`` (searched upward) and any
+    Lintro-specific config files in the working directory. Two invocations that
+    produce the same fingerprint may safely reuse the discovery and pyproject
+    caches.
+
+    Returns:
+        tuple[Any, ...]: A hashable, comparable fingerprint of the config inputs.
+    """
+    cwd = Path.cwd().resolve()
+    signatures: list[tuple[str, int, int] | None] = []
+
+    # pyproject.toml may live in a parent directory; use the nearest one.
+    for parent in [cwd, *cwd.parents]:
+        candidate = parent / "pyproject.toml"
+        if candidate.exists():
+            signatures.append(_stat_signature(candidate))
+            break
+    else:
+        signatures.append(None)
+
+    for filename in _LINTRO_CONFIG_FILENAMES:
+        signatures.append(_stat_signature(cwd / filename))
+
+    return (str(cwd), tuple(signatures))
+
+
+def _cache_clear_requested_via_env() -> bool:
+    """Report whether ``LINTRO_NO_CACHE`` forces cache clearing.
+
+    Returns:
+        bool: ``True`` when the ``LINTRO_NO_CACHE`` environment variable is set
+        to a truthy value, otherwise ``False``.
+    """
+    value = os.environ.get("LINTRO_NO_CACHE", "").strip().lower()
+    return value in _TRUTHY_ENV_VALUES
+
+
+def _maybe_clear_caches() -> None:
+    """Clear discovery/pyproject caches only when config inputs changed.
+
+    The caches are cleared on the first invocation in a process, whenever the
+    config fingerprint differs from the previous invocation, or when the
+    ``LINTRO_NO_CACHE`` escape hatch is enabled. Otherwise the caches are reused
+    to avoid redundant filesystem probing and re-parsing.
+    """
+    global _last_config_fingerprint
+
+    fingerprint = _compute_config_fingerprint()
+    if _cache_clear_requested_via_env() or fingerprint != _last_config_fingerprint:
+        clear_discovery_cache()
+        clear_pyproject_cache()
+    _last_config_fingerprint = fingerprint
 
 
 class LintroGroup(click.Group):
@@ -153,10 +249,12 @@ class LintroGroup(click.Group):
         Raises:
             SystemExit: If a command exits with a non-zero exit code.
         """
-        # Clear caches at start of each invocation to ensure fresh tool
-        # detection and pyproject.toml loading across working directories
-        clear_discovery_cache()
-        clear_pyproject_cache()
+        # Clear the discovery/pyproject caches only when the config inputs
+        # changed since the last in-process invocation (or when forced via
+        # LINTRO_NO_CACHE). This keeps single-shot CLI semantics intact while
+        # avoiding redundant tool detection and pyproject.toml re-parsing when
+        # nothing relevant changed.
+        _maybe_clear_caches()
 
         all_args = ctx.protected_args + ctx.args
 
