@@ -44,65 +44,60 @@ def _jsonl_response(*, text: str = '{"summary": "ok"}') -> str:
     return "\n".join(lines)
 
 
-class TestCodexCliInit:
-    """Tests for Codex CLI transport initialization."""
-
-    def test_raises_when_codex_missing(self) -> None:
-        """Raise when the codex binary is not on PATH."""
-        with (
-            patch("lintro.ai.providers.openai._find_codex", return_value=None),
-            pytest.raises(AINotAvailableError, match="codex"),
-        ):
-            OpenAIProvider(transport=AITransport.CLI)
-
-    def test_cli_transport_available(self, _mock_codex_on_path: None) -> None:
-        """Report availability when the codex binary is discoverable."""
-        provider = OpenAIProvider(transport=AITransport.CLI)
-        assert_that(provider.is_available()).is_true()
+def test_codex_cli_init_raises_when_codex_missing() -> None:
+    """Raise when the codex binary is not on PATH."""
+    with (
+        patch("lintro.ai.providers.openai._find_codex", return_value=None),
+        pytest.raises(AINotAvailableError, match="codex"),
+    ):
+        OpenAIProvider(transport=AITransport.CLI)
 
 
-class TestCodexCliComplete:
-    """Tests for codex exec completions."""
-
-    def test_success(self, _mock_codex_on_path: None) -> None:
-        """Parse JSONL output from a successful codex exec invocation."""
-        provider = OpenAIProvider(model="gpt-5.2-codex", transport=AITransport.CLI)
-        stdout = _jsonl_response()
-        with patch("subprocess.run") as mock_run:
-            mock_run.return_value = subprocess.CompletedProcess(
-                args=[],
-                returncode=0,
-                stdout=stdout,
-                stderr="",
-            )
-            response = provider.complete("Review this diff", repo_root="/tmp/repo")
-
-        assert_that(response.content).contains("summary")
-        assert_that(response.provider).is_equal_to(AIProvider.OPENAI)
-        cmd = mock_run.call_args.args[0]
-        assert_that(cmd).contains("exec", "--json", "--sandbox", "read-only")
-        assert_that(cmd).contains("--model", "gpt-5.2-codex")
-
-    def test_auth_error(self, _mock_codex_on_path: None) -> None:
-        """Surface authentication failures from codex stderr."""
-        provider = OpenAIProvider(transport=AITransport.CLI)
-        with (
-            patch("subprocess.run") as mock_run,
-            pytest.raises(AIAuthenticationError, match="login"),
-        ):
-            mock_run.return_value = subprocess.CompletedProcess(
-                args=[],
-                returncode=1,
-                stdout="",
-                stderr="Not authenticated. Run codex login.",
-            )
-            provider.complete("hello", repo_root="/tmp/repo")
+def test_codex_cli_init_cli_transport_available(
+    _mock_codex_on_path: None,
+) -> None:
+    """Report availability when the codex binary is discoverable."""
+    provider = OpenAIProvider(transport=AITransport.CLI)
+    assert_that(provider.is_available()).is_true()
 
 
-class TestFindCodex:
-    """Tests for codex binary discovery."""
+def test_codex_cli_complete_success(_mock_codex_on_path: None) -> None:
+    """Parse JSONL output from a successful codex exec invocation."""
+    provider = OpenAIProvider(model="gpt-5.2-codex", transport=AITransport.CLI)
+    stdout = _jsonl_response()
+    with patch("subprocess.run") as mock_run:
+        mock_run.return_value = subprocess.CompletedProcess(
+            args=[],
+            returncode=0,
+            stdout=stdout,
+            stderr="",
+        )
+        response = provider.complete("Review this diff", repo_root="/tmp/repo")
 
-    def test_found(self) -> None:
-        """Return the codex path when shutil.which finds it."""
-        with patch("shutil.which", return_value="/usr/local/bin/codex"):
-            assert_that(_find_codex()).is_equal_to("/usr/local/bin/codex")
+    assert_that(response.content).contains("summary")
+    assert_that(response.provider).is_equal_to(AIProvider.OPENAI)
+    cmd = mock_run.call_args.args[0]
+    assert_that(cmd).contains("exec", "--json", "--sandbox", "read-only")
+    assert_that(cmd).contains("--model", "gpt-5.2-codex")
+
+
+def test_codex_cli_complete_auth_error(_mock_codex_on_path: None) -> None:
+    """Surface authentication failures from codex stderr."""
+    provider = OpenAIProvider(transport=AITransport.CLI)
+    with (
+        patch("subprocess.run") as mock_run,
+        pytest.raises(AIAuthenticationError, match="login"),
+    ):
+        mock_run.return_value = subprocess.CompletedProcess(
+            args=[],
+            returncode=1,
+            stdout="",
+            stderr="Not authenticated. Run codex login.",
+        )
+        provider.complete("hello", repo_root="/tmp/repo")
+
+
+def test_find_codex_found() -> None:
+    """Return the codex path when shutil.which finds it."""
+    with patch("shutil.which", return_value="/usr/local/bin/codex"):
+        assert_that(_find_codex()).is_equal_to("/usr/local/bin/codex")
