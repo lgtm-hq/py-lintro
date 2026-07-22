@@ -112,6 +112,7 @@ Scripts for GitHub Actions workflows and continuous integration.
 | `fail-on-security-audit.sh`          | Fail CI when security audit finds vulnerabilities                     | `./scripts/ci/fail-on-security-audit.sh`                                           |
 | `free-disk-space.sh`                 | Free disk space on CI runner for Docker builds                        | `./scripts/ci/free-disk-space.sh`                                                  |
 | `security-comment.sh`                | Run osv-scanner via lintro in Docker and generate security PR comment | `./scripts/ci/security-comment.sh --help`                                          |
+| `sign-dist-sigstore.sh`              | Keyless Sigstore signing of dist files into `.sigstore` bundles       | `DIST_DIR=dist ./scripts/ci/sign-dist-sigstore.sh`                                 |
 | `install-osv-scanner.sh`             | Download and verify osv-scanner with curl exit-23 retries             | `./scripts/ci/security/install-osv-scanner.sh`                                     |
 | `check-vuln-suppressions.sh`         | Verbose wrapper for lgtm-ci vulnerability suppression check           | `./scripts/ci/security/check-vuln-suppressions.sh`                                 |
 | `run-ai-review.sh`                   | Dogfood `lintro review` on a PR using trusted base-branch lintro      | `PR_NUMBER=123 ./scripts/ci/run-ai-review.sh`                                      |

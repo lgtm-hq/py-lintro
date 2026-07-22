@@ -429,6 +429,18 @@
       "datasourceTemplate": "github-tags",
       "packageNameTemplate": "rust-lang/rustfmt",
       "extractVersionTemplate": "^v(?<version>.*)$"
+    },
+    {
+      "description": "Update pinned sigstore CLI in sign-dist-sigstore.sh",
+      "customType": "regex",
+      "managerFilePatterns": [
+        "scripts/ci/sign-dist-sigstore\\.sh"
+      ],
+      "matchStrings": [
+        "SIGSTORE_VERSION=\"\\$\\{SIGSTORE_VERSION:-(?<currentValue>[0-9]+\\.[0-9]+\\.[0-9]+)\\}\""
+      ],
+      "datasourceTemplate": "pypi",
+      "packageNameTemplate": "sigstore"
     }
   ]
 }

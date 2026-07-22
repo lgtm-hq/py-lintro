@@ -184,9 +184,73 @@ jobs:
         with:
           subject-path: ${{ steps.prepare.outputs.dist-path }}/*
 
+  sign-artifacts:
+    name: Sign artifacts with Sigstore
+    needs: [pypi-upload]
+    if: >-
+      github.ref_type == 'tag' &&
+      !startsWith(github.ref_name, 'actions-v')
+    runs-on: ubuntu-latest
+    permissions:
+      # read: download the python-dist artifact to sign it
+      contents: read
+      # write: OIDC token for Sigstore keyless signing (Fulcio/Rekor)
+      id-token: write
+    steps:
+      - name: Harden runner
+        # yamllint disable-line rule:line-length
+        uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
+        with:
+          egress-policy: block
+          # pypi + astral: install the `sigstore` CLI via uvx.
+          # sigstore.dev endpoints: keyless signing exchanges the GitHub OIDC
+          # token at Fulcio for a short-lived cert, logs to Rekor, and refreshes
+          # the TUF trust root (same set already allowlisted for pypi-upload).
+          allowed-endpoints: >
+            github.com:443
+            api.github.com:443
+            codeload.github.com:443
+            objects.githubusercontent.com:443
+            actions.githubusercontent.com:443
+            *.blob.core.windows.net:443
+            pypi.org:443
+            files.pythonhosted.org:443
+            astral.sh:443
+            releases.astral.sh:443
+            fulcio.sigstore.dev:443
+            rekor.sigstore.dev:443
+            tuf-repo-cdn.sigstore.dev:443
+            oauth2.sigstore.dev:443
+      - name: Checkout repository
+        # yamllint disable-line rule:line-length
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        with:
+          persist-credentials: false
+      - name: Set up uv
+        # yamllint disable-line rule:line-length
+        uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7
+      - name: Download built distribution
+        # yamllint disable-line rule:line-length
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
+        with:
+          name: python-dist
+          path: dist
+      - name: Sign distribution with Sigstore
+        env:
+          DIST_DIR: dist
+        run: ./scripts/ci/sign-dist-sigstore.sh
+      - name: Upload signed distribution
+        # yamllint disable-line rule:line-length
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: python-dist-signed
+          # dist artifacts plus the .sigstore bundles produced above
+          path: dist/*
+          if-no-files-found: error
+
   github-release:
     name: Create GitHub Release
-    needs: [pypi-upload]
+    needs: [sign-artifacts]
     if: ${{ !startsWith(github.ref_name, 'actions-v') }}
     # yamllint disable-line rule:line-length
     uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-github-release.yml@31c25ef2e8992960e218524780e34f44f51271b5 # v0.54.0
@@ -194,7 +258,8 @@ jobs:
       # write: create GitHub Release and upload dist assets
       contents: write
     with:
-      artifact-name: python-dist
+      # signed artifact: dist files + Sigstore .sigstore bundles as assets
+      artifact-name: python-dist-signed
       generate-release-notes: true
       tooling-ref: '31c25ef2e8992960e218524780e34f44f51271b5' # v0.54.0
       egress-policy: block
