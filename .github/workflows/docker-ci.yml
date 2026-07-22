@@ -103,7 +103,7 @@ jobs:
             github.com:443
             api.github.com:443
       - name: Checkout
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
           persist-credentials: false
@@ -249,7 +249,7 @@ jobs:
             astral.sh:443
             releases.astral.sh:443
       - name: Checkout
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
       - name: Environment setup
@@ -318,7 +318,7 @@ jobs:
             semgrep.dev:443
             metrics.semgrep.dev:443
       - name: Checkout
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
       - name: Check if fork PR
@@ -464,7 +464,7 @@ jobs:
       contents: read
       packages: read # pull lintro-image from GHCR in reusable-quality-lint
     with:
-      tooling-ref: 'ee8484ca71db3a2c2c33da6128bbf2330fcd7c88'  # v0.59.2
+      tooling-ref: 'ee8484ca71db3a2c2c33da6128bbf2330fcd7c88' # v0.59.2
       job-name: '🛠️ Dogfooding Lint'
       lintro-tool-options: >-
         pydoclint:timeout=120,bandit:timeout=120,prettier:timeout=120,osv_scanner:check_suppressions=false
@@ -552,7 +552,7 @@ jobs:
             api.osv.dev:443
             api.deps.dev:443
       - name: Checkout
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           # Full history: the script diffs against merge-base(origin/<base>).
           fetch-depth: 0
@@ -658,7 +658,7 @@ jobs:
             api.osv.dev:443
             api.deps.dev:443
       - name: Checkout
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
       - name: Log in to GitHub Container Registry
@@ -720,7 +720,7 @@ jobs:
         ${{ needs.changes.outputs.lint-scope == 'changed'
         && needs.dogfooding-lint-changed.outputs.exit-code
         || needs.dogfooding-lint.outputs.exit-code }}
-      tooling-ref: 'ee8484ca71db3a2c2c33da6128bbf2330fcd7c88'  # v0.59.2
+      tooling-ref: 'ee8484ca71db3a2c2c33da6128bbf2330fcd7c88' # v0.59.2
       job-name: '🛠️ Dogfooding Lint PR Comment'
       egress-policy: block
 
@@ -749,7 +749,7 @@ jobs:
     permissions:
       contents: read
     with:
-      tooling-ref: 'ee8484ca71db3a2c2c33da6128bbf2330fcd7c88'  # v0.59.2
+      tooling-ref: 'ee8484ca71db3a2c2c33da6128bbf2330fcd7c88' # v0.59.2
       job-name: '🛠️ Lintro Code Quality'
       runner-image: ubuntu-24.04
       # Mirrors whichever dogfooding job ran (#1361): lint-scope 'changed'
@@ -805,7 +805,7 @@ jobs:
             api.osv.dev:443
             api.deps.dev:443
       - name: Checkout
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
       - name: Log in to GHCR
@@ -919,7 +919,7 @@ jobs:
             api.osv.dev:443
             api.deps.dev:443
       - name: Checkout
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           # Full history: the manifest gate diffs the manifest against the
           # merge-base with the base branch to tolerate a newly-added tool's
@@ -1052,7 +1052,7 @@ jobs:
             timestamp.sigstore.dev:443
             oauth2.sigstore.dev:443
       - name: Checkout
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
           fetch-tags: true
@@ -1151,7 +1151,7 @@ jobs:
             github.com:443
             api.github.com:443
       - name: Checkout
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
       - name: Delete CI-tagged images

@@ -35,7 +35,7 @@ jobs:
       # line so minor/major bumps do not go stale and block the unattended
       # release PR (#1372). Logic lives in dedicated scripts, not inline runs.
       version-update-script: scripts/ci/finalize-version-pr.py
-      tooling-ref: 'ee8484ca71db3a2c2c33da6128bbf2330fcd7c88'  # v0.59.2
+      tooling-ref: 'ee8484ca71db3a2c2c33da6128bbf2330fcd7c88' # v0.59.2
       egress-policy: block
       # Paired with release-auto-tag.yml (egress-preset: github-tooling).
       # Guarded by test_release_workflows_use_paired_egress_presets.

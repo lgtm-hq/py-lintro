@@ -34,7 +34,7 @@ jobs:
       contents: read
       packages: read # pull lintro-image from GHCR in reusable-quality-lint
     with:
-      tooling-ref: 'ee8484ca71db3a2c2c33da6128bbf2330fcd7c88'  # v0.59.2
+      tooling-ref: 'ee8484ca71db3a2c2c33da6128bbf2330fcd7c88' # v0.59.2
       job-name: '🌙 Nightly Dogfooding Lint'
       lintro-tool-options: >-
         pydoclint:timeout=120,bandit:timeout=120,prettier:timeout=120,osv_scanner:check_suppressions=false
@@ -73,7 +73,7 @@ jobs:
             ghcr.io:443
             pkg-containers.githubusercontent.com:443
       - name: Checkout
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
       - name: Log in to GitHub Container Registry
@@ -145,7 +145,7 @@ jobs:
             api.osv.dev:443
             api.deps.dev:443
       - name: Checkout
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
       - name: Log in to GitHub Container Registry
@@ -183,4 +183,4 @@ jobs:
       issues: write # open or ping the deduplicated failure issue
     with:
       workflow-key: dogfood-nightly
-      tooling-ref: 'ee8484ca71db3a2c2c33da6128bbf2330fcd7c88'  # v0.59.2
+      tooling-ref: 'ee8484ca71db3a2c2c33da6128bbf2330fcd7c88' # v0.59.2

@@ -44,7 +44,7 @@ jobs:
       min-age-days: >-
         ${{ github.event_name != 'workflow_dispatch' && 7 || inputs.min_age_days }}
       dry-run: ${{ inputs.dry_run == true }}
-      tooling-ref: 'ee8484ca71db3a2c2c33da6128bbf2330fcd7c88'  # v0.59.2
+      tooling-ref: 'ee8484ca71db3a2c2c33da6128bbf2330fcd7c88' # v0.59.2
       egress-policy: block
       egress-preset: github-tooling
       # Full list (v0.50.0+ replace semantics): the reusable passes
@@ -76,7 +76,7 @@ jobs:
       min-age-days: >-
         ${{ github.event_name != 'workflow_dispatch' && 7 || inputs.min_age_days }}
       dry-run: ${{ inputs.dry_run == true }}
-      tooling-ref: 'ee8484ca71db3a2c2c33da6128bbf2330fcd7c88'  # v0.59.2
+      tooling-ref: 'ee8484ca71db3a2c2c33da6128bbf2330fcd7c88' # v0.59.2
       egress-policy: block
       egress-preset: github-tooling
       # Full list (v0.50.0+ replace semantics): the reusable passes

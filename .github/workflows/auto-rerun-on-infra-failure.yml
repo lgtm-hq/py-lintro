@@ -40,7 +40,7 @@ jobs:
       actions: write
       contents: read
     with:
-      tooling-ref: 'ee8484ca71db3a2c2c33da6128bbf2330fcd7c88'  # v0.59.2
+      tooling-ref: 'ee8484ca71db3a2c2c33da6128bbf2330fcd7c88' # v0.59.2
       # run id/attempt are numbers in the event payload; format() passes them
       # as the strings the reusable workflow inputs expect.
       run-id: ${{ format('{0}', github.event.workflow_run.id) }}

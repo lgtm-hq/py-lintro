@@ -47,7 +47,7 @@ jobs:
       bundle-manifest: .github/pages-bundle-manifest.json
       commit-sha: ${{ github.event.workflow_run.head_sha || github.sha }}
       fallback-ref: main
-      tooling-ref: 'ee8484ca71db3a2c2c33da6128bbf2330fcd7c88'  # v0.59.2
+      tooling-ref: 'ee8484ca71db3a2c2c33da6128bbf2330fcd7c88' # v0.59.2
       # Since lgtm-ci v0.50.0 the enforcing harden-runner step runs before
       # preset resolution, and harden-runner splits allowed-endpoints on
       # spaces, so the reusable's newline-separated per-job defaults collapse

@@ -16,7 +16,7 @@ jobs:
     with:
       configuration-path: .github/labeler.yml
       sync-labels: false
-      tooling-ref: 'ee8484ca71db3a2c2c33da6128bbf2330fcd7c88'  # v0.59.2
+      tooling-ref: 'ee8484ca71db3a2c2c33da6128bbf2330fcd7c88' # v0.59.2
       egress-policy: block
       egress-preset: github-tooling
     permissions:

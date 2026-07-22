@@ -54,7 +54,7 @@ jobs:
       draft-pr-skip: true
       job-name: Python Compatibility
       runner-image: ubuntu-24.04
-      tooling-ref: 'ee8484ca71db3a2c2c33da6128bbf2330fcd7c88'  # v0.59.2
+      tooling-ref: 'ee8484ca71db3a2c2c33da6128bbf2330fcd7c88' # v0.59.2
       egress-policy: block
       egress-preset: pypi
       # Full list (v0.50.0+ replace semantics): the reusable passes
@@ -96,7 +96,7 @@ jobs:
       draft-pr-skip: true
       job-name: Python Coverage
       runner-image: ubuntu-24.04
-      tooling-ref: 'ee8484ca71db3a2c2c33da6128bbf2330fcd7c88'  # v0.59.2
+      tooling-ref: 'ee8484ca71db3a2c2c33da6128bbf2330fcd7c88' # v0.59.2
       egress-policy: block
       egress-preset: pypi
       # Full list (v0.50.0+ replace semantics): the reusable passes
@@ -134,7 +134,7 @@ jobs:
     steps:
       - name: Checkout gate script
         # yamllint disable-line rule:line-length
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           sparse-checkout: scripts/ci/evaluate-test-gate.sh
           sparse-checkout-cone-mode: false
@@ -162,7 +162,7 @@ jobs:
     permissions:
       contents: read
     with:
-      tooling-ref: 'ee8484ca71db3a2c2c33da6128bbf2330fcd7c88'  # v0.59.2
+      tooling-ref: 'ee8484ca71db3a2c2c33da6128bbf2330fcd7c88' # v0.59.2
       job-name: '🧪 Test Suite & Coverage'
       runner-image: ubuntu-24.04
       upstream-result: ${{ needs.test-gate.outputs.result }}

@@ -321,7 +321,7 @@ def test_workflow_reviews_pr_via_gh_not_working_tree() -> None:
     "action_ref",
     [
         "step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920",
-        "actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0",
+        "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1",
         "astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990",
     ],
 )
