@@ -1034,6 +1034,21 @@ def test_docker_ci_integration_verifies_ci_image_tools() -> None:
     assert_that(verify["env"]["IMAGE"]).is_equal_to("py-lintro:latest")
 
 
+def test_docker_ci_integration_passes_base_ref_for_version_lag() -> None:
+    """integration-test passes BASE_REF so runtime version-lag matches the gate."""
+    docker_ci = _load_workflow(name="docker-ci.yml")
+    steps = docker_ci["jobs"]["integration-test"]["steps"]
+    run_steps = [
+        step
+        for step in steps
+        if step.get("run") == "scripts/docker/run-docker-test-suite.sh"
+    ]
+    assert_that(run_steps).is_length(1)
+    # docker-test.sh uses BASE_REF to populate LINTRO_ALLOW_VERSION_LAG from
+    # compute-new-manifest-tools.sh (EMIT=version-changed), mirroring #1582.
+    assert_that(run_steps[0]["env"]["BASE_REF"]).is_equal_to("${{ github.base_ref }}")
+
+
 def test_dogfood_nightly_gates_pinned_digest_tools() -> None:
     """dogfood-nightly verifies the pinned release digest and notifies on fail."""
     nightly = _load_workflow(name="dogfood-nightly.yml")

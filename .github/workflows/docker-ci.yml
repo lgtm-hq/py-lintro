@@ -993,7 +993,12 @@ jobs:
           BASE_REF: ${{ github.base_ref }}
         run: scripts/ci/verify-image-manifest-tools.sh
       - name: Run Docker integration tests
+        # BASE_REF feeds compute-new-manifest-tools.sh inside docker-test.sh so
+        # LINTRO_ALLOW_VERSION_LAG matches the image gate's --allow-version-lag
+        # list. Empty on non-PR events → full min-version enforcement at runtime.
         if: needs.changes.outputs.pipeline != 'false'
+        env:
+          BASE_REF: ${{ github.base_ref }}
         run: scripts/docker/run-docker-test-suite.sh
       - name: Extract test summary
         if: always() && needs.changes.outputs.pipeline != 'false'
