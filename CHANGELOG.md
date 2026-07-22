@@ -21,6 +21,16 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.91.4] - 2026-07-22
+
+### Changed
+
+- **deps**: update dependency fast-uri to 4.1.1 (patch) [security] (#1600) (0374661)
+
+### Fixed
+
+- **deps**: update dependency @lgtm-hq/turbo-themes to 0.29.3 (minor) (#1563) (8f879c7)
+
 ## [0.91.3] - 2026-07-21
 
 ### Fixed
