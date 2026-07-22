@@ -8,10 +8,17 @@ name: Auto Rerun on Infra Failure
 # runner shutdown signals, harden-runner allowed-domain resolution errors),
 # re-run only the failed jobs — once (run-attempt guard upstream). This repo
 # saw a ghcr.io login timeout (run 29325278849) and a runner shutdown during
-# #1370's CI, both manually rerun. See #1374 and Rustume's equivalent (#474).
+# #1370's CI, both manually rerun. Tag publishes also flake on setup-uv
+# manifest timeouts and runner loss (#1487). See #1374 and Rustume's
+# equivalent (#474).
 #
 # workflow_run triggers only run from the definition on the default branch,
 # so changes here take effect after merging to main.
+#
+# No branches: filter — tag-triggered publish runs set head_branch to the
+# tag name (e.g. v0.88.1), so branches: [main] would miss them.
+# workflow_run has no separate tags: filter. Fork abuse is blocked by the
+# same-repo guard on the job below (head_repository.full_name).
 
 'on':
   workflow_run:
@@ -21,16 +28,18 @@ name: Auto Rerun on Infra Failure
       - CI - Docker
       - CI - Tests
       - Deploy - GitHub Pages
+      - Publish - Homebrew Tap
+      - Publish - npm
+      - Publish - PyPI Production
     types: [completed]
-    branches: [main]
 
 permissions: {}
 
 jobs:
   rerun:
-    # Same-repo guard: the branches filter matches the triggering run's head
-    # branch name, so a fork branch named "main" would otherwise reach the
-    # actions:write rerun with the upstream token.
+    # Same-repo guard: without a branches filter, a fork PR workflow that
+    # shares a watched name would otherwise reach the actions:write rerun
+    # with the upstream token. Restrict to runs whose head repo is this one.
     if: >-
       github.event.workflow_run.conclusion == 'failure' &&
       github.event.workflow_run.head_repository.full_name == github.repository

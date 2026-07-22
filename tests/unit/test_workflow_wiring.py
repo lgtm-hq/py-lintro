@@ -916,6 +916,84 @@ def test_publish_npm_exposes_dist_tag_for_backfills() -> None:
     assert_that(publish_step["env"]["NPM_DIST_TAG"]).contains("inputs.dist_tag")
 
 
+# Exact uv pin for binary builds (#1487). Keep in sync with
+# docker/tools.Dockerfile ARG UV_VERSION.
+_BINARY_BUILD_UV_VERSION = "0.11.29"
+
+
+def test_build_binary_pins_setup_uv_version() -> None:
+    """Binary builds must pin setup-uv to an exact version, not latest.
+
+    ``version: latest`` forces astral-sh/setup-uv to fetch
+    astral-sh/versions uv.ndjson, which has timed out repeatedly under
+    harden-runner during tag publishes (#1487). An exact pin uses the
+    ExactVersionResolver path; the continue-on-error retry remains.
+    """
+    workflow = _load_workflow(name="build-binary.yml")
+    assert_that(workflow["env"]["UV_VERSION"]).is_equal_to(_BINARY_BUILD_UV_VERSION)
+
+    setup_uv_steps: list[dict[str, Any]] = []
+    for job in workflow["jobs"].values():
+        for step in job.get("steps") or []:
+            uses = step.get("uses") or ""
+            if "astral-sh/setup-uv@" in uses:
+                setup_uv_steps.append(step)
+
+    assert_that(setup_uv_steps).is_not_empty()
+    for step in setup_uv_steps:
+        version = step.get("with", {}).get("version", "")
+        assert_that(version).does_not_contain("latest")
+        assert_that(version).contains("env.UV_VERSION")
+
+
+def test_build_binary_retries_setup_uv_on_failure() -> None:
+    """Each setup-uv job keeps a continue-on-error + retry pair (#1513)."""
+    workflow = _load_workflow(name="build-binary.yml")
+    jobs_with_setup_uv = [
+        job_id
+        for job_id, job in workflow["jobs"].items()
+        if any(
+            "astral-sh/setup-uv@" in (step.get("uses") or "")
+            for step in job.get("steps") or []
+        )
+    ]
+    assert_that(jobs_with_setup_uv).is_not_empty()
+
+    for job_id in jobs_with_setup_uv:
+        steps = workflow["jobs"][job_id]["steps"]
+        first = next(step for step in steps if step.get("id") == "setup-uv")
+        assert_that(first.get("continue-on-error")).is_true()
+        retry = next(step for step in steps if step.get("name") == "Install uv (retry)")
+        assert_that(retry.get("if")).contains("steps.setup-uv.outcome == 'failure'")
+
+
+def test_auto_rerun_covers_tag_publish_workflows() -> None:
+    """Auto-rerun must watch publish workflows and not filter to main only.
+
+    Tag publishes set workflow_run.head_branch to the tag name, so
+    ``branches: [main]`` would never see Publish - PyPI Production failures.
+    Fork abuse is blocked by the same-repo job guard instead (#1487).
+    """
+    workflow = _load_workflow(name="auto-rerun-on-infra-failure.yml")
+    trigger = workflow["on"]["workflow_run"]
+    watched = set(trigger["workflows"])
+
+    assert_that(watched).contains("Publish - PyPI Production")
+    assert_that(watched).contains("Publish - Homebrew Tap")
+    assert_that(watched).contains("Publish - npm")
+    # branches: would exclude tag head_branch values; omit it entirely.
+    assert_that(trigger).does_not_contain_key("branches")
+    assert_that(trigger).does_not_contain_key("branches-ignore")
+
+    rerun_if = _normalize_github_expr(workflow["jobs"]["rerun"]["if"])
+    assert_that(rerun_if).contains(
+        "github.event.workflow_run.head_repository.full_name == github.repository",
+    )
+    assert_that(rerun_if).contains(
+        "github.event.workflow_run.conclusion == 'failure'",
+    )
+
+
 # Canonical lgtm-ci pin used by all py-lintro workflows (v0.52.4).
 # Pages deploy must not regress to v0.32.3 (missing GH_TOKEN in bundler).
 # The 40-hex git SHA trips trufflehog's Github legacy-token detector under
