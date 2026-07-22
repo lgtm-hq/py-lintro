@@ -5,6 +5,7 @@ consistency, accuracy, and completeness.
 """
 
 import re
+import shutil
 import subprocess  # nosec B404 - subprocess is used to drive the tool/CLI under test; invocations use shell=False
 from pathlib import Path
 
@@ -199,6 +200,34 @@ def test_command_consistency() -> None:
         pytest.fail(
             "Inconsistent command usage:\n" + "\n".join(inconsistent_commands),
         )
+
+
+def test_justfile_parses() -> None:
+    """Test that the developer justfile exists and parses via `just --list`.
+
+    Skips when the `just` binary is unavailable (e.g. minimal CI images) so the
+    suite stays green while still validating the recipe file wherever `just` is
+    installed.
+    """
+    assert_that(Path("justfile").exists()).is_true()
+
+    just_bin = shutil.which("just")
+    if just_bin is None:
+        pytest.skip("`just` binary not installed; skipping justfile parse check")
+
+    try:
+        result = subprocess.run(
+            [just_bin, "--list"],
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+    except subprocess.TimeoutExpired:
+        pytest.fail("`just --list` timed out")
+
+    assert_that(result.returncode).is_equal_to(0)
+    for recipe in ("setup", "lint", "format", "test", "clean"):
+        assert_that(result.stdout).contains(recipe)
 
 
 # ---------------------------------------------------------------------------
