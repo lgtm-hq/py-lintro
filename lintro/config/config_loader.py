@@ -188,14 +188,18 @@ def _parse_execution_config(data: dict[str, Any]) -> ExecutionConfig:
             f"got {max_fix_retries}",
         )
 
-    # max_workers and artifacts are optional; when absent, ExecutionConfig
-    # applies its own defaults (CPU count and empty list respectively). Only
-    # forward them when present so the model defaults still win on omission.
+    # max_workers, artifacts, and snapshot settings are optional; when
+    # absent, ExecutionConfig applies its own defaults. Only forward them
+    # when present so the model defaults still win on omission.
     optional_fields: dict[str, Any] = {}
     if "max_workers" in data:
         optional_fields["max_workers"] = data["max_workers"]
     if "artifacts" in data:
         optional_fields["artifacts"] = data["artifacts"]
+    if "tool_snapshot_ttl" in data:
+        optional_fields["tool_snapshot_ttl"] = data["tool_snapshot_ttl"]
+    if "strict_missing_tools" in data:
+        optional_fields["strict_missing_tools"] = data["strict_missing_tools"]
 
     return ExecutionConfig(
         enabled_tools=enabled_tools,

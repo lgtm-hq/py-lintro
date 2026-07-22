@@ -65,12 +65,22 @@ class ToolCheckResult:
     upgrade_hint: str = ""
 
 
-def _check_tool(tool: ManifestTool, context: RuntimeContext) -> ToolCheckResult:
+def _check_tool(
+    tool: ManifestTool,
+    context: RuntimeContext,
+    snapshot: object | None = None,
+) -> ToolCheckResult:
     """Check a single tool's installation status and version.
+
+    When a capability ``snapshot`` is provided (from the shared probe cache),
+    version/availability come from that snapshot instead of an ad-hoc
+    subprocess. Direct subprocess probing remains as a fallback for unit
+    tests and environments where the snapshot layer is unavailable.
 
     Args:
         tool: Manifest tool entry.
         context: Runtime context for install hints.
+        snapshot: Optional ToolSnapshot from the shared probe cache.
 
     Returns:
         ToolCheckResult with status and details.
@@ -97,6 +107,41 @@ def _check_tool(tool: ManifestTool, context: RuntimeContext) -> ToolCheckResult:
             status=ToolStatus.MISSING,
             error="no_command",
             details="No version command defined",
+            install_hint=hint,
+            upgrade_hint=upgrade_hint,
+        )
+
+    if snapshot is not None:
+        available = bool(getattr(snapshot, "available", False))
+        version = getattr(snapshot, "version", None)
+        binary_path = getattr(snapshot, "binary_path", "") or None
+        probe_error = getattr(snapshot, "probe_error", None)
+        remediation = getattr(snapshot, "remediation_hint", None) or hint
+        if not available:
+            return ToolCheckResult(
+                tool=tool,
+                status=ToolStatus.MISSING,
+                error="probe_failed",
+                details=probe_error or "unavailable",
+                path=binary_path,
+                install_hint=remediation,
+                upgrade_hint=upgrade_hint,
+            )
+        if not version:
+            return ToolCheckResult(
+                tool=tool,
+                status=ToolStatus.UNKNOWN,
+                error="no_version",
+                details=probe_error or "no version",
+                path=binary_path,
+                install_hint=hint,
+            )
+        status = _compare_versions(version, tool.version, tool.min_version)
+        return ToolCheckResult(
+            tool=tool,
+            status=status,
+            installed_version=version,
+            path=binary_path,
             install_hint=hint,
             upgrade_hint=upgrade_hint,
         )
@@ -570,8 +615,17 @@ def doctor_command(
                 if not config.is_tool_enabled(t.name)
             ]
 
-    # Check enabled tools
-    all_results = [_check_tool(tool, context) for tool in tools_to_check]
+    # Probe tools once via the shared snapshot cache (parallel), then map
+    # each result into doctor status without ad-hoc per-tool subprocesses.
+    from lintro.tools.core.snapshots import probe_all_tools
+
+    snapshots = probe_all_tools(
+        tool_names=[t.name for t in tools_to_check],
+    )
+    all_results = [
+        _check_tool(tool, context, snapshot=snapshots.get(tool.name.lower()))
+        for tool in tools_to_check
+    ]
     all_results.extend(disabled_results)
 
     # Split into production and dev
@@ -736,7 +790,21 @@ def doctor_command(
 
     if fix and has_fixable:
         _run_fix(display_console, prod_results, context, registry)
-        rechecked = [_check_tool(tool, context) for tool in tools_to_check]
+        from lintro.tools.core.snapshots import clear_snapshot_cache, probe_all_tools
+
+        clear_snapshot_cache()
+        recheck_snapshots = probe_all_tools(
+            force=True,
+            tool_names=[t.name for t in tools_to_check],
+        )
+        rechecked = [
+            _check_tool(
+                tool,
+                context,
+                snapshot=recheck_snapshots.get(tool.name.lower()),
+            )
+            for tool in tools_to_check
+        ]
         rechecked_prod = [r for r in rechecked if r.tool.tier != "dev"]
         missing_count = sum(1 for r in rechecked_prod if r.status == ToolStatus.MISSING)
         outdated_count = sum(

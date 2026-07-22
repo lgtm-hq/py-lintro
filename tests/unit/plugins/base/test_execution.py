@@ -221,11 +221,19 @@ def test_prepare_execution_version_check_fails_returns_early_result(
         success=True,
         output="Version check failed",
         issues_count=0,
+        skipped=True,
+        skip_reason="Version check failed",
     )
 
-    with patch(
-        "lintro.plugins.execution_preparation.verify_tool_version",
-        return_value=skip_result,
+    with (
+        patch(
+            "lintro.plugins.execution_preparation.discover_files",
+            return_value=["/tmp/sample.py"],
+        ),
+        patch(
+            "lintro.plugins.execution_preparation.verify_tool_version",
+            return_value=skip_result,
+        ),
     ):
         ctx = fake_tool_plugin._prepare_execution(["."], {})
 

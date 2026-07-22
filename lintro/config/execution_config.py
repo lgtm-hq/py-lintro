@@ -42,6 +42,12 @@ class ExecutionConfig(BaseModel):
             markdown, html, sarif, plain. When ``GITHUB_ACTIONS=true``
             is detected, SARIF is emitted automatically even if this
             list is empty.
+        tool_snapshot_ttl: TTL in seconds for cached tool capability
+            snapshots (default: 600). Binary path+mtime changes invalidate
+            immediately regardless of TTL.
+        strict_missing_tools: When True, unavailable tools fail the run
+            (exit code 1). Default False — missing tools degrade visibly
+            without counting as a lint failure.
     """
 
     model_config = ConfigDict(frozen=False, extra="forbid")
@@ -54,3 +60,5 @@ class ExecutionConfig(BaseModel):
     auto_install_deps: bool | None = None
     max_fix_retries: int = Field(default=3, ge=1, le=10)
     artifacts: list[ArtifactFormat] = Field(default_factory=list)
+    tool_snapshot_ttl: int = Field(default=600, ge=1, le=86400)
+    strict_missing_tools: bool = False
