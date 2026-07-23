@@ -1134,3 +1134,11 @@ def test_dogfood_nightly_gates_pinned_digest_tools() -> None:
 
     # A pinned-digest failure must reach the deduplicated failure notifier.
     assert_that(jobs["notify-failure"]["needs"]).contains("verify-pinned-image-tools")
+
+
+def test_publish_pypi_sbom_fails_on_high_severity() -> None:
+    """Release SBOM must gate publishes on high/critical vulns (#1118)."""
+    publish = _load_workflow(name="publish-pypi-on-tag.yml")
+    sbom = publish["jobs"]["sbom"]
+    assert_that(sbom["with"]).contains_entry({"fail-on-severity": "high"})
+    assert_that(sbom["with"].get("scan-vulnerabilities")).is_true()
