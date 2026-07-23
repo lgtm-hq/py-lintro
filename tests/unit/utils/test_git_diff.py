@@ -208,6 +208,56 @@ def test_filter_files_by_diff_restricts_to_changed(git_repo: Path) -> None:
     assert_that(_names(filtered)).is_equal_to(["a.py"])
 
 
+def test_filter_files_by_diff_matches_through_symlinked_path(
+    git_repo: Path,
+    tmp_path: Path,
+) -> None:
+    """A repo reached through a symlink still matches changed files.
+
+    ``git rev-parse --show-toplevel`` realpath's the root while discovery
+    preserves symlinks (``os.path.abspath``). Without resolving both sides of
+    the membership test, a changed file under a symlinked path is silently
+    dropped. Regression test for the ``--diff`` symlink drop.
+
+    Args:
+        git_repo: Initialized git repository fixture.
+        tmp_path: Pytest temporary directory (the repo itself).
+    """
+    (git_repo / "a.py").write_text("x = 9\n")  # changed vs main
+    link = tmp_path.parent / f"{tmp_path.name}-link"
+    link.symlink_to(git_repo, target_is_directory=True)
+    # Candidate discovered via the symlink path (symlink preserved).
+    candidate = str(link / "a.py")
+
+    filtered = filter_files_by_diff([candidate], "main", str(link))
+
+    assert_that(_names(filtered)).is_equal_to(["a.py"])
+
+
+def test_filter_files_by_diff_for_paths_matches_through_symlinked_path(
+    git_repo: Path,
+    tmp_path: Path,
+) -> None:
+    """Per-repo filtering matches changed files under a symlinked target.
+
+    Exercises both the symlink-aware repo bucketing (``_path_in_repo``) and the
+    resolved membership test, since the multi-repo path groups discovered files
+    by realpath'd repo root before filtering.
+
+    Args:
+        git_repo: Initialized git repository fixture.
+        tmp_path: Pytest temporary directory (the repo itself).
+    """
+    (git_repo / "a.py").write_text("x = 9\n")  # changed vs main
+    link = tmp_path.parent / f"{tmp_path.name}-mrlink"
+    link.symlink_to(git_repo, target_is_directory=True)
+    candidate = str(link / "a.py")
+
+    filtered = filter_files_by_diff_for_paths([candidate], "main", [str(link)])
+
+    assert_that(_names(filtered)).is_equal_to(["a.py"])
+
+
 def test_filter_files_by_diff_empty_changed_set(git_repo: Path) -> None:
     """With no changes, filtering returns an empty list."""
     candidates = [str(git_repo / "a.py"), str(git_repo / "b.py")]

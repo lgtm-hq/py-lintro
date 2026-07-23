@@ -288,8 +288,12 @@ def _path_in_repo(path: str, repo_root: str) -> bool:
     Returns:
         True when ``path`` is the root itself or a path beneath it.
     """
-    abs_path = Path(path).absolute()
-    abs_root = Path(repo_root).absolute()
+    # Resolve symlinks on both sides: ``repo_root`` comes from ``git rev-parse
+    # --show-toplevel`` (realpath'd) while ``path`` comes from discovery
+    # (``os.path.abspath``, symlink-preserved). Comparing them unresolved makes
+    # files reached through a symlink fall outside their own repository.
+    abs_path = Path(path).resolve()
+    abs_root = Path(repo_root).resolve()
     if abs_path == abs_root:
         return True
     return abs_root in abs_path.parents
@@ -490,4 +494,12 @@ def filter_files_by_diff(
     changed = get_changed_files(base, cwd)
     if not changed:
         return []
-    return [f for f in files if absolute_path_without_resolving(Path(f)) in changed]
+    # Resolve symlinks on both sides of the membership test. ``git rev-parse
+    # --show-toplevel`` reports a realpath'd root (so ``changed`` paths are
+    # symlink-resolved), while discovery yields ``os.path.abspath`` paths that
+    # preserve symlinks. Without resolving both, a scan target reached through
+    # a symlink (e.g. macOS ``/var`` -> ``/private/var``) never matches and the
+    # changed files are silently dropped. Keys only; the original ``f`` is
+    # returned so callers keep the discovered path form.
+    changed_keys = {str(Path(c).resolve()) for c in changed}
+    return [f for f in files if str(Path(f).resolve()) in changed_keys]
