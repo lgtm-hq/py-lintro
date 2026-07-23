@@ -21,6 +21,12 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.91.10] - 2026-07-23
+
+### Fixed
+
+- **ai**: only pass --json-schema-name when the claude CLI supports it (#1626) (329ccb4)
+
 ## [0.91.9] - 2026-07-23
 
 ### Fixed
