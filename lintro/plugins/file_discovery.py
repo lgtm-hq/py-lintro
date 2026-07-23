@@ -7,13 +7,14 @@ from __future__ import annotations
 
 import os
 import sys
+from pathlib import Path
 
 from loguru import logger
 from rich.progress import Progress, SpinnerColumn, TextColumn
 
 from lintro.plugins.protocol import ToolDefinition
 from lintro.utils.path_filtering import walk_files_with_excludes
-from lintro.utils.path_utils import find_lintro_ignore
+from lintro.utils.path_utils import find_file_upward, find_lintro_ignore
 
 # Default exclude patterns for file discovery
 DEFAULT_EXCLUDE_PATTERNS: list[str] = [
@@ -168,3 +169,53 @@ def get_cwd(paths: list[str]) -> str | None:
     except ValueError:
         # Can happen on Windows with paths on different drives
         return None
+
+
+#: Markers that identify a project root, in the order they are probed while
+#: walking up from the discovered files. ``.git`` covers repositories (including
+#: worktrees/submodules, where it is a file); the rest cover language projects.
+_PROJECT_ROOT_MARKERS: tuple[str, ...] = (
+    ".git",
+    "pyproject.toml",
+    "package.json",
+    "setup.py",
+    "setup.cfg",
+    "go.mod",
+    "Cargo.toml",
+)
+
+
+def get_execution_cwd(files: list[str]) -> str:
+    """Return a stable, scope-independent working directory for tool subprocesses.
+
+    The tool subprocess is anchored to the **project root** of the discovered
+    files — the nearest ancestor directory holding a project marker (``.git``,
+    ``pyproject.toml``, ``package.json``, ...), found by walking up from the
+    files' common ancestor.
+
+    Unlike :func:`get_cwd` (the raw common ancestor), this does not move with
+    the input scope: walking up from a single file's directory or from the
+    whole-repo common ancestor reaches the *same* fixed marker, so the path a
+    tool sees for a given file — and thus any config ``overrides`` keyed on that
+    path — is identical whether the user passed a file, a directory, or ``.``
+    (#1616). Because the anchor is derived from the files (not the process cwd),
+    each tool's own config discovery still resolves relative to where the files
+    actually live.
+
+    Falls back to the files' common ancestor when no marker is found (preserving
+    prior behavior for marker-less trees), and to the process cwd when there are
+    no files.
+
+    Args:
+        files: Discovered file paths the tool will process.
+
+    Returns:
+        Absolute path to use as the tool subprocess working directory.
+    """
+    common = get_cwd(files)
+    if common is None:
+        return os.getcwd()
+    marker = find_file_upward(Path(common), _PROJECT_ROOT_MARKERS)
+    if marker is not None:
+        return str(marker.parent)
+    return common
