@@ -21,6 +21,12 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.91.17] - 2026-07-23
+
+### Fixed
+
+- **trufflehog**: ignore benign missing-path scan errors (#1633) (05c6e31)
+
 ## [0.91.16] - 2026-07-23
 
 ### Fixed
