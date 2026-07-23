@@ -1214,7 +1214,7 @@ wheels = [
 
 [[package]]
 name = "lintro"
-version = "0.91.21"
+version = "0.91.22"
 source = { editable = "." }
 dependencies = [
     { name = "click" },
