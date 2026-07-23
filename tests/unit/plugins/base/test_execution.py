@@ -231,6 +231,38 @@ def test_get_execution_cwd_anchors_to_project_root_regardless_of_scope(
     assert_that(Path(among_many).resolve()).is_equal_to(tmp_path.resolve())
 
 
+def test_get_execution_cwd_prefers_git_root_over_nested_package_marker(
+    tmp_path: Path,
+) -> None:
+    """A nested package marker must not shift the anchor by invocation scope.
+
+    Regression for #1616 (monorepo): a file in a nested package resolves to the
+    git repository root whether it is scanned alone or among files from other
+    packages, so the same file always gets the same subprocess cwd.
+
+    Args:
+        tmp_path: Pytest temporary directory fixture.
+    """
+    from lintro.plugins.file_discovery import get_execution_cwd
+
+    (tmp_path / ".git").mkdir()  # single repo root
+    pkg_a = tmp_path / "packages" / "a"
+    pkg_b = tmp_path / "packages" / "b"
+    (pkg_a / "src").mkdir(parents=True)
+    pkg_b.mkdir(parents=True)
+    (pkg_a / "package.json").write_text("{}\n")  # nested marker
+    a_file = pkg_a / "src" / "foo.ts"
+    a_file.write_text("const x = 1;\n")
+    b_file = pkg_b / "bar.ts"
+    b_file.write_text("const y = 2;\n")
+
+    narrow = get_execution_cwd([str(a_file)])  # just the nested-package file
+    wide = get_execution_cwd([str(a_file), str(b_file)])  # spanning packages
+
+    assert_that(Path(narrow).resolve()).is_equal_to(tmp_path.resolve())
+    assert_that(Path(wide).resolve()).is_equal_to(tmp_path.resolve())
+
+
 def test_get_execution_cwd_falls_back_to_common_ancestor_without_marker(
     tmp_path: Path,
 ) -> None:

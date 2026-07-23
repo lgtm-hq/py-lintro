@@ -171,11 +171,15 @@ def get_cwd(paths: list[str]) -> str | None:
         return None
 
 
-#: Markers that identify a project root, in the order they are probed while
-#: walking up from the discovered files. ``.git`` covers repositories (including
-#: worktrees/submodules, where it is a file); the rest cover language projects.
-_PROJECT_ROOT_MARKERS: tuple[str, ...] = (
-    ".git",
+#: Git marker, preferred as the anchor: a repository has a single root, so it
+#: stays fixed even when nested language-project markers (monorepo packages)
+#: sit between a file and the repo root. ``.git`` is a directory in a normal
+#: checkout and a file in worktrees/submodules, so existence (not is-dir) is
+#: what matters.
+_GIT_MARKER: tuple[str, ...] = (".git",)
+
+#: Language/project markers used only when there is no enclosing git repository.
+_LANG_ROOT_MARKERS: tuple[str, ...] = (
     "pyproject.toml",
     "package.json",
     "setup.py",
@@ -189,18 +193,21 @@ def get_execution_cwd(files: list[str]) -> str:
     """Return a stable, scope-independent working directory for tool subprocesses.
 
     The tool subprocess is anchored to the **project root** of the discovered
-    files — the nearest ancestor directory holding a project marker (``.git``,
-    ``pyproject.toml``, ``package.json``, ...), found by walking up from the
-    files' common ancestor.
+    files, found by walking up from the files' common ancestor. The git
+    repository root (``.git``) is preferred; only when there is no enclosing
+    repository is the nearest language-project marker (``pyproject.toml``,
+    ``package.json``, ...) used.
 
     Unlike :func:`get_cwd` (the raw common ancestor), this does not move with
     the input scope: walking up from a single file's directory or from the
-    whole-repo common ancestor reaches the *same* fixed marker, so the path a
+    whole-repo common ancestor reaches the *same* repository root, so the path a
     tool sees for a given file — and thus any config ``overrides`` keyed on that
     path — is identical whether the user passed a file, a directory, or ``.``
-    (#1616). Because the anchor is derived from the files (not the process cwd),
-    each tool's own config discovery still resolves relative to where the files
-    actually live.
+    (#1616). Preferring the git root keeps this stable in a monorepo, where a
+    narrow invocation would otherwise stop at a nested package marker while a
+    repo-wide invocation stops at the outer one. Because the anchor is derived
+    from the files (not the process cwd), each tool's own config discovery still
+    resolves relative to where the files actually live.
 
     Falls back to the files' common ancestor when no marker is found (preserving
     prior behavior for marker-less trees), and to the process cwd when there are
@@ -215,7 +222,11 @@ def get_execution_cwd(files: list[str]) -> str:
     common = get_cwd(files)
     if common is None:
         return os.getcwd()
-    marker = find_file_upward(Path(common), _PROJECT_ROOT_MARKERS)
-    if marker is not None:
-        return str(marker.parent)
+    start = Path(common)
+    git_root = find_file_upward(start, _GIT_MARKER)
+    if git_root is not None:
+        return str(git_root.parent)
+    lang_root = find_file_upward(start, _LANG_ROOT_MARKERS)
+    if lang_root is not None:
+        return str(lang_root.parent)
     return common
