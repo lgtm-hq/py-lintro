@@ -10,7 +10,10 @@ export const NATIVE_THEME = 'terminal';
 
 export const DEFAULT_THEME = NATIVE_THEME;
 
-export const turboThemeOptions: ThemeOption[] = flavors.map((theme) => ({
+/** turbo-themes flavors excluding ids reserved by the site-native theme. */
+const siteTurboFlavors = flavors.filter((theme) => theme.id !== NATIVE_THEME);
+
+export const turboThemeOptions: ThemeOption[] = siteTurboFlavors.map((theme) => ({
   id: theme.id,
   label: theme.label,
 }));
@@ -29,7 +32,7 @@ export function isNativeTheme(id: string): boolean {
 
 export const themeAppearances: Record<string, 'light' | 'dark'> = {
   [NATIVE_THEME]: 'dark',
-  ...Object.fromEntries(flavors.map((theme) => [theme.id, theme.appearance])),
+  ...Object.fromEntries(siteTurboFlavors.map((theme) => [theme.id, theme.appearance])),
 };
 
 export interface ThemeMenuItem {
@@ -83,7 +86,7 @@ function shortThemeLabel(fullLabel: string, groupLabel: string): string {
 export function buildThemeMenuGroups(): ThemeMenuGroup[] {
   const byVendor = new Map<string, ThemeMenuItem[]>();
 
-  for (const flavor of flavors) {
+  for (const flavor of siteTurboFlavors) {
     const groupLabel = VENDOR_LABELS[flavor.vendor] ?? flavor.vendor;
     const items = byVendor.get(flavor.vendor) ?? [];
     items.push({

@@ -67,6 +67,39 @@ class _AnthropicCliTransport(CliTransport):
             api_key_env=DEFAULT_API_KEY_ENV,
         )
         self._model = model
+        self._supports_schema_name: bool | None = None
+        self._capability_lock = threading.Lock()
+
+    def supports_json_schema_name(self) -> bool:
+        """Return whether the installed ``claude`` CLI accepts ``--json-schema-name``.
+
+        The current ``@anthropic-ai/claude-code`` (2.1.218) removed the
+        ``--json-schema-name`` option, so passing it fails the whole call with
+        ``unknown option '--json-schema-name'``. Probe ``claude --help`` once and
+        cache whether the flag is advertised, so it is only sent to binaries that
+        accept it (#1611). ``--json-schema`` itself is unaffected — only the name
+        refinement is gated. A failed probe returns ``False`` (send neither):
+        the flag is optional, so omitting it keeps structured output working.
+
+        Returns:
+            True when the installed binary advertises ``--json-schema-name``.
+        """
+        with self._capability_lock:
+            if self._supports_schema_name is not None:
+                return self._supports_schema_name
+            supported = False
+            try:
+                result = self.run([self._binary_path, "--help"], timeout=10.0)
+                help_text = f"{result.stdout or ''}{result.stderr or ''}"
+                # Only trust a clean exit: a non-zero --help may echo the flag
+                # in an error message without actually supporting it.
+                supported = result.returncode == 0 and "--json-schema-name" in help_text
+            except (AIProviderError, AINotAvailableError, OSError) as exc:
+                # OSError covers PermissionError and other subprocess spawn
+                # failures that CliTransport.run() does not remap.
+                logger.debug(f"Claude CLI capability probe failed: {exc}")
+            self._supports_schema_name = supported
+            return supported
 
     def parse_stdout(self, stdout: str) -> tuple[AIResponse, str | None]:
         """Parse JSON envelope from ``claude --output-format json``."""
@@ -270,7 +303,7 @@ class AnthropicProvider(BaseAIProvider):
             cmd.extend(["--append-system-prompt", system])
         if cli_schema is not None:
             cmd.extend(["--json-schema", json.dumps(cli_schema.schema)])
-            if cli_schema.schema_name:
+            if cli_schema.schema_name and self._cli.supports_json_schema_name():
                 cmd.extend(["--json-schema-name", cli_schema.schema_name])
         with self._session_lock:
             resume_session_id = None if use_one_shot else self._session_id

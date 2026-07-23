@@ -823,3 +823,103 @@ def test_executor_dry_run_treats_formatter_issues_without_flag_as_fixable(
     assert_that(code).is_equal_to(1)
     texts = _console_texts(fake_logger)
     assert_that(texts).contains("Would fix 1 issue in")
+
+
+def test_executor_diff_mixed_targets_warns_non_repo_full_scan(
+    monkeypatch: pytest.MonkeyPatch,
+    fake_logger: Any,
+) -> None:
+    """Mixed repo/non-repo ``--diff`` targets warn that non-repo paths full-scan.
+
+    Regression for #1618: the changed-file count only covers repository targets,
+    so a warning must flag that non-repo targets are scanned in full and the
+    count is not the whole scan scope.
+
+    Args:
+        monkeypatch: Pytest monkeypatch fixture.
+        fake_logger: FakeLogger fixture.
+    """
+    _stub_logger(monkeypatch, fake_logger)
+    result = ToolResult(name="ruff", success=True, output="x", issues_count=0)
+    tool = CallTrackingTool("ruff", can_fix=True, result=result)
+    _setup_tool_manager(monkeypatch, {"ruff": tool})
+
+    import lintro.utils.git_diff as git_diff
+
+    monkeypatch.setattr(
+        git_diff,
+        "resolve_git_cwd_from_paths",
+        lambda paths: {"/repo": ["/repo/src"], None: ["/outside"]},
+    )
+    monkeypatch.setattr(
+        git_diff,
+        "get_changed_files_for_paths",
+        lambda base, paths: frozenset({"/repo/src/a.py"}),
+    )
+
+    run_lint_tools_simple(
+        action="check",
+        paths=["/repo/src", "/outside"],
+        tools="all",
+        tool_options=None,
+        exclude=None,
+        include_venv=False,
+        group_by="auto",
+        output_format="grid",
+        verbose=False,
+        raw_output=False,
+        dry_run=False,
+        diff_base="main",
+    )
+
+    texts = _console_texts(fake_logger)
+    assert_that(texts).contains("scanned in full (not")
+    assert_that(texts).contains("Diff mode: scanning 1 file(s)")
+
+
+def test_executor_diff_repo_only_targets_no_warning(
+    monkeypatch: pytest.MonkeyPatch,
+    fake_logger: Any,
+) -> None:
+    """Repository-only ``--diff`` targets do not emit the mixed-scope warning.
+
+    Args:
+        monkeypatch: Pytest monkeypatch fixture.
+        fake_logger: FakeLogger fixture.
+    """
+    _stub_logger(monkeypatch, fake_logger)
+    result = ToolResult(name="ruff", success=True, output="x", issues_count=0)
+    tool = CallTrackingTool("ruff", can_fix=True, result=result)
+    _setup_tool_manager(monkeypatch, {"ruff": tool})
+
+    import lintro.utils.git_diff as git_diff
+
+    monkeypatch.setattr(
+        git_diff,
+        "resolve_git_cwd_from_paths",
+        lambda paths: {"/repo": ["/repo/src"]},
+    )
+    monkeypatch.setattr(
+        git_diff,
+        "get_changed_files_for_paths",
+        lambda base, paths: frozenset({"/repo/src/a.py"}),
+    )
+
+    run_lint_tools_simple(
+        action="check",
+        paths=["/repo/src"],
+        tools="all",
+        tool_options=None,
+        exclude=None,
+        include_venv=False,
+        group_by="auto",
+        output_format="grid",
+        verbose=False,
+        raw_output=False,
+        dry_run=False,
+        diff_base="main",
+    )
+
+    texts = _console_texts(fake_logger)
+    assert_that(texts).does_not_contain("scanned in full")
+    assert_that(texts).contains("Diff mode: scanning")

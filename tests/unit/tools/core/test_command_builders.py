@@ -563,6 +563,24 @@ def test_standalone_builder_returns_tool_name() -> None:
     assert_that(cmd).is_equal_to(["hadolint"])
 
 
+def test_standalone_builder_handles_pip_audit() -> None:
+    """StandaloneBuilder can handle pip_audit."""
+    builder = StandaloneBuilder()
+    assert_that(builder.can_handle(ToolName.PIP_AUDIT)).is_true()
+
+
+def test_standalone_builder_maps_pip_audit_to_hyphenated_binary() -> None:
+    """pip_audit resolves to the ``pip-audit`` binary, not ``pip_audit``.
+
+    The internal tool name uses an underscore, but the installed executable
+    is ``pip-audit``; without the binary mapping the version check would exec
+    a nonexistent ``pip_audit`` and the tool would always skip.
+    """
+    builder = StandaloneBuilder()
+    cmd = builder.get_command("pip_audit", ToolName.PIP_AUDIT)
+    assert_that(cmd).is_equal_to(["pip-audit"])
+
+
 # =============================================================================
 # CommandBuilderRegistry tests
 # =============================================================================

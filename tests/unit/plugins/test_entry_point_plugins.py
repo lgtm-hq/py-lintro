@@ -171,6 +171,23 @@ class _NotAPlugin:
 
 
 @pytest.fixture(autouse=True)
+def enable_external_plugins() -> Iterator[None]:
+    """Opt in to external plugin loading for entry-point discovery tests.
+
+    External plugin loading is opt-in and default-deny (see the plugin trust
+    model). These tests exercise the discovery/registration mechanics with a
+    permissive trust decision (enabled, no allowlist) so they focus on the
+    entry-point contract rather than the trust gate, which is covered
+    separately in ``test_discovery``.
+    """
+    with patch(
+        "lintro.plugins.discovery._resolve_plugin_trust",
+        return_value=(True, None),
+    ):
+        yield
+
+
+@pytest.fixture(autouse=True)
 def preserve_registry() -> Iterator[None]:
     """Snapshot and restore global registry + discovery state per test."""
     reset_discovery()

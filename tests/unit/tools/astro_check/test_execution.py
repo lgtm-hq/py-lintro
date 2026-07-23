@@ -148,12 +148,13 @@ def test_check_with_mocked_subprocess_issues_found(
     assert_that(result.issues_count).is_equal_to(2)
     issues = result.issues
     assert_that(issues).is_not_none()
-    assert issues is not None
+    assert issues is not None  # narrow type for mypy
     assert_that(issues).is_length(2)
 
     # Verify first issue
     first_issue = issues[0]
-    assert isinstance(first_issue, AstroCheckIssue)
+    assert_that(first_issue).is_instance_of(AstroCheckIssue)
+    assert isinstance(first_issue, AstroCheckIssue)  # narrow type for mypy
     assert_that(first_issue.file).is_equal_to("src/pages/index.astro")
     assert_that(first_issue.line).is_equal_to(10)
     assert_that(first_issue.code).is_equal_to("TS2322")
