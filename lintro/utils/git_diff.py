@@ -305,13 +305,18 @@ def _files_under_scan_path(files: list[str], scan_path: str) -> list[str]:
     Returns:
         Files contained in or equal to ``scan_path``.
     """
-    abs_scan = Path(scan_path).absolute()
+    abs_scan = Path(absolute_path_without_resolving(Path(scan_path)))
     if abs_scan.is_file():
-        return [f for f in files if Path(f).absolute() == abs_scan]
+        return [
+            f
+            for f in files
+            if Path(absolute_path_without_resolving(Path(f))) == abs_scan
+        ]
     return [
         f
         for f in files
-        if abs_scan in (abs_f := Path(f).absolute()).parents or abs_f == abs_scan
+        if abs_scan in (abs_f := Path(absolute_path_without_resolving(Path(f)))).parents
+        or abs_f == abs_scan
     ]
 
 

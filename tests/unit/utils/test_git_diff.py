@@ -408,6 +408,34 @@ def test_filter_files_by_diff_for_paths_non_repo_fallback(tmp_path: Path) -> Non
     assert_that(_names(filtered)).is_equal_to(["plain.py"])
 
 
+def test_filter_files_by_diff_for_paths_non_repo_dotdot_scan_path(
+    tmp_path: Path,
+) -> None:
+    """Non-repo scan targets containing ``..`` still match discovered files.
+
+    Discovery normalizes ``..`` (``os.path.abspath``), so the scan target must
+    be normalized the same way; otherwise a target like ``plain/../plain``
+    fails to match and drops the full-scan fallback.
+
+    Args:
+        tmp_path: Temporary directory fixture.
+    """
+    plain_dir = tmp_path / "plain"
+    plain_dir.mkdir()
+    plain_file = plain_dir / "plain.py"
+    plain_file.write_text("z = 1\n")
+    candidates = [str(plain_file)]
+    dotdot_scan = str(plain_dir / ".." / "plain")
+
+    filtered = filter_files_by_diff_for_paths(
+        candidates,
+        "main",
+        [dotdot_scan],
+    )
+
+    assert_that(_names(filtered)).is_equal_to(["plain.py"])
+
+
 def test_all_repo_defaults_resolvable_multi_repo(
     two_git_repos: tuple[Path, Path],
 ) -> None:
