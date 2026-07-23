@@ -231,36 +231,35 @@ def test_get_execution_cwd_anchors_to_project_root_regardless_of_scope(
     assert_that(Path(among_many).resolve()).is_equal_to(tmp_path.resolve())
 
 
-def test_get_execution_cwd_prefers_git_root_over_nested_package_marker(
+def test_get_execution_cwd_anchors_to_nearest_nested_project_marker(
     tmp_path: Path,
 ) -> None:
-    """A nested package marker must not shift the anchor by invocation scope.
+    """A file in a nested project anchors to that project, not the outer repo.
 
-    Regression for #1616 (monorepo): a file in a nested package resolves to the
-    git repository root whether it is scanned alone or among files from other
-    packages, so the same file always gets the same subprocess cwd.
+    The nearest marker wins so a tool's own config discovery (e.g. tsconfig for
+    a monorepo package) resolves against the project the file belongs to. A file
+    scanned together with siblings from the same package therefore shares that
+    package's anchor.
 
     Args:
         tmp_path: Pytest temporary directory fixture.
     """
     from lintro.plugins.file_discovery import get_execution_cwd
 
-    (tmp_path / ".git").mkdir()  # single repo root
-    pkg_a = tmp_path / "packages" / "a"
-    pkg_b = tmp_path / "packages" / "b"
-    (pkg_a / "src").mkdir(parents=True)
-    pkg_b.mkdir(parents=True)
-    (pkg_a / "package.json").write_text("{}\n")  # nested marker
-    a_file = pkg_a / "src" / "foo.ts"
-    a_file.write_text("const x = 1;\n")
-    b_file = pkg_b / "bar.ts"
-    b_file.write_text("const y = 2;\n")
+    (tmp_path / ".git").mkdir()  # outer repo root
+    pkg = tmp_path / "packages" / "a"
+    (pkg / "src").mkdir(parents=True)
+    (pkg / "package.json").write_text("{}\n")  # nested project marker
+    file_one = pkg / "src" / "foo.ts"
+    file_one.write_text("const x = 1;\n")
+    file_two = pkg / "src" / "bar.ts"
+    file_two.write_text("const y = 2;\n")
 
-    narrow = get_execution_cwd([str(a_file)])  # just the nested-package file
-    wide = get_execution_cwd([str(a_file), str(b_file)])  # spanning packages
+    single = get_execution_cwd([str(file_one)])
+    both = get_execution_cwd([str(file_one), str(file_two)])
 
-    assert_that(Path(narrow).resolve()).is_equal_to(tmp_path.resolve())
-    assert_that(Path(wide).resolve()).is_equal_to(tmp_path.resolve())
+    assert_that(Path(single).resolve()).is_equal_to(pkg.resolve())
+    assert_that(Path(both).resolve()).is_equal_to(pkg.resolve())
 
 
 def test_get_execution_cwd_falls_back_to_common_ancestor_without_marker(
@@ -281,6 +280,34 @@ def test_get_execution_cwd_falls_back_to_common_ancestor_without_marker(
     result = get_execution_cwd([str(target)])
 
     assert_that(Path(result).resolve()).is_equal_to(nested.resolve())
+
+
+def test_get_execution_cwd_bounds_marker_search_depth(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A project marker beyond the depth bound is ignored (falls back).
+
+    Guards against anchoring to a distant unrelated marker, e.g. a
+    dotfile-managed ``~/.git`` far above a marker-less working directory.
+
+    Args:
+        tmp_path: Pytest temporary directory fixture.
+        monkeypatch: Pytest monkeypatch fixture.
+    """
+    import lintro.plugins.file_discovery as fd
+
+    monkeypatch.setattr(fd, "_PROJECT_ROOT_SEARCH_MAX_DEPTH", 2)
+    (tmp_path / ".git").mkdir()  # marker far above the files
+    deep = tmp_path / "a" / "b" / "c" / "d"
+    deep.mkdir(parents=True)
+    target = deep / "foo.ts"
+    target.write_text("const x = 1;\n")
+
+    result = fd.get_execution_cwd([str(target)])
+
+    # .git is 4 levels up but the search stops after 2 -> fall back to common.
+    assert_that(Path(result).resolve()).is_equal_to(deep.resolve())
 
 
 # =============================================================================

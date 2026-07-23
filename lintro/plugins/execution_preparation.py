@@ -285,11 +285,11 @@ def prepare_execution(
 
     logger.debug(f"Files to process: {files}")
 
-    # Compute cwd and relative paths. Anchor the tool subprocess to a stable
-    # project root (the process cwd) rather than the commonpath of discovered
-    # files, so the path each tool sees for a given file — and thus config
-    # ``overrides`` keyed on it — is identical whether the user passed a file,
-    # a directory, or ``.`` (#1616).
+    # Compute cwd and relative paths. Anchor the tool subprocess to the files'
+    # project root rather than the commonpath of discovered files, so the path
+    # each tool sees for a given file — and thus config ``overrides`` keyed on
+    # it — is identical whether the user passed a file, a directory, or ``.``
+    # (#1616).
     cwd = get_execution_cwd(files)
     rel_files = [os.path.relpath(os.path.abspath(f), cwd) for f in files]
 

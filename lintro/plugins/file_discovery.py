@@ -171,15 +171,15 @@ def get_cwd(paths: list[str]) -> str | None:
         return None
 
 
-#: Git marker, preferred as the anchor: a repository has a single root, so it
-#: stays fixed even when nested language-project markers (monorepo packages)
-#: sit between a file and the repo root. ``.git`` is a directory in a normal
-#: checkout and a file in worktrees/submodules, so existence (not is-dir) is
-#: what matters.
-_GIT_MARKER: tuple[str, ...] = (".git",)
-
-#: Language/project markers used only when there is no enclosing git repository.
-_LANG_ROOT_MARKERS: tuple[str, ...] = (
+#: Markers that identify a project root, probed in order in each directory
+#: while walking up from the discovered files. ``.git`` covers repositories
+#: (a directory normally, a file in worktrees/submodules, so existence — not
+#: is-dir — is what matters); the rest cover language projects. The *nearest*
+#: marker wins, so a file in a nested project (e.g. a monorepo package with its
+#: own ``package.json``/``tsconfig.json``) anchors to that project — the
+#: directory a tool's own config discovery expects — rather than the outer repo.
+_PROJECT_ROOT_MARKERS: tuple[str, ...] = (
+    ".git",
     "pyproject.toml",
     "package.json",
     "setup.py",
@@ -188,30 +188,41 @@ _LANG_ROOT_MARKERS: tuple[str, ...] = (
     "Cargo.toml",
 )
 
+#: Bounds the upward marker search, counting the files' common ancestor itself,
+#: so an unrelated marker from a far filesystem ancestor (e.g. a dotfile-managed
+#: ``~/.git``, or a distant vendored ``package.json``) is never picked up.
+#: Matches ``_IGNORE_SEARCH_MAX_DEPTH`` used for ``.lintro-ignore`` discovery.
+_PROJECT_ROOT_SEARCH_MAX_DEPTH = 20
+
 
 def get_execution_cwd(files: list[str]) -> str:
     """Return a stable, scope-independent working directory for tool subprocesses.
 
     The tool subprocess is anchored to the **project root** of the discovered
-    files, found by walking up from the files' common ancestor. The git
-    repository root (``.git``) is preferred; only when there is no enclosing
-    repository is the nearest language-project marker (``pyproject.toml``,
-    ``package.json``, ...) used.
+    files — the nearest ancestor directory holding a project marker (``.git``,
+    ``pyproject.toml``, ``package.json``, ...), found by walking up from the
+    files' common ancestor.
 
     Unlike :func:`get_cwd` (the raw common ancestor), this does not move with
-    the input scope: walking up from a single file's directory or from the
-    whole-repo common ancestor reaches the *same* repository root, so the path a
-    tool sees for a given file — and thus any config ``overrides`` keyed on that
-    path — is identical whether the user passed a file, a directory, or ``.``
-    (#1616). Preferring the git root keeps this stable in a monorepo, where a
-    narrow invocation would otherwise stop at a nested package marker while a
-    repo-wide invocation stops at the outer one. Because the anchor is derived
-    from the files (not the process cwd), each tool's own config discovery still
-    resolves relative to where the files actually live.
+    the input scope: within one project, walking up from a single file's
+    directory or from the whole-repo common ancestor reaches the *same* marker,
+    so the path a tool sees for a given file — and thus any config ``overrides``
+    keyed on that path — is identical whether the user passed a file, a
+    directory, or ``.`` (#1616). Because the anchor is derived from the files
+    (not the process cwd) and uses the *nearest* marker, each tool's own config
+    discovery still resolves against the project the files actually belong to,
+    including nested projects in a monorepo.
 
-    Falls back to the files' common ancestor when no marker is found (preserving
-    prior behavior for marker-less trees), and to the process cwd when there are
-    no files.
+    Falls back to the files' common ancestor when no marker is found within
+    ``_PROJECT_ROOT_SEARCH_MAX_DEPTH`` ancestors (preserving prior behavior for
+    marker-less trees, and avoiding a distant unrelated marker), and to the
+    process cwd when there are no files.
+
+    Note:
+        When a single invocation spans multiple nested projects, the common
+        ancestor (and thus the anchor) is the outer project; per-project
+        anchoring in that case would require grouping files by project root and
+        running the tool once per group.
 
     Args:
         files: Discovered file paths the tool will process.
@@ -222,11 +233,11 @@ def get_execution_cwd(files: list[str]) -> str:
     common = get_cwd(files)
     if common is None:
         return os.getcwd()
-    start = Path(common)
-    git_root = find_file_upward(start, _GIT_MARKER)
-    if git_root is not None:
-        return str(git_root.parent)
-    lang_root = find_file_upward(start, _LANG_ROOT_MARKERS)
-    if lang_root is not None:
-        return str(lang_root.parent)
+    marker = find_file_upward(
+        Path(common),
+        _PROJECT_ROOT_MARKERS,
+        max_depth=_PROJECT_ROOT_SEARCH_MAX_DEPTH,
+    )
+    if marker is not None:
+        return str(marker.parent)
     return common
