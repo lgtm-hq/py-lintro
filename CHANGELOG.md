@@ -21,6 +21,16 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.91.20] - 2026-07-23
+
+### Changed
+
+- **ai**: add fallback concurrency regression tests (#1441) (4cf515a)
+
+### Fixed
+
+- **ci**: guard single-run scheduled lintro analysis invariant (#1169) (466f037)
+
 ## [0.91.19] - 2026-07-23
 
 ### Fixed
