@@ -21,6 +21,12 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.91.13] - 2026-07-23
+
+### Fixed
+
+- **cli**: let explicit --tools bypass enabled_tools allowlist (#1451) (9def246)
+
 ## [0.91.12] - 2026-07-23
 
 ### Fixed
