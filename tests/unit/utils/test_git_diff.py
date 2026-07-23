@@ -13,8 +13,11 @@ import lintro.utils.git_diff as git_diff
 from lintro.utils.git_diff import (
     DIFF_DEFAULT_SENTINEL,
     DiffResolutionError,
+    all_repo_defaults_resolvable,
     filter_files_by_diff,
+    filter_files_by_diff_for_paths,
     get_changed_files,
+    get_changed_files_for_paths,
     is_git_repository,
     resolve_default_base,
     resolve_git_cwd_from_paths,
@@ -264,21 +267,6 @@ def test_walk_files_with_excludes_diff_base_outside_process_cwd(
     assert_that(_names(files)).is_equal_to(["a.py", "d.py"])
 
 
-def test_resolve_git_cwd_from_paths_uses_target_repo(
-    git_repo: Path,
-    tmp_path: Path,
-) -> None:
-    """Explicit scan targets resolve to that repository root."""
-    assert_that(resolve_git_cwd_from_paths([str(git_repo)])).is_equal_to(
-        str(git_repo.resolve()),
-    )
-
-
-def test_resolve_git_cwd_from_paths_default_dot() -> None:
-    """The default path keeps process-cwd behavior."""
-    assert_that(resolve_git_cwd_from_paths(["."])).is_equal_to(".")
-
-
 def test_walk_files_with_excludes_no_diff_base_scans_all(git_repo: Path) -> None:
     """Without ``diff_base`` all matching files are discovered."""
     from lintro.utils.path_filtering import walk_files_with_excludes
@@ -296,3 +284,203 @@ def test_diff_default_sentinel_is_distinct() -> None:
     """The sentinel is unlikely to collide with a real ref name."""
     assert_that(DIFF_DEFAULT_SENTINEL).is_not_equal_to("main")
     assert_that(DIFF_DEFAULT_SENTINEL).is_not_equal_to("")
+
+
+@pytest.fixture
+def two_git_repos(tmp_path: Path) -> tuple[Path, Path]:
+    """Create two independent git repositories with committed baselines.
+
+    Args:
+        tmp_path: Pytest temporary directory.
+
+    Returns:
+        Tuple of repository paths, each on a feature branch with ``main`` as
+        the default base.
+    """
+    repos: list[Path] = []
+    for name, filename in (("repo_a", "a.py"), ("repo_b", "b.py")):
+        repo = tmp_path / name
+        repo.mkdir()
+        _git(repo, "init", "-q")
+        _git(repo, "config", "user.email", "test@example.com")
+        _git(repo, "config", "user.name", "Test User")
+        (repo / filename).write_text("x = 1\n")
+        _git(repo, "add", ".")
+        _git(repo, "commit", "-qm", "init")
+        _git(repo, "branch", "-M", "main")
+        _git(repo, "checkout", "-qb", "feature")
+        repos.append(repo)
+    return repos[0], repos[1]
+
+
+def test_resolve_git_cwd_from_paths_groups_by_repo(
+    two_git_repos: tuple[Path, Path],
+) -> None:
+    """Each scan target maps to its own repository root."""
+    repo_a, repo_b = two_git_repos
+    groups = resolve_git_cwd_from_paths([str(repo_a), str(repo_b)])
+
+    assert_that(groups).contains_key(str(repo_a.resolve()))
+    assert_that(groups).contains_key(str(repo_b.resolve()))
+    assert_that(groups[str(repo_a.resolve())]).is_equal_to([str(repo_a)])
+    assert_that(groups[str(repo_b.resolve())]).is_equal_to([str(repo_b)])
+
+
+def test_resolve_git_cwd_from_paths_non_repo_path(tmp_path: Path) -> None:
+    """Paths outside any git repository are grouped under ``None``."""
+    plain_dir = tmp_path / "plain"
+    plain_dir.mkdir()
+    groups = resolve_git_cwd_from_paths([str(plain_dir)])
+
+    assert_that(groups).contains_key(None)
+    assert_that(groups[None]).is_equal_to([str(plain_dir)])
+
+
+def test_get_changed_files_for_paths_multi_repo(
+    two_git_repos: tuple[Path, Path],
+) -> None:
+    """Changed files from every repository are included in the union."""
+    repo_a, repo_b = two_git_repos
+    (repo_a / "a.py").write_text("x = 42\n")
+    _git(repo_a, "commit", "-aqm", "change a")
+    (repo_b / "b.py").write_text("y = 99\n")
+    _git(repo_b, "commit", "-aqm", "change b")
+
+    changed = get_changed_files_for_paths(
+        "main",
+        [str(repo_a), str(repo_b)],
+    )
+
+    assert_that(_names(changed)).contains("a.py", "b.py")
+
+
+def test_filter_files_by_diff_for_paths_multi_repo(
+    two_git_repos: tuple[Path, Path],
+) -> None:
+    """Per-repo diff filtering keeps changed files from every repository."""
+    repo_a, repo_b = two_git_repos
+    (repo_a / "a.py").write_text("x = 42\n")
+    _git(repo_a, "commit", "-aqm", "change a")
+    (repo_b / "b.py").write_text("y = 99\n")
+    _git(repo_b, "commit", "-aqm", "change b")
+
+    candidates = [str(repo_a / "a.py"), str(repo_b / "b.py")]
+    filtered = filter_files_by_diff_for_paths(
+        candidates,
+        "main",
+        [str(repo_a), str(repo_b)],
+    )
+
+    assert_that(_names(filtered)).contains("a.py", "b.py")
+
+
+def test_filter_files_by_diff_for_paths_single_repo_regression(
+    git_repo: Path,
+) -> None:
+    """Single-repository behavior matches ``filter_files_by_diff``."""
+    (git_repo / "a.py").write_text("x = 9\n")
+    candidates = [str(git_repo / "a.py"), str(git_repo / "b.py")]
+
+    legacy = filter_files_by_diff(candidates, "main", str(git_repo))
+    grouped = filter_files_by_diff_for_paths(
+        candidates,
+        "main",
+        [str(git_repo)],
+    )
+
+    assert_that(_names(grouped)).is_equal_to(_names(legacy))
+
+
+def test_filter_files_by_diff_for_paths_non_repo_fallback(tmp_path: Path) -> None:
+    """Non-repo scan targets keep all discovered files without diff filtering."""
+    plain_dir = tmp_path / "plain"
+    plain_dir.mkdir()
+    plain_file = plain_dir / "plain.py"
+    plain_file.write_text("z = 1\n")
+    candidates = [str(plain_file)]
+
+    filtered = filter_files_by_diff_for_paths(
+        candidates,
+        "main",
+        [str(plain_dir)],
+    )
+
+    assert_that(_names(filtered)).is_equal_to(["plain.py"])
+
+
+def test_filter_files_by_diff_for_paths_non_repo_dotdot_scan_path(
+    tmp_path: Path,
+) -> None:
+    """Non-repo scan targets containing ``..`` still match discovered files.
+
+    Discovery normalizes ``..`` (``os.path.abspath``), so the scan target must
+    be normalized the same way; otherwise a target like ``plain/../plain``
+    fails to match and drops the full-scan fallback.
+
+    Args:
+        tmp_path: Temporary directory fixture.
+    """
+    plain_dir = tmp_path / "plain"
+    plain_dir.mkdir()
+    plain_file = plain_dir / "plain.py"
+    plain_file.write_text("z = 1\n")
+    candidates = [str(plain_file)]
+    dotdot_scan = str(plain_dir / ".." / "plain")
+
+    filtered = filter_files_by_diff_for_paths(
+        candidates,
+        "main",
+        [dotdot_scan],
+    )
+
+    assert_that(_names(filtered)).is_equal_to(["plain.py"])
+
+
+def test_all_repo_defaults_resolvable_multi_repo(
+    two_git_repos: tuple[Path, Path],
+) -> None:
+    """Every grouped repository must resolve a default base."""
+    repo_a, repo_b = two_git_repos
+
+    assert_that(
+        all_repo_defaults_resolvable([str(repo_a), str(repo_b)]),
+    ).is_true()
+
+
+def test_all_repo_defaults_resolvable_false_for_orphan_branch(
+    tmp_path: Path,
+) -> None:
+    """A repo without ``main``/``master`` fails all-repo default resolution."""
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _git(repo, "init", "-q")
+    _git(repo, "config", "user.email", "test@example.com")
+    _git(repo, "config", "user.name", "Test User")
+    (repo / "only.py").write_text("x = 1\n")
+    _git(repo, "add", ".")
+    _git(repo, "commit", "-qm", "init")
+    _git(repo, "branch", "-M", "feature")
+
+    assert_that(all_repo_defaults_resolvable([str(repo)])).is_false()
+
+
+def test_walk_files_with_excludes_multi_repo_diff(
+    two_git_repos: tuple[Path, Path],
+) -> None:
+    """``walk_files_with_excludes`` includes changed files from each repo."""
+    from lintro.utils.path_filtering import walk_files_with_excludes
+
+    repo_a, repo_b = two_git_repos
+    (repo_a / "a.py").write_text("x = 42\n")
+    _git(repo_a, "commit", "-aqm", "change a")
+    (repo_b / "b.py").write_text("y = 99\n")
+    _git(repo_b, "commit", "-aqm", "change b")
+
+    files = walk_files_with_excludes(
+        paths=[str(repo_a), str(repo_b)],
+        file_patterns=["*.py"],
+        exclude_patterns=[],
+        diff_base="main",
+    )
+
+    assert_that(_names(files)).contains("a.py", "b.py")

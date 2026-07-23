@@ -151,16 +151,12 @@ def walk_files_with_excludes(
     # Apply git-diff filtering if a base ref was resolved. Restricts the set to
     # files changed relative to the base so only branch changes are scanned.
     if diff_base:
-        from lintro.utils.git_diff import (
-            filter_files_by_diff,
-            resolve_git_cwd_from_paths,
-        )
+        from lintro.utils.git_diff import filter_files_by_diff_for_paths
 
-        diff_cwd = resolve_git_cwd_from_paths(paths)
-        all_files = filter_files_by_diff(
+        all_files = filter_files_by_diff_for_paths(
             all_files,
             diff_base,
-            cwd=diff_cwd,
+            paths,
         )
 
     # Apply incremental filtering if enabled
