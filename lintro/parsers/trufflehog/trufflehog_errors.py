@@ -92,7 +92,8 @@ def is_benign_missing_path_error(
     try:
         missing = str(Path(missing_raw).resolve())
     except (OSError, RuntimeError, ValueError):
-        missing = missing_raw
+        # Unresolvable paths cannot be proven outside the scan set — fail closed.
+        return False
 
     if missing in scan_paths:
         return False

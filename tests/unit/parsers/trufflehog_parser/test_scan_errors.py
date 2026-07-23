@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
+import pytest
 from assertpy import assert_that
 
 from lintro.parsers.trufflehog.trufflehog_errors import (
@@ -72,6 +75,24 @@ def test_permission_denied_is_not_benign() -> None:
     assert_that(
         is_benign_missing_path_error(
             "open /secret: permission denied",
+            scan_paths={"/repo/src/a.py"},
+        ),
+    ).is_false()
+
+
+def test_unresolvable_missing_path_fails_closed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Path.resolve failures must not classify the error as benign."""
+
+    def _boom(self: Path) -> Path:
+        raise OSError("cannot resolve")
+
+    monkeypatch.setattr(Path, "resolve", _boom)
+
+    assert_that(
+        is_benign_missing_path_error(
+            "lstat /ci/coverage: no such file or directory",
             scan_paths={"/repo/src/a.py"},
         ),
     ).is_false()
