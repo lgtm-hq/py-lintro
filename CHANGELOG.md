@@ -21,6 +21,12 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.91.11] - 2026-07-23
+
+### Fixed
+
+- **cli**: warn when --diff targets mix repo and non-repo paths (#1628) (b43aa3d)
+
 ## [0.91.10] - 2026-07-23
 
 ### Fixed
