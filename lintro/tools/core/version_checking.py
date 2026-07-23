@@ -56,6 +56,7 @@ from loguru import logger
 from lintro._tool_versions import (
     _NPM_PACKAGE_TO_TOOL,
     get_all_minimum_versions,
+    get_tool_version,
 )
 from lintro.enums.tool_name import ToolName
 
@@ -63,6 +64,8 @@ from lintro.enums.tool_name import ToolName
 # during parallel execution
 _logged_warnings: set[str] = set()
 _logged_warnings_lock: threading.Lock = threading.Lock()
+_COMMITLINT_CONFIG_CONVENTIONAL_PACKAGE = "@commitlint/config-conventional"
+_COMMITLINT_HINT_KEYS = {"commitlint", "@commitlint/cli"}
 
 
 def _get_version_timeout() -> int:
@@ -136,7 +139,7 @@ def get_install_hints() -> dict[str, str]:
     Returns:
         dict[str, str]: Dictionary mapping tool names to installation hint strings.
     """
-    # Static templates mapping tool -> install hint template with {version} placeholder
+    # Static templates mapping tool -> install hint template with placeholders.
     templates: dict[str, str] = {
         "bandit": (
             "Install via: pip install bandit>={version} or uv add bandit>={version}"
@@ -166,7 +169,11 @@ def get_install_hints() -> dict[str, str]:
         ),
         "commitlint": (
             "Install via: bun add -g @commitlint/cli@{version} "
-            "@commitlint/config-conventional@{version}"
+            "@commitlint/config-conventional@{commitlint_config_conventional_version}"
+        ),
+        "@commitlint/cli": (
+            "Install via: bun add -g @commitlint/cli@{version} "
+            "@commitlint/config-conventional@{commitlint_config_conventional_version}"
         ),
         "html_validate": "Install via: bun add -d html-validate@>={version}",
         "html-validate": "Install via: bun add -d html-validate@>={version}",
@@ -264,21 +271,36 @@ def get_install_hints() -> dict[str, str]:
 
     versions = get_minimum_versions()
     hints: dict[str, str] = {}
+    skipped_hints: set[str] = set()
 
     # Build hints only for tools that exist in versions
     for tool, template in templates.items():
         version = versions.get(tool)
         if version is not None:
-            hints[tool] = template.format(version=version)
+            template_values = {"version": version}
+            if tool in _COMMITLINT_HINT_KEYS:
+                companion_version = get_tool_version(
+                    _COMMITLINT_CONFIG_CONVENTIONAL_PACKAGE,
+                )
+                if companion_version is None:
+                    skipped_hints.add(tool)
+                    continue
+                template_values["commitlint_config_conventional_version"] = (
+                    companion_version
+                )
+            hints[tool] = template.format(**template_values)
 
-    # Warn about tools in versions that don't have templates (only once)
-    missing = set(versions) - set(templates)
+    # Log tools in versions that don't have templates (only once).
+    # Debug-level: the completeness gate in test_tool_completeness.py fails
+    # CI when a registered tool or version key lacks a hint; a warning here
+    # would only noise user runs for the same gap.
+    missing = (set(versions) - set(templates)) | skipped_hints
     if missing:
         warning_key = f"missing_hints:{','.join(sorted(missing))}"
         with _logged_warnings_lock:
             if warning_key not in _logged_warnings:
                 _logged_warnings.add(warning_key)
-                logger.warning(
+                logger.debug(
                     f"Missing install hints for tools: {', '.join(sorted(missing))}",
                 )
 
