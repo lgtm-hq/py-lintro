@@ -3,14 +3,21 @@
 from __future__ import annotations
 
 import contextlib
-from unittest.mock import patch
+import io
+from unittest.mock import MagicMock, patch
 
 import pytest
 from assertpy import assert_that
 from click.testing import CliRunner
 
 from lintro import __version__
-from lintro.cli import LintroGroup, cli, main
+from lintro.cli import (
+    LintroGroup,
+    _is_utf8_encoding,
+    cli,
+    ensure_utf8_stdio,
+    main,
+)
 
 # =============================================================================
 # CLI Entry Point Tests
@@ -65,13 +72,101 @@ def test_cli_invalid_command(cli_runner: CliRunner) -> None:
 
 
 def test_main_entry_point() -> None:
-    """Verify main() entry point calls cli()."""
-    with patch("lintro.cli.cli") as mock_cli:
-        mock_cli.return_value = None
+    """Verify main() forces UTF-8 stdio then calls cli()."""
+    with (
+        patch("lintro.cli.ensure_utf8_stdio") as mock_ensure,
+        patch("lintro.cli.cli") as mock_cli,
+    ):
+        # Fail if cli() runs before UTF-8 stdio is forced.
+        mock_cli.side_effect = lambda: mock_ensure.assert_called_once_with()
         # main() calls cli() which is a Click command
         with contextlib.suppress(SystemExit):
             main()
+        mock_ensure.assert_called_once_with()
         mock_cli.assert_called_once()
+
+
+@pytest.mark.parametrize(
+    ("encoding", "expected"),
+    [
+        ("utf-8", True),
+        ("UTF-8", True),
+        ("utf8", True),
+        ("UTF8", True),
+        ("utf_8", True),
+        ("UTF_8", True),
+        ("ascii", False),
+        ("US-ASCII", False),
+        ("latin-1", False),
+        (None, False),
+    ],
+    ids=[
+        "utf-8",
+        "UTF-8",
+        "utf8",
+        "UTF8",
+        "utf_8",
+        "UTF_8",
+        "ascii",
+        "US-ASCII",
+        "latin-1",
+        "none",
+    ],
+)
+def test_is_utf8_encoding(encoding: str | None, expected: bool) -> None:
+    """Verify UTF-8 encoding name detection.
+
+    Args:
+        encoding: Encoding name under test.
+        expected: Whether the name should be treated as UTF-8.
+    """
+    assert_that(_is_utf8_encoding(encoding)).is_equal_to(expected)
+
+
+def test_ensure_utf8_stdio_reconfigures_ascii_streams() -> None:
+    """ASCII stdout/stderr must be reconfigured to UTF-8."""
+    stdout = MagicMock()
+    stdout.encoding = "ascii"
+    stderr = MagicMock()
+    stderr.encoding = "US-ASCII"
+
+    with (
+        patch("lintro.cli.sys.stdout", stdout),
+        patch("lintro.cli.sys.stderr", stderr),
+    ):
+        ensure_utf8_stdio()
+
+    stdout.reconfigure.assert_called_once_with(encoding="utf-8", errors="replace")
+    stderr.reconfigure.assert_called_once_with(encoding="utf-8", errors="replace")
+
+
+def test_ensure_utf8_stdio_skips_utf8_streams() -> None:
+    """Already-UTF-8 streams must not be reconfigured."""
+    stdout = MagicMock()
+    stdout.encoding = "utf-8"
+    stderr = MagicMock()
+    stderr.encoding = "UTF-8"
+
+    with (
+        patch("lintro.cli.sys.stdout", stdout),
+        patch("lintro.cli.sys.stderr", stderr),
+    ):
+        ensure_utf8_stdio()
+
+    stdout.reconfigure.assert_not_called()
+    stderr.reconfigure.assert_not_called()
+
+
+def test_ensure_utf8_stdio_tolerates_streams_without_reconfigure() -> None:
+    """Streams lacking reconfigure (e.g. StringIO) must not raise."""
+    stdout = io.StringIO()
+    stderr = io.StringIO()
+
+    with (
+        patch("lintro.cli.sys.stdout", stdout),
+        patch("lintro.cli.sys.stderr", stderr),
+    ):
+        ensure_utf8_stdio()
 
 
 # =============================================================================

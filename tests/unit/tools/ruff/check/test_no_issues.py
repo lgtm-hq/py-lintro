@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from unittest.mock import MagicMock, patch
 
 from assertpy import assert_that
 
+from lintro.models.core.tool_result import ToolResult
 from lintro.tools.implementations.ruff.check import execute_ruff_check
 
 
@@ -18,10 +20,6 @@ def test_execute_ruff_check_no_issues_returns_success(
         mock_ruff_tool: Mock RuffTool instance for testing.
     """
     with (
-        patch(
-            "lintro.tools.implementations.ruff.check.walk_files_with_excludes",
-            return_value=["test.py"],
-        ),
         patch(
             "lintro.tools.implementations.ruff.check.run_subprocess_with_timeout",
             return_value=(True, "[]"),
@@ -50,10 +48,6 @@ def test_execute_ruff_check_no_issues_with_format_check(
 
     with (
         patch(
-            "lintro.tools.implementations.ruff.check.walk_files_with_excludes",
-            return_value=["test.py"],
-        ),
-        patch(
             "lintro.tools.implementations.ruff.check.run_subprocess_with_timeout",
             return_value=(True, ""),
         ),
@@ -74,13 +68,22 @@ def test_execute_ruff_check_no_issues_with_format_check(
 
 def test_execute_ruff_check_empty_paths_returns_no_files_message(
     mock_ruff_tool: MagicMock,
+    ruff_execution_context: Callable[..., MagicMock],
 ) -> None:
-    """Return no files message when paths list is empty after validation.
+    """Return no files message when the prepared context short-circuits.
 
     Args:
         mock_ruff_tool: Mock RuffTool instance for testing.
+        ruff_execution_context: Factory for mock execution contexts.
     """
-    mock_ruff_tool._validate_paths.return_value = None
+    mock_ruff_tool._prepare_execution.return_value = ruff_execution_context(
+        early_result=ToolResult(
+            name="ruff",
+            success=True,
+            output="No files to check.",
+            issues_count=0,
+        ),
+    )
 
     result = execute_ruff_check(mock_ruff_tool, [])
 
@@ -91,18 +94,25 @@ def test_execute_ruff_check_empty_paths_returns_no_files_message(
 
 def test_execute_ruff_check_no_python_files_found(
     mock_ruff_tool: MagicMock,
+    ruff_execution_context: Callable[..., MagicMock],
 ) -> None:
-    """Return no Python files message when no matching files are discovered.
+    """Return no files message when no matching files are discovered.
 
     Args:
         mock_ruff_tool: Mock RuffTool instance for testing.
+        ruff_execution_context: Factory for mock execution contexts.
     """
-    with patch(
-        "lintro.tools.implementations.ruff.check.walk_files_with_excludes",
-        return_value=[],
-    ):
-        result = execute_ruff_check(mock_ruff_tool, ["/test/project"])
+    mock_ruff_tool._prepare_execution.return_value = ruff_execution_context(
+        early_result=ToolResult(
+            name="ruff",
+            success=True,
+            output="No py/pyi files found to check.",
+            issues_count=0,
+        ),
+    )
 
-        assert_that(result.success).is_true()
-        assert_that(result.output).is_equal_to("No Python files found to check.")
-        assert_that(result.issues_count).is_equal_to(0)
+    result = execute_ruff_check(mock_ruff_tool, ["/test/project"])
+
+    assert_that(result.success).is_true()
+    assert_that(result.output).is_equal_to("No py/pyi files found to check.")
+    assert_that(result.issues_count).is_equal_to(0)

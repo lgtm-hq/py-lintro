@@ -21,17 +21,12 @@ def test_execute_ruff_fix_unsafe_fixes_enabled(
     """
     mock_ruff_tool.options["unsafe_fixes"] = True
 
-    with patch(
-        "lintro.tools.implementations.ruff.fix.walk_files_with_excludes",
-    ) as mock_walk:
-        mock_walk.return_value = ["test.py"]
+    mock_ruff_tool._run_subprocess.side_effect = [
+        (True, sample_ruff_json_empty_output),  # Initial check
+        (True, sample_ruff_json_empty_output),  # Fix with unsafe
+    ]
 
-        mock_ruff_tool._run_subprocess.side_effect = [
-            (True, sample_ruff_json_empty_output),  # Initial check
-            (True, sample_ruff_json_empty_output),  # Fix with unsafe
-        ]
-
-        result = execute_ruff_fix(mock_ruff_tool, ["test.py"])
+    result = execute_ruff_fix(mock_ruff_tool, ["test.py"])
 
     assert_that(result.success).is_true()
 
@@ -55,14 +50,7 @@ def test_execute_ruff_fix_warns_about_unsafe_fixes(
         }
     ]"""
 
-    with (
-        patch(
-            "lintro.tools.implementations.ruff.fix.walk_files_with_excludes",
-        ) as mock_walk,
-        patch("lintro.tools.implementations.ruff.fix.logger") as mock_logger,
-    ):
-        mock_walk.return_value = ["test.py"]
-
+    with patch("lintro.tools.implementations.ruff.fix.logger") as mock_logger:
         mock_ruff_tool._run_subprocess.side_effect = [
             (False, remaining_output),  # Initial check
             (False, remaining_output),  # Fix attempt

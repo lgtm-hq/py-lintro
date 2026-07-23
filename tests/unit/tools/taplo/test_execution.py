@@ -8,6 +8,7 @@ from unittest.mock import patch
 from assertpy import assert_that
 
 from lintro.tools.definitions.taplo import TaploPlugin
+from tests.test_samples_helpers import copy_sample
 
 # Tests for TaploPlugin.check method
 
@@ -22,8 +23,14 @@ def test_check_with_mocked_subprocess_success(
         taplo_plugin: The TaploPlugin instance to test.
         tmp_path: Temporary directory path for test files.
     """
-    test_file = tmp_path / "test.toml"
-    test_file.write_text('[project]\nname = "test"\n')
+    test_file = copy_sample(
+        tmp_path,
+        "tools",
+        "config",
+        "taplo",
+        "taplo_clean.toml",
+        dest_name="test.toml",
+    )
 
     with patch(
         "lintro.plugins.execution_preparation.verify_tool_version",
@@ -50,8 +57,14 @@ def test_check_with_mocked_subprocess_lint_errors(
         taplo_plugin: The TaploPlugin instance to test.
         tmp_path: Temporary directory path for test files.
     """
-    test_file = tmp_path / "test.toml"
-    test_file.write_text("invalid = \n")
+    test_file = copy_sample(
+        tmp_path,
+        "tools",
+        "config",
+        "taplo",
+        "taplo_invalid.toml",
+        dest_name="test.toml",
+    )
 
     taplo_output = """error[invalid_value]: invalid value
   --> test.toml:1:10
@@ -85,8 +98,14 @@ def test_check_with_mocked_subprocess_format_issues(
         taplo_plugin: The TaploPlugin instance to test.
         tmp_path: Temporary directory path for test files.
     """
-    test_file = tmp_path / "test.toml"
-    test_file.write_text('[project]\nname="test"\n')
+    test_file = copy_sample(
+        tmp_path,
+        "tools",
+        "config",
+        "taplo",
+        "taplo_unformatted.toml",
+        dest_name="test.toml",
+    )
 
     format_output = """error[formatting]: the file is not properly formatted
   --> test.toml:2:1
@@ -146,8 +165,14 @@ def test_fix_with_mocked_subprocess_success(
         taplo_plugin: The TaploPlugin instance to test.
         tmp_path: Temporary directory path for test files.
     """
-    test_file = tmp_path / "test.toml"
-    test_file.write_text('[project]\nname="test"\n')
+    test_file = copy_sample(
+        tmp_path,
+        "tools",
+        "config",
+        "taplo",
+        "taplo_unformatted.toml",
+        dest_name="test.toml",
+    )
 
     format_issue_output = """error[formatting]: the file is not properly formatted
   --> test.toml:2:1
@@ -188,8 +213,14 @@ def test_fix_with_mocked_subprocess_partial_fix(
         taplo_plugin: The TaploPlugin instance to test.
         tmp_path: Temporary directory path for test files.
     """
-    test_file = tmp_path / "test.toml"
-    test_file.write_text("invalid = \n")
+    test_file = copy_sample(
+        tmp_path,
+        "tools",
+        "config",
+        "taplo",
+        "taplo_invalid.toml",
+        dest_name="test.toml",
+    )
 
     format_issue = """error[formatting]: the file is not properly formatted
   --> test.toml:1:1
@@ -237,8 +268,14 @@ def test_fix_with_no_changes_needed(
         taplo_plugin: The TaploPlugin instance to test.
         tmp_path: Temporary directory path for test files.
     """
-    test_file = tmp_path / "test.toml"
-    test_file.write_text('[project]\nname = "test"\n')
+    test_file = copy_sample(
+        tmp_path,
+        "tools",
+        "config",
+        "taplo",
+        "taplo_clean.toml",
+        dest_name="test.toml",
+    )
 
     with patch(
         "lintro.plugins.execution_preparation.verify_tool_version",
