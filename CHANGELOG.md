@@ -21,6 +21,16 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.91.6] - 2026-07-23
+
+### Changed
+
+- **security**: retire homebrew-tap write credential references (#1459) (fe37b8a)
+
+### Fixed
+
+- **cli**: resolve --diff cwd and reject path tokens (#1335) (d8b57ff)
+
 ## [0.91.5] - 2026-07-23
 
 ### Changed
