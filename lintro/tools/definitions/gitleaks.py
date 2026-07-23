@@ -252,12 +252,31 @@ class GitleaksPlugin(BaseToolPlugin):
             output: str
             execution_failure: bool = False
             try:
-                self._run_subprocess(
+                # --exit-code 0 means leaks still exit 0; non-zero is a real
+                # tool failure (missing source, bad config, etc.).
+                proc = self._run_subprocess_result(
                     cmd=cmd,
                     timeout=ctx.timeout,
                     cwd=ctx.cwd,
                 )
                 output = Path(report_path).read_text(encoding="utf-8").strip()
+                if proc.returncode != 0:
+                    stderr = (proc.stderr or proc.output or "").strip()
+                    logger.error(
+                        "Gitleaks exited with code %s: %s",
+                        proc.returncode,
+                        stderr[:500] if stderr else "(no stderr)",
+                    )
+                    return [], ToolResult(
+                        name=self.definition.name,
+                        success=False,
+                        output=(
+                            stderr
+                            if stderr
+                            else (f"Gitleaks exited with code {proc.returncode}")
+                        ),
+                        issues_count=0,
+                    )
             except subprocess.TimeoutExpired:
                 timeout_msg = (
                     f"Gitleaks execution timed out ({ctx.timeout}s limit exceeded)."
@@ -271,7 +290,7 @@ class GitleaksPlugin(BaseToolPlugin):
                     output=timeout_msg,
                     issues_count=0,
                 )
-            except (OSError, ValueError, RuntimeError) as e:
+            except (OSError, ValueError, RuntimeError, FileNotFoundError) as e:
                 logger.error(f"Failed to run Gitleaks: {e}")
                 output = f"Gitleaks failed: {e}"
                 execution_failure = True
