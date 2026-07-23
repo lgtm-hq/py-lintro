@@ -66,7 +66,7 @@ def config_command(
     - Per-tool effective configuration
     - Configuration warnings and inconsistencies
 
-    \f
+    \u000c
 
     Args:
         verbose: Show detailed configuration including native tool configs.

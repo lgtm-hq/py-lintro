@@ -125,7 +125,7 @@ def setup_command(
     Scans your project, detects languages and frameworks, recommends tools,
     installs missing ones, and generates a .lintro-config.yaml.
 
-    \f
+    \u000c
 
     Args:
         profile: Named profile to use.

@@ -187,7 +187,7 @@ def check_command(
 ) -> None:
     """Check files for issues using the specified tools.
 
-    \f
+    \u000c
 
     Args:
         paths: tuple: List of file/directory paths to check.

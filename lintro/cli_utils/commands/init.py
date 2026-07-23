@@ -336,7 +336,7 @@ def init_command(
     Detects languages, enables appropriate tools in config, and prints
     next steps for installing tools and running checks.
 
-    \f
+    \u000c
 
     Args:
         minimal: Use minimal template with fewer defaults.

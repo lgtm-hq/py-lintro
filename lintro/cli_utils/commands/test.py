@@ -165,7 +165,7 @@ def test_command(
 
     This CLI command wraps pytest with lintro's output formatting.
 
-    \f
+    \u000c
 
     Args:
         paths: Paths to test files or directories.

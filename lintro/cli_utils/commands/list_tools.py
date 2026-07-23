@@ -72,7 +72,7 @@ def list_tools_command(
 ) -> None:
     """List all available tools and their configurations.
 
-    \f
+    \u000c
 
     Args:
         output: Path to output file for writing results.
