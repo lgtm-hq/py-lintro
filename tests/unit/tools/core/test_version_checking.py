@@ -128,6 +128,32 @@ def test_get_install_hints_includes_commitlint_cli_alias() -> None:
     assert_that(result["@commitlint/cli"]).is_equal_to(result["commitlint"])
 
 
+def test_get_install_hints_uses_commitlint_companion_version(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Commitlint hint uses each npm package's resolved version."""
+    monkeypatch.setattr(
+        version_checking,
+        "get_minimum_versions",
+        lambda: {"commitlint": "21.2.1", "@commitlint/cli": "21.2.1"},
+    )
+    monkeypatch.setattr(
+        version_checking,
+        "get_tool_version",
+        lambda package: (
+            "21.2.0" if package == "@commitlint/config-conventional" else None
+        ),
+    )
+
+    result = get_install_hints()
+
+    assert_that(result["commitlint"]).contains("@commitlint/cli@21.2.1")
+    assert_that(result["commitlint"]).contains(
+        "@commitlint/config-conventional@21.2.0",
+    )
+    assert_that(result["@commitlint/cli"]).is_equal_to(result["commitlint"])
+
+
 def test_get_install_hints_missing_template_logs_debug(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
