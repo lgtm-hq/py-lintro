@@ -120,7 +120,8 @@ jobs:
           retention-days: 7
 
       - name: Upload to release
-        if: inputs.release_tag != ''
+        # Resolved tag is set for both workflow_call and workflow_dispatch.
+        if: needs.get-release-info.outputs.release_tag != ''
         # yamllint disable-line rule:line-length
         uses: softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228 # v3
         with:
@@ -242,7 +243,8 @@ jobs:
           retention-days: 7
 
       - name: Upload to release
-        if: inputs.release_tag != ''
+        # Resolved tag is set for both workflow_call and workflow_dispatch.
+        if: needs.get-release-info.outputs.release_tag != ''
         uses: softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228 # v3
         with:
           tag_name: ${{ needs.get-release-info.outputs.release_tag }}
@@ -363,7 +365,8 @@ jobs:
           retention-days: 7
 
       - name: Upload to release
-        if: inputs.release_tag != ''
+        # Resolved tag is set for both workflow_call and workflow_dispatch.
+        if: needs.get-release-info.outputs.release_tag != ''
         # yamllint disable-line rule:line-length
         uses: softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228 # v3
         with:
@@ -424,7 +427,8 @@ jobs:
           retention-days: 7
 
       - name: Upload to release
-        if: inputs.release_tag != ''
+        # Resolved tag is set for both workflow_call and workflow_dispatch.
+        if: needs.get-release-info.outputs.release_tag != ''
         uses: softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228 # v3
         with:
           tag_name: ${{ needs.get-release-info.outputs.release_tag }}
@@ -444,8 +448,8 @@ jobs:
     # to recover) instead of shipping a partial bump. The universal guard
     # keeps single-arch workflow_call runs from failing on a missing
     # checksum artifact.
+    # Use resolved tag: workflow_dispatch has no release_tag input.
     if: >-
-      inputs.release_tag != '' &&
       inputs.arch == 'universal' &&
       needs.get-release-info.outputs.release_tag != '' &&
       needs.get-release-info.outputs.is_prerelease == 'false'
