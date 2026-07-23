@@ -83,12 +83,12 @@ documentation of their purposes and security considerations.
    committed credentials.
 
 5. **Retired App Credentials**: The organization-level GitHub App that formerly held
-   direct write access to `homebrew-tap` has been decommissioned. Retiring the
-   `HOMEBREW_TAP_DISPATCH_TOKEN` row above does not remove the App itself. An
-   organization admin must verify that no other repository still depends on the App,
-   then manually delete the former org-level `HOMEBREW_TAP_APP_ID` and
-   `HOMEBREW_TAP_APP_PRIVATE_KEY` secrets and rotate (or delete) the underlying GitHub
-   App private key.
+   direct write access to `homebrew-tap` has been decommissioned. Removing the former
+   `HOMEBREW_TAP_APP_ID` / `HOMEBREW_TAP_APP_PRIVATE_KEY` entries from this document does
+   not remove the App itself. An organization admin must verify that no other repository
+   still depends on the App, then manually delete the former org-level
+   `HOMEBREW_TAP_APP_ID` and `HOMEBREW_TAP_APP_PRIVATE_KEY` secrets and rotate (or
+   delete) the underlying GitHub App private key.
 
 ## Workflow Security
 
