@@ -26,6 +26,7 @@ def create_logger(
     run_dir: Path | None = None,
     *,
     route_stderr: bool = False,
+    art_enabled: bool = True,
     **kwargs: Any,
 ) -> ThreadSafeConsoleLogger:
     """Create a new ThreadSafeConsoleLogger instance.
@@ -34,12 +35,18 @@ def create_logger(
         run_dir: Optional run directory path for output location display.
         route_stderr: When True, decorative console output is routed to stderr
             so stdout carries only the final machine-readable document.
+        art_enabled: When True (default), decorative ASCII art may be printed
+            to an interactive TTY. When False, art is suppressed entirely.
         **kwargs: Additional arguments (ignored for backward compatibility).
 
     Returns:
         ThreadSafeConsoleLogger: A new instance of ThreadSafeConsoleLogger.
     """
-    return ThreadSafeConsoleLogger(run_dir=run_dir, route_stderr=route_stderr)
+    return ThreadSafeConsoleLogger(
+        run_dir=run_dir,
+        route_stderr=route_stderr,
+        art_enabled=art_enabled,
+    )
 
 
 __all__ = [

@@ -9,6 +9,7 @@ from unittest.mock import patch
 from assertpy import assert_that
 
 from lintro.tools.definitions.shfmt import ShfmtPlugin
+from tests.test_samples_helpers import copy_sample
 
 if TYPE_CHECKING:
     pass
@@ -29,8 +30,14 @@ def test_check_with_mocked_subprocess_success(
         shfmt_plugin: The ShfmtPlugin instance to test.
         tmp_path: Temporary directory path for test files.
     """
-    test_file = tmp_path / "test_script.sh"
-    test_file.write_text('#!/bin/bash\necho "hello"\n')
+    test_file = copy_sample(
+        tmp_path,
+        "tools",
+        "shell",
+        "shfmt",
+        "shfmt_hello.sh",
+        dest_name="test_script.sh",
+    )
 
     with patch(
         "lintro.plugins.execution_preparation.verify_tool_version",
@@ -57,9 +64,13 @@ def test_check_with_mocked_subprocess_issues(
         shfmt_plugin: The ShfmtPlugin instance to test.
         tmp_path: Temporary directory path for test files.
     """
-    test_file = tmp_path / "test_script.sh"
-    test_file.write_text(
-        '#!/bin/bash\nif [  "$foo" = "bar" ]; then\necho "match"\nfi\n',
+    test_file = copy_sample(
+        tmp_path,
+        "tools",
+        "shell",
+        "shfmt",
+        "shfmt_violations_compact.sh",
+        dest_name="test_script.sh",
     )
 
     shfmt_diff_output = f"""--- {test_file}
@@ -121,9 +132,13 @@ def test_fix_with_mocked_subprocess_success(
         shfmt_plugin: The ShfmtPlugin instance to test.
         tmp_path: Temporary directory path for test files.
     """
-    test_file = tmp_path / "test_script.sh"
-    test_file.write_text(
-        '#!/bin/bash\nif [  "$foo" = "bar" ]; then\necho "match"\nfi\n',
+    test_file = copy_sample(
+        tmp_path,
+        "tools",
+        "shell",
+        "shfmt",
+        "shfmt_violations_compact.sh",
+        dest_name="test_script.sh",
     )
 
     shfmt_diff_output = f"""--- {test_file}
@@ -187,8 +202,14 @@ def test_fix_with_nothing_to_fix(
         shfmt_plugin: The ShfmtPlugin instance to test.
         tmp_path: Temporary directory path for test files.
     """
-    test_file = tmp_path / "test_script.sh"
-    test_file.write_text('#!/bin/bash\necho "hello"\n')
+    test_file = copy_sample(
+        tmp_path,
+        "tools",
+        "shell",
+        "shfmt",
+        "shfmt_hello.sh",
+        dest_name="test_script.sh",
+    )
 
     with patch(
         "lintro.plugins.execution_preparation.verify_tool_version",

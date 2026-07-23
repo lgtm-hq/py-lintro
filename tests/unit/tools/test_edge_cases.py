@@ -20,6 +20,7 @@ from assertpy import assert_that
 from lintro.enums.tool_name import ToolName
 from lintro.models.core.tool_result import ToolResult
 from lintro.tools.definitions.ruff import RuffPlugin
+from tests.test_samples_helpers import copy_sample
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -37,8 +38,14 @@ def test_regular_symlink_is_followed(tmp_path: Path) -> None:
         tmp_path: Temporary directory path for test files.
     """
     # Create a real file
-    real_file = tmp_path / "real_file.py"
-    real_file.write_text("x = 1\n")
+    real_file = copy_sample(
+        tmp_path,
+        "tools",
+        "python",
+        "common",
+        "minimal_x.py",
+        dest_name="real_file.py",
+    )
 
     # Create a symlink to the file
     symlink_path = tmp_path / "symlink_file.py"
@@ -83,7 +90,14 @@ def test_symlink_directory_traversal(tmp_path: Path) -> None:
     # Create a subdirectory with a file
     subdir = tmp_path / "subdir"
     subdir.mkdir()
-    (subdir / "file.py").write_text("y = 2\n")
+    copy_sample(
+        subdir,
+        "tools",
+        "python",
+        "common",
+        "minimal_y.py",
+        dest_name="file.py",
+    )
 
     # Create a symlink to the directory
     dir_link = tmp_path / "link_to_subdir"
@@ -140,7 +154,14 @@ def test_long_file_paths_handled(
     if current.exists():
         test_file = current / "test.py"
         try:
-            test_file.write_text("x = 1\n")
+            copy_sample(
+                current,
+                "tools",
+                "python",
+                "common",
+                "minimal_x.py",
+                dest_name="test.py",
+            )
             assert_that(test_file.exists()).is_true()
             assert_that(len(str(test_file))).is_greater_than(100)
         except OSError:
@@ -158,8 +179,14 @@ def test_path_with_spaces_and_special_chars(tmp_path: Path) -> None:
     special_dir = tmp_path / "path with spaces"
     special_dir.mkdir()
 
-    test_file = special_dir / "file [1].py"
-    test_file.write_text("x = 1\n")
+    test_file = copy_sample(
+        special_dir,
+        "tools",
+        "python",
+        "common",
+        "minimal_x.py",
+        dest_name="file [1].py",
+    )
 
     assert_that(test_file.exists()).is_true()
     assert_that(test_file.read_text()).is_equal_to("x = 1\n")
@@ -235,7 +262,14 @@ def test_unicode_in_file_paths(
 
     test_file = tmp_path / f"{safe_name}.py"
     try:
-        test_file.write_text("x = 1\n")
+        copy_sample(
+            tmp_path,
+            "tools",
+            "python",
+            "common",
+            "minimal_x.py",
+            dest_name=f"{safe_name}.py",
+        )
         assert_that(test_file.exists()).is_true()
     except (OSError, UnicodeEncodeError):
         # Some systems may not support all Unicode in filenames
@@ -328,8 +362,14 @@ def test_single_file_handling(tmp_path: Path) -> None:
     Args:
         tmp_path: Temporary directory path for test files.
     """
-    test_file = tmp_path / "single.py"
-    test_file.write_text("x = 1\n")
+    test_file = copy_sample(
+        tmp_path,
+        "tools",
+        "python",
+        "common",
+        "minimal_x.py",
+        dest_name="single.py",
+    )
 
     plugin = RuffPlugin()
 
