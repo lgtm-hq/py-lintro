@@ -21,6 +21,12 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.91.16] - 2026-07-23
+
+### Fixed
+
+- **cli**: accept hyphenated names in --tools selection (#1635) (ad37502)
+
 ## [0.91.15] - 2026-07-23
 
 ### Fixed
