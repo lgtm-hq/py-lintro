@@ -21,6 +21,24 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.91.5] - 2026-07-23
+
+### Changed
+
+- **deps**: update dependency astral-sh/uv to 0.11.31 (patch) (#1603) (1b40902)
+- **deps**: update ghcr.io/lgtm-hq/lintro-tools:latest docker digest to eda3491 (#1602)
+  (1304e8d)
+- **deps**: update linting tools (#1477) (ecad0ec)
+- **deps**: update dependency lgtm-hq/lgtm-ci to v0.59.2 (minor) (#1482) (e2b5faf)
+- **deps**: update ghcr.io/lgtm-hq/lintro-tools:latest docker digest to 7623a30 (#1443)
+  (a8f7c48)
+- **deps**: update github-actions (#1589) (0d74038)
+
+### Fixed
+
+- **gitleaks**: surface non-zero exits, resolve prepared source path; extend ai-review
+  secret scope guard (#1385) (f2cc1df)
+
 ## [0.91.4] - 2026-07-22
 
 ### Changed
