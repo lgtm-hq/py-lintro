@@ -12,7 +12,11 @@ from loguru import logger
 
 from lintro.config.lintro_config import LintroConfig
 from lintro.models.core.tool_result import ToolResult
-from lintro.plugins.file_discovery import discover_files, get_cwd, validate_paths
+from lintro.plugins.file_discovery import (
+    discover_files,
+    get_execution_cwd,
+    validate_paths,
+)
 from lintro.plugins.protocol import ToolDefinition
 
 # Constants for default values
@@ -281,9 +285,13 @@ def prepare_execution(
 
     logger.debug(f"Files to process: {files}")
 
-    # Compute cwd and relative paths
-    cwd = get_cwd(files)
-    rel_files = [os.path.relpath(f, cwd) if cwd else f for f in files]
+    # Compute cwd and relative paths. Anchor the tool subprocess to the files'
+    # project root rather than the commonpath of discovered files, so the path
+    # each tool sees for a given file — and thus config ``overrides`` keyed on
+    # it — is identical whether the user passed a file, a directory, or ``.``
+    # (#1616).
+    cwd = get_execution_cwd(files)
+    rel_files = [os.path.relpath(os.path.abspath(f), cwd) for f in files]
 
     # Get timeout (keep as float to preserve precision)
     timeout_value = merged_options.get("timeout")
