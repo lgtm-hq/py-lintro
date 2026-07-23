@@ -64,7 +64,7 @@ class IssueDedupKey:
             file=getattr(issue, "file", "") or "",
             line=getattr(issue, "line", None) or 0,
             column=getattr(issue, "column", None) or 0,
-            code=getattr(issue, "code", "") or "",
+            code=issue.get_code(),
             message=getattr(issue, "message", "") or "",
         )
 

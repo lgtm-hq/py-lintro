@@ -165,6 +165,8 @@ def test_command(
 
     This CLI command wraps pytest with lintro's output formatting.
 
+    \u000c
+
     Args:
         paths: Paths to test files or directories.
         exclude: Pattern to exclude paths.

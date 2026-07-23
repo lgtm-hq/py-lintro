@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import csv
 import io
+from pathlib import Path
 
 import pytest
 from assertpy import assert_that
@@ -26,7 +27,13 @@ from lintro.utils.output.file_writer import format_tool_output, write_output_fil
 
 def _yamllint_case() -> tuple[str, list[BaseIssue], str]:
     issues: list[BaseIssue] = [
-        YamllintIssue(file="a.yaml", line=2, column=4, message="too many", rule="colons"),
+        YamllintIssue(
+            file="a.yaml",
+            line=2,
+            column=4,
+            message="too many",
+            rule="colons",
+        ),
     ]
     return "yamllint", issues, "colons"
 
@@ -41,7 +48,7 @@ def _ruff_case() -> tuple[str, list[BaseIssue], str]:
 @pytest.mark.parametrize("case", [_yamllint_case(), _ruff_case()])
 def test_code_is_consistent_across_grid_csv_json(
     case: tuple[str, list[BaseIssue], str],
-    tmp_path,
+    tmp_path: Path,
 ) -> None:
     """Grid, CSV, and JSON all render the same non-empty code for one issue."""
     tool_name, issues, expected_code = case

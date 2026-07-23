@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 from assertpy import assert_that
 
@@ -152,16 +154,23 @@ def test_build_check_command_verification_enabled(
 
 def test_build_check_command_optional_flags(
     trufflehog_plugin: TrufflehogPlugin,
+    tmp_path: Path,
 ) -> None:
-    """Optional flags should be appended when set.
+    """Optional flags should be appended when set and paths exist.
 
     Args:
         trufflehog_plugin: The plugin under test.
+        tmp_path: Temporary directory for on-disk option files.
     """
+    config_file = tmp_path / "cfg.yaml"
+    config_file.write_text("detectors: []\n")
+    exclude_file = tmp_path / "exclude.txt"
+    exclude_file.write_text("vendor/.*\n")
+
     trufflehog_plugin.set_options(
         results="verified,unverified",
-        config="/cfg.yaml",
-        exclude_paths="/exclude.txt",
+        config=str(config_file),
+        exclude_paths=str(exclude_file),
         concurrency=8,
     )
     cmd = trufflehog_plugin._build_check_command(source_paths=["/abs/path"])
@@ -169,11 +178,47 @@ def test_build_check_command_optional_flags(
     assert_that(cmd).contains("--results")
     assert_that(cmd).contains("verified,unverified")
     assert_that(cmd).contains("--config")
-    assert_that(cmd).contains("/cfg.yaml")
+    assert_that(cmd).contains(str(config_file))
     assert_that(cmd).contains("--exclude-paths")
-    assert_that(cmd).contains("/exclude.txt")
+    assert_that(cmd).contains(str(exclude_file))
     assert_that(cmd).contains("--concurrency")
     assert_that(cmd).contains("8")
+
+
+def test_build_check_command_fails_when_config_is_absent(
+    trufflehog_plugin: TrufflehogPlugin,
+    tmp_path: Path,
+) -> None:
+    """A missing explicit config must fail instead of disabling detectors.
+
+    Args:
+        trufflehog_plugin: The plugin under test.
+        tmp_path: Temporary directory path.
+    """
+    missing_config = tmp_path / "missing-config.yaml"
+    trufflehog_plugin.set_options(config=str(missing_config))
+
+    with pytest.raises(ValueError, match="config file does not exist"):
+        trufflehog_plugin._build_check_command(source_paths=["/abs/path"])
+
+
+def test_build_check_command_skips_absent_exclude_paths(
+    trufflehog_plugin: TrufflehogPlugin,
+    tmp_path: Path,
+) -> None:
+    """Absent CI-only exclude files must not be passed to TruffleHog.
+
+    Args:
+        trufflehog_plugin: The plugin under test.
+        tmp_path: Temporary directory path.
+    """
+    missing_exclude = tmp_path / "missing-exclude.txt"
+    trufflehog_plugin.set_options(exclude_paths=str(missing_exclude))
+    cmd = trufflehog_plugin._build_check_command(source_paths=["/abs/path"])
+
+    assert_that(cmd).does_not_contain("--config")
+    assert_that(cmd).does_not_contain("--exclude-paths")
+    assert_that(cmd).does_not_contain(str(missing_exclude))
 
 
 def test_build_check_command_multiple_paths(

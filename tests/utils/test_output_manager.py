@@ -63,7 +63,7 @@ def make_tool_result(
     )
 
 
-def make_issue(file: str, line: int, code: str, message: str) -> SimpleNamespace:
+def make_issue(file: str, line: int, code: str, message: str) -> _ReportIssue:
     """Factory for issue-like objects used in report tests.
 
     Args:
