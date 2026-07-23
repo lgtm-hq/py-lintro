@@ -728,6 +728,21 @@ def run_lint_tools_simple(
             except DiffResolutionError as exc:
                 logger.console_output(text=f"Error: {exc}", color="red")
                 return 1
+            # Non-repo scan targets are scanned in full (they have no diff to
+            # filter against), but the changed-file count only covers the
+            # repository targets. Warn so the count below isn't read as the
+            # whole scan scope when targets are mixed (#1618).
+            non_repo_targets = repo_groups.get(None)
+            if non_repo_targets and has_repo_paths:
+                logger.console_output(
+                    text=(
+                        f"--diff: {len(non_repo_targets)} scan target(s) are "
+                        "outside a git repository and are scanned in full (not "
+                        "diff-filtered); the changed-file count below counts only "
+                        "the repository target(s)."
+                    ),
+                    color="yellow",
+                )
             display_base = (
                 "default base"
                 if resolved_diff_base == DIFF_DEFAULT_SENTINEL
