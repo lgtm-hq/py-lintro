@@ -21,6 +21,12 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.91.22] - 2026-07-23
+
+### Fixed
+
+- **formatters**: unify rule-code across output formats (#1463) (7ae350e)
+
 ## [0.91.21] - 2026-07-23
 
 ### Fixed
