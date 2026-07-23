@@ -30,7 +30,7 @@ concurrency:
 jobs:
   codeql:
     # yamllint disable-line rule:line-length
-    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-codeql.yml@66cad82ead0e5d119928c895c7d7da9c837989e5 # v0.52.3
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-codeql.yml@ee8484ca71db3a2c2c33da6128bbf2330fcd7c88 # v0.59.2
     with:
       # Org ruleset (checks-py-lintro): codeql / 🔬 CodeQL Analysis
       job-name: '🔬 CodeQL Analysis'
@@ -38,7 +38,7 @@ jobs:
       build-mode: none
       config-file: .github/codeql/codeql-config.yml
       category: '/language:all'
-      tooling-ref: '66cad82ead0e5d119928c895c7d7da9c837989e5' # v0.52.3
+      tooling-ref: 'ee8484ca71db3a2c2c33da6128bbf2330fcd7c88' # v0.59.2
       egress-policy: block
       egress-preset: github-tooling
       # Full list (v0.50.0+ replace semantics): the reusable passes

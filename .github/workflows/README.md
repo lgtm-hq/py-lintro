@@ -3,7 +3,7 @@
 This repository uses GitHub Actions for quality gates, release automation, and
 publishing. Shared workflows are thin callers to
 [lgtm-ci](https://github.com/lgtm-hq/lgtm-ci) reusable workflows pinned at
-`66cad82ead0e5d119928c895c7d7da9c837989e5` (**v0.52.3**). All workflow SHA pins include
+`ee8484ca71db3a2c2c33da6128bbf2330fcd7c88` (**v0.59.2**). All workflow SHA pins include
 trailing `# vX.Y.Z` comments so Renovate can track digest updates. Policy is enforced by
 [lgtm-ci validate-action-pinning](https://github.com/lgtm-hq/lgtm-ci/pull/221) (via
 `validate-action-pinning.yml`) and automated by the
@@ -17,7 +17,13 @@ trailing `# vX.Y.Z` comments so Renovate can track digest updates. Policy is enf
 - **docker-ci.yml** — Manifest sync, multi-stage Docker build, dogfooding quality
   (`reusable-quality-lint.yml` + PR-only `reusable-publish-quality-summary.yml`,
   CI-built image), integration tests, security audit, GHCR publish (main), CI tag
-  cleanup
+  cleanup. PRs without global-lint-impact changes lint only their changed files
+  (`dogfooding-lint-changed`, same image/tool set); merge queue, pushes, and
+  global-impact PRs keep the full-repo run (#1361)
+- **dogfood-nightly.yml** — Nightly full-repo dogfooding lint on `main`
+  (`reusable-quality-lint.yml`, pinned release image) backstopping changed-files PR
+  linting; failures open/ping a deduplicated issue via
+  `reusable-main-failure-notifier.yml`
 
 ## Release
 
@@ -46,6 +52,11 @@ on `main` failures — hence the `actions: read` + `issues: write` job permissio
   (same three-step pattern with `repository-url: https://test.pypi.org/legacy/`)
 - **docker-build-publish.yml** — Multi-arch GHCR publish via `reusable-docker.yml`
   (full + base images, registry cache at `:cache`, no-cache on version tags)
+- **docker-tools-publish.yml** — Publishes the `lintro-tools` toolchain base image
+  (`docker/tools.Dockerfile`) via `reusable-docker.yml` on tool-pin changes plus a
+  weekly no-cache rebuild for CVE freshness; cosign-signed with SBOM + provenance
+  attestations. A follow-up root `Dockerfile` change will consume it via a
+  Renovate-managed digest-pinned `FROM`.
 
 ## Security & maintenance
 

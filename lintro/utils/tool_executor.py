@@ -154,19 +154,20 @@ def _warn_ai_fix_disabled(
     *,
     action: Action,
     ai_fix: bool,
-    ai_enabled: bool,
+    ai_lint_enabled: bool,
     logger: Any,
     output_format: str = "",
 ) -> None:
-    """Warn when users request AI fixes but AI is disabled in config."""
-    if action != Action.CHECK or not ai_fix or ai_enabled:
+    """Warn when users request AI fixes but AI lint is disabled in config."""
+    if action != Action.CHECK or not ai_fix or ai_lint_enabled:
         return
     # Suppress plain-text warnings for machine-readable output formats
     if output_format.lower() in ("json", "sarif"):
         return
     logger.console_output(
-        "AI fixes requested with --fix, but ai.enabled is false in "
-        ".lintro-config.yaml; skipping AI enhancements.",
+        "AI fixes requested with --fix, but AI lint is disabled in "
+        ".lintro-config.yaml (set ai.enabled and ai.lint: true); "
+        "skipping AI enhancements.",
     )
 
 
@@ -235,6 +236,8 @@ def _display_fix_result(
             output=result.output or "",
             output_format=output_format,
             issues=list(result.issues) if result.issues else None,
+            success=result.success,
+            issues_count=result.issues_count,
         )
     if result.output and raw_output:
         display_output = result.output
@@ -479,6 +482,7 @@ def run_lint_tools_simple(
     score: bool = False,
     fail_under: float | None = None,
     diff_base: str | None = None,
+    no_art: bool = False,
 ) -> int:
     """Simplified runner using Loguru-based logging with rich formatting.
 
@@ -522,6 +526,9 @@ def run_lint_tools_simple(
             files; :data:`~lintro.utils.git_diff.DIFF_DEFAULT_SENTINEL` resolves
             the repository default base; any other value is used as the base
             ref. Non-git directories fall back to a full scan with a warning.
+        no_art: When True, suppress decorative ASCII art regardless of the
+            ``output.art`` config value. Art is also suppressed automatically
+            when ``output.art`` is ``False`` or stdout is not a TTY.
 
     Returns:
         Exit code (0 for success, 1 for failures).
@@ -561,9 +568,18 @@ def run_lint_tools_simple(
     # Score-only takes priority over machine-readable formats so
     # ``--score --output-format json`` still prints only the numeric score.
     score_only = bool(score)
+
+    # Resolve whether decorative ASCII art may be shown. Either the ``--no-art``
+    # flag or ``output.art: false`` in config disables it; the TTY guard in
+    # print_ascii_art still applies on top of this.
+    from lintro.config.config_loader import get_config as _get_config
+
+    art_enabled = bool(_get_config().output.art) and not no_art
+
     logger = create_logger(
         run_dir=output_manager.run_dir,
         route_stderr=machine_readable_output or score_only,
+        art_enabled=art_enabled,
     )
 
     # Get tools to run (now returns ToolsToRunResult with skip info)
@@ -992,7 +1008,7 @@ def run_lint_tools_simple(
     _warn_ai_fix_disabled(
         action=action,
         ai_fix=effective_ai_fix,
-        ai_enabled=lintro_config.ai.enabled,
+        ai_lint_enabled=lintro_config.ai.lint_enabled,
         logger=logger,
         output_format=output_format,
     )

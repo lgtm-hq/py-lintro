@@ -137,3 +137,79 @@ def test_run_subprocess_with_timeout_exception() -> None:
     # Verify the exception has enhanced message
     assert_that(str(exc_info.value.output)).contains("test_tool execution timed out")
     assert_that(str(exc_info.value.output)).contains("(10s limit exceeded)")
+
+
+def _timeout_tool(default_timeout: int = 300, option_timeout: int | None = 30) -> Any:
+    """Build a mock tool whose subprocess always times out.
+
+    Args:
+        default_timeout: Value for ``tool._default_timeout``.
+        option_timeout: Value stored under ``tool.options['timeout']``; omitted
+            when None so the option key is absent.
+
+    Returns:
+        Any: Configured MockTool that raises TimeoutExpired on subprocess runs.
+    """
+    tool = MockTool(default_timeout=default_timeout)
+    if option_timeout is not None:
+        tool.options["timeout"] = option_timeout
+
+    def _raise(
+        cmd: list[str],
+        timeout: int | None = None,
+        cwd: str | None = None,
+    ) -> tuple[bool, str]:
+        raise subprocess.TimeoutExpired(cmd=cmd, timeout=timeout or 0)
+
+    tool._run_subprocess = _raise  # type: ignore[method-assign]
+    return tool
+
+
+def test_run_subprocess_timeout_zero_preserved() -> None:
+    """An explicit timeout=0 is preserved, not replaced by the option/default.
+
+    Regression test for the falsy-zero bug (#1221): ``timeout or fallback``
+    treated ``0`` as missing and reported the configured timeout instead.
+    """
+    tool = _timeout_tool(default_timeout=300, option_timeout=30)
+
+    with pytest.raises(subprocess.TimeoutExpired) as exc_info:
+        run_subprocess_with_timeout(tool, ["slow"], timeout=0)
+
+    # The reported timeout must be the caller-provided 0, not the 30s option.
+    assert_that(exc_info.value.timeout).is_equal_to(0)
+    assert_that(str(exc_info.value.output)).contains("(0s limit exceeded)")
+    assert_that(str(exc_info.value.output)).does_not_contain("(30s limit exceeded)")
+
+
+def test_run_subprocess_timeout_none_uses_option_fallback() -> None:
+    """A timeout of None falls back to the tool option, then the default."""
+    tool = _timeout_tool(default_timeout=300, option_timeout=45)
+
+    with pytest.raises(subprocess.TimeoutExpired) as exc_info:
+        run_subprocess_with_timeout(tool, ["slow"], timeout=None)
+
+    assert_that(exc_info.value.timeout).is_equal_to(45)
+    assert_that(str(exc_info.value.output)).contains("(45s limit exceeded)")
+
+
+def test_run_subprocess_timeout_none_uses_default_when_no_option() -> None:
+    """A timeout of None falls back to the tool default when no option is set."""
+    tool = _timeout_tool(default_timeout=300, option_timeout=None)
+
+    with pytest.raises(subprocess.TimeoutExpired) as exc_info:
+        run_subprocess_with_timeout(tool, ["slow"], timeout=None)
+
+    assert_that(exc_info.value.timeout).is_equal_to(300)
+    assert_that(str(exc_info.value.output)).contains("(300s limit exceeded)")
+
+
+def test_run_subprocess_timeout_positive_passthrough() -> None:
+    """An explicit positive timeout is passed through unchanged."""
+    tool = _timeout_tool(default_timeout=300, option_timeout=30)
+
+    with pytest.raises(subprocess.TimeoutExpired) as exc_info:
+        run_subprocess_with_timeout(tool, ["slow"], timeout=45)
+
+    assert_that(exc_info.value.timeout).is_equal_to(45)
+    assert_that(str(exc_info.value.output)).contains("(45s limit exceeded)")

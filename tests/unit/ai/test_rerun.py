@@ -4,14 +4,15 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
+from typing import Any
 from unittest.mock import MagicMock, patch
 
+import pytest
 from assertpy import assert_that
 
 from lintro.ai.rerun import (
-    _tool_cwd,
+    absolute_paths_for_context,
     apply_rerun_results,
-    paths_for_context,
     rerun_tools,
 )
 from lintro.models.core.tool_result import ToolResult
@@ -22,54 +23,147 @@ from .conftest import MockIssue
 _ByTool = dict[str, tuple[ToolResult, list[BaseIssue]]]
 
 
-# -- TestToolCwd: Tests for _tool_cwd context manager. -----------------------
+# -- TestAbsolutePathsForContext: Tests for absolute_paths_for_context. ------
 
 
-def test_tool_cwd_restores_original_cwd(tmp_path: Path) -> None:
-    """_tool_cwd changes cwd and restores it after exit."""
-    original = os.getcwd()
-    target = str(tmp_path)
+def test_absolute_paths_for_context_resolves_relative_paths(tmp_path: Path) -> None:
+    """Relative paths are resolved to absolute form for cwd-explicit rerun."""
+    child = tmp_path / "src" / "main.py"
+    child.parent.mkdir(parents=True)
+    child.write_text("x = 1\n", encoding="utf-8")
 
-    with _tool_cwd(target):
-        assert_that(os.getcwd()).is_equal_to(target)
+    monkeyed_cwd = os.getcwd()
+    try:
+        os.chdir(str(tmp_path))
+        result = absolute_paths_for_context(file_paths=["src/main.py"])
+    finally:
+        os.chdir(monkeyed_cwd)
 
-    assert_that(os.getcwd()).is_equal_to(original)
-
-
-def test_tool_cwd_skips_when_none() -> None:
-    """When cwd is None, the context manager yields without changing directory."""
-    original = os.getcwd()
-
-    with _tool_cwd(None):
-        assert_that(os.getcwd()).is_equal_to(original)
-
-    assert_that(os.getcwd()).is_equal_to(original)
+    assert_that(result).is_length(1)
+    assert_that(result[0]).is_equal_to(str(child.resolve()))
+    assert_that(Path(result[0]).is_absolute()).is_true()
 
 
-# -- TestPathsForContext: Tests for paths_for_context. -----------------------
+def test_absolute_paths_for_context_keeps_absolute_paths(tmp_path: Path) -> None:
+    """Already-absolute paths are returned in resolved absolute form."""
+    absolute = str(tmp_path / "a" / "b.py")
+
+    result = absolute_paths_for_context(file_paths=[absolute])
+
+    assert_that(result).is_length(1)
+    assert_that(result[0]).is_equal_to(str(Path(absolute).resolve()))
 
 
-def test_paths_for_context_relativizes_paths(tmp_path: Path) -> None:
-    """Given absolute paths and a cwd, returns relative paths for children."""
-    cwd = str(tmp_path)
-    child = str(tmp_path / "src" / "main.py")
-    outside = "/some/other/path/file.py"
-
-    result = paths_for_context(file_paths=[child, outside], cwd=cwd)
-
-    assert_that(result).is_length(2)
-    assert_that(result[0]).is_equal_to(str(Path("src") / "main.py"))
-    # Outside path stays absolute (resolved)
-    assert_that(result[1]).is_equal_to(str(Path(outside).resolve()))
+# -- TestRerunNoChdir: rerun must never mutate the process-global cwd. -------
 
 
-def test_paths_for_context_returns_originals_when_no_cwd() -> None:
-    """When cwd is None, returns original paths unchanged."""
-    paths = ["/a/b/c.py", "/d/e/f.py"]
+@patch("lintro.tools.tool_manager.get_tool")
+def test_ai_rerun_does_not_chdir(
+    mock_get_tool: MagicMock,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """rerun_tools must not call os.chdir; the process cwd stays unchanged."""
 
-    result = paths_for_context(file_paths=paths, cwd=None)
+    def _fail_chdir(*_args: Any, **_kwargs: Any) -> None:
+        raise AssertionError("rerun_tools must not call os.chdir")
 
-    assert_that(result).is_equal_to(paths)
+    monkeypatch.setattr(os, "chdir", _fail_chdir)
+
+    source = tmp_path / "src" / "main.py"
+    source.parent.mkdir(parents=True)
+    source.write_text("x = 1\n", encoding="utf-8")
+
+    issue = MockIssue(
+        file=str(source),
+        line=1,
+        column=1,
+        message="test",
+        code="E501",
+        severity="warning",
+    )
+    result = ToolResult(
+        name="ruff",
+        success=False,
+        issues_count=1,
+        issues=[issue],
+        cwd=str(tmp_path),
+    )
+    by_tool: _ByTool = {"ruff": (result, [issue])}
+
+    captured: dict[str, Any] = {}
+
+    class _FakeTool:
+        def check(self, paths: Any, options: Any) -> ToolResult:
+            captured["paths"] = paths
+            return ToolResult(name="ruff", success=True, issues_count=0, issues=[])
+
+    mock_get_tool.return_value = _FakeTool()
+
+    before = os.getcwd()
+    results = rerun_tools(by_tool)
+    after = os.getcwd()
+
+    assert_that(after).is_equal_to(before)
+    assert_that(results).is_length(1)
+    # Tool receives absolute paths so it derives its own cwd.
+    assert_that(captured["paths"]).is_equal_to([str(source.resolve())])
+
+
+@patch("lintro.plugins.base.run_subprocess")
+def test_ai_rerun_passes_cwd_to_subprocess(
+    mock_run_subprocess: MagicMock,
+    tmp_path: Path,
+) -> None:
+    """The stubbed subprocess layer receives the intended cwd during rerun.
+
+    A real tool (ruff) is re-run through ``rerun_tools`` with the subprocess
+    layer stubbed. Because rerun passes absolute paths, the tool resolves its
+    working directory from the target file's parent and hands that cwd to
+    ``run_subprocess`` — no process-global ``os.chdir`` involved.
+    """
+    from lintro.plugins.subprocess_executor import SubprocessResult
+
+    source = tmp_path / "main.py"
+    source.write_text("x = 1\n", encoding="utf-8")
+    expected_cwd = str(source.resolve().parent)
+
+    captured_cwds: list[str | None] = []
+
+    def _fake_run_subprocess(
+        cmd: list[str],
+        timeout: float,
+        cwd: str | None = None,
+        env: dict[str, str] | None = None,
+        stdin: int | None = None,
+    ) -> SubprocessResult:
+        captured_cwds.append(cwd)
+        return SubprocessResult(returncode=0, stdout="", stderr="", output="")
+
+    mock_run_subprocess.side_effect = _fake_run_subprocess
+
+    issue = MockIssue(
+        file=str(source),
+        line=1,
+        column=1,
+        message="test",
+        code="E501",
+        severity="warning",
+    )
+    result = ToolResult(
+        name="ruff",
+        success=False,
+        issues_count=1,
+        issues=[issue],
+        cwd=expected_cwd,
+    )
+    by_tool: _ByTool = {"ruff": (result, [issue])}
+
+    results = rerun_tools(by_tool)
+
+    assert_that(results).is_length(1)
+    assert_that(captured_cwds).is_not_empty()
+    assert_that(captured_cwds).contains(expected_cwd)
 
 
 # -- TestRerunTools: Tests for rerun_tools. ----------------------------------

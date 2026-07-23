@@ -23,6 +23,9 @@ import os
 import shutil
 import subprocess  # nosec B404 - subprocess is the core mechanism for invoking git; all invocations use shell=False
 from functools import lru_cache
+from pathlib import Path
+
+from lintro.utils.path_utils import absolute_path_without_resolving
 
 # Sentinel used by the ``--diff`` CLI option to mean "flag supplied without an
 # explicit base"; resolved to the repository's default base ref at runtime.
@@ -271,7 +274,7 @@ def get_changed_files(base: str, cwd: str = ".") -> frozenset[str]:
     Raises:
         DiffResolutionError: When ``base`` does not resolve to a commit.
     """
-    root = _repo_root(cwd) or os.path.abspath(cwd)
+    root = _repo_root(cwd) or absolute_path_without_resolving(Path(cwd))
 
     if not ref_exists(base, cwd):
         raise DiffResolutionError(
@@ -287,9 +290,9 @@ def get_changed_files(base: str, cwd: str = ".") -> frozenset[str]:
 
     changed: set[str] = set()
     for name in names:
-        abs_path = os.path.realpath(os.path.join(root, name))
+        abs_path = absolute_path_without_resolving(Path(root) / name)
         # Drop deletions / rename sources that no longer exist on disk.
-        if os.path.isfile(abs_path):
+        if Path(abs_path).is_file():
             changed.add(abs_path)
     return frozenset(changed)
 
@@ -312,5 +315,4 @@ def filter_files_by_diff(
     changed = get_changed_files(base, cwd)
     if not changed:
         return []
-    changed_real = {os.path.realpath(path) for path in changed}
-    return [f for f in files if os.path.realpath(f) in changed_real]
+    return [f for f in files if absolute_path_without_resolving(Path(f)) in changed]

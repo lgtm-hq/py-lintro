@@ -9,6 +9,7 @@ from unittest.mock import patch
 from assertpy import assert_that
 
 from lintro.tools.definitions.taplo import TaploPlugin
+from tests.test_samples_helpers import copy_sample
 
 # Tests for timeout handling in check method
 
@@ -23,8 +24,14 @@ def test_check_with_timeout(
         taplo_plugin: The TaploPlugin instance to test.
         tmp_path: Temporary directory path for test files.
     """
-    test_file = tmp_path / "test.toml"
-    test_file.write_text('[project]\nname = "test"\n')
+    test_file = copy_sample(
+        tmp_path,
+        "tools",
+        "config",
+        "taplo",
+        "taplo_clean.toml",
+        dest_name="test.toml",
+    )
 
     with patch.object(
         taplo_plugin,
@@ -48,8 +55,14 @@ def test_check_with_timeout_on_format_check(
         taplo_plugin: The TaploPlugin instance to test.
         tmp_path: Temporary directory path for test files.
     """
-    test_file = tmp_path / "test.toml"
-    test_file.write_text('[project]\nname = "test"\n')
+    test_file = copy_sample(
+        tmp_path,
+        "tools",
+        "config",
+        "taplo",
+        "taplo_clean.toml",
+        dest_name="test.toml",
+    )
 
     with patch.object(
         taplo_plugin,
@@ -78,8 +91,14 @@ def test_fix_with_timeout(
         taplo_plugin: The TaploPlugin instance to test.
         tmp_path: Temporary directory path for test files.
     """
-    test_file = tmp_path / "test.toml"
-    test_file.write_text('[project]\nname = "test"\n')
+    test_file = copy_sample(
+        tmp_path,
+        "tools",
+        "config",
+        "taplo",
+        "taplo_clean.toml",
+        dest_name="test.toml",
+    )
 
     with patch.object(
         taplo_plugin,
@@ -102,8 +121,14 @@ def test_fix_with_timeout_during_fix_command(
         taplo_plugin: The TaploPlugin instance to test.
         tmp_path: Temporary directory path for test files.
     """
-    test_file = tmp_path / "test.toml"
-    test_file.write_text('[project]\nname="test"\n')
+    test_file = copy_sample(
+        tmp_path,
+        "tools",
+        "config",
+        "taplo",
+        "taplo_unformatted.toml",
+        dest_name="test.toml",
+    )
 
     format_issue = """error[formatting]: the file is not properly formatted
   --> test.toml:2:1

@@ -24,6 +24,7 @@ from lintro.config.lintro_config import (
     ExecutionConfig,
     LintroConfig,
     LintroToolConfig,
+    OutputConfig,
 )
 from lintro.config.review_config import (
     ReviewChecklistConfig,
@@ -187,6 +188,15 @@ def _parse_execution_config(data: dict[str, Any]) -> ExecutionConfig:
             f"got {max_fix_retries}",
         )
 
+    # max_workers and artifacts are optional; when absent, ExecutionConfig
+    # applies its own defaults (CPU count and empty list respectively). Only
+    # forward them when present so the model defaults still win on omission.
+    optional_fields: dict[str, Any] = {}
+    if "max_workers" in data:
+        optional_fields["max_workers"] = data["max_workers"]
+    if "artifacts" in data:
+        optional_fields["artifacts"] = data["artifacts"]
+
     return ExecutionConfig(
         enabled_tools=enabled_tools,
         tool_order=tool_order,
@@ -194,6 +204,7 @@ def _parse_execution_config(data: dict[str, Any]) -> ExecutionConfig:
         parallel=data.get("parallel", True),
         auto_install_deps=data.get("auto_install_deps"),
         max_fix_retries=max_fix_retries,
+        **optional_fields,
     )
 
 
@@ -387,6 +398,44 @@ def _parse_review_config(data: Any) -> ReviewConfig:
     return ReviewConfig(**filtered)
 
 
+def _parse_output_config(data: Any) -> OutputConfig:
+    """Parse the console output configuration section.
+
+    Args:
+        data: Raw ``output`` section from config.
+
+    Returns:
+        OutputConfig: Parsed output configuration.
+
+    Raises:
+        ValueError: When the output section is not a mapping or ``art`` is not
+            a boolean.
+    """
+    if data is None:
+        return OutputConfig()
+    if not isinstance(data, dict):
+        msg = f"output config must be a mapping, got {type(data).__name__}"
+        raise ValueError(msg)
+    if not data:
+        return OutputConfig()
+
+    known_fields = set(OutputConfig.model_fields)
+    unknown = set(data) - known_fields
+    if unknown:
+        logger.warning(
+            "Unknown output config keys ignored: {}",
+            ", ".join(sorted(unknown)),
+        )
+    filtered = {key: value for key, value in data.items() if key in known_fields}
+
+    art = filtered.get("art")
+    if art is not None and not isinstance(art, bool):
+        msg = f"output.art must be a boolean, got {type(art).__name__}"
+        raise ValueError(msg)
+
+    return OutputConfig(**filtered)
+
+
 def _parse_score_config(data: Any) -> ScoreConfig:
     """Parse the health score configuration section.
 
@@ -435,6 +484,7 @@ def _convert_pyproject_to_config(data: dict[str, Any]) -> dict[str, Any]:
         "ai": {},
         "review": {},
         "score": {},
+        "output": {},
     }
 
     # Inline import: ToolName is a static StrEnum that does not trigger
@@ -455,8 +505,10 @@ def _convert_pyproject_to_config(data: dict[str, Any]) -> dict[str, Any]:
         "tool_order",
         "fail_fast",
         "parallel",
+        "max_workers",
         "auto_install_deps",
         "max_fix_retries",
+        "artifacts",
     }
 
     # Known enforce settings (formerly global)
@@ -491,6 +543,8 @@ def _convert_pyproject_to_config(data: dict[str, Any]) -> dict[str, Any]:
             result["review"] = value
         elif key_lower == "score" and isinstance(value, dict):
             result["score"] = value
+        elif key_lower == "output" and isinstance(value, dict):
+            result["output"] = value
 
     return result
 
@@ -558,6 +612,7 @@ def load_config(
     ai_config = _parse_ai_config(data.get("ai", {}))
     review_config = _parse_review_config(data.get("review", {}))
     score_config = _parse_score_config(data.get("score", {}))
+    output_config = _parse_output_config(data.get("output", {}))
 
     return LintroConfig(
         execution=execution_config,
@@ -567,6 +622,7 @@ def load_config(
         ai=ai_config,
         review=review_config,
         score=score_config,
+        output=output_config,
         config_path=resolved_path,
     )
 

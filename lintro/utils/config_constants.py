@@ -94,6 +94,7 @@ DEFAULT_TOOL_PRIORITIES: dict[str, int] = {
     ToolName.RUFF: 20,
     ToolName.OXFMT: 25,
     ToolName.MARKDOWNLINT: 30,
+    ToolName.HTML_VALIDATE: 30,
     ToolName.YAMLLINT: 35,
     ToolName.BANDIT: 45,
     ToolName.HADOLINT: 50,
@@ -101,6 +102,9 @@ DEFAULT_TOOL_PRIORITIES: dict[str, int] = {
     ToolName.ACTIONLINT: 55,
     ToolName.MYPY: 82,
     ToolName.TSC: 82,
+    ToolName.GOLANGCI_LINT: 85,
     ToolName.OSV_SCANNER: 90,
+    ToolName.PIP_AUDIT: 90,
+    ToolName.TRUFFLEHOG: 90,
     ToolName.PYTEST: 100,
 }
