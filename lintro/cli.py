@@ -1,6 +1,9 @@
 """Command-line interface for Lintro."""
 
-from typing import Any, cast
+import codecs
+import contextlib
+import sys
+from typing import Any, TextIO, cast
 
 import click
 from rich.console import Console
@@ -11,6 +14,54 @@ from rich.text import Text
 from lintro import __version__
 from lintro.cli_utils.command_chainer import CommandChainer
 from lintro.utils.logger_setup import setup_cli_logging
+
+
+def _is_utf8_encoding(encoding: str | None) -> bool:
+    """Return whether *encoding* names UTF-8.
+
+    Args:
+        encoding: Encoding name from a text stream, or ``None``.
+
+    Returns:
+        ``True`` when *encoding* is UTF-8 (any common spelling).
+    """
+    if encoding is None:
+        return False
+    try:
+        return codecs.lookup(encoding).name == "utf-8"
+    except LookupError:
+        # Unknown codec name — cannot be a UTF-8 alias.
+        return False
+
+
+def _reconfigure_stream_utf8(stream: TextIO) -> None:
+    """Reconfigure *stream* to UTF-8 when it is not already UTF-8.
+
+    Args:
+        stream: Stdout/stderr (or compatible) text stream.
+    """
+    if _is_utf8_encoding(getattr(stream, "encoding", None)):
+        return
+    reconfigure = getattr(stream, "reconfigure", None)
+    if not callable(reconfigure):
+        return
+    # Closed streams or non-reconfigurable wrappers — leave as-is.
+    with contextlib.suppress(OSError, ValueError, AttributeError, TypeError):
+        reconfigure(encoding="utf-8", errors="replace")
+
+
+def ensure_utf8_stdio() -> None:
+    """Force UTF-8 on stdout/stderr for ASCII (and other non-UTF-8) locales.
+
+    Rich help output includes emoji (e.g. the wrench in the banner). Under
+    ASCII locales such as ``en_US.US-ASCII``, writing that output raises
+    ``UnicodeEncodeError``. CPython's UTF-8 mode rescues ``C``/``POSIX`` but
+    not other ASCII locales, and ``PYTHONUTF8``/``PYTHONIOENCODING`` do not
+    reach Nuitka onefile binaries — only an in-process reconfigure does.
+    """
+    _reconfigure_stream_utf8(sys.stdout)
+    _reconfigure_stream_utf8(sys.stderr)
+
 
 # Configure loguru for CLI commands (help, version, etc.)
 # Only WARNING and above will show. DEBUG logs go to file when tool_executor runs.
@@ -239,4 +290,5 @@ cli.add_command(versions_command, name="version")
 
 def main() -> None:
     """Entry point for the CLI."""
+    ensure_utf8_stdio()
     cli()
