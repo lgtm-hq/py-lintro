@@ -152,16 +152,12 @@ def _get_disabled_reason(config: LintroConfig, tool_name: str) -> str:
     Returns:
         Human-readable reason string.
     """
-    tool_lower = tool_name.lower()
-
     # Check if excluded by enabled_tools allowlist
-    if config.execution.enabled_tools:
-        enabled_lower = [t.lower() for t in config.execution.enabled_tools]
-        if tool_lower not in enabled_lower:
-            return "not in enabled_tools"
+    if not config.is_tool_in_enabled_tools(tool_name):
+        return "not in enabled_tools"
 
     # Check tool-level enabled flag
-    tool_config = config.get_tool_config(tool_lower)
+    tool_config = config.get_tool_config(tool_name)
     if not tool_config.enabled:
         return "disabled in config"
 

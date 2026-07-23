@@ -686,6 +686,75 @@ def test_underscore_alias_resolves_hyphen_registered_tool(
     assert_that(result.to_run).contains_only("astro-check", "vue-tsc")
 
 
+def test_hyphenated_config_disables_underscore_registry_key(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Hyphenated tool config disables an underscored registered tool."""
+    from lintro.tools import tool_manager
+
+    registered = {"html_validate", "ruff"}
+
+    monkeypatch.setattr(
+        tool_manager,
+        "get_check_tools",
+        lambda: sorted(registered),
+    )
+
+    config = LintroConfig(
+        tools={"html-validate": LintroToolConfig(enabled=False)},
+    )
+
+    with patch(
+        "lintro.utils.execution.tool_configuration.get_config",
+        return_value=config,
+    ):
+        result = get_tools_to_run(tools=None, action="check")
+
+    assert_that(result.to_run).contains_only("ruff")
+    skipped_by_name = {s.name: s for s in result.skipped}
+    assert_that(skipped_by_name).contains_key("html_validate")
+    assert_that(skipped_by_name["html_validate"].reason).is_equal_to(
+        "disabled in config",
+    )
+
+
+def test_underscore_config_disables_hyphen_registry_key(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Underscored tool config disables a hyphenated registered tool."""
+    from lintro.tools import tool_manager
+
+    registered = {"astro-check", "ruff"}
+
+    monkeypatch.setattr(
+        tool_manager,
+        "is_tool_registered",
+        lambda name: name in registered,
+    )
+    monkeypatch.setattr(
+        tool_manager,
+        "get_tool_names",
+        lambda: sorted(registered),
+    )
+
+    config = LintroConfig(
+        tools={"astro_check": LintroToolConfig(enabled=False)},
+    )
+
+    with patch(
+        "lintro.utils.execution.tool_configuration.get_config",
+        return_value=config,
+    ):
+        result = get_tools_to_run(tools="astro_check,ruff", action="check")
+
+    assert_that(result.to_run).contains_only("ruff")
+    skipped_by_name = {s.name: s for s in result.skipped}
+    assert_that(skipped_by_name).contains_key("astro-check")
+    assert_that(skipped_by_name["astro-check"].reason).is_equal_to(
+        "disabled in config",
+    )
+
+
 def test_unknown_tool_includes_did_you_mean_suggestion(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
