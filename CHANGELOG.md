@@ -21,6 +21,35 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.91.20] - 2026-07-23
+
+### Changed
+
+- **ai**: add fallback concurrency regression tests (#1441) (4cf515a)
+
+### Fixed
+
+- **ci**: guard single-run scheduled lintro analysis invariant (#1169) (466f037)
+
+## [0.91.19] - 2026-07-23
+
+### Fixed
+
+- **docker**: backfill dispatch input-validation gaps (#1327) (af2d25b)
+
+## [0.91.18] - 2026-07-23
+
+### Fixed
+
+- **output**: --output-format markdown/csv stdout clean like json/sarif (#1464)
+  (da2bca6)
+
+## [0.91.17] - 2026-07-23
+
+### Fixed
+
+- **trufflehog**: ignore benign missing-path scan errors (#1633) (05c6e31)
+
 ## [0.91.16] - 2026-07-23
 
 ### Fixed
