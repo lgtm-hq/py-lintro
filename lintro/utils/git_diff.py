@@ -19,6 +19,7 @@ produce phantom paths that would break downstream tools.
 
 from __future__ import annotations
 
+import os
 import shutil
 import subprocess  # nosec B404 - subprocess is the core mechanism for invoking git; all invocations use shell=False
 from functools import lru_cache
@@ -90,6 +91,42 @@ def is_git_repository(path: str = ".") -> bool:
     return result.returncode == 0 and result.stdout.strip() == "true"
 
 
+def resolve_git_cwd_from_paths(paths: list[str]) -> str:
+    """Derive the git working directory from explicit target paths.
+
+    When callers pass concrete scan targets, git diff operations must run in
+    that checkout's repository rather than the process cwd. The default path
+    ``'.'`` keeps the existing process-cwd behavior.
+
+    Args:
+        paths: Target paths passed to file discovery.
+
+    Returns:
+        Directory to use as ``cwd`` for git diff helpers.
+    """
+    if paths == ["."]:
+        return "."
+
+    for path in paths:
+        abs_path = os.path.abspath(path)
+        probe = abs_path if os.path.isdir(abs_path) else os.path.dirname(abs_path)
+        root = _repo_root(probe)
+        if root:
+            return root
+
+    abs_paths = [os.path.abspath(path) for path in paths]
+    parent_dirs = {
+        path if os.path.isdir(path) else os.path.dirname(path) for path in abs_paths
+    }
+    if len(parent_dirs) == 1:
+        return parent_dirs.pop()
+
+    try:
+        return os.path.commonpath(list(parent_dirs))
+    except ValueError:
+        return abs_paths[0]
+
+
 def _repo_root(cwd: str) -> str | None:
     """Return the absolute repository root for ``cwd``, or None.
 
@@ -109,7 +146,7 @@ def _repo_root(cwd: str) -> str | None:
     return root or None
 
 
-def _ref_exists(ref: str, cwd: str) -> bool:
+def ref_exists(ref: str, cwd: str = ".") -> bool:
     """Return whether ``ref`` resolves to a commit.
 
     Args:
@@ -148,13 +185,13 @@ def resolve_default_base(cwd: str = ".") -> str | None:
         )
         if symbolic.returncode == 0:
             candidate = symbolic.stdout.strip()
-            if candidate and candidate != "origin/HEAD" and _ref_exists(candidate, cwd):
+            if candidate and candidate != "origin/HEAD" and ref_exists(candidate, cwd):
                 return candidate
     except (OSError, subprocess.SubprocessError):
         pass
 
     for candidate in _DEFAULT_BASE_CANDIDATES:
-        if _ref_exists(candidate, cwd):
+        if ref_exists(candidate, cwd):
             return candidate
     return None
 
@@ -239,7 +276,7 @@ def get_changed_files(base: str, cwd: str = ".") -> frozenset[str]:
     """
     root = _repo_root(cwd) or absolute_path_without_resolving(Path(cwd))
 
-    if not _ref_exists(base, cwd):
+    if not ref_exists(base, cwd):
         raise DiffResolutionError(
             f"Cannot resolve --diff base ref '{base}'. Fetch it or pass an "
             f"existing ref (e.g. 'main' or 'origin/main').",

@@ -3,6 +3,7 @@
 import click
 
 from lintro.api import core as api
+from lintro.cli_utils.diff_option import validate_diff_base_ref
 from lintro.utils.git_diff import DIFF_DEFAULT_SENTINEL
 from lintro.utils.tool_executor import run_lint_tools_simple
 
@@ -172,6 +173,8 @@ def format_command(
         dry_run: bool: Preview would-be fixes without modifying any files.
         no_art: bool: Suppress the decorative ASCII art printed after the run.
     """
+    validate_diff_base_ref(diff_base=diff_base)
+
     # Default to current directory if no paths provided
     normalized_paths: list[str] = list(paths) if paths else list(DEFAULT_PATHS)
 
