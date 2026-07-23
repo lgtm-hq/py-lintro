@@ -168,6 +168,10 @@ def get_install_hints() -> dict[str, str]:
             "Install via: bun add -g @commitlint/cli@{version} "
             "@commitlint/config-conventional@{version}"
         ),
+        "@commitlint/cli": (
+            "Install via: bun add -g @commitlint/cli@{version} "
+            "@commitlint/config-conventional@{version}"
+        ),
         "html_validate": "Install via: bun add -d html-validate@>={version}",
         "html-validate": "Install via: bun add -d html-validate@>={version}",
         "markdownlint": "Install via: bun add -d markdownlint-cli2@>={version}",
@@ -271,14 +275,17 @@ def get_install_hints() -> dict[str, str]:
         if version is not None:
             hints[tool] = template.format(version=version)
 
-    # Warn about tools in versions that don't have templates (only once)
+    # Log tools in versions that don't have templates (only once).
+    # Debug-level: the completeness gate in test_tool_completeness.py fails
+    # CI when a registered tool or version key lacks a hint; a warning here
+    # would only noise user runs for the same gap.
     missing = set(versions) - set(templates)
     if missing:
         warning_key = f"missing_hints:{','.join(sorted(missing))}"
         with _logged_warnings_lock:
             if warning_key not in _logged_warnings:
                 _logged_warnings.add(warning_key)
-                logger.warning(
+                logger.debug(
                     f"Missing install hints for tools: {', '.join(sorted(missing))}",
                 )
 

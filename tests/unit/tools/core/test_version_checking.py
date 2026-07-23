@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+from unittest.mock import MagicMock, patch
+
 import pytest
 from assertpy import assert_that
 
+from lintro.tools.core import version_checking
 from lintro.tools.core.version_checking import (
     _get_version_timeout,
     get_install_hints,
@@ -114,6 +117,39 @@ def test_get_install_hints_bun_for_node_tools() -> None:
     """Node.js tools have bun install hints."""
     result = get_install_hints()
     assert_that("bun add" in result.get("markdownlint", "")).is_true()
+
+
+def test_get_install_hints_includes_commitlint_cli_alias() -> None:
+    """``@commitlint/cli`` npm alias has the same bun install hint as commitlint."""
+    result = get_install_hints()
+    assert_that(result).contains_key("@commitlint/cli")
+    assert_that(result["@commitlint/cli"]).contains("bun add")
+    assert_that(result["@commitlint/cli"]).contains("@commitlint/cli@")
+    assert_that(result["@commitlint/cli"]).is_equal_to(result["commitlint"])
+
+
+def test_get_install_hints_missing_template_logs_debug(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Missing hint templates log at debug, not warning (#1593 / #1425).
+
+    Args:
+        monkeypatch: Pytest fixture for patching modules and attributes.
+    """
+    monkeypatch.setattr(
+        version_checking,
+        "get_minimum_versions",
+        lambda: {"hadolint": "2.12.0", "totally_missing_tool": "1.0.0"},
+    )
+    version_checking._logged_warnings.clear()
+    mock_logger = MagicMock()
+    with patch.object(version_checking, "logger", mock_logger):
+        get_install_hints()
+    mock_logger.warning.assert_not_called()
+    mock_logger.debug.assert_called()
+    debug_msg = mock_logger.debug.call_args[0][0]
+    assert_that(debug_msg).contains("Missing install hints")
+    assert_that(debug_msg).contains("totally_missing_tool")
 
 
 def test_get_install_hints_external_tools() -> None:

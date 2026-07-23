@@ -39,7 +39,10 @@ from assertpy import assert_that
 
 from lintro.enums.tool_type import ToolType
 from lintro.tools.core.tool_manager import ToolManager
-from lintro.tools.core.version_checking import get_install_hints
+from lintro.tools.core.version_checking import (
+    get_install_hints,
+    get_minimum_versions,
+)
 from lintro.utils.unified_config import get_tool_priority
 
 # ── Repository layout ──────────────────────────────────────────────────────
@@ -435,6 +438,22 @@ def test_install_hint_exists(tool: str) -> None:
     assert_that(has_hint).described_as(
         f"{tool}: no install hint in version_checking.py",
     ).is_true()
+
+
+def test_install_hints_cover_all_version_keys() -> None:
+    """Every ``get_minimum_versions()`` key has an install-hint template.
+
+    Guards npm package aliases (e.g. ``@commitlint/cli``) that appear in
+    version maps alongside the registry tool name (``commitlint``). A gap
+    here is what made ``get_install_hints()`` emit
+    ``Missing install hints for tools: ...`` (#1593).
+    """
+    versions = get_minimum_versions()
+    hints = get_install_hints()
+    missing = sorted(set(versions) - set(hints))
+    assert_that(missing).described_as(
+        f"version keys without install hints: {missing}",
+    ).is_empty()
 
 
 @pytest.mark.parametrize("tool", TOOL_NAMES)
