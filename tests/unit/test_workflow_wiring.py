@@ -1134,3 +1134,65 @@ def test_dogfood_nightly_gates_pinned_digest_tools() -> None:
 
     # A pinned-digest failure must reach the deduplicated failure notifier.
     assert_that(jobs["notify-failure"]["needs"]).contains("verify-pinned-image-tools")
+
+
+def test_docker_ci_defers_ci_tag_cleanup() -> None:
+    """docker-ci must not delete run-scoped CI tags on completion (#1138).
+
+    Immediate cleanup (even when gated on no-failure) still races partial
+    reruns and leaves "Re-run failed jobs" as a trap. Tags stay
+    ``ci-${{ github.run_id }}``; age-based reclaim is owned by ghcr-cleanup.
+    """
+    docker_ci = _load_workflow(name="docker-ci.yml")
+    jobs = docker_ci["jobs"]
+    assert_that(jobs).does_not_contain_key("cleanup-ci-images")
+
+    inline_cleanup = [
+        step.get("run", "")
+        for job in jobs.values()
+        for step in (job.get("steps") or [])
+        if isinstance(step, dict) and step.get("run")
+    ]
+    assert_that(inline_cleanup).does_not_contain(
+        "scripts/ci/maintenance/delete-ci-ghcr-tags.sh",
+    )
+    assert_that(inline_cleanup).does_not_contain(
+        "scripts/ci/maintenance/sweep-ci-ghcr-tags.sh",
+    )
+
+    # Tag scheme stays run-scoped (not attempt-scoped); build still pushes it.
+    build_steps = jobs["docker-build"]["steps"]
+    tag_values = [
+        (step.get("with") or {}).get("tags", "")
+        for step in build_steps
+        if isinstance(step, dict)
+    ]
+    assert_that("\n".join(tag_values)).contains("ci-${{ github.run_id }}")
+    assert_that("\n".join(tag_values)).does_not_contain("github.run_attempt")
+
+
+def test_ghcr_cleanup_sweeps_ephemeral_ci_tags() -> None:
+    """Scheduled maintenance owns the age-based CI-tag sweep (#1138)."""
+    cleanup = _load_workflow(name="ghcr-cleanup.yml")
+    sweep = cleanup["jobs"]["sweep-ci-tags"]
+
+    assert_that(sweep["permissions"]).is_equal_to(
+        {
+            "contents": "read",
+            "packages": "write",
+        },
+    )
+    triggers = cleanup["on"]
+    assert_that(triggers).contains_key("schedule")
+    run_steps = [
+        step.get("run", "")
+        for step in sweep["steps"]
+        if isinstance(step, dict) and step.get("run")
+    ]
+    assert_that(run_steps).contains(
+        "scripts/ci/maintenance/sweep-ci-ghcr-tags.sh",
+    )
+    # Dispatch inputs drive dry-run / age for both prune and sweep.
+    assert_that(triggers).contains_key("workflow_dispatch")
+    assert_that(triggers["workflow_dispatch"]["inputs"]).contains_key("min_age_days")
+    assert_that(triggers["workflow_dispatch"]["inputs"]).contains_key("dry_run")

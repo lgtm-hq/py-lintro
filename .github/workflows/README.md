@@ -16,8 +16,9 @@ trailing `# vX.Y.Z` comments so Renovate can track digest updates. Policy is enf
   `reusable-test-python.yml`
 - **docker-ci.yml** — Manifest sync, multi-stage Docker build, dogfooding quality
   (`reusable-quality-lint.yml` + PR-only `reusable-publish-quality-summary.yml`,
-  CI-built image), integration tests, security audit, GHCR publish (main), CI tag
-  cleanup. PRs without global-lint-impact changes lint only their changed files
+  CI-built image), integration tests, security audit, GHCR publish (main). Ephemeral
+  `ci-<run_id>` tags are retained for partial reruns (#1138) and reclaimed by the weekly
+  GHCR sweep. PRs without global-lint-impact changes lint only their changed files
   (`dogfooding-lint-changed`, same image/tool set); merge queue, pushes, and
   global-impact PRs keep the full-repo run (#1361)
 - **dogfood-nightly.yml** — Nightly full-repo dogfooding lint on `main`
@@ -61,7 +62,8 @@ on `main` failures — hence the `actions: read` + `issues: write` job permissio
 ## Security & maintenance
 
 - **ghcr-cleanup.yml** — Scheduled GHCR cleanup via `reusable-ghcr-cleanup.yml`
-  (`py-lintro`, `py-lintro-base`)
+  (`py-lintro`, `py-lintro-base`) plus age-based sweep of ephemeral `ci-*` tags
+  (`sweep-ci-ghcr-tags.sh`, #1138)
 - **vuln-suppression-check.yml** — Weekly OSV suppression staleness via
   `reusable-vuln-suppression-check.yml`
 - **renovate.yml** — Daily dependency updates (lgtm-ci `harden-runner` +

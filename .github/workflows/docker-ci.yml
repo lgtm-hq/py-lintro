@@ -1117,50 +1117,9 @@ jobs:
             ghcr.io/lgtm-hq/py-lintro-base@${{ steps.promote-base.outputs.digest }}
         run: scripts/ci/cosign-sign-images.sh
 
-  cleanup-ci-images:
-    name: 🧹 Cleanup CI Images
-    needs:
-      - changes
-      - docker-build
-      - dogfooding-lint
-      - dogfooding-lint-changed
-      - security-audit
-      - integration-test
-      - publish
-    # Nothing to clean up when the build was path-skipped (no CI tags pushed).
-    # Sequencing (#1138, #1358): cleanup only runs when every consumer of the
-    # ci-${run_id} tags — including publish, which promotes them by digest —
-    # finished green or was skipped (publish is skipped on PRs). On any
-    # failure the CI tags survive so a re-run of failed jobs can still pull
-    # and promote them; re-runs share the run_id, so the eventual green
-    # re-run deletes the same tags. Cross-run digest sharing is handled
-    # inside delete-ci-ghcr-tags.sh (sole-tag versions only).
-    if: >-
-      always() &&
-      needs.changes.outputs.pipeline != 'false' &&
-      needs.docker-build.outputs.is-fork != 'true' &&
-      !contains(needs.*.result, 'failure') &&
-      !contains(needs.*.result, 'cancelled')
-    runs-on: ubuntu-24.04
-    permissions:
-      contents: read # checkout delete-ci-ghcr-tags.sh
-      packages: write # delete ephemeral CI tags from GHCR
-    timeout-minutes: 5
-    steps:
-      - name: Harden Runner
-        # yamllint disable-line rule:line-length
-        uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
-        with:
-          egress-policy: 'block'
-          allowed-endpoints: >
-            github.com:443
-            api.github.com:443
-      - name: Checkout
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-      - name: Delete CI-tagged images
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          CI_TAG: ci-${{ github.run_id }}
-        run: scripts/ci/maintenance/delete-ci-ghcr-tags.sh
+  # Ephemeral ci-${{ github.run_id }} tags are intentionally NOT deleted here
+  # (#1138). Immediate cleanup broke "Re-run failed jobs": docker-build does
+  # not rebuild on a partial rerun, so downstream jobs pulled a missing tag
+  # ("manifest unknown"). Skip-on-failure was only an interim mitigation.
+  # Age-based reclaim lives in ghcr-cleanup.yml → sweep-ci-tags
+  # (scripts/ci/maintenance/sweep-ci-ghcr-tags.sh).

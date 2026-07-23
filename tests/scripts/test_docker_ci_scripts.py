@@ -24,6 +24,7 @@ _REPO_ROOT = Path(__file__).resolve().parent.parent.parent
         "scripts/ci/testing/pull-ci-docker-images.sh",
         "scripts/ci/testing/load-ci-docker-images.sh",
         "scripts/ci/maintenance/delete-ci-ghcr-tags.sh",
+        "scripts/ci/maintenance/sweep-ci-ghcr-tags.sh",
         "scripts/ci/validate-docker-backfill-inputs.sh",
         "scripts/docker/save-ci-images-tarball.sh",
         "scripts/docker/run-docker-test-suite.sh",
@@ -384,4 +385,161 @@ def test_delete_ci_ghcr_tags_recheck_catches_new_tags(
 
     assert_that(result.returncode).is_equal_to(0)
     assert_that(result.stdout).contains("tags changed since snapshot")
+    assert_that(gh_log.read_text()).does_not_contain("--method DELETE")
+
+
+def test_sweep_ci_ghcr_tags_requires_token() -> None:
+    """sweep-ci-ghcr-tags.sh should fail when GH_TOKEN is missing."""
+    script_path = (
+        _REPO_ROOT / "scripts/ci/maintenance/sweep-ci-ghcr-tags.sh"
+    ).resolve()
+    result = subprocess.run(  # nosec B603 - fixed argv run against a repo script in a controlled test; shell=False, no user shell input
+        [str(script_path)],
+        capture_output=True,
+        text=True,
+        check=False,
+        env={
+            **os.environ.copy(),
+            "GH_TOKEN": "",
+        },  # nosec B105 - empty token for required-env validation
+    )
+    assert_that(result.returncode).is_equal_to(2)
+    assert_that(result.stderr).contains("GH_TOKEN is required")
+
+
+def test_sweep_ci_ghcr_tags_validates_min_age_days() -> None:
+    """sweep-ci-ghcr-tags.sh should reject a non-integer MIN_AGE_DAYS."""
+    script_path = (
+        _REPO_ROOT / "scripts/ci/maintenance/sweep-ci-ghcr-tags.sh"
+    ).resolve()
+    result = subprocess.run(  # nosec B603 - fixed argv run against a repo script in a controlled test; shell=False, no user shell input
+        [str(script_path)],
+        capture_output=True,
+        text=True,
+        check=False,
+        env={
+            **os.environ.copy(),
+            "GH_TOKEN": "x",  # nosec B105 - placeholder token for arg validation
+            "MIN_AGE_DAYS": "notanumber",
+        },
+    )
+    assert_that(result.returncode).is_equal_to(2)
+    assert_that(result.stderr).contains("MIN_AGE_DAYS must be")
+
+
+def test_sweep_ci_ghcr_tags_deletes_ci_only_versions(
+    tmp_path: Path,
+) -> None:
+    """Sweep should delete CI-only versions and skip mixed-tag digests."""
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    gh_log = tmp_path / "gh.log"
+    _write_stub(
+        bin_dir,
+        "gh",
+        (
+            'echo "$*" >> "$GH_LOG"\n'
+            'if [[ "$*" == *"DELETE"* ]]; then\n'
+            "  exit 0\n"
+            "fi\n"
+            'if [[ "$*" == *"/versions/"* ]]; then\n'
+            '  echo "$GH_VERSION_TAGS"\n'
+            "  exit 0\n"
+            "fi\n"
+            'printf "%s\\n" "$GH_VERSIONS_TSV"'
+        ),
+    )
+
+    result = _run_with_stubs(
+        "scripts/ci/maintenance/sweep-ci-ghcr-tags.sh",
+        bin_dir,
+        {
+            "GH_TOKEN": "dummy",  # nosec B105 - fake token for stubbed gh
+            "PACKAGES": "py-lintro",
+            "MIN_AGE_DAYS": "0",
+            "GH_LOG": str(gh_log),
+            # jq filtering is stubbed; the script still re-validates tags.
+            "GH_VERSIONS_TSV": "201\tci-1 ci-2\n202\tci-old",
+            "GH_VERSION_TAGS": "ci-old",
+        },
+    )
+
+    assert_that(result.returncode).is_equal_to(0)
+    assert_that(result.stdout).contains("Deleted py-lintro version 202")
+    assert_that(result.stdout).contains("Deleted py-lintro version 201")
+    log = gh_log.read_text()
+    assert_that(log).contains("versions/201")
+    assert_that(log).contains("versions/202")
+
+
+def test_sweep_ci_ghcr_tags_recheck_aborts_on_persistent_tag(
+    tmp_path: Path,
+) -> None:
+    """A persistent tag attached between list and delete must abort delete."""
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    gh_log = tmp_path / "gh.log"
+    _write_stub(
+        bin_dir,
+        "gh",
+        (
+            'echo "$*" >> "$GH_LOG"\n'
+            'if [[ "$*" == *"DELETE"* ]]; then\n'
+            "  exit 0\n"
+            "fi\n"
+            'if [[ "$*" == *"/versions/"* ]]; then\n'
+            '  echo "$GH_VERSION_TAGS"\n'
+            "  exit 0\n"
+            "fi\n"
+            'printf "%s\\n" "$GH_VERSIONS_TSV"'
+        ),
+    )
+
+    result = _run_with_stubs(
+        "scripts/ci/maintenance/sweep-ci-ghcr-tags.sh",
+        bin_dir,
+        {
+            "GH_TOKEN": "dummy",  # nosec B105 - fake token for stubbed gh
+            "PACKAGES": "py-lintro",
+            "MIN_AGE_DAYS": "0",
+            "GH_LOG": str(gh_log),
+            "GH_VERSIONS_TSV": "202\tci-old",
+            # Promotion attached main between snapshot and delete.
+            "GH_VERSION_TAGS": "ci-old main",
+        },
+    )
+
+    assert_that(result.returncode).is_equal_to(0)
+    assert_that(result.stdout).contains("tags changed since snapshot")
+    assert_that(gh_log.read_text()).does_not_contain("--method DELETE")
+
+
+def test_sweep_ci_ghcr_tags_dry_run_skips_delete(
+    tmp_path: Path,
+) -> None:
+    """DRY_RUN=true should log candidates without calling DELETE."""
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    gh_log = tmp_path / "gh.log"
+    _write_stub(
+        bin_dir,
+        "gh",
+        ('echo "$*" >> "$GH_LOG"\n' 'printf "%s\\n" "$GH_VERSIONS_TSV"'),
+    )
+
+    result = _run_with_stubs(
+        "scripts/ci/maintenance/sweep-ci-ghcr-tags.sh",
+        bin_dir,
+        {
+            "GH_TOKEN": "dummy",  # nosec B105 - fake token for stubbed gh
+            "PACKAGES": "py-lintro",
+            "MIN_AGE_DAYS": "0",
+            "DRY_RUN": "true",
+            "GH_LOG": str(gh_log),
+            "GH_VERSIONS_TSV": "202\tci-old",
+        },
+    )
+
+    assert_that(result.returncode).is_equal_to(0)
+    assert_that(result.stdout).contains("[dry-run] Would delete")
     assert_that(gh_log.read_text()).does_not_contain("--method DELETE")
