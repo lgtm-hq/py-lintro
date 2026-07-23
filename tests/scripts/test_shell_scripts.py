@@ -4,6 +4,7 @@ This module tests the shell scripts to ensure they follow best practices,
 have correct syntax, and provide appropriate help/usage information.
 """
 
+import json
 import subprocess  # nosec B404 - subprocess is used to drive the tool/CLI under test; invocations use shell=False
 from pathlib import Path
 
@@ -489,3 +490,32 @@ def test_renovate_regex_manager_current_value() -> None:
     content = config_path.read_text()
     assert_that(content).contains("customManagers")
     assert_that(content).contains("currentValue")
+
+
+def test_renovate_post_upgrade_tasks_cover_tool_pin_managers() -> None:
+    """Renovate runs the generator after npm, pypi, and regex pin bumps."""
+    config_path = Path("renovate.json")
+    config = json.loads(config_path.read_text())
+    regen_rules = [
+        rule for rule in config.get("packageRules", []) if "postUpgradeTasks" in rule
+    ]
+    assert_that(regen_rules).is_not_empty()
+
+    managers: set[str] = set()
+    file_names: set[str] = set()
+    commands: set[str] = set()
+    for rule in regen_rules:
+        managers.update(rule.get("matchManagers", []))
+        file_names.update(rule.get("matchFileNames", []))
+        commands.update(rule["postUpgradeTasks"].get("commands", []))
+
+    assert_that(managers).contains("custom.regex", "npm", "pep621", "uv")
+    assert_that(file_names).contains(
+        "package.json",
+        "pyproject.toml",
+        "lintro/_tool_versions.py",
+    )
+    assert_that(commands).contains("python3 scripts/ci/generate-tool-versions.py")
+    assert_that(config.get("allowedCommands")).contains(
+        "python3 scripts/ci/generate-tool-versions.py",
+    )

@@ -54,9 +54,9 @@ def _get_tool_probe_info() -> dict[str, _ToolProbeInfo] | None:
         or None if the registry is unavailable (early startup).
     """
     try:
-        from lintro.tools.core.tool_registry import ToolRegistry
+        from lintro.tools.core.tool_registry import ManifestRegistry
 
-        registry = ToolRegistry.load()
+        registry = ManifestRegistry.load()
         return {
             tool.name: _ToolProbeInfo(
                 version_command=tool.version_command,

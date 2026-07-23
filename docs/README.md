@@ -30,6 +30,8 @@ configuring, and contributing to Lintro.
 
 - **[Contributing Guide](contributing.md)** - Development setup and contribution
   guidelines
+- **[Adding a New Tool](contributing/adding-a-new-tool.md)** - Step-by-step guide for
+  integrating a new linting or formatting tool
 - **[Testing Guide](testing.md)** - Test layout, source mapping, markers, fixtures, and
   coverage
 
@@ -66,7 +68,7 @@ configuring, and contributing to Lintro.
 | **GitHub Actions**      | [GitHub Integration → Quick Setup](github-integration.md#quick-setup)     |
 | **AI features**         | [AI Features → Quick Start](ai-features.md#quick-start)                   |
 | **Configure tools**     | [Configuration → Tool Configuration](configuration.md#tool-configuration) |
-| **Add new tool**        | [Contributing → How to Add a Tool](contributing.md#how-to-add-a-new-tool) |
+| **Add new tool**        | [Adding a New Tool Guide](contributing/adding-a-new-tool.md)              |
 | **Project vision**      | [Architecture → Vision](architecture/VISION.md)                           |
 | **Development roadmap** | [Architecture → Roadmap](architecture/ROADMAP.md)                         |
 | **Troubleshooting**     | [Troubleshooting](troubleshooting.md)                                     |
@@ -221,7 +223,8 @@ docker run --rm -v "$(pwd):/code" lintro:latest check
 - **Configuration:** [Configuration Guide](configuration.md)
 - **Docker:** [Docker Usage](docker.md)
 - **CI/CD:** [GitHub Integration](github-integration.md)
-- **Contributing:** [Contributing Guide](contributing.md)
+- **Contributing:** [Contributing Guide](contributing.md),
+  [Adding a New Tool](contributing/adding-a-new-tool.md)
 - **Tool Comparison:** [Tool Analysis](tool-analysis/)
 
 ### Search by Error/Issue

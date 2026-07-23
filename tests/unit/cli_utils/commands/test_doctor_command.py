@@ -362,7 +362,7 @@ def test_markdown_report_contains_headers() -> None:
 
 
 def _patch_doctor_deps() -> tuple[Any, Any]:
-    """Patch ToolRegistry.load and RuntimeContext.detect for CLI tests.
+    """Patch ManifestRegistry.load and RuntimeContext.detect for CLI tests.
 
     Returns:
         Tuple of two context-manager patches.
@@ -376,7 +376,7 @@ def _patch_doctor_deps() -> tuple[Any, Any]:
 
     return (
         patch(
-            "lintro.cli_utils.commands.doctor.ToolRegistry.load",
+            "lintro.cli_utils.commands.doctor.ManifestRegistry.load",
             return_value=registry,
         ),
         patch(
@@ -474,6 +474,40 @@ def test_doctor_tools_filter_known_tool() -> None:
 
     assert_that(result.exit_code).is_equal_to(0)
     assert_that(result.output).contains("ruff")
+
+
+def test_doctor_oxlint_type_aware_failure_exit_1() -> None:
+    """A failing oxlint type-aware check causes exit 1 and shows the hint."""
+    from lintro.tools.definitions.oxlint_doctor import OxlintCheckResult
+
+    runner = CliRunner()
+    p1, p2 = _patch_doctor_deps()
+
+    failing = [
+        OxlintCheckResult(
+            name="oxlint.type-aware.tsgolint",
+            status=ToolStatus.MISSING,
+            message="oxlint-tsgolint not resolvable (node_modules / bunx)",
+            hint="bun add -d oxlint-tsgolint@latest",
+        ),
+    ]
+
+    with (
+        p1,
+        p2,
+        patch("subprocess.run") as mock_run,
+        patch("shutil.which", return_value="/usr/bin/ruff"),
+        patch(
+            "lintro.cli_utils.commands.doctor.check_oxlint_type_aware",
+            return_value=failing,
+        ),
+    ):
+        mock_run.return_value = MagicMock(returncode=0, stdout="ruff 0.14.4", stderr="")
+        result = runner.invoke(doctor_command, [])
+
+    assert_that(result.exit_code).is_equal_to(1)
+    assert_that(result.output).contains("Oxlint type-aware")
+    assert_that(result.output).contains("bun add -d oxlint-tsgolint@latest")
 
 
 def test_doctor_unknown_tool_name_exit_1() -> None:

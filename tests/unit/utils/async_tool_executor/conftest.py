@@ -7,6 +7,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 import pytest
+from assertpy import assert_that
 
 from lintro.models.core.tool_result import ToolResult
 from lintro.utils.async_tool_executor import AsyncToolExecutor
@@ -82,7 +83,8 @@ class MockToolPlugin:
 
             time.sleep(self.delay)
         # check_result is guaranteed non-None by __post_init__
-        assert self.check_result is not None
+        assert_that(self.check_result).is_not_none()
+        assert self.check_result is not None  # narrow type for mypy
         return self.check_result
 
     def fix(
@@ -105,7 +107,8 @@ class MockToolPlugin:
 
             time.sleep(self.delay)
         # fix_result is guaranteed non-None by __post_init__
-        assert self.fix_result is not None
+        assert_that(self.fix_result).is_not_none()
+        assert self.fix_result is not None  # narrow type for mypy
         return self.fix_result
 
 

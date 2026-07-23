@@ -11,6 +11,7 @@ from assertpy import assert_that
 
 from lintro.plugins.subprocess_executor import SubprocessResult
 from lintro.tools.definitions.gitleaks import GitleaksPlugin
+from tests.test_samples_helpers import copy_sample
 
 
 def _get_report_path(cmd: list[str]) -> str | None:
@@ -68,8 +69,14 @@ def test_check_with_mocked_subprocess_success(
         gitleaks_plugin: The GitleaksPlugin instance to test.
         tmp_path: Temporary directory path for test files.
     """
-    test_file = tmp_path / "test_module.py"
-    test_file.write_text('"""Test module with no secrets."""\n')
+    test_file = copy_sample(
+        tmp_path,
+        "tools",
+        "security",
+        "gitleaks",
+        "gitleaks_test_module.py",
+        dest_name="test_module.py",
+    )
 
     with patch.object(
         gitleaks_plugin,
@@ -92,8 +99,14 @@ def test_check_with_mocked_subprocess_secrets_found(
         gitleaks_plugin: The GitleaksPlugin instance to test.
         tmp_path: Temporary directory path for test files.
     """
-    test_file = tmp_path / "test_module.py"
-    test_file.write_text('API_KEY = "AKIAIOSFODNN7EXAMPLE"\n')
+    test_file = copy_sample(
+        tmp_path,
+        "tools",
+        "security",
+        "gitleaks",
+        "gitleaks_aws_key.py",
+        dest_name="test_module.py",
+    )
 
     gitleaks_output = """[
         {
@@ -134,8 +147,14 @@ def test_check_empty_report_with_zero_exit_is_not_clean(
         gitleaks_plugin: The GitleaksPlugin instance to test.
         tmp_path: Temporary directory path for test files.
     """
-    test_file = tmp_path / "test_module.py"
-    test_file.write_text('"""Module."""\n')
+    test_file = copy_sample(
+        tmp_path,
+        "tools",
+        "security",
+        "gitleaks",
+        "gitleaks_module.py",
+        dest_name="test_module.py",
+    )
 
     with patch.object(
         gitleaks_plugin,
@@ -159,8 +178,14 @@ def test_check_garbage_report_with_zero_exit_is_not_clean(
         gitleaks_plugin: The GitleaksPlugin instance to test.
         tmp_path: Temporary directory path for test files.
     """
-    test_file = tmp_path / "test_module.py"
-    test_file.write_text('"""Module."""\n')
+    test_file = copy_sample(
+        tmp_path,
+        "tools",
+        "security",
+        "gitleaks",
+        "gitleaks_module.py",
+        dest_name="test_module.py",
+    )
 
     garbage = "}{ not valid json report"
 
@@ -186,8 +211,14 @@ def test_check_non_array_report_with_zero_exit_is_not_clean(
         gitleaks_plugin: The GitleaksPlugin instance to test.
         tmp_path: Temporary directory path for test files.
     """
-    test_file = tmp_path / "test_module.py"
-    test_file.write_text('"""Module."""\n')
+    test_file = copy_sample(
+        tmp_path,
+        "tools",
+        "security",
+        "gitleaks",
+        "gitleaks_module.py",
+        dest_name="test_module.py",
+    )
 
     with patch.object(
         gitleaks_plugin,

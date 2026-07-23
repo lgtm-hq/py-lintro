@@ -76,7 +76,7 @@ def test_get_strategy_pip() -> None:
 
     assert_that(strategy).is_not_none()
     # narrow Optional for mypy — assertpy does not perform type narrowing
-    assert strategy is not None  # noqa: S101
+    assert strategy is not None  # narrow type for mypy
     assert_that(strategy.install_type()).is_equal_to("pip")
 
 
@@ -98,7 +98,7 @@ def test_pip_install_hint_with_uv() -> None:
     strategy = get_strategy("pip")
     assert_that(strategy).is_not_none()
     # narrow Optional for mypy — assertpy does not perform type narrowing
-    assert strategy is not None  # noqa: S101
+    assert strategy is not None  # narrow type for mypy
 
     result = strategy.install_hint(env, "ruff", "0.14.0", "ruff", None)
 
@@ -111,7 +111,7 @@ def test_pip_install_hint_without_uv() -> None:
     strategy = get_strategy("pip")
     assert_that(strategy).is_not_none()
     # narrow Optional for mypy — assertpy does not perform type narrowing
-    assert strategy is not None  # noqa: S101
+    assert strategy is not None  # narrow type for mypy
 
     result = strategy.install_hint(env, "ruff", "0.14.0", "ruff", None)
 
@@ -127,7 +127,7 @@ def test_pip_install_hint_homebrew_context() -> None:
     strategy = get_strategy("pip")
     assert_that(strategy).is_not_none()
     # narrow Optional for mypy — assertpy does not perform type narrowing
-    assert strategy is not None  # noqa: S101
+    assert strategy is not None  # narrow type for mypy
 
     result = strategy.install_hint(
         env,
@@ -146,7 +146,7 @@ def test_pip_upgrade_hint() -> None:
     strategy = get_strategy("pip")
     assert_that(strategy).is_not_none()
     # narrow Optional for mypy — assertpy does not perform type narrowing
-    assert strategy is not None  # noqa: S101
+    assert strategy is not None  # narrow type for mypy
 
     result = strategy.upgrade_hint(env, "ruff", "0.14.0", "ruff", None)
 
@@ -162,7 +162,7 @@ def test_pip_upgrade_hint_homebrew() -> None:
     strategy = get_strategy("pip")
     assert_that(strategy).is_not_none()
     # narrow Optional for mypy — assertpy does not perform type narrowing
-    assert strategy is not None  # noqa: S101
+    assert strategy is not None  # narrow type for mypy
 
     result = strategy.upgrade_hint(
         env,
@@ -181,7 +181,7 @@ def test_pip_check_prerequisites_met() -> None:
     strategy = get_strategy("pip")
     assert_that(strategy).is_not_none()
     # narrow Optional for mypy — assertpy does not perform type narrowing
-    assert strategy is not None  # noqa: S101
+    assert strategy is not None  # narrow type for mypy
 
     result = strategy.check_prerequisites(env, "ruff")
 
@@ -194,7 +194,7 @@ def test_pip_check_prerequisites_not_met() -> None:
     strategy = get_strategy("pip")
     assert_that(strategy).is_not_none()
     # narrow Optional for mypy — assertpy does not perform type narrowing
-    assert strategy is not None  # noqa: S101
+    assert strategy is not None  # narrow type for mypy
 
     result = strategy.check_prerequisites(env, "ruff")
 
@@ -210,7 +210,7 @@ def test_pip_brew_only_non_homebrew_context() -> None:
     strategy = get_strategy("pip")
     assert_that(strategy).is_not_none()
     # narrow Optional for mypy — assertpy does not perform type narrowing
-    assert strategy is not None  # noqa: S101
+    assert strategy is not None  # narrow type for mypy
 
     # Prerequisites pass for a tool with a brew formula
     assert_that(strategy.check_prerequisites(env, "markdownlint")).is_none()
@@ -237,7 +237,7 @@ def test_pip_is_available_true() -> None:
     strategy = get_strategy("pip")
     assert_that(strategy).is_not_none()
     # narrow Optional for mypy — assertpy does not perform type narrowing
-    assert strategy is not None  # noqa: S101
+    assert strategy is not None  # narrow type for mypy
 
     assert_that(strategy.is_available(env)).is_true()
 
@@ -248,7 +248,7 @@ def test_pip_is_available_false() -> None:
     strategy = get_strategy("pip")
     assert_that(strategy).is_not_none()
     # narrow Optional for mypy — assertpy does not perform type narrowing
-    assert strategy is not None  # noqa: S101
+    assert strategy is not None  # narrow type for mypy
 
     assert_that(strategy.is_available(env)).is_false()
 
@@ -264,7 +264,7 @@ def test_npm_install_hint_with_bun() -> None:
     strategy = get_strategy("npm")
     assert_that(strategy).is_not_none()
     # narrow Optional for mypy — assertpy does not perform type narrowing
-    assert strategy is not None  # noqa: S101
+    assert strategy is not None  # narrow type for mypy
 
     result = strategy.install_hint(env, "prettier", "3.2.0", "prettier", None)
 
@@ -277,7 +277,7 @@ def test_npm_install_hint_without_bun() -> None:
     strategy = get_strategy("npm")
     assert_that(strategy).is_not_none()
     # narrow Optional for mypy — assertpy does not perform type narrowing
-    assert strategy is not None  # noqa: S101
+    assert strategy is not None  # narrow type for mypy
 
     result = strategy.install_hint(env, "prettier", "3.2.0", "prettier", None)
 
@@ -290,7 +290,7 @@ def test_npm_upgrade_hint_with_bun() -> None:
     strategy = get_strategy("npm")
     assert_that(strategy).is_not_none()
     # narrow Optional for mypy — assertpy does not perform type narrowing
-    assert strategy is not None  # noqa: S101
+    assert strategy is not None  # narrow type for mypy
 
     result = strategy.upgrade_hint(env, "prettier", "3.2.0", "prettier", None)
 
@@ -303,7 +303,7 @@ def test_npm_check_prerequisites_met() -> None:
     strategy = get_strategy("npm")
     assert_that(strategy).is_not_none()
     # narrow Optional for mypy — assertpy does not perform type narrowing
-    assert strategy is not None  # noqa: S101
+    assert strategy is not None  # narrow type for mypy
 
     result = strategy.check_prerequisites(env, "prettier")
 
@@ -316,7 +316,7 @@ def test_npm_check_prerequisites_not_met() -> None:
     strategy = get_strategy("npm")
     assert_that(strategy).is_not_none()
     # narrow Optional for mypy — assertpy does not perform type narrowing
-    assert strategy is not None  # noqa: S101
+    assert strategy is not None  # narrow type for mypy
 
     result = strategy.check_prerequisites(env, "prettier")
 
@@ -332,7 +332,7 @@ def test_npm_brew_only_mapped_tool() -> None:
     strategy = get_strategy("npm")
     assert_that(strategy).is_not_none()
     # narrow Optional for mypy — assertpy does not perform type narrowing
-    assert strategy is not None  # noqa: S101
+    assert strategy is not None  # narrow type for mypy
 
     assert_that(strategy.check_prerequisites(env, "markdownlint")).is_none()
     hint = strategy.install_hint(
@@ -354,7 +354,7 @@ def test_npm_brew_only_unmapped_tool() -> None:
     strategy = get_strategy("npm")
     assert_that(strategy).is_not_none()
     # narrow Optional for mypy — assertpy does not perform type narrowing
-    assert strategy is not None  # noqa: S101
+    assert strategy is not None  # narrow type for mypy
 
     result = strategy.check_prerequisites(env, "prettier")
     assert_that(result).is_equal_to("bun/npm not available (install Node.js first)")
@@ -371,7 +371,7 @@ def test_binary_install_hint_with_brew() -> None:
     strategy = get_strategy("binary")
     assert_that(strategy).is_not_none()
     # narrow Optional for mypy — assertpy does not perform type narrowing
-    assert strategy is not None  # noqa: S101
+    assert strategy is not None  # narrow type for mypy
 
     result = strategy.install_hint(env, "hadolint", "2.12.0", "hadolint", None)
 
@@ -384,7 +384,7 @@ def test_binary_install_hint_without_brew() -> None:
     strategy = get_strategy("binary")
     assert_that(strategy).is_not_none()
     # narrow Optional for mypy — assertpy does not perform type narrowing
-    assert strategy is not None  # noqa: S101
+    assert strategy is not None  # narrow type for mypy
 
     result = strategy.install_hint(env, "hadolint", "2.12.0", "hadolint", None)
 
@@ -398,7 +398,7 @@ def test_binary_upgrade_hint_with_brew() -> None:
     strategy = get_strategy("binary")
     assert_that(strategy).is_not_none()
     # narrow Optional for mypy — assertpy does not perform type narrowing
-    assert strategy is not None  # noqa: S101
+    assert strategy is not None  # narrow type for mypy
 
     result = strategy.upgrade_hint(env, "hadolint", "2.12.0", "hadolint", None)
 
@@ -411,7 +411,7 @@ def test_binary_check_prerequisites_always_none() -> None:
     strategy = get_strategy("binary")
     assert_that(strategy).is_not_none()
     # narrow Optional for mypy — assertpy does not perform type narrowing
-    assert strategy is not None  # noqa: S101
+    assert strategy is not None  # narrow type for mypy
 
     result = strategy.check_prerequisites(env, "hadolint")
 
@@ -429,7 +429,7 @@ def test_cargo_install_hint() -> None:
     strategy = get_strategy("cargo")
     assert_that(strategy).is_not_none()
     # narrow Optional for mypy — assertpy does not perform type narrowing
-    assert strategy is not None  # noqa: S101
+    assert strategy is not None  # narrow type for mypy
 
     result = strategy.install_hint(
         env,
@@ -448,7 +448,7 @@ def test_cargo_upgrade_hint() -> None:
     strategy = get_strategy("cargo")
     assert_that(strategy).is_not_none()
     # narrow Optional for mypy — assertpy does not perform type narrowing
-    assert strategy is not None  # noqa: S101
+    assert strategy is not None  # narrow type for mypy
 
     result = strategy.upgrade_hint(
         env,
@@ -467,7 +467,7 @@ def test_cargo_check_prerequisites_met() -> None:
     strategy = get_strategy("cargo")
     assert_that(strategy).is_not_none()
     # narrow Optional for mypy — assertpy does not perform type narrowing
-    assert strategy is not None  # noqa: S101
+    assert strategy is not None  # narrow type for mypy
 
     result = strategy.check_prerequisites(env, "cargo-audit")
 
@@ -480,7 +480,7 @@ def test_cargo_check_prerequisites_not_met() -> None:
     strategy = get_strategy("cargo")
     assert_that(strategy).is_not_none()
     # narrow Optional for mypy — assertpy does not perform type narrowing
-    assert strategy is not None  # noqa: S101
+    assert strategy is not None  # narrow type for mypy
 
     result = strategy.check_prerequisites(env, "cargo-audit")
 
@@ -498,7 +498,7 @@ def test_rustup_install_hint_with_component() -> None:
     strategy = get_strategy("rustup")
     assert_that(strategy).is_not_none()
     # narrow Optional for mypy — assertpy does not perform type narrowing
-    assert strategy is not None  # noqa: S101
+    assert strategy is not None  # narrow type for mypy
 
     result = strategy.install_hint(env, "clippy", "0.1.0", None, "clippy")
 
@@ -511,7 +511,7 @@ def test_rustup_install_hint_without_component() -> None:
     strategy = get_strategy("rustup")
     assert_that(strategy).is_not_none()
     # narrow Optional for mypy — assertpy does not perform type narrowing
-    assert strategy is not None  # noqa: S101
+    assert strategy is not None  # narrow type for mypy
 
     result = strategy.install_hint(env, "rustfmt", "1.0.0", None, None)
 
@@ -524,7 +524,7 @@ def test_rustup_upgrade_hint() -> None:
     strategy = get_strategy("rustup")
     assert_that(strategy).is_not_none()
     # narrow Optional for mypy — assertpy does not perform type narrowing
-    assert strategy is not None  # noqa: S101
+    assert strategy is not None  # narrow type for mypy
 
     result = strategy.upgrade_hint(env, "clippy", "0.1.0", None, "clippy")
 
@@ -537,7 +537,7 @@ def test_rustup_check_prerequisites_met() -> None:
     strategy = get_strategy("rustup")
     assert_that(strategy).is_not_none()
     # narrow Optional for mypy — assertpy does not perform type narrowing
-    assert strategy is not None  # noqa: S101
+    assert strategy is not None  # narrow type for mypy
 
     result = strategy.check_prerequisites(env, "clippy")
 
@@ -550,7 +550,7 @@ def test_rustup_check_prerequisites_not_met() -> None:
     strategy = get_strategy("rustup")
     assert_that(strategy).is_not_none()
     # narrow Optional for mypy — assertpy does not perform type narrowing
-    assert strategy is not None  # noqa: S101
+    assert strategy is not None  # narrow type for mypy
 
     result = strategy.check_prerequisites(env, "clippy")
 

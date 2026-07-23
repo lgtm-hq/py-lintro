@@ -13,9 +13,10 @@ set -euo pipefail
 #      `chore(release): version X.Y.Z`, and the head branch is
 #      `release/vX.Y.Z` (what reusable-release-version-pr produces).
 #   2. Verification (diff allowlist — DECIDES): the diff vs the PR base must
-#      touch only CHANGELOG.md, pyproject.toml, uv.lock, and
-#      <package>/__init__.py, and outside CHANGELOG.md the only permitted
-#      change is the project's own version stamp:
+#      touch only CHANGELOG.md, pyproject.toml, uv.lock,
+#      <package>/__init__.py, SECURITY.md, and .github/SECURITY.md, and
+#      outside CHANGELOG.md the only permitted change is the project's own
+#      version stamp:
 #        - pyproject.toml: only the [project] `version = "..."` line;
 #        - <package>/__init__.py: only the `__version__ = "..."` line;
 #        - uv.lock: only the `version = "..."` line of the project's own
@@ -25,6 +26,12 @@ set -euo pipefail
 #          stripped from BOTH revisions — the remainders must be
 #          byte-identical (prior art: lgtm-hq/Rustume
 #          scripts/ci/docker/release_bump_only.sh, #457).
+#        - SECURITY.md / .github/SECURITY.md: only the supported-versions
+#          table rows (the `major.minor.x` supported row and the
+#          `< major.minor` unsupported row) may change, so minor/major bumps
+#          — which the version PR now stamps into that table (#1372) — stay
+#          bump-only. Any other SECURITY.md edit survives the row strip and
+#          fails the byte-identical remainder check (#1362 content guard).
 #
 # CHANGELOG.md content is not inspected (prose never affects the image or
 # the test matrix). Every unexpected condition fails closed to "false" so
@@ -64,8 +71,9 @@ Behavior:
   - Identity signals (bot author + chore(release) title + release/v*
     branch) only nominate; the diff allowlist decides.
   - Qualifying diffs touch only CHANGELOG.md, pyproject.toml, uv.lock,
-    and <package>/__init__.py, and change nothing beyond the project's
-    own version stamp in the latter three.
+    <package>/__init__.py, SECURITY.md, and .github/SECURITY.md, and
+    change nothing beyond the project's own version stamp in pyproject/
+    uv.lock/__init__ and the supported-versions table rows in SECURITY.md.
   - Any unexpected condition fails closed to release-bump=false.
 
 Outputs (via GITHUB_OUTPUT):
@@ -135,7 +143,14 @@ fi
 
 # --- Layer 2: verification (diff allowlist decides) -------------------------
 
-allowed_files=("CHANGELOG.md" "pyproject.toml" "uv.lock" "$init_file")
+allowed_files=(
+	"CHANGELOG.md"
+	"pyproject.toml"
+	"uv.lock"
+	"$init_file"
+	"SECURITY.md"
+	".github/SECURITY.md"
+)
 
 changed_files="$(git diff --name-only "$base" "$head")"
 
@@ -213,5 +228,28 @@ if ! git diff --quiet "$base" "$head" -- uv.lock; then
 	fi
 fi
 
-echo "version-bump PR verified: diff limited to version stamp + CHANGELOG"
+# SECURITY.md / .github/SECURITY.md: only the supported-versions table rows may
+# change. The version PR stamps the current `major.minor.x` supported row and
+# the `< major.minor` unsupported row (#1372); strip exactly those row shapes —
+# regardless of column padding or the support mark used (emoji or GitHub
+# shortcode) — from both revisions and require the remainders to be
+# byte-identical. Any other SECURITY.md edit (prose, a new row, a changed mark
+# on a non-version row) survives the strip and fails closed.
+strip_security_rows() {
+	git show "$1:$2" 2>/dev/null | grep -Ev \
+		'^\|[[:space:]]*([0-9]+\.[0-9]+\.x|<[[:space:]]*[0-9]+\.[0-9]+)[[:space:]]*\|.*\|[[:space:]]*$' ||
+		true
+}
+
+for security_file in "SECURITY.md" ".github/SECURITY.md"; do
+	if ! git diff --quiet "$base" "$head" -- "$security_file"; then
+		if ! diff -q <(strip_security_rows "$base" "$security_file") \
+			<(strip_security_rows "$head" "$security_file") >/dev/null; then
+			echo "not bump-only: ${security_file} changed beyond the support table"
+			emit "false"
+		fi
+	fi
+done
+
+echo "version-bump PR verified: diff limited to version stamp + CHANGELOG + SECURITY table"
 emit "true"

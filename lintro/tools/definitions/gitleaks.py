@@ -8,7 +8,6 @@ known secret formats and reports findings with detailed location information.
 from __future__ import annotations
 
 import json
-import os
 import subprocess  # nosec B404 - used safely with shell disabled
 import tempfile
 from dataclasses import dataclass
@@ -21,6 +20,7 @@ from lintro._tool_versions import get_min_version
 from lintro.enums.tool_name import ToolName
 from lintro.enums.tool_type import ToolType
 from lintro.models.core.tool_result import ToolResult
+from lintro.parsers.gitleaks.gitleaks_issue import GitleaksIssue
 from lintro.parsers.gitleaks.gitleaks_parser import parse_gitleaks_output
 from lintro.plugins.base import BaseToolPlugin, ExecutionContext
 from lintro.plugins.protocol import ToolDefinition
@@ -114,42 +114,6 @@ class GitleaksPlugin(BaseToolPlugin):
         )
         super().set_options(**options, **kwargs)
 
-    def _resolve_source_path(self, ctx: ExecutionContext) -> str:
-        """Resolve the gitleaks ``--source`` path from prepared execution context.
-
-        Uses paths relative to ``ctx.cwd`` (or absolute ``ctx.files``) so the
-        source exists under the subprocess working directory. Passing the raw
-        caller paths double-prefixes when cwd is already the file's parent.
-
-        Args:
-            ctx: Prepared :class:`~lintro.plugins.base.ExecutionContext`.
-
-        Returns:
-            Path string suitable for ``gitleaks detect --source``.
-        """
-        if ctx.rel_files:
-            if len(ctx.rel_files) == 1:
-                return ctx.rel_files[0]
-            # Multiple files: scan their common parent relative to cwd.
-            abs_files = ctx.files or [
-                str(Path(ctx.cwd) / rel) if ctx.cwd else rel for rel in ctx.rel_files
-            ]
-            try:
-                common = Path(os.path.commonpath(abs_files))
-            except ValueError:
-                logger.warning(
-                    "Cannot determine common path for prepared files; "
-                    "falling back to working directory.",
-                )
-                return "."
-            if ctx.cwd:
-                return str(common.relative_to(Path(ctx.cwd)))
-            return str(common)
-
-        if ctx.cwd:
-            return "."
-        return str(Path.cwd())
-
     def _build_check_command(self, source_path: str, report_path: str) -> list[str]:
         """Build the gitleaks check command.
 
@@ -213,13 +177,60 @@ class GitleaksPlugin(BaseToolPlugin):
         if ctx.should_skip:
             return ctx.early_result  # type: ignore[return-value]
 
-        # Resolve --source from prepared paths. ``_prepare_execution`` sets
-        # ``ctx.cwd`` to the common parent and ``ctx.rel_files`` relative to it;
-        # using the raw input ``paths`` here double-prefixes the directory when
-        # a single nested file is scanned (changed-files dogfood), so gitleaks
-        # cannot find the file and leaves an empty report.
-        source_path = self._resolve_source_path(ctx=ctx)
+        # Determine source paths from prepared execution context. ctx.cwd may be
+        # narrowed to a subdirectory; use rel_files (paths relative to ctx.cwd)
+        # rather than raw CLI path arguments. Scan each explicit file when
+        # multiple paths are provided so sibling files in the same directory
+        # are not included.
+        cwd_path = Path(ctx.cwd) if ctx.cwd else Path.cwd()
+        scan_explicit_files = bool(paths) and not (
+            len(paths) == 1 and paths[0] in {".", "./"}
+        )
+        if scan_explicit_files and len(ctx.rel_files) > 1:
+            source_paths = list(ctx.rel_files)
+        elif len(ctx.rel_files) == 1:
+            source_paths = [ctx.rel_files[0]]
+        elif len(ctx.files) == 1:
+            source_paths = [ctx.files[0]]
+        elif paths and len(paths) == 1:
+            source_paths = [str(Path(paths[0]).resolve())]
+        else:
+            source_paths = [str(cwd_path)]
 
+        all_issues: list[GitleaksIssue] = []
+        for source_path in source_paths:
+            issues, error_result = self._scan_source_path(
+                source_path=source_path,
+                ctx=ctx,
+            )
+            if error_result is not None:
+                return error_result
+            all_issues.extend(issues)
+
+        return ToolResult(
+            name=self.definition.name,
+            success=True,
+            output=None,
+            issues_count=len(all_issues),
+            issues=all_issues,
+            parse_failures_count=0,
+        )
+
+    def _scan_source_path(
+        self,
+        *,
+        source_path: str,
+        ctx: ExecutionContext,
+    ) -> tuple[list[GitleaksIssue], ToolResult | None]:
+        """Run Gitleaks against a single source path.
+
+        Args:
+            source_path: File or directory path for gitleaks --source.
+            ctx: Prepared execution context.
+
+        Returns:
+            Tuple of parsed issues and an optional error ToolResult.
+        """
         # Use a temporary file for the report (gitleaks can't write to /dev/stdout
         # in subprocess environments due to permission issues)
         with tempfile.NamedTemporaryFile(
@@ -248,7 +259,6 @@ class GitleaksPlugin(BaseToolPlugin):
                     timeout=ctx.timeout,
                     cwd=ctx.cwd,
                 )
-                # Read the report from the temp file
                 output = Path(report_path).read_text(encoding="utf-8").strip()
                 if proc.returncode != 0:
                     stderr = (proc.stderr or proc.output or "").strip()
@@ -257,7 +267,7 @@ class GitleaksPlugin(BaseToolPlugin):
                         proc.returncode,
                         stderr[:500] if stderr else "(no stderr)",
                     )
-                    return ToolResult(
+                    return [], ToolResult(
                         name=self.definition.name,
                         success=False,
                         output=(
@@ -274,7 +284,7 @@ class GitleaksPlugin(BaseToolPlugin):
                     "  - Large codebase taking too long to scan\n"
                     "  - Need to increase timeout via --tool-options gitleaks:timeout=N"
                 )
-                return ToolResult(
+                return [], ToolResult(
                     name=self.definition.name,
                     success=False,
                     output=timeout_msg,
@@ -285,9 +295,8 @@ class GitleaksPlugin(BaseToolPlugin):
                 output = f"Gitleaks failed: {e}"
                 execution_failure = True
 
-            # Parse the JSON output
             if execution_failure:
-                return ToolResult(
+                return [], ToolResult(
                     name=self.definition.name,
                     success=False,
                     output=output,
@@ -297,13 +306,10 @@ class GitleaksPlugin(BaseToolPlugin):
             issues = parse_gitleaks_output(output=output)
             issues_count = len(issues)
 
-            # Check for parsing failures. Gitleaks is a security scanner, so an
-            # empty or unparseable report must never be reported as a clean pass
-            # (see #1044).
             stripped = output.strip()
             if issues_count == 0 and not stripped:
                 logger.error("Gitleaks report file was empty")
-                return ToolResult(
+                return [], ToolResult(
                     name=self.definition.name,
                     success=False,
                     output=(
@@ -319,7 +325,7 @@ class GitleaksPlugin(BaseToolPlugin):
                     data = json.loads(output)
                 except json.JSONDecodeError as e:
                     logger.error(f"Failed to parse gitleaks output: {e}")
-                    return ToolResult(
+                    return [], ToolResult(
                         name=self.definition.name,
                         success=False,
                         output=f"Failed to parse gitleaks output: {e}",
@@ -331,7 +337,7 @@ class GitleaksPlugin(BaseToolPlugin):
                         "Gitleaks output was not a JSON array (got %s).",
                         type(data).__name__,
                     )
-                    return ToolResult(
+                    return [], ToolResult(
                         name=self.definition.name,
                         success=False,
                         output=(
@@ -342,16 +348,8 @@ class GitleaksPlugin(BaseToolPlugin):
                         parse_failures_count=1,
                     )
 
-            return ToolResult(
-                name=self.definition.name,
-                success=True,
-                output=None,
-                issues_count=issues_count,
-                issues=issues,
-                parse_failures_count=0,
-            )
+            return issues, None
         finally:
-            # Clean up the temporary report file
             Path(report_path).unlink(missing_ok=True)
 
     def fix(self, paths: list[str], options: dict[str, object]) -> ToolResult:
