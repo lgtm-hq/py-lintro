@@ -278,6 +278,32 @@ def _probe_path_for_repo(path: str) -> str:
     return str(parent) if str(parent) != str(abs_path) else "."
 
 
+def _diff_key(path: str) -> str:
+    """Return a canonical membership key for diff comparisons.
+
+    Resolves symlinks in the **directory** portion of ``path`` but keeps the
+    final component unfollowed. This mirrors git, which reports a realpath'd
+    worktree root (``git rev-parse --show-toplevel``) yet leaves tracked
+    in-tree symlinks as their own paths. Directory-symlinked scan targets (e.g.
+    macOS ``/var`` -> ``/private/var``) therefore compare equal to git's
+    changed set, while a tracked terminal symlink is neither followed out of its
+    repository nor collapsed onto the file it aliases.
+
+    Args:
+        path: File or directory path to canonicalize.
+
+    Returns:
+        Absolute path with directory symlinks resolved and the final component
+        preserved.
+    """
+    candidate = Path(path)
+    try:
+        parent = candidate.parent.resolve()
+    except OSError:
+        parent = candidate.parent.absolute()
+    return str(parent / candidate.name)
+
+
 def _path_in_repo(path: str, repo_root: str) -> bool:
     """Return whether ``path`` lies inside ``repo_root``.
 
@@ -288,8 +314,13 @@ def _path_in_repo(path: str, repo_root: str) -> bool:
     Returns:
         True when ``path`` is the root itself or a path beneath it.
     """
-    abs_path = Path(path).absolute()
-    abs_root = Path(repo_root).absolute()
+    # ``repo_root`` comes from ``git rev-parse --show-toplevel`` (realpath'd)
+    # while ``path`` comes from discovery (``os.path.abspath``, symlink
+    # preserved). Canonicalize both so a file reached through a symlinked
+    # directory is still recognized as belonging to its repository, without
+    # following a tracked terminal symlink out of the tree.
+    abs_path = Path(_diff_key(path))
+    abs_root = Path(repo_root).resolve()
     if abs_path == abs_root:
         return True
     return abs_root in abs_path.parents
@@ -490,4 +521,14 @@ def filter_files_by_diff(
     changed = get_changed_files(base, cwd)
     if not changed:
         return []
-    return [f for f in files if absolute_path_without_resolving(Path(f)) in changed]
+    # Canonicalize both sides of the membership test. ``git rev-parse
+    # --show-toplevel`` reports a realpath'd root (so ``changed`` paths are
+    # directory-resolved), while discovery yields ``os.path.abspath`` paths that
+    # preserve symlinks. Without canonicalizing, a scan target reached through a
+    # symlinked directory (e.g. macOS ``/var`` -> ``/private/var``) never
+    # matches and the changed files are silently dropped. ``_diff_key`` keeps
+    # the final component unfollowed so tracked symlink aliases stay distinct.
+    # Keys only; the original ``f`` is returned so callers keep the discovered
+    # path form.
+    changed_keys = {_diff_key(c) for c in changed}
+    return [f for f in files if _diff_key(f) in changed_keys]
