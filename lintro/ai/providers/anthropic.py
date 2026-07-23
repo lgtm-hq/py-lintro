@@ -91,8 +91,12 @@ class _AnthropicCliTransport(CliTransport):
             try:
                 result = self.run([self._binary_path, "--help"], timeout=10.0)
                 help_text = f"{result.stdout or ''}{result.stderr or ''}"
-                supported = "--json-schema-name" in help_text
-            except (AIProviderError, AINotAvailableError) as exc:
+                # Only trust a clean exit: a non-zero --help may echo the flag
+                # in an error message without actually supporting it.
+                supported = result.returncode == 0 and "--json-schema-name" in help_text
+            except (AIProviderError, AINotAvailableError, OSError) as exc:
+                # OSError covers PermissionError and other subprocess spawn
+                # failures that CliTransport.run() does not remap.
                 logger.debug(f"Claude CLI capability probe failed: {exc}")
             self._supports_schema_name = supported
             return supported

@@ -242,6 +242,40 @@ class TestClaudeCliComplete:
         with patch("subprocess.run", side_effect=FileNotFoundError()):
             assert_that(transport.supports_json_schema_name()).is_false()
 
+    def test_supports_json_schema_name_false_on_nonzero_help(
+        self,
+        _mock_claude_on_path: None,
+    ) -> None:
+        """A non-zero --help exit is unsupported even if it echoes the flag."""
+        from lintro.ai.providers.anthropic import _AnthropicCliTransport
+
+        transport = _AnthropicCliTransport(
+            binary_path="/usr/local/bin/claude",
+            model="claude-sonnet-4-6",
+        )
+        with patch("subprocess.run") as mock_run:
+            mock_run.return_value = subprocess.CompletedProcess(
+                args=[],
+                returncode=1,
+                stdout="",
+                stderr="error near --json-schema-name\n",
+            )
+            assert_that(transport.supports_json_schema_name()).is_false()
+
+    def test_supports_json_schema_name_false_on_permission_error(
+        self,
+        _mock_claude_on_path: None,
+    ) -> None:
+        """A PermissionError spawning the probe reports the flag unsupported."""
+        from lintro.ai.providers.anthropic import _AnthropicCliTransport
+
+        transport = _AnthropicCliTransport(
+            binary_path="/usr/local/bin/claude",
+            model="claude-sonnet-4-6",
+        )
+        with patch("subprocess.run", side_effect=PermissionError()):
+            assert_that(transport.supports_json_schema_name()).is_false()
+
     def test_auth_error(self, _mock_claude_on_path: None) -> None:
         """Surface authentication failures from claude stderr."""
         provider = AnthropicProvider(transport=AITransport.CLI)
