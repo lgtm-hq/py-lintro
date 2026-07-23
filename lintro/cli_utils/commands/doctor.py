@@ -497,6 +497,8 @@ def doctor_command(
     Checks all supported tools grouped by category (bundled, npm, external).
     Shows actionable install commands for missing or outdated tools.
 
+    \u000c
+
     Args:
         json_output: Output results as JSON.
         tools: Comma-separated tool names to check.
