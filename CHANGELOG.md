@@ -21,6 +21,13 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.91.18] - 2026-07-23
+
+### Fixed
+
+- **output**: --output-format markdown/csv stdout clean like json/sarif (#1464)
+  (da2bca6)
+
 ## [0.91.17] - 2026-07-23
 
 ### Fixed
