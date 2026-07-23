@@ -116,6 +116,14 @@ def test_get_install_hints_bun_for_node_tools() -> None:
     assert_that("bun add" in result.get("markdownlint", "")).is_true()
 
 
+def test_get_install_hints_contains_commitlint_package_alias() -> None:
+    """Package-keyed commitlint versions have install hints."""
+    result = get_install_hints()
+
+    assert_that(result).contains_key("@commitlint/cli")
+    assert_that(result["@commitlint/cli"]).contains("@commitlint/cli@")
+
+
 def test_get_install_hints_external_tools() -> None:
     """External tools have appropriate install hints."""
     result = get_install_hints()

@@ -97,6 +97,7 @@ class OxlintPlugin(BaseToolPlugin):
         verbose_fix_output: bool | None = None,
         config: str | None = None,
         tsconfig: str | None = None,
+        type_aware: bool | None = None,
         allow: list[str] | str | None = None,
         deny: list[str] | str | None = None,
         warn: list[str] | str | None = None,
@@ -112,6 +113,8 @@ class OxlintPlugin(BaseToolPlugin):
             verbose_fix_output: If True, include raw Oxlint output in fix().
             config: Path to Oxlint config file (--config).
             tsconfig: Path to tsconfig.json for TypeScript support (--tsconfig).
+            type_aware: If True, enable type-aware linting (--type-aware).
+                Requires ``oxlint-tsgolint`` and TypeScript >= 7.0.
             allow: Rules to allow/turn off (--allow). Can be string or list.
             deny: Rules to deny/report as errors (--deny). Can be string or list.
             warn: Rules to warn on (--warn). Can be string or list.
@@ -123,6 +126,7 @@ class OxlintPlugin(BaseToolPlugin):
         validate_bool(verbose_fix_output, "verbose_fix_output")
         validate_str(config, "config")
         validate_str(tsconfig, "tsconfig")
+        validate_bool(type_aware, "type_aware")
 
         # Normalize rule lists (accept string or list)
         allow_list = normalize_str_or_list(allow, "allow")
@@ -139,6 +143,7 @@ class OxlintPlugin(BaseToolPlugin):
             verbose_fix_output=verbose_fix_output,
             config=config,
             tsconfig=tsconfig,
+            type_aware=type_aware,
             allow=allow_list,
             deny=deny_list,
             warn=warn_list,
@@ -213,6 +218,10 @@ class OxlintPlugin(BaseToolPlugin):
         tsconfig = options.get("tsconfig")
         if tsconfig:
             args.extend(["--tsconfig", str(tsconfig)])
+
+        # Type-aware linting (requires oxlint-tsgolint + TypeScript >= 7.0)
+        if options.get("type_aware"):
+            args.append("--type-aware")
 
         # Rule severity options
         allow_rules = options.get("allow")

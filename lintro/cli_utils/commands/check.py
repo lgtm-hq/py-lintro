@@ -10,8 +10,9 @@ Functions:
 import sys
 
 import click
-from click.testing import CliRunner
 
+from lintro.api import core as api
+from lintro.cli_utils.diff_option import validate_diff_base_ref
 from lintro.utils.git_diff import DIFF_DEFAULT_SENTINEL
 from lintro.utils.tool_executor import run_lint_tools_simple
 
@@ -153,6 +154,11 @@ DEFAULT_ACTION: str = "check"
     default=None,
     help="Exit 1 if the health score is below this threshold (0-100).",
 )
+@click.option(
+    "--no-art",
+    is_flag=True,
+    help="Suppress the decorative ASCII art printed after the run.",
+)
 def check_command(
     paths: tuple[str, ...],
     tools: str | None,
@@ -177,6 +183,7 @@ def check_command(
     transport: str | None,
     score: bool,
     fail_under: float | None,
+    no_art: bool,
 ) -> None:
     """Check files for issues using the specified tools.
 
@@ -206,6 +213,7 @@ def check_command(
         transport: str | None: Override AI transport (``api`` or ``cli``).
         score: bool: Print only the health score, suppressing the summary.
         fail_under: float | None: Exit 1 if the health score is below this value.
+        no_art: bool: Suppress the decorative ASCII art printed after the run.
 
     Raises:
         SystemExit: Process exit with the aggregated exit code from tools.
@@ -215,6 +223,8 @@ def check_command(
         from lintro.utils.file_cache import clear_all_caches
 
         clear_all_caches()
+
+    validate_diff_base_ref(diff_base=diff_base)
 
     # Add default paths if none provided
     path_list: list[str] = list(paths) if paths else list(DEFAULT_PATHS)
@@ -253,6 +263,7 @@ def check_command(
         transport=transport,
         score=score,
         fail_under=fail_under,
+        no_art=no_art,
     )
 
     # Exit with code only; CLI uses this as process exit code and avoids any
@@ -297,39 +308,22 @@ def check(
     Returns:
         None: This function does not return a value.
     """
-    # Build arguments for the click command
-    args: list[str] = []
-    if paths:
-        args.extend(list(paths))
-    if tools:
-        args.extend(["--tools", tools])
-    if tool_options:
-        args.extend(["--tool-options", tool_options])
-    if exclude:
-        args.extend(["--exclude", exclude])
-    if include_venv:
-        args.append("--include-venv")
-    if output:
-        args.extend(["--output", output])
-    if output_format:
-        args.extend(["--output-format", output_format])
-    if group_by:
-        args.extend(["--group-by", group_by])
-    if ignore_conflicts:
-        args.append("--ignore-conflicts")
-    if verbose:
-        args.append("--verbose")
-    if no_log:
-        args.append("--no-log")
-    if auto_install:
-        args.append("--auto-install")
-    if yes:
-        args.append("--yes")
-    if ai_fix:
-        args.append("--fix")
-
-    runner = CliRunner()
-    result = runner.invoke(check_command, args)
+    result = api.check(
+        paths=paths,
+        tools=tools,
+        tool_options=tool_options,
+        exclude=exclude,
+        include_venv=include_venv,
+        output=output,
+        output_format=output_format,
+        group_by=group_by,
+        ignore_conflicts=ignore_conflicts,
+        verbose=verbose,
+        no_log=no_log,
+        auto_install=auto_install,
+        yes=yes,
+        ai_fix=ai_fix,
+    )
 
     if result.exit_code != DEFAULT_EXIT_CODE:
         sys.exit(result.exit_code)

@@ -25,8 +25,10 @@ def _load_render_module() -> Any:
         "render_coverage_json_html",
         RENDER_SCRIPT,
     )
-    assert spec is not None
-    assert spec.loader is not None
+    assert_that(spec).is_not_none()
+    assert spec is not None  # narrow type for mypy
+    assert_that(spec.loader).is_not_none()
+    assert spec.loader is not None  # narrow type for mypy
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module

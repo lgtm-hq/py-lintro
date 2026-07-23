@@ -148,6 +148,14 @@ class AsyncToolExecutor:
 
         Returns:
             List of (tool_name, ToolResult) tuples in completion order.
+
+        Raises:
+            asyncio.CancelledError: If a tool task was cancelled; re-raised
+                after executor cleanup so cancellation propagates.
+            KeyboardInterrupt: If a tool task raised it; re-raised after
+                executor cleanup.
+            SystemExit: If a tool task raised it; re-raised after executor
+                cleanup.
         """
         options = options_per_tool or {}
 
@@ -179,25 +187,88 @@ class AsyncToolExecutor:
         tasks = [run_with_name(name, tool) for name, tool in tools]
         results = await asyncio.gather(*tasks, return_exceptions=True)
 
-        # Handle any exceptions that occurred
+        from lintro.models.core.tool_result import ToolResult
+
+        def _make_failed_result(
+            name: str,
+            message: str,
+        ) -> tuple[str, ToolResult]:
+            """Build a failed ``ToolResult`` entry for the given tool.
+
+            Args:
+                name: Name of the tool the result belongs to.
+                message: Human-readable failure description.
+
+            Returns:
+                A ``(tool_name, ToolResult)`` tuple with ``success=False``.
+            """
+            return (
+                name,
+                ToolResult(
+                    name=name,
+                    success=False,
+                    output=message,
+                    issues_count=0,
+                ),
+            )
+
+        # ``asyncio.gather(return_exceptions=True)`` aggregates *any* raised
+        # value, including ``BaseException`` subclasses that are not
+        # ``Exception`` (``CancelledError``, ``KeyboardInterrupt``,
+        # ``SystemExit``). Those must never be treated as tool results: fatal
+        # control-flow exceptions are re-raised after cleanup, non-fatal
+        # per-tool exceptions map to failed results, and only structurally
+        # valid ``(str, ToolResult)`` tuples enter the success branch.
         processed_results: list[tuple[str, ToolResult]] = []
         for i, result in enumerate(results):
             tool_name = tools[i][0]
-            if isinstance(result, Exception):
-                logger.error(f"Tool {tool_name} failed with exception: {result}")
-                # Create a failed result
-                from lintro.models.core.tool_result import ToolResult
 
-                failed_result = ToolResult(
-                    name=tool_name,
-                    success=False,
-                    output=f"Parallel execution failed: {result}",
-                    issues_count=0,
+            if isinstance(
+                result,
+                (asyncio.CancelledError, KeyboardInterrupt, SystemExit),
+            ):
+                logger.warning(
+                    f"Tool {tool_name} raised fatal "
+                    f"{type(result).__name__}; propagating after cleanup",
                 )
-                processed_results.append((tool_name, failed_result))
+                self.shutdown()
+                if isinstance(result, asyncio.CancelledError):
+                    raise asyncio.CancelledError(*result.args) from result
+                if isinstance(result, KeyboardInterrupt):
+                    raise KeyboardInterrupt(*result.args) from result
+                raise SystemExit(result.code) from result
+
+            if isinstance(result, BaseException):
+                logger.error(f"Tool {tool_name} failed with exception: {result}")
+                processed_results.append(
+                    _make_failed_result(
+                        name=tool_name,
+                        message=f"Parallel execution failed: {result}",
+                    ),
+                )
+                continue
+
+            if (
+                isinstance(result, tuple)
+                and len(result) == 2
+                and isinstance(result[0], str)
+                and isinstance(result[1], ToolResult)
+            ):
+                processed_results.append(result)
             else:
-                # Result is tuple[str, ToolResult] (type narrowed by isinstance check)
-                processed_results.append(result)  # type: ignore[arg-type]
+                logger.error(
+                    f"Tool {tool_name} returned a malformed result "
+                    f"({type(result).__name__}); recording as failure",
+                )
+                processed_results.append(
+                    _make_failed_result(
+                        name=tool_name,
+                        message=(
+                            "Parallel execution produced a malformed result: "
+                            f"{result!r}"
+                        ),
+                    ),
+                )
 
         return processed_results
 

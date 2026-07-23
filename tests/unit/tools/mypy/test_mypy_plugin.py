@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import os
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 import pytest
@@ -269,3 +271,146 @@ def test_build_command_non_strict_omits_allow_any_flags(
         "--allow-untyped-decorators",
     )
     assert_that(cmd).contains("--ignore-missing-imports")
+
+
+# Tests for MypyPlugin.check working-directory handling.
+#
+# Regression coverage for #492: mypy must run from the project root (where the
+# config file lives), passing file paths relative to that root, so Python
+# package/module resolution works. Running from the file's parent directory
+# resolved imports to ``Any`` and mis-flagged ``type: ignore`` comments.
+
+
+def _make_project(tmp_path: Path) -> Path:
+    """Create a minimal Python package tree with a mypy config.
+
+    Args:
+        tmp_path: Temporary directory provided by pytest.
+
+    Returns:
+        Path: The project root containing ``pyproject.toml`` and a nested
+        ``pkg/sub/mod.py`` source file.
+    """
+    (tmp_path / "pyproject.toml").write_text(
+        '[tool.mypy]\npython_version = "3.11"\n',
+        encoding="utf-8",
+    )
+    nested = tmp_path / "pkg" / "sub"
+    nested.mkdir(parents=True)
+    (tmp_path / "pkg" / "__init__.py").write_text("", encoding="utf-8")
+    (nested / "__init__.py").write_text("", encoding="utf-8")
+    (nested / "mod.py").write_text("x: int = 1\n", encoding="utf-8")
+    return tmp_path
+
+
+def test_check_runs_from_project_root_for_single_file(
+    mypy_plugin: MypyPlugin,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Run mypy from the project root with a root-relative path (#492).
+
+    Args:
+        mypy_plugin: The MypyPlugin instance to test.
+        tmp_path: Temporary directory provided by pytest.
+        monkeypatch: Pytest monkeypatch fixture.
+    """
+    project_root = _make_project(tmp_path)
+    monkeypatch.chdir(project_root)
+
+    captured: dict[str, object] = {}
+
+    def fake_run_subprocess(
+        cmd: list[str],
+        timeout: float,
+        cwd: str | None = None,
+        **_: object,
+    ) -> tuple[bool, str]:
+        captured["cmd"] = cmd
+        captured["cwd"] = cwd
+        return True, ""
+
+    monkeypatch.setattr(mypy_plugin, "_run_subprocess", fake_run_subprocess)
+    mypy_plugin.set_options()
+
+    result = mypy_plugin.check([os.path.join("pkg", "sub", "mod.py")], {})
+
+    assert_that(result.success).is_true()
+    assert_that(captured["cwd"]).is_equal_to(str(project_root))
+    # The target path is relative to the project root, not the file's basename.
+    assert_that(captured["cmd"]).contains(os.path.join("pkg", "sub", "mod.py"))
+    assert_that(captured["cmd"]).does_not_contain("mod.py")
+
+
+def test_check_target_is_relative_to_root_not_basename(
+    mypy_plugin: MypyPlugin,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Pass a full root-relative path so module resolution works (#492).
+
+    Args:
+        mypy_plugin: The MypyPlugin instance to test.
+        tmp_path: Temporary directory provided by pytest.
+        monkeypatch: Pytest monkeypatch fixture.
+    """
+    project_root = _make_project(tmp_path)
+    monkeypatch.chdir(project_root)
+
+    captured: dict[str, object] = {}
+
+    def fake_run_subprocess(
+        cmd: list[str],
+        timeout: float,
+        cwd: str | None = None,
+        **_: object,
+    ) -> tuple[bool, str]:
+        captured["cmd"] = cmd
+        captured["cwd"] = cwd
+        return True, ""
+
+    monkeypatch.setattr(mypy_plugin, "_run_subprocess", fake_run_subprocess)
+    mypy_plugin.set_options()
+
+    mypy_plugin.check([os.path.join("pkg", "sub", "mod.py")], {})
+
+    target = captured["cmd"][-1]  # type: ignore[index]
+    assert_that(target).is_equal_to(os.path.join("pkg", "sub", "mod.py"))
+    # A path relative to the file's own directory would collapse to the basename.
+    assert_that(str(target)).contains(os.sep)
+
+
+def test_check_directory_target_runs_from_project_root(
+    mypy_plugin: MypyPlugin,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Run mypy from the project root when a directory is passed (#492).
+
+    Args:
+        mypy_plugin: The MypyPlugin instance to test.
+        tmp_path: Temporary directory provided by pytest.
+        monkeypatch: Pytest monkeypatch fixture.
+    """
+    project_root = _make_project(tmp_path)
+    monkeypatch.chdir(project_root)
+
+    captured: dict[str, object] = {}
+
+    def fake_run_subprocess(
+        cmd: list[str],
+        timeout: float,
+        cwd: str | None = None,
+        **_: object,
+    ) -> tuple[bool, str]:
+        captured["cmd"] = cmd
+        captured["cwd"] = cwd
+        return True, ""
+
+    monkeypatch.setattr(mypy_plugin, "_run_subprocess", fake_run_subprocess)
+    mypy_plugin.set_options()
+
+    result = mypy_plugin.check(["pkg"], {})
+
+    assert_that(result.success).is_true()
+    assert_that(captured["cwd"]).is_equal_to(str(project_root))
