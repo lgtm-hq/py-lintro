@@ -28,6 +28,10 @@ from lintro._tool_versions import get_min_version
 from lintro.enums.tool_name import ToolName
 from lintro.enums.tool_type import ToolType
 from lintro.models.core.tool_result import ToolResult
+from lintro.parsers.trufflehog.trufflehog_errors import (
+    extract_trufflehog_scan_errors,
+    scan_errors_are_all_benign,
+)
 from lintro.parsers.trufflehog.trufflehog_parser import parse_trufflehog_output
 from lintro.plugins.base import BaseToolPlugin
 from lintro.plugins.protocol import ToolDefinition
@@ -76,6 +80,27 @@ def _argv_byte_budget() -> int:
     budget = arg_max - env_bytes - _ARGV_SAFETY_HEADROOM_BYTES
     # Always leave room for at least a moderately long single path per batch.
     return max(budget, _ARGV_SAFETY_HEADROOM_BYTES)
+
+
+def _existing_option_path(raw_path: str) -> str | None:
+    """Return ``raw_path`` when it exists on disk, else ``None``.
+
+    Used for optional TruffleHog file flags (currently ``--exclude-paths``) so
+    CI-only paths that are absent locally are skipped rather than handed to the
+    binary (which would emit ``lstat …: no such file or directory``).
+
+    Args:
+        raw_path: Configured filesystem path string.
+
+    Returns:
+        The path string when the file or directory exists, otherwise ``None``.
+    """
+    try:
+        if Path(raw_path).exists():
+            return raw_path
+    except OSError:
+        return None
+    return None
 
 
 def _chunk_source_paths(
@@ -209,6 +234,10 @@ class TrufflehogPlugin(BaseToolPlugin):
 
         Returns:
             List of command arguments.
+
+        Raises:
+            ValueError: If an explicitly configured TruffleHog config file is
+                missing.
         """
         cmd: list[str] = ["trufflehog", "filesystem", *source_paths]
 
@@ -230,15 +259,32 @@ class TrufflehogPlugin(BaseToolPlugin):
         if results_opt is not None:
             cmd.extend(["--results", str(results_opt)])
 
-        # Custom detector config
+        # Custom detector config — only when the file exists on disk so a
+        # missing explicit config never downgrades the scan to default
+        # detectors.
         config_opt = self.options.get("config")
-        if config_opt is not None:
-            cmd.extend(["--config", str(config_opt)])
+        if isinstance(config_opt, str) and config_opt:
+            config_path = _existing_option_path(config_opt)
+            if config_path is not None:
+                cmd.extend(["--config", config_path])
+            else:
+                raise ValueError(
+                    "TruffleHog config file does not exist: "
+                    f"{config_opt}. Refusing to run without the configured "
+                    "custom detectors.",
+                )
 
-        # Exclude-paths file
+        # Exclude-paths file — same existence gate for CI-only exclude lists.
         exclude_opt = self.options.get("exclude_paths")
-        if exclude_opt is not None:
-            cmd.extend(["--exclude-paths", str(exclude_opt)])
+        if isinstance(exclude_opt, str) and exclude_opt:
+            exclude_path = _existing_option_path(exclude_opt)
+            if exclude_path is not None:
+                cmd.extend(["--exclude-paths", exclude_path])
+            else:
+                logger.warning(
+                    f"[trufflehog] Skipping absent --exclude-paths file: "
+                    f"{exclude_opt}",
+                )
 
         # Concurrency
         concurrency_opt = self.options.get("concurrency")
@@ -276,11 +322,45 @@ class TrufflehogPlugin(BaseToolPlugin):
         # clean pass. A stable sort keeps batch boundaries and aggregated output
         # deterministic.
         source_paths = sorted(str(Path(f).resolve()) for f in ctx.files)
+        if not source_paths:
+            return ToolResult(
+                name=self.definition.name,
+                success=True,
+                output="No files to check.",
+                issues_count=0,
+            )
+        missing_scan_paths = [
+            source_path
+            for source_path in source_paths
+            if not Path(source_path).exists()
+        ]
+        if missing_scan_paths:
+            missing_list = "\n".join(f"  - {path}" for path in missing_scan_paths)
+            return ToolResult(
+                name=self.definition.name,
+                success=False,
+                output=(
+                    "TruffleHog scan incomplete: resolved scan target(s) "
+                    "disappeared before execution.\n"
+                    f"{missing_list}"
+                ),
+                issues_count=0,
+                parse_failures_count=1,
+            )
 
         # Expanding every file into one invocation can exceed ARG_MAX on large
         # repositories, so batch the paths under a byte budget and merge the
         # per-batch results into a single ToolResult.
-        fixed_args = self._build_check_command(source_paths=[])
+        try:
+            fixed_args = self._build_check_command(source_paths=[])
+        except (OSError, ValueError, RuntimeError) as e:
+            logger.error(f"Failed to prepare TruffleHog command: {e}")
+            return ToolResult(
+                name=self.definition.name,
+                success=False,
+                output=f"TruffleHog failed: {e}",
+                issues_count=0,
+            )
         fixed_arg_bytes = sum(
             len(a.encode("utf-8", "surrogatepass")) + 1 for a in fixed_args
         )
@@ -337,14 +417,13 @@ class TrufflehogPlugin(BaseToolPlugin):
             A ToolResult for the batch: ``success`` False on any execution,
             scan, or parse failure, with any emitted findings preserved.
         """
-        cmd = self._build_check_command(source_paths=source_paths)
-        logger.debug(
-            f"[trufflehog] Running: {' '.join(cmd[:10])}... (cwd={ctx.cwd})",
-        )
-
         # TruffleHog writes JSONL findings to stdout and diagnostic logs to
         # stderr, so parse stdout independently (see #1043).
         try:
+            cmd = self._build_check_command(source_paths=source_paths)
+            logger.debug(
+                f"[trufflehog] Running: {' '.join(cmd[:10])}... (cwd={ctx.cwd})",
+            )
             result = self._run_subprocess_result(
                 cmd=cmd,
                 timeout=ctx.timeout,
@@ -395,24 +474,32 @@ class TrufflehogPlugin(BaseToolPlugin):
             )
 
         # TruffleHog exits 0 even when it fails to read a scan target (it logs
-        # "encountered errors during scan" to stderr). A security scanner must
-        # never report a clean or complete pass from a scan that did not fully
-        # run — even if other targets produced findings — so surface this as a
-        # failure while keeping any findings that were emitted (see #1044).
+        # "encountered errors during scan" to stderr). Fail closed on genuine
+        # incomplete scans (#1044), but ignore benign ``lstat``/``stat``
+        # missing-path errors for targets that were never part of the resolved
+        # scan set — typically CI-only artifact dirs (#1631).
         if "encountered errors during scan" in stderr:
-            logger.error(f"TruffleHog reported scan errors: {stderr[:500]}")
-            partial = parse_trufflehog_output(output=stdout) if stdout else []
-            return ToolResult(
-                name=self.definition.name,
-                success=False,
-                output=(
-                    "TruffleHog encountered errors during the scan; "
-                    "treating as a failure rather than a clean pass."
-                ),
-                issues=partial,
-                issues_count=len(partial),
-                parse_failures_count=1,
-            )
+            scan_errors = extract_trufflehog_scan_errors(stderr)
+            scan_path_set = frozenset(source_paths)
+            if scan_errors_are_all_benign(scan_errors, scan_paths=scan_path_set):
+                logger.warning(
+                    "[trufflehog] Ignoring benign missing-path scan errors "
+                    f"outside the resolved scan set: {scan_errors}",
+                )
+            else:
+                logger.error(f"TruffleHog reported scan errors: {stderr[:500]}")
+                partial = parse_trufflehog_output(output=stdout) if stdout else []
+                return ToolResult(
+                    name=self.definition.name,
+                    success=False,
+                    output=(
+                        "TruffleHog encountered errors during the scan; "
+                        "treating as a failure rather than a clean pass."
+                    ),
+                    issues=partial,
+                    issues_count=len(partial),
+                    parse_failures_count=1,
+                )
 
         issues = parse_trufflehog_output(output=stdout)
         issues_count = len(issues)
