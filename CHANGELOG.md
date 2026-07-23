@@ -21,6 +21,12 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.91.8] - 2026-07-23
+
+### Fixed
+
+- **cli**: resolve symlinks in --diff changed-file matching (#1621) (db7e5e2)
+
 ## [0.91.7] - 2026-07-23
 
 ### Fixed
