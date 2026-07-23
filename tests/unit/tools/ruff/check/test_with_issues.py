@@ -34,10 +34,6 @@ def test_execute_ruff_check_with_lint_issues_returns_failure(
 
     with (
         patch(
-            "lintro.tools.implementations.ruff.check.walk_files_with_excludes",
-            return_value=["test.py"],
-        ),
-        patch(
             "lintro.tools.implementations.ruff.check.run_subprocess_with_timeout",
             return_value=(False, '[{"code": "F401"}]'),
         ),
@@ -72,10 +68,6 @@ def test_execute_ruff_check_with_multiple_lint_issues(
 
     with (
         patch(
-            "lintro.tools.implementations.ruff.check.walk_files_with_excludes",
-            return_value=["test.py"],
-        ),
-        patch(
             "lintro.tools.implementations.ruff.check.run_subprocess_with_timeout",
             return_value=(False, "[]"),
         ),
@@ -102,10 +94,6 @@ def test_execute_ruff_check_with_format_issues_returns_failure(
     mock_ruff_tool.options["format_check"] = True
 
     with (
-        patch(
-            "lintro.tools.implementations.ruff.check.walk_files_with_excludes",
-            return_value=["test.py"],
-        ),
         patch(
             "lintro.tools.implementations.ruff.check.run_subprocess_with_timeout",
             return_value=(True, ""),
@@ -142,10 +130,6 @@ def test_execute_ruff_check_combines_lint_and_format_issues(
     ]
 
     with (
-        patch(
-            "lintro.tools.implementations.ruff.check.walk_files_with_excludes",
-            return_value=["test.py", "other.py"],
-        ),
         patch(
             "lintro.tools.implementations.ruff.check.run_subprocess_with_timeout",
             return_value=(False, "[]"),

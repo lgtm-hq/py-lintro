@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from typing import cast
 from unittest.mock import MagicMock, patch
 
@@ -13,20 +14,22 @@ from lintro.tools.implementations.ruff.check import execute_ruff_check
 
 def test_execute_ruff_check_normalizes_format_paths_to_absolute(
     mock_ruff_tool: MagicMock,
+    ruff_execution_context: Callable[..., MagicMock],
 ) -> None:
     """Normalize format check file paths to absolute paths.
 
     Args:
         mock_ruff_tool: Mock RuffTool instance for testing.
+        ruff_execution_context: Factory for mock execution contexts.
     """
     mock_ruff_tool.options["format_check"] = True
-    mock_ruff_tool._get_cwd.return_value = "/test/project"
+    mock_ruff_tool._prepare_execution.return_value = ruff_execution_context(
+        files=["/test/project/test.py"],
+        rel_files=["test.py"],
+        cwd="/test/project",
+    )
 
     with (
-        patch(
-            "lintro.tools.implementations.ruff.check.walk_files_with_excludes",
-            return_value=["/test/project/test.py"],
-        ),
         patch(
             "lintro.tools.implementations.ruff.check.run_subprocess_with_timeout",
         ) as mock_subprocess,

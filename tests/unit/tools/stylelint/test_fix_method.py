@@ -8,6 +8,7 @@ from unittest.mock import patch
 from assertpy import assert_that
 
 from lintro.tools.definitions.stylelint import StylelintPlugin
+from tests.test_samples_helpers import copy_sample
 from tests.unit.tools.stylelint.conftest import make_ctx
 
 INITIAL_JSON = (
@@ -32,7 +33,14 @@ def test_fix_partial_preserves_invariant(
     tmp_path: Path,
 ) -> None:
     """Fix reports fixed/remaining counts satisfying the count invariant."""
-    (tmp_path / "a.css").write_text("a { color: #FFFFFF; }\n.x {}\n")
+    copy_sample(
+        tmp_path,
+        "tools",
+        "web",
+        "stylelint",
+        "stylelint_fix_input.css",
+        dest_name="a.css",
+    )
 
     # check -> fix -> re-check
     outputs = [
@@ -68,7 +76,14 @@ def test_fix_all_resolved(
     tmp_path: Path,
 ) -> None:
     """Fix succeeds when every issue is auto-fixed."""
-    (tmp_path / "a.css").write_text("a { color: #FFFFFF; }\n")
+    copy_sample(
+        tmp_path,
+        "tools",
+        "web",
+        "stylelint",
+        "stylelint_violations.css",
+        dest_name="a.css",
+    )
 
     outputs = [
         (False, INITIAL_JSON),
@@ -99,7 +114,14 @@ def test_fix_uses_fix_flag(
     tmp_path: Path,
 ) -> None:
     """The fix path invokes stylelint with the --fix flag."""
-    (tmp_path / "a.css").write_text("a { color: #FFFFFF; }\n")
+    copy_sample(
+        tmp_path,
+        "tools",
+        "web",
+        "stylelint",
+        "stylelint_violations.css",
+        dest_name="a.css",
+    )
 
     outputs = [
         (True, CLEAN_JSON),
@@ -131,7 +153,14 @@ def test_fix_skips_when_no_config(
     tmp_path: Path,
 ) -> None:
     """Fix returns a non-error skip when no stylelint config exists."""
-    (tmp_path / "a.css").write_text("a { color: red; }\n")
+    copy_sample(
+        tmp_path,
+        "tools",
+        "web",
+        "stylelint",
+        "stylelint_red.css",
+        dest_name="a.css",
+    )
 
     with (
         patch.object(stylelint_plugin, "_prepare_execution") as prep,

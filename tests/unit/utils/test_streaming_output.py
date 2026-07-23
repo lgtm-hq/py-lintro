@@ -220,7 +220,7 @@ def test_context_manager_closes_file() -> None:
         with handler:
             file_handle = handler._file_handle
         assert_that(file_handle).is_not_none()
-        assert file_handle is not None
+        assert file_handle is not None  # narrow type for mypy
         assert_that(file_handle.closed).is_true()
     finally:
         Path(temp_path).unlink()
