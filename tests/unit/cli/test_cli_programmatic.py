@@ -18,10 +18,10 @@ def test_check_programmatic_success(monkeypatch: pytest.MonkeyPatch) -> None:
     Args:
         monkeypatch: Pytest monkeypatch fixture to stub executor return.
     """
-    import lintro.cli_utils.commands.check as check_mod
+    import lintro.api.core as api_core
 
     mock_run = MagicMock(return_value=0)
-    monkeypatch.setattr(check_mod, "run_lint_tools_simple", mock_run, raising=True)
+    monkeypatch.setattr(api_core, "run_lint_tools_simple", mock_run, raising=True)
 
     # Function returns None on success (no exception raised)
     check_prog(
@@ -51,10 +51,10 @@ def test_check_programmatic_failure_raises(monkeypatch: pytest.MonkeyPatch) -> N
     Args:
         monkeypatch: Pytest fixture for patching modules and attributes.
     """
-    import lintro.cli_utils.commands.check as check_mod
+    import lintro.api.core as api_core
 
     monkeypatch.setattr(
-        check_mod,
+        api_core,
         "run_lint_tools_simple",
         lambda **k: 1,
         raising=True,
@@ -82,11 +82,11 @@ def test_format_programmatic_success(monkeypatch: pytest.MonkeyPatch) -> None:
     Args:
         monkeypatch: Pytest fixture for patching modules and attributes.
     """
-    import lintro.cli_utils.commands.format as format_mod
+    import lintro.api.core as api_core
 
     mock_run = MagicMock(return_value=0)
     monkeypatch.setattr(
-        format_mod,
+        api_core,
         "run_lint_tools_simple",
         mock_run,
         raising=True,
@@ -117,10 +117,10 @@ def test_format_programmatic_failure_raises(monkeypatch: pytest.MonkeyPatch) -> 
     Args:
         monkeypatch: Pytest fixture for patching modules and attributes.
     """
-    import lintro.cli_utils.commands.format as format_mod
+    import lintro.api.core as api_core
 
     monkeypatch.setattr(
-        format_mod,
+        api_core,
         "run_lint_tools_simple",
         lambda **k: 1,
         raising=True,

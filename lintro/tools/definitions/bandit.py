@@ -421,11 +421,14 @@ class BanditPlugin(BaseToolPlugin):
                 "No .py/.pyi files found" in output
                 or "No .py/.pyi files found" in stderr_output
             ):
-                logger.debug("[bandit] No Python files found to check")
+                # Informational, non-JSON output. Keep ``output`` empty so the
+                # display layer never routes this through the JSON parser and
+                # emits parse-error noise for a clean, zero-issue pass (#1534).
+                logger.debug("[bandit] No .py/.pyi files found to check")
                 return ToolResult(
                     name=self.definition.name,
                     success=True,
-                    output="No .py/.pyi files found to check.",
+                    output=None,
                     issues_count=0,
                 )
 
@@ -447,11 +450,14 @@ class BanditPlugin(BaseToolPlugin):
                         output=stderr_output or "Bandit failed with non-zero exit code",
                         issues_count=0,
                     )
-                logger.debug("[bandit] Empty output received")
+                # Informational, non-JSON output. Keep ``output`` empty so a
+                # clean, zero-issue pass is never routed through the JSON
+                # parser and reported as parse-error noise (#1534).
+                logger.debug("[bandit] Empty output received; treating as clean pass")
                 return ToolResult(
                     name=self.definition.name,
                     success=True,
-                    output="Bandit ran successfully and found no issues",
+                    output=None,
                     issues_count=0,
                 )
 

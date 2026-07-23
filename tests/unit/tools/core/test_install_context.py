@@ -84,7 +84,7 @@ def test_runtime_context_environment_reflects_managers() -> None:
 def test_detect_docker_via_dockerenv() -> None:
     """Detect Docker context when /.dockerenv file exists."""
     with patch(
-        "lintro.tools.core.install_context.os.path.exists",
+        "lintro.tools.core.install_context.Path.exists",
         return_value=True,
     ):
         result = _detect_install_context()
@@ -98,7 +98,7 @@ def test_detect_docker_via_env_var(
     """Detect Docker context via LINTRO_DOCKER=1 env var."""
     monkeypatch.setenv("LINTRO_DOCKER", "1")
     with patch(
-        "lintro.tools.core.install_context.os.path.exists",
+        "lintro.tools.core.install_context.Path.exists",
         return_value=False,
     ):
         result = _detect_install_context()
@@ -117,7 +117,7 @@ def test_detect_docker_via_container_env_var(
     monkeypatch.delenv("LINTRO_DOCKER", raising=False)
     monkeypatch.setenv("CONTAINER", "docker")
     with patch(
-        "lintro.tools.core.install_context.os.path.exists",
+        "lintro.tools.core.install_context.Path.exists",
         return_value=False,
     ):
         result = _detect_install_context()
@@ -134,7 +134,7 @@ def test_detect_pip_default(
 
     with (
         patch(
-            "lintro.tools.core.install_context.os.path.exists",
+            "lintro.tools.core.install_context.Path.exists",
             return_value=False,
         ),
         patch(
@@ -203,7 +203,7 @@ def test_detect_homebrew_install_context(
 
     with (
         patch(
-            "lintro.tools.core.install_context.os.path.exists",
+            "lintro.tools.core.install_context.Path.exists",
             return_value=False,
         ),
         patch(
@@ -216,8 +216,9 @@ def test_detect_homebrew_install_context(
             executable,
         ),
         patch(
-            "lintro.tools.core.install_context.os.path.realpath",
-            side_effect=lambda path: path,
+            "lintro.tools.core.install_context.Path.resolve",
+            autospec=True,
+            side_effect=lambda self, strict=False: self,
         ),
     ):
         result = _detect_install_context()
@@ -255,7 +256,7 @@ def test_detect_npm_bin_install_context(
 
     with (
         patch(
-            "lintro.tools.core.install_context.os.path.exists",
+            "lintro.tools.core.install_context.Path.exists",
             return_value=False,
         ),
         patch(
@@ -268,8 +269,9 @@ def test_detect_npm_bin_install_context(
             executable,
         ),
         patch(
-            "lintro.tools.core.install_context.os.path.realpath",
-            side_effect=lambda path: path,
+            "lintro.tools.core.install_context.Path.resolve",
+            autospec=True,
+            side_effect=lambda self, strict=False: self,
         ),
     ):
         result = _detect_install_context()

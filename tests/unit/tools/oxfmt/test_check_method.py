@@ -79,7 +79,7 @@ def test_check_returns_issues_when_unformatted_files(
         assert_that(result.issues_count).is_equal_to(2)
         assert_that(result.issues).is_not_none()
         issues = result.issues
-        assert issues is not None
+        assert issues is not None  # narrow type for mypy
         assert_that(issues[0].file).is_equal_to("test.js")
         assert_that(issues[1].file).is_equal_to("other.ts")
 

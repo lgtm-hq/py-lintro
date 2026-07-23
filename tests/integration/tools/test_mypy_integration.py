@@ -289,7 +289,7 @@ def missing_annotations(value):
 
     assert_that(result.issues_count).is_greater_than(0)
     assert_that(result.issues).is_not_none()
-    assert result.issues is not None  # narrow for type checker
+    assert result.issues is not None  # narrow type for mypy
     codes = {issue.code for issue in result.issues if isinstance(issue, MypyIssue)}
     assert_that(codes).contains("no-untyped-def")
     assert_that(codes).does_not_contain("misc")

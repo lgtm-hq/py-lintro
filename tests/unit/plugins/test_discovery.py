@@ -11,6 +11,7 @@ from assertpy import assert_that
 from lintro.plugins.discovery import (
     BUILTIN_DEFINITIONS_PATH,
     ENTRY_POINT_GROUP,
+    ENV_ENABLE_EXTERNAL_PLUGINS,
     discover_all_tools,
     discover_builtin_tools,
     discover_external_plugins,
@@ -23,6 +24,20 @@ from lintro.plugins.discovery import (
 def clean_discovery_state() -> None:
     """Reset discovery state before each test to ensure clean state."""
     reset_discovery()
+
+
+@pytest.fixture(autouse=True)
+def _enable_external_plugins(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Opt in to external plugins for tests that exercise loading.
+
+    External plugin loading is disabled by default (security). Most tests in
+    this module assert on the loading path, so opt in via the env var here.
+    Tests that verify default-deny behavior override this explicitly.
+
+    Args:
+        monkeypatch: Pytest monkeypatch fixture.
+    """
+    monkeypatch.setenv(ENV_ENABLE_EXTERNAL_PLUGINS, "1")
 
 
 # =============================================================================
@@ -143,6 +158,160 @@ def test_discover_external_plugins_handles_load_error() -> None:
     with patch("importlib.metadata.entry_points", return_value=[mock_ep]):
         result = discover_external_plugins()
         assert_that(result).is_equal_to(0)
+
+
+# =============================================================================
+# Tests for external plugin trust model (opt-in, default-deny)
+# =============================================================================
+
+
+def test_external_plugins_disabled_by_default(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Do not load external plugins without explicit opt-in.
+
+    Args:
+        monkeypatch: Pytest monkeypatch fixture.
+    """
+    monkeypatch.delenv(ENV_ENABLE_EXTERNAL_PLUGINS, raising=False)
+    monkeypatch.setattr(
+        "lintro.plugins.discovery._load_plugins_config",
+        lambda: {},
+    )
+
+    mock_ep = MagicMock()
+    mock_ep.name = "evil"
+
+    with patch(
+        "importlib.metadata.entry_points",
+        return_value=[mock_ep],
+    ) as mock_entry_points:
+        result = discover_external_plugins()
+
+    assert_that(result).is_equal_to(0)
+    # The entry point registry must not even be queried, and no plugin code
+    # (ep.load) may be executed when loading is disabled.
+    assert_that(mock_entry_points.called).is_false()
+    assert_that(mock_ep.load.called).is_false()
+
+
+def test_external_plugins_opt_in_env(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Load external plugins when the opt-in env var is set.
+
+    Args:
+        monkeypatch: Pytest monkeypatch fixture.
+    """
+    monkeypatch.setenv(ENV_ENABLE_EXTERNAL_PLUGINS, "1")
+    monkeypatch.setattr(
+        "lintro.plugins.discovery._load_plugins_config",
+        lambda: {},
+    )
+
+    mock_ep = MagicMock()
+    mock_ep.name = "trusted_plugin"
+    mock_ep.load.return_value = "not-a-class"
+
+    with patch("importlib.metadata.entry_points", return_value=[mock_ep]):
+        discover_external_plugins()
+
+    # Opt-in reached the load path and executed the entry point.
+    assert_that(mock_ep.load.called).is_true()
+
+
+def test_allowlist_filters_untrusted(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Load only allowlisted entry points and skip untrusted ones.
+
+    Args:
+        monkeypatch: Pytest monkeypatch fixture.
+    """
+    monkeypatch.delenv(ENV_ENABLE_EXTERNAL_PLUGINS, raising=False)
+    monkeypatch.setattr(
+        "lintro.plugins.discovery._load_plugins_config",
+        lambda: {"trusted": ["a"]},
+    )
+
+    ep_a = MagicMock()
+    ep_a.name = "a"
+    ep_a.load.return_value = "not-a-class"
+    ep_b = MagicMock()
+    ep_b.name = "b"
+    ep_b.load.return_value = "not-a-class"
+
+    with patch("importlib.metadata.entry_points", return_value=[ep_a, ep_b]):
+        discover_external_plugins()
+
+    # Only the allowlisted entry point may be loaded/executed.
+    assert_that(ep_a.load.called).is_true()
+    assert_that(ep_b.load.called).is_false()
+
+
+def test_malformed_yaml_config_fails_closed(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """A malformed ``.lintro-config.yaml`` disables external plugins.
+
+    A YAML parse error must not crash discovery or be swallowed into a
+    load-everything state; it must fail closed and load no external plugins.
+
+    Args:
+        monkeypatch: Pytest monkeypatch fixture.
+        tmp_path: Temporary working directory.
+    """
+    monkeypatch.setenv(ENV_ENABLE_EXTERNAL_PLUGINS, "1")
+    monkeypatch.chdir(tmp_path)
+    # Unbalanced brackets: invalid YAML that raises yaml.YAMLError.
+    (tmp_path / ".lintro-config.yaml").write_text(
+        "plugins:\n  trusted: [unterminated\n",
+        encoding="utf-8",
+    )
+
+    ep = MagicMock()
+    ep.name = "evil"
+    ep.load.return_value = "not-a-class"
+
+    with patch("importlib.metadata.entry_points", return_value=[ep]):
+        result = discover_external_plugins()
+
+    assert_that(result).is_equal_to(0)
+    assert_that(ep.load.called).is_false()
+
+
+def test_malformed_pyproject_config_fails_closed(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """A malformed ``pyproject.toml`` disables external plugins.
+
+    When ``pyproject.toml`` is the only trust-config source and it cannot be
+    parsed, discovery must fail closed rather than treat the allowlist as
+    absent (which would load every discovered plugin).
+
+    Args:
+        monkeypatch: Pytest monkeypatch fixture.
+        tmp_path: Temporary working directory.
+    """
+    monkeypatch.setenv(ENV_ENABLE_EXTERNAL_PLUGINS, "1")
+    monkeypatch.chdir(tmp_path)
+    # Invalid TOML: raises tomllib.TOMLDecodeError.
+    (tmp_path / "pyproject.toml").write_text(
+        "[tool.lintro.plugins]\ntrusted = [\n",
+        encoding="utf-8",
+    )
+
+    ep = MagicMock()
+    ep.name = "evil"
+    ep.load.return_value = "not-a-class"
+
+    with patch("importlib.metadata.entry_points", return_value=[ep]):
+        result = discover_external_plugins()
+
+    assert_that(result).is_equal_to(0)
+    assert_that(ep.load.called).is_false()
 
 
 # =============================================================================
