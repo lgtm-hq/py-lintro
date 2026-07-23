@@ -187,6 +187,8 @@ def check_command(
 ) -> None:
     """Check files for issues using the specified tools.
 
+    \u000c
+
     Args:
         paths: tuple: List of file/directory paths to check.
         tools: str | None: Comma-separated list of tool names to run.

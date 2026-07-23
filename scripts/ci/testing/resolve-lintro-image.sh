@@ -53,12 +53,25 @@ image_manifest_exists() {
 find_newest_sha_tag() {
 	local tag=""
 	local versions_json=""
+	local api_base=""
+	local list_err=""
 	# Use --paginate without --jq so pages are concatenated into one array,
 	# then select the newest sha-* tag with a single jq pass.
-	if ! versions_json=$(gh api \
-		--paginate \
-		"orgs/${ghcr_org}/packages/container/py-lintro/versions"); then
-		echo "::error::Failed to list GHCR sha-* tags for fallback resolution." >&2
+	# GHCR_ORG_PACKAGE is a registry prefix; the owner may be an org or a
+	# user. Prefer the org Packages API, then fall back to the user endpoint
+	# (Greptile #1326 P1).
+	for api_base in "orgs/${ghcr_org}" "users/${ghcr_org}"; do
+		if versions_json=$(gh api \
+			--paginate \
+			"${api_base}/packages/container/py-lintro/versions" 2>/dev/null); then
+			break
+		fi
+		list_err="${api_base}"
+		versions_json=""
+	done
+	if [[ -z "$versions_json" ]]; then
+		echo "::error::Failed to list GHCR sha-* tags for fallback resolution" \
+			"(tried orgs/${ghcr_org} and users/${ghcr_org}; last=${list_err})." >&2
 		exit 1
 	fi
 	if ! tag=$(printf '%s' "$versions_json" | jq -s -r '

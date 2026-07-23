@@ -367,6 +367,114 @@ def test_executor_json_stdout_is_clean_and_banners_go_to_stderr(
     assert_that(captured.err).contains("[LINTRO]")
 
 
+def test_executor_csv_stdout_is_clean_and_banners_go_to_stderr(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """--output-format csv emits a single parseable CSV document on stdout.
+
+    Regression test for #1418: markdown/csv stdout must be clean like
+    json/sarif, with the human summary UI routed to stderr.
+
+    Args:
+        monkeypatch: Pytest monkeypatch fixture.
+        capsys: Pytest capture fixture for stdout/stderr.
+    """
+    import csv as _csv
+    import io as _io
+
+    from lintro.parsers.ruff.ruff_issue import RuffIssue
+
+    issue = RuffIssue(file="a.py", line=1, column=1, message="unused", code="F401")
+    result = ToolResult(
+        name="ruff",
+        success=False,
+        output="raw",
+        issues_count=1,
+        issues=[issue],
+    )
+    _setup_tool_manager(
+        monkeypatch,
+        {"ruff": FakeTool("ruff", can_fix=True, result=result)},
+    )
+    code = run_lint_tools_simple(
+        action="check",
+        paths=["."],
+        tools="all",
+        tool_options=None,
+        exclude=None,
+        include_venv=False,
+        group_by="auto",
+        output_format="csv",
+        verbose=False,
+        raw_output=False,
+    )
+    assert_that(code).is_equal_to(1)
+
+    captured = capsys.readouterr()
+    # stdout must parse as CSV with the expected header.
+    reader = _csv.reader(_io.StringIO(captured.out))
+    rows = list(reader)
+    assert_that(rows[0]).is_equal_to(
+        ["tool", "issues_count", "file", "line", "code", "message", "doc_url"],
+    )
+    assert_that(any("F401" in row for row in rows[1:])).is_true()
+    # The human UI must not pollute stdout, but must appear on stderr.
+    assert_that(captured.out).does_not_contain("[LINTRO]")
+    assert_that(captured.out).does_not_contain("Configuration")
+    assert_that(captured.err).contains("[LINTRO]")
+
+
+def test_executor_markdown_stdout_is_clean_and_banners_go_to_stderr(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """--output-format markdown emits a clean Markdown report on stdout.
+
+    Regression test for #1418.
+
+    Args:
+        monkeypatch: Pytest monkeypatch fixture.
+        capsys: Pytest capture fixture for stdout/stderr.
+    """
+    from lintro.parsers.ruff.ruff_issue import RuffIssue
+
+    issue = RuffIssue(file="a.py", line=1, column=1, message="unused", code="F401")
+    result = ToolResult(
+        name="ruff",
+        success=False,
+        output="raw",
+        issues_count=1,
+        issues=[issue],
+    )
+    _setup_tool_manager(
+        monkeypatch,
+        {"ruff": FakeTool("ruff", can_fix=True, result=result)},
+    )
+    code = run_lint_tools_simple(
+        action="check",
+        paths=["."],
+        tools="all",
+        tool_options=None,
+        exclude=None,
+        include_venv=False,
+        group_by="auto",
+        output_format="markdown",
+        verbose=False,
+        raw_output=False,
+    )
+    assert_that(code).is_equal_to(1)
+
+    captured = capsys.readouterr()
+    assert_that(captured.out.startswith("# Lintro Report")).is_true()
+    assert_that(captured.out).contains("| Tool | Issues |")
+    # No braille art, Configuration box, or run banner on stdout.
+    assert_that(captured.out).does_not_contain("Configuration")
+    assert_that(captured.out).does_not_contain("[LINTRO]")
+    assert_that(captured.out).does_not_contain("⣿")
+    assert_that(captured.err).contains("[LINTRO]")
+
+
 def test_executor_handles_tool_failure_with_output(
     monkeypatch: pytest.MonkeyPatch,
     fake_logger: Any,

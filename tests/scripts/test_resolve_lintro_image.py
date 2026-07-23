@@ -274,3 +274,65 @@ exit 99
 
         assert_that(result.returncode).is_equal_to(1)
         assert_that(result.stderr).contains("No published sha-* tags")
+
+
+def test_resolve_lintro_image_falls_back_via_user_packages_api() -> None:
+    """User-owned GHCR prefixes should resolve via users/*/packages, not orgs/*."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        mock_bin = Path(tmpdir) / "bin"
+        mock_bin.mkdir()
+        requested_sha = "abc123def456789012345678901234567890abcd"
+        fallback_sha = "fedcba9876543210fedcba9876543210fedcba98"
+        fallback = f"ghcr.io/some-user/py-lintro:sha-{fallback_sha}"
+        _write_executable(
+            mock_bin / "docker",
+            f"""#!/usr/bin/env bash
+if [[ "$1" == "manifest" && "$2" == "inspect" && "$3" == "{fallback}" ]]; then
+  exit 0
+fi
+exit 1
+""",
+        )
+        _write_executable(
+            mock_bin / "gh",
+            f"""#!/usr/bin/env bash
+if [[ "$1" == "api" ]]; then
+  # First attempt is orgs/... — fail so the script tries users/...
+  if [[ "$*" == *"orgs/some-user/packages"* ]]; then
+    echo "Not Found" >&2
+    exit 1
+  fi
+  if [[ "$*" == *"users/some-user/packages"* ]]; then
+    cat <<'JSON'
+[
+  {{
+    "updated_at": "2026-07-01T00:00:00Z",
+    "metadata": {{
+      "container": {{
+        "tags": ["sha-{fallback_sha}"]
+      }}
+    }}
+  }}
+]
+JSON
+    exit 0
+  fi
+fi
+exit 99
+""",
+        )
+        output_path = Path(tmpdir) / "github_output"
+        output_path.touch()
+        result = _run_resolve(
+            env={
+                "PATH": f"{mock_bin}:{os.environ.get('PATH', '')}",
+                "GITHUB_OUTPUT": str(output_path),
+                "GHCR_ORG_PACKAGE": "ghcr.io/some-user",
+            },
+            requested_sha=requested_sha,
+        )
+
+        assert_that(result.returncode).is_equal_to(0)
+        output = output_path.read_text(encoding="utf-8")
+        assert_that(output).contains(f"lintro_image={fallback}")
+        assert_that(output).contains("lintro_fallback=true")
