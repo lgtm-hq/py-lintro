@@ -28,6 +28,52 @@ def test_detect_python(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     assert_that(langs).contains("python")
 
 
+def test_detect_python_via_requirements_txt(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Detect Python from a top-level ``requirements.txt`` (no pyproject)."""
+    (tmp_path / "requirements.txt").write_text("requests==2.32.0\n")
+    monkeypatch.chdir(tmp_path)
+
+    langs = detect_project_languages()
+    assert_that(langs).contains("python")
+
+
+def test_detect_python_via_nested_requirements_dir(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Detect Python from the ``requirements/base.txt`` layout.
+
+    The filename here is ``base.txt`` (not ``requirements*.txt``), so this
+    covers the pip-tools-style directory layout that a filename-only glob
+    would miss.
+    """
+    reqs_dir = tmp_path / "requirements"
+    reqs_dir.mkdir()
+    (reqs_dir / "base.txt").write_text("requests==2.32.0\n")
+    (reqs_dir / "prod.txt").write_text("-r base.txt\ngunicorn==22.0.0\n")
+    monkeypatch.chdir(tmp_path)
+
+    langs = detect_project_languages()
+    assert_that(langs).contains("python")
+
+
+def test_detect_python_ignores_vendored_requirements(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A requirements file only inside a vendored tree does not mark Python."""
+    vendored = tmp_path / "node_modules" / "pkg"
+    vendored.mkdir(parents=True)
+    (vendored / "requirements.txt").write_text("requests==2.32.0\n")
+    monkeypatch.chdir(tmp_path)
+
+    langs = detect_project_languages()
+    assert_that(langs).does_not_contain("python")
+
+
 def test_detect_javascript(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Detect JavaScript when package.json exists."""
     (tmp_path / "package.json").write_text('{"name":"x"}')
@@ -206,7 +252,7 @@ def _patch_setup_deps() -> tuple[Any, Any, Any, Any]:
 
     return (
         patch(
-            "lintro.cli_utils.commands.setup.ToolRegistry.load",
+            "lintro.cli_utils.commands.setup.ManifestRegistry.load",
             return_value=registry,
         ),
         patch(

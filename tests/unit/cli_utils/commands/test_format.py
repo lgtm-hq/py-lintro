@@ -218,54 +218,41 @@ def test_format_command_returns_tool_exit_code(mock_run: MagicMock) -> None:
 # =============================================================================
 
 
-@patch("lintro.cli_utils.commands.format.CliRunner")
-def test_format_code_invokes_command(mock_runner_class: MagicMock) -> None:
-    """format_code invokes format_command via CliRunner.
+@patch("lintro.api.core.run_lint_tools_simple")
+def test_format_code_invokes_command(mock_run: MagicMock) -> None:
+    """format_code routes through the library API.
 
     Args:
-        mock_runner_class: Mock for CliRunner class.
+        mock_run: Mock for run_lint_tools_simple used by the API.
     """
-    mock_runner = MagicMock()
-    mock_result = MagicMock()
-    mock_result.exit_code = 0
-    mock_runner.invoke.return_value = mock_result
-    mock_runner_class.return_value = mock_runner
+    mock_run.return_value = 0
 
     format_code(paths=["src/"])
 
-    mock_runner.invoke.assert_called_once()
+    mock_run.assert_called_once()
 
 
-@patch("lintro.cli_utils.commands.format.CliRunner")
-def test_format_code_raises_on_failure(mock_runner_class: MagicMock) -> None:
+@patch("lintro.api.core.run_lint_tools_simple")
+def test_format_code_raises_on_failure(mock_run: MagicMock) -> None:
     """format_code raises RuntimeError on non-zero exit.
 
     Args:
-        mock_runner_class: Mock for CliRunner class.
+        mock_run: Mock for run_lint_tools_simple used by the API.
     """
-    mock_runner = MagicMock()
-    mock_result = MagicMock()
-    mock_result.exit_code = 1
-    mock_result.output = "Format error"
-    mock_runner.invoke.return_value = mock_result
-    mock_runner_class.return_value = mock_runner
+    mock_run.return_value = 1
 
     with pytest.raises(RuntimeError, match="Format failed"):
         format_code(paths=["src/"])
 
 
-@patch("lintro.cli_utils.commands.format.CliRunner")
-def test_format_code_passes_options(mock_runner_class: MagicMock) -> None:
-    """format_code passes all options to command.
+@patch("lintro.api.core.run_lint_tools_simple")
+def test_format_code_passes_options(mock_run: MagicMock) -> None:
+    """format_code passes all options through to the API.
 
     Args:
-        mock_runner_class: Mock for CliRunner class.
+        mock_run: Mock for run_lint_tools_simple used by the API.
     """
-    mock_runner = MagicMock()
-    mock_result = MagicMock()
-    mock_result.exit_code = 0
-    mock_runner.invoke.return_value = mock_result
-    mock_runner_class.return_value = mock_runner
+    mock_run.return_value = 0
 
     format_code(
         paths=["src/"],
@@ -275,11 +262,9 @@ def test_format_code_passes_options(mock_runner_class: MagicMock) -> None:
         verbose=True,
     )
 
-    call_args = mock_runner.invoke.call_args[0][1]
-    assert_that(call_args).contains("src/")
-    assert_that(call_args).contains("--tools")
-    assert_that(call_args).contains("ruff")
-    assert_that(call_args).contains("--exclude")
-    assert_that(call_args).contains("*.bak")
-    assert_that(call_args).contains("--include-venv")
-    assert_that(call_args).contains("--verbose")
+    call_kwargs = mock_run.call_args.kwargs
+    assert_that(call_kwargs["paths"]).is_equal_to(["src/"])
+    assert_that(call_kwargs["tools"]).is_equal_to("ruff")
+    assert_that(call_kwargs["exclude"]).is_equal_to("*.bak")
+    assert_that(call_kwargs["include_venv"]).is_true()
+    assert_that(call_kwargs["verbose"]).is_true()

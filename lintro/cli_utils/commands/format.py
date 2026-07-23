@@ -1,8 +1,9 @@
 """Format command implementation using simplified Loguru-based approach."""
 
 import click
-from click.testing import CliRunner
 
+from lintro.api import core as api
+from lintro.cli_utils.diff_option import validate_diff_base_ref
 from lintro.utils.git_diff import DIFF_DEFAULT_SENTINEL
 from lintro.utils.tool_executor import run_lint_tools_simple
 
@@ -117,6 +118,11 @@ DEFAULT_ACTION: str = "fmt"
         "would be fixed and 1 when fixes are available (useful for CI checks)."
     ),
 )
+@click.option(
+    "--no-art",
+    is_flag=True,
+    help="Suppress the decorative ASCII art printed after the run.",
+)
 def format_command(
     ctx: click.Context,
     paths: tuple[str, ...],
@@ -136,6 +142,7 @@ def format_command(
     auto_install: bool,
     yes: bool,
     dry_run: bool,
+    no_art: bool,
 ) -> None:
     """Format code using configured formatting tools.
 
@@ -164,7 +171,10 @@ def format_command(
         auto_install: bool: Whether to auto-install Node.js deps if missing.
         yes: bool: Skip confirmation prompt and proceed immediately.
         dry_run: bool: Preview would-be fixes without modifying any files.
+        no_art: bool: Suppress the decorative ASCII art printed after the run.
     """
+    validate_diff_base_ref(diff_base=diff_base)
+
     # Default to current directory if no paths provided
     normalized_paths: list[str] = list(paths) if paths else list(DEFAULT_PATHS)
 
@@ -188,6 +198,7 @@ def format_command(
         auto_install=auto_install,
         yes=yes,
         dry_run=dry_run,
+        no_art=no_art,
     )
 
     # Exit with code from tool execution.
@@ -230,32 +241,20 @@ def format_code(
     Raises:
         RuntimeError: If format fails for any reason.
     """
-    args: list[str] = []
-    if paths:
-        args.extend(paths)
-    if tools:
-        args.extend(["--tools", tools])
-    if tool_options:
-        args.extend(["--tool-options", tool_options])
-    if exclude:
-        args.extend(["--exclude", exclude])
-    if include_venv:
-        args.append("--include-venv")
-    if group_by:
-        args.extend(["--group-by", group_by])
-    if output_format:
-        args.extend(["--output-format", output_format])
-    if verbose:
-        args.append("--verbose")
-    if auto_install:
-        args.append("--auto-install")
-    if yes:
-        args.append("--yes")
-
-    runner = CliRunner()
-    result = runner.invoke(format_command, args)
+    result = api.format(
+        paths=paths,
+        tools=tools,
+        tool_options=tool_options,
+        exclude=exclude,
+        include_venv=include_venv,
+        group_by=group_by,
+        output_format=output_format,
+        verbose=verbose,
+        auto_install=auto_install,
+        yes=yes,
+    )
     if result.exit_code != DEFAULT_EXIT_CODE:
-        raise RuntimeError(f"Format failed: {result.output}")
+        raise RuntimeError(f"Format failed with exit code {result.exit_code}")
     return None
 
 
