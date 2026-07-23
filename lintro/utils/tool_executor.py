@@ -559,12 +559,9 @@ def run_lint_tools_simple(
 
     setup_execution_logging(output_manager.run_dir, debug=debug)
 
-    # Create simplified logger with rich formatting. For machine-readable
-    # output (JSON/SARIF) route all decorative console output to stderr so
-    # stdout carries only the final parseable document.
+    # Create simplified logger with rich formatting.
     from lintro.utils.console import create_logger
 
-    machine_readable_output = output_format.lower() in ("json", "sarif")
     # Explicit non-grid formats that must emit a single clean, parseable
     # document on stdout. For these we route all decorative console UI to
     # stderr and suppress the human summary so stdout carries only the payload
@@ -795,11 +792,7 @@ def run_lint_tools_simple(
     # Pre-execution config summary. Suppressed for clean-stdout formats
     # (json/sarif/csv/markdown) and score-only mode because it writes the rich
     # Configuration box to stdout via its own Console, bypassing route_stderr.
-    if (
-        not clean_stdout_output
-        and not score_only
-        and (tools_to_run or skipped_tools)
-    ):
+    if not clean_stdout_output and not score_only and (tools_to_run or skipped_tools):
         from lintro.utils.console.pre_execution_summary import (
             print_pre_execution_summary,
         )
