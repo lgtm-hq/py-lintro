@@ -416,7 +416,7 @@ class OutputManager:
                     file: str = markdown_escape(_repo_relative_path(raw_file))
                     line = _format_issue_line(getattr(issue, "line", None))
                     code: str = markdown_escape(
-                        _format_issue_field(getattr(issue, "code", "") or ""),
+                        _format_issue_field(issue.get_code()),
                     )
                     msg: str = markdown_escape(
                         _format_issue_field(getattr(issue, "message", "") or ""),
@@ -463,7 +463,7 @@ class OutputManager:
                     file: str = html_escape(_repo_relative_path(raw_file))
                     line = _format_issue_line(getattr(issue, "line", None))
                     code: str = html_escape(
-                        _format_issue_field(getattr(issue, "code", "") or ""),
+                        _format_issue_field(issue.get_code()),
                     )
                     msg: str = html_escape(
                         _format_issue_field(getattr(issue, "message", "") or ""),
@@ -500,7 +500,7 @@ class OutputManager:
                             str(r.issues_count),
                             _repo_relative_path(raw_file),
                             _format_issue_line(getattr(issue, "line", None)),
-                            _format_issue_field(getattr(issue, "code", "") or ""),
+                            _format_issue_field(issue.get_code()),
                             _format_issue_field(getattr(issue, "message", "") or ""),
                         ],
                     )

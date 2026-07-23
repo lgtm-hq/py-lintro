@@ -63,7 +63,7 @@ def build_doc_url_map(all_results: Sequence[Any]) -> dict[str, str]:
     for result in all_results:
         if hasattr(result, "issues") and result.issues:
             for issue in result.issues:
-                code = str(getattr(issue, "code", "") or "")
+                code = issue.get_code()
                 url = str(getattr(issue, "doc_url", "") or "")
                 if code and url:
                     doc_url_map[code] = url
@@ -100,7 +100,7 @@ def _render_markdown_issue_rows(issues: Sequence[BaseIssue]) -> list[str]:
     for issue in issues:
         file_val = str(getattr(issue, "file", "") or "").replace("|", r"\|")
         line_val = getattr(issue, "line", None) or 0
-        code_val = str(getattr(issue, "code", "") or "").replace("|", r"\|")
+        code_val = issue.get_code().replace("|", r"\|")
         msg_val = str(getattr(issue, "message", "") or "").replace("|", r"\|")
         doc_url = str(getattr(issue, "doc_url", "") or "")
         # Percent-encode pipes in the URL so they don't break the
@@ -126,7 +126,7 @@ def _render_html_issue_rows(issues: Sequence[BaseIssue]) -> list[str]:
     for issue in issues:
         f_val = html.escape(str(getattr(issue, "file", "") or ""))
         l_val = html.escape(str(getattr(issue, "line", None) or 0))
-        c_val = html.escape(str(getattr(issue, "code", "") or ""))
+        c_val = html.escape(issue.get_code())
         m_val = html.escape(str(getattr(issue, "message", "") or ""))
         doc_url = str(getattr(issue, "doc_url", "") or "")
         d_val = (
@@ -217,7 +217,7 @@ def render_csv_report(all_results: Sequence[ToolResult]) -> str:
                         sanitize_csv_value(str(merged_count)),
                         sanitize_csv_value(str(getattr(issue, "file", "") or "")),
                         sanitize_csv_value(str(getattr(issue, "line", None) or 0)),
-                        sanitize_csv_value(str(getattr(issue, "code", "") or "")),
+                        sanitize_csv_value(issue.get_code()),
                         sanitize_csv_value(str(getattr(issue, "message", "") or "")),
                         sanitize_csv_value(str(getattr(issue, "doc_url", "") or "")),
                     ],
