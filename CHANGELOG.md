@@ -21,6 +21,53 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.91.20] - 2026-07-23
+
+### Changed
+
+- **ai**: add fallback concurrency regression tests (#1441) (4cf515a)
+
+### Fixed
+
+- **ci**: guard single-run scheduled lintro analysis invariant (#1169) (466f037)
+
+## [0.91.19] - 2026-07-23
+
+### Fixed
+
+- **docker**: backfill dispatch input-validation gaps (#1327) (af2d25b)
+
+## [0.91.18] - 2026-07-23
+
+### Fixed
+
+- **output**: --output-format markdown/csv stdout clean like json/sarif (#1464)
+  (da2bca6)
+
+## [0.91.17] - 2026-07-23
+
+### Fixed
+
+- **trufflehog**: ignore benign missing-path scan errors (#1633) (05c6e31)
+
+## [0.91.16] - 2026-07-23
+
+### Fixed
+
+- **cli**: accept hyphenated names in --tools selection (#1635) (ad37502)
+
+## [0.91.15] - 2026-07-23
+
+### Fixed
+
+- **cli**: render clean --help text for subcommands (#1457) (b7b5fbe)
+
+## [0.91.14] - 2026-07-23
+
+### Fixed
+
+- **ci**: upload build-binary artifacts on workflow_dispatch (#1634) (60572af)
+
 ## [0.91.13] - 2026-07-23
 
 ### Fixed

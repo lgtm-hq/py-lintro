@@ -13,6 +13,9 @@ import yaml
 from assertpy import assert_that
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
+_LINTRO_REPORT_SCRIPT = (
+    _REPO_ROOT / "scripts" / "ci" / "testing" / "lintro-report-generate.sh"
+)
 # Bandit B106 false-positives on the contiguous ``pull_request`` literal because
 # of the ``pass`` substring. Build the event kind from parts for token matching.
 _GITHUB_PULL_REQUEST_EVENT = "pull_" + "request"
@@ -888,6 +891,68 @@ def test_docker_ci_detect_step_has_no_pipeline_allow_list() -> None:
     ]
     assert_that(checkout_steps).is_length(1)
     assert_that(checkout_steps[0]["with"]["fetch-depth"]).is_equal_to(0)
+
+
+def test_lintro_report_runs_full_codebase_analysis_exactly_once() -> None:
+    """The scheduled report must run the heavy ``lintro check .`` analysis once.
+
+    Running the full-codebase analysis twice (once for the artifact and once for
+    the step summary) doubled peak memory and OOM-killed the 7GB runner. The
+    generation script must invoke the analysis a single time and reuse its
+    markdown output for both the report artifact and the step summary.
+    """
+    script = _LINTRO_REPORT_SCRIPT.read_text(encoding="utf-8")
+
+    # The only heavy invocation is the Docker ``lintro check .`` run. Match the
+    # actual command (via the ``DOCKER_RUN`` array) so comments/echo text that
+    # merely mention "lintro check" are not counted.
+    analysis_runs = re.findall(
+        r'"\$\{DOCKER_RUN\[@\]\}"\s+lintro\s+check\b',
+        script,
+    )
+    assert_that(analysis_runs).is_length(1)
+
+    # The step summary must reuse the already-written report rather than trigger
+    # a second analysis. ``list-tools`` is lightweight and allowed.
+    assert_that(script).contains("tail -n +3 lintro-report/report.md")
+    assert_that(script).contains("--output-format markdown")
+
+
+def test_lintro_report_scheduled_workflow_shares_single_run_output() -> None:
+    """The scheduled workflow wires one analysis step to the report artifact."""
+    workflow = _load_workflow(name="lintro-report-scheduled.yml")
+    report_job = workflow["jobs"]["lintro-report"]
+
+    # Concurrency guard for the report ref must remain intact.
+    assert_that(report_job["concurrency"]["group"]).is_equal_to(
+        "report-${{ github.ref }}",
+    )
+    assert_that(report_job["concurrency"]["cancel-in-progress"]).is_true()
+
+    steps = report_job["steps"]
+    generate_steps = [
+        step
+        for step in steps
+        if "lintro-report-generate.sh" in str(step.get("run", ""))
+    ]
+    assert_that(generate_steps).is_length(1)
+
+    upload_steps = [
+        step
+        for step in steps
+        if str(step.get("uses", "")).startswith("actions/upload-artifact")
+    ]
+    assert_that(upload_steps).is_length(1)
+    assert_that(upload_steps[0]["with"]["path"]).is_equal_to(
+        "lintro-report/report.md",
+    )
+
+    # The notify job consumes the report job's result, not a second analysis.
+    # GitHub Actions accepts both scalar and list forms for `needs`.
+    notify_needs = workflow["jobs"]["notify"]["needs"]
+    if isinstance(notify_needs, str):
+        notify_needs = [notify_needs]
+    assert_that(notify_needs).contains("lintro-report")
 
 
 def test_publish_npm_exposes_dist_tag_for_backfills() -> None:
