@@ -24,7 +24,7 @@ import subprocess  # nosec B404 - subprocess is the core mechanism for invoking 
 from functools import lru_cache
 from pathlib import Path
 
-from lintro.utils.path_utils import absolute_path
+from lintro.utils.path_utils import absolute_path_without_resolving
 
 # Sentinel used by the ``--diff`` CLI option to mean "flag supplied without an
 # explicit base"; resolved to the repository's default base ref at runtime.
@@ -109,7 +109,7 @@ def _repo_root(cwd: str) -> str | None:
     return root or None
 
 
-def _ref_exists(ref: str, cwd: str) -> bool:
+def ref_exists(ref: str, cwd: str = ".") -> bool:
     """Return whether ``ref`` resolves to a commit.
 
     Args:
@@ -148,13 +148,13 @@ def resolve_default_base(cwd: str = ".") -> str | None:
         )
         if symbolic.returncode == 0:
             candidate = symbolic.stdout.strip()
-            if candidate and candidate != "origin/HEAD" and _ref_exists(candidate, cwd):
+            if candidate and candidate != "origin/HEAD" and ref_exists(candidate, cwd):
                 return candidate
     except (OSError, subprocess.SubprocessError):
         pass
 
     for candidate in _DEFAULT_BASE_CANDIDATES:
-        if _ref_exists(candidate, cwd):
+        if ref_exists(candidate, cwd):
             return candidate
     return None
 
@@ -237,9 +237,9 @@ def get_changed_files(base: str, cwd: str = ".") -> frozenset[str]:
     Raises:
         DiffResolutionError: When ``base`` does not resolve to a commit.
     """
-    root = _repo_root(cwd) or absolute_path(cwd)
+    root = _repo_root(cwd) or absolute_path_without_resolving(Path(cwd))
 
-    if not _ref_exists(base, cwd):
+    if not ref_exists(base, cwd):
         raise DiffResolutionError(
             f"Cannot resolve --diff base ref '{base}'. Fetch it or pass an "
             f"existing ref (e.g. 'main' or 'origin/main').",
@@ -253,7 +253,7 @@ def get_changed_files(base: str, cwd: str = ".") -> frozenset[str]:
 
     changed: set[str] = set()
     for name in names:
-        abs_path = absolute_path(str(Path(root) / name))
+        abs_path = absolute_path_without_resolving(Path(root) / name)
         # Drop deletions / rename sources that no longer exist on disk.
         if Path(abs_path).is_file():
             changed.add(abs_path)
@@ -388,7 +388,7 @@ def _validate_explicit_base_for_paths(base: str, scan_paths: list[str]) -> None:
     for repo_root in groups:
         if repo_root is None:
             continue
-        if not _ref_exists(base, repo_root):
+        if not ref_exists(base, repo_root):
             raise DiffResolutionError(
                 f"Cannot resolve --diff base ref '{base}'. Fetch it or pass an "
                 f"existing ref (e.g. 'main' or 'origin/main').",
@@ -453,7 +453,7 @@ def filter_files_by_diff_for_paths(
         if repo_root is None:
             for scan_path in group_paths:
                 for file_path in _files_under_scan_path(files, scan_path):
-                    included.add(absolute_path(file_path))
+                    included.add(absolute_path_without_resolving(Path(file_path)))
             continue
 
         resolved_base = _resolve_base_for_repo(base, repo_root)
@@ -462,9 +462,9 @@ def filter_files_by_diff_for_paths(
 
         repo_files = [f for f in files if _path_in_repo(f, repo_root)]
         for file_path in filter_files_by_diff(repo_files, resolved_base, repo_root):
-            included.add(absolute_path(file_path))
+            included.add(absolute_path_without_resolving(Path(file_path)))
 
-    return [f for f in files if absolute_path(f) in included]
+    return [f for f in files if absolute_path_without_resolving(Path(f)) in included]
 
 
 def filter_files_by_diff(
@@ -485,4 +485,4 @@ def filter_files_by_diff(
     changed = get_changed_files(base, cwd)
     if not changed:
         return []
-    return [f for f in files if absolute_path(f) in changed]
+    return [f for f in files if absolute_path_without_resolving(Path(f)) in changed]

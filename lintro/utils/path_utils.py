@@ -15,43 +15,29 @@ from loguru import logger
 _IGNORE_SEARCH_MAX_DEPTH = 20
 
 
-def absolute_path(path: str | Path, *, base_dir: Path | None = None) -> str:
+def absolute_path_without_resolving(path: Path) -> str:
     """Return an absolute path without resolving symlinks.
 
-    Matches ``os.path.abspath`` normalization of ``.`` and ``..`` components.
-
     Args:
-        path: Relative or absolute path.
-        base_dir: Base directory for relative paths when supplied.
+        path: Path to convert.
 
     Returns:
-        Absolute normalized path string.
+        Absolute path with ``..`` segments normalized, matching
+        ``os.path.abspath`` semantics without following symlinks.
     """
-    candidate = Path(path).expanduser()
-    if not candidate.is_absolute():
-        candidate = (base_dir or Path.cwd()) / candidate
-    return str(_normalize_absolute(candidate))
+    absolute_path = path if path.is_absolute() else Path.cwd() / path
+    normalized_parts: list[str] = []
 
-
-def _normalize_absolute(path: Path) -> Path:
-    """Collapse ``.`` and ``..`` parts without resolving symlinks."""
-    parts: list[str] = []
-    for part in path.parts:
-        if part in (".", ""):
+    for part in absolute_path.parts:
+        if part in {absolute_path.anchor, ""}:
             continue
         if part == "..":
-            if path.is_absolute():
-                if len(parts) > 1:
-                    parts.pop()
-            elif parts and parts[-1] != "..":
-                parts.pop()
-            else:
-                parts.append("..")
+            if normalized_parts:
+                normalized_parts.pop()
             continue
-        parts.append(part)
-    if not parts:
-        return Path(path.anchor)
-    return Path(*parts)
+        normalized_parts.append(part)
+
+    return str(Path(absolute_path.anchor, *normalized_parts))
 
 
 def find_file_upward(

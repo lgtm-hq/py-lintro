@@ -274,11 +274,20 @@ def test_workflow_installs_from_base_ref_not_pr_head() -> None:
 def test_workflow_secret_scoped_to_review_step_only() -> None:
     """ANTHROPIC_API_KEY is injected only into the final review step env.
 
-    The secret must not appear in earlier steps (checkout, uv sync, etc.) so
-    PR-controlled code paths never receive the key before the trusted base-ref
-    install completes. This is the ordering control audited in #1317.
+    The secret must not appear in workflow- or job-level env maps, nor in
+    earlier steps (checkout, uv sync, etc.), so PR-controlled code paths never
+    receive the key before the trusted base-ref install completes. This is the
+    ordering control audited in #1317.
     """
     loaded = yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))
+
+    workflow_env = loaded.get("env")
+    if workflow_env is not None:
+        assert_that(workflow_env).does_not_contain_key("ANTHROPIC_API_KEY")
+
+    job_env = loaded["jobs"]["ai-review"].get("env")
+    if job_env is not None:
+        assert_that(job_env).does_not_contain_key("ANTHROPIC_API_KEY")
 
     steps = loaded["jobs"]["ai-review"]["steps"]
     steps_with_key = [
@@ -320,9 +329,9 @@ def test_workflow_reviews_pr_via_gh_not_working_tree() -> None:
 @pytest.mark.parametrize(
     "action_ref",
     [
-        "step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411",
-        "actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10",
-        "astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78",
+        "step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920",
+        "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1",
+        "astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990",
     ],
 )
 def test_workflow_pins_actions_to_sha(*, action_ref: str) -> None:

@@ -61,6 +61,31 @@ def test_tsconfig_rejects_non_string(oxlint_plugin: OxlintPlugin) -> None:
 
 
 # =============================================================================
+# Tests for the type_aware option validation
+# =============================================================================
+
+
+def test_type_aware_accepts_bool(oxlint_plugin: OxlintPlugin) -> None:
+    """type_aware option accepts a boolean value.
+
+    Args:
+        oxlint_plugin: The OxlintPlugin instance to test.
+    """
+    oxlint_plugin.set_options(type_aware=True)
+    assert_that(oxlint_plugin.options.get("type_aware")).is_true()
+
+
+def test_type_aware_rejects_non_bool(oxlint_plugin: OxlintPlugin) -> None:
+    """type_aware option rejects non-boolean values.
+
+    Args:
+        oxlint_plugin: The OxlintPlugin instance to test.
+    """
+    with pytest.raises(ValueError, match="type_aware must be a boolean"):
+        oxlint_plugin.set_options(type_aware="yes")  # type: ignore[arg-type]
+
+
+# =============================================================================
 # Tests for rule list options (allow, deny, warn)
 # =============================================================================
 
@@ -219,6 +244,38 @@ def test_build_args_rule_options_add_flags(
     args = oxlint_plugin._build_oxlint_args(oxlint_plugin.options)
     for rule in rules:
         assert_that(args).contains(flag, rule)
+
+
+def test_build_args_type_aware_adds_flag(oxlint_plugin: OxlintPlugin) -> None:
+    """type_aware=True adds the --type-aware flag.
+
+    Args:
+        oxlint_plugin: The OxlintPlugin instance to test.
+    """
+    oxlint_plugin.set_options(type_aware=True)
+    args = oxlint_plugin._build_oxlint_args(oxlint_plugin.options)
+    assert_that(args).contains("--type-aware")
+
+
+def test_build_args_type_aware_absent_by_default(oxlint_plugin: OxlintPlugin) -> None:
+    """--type-aware is absent when type_aware is not set.
+
+    Args:
+        oxlint_plugin: The OxlintPlugin instance to test.
+    """
+    args = oxlint_plugin._build_oxlint_args(oxlint_plugin.options)
+    assert_that(args).does_not_contain("--type-aware")
+
+
+def test_build_args_type_aware_false_omits_flag(oxlint_plugin: OxlintPlugin) -> None:
+    """--type-aware is omitted when type_aware is explicitly False.
+
+    Args:
+        oxlint_plugin: The OxlintPlugin instance to test.
+    """
+    oxlint_plugin.set_options(type_aware=False)
+    args = oxlint_plugin._build_oxlint_args(oxlint_plugin.options)
+    assert_that(args).does_not_contain("--type-aware")
 
 
 def test_build_args_multiple_options_combine(oxlint_plugin: OxlintPlugin) -> None:

@@ -10,23 +10,25 @@ Sources:
 
 NPM_VERSIONS: dict[str, str] = {
     "@astrojs/check": "0.9.9",
-    "@commitlint/cli": "21.2.0",
+    "@commitlint/cli": "21.2.1",
     "@commitlint/config-conventional": "21.2.0",
-    "astro": "6.4.8",
-    "markdownlint-cli2": "0.23.0",
-    "oxfmt": "0.57.0",
-    "oxlint": "1.72.0",
+    "astro": "7.1.3",
+    "html-validate": "11.5.6",
+    "markdownlint-cli2": "0.23.1",
+    "oxfmt": "0.59.0",
+    "oxlint": "1.74.0",
     "prettier": "3.9.4",
     "stylelint": "17.14.0",
-    "svelte-check": "4.7.1",
-    "typescript": "5.9.3",
-    "vue-tsc": "3.3.6",
+    "svelte-check": "4.7.3",
+    "typescript": "6.0.3",
+    "vue-tsc": "3.3.7",
 }
 
 PYPI_VERSIONS: dict[str, str] = {
     "bandit": "1.9.4",
     "black": "26.3.1",
     "mypy": "1.19.1",
+    "pip-audit": "2.10.1",
     "pydoclint": "0.8.3",
     "pytest": "9.0.3",
     "ruff": "0.15.9",

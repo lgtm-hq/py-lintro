@@ -18,6 +18,49 @@ from lintro.plugins.protocol import ToolDefinition
 # Constants for default values
 DEFAULT_TIMEOUT: int = 30
 
+# Comma-separated tool names (or ``*``) whose below-minimum binaries may still
+# run. Mirrors CI ``--allow-version-lag`` (#1582): digest-pinned tools images
+# lag a Renovate manifest bump until the post-merge republish lands. Without
+# this, plugins skip the lagging binary and integration checks that expect
+# findings (e.g. trufflehog secrets) fail with ``issues_count == 0``.
+_ALLOW_VERSION_LAG_ENV: str = "LINTRO_ALLOW_VERSION_LAG"
+
+
+def _parse_allow_version_lag(raw: str | None) -> set[str] | None:
+    """Parse ``LINTRO_ALLOW_VERSION_LAG`` into a tool-name set.
+
+    Args:
+        raw: Env value: comma-separated tool names, ``*`` for all, or empty.
+
+    Returns:
+        A set of lowercased tool names, ``None`` when ``*`` (allow all), or an
+        empty set when unset/blank (full enforcement).
+    """
+    if raw is None:
+        return set()
+    text = raw.strip()
+    if not text:
+        return set()
+    if text == "*":
+        return None
+    names = {part.strip().lower() for part in text.split(",") if part.strip()}
+    return names
+
+
+def _version_lag_allowed(tool_name: str) -> bool:
+    """Return whether ``tool_name`` may run when below the minimum version.
+
+    Args:
+        tool_name: Tool name from the tool definition.
+
+    Returns:
+        True when the tool is listed in ``LINTRO_ALLOW_VERSION_LAG`` (or ``*``).
+    """
+    allow = _parse_allow_version_lag(os.environ.get(_ALLOW_VERSION_LAG_ENV))
+    if allow is None:
+        return True
+    return tool_name.lower() in allow
+
 
 def get_effective_timeout(
     timeout: int | float | None,
@@ -77,6 +120,12 @@ def get_executable_command(tool_name: str) -> list[str]:
 def verify_tool_version(definition: ToolDefinition) -> ToolResult | None:
     """Verify that the tool meets minimum version requirements.
 
+    When ``LINTRO_ALLOW_VERSION_LAG`` lists the tool (or is ``*``) and the
+    binary is present but older than the manifest minimum, proceed with a
+    warning instead of skipping. Missing binaries and other hard failures
+    still skip. This matches the CI image gate's ``--allow-version-lag``
+    policy for Renovate tool bumps against a digest-pinned base image.
+
     Args:
         definition: Tool definition with name.
 
@@ -114,6 +163,24 @@ def verify_tool_version(definition: ToolDefinition) -> ToolResult | None:
                 definition.name,
             )
             return None
+
+    # Digest-pinned image lag after a manifest version bump: binary exists and
+    # is merely older than min_version. Allowlisted tools keep running so
+    # integration coverage is not silently reduced to a skip.
+    if (
+        version_info.current_version is not None
+        and version_info.error_message
+        and "below minimum requirement" in version_info.error_message
+        and _version_lag_allowed(definition.name)
+    ):
+        logger.warning(
+            "{} {} is below minimum {} but allowed via {}; proceeding",
+            definition.name,
+            version_info.current_version,
+            version_info.min_version,
+            _ALLOW_VERSION_LAG_ENV,
+        )
+        return None
 
     skip_message = (
         f"Skipping {definition.name}: {version_info.error_message}. "
@@ -187,6 +254,7 @@ def prepare_execution(
         exclude_patterns=exclude_patterns,
         include_venv=include_venv,
         diff_base=diff_base if isinstance(diff_base, str) else None,
+        incremental=bool(merged_options.get("incremental", False)),
     )
 
     if not files:

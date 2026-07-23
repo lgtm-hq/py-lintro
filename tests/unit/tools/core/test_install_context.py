@@ -7,7 +7,6 @@ and CI detection.
 
 from __future__ import annotations
 
-from pathlib import Path
 from unittest.mock import patch
 
 import pytest
@@ -85,7 +84,7 @@ def test_runtime_context_environment_reflects_managers() -> None:
 def test_detect_docker_via_dockerenv() -> None:
     """Detect Docker context when /.dockerenv file exists."""
     with patch(
-        "lintro.tools.core.install_context._dockerenv_exists",
+        "lintro.tools.core.install_context.Path.exists",
         return_value=True,
     ):
         result = _detect_install_context()
@@ -99,7 +98,7 @@ def test_detect_docker_via_env_var(
     """Detect Docker context via LINTRO_DOCKER=1 env var."""
     monkeypatch.setenv("LINTRO_DOCKER", "1")
     with patch(
-        "lintro.tools.core.install_context._dockerenv_exists",
+        "lintro.tools.core.install_context.Path.exists",
         return_value=False,
     ):
         result = _detect_install_context()
@@ -118,17 +117,12 @@ def test_detect_docker_via_container_env_var(
     monkeypatch.delenv("LINTRO_DOCKER", raising=False)
     monkeypatch.setenv("CONTAINER", "docker")
     with patch(
-        "lintro.tools.core.install_context._dockerenv_exists",
+        "lintro.tools.core.install_context.Path.exists",
         return_value=False,
     ):
         result = _detect_install_context()
 
     assert_that(result).is_equal_to(InstallContext.DOCKER)
-
-
-def _resolve_passthrough(self: Path) -> Path:
-    """Return the path unchanged, mimicking identity ``realpath`` in tests."""
-    return self
 
 
 def test_detect_pip_default(
@@ -140,11 +134,7 @@ def test_detect_pip_default(
 
     with (
         patch(
-            "lintro.tools.core.install_context._dockerenv_exists",
-            return_value=False,
-        ),
-        patch(
-            "lintro.tools.core.install_context._git_root_marker_exists",
+            "lintro.tools.core.install_context.Path.exists",
             return_value=False,
         ),
         patch(
@@ -156,7 +146,6 @@ def test_detect_pip_default(
             "lintro.tools.core.install_context.sys.executable",
             "/usr/bin/python3",
         ),
-        patch.object(Path, "resolve", new=_resolve_passthrough),
     ):
         result = _detect_install_context()
 
@@ -214,11 +203,7 @@ def test_detect_homebrew_install_context(
 
     with (
         patch(
-            "lintro.tools.core.install_context._dockerenv_exists",
-            return_value=False,
-        ),
-        patch(
-            "lintro.tools.core.install_context._git_root_marker_exists",
+            "lintro.tools.core.install_context.Path.exists",
             return_value=False,
         ),
         patch(
@@ -230,7 +215,11 @@ def test_detect_homebrew_install_context(
             "lintro.tools.core.install_context.sys.executable",
             executable,
         ),
-        patch.object(Path, "resolve", new=_resolve_passthrough),
+        patch(
+            "lintro.tools.core.install_context.Path.resolve",
+            autospec=True,
+            side_effect=lambda self, strict=False: self,
+        ),
     ):
         result = _detect_install_context()
 
@@ -267,11 +256,7 @@ def test_detect_npm_bin_install_context(
 
     with (
         patch(
-            "lintro.tools.core.install_context._dockerenv_exists",
-            return_value=False,
-        ),
-        patch(
-            "lintro.tools.core.install_context._git_root_marker_exists",
+            "lintro.tools.core.install_context.Path.exists",
             return_value=False,
         ),
         patch(
@@ -283,7 +268,11 @@ def test_detect_npm_bin_install_context(
             "lintro.tools.core.install_context.sys.executable",
             executable,
         ),
-        patch.object(Path, "resolve", new=_resolve_passthrough),
+        patch(
+            "lintro.tools.core.install_context.Path.resolve",
+            autospec=True,
+            side_effect=lambda self, strict=False: self,
+        ),
     ):
         result = _detect_install_context()
 

@@ -15,7 +15,7 @@ from pathlib import Path
 
 from loguru import logger
 
-from lintro.utils.path_utils import absolute_path
+from lintro.utils.path_utils import absolute_path_without_resolving
 
 
 @dataclass
@@ -38,6 +38,40 @@ class LineLengthViolation:
     column: int
     message: str
     code: str = "E501"
+
+
+def _file_arg_path(file_path: str, cwd: str | None) -> str:
+    """Return the path to pass to Ruff for an input file.
+
+    Args:
+        file_path: User-provided file path.
+        cwd: Working directory for relative paths.
+
+    Returns:
+        Absolute path for relative inputs, or the original absolute path.
+    """
+    path = Path(file_path)
+    if cwd and not path.is_absolute():
+        return absolute_path_without_resolving(Path(cwd) / path)
+    if not path.is_absolute():
+        return absolute_path_without_resolving(path)
+    return file_path
+
+
+def _ruff_output_path(file_path: str, cwd: str | None) -> str:
+    """Return a normalized violation path from Ruff output.
+
+    Args:
+        file_path: Filename reported by Ruff.
+        cwd: Working directory Ruff ran in.
+
+    Returns:
+        Absolute path for relative Ruff output when ``cwd`` is available.
+    """
+    path = Path(file_path)
+    if cwd and not path.is_absolute():
+        return absolute_path_without_resolving(Path(cwd) / path)
+    return file_path
 
 
 def check_line_length_violations(
@@ -81,10 +115,10 @@ def check_line_length_violations(
         logger.debug("Ruff not found in PATH, skipping line length check")
         return []
 
-    abs_files = [
-        absolute_path(file_path, base_dir=Path(cwd) if cwd else None)
-        for file_path in files
-    ]
+    # Convert relative paths to absolute paths
+    abs_files: list[str] = []
+    for file_path in files:
+        abs_files.append(_file_arg_path(file_path, cwd))
 
     # Build the Ruff command
     cmd: list[str] = [
@@ -128,9 +162,7 @@ def check_line_length_violations(
         violations: list[LineLengthViolation] = []
         for issue in issues_data:
             # Ruff JSON format has: filename, row, column, message, code
-            file_path = issue.get("filename", "")
-            if not Path(file_path).is_absolute() and cwd:
-                file_path = absolute_path(file_path, base_dir=Path(cwd))
+            file_path = _ruff_output_path(issue.get("filename", ""), cwd)
 
             # Handle both old and new Ruff JSON formats
             line = issue.get("location", {}).get("row") or issue.get("row", 0)

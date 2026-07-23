@@ -238,6 +238,6 @@ def test_vuln_suppression_workflow_uses_local_scripts() -> None:
     tooling_match = _TOOLING_REF_RE.search(content)
     assert_that(uses_match).is_not_none()
     assert_that(tooling_match).is_not_none()
-    assert uses_match is not None
-    assert tooling_match is not None
+    assert uses_match is not None  # narrow type for mypy
+    assert tooling_match is not None  # narrow type for mypy
     assert_that(uses_match.group(1)).is_equal_to(tooling_match.group(1))

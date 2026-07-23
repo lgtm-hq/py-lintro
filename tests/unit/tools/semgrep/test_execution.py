@@ -12,6 +12,7 @@ from assertpy import assert_that
 
 from lintro.parsers.semgrep.semgrep_issue import SemgrepIssue
 from lintro.tools.definitions.semgrep import SemgrepPlugin
+from tests.test_samples_helpers import copy_sample
 
 # =============================================================================
 # Tests for SemgrepPlugin.check method
@@ -55,8 +56,14 @@ def test_check_with_mocked_subprocess_findings(
         semgrep_plugin: The SemgrepPlugin instance to test.
         tmp_path: Temporary directory path for test files.
     """
-    test_file = tmp_path / "vulnerable.py"
-    test_file.write_text("import os\nos.system(user_input)\n")
+    test_file = copy_sample(
+        tmp_path,
+        "tools",
+        "python",
+        "semgrep",
+        "semgrep_dangerous_system_call.py",
+        dest_name="vulnerable.py",
+    )
 
     # Semgrep JSON output with findings
     semgrep_output = json.dumps(
@@ -111,8 +118,14 @@ def test_check_with_multiple_findings(
         semgrep_plugin: The SemgrepPlugin instance to test.
         tmp_path: Temporary directory path for test files.
     """
-    test_file = tmp_path / "multiple_issues.py"
-    test_file.write_text("import os\nos.system(x)\neval(y)\n")
+    test_file = copy_sample(
+        tmp_path,
+        "tools",
+        "python",
+        "semgrep",
+        "semgrep_multiple_findings.py",
+        dest_name="multiple_issues.py",
+    )
 
     # Semgrep JSON output with multiple findings
     semgrep_output = json.dumps(

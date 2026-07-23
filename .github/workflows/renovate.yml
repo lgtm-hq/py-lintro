@@ -44,7 +44,7 @@ jobs:
 
       - name: Checkout
         # yamllint disable-line rule:line-length
-        uses: lgtm-hq/lgtm-ci/.github/actions/secure-checkout@31c25ef2e8992960e218524780e34f44f51271b5 # v0.54.0
+        uses: lgtm-hq/lgtm-ci/.github/actions/secure-checkout@ee8484ca71db3a2c2c33da6128bbf2330fcd7c88 # v0.59.2
         with:
           fetch-depth: 1
           persist-credentials: true
@@ -52,7 +52,7 @@ jobs:
 
       - name: Self-hosted Renovate
         # yamllint disable-line rule:line-length
-        uses: renovatebot/github-action@eaf12548c13069dcc28bb75c4ee4610cdbe400c5 # v44.2.6
+        uses: renovatebot/github-action@3064367f740a1a91cca218698a63902689cce200 # v46.1.20
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
           configurationFile: renovate.json

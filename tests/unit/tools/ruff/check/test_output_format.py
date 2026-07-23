@@ -20,10 +20,6 @@ def test_execute_ruff_check_output_is_none_on_success(
     """
     with (
         patch(
-            "lintro.tools.implementations.ruff.check.walk_files_with_excludes",
-            return_value=["test.py"],
-        ),
-        patch(
             "lintro.tools.implementations.ruff.check.run_subprocess_with_timeout",
             return_value=(True, "[]"),
         ),
@@ -51,10 +47,6 @@ def test_execute_ruff_check_output_is_none_with_issues(
     ]
 
     with (
-        patch(
-            "lintro.tools.implementations.ruff.check.walk_files_with_excludes",
-            return_value=["test.py"],
-        ),
         patch(
             "lintro.tools.implementations.ruff.check.run_subprocess_with_timeout",
             return_value=(False, "[]"),

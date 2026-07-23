@@ -145,12 +145,13 @@ def test_check_with_mocked_subprocess_issues_found(
     assert_that(result.issues_count).is_equal_to(2)
     issues = result.issues
     assert_that(issues).is_not_none()
-    assert issues is not None
+    assert issues is not None  # narrow type for mypy
     assert_that(issues).is_length(2)
 
     # Verify first issue
     first_issue = issues[0]
-    assert isinstance(first_issue, SvelteCheckIssue)
+    assert_that(first_issue).is_instance_of(SvelteCheckIssue)
+    assert isinstance(first_issue, SvelteCheckIssue)  # narrow type for mypy
     assert_that(first_issue.file).is_equal_to("src/lib/Button.svelte")
     assert_that(first_issue.line).is_equal_to(15)
     assert_that(first_issue.severity).is_equal_to("error")

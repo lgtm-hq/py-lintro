@@ -32,17 +32,18 @@
     }
   },
   "language_map": {
-    "python": ["ruff", "black", "mypy", "bandit", "pydoclint", "semgrep"],
+    "python": ["ruff", "black", "mypy", "bandit", "pydoclint", "semgrep", "pip_audit"],
     "javascript": ["oxlint", "oxfmt", "prettier"],
     "typescript": ["oxlint", "oxfmt", "prettier", "tsc"],
     "rust": ["clippy", "rustfmt", "rustc", "cargo_audit", "cargo_deny"],
-    "go": ["semgrep"],
+    "go": ["golangci_lint", "semgrep"],
     "ruby": ["semgrep"],
     "sql": ["sqlfluff"],
     "shell": ["shellcheck", "shfmt"],
     "docker": ["hadolint"],
     "yaml": ["yamllint"],
     "markdown": ["markdownlint", "vale"],
+    "html": ["html_validate"],
     "toml": ["taplo"],
     "dotenv": ["dotenv_linter"],
     "css": ["stylelint"],
@@ -50,7 +51,7 @@
     "less": ["stylelint"],
     "sass": ["stylelint"],
     "github_actions": ["actionlint"],
-    "security": ["gitleaks", "osv_scanner", "semgrep"],
+    "security": ["gitleaks", "osv_scanner", "semgrep", "trufflehog"],
     "astro": ["astro_check", "prettier"],
     "svelte": ["svelte_check", "prettier"],
     "vue": ["vue_tsc", "prettier"],
@@ -73,7 +74,7 @@
     },
     {
       "name": "astro_check",
-      "version": "6.4.8",
+      "version": "7.1.3",
       "install": {
         "type": "npm",
         "package": "astro",
@@ -139,7 +140,7 @@
     },
     {
       "name": "clippy",
-      "version": "1.96.0",
+      "version": "1.97.1",
       "install": {
         "type": "rustup",
         "component": "clippy"
@@ -152,7 +153,7 @@
     },
     {
       "name": "commitlint",
-      "version": "21.2.0",
+      "version": "21.2.1",
       "install": {
         "type": "npm",
         "package": "@commitlint/cli"
@@ -173,7 +174,7 @@
       "category": "external",
       "version_command": ["dotenv-linter", "--version"],
       "languages": ["dotenv"],
-      "tags": ["linter", "formatter"]
+      "tags": ["linter"]
     },
     {
       "name": "gitleaks",
@@ -188,6 +189,18 @@
       "tags": ["security"]
     },
     {
+      "name": "golangci_lint",
+      "version": "2.12.2",
+      "install": {
+        "type": "binary"
+      },
+      "tier": "tools",
+      "category": "external",
+      "version_command": ["golangci-lint", "version"],
+      "languages": ["go"],
+      "tags": ["linter"]
+    },
+    {
       "name": "hadolint",
       "version": "2.14.0",
       "install": {
@@ -200,8 +213,21 @@
       "tags": ["linter"]
     },
     {
+      "name": "html_validate",
+      "version": "11.5.6",
+      "install": {
+        "type": "npm",
+        "package": "html-validate"
+      },
+      "tier": "tools",
+      "category": "npm",
+      "version_command": ["html-validate", "--version"],
+      "languages": ["html"],
+      "tags": ["linter"]
+    },
+    {
       "name": "markdownlint",
-      "version": "0.23.0",
+      "version": "0.23.1",
       "install": {
         "type": "npm",
         "package": "markdownlint-cli2"
@@ -227,7 +253,7 @@
     },
     {
       "name": "osv_scanner",
-      "version": "2.3.8",
+      "version": "2.4.0",
       "install": {
         "type": "binary",
         "package": "osv-scanner"
@@ -240,7 +266,7 @@
     },
     {
       "name": "oxfmt",
-      "version": "0.57.0",
+      "version": "0.59.0",
       "install": {
         "type": "npm",
         "package": "oxfmt"
@@ -253,7 +279,7 @@
     },
     {
       "name": "oxlint",
-      "version": "1.72.0",
+      "version": "1.74.0",
       "install": {
         "type": "npm",
         "package": "oxlint"
@@ -263,6 +289,19 @@
       "version_command": ["oxlint", "--version"],
       "languages": ["javascript", "typescript"],
       "tags": ["linter"]
+    },
+    {
+      "name": "pip_audit",
+      "version": "2.10.1",
+      "install": {
+        "type": "pip",
+        "package": "pip-audit"
+      },
+      "tier": "tools",
+      "category": "bundled",
+      "version_command": ["pip-audit", "--version"],
+      "languages": ["python"],
+      "tags": ["security"]
     },
     {
       "name": "prettier",
@@ -318,7 +357,7 @@
     },
     {
       "name": "rustc",
-      "version": "1.96.1",
+      "version": "1.97.1",
       "install": {
         "type": "rustup"
       },
@@ -330,7 +369,7 @@
     },
     {
       "name": "rustfmt",
-      "version": "1.8.0",
+      "version": "1.9.0",
       "install": {
         "type": "rustup",
         "component": "rustfmt"
@@ -407,7 +446,7 @@
     },
     {
       "name": "svelte_check",
-      "version": "4.7.1",
+      "version": "4.7.3",
       "install": {
         "type": "npm",
         "package": "svelte-check",
@@ -432,8 +471,20 @@
       "tags": ["linter", "formatter"]
     },
     {
+      "name": "trufflehog",
+      "version": "3.95.9",
+      "install": {
+        "type": "binary"
+      },
+      "tier": "tools",
+      "category": "external",
+      "version_command": ["trufflehog", "--version"],
+      "languages": ["security"],
+      "tags": ["security"]
+    },
+    {
       "name": "tsc",
-      "version": "5.9.3",
+      "version": "6.0.3",
       "install": {
         "type": "npm",
         "package": "typescript",
@@ -459,7 +510,7 @@
     },
     {
       "name": "vue_tsc",
-      "version": "3.3.6",
+      "version": "3.3.7",
       "install": {
         "type": "npm",
         "package": "vue-tsc",

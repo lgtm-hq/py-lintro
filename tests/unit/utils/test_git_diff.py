@@ -9,6 +9,7 @@ from pathlib import Path
 import pytest
 from assertpy import assert_that
 
+import lintro.utils.git_diff as git_diff
 from lintro.utils.git_diff import (
     DIFF_DEFAULT_SENTINEL,
     DiffResolutionError,
@@ -123,6 +124,38 @@ def test_get_changed_files_includes_working_tree_and_untracked(
     assert_that(_names(changed)).is_equal_to(["a.py", "c.py"])
 
 
+def test_get_changed_files_fallback_root_preserves_cwd_symlink(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Fallback absolute root keeps ``abspath`` symlink semantics.
+
+    Args:
+        tmp_path: Temporary directory fixture.
+        monkeypatch: Pytest monkeypatch fixture.
+    """
+    real_repo = tmp_path / "real"
+    real_repo.mkdir()
+    symlink_repo = tmp_path / "link"
+    symlink_repo.symlink_to(real_repo, target_is_directory=True)
+    (symlink_repo / "changed.py").write_text("x = 1\n")
+
+    monkeypatch.setattr(git_diff, "_repo_root", lambda cwd: None)
+    monkeypatch.setattr(git_diff, "ref_exists", lambda base, cwd: True)
+    monkeypatch.setattr(
+        git_diff,
+        "_merge_base_diff_names",
+        lambda base, cwd: ["changed.py"],
+    )
+    monkeypatch.setattr(git_diff, "_worktree_diff_names", lambda cwd, *, cached: [])
+    monkeypatch.setattr(git_diff, "_untracked_names", lambda cwd: [])
+
+    changed = get_changed_files("main", str(symlink_repo))
+
+    assert_that(changed).contains(str(symlink_repo / "changed.py"))
+    assert_that(changed).does_not_contain(str(real_repo / "changed.py"))
+
+
 def test_get_changed_files_staged_change(git_repo: Path) -> None:
     """Staged (cached) changes are included."""
     (git_repo / "a.py").write_text("x = 5\n")
@@ -190,9 +223,8 @@ def test_walk_files_with_excludes_diff_base(
 ) -> None:
     """``walk_files_with_excludes`` restricts discovery to changed files.
 
-    Diff filtering resolves the repo from the current working directory, as it
-    does when lintro is invoked from a project root, so the test runs from
-    inside the repository.
+    When invoked from inside the repository, diff filtering uses the target
+    checkout rather than an unrelated process cwd.
     """
     from lintro.utils.path_filtering import walk_files_with_excludes
 
@@ -203,6 +235,30 @@ def test_walk_files_with_excludes_diff_base(
 
     files = walk_files_with_excludes(
         paths=["."],
+        file_patterns=["*.py"],
+        exclude_patterns=[],
+        diff_base="main",
+    )
+
+    assert_that(_names(files)).is_equal_to(["a.py", "d.py"])
+
+
+def test_walk_files_with_excludes_diff_base_outside_process_cwd(
+    git_repo: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Diff filtering uses the target checkout when cwd is elsewhere."""
+    from lintro.utils.path_filtering import walk_files_with_excludes
+
+    (git_repo / "a.py").write_text("x = 3\n")
+    (git_repo / "d.py").write_text("d = 4\n")
+    outside_cwd = tmp_path / "outside"
+    outside_cwd.mkdir()
+    monkeypatch.chdir(outside_cwd)
+
+    files = walk_files_with_excludes(
+        paths=[str(git_repo)],
         file_patterns=["*.py"],
         exclude_patterns=[],
         diff_base="main",

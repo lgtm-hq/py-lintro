@@ -20,7 +20,7 @@ from rich.console import Console
 
 from lintro.tools.core.install_context import RuntimeContext
 from lintro.tools.core.tool_installer import ToolInstaller
-from lintro.tools.core.tool_registry import ToolRegistry
+from lintro.tools.core.tool_registry import ManifestRegistry
 from lintro.utils.project_detection import (
     detect_package_managers,
     detect_project_languages,
@@ -167,7 +167,7 @@ def setup_command(
     console.print()
 
     # ── Load registry ──
-    registry = ToolRegistry.load()
+    registry = ManifestRegistry.load()
     context = RuntimeContext.detect()
 
     # ── Resolve profile ──

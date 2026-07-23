@@ -1,7 +1,14 @@
-"""Tests for path filtering in execute_ruff_check."""
+"""Tests for path handling in execute_ruff_check.
+
+File discovery, exclude patterns, and venv handling are owned by the shared
+``BaseToolPlugin._prepare_execution`` pipeline. These tests verify that
+``execute_ruff_check`` delegates discovery to that pipeline and consumes the
+resulting execution context (relative files and cwd) when building commands.
+"""
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from unittest.mock import MagicMock, patch
 
 from assertpy import assert_that
@@ -9,19 +16,15 @@ from assertpy import assert_that
 from lintro.tools.implementations.ruff.check import execute_ruff_check
 
 
-def test_execute_ruff_check_filters_python_files(
+def test_execute_ruff_check_delegates_discovery_to_prepare_execution(
     mock_ruff_tool: MagicMock,
 ) -> None:
-    """Filter files to only Python files.
+    """Delegate file discovery to the shared preparation pipeline.
 
     Args:
         mock_ruff_tool: Mock RuffTool instance for testing.
     """
     with (
-        patch(
-            "lintro.tools.implementations.ruff.check.walk_files_with_excludes",
-            return_value=["test.py", "module.pyi"],
-        ) as mock_walk,
         patch(
             "lintro.tools.implementations.ruff.check.run_subprocess_with_timeout",
             return_value=(True, "[]"),
@@ -33,92 +36,31 @@ def test_execute_ruff_check_filters_python_files(
     ):
         execute_ruff_check(mock_ruff_tool, ["/test/project"])
 
-        mock_walk.assert_called_once()
-        call_kwargs = mock_walk.call_args.kwargs
-        assert_that(call_kwargs["file_patterns"]).contains("*.py", "*.pyi")
-
-
-def test_execute_ruff_check_uses_exclude_patterns(
-    mock_ruff_tool: MagicMock,
-) -> None:
-    """Pass exclude patterns to file walker.
-
-    Args:
-        mock_ruff_tool: Mock RuffTool instance for testing.
-    """
-    mock_ruff_tool.exclude_patterns = ["*_test.py", "__pycache__"]
-
-    with (
-        patch(
-            "lintro.tools.implementations.ruff.check.walk_files_with_excludes",
-            return_value=["main.py"],
-        ) as mock_walk,
-        patch(
-            "lintro.tools.implementations.ruff.check.run_subprocess_with_timeout",
-            return_value=(True, "[]"),
-        ),
-        patch(
-            "lintro.tools.implementations.ruff.check.parse_ruff_output",
-            return_value=[],
-        ),
-    ):
-        execute_ruff_check(mock_ruff_tool, ["/test/project"])
-
-        call_kwargs = mock_walk.call_args.kwargs
-        assert_that(call_kwargs["exclude_patterns"]).contains(
-            "*_test.py",
-            "__pycache__",
-        )
-
-
-def test_execute_ruff_check_respects_include_venv(
-    mock_ruff_tool: MagicMock,
-) -> None:
-    """Pass include_venv setting to file walker.
-
-    Args:
-        mock_ruff_tool: Mock RuffTool instance for testing.
-    """
-    mock_ruff_tool.include_venv = True
-
-    with (
-        patch(
-            "lintro.tools.implementations.ruff.check.walk_files_with_excludes",
-            return_value=["test.py"],
-        ) as mock_walk,
-        patch(
-            "lintro.tools.implementations.ruff.check.run_subprocess_with_timeout",
-            return_value=(True, "[]"),
-        ),
-        patch(
-            "lintro.tools.implementations.ruff.check.parse_ruff_output",
-            return_value=[],
-        ),
-    ):
-        execute_ruff_check(mock_ruff_tool, ["/test/project"])
-
-        call_kwargs = mock_walk.call_args.kwargs
-        assert_that(call_kwargs["include_venv"]).is_true()
+        mock_ruff_tool._prepare_execution.assert_called_once()
+        call = mock_ruff_tool._prepare_execution.call_args
+        assert_that(call.kwargs.get("paths")).is_equal_to(["/test/project"])
 
 
 def test_execute_ruff_check_converts_paths_to_relative(
     mock_ruff_tool: MagicMock,
+    ruff_execution_context: Callable[..., MagicMock],
 ) -> None:
-    """Convert absolute file paths to relative paths for ruff command.
+    """Use relative file paths from the execution context for the ruff command.
 
     Args:
         mock_ruff_tool: Mock RuffTool instance for testing.
+        ruff_execution_context: Factory for mock execution contexts.
     """
-    mock_ruff_tool._get_cwd.return_value = "/test/project"
+    mock_ruff_tool._prepare_execution.return_value = ruff_execution_context(
+        files=[
+            "/test/project/src/main.py",
+            "/test/project/tests/test_main.py",
+        ],
+        rel_files=["src/main.py", "tests/test_main.py"],
+        cwd="/test/project",
+    )
 
     with (
-        patch(
-            "lintro.tools.implementations.ruff.check.walk_files_with_excludes",
-            return_value=[
-                "/test/project/src/main.py",
-                "/test/project/tests/test_main.py",
-            ],
-        ),
         patch(
             "lintro.tools.implementations.ruff.check.run_subprocess_with_timeout",
             return_value=(True, "[]"),
@@ -142,26 +84,28 @@ def test_execute_ruff_check_converts_paths_to_relative(
 
         call_args = mock_build_cmd.call_args
         files_arg = call_args.kwargs.get("files") or call_args.args[1]
-        # Files should be relative paths
+        # Files should be the relative paths from the execution context
         assert_that(files_arg).contains("src/main.py")
         assert_that(files_arg).contains("tests/test_main.py")
 
 
 def test_execute_ruff_check_handles_multiple_directories(
     mock_ruff_tool: MagicMock,
+    ruff_execution_context: Callable[..., MagicMock],
 ) -> None:
     """Handle files from multiple directories.
 
     Args:
         mock_ruff_tool: Mock RuffTool instance for testing.
+        ruff_execution_context: Factory for mock execution contexts.
     """
-    mock_ruff_tool._get_cwd.return_value = "/test"
+    mock_ruff_tool._prepare_execution.return_value = ruff_execution_context(
+        files=["/test/project1/main.py", "/test/project2/main.py"],
+        rel_files=["project1/main.py", "project2/main.py"],
+        cwd="/test",
+    )
 
     with (
-        patch(
-            "lintro.tools.implementations.ruff.check.walk_files_with_excludes",
-            return_value=["/test/project1/main.py", "/test/project2/main.py"],
-        ),
         patch(
             "lintro.tools.implementations.ruff.check.run_subprocess_with_timeout",
             return_value=(True, "[]"),
@@ -178,19 +122,21 @@ def test_execute_ruff_check_handles_multiple_directories(
 
 def test_execute_ruff_check_uses_absolute_paths_when_no_cwd(
     mock_ruff_tool: MagicMock,
+    ruff_execution_context: Callable[..., MagicMock],
 ) -> None:
-    """Use absolute paths when cwd cannot be determined.
+    """Use absolute paths when the context has no common working directory.
 
     Args:
         mock_ruff_tool: Mock RuffTool instance for testing.
+        ruff_execution_context: Factory for mock execution contexts.
     """
-    mock_ruff_tool._get_cwd.return_value = None
+    mock_ruff_tool._prepare_execution.return_value = ruff_execution_context(
+        files=["/test/project/test.py"],
+        rel_files=["/test/project/test.py"],
+        cwd=None,
+    )
 
     with (
-        patch(
-            "lintro.tools.implementations.ruff.check.walk_files_with_excludes",
-            return_value=["/test/project/test.py"],
-        ),
         patch(
             "lintro.tools.implementations.ruff.check.run_subprocess_with_timeout",
             return_value=(True, "[]"),
