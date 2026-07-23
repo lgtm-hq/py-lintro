@@ -21,6 +21,12 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.91.21] - 2026-07-23
+
+### Fixed
+
+- **tools**: add missing @commitlint/cli install hint (#1636) (e0028b6)
+
 ## [0.91.20] - 2026-07-23
 
 ### Changed
