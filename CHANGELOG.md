@@ -21,6 +21,12 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.91.12] - 2026-07-23
+
+### Fixed
+
+- **cli**: force UTF-8 stdio under ASCII locales (#1479) (fc4abf2)
+
 ## [0.91.11] - 2026-07-23
 
 ### Fixed
