@@ -20,7 +20,7 @@ from rich.console import Console
 
 from lintro.tools.core.install_context import RuntimeContext
 from lintro.tools.core.tool_installer import ToolInstaller
-from lintro.tools.core.tool_registry import ToolRegistry
+from lintro.tools.core.tool_registry import ManifestRegistry
 from lintro.utils.project_detection import (
     detect_package_managers,
     detect_project_languages,
@@ -125,6 +125,8 @@ def setup_command(
     Scans your project, detects languages and frameworks, recommends tools,
     installs missing ones, and generates a .lintro-config.yaml.
 
+    \u000c
+
     Args:
         profile: Named profile to use.
         yes: Non-interactive mode.
@@ -167,7 +169,7 @@ def setup_command(
     console.print()
 
     # ── Load registry ──
-    registry = ToolRegistry.load()
+    registry = ManifestRegistry.load()
     context = RuntimeContext.detect()
 
     # ── Resolve profile ──

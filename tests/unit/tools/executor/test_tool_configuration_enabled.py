@@ -324,6 +324,185 @@ def test_execution_enabled_tools_combined_with_tool_disabled(
     assert_that(result.to_run).is_equal_to(["ruff"])
 
 
+def test_explicit_tools_bypasses_enabled_tools_allowlist(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Explicit --tools runs even when absent from enabled_tools."""
+    from lintro.tools import tool_manager
+
+    monkeypatch.setattr(
+        tool_manager,
+        "is_tool_registered",
+        lambda name: name in {"ruff", "yamllint"},
+    )
+    monkeypatch.setattr(
+        tool_manager,
+        "get_tool_names",
+        lambda: ["ruff", "yamllint"],
+    )
+
+    config = LintroConfig(
+        execution=ExecutionConfig(enabled_tools=["yamllint"]),
+    )
+
+    with patch(
+        "lintro.utils.execution.tool_configuration.get_config",
+        return_value=config,
+    ):
+        result = get_tools_to_run(tools="ruff", action="check")
+
+    assert_that(result.to_run).is_equal_to(["ruff"])
+    assert_that(result.skipped).is_empty()
+
+
+def test_default_run_still_filters_by_enabled_tools(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Without --tools, enabled_tools still excludes tools not on the list."""
+    from lintro.tools import tool_manager
+
+    monkeypatch.setattr(
+        tool_manager,
+        "get_check_tools",
+        lambda: ["ruff", "yamllint"],
+    )
+
+    config = LintroConfig(
+        execution=ExecutionConfig(enabled_tools=["yamllint"]),
+    )
+
+    with patch(
+        "lintro.utils.execution.tool_configuration.get_config",
+        return_value=config,
+    ):
+        result = get_tools_to_run(tools=None, action="check")
+
+    assert_that(result.to_run).is_equal_to(["yamllint"])
+    skipped_by_name = {s.name: s for s in result.skipped}
+    assert_that(skipped_by_name).contains_key("ruff")
+    assert_that(skipped_by_name["ruff"].reason).is_equal_to(
+        "not in enabled_tools",
+    )
+
+
+def test_tools_all_still_filters_by_enabled_tools(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """``--tools all`` still applies enabled_tools filtering."""
+    from lintro.tools import tool_manager
+
+    monkeypatch.setattr(
+        tool_manager,
+        "get_check_tools",
+        lambda: ["ruff", "yamllint"],
+    )
+
+    config = LintroConfig(
+        execution=ExecutionConfig(enabled_tools=["yamllint"]),
+    )
+
+    with patch(
+        "lintro.utils.execution.tool_configuration.get_config",
+        return_value=config,
+    ):
+        result = get_tools_to_run(tools="all", action="check")
+
+    assert_that(result.to_run).is_equal_to(["yamllint"])
+    skipped_by_name = {s.name: s for s in result.skipped}
+    assert_that(skipped_by_name).contains_key("ruff")
+    assert_that(skipped_by_name["ruff"].reason).is_equal_to(
+        "not in enabled_tools",
+    )
+
+
+def test_explicit_tools_still_honors_per_tool_disabled(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Explicit --tools still skips tools with tools.<name>.enabled false."""
+    from lintro.tools import tool_manager
+
+    monkeypatch.setattr(
+        tool_manager,
+        "is_tool_registered",
+        lambda name: name in {"ruff", "yamllint"},
+    )
+    monkeypatch.setattr(
+        tool_manager,
+        "get_tool_names",
+        lambda: ["ruff", "yamllint"],
+    )
+
+    config = LintroConfig(
+        execution=ExecutionConfig(enabled_tools=["yamllint"]),
+        tools={"ruff": LintroToolConfig(enabled=False)},
+    )
+
+    with patch(
+        "lintro.utils.execution.tool_configuration.get_config",
+        return_value=config,
+    ):
+        result = get_tools_to_run(tools="ruff", action="check")
+
+    assert_that(result.to_run).is_empty()
+    assert_that(result.skipped).is_length(1)
+    assert_that(result.skipped[0].name).is_equal_to("ruff")
+    assert_that(result.skipped[0].reason).is_equal_to("disabled in config")
+
+
+def test_explicit_pytest_bypasses_enabled_tools_allowlist(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Explicit --tools pytest bypasses enabled_tools on the test action."""
+    from lintro.tools import tool_manager
+
+    monkeypatch.setattr(
+        tool_manager,
+        "is_tool_registered",
+        lambda name: name == "pytest",
+    )
+
+    config = LintroConfig(
+        execution=ExecutionConfig(enabled_tools=["ruff"]),
+    )
+
+    with patch(
+        "lintro.utils.execution.tool_configuration.get_config",
+        return_value=config,
+    ):
+        result = get_tools_to_run(tools="pytest", action="test")
+
+    assert_that(result.to_run).is_equal_to(["pytest"])
+    assert_that(result.skipped).is_empty()
+
+
+def test_default_test_run_still_filters_by_enabled_tools(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Default lintro test still applies enabled_tools to pytest."""
+    from lintro.tools import tool_manager
+
+    monkeypatch.setattr(
+        tool_manager,
+        "is_tool_registered",
+        lambda name: name == "pytest",
+    )
+
+    config = LintroConfig(
+        execution=ExecutionConfig(enabled_tools=["ruff"]),
+    )
+
+    with patch(
+        "lintro.utils.execution.tool_configuration.get_config",
+        return_value=config,
+    ):
+        result = get_tools_to_run(tools=None, action="test")
+
+    assert_that(result.to_run).is_empty()
+    assert_that(result.skipped).is_length(1)
+    assert_that(result.skipped[0].name).is_equal_to("pytest")
+    assert_that(result.skipped[0].reason).is_equal_to("not in enabled_tools")
+
+
 # =============================================================================
 # Fix action
 # =============================================================================
@@ -403,3 +582,208 @@ def test_disabled_tool_case_insensitive(
     assert_that(result.to_run).is_equal_to(["ruff"])
     assert_that(result.to_run).does_not_contain("MyPy")
     assert_that(result.to_run).does_not_contain("mypy")
+
+
+# =============================================================================
+# Hyphenated --tools names (#1630)
+# =============================================================================
+
+
+def test_hyphenated_tools_resolve_to_underscore_registry_keys(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Hyphenated canonical names resolve to underscored registry keys."""
+    from lintro.tools import tool_manager
+
+    registered = {"html_validate", "pip_audit", "golangci_lint", "ruff"}
+
+    monkeypatch.setattr(
+        tool_manager,
+        "is_tool_registered",
+        lambda name: name in registered,
+    )
+    monkeypatch.setattr(
+        tool_manager,
+        "get_tool_names",
+        lambda: sorted(registered),
+    )
+
+    config = LintroConfig()
+
+    with patch(
+        "lintro.utils.execution.tool_configuration.get_config",
+        return_value=config,
+    ):
+        result = get_tools_to_run(
+            tools="html-validate,pip-audit,golangci-lint",
+            action="check",
+        )
+
+    assert_that(result.to_run).contains_only(
+        "html_validate",
+        "pip_audit",
+        "golangci_lint",
+    )
+
+
+def test_mixed_hyphen_and_plain_tools_resolve(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Mixed hyphenated and plain names both resolve in one --tools list."""
+    from lintro.tools import tool_manager
+
+    registered = {"html_validate", "ruff"}
+
+    monkeypatch.setattr(
+        tool_manager,
+        "is_tool_registered",
+        lambda name: name in registered,
+    )
+    monkeypatch.setattr(
+        tool_manager,
+        "get_tool_names",
+        lambda: sorted(registered),
+    )
+
+    config = LintroConfig()
+
+    with patch(
+        "lintro.utils.execution.tool_configuration.get_config",
+        return_value=config,
+    ):
+        result = get_tools_to_run(tools="html-validate,ruff", action="check")
+
+    assert_that(result.to_run).contains_only("html_validate", "ruff")
+
+
+def test_underscore_alias_resolves_hyphen_registered_tool(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Underscore spelling resolves tools registered with hyphens."""
+    from lintro.tools import tool_manager
+
+    registered = {"astro-check", "vue-tsc"}
+
+    monkeypatch.setattr(
+        tool_manager,
+        "is_tool_registered",
+        lambda name: name in registered,
+    )
+    monkeypatch.setattr(
+        tool_manager,
+        "get_tool_names",
+        lambda: sorted(registered),
+    )
+
+    config = LintroConfig()
+
+    with patch(
+        "lintro.utils.execution.tool_configuration.get_config",
+        return_value=config,
+    ):
+        result = get_tools_to_run(tools="astro_check,vue_tsc", action="check")
+
+    assert_that(result.to_run).contains_only("astro-check", "vue-tsc")
+
+
+def test_hyphenated_config_disables_underscore_registry_key(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Hyphenated tool config disables an underscored registered tool."""
+    from lintro.tools import tool_manager
+
+    registered = {"html_validate", "ruff"}
+
+    monkeypatch.setattr(
+        tool_manager,
+        "get_check_tools",
+        lambda: sorted(registered),
+    )
+
+    config = LintroConfig(
+        tools={"html-validate": LintroToolConfig(enabled=False)},
+    )
+
+    with patch(
+        "lintro.utils.execution.tool_configuration.get_config",
+        return_value=config,
+    ):
+        result = get_tools_to_run(tools=None, action="check")
+
+    assert_that(result.to_run).contains_only("ruff")
+    skipped_by_name = {s.name: s for s in result.skipped}
+    assert_that(skipped_by_name).contains_key("html_validate")
+    assert_that(skipped_by_name["html_validate"].reason).is_equal_to(
+        "disabled in config",
+    )
+
+
+def test_underscore_config_disables_hyphen_registry_key(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Underscored tool config disables a hyphenated registered tool."""
+    from lintro.tools import tool_manager
+
+    registered = {"astro-check", "ruff"}
+
+    monkeypatch.setattr(
+        tool_manager,
+        "is_tool_registered",
+        lambda name: name in registered,
+    )
+    monkeypatch.setattr(
+        tool_manager,
+        "get_tool_names",
+        lambda: sorted(registered),
+    )
+
+    config = LintroConfig(
+        tools={"astro_check": LintroToolConfig(enabled=False)},
+    )
+
+    with patch(
+        "lintro.utils.execution.tool_configuration.get_config",
+        return_value=config,
+    ):
+        result = get_tools_to_run(tools="astro_check,ruff", action="check")
+
+    assert_that(result.to_run).contains_only("ruff")
+    skipped_by_name = {s.name: s for s in result.skipped}
+    assert_that(skipped_by_name).contains_key("astro-check")
+    assert_that(skipped_by_name["astro-check"].reason).is_equal_to(
+        "disabled in config",
+    )
+
+
+def test_unknown_tool_includes_did_you_mean_suggestion(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Genuine unknown names still raise, with a nearest-match hint."""
+    from lintro.tools import tool_manager
+
+    registered = {"html_validate", "ruff", "mypy"}
+
+    monkeypatch.setattr(
+        tool_manager,
+        "is_tool_registered",
+        lambda name: name in registered,
+    )
+    monkeypatch.setattr(
+        tool_manager,
+        "get_tool_names",
+        lambda: sorted(registered),
+    )
+
+    config = LintroConfig()
+
+    with patch(
+        "lintro.utils.execution.tool_configuration.get_config",
+        return_value=config,
+    ):
+        with pytest.raises(ValueError) as exc_info:
+            get_tools_to_run(tools="html-valdate", action="check")
+
+    message = str(exc_info.value)
+    assert_that(message).contains("Unknown tool 'html-valdate'")
+    assert_that(message).contains("Did you mean")
+    assert_that(message).contains("html")

@@ -1,15 +1,21 @@
-"""Unified tool registry loaded from manifest.json.
+"""Unified manifest registry loaded from manifest.json.
 
-This module is the single source of truth for all tool metadata. It replaces
-three parallel tool-to-version-command dicts that previously existed in:
+This module owns static tool *metadata* (versions, install commands,
+language mappings, profiles) parsed from ``manifest.json``. It is the single
+source of truth for that metadata and replaces three parallel
+tool-to-version-command dicts that previously existed in:
 - doctor.py (TOOL_COMMANDS)
 - version_requirements.py (tool_commands)
 - runtime_discovery.py (TOOL_VERSION_COMMANDS)
 
-Usage:
-    from lintro.tools.core.tool_registry import ToolRegistry
+This is distinct from :class:`lintro.plugins.registry.ToolRegistry`, which
+tracks *live plugin instances* (registered ``BaseToolPlugin`` subclasses)
+rather than manifest metadata.
 
-    registry = ToolRegistry.load()
+Usage:
+    from lintro.tools.core.tool_registry import ManifestRegistry
+
+    registry = ManifestRegistry.load()
     tool = registry.get("ruff")
     print(tool.version_command)  # ["ruff", "--version"]
 """
@@ -18,6 +24,7 @@ from __future__ import annotations
 
 import json
 import logging
+import warnings
 from functools import lru_cache
 from pathlib import Path
 from typing import Any
@@ -28,9 +35,10 @@ from lintro.tools.core.manifest_models import ManifestTool, ProfileDefinition
 # continues to work.
 __all__ = [
     "CATEGORY_LABELS",
+    "ManifestRegistry",
     "ManifestTool",
     "ProfileDefinition",
-    "ToolRegistry",
+    "ToolRegistry",  # noqa: F822 - deprecated alias resolved via module __getattr__
 ]
 
 # Use stdlib logging to avoid external dependencies during early imports
@@ -46,11 +54,14 @@ CATEGORY_LABELS: dict[str, str] = {
 }
 
 
-class ToolRegistry:
+class ManifestRegistry:
     """Single source of truth for all tool metadata.
 
     Loaded from manifest.json v2. Provides typed access to tool metadata,
     version commands, language mappings, and profiles.
+
+    Not to be confused with :class:`lintro.plugins.registry.ToolRegistry`,
+    which manages live plugin instances rather than manifest metadata.
     """
 
     def __init__(
@@ -66,13 +77,13 @@ class ToolRegistry:
 
     @classmethod
     @lru_cache(maxsize=1)
-    def load(cls) -> ToolRegistry:
+    def load(cls) -> ManifestRegistry:
         """Load the registry from manifest.json.
 
         Cached via lru_cache — call clear_cache() to force a reload.
 
         Returns:
-            ToolRegistry: Loaded and cached registry instance.
+            ManifestRegistry: Loaded and cached registry instance.
         """
         return cls._load_from_path(_MANIFEST_PATH)
 
@@ -86,14 +97,14 @@ class ToolRegistry:
         cls.load.cache_clear()
 
     @classmethod
-    def _load_from_path(cls, path: Path) -> ToolRegistry:
+    def _load_from_path(cls, path: Path) -> ManifestRegistry:
         """Load registry from a specific manifest path.
 
         Args:
             path: Path to manifest.json.
 
         Returns:
-            ToolRegistry: Loaded registry.
+            ManifestRegistry: Loaded registry.
 
         Raises:
             ValueError: If the manifest is malformed or has an invalid version.
@@ -431,3 +442,32 @@ class ToolRegistry:
     def __contains__(self, name: str) -> bool:
         """Check if a tool is in the registry."""
         return name in self._tools
+
+
+def __getattr__(name: str) -> Any:
+    """Provide a deprecated ``ToolRegistry`` alias for :class:`ManifestRegistry`.
+
+    Implements `PEP 562 <https://peps.python.org/pep-0562/>`_ module-level
+    attribute access so that ``from lintro.tools.core.tool_registry import
+    ToolRegistry`` keeps working, while emitting a ``DeprecationWarning`` the
+    first time the old name is used.
+
+    Args:
+        name: Attribute name being looked up on this module.
+
+    Returns:
+        ``ManifestRegistry`` when ``name`` is ``"ToolRegistry"``.
+
+    Raises:
+        AttributeError: If ``name`` is not a recognized module attribute.
+    """
+    if name == "ToolRegistry":
+        warnings.warn(
+            "lintro.tools.core.tool_registry.ToolRegistry is deprecated and "
+            "will be removed in a future release; use ManifestRegistry "
+            "instead.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        return ManifestRegistry
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

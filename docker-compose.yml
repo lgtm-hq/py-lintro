@@ -55,6 +55,9 @@ services:
       - RUNNING_IN_DOCKER=1
       - DOCKER_BUILDKIT=0
       - COVERAGE_OUTPUT_DIR=/app
+      # Renovate tool bumps: allow plugins to run slightly-older baked binaries
+      # until the tools-image digest catches up (#1582 / LINTRO_ALLOW_VERSION_LAG).
+      - LINTRO_ALLOW_VERSION_LAG=${LINTRO_ALLOW_VERSION_LAG:-}
       # AI provider keys: only injected when PROVIDE_AI_KEYS is set
       # e.g., PROVIDE_AI_KEYS=1 docker compose run test-integration
       - ANTHROPIC_API_KEY=${PROVIDE_AI_KEYS:+${ANTHROPIC_API_KEY:-}}

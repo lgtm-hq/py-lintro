@@ -13,6 +13,7 @@ from __future__ import annotations
 import csv
 import datetime
 import html
+import io
 import json
 from collections.abc import Sequence
 from pathlib import Path
@@ -62,7 +63,7 @@ def build_doc_url_map(all_results: Sequence[Any]) -> dict[str, str]:
     for result in all_results:
         if hasattr(result, "issues") and result.issues:
             for issue in result.issues:
-                code = str(getattr(issue, "code", "") or "")
+                code = issue.get_code()
                 url = str(getattr(issue, "doc_url", "") or "")
                 if code and url:
                     doc_url_map[code] = url
@@ -99,7 +100,7 @@ def _render_markdown_issue_rows(issues: Sequence[BaseIssue]) -> list[str]:
     for issue in issues:
         file_val = str(getattr(issue, "file", "") or "").replace("|", r"\|")
         line_val = getattr(issue, "line", None) or 0
-        code_val = str(getattr(issue, "code", "") or "").replace("|", r"\|")
+        code_val = issue.get_code().replace("|", r"\|")
         msg_val = str(getattr(issue, "message", "") or "").replace("|", r"\|")
         doc_url = str(getattr(issue, "doc_url", "") or "")
         # Percent-encode pipes in the URL so they don't break the
@@ -125,7 +126,7 @@ def _render_html_issue_rows(issues: Sequence[BaseIssue]) -> list[str]:
     for issue in issues:
         f_val = html.escape(str(getattr(issue, "file", "") or ""))
         l_val = html.escape(str(getattr(issue, "line", None) or 0))
-        c_val = html.escape(str(getattr(issue, "code", "") or ""))
+        c_val = html.escape(issue.get_code())
         m_val = html.escape(str(getattr(issue, "message", "") or ""))
         doc_url = str(getattr(issue, "doc_url", "") or "")
         d_val = (
@@ -180,6 +181,116 @@ def _merged_issue_count(result: ToolResult) -> int:
     return len(_merged_issues(result))
 
 
+_CSV_REPORT_HEADER: list[str] = [
+    "tool",
+    "issues_count",
+    "file",
+    "line",
+    "code",
+    "message",
+    "doc_url",
+]
+
+
+def render_csv_report(all_results: Sequence[ToolResult]) -> str:
+    """Render all results as a single CSV document.
+
+    This is the shared source of truth for the ``--output-format csv`` stdout
+    payload and the ``--output <file>.csv`` artifact, so both stay identical
+    and machine-parseable.
+
+    Args:
+        all_results: Sequence of ToolResult objects.
+
+    Returns:
+        The complete CSV document as a string, including the header row.
+    """
+    rows: list[list[str]] = []
+    for result in all_results:
+        merged_issues = _merged_issues(result)
+        merged_count = len(merged_issues)
+        if merged_issues:
+            for issue in merged_issues:
+                rows.append(
+                    [
+                        sanitize_csv_value(result.name),
+                        sanitize_csv_value(str(merged_count)),
+                        sanitize_csv_value(str(getattr(issue, "file", "") or "")),
+                        sanitize_csv_value(str(getattr(issue, "line", None) or 0)),
+                        sanitize_csv_value(issue.get_code()),
+                        sanitize_csv_value(str(getattr(issue, "message", "") or "")),
+                        sanitize_csv_value(str(getattr(issue, "doc_url", "") or "")),
+                    ],
+                )
+        else:
+            rows.append(
+                [sanitize_csv_value(result.name), sanitize_csv_value(str(merged_count))]
+                + ["", "", "", "", ""],
+            )
+    buffer = io.StringIO()
+    writer = csv.writer(buffer)
+    writer.writerow(_CSV_REPORT_HEADER)
+    writer.writerows(rows)
+    return buffer.getvalue()
+
+
+def render_markdown_report(
+    all_results: Sequence[ToolResult],
+    action: Action,
+) -> str:
+    """Render all results as a single Markdown report.
+
+    Shared source of truth for the ``--output-format markdown`` stdout payload
+    and the ``--output <file>.md`` artifact.
+
+    Args:
+        all_results: Sequence of ToolResult objects.
+        action: The action performed (check, fmt, test).
+
+    Returns:
+        The complete Markdown report as a string.
+    """
+    lines: list[str] = ["# Lintro Report", ""]
+    lines.append("## Summary\n")
+    lines.append("| Tool | Issues |")
+    lines.append("|------|--------|")
+    for result in all_results:
+        lines.append(f"| {result.name} | {_merged_issue_count(result)} |")
+    lines.append("")
+    for result in all_results:
+        issues_count = _merged_issue_count(result)
+        lines.append(f"### {result.name} ({issues_count} issues)")
+        if _result_has_fix_split(result, action):
+            initial = list(result.initial_issues or [])
+            lines.append(f"#### Detected issues ({len(initial)})")
+            lines.append(_MARKDOWN_ISSUES_HEADER)
+            lines.extend(_render_markdown_issue_rows(initial))
+            lines.append("")
+            remaining = list(result.issues or [])
+            if remaining:
+                lines.append(f"#### Remaining issues ({len(remaining)})")
+                lines.append(_MARKDOWN_ISSUES_HEADER)
+                lines.extend(_render_markdown_issue_rows(remaining))
+                lines.append("")
+            else:
+                lines.append("#### All issues were auto-fixed.")
+                lines.append("")
+            tool_output = getattr(result, "output", "") or ""
+            if tool_output.strip():
+                lines.append("#### Tool output")
+                lines.append("```")
+                lines.append(tool_output.strip())
+                lines.append("```")
+                lines.append("")
+        elif hasattr(result, "issues") and result.issues:
+            lines.append(_MARKDOWN_ISSUES_HEADER)
+            lines.extend(_render_markdown_issue_rows(result.issues))
+            lines.append("")
+        else:
+            lines.append("No issues found.\n")
+    return "\n".join(lines)
+
+
 def write_output_file(
     *,
     output_path: str,
@@ -226,99 +337,21 @@ def write_output_file(
         )
 
     elif output_format == OutputFormat.CSV:
-        # Write CSV format
-        rows: list[list[str]] = []
-        header: list[str] = [
-            "tool",
-            "issues_count",
-            "file",
-            "line",
-            "code",
-            "message",
-            "doc_url",
-        ]
-        for result in all_results:
-            merged_issues = _merged_issues(result)
-            merged_count = len(merged_issues)
-            if merged_issues:
-                for issue in merged_issues:
-                    rows.append(
-                        [
-                            sanitize_csv_value(result.name),
-                            sanitize_csv_value(
-                                str(merged_count),
-                            ),
-                            sanitize_csv_value(str(getattr(issue, "file", "") or "")),
-                            sanitize_csv_value(
-                                str(getattr(issue, "line", None) or 0),
-                            ),
-                            sanitize_csv_value(str(getattr(issue, "code", "") or "")),
-                            sanitize_csv_value(
-                                str(getattr(issue, "message", "") or ""),
-                            ),
-                            sanitize_csv_value(
-                                str(getattr(issue, "doc_url", "") or ""),
-                            ),
-                        ],
-                    )
-            else:
-                rows.append(
-                    [
-                        sanitize_csv_value(result.name),
-                        sanitize_csv_value(str(merged_count)),
-                        "",
-                        "",
-                        "",
-                        "",
-                        "",
-                    ],
-                )
-        with output_file.open("w", encoding="utf-8", newline="") as f:
-            writer = csv.writer(f)
-            writer.writerow(header)
-            writer.writerows(rows)
+        # Write CSV format via the shared renderer so the artifact matches the
+        # ``--output-format csv`` stdout payload byte-for-byte. ``newline=""``
+        # avoids the csv module's ``\r\n`` being translated a second time.
+        output_file.write_text(
+            render_csv_report(all_results),
+            encoding="utf-8",
+            newline="",
+        )
 
     elif output_format == OutputFormat.MARKDOWN:
-        # Write Markdown format
-        lines: list[str] = ["# Lintro Report", ""]
-        lines.append("## Summary\n")
-        lines.append("| Tool | Issues |")
-        lines.append("|------|--------|")
-        for result in all_results:
-            lines.append(f"| {result.name} | {_merged_issue_count(result)} |")
-        lines.append("")
-        for result in all_results:
-            issues_count = _merged_issue_count(result)
-            lines.append(f"### {result.name} ({issues_count} issues)")
-            if _result_has_fix_split(result, action):
-                initial = list(result.initial_issues or [])
-                lines.append(f"#### Detected issues ({len(initial)})")
-                lines.append(_MARKDOWN_ISSUES_HEADER)
-                lines.extend(_render_markdown_issue_rows(initial))
-                lines.append("")
-                remaining = list(result.issues or [])
-                if remaining:
-                    lines.append(f"#### Remaining issues ({len(remaining)})")
-                    lines.append(_MARKDOWN_ISSUES_HEADER)
-                    lines.extend(_render_markdown_issue_rows(remaining))
-                    lines.append("")
-                else:
-                    lines.append("#### All issues were auto-fixed.")
-                    lines.append("")
-                tool_output = getattr(result, "output", "") or ""
-                if tool_output.strip():
-                    lines.append("#### Tool output")
-                    lines.append("```")
-                    lines.append(tool_output.strip())
-                    lines.append("```")
-                    lines.append("")
-            elif hasattr(result, "issues") and result.issues:
-                lines.append(_MARKDOWN_ISSUES_HEADER)
-                lines.extend(_render_markdown_issue_rows(result.issues))
-                lines.append("")
-            else:
-                lines.append("No issues found.\n")
-        output_file.write_text("\n".join(lines), encoding="utf-8")
+        # Write Markdown format via the shared renderer (see render_markdown_report).
+        output_file.write_text(
+            render_markdown_report(all_results, action),
+            encoding="utf-8",
+        )
 
     elif output_format == OutputFormat.HTML:
         # Write HTML format
@@ -425,6 +458,9 @@ def format_tool_output(
     output: str,
     output_format: str | OutputFormat = "grid",
     issues: Sequence[BaseIssue] | None = None,
+    *,
+    success: bool | None = None,
+    issues_count: int | None = None,
 ) -> str:
     """Format tool output using the specified format.
 
@@ -433,6 +469,12 @@ def format_tool_output(
         output: str: Raw output from the tool.
         output_format: str: Output format (plain, grid, markdown, html, json, csv).
         issues: Sequence[BaseIssue] | None: List of parsed issue objects (optional).
+        success: bool | None: Whether the tool run succeeded. When a Bandit
+            run succeeds with zero issues, informational (non-JSON) output is
+            returned as-is instead of being re-parsed, avoiding parse-error
+            noise for clean passes (#1534).
+        issues_count: int | None: The tool-reported issue count, used together
+            with ``success`` to detect a clean zero-issue pass.
 
     Returns:
         str: Formatted output string.
@@ -463,6 +505,14 @@ def format_tool_output(
 
     if not output or not output.strip():
         return "No issues found."
+
+    # A successful, zero-issue Bandit run with no parsed issues may carry only
+    # informational (non-JSON) text. Return it verbatim rather than feeding it
+    # to the JSON parser, which would raise and print parse-error noise for a
+    # clean pass (#1534). Real failures (success is False) still get parsed so
+    # unparseable diagnostic output surfaces as an error (#1044).
+    if tool_name == ToolName.BANDIT.value and success and issues_count == 0:
+        return output
 
     # Try to parse the output using registered parser (O(1) lookup)
     # Note: pytest output is already formatted by build_output_with_failures

@@ -236,6 +236,8 @@ def _display_fix_result(
             output=result.output or "",
             output_format=output_format,
             issues=list(result.issues) if result.issues else None,
+            success=result.success,
+            issues_count=result.issues_count,
         )
     if result.output and raw_output:
         display_output = result.output
@@ -480,6 +482,7 @@ def run_lint_tools_simple(
     score: bool = False,
     fail_under: float | None = None,
     diff_base: str | None = None,
+    no_art: bool = False,
 ) -> int:
     """Simplified runner using Loguru-based logging with rich formatting.
 
@@ -523,6 +526,9 @@ def run_lint_tools_simple(
             files; :data:`~lintro.utils.git_diff.DIFF_DEFAULT_SENTINEL` resolves
             the repository default base; any other value is used as the base
             ref. Non-git directories fall back to a full scan with a warning.
+        no_art: When True, suppress decorative ASCII art regardless of the
+            ``output.art`` config value. Art is also suppressed automatically
+            when ``output.art`` is ``False`` or stdout is not a TTY.
 
     Returns:
         Exit code (0 for success, 1 for failures).
@@ -553,18 +559,29 @@ def run_lint_tools_simple(
 
     setup_execution_logging(output_manager.run_dir, debug=debug)
 
-    # Create simplified logger with rich formatting. For machine-readable
-    # output (JSON/SARIF) route all decorative console output to stderr so
-    # stdout carries only the final parseable document.
+    # Create simplified logger with rich formatting.
     from lintro.utils.console import create_logger
 
-    machine_readable_output = output_format.lower() in ("json", "sarif")
+    # Explicit non-grid formats that must emit a single clean, parseable
+    # document on stdout. For these we route all decorative console UI to
+    # stderr and suppress the human summary so stdout carries only the payload
+    # (grid remains the default human view).
+    clean_stdout_output = output_format.lower() in ("json", "sarif", "csv", "markdown")
     # Score-only takes priority over machine-readable formats so
     # ``--score --output-format json`` still prints only the numeric score.
     score_only = bool(score)
+
+    # Resolve whether decorative ASCII art may be shown. Either the ``--no-art``
+    # flag or ``output.art: false`` in config disables it; the TTY guard in
+    # print_ascii_art still applies on top of this.
+    from lintro.config.config_loader import get_config as _get_config
+
+    art_enabled = bool(_get_config().output.art) and not no_art
+
     logger = create_logger(
         run_dir=output_manager.run_dir,
-        route_stderr=machine_readable_output or score_only,
+        route_stderr=clean_stdout_output or score_only,
+        art_enabled=art_enabled,
     )
 
     # Get tools to run (now returns ToolsToRunResult with skip info)
@@ -672,29 +689,35 @@ def run_lint_tools_simple(
 
     # Resolve the git-diff base ref (if --diff was supplied). Non-git dirs and
     # unresolvable default refs fall back to a full scan with a warning; an
-    # explicit but unresolvable ref is a hard error.
+    # explicit but unresolvable ref is a hard error. Scan targets may span
+    # multiple repositories; each repo's diff is computed independently.
     resolved_diff_base: str | None = None
     if diff_base is not None:
         from lintro.utils.git_diff import (
             DIFF_DEFAULT_SENTINEL,
             DiffResolutionError,
-            get_changed_files,
+            all_repo_defaults_resolvable,
+            get_changed_files_for_paths,
             is_git_repository,
-            resolve_default_base,
+            resolve_git_cwd_from_paths,
         )
 
-        if not is_git_repository():
+        repo_groups = resolve_git_cwd_from_paths(paths)
+        has_repo_paths = any(root is not None for root in repo_groups)
+
+        if not has_repo_paths and not is_git_repository():
             logger.console_output(
                 text="--diff requested but not inside a git repository; "
                 "scanning all files.",
                 color="yellow",
             )
         elif diff_base == DIFF_DEFAULT_SENTINEL:
-            resolved_diff_base = resolve_default_base()
-            if resolved_diff_base is None:
+            if all_repo_defaults_resolvable(paths):
+                resolved_diff_base = DIFF_DEFAULT_SENTINEL
+            else:
                 logger.console_output(
-                    text="--diff: could not resolve a default base ref "
-                    "(tried origin/HEAD, origin/main, main, ...); "
+                    text="--diff: could not resolve a default base ref in every "
+                    "repository (tried origin/HEAD, origin/main, main, ...); "
                     "scanning all files.",
                     color="yellow",
                 )
@@ -703,14 +726,34 @@ def run_lint_tools_simple(
 
         if resolved_diff_base is not None:
             try:
-                changed = get_changed_files(resolved_diff_base)
+                changed = get_changed_files_for_paths(resolved_diff_base, paths)
             except DiffResolutionError as exc:
                 logger.console_output(text=f"Error: {exc}", color="red")
                 return 1
+            # Non-repo scan targets are scanned in full (they have no diff to
+            # filter against), but the changed-file count only covers the
+            # repository targets. Warn so the count below isn't read as the
+            # whole scan scope when targets are mixed (#1618).
+            non_repo_targets = repo_groups.get(None)
+            if non_repo_targets and has_repo_paths:
+                logger.console_output(
+                    text=(
+                        f"--diff: {len(non_repo_targets)} scan target(s) are "
+                        "outside a git repository and are scanned in full (not "
+                        "diff-filtered); the changed-file count below counts only "
+                        "the repository target(s)."
+                    ),
+                    color="yellow",
+                )
+            display_base = (
+                "default base"
+                if resolved_diff_base == DIFF_DEFAULT_SENTINEL
+                else resolved_diff_base
+            )
             logger.console_output(
                 text=(
                     f"Diff mode: scanning {len(changed)} file(s) changed vs "
-                    f"{resolved_diff_base}"
+                    f"{display_base}"
                 ),
                 color="cyan",
             )
@@ -746,12 +789,10 @@ def run_lint_tools_simple(
     else:
         effective_auto_install = is_container
 
-    # Pre-execution config summary (suppress in JSON/SARIF and score-only mode)
-    if (
-        output_format.lower() not in {"json", "sarif"}
-        and not score_only
-        and (tools_to_run or skipped_tools)
-    ):
+    # Pre-execution config summary. Suppressed for clean-stdout formats
+    # (json/sarif/csv/markdown) and score-only mode because it writes the rich
+    # Configuration box to stdout via its own Console, bypassing route_stderr.
+    if not clean_stdout_output and not score_only and (tools_to_run or skipped_tools):
         from lintro.utils.console.pre_execution_summary import (
             print_pre_execution_summary,
         )
@@ -1102,6 +1143,17 @@ def run_lint_tools_simple(
                 standard_issues=standard_issues,
             )
             print(sarif_json)
+        elif output_format.lower() == "csv":
+            # Emit a single clean CSV document on stdout; decorative UI has been
+            # routed to stderr so stdout parses with csv.reader.
+            from lintro.utils.output.file_writer import render_csv_report
+
+            print(render_csv_report(all_results), end="")
+        elif output_format.lower() == "markdown":
+            # Emit a single clean Markdown report on stdout.
+            from lintro.utils.output.file_writer import render_markdown_report
+
+            print(render_markdown_report(all_results, action))
         else:
             logger.print_execution_summary(action, all_results)
 
@@ -1138,9 +1190,10 @@ def run_lint_tools_simple(
                     color=_tier_color,
                 )
 
-        # Route warnings to stderr (loguru) for machine-readable formats so
-        # plain-text messages don't corrupt JSON/SARIF output on stdout.
-        _is_machine = output_format.lower() in ("json", "sarif")
+        # Route warnings to stderr (loguru) for clean-stdout formats so
+        # plain-text messages don't corrupt the JSON/SARIF/CSV/Markdown
+        # document on stdout.
+        _is_machine = clean_stdout_output
 
         def _warn(msg: str) -> None:
             if _is_machine:

@@ -7,6 +7,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from lintro.ai.config import AIConfig
 from lintro.config.enforce_config import EnforceConfig
 from lintro.config.execution_config import ExecutionConfig
+from lintro.config.output_config import OutputConfig
 from lintro.config.review_config import ReviewConfig
 from lintro.config.score_config import ScoreConfig
 from lintro.config.tool_config import LintroToolConfig
@@ -17,9 +18,28 @@ __all__ = [
     "ExecutionConfig",
     "LintroConfig",
     "LintroToolConfig",
+    "OutputConfig",
     "ReviewConfig",
     "ScoreConfig",
 ]
+
+
+def _tool_name_aliases(tool_name: str) -> tuple[str, ...]:
+    """Return case-normalized lookup aliases for hyphen/underscore tool names."""
+    tool_lower = tool_name.lower()
+    candidates = [
+        tool_lower,
+        tool_lower.replace("-", "_"),
+        tool_lower.replace("_", "-"),
+    ]
+    return tuple(dict.fromkeys(candidates))
+
+
+def _contains_tool_name_alias(tool_name: str, configured_names: list[str]) -> bool:
+    """Check whether a configured tool-name list contains any spelling alias."""
+    aliases = set(_tool_name_aliases(tool_name))
+    configured = {name.lower() for name in configured_names}
+    return not aliases.isdisjoint(configured)
 
 
 class LintroConfig(BaseModel):
@@ -43,6 +63,7 @@ class LintroConfig(BaseModel):
         ai: AI-powered features configuration (optional, disabled by default).
         review: Diff review command configuration (checklist items).
         score: Health score weights and scale (0-100 metric).
+        output: Console output presentation settings (e.g. ASCII art toggle).
         config_path: Path to the config file (set by loader).
     """
 
@@ -55,6 +76,7 @@ class LintroConfig(BaseModel):
     ai: AIConfig = Field(default_factory=AIConfig)
     review: ReviewConfig = Field(default_factory=ReviewConfig)
     score: ScoreConfig = Field(default_factory=ScoreConfig)
+    output: OutputConfig = Field(default_factory=OutputConfig)
     config_path: str | None = None
 
     def get_tool_config(self, tool_name: str) -> LintroToolConfig:
@@ -67,7 +89,25 @@ class LintroConfig(BaseModel):
             LintroToolConfig: Tool configuration. Returns default config if not
                 explicitly configured.
         """
-        return self.tools.get(tool_name.lower(), LintroToolConfig())
+        tool_configs = {name.lower(): config for name, config in self.tools.items()}
+        for candidate in _tool_name_aliases(tool_name):
+            if candidate in tool_configs:
+                return tool_configs[candidate]
+        return LintroToolConfig()
+
+    def is_tool_in_enabled_tools(self, tool_name: str) -> bool:
+        """Check if a tool is allowed by ``execution.enabled_tools``.
+
+        Args:
+            tool_name: Name of the tool.
+
+        Returns:
+            bool: True when ``enabled_tools`` is empty or contains the tool name
+                using either hyphen or underscore spelling.
+        """
+        if not self.execution.enabled_tools:
+            return True
+        return _contains_tool_name_alias(tool_name, self.execution.enabled_tools)
 
     def is_tool_enabled(self, tool_name: str) -> bool:
         """Check if a tool is enabled.
@@ -83,16 +123,12 @@ class LintroConfig(BaseModel):
         Returns:
             bool: True if tool should run.
         """
-        tool_lower = tool_name.lower()
-
         # Check execution.enabled_tools filter
-        if self.execution.enabled_tools:
-            enabled_lower = [t.lower() for t in self.execution.enabled_tools]
-            if tool_lower not in enabled_lower:
-                return False
+        if not self.is_tool_in_enabled_tools(tool_name):
+            return False
 
         # Check tool-specific enabled flag
-        tool_config = self.get_tool_config(tool_lower)
+        tool_config = self.get_tool_config(tool_name)
         return bool(tool_config.enabled)
 
     def get_tool_defaults(self, tool_name: str) -> dict[str, Any]:

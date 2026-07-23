@@ -16,6 +16,7 @@ the CLI.
 
 ## Debug & extend
 
+- [Library API](./library-api.md) — embed `check`/`fmt`/`test` in Python programs
 - [AI features](../ai-features.md) — summaries, explanations, and fix suggestions
 - [Troubleshooting](../troubleshooting.md) — common failures and fixes
 - [Debugging](../debugging.md) — verbose runs and internals

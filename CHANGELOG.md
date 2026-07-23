@@ -21,6 +21,450 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.91.22] - 2026-07-23
+
+### Fixed
+
+- **formatters**: unify rule-code across output formats (#1463) (7ae350e)
+
+## [0.91.21] - 2026-07-23
+
+### Fixed
+
+- **tools**: add missing @commitlint/cli install hint (#1636) (e0028b6)
+
+## [0.91.20] - 2026-07-23
+
+### Changed
+
+- **ai**: add fallback concurrency regression tests (#1441) (4cf515a)
+
+### Fixed
+
+- **ci**: guard single-run scheduled lintro analysis invariant (#1169) (466f037)
+
+## [0.91.19] - 2026-07-23
+
+### Fixed
+
+- **docker**: backfill dispatch input-validation gaps (#1327) (af2d25b)
+
+## [0.91.18] - 2026-07-23
+
+### Fixed
+
+- **output**: --output-format markdown/csv stdout clean like json/sarif (#1464)
+  (da2bca6)
+
+## [0.91.17] - 2026-07-23
+
+### Fixed
+
+- **trufflehog**: ignore benign missing-path scan errors (#1633) (05c6e31)
+
+## [0.91.16] - 2026-07-23
+
+### Fixed
+
+- **cli**: accept hyphenated names in --tools selection (#1635) (ad37502)
+
+## [0.91.15] - 2026-07-23
+
+### Fixed
+
+- **cli**: render clean --help text for subcommands (#1457) (b7b5fbe)
+
+## [0.91.14] - 2026-07-23
+
+### Fixed
+
+- **ci**: upload build-binary artifacts on workflow_dispatch (#1634) (60572af)
+
+## [0.91.13] - 2026-07-23
+
+### Fixed
+
+- **cli**: let explicit --tools bypass enabled_tools allowlist (#1451) (9def246)
+
+## [0.91.12] - 2026-07-23
+
+### Fixed
+
+- **cli**: force UTF-8 stdio under ASCII locales (#1479) (fc4abf2)
+
+## [0.91.11] - 2026-07-23
+
+### Fixed
+
+- **cli**: warn when --diff targets mix repo and non-repo paths (#1628) (b43aa3d)
+
+## [0.91.10] - 2026-07-23
+
+### Fixed
+
+- **ai**: only pass --json-schema-name when the claude CLI supports it (#1626) (329ccb4)
+
+## [0.91.9] - 2026-07-23
+
+### Fixed
+
+- **core**: anchor tool cwd to the files' project root for scope-independence (#1623)
+  (edf70c4)
+
+## [0.91.8] - 2026-07-23
+
+### Fixed
+
+- **cli**: resolve symlinks in --diff changed-file matching (#1621) (db7e5e2)
+
+## [0.91.7] - 2026-07-23
+
+### Fixed
+
+- **cli**: resolve --diff per repository for multi-repo scans (#1383) (c06ce16)
+
+## [0.91.6] - 2026-07-23
+
+### Changed
+
+- **security**: retire homebrew-tap write credential references (#1459) (fe37b8a)
+
+### Fixed
+
+- **cli**: resolve --diff cwd and reject path tokens (#1335) (d8b57ff)
+
+## [0.91.5] - 2026-07-23
+
+### Changed
+
+- **deps**: update dependency astral-sh/uv to 0.11.31 (patch) (#1603) (1b40902)
+- **deps**: update ghcr.io/lgtm-hq/lintro-tools:latest docker digest to eda3491 (#1602)
+  (1304e8d)
+- **deps**: update linting tools (#1477) (ecad0ec)
+- **deps**: update dependency lgtm-hq/lgtm-ci to v0.59.2 (minor) (#1482) (e2b5faf)
+- **deps**: update ghcr.io/lgtm-hq/lintro-tools:latest docker digest to 7623a30 (#1443)
+  (a8f7c48)
+- **deps**: update github-actions (#1589) (0d74038)
+
+### Fixed
+
+- **gitleaks**: surface non-zero exits, resolve prepared source path; extend ai-review
+  secret scope guard (#1385) (f2cc1df)
+
+## [0.91.4] - 2026-07-22
+
+### Changed
+
+- **deps**: update dependency fast-uri to 4.1.1 (patch) [security] (#1600) (0374661)
+
+### Fixed
+
+- **deps**: update dependency @lgtm-hq/turbo-themes to 0.29.3 (minor) (#1563) (8f879c7)
+
+## [0.91.3] - 2026-07-21
+
+### Fixed
+
+- **licenses**: SPDX/npm evaluation gaps can false-pass a deny policy (#1330) (e03b71b)
+
+## [0.91.2] - 2026-07-21
+
+### Fixed
+
+- **security**: bump fast-uri and svgo past new advisories (#1597) (bb991c0)
+
+## [0.91.1] - 2026-07-21
+
+### Fixed
+
+- **security**: make external plugin loading opt-in with a trust model (#1256) (29e47df)
+
+## [0.91.0] - 2026-07-21
+
+### Added
+
+- **tools**: add html-validate for HTML validation (#1153) (266e94e)
+
+## [0.90.1] - 2026-07-21
+
+### Changed
+
+- **deps**: update dependency astral-sh/uv to 0.11.30 (patch) (#1587) (a8f4790)
+
+### Fixed
+
+- **ci**: tolerate baked-tool version lag and bump astro to 7.1.3 (#1591) (3bfe08b)
+
+## [0.90.0] - 2026-07-21
+
+### Added
+
+- **tools**: add trufflehog for secrets detection (#1149) (7ad74bf)
+
+## [0.89.1] - 2026-07-21
+
+### Fixed
+
+- **security**: time-box suppression for astro GHSA-4g3v-8h47-v7g6 (#1585) (f0dae4a)
+
+## [0.89.0] - 2026-07-20
+
+### Added
+
+- **tools**: add golangci-lint Go meta-linter plugin (#1148) (700b595)
+
+### Fixed
+
+- **tools**: complete golangci-lint registration to unbreak main (#1581) (b3bd671)
+
+## [0.88.1] - 2026-07-20
+
+### Fixed
+
+- **ci**: tolerate PR-introduced tools in the docker-ci manifest gate (#1566) (b9fa926)
+
+## [0.88.0] - 2026-07-20
+
+### Added
+
+- **docker**: bundle pinned Go toolchain in lintro-tools image (#1553) (87a7c6f)
+
+## [0.87.1] - 2026-07-20
+
+### Changed
+
+- **deps**: update actions/setup-python action to v7.0.0 (major) (#1547) (511a54d)
+
+### Fixed
+
+- **markdownlint**: forward nested defaults.markdownlint rule options (#1554) (c2df0c2)
+
+## [0.87.0] - 2026-07-20
+
+### Added
+
+- **oxlint**: add type-aware linting support with doctor checks (#1526) (1f6a979)
+- **pip_audit**: close parity gaps with osv_scanner (#1525) (1171941)
+- **ci**: run verify-manifest-tools inside built and pinned images to catch
+  manifest-vs-image drift (#1528) (1ee3b3b)
+
+### Changed
+
+- **tools**: add parametrized tool-completeness gate over the plugin registry (#1524)
+  (06f203c)
+
+## [0.86.0] - 2026-07-20
+
+### Added
+
+- **ci**: add repo-root .stylelintrc.json and fix hex violations (#1519) (4aa2234)
+
+## [0.85.2] - 2026-07-20
+
+### Fixed
+
+- **docker**: deliver and verify pip-audit in runtime image (#1523) (3714ed6)
+
+## [0.85.1] - 2026-07-20
+
+### Fixed
+
+- **ci**: allow raw.githubusercontent.com in generate-man-page egress allowlist (#1557)
+  (76c4b1a)
+
+## [0.85.0] - 2026-07-20
+
+### Added
+
+- **vale**: add repo-root .vale.ini for prose linting (#1522) (39e953c)
+
+### Changed
+
+- add adding-a-new-tool guide, issue template, and PR checklist (#1530) (08a0512)
+- add idiom-review documentation across README, configuration, and tool analysis (#1527)
+  (5a7ce54)
+
+## [0.84.1] - 2026-07-20
+
+### Changed
+
+- **core**: migrate os.path usage to pathlib in core modules (#1537) (ac761d9)
+
+### Fixed
+
+- **manifest**: drop formatter tag from dotenv-linter entry (#1521) (858ddac)
+
+## [0.84.0] - 2026-07-20
+
+### Added
+
+- **cli**: add shell completions and man page generation (#1541) (a5ba92a)
+
+## [0.83.0] - 2026-07-20
+
+### Added
+
+- **ci**: fail dogfooding when an enabled tool silently skips (#1536) (89a9e5b)
+
+### Changed
+
+- **tests**: normalize new-tool test and fixture placements (#1538) (2dd1d42)
+
+## [0.82.3] - 2026-07-20
+
+### Changed
+
+- **deps**: update dependency svelte to 5.56.6 (patch) (#1544) (437ddf5)
+- **deps**: update renovatebot/github-action action to v46.1.20 (patch) (#1545)
+  (61a8087)
+
+### Fixed
+
+- **output**: gate ASCII art on TTY and add --no-art (#1539) (5ed0ad3)
+
+## [0.82.2] - 2026-07-20
+
+### Changed
+
+- **deps**: update pypa/gh-action-pypi-publish action to v1.14.1 (patch) (#1542)
+  (888e926)
+
+### Fixed
+
+- **output**: stop routing bandit no-files message through JSON parser (#1540) (a4640e5)
+
+## [0.82.1] - 2026-07-19
+
+### Fixed
+
+- **release**: stamp SECURITY.md support table on minor bumps (#1467) (bf46365)
+
+## [0.82.0] - 2026-07-18
+
+### Added
+
+- **commitlint**: add root commitlint.config.js extending config-conventional (#1518)
+  (69de320)
+
+### Changed
+
+- **idiom-review**: remove dead DEFAULT_ENABLED ClassVar (#1520) (fd4ad29)
+
+## [0.81.3] - 2026-07-18
+
+### Fixed
+
+- **pip-audit**: continue auditing remaining targets after a per-target timeout (#1507)
+  (d0211ce)
+
+## [0.81.2] - 2026-07-18
+
+### Fixed
+
+- **deps**: exclude test_samples fixtures from Renovate tracking (#1504) (a8e051e)
+
+## [0.81.1] - 2026-07-18
+
+### Changed
+
+- add AGENTS.md with Cursor Cloud dev environment instructions (#1503) (ff00551)
+
+### Fixed
+
+- **ci**: retry setup-uv in binary builds and disable matrix fail-fast (#1514) (2e24483)
+
+## [0.81.0] - 2026-07-18
+
+### Added
+
+- **tools**: add pip-audit for Python dependency vulnerability scanning (#1145)
+  (8d37f54)
+
+### Changed
+
+- **deps**: update python:3.14-slim docker digest to cea0e60 (#1489) (0ca34b1)
+- **deps**: update dependency svelte to 5.56.5 (patch) (#1488) (9b19881)
+
+## [0.80.11] - 2026-07-17
+
+### Changed
+
+- format CONTRIBUTING.md with prettier (#1475) (5b1e8f3)
+- **deps**: pin dependencies (#1472) (06bc820)
+
+### Fixed
+
+- **ci**: bump pinned lintro image past identify dependency (#1462) (4a1609a)
+
+## [0.80.10] - 2026-07-17
+
+### Changed
+
+- **repo**: add root CONTRIBUTING.md pointer and remove stray findings.md (#1455)
+  (504e31d)
+- replace bare assert with assertpy assert_that across test suite (#1389) (4fc76f4)
+- move inline tool sample inputs to test_samples fixtures (#1382) (9f75984)
+
+### Fixed
+
+- **mypy**: run mypy from project root for individual files (#1270) (75ffacb)
+
+## [0.80.9] - 2026-07-17
+
+### Fixed
+
+- **core**: route programmatic execution through real library API (#1269) (6e5cda4)
+
+## [0.80.8] - 2026-07-17
+
+### Fixed
+
+- **tools**: preserve explicit timeout=0 and route ruff through _prepare_execution
+  (#1266) (ca1b013)
+
+## [0.80.7] - 2026-07-17
+
+### Changed
+
+- **deps**: update ubuntu:latest docker digest to 3131b4c (#1468) (6fd6e6b)
+- **ai**: remove process-global os.chdir from rerun path (#1265) (9103dbc)
+
+### Fixed
+
+- **execution**: handle BaseException in gather results and nested event loops (#1264)
+  (7252969)
+
+## [0.80.6] - 2026-07-16
+
+### Changed
+
+- **tools**: rename manifest ToolRegistry to ManifestRegistry (#1260) (f729796)
+
+- **tools/core**: rename `lintro.tools.core.tool_registry.ToolRegistry` to
+  `ManifestRegistry` to disambiguate it from `lintro.plugins.registry.ToolRegistry`
+  (#1220)
+
+### Deprecated
+
+- **tools/core**: `lintro.tools.core.tool_registry.ToolRegistry` is deprecated in favor
+  of `ManifestRegistry`; importing or using the old name now emits a
+  `DeprecationWarning` and will be removed in a future release (#1220)
+
+### Fixed
+
+- **ci**: use valid npm range syntax for astro allowedVersions (#1454) (e012d9d)
+
+## [0.80.5] - 2026-07-16
+
+### Changed
+
+- **site**: add missing rehype devDependencies for doc-links suite (#1446) (140fd7c)
+
+### Fixed
+
+- **security**: pin astro to 7.0.9 to drop flagged 7.1.0 (MAL-2026-10726) (#1448)
+  (491792f)
+
 ## [0.80.4] - 2026-07-16
 
 ### Changed

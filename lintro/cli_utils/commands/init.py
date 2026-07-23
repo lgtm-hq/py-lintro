@@ -19,7 +19,7 @@ from rich.console import Console
 from rich.panel import Panel
 
 from lintro.cli_utils.onboarding import print_install_next_steps
-from lintro.tools.core.tool_registry import ToolRegistry
+from lintro.tools.core.tool_registry import ManifestRegistry
 from lintro.utils.project_detection import detect_project_languages
 
 # Static templates retained for tests and --static mode
@@ -336,6 +336,8 @@ def init_command(
     Detects languages, enables appropriate tools in config, and prints
     next steps for installing tools and running checks.
 
+    \u000c
+
     Args:
         minimal: Use minimal template with fewer defaults.
         force: Overwrite existing config file if it exists.
@@ -356,7 +358,7 @@ def init_command(
         tool_names: list[str] = _extract_tool_names(config_content)
         detected_langs: list[str] = []
     else:
-        registry = ToolRegistry.load()
+        registry = ManifestRegistry.load()
         detected_langs = detect_project_languages()
         effective_profile = profile or ("minimal" if minimal else "recommended")
 

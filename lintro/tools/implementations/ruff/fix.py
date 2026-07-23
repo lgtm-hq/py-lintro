@@ -14,18 +14,19 @@ from lintro.parsers.ruff.ruff_parser import (
     parse_ruff_format_check_output,
     parse_ruff_output,
 )
-from lintro.tools.core.timeout_utils import (
-    create_timeout_result,
-    get_timeout_value,
-)
-from lintro.utils.path_filtering import walk_files_with_excludes
+from lintro.tools.core.timeout_utils import create_timeout_result
+
+# Re-exported so callers keep a single source of truth for the default Ruff
+# timeout (defined in lintro.tools.definitions.ruff). Importing here preserves
+# the historical ``from ...ruff.fix import RUFF_DEFAULT_TIMEOUT`` entry point.
+from lintro.tools.definitions.ruff import RUFF_DEFAULT_TIMEOUT
 
 if TYPE_CHECKING:
     from lintro.models.core.tool_result import ToolResult
     from lintro.tools.definitions.ruff import RuffPlugin
 
-# Constants from tool_ruff.py
-RUFF_DEFAULT_TIMEOUT: int = 30
+__all__ = ["RUFF_DEFAULT_TIMEOUT", "execute_ruff_fix"]
+
 DEFAULT_REMAINING_ISSUES_DISPLAY: int = 5
 
 
@@ -88,42 +89,19 @@ def execute_ruff_fix(
         build_ruff_format_command,
     )
 
-    # Check version requirements
-    version_result = tool._verify_tool_version()
-    if version_result is not None:
-        return version_result
-
-    tool._validate_paths(paths=paths)
-    if not paths:
-        return ToolResult(
-            name=tool.definition.name,
-            success=True,
-            output="No files to fix.",
-            issues_count=0,
-        )
-
-    # Use shared utility for file discovery
-    diff_base_opt = tool.options.get("diff_base")
-    diff_base = diff_base_opt if isinstance(diff_base_opt, str) else None
-    python_files: list[str] = walk_files_with_excludes(
+    # Delegate file discovery, version checking, and timeout resolution to the
+    # shared preparation pipeline so ruff behaves consistently with every other
+    # tool plugin.
+    ctx = tool._prepare_execution(
         paths=paths,
-        file_patterns=tool.definition.file_patterns,
-        exclude_patterns=tool.exclude_patterns,
-        include_venv=tool.include_venv,
-        incremental=bool(tool.options.get("incremental", False)),
-        tool_name="ruff",
-        diff_base=diff_base,
+        options={},
+        no_files_message="No files to fix.",
     )
+    if ctx.should_skip:
+        return ctx.early_result  # type: ignore[return-value]
 
-    if not python_files:
-        return ToolResult(
-            name=tool.definition.name,
-            success=True,
-            output="No Python files found to fix.",
-            issues_count=0,
-        )
-
-    timeout: int = get_timeout_value(tool, RUFF_DEFAULT_TIMEOUT)
+    python_files: list[str] = ctx.files
+    timeout: int = int(ctx.timeout)
     overall_success: bool = True
 
     # Track unsafe fixes for internal decisioning; do not emit as user-facing noise

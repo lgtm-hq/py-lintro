@@ -40,7 +40,10 @@ def mypy_tool() -> BaseToolPlugin:
         BaseToolPlugin: Configured tool plugin instance for assertions.
     """
     tool = ToolRegistry.get("mypy")
-    assert tool is not None, "mypy tool not found in registry"
+    assert_that(tool).described_as(
+        "mypy tool not found in registry",
+    ).is_not_none()
+    assert tool is not None  # narrow type for mypy
     return tool
 
 

@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+from unittest.mock import MagicMock, patch
+
 import pytest
 from assertpy import assert_that
 
+from lintro.tools.core import version_checking
 from lintro.tools.core.version_checking import (
     _get_version_timeout,
     get_install_hints,
@@ -114,6 +117,90 @@ def test_get_install_hints_bun_for_node_tools() -> None:
     """Node.js tools have bun install hints."""
     result = get_install_hints()
     assert_that("bun add" in result.get("markdownlint", "")).is_true()
+
+
+def test_get_install_hints_includes_commitlint_cli_alias() -> None:
+    """``@commitlint/cli`` npm alias has the same bun install hint as commitlint."""
+    result = get_install_hints()
+    assert_that(result).contains_key("@commitlint/cli")
+    assert_that(result["@commitlint/cli"]).contains("bun add")
+    assert_that(result["@commitlint/cli"]).contains("@commitlint/cli@")
+    assert_that(result["@commitlint/cli"]).is_equal_to(result["commitlint"])
+
+
+def test_get_install_hints_uses_commitlint_companion_version(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Commitlint hint uses each npm package's resolved version."""
+    monkeypatch.setattr(
+        version_checking,
+        "get_minimum_versions",
+        lambda: {"commitlint": "21.2.1", "@commitlint/cli": "21.2.1"},
+    )
+    monkeypatch.setattr(
+        version_checking,
+        "get_tool_version",
+        lambda package: (
+            "21.2.0" if package == "@commitlint/config-conventional" else None
+        ),
+    )
+
+    result = get_install_hints()
+
+    assert_that(result["commitlint"]).contains("@commitlint/cli@21.2.1")
+    assert_that(result["commitlint"]).contains(
+        "@commitlint/config-conventional@21.2.0",
+    )
+    assert_that(result["@commitlint/cli"]).is_equal_to(result["commitlint"])
+
+
+def test_get_install_hints_logs_commitlint_when_companion_version_unresolved(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Dropped commitlint hints are included in the missing-hint diagnostic."""
+    monkeypatch.setattr(
+        version_checking,
+        "get_minimum_versions",
+        lambda: {"commitlint": "21.2.1", "@commitlint/cli": "21.2.1"},
+    )
+    monkeypatch.setattr(version_checking, "get_tool_version", lambda _package: None)
+    version_checking._logged_warnings.clear()
+    mock_logger = MagicMock()
+
+    with patch.object(version_checking, "logger", mock_logger):
+        result = get_install_hints()
+
+    assert_that(result).does_not_contain_key("commitlint")
+    assert_that(result).does_not_contain_key("@commitlint/cli")
+    mock_logger.debug.assert_called()
+    debug_msg = mock_logger.debug.call_args[0][0]
+    assert_that(debug_msg).contains("Missing install hints")
+    assert_that(debug_msg).contains("commitlint")
+    assert_that(debug_msg).contains("@commitlint/cli")
+
+
+def test_get_install_hints_missing_template_logs_debug(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Missing hint templates log at debug, not warning (#1593 / #1425).
+
+    Args:
+        monkeypatch: Pytest fixture for patching modules and attributes.
+    """
+    monkeypatch.setattr(
+        version_checking,
+        "get_minimum_versions",
+        lambda: {"hadolint": "2.12.0", "totally_missing_tool": "1.0.0"},
+    )
+    version_checking._logged_warnings.clear()
+    mock_logger = MagicMock()
+    with patch.object(version_checking, "logger", mock_logger):
+        get_install_hints()
+    mock_logger.warning.assert_not_called()
+    mock_logger.debug.assert_called()
+    debug_msg = mock_logger.debug.call_args[0][0]
+    assert_that(debug_msg).contains("Missing install hints")
+    assert_that(debug_msg).contains("totally_missing_tool")
 
 
 def test_get_install_hints_external_tools() -> None:

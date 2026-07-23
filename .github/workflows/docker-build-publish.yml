@@ -12,7 +12,9 @@ name: Build - Docker Image & Registry
   workflow_dispatch:
     inputs:
       force_publish:
-        description: 'Run publish on this branch (manual testing)'
+        description: >-
+          Run publish on this branch (manual testing). Requires backfill_version
+          so :latest is not moved with an empty version tag.
         required: false
         default: 'false'
       backfill_version:
@@ -31,10 +33,38 @@ permissions:
   contents: read
 
 jobs:
-  docker-full:
-    name: 🐳 Docker Full Image
+  validate-backfill-inputs:
+    if: github.event_name == 'workflow_dispatch'
+    name: Validate backfill inputs
+    runs-on: ubuntu-24.04
+    outputs:
+      backfill_version: ${{ steps.validate.outputs.backfill_version }}
+      backfill_ref: ${{ steps.validate.outputs.backfill_ref }}
+      force_publish: ${{ steps.validate.outputs.force_publish }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          persist-credentials: false
+      - name: Validate dispatch inputs
+        id: validate
+        env:
+          BACKFILL_VERSION: ${{ inputs.backfill_version }}
+          BACKFILL_REF: ${{ inputs.backfill_ref }}
+          FORCE_PUBLISH: ${{ inputs.force_publish }}
+        run: ./scripts/ci/validate-docker-backfill-inputs.sh
+
+  docker-base:
+    name: 🐳 Docker Base Image
+    needs: validate-backfill-inputs
+    if: >-
+      always() && !cancelled() &&
+      (needs.validate-backfill-inputs.result == 'success' ||
+      needs.validate-backfill-inputs.result == 'skipped')
+    # Base image (tools layer) publishes before full; a full-image failure must
+    # not block repairing py-lintro-base tags during backfill dispatch.
     # yamllint disable-line rule:line-length
-    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-docker.yml@31c25ef2e8992960e218524780e34f44f51271b5 # v0.54.0
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-docker.yml@ee8484ca71db3a2c2c33da6128bbf2330fcd7c88 # v0.59.2
     permissions:
       contents: read
       packages: write
@@ -43,11 +73,12 @@ jobs:
       security-events: write
     with:
       file: Dockerfile
-      target: full
-      image-name: lgtm-hq/py-lintro
+      target: base
+      image-name: lgtm-hq/py-lintro-base
       version: >-
         ${{ (github.event_name == 'workflow_dispatch'
-        && inputs.backfill_version != '') && inputs.backfill_version
+        && needs.validate-backfill-inputs.outputs.backfill_version != '')
+        && needs.validate-backfill-inputs.outputs.backfill_version
         || (startsWith(github.ref, 'refs/tags/')
         && github.ref_name
         || (github.event_name == 'release' && github.event.release.tag_name || '')) }}
@@ -57,18 +88,19 @@ jobs:
         || startsWith(github.ref, 'refs/tags/')
         || github.event_name == 'release'
         || (github.event_name == 'workflow_dispatch'
-        && (inputs.force_publish == 'true' || inputs.backfill_version != ''))) }}
+        && (needs.validate-backfill-inputs.outputs.force_publish == 'true'
+        || needs.validate-backfill-inputs.outputs.backfill_version != ''))) }}
       source-ref: >-
         ${{ github.event_name == 'workflow_dispatch'
-        && inputs.backfill_ref || '' }}
+        && needs.validate-backfill-inputs.outputs.backfill_ref || '' }}
       tag-latest: >-
         ${{ !(github.event_name == 'workflow_dispatch'
-        && inputs.backfill_version != '') }}
+        && needs.validate-backfill-inputs.outputs.backfill_version != '') }}
       platforms: linux/amd64,linux/arm64
       runner-map: '{"linux/arm64":"ubuntu-24.04-arm"}'
       smoke-test: lintro --version
       validate-on-pr: false
-      cache-registry-ref: ghcr.io/lgtm-hq/py-lintro:cache
+      cache-registry-ref: ghcr.io/lgtm-hq/py-lintro-base:cache
       # Release (tag) builds reuse the registry cache (#1358): BuildKit
       # cache is content-addressed, so a tag build reassembles exactly the
       # layers already built and validated on main instead of a cold
@@ -76,11 +108,11 @@ jobs:
       # republishes remain fully cold.
       no-cache: >-
         ${{ github.event_name == 'workflow_dispatch'
-        && inputs.backfill_version != '' }}
+        && needs.validate-backfill-inputs.outputs.backfill_version != '' }}
       provenance: false
       sbom: false
       cosign-sign: true
-      tooling-ref: '31c25ef2e8992960e218524780e34f44f51271b5' # v0.54.0
+      tooling-ref: 'ee8484ca71db3a2c2c33da6128bbf2330fcd7c88' # v0.59.2
       egress-policy: block
       egress-preset: docker
       # Full list (v0.50.0+ replace semantics): the reusable passes
@@ -125,11 +157,16 @@ jobs:
         timestamp.sigstore.dev:443
         oauth2.sigstore.dev:443
 
-  docker-base:
-    name: 🐳 Docker Base Image
-    needs: docker-full
+  docker-full:
+    name: 🐳 Docker Full Image
+    needs: [validate-backfill-inputs, docker-base]
+    if: >-
+      always() && !cancelled() &&
+      (needs.validate-backfill-inputs.result == 'success' ||
+      needs.validate-backfill-inputs.result == 'skipped') &&
+      needs.docker-base.result == 'success'
     # yamllint disable-line rule:line-length
-    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-docker.yml@31c25ef2e8992960e218524780e34f44f51271b5 # v0.54.0
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-docker.yml@ee8484ca71db3a2c2c33da6128bbf2330fcd7c88 # v0.59.2
     permissions:
       contents: read
       packages: write
@@ -138,11 +175,12 @@ jobs:
       security-events: write
     with:
       file: Dockerfile
-      target: base
-      image-name: lgtm-hq/py-lintro-base
+      target: full
+      image-name: lgtm-hq/py-lintro
       version: >-
         ${{ (github.event_name == 'workflow_dispatch'
-        && inputs.backfill_version != '') && inputs.backfill_version
+        && needs.validate-backfill-inputs.outputs.backfill_version != '')
+        && needs.validate-backfill-inputs.outputs.backfill_version
         || (startsWith(github.ref, 'refs/tags/')
         && github.ref_name
         || (github.event_name == 'release' && github.event.release.tag_name || '')) }}
@@ -152,18 +190,19 @@ jobs:
         || startsWith(github.ref, 'refs/tags/')
         || github.event_name == 'release'
         || (github.event_name == 'workflow_dispatch'
-        && (inputs.force_publish == 'true' || inputs.backfill_version != ''))) }}
+        && (needs.validate-backfill-inputs.outputs.force_publish == 'true'
+        || needs.validate-backfill-inputs.outputs.backfill_version != ''))) }}
       source-ref: >-
         ${{ github.event_name == 'workflow_dispatch'
-        && inputs.backfill_ref || '' }}
+        && needs.validate-backfill-inputs.outputs.backfill_ref || '' }}
       tag-latest: >-
         ${{ !(github.event_name == 'workflow_dispatch'
-        && inputs.backfill_version != '') }}
+        && needs.validate-backfill-inputs.outputs.backfill_version != '') }}
       platforms: linux/amd64,linux/arm64
       runner-map: '{"linux/arm64":"ubuntu-24.04-arm"}'
       smoke-test: lintro --version
       validate-on-pr: false
-      cache-registry-ref: ghcr.io/lgtm-hq/py-lintro-base:cache
+      cache-registry-ref: ghcr.io/lgtm-hq/py-lintro:cache
       # Release (tag) builds reuse the registry cache (#1358): BuildKit
       # cache is content-addressed, so a tag build reassembles exactly the
       # layers already built and validated on main instead of a cold
@@ -171,11 +210,11 @@ jobs:
       # republishes remain fully cold.
       no-cache: >-
         ${{ github.event_name == 'workflow_dispatch'
-        && inputs.backfill_version != '' }}
+        && needs.validate-backfill-inputs.outputs.backfill_version != '' }}
       provenance: false
       sbom: false
       cosign-sign: true
-      tooling-ref: '31c25ef2e8992960e218524780e34f44f51271b5' # v0.54.0
+      tooling-ref: 'ee8484ca71db3a2c2c33da6128bbf2330fcd7c88' # v0.59.2
       egress-policy: block
       egress-preset: docker
       # Full list (v0.50.0+ replace semantics): the reusable passes
