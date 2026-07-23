@@ -8,6 +8,7 @@ from unittest.mock import patch
 from assertpy import assert_that
 
 from lintro.parsers.trufflehog.trufflehog_issue import TrufflehogIssue
+from lintro.plugins.base import ExecutionContext
 from lintro.tools.definitions.trufflehog import TrufflehogPlugin
 from tests.unit.tools.trufflehog.conftest import (
     make_subprocess_result,
@@ -101,6 +102,62 @@ def test_check_passes_absolute_paths_to_command(
 
     # The resolved absolute path should appear in the command.
     assert_that(captured["cmd"]).contains(str(test_file.resolve()))
+
+
+def test_check_fails_when_resolved_scan_target_disappears(
+    trufflehog_plugin: TrufflehogPlugin,
+    tmp_path: Path,
+) -> None:
+    """A resolved scan-set file disappearing before invoke must fail closed.
+
+    Args:
+        trufflehog_plugin: The plugin under test.
+        tmp_path: Temporary directory path.
+    """
+    test_file = tmp_path / "module.py"
+    test_file.write_text('"""Module."""\n')
+    prepared = ExecutionContext(
+        files=[str(test_file)],
+        cwd=str(tmp_path),
+        timeout=60,
+    )
+    test_file.unlink()
+
+    with (
+        patch.object(trufflehog_plugin, "_prepare_execution", return_value=prepared),
+        patch.object(trufflehog_plugin, "_run_subprocess_result") as run_mock,
+    ):
+        result = trufflehog_plugin.check([str(test_file)], {})
+
+    assert_that(result.success).is_false()
+    assert_that(result.output).contains("disappeared before execution")
+    assert_that(result.output).contains(str(test_file.resolve()))
+    assert_that(result.parse_failures_count).is_equal_to(1)
+    run_mock.assert_not_called()
+
+
+def test_check_fails_when_config_is_absent(
+    trufflehog_plugin: TrufflehogPlugin,
+    tmp_path: Path,
+) -> None:
+    """A missing explicit config must not fall back to default detectors.
+
+    Args:
+        trufflehog_plugin: The plugin under test.
+        tmp_path: Temporary directory path.
+    """
+    test_file = tmp_path / "module.py"
+    test_file.write_text('"""Module."""\n')
+    missing_config = tmp_path / "missing-trufflehog.yaml"
+    trufflehog_plugin.set_options(config=str(missing_config))
+
+    with patch.object(trufflehog_plugin, "_run_subprocess_result") as run_mock:
+        result = trufflehog_plugin.check([str(test_file)], {})
+
+    assert_that(result.success).is_false()
+    assert_that(result.output).contains("config file does not exist")
+    assert_that(result.output).contains(str(missing_config))
+    run_mock.assert_not_called()
 
 
 def test_check_unparseable_output_is_not_clean(
