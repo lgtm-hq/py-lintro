@@ -21,6 +21,12 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.91.15] - 2026-07-23
+
+### Fixed
+
+- **cli**: render clean --help text for subcommands (#1457) (b7b5fbe)
+
 ## [0.91.14] - 2026-07-23
 
 ### Fixed
