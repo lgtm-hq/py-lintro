@@ -21,9 +21,11 @@ name: Maintenance - GHCR Registry Cleanup
         default: false
         type: boolean
       min_age_days:
-        description: 'Minimum age in days before deletion (protects multi-arch deps)'
+        description: >-
+          Minimum age in days before deletion. For CI-tag sweep, keep >=90 so
+          Actions reruns of aged runs can still pull ci-<run_id> (#1138).
         required: false
-        default: 7
+        default: 90
         type: number
 
 concurrency:
@@ -84,6 +86,8 @@ jobs:
           allowed-endpoints: >
             github.com:443
             api.github.com:443
+            codeload.github.com:443
+            objects.githubusercontent.com:443
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:

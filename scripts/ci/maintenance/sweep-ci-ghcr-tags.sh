@@ -102,6 +102,10 @@ sweep_package() {
 
 	# One TSV line per candidate: <id>\t<updated_at>\t<space-joined tags>
 	# Embed prefix/cutoff via shell interpolation (gh api has no --arg).
+	# Keep stderr out of the TSV payload so diagnostic noise cannot corrupt
+	# the while-read loop (CodeRabbit on #1645).
+	local query_err_file=""
+	query_err_file="$(mktemp)"
 	if ! query_output=$(gh api \
 		"orgs/${org}/packages/container/${pkg}/versions" \
 		--paginate \
@@ -115,11 +119,13 @@ sweep_package() {
 			| [( .id | tostring),
 				.updated_at,
 				((.metadata.container.tags // []) | join(\" \"))]
-			| @tsv" 2>&1); then
-		echo "::error::Failed to query versions for ${pkg}: ${query_output}" >&2
+			| @tsv" 2>"${query_err_file}"); then
+		echo "::error::Failed to query versions for ${pkg}: $(cat "${query_err_file}")" >&2
+		rm -f "${query_err_file}"
 		sweep_errors=1
 		return
 	fi
+	rm -f "${query_err_file}"
 	versions="$query_output"
 
 	if [[ -z "$versions" ]]; then
@@ -146,16 +152,20 @@ sweep_package() {
 		local state=""
 		local current_updated=""
 		local current_tags=""
-		local recheck=0
 		local safe_to_delete=1
-		for recheck in 1 2; do
-			if ! state=$(fetch_version_state "$pkg" "$vid" 2>&1); then
+		local recheck_err_file=""
+		# Dual recheck narrows the promotion/TOCTOU window before DELETE.
+		for _ in 1 2; do
+			recheck_err_file="$(mktemp)"
+			if ! state=$(fetch_version_state "$pkg" "$vid" 2>"${recheck_err_file}"); then
 				echo "::error::Failed to re-check version ${vid}; skipping" \
-					"deletion: ${state}" >&2
+					"deletion: $(cat "${recheck_err_file}")" >&2
+				rm -f "${recheck_err_file}"
 				sweep_errors=1
 				safe_to_delete=0
 				break
 			fi
+			rm -f "${recheck_err_file}"
 			IFS=$'\t' read -r current_updated current_tags <<<"$state"
 			if [[ "$current_updated" != "$snap_updated" ]]; then
 				echo "Skipping version ${vid} (${pkg}): updated_at changed" \
@@ -174,13 +184,16 @@ sweep_package() {
 		if [[ "$safe_to_delete" -ne 1 ]]; then
 			continue
 		fi
-		local delete_output=""
-		if delete_output=$(gh api --method DELETE \
+		local delete_err_file=""
+		delete_err_file="$(mktemp)"
+		if gh api --method DELETE \
 			"orgs/${org}/packages/container/${pkg}/versions/${vid}" \
-			2>&1); then
+			>/dev/null 2>"${delete_err_file}"; then
+			rm -f "${delete_err_file}"
 			echo "Deleted ${pkg} version ${vid} (tags: ${current_tags})"
 		else
-			echo "::error::Failed to delete ${pkg} version ${vid}: ${delete_output}" >&2
+			echo "::error::Failed to delete ${pkg} version ${vid}: $(cat "${delete_err_file}")" >&2
+			rm -f "${delete_err_file}"
 			sweep_errors=1
 		fi
 	done <<<"$versions"

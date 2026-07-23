@@ -1195,6 +1195,9 @@ def test_ghcr_cleanup_sweeps_ephemeral_ci_tags() -> None:
     # Dispatch inputs drive dry-run / age for both prune and sweep.
     assert_that(triggers).contains_key("workflow_dispatch")
     assert_that(triggers["workflow_dispatch"]["inputs"]).contains_key("min_age_days")
+    assert_that(
+        triggers["workflow_dispatch"]["inputs"]["min_age_days"]["default"],
+    ).is_equal_to(90)
     assert_that(triggers["workflow_dispatch"]["inputs"]).contains_key("dry_run")
     sweep_env = next(
         (step.get("env") or {})
