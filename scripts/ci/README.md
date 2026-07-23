@@ -26,6 +26,7 @@ scripts/ci/
 | `docker-ci.yml`               | Fork detect, image pull/load, lgtm-ci quality, test summary, security audit                                                      |
 | `publish-pypi-on-tag.yml`     | lgtm-ci quality/SBOM; `build-artifacts` + PyPI publish + GitHub release                                                          |
 | `pr-comment-cleanup.yml`      | `post-pr-delete-previous.sh`                                                                                                     |
+| `pr-size.yml`                 | `pr-size-label.py` (effective-line size labels)                                                                                  |
 | `lintro-report-scheduled.yml` | `lintro-report-generate.sh`                                                                                                      |
 | GHCR cleanup (docker-ci)      | `maintenance/delete-ci-ghcr-tags.sh`                                                                                             |
 | GHCR cleanup (scheduled)      | lgtm-ci `reusable-ghcr-cleanup.yml` (`ghcr-cleanup.yml`)                                                                         |

@@ -1,0 +1,60 @@
+# SPDX-License-Identifier: MIT
+# For license details, see the repository root LICENSE file.
+---
+name: PR - Size Labels
+
+# Labels each PR with size:XS…size:XL from effective changed lines.
+# Uses pull_request_target so labeling works for forks: checkout is the BASE
+# ref only; the script reads diff metadata via the GitHub API and never
+# executes PR-controlled code.
+
+'on':
+  pull_request_target:
+    types: [opened, synchronize, reopened]
+
+permissions: {}
+
+concurrency:
+  group: pr-size-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  label-size:
+    name: Label PR size
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      # Apply/remove size:* labels on the PR.
+      pull-requests: write
+      # Upsert missing size:* label definitions (color/description).
+      issues: write
+    timeout-minutes: 5
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Harden Runner
+        # yamllint disable-line rule:line-length
+        uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
+        with:
+          egress-policy: 'block'
+          allowed-endpoints: >
+            github.com:443
+            api.github.com:443
+            codeload.github.com:443
+            objects.githubusercontent.com:443
+
+      - name: Checkout base ref (trusted script only)
+        # SECURITY: never check out the PR head. The sizing script comes from
+        # the base ref and consumes diff metadata via `gh api` only.
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+          fetch-depth: 1
+
+      - name: Apply size label
+        env:
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+        run: python3 scripts/ci/pr-size-label.py
