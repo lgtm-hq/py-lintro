@@ -21,6 +21,12 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.91.7] - 2026-07-23
+
+### Fixed
+
+- **cli**: resolve --diff per repository for multi-repo scans (#1383) (c06ce16)
+
 ## [0.91.6] - 2026-07-23
 
 ### Changed
