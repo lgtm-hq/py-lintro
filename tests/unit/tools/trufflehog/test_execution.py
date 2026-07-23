@@ -128,11 +128,11 @@ def test_check_unparseable_output_is_not_clean(
     assert_that(result.parse_failures_count).is_equal_to(1)
 
 
-def test_check_scan_error_is_not_clean(
+def test_check_benign_missing_path_scan_error_passes(
     trufflehog_plugin: TrufflehogPlugin,
     tmp_path: Path,
 ) -> None:
-    """A scan-error log with empty stdout must fail, not pass clean.
+    """Lstat missing-path errors outside the scan set must not hard-fail.
 
     Args:
         trufflehog_plugin: The plugin under test.
@@ -143,12 +143,133 @@ def test_check_scan_error_is_not_clean(
 
     stderr = (
         '{"level":"error","msg":"encountered errors during scan",'
-        '"errors":["lstat /nope: no such file or directory"]}'
+        '"errors":["lstat /nope/coverage: no such file or directory",'
+        '"lstat /nope/lighthouse-reports: no such file or directory"]}'
     )
     with patch.object(
         trufflehog_plugin,
         "_run_subprocess_result",
         return_value=make_subprocess_result(stdout="", stderr=stderr, returncode=0),
+    ):
+        result = trufflehog_plugin.check([str(test_file)], {})
+
+    assert_that(result.success).is_true()
+    assert_that(result.issues_count).is_equal_to(0)
+    # Benign scan noise must not surface as a version-incompat parse warning.
+    assert_that(result.parse_failures_count in (0, None)).is_true()
+
+
+def test_check_permission_denied_scan_error_fails(
+    trufflehog_plugin: TrufflehogPlugin,
+    tmp_path: Path,
+) -> None:
+    """A permission-denied scan error is a genuine incomplete scan.
+
+    Args:
+        trufflehog_plugin: The plugin under test.
+        tmp_path: Temporary directory path.
+    """
+    test_file = tmp_path / "module.py"
+    test_file.write_text('"""Module."""\n')
+
+    stderr = (
+        '{"level":"error","msg":"encountered errors during scan",'
+        '"errors":["open /secret: permission denied"]}'
+    )
+    with patch.object(
+        trufflehog_plugin,
+        "_run_subprocess_result",
+        return_value=make_subprocess_result(stdout="", stderr=stderr, returncode=0),
+    ):
+        result = trufflehog_plugin.check([str(test_file)], {})
+
+    assert_that(result.success).is_false()
+    assert_that(result.parse_failures_count).is_equal_to(1)
+
+
+def test_check_missing_scan_set_path_fails(
+    trufflehog_plugin: TrufflehogPlugin,
+    tmp_path: Path,
+) -> None:
+    """A missing path that was part of the resolved scan set must fail closed.
+
+    Args:
+        trufflehog_plugin: The plugin under test.
+        tmp_path: Temporary directory path.
+    """
+    test_file = tmp_path / "module.py"
+    test_file.write_text('"""Module."""\n')
+    resolved = str(test_file.resolve())
+
+    stderr = (
+        '{"level":"error","msg":"encountered errors during scan",'
+        '"errors":["lstat ' + resolved + ': no such file or directory"]}'
+    )
+    with patch.object(
+        trufflehog_plugin,
+        "_run_subprocess_result",
+        return_value=make_subprocess_result(stdout="", stderr=stderr, returncode=0),
+    ):
+        result = trufflehog_plugin.check([str(test_file)], {})
+
+    assert_that(result.success).is_false()
+    assert_that(result.parse_failures_count).is_equal_to(1)
+
+
+def test_check_benign_scan_error_with_findings_still_reports_secrets(
+    trufflehog_plugin: TrufflehogPlugin,
+    tmp_path: Path,
+) -> None:
+    """Benign missing-path noise must not hide or fail real secret findings.
+
+    Args:
+        trufflehog_plugin: The plugin under test.
+        tmp_path: Temporary directory path.
+    """
+    test_file = tmp_path / "config.py"
+    test_file.write_text("TOKEN = 'ghp_fake'\n")
+
+    stderr = (
+        '{"level":"error","msg":"encountered errors during scan",'
+        '"errors":["lstat /ci-only/coverage: no such file or directory"]}'
+    )
+    with patch.object(
+        trufflehog_plugin,
+        "_run_subprocess_result",
+        return_value=make_subprocess_result(
+            stdout=sample_finding_line(file=str(test_file), line=1),
+            stderr=stderr,
+            returncode=0,
+        ),
+    ):
+        result = trufflehog_plugin.check([str(test_file)], {})
+
+    assert_that(result.success).is_true()
+    assert_that(result.issues_count).is_equal_to(1)
+    assert_that(result.parse_failures_count in (0, None)).is_true()
+
+
+def test_check_unparseable_scan_error_details_fail_closed(
+    trufflehog_plugin: TrufflehogPlugin,
+    tmp_path: Path,
+) -> None:
+    """Scan-error banner without extractable reasons must fail closed.
+
+    Args:
+        trufflehog_plugin: The plugin under test.
+        tmp_path: Temporary directory path.
+    """
+    test_file = tmp_path / "module.py"
+    test_file.write_text('"""Module."""\n')
+
+    with patch.object(
+        trufflehog_plugin,
+        "_run_subprocess_result",
+        return_value=make_subprocess_result(
+            stdout="",
+            stderr="level=error msg=encountered errors during scan",
+            returncode=0,
+        ),
     ):
         result = trufflehog_plugin.check([str(test_file)], {})
 
@@ -212,11 +333,11 @@ def test_check_nonzero_exit_with_partial_findings_fails(
     assert_that(result.issues_count).is_equal_to(1)
 
 
-def test_check_scan_error_with_findings_still_fails(
+def test_check_genuine_scan_error_with_findings_still_fails(
     trufflehog_plugin: TrufflehogPlugin,
     tmp_path: Path,
 ) -> None:
-    """Scan errors on one target fail the run even when another had findings.
+    """Genuine scan errors fail the run even when another target had findings.
 
     Args:
         trufflehog_plugin: The plugin under test.
@@ -225,12 +346,16 @@ def test_check_scan_error_with_findings_still_fails(
     test_file = tmp_path / "module.py"
     test_file.write_text("AWS_KEY = 'AKIA...'\n")
 
+    stderr = (
+        '{"level":"error","msg":"encountered errors during scan",'
+        '"errors":["open /etc/shadow: permission denied"]}'
+    )
     with patch.object(
         trufflehog_plugin,
         "_run_subprocess_result",
         return_value=make_subprocess_result(
             stdout=sample_finding_line(file=str(test_file)),
-            stderr="level=error msg=encountered errors during scan",
+            stderr=stderr,
             returncode=0,
         ),
     ):

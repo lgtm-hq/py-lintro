@@ -60,9 +60,15 @@ never report a clean pass from a scan that did not run. The wrapper therefore:
 - Resolves every requested path to an **absolute path** before scanning, because a
   relative path that does not resolve against TruffleHog's working directory yields a
   silent empty result.
+- Skips optional `--config` / `--exclude-paths` flags when the configured file is
+  absent on disk, so CI-only artifact paths do not generate scan-time `lstat` noise.
 - Treats non-empty-but-unparseable stdout as a **parse failure** (see #1044).
-- Treats `encountered errors during scan` as a **failure**, even when partial findings
-  were emitted for other targets.
+- Treats `encountered errors during scan` as a **failure** when the per-error reasons
+  are missing, unparseable, or genuine (permission denied, a missing target that was
+  part of the resolved scan set, crashes). Benign `lstat`/`stat` `no such file or
+  directory` errors for paths **outside** the resolved scan set (for example CI-only
+  `coverage/` dirs) are logged and ignored so the gate stays green when no secrets
+  were found (see #1631). Partial findings are always preserved.
 
 ### Options
 
