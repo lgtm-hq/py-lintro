@@ -21,6 +21,13 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.91.9] - 2026-07-23
+
+### Fixed
+
+- **core**: anchor tool cwd to the files' project root for scope-independence (#1623)
+  (edf70c4)
+
 ## [0.91.8] - 2026-07-23
 
 ### Fixed
