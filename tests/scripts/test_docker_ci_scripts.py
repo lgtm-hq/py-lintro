@@ -430,7 +430,7 @@ def test_sweep_ci_ghcr_tags_validates_min_age_days() -> None:
 def test_sweep_ci_ghcr_tags_deletes_ci_only_versions(
     tmp_path: Path,
 ) -> None:
-    """Sweep should delete CI-only versions and skip mixed-tag digests."""
+    """Sweep should delete CI-only versions after dual pre-delete rechecks."""
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
     gh_log = tmp_path / "gh.log"
@@ -442,8 +442,14 @@ def test_sweep_ci_ghcr_tags_deletes_ci_only_versions(
             'if [[ "$*" == *"DELETE"* ]]; then\n'
             "  exit 0\n"
             "fi\n"
-            'if [[ "$*" == *"/versions/"* ]]; then\n'
-            '  echo "$GH_VERSION_TAGS"\n'
+            # Match /versions/<id> (not the list endpoint .../versions).
+            'if [[ "$*" =~ /versions/([0-9]+) ]]; then\n'
+            '  vid="${BASH_REMATCH[1]}"\n'
+            '  case "$vid" in\n'
+            "  201) printf '%s\\t%s\\n' '2026-01-01T00:00:00Z' 'ci-1 ci-2' ;;\n"
+            "  202) printf '%s\\t%s\\n' '2026-01-02T00:00:00Z' 'ci-old' ;;\n"
+            '  *) echo "unexpected version $vid" >&2; exit 99 ;;\n'
+            "  esac\n"
             "  exit 0\n"
             "fi\n"
             'printf "%s\\n" "$GH_VERSIONS_TSV"'
@@ -458,9 +464,11 @@ def test_sweep_ci_ghcr_tags_deletes_ci_only_versions(
             "PACKAGES": "py-lintro",
             "MIN_AGE_DAYS": "0",
             "GH_LOG": str(gh_log),
-            # jq filtering is stubbed; the script still re-validates tags.
-            "GH_VERSIONS_TSV": "201\tci-1 ci-2\n202\tci-old",
-            "GH_VERSION_TAGS": "ci-old",
+            # id\\tupdated_at\\ttags (jq filtering is stubbed).
+            "GH_VERSIONS_TSV": (
+                "201\t2026-01-01T00:00:00Z\tci-1 ci-2\n"
+                "202\t2026-01-02T00:00:00Z\tci-old"
+            ),
         },
     )
 
@@ -470,6 +478,9 @@ def test_sweep_ci_ghcr_tags_deletes_ci_only_versions(
     log = gh_log.read_text()
     assert_that(log).contains("versions/201")
     assert_that(log).contains("versions/202")
+    # Two rechecks per deleted version before DELETE.
+    assert_that(log.count("versions/201")).is_greater_than_or_equal_to(2)
+    assert_that(log.count("versions/202")).is_greater_than_or_equal_to(2)
 
 
 def test_sweep_ci_ghcr_tags_recheck_aborts_on_persistent_tag(
@@ -488,7 +499,7 @@ def test_sweep_ci_ghcr_tags_recheck_aborts_on_persistent_tag(
             "  exit 0\n"
             "fi\n"
             'if [[ "$*" == *"/versions/"* ]]; then\n'
-            '  echo "$GH_VERSION_TAGS"\n'
+            '  echo "$GH_VERSION_STATE"\n'
             "  exit 0\n"
             "fi\n"
             'printf "%s\\n" "$GH_VERSIONS_TSV"'
@@ -503,15 +514,82 @@ def test_sweep_ci_ghcr_tags_recheck_aborts_on_persistent_tag(
             "PACKAGES": "py-lintro",
             "MIN_AGE_DAYS": "0",
             "GH_LOG": str(gh_log),
-            "GH_VERSIONS_TSV": "202\tci-old",
+            "GH_VERSIONS_TSV": "202\t2026-01-02T00:00:00Z\tci-old",
             # Promotion attached main between snapshot and delete.
-            "GH_VERSION_TAGS": "ci-old main",
+            "GH_VERSION_STATE": "2026-01-02T00:00:00Z\tci-old main",
         },
     )
 
     assert_that(result.returncode).is_equal_to(0)
     assert_that(result.stdout).contains("tags changed since snapshot")
     assert_that(gh_log.read_text()).does_not_contain("--method DELETE")
+
+
+def test_sweep_ci_ghcr_tags_recheck_aborts_on_updated_at_change(
+    tmp_path: Path,
+) -> None:
+    """An updated_at change between list and delete must abort delete."""
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    gh_log = tmp_path / "gh.log"
+    _write_stub(
+        bin_dir,
+        "gh",
+        (
+            'echo "$*" >> "$GH_LOG"\n'
+            'if [[ "$*" == *"DELETE"* ]]; then\n'
+            "  exit 0\n"
+            "fi\n"
+            'if [[ "$*" == *"/versions/"* ]]; then\n'
+            '  echo "$GH_VERSION_STATE"\n'
+            "  exit 0\n"
+            "fi\n"
+            'printf "%s\\n" "$GH_VERSIONS_TSV"'
+        ),
+    )
+
+    result = _run_with_stubs(
+        "scripts/ci/maintenance/sweep-ci-ghcr-tags.sh",
+        bin_dir,
+        {
+            "GH_TOKEN": "dummy",  # nosec B105 - fake token for stubbed gh
+            "PACKAGES": "py-lintro",
+            "MIN_AGE_DAYS": "0",
+            "GH_LOG": str(gh_log),
+            "GH_VERSIONS_TSV": "202\t2026-01-02T00:00:00Z\tci-old",
+            "GH_VERSION_STATE": "2026-01-03T00:00:00Z\tci-old",
+        },
+    )
+
+    assert_that(result.returncode).is_equal_to(0)
+    assert_that(result.stdout).contains("updated_at changed since snapshot")
+    assert_that(gh_log.read_text()).does_not_contain("--method DELETE")
+
+
+def test_sweep_ci_ghcr_tags_fails_on_query_error(
+    tmp_path: Path,
+) -> None:
+    """Package version query failures must fail the sweep job."""
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    _write_stub(
+        bin_dir,
+        "gh",
+        ('echo "boom" >&2\n' "exit 1\n"),
+    )
+
+    result = _run_with_stubs(
+        "scripts/ci/maintenance/sweep-ci-ghcr-tags.sh",
+        bin_dir,
+        {
+            "GH_TOKEN": "dummy",  # nosec B105 - fake token for stubbed gh
+            "PACKAGES": "py-lintro",
+            "MIN_AGE_DAYS": "0",
+        },
+    )
+
+    assert_that(result.returncode).is_equal_to(1)
+    assert_that(result.stderr).contains("Failed to query versions")
 
 
 def test_sweep_ci_ghcr_tags_dry_run_skips_delete(
@@ -536,7 +614,7 @@ def test_sweep_ci_ghcr_tags_dry_run_skips_delete(
             "MIN_AGE_DAYS": "0",
             "DRY_RUN": "true",
             "GH_LOG": str(gh_log),
-            "GH_VERSIONS_TSV": "202\tci-old",
+            "GH_VERSIONS_TSV": "202\t2026-01-02T00:00:00Z\tci-old",
         },
     )
 

@@ -13,14 +13,18 @@ set -euo pipefail
 # the whole life of the run (all attempts) while still bounding GHCR storage:
 # tags older than MIN_AGE_DAYS are pruned on the weekly schedule.
 #
+# Default MIN_AGE_DAYS is 90 to match GitHub Actions' default workflow-run
+# retention: maintainers can re-run failed jobs for as long as the run is
+# kept, and the ci-<run_id> tag must still resolve for those partial reruns.
+#
 # The GHCR Packages API deletes whole *versions* (one version = one digest
 # carrying every tag that points at it). Safety rules match
 # delete-ci-ghcr-tags.sh (#1138, #1358):
 #   - Only versions whose EVERY tag starts with TAG_PREFIX are candidates.
 #   - Mixed CI+release (or CI+foreign) versions are skipped.
-#   - Tags are re-checked immediately before DELETE to narrow the TOCTOU
-#     window if promotion or a byte-identical concurrent build attaches a
-#     persistent tag between the list and the delete.
+#   - Tags + updated_at are re-checked immediately before DELETE to narrow
+#     the TOCTOU window if promotion or a byte-identical concurrent build
+#     attaches a persistent tag between the list and the delete.
 # The persistent ":cache" tag never matches the CI prefix. Architecture-
 # specific child manifests that become untagged are left for the weekly
 # untagged prune (reusable-ghcr-cleanup.yml).
@@ -38,7 +42,7 @@ Environment:
   PACKAGES       Space-separated package names
                  (default: "py-lintro py-lintro-base")
   TAG_PREFIX     Only sweep tags starting with this (default: ci-)
-  MIN_AGE_DAYS   Only delete versions older than N days (default: 7)
+  MIN_AGE_DAYS   Only delete versions older than N days (default: 90)
   DRY_RUN        When "true", log candidates without deleting (default: false)
 EOF
 	exit 0
@@ -48,8 +52,9 @@ gh_token="${GH_TOKEN:-}"
 org="${ORG:-lgtm-hq}"
 packages="${PACKAGES:-py-lintro py-lintro-base}"
 tag_prefix="${TAG_PREFIX:-ci-}"
-min_age_days="${MIN_AGE_DAYS:-7}"
+min_age_days="${MIN_AGE_DAYS:-90}"
 dry_run="${DRY_RUN:-false}"
+sweep_errors=0
 
 if [[ -z "$gh_token" ]]; then
 	echo "GH_TOKEN is required" >&2
@@ -81,12 +86,21 @@ tags_are_ci_only() {
 	return 0
 }
 
+# Fetch current tags + updated_at for a version. Prints "<updated_at>\t<tags>".
+fetch_version_state() {
+	local pkg="$1"
+	local vid="$2"
+	gh api \
+		"orgs/${org}/packages/container/${pkg}/versions/${vid}" \
+		--jq '[.updated_at, ((.metadata.container.tags // []) | join(" "))] | @tsv'
+}
+
 sweep_package() {
 	local pkg="$1"
 	local query_output=""
 	local versions=""
 
-	# One TSV line per candidate: <id>\t<space-joined tags>
+	# One TSV line per candidate: <id>\t<updated_at>\t<space-joined tags>
 	# Embed prefix/cutoff via shell interpolation (gh api has no --arg).
 	if ! query_output=$(gh api \
 		"orgs/${org}/packages/container/${pkg}/versions" \
@@ -99,9 +113,11 @@ sweep_package() {
 				and ((.updated_at | fromdateiso8601) < ${cutoff_epoch})
 			)
 			| [( .id | tostring),
+				.updated_at,
 				((.metadata.container.tags // []) | join(\" \"))]
 			| @tsv" 2>&1); then
-		echo "::warning::Failed to query versions for ${pkg}: ${query_output}" >&2
+		echo "::error::Failed to query versions for ${pkg}: ${query_output}" >&2
+		sweep_errors=1
 		return
 	fi
 	versions="$query_output"
@@ -111,7 +127,7 @@ sweep_package() {
 		return
 	fi
 
-	while IFS=$'\t' read -r vid tags; do
+	while IFS=$'\t' read -r vid snap_updated tags; do
 		[[ -z "$vid" ]] && continue
 		if ! tags_are_ci_only "$tags"; then
 			echo "Skipping version ${vid} (${pkg}): unexpected non-CI tags" \
@@ -124,18 +140,38 @@ sweep_package() {
 		fi
 		# Re-check immediately before deleting: promotion (#1358) or a
 		# byte-identical concurrent build may have attached a persistent
-		# tag between the paginated snapshot and now.
+		# tag (or refreshed updated_at) between the paginated snapshot and
+		# now. A second immediate recheck narrows the residual TOCTOU window
+		# before DELETE.
+		local state=""
+		local current_updated=""
 		local current_tags=""
-		if ! current_tags=$(gh api \
-			"orgs/${org}/packages/container/${pkg}/versions/${vid}" \
-			--jq '(.metadata.container.tags // []) | join(" ")' 2>&1); then
-			echo "::warning::Failed to re-check version ${vid}; skipping" \
-				"deletion: ${current_tags}"
-			continue
-		fi
-		if ! tags_are_ci_only "$current_tags"; then
-			echo "Skipping version ${vid} (${pkg}): tags changed since" \
-				"snapshot [${current_tags}] (#1138)"
+		local recheck=0
+		local safe_to_delete=1
+		for recheck in 1 2; do
+			if ! state=$(fetch_version_state "$pkg" "$vid" 2>&1); then
+				echo "::error::Failed to re-check version ${vid}; skipping" \
+					"deletion: ${state}" >&2
+				sweep_errors=1
+				safe_to_delete=0
+				break
+			fi
+			IFS=$'\t' read -r current_updated current_tags <<<"$state"
+			if [[ "$current_updated" != "$snap_updated" ]]; then
+				echo "Skipping version ${vid} (${pkg}): updated_at changed" \
+					"since snapshot (${snap_updated} -> ${current_updated})" \
+					"(#1138)"
+				safe_to_delete=0
+				break
+			fi
+			if ! tags_are_ci_only "$current_tags"; then
+				echo "Skipping version ${vid} (${pkg}): tags changed since" \
+					"snapshot [${current_tags}] (#1138)"
+				safe_to_delete=0
+				break
+			fi
+		done
+		if [[ "$safe_to_delete" -ne 1 ]]; then
 			continue
 		fi
 		local delete_output=""
@@ -144,7 +180,8 @@ sweep_package() {
 			2>&1); then
 			echo "Deleted ${pkg} version ${vid} (tags: ${current_tags})"
 		else
-			echo "::warning::Failed to delete ${pkg} version ${vid}: ${delete_output}"
+			echo "::error::Failed to delete ${pkg} version ${vid}: ${delete_output}" >&2
+			sweep_errors=1
 		fi
 	done <<<"$versions"
 }
@@ -153,3 +190,8 @@ echo "Sweeping ${tag_prefix}* tags older than ${min_age_days}d (dry_run=${dry_ru
 for pkg in $packages; do
 	sweep_package "$pkg"
 done
+
+if [[ "$sweep_errors" -ne 0 ]]; then
+	echo "::error::GHCR CI-tag sweep completed with errors" >&2
+	exit 1
+fi

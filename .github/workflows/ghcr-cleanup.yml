@@ -91,8 +91,10 @@ jobs:
       - name: Sweep aged-out CI tags
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # 90d matches Actions default run retention so partial reruns
+          # of aged workflow runs can still pull ci-<run_id> (#1138).
           MIN_AGE_DAYS: >-
-            ${{ github.event_name != 'workflow_dispatch' && 7 || inputs.min_age_days }}
+            ${{ github.event_name != 'workflow_dispatch' && 90 || inputs.min_age_days }}
           DRY_RUN: ${{ inputs.dry_run == true }}
         run: scripts/ci/maintenance/sweep-ci-ghcr-tags.sh
 

@@ -1196,3 +1196,10 @@ def test_ghcr_cleanup_sweeps_ephemeral_ci_tags() -> None:
     assert_that(triggers).contains_key("workflow_dispatch")
     assert_that(triggers["workflow_dispatch"]["inputs"]).contains_key("min_age_days")
     assert_that(triggers["workflow_dispatch"]["inputs"]).contains_key("dry_run")
+    sweep_env = next(
+        (step.get("env") or {})
+        for step in sweep["steps"]
+        if isinstance(step, dict)
+        and step.get("run") == "scripts/ci/maintenance/sweep-ci-ghcr-tags.sh"
+    )
+    assert_that(str(sweep_env.get("MIN_AGE_DAYS", ""))).contains("90")
