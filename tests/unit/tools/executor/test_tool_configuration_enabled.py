@@ -403,3 +403,139 @@ def test_disabled_tool_case_insensitive(
     assert_that(result.to_run).is_equal_to(["ruff"])
     assert_that(result.to_run).does_not_contain("MyPy")
     assert_that(result.to_run).does_not_contain("mypy")
+
+
+# =============================================================================
+# Hyphenated --tools names (#1630)
+# =============================================================================
+
+
+def test_hyphenated_tools_resolve_to_underscore_registry_keys(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Hyphenated canonical names resolve to underscored registry keys."""
+    from lintro.tools import tool_manager
+
+    registered = {"html_validate", "pip_audit", "golangci_lint", "ruff"}
+
+    monkeypatch.setattr(
+        tool_manager,
+        "is_tool_registered",
+        lambda name: name in registered,
+    )
+    monkeypatch.setattr(
+        tool_manager,
+        "get_tool_names",
+        lambda: sorted(registered),
+    )
+
+    config = LintroConfig()
+
+    with patch(
+        "lintro.utils.execution.tool_configuration.get_config",
+        return_value=config,
+    ):
+        result = get_tools_to_run(
+            tools="html-validate,pip-audit,golangci-lint",
+            action="check",
+        )
+
+    assert_that(result.to_run).contains_only(
+        "html_validate",
+        "pip_audit",
+        "golangci_lint",
+    )
+
+
+def test_mixed_hyphen_and_plain_tools_resolve(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Mixed hyphenated and plain names both resolve in one --tools list."""
+    from lintro.tools import tool_manager
+
+    registered = {"html_validate", "ruff"}
+
+    monkeypatch.setattr(
+        tool_manager,
+        "is_tool_registered",
+        lambda name: name in registered,
+    )
+    monkeypatch.setattr(
+        tool_manager,
+        "get_tool_names",
+        lambda: sorted(registered),
+    )
+
+    config = LintroConfig()
+
+    with patch(
+        "lintro.utils.execution.tool_configuration.get_config",
+        return_value=config,
+    ):
+        result = get_tools_to_run(tools="html-validate,ruff", action="check")
+
+    assert_that(result.to_run).contains_only("html_validate", "ruff")
+
+
+def test_underscore_alias_resolves_hyphen_registered_tool(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Underscore spelling resolves tools registered with hyphens."""
+    from lintro.tools import tool_manager
+
+    registered = {"astro-check", "vue-tsc"}
+
+    monkeypatch.setattr(
+        tool_manager,
+        "is_tool_registered",
+        lambda name: name in registered,
+    )
+    monkeypatch.setattr(
+        tool_manager,
+        "get_tool_names",
+        lambda: sorted(registered),
+    )
+
+    config = LintroConfig()
+
+    with patch(
+        "lintro.utils.execution.tool_configuration.get_config",
+        return_value=config,
+    ):
+        result = get_tools_to_run(tools="astro_check,vue_tsc", action="check")
+
+    assert_that(result.to_run).contains_only("astro-check", "vue-tsc")
+
+
+def test_unknown_tool_includes_did_you_mean_suggestion(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Genuine unknown names still raise, with a nearest-match hint."""
+    from lintro.tools import tool_manager
+
+    registered = {"html_validate", "ruff", "mypy"}
+
+    monkeypatch.setattr(
+        tool_manager,
+        "is_tool_registered",
+        lambda name: name in registered,
+    )
+    monkeypatch.setattr(
+        tool_manager,
+        "get_tool_names",
+        lambda: sorted(registered),
+    )
+
+    config = LintroConfig()
+
+    with patch(
+        "lintro.utils.execution.tool_configuration.get_config",
+        return_value=config,
+    ):
+        with pytest.raises(ValueError) as exc_info:
+            get_tools_to_run(tools="html-valdate", action="check")
+
+    message = str(exc_info.value)
+    assert_that(message).contains("Unknown tool 'html-valdate'")
+    assert_that(message).contains("Did you mean")
+    assert_that(message).contains("html")

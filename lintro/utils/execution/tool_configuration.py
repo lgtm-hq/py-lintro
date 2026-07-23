@@ -6,6 +6,7 @@ and determining which tools to run.
 
 from __future__ import annotations
 
+import difflib
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
@@ -19,6 +20,77 @@ from lintro.utils.unified_config import UnifiedConfigManager
 if TYPE_CHECKING:
     from lintro.config.lintro_config import LintroConfig
     from lintro.plugins.base import BaseToolPlugin
+
+
+def _tool_name_lookup_candidates(name: str) -> list[str]:
+    """Build hyphen/underscore lookup candidates for a user-supplied tool name.
+
+    Registry keys are inconsistently hyphenated or underscored (e.g.
+    ``html_validate`` vs ``astro-check``). Accept either spelling by trying
+    both forms, matching :func:`lintro.enums.tool_name.normalize_tool_name`'s
+    hyphen→underscore tolerance without breaking hyphen-registered tools.
+
+    Args:
+        name: Raw tool name from ``--tools`` (already stripped/lowercased).
+
+    Returns:
+        Deduplicated candidate registry keys to try, in preference order.
+    """
+    candidates: list[str] = [name]
+    underscored = name.replace("-", "_")
+    if underscored != name:
+        candidates.append(underscored)
+    hyphenated = name.replace("_", "-")
+    if hyphenated != name:
+        candidates.append(hyphenated)
+    return candidates
+
+
+def _resolve_registered_tool_name(name: str) -> str | None:
+    """Resolve a user-supplied tool name to the registered registry key.
+
+    Args:
+        name: Raw tool name from ``--tools`` (already stripped/lowercased).
+
+    Returns:
+        The registered tool name if found, otherwise ``None``.
+    """
+    for candidate in _tool_name_lookup_candidates(name=name):
+        if tool_manager.is_tool_registered(candidate):
+            return candidate
+    return None
+
+
+def _unknown_tool_error_message(*, name: str, available_names: list[str]) -> str:
+    """Build an Unknown-tool error with an optional nearest-match hint.
+
+    Args:
+        name: The unresolved user-supplied name.
+        available_names: Registered tool names (excluding pytest).
+
+    Returns:
+        Error message string for ``ValueError``.
+    """
+    message = f"Unknown tool '{name}'. Available tools: {available_names}"
+    # Prefer matching against both registered names and underscore/hyphen
+    # aliases so typos near either spelling still suggest well.
+    suggestion_pool: list[str] = list(available_names)
+    for registered in available_names:
+        underscored = registered.replace("-", "_")
+        hyphenated = registered.replace("_", "-")
+        if underscored not in suggestion_pool:
+            suggestion_pool.append(underscored)
+        if hyphenated not in suggestion_pool:
+            suggestion_pool.append(hyphenated)
+    matches = difflib.get_close_matches(
+        name,
+        suggestion_pool,
+        n=1,
+        cutoff=0.6,
+    )
+    if matches:
+        message = f"{message} Did you mean '{matches[0]}'?"
+    return message
 
 
 @dataclass(frozen=True)
@@ -307,39 +379,43 @@ def get_tools_to_run(
 
         return ToolsToRunResult(to_run=to_run, skipped=skipped)
 
-    # Parse specific tools
+    # Parse specific tools (accept hyphen or underscore spellings)
     tool_names: list[str] = [name.strip().lower() for name in tools.split(",")]
     to_run = []
     skipped = []
 
-    for name in tool_names:
-        # Reject pytest for check/fmt actions
-        if name == ToolName.PYTEST.value.lower():
+    for raw_name in tool_names:
+        # Reject pytest for check/fmt actions (either spelling)
+        if raw_name.replace("-", "_") == ToolName.PYTEST.value.lower():
             raise ValueError(
                 "pytest tool is not available for check/fmt actions. "
                 "Use 'lintro test' instead.",
             )
-        # Use tool_manager to trigger discovery before checking registration
-        if not tool_manager.is_tool_registered(name):
+        # Resolve hyphen↔underscore aliases to the registered registry key
+        resolved_name = _resolve_registered_tool_name(name=raw_name)
+        if resolved_name is None:
             available_names = [
                 n for n in tool_manager.get_tool_names() if n.lower() != "pytest"
             ]
             raise ValueError(
-                f"Unknown tool '{name}'. Available tools: {available_names}",
+                _unknown_tool_error_message(
+                    name=raw_name,
+                    available_names=available_names,
+                ),
             )
         # Track disabled tools with reason
-        if not config.is_tool_enabled(name):
-            reason = _get_disabled_reason(config, name)
-            skipped.append(SkippedTool(name=name, reason=reason))
+        if not config.is_tool_enabled(resolved_name):
+            reason = _get_disabled_reason(config, resolved_name)
+            skipped.append(SkippedTool(name=resolved_name, reason=reason))
             continue
         # Verify the tool supports the requested action
         if action == Action.FIX:
-            tool_instance = tool_manager.get_tool(name)
+            tool_instance = tool_manager.get_tool(resolved_name)
             if not tool_instance.definition.can_fix:
                 raise ValueError(
-                    f"Tool '{name}' does not support formatting",
+                    f"Tool '{resolved_name}' does not support formatting",
                 )
-        to_run.append(name)
+        to_run.append(resolved_name)
 
     to_run = _apply_conflict_resolution(
         to_run,
