@@ -21,6 +21,12 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.91.14] - 2026-07-23
+
+### Fixed
+
+- **ci**: upload build-binary artifacts on workflow_dispatch (#1634) (60572af)
+
 ## [0.91.13] - 2026-07-23
 
 ### Fixed
