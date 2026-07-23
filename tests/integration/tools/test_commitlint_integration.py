@@ -16,6 +16,7 @@ from assertpy import assert_that
 from lintro.models.core.tool_result import ToolResult
 from lintro.parsers.commitlint.commitlint_issue import CommitlintIssue
 from lintro.plugins import ToolRegistry
+from tests.test_samples_helpers import sample_path
 
 _SELF_CONTAINED_CONFIG = (
     "module.exports = {\n"
@@ -61,13 +62,31 @@ def _init_repo(repo: Path, *, config: str | None) -> None:
         (repo / "commitlint.config.js").write_text(config, encoding="utf-8")
 
 
+def _sample_message(name: str) -> str:
+    """Load a commitlint sample message.
+
+    Args:
+        name: Filename under the commitlint git sample directory.
+
+    Returns:
+        Commit message text with fixture leading/trailing whitespace removed.
+    """
+    return (
+        sample_path("tools", "git", "commitlint", name)
+        .read_text(
+            encoding="utf-8",
+        )
+        .strip()
+    )
+
+
 @_requires_binaries
 def test_commitlint_detects_bad_last_commit(tmp_path: Path) -> None:
     """Commitlint flags a non-conventional last commit message."""
     _init_repo(tmp_path, config=_SELF_CONTAINED_CONFIG)
     (tmp_path / "a.txt").write_text("x\n", encoding="utf-8")
     _git(tmp_path, "add", "-A")
-    _git(tmp_path, "commit", "-m", "Bad Commit Message Without Type")
+    _git(tmp_path, "commit", "-m", _sample_message("commitlint_violations.txt"))
 
     tool = ToolRegistry.get("commitlint")
     tool.exclude_patterns = []
@@ -86,7 +105,7 @@ def test_commitlint_passes_conventional_commit(tmp_path: Path) -> None:
     _init_repo(tmp_path, config=_SELF_CONTAINED_CONFIG)
     (tmp_path / "a.txt").write_text("x\n", encoding="utf-8")
     _git(tmp_path, "add", "-A")
-    _git(tmp_path, "commit", "-m", "feat(scope): add a thing")
+    _git(tmp_path, "commit", "-m", _sample_message("commitlint_clean.txt"))
 
     tool = ToolRegistry.get("commitlint")
     tool.exclude_patterns = []

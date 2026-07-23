@@ -18,7 +18,10 @@ def _load_migrate_module() -> Any:
         "migrate_docs_content",
         MIGRATE_SCRIPT,
     )
-    assert spec and spec.loader
+    assert_that(spec).is_not_none()
+    assert spec is not None  # narrow type for mypy
+    assert_that(spec.loader).is_not_none()
+    assert spec.loader is not None  # narrow type for mypy
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
@@ -51,11 +54,11 @@ def test_main_writes_frontmatter(isolated_docs: tuple[Any, Path]) -> None:
     migrate, site_content = isolated_docs
     migrate.main()
     output = site_content / "getting-started" / "getting-started.md"
-    assert output.exists()
+    assert_that(output.exists()).is_true()
     text = output.read_text(encoding="utf-8")
-    assert text.startswith("---\n")
-    assert "category: getting-started" in text
-    assert "# Getting Started" in text
+    assert_that(text).starts_with("---\n")
+    assert_that(text).contains("category: getting-started")
+    assert_that(text).contains("# Getting Started")
 
 
 def test_main_writes_route_map(isolated_docs: tuple[Any, Path]) -> None:
@@ -105,8 +108,8 @@ def test_rewrite_root_readme_links_keeps_docs_internal_links() -> None:
 def test_docs_paths_use_repo_layout() -> None:
     """Default paths should target py-lintro docs and site content."""
     migrate = _load_migrate_module()
-    assert migrate.DOCS_SRC.name == "docs"
-    assert migrate.DOCS_DEST.parts[-3:] == ("src", "content", "docs")
+    assert_that(migrate.DOCS_SRC.name).is_equal_to("docs")
+    assert_that(migrate.DOCS_DEST.parts[-3:]).is_equal_to(("src", "content", "docs"))
 
 
 def test_tool_migration_uses_short_titles_and_groups(
@@ -142,9 +145,9 @@ def test_tool_migration_uses_short_titles_and_groups(
     index = (site_content / "tools" / "index.md").read_text(encoding="utf-8")
     ruff = (site_content / "tools" / "ruff.md").read_text(encoding="utf-8")
     config = (site_content / "usage" / "configuration.md").read_text(encoding="utf-8")
-    assert 'title: "tools"' in index
-    assert 'title: "ruff"' in ruff
-    assert "navGroup: python" in ruff
-    assert 'title: "configuration"' in config
-    assert "navGroup: setup" in config
-    assert "Tool Analysis" not in ruff.split("---")[1]
+    assert_that(index).contains('title: "tools"')
+    assert_that(ruff).contains('title: "ruff"')
+    assert_that(ruff).contains("navGroup: python")
+    assert_that(config).contains('title: "configuration"')
+    assert_that(config).contains("navGroup: setup")
+    assert_that(ruff.split("---")[1]).does_not_contain("Tool Analysis")

@@ -1,0 +1,10 @@
+# Sample requirements file pinning packages with known vulnerabilities.
+# Used for manual testing and integration checks (requires network access to
+# the PyPI Advisory Database / OSV).
+# Versions are pinned to releases that both ship wheels (so pip-audit can
+# resolve them without building from source on modern Python) and carry known
+# advisories, so `pip-audit --strict` reports vulnerabilities instead of
+# failing to build.
+# See: lintro check test_samples/ --tools pip_audit
+jinja2==2.11.2
+requests==2.19.0

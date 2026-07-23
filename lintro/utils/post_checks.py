@@ -235,6 +235,8 @@ def execute_post_checks(
                         output=output or "",
                         output_format=output_fmt_enum.value,
                         issues=issues,
+                        success=getattr(result, "success", None),
+                        issues_count=issues_count,
                     )
 
                 if not json_output_mode:
