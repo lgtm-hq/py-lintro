@@ -5,7 +5,6 @@ from __future__ import annotations
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
-from typing import cast
 from unittest.mock import MagicMock
 
 import pytest
@@ -341,10 +340,7 @@ def test_with_fallback_parallel_calls_overlap() -> None:
 
     def run_fallback(_: int) -> str:
         """Invoke _with_fallback from a worker thread."""
-        return cast(
-            str,
-            _with_fallback(provider, slow_attempt, "hello"),
-        )
+        return _with_fallback(provider, slow_attempt, "hello")
 
     started_at = time.perf_counter()
     with ThreadPoolExecutor(max_workers=worker_count) as pool:

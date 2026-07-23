@@ -5,6 +5,7 @@ from __future__ import annotations
 import importlib.util
 import sys
 from pathlib import Path
+from types import ModuleType
 from unittest.mock import patch
 
 import pytest
@@ -14,15 +15,17 @@ _REPO_ROOT = Path(__file__).resolve().parents[2]
 _BUILD_SCRIPT = _REPO_ROOT / "scripts" / "build" / "build_macos.py"
 
 
-def _load_build_macos_module():
+def _load_build_macos_module() -> ModuleType:
     """Import build_macos without executing its main entry point.
 
     Returns:
         Loaded build_macos module.
     """
     spec = importlib.util.spec_from_file_location("build_macos", _BUILD_SCRIPT)
-    assert spec is not None
-    assert spec.loader is not None
+    assert_that(spec).is_not_none()
+    assert spec is not None  # narrow type for mypy
+    assert_that(spec.loader).is_not_none()
+    assert spec.loader is not None  # narrow type for mypy
     module = importlib.util.module_from_spec(spec)
     sys.modules["build_macos"] = module
     spec.loader.exec_module(module)

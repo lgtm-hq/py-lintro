@@ -1,90 +1,47 @@
 """Tool re-execution service for post-fix verification.
 
 Re-runs tools on files modified by AI fixes to get fresh remaining
-issue counts, using the original tool execution cwd for consistency.
+issue counts. Files are passed as absolute paths so each tool resolves
+its own working directory from the target files, matching the directory
+used during the original run without mutating the process-global cwd.
 """
 
 from __future__ import annotations
 
-import os
-import threading
-from contextlib import contextmanager
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 from loguru import logger
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator
-
     from lintro.models.core.tool_result import ToolResult
     from lintro.parsers.base_issue import BaseIssue
 
-_rerun_cwd_lock = threading.Lock()
 
-
-@contextmanager
-def _tool_cwd(cwd: str | None) -> Iterator[None]:
-    """Context manager for tool execution in a specific cwd.
-
-    Uses a process-global lock because ``os.chdir`` is process-wide
-    and tools call ``subprocess.run`` internally without a ``cwd`` param.
-
-    Known V1 limitation: ``os.chdir()`` is process-global, so other
-    concurrent code sees the changed cwd even though the lock serializes
-    reruns. Long-term fix: pass ``cwd`` to ``subprocess.run`` in the
-    tool abstraction layer.
-
-    Args:
-        cwd: Directory to chdir into, or None to skip.
-    """
-    if not cwd:
-        yield
-        return
-
-    with _rerun_cwd_lock:
-        original_cwd = Path.cwd()
-        os.chdir(cwd)
-        try:
-            yield
-        finally:
-            os.chdir(original_cwd)
-
-
-def paths_for_context(
+def absolute_paths_for_context(
     *,
     file_paths: list[str],
-    cwd: str | None,
 ) -> list[str]:
-    """Prefer paths relative to tool cwd when possible.
+    """Resolve file paths to absolute form for cwd-explicit rerun.
+
+    Passing absolute paths lets each tool derive its subprocess working
+    directory from the common parent of the targets, which resolves the
+    same directory the original run used without relying on ``os.chdir``.
 
     Args:
-        file_paths: Absolute file paths to relativize.
-        cwd: Tool's original working directory.
+        file_paths: File paths to resolve. May be absolute or relative.
 
     Returns:
-        List of paths, made relative to cwd where possible.
+        List of absolute path strings. Unresolvable paths are returned
+        unchanged so the tool can surface its own error.
     """
-    if not cwd:
-        return file_paths
-
-    try:
-        cwd_path = Path(cwd).resolve()
-    except OSError:
-        return file_paths
-
-    contextual_paths: list[str] = []
+    resolved_paths: list[str] = []
     for file_path in file_paths:
         try:
-            resolved = Path(file_path).resolve()
+            resolved_paths.append(str(Path(file_path).resolve()))
         except OSError:
-            contextual_paths.append(file_path)
-            continue
-        try:
-            contextual_paths.append(str(resolved.relative_to(cwd_path)))
-        except ValueError:
-            contextual_paths.append(str(resolved))
-    return contextual_paths
+            resolved_paths.append(file_path)
+    return resolved_paths
 
 
 def rerun_tools(
@@ -92,7 +49,9 @@ def rerun_tools(
 ) -> list[ToolResult] | None:
     """Re-run tools on analyzed files to get fresh remaining issue counts.
 
-    Reuses the original tool execution cwd for path/config consistency.
+    Each tool is re-run against absolute file paths so it resolves the same
+    working directory (and therefore the same config) as the original run,
+    without mutating the process-global cwd.
 
     Args:
         by_tool: Dict mapping tool name to (result, issues) pairs.
@@ -106,17 +65,16 @@ def rerun_tools(
         return None
 
     rerun_results: list[ToolResult] = []
-    for tool_name, (result, issues) in by_tool.items():
+    for tool_name, (_result, issues) in by_tool.items():
         file_paths = sorted({issue.file for issue in issues if issue.file})
         if not file_paths:
             continue
 
-        rerun_paths = paths_for_context(file_paths=file_paths, cwd=result.cwd)
+        rerun_paths = absolute_paths_for_context(file_paths=file_paths)
 
         try:
             tool = tool_manager.get_tool(tool_name)
-            with _tool_cwd(result.cwd):
-                rerun_results.append(tool.check(rerun_paths, {}))
+            rerun_results.append(tool.check(rerun_paths, {}))
         except (KeyError, ImportError):
             logger.debug(
                 f"AI post-fix rerun skipped for {tool_name}: tool not available",
