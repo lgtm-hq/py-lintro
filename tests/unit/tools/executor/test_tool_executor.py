@@ -430,11 +430,11 @@ def test_executor_csv_stdout_bytes_match_file_artifact(
     capsysbinary: pytest.CaptureFixture[bytes],
     tmp_path: Path,
 ) -> None:
-    """--output-format csv stdout is byte-identical to the --output artifact.
+    r"""--output-format csv stdout is byte-identical to the --output artifact.
 
-    Regression test for #1665: the csv module emits ``\\r\\n`` terminators and
-    a text-mode stdout would translate every ``\\n`` a second time on Windows,
-    yielding ``\\r\\r\\n``. Assertions are on raw bytes because a decoded-text
+    Regression test for #1665: the csv module emits ``\r\n`` terminators and
+    a text-mode stdout would translate every ``\n`` a second time on Windows,
+    yielding ``\r\r\n``. Assertions are on raw bytes because a decoded-text
     comparison cannot observe the doubled carriage return.
 
     Args:
@@ -512,12 +512,12 @@ def test_executor_csv_stdout_survives_windows_newline_translation(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
-    """--output-format csv does not double carriage returns on Windows stdout.
+    r"""--output-format csv does not double carriage returns on Windows stdout.
 
     Regression test for #1665. POSIX text streams perform no newline
     translation, so a byte comparison on Linux/macOS alone cannot observe the
-    bug. This test substitutes a stdout that translates ``\\n`` to ``\\r\\n``
-    exactly like a Windows console does, which makes the doubled ``\\r\\r\\n``
+    bug. This test substitutes a stdout that translates ``\n`` to ``\r\n``
+    exactly like a Windows console does, which makes the doubled ``\r\r\n``
     reproducible on every platform.
 
     Args:

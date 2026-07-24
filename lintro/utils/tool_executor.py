@@ -51,11 +51,11 @@ __all__ = [
 
 
 def _write_stdout_verbatim(payload: str) -> None:
-    """Write ``payload`` to stdout without newline translation.
+    r"""Write ``payload`` to stdout without newline translation.
 
-    The CSV renderer emits RFC 4180 ``\\r\\n`` line terminators. Writing that
-    through the text-mode ``sys.stdout`` wrapper would translate every ``\\n``
-    a second time on Windows, producing ``\\r\\r\\n`` and breaking the
+    The CSV renderer emits RFC 4180 ``\r\n`` line terminators. Writing that
+    through the text-mode ``sys.stdout`` wrapper would translate every ``\n``
+    a second time on Windows, producing ``\r\r\n`` and breaking the
     byte-for-byte equality between the stdout payload and the
     ``--output <file>.csv`` artifact (#1665).
 
