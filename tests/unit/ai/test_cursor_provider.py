@@ -4,7 +4,8 @@ from __future__ import annotations
 
 import json
 import subprocess  # nosec B404 - subprocess is used to drive the tool/CLI under test; invocations use shell=False
-from unittest.mock import patch
+from collections.abc import Callable
+from unittest.mock import MagicMock, patch
 
 import pytest
 from assertpy import assert_that
@@ -56,6 +57,76 @@ def _cli_json(
             },
         },
     )
+
+
+#: Trimmed ``agent --help`` output carrying the optional flags lintro gates on.
+_AGENT_HELP = (
+    "  -p, --print              Print responses to console\n"
+    "  --output-format <fmt>    Output format\n"
+    "  --resume [chatId]        Select a session to resume\n"
+    "  --trust                  Trust the current workspace without prompting\n"
+)
+
+
+def _fake_run_with_probes(
+    stdout: str,
+) -> Callable[..., subprocess.CompletedProcess[str]]:
+    """Build a ``subprocess.run`` stand-in that answers capability probes.
+
+    The capability guard probes ``agent --version`` and ``agent --help`` before
+    the real call; without realistic probe answers, gated optional flags such as
+    ``--resume`` and ``--trust`` would be filtered out.
+
+    Args:
+        stdout: Stdout to return for the actual completion call.
+
+    Returns:
+        A callable suitable for ``patch("subprocess.run", side_effect=...)``.
+    """
+
+    def _run(
+        cmd: list[str],
+        *args: object,
+        **kwargs: object,
+    ) -> subprocess.CompletedProcess[str]:
+        if "--version" in cmd:
+            return subprocess.CompletedProcess(
+                args=cmd,
+                returncode=0,
+                stdout="2026.07.09-a3815c0\n",
+                stderr="",
+            )
+        if "--help" in cmd:
+            return subprocess.CompletedProcess(
+                args=cmd,
+                returncode=0,
+                stdout=_AGENT_HELP,
+                stderr="",
+            )
+        return subprocess.CompletedProcess(
+            args=cmd,
+            returncode=0,
+            stdout=stdout,
+            stderr="",
+        )
+
+    return _run
+
+
+def _completion_calls(mock_run: MagicMock) -> list[list[str]]:
+    """Return only the argv lists of real completion calls.
+
+    Args:
+        mock_run: The patched ``subprocess.run`` mock.
+
+    Returns:
+        Argv lists with ``--version`` / ``--help`` probes filtered out.
+    """
+    return [
+        list(call.args[0])
+        for call in mock_run.call_args_list
+        if "--version" not in call.args[0] and "--help" not in call.args[0]
+    ]
 
 
 # -- _find_agent -----------------------------------------------------------
@@ -130,17 +201,14 @@ def test_complete_parses_successful_cli_json(provider):
 def test_complete_durable_session_uses_resume(provider):
     """Second call in a durable session resumes the CLI session id."""
     stdout = _cli_json(result="ok")
-    with patch("subprocess.run") as mock_run:
-        mock_run.return_value = subprocess.CompletedProcess(
-            args=[],
-            returncode=0,
-            stdout=stdout,
-            stderr="",
-        )
+    with patch(
+        "subprocess.run",
+        side_effect=_fake_run_with_probes(stdout),
+    ) as mock_run:
         provider.begin_durable_session(repo_root="/tmp/repo")
         provider.complete("first", repo_root="/tmp/repo")
         provider.complete("second", repo_root="/tmp/repo")
-        second_cmd = mock_run.call_args_list[1].args[0]
+        second_cmd = _completion_calls(mock_run)[1]
         assert_that(second_cmd).contains("--resume", "sess-123")
 
 
@@ -368,15 +436,12 @@ def test_complete_includes_trust_flag_when_opted_in(_mock_agent_on_path):
     """The '--trust' flag is present only when the opt-in is set."""
     trusting = CursorProvider(cursor_trust_workspace=True)
     stdout = _cli_json(result="ok")
-    with patch("subprocess.run") as mock_run:
-        mock_run.return_value = subprocess.CompletedProcess(
-            args=[],
-            returncode=0,
-            stdout=stdout,
-            stderr="",
-        )
+    with patch(
+        "subprocess.run",
+        side_effect=_fake_run_with_probes(stdout),
+    ) as mock_run:
         trusting.complete("Hello", repo_root="/tmp/repo")
-    cmd = mock_run.call_args.args[0]
+    cmd = _completion_calls(mock_run)[-1]
     assert_that(cmd).contains("--trust")
 
 

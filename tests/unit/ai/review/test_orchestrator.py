@@ -15,6 +15,7 @@ from lintro.ai.budget import CostBudget
 from lintro.ai.config import AIConfig
 from lintro.ai.enums import AITransport
 from lintro.ai.exceptions import AIError
+from lintro.ai.providers.capabilities import ProviderCapabilities
 from lintro.ai.providers.response import AIResponse
 from lintro.ai.review.enums.review_category import ReviewCategory
 from lintro.ai.review.exceptions import ReviewExecutionError
@@ -65,6 +66,10 @@ def _mock_provider(*, content: str) -> MagicMock:
     provider = MagicMock()
     provider.model_name = "claude-sonnet-4-20250514"
     provider.name = "anthropic"
+    # Declare capabilities explicitly: a bare MagicMock attribute is truthy, so
+    # without this a single-chunk review would spuriously take the durable-
+    # session path. Tests that exercise that path override this.
+    provider.capabilities = ProviderCapabilities(supports_sessions=False)
     provider.complete.return_value = AIResponse(
         content=content,
         model="claude-sonnet-4-20250514",
@@ -920,3 +925,63 @@ def test_build_git_native_review_prompt_uses_git_command_when_not_embedded(
 
     assert_that(user_prompt).contains("git diff")
     assert_that(user_prompt).does_not_contain("<pull_request_diff>")
+
+
+def _capability_provider(*, supports_sessions: bool) -> MagicMock:
+    """Build a mock provider declaring a session capability.
+
+    Args:
+        supports_sessions: Value of ``capabilities.supports_sessions``.
+
+    Returns:
+        A configured provider mock.
+    """
+    provider = _mock_provider(content=_sample_response_json())
+    provider.capabilities = ProviderCapabilities(
+        supports_sessions=supports_sessions,
+    )
+    return provider
+
+
+def _run_single_chunk_review(provider: MagicMock) -> None:
+    """Run a one-chunk review against *provider*.
+
+    Args:
+        provider: The provider mock under test.
+    """
+    with patch(
+        "lintro.ai.review.orchestrator.call_ai",
+        side_effect=lambda *, provider, user_prompt, system_prompt=None, **kwargs: provider.complete(
+            user_prompt,
+            system=system_prompt,
+        ),
+    ):
+        run_review(
+            _one_file_context(),
+            provider=provider,
+            ai_config=AIConfig(enabled=True, transport=AITransport.CLI),
+            depth=1,
+            checklist_items=[],
+            checklist_text="1. [logic-bug] Example?",
+            classifications=[],
+        )
+
+
+def test_run_review_opens_durable_session_when_capability_declared() -> None:
+    """Open a durable session for any provider declaring session support."""
+    provider = _capability_provider(supports_sessions=True)
+
+    _run_single_chunk_review(provider)
+
+    provider.begin_durable_session.assert_called_once()
+    provider.end_durable_session.assert_called_once()
+
+
+def test_run_review_skips_durable_session_without_capability() -> None:
+    """Leave sessions alone for providers that declare no session support."""
+    provider = _capability_provider(supports_sessions=False)
+
+    _run_single_chunk_review(provider)
+
+    provider.begin_durable_session.assert_not_called()
+    provider.end_durable_session.assert_not_called()

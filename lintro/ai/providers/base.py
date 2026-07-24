@@ -12,6 +12,7 @@ from abc import ABC, abstractmethod
 from typing import TYPE_CHECKING, Any
 
 from lintro.ai.exceptions import AIAuthenticationError, AINotAvailableError
+from lintro.ai.providers.capabilities import ProviderCapabilities
 from lintro.ai.providers.constants import (
     DEFAULT_MAX_TOKENS,
     DEFAULT_PER_CALL_MAX_TOKENS,
@@ -24,7 +25,12 @@ if TYPE_CHECKING:
     from lintro.ai.enums import AITransport
     from lintro.ai.json_response import CliSchemaRequest
 
-__all__ = ["AIResponse", "AIStreamResult", "BaseAIProvider"]
+__all__ = [
+    "AIResponse",
+    "AIStreamResult",
+    "BaseAIProvider",
+    "ProviderCapabilities",
+]
 
 
 class BaseAIProvider(ABC):
@@ -202,6 +208,21 @@ class BaseAIProvider(ABC):
             _chunks=iter([response.content]),
             _on_done=lambda: response,
         )
+
+    # -- Capability declaration --------------------------------------------
+
+    @property
+    def capabilities(self) -> ProviderCapabilities:
+        """Declare what this provider supports on its configured transport.
+
+        The base declaration is deliberately conservative -- nothing is
+        supported unless a provider says so -- so a new provider degrades to
+        the safe path until it declares otherwise.
+
+        Returns:
+            The provider's capability declaration.
+        """
+        return ProviderCapabilities()
 
     def begin_durable_session(self, *, repo_root: str) -> None:
         """Optional hook for providers that reuse CLI sessions.

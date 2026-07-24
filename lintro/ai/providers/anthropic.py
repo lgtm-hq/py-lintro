@@ -24,8 +24,14 @@ from lintro.ai.exceptions import (
     AIRateLimitError,
 )
 from lintro.ai.json_response import CliSchemaRequest
-from lintro.ai.providers.base import AIResponse, AIStreamResult, BaseAIProvider
-from lintro.ai.providers.cli_transport import CliTransport
+from lintro.ai.providers.base import (
+    AIResponse,
+    AIStreamResult,
+    BaseAIProvider,
+    ProviderCapabilities,
+)
+from lintro.ai.providers.cli_contracts import cli_contract_for
+from lintro.ai.providers.cli_transport import CliTransport, OptionalArg
 from lintro.ai.providers.constants import (
     DEFAULT_MAX_TOKENS,
     DEFAULT_PER_CALL_MAX_TOKENS,
@@ -65,41 +71,9 @@ class _AnthropicCliTransport(CliTransport):
             binary_name="Claude",
             install_hint="Install Claude Code: https://code.claude.com/docs/en/setup",
             api_key_env=DEFAULT_API_KEY_ENV,
+            contract=cli_contract_for(AIProvider.ANTHROPIC),
         )
         self._model = model
-        self._supports_schema_name: bool | None = None
-        self._capability_lock = threading.Lock()
-
-    def supports_json_schema_name(self) -> bool:
-        """Return whether the installed ``claude`` CLI accepts ``--json-schema-name``.
-
-        The current ``@anthropic-ai/claude-code`` (2.1.218) removed the
-        ``--json-schema-name`` option, so passing it fails the whole call with
-        ``unknown option '--json-schema-name'``. Probe ``claude --help`` once and
-        cache whether the flag is advertised, so it is only sent to binaries that
-        accept it (#1611). ``--json-schema`` itself is unaffected — only the name
-        refinement is gated. A failed probe returns ``False`` (send neither):
-        the flag is optional, so omitting it keeps structured output working.
-
-        Returns:
-            True when the installed binary advertises ``--json-schema-name``.
-        """
-        with self._capability_lock:
-            if self._supports_schema_name is not None:
-                return self._supports_schema_name
-            supported = False
-            try:
-                result = self.run([self._binary_path, "--help"], timeout=10.0)
-                help_text = f"{result.stdout or ''}{result.stderr or ''}"
-                # Only trust a clean exit: a non-zero --help may echo the flag
-                # in an error message without actually supporting it.
-                supported = result.returncode == 0 and "--json-schema-name" in help_text
-            except (AIProviderError, AINotAvailableError, OSError) as exc:
-                # OSError covers PermissionError and other subprocess spawn
-                # failures that CliTransport.run() does not remap.
-                logger.debug(f"Claude CLI capability probe failed: {exc}")
-            self._supports_schema_name = supported
-            return supported
 
     def parse_stdout(self, stdout: str) -> tuple[AIResponse, str | None]:
         """Parse JSON envelope from ``claude --output-format json``."""
@@ -272,6 +246,44 @@ class AnthropicProvider(BaseAIProvider):
             return _find_claude() is not None
         return super().is_available()
 
+    @property
+    def capabilities(self) -> ProviderCapabilities:
+        """Declare Anthropic capabilities for the configured transport.
+
+        Returns:
+            CLI transport resumes ``claude`` sessions and accepts a native JSON
+            schema but streams only via the base fallback; API transport streams
+            natively and has no server-side session to resume.
+        """
+        if self._transport == AITransport.CLI:
+            return ProviderCapabilities(
+                supports_sessions=True,
+                supports_structured_output=True,
+                supports_streaming=False,
+            )
+        return ProviderCapabilities(
+            supports_sessions=False,
+            supports_structured_output=False,
+            supports_streaming=True,
+        )
+
+    def begin_durable_session(self, *, repo_root: str) -> None:
+        """Start a fresh reusable ``claude`` session.
+
+        Args:
+            repo_root: Absolute path to the repository under review. Unused;
+                the working directory is passed per call instead.
+        """
+        del repo_root
+        self.end_durable_session()
+
+    def end_durable_session(self) -> None:
+        """Drop the resumable session id so the next call starts clean."""
+        if self._transport != AITransport.CLI:
+            return
+        with self._session_lock:
+            self._session_id = None
+
     def _complete_cli(
         self,
         prompt: str,
@@ -301,14 +313,25 @@ class AnthropicProvider(BaseAIProvider):
         ]
         if system:
             cmd.extend(["--append-system-prompt", system])
+
+        candidates: list[OptionalArg] = []
         if cli_schema is not None:
             cmd.extend(["--json-schema", json.dumps(cli_schema.schema)])
-            if cli_schema.schema_name and self._cli.supports_json_schema_name():
-                cmd.extend(["--json-schema-name", cli_schema.schema_name])
+            if cli_schema.schema_name:
+                candidates.append(
+                    OptionalArg(
+                        flag="--json-schema-name",
+                        values=(cli_schema.schema_name,),
+                    ),
+                )
         with self._session_lock:
             resume_session_id = None if use_one_shot else self._session_id
         if resume_session_id is not None:
-            cmd.extend(["--resume", resume_session_id])
+            candidates.append(
+                OptionalArg(flag="--resume", values=(resume_session_id,)),
+            )
+
+        optional_args = self._cli.apply_optional_args(cmd, candidates)
 
         logger.debug(
             f"Claude CLI request: model={effective_model}, "
@@ -316,8 +339,9 @@ class AnthropicProvider(BaseAIProvider):
             f"prompt_len={len(prompt)}",
         )
 
-        result = self._cli.run(
+        result = self._cli.run_guarded(
             cmd,
+            optional_args=optional_args,
             timeout=timeout,
             cwd=repo_root or os.getcwd(),
         )
