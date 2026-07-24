@@ -145,8 +145,8 @@ jobs:
               - '!**/vendor/**'
               - '!**/__pycache__/**'
               - '!**/*.egg-info/**'
-              - '!build/**'
-              - '!dist/**'
+              - '!**/build/**'
+              - '!**/dist/**'
       - name: Generate SBOM
         id: sbom
         # Same syft action, target and format as the release gate; the
@@ -181,9 +181,10 @@ jobs:
           !fromJSON(steps.changes.outputs.changes).deps
         env:
           SUMMARY: >-
-            No changes to uv.lock, pyproject.toml or the release publish
-            workflow — the release SBOM vulnerability gate cannot change
-            result for this PR, so the scan was skipped.
+            No dependency manifest changed (Python / JavaScript / Rust / Go
+            manifests, or the release publish workflow), so the release SBOM
+            vulnerability gate cannot change result for this PR and the scan
+            was skipped.
         run: |
           {
             echo "### 🔐 Dependency Vulnerability Gate"
