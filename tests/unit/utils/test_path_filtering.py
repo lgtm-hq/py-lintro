@@ -423,3 +423,62 @@ def test_resolve_exclude_anchors_prefers_project_root(
     anchors = resolve_exclude_anchors([str(project_under_excluded_ancestor)])
 
     assert_that(anchors[0]).is_equal_to(str(project_under_excluded_ancestor))
+
+
+def test_markerless_file_outside_project_ignores_ancestor_dir_name(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A named file with no project marker is not excluded by ancestor names.
+
+    Args:
+        tmp_path: Temporary directory path.
+        monkeypatch: Pytest monkeypatch fixture.
+    """
+    # A tree with no project marker anywhere, under a ``build`` ancestor.
+    loose = tmp_path / "build" / "scratch"
+    loose.mkdir(parents=True)
+    target = loose / "note.md"
+    target.write_text("# note\n", encoding="utf-8")
+
+    # Run from a directory that is itself markerless so no project root is
+    # resolved for the current working directory either.
+    workdir = tmp_path / "elsewhere"
+    workdir.mkdir()
+    monkeypatch.chdir(workdir)
+
+    files = walk_files_with_excludes(
+        paths=[str(target)],
+        file_patterns=["*.md"],
+        exclude_patterns=["build", "dist", "cache"],
+    )
+
+    assert_that(files).is_length(1)
+
+
+def test_markerless_named_file_still_matched_by_filename_pattern(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Filename-level excludes still apply to a markerless named file.
+
+    Args:
+        tmp_path: Temporary directory path.
+        monkeypatch: Pytest monkeypatch fixture.
+    """
+    loose = tmp_path / "build"
+    loose.mkdir()
+    target = loose / "note.md"
+    target.write_text("# note\n", encoding="utf-8")
+
+    workdir = tmp_path / "elsewhere"
+    workdir.mkdir()
+    monkeypatch.chdir(workdir)
+
+    files = walk_files_with_excludes(
+        paths=[str(target)],
+        file_patterns=["*.md"],
+        exclude_patterns=["*.md"],
+    )
+
+    assert_that(files).is_empty()

@@ -115,12 +115,16 @@ def resolve_exclude_anchors(paths: "Sequence[str] | None" = None) -> tuple[str, 
             continue
         # A file named outside the current project still belongs to *some*
         # project; anchor on its own root rather than the filesystem root.
+        # When no marker exists anywhere above it, anchor on its own directory
+        # so only filename-level patterns (e.g. ``*.pyc``) can match — an
+        # explicitly requested file must never be dropped because an ancestor
+        # is named ``build``, ``dist`` or ``cache`` (#1678, greptile P1).
         parent = os.path.dirname(abs_path)
         if not parent or parent in seen_parents:
             continue
         seen_parents.add(parent)
-        file_root = find_project_root(parent)
-        if file_root is not None and file_root not in file_roots:
+        file_root = find_project_root(parent) or parent
+        if file_root not in file_roots:
             file_roots.append(file_root)
 
     anchors.extend(root for root in file_roots if root not in anchors)
