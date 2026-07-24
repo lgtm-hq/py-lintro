@@ -11,6 +11,7 @@ Supports parallel execution when enabled via configuration.
 
 from __future__ import annotations
 
+import sys
 from typing import TYPE_CHECKING, Any
 
 from lintro.enums.action import Action, normalize_action
@@ -47,6 +48,35 @@ __all__ = [
     "DEFAULT_REMAINING_COUNT",
     "run_lint_tools_simple",
 ]
+
+
+def _write_stdout_verbatim(payload: str) -> None:
+    """Write ``payload`` to stdout without newline translation.
+
+    The CSV renderer emits RFC 4180 ``\\r\\n`` line terminators. Writing that
+    through the text-mode ``sys.stdout`` wrapper would translate every ``\\n``
+    a second time on Windows, producing ``\\r\\r\\n`` and breaking the
+    byte-for-byte equality between the stdout payload and the
+    ``--output <file>.csv`` artifact (#1665).
+
+    Writing UTF-8 bytes straight to ``sys.stdout.buffer`` bypasses translation
+    on every platform. Streams without a binary ``buffer`` (for example a
+    ``StringIO`` substituted by a caller) fall back to a plain text write,
+    which is already correct because such streams perform no translation.
+
+    Args:
+        payload: The exact document to emit on stdout.
+    """
+    stream = sys.stdout
+    buffer = getattr(stream, "buffer", None)
+    if buffer is None:
+        stream.write(payload)
+        stream.flush()
+        return
+    # Flush any pending text writes first so byte output stays ordered.
+    stream.flush()
+    buffer.write(payload.encode("utf-8"))
+    buffer.flush()
 
 
 def _get_remaining_count(result: ToolResult) -> int:
@@ -1148,7 +1178,10 @@ def run_lint_tools_simple(
             # routed to stderr so stdout parses with csv.reader.
             from lintro.utils.output.file_writer import render_csv_report
 
-            print(render_csv_report(all_results), end="")
+            # Emitted verbatim as UTF-8 bytes so the csv module's \r\n line
+            # terminators are not translated a second time on Windows and the
+            # payload stays byte-identical to the --output file artifact.
+            _write_stdout_verbatim(render_csv_report(all_results))
         elif output_format.lower() == "markdown":
             # Emit a single clean Markdown report on stdout.
             from lintro.utils.output.file_writer import render_markdown_report

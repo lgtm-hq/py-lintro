@@ -425,6 +425,165 @@ def test_executor_csv_stdout_is_clean_and_banners_go_to_stderr(
     assert_that(captured.err).contains("[LINTRO]")
 
 
+def test_executor_csv_stdout_bytes_match_file_artifact(
+    monkeypatch: pytest.MonkeyPatch,
+    capsysbinary: pytest.CaptureFixture[bytes],
+    tmp_path: Path,
+) -> None:
+    """--output-format csv stdout is byte-identical to the --output artifact.
+
+    Regression test for #1665: the csv module emits ``\\r\\n`` terminators and
+    a text-mode stdout would translate every ``\\n`` a second time on Windows,
+    yielding ``\\r\\r\\n``. Assertions are on raw bytes because a decoded-text
+    comparison cannot observe the doubled carriage return.
+
+    Args:
+        monkeypatch: Pytest monkeypatch fixture.
+        capsysbinary: Pytest capture fixture yielding raw stdout/stderr bytes.
+        tmp_path: Temporary directory for the CSV artifact.
+    """
+    import csv as _csv
+    import io as _io
+
+    from lintro.enums.action import Action
+    from lintro.enums.output_format import OutputFormat
+    from lintro.parsers.ruff.ruff_issue import RuffIssue
+    from lintro.utils.output.file_writer import write_output_file
+
+    issue = RuffIssue(file="a.py", line=1, column=1, message="unused", code="F401")
+
+    def _make_result() -> ToolResult:
+        return ToolResult(
+            name="ruff",
+            success=False,
+            output="raw",
+            issues_count=1,
+            issues=[issue],
+        )
+
+    _setup_tool_manager(
+        monkeypatch,
+        {"ruff": FakeTool("ruff", can_fix=True, result=_make_result())},
+    )
+    code = run_lint_tools_simple(
+        action="check",
+        paths=["."],
+        tools="all",
+        tool_options=None,
+        exclude=None,
+        include_venv=False,
+        group_by="auto",
+        output_format="csv",
+        verbose=False,
+        raw_output=False,
+    )
+    assert_that(code).is_equal_to(1)
+    stdout_bytes = capsysbinary.readouterr().out
+
+    artifact = tmp_path / "report.csv"
+    write_output_file(
+        output_path=str(artifact),
+        output_format=OutputFormat.CSV,
+        all_results=[_make_result()],
+        action=Action.CHECK,
+        total_issues=1,
+        total_fixed=0,
+    )
+    artifact_bytes = artifact.read_bytes()
+
+    # The stdout payload and the file artifact must not drift apart.
+    assert_that(stdout_bytes).is_equal_to(artifact_bytes)
+    # Neither side may carry a doubled carriage return.
+    assert_that(stdout_bytes).does_not_contain(b"\r\r")
+    assert_that(artifact_bytes).does_not_contain(b"\r\r")
+    # RFC 4180 terminators survive intact.
+    assert_that(stdout_bytes).contains(b"\r\n")
+    # The payload still round-trips through csv.reader.
+    rows = list(_csv.reader(_io.StringIO(stdout_bytes.decode("utf-8"))))
+    assert_that(rows[0]).is_equal_to(
+        ["tool", "issues_count", "file", "line", "code", "message", "doc_url"],
+    )
+    assert_that(rows).is_length(2)
+    assert_that(rows[1][0]).is_equal_to("ruff")
+    assert_that(rows[1][4]).is_equal_to("F401")
+
+
+def test_executor_csv_stdout_survives_windows_newline_translation(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """--output-format csv does not double carriage returns on Windows stdout.
+
+    Regression test for #1665. POSIX text streams perform no newline
+    translation, so a byte comparison on Linux/macOS alone cannot observe the
+    bug. This test substitutes a stdout that translates ``\\n`` to ``\\r\\n``
+    exactly like a Windows console does, which makes the doubled ``\\r\\r\\n``
+    reproducible on every platform.
+
+    Args:
+        monkeypatch: Pytest monkeypatch fixture.
+        tmp_path: Temporary directory for the CSV artifact.
+    """
+    import io as _io
+    import sys as _sys
+
+    from lintro.enums.action import Action
+    from lintro.enums.output_format import OutputFormat
+    from lintro.parsers.ruff.ruff_issue import RuffIssue
+    from lintro.utils.output.file_writer import write_output_file
+
+    issue = RuffIssue(file="a.py", line=1, column=1, message="unused", code="F401")
+
+    def _make_result() -> ToolResult:
+        return ToolResult(
+            name="ruff",
+            success=False,
+            output="raw",
+            issues_count=1,
+            issues=[issue],
+        )
+
+    _setup_tool_manager(
+        monkeypatch,
+        {"ruff": FakeTool("ruff", can_fix=True, result=_make_result())},
+    )
+    raw_stdout = _io.BytesIO()
+    # newline="\r\n" reproduces the Windows console's text-mode translation.
+    windows_stdout = _io.TextIOWrapper(
+        raw_stdout,
+        encoding="utf-8",
+        newline="\r\n",
+    )
+    monkeypatch.setattr(_sys, "stdout", windows_stdout)
+    run_lint_tools_simple(
+        action="check",
+        paths=["."],
+        tools="all",
+        tool_options=None,
+        exclude=None,
+        include_venv=False,
+        group_by="auto",
+        output_format="csv",
+        verbose=False,
+        raw_output=False,
+    )
+    windows_stdout.flush()
+    stdout_bytes = raw_stdout.getvalue()
+
+    artifact = tmp_path / "report.csv"
+    write_output_file(
+        output_path=str(artifact),
+        output_format=OutputFormat.CSV,
+        all_results=[_make_result()],
+        action=Action.CHECK,
+        total_issues=1,
+        total_fixed=0,
+    )
+
+    assert_that(stdout_bytes).does_not_contain(b"\r\r")
+    assert_that(stdout_bytes).is_equal_to(artifact.read_bytes())
+
+
 def test_executor_markdown_stdout_is_clean_and_banners_go_to_stderr(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
