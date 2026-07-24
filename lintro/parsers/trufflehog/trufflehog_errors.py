@@ -39,8 +39,9 @@ def extract_trufflehog_scan_errors(stderr: str) -> list[str]:
     * The aggregate ``encountered errors during scan`` payload takes
       precedence — its ``errors`` array is expanded so each reason stays
       individually classifiable against the resolved scan set.
-    * Any other error-severity record (``level`` of ``error``/``fatal``/
-      ``panic``, or a non-empty ``error``/``err`` field) is retained.
+    * Any other error-severity record (``level`` of ``error``/``dpanic``/
+      ``panic``/``fatal``, or a non-empty ``error``/``err`` field) is
+      retained.
     * Routine progress records (``running source``, ``finished scanning``, …)
       carry an informational level and no error field, so they are ignored.
 
