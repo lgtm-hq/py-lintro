@@ -11,11 +11,14 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+import pytest
 from assertpy import assert_that
 
 from lintro.enums.action import Action
 from lintro.utils.summary_tables import (
     DEFAULT_REMAINING_COUNT,
+    NO_FILES_NOTE,
+    _is_no_files_result,
     print_summary_table,
 )
 
@@ -206,6 +209,8 @@ def test_fix_no_files_shows_zero(
     assert_that(combined).contains("PASS")
     # Should show 0 for both Fixed and Remaining, not SKIPPED
     assert_that(combined).does_not_contain("SKIPPED")
+    # A zero-file fix run is annotated too, mirroring the CHECK note (#1678).
+    assert_that(combined).contains(NO_FILES_NOTE)
 
 
 def test_fix_parsing_remaining_from_output(
@@ -484,3 +489,124 @@ def test_default_remaining_count_used_in_fix_output(
     combined = "".join(output)
     # The "?" should appear in the remaining column when count is unknown
     assert_that(combined).contains(DEFAULT_REMAINING_COUNT)
+
+
+# =============================================================================
+# Tests for the no-files note (issue #1678)
+# =============================================================================
+
+
+def test_check_pass_with_no_files_is_annotated(
+    console_capture: tuple[Callable[[str], None], list[str]],
+    fake_tool_result_factory: Callable[..., FakeToolResult],
+) -> None:
+    """A pass over zero files is annotated so it is not read as a clean scan.
+
+    Args:
+        console_capture: Mock console output capture.
+        fake_tool_result_factory: Factory for creating fake tool results.
+    """
+    capture, output = console_capture
+    result = fake_tool_result_factory(
+        name="prettier",
+        success=True,
+        issues_count=0,
+        output="No .md files found to check.",
+    )
+
+    print_summary_table(capture, Action.CHECK, [result])
+
+    combined = "".join(output)
+    assert_that(combined).contains("PASS")
+    assert_that(combined).contains(NO_FILES_NOTE)
+
+
+def test_check_pass_over_real_files_has_no_note(
+    console_capture: tuple[Callable[[str], None], list[str]],
+    fake_tool_result_factory: Callable[..., FakeToolResult],
+) -> None:
+    """A genuine clean scan is not annotated with the no-files note.
+
+    Args:
+        console_capture: Mock console output capture.
+        fake_tool_result_factory: Factory for creating fake tool results.
+    """
+    capture, output = console_capture
+    result = fake_tool_result_factory(
+        name="prettier",
+        success=True,
+        issues_count=0,
+        output=None,
+    )
+
+    print_summary_table(capture, Action.CHECK, [result])
+
+    combined = "".join(output)
+    assert_that(combined).contains("PASS")
+    assert_that(combined).does_not_contain(NO_FILES_NOTE)
+
+
+@pytest.mark.parametrize(
+    "message",
+    [
+        "No .md files found to check.",
+        "No .md files found to check",
+        "No files to check.",
+        "No files to fix.",
+        "No files to format",
+        "No Astro files to check.",
+        "No TOML files to format.",
+        "No Go files found to fix.",
+        "No .py/.pyi files found",
+        "No {file_type} found to check.",
+    ],
+    ids=[
+        "found_to_check_period",
+        "found_to_check_no_period",
+        "files_to_check",
+        "files_to_fix",
+        "files_to_format_no_period",
+        "typed_files_to_check",
+        "typed_files_to_format",
+        "found_to_fix",
+        "files_found_no_period",
+        "templated",
+    ],
+)
+def test_is_no_files_result_recognizes_discovery_messages(message: str) -> None:
+    """Every framework no-files message is recognized, with or without a period.
+
+    Args:
+        message: A framework "nothing to do" message.
+    """
+    assert_that(_is_no_files_result(message)).is_true()
+
+
+@pytest.mark.parametrize(
+    "message",
+    [
+        "No issues found.",
+        "No issues found",
+        "No configuration found",
+        "No fixes needed.",
+        "Found 3 issues",
+        "",
+        None,
+    ],
+    ids=[
+        "ran_clean_period",
+        "ran_clean",
+        "no_config",
+        "no_fixes_needed",
+        "has_issues",
+        "empty",
+        "none",
+    ],
+)
+def test_is_no_files_result_ignores_ran_messages(message: object) -> None:
+    """A tool that actually ran is never mistaken for a zero-file run.
+
+    Args:
+        message: A message that must not be treated as a no-files result.
+    """
+    assert_that(_is_no_files_result(message)).is_false()
