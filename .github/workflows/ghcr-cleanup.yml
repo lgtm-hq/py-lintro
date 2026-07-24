@@ -110,8 +110,8 @@ jobs:
           # near day 90 could hit an already-swept ci-<run_id> (#1138).
           # Dedicated dispatch input — do not share min_age_days with the
           # untagged prune jobs (those default to 7).
-          MIN_AGE_DAYS: >-
-            ${{ github.event_name != 'workflow_dispatch' && 91 || inputs.sweep_min_age_days }}
+          # yamllint disable-line rule:line-length
+          MIN_AGE_DAYS: ${{ github.event_name != 'workflow_dispatch' && 91 || inputs.sweep_min_age_days }}
           DRY_RUN: ${{ inputs.dry_run == true }}
         run: scripts/ci/maintenance/sweep-ci-ghcr-tags.sh
 
