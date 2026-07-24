@@ -192,6 +192,16 @@ sweep_package() {
 				safe_to_delete=0
 				break
 			fi
+			current_tag_count=0
+			for _t in $current_tags; do
+				current_tag_count=$((current_tag_count + 1))
+			done
+			if [[ "$current_tag_count" -ne 1 ]]; then
+				echo "Skipping version ${vid} (${pkg}): no longer sole-tagged" \
+					"[${current_tags}] (#1138/#1652)"
+				safe_to_delete=0
+				break
+			fi
 		done
 		if [[ "$safe_to_delete" -ne 1 ]]; then
 			continue
