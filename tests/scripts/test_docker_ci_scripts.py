@@ -429,6 +429,99 @@ def test_sweep_ci_ghcr_tags_validates_min_age_days() -> None:
     assert_that(result.stderr).contains("MIN_AGE_DAYS must be")
 
 
+def _run_sweep_validation(
+    tmp_path: Path,
+    env: dict[str, str],
+) -> subprocess.CompletedProcess[str]:
+    """Run the GHCR sweep with a no-op ``gh`` stub so no network call happens.
+
+    The stub prints nothing, so any invocation that reaches the sweep body
+    finds no candidate versions and exits 0. Only input validation is
+    exercised.
+
+    Args:
+        tmp_path: Pytest temporary directory for the PATH shim.
+        env: Extra environment variables for the script.
+
+    Returns:
+        subprocess.CompletedProcess[str]: The completed process.
+    """
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    _write_stub(bin_dir, "gh", "exit 0")
+    return _run_with_stubs(
+        "scripts/ci/maintenance/sweep-ci-ghcr-tags.sh",
+        bin_dir,
+        {
+            "GH_TOKEN": "dummy",  # nosec B105 - fake token, gh is stubbed
+            "PACKAGES": "py-lintro",
+            **env,
+        },
+    )
+
+
+def test_sweep_ci_ghcr_tags_rejects_short_retention(tmp_path: Path) -> None:
+    """MIN_AGE_DAYS below the 91d rerun window must be rejected (#1138)."""
+    result = _run_sweep_validation(tmp_path, {"MIN_AGE_DAYS": "0"})
+
+    assert_that(result.returncode).is_equal_to(2)
+    assert_that(result.stderr).contains("below the 91d")
+    assert_that(result.stderr).contains("rerun-retention window")
+    assert_that(result.stderr).contains("ALLOW_SHORT_RETENTION=true")
+
+
+def test_sweep_ci_ghcr_tags_short_retention_override(tmp_path: Path) -> None:
+    """ALLOW_SHORT_RETENTION=true must permit a MIN_AGE_DAYS below the floor."""
+    result = _run_sweep_validation(
+        tmp_path,
+        {"MIN_AGE_DAYS": "0", "ALLOW_SHORT_RETENTION": "true"},
+    )
+
+    assert_that(result.returncode).is_equal_to(0)
+    assert_that(result.stderr).does_not_contain("rerun-retention window")
+    assert_that(result.stdout).contains("Sweeping ci-* tags older than 0d")
+
+
+def test_sweep_ci_ghcr_tags_accepts_default_floor(tmp_path: Path) -> None:
+    """MIN_AGE_DAYS equal to the 91d floor must pass validation."""
+    result = _run_sweep_validation(tmp_path, {"MIN_AGE_DAYS": "91"})
+
+    assert_that(result.returncode).is_equal_to(0)
+    assert_that(result.stdout).contains("Sweeping ci-* tags older than 91d")
+
+
+@pytest.mark.parametrize(
+    "tag_prefix",
+    [
+        'ci-" or true or "',
+        "ci-$(id)",
+        "ci-*",
+        "ci with space",
+    ],
+)
+def test_sweep_ci_ghcr_tags_rejects_unsafe_tag_prefix(
+    tmp_path: Path,
+    tag_prefix: str,
+) -> None:
+    """TAG_PREFIX is interpolated into jq, so unsafe characters must fail."""
+    result = _run_sweep_validation(tmp_path, {"TAG_PREFIX": tag_prefix})
+
+    assert_that(result.returncode).is_equal_to(2)
+    assert_that(result.stderr).contains("TAG_PREFIX must match")
+
+
+@pytest.mark.parametrize("tag_prefix", ["ci-", "ci", "ci.1_0-x"])
+def test_sweep_ci_ghcr_tags_accepts_safe_tag_prefix(
+    tmp_path: Path,
+    tag_prefix: str,
+) -> None:
+    """A TAG_PREFIX within the allowed character class must pass validation."""
+    result = _run_sweep_validation(tmp_path, {"TAG_PREFIX": tag_prefix})
+
+    assert_that(result.returncode).is_equal_to(0)
+    assert_that(result.stdout).contains(f"Sweeping {tag_prefix}* tags")
+
+
 def test_sweep_ci_ghcr_tags_deletes_ci_only_versions(
     tmp_path: Path,
 ) -> None:
@@ -465,6 +558,7 @@ def test_sweep_ci_ghcr_tags_deletes_ci_only_versions(
             "GH_TOKEN": "dummy",  # nosec B105 - fake token for stubbed gh
             "PACKAGES": "py-lintro",
             "MIN_AGE_DAYS": "0",
+            "ALLOW_SHORT_RETENTION": "true",
             "GH_LOG": str(gh_log),
             # id\\tupdated_at\\ttags (jq filtering is stubbed).
             "GH_VERSIONS_TSV": (
@@ -517,6 +611,7 @@ def test_sweep_ci_ghcr_tags_recheck_aborts_on_persistent_tag(
             "GH_TOKEN": "dummy",  # nosec B105 - fake token for stubbed gh
             "PACKAGES": "py-lintro",
             "MIN_AGE_DAYS": "0",
+            "ALLOW_SHORT_RETENTION": "true",
             "GH_LOG": str(gh_log),
             "GH_VERSIONS_TSV": "202\t2026-01-02T00:00:00Z\tci-old",
             # Promotion attached main between snapshot and delete.
@@ -559,6 +654,7 @@ def test_sweep_ci_ghcr_tags_recheck_aborts_on_updated_at_change(
             "GH_TOKEN": "dummy",  # nosec B105 - fake token for stubbed gh
             "PACKAGES": "py-lintro",
             "MIN_AGE_DAYS": "0",
+            "ALLOW_SHORT_RETENTION": "true",
             "GH_LOG": str(gh_log),
             "GH_VERSIONS_TSV": "202\t2026-01-02T00:00:00Z\tci-old",
             "GH_VERSION_STATE": "2026-01-03T00:00:00Z\tci-old",
@@ -589,6 +685,7 @@ def test_sweep_ci_ghcr_tags_fails_on_query_error(
             "GH_TOKEN": "dummy",  # nosec B105 - fake token for stubbed gh
             "PACKAGES": "py-lintro",
             "MIN_AGE_DAYS": "0",
+            "ALLOW_SHORT_RETENTION": "true",
         },
     )
 
@@ -626,6 +723,7 @@ def test_sweep_ci_ghcr_tags_recheck_404_is_benign(
             "GH_TOKEN": "dummy",  # nosec B105 - fake token for stubbed gh
             "PACKAGES": "py-lintro",
             "MIN_AGE_DAYS": "0",
+            "ALLOW_SHORT_RETENTION": "true",
             "GH_LOG": str(gh_log),
             "GH_VERSIONS_TSV": "202\t2026-01-02T00:00:00Z\tci-old",
         },
@@ -662,6 +760,7 @@ def test_sweep_ci_ghcr_tags_recheck_hard_error_fails(
             "GH_TOKEN": "dummy",  # nosec B105 - fake token for stubbed gh
             "PACKAGES": "py-lintro",
             "MIN_AGE_DAYS": "0",
+            "ALLOW_SHORT_RETENTION": "true",
             "GH_VERSIONS_TSV": "202\t2026-01-02T00:00:00Z\tci-old",
         },
     )
@@ -700,6 +799,7 @@ def test_sweep_ci_ghcr_tags_recheck_aborts_on_second_ci_tag(
             "GH_TOKEN": "dummy",  # nosec B105 - fake token for stubbed gh
             "PACKAGES": "py-lintro",
             "MIN_AGE_DAYS": "0",
+            "ALLOW_SHORT_RETENTION": "true",
             "GH_LOG": str(gh_log),
             "GH_VERSIONS_TSV": "202\t2026-01-02T00:00:00Z\tci-old",
             # Concurrent build attached another ci-* tag.
@@ -732,6 +832,7 @@ def test_sweep_ci_ghcr_tags_dry_run_skips_delete(
             "GH_TOKEN": "dummy",  # nosec B105 - fake token for stubbed gh
             "PACKAGES": "py-lintro",
             "MIN_AGE_DAYS": "0",
+            "ALLOW_SHORT_RETENTION": "true",
             "DRY_RUN": "true",
             "GH_LOG": str(gh_log),
             "GH_VERSIONS_TSV": "202\t2026-01-02T00:00:00Z\tci-old",
