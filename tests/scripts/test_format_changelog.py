@@ -219,6 +219,85 @@ def test_identifier_wrapping_is_idempotent(module: ModuleType) -> None:
     assert_that(twice).is_equal_to(once)
 
 
+def test_dotted_filename_underscore_is_not_wrapped(module: ModuleType) -> None:
+    """An underscore inside a dotted filename/domain is left intact."""
+    src = "- **ci**: fix format_changelog.py wrapping and update a_b.example.com (#1)\n"
+    result = module.format_changelog(src)
+
+    assert_that(result).contains("format_changelog.py")
+    assert_that(result).does_not_contain("`format_changelog`")
+    assert_that(result).contains("a_b.example.com")
+
+
+def test_inline_link_destination_underscore_is_not_wrapped(
+    module: ModuleType,
+) -> None:
+    """An underscore inside a Markdown inline link is left intact."""
+    src = "- **docs**: see [the guide](https://x.test/get_started.md) now (#1)\n"
+    result = module.format_changelog(src)
+
+    assert_that(result).contains("[the guide](https://x.test/get_started.md)")
+    assert_that(result).does_not_contain("`get_started`")
+
+
+def test_url_query_parameter_underscore_is_not_wrapped(module: ModuleType) -> None:
+    """An underscore inside a URL query string is left intact."""
+    src = "- **api**: call https://x.test/search?sort_by=name&page_size=20 (#1)\n"
+    result = module.format_changelog(src)
+
+    assert_that(result).contains("https://x.test/search?sort_by=name&page_size=20")
+    assert_that(result).does_not_contain("`sort_by`")
+    assert_that(result).does_not_contain("`page_size`")
+
+
+def test_multi_backtick_code_span_is_preserved(module: ModuleType) -> None:
+    """A double-backtick code span containing an underscore is not rewrapped."""
+    src = "- **x**: keep ``inner_code`` intact and wrap outer_ident here (#1)\n"
+    result = module.format_changelog(src)
+
+    assert_that(result).contains("``inner_code``")
+    assert_that(result).does_not_contain("`inner_code`_")
+    assert_that(result).contains("`outer_ident`")
+
+
+def test_code_span_spanning_physical_lines_is_preserved(
+    module: ModuleType,
+) -> None:
+    """Inline-code-span state carries across physical lines within a paragraph."""
+    src = (
+        "A paragraph with `code that keeps going\n"
+        "onto under_score line` then real_ident after it.\n"
+    )
+    result = module._protect_code_identifiers(src)
+
+    # The underscore inside the wrapped code span is untouched...
+    assert_that(result).contains("onto under_score line`")
+    assert_that(result).does_not_contain("`under_score`")
+    # ...while the identifier after the span closes is wrapped.
+    assert_that(result).contains("`real_ident`")
+
+
+def test_hard_break_line_identifier_is_wrapped(module: ModuleType) -> None:
+    """A snake_case identifier on a hard-break line is protected in place."""
+    src = "first line has real_ident here  \nsecond line has other_ident too\n"
+    result = module._protect_code_identifiers(src)
+
+    assert_that(result).contains("`real_ident`")
+    assert_that(result).contains("`other_ident`")
+    # The trailing hard-break marker (two spaces) is preserved.
+    assert_that(result).contains("`real_ident` here  ")
+
+
+def test_fenced_code_block_is_not_transformed(module: ModuleType) -> None:
+    """Identifiers inside a fenced code block are never wrapped."""
+    src = "```python\nx = some_func_call()\n```\n\nprose with plain_ident here\n"
+    result = module.format_changelog(src)
+
+    assert_that(result).contains("x = some_func_call()")
+    assert_that(result).does_not_contain("`some_func_call`")
+    assert_that(result).contains("`plain_ident`")
+
+
 def test_missing_file_is_a_non_fatal_skip(
     module: ModuleType,
     tmp_path: Path,
