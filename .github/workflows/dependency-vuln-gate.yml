@@ -102,7 +102,6 @@ jobs:
               - 'uv.lock'
               - 'pyproject.toml'
               - '.github/workflows/publish-pypi-on-tag.yml'
-              - '.github/workflows/dependency-vuln-gate.yml'
       - name: Generate SBOM
         id: sbom
         # Same syft action, target and format as the release gate; the
