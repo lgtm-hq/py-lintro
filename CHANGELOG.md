@@ -21,6 +21,12 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.91.36] - 2026-07-24
+
+### Fixed
+
+- **ci**: run the release SBOM vulnerability gate pre-merge (#1675) (e5025e7)
+
 ## [0.91.35] - 2026-07-24
 
 ### Fixed
