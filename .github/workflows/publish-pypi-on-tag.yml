@@ -71,6 +71,9 @@ jobs:
       target-type: dir
       sbom-format: cyclonedx-json
       scan-vulnerabilities: true
+      # Block tagged publishes when grype finds high/critical vulns (#1118).
+      # Remediation landed in #1126; Dependabot shows no open high alerts.
+      fail-on-severity: high
       create-attestation: true
       tooling-ref: 'ee8484ca71db3a2c2c33da6128bbf2330fcd7c88' # v0.59.2
       egress-policy: block
