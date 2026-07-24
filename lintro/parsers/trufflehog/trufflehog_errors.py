@@ -23,42 +23,48 @@ _MISSING_PATH_RE: re.Pattern[str] = re.compile(
     re.IGNORECASE,
 )
 
-# zap log levels that signal a failure. TruffleHog logs progress as
-# ``info-0``/``debug-N`` and failures as ``error``; ``dpanic``/``panic``/
-# ``fatal`` are zap's escalating fatal levels.
-_ERROR_LEVELS: frozenset[str] = frozenset(
-    {"error", "dpanic", "panic", "fatal"},
+# zap log levels that are routine advisories, never scan incompleteness. A
+# JSON record at one of these levels *with no error field* is progress noise
+# and is dropped; anything else — an error level, an ``error``/``err`` field,
+# or an unrecognised/absent level — is retained so the caller fails closed
+# (unknown means unsafe). ``warn`` is treated as advisory pending evidence
+# that TruffleHog uses it for incompleteness (#1685).
+_BENIGN_LEVELS: frozenset[str] = frozenset(
+    {"info", "debug", "warn"},
 )
 
 
 def extract_trufflehog_scan_errors(stderr: str) -> list[str]:
     """Extract per-path scan error strings from TruffleHog stderr.
 
-    JSON log records are classified by severity, not by message:
+    The classification is deliberately asymmetric toward retention — unknown
+    means unsafe:
 
     * The aggregate ``encountered errors during scan`` payload takes
       precedence — its ``errors`` array is expanded so each reason stays
       individually classifiable against the resolved scan set.
-    * Any other error-severity record (``level`` of ``error``/``dpanic``/
-      ``panic``/``fatal``, or a non-empty ``error``/``err`` field) is
-      retained.
-    * Routine progress records (``running source``, ``finished scanning``, …)
-      carry an informational level and no error field, so they are ignored.
+    * A JSON record positively identified as a routine advisory (an
+      ``info``/``debug``/``warn`` level with no ``error``/``err`` field —
+      ``running source``, ``finished scanning``, …) is dropped as progress
+      noise.
+    * Every other JSON record is retained: error/fatal/panic levels, records
+      carrying an ``error``/``err`` field, and records whose structure we do
+      not recognise at all (no known level). A structurally unknown record is
+      never proven benign, so it is kept.
+    * Every non-JSON line is retained verbatim.
 
-    Every remaining non-empty line is retained verbatim, even when it matches
-    no known error shape. This is deliberate: unknown means unsafe. An
-    unclassified line is never a benign missing path
-    (:func:`is_benign_missing_path_error` returns False for anything that is
-    not an ``lstat``/``stat`` "no such file or directory" reason), so keeping
-    it makes :func:`scan_errors_are_all_benign` return False and the caller
-    fail closed on a possibly incomplete scan (#1044, #1662).
+    A retained line is never a benign missing path unless it is exactly an
+    ``lstat``/``stat`` "no such file or directory" reason
+    (:func:`is_benign_missing_path_error` returns False for everything else),
+    so keeping it makes :func:`scan_errors_are_all_benign` return False and the
+    caller fail closed on a possibly incomplete scan (#1044, #1662).
 
     Args:
         stderr: Raw stderr captured from a TruffleHog run.
 
     Returns:
-        Ordered list of individual error reason strings. Empty when none can
-        be extracted (caller should fail closed — the scan may be incomplete).
+        Ordered list of individual error reason strings. Empty when only
+        routine progress records were present (a clean scan).
     """
     if not stderr or not stderr.strip():
         return []
@@ -87,10 +93,11 @@ def extract_trufflehog_scan_errors(stderr: str) -> list[str]:
             if aggregate:
                 for err in aggregate:
                     _record(err)
-            elif _is_error_record(payload):
-                # An error-severity record that is not the aggregate payload
-                # (or an aggregate with no usable reasons). Keep it so the
-                # caller cannot mistake the batch for a clean scan.
+            elif not _is_benign_progress_record(payload):
+                # Not the aggregate and not a positively-benign advisory: an
+                # error record, a record with an error field, or a structure
+                # we do not recognise. Keep it so the caller cannot mistake
+                # the batch for a clean scan.
                 _record(_reason_from_error_record(payload, raw=stripped))
             continue
 
@@ -105,33 +112,22 @@ def stderr_reports_scan_errors(stderr: str) -> bool:
     """Return whether TruffleHog stderr reports any scan error.
 
     TruffleHog exits 0 either way, so this is the gate that decides whether a
-    batch needs error classification at all. It fires on the aggregate
-    ``encountered errors during scan`` banner *and* on any standalone
-    error-severity JSON record: when an unreadable file is reached through a
-    scanned directory, TruffleHog logs only the standalone record and no
-    aggregate, which would otherwise read as a clean scan (#1662).
-
-    Plain-text stderr is matched on the banner alone, so ordinary non-JSON
-    log noise does not trip the gate.
+    batch needs error classification at all. It is defined as exactly "did
+    extraction retain anything", so the gate and
+    :func:`extract_trufflehog_scan_errors` can never diverge: any line the
+    extractor keeps trips the gate, and a stderr of only routine progress
+    records does not. This covers the aggregate ``encountered errors during
+    scan`` banner, standalone error records emitted without an aggregate (an
+    unreadable file reached through a scanned directory — #1662), and any
+    unclassifiable JSON or plain-text diagnostic.
 
     Args:
         stderr: Raw stderr captured from a TruffleHog run.
 
     Returns:
-        True when the stderr carries at least one scan-error signal.
+        True when the stderr carries at least one line the extractor retains.
     """
-    if not stderr or not stderr.strip():
-        return False
-
-    if "encountered errors during scan" in stderr:
-        return True
-
-    return any(
-        (payload := _json_log_payload(line.strip())) is not None
-        and _is_error_record(payload)
-        for line in stderr.splitlines()
-        if line.strip()
-    )
+    return bool(extract_trufflehog_scan_errors(stderr))
 
 
 def is_benign_missing_path_error(
@@ -221,29 +217,38 @@ def _json_log_payload(line: str) -> dict[str, object] | None:
     return payload if isinstance(payload, dict) else None
 
 
-def _is_error_record(payload: dict[str, object]) -> bool:
-    """Return whether a JSON log record reports an error.
+def _is_benign_progress_record(payload: dict[str, object]) -> bool:
+    """Return whether a JSON log record is a routine advisory, not an error.
 
-    Classification is by severity rather than by message text, so a scan
-    failure logged under any ``msg`` is caught. TruffleHog's zap logger emits
-    ``level`` values such as ``info-0`` for progress and ``error`` for
-    failures, and attaches the underlying reason as an ``error`` field.
+    Classification is by severity, not message text, so a scan failure logged
+    under any ``msg`` is still caught by retaining everything this rejects.
+    TruffleHog's zap logger emits ``level`` values such as ``info-0`` for
+    progress and ``error`` for failures, and attaches the underlying reason as
+    an ``error`` field.
+
+    A record is benign progress only when it is positively recognised as such:
+    an ``info``/``debug``/``warn`` level *and* no ``error``/``err`` field. A
+    record with an error field, an error/fatal/panic level, or an
+    unrecognised/absent level is not benign — the caller retains it so an
+    unknown record fails the scan closed.
 
     Args:
         payload: A decoded JSON log record from TruffleHog stderr.
 
     Returns:
-        True when the record's level is error-like or it carries a non-empty
-        ``error``/``err`` field.
+        True only when the record is a recognised advisory carrying no error.
     """
-    level = payload.get("level")
-    if isinstance(level, str):
-        # ``info-0``/``debug-3`` carry a verbosity suffix; compare the stem.
-        stem = level.strip().lower().split("-", 1)[0]
-        if stem in _ERROR_LEVELS:
-            return True
+    if _error_field_text(payload) is not None:
+        return False
 
-    return _error_field_text(payload) is not None
+    level = payload.get("level")
+    if not isinstance(level, str):
+        # No recognisable level — cannot prove it benign, so it is not.
+        return False
+
+    # ``info-0``/``debug-3`` carry a verbosity suffix; compare the stem.
+    stem = level.strip().lower().split("-", 1)[0]
+    return stem in _BENIGN_LEVELS
 
 
 def _error_field_text(payload: dict[str, object]) -> str | None:

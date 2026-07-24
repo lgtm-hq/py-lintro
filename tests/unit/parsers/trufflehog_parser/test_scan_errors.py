@@ -170,6 +170,47 @@ def test_json_error_record_without_reason_keeps_raw_line() -> None:
     assert_that(extract_trufflehog_scan_errors(record)).is_equal_to([record])
 
 
+@pytest.mark.parametrize(
+    "record",
+    [
+        '{"level":"warn","msg":"detector deprecated"}',
+        '{"level":"debug-2","msg":"chunk emitted","chunks":3}',
+        '{"level":"info-0","msg":"running source"}',
+    ],
+    ids=["warn-advisory", "debug-progress", "info-progress"],
+)
+def test_json_advisory_records_are_dropped(record: str) -> None:
+    """Info/debug/warn records with no error field are routine noise.
+
+    Args:
+        record: A single benign-advisory JSON log record.
+    """
+    assert_that(extract_trufflehog_scan_errors(record)).is_empty()
+
+
+@pytest.mark.parametrize(
+    "record",
+    [
+        '{"error":"read: broken pipe"}',
+        '{"unexpected":"structure","no":"level"}',
+        '{"level":"trace","msg":"unknown level stem"}',
+    ],
+    ids=["error-field-no-level", "no-level-at-all", "unrecognised-level"],
+)
+def test_unclassifiable_json_records_are_retained(record: str) -> None:
+    """A JSON record we cannot prove benign is kept so the caller fails closed.
+
+    Args:
+        record: A single JSON record with no recognised benign level.
+    """
+    errors = extract_trufflehog_scan_errors(record)
+
+    assert_that(errors).is_length(1)
+    assert_that(
+        scan_errors_are_all_benign(errors, scan_paths={"/repo/src/a.py"}),
+    ).is_false()
+
+
 def test_aggregate_payload_takes_precedence_over_raw_retention() -> None:
     """The aggregate payload expands to reasons rather than the raw line."""
     stderr = (
@@ -204,6 +245,11 @@ def test_aggregate_payload_with_empty_errors_fails_closed() -> None:
             '{"level":"info-0","msg":"finished scanning","chunks":1}',
             False,
         ),
+        (
+            '{"level":"debug-2","msg":"chunk emitted"}\n'
+            '{"level":"warn","msg":"detector deprecated"}',
+            False,
+        ),
         ("level=error msg=encountered errors during scan", True),
         (
             '{"level":"error","msg":"encountered errors during scan","errors":[]}',
@@ -216,20 +262,25 @@ def test_aggregate_payload_with_empty_errors_fails_closed() -> None:
             '{"level":"info-0","msg":"finished scanning"}',
             True,
         ),
-        ("scanning 12 files", False),
+        ('{"error":"read: broken pipe"}', True),
+        ('{"unexpected":"structure","no":"level"}', True),
+        ("scanning 12 files", True),
     ],
     ids=[
         "empty",
         "whitespace",
-        "progress-only",
+        "info-progress-only",
+        "debug-and-warn-advisories-only",
         "plain-text-banner",
         "aggregate-json",
         "standalone-error-record-without-aggregate",
-        "plain-text-noise-does-not-trip-gate",
+        "error-field-without-level",
+        "unrecognised-json-structure",
+        "unclassifiable-plain-text-trips-gate",
     ],
 )
 def test_stderr_reports_scan_errors(stderr: str, expected: bool) -> None:
-    """The plugin gate fires on aggregate banners and standalone error records.
+    """The gate mirrors extraction exactly: retained lines trip it, noise does not.
 
     Args:
         stderr: Raw stderr captured from a TruffleHog run.
