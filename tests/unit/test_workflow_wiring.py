@@ -1227,3 +1227,190 @@ def test_publish_pypi_sbom_fails_on_high_severity() -> None:
     sbom = publish["jobs"]["sbom"]
     assert_that(sbom["with"]).contains_entry({"fail-on-severity": "high"})
     assert_that(sbom["with"].get("scan-vulnerabilities")).is_true()
+
+
+_PUSH_SHA_TERNARY = "github.event_name == 'push' && github.sha || github.ref"
+
+# Job-level concurrency groups that legitimately key on ``github.ref`` even
+# though their workflow runs on pushes to ``main``. Maps ``"<workflow>:<job>"``
+# to the reason the #1673 self-cancellation cannot bite.
+_REF_KEYED_PUSH_GROUP_EXEMPTIONS: dict[str, str] = {
+    # docker-ci declares a workflow-level group with
+    # ``cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}``, so two
+    # main pushes never execute concurrently and this job-level group can never
+    # cancel a sibling commit's build. Re-keying it on github.sha would be a
+    # behavioural no-op.
+    "docker-ci.yml:docker-build": (
+        "workflow-level group already serializes main pushes"
+    ),
+}
+
+
+def _render_concurrency_group(
+    group: str,
+    *,
+    event_name: str,
+    ref: str,
+    sha: str,
+    matrix: dict[str, str] | None = None,
+) -> str:
+    """Evaluate a concurrency ``group`` the way GitHub Actions would.
+
+    Only the small expression grammar this repository uses is supported: bare
+    context lookups and the ``github.event_name == 'push' && github.sha ||
+    github.ref`` ternary. ``github.sha`` is always a non-empty commit id, so the
+    ternary never falls through to its ``||`` branch by accident.
+
+    Args:
+        group: Raw ``concurrency.group`` value from the workflow file.
+        event_name: Value of ``github.event_name`` to simulate.
+        ref: Value of ``github.ref`` to simulate.
+        sha: Value of ``github.sha`` to simulate.
+        matrix: Optional ``matrix`` context values keyed by matrix dimension.
+
+    Returns:
+        The rendered concurrency group string.
+    """
+    context = {
+        "github.event_name": event_name,
+        "github.ref": ref,
+        "github.sha": sha,
+    }
+    context.update({f"matrix.{key}": value for key, value in (matrix or {}).items()})
+
+    def _render(match: re.Match[str]) -> str:
+        expr = _normalize_github_expr(match.group(1))
+        if expr == _PUSH_SHA_TERNARY:
+            return sha if event_name == "push" else ref
+        assert_that(context).contains_key(expr)
+        return context[expr]
+
+    return re.sub(r"\$\{\{(.+?)\}\}", _render, " ".join(group.split()))
+
+
+@pytest.mark.parametrize(
+    ("workflow", "job", "matrix"),
+    [
+        (
+            "test-built-package.yml",
+            "test-package-install",
+            {"package-type": "wheel"},
+        ),
+        ("site-quality.yml", None, None),
+    ],
+)
+def test_main_push_concurrency_groups_key_on_commit_sha(
+    workflow: str,
+    job: str | None,
+    matrix: dict[str, str] | None,
+) -> None:
+    """Push events must get a per-commit concurrency slot (#1673).
+
+    ``github.ref`` is ``refs/heads/main`` for every push to main, so a group
+    keyed on it collapses consecutive merges into one slot and
+    ``cancel-in-progress`` kills the earlier commit's run. Pull requests must
+    keep the ref-keyed behaviour so a force-push still supersedes the stale run.
+
+    Args:
+        workflow: Workflow file name under ``.github/workflows``.
+        job: Job id owning the concurrency block, or ``None`` for the
+            workflow-level block.
+        matrix: ``matrix`` context values the group interpolates, if any.
+    """
+    data = _load_workflow(name=workflow)
+    scope = data if job is None else data["jobs"][job]
+    concurrency = scope["concurrency"]
+    assert_that(concurrency["cancel-in-progress"]).is_true()
+
+    group = concurrency["group"]
+    main_ref = "refs/heads/main"
+    first = _render_concurrency_group(
+        group,
+        event_name="push",
+        ref=main_ref,
+        sha="a" * 40,
+        matrix=matrix,
+    )
+    second = _render_concurrency_group(
+        group,
+        event_name="push",
+        ref=main_ref,
+        sha="b" * 40,
+        matrix=matrix,
+    )
+    assert_that(first).is_not_equal_to(second)
+    assert_that(first).contains("a" * 40)
+    assert_that(first).does_not_contain(main_ref)
+
+    # A pull request keeps its ref-keyed slot, so a force-push (new sha, same
+    # ref) still lands in the same group and cancels the outdated run.
+    pr_ref = "refs/pull/1673/merge"
+    before = _render_concurrency_group(
+        group,
+        event_name=_GITHUB_PULL_REQUEST_EVENT,
+        ref=pr_ref,
+        sha="c" * 40,
+        matrix=matrix,
+    )
+    after = _render_concurrency_group(
+        group,
+        event_name=_GITHUB_PULL_REQUEST_EVENT,
+        ref=pr_ref,
+        sha="d" * 40,
+        matrix=matrix,
+    )
+    assert_that(before).is_equal_to(after)
+    assert_that(before).contains(pr_ref)
+
+
+def _workflow_pushes_to_main(data: dict[str, Any]) -> bool:
+    """Report whether a parsed workflow triggers on pushes to ``main``.
+
+    Args:
+        data: Parsed workflow mapping.
+
+    Returns:
+        True when the workflow has a ``push`` trigger listing ``main``.
+    """
+    push = (data.get("on") or {}).get("push")
+    if not isinstance(push, dict):
+        return False
+    return "main" in (push.get("branches") or [])
+
+
+def test_no_main_push_workflow_cancels_itself_on_ref() -> None:
+    """Audit every push-to-main workflow for the #1673 self-cancel pattern.
+
+    A group keyed only on ``github.ref`` combined with a literal
+    ``cancel-in-progress: true`` means consecutive main merges cancel each
+    other. Guarding cancellation with ``github.ref != 'refs/heads/main'`` or
+    keying the group on ``github.sha`` both avoid it.
+    """
+    offenders: list[str] = []
+    workflows = sorted((_REPO_ROOT / ".github" / "workflows").glob("*.yml"))
+    assert_that(workflows).is_not_empty()
+
+    for path in workflows:
+        data = yaml.safe_load(path.read_text(encoding="utf-8"))
+        if not isinstance(data, dict) or not _workflow_pushes_to_main(data):
+            continue
+        scopes: list[tuple[str, Any]] = [(path.name, data)]
+        scopes.extend(
+            (f"{path.name}:{job_id}", job)
+            for job_id, job in (data.get("jobs") or {}).items()
+            if isinstance(job, dict)
+        )
+        for label, scope in scopes:
+            concurrency = scope.get("concurrency")
+            if not isinstance(concurrency, dict):
+                continue
+            if concurrency.get("cancel-in-progress") is not True:
+                continue
+            group = str(concurrency.get("group", ""))
+            if "github.sha" in group:
+                continue
+            if label in _REF_KEYED_PUSH_GROUP_EXEMPTIONS:
+                continue
+            offenders.append(label)
+
+    assert_that(offenders).is_empty()
