@@ -21,6 +21,18 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.91.32] - 2026-07-24
+
+### Changed
+
+- **ai**: remove dead AUDIT_FILE constant and unused _rotate_audit_log wrapper (#1669)
+  (d6367ff)
+
+### Fixed
+
+- **ci**: validate MIN_AGE_DAYS floor and TAG_PREFIX in GHCR CI-tag sweep (#1674)
+  (aaa4124)
+
 ## [0.91.31] - 2026-07-24
 
 ### Fixed
