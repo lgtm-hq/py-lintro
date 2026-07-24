@@ -34,7 +34,12 @@ name: Security - Dependency Vulnerability Gate
 'on':
   pull_request:
     branches: [main]
-    types: [opened, synchronize, reopened, ready_for_review]
+    # `edited` fires on base-branch retarget, which changes the PR diff and so
+    # the resolved dependency set the gate scans; without it the gate result
+    # could reflect the old base (#1667). detect-changes re-resolves the diff
+    # and the scan steps skip when no dependency file changed, so firing on
+    # edits stays cheap.
+    types: [opened, synchronize, reopened, ready_for_review, edited]
   merge_group:
     types: [checks_requested]
   workflow_dispatch:

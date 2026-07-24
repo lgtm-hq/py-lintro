@@ -1709,10 +1709,13 @@ def test_dependency_vuln_gate_filter_globs_match_committed_manifests() -> None:
         "go.sum",
     }
 
-    # Match with pathspec's gitignore semantics, which support ``**`` globstar
-    # natively (``**/foo`` matches ``foo`` at any depth including root), rather
-    # than a hand-rolled matcher. The filter is a pure allow-list, so a manifest
-    # is covered iff it matches any pattern.
+    # Match with pathspec's gitignore semantics rather than a hand-rolled
+    # matcher. gitignore globs support the ``**`` globstar natively, closely
+    # mirroring the picomatch semantics dorny/paths-filter applies: a leading
+    # ``**/`` matches at any depth including the repo root (so ``**/uv.lock``
+    # matches both ``uv.lock`` and ``a/b/uv.lock``), and ``*`` within a segment
+    # does not cross ``/``. The filter is a pure allow-list, so a manifest is
+    # covered iff it matches at least one pattern (``GitIgnoreSpec.match_file``).
     spec = GitIgnoreSpec.from_lines(patterns)
 
     manifests = [p for p in tracked if Path(p).name in manifest_names]
