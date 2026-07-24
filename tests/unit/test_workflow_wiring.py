@@ -1453,7 +1453,13 @@ def _vuln_gate_step(*, uses_prefix: str) -> dict[str, Any]:
         The matching step mapping.
     """
     steps = _vuln_gate_job()["steps"]
-    step = next(step for step in steps if step.get("uses", "").startswith(uses_prefix))
+    step = next(
+        (step for step in steps if step.get("uses", "").startswith(uses_prefix)),
+        None,
+    )
+    assert_that(step).described_as(
+        f"gate step with uses prefix {uses_prefix!r}",
+    ).is_not_none()
     return cast(dict[str, Any], step)
 
 
@@ -1559,7 +1565,9 @@ def test_dependency_vuln_gate_scopes_to_dependency_paths() -> None:
     assert_that(deps).contains("**/bun.lock")
     # Rust and Go (test_samples manifests are in the scanned tree)
     assert_that(deps).contains("**/Cargo.lock")
+    assert_that(deps).contains("**/Cargo.toml")
     assert_that(deps).contains("**/go.mod")
+    assert_that(deps).contains("**/go.sum")
     # The gate exercises itself and the real release gate.
     assert_that(deps).contains(".github/workflows/publish-pypi-on-tag.yml")
     # Vendored / generated trees are excluded so they cannot trigger.
