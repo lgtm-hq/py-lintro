@@ -1570,8 +1570,24 @@ def test_dependency_vuln_gate_scopes_to_dependency_paths() -> None:
     assert_that(deps).contains("**/go.sum")
     # The gate exercises itself and the real release gate.
     assert_that(deps).contains(".github/workflows/publish-pypi-on-tag.yml")
-    # Vendored / generated trees are excluded so they cannot trigger.
-    assert_that(deps).contains("!**/node_modules/**")
+
+
+def test_dependency_vuln_gate_filter_is_pure_allow_list() -> None:
+    """The ``deps`` filter carries no ``!`` negations (dorny ``some`` trap).
+
+    dorny/paths-filter defaults to ``predicate-quantifier: some`` and the
+    lgtm-ci wrapper does not override it, so a standalone negation like
+    ``!**/node_modules/**`` would match every file *outside* node_modules and
+    force ``deps`` true on nearly every PR — it does not subtract. Excluding
+    vendored trees would also make this gate looser than the release gate,
+    which scans them via ``syft scan dir:.``. So the filter must stay a pure
+    allow-list.
+    """
+    detect_step = _vuln_gate_step(uses_prefix=_VULN_DETECT_ACTION)
+    patterns = yaml.safe_load(detect_step["with"]["filters"])["deps"]
+
+    negations = [p for p in patterns if p.startswith("!")]
+    assert_that(negations).is_empty()
 
 
 def test_dependency_vuln_gate_filter_globs_match_committed_manifests() -> None:
@@ -1580,15 +1596,12 @@ def test_dependency_vuln_gate_filter_globs_match_committed_manifests() -> None:
     Guards the #1667 drift concern directly: if a real manifest the release
     gate scans is not matched by any ``deps`` pattern, a PR could change the
     scanned graph through it without the pre-merge gate reacting. Enumerates
-    the repo's tracked manifests and asserts each matches a positive pattern
-    and survives the negations, using the same picomatch-style semantics dorny
-    applies.
+    the repo's tracked manifests and asserts each matches a pattern, using the
+    same picomatch-style semantics dorny applies (pure allow-list, ``some``
+    quantifier — a file matches the filter if it matches any pattern).
     """
     detect_step = _vuln_gate_step(uses_prefix=_VULN_DETECT_ACTION)
     patterns = yaml.safe_load(detect_step["with"]["filters"])["deps"]
-
-    positives = [p for p in patterns if not p.startswith("!")]
-    negatives = [p[1:] for p in patterns if p.startswith("!")]
 
     tracked = subprocess.run(  # nosec B603 B607 - fixed argv against this repo
         ["git", "ls-files"],
@@ -1618,25 +1631,13 @@ def test_dependency_vuln_gate_filter_globs_match_committed_manifests() -> None:
         "go.sum",
     }
 
-    def matches_positive(path: str, pattern: str) -> bool:
-        # Every positive pattern is either ``**/<glob-with-no-slash>`` (matches
-        # any file whose basename matches the glob, at any depth including root)
-        # or an exact repo-relative path.
+    def matches(path: str, pattern: str) -> bool:
+        # Every pattern is either ``**/<glob-with-no-slash>`` (matches any file
+        # whose basename matches the glob, at any depth including root) or an
+        # exact repo-relative path.
         if pattern.startswith("**/"):
             return fnmatch(Path(path).name, pattern[3:])
         return path == pattern
-
-    def matches_negative(path: str, pattern: str) -> bool:
-        segments = path.split("/")
-        if pattern.startswith("**/") and pattern.endswith("/**"):
-            # ``**/DIR/**`` — DIR appears as a path segment (glob on the segment
-            # covers ``*.egg-info``).
-            needle = pattern[3:-3]
-            return any(fnmatch(seg, needle) for seg in segments)
-        if pattern.endswith("/**"):
-            # ``PREFIX/**`` — path is under PREFIX.
-            return path.startswith(pattern[:-3] + "/")
-        return fnmatch(path, pattern)
 
     manifests = [p for p in tracked if Path(p).name in manifest_names]
     # requirements*.txt is a glob family rather than a fixed name.
@@ -1647,11 +1648,10 @@ def test_dependency_vuln_gate_filter_globs_match_committed_manifests() -> None:
     ]
     assert_that(manifests).is_not_empty()
 
-    unmatched = []
-    for path in manifests:
-        if any(matches_negative(path, neg) for neg in negatives):
-            continue  # legitimately excluded (vendored/generated)
-        if not any(matches_positive(path, pos) for pos in positives):
-            unmatched.append(path)
+    unmatched = [
+        path
+        for path in manifests
+        if not any(matches(path, pattern) for pattern in patterns)
+    ]
 
     assert_that(unmatched).is_empty()

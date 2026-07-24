@@ -55,6 +55,10 @@ jobs:
       # (security-events) and creates no attestation (id-token/attestations) —
       # it only has to fail the way the release gate fails.
       contents: read
+      # read: dorny/paths-filter resolves the changed-file list on
+      # pull_request events via the Pulls API (GET pulls/{n}/files); with a
+      # locked-down token that call needs the pull-requests read scope.
+      pull-requests: read
     steps:
       - name: Harden Runner
         # yamllint disable-line rule:line-length
@@ -108,9 +112,19 @@ jobs:
             # would be LOOSER than the release gate: a PR bumping any of those
             # other manifests to a vulnerable version would pass here and break
             # the tagged publish — the exact drift #1667 exists to prevent. So
-            # match every language dependency manifest at any depth, then
-            # subtract vendored / generated trees that are not the resolved set
-            # (dorny evaluates negations last, so they remove earlier matches).
+            # match every language dependency manifest at any depth.
+            #
+            # This is a pure allow-list — deliberately NO `!` exclusions. dorny
+            # defaults to `predicate-quantifier: some`, under which a standalone
+            # negation like `!**/node_modules/**` matches every file OUTSIDE
+            # node_modules and so would make `deps` true on nearly every PR; it
+            # does not subtract. Exclusions are also unnecessary and would be
+            # wrong here: vendored / generated trees (node_modules, .venv,
+            # build, dist, *.egg-info) are gitignored, so they never appear in a
+            # PR diff and cannot trigger this filter — and if one were ever
+            # committed, the release gate's `syft scan dir:.` scans it too, so
+            # triggering the scan on it is correct (excluding it would make this
+            # gate looser than the release gate).
             deps:
               # Python
               - '**/pyproject.toml'
@@ -137,16 +151,6 @@ jobs:
               # The gate + release publish workflow themselves
               - '.github/workflows/publish-pypi-on-tag.yml'
               - '.github/workflows/dependency-vuln-gate.yml'
-              # Vendored / generated trees are never the resolved dependency
-              # set; exclude them so a committed vendor manifest cannot trigger.
-              - '!**/node_modules/**'
-              - '!**/.venv/**'
-              - '!**/venv/**'
-              - '!**/vendor/**'
-              - '!**/__pycache__/**'
-              - '!**/*.egg-info/**'
-              - '!**/build/**'
-              - '!**/dist/**'
       - name: Generate SBOM
         id: sbom
         # Same syft action, target and format as the release gate; the

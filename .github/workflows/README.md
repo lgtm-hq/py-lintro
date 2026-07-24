@@ -73,10 +73,10 @@ on `main` failures — hence the `actions: read` + `issues: write` job permissio
   whole repo, so the scan steps are gated (inside the job) on **every** language
   manifest that graph is cataloged from — Python (`pyproject.toml` / `uv.lock` /
   `requirements*.txt`), JavaScript (`package.json` / lockfiles incl. `bun.lock`), Rust
-  (`Cargo.toml` / `Cargo.lock`) and Go (`go.mod` / `go.sum`) at any depth, minus
-  vendored trees — not just the Python lock, or the pre-merge gate would be looser than
-  the release gate. Unfiltered trigger, so the `🔐 Dependency Vulnerability Gate`
-  context always reports and is safe to require
+  (`Cargo.toml` / `Cargo.lock`) and Go (`go.mod` / `go.sum`) at any depth — a pure
+  allow-list, not just the Python lock, or the pre-merge gate would be looser than the
+  release gate. Unfiltered trigger, so the `🔐 Dependency Vulnerability Gate` context
+  always reports and is safe to require
 - **renovate.yml** — Daily dependency updates (lgtm-ci `harden-runner` +
   `secure-checkout`)
 - **lintro-report-scheduled.yml**, **pr-comment-cleanup.yml**,
