@@ -12,6 +12,7 @@ from lintro.plugins.base import ExecutionContext
 from lintro.tools.definitions.trufflehog import TrufflehogPlugin
 from tests.unit.tools.trufflehog.conftest import (
     make_subprocess_result,
+    run_check_with_stderr,
     sample_finding_line,
 )
 
@@ -195,25 +196,131 @@ def test_check_benign_missing_path_scan_error_passes(
         trufflehog_plugin: The plugin under test.
         tmp_path: Temporary directory path.
     """
-    test_file = tmp_path / "module.py"
-    test_file.write_text('"""Module."""\n')
-
     stderr = (
         '{"level":"error","msg":"encountered errors during scan",'
         '"errors":["lstat /nope/coverage: no such file or directory",'
         '"lstat /nope/lighthouse-reports: no such file or directory"]}'
     )
-    with patch.object(
-        trufflehog_plugin,
-        "_run_subprocess_result",
-        return_value=make_subprocess_result(stdout="", stderr=stderr, returncode=0),
-    ):
-        result = trufflehog_plugin.check([str(test_file)], {})
+    result = run_check_with_stderr(
+        plugin=trufflehog_plugin,
+        tmp_path=tmp_path,
+        stderr=stderr,
+    )
 
     assert_that(result.success).is_true()
     assert_that(result.issues_count).is_equal_to(0)
     # Benign scan noise must not surface as a version-incompat parse warning.
     assert_that(result.parse_failures_count in (0, None)).is_true()
+
+
+def test_check_realistic_json_log_stream_with_benign_error_passes(
+    trufflehog_plugin: TrufflehogPlugin,
+    tmp_path: Path,
+) -> None:
+    """Routine JSON progress logs must not turn a benign scan into a failure.
+
+    Args:
+        trufflehog_plugin: The plugin under test.
+        tmp_path: Temporary directory path.
+    """
+    stderr = (
+        '{"level":"info-0","msg":"running source","source_manager_worker_id":"x"}\n'
+        '{"level":"error","msg":"encountered errors during scan","job":1,'
+        '"errors":["lstat /nope/coverage: no such file or directory"]}\n'
+        '{"level":"info-0","msg":"finished scanning","chunks":1,"bytes":3}\n'
+    )
+    result = run_check_with_stderr(
+        plugin=trufflehog_plugin,
+        tmp_path=tmp_path,
+        stderr=stderr,
+    )
+
+    assert_that(result.success).is_true()
+    assert_that(result.issues_count).is_equal_to(0)
+
+
+def test_check_standalone_error_record_without_aggregate_fails(
+    trufflehog_plugin: TrufflehogPlugin,
+    tmp_path: Path,
+) -> None:
+    """An unreadable target logged without an aggregate must still fail closed.
+
+    This is the stderr TruffleHog emits when the unreadable file is reached
+    through a scanned directory: a standalone error record and no
+    ``encountered errors during scan`` banner at all.
+
+    Args:
+        trufflehog_plugin: The plugin under test.
+        tmp_path: Temporary directory path.
+    """
+    stderr = (
+        '{"level":"info-0","msg":"running source","with_units":true}\n'
+        '{"level":"error","msg":"error scanning file","unit_kind":"unit",'
+        '"path":"/nope/locked.py",'
+        '"error":"unable to open file: open /nope/locked.py: permission denied"}\n'
+        '{"level":"info-0","msg":"finished scanning","chunks":1}\n'
+    )
+    result = run_check_with_stderr(
+        plugin=trufflehog_plugin,
+        tmp_path=tmp_path,
+        stderr=stderr,
+    )
+
+    assert_that(result.success).is_false()
+    assert_that(result.parse_failures_count).is_equal_to(1)
+
+
+def test_check_json_error_record_beside_benign_aggregate_fails(
+    trufflehog_plugin: TrufflehogPlugin,
+    tmp_path: Path,
+) -> None:
+    """A JSON error record must fail the batch despite a benign aggregate.
+
+    Args:
+        trufflehog_plugin: The plugin under test.
+        tmp_path: Temporary directory path.
+    """
+    stderr = (
+        '{"level":"info-0","msg":"running source"}\n'
+        '{"level":"error","msg":"error scanning file","path":"/nope/secret.txt",'
+        '"error":"unable to open file: open /nope/secret.txt: permission denied"}\n'
+        '{"level":"error","msg":"encountered errors during scan",'
+        '"errors":["lstat /nope/coverage: no such file or directory"]}\n'
+        '{"level":"info-0","msg":"finished scanning","chunks":1}\n'
+    )
+    result = run_check_with_stderr(
+        plugin=trufflehog_plugin,
+        tmp_path=tmp_path,
+        stderr=stderr,
+    )
+
+    assert_that(result.success).is_false()
+    assert_that(result.parse_failures_count).is_equal_to(1)
+
+
+def test_check_unclassified_error_beside_benign_one_fails(
+    trufflehog_plugin: TrufflehogPlugin,
+    tmp_path: Path,
+) -> None:
+    """An unrecognised diagnostic must fail closed even next to benign noise.
+
+    Args:
+        trufflehog_plugin: The plugin under test.
+        tmp_path: Temporary directory path.
+    """
+    stderr = (
+        '{"level":"error","msg":"encountered errors during scan",'
+        '"errors":["lstat /nope/coverage: no such file or directory"]}\n'
+        "failed to open archive /repo/src/big.zip: unexpected EOF\n"
+    )
+    result = run_check_with_stderr(
+        plugin=trufflehog_plugin,
+        tmp_path=tmp_path,
+        stderr=stderr,
+    )
+
+    assert_that(result.success).is_false()
+    assert_that(result.parse_failures_count).is_equal_to(1)
 
 
 def test_check_permission_denied_scan_error_fails(
@@ -226,19 +333,15 @@ def test_check_permission_denied_scan_error_fails(
         trufflehog_plugin: The plugin under test.
         tmp_path: Temporary directory path.
     """
-    test_file = tmp_path / "module.py"
-    test_file.write_text('"""Module."""\n')
-
     stderr = (
         '{"level":"error","msg":"encountered errors during scan",'
         '"errors":["open /secret: permission denied"]}'
     )
-    with patch.object(
-        trufflehog_plugin,
-        "_run_subprocess_result",
-        return_value=make_subprocess_result(stdout="", stderr=stderr, returncode=0),
-    ):
-        result = trufflehog_plugin.check([str(test_file)], {})
+    result = run_check_with_stderr(
+        plugin=trufflehog_plugin,
+        tmp_path=tmp_path,
+        stderr=stderr,
+    )
 
     assert_that(result.success).is_false()
     assert_that(result.parse_failures_count).is_equal_to(1)
@@ -262,12 +365,12 @@ def test_check_missing_scan_set_path_fails(
         '{"level":"error","msg":"encountered errors during scan",'
         '"errors":["lstat ' + resolved + ': no such file or directory"]}'
     )
-    with patch.object(
-        trufflehog_plugin,
-        "_run_subprocess_result",
-        return_value=make_subprocess_result(stdout="", stderr=stderr, returncode=0),
-    ):
-        result = trufflehog_plugin.check([str(test_file)], {})
+    result = run_check_with_stderr(
+        plugin=trufflehog_plugin,
+        tmp_path=tmp_path,
+        stderr=stderr,
+        scan_path=test_file,
+    )
 
     assert_that(result.success).is_false()
     assert_that(result.parse_failures_count).is_equal_to(1)

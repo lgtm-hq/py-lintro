@@ -42,8 +42,20 @@ Environment:
   ORG            GHCR org owner (default: lgtm-hq)
   PACKAGES       Space-separated package names
                  (default: "py-lintro py-lintro-base")
-  TAG_PREFIX     Only sweep tags starting with this (default: ci-)
-  MIN_AGE_DAYS   Only delete versions older than N days (default: 91)
+  TAG_PREFIX     Only sweep tags starting with this (default: ci-).
+                 Must match ^[A-Za-z0-9._-]+$ because it is interpolated
+                 into the gh api --jq filter program.
+  MIN_AGE_DAYS   Only delete versions older than N days (default: 91).
+                 Values below 91 are rejected unless ALLOW_SHORT_RETENTION
+                 is "true" (see below).
+  ALLOW_SHORT_RETENTION
+                 When "true", allow MIN_AGE_DAYS below the 91-day rerun-
+                 retention window. Only for testing: a shorter window
+                 sweeps ci-<run_id> tags of still-running workflows and
+                 re-creates the "manifest unknown" failure of #1138.
+                 Taking the bypass logs a ::warning:: so an inherited
+                 value can never waive the guard silently.
+                 ghcr-cleanup.yml never sets it.
   DRY_RUN        When "true", log candidates without deleting (default: false)
 EOF
 	exit 0
@@ -57,6 +69,11 @@ min_age_days="${MIN_AGE_DAYS:-91}"
 dry_run="${DRY_RUN:-false}"
 sweep_errors=0
 
+# Actions keeps runs for 90 days from completion; GHCR updated_at reflects the
+# push, so +1 day covers the skew. Sweeping below this window deletes
+# ci-<run_id> tags of runs that can still be partially re-run (#1138).
+readonly SAFE_MIN_AGE_DAYS=91
+
 if [[ -z "$gh_token" ]]; then
 	echo "GH_TOKEN is required" >&2
 	exit 2
@@ -67,8 +84,27 @@ if ! [[ "$min_age_days" =~ ^[0-9]+$ ]]; then
 	exit 2
 fi
 
-if [[ -z "$tag_prefix" ]]; then
-	echo "TAG_PREFIX must be non-empty" >&2
+if [[ "$min_age_days" -lt "$SAFE_MIN_AGE_DAYS" ]]; then
+	if [[ "${ALLOW_SHORT_RETENTION:-false}" != "true" ]]; then
+		echo "MIN_AGE_DAYS=${min_age_days} is below the ${SAFE_MIN_AGE_DAYS}d" \
+			"rerun-retention window (#1138)." >&2
+		echo "Set ALLOW_SHORT_RETENTION=true to override." >&2
+		exit 2
+	fi
+	# Never let an inherited ALLOW_SHORT_RETENTION bypass go unnoticed: an
+	# operator reading the log must see that the #1138 guard was waived.
+	echo "::warning::ALLOW_SHORT_RETENTION=true waives the" \
+		"${SAFE_MIN_AGE_DAYS}d guard; sweeping with" \
+		"MIN_AGE_DAYS=${min_age_days} can delete ci-<run_id> tags of" \
+		"workflows that are still re-runnable (#1138)." >&2
+fi
+
+# TAG_PREFIX is interpolated into the gh api --jq program below (gh has no
+# --arg equivalent), so constrain it to characters that cannot terminate the
+# jq string literal or alter the filter's semantics. This also subsumes the
+# previous non-empty check.
+if ! [[ "$tag_prefix" =~ ^[A-Za-z0-9._-]+$ ]]; then
+	echo "TAG_PREFIX must match ^[A-Za-z0-9._-]+\$, got: ${tag_prefix}" >&2
 	exit 2
 fi
 
