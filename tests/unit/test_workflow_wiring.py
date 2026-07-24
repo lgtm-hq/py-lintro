@@ -1634,19 +1634,28 @@ def test_dependency_vuln_gate_filter_globs_match_committed_manifests() -> None:
     }
 
     def matches(path: str, pattern: str) -> bool:
-        # Every pattern is either ``**/<glob-with-no-slash>`` (matches any file
-        # whose basename matches the glob, at any depth including root) or an
-        # exact repo-relative path.
+        # A ``**/`` pattern with no further slash matches any file whose
+        # basename matches the glob (any depth including root). A ``**/`` pattern
+        # that still contains a slash (e.g. ``**/requirements/*.txt``) matches
+        # against the path tail at any depth. Anything else is an exact path.
         if pattern.startswith("**/"):
-            return fnmatch(Path(path).name, pattern[3:])
+            rest = pattern[3:]
+            if "/" in rest:
+                return fnmatch(path, rest) or fnmatch(path, f"*/{rest}")
+            return fnmatch(Path(path).name, rest)
         return path == pattern
 
     manifests = [p for p in tracked if Path(p).name in manifest_names]
-    # requirements*.txt is a glob family rather than a fixed name.
+    # requirements files are a glob family: `*requirements*.txt` basenames, and
+    # any `.txt` inside a `requirements/` directory (requirements/base.txt).
     manifests += [
         p
         for p in tracked
-        if Path(p).name.startswith("requirements") and p.endswith(".txt")
+        if p.endswith(".txt")
+        and (
+            Path(p).name.startswith("requirements")
+            or Path(p).parent.name == "requirements"
+        )
     ]
     assert_that(manifests).is_not_empty()
 
