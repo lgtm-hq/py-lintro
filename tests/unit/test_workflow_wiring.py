@@ -11,6 +11,7 @@ from typing import Any, cast
 import pytest
 import yaml
 from assertpy import assert_that
+from pathspec import GitIgnoreSpec
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _LINTRO_REPORT_SCRIPT = (
@@ -1477,3 +1478,258 @@ def test_no_main_push_workflow_cancels_itself_on_ref() -> None:
             offenders.append(label)
 
     assert_that(offenders).is_empty()
+
+
+# --- Pre-merge dependency vulnerability gate (#1667) ------------------------
+#
+# The release gate (publish-pypi-on-tag.yml `sbom`) only runs on a version-tag
+# push, so a lockfile that trips grype merges green and breaks the publish at a
+# ref that can no longer be fixed (v0.91.26 / v0.91.27).
+# dependency-vuln-gate.yml runs the same scan pre-merge; these tests pin it to
+# the release gate so the two cannot drift, and pin its required-check-safe
+# shape (#1196).
+
+_VULN_GATE_WORKFLOW = "dependency-vuln-gate.yml"
+_VULN_GATE_JOB = "dependency-vuln-scan"
+_VULN_SCAN_ACTION = "lgtm-hq/lgtm-ci/.github/actions/scan-vulnerabilities"
+_VULN_SBOM_ACTION = "lgtm-hq/lgtm-ci/.github/actions/generate-sbom"
+_VULN_DETECT_ACTION = "lgtm-hq/lgtm-ci/.github/actions/detect-changes"
+
+
+def _vuln_gate_job() -> dict[str, Any]:
+    """Return the pre-merge dependency vulnerability gate job definition.
+
+    Returns:
+        The ``dependency-vuln-scan`` job mapping.
+    """
+    workflow = _load_workflow(name=_VULN_GATE_WORKFLOW)
+    return cast(dict[str, Any], workflow["jobs"][_VULN_GATE_JOB])
+
+
+def _vuln_gate_step(*, uses_prefix: str) -> dict[str, Any]:
+    """Return the gate step whose action path equals ``uses_prefix``.
+
+    Matches on the action path before the ``@<ref>`` pin exactly, so a
+    similarly named action (e.g. ``scan-vulnerabilities-other@<ref>``) is not
+    accepted.
+
+    Args:
+        uses_prefix: Full action path (without ``@<ref>``) to match.
+
+    Returns:
+        The matching step mapping.
+    """
+    steps = _vuln_gate_job()["steps"]
+    step = next(
+        (
+            step
+            for step in steps
+            if str(step.get("uses", "")).partition("@")[0] == uses_prefix
+        ),
+        None,
+    )
+    assert_that(step).described_as(
+        f"gate step for action {uses_prefix!r}",
+    ).is_not_none()
+    return cast(dict[str, Any], step)
+
+
+def test_dependency_vuln_gate_job_exists() -> None:
+    """The pre-merge gate job exists and scans the repo dependency set."""
+    job = _vuln_gate_job()
+    assert_that(job["name"]).contains("Dependency Vulnerability Gate")
+
+    sbom_step = _vuln_gate_step(uses_prefix=_VULN_SBOM_ACTION)
+    assert_that(sbom_step["with"]).contains_entry({"target": "."})
+    assert_that(sbom_step["with"]).contains_entry({"target-type": "dir"})
+
+    scan_step = _vuln_gate_step(uses_prefix=_VULN_SCAN_ACTION)
+    assert_that(scan_step["with"]).contains_entry({"target-type": "sbom"})
+    assert_that(str(scan_step["with"]["target"])).contains("steps.sbom.outputs")
+
+
+def test_dependency_vuln_gate_matches_release_fail_on_threshold() -> None:
+    """Pre-merge threshold must equal the release gate's (#1667).
+
+    A pre-merge scan looser than publish-pypi-on-tag.yml's ``sbom`` job
+    manufactures false confidence, so the threshold is asserted equal to the
+    release gate rather than merely asserted to be ``high``.
+    """
+    publish = _load_workflow(name="publish-pypi-on-tag.yml")
+    release_threshold = publish["jobs"]["sbom"]["with"]["fail-on-severity"]
+
+    scan_step = _vuln_gate_step(uses_prefix=_VULN_SCAN_ACTION)
+
+    assert_that(scan_step["with"]["fail-on"]).is_equal_to(release_threshold)
+
+
+def test_dependency_vuln_gate_shares_release_tooling_ref() -> None:
+    """Gate actions are pinned at the release gate's lgtm-ci tooling-ref."""
+    publish = _load_workflow(name="publish-pypi-on-tag.yml")
+    release_ref = str(publish["jobs"]["sbom"]["with"]["tooling-ref"])
+
+    pinned = [
+        step["uses"]
+        for step in _vuln_gate_job()["steps"]
+        if step.get("uses", "").startswith("lgtm-hq/lgtm-ci/")
+    ]
+
+    assert_that(pinned).is_not_empty()
+    for uses in pinned:
+        # Exact equality on the ref after ``@`` — a substring/``contains``
+        # check would also pass on a longer ref that merely ends with the
+        # release pin, which is the drift this guard exists to forbid.
+        ref = uses.split("@", 1)[1]
+        assert_that(ref).is_equal_to(release_ref)
+
+
+def test_dependency_vuln_gate_is_required_check_safe() -> None:
+    """The gate must always report its context (#1196).
+
+    A ``paths:`` filter, or a job-level ``if:``, would stop the context from
+    ever being created — which deadlocks the merge queue the moment the
+    context is added to the ``checks-py-lintro`` ruleset. Path scoping
+    therefore lives on the steps inside the job, not on the trigger or the job.
+    """
+    workflow = _load_workflow(name=_VULN_GATE_WORKFLOW)
+    triggers = workflow["on"]
+
+    assert_that(triggers).contains_key(_GITHUB_PULL_REQUEST_EVENT)
+    assert_that(triggers).contains_key("merge_group")
+    for event in (_GITHUB_PULL_REQUEST_EVENT, "merge_group"):
+        assert_that(triggers[event] or {}).does_not_contain_key("paths")
+        assert_that(triggers[event] or {}).does_not_contain_key("paths-ignore")
+
+    job = _vuln_gate_job()
+    assert_that(job).does_not_contain_key("if")
+    # A skipped reusable *caller* collapses its nested contexts, so the gate
+    # must stay a plain job that always reports its own check run.
+    assert_that(job).does_not_contain_key("uses")
+    assert_that(job).contains_key("runs-on")
+
+    # The expensive steps are the ones that skip.
+    for prefix in (_VULN_SBOM_ACTION, _VULN_SCAN_ACTION):
+        step_if = _normalize_github_expr(_vuln_gate_step(uses_prefix=prefix)["if"])
+        assert_that(step_if).contains("steps.changes.outputs.changes")
+
+
+def test_dependency_vuln_gate_scopes_to_dependency_paths() -> None:
+    """The scan covers every language manifest the release gate scans.
+
+    The release gate is ``syft scan dir:.`` over the whole repo, so the
+    pre-merge filter must react to any file that can change that graph — not
+    just the Python lock — or it is looser than the release gate (#1667). This
+    repo's SBOM is cataloged from JavaScript, Python, Rust and Go manifests,
+    so all four families must be watched, at any depth.
+    """
+    detect_step = _vuln_gate_step(uses_prefix=_VULN_DETECT_ACTION)
+    filters = yaml.safe_load(detect_step["with"]["filters"])
+    deps = filters["deps"]
+
+    assert_that(filters).contains_key("deps")
+    # Python — `*requirements*.txt` basenames ("requirements" anywhere, e.g.
+    # dev-requirements.txt) and the requirements/ dir layout at any depth.
+    assert_that(deps).contains("**/uv.lock")
+    assert_that(deps).contains("**/pyproject.toml")
+    assert_that(deps).contains("**/*requirements*.txt")
+    assert_that(deps).contains("**/requirements/*.txt")
+    assert_that(deps).contains("**/requirements/**/*.txt")
+    # JavaScript / TypeScript (root bun.lock, apps/site, npm/ manifests)
+    assert_that(deps).contains("**/package.json")
+    assert_that(deps).contains("**/bun.lock")
+    # Rust and Go (test_samples manifests are in the scanned tree)
+    assert_that(deps).contains("**/Cargo.lock")
+    assert_that(deps).contains("**/Cargo.toml")
+    assert_that(deps).contains("**/go.mod")
+    assert_that(deps).contains("**/go.sum")
+    # The gate exercises itself and the real release gate.
+    assert_that(deps).contains(".github/workflows/publish-pypi-on-tag.yml")
+
+
+def test_dependency_vuln_gate_filter_is_pure_allow_list() -> None:
+    """The ``deps`` filter carries no ``!`` negations (dorny ``some`` trap).
+
+    dorny/paths-filter defaults to ``predicate-quantifier: some`` and the
+    lgtm-ci wrapper does not override it, so a standalone negation like
+    ``!**/node_modules/**`` would match every file *outside* node_modules and
+    force ``deps`` true on nearly every PR — it does not subtract. Excluding
+    vendored trees would also make this gate looser than the release gate,
+    which scans them via ``syft scan dir:.``. So the filter must stay a pure
+    allow-list.
+    """
+    detect_step = _vuln_gate_step(uses_prefix=_VULN_DETECT_ACTION)
+    patterns = yaml.safe_load(detect_step["with"]["filters"])["deps"]
+
+    negations = [p for p in patterns if p.startswith("!")]
+    assert_that(negations).is_empty()
+
+
+def test_dependency_vuln_gate_filter_globs_match_committed_manifests() -> None:
+    """Every committed dependency manifest matches the gate's ``deps`` filter.
+
+    Guards the #1667 drift concern directly: if a real manifest the release
+    gate scans is not matched by any ``deps`` pattern, a PR could change the
+    scanned graph through it without the pre-merge gate reacting. Enumerates
+    the repo's tracked manifests and asserts each matches a pattern, using the
+    same picomatch-style semantics dorny applies (pure allow-list, ``some``
+    quantifier — a file matches the filter if it matches any pattern).
+    """
+    detect_step = _vuln_gate_step(uses_prefix=_VULN_DETECT_ACTION)
+    patterns = yaml.safe_load(detect_step["with"]["filters"])["deps"]
+
+    tracked = subprocess.run(  # nosec B603 B607 - fixed argv against this repo
+        ["git", "ls-files"],
+        cwd=_REPO_ROOT,
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout.splitlines()
+
+    # Genuine dependency-manifest basenames the release gate's syft scan
+    # catalogs. Deliberately excludes ``setup.py`` / ``setup.cfg``: the filter
+    # still lists them for future-proofing, but this repo's only committed
+    # ``setup.py`` is a Click command module (lintro/cli_utils/commands/), not
+    # packaging metadata, and syft does not catalog it — so it is not a manifest
+    # this drift guard should assert on.
+    manifest_names = {
+        "pyproject.toml",
+        "uv.lock",
+        "poetry.lock",
+        "Pipfile",
+        "Pipfile.lock",
+        "package.json",
+        "package-lock.json",
+        "pnpm-lock.yaml",
+        "yarn.lock",
+        "bun.lock",
+        "bun.lockb",
+        "Cargo.toml",
+        "Cargo.lock",
+        "go.mod",
+        "go.sum",
+    }
+
+    # Match with pathspec's gitignore semantics rather than a hand-rolled
+    # matcher. gitignore globs support the ``**`` globstar natively, closely
+    # mirroring the picomatch semantics dorny/paths-filter applies: a leading
+    # ``**/`` matches at any depth including the repo root (so ``**/uv.lock``
+    # matches both ``uv.lock`` and ``a/b/uv.lock``), and ``*`` within a segment
+    # does not cross ``/``. The filter is a pure allow-list, so a manifest is
+    # covered iff it matches at least one pattern (``GitIgnoreSpec.match_file``).
+    spec = GitIgnoreSpec.from_lines(patterns)
+
+    manifests = [p for p in tracked if Path(p).name in manifest_names]
+    # requirements files are a glob family: `*requirements*.txt` basenames, and
+    # any `.txt` under a `requirements/` directory at any depth
+    # (requirements/base.txt, requirements/dev/base.txt).
+    manifests += [
+        p
+        for p in tracked
+        if p.endswith(".txt")
+        and ("requirements" in Path(p).name or "requirements" in Path(p).parent.parts)
+    ]
+    assert_that(manifests).is_not_empty()
+
+    unmatched = [path for path in manifests if not spec.match_file(path)]
+
+    assert_that(unmatched).is_empty()
