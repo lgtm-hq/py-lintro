@@ -66,6 +66,12 @@ on `main` failures — hence the `actions: read` + `issues: write` job permissio
   (`sweep-ci-ghcr-tags.sh`, #1138)
 - **vuln-suppression-check.yml** — Weekly OSV suppression staleness via
   `reusable-vuln-suppression-check.yml`
+- **dependency-vuln-gate.yml** — Pre-merge mirror of the release SBOM vulnerability
+  gate (#1667): same lgtm-ci syft/grype actions, same pin, same `fail-on: high` as
+  `publish-pypi-on-tag.yml`'s `sbom` job, so a lockfile that would break the tagged
+  publish fails on the PR instead. Unfiltered trigger with the scan steps gated
+  *inside* the job (`uv.lock`, `pyproject.toml`, the publish workflow), so the
+  `🔐 Dependency Vulnerability Gate` context always reports and is safe to require
 - **renovate.yml** — Daily dependency updates (lgtm-ci `harden-runner` +
   `secure-checkout`)
 - **lintro-report-scheduled.yml**, **pr-comment-cleanup.yml**,
