@@ -686,19 +686,140 @@ jobs:
             || format('ghcr.io/lgtm-hq/py-lintro:ci-{0}', github.run_id) }}
         run: scripts/ci/dogfood-skip-gate.sh
 
+  # Bounded retry (1 attempt) when the full-repo dogfooding-lint fails —
+  # absorbs runner shutdown (exit 143) and artifact ETIMEDOUT flakes without a
+  # manual workflow rerun (#1313). Only the full-repo run is retried: the
+  # changed-files variant runs when dogfooding-lint is scope-skipped, so this
+  # job keys off dogfooding-lint.result == 'failure' and stays skipped there.
+  dogfooding_lint_retry:
+    needs: [docker-build, manifest-sync, dogfooding-lint]
+    if: >-
+      always() &&
+      !cancelled() &&
+      needs.dogfooding-lint.result == 'failure' &&
+      needs.docker-build.result == 'success' &&
+      (
+        needs.manifest-sync.result == 'success' ||
+        needs.manifest-sync.result == 'skipped'
+      )
+    # yamllint disable-line rule:line-length
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-quality-lint.yml@ee8484ca71db3a2c2c33da6128bbf2330fcd7c88 # v0.59.2
+    permissions:
+      contents: read
+      packages: read # pull lintro-image from GHCR in reusable-quality-lint
+    with:
+      tooling-ref: 'ee8484ca71db3a2c2c33da6128bbf2330fcd7c88' # v0.59.2
+      job-name: '🛠️ Dogfooding Lint (retry)'
+      lintro-tool-options: >-
+        pydoclint:timeout=120,bandit:timeout=120,prettier:timeout=120,osv_scanner:check_suppressions=false
+      egress-policy: block
+      # Same image selection as dogfooding-lint: CI-built image for
+      # same-repo PRs, pinned release digest for forks (no CI push).
+      # Pinned digest — keep in sync with pyproject.toml lintro pin
+      lintro-image: >-
+        ${{ needs.docker-build.outputs.is-fork == 'true'
+        && format(
+          'ghcr.io/lgtm-hq/py-lintro@sha256:{0}',
+          '0e8f3892f31f7bb6ce56a33d037d983591b82c325bf56281f9d9e2fec488aa5c'
+        )
+        || format('ghcr.io/lgtm-hq/py-lintro:ci-{0}', github.run_id) }}
+
+  # Rolls the effective dogfooding result up into a single required-check
+  # verdict (#1313). Picks whichever lint attempt is authoritative — the
+  # changed-files job in scope 'changed', otherwise the retry when it ran,
+  # otherwise the full run — and treats runner infra-flake failures as
+  # non-blocking (scripts/ci/run-code-quality-gate.sh). Docs-only PRs
+  # (pipeline == 'false') report success without a lint run.
+  code-quality-gate:
+    name: 🚦 Code Quality Gate
+    needs:
+      - changes
+      - docker-build
+      - manifest-sync
+      - dogfooding-lint
+      - dogfooding-lint-changed
+      - dogfooding_lint_retry
+    if: >-
+      always() &&
+      !cancelled() &&
+      (
+        github.event_name != 'pull_request' ||
+        github.event.pull_request.draft == false
+      )
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read # sparse checkout of the gate scripts below
+    timeout-minutes: 5
+    outputs:
+      result: ${{ steps.gate.outputs.result }}
+      passed: ${{ steps.gate.outputs.passed }}
+      status: ${{ steps.gate.outputs.status }}
+      exit-code: ${{ steps.gate.outputs.exit-code }}
+      # 'true' when the gate went green by absorbing runner noise rather than
+      # by observing a successful lint run. The required check stays green
+      # (#1313), but `publish` refuses to promote an unlinted image.
+      infra-flake: ${{ steps.gate.outputs.infra-flake }}
+    steps:
+      - name: Checkout gate scripts
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          sparse-checkout: |
+            scripts/ci/run-code-quality-gate.sh
+            scripts/ci/evaluate-code-quality-gate.sh
+            scripts/ci/assert-required-check.sh
+            scripts/ci/is-infra-flake-failure.sh
+          sparse-checkout-cone-mode: false
+          persist-credentials: false
+      - name: Evaluate and assert code quality gate
+        id: gate
+        env:
+          DOCKER_BUILD_RESULT: ${{ needs.docker-build.result }}
+          MANIFEST_SYNC_RESULT: ${{ needs.manifest-sync.result }}
+          # Effective dogfooding result (#1361 scope + #1313 retry): docs-only
+          # PRs report success without a lint run; lint-scope 'changed' selects
+          # the changed-files job; anything else selects the full run. The
+          # retry (full-run only) is folded in below via RETRY_LINT_*.
+          PRIMARY_LINT_RESULT: >-
+            ${{ needs.changes.outputs.pipeline == 'false' && 'success'
+            || needs.changes.outputs.lint-scope == 'changed'
+            && needs.dogfooding-lint-changed.result
+            || needs.dogfooding-lint.result }}
+          RETRY_LINT_RESULT: ${{ needs.dogfooding_lint_retry.result }}
+          PRIMARY_LINT_STATUS: >-
+            ${{ needs.changes.outputs.lint-scope == 'changed'
+            && needs.dogfooding-lint-changed.outputs.status
+            || needs.dogfooding-lint.outputs.status }}
+          PRIMARY_LINT_EXIT_CODE: >-
+            ${{ needs.changes.outputs.lint-scope == 'changed'
+            && needs.dogfooding-lint-changed.outputs.exit-code
+            || needs.dogfooding-lint.outputs.exit-code }}
+          RETRY_LINT_STATUS: ${{ needs.dogfooding_lint_retry.outputs.status }}
+          RETRY_LINT_EXIT_CODE: ${{ needs.dogfooding_lint_retry.outputs.exit-code }}
+        run: scripts/ci/run-code-quality-gate.sh
+
   dogfooding-pr-comment:
-    # Comments with the outputs of whichever dogfooding job ran (full or
-    # changed-files — they are mutually exclusive per run, see #1361).
-    needs: [changes, dogfooding-lint, dogfooding-lint-changed]
+    # Comments with the outputs of whichever dogfooding attempt is
+    # authoritative: the changed-files job in scope 'changed', otherwise the
+    # retry when it ran, otherwise the full run (#1361 + #1313). The full and
+    # changed-files jobs are mutually exclusive per run.
+    needs: [changes, dogfooding-lint, dogfooding-lint-changed, dogfooding_lint_retry]
     if: >-
       always() &&
       !cancelled() &&
       (
         (
-          needs.dogfooding-lint.result != 'cancelled' &&
-          needs.dogfooding-lint.result != 'skipped' &&
-          needs.dogfooding-lint.outputs.exit-code != '' &&
-          needs.dogfooding-lint.outputs.status != ''
+          (
+            needs.dogfooding_lint_retry.result != 'cancelled' &&
+            needs.dogfooding_lint_retry.result != 'skipped' &&
+            needs.dogfooding_lint_retry.outputs.exit-code != '' &&
+            needs.dogfooding_lint_retry.outputs.status != ''
+          ) ||
+          (
+            needs.dogfooding-lint.result != 'cancelled' &&
+            needs.dogfooding-lint.result != 'skipped' &&
+            needs.dogfooding-lint.outputs.exit-code != '' &&
+            needs.dogfooding-lint.outputs.status != ''
+          )
         ) ||
         (
           needs.dogfooding-lint-changed.result != 'cancelled' &&
@@ -719,6 +840,11 @@ jobs:
       exit-code: >-
         ${{ needs.changes.outputs.lint-scope == 'changed'
         && needs.dogfooding-lint-changed.outputs.exit-code
+        || (
+          needs.dogfooding_lint_retry.result != 'skipped' &&
+          needs.dogfooding_lint_retry.outputs.exit-code != '' &&
+          needs.dogfooding_lint_retry.outputs.exit-code
+        )
         || needs.dogfooding-lint.outputs.exit-code }}
       tooling-ref: 'ee8484ca71db3a2c2c33da6128bbf2330fcd7c88' # v0.59.2
       job-name: '🛠️ Dogfooding Lint PR Comment'
@@ -731,12 +857,7 @@ jobs:
   # full pipeline runs, and this gate mirrors the real results — so a broken
   # filter can never skip coverage or green-light an untested merge.
   lintro-code-quality:
-    needs:
-      - changes
-      - docker-build
-      - manifest-sync
-      - dogfooding-lint
-      - dogfooding-lint-changed
+    needs: [code-quality-gate]
     if: >-
       always() &&
       !cancelled() &&
@@ -752,25 +873,11 @@ jobs:
       tooling-ref: 'ee8484ca71db3a2c2c33da6128bbf2330fcd7c88' # v0.59.2
       job-name: '🛠️ Lintro Code Quality'
       runner-image: ubuntu-24.04
-      # Mirrors whichever dogfooding job ran (#1361): lint-scope 'changed'
-      # selects the changed-files job; anything else — including an empty
-      # lint-scope from a failed changes job — selects the full run.
-      upstream-result: >-
-        ${{
-          needs.changes.outputs.pipeline == 'false' && 'success'
-          || needs.docker-build.result != 'success' && needs.docker-build.result
-          || (
-            needs.manifest-sync.result != 'success' &&
-            needs.manifest-sync.result != 'skipped'
-          ) && needs.manifest-sync.result
-          || needs.changes.outputs.lint-scope == 'changed'
-          && needs.dogfooding-lint-changed.result
-          || needs.dogfooding-lint.result
-        }}
-      status-output: >-
-        ${{ needs.changes.outputs.lint-scope == 'changed'
-        && needs.dogfooding-lint-changed.outputs.status
-        || needs.dogfooding-lint.outputs.status }}
+      # Consumes the rolled-up gate verdict (#1313), which itself mirrors
+      # whichever dogfooding attempt ran (#1361) and absorbs infra flakes.
+      upstream-result: ${{ needs.code-quality-gate.outputs.result }}
+      passed-output: ${{ needs.code-quality-gate.outputs.passed }}
+      status-output: ${{ needs.code-quality-gate.outputs.status }}
       status-expected: passed
       egress-policy: block
       egress-preset: github-tooling
@@ -1021,8 +1128,22 @@ jobs:
   # promoted digests are then signed with Cosign (keyless OIDC).
   publish:
     name: 📦 Publish to GHCR
-    needs: [dogfooding-lint, security-audit, integration-test]
-    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    needs: [changes, code-quality-gate, security-audit, integration-test]
+    # Publishing used to hang off `dogfooding-lint`, which is skipped on
+    # docs-only pushes, so publish was skipped with it. The gate deliberately
+    # reports success there instead (it is a required check), so the docs-only
+    # guard has to be restated here — otherwise a docs-only push to main would
+    # try to promote a ci-${run_id} image that docker-build never built.
+    #
+    # Likewise, an absorbed infra flake keeps the required check green but
+    # proves nothing about lint, so it must not promote an image (#1313).
+    # Only a gate that observed a real successful lint run may publish.
+    if: >-
+      github.ref == 'refs/heads/main' &&
+      github.event_name == 'push' &&
+      needs.changes.outputs.pipeline != 'false' &&
+      needs.code-quality-gate.outputs.result == 'success' &&
+      needs.code-quality-gate.outputs.infra-flake != 'true'
     runs-on: ubuntu-24.04
     permissions:
       contents: read # checkout and metadata extraction

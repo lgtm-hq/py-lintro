@@ -619,12 +619,15 @@ def test_docker_ci_comment_condition_semantics(
             cancelled=cancelled,
             results={
                 "dogfooding-lint": dogfooding_lint,
-                # Full-scope scenarios: the changed-files job did not run.
+                # Full-scope scenarios: neither the changed-files job nor the
+                # bounded retry ran, so the full lint result decides.
                 "dogfooding-lint-changed": "skipped",
+                "dogfooding_lint_retry": "skipped",
             },
             outputs={
                 "dogfooding-lint": lint_outputs,
                 "dogfooding-lint-changed": {"exit-code": "", "status": ""},
+                "dogfooding_lint_retry": {"exit-code": "", "status": ""},
             },
             event_is_pull_request=event_is_pull_request,
             head_repo_not_fork=head_repo_not_fork,
@@ -661,10 +664,14 @@ def test_docker_ci_comment_condition_changed_scope_semantics(
             results={
                 "dogfooding-lint": "skipped",
                 "dogfooding-lint-changed": lint_changed,
+                # Retry only ever runs for the full-repo lint; in changed scope
+                # the full job was skipped, so the retry is skipped too.
+                "dogfooding_lint_retry": "skipped",
             },
             outputs={
                 "dogfooding-lint": {"exit-code": "", "status": ""},
                 "dogfooding-lint-changed": changed_outputs,
+                "dogfooding_lint_retry": {"exit-code": "", "status": ""},
             },
             event_is_pull_request=True,
             head_repo_not_fork=True,
@@ -674,38 +681,94 @@ def test_docker_ci_comment_condition_changed_scope_semantics(
 
 
 def test_docker_ci_lintro_code_quality_wires_upstream_jobs() -> None:
-    """Required check propagates docker-build failure even when lint is skipped."""
+    """Required check consumes the code-quality gate rollup output."""
     docker_ci = _load_workflow(name="docker-ci.yml")
+    gate_job = docker_ci["jobs"]["code-quality-gate"]
     job = docker_ci["jobs"]["lintro-code-quality"]
 
-    assert_that(job["needs"]).contains(
+    # The gate rolls up the effective dogfooding result across the full run,
+    # its retry, and the changed-files variant (#1313 + #1361).
+    assert_that(gate_job["needs"]).contains(
         "changes",
         "docker-build",
         "manifest-sync",
         "dogfooding-lint",
         "dogfooding-lint-changed",
+        "dogfooding_lint_retry",
     )
-    assert_that(job["if"]).contains("!cancelled()")
-    upstream = _normalize_github_expr(job["with"]["upstream-result"])
-    assert_that(upstream).is_equal_to(
+    # The gate's primary lint selection mirrors whichever dogfooding job ran:
+    # docs-only PRs report success, lint-scope 'changed' selects the
+    # changed-files job, anything else selects the full run.
+    gate_step = next(step for step in gate_job["steps"] if step.get("id") == "gate")
+    primary_result = _normalize_github_expr(gate_step["env"]["PRIMARY_LINT_RESULT"])
+    assert_that(primary_result).is_equal_to(
         _normalize_github_expr(
             "${{ needs.changes.outputs.pipeline == 'false' && 'success' "
-            "|| needs.docker-build.result != 'success' && needs.docker-build.result "
-            "|| ( needs.manifest-sync.result != 'success' && "
-            "needs.manifest-sync.result != 'skipped' ) && needs.manifest-sync.result "
             "|| needs.changes.outputs.lint-scope == 'changed' && "
             "needs.dogfooding-lint-changed.result "
             "|| needs.dogfooding-lint.result }}",
         ),
     )
-    status_output = _normalize_github_expr(job["with"]["status-output"])
-    assert_that(status_output).is_equal_to(
-        _normalize_github_expr(
-            "${{ needs.changes.outputs.lint-scope == 'changed' && "
-            "needs.dogfooding-lint-changed.outputs.status "
-            "|| needs.dogfooding-lint.outputs.status }}",
-        ),
+    assert_that(gate_step["env"]["RETRY_LINT_RESULT"]).contains(
+        "needs.dogfooding_lint_retry.result",
     )
+    # The required check consumes only the rolled-up gate outputs.
+    assert_that(job["needs"]).contains("code-quality-gate")
+    assert_that(job["if"]).contains("!cancelled()")
+    assert_that(job["with"]["upstream-result"]).contains(
+        "needs.code-quality-gate.outputs.result",
+    )
+    assert_that(job["with"]["passed-output"]).contains(
+        "needs.code-quality-gate.outputs.passed",
+    )
+    assert_that(job["with"]["status-output"]).contains(
+        "needs.code-quality-gate.outputs.status",
+    )
+
+
+def test_docker_ci_publish_refuses_absorbed_infra_flake() -> None:
+    """An absorbed infra flake keeps the check green but must not publish."""
+    docker_ci = _load_workflow(name="docker-ci.yml")
+    gate_job = docker_ci["jobs"]["code-quality-gate"]
+    publish = docker_ci["jobs"]["publish"]
+
+    assert_that(gate_job["outputs"]).contains_key("infra-flake")
+    assert_that(publish["needs"]).contains("code-quality-gate")
+    publish_if = _normalize_github_expr(publish["if"])
+    assert_that(publish_if).contains(
+        "needs.code-quality-gate.outputs.result == 'success'",
+    )
+    assert_that(publish_if).contains(
+        "needs.code-quality-gate.outputs.infra-flake != 'true'",
+    )
+
+
+def test_docker_ci_publish_skips_docs_only_pushes() -> None:
+    """Docs-only pushes have no CI image to promote, so publish must not run."""
+    docker_ci = _load_workflow(name="docker-ci.yml")
+    publish = docker_ci["jobs"]["publish"]
+
+    # The gate reports success on docs-only runs because it is a required
+    # check, so publish can no longer rely on dogfooding-lint being skipped.
+    assert_that(publish["needs"]).contains("changes")
+    assert_that(_normalize_github_expr(publish["if"])).contains(
+        "needs.changes.outputs.pipeline != 'false'",
+    )
+
+
+def test_docker_ci_retries_dogfooding_lint_on_failure() -> None:
+    """Dogfooding lint retry runs only after a primary lint failure."""
+    docker_ci = _load_workflow(name="docker-ci.yml")
+    retry_job = docker_ci["jobs"]["dogfooding_lint_retry"]
+    retry_condition = retry_job["if"]
+
+    assert_that(retry_job["needs"]).contains(
+        "docker-build",
+        "manifest-sync",
+        "dogfooding-lint",
+    )
+    assert_that(retry_condition).contains("needs.dogfooding-lint.result == 'failure'")
+    assert_that(retry_condition).contains("needs.docker-build.result == 'success'")
 
 
 # --- Deny-by-default pipeline skip-list drift guard (#1369) ------------------
