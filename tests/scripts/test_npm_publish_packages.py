@@ -139,6 +139,7 @@ def _run(
         text=True,
         check=False,
         env=env,
+        timeout=60,
     )
     result_log = log.read_text() if log.exists() else ""
     # Fold stderr (warnings/errors) into stdout, then append the publish log so
@@ -154,6 +155,7 @@ def test_help_exits_zero() -> None:
         capture_output=True,
         text=True,
         check=False,
+        timeout=60,
     )
     assert_that(result.returncode).is_equal_to(0)
     assert_that(result.stdout).contains("Usage:")
@@ -217,9 +219,10 @@ def test_transient_error_exhausts_attempts_and_fails(tmp_path: Path) -> None:
     )
     assert_that(result.returncode).is_not_equal_to(0)
     assert_that(result.stdout).contains("failed after 3 attempts")
-    # linux-x64 and meta must NOT publish after the hard failure.
+    # linux-x64 and the meta package must NOT publish after the hard failure.
     log = result.stdout.split("---LOG---", 1)[1]
     assert_that(log).does_not_contain("linux-x64")
+    assert_that(log).does_not_contain("lintro")
 
 
 def test_auth_failure_is_not_retried(tmp_path: Path) -> None:

@@ -84,11 +84,11 @@ retry_base_delay="${NPM_PUBLISH_RETRY_DELAY:-5}"
 # (TLOG_CREATE_ENTRY_ERROR), other Sigstore/tlog hiccups, registry 5xx, and
 # transient network errors. Auth (E401/E403/ENEEDAUTH/EOTP) and validation
 # errors do NOT match and therefore fall through to a hard failure.
-TRANSIENT_ERROR_RE='TLOG_CREATE_ENTRY_ERROR|creating tlog entry|transparency log|rekor|fulcio|sigstore|ETIMEDOUT|ECONNRESET|EAI_AGAIN|ENOTFOUND|socket hang up|(50[0-9]|5[0-9][0-9]) (internal server error|bad gateway|service unavailable|gateway time-?out)|internal server error|bad gateway|service unavailable|gateway time-?out|EAGAIN'
+TRANSIENT_ERROR_RE='TLOG_CREATE_ENTRY_ERROR|creating tlog entry|transparency log|rekor|fulcio|sigstore|ETIMEDOUT|ECONNRESET|EAI_AGAIN|ENOTFOUND|socket hang up|5[0-9][0-9] (internal server error|bad gateway|service unavailable|gateway time-?out)|internal server error|bad gateway|service unavailable|gateway time-?out|EAGAIN'
 # A publish conflict means the exact name@version is already on the registry —
 # the desired end state. Treat it as an idempotent success (a prior attempt in
 # this loop or an earlier run landed the tarball) rather than a failure.
-ALREADY_PUBLISHED_RE='EPUBLISHCONFLICT|cannot publish over|previously published version|already published|forbidden.*over'
+ALREADY_PUBLISHED_RE='EPUBLISHCONFLICT|cannot publish over|previously published version|already published'
 
 # Publish one package directory with bounded, exponential-backoff retry on
 # transient Sigstore/registry errors only.

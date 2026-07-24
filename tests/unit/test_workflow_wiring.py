@@ -1063,7 +1063,10 @@ def test_publish_npm_delegates_publish_to_hardened_script() -> None:
     )
     assert_that(publish_step).is_not_none()
     assert publish_step is not None  # narrow type for mypy
-    assert_that(publish_step["run"]).contains(
+    # The step must delegate to the script as its command, not merely mention
+    # it — an inline ``npm publish`` loop that referenced the path in a comment
+    # would slip past a substring check.
+    assert_that(publish_step["run"].strip()).is_equal_to(
         "scripts/ci/npm/publish_packages.sh",
     )
     # Provenance must not be dropped on a live publish.
@@ -1071,26 +1074,11 @@ def test_publish_npm_delegates_publish_to_hardened_script() -> None:
     assert_that(publish_step["env"]["NPM_PROVENANCE"]).contains("'1'")
 
 
-def test_publish_npm_script_retries_only_transient_errors() -> None:
-    """publish_packages.sh retries transient tlog/registry errors, not auth.
-
-    Guards the core of issue #1682: the Rekor 409 (TLOG_CREATE_ENTRY_ERROR)
-    class is retried with bounded backoff while auth/validation failures are
-    not, and the registry existence check makes a re-run idempotent.
-    """
-    script_path = _REPO_ROOT / "scripts" / "ci" / "npm" / "publish_packages.sh"
-    script = script_path.read_text()
-    assert_that(script).contains("TLOG_CREATE_ENTRY_ERROR")
-    assert_that(script).contains("NPM_PUBLISH_MAX_ATTEMPTS")
-    # Exponential backoff and a bounded attempt budget.
-    assert_that(script).contains("delay * 2")
-    assert_that(script).contains("-ge")
-    assert_that(script).contains("max_attempts")
-    # Non-transient failures are hard errors, never retried.
-    assert_that(script).contains("non-transient error")
-    # Idempotency: skip an already-published name@version.
-    assert_that(script).contains("npm view")
-    assert_that(script).contains("already published")
+# The retry/idempotency behaviour of publish_packages.sh itself is covered by
+# executable stub-based tests in tests/scripts/test_npm_publish_packages.py
+# (transient-retry-success, attempt-exhaustion, auth-not-retried, skip and
+# conflict idempotency). That is a stronger guard than asserting on script
+# substrings here, so this module only asserts the workflow-to-script wiring.
 
 
 # Canonical lgtm-ci pin used by all py-lintro workflows (v0.52.4).
