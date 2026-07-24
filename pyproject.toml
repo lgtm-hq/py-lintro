@@ -31,7 +31,9 @@ classifiers = [
 ]
 requires-python = ">=3.11"
 dependencies = [
-  "click>=8.1.8",
+  # click 8.1.8 is vulnerable to PYSEC-2026-2132 / CVE-2026-7246
+  # (GHSA-47fr-3ffg-hgmw, High); fixed in 8.3.3.
+  "click>=8.3.3",
   "loguru>=0.7.3",
   "packaging>=25.0",
   "pathspec>=0.12.1",
@@ -382,11 +384,24 @@ override-dependencies = [
   # Safe: lintro invokes semgrep as a subprocess; rich version doesn't affect its behavior.
   # TODO: Remove once semgrep drops the rich<14 pin (not tracked by Renovate).
   "rich>=14.2.0",
-  # semgrep==mcp==1.23.3 but mcp 1.23.3 has high GHSAs blocking release SBOM
-  # fail-on-severity (#1659). Override like rich: lintro runs semgrep as a
-  # subprocess; mcp is not a lintro runtime import.
+  # semgrep 1.168.0 pins mcp==1.23.3 exactly, but mcp 1.23.3 carries high GHSAs
+  # that fail the release SBOM `fail-on-severity: high` gate (#1659). An exact
+  # pin cannot be lifted by constraint-dependencies, so an override is required.
+  # NOTE: unlike a pure subprocess dependency, semgrep *does* import mcp eagerly
+  # (semgrep/mcp/server.py imports mcp.server.fastmcp at `import semgrep.cli`
+  # time), so this override really does change semgrep's runtime dependency.
+  # Validated by CI: the Dockerized dogfooding-lint job builds from this lock and
+  # runs `semgrep (check)` to completion, exercising that import path.
+  # TODO: Remove once semgrep pins an mcp release without these advisories.
   # (GHSA-hvrp-rf83-w775, GHSA-jpw9-pfvf-9f58, GHSA-vj7q-gjh5-988w)
   "mcp>=1.28.1",
+  # click 8.1.8 has PYSEC-2026-2132 / CVE-2026-7246 (High). No semgrep release
+  # accepts click 8.3.x (<=1.170.1 pins <8.2, >=1.171.0 pins ~=8.4.2) and
+  # sqlfluff caps click<8.4.0, so an override is the only way to ship a patched
+  # click alongside both tools. Upper bound keeps sqlfluff natively satisfied;
+  # only semgrep's pin is overridden. Validated: semgrep 1.168.0 and sqlfluff
+  # 4.2.2 both run to completion under click 8.3.3 (dogfooding-lint in CI).
+  "click>=8.3.3,<8.4.0",
 ]
 
 [tool.pydoclint]
