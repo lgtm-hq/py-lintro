@@ -129,7 +129,12 @@ jobs:
               # Python
               - '**/pyproject.toml'
               - '**/uv.lock'
+              # requirements files both as `*requirements*.txt` basenames
+              # (services/api/requirements.txt, dev-requirements.txt) and as a
+              # `requirements/` directory layout (requirements/base.txt), which
+              # the basename glob would miss.
               - '**/requirements*.txt'
+              - '**/requirements/*.txt'
               - '**/poetry.lock'
               - '**/Pipfile'
               - '**/Pipfile.lock'
