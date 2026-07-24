@@ -154,29 +154,29 @@ def test_get_install_hints_uses_commitlint_companion_version(
     assert_that(result["@commitlint/cli"]).is_equal_to(result["commitlint"])
 
 
-def test_get_install_hints_logs_commitlint_when_companion_version_unresolved(
+def test_get_install_hints_falls_back_when_companion_version_unresolved(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Dropped commitlint hints are included in the missing-hint diagnostic."""
+    """Commitlint hints survive an unresolvable companion version (#1663).
+
+    Args:
+        monkeypatch: Pytest fixture for patching modules and attributes.
+    """
     monkeypatch.setattr(
         version_checking,
         "get_minimum_versions",
         lambda: {"commitlint": "21.2.1", "@commitlint/cli": "21.2.1"},
     )
     monkeypatch.setattr(version_checking, "get_tool_version", lambda _package: None)
-    version_checking._logged_warnings.clear()
-    mock_logger = MagicMock()
 
-    with patch.object(version_checking, "logger", mock_logger):
-        result = get_install_hints()
+    result = get_install_hints()
 
-    assert_that(result).does_not_contain_key("commitlint")
-    assert_that(result).does_not_contain_key("@commitlint/cli")
-    mock_logger.debug.assert_called()
-    debug_msg = mock_logger.debug.call_args[0][0]
-    assert_that(debug_msg).contains("Missing install hints")
-    assert_that(debug_msg).contains("commitlint")
-    assert_that(debug_msg).contains("@commitlint/cli")
+    assert_that(result).contains_key("commitlint")
+    assert_that(result).contains_key("@commitlint/cli")
+    for key in ("commitlint", "@commitlint/cli"):
+        assert_that(result[key]).does_not_contain("{")
+        assert_that(result[key]).contains("@commitlint/cli@21.2.1")
+        assert_that(result[key]).contains("@commitlint/config-conventional@21.2.1")
 
 
 def test_get_install_hints_missing_template_logs_debug(

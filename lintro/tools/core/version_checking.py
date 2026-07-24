@@ -271,7 +271,6 @@ def get_install_hints() -> dict[str, str]:
 
     versions = get_minimum_versions()
     hints: dict[str, str] = {}
-    skipped_hints: set[str] = set()
 
     # Build hints only for tools that exist in versions
     for tool, template in templates.items():
@@ -279,12 +278,12 @@ def get_install_hints() -> dict[str, str]:
         if version is not None:
             template_values = {"version": version}
             if tool in _COMMITLINT_HINT_KEYS:
-                companion_version = get_tool_version(
-                    _COMMITLINT_CONFIG_CONVENTIONAL_PACKAGE,
+                # Fall back to the CLI version when the companion package
+                # version cannot be resolved: a slightly-stale companion
+                # version in an install hint beats no hint at all (#1663).
+                companion_version = (
+                    get_tool_version(_COMMITLINT_CONFIG_CONVENTIONAL_PACKAGE) or version
                 )
-                if companion_version is None:
-                    skipped_hints.add(tool)
-                    continue
                 template_values["commitlint_config_conventional_version"] = (
                     companion_version
                 )
@@ -294,7 +293,7 @@ def get_install_hints() -> dict[str, str]:
     # Debug-level: the completeness gate in test_tool_completeness.py fails
     # CI when a registered tool or version key lacks a hint; a warning here
     # would only noise user runs for the same gap.
-    missing = (set(versions) - set(templates)) | skipped_hints
+    missing = set(versions) - set(templates)
     if missing:
         warning_key = f"missing_hints:{','.join(sorted(missing))}"
         with _logged_warnings_lock:
