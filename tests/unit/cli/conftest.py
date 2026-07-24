@@ -22,7 +22,9 @@ def isolated_cli_runner() -> CliRunner:
     Returns:
         A CliRunner instance with isolated filesystem.
     """
-    return CliRunner(mix_stderr=False)
+    # click >= 8.2 removed the ``mix_stderr`` argument; stdout and stderr are
+    # always captured separately, which is the behaviour this fixture wants.
+    return CliRunner()
 
 
 @pytest.fixture
