@@ -25,6 +25,30 @@ _SCRIPT = _REPO_ROOT / "scripts/ci/npm/publish_packages.sh"
 _PACKAGES = ("darwin-arm64", "darwin-x64", "linux-arm64", "linux-x64", "lintro")
 
 
+def _publish_log(result: subprocess.CompletedProcess[str]) -> str:
+    """Return the publish-log section the npm stub recorded.
+
+    Args:
+        result: The completed run produced by ``_run``.
+
+    Returns:
+        str: The text between the ``---LOG---`` and ``---SLEEP---`` markers.
+    """
+    return result.stdout.split("---LOG---", 1)[1].split("---SLEEP---", 1)[0]
+
+
+def _sleep_log(result: subprocess.CompletedProcess[str]) -> str:
+    """Return the recorded backoff-sleep durations, one per line.
+
+    Args:
+        result: The completed run produced by ``_run``.
+
+    Returns:
+        str: The text after the ``---SLEEP---`` marker.
+    """
+    return result.stdout.split("---SLEEP---", 1)[1]
+
+
 def _write_stub(bin_dir: Path, name: str, body: str) -> None:
     """Write an executable stub binary into a PATH shim directory.
 
@@ -178,7 +202,7 @@ def test_all_packages_publish_when_absent(tmp_path: Path) -> None:
     for pkg in _PACKAGES:
         assert_that(result.stdout).contains(f"Publishing {pkg}")
     # Meta package is published last.
-    log = result.stdout.split("---LOG---", 1)[1].split("---SLEEP---", 1)[0]
+    log = _publish_log(result)
     assert_that(log.strip().splitlines()).is_length(len(_PACKAGES))
     assert_that(log.strip().splitlines()[-1]).contains("lintro")
 
@@ -186,7 +210,7 @@ def test_all_packages_publish_when_absent(tmp_path: Path) -> None:
 def test_provenance_flag_is_passed(tmp_path: Path) -> None:
     """Each publish carries --provenance so signing is never dropped."""
     result = _run(tmp_path, npm_body="exit 0")
-    log = result.stdout.split("---LOG---", 1)[1].split("---SLEEP---", 1)[0]
+    log = _publish_log(result)
     for line in log.strip().splitlines():
         assert_that(line).contains("--provenance")
 
@@ -205,7 +229,11 @@ def test_transient_tlog_409_is_retried_then_succeeds(tmp_path: Path) -> None:
         "exit 0"
     )
     state = tmp_path / "state"
-    result = _run(tmp_path, npm_body=npm_body, extra_env={"STATE": str(state)})
+    result = _run(
+        tmp_path,
+        npm_body=npm_body,
+        extra_env={"STATE": str(state), "NPM_PUBLISH_MAX_ATTEMPTS": "3"},
+    )
     assert_that(result.returncode).is_equal_to(0)
     assert_that(result.stdout).contains("transient publish error for linux-arm64")
     assert_that(result.stdout).contains("attempt 1/3")
@@ -232,10 +260,14 @@ def test_backoff_delay_doubles_between_retries(tmp_path: Path) -> None:
         tmp_path,
         npm_body=npm_body,
         # Base delay 5s; the stubbed sleep records without waiting.
-        extra_env={"STATE": str(state), "NPM_PUBLISH_RETRY_DELAY": "5"},
+        extra_env={
+            "STATE": str(state),
+            "NPM_PUBLISH_RETRY_DELAY": "5",
+            "NPM_PUBLISH_MAX_ATTEMPTS": "3",
+        },
     )
     assert_that(result.returncode).is_equal_to(0)
-    sleeps = result.stdout.split("---SLEEP---", 1)[1].strip().splitlines()
+    sleeps = _sleep_log(result).strip().splitlines()
     # 5 then 10 — exponential doubling of the base delay.
     assert_that(sleeps).is_equal_to(["5", "10"])
 
@@ -274,7 +306,7 @@ def test_transient_error_exhausts_attempts_and_fails(tmp_path: Path) -> None:
     assert_that(result.returncode).is_not_equal_to(0)
     assert_that(result.stdout).contains("failed after 3 attempts")
     # linux-x64 and the meta package must NOT publish after the hard failure.
-    log = result.stdout.split("---LOG---", 1)[1].split("---SLEEP---", 1)[0]
+    log = _publish_log(result)
     assert_that(log).does_not_contain("linux-x64")
     assert_that(log).does_not_contain("lintro")
 
@@ -291,13 +323,48 @@ def test_auth_failure_is_not_retried(tmp_path: Path) -> None:
     )
     result = _run(tmp_path, npm_body=npm_body)
     assert_that(result.returncode).is_not_equal_to(0)
-    assert_that(result.stdout).contains("non-transient error")
+    assert_that(result.stdout).contains("non-retryable auth/validation error")
     # Only one publish attempt for darwin-arm64 (no retry).
-    log = result.stdout.split("---LOG---", 1)[1].split("---SLEEP---", 1)[0]
+    log = _publish_log(result)
     darwin_attempts = [
         line for line in log.strip().splitlines() if "darwin-arm64" in line
     ]
     assert_that(darwin_attempts).is_length(1)
+
+
+def test_auth_error_mentioning_sigstore_is_not_retried(tmp_path: Path) -> None:
+    """An auth failure is a hard fail even if it names a Sigstore component.
+
+    The transient regex matches ``sigstore``; the non-retryable auth check must
+    win so ``sigstore authentication failed (E401)`` is never retried.
+    """
+    npm_body = (
+        'if [[ "$(basename "$PWD")" == "darwin-arm64" ]]; then\n'
+        '  echo "npm error sigstore authentication failed (E401)" >&2\n'
+        "  exit 1\n"
+        "fi\n"
+        "exit 0"
+    )
+    result = _run(tmp_path, npm_body=npm_body)
+    assert_that(result.returncode).is_not_equal_to(0)
+    assert_that(result.stdout).contains("non-retryable auth/validation error")
+    log = _publish_log(result)
+    darwin_attempts = [
+        line for line in log.strip().splitlines() if "darwin-arm64" in line
+    ]
+    assert_that(darwin_attempts).is_length(1)
+
+
+def test_invalid_max_attempts_is_rejected(tmp_path: Path) -> None:
+    """A non-integer NPM_PUBLISH_MAX_ATTEMPTS aborts before any publish."""
+    result = _run(
+        tmp_path,
+        npm_body="exit 0",
+        extra_env={"NPM_PUBLISH_MAX_ATTEMPTS": "0"},
+    )
+    assert_that(result.returncode).is_not_equal_to(0)
+    assert_that(result.stdout).contains("NPM_PUBLISH_MAX_ATTEMPTS must be")
+    assert_that(_publish_log(result).strip()).is_equal_to("")
 
 
 def test_already_published_versions_are_skipped(tmp_path: Path) -> None:
@@ -317,7 +384,7 @@ def test_already_published_versions_are_skipped(tmp_path: Path) -> None:
     assert_that(result.stdout).contains("Skipping @lgtm-hq/lintro-darwin-arm64")
     assert_that(result.stdout).contains("Skipping @lgtm-hq/lintro-darwin-x64")
     # Only the three remaining packages actually publish.
-    log = result.stdout.split("---LOG---", 1)[1].split("---SLEEP---", 1)[0]
+    log = _publish_log(result)
     published = log.strip().splitlines()
     assert_that(published).is_length(3)
     assert_that(log).does_not_contain("darwin")
@@ -360,7 +427,7 @@ def test_ambiguous_view_failure_falls_through_to_publish(tmp_path: Path) -> None
     assert_that(result.stdout).contains("could not verify @lgtm-hq/lintro-linux-arm64")
     assert_that(result.stdout).contains("proceeding to publish")
     # linux-arm64 is still published despite the ambiguous check.
-    log = result.stdout.split("---LOG---", 1)[1].split("---SLEEP---", 1)[0]
+    log = _publish_log(result)
     assert_that(log).contains("linux-arm64")
 
 
@@ -376,5 +443,5 @@ def test_dry_run_publishes_without_existence_check(tmp_path: Path) -> None:
     )
     assert_that(result.returncode).is_equal_to(0)
     assert_that(result.stdout).does_not_contain("VIEW SHOULD NOT RUN")
-    log = result.stdout.split("---LOG---", 1)[1].split("---SLEEP---", 1)[0]
+    log = _publish_log(result)
     assert_that(log.strip().splitlines()).is_length(len(_PACKAGES))

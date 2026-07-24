@@ -79,12 +79,25 @@ fi
 
 max_attempts="${NPM_PUBLISH_MAX_ATTEMPTS:-3}"
 retry_base_delay="${NPM_PUBLISH_RETRY_DELAY:-5}"
+# Reject non-integer / negative / octal-looking values up front: bad values
+# would otherwise break arithmetic in the retry loop or loop unexpectedly.
+if [[ ! "$max_attempts" =~ ^[1-9][0-9]*$ ]]; then
+	echo "ERROR: NPM_PUBLISH_MAX_ATTEMPTS must be a positive integer (got '$max_attempts')" >&2
+	exit 1
+fi
+if [[ ! "$retry_base_delay" =~ ^(0|[1-9][0-9]*)$ ]]; then
+	echo "ERROR: NPM_PUBLISH_RETRY_DELAY must be a non-negative integer (got '$retry_base_delay')" >&2
+	exit 1
+fi
 
+# Non-retryable failures: authentication, permission, and validation errors.
+# These are checked BEFORE the transient patterns because an auth message can
+# also mention a Sigstore component (e.g. "sigstore authentication failed
+# (E401)"), and retrying it would only hide the real problem.
+NON_RETRYABLE_ERROR_RE='E401|E403|E402|ENEEDAUTH|EOTP|EPERM|unauthorized|forbidden|authentication failed|permission denied'
 # Transient failures that are safe to retry: the Rekor transparency-log 409
 # (TLOG_CREATE_ENTRY_ERROR), other Sigstore/tlog hiccups, registry 5xx,
-# rate-limit 429s, and transient network errors. Auth (E401/E403/ENEEDAUTH/EOTP)
-# and validation errors do NOT match and therefore fall through to a hard
-# failure.
+# rate-limit 429s, and transient network errors.
 TRANSIENT_ERROR_RE='TLOG_CREATE_ENTRY_ERROR|creating tlog entry|transparency log|rekor|fulcio|sigstore|ETIMEDOUT|ECONNRESET|EAI_AGAIN|ENOTFOUND|socket hang up|5[0-9][0-9] (internal server error|bad gateway|service unavailable|gateway time-?out)|internal server error|bad gateway|service unavailable|gateway time-?out|EAGAIN|E429|429 too many requests'
 # A publish conflict means the exact name@version is already on the registry —
 # the desired end state. Treat it as an idempotent success (a prior attempt in
@@ -116,6 +129,10 @@ publish_one() {
 		if grep -qiE "$ALREADY_PUBLISHED_RE" <<<"$output"; then
 			echo "==> $pkg already present on the registry (publish conflict); treating as an idempotent success." >&2
 			return 0
+		fi
+		if grep -qiE "$NON_RETRYABLE_ERROR_RE" <<<"$output"; then
+			echo "ERROR: $pkg publish failed with a non-retryable auth/validation error; not retrying." >&2
+			return 1
 		fi
 		if grep -qiE "$TRANSIENT_ERROR_RE" <<<"$output"; then
 			if [[ "$attempt" -ge "$max_attempts" ]]; then
