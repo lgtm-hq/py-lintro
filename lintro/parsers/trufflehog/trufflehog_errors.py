@@ -5,6 +5,10 @@ TruffleHog exits 0 even when it cannot read a scan target, logging
 must fail closed on genuine incomplete scans (#1044), but CI-only artifact
 paths that are absent locally (``coverage/``, ``lighthouse-reports/``, …) are
 benign when they were never part of the resolved scan set (#1631).
+
+Classification is deliberately conservative: only recognised shapes are ever
+called benign, and anything that cannot be classified is kept so the caller
+fails closed rather than reporting a clean pass (#1662).
 """
 
 from __future__ import annotations
@@ -23,8 +27,18 @@ _MISSING_PATH_RE: re.Pattern[str] = re.compile(
 def extract_trufflehog_scan_errors(stderr: str) -> list[str]:
     """Extract per-path scan error strings from TruffleHog stderr.
 
-    Prefers structured JSON log lines that carry an ``errors`` array. Falls
-    back to bare ``lstat``/``stat`` lines when no JSON payload is present.
+    Structured JSON log lines are authoritative: the ``errors`` array of a
+    scan-error payload carries every reason, and other JSON log records
+    (``running source``, ``finished scanning``, …) are routine progress noise
+    that is deliberately ignored.
+
+    Every remaining non-empty line is retained verbatim, even when it matches
+    no known error shape. This is deliberate: unknown means unsafe. An
+    unclassified line is never a benign missing path
+    (:func:`is_benign_missing_path_error` returns False for anything that is
+    not an ``lstat``/``stat`` "no such file or directory" reason), so keeping
+    it makes :func:`scan_errors_are_all_benign` return False and the caller
+    fail closed on a possibly incomplete scan (#1044, #1662).
 
     Args:
         stderr: Raw stderr captured from a TruffleHog run.
@@ -44,20 +58,17 @@ def extract_trufflehog_scan_errors(stderr: str) -> list[str]:
         if not stripped:
             continue
 
-        from_json = _errors_from_json_line(stripped)
-        if from_json:
-            for err in from_json:
+        payload = _json_log_payload(stripped)
+        if payload is not None:
+            for err in _errors_from_payload(payload):
                 if err not in seen:
                     seen.add(err)
                     extracted.append(err)
             continue
 
-        # Plain-text / logfmt lines that already look like a path error.
-        is_path_error = (
-            _MISSING_PATH_RE.match(stripped) is not None
-            or "permission denied" in stripped.lower()
-        )
-        if is_path_error and stripped not in seen:
+        # Plain-text / logfmt line. Retain it whatever it says — an
+        # unclassifiable diagnostic must not be silently dropped.
+        if stripped not in seen:
             seen.add(stripped)
             extracted.append(stripped)
 
@@ -130,27 +141,37 @@ def scan_errors_are_all_benign(
     )
 
 
-def _errors_from_json_line(line: str) -> list[str]:
-    """Pull the ``errors`` array from a TruffleHog JSON log line, if present.
+def _json_log_payload(line: str) -> dict[str, object] | None:
+    """Decode a stderr line as a structured JSON log record.
 
     Args:
-        line: A single stderr line that may be JSON.
+        line: A single stripped stderr line.
 
     Returns:
-        The string entries from ``errors``, or an empty list when the line is
-        not a scan-error JSON object.
+        The decoded mapping when the line is a JSON object, otherwise None
+        (the caller then treats the line as unstructured text).
     """
     if not line.startswith("{"):
-        return []
+        return None
 
     try:
         payload = json.loads(line)
     except json.JSONDecodeError:
-        return []
+        return None
 
-    if not isinstance(payload, dict):
-        return []
+    return payload if isinstance(payload, dict) else None
 
+
+def _errors_from_payload(payload: dict[str, object]) -> list[str]:
+    """Pull the ``errors`` array from a TruffleHog JSON log record.
+
+    Args:
+        payload: A decoded JSON log record from TruffleHog stderr.
+
+    Returns:
+        The string entries from ``errors``, or an empty list when the record
+        is not a scan-error payload.
+    """
     msg = payload.get("msg")
     if not isinstance(msg, str) or "encountered errors during scan" not in msg:
         return []

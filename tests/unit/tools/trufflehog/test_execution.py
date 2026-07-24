@@ -216,6 +216,65 @@ def test_check_benign_missing_path_scan_error_passes(
     assert_that(result.parse_failures_count in (0, None)).is_true()
 
 
+def test_check_realistic_json_log_stream_with_benign_error_passes(
+    trufflehog_plugin: TrufflehogPlugin,
+    tmp_path: Path,
+) -> None:
+    """Routine JSON progress logs must not turn a benign scan into a failure.
+
+    Args:
+        trufflehog_plugin: The plugin under test.
+        tmp_path: Temporary directory path.
+    """
+    test_file = tmp_path / "module.py"
+    test_file.write_text('"""Module."""\n')
+
+    stderr = (
+        '{"level":"info-0","msg":"running source","source_manager_worker_id":"x"}\n'
+        '{"level":"error","msg":"encountered errors during scan","job":1,'
+        '"errors":["lstat /nope/coverage: no such file or directory"]}\n'
+        '{"level":"info-0","msg":"finished scanning","chunks":1,"bytes":3}\n'
+    )
+    with patch.object(
+        trufflehog_plugin,
+        "_run_subprocess_result",
+        return_value=make_subprocess_result(stdout="", stderr=stderr, returncode=0),
+    ):
+        result = trufflehog_plugin.check([str(test_file)], {})
+
+    assert_that(result.success).is_true()
+    assert_that(result.issues_count).is_equal_to(0)
+
+
+def test_check_unclassified_error_beside_benign_one_fails(
+    trufflehog_plugin: TrufflehogPlugin,
+    tmp_path: Path,
+) -> None:
+    """An unrecognised diagnostic must fail closed even next to benign noise.
+
+    Args:
+        trufflehog_plugin: The plugin under test.
+        tmp_path: Temporary directory path.
+    """
+    test_file = tmp_path / "module.py"
+    test_file.write_text('"""Module."""\n')
+
+    stderr = (
+        '{"level":"error","msg":"encountered errors during scan",'
+        '"errors":["lstat /nope/coverage: no such file or directory"]}\n'
+        "failed to open archive /repo/src/big.zip: unexpected EOF\n"
+    )
+    with patch.object(
+        trufflehog_plugin,
+        "_run_subprocess_result",
+        return_value=make_subprocess_result(stdout="", stderr=stderr, returncode=0),
+    ):
+        result = trufflehog_plugin.check([str(test_file)], {})
+
+    assert_that(result.success).is_false()
+    assert_that(result.parse_failures_count).is_equal_to(1)
+
+
 def test_check_permission_denied_scan_error_fails(
     trufflehog_plugin: TrufflehogPlugin,
     tmp_path: Path,
