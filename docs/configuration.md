@@ -2580,6 +2580,8 @@ ai:
 | `retry_base_delay`      | float  | `1.0`       | Initial retry delay in seconds (min 0.1)         |
 | `retry_max_delay`       | float  | `30.0`      | Maximum retry delay in seconds (min 1.0)         |
 | `retry_backoff_factor`  | float  | `2.0`       | Retry delay multiplier (min 1.0)                 |
+| `transcript_logging`    | bool   | `false`     | Opt-in NDJSON logging of AI provider traffic     |
+| `transcript_retention`  | int    | `10`        | Max transcript files kept under `.lintro-cache`  |
 
 ### Idiom Review Tool (`idiom-review`)
 

@@ -11,6 +11,7 @@ from rich.console import Console
 
 from lintro.ai.availability import require_ai
 from lintro.ai.exceptions import AIError
+from lintro.ai.paths import resolve_workspace_root
 from lintro.ai.providers import get_provider
 from lintro.ai.review import (
     classify_changed_files,
@@ -244,7 +245,8 @@ def review_command(
             update={"api_timeout": timeout},
         )
 
-    provider = get_provider(effective_ai_config)
+    workspace_root = resolve_workspace_root(lintro_config.config_path)
+    provider = get_provider(effective_ai_config, workspace_root=workspace_root)
     effective_depth = depth if depth is not None else lintro_config.review.depth
     effective_strictness = ReviewStrictness(
         (strictness or lintro_config.review.strictness.value).lower(),

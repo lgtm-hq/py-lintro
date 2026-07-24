@@ -178,9 +178,9 @@ class IdiomReviewPlugin(BaseToolPlugin):
         """
         lintro_config = self._get_lintro_config()
         ai_config = lintro_config.ai
-        provider = get_provider(ai_config)
-        budget = CostBudget(max_cost_usd=ai_config.max_cost_usd)
         workspace_root = resolve_workspace_root(lintro_config.config_path)
+        provider = get_provider(ai_config, workspace_root=workspace_root)
+        budget = CostBudget(max_cost_usd=ai_config.max_cost_usd)
 
         engine = IdiomReviewEngine(
             provider=provider,
