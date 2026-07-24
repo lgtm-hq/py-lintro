@@ -79,6 +79,9 @@ fi
 
 max_attempts="${NPM_PUBLISH_MAX_ATTEMPTS:-3}"
 retry_base_delay="${NPM_PUBLISH_RETRY_DELAY:-5}"
+# Ceiling for the exponential backoff. Without it, a high attempt count would
+# double the delay unboundedly and stall the release job for hours.
+retry_max_delay="${NPM_PUBLISH_MAX_DELAY:-60}"
 # Reject non-integer / negative / octal-looking values up front: bad values
 # would otherwise break arithmetic in the retry loop or loop unexpectedly.
 if [[ ! "$max_attempts" =~ ^[1-9][0-9]*$ ]]; then
@@ -87,6 +90,10 @@ if [[ ! "$max_attempts" =~ ^[1-9][0-9]*$ ]]; then
 fi
 if [[ ! "$retry_base_delay" =~ ^(0|[1-9][0-9]*)$ ]]; then
 	echo "ERROR: NPM_PUBLISH_RETRY_DELAY must be a non-negative integer (got '$retry_base_delay')" >&2
+	exit 1
+fi
+if [[ ! "$retry_max_delay" =~ ^(0|[1-9][0-9]*)$ ]]; then
+	echo "ERROR: NPM_PUBLISH_MAX_DELAY must be a non-negative integer (got '$retry_max_delay')" >&2
 	exit 1
 fi
 
@@ -143,6 +150,9 @@ publish_one() {
 			sleep "$delay"
 			attempt=$((attempt + 1))
 			delay=$((delay * 2))
+			if [[ "$delay" -gt "$retry_max_delay" ]]; then
+				delay="$retry_max_delay"
+			fi
 			continue
 		fi
 		echo "ERROR: $pkg publish failed with a non-transient error (exit $rc); not retrying." >&2
@@ -162,6 +172,11 @@ for pkg in "${PACKAGES[@]}"; do
 		pkg_version="$(node -p "require('$pkg_dir/package.json').version")"
 		# Distinguish "version not published" (npm E404) from a lookup that
 		# failed for another reason (network, rate-limit, 5xx).
+		# Redirect order is intentional: inside $() stdout is the capture pipe,
+		# so `2>&1` routes stderr into it and `>/dev/null` then discards stdout
+		# only. view_err therefore holds just the error text. Do NOT "simplify"
+		# this to `>/dev/null 2>&1` — that discards both streams and would
+		# break the E404 classification below.
 		view_err="$(npm view "$pkg_name@$pkg_version" version 2>&1 >/dev/null)" && view_ok=1 || view_ok=0
 		if [[ "$view_ok" == "1" ]]; then
 			echo "==> Skipping $pkg_name@$pkg_version (already published)"

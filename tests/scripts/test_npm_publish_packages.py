@@ -16,6 +16,7 @@ import os
 import subprocess  # nosec B404 - drives the script under test with shell=False
 from pathlib import Path
 
+import pytest
 from assertpy import assert_that
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent.parent
@@ -272,6 +273,41 @@ def test_backoff_delay_doubles_between_retries(tmp_path: Path) -> None:
     assert_that(sleeps).is_equal_to(["5", "10"])
 
 
+def test_backoff_delay_is_capped(tmp_path: Path) -> None:
+    """Exponential backoff stops doubling once it reaches the ceiling.
+
+    Without a cap a high attempt count would grow the delay unboundedly and
+    stall the release job long past any useful retry window.
+    """
+    npm_body = (
+        'if [[ "$(basename "$PWD")" == "linux-arm64" ]]; then\n'
+        '  n="$(cat "$STATE" 2>/dev/null || echo 0)"\n'
+        '  if [[ "$n" -lt 4 ]]; then\n'
+        '    echo "$((n + 1))" > "$STATE"\n'
+        '    echo "npm error code TLOG_CREATE_ENTRY_ERROR" >&2\n'
+        "    exit 1\n"
+        "  fi\n"
+        "fi\n"
+        "exit 0"
+    )
+    state = tmp_path / "state"
+    result = _run(
+        tmp_path,
+        npm_body=npm_body,
+        extra_env={
+            "STATE": str(state),
+            "NPM_PUBLISH_RETRY_DELAY": "10",
+            "NPM_PUBLISH_MAX_ATTEMPTS": "5",
+            "NPM_PUBLISH_MAX_DELAY": "25",
+        },
+    )
+
+    assert_that(result.returncode).is_equal_to(0)
+    sleeps = _sleep_log(result).strip().splitlines()
+    # 10, 20, then clamped to 25 instead of 40 and 80.
+    assert_that(sleeps).is_equal_to(["10", "20", "25", "25"])
+
+
 def test_rate_limit_429_is_retried_then_succeeds(tmp_path: Path) -> None:
     """A registry 429 (rate limit) is transient and retried, not a hard fail."""
     npm_body = (
@@ -330,6 +366,9 @@ def test_auth_failure_is_not_retried(tmp_path: Path) -> None:
         line for line in log.strip().splitlines() if "darwin-arm64" in line
     ]
     assert_that(darwin_attempts).is_length(1)
+    # The run aborts at the first hard failure: later packages never publish.
+    assert_that(log).does_not_contain("linux-x64")
+    assert_that(log).does_not_contain("lintro")
 
 
 def test_auth_error_mentioning_sigstore_is_not_retried(tmp_path: Path) -> None:
@@ -353,18 +392,93 @@ def test_auth_error_mentioning_sigstore_is_not_retried(tmp_path: Path) -> None:
         line for line in log.strip().splitlines() if "darwin-arm64" in line
     ]
     assert_that(darwin_attempts).is_length(1)
+    # The run aborts at the first hard failure: later packages never publish.
+    assert_that(log).does_not_contain("linux-x64")
+    assert_that(log).does_not_contain("lintro")
 
 
-def test_invalid_max_attempts_is_rejected(tmp_path: Path) -> None:
-    """A non-integer NPM_PUBLISH_MAX_ATTEMPTS aborts before any publish."""
+@pytest.mark.parametrize("bad_value", ["0", "abc", "-1"])
+def test_invalid_max_attempts_is_rejected(tmp_path: Path, bad_value: str) -> None:
+    """An out-of-range NPM_PUBLISH_MAX_ATTEMPTS aborts before any publish.
+
+    The guard requires a *positive* integer, so zero and negative values are
+    rejected alongside genuinely non-numeric ones.
+    """
     result = _run(
         tmp_path,
         npm_body="exit 0",
-        extra_env={"NPM_PUBLISH_MAX_ATTEMPTS": "0"},
+        extra_env={"NPM_PUBLISH_MAX_ATTEMPTS": bad_value},
     )
     assert_that(result.returncode).is_not_equal_to(0)
     assert_that(result.stdout).contains("NPM_PUBLISH_MAX_ATTEMPTS must be")
     assert_that(_publish_log(result).strip()).is_equal_to("")
+
+
+def test_unknown_error_is_not_retried(tmp_path: Path) -> None:
+    """An unclassifiable failure falls through to a hard fail without retry.
+
+    Guards the fall-through branch of ``publish_one``: if a future regex edit
+    accidentally widened or narrowed one of the three classifiers, an unknown
+    error could silently start retrying (or stop failing) unnoticed.
+    """
+    npm_body = (
+        'if [[ "$(basename "$PWD")" == "darwin-arm64" ]]; then\n'
+        '  echo "npm error code EUNKNOWN" >&2\n'
+        '  echo "npm error something entirely unclassifiable" >&2\n'
+        "  exit 1\n"
+        "fi\n"
+        "exit 0"
+    )
+    result = _run(tmp_path, npm_body=npm_body)
+
+    assert_that(result.returncode).is_not_equal_to(0)
+    assert_that(result.stdout).contains("non-transient error")
+    log = _publish_log(result)
+    darwin_attempts = [
+        line for line in log.strip().splitlines() if "darwin-arm64" in line
+    ]
+    assert_that(darwin_attempts).is_length(1)
+    assert_that(log).does_not_contain("linux-x64")
+
+
+@pytest.mark.parametrize(
+    ("stderr_line", "expected_marker"),
+    [
+        ("npm error code E401", "non-retryable auth/validation error"),
+        ("npm error 403 Forbidden - PUT registry", "non-retryable"),
+        ("npm error code ENEEDAUTH", "non-retryable"),
+        ("npm error permission denied", "non-retryable"),
+        ("npm error TLOG_CREATE_ENTRY_ERROR creating tlog entry", "transient"),
+        ("npm error 503 Service Unavailable", "transient"),
+        ("npm error 429 Too Many Requests", "transient"),
+        ("npm error ECONNRESET socket hang up", "transient"),
+    ],
+)
+def test_stderr_patterns_select_expected_path(
+    tmp_path: Path,
+    stderr_line: str,
+    expected_marker: str,
+) -> None:
+    """Representative npm failure strings route to their intended classifier.
+
+    Locks the wording of each supported error family so a registry message
+    change cannot silently fall through to the wrong retry path.
+    """
+    npm_body = (
+        'if [[ "$(basename "$PWD")" == "darwin-arm64" ]]; then\n'
+        f'  echo "{stderr_line}" >&2\n'
+        "  exit 1\n"
+        "fi\n"
+        "exit 0"
+    )
+    result = _run(
+        tmp_path,
+        npm_body=npm_body,
+        extra_env={"NPM_PUBLISH_MAX_ATTEMPTS": "2", "NPM_PUBLISH_RETRY_DELAY": "0"},
+    )
+
+    assert_that(result.returncode).is_not_equal_to(0)
+    assert_that(result.stdout).contains(expected_marker)
 
 
 def test_already_published_versions_are_skipped(tmp_path: Path) -> None:
