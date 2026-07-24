@@ -1192,13 +1192,23 @@ def test_ghcr_cleanup_sweeps_ephemeral_ci_tags() -> None:
     assert_that(run_steps).contains(
         "scripts/ci/maintenance/sweep-ci-ghcr-tags.sh",
     )
-    # Dispatch inputs drive dry-run / age for both prune and sweep.
+    # Dispatch inputs: prune keeps min_age_days=7; sweep has its own 90d input
+    # so a no-override manual dispatch does not silently lengthen untagged
+    # prune retention (CodeRabbit on #1645).
     assert_that(triggers).contains_key("workflow_dispatch")
-    assert_that(triggers["workflow_dispatch"]["inputs"]).contains_key("min_age_days")
-    assert_that(
-        triggers["workflow_dispatch"]["inputs"]["min_age_days"]["default"],
-    ).is_equal_to(90)
-    assert_that(triggers["workflow_dispatch"]["inputs"]).contains_key("dry_run")
+    inputs = triggers["workflow_dispatch"]["inputs"]
+    assert_that(inputs).contains_key("min_age_days")
+    assert_that(inputs["min_age_days"]["default"]).is_equal_to(7)
+    assert_that(inputs).contains_key("sweep_min_age_days")
+    assert_that(inputs["sweep_min_age_days"]["default"]).is_equal_to(90)
+    assert_that(inputs).contains_key("dry_run")
+    prune = cleanup["jobs"]["prune-untagged"]
+    assert_that(str(prune["with"].get("min-age-days", ""))).contains(
+        "inputs.min_age_days",
+    )
+    assert_that(str(prune["with"].get("min-age-days", ""))).does_not_contain(
+        "sweep_min_age_days",
+    )
     sweep_env = next(
         (step.get("env") or {})
         for step in sweep["steps"]
@@ -1206,6 +1216,9 @@ def test_ghcr_cleanup_sweeps_ephemeral_ci_tags() -> None:
         and step.get("run") == "scripts/ci/maintenance/sweep-ci-ghcr-tags.sh"
     )
     assert_that(str(sweep_env.get("MIN_AGE_DAYS", ""))).contains("90")
+    assert_that(str(sweep_env.get("MIN_AGE_DAYS", ""))).contains(
+        "inputs.sweep_min_age_days",
+    )
 
 
 def test_publish_pypi_sbom_fails_on_high_severity() -> None:

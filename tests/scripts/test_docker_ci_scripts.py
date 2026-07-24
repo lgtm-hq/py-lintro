@@ -596,6 +596,80 @@ def test_sweep_ci_ghcr_tags_fails_on_query_error(
     assert_that(result.stderr).contains("Failed to query versions")
 
 
+def test_sweep_ci_ghcr_tags_recheck_404_is_benign(
+    tmp_path: Path,
+) -> None:
+    """A 404 on pre-delete recheck means the version is already gone."""
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    gh_log = tmp_path / "gh.log"
+    _write_stub(
+        bin_dir,
+        "gh",
+        (
+            'echo "$*" >> "$GH_LOG"\n'
+            'if [[ "$*" == *"DELETE"* ]]; then\n'
+            "  exit 0\n"
+            "fi\n"
+            'if [[ "$*" == *"/versions/"* ]]; then\n'
+            '  echo "gh: Not Found (HTTP 404)" >&2\n'
+            "  exit 1\n"
+            "fi\n"
+            'printf "%s\\n" "$GH_VERSIONS_TSV"'
+        ),
+    )
+
+    result = _run_with_stubs(
+        "scripts/ci/maintenance/sweep-ci-ghcr-tags.sh",
+        bin_dir,
+        {
+            "GH_TOKEN": "dummy",  # nosec B105 - fake token for stubbed gh
+            "PACKAGES": "py-lintro",
+            "MIN_AGE_DAYS": "0",
+            "GH_LOG": str(gh_log),
+            "GH_VERSIONS_TSV": "202\t2026-01-02T00:00:00Z\tci-old",
+        },
+    )
+
+    assert_that(result.returncode).is_equal_to(0)
+    assert_that(result.stdout).contains("already deleted")
+    assert_that(result.stderr).does_not_contain("Failed to re-check")
+    assert_that(gh_log.read_text()).does_not_contain("--method DELETE")
+
+
+def test_sweep_ci_ghcr_tags_recheck_hard_error_fails(
+    tmp_path: Path,
+) -> None:
+    """Non-404 recheck failures must fail closed (auth/network/rate-limit)."""
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    _write_stub(
+        bin_dir,
+        "gh",
+        (
+            'if [[ "$*" == *"/versions/"* && "$*" != *"DELETE"* ]]; then\n'
+            '  echo "API rate limit exceeded" >&2\n'
+            "  exit 1\n"
+            "fi\n"
+            'printf "%s\\n" "$GH_VERSIONS_TSV"'
+        ),
+    )
+
+    result = _run_with_stubs(
+        "scripts/ci/maintenance/sweep-ci-ghcr-tags.sh",
+        bin_dir,
+        {
+            "GH_TOKEN": "dummy",  # nosec B105 - fake token for stubbed gh
+            "PACKAGES": "py-lintro",
+            "MIN_AGE_DAYS": "0",
+            "GH_VERSIONS_TSV": "202\t2026-01-02T00:00:00Z\tci-old",
+        },
+    )
+
+    assert_that(result.returncode).is_equal_to(1)
+    assert_that(result.stderr).contains("Failed to re-check")
+
+
 def test_sweep_ci_ghcr_tags_recheck_aborts_on_second_ci_tag(
     tmp_path: Path,
 ) -> None:

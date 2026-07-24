@@ -22,8 +22,16 @@ name: Maintenance - GHCR Registry Cleanup
         type: boolean
       min_age_days:
         description: >-
-          Minimum age in days before deletion. For CI-tag sweep, keep >=90 so
-          Actions reruns of aged runs can still pull ci-<run_id> (#1138).
+          Minimum age in days before pruning untagged package versions
+          (py-lintro / py-lintro-base). Scheduled runs always use 7.
+        required: false
+        default: 7
+        type: number
+      sweep_min_age_days:
+        description: >-
+          Minimum age in days before sweeping ephemeral ci-<run_id> tags.
+          Keep >=90 so Actions reruns of aged runs can still pull the tag
+          (#1138). Scheduled runs always use 90.
         required: false
         default: 90
         type: number
@@ -97,8 +105,10 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           # 90d matches Actions default run retention so partial reruns
           # of aged workflow runs can still pull ci-<run_id> (#1138).
+          # Dedicated dispatch input — do not share min_age_days with the
+          # untagged prune jobs (those default to 7).
           MIN_AGE_DAYS: >-
-            ${{ github.event_name != 'workflow_dispatch' && 90 || inputs.min_age_days }}
+            ${{ github.event_name != 'workflow_dispatch' && 90 || inputs.sweep_min_age_days }}
           DRY_RUN: ${{ inputs.dry_run == true }}
         run: scripts/ci/maintenance/sweep-ci-ghcr-tags.sh
 

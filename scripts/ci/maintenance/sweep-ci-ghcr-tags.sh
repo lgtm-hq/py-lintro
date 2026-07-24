@@ -170,6 +170,17 @@ sweep_package() {
 		for _ in 1 2; do
 			recheck_err_file="$(mktemp)"
 			if ! state=$(fetch_version_state "$pkg" "$vid" 2>"${recheck_err_file}"); then
+				# 404 = already deleted by a prior sweep/manual cleanup —
+				# benign for a reclaim job. Auth/network/rate-limit still
+				# fail closed so we do not silently under-delete.
+				if grep -Eqi 'HTTP[[:space:]]*404|Not Found \(HTTP 404\)' \
+					"${recheck_err_file}"; then
+					echo "Skipping version ${vid} (${pkg}): already deleted" \
+						"(404 on recheck)"
+					rm -f "${recheck_err_file}"
+					safe_to_delete=0
+					break
+				fi
 				echo "::error::Failed to re-check version ${vid}; skipping" \
 					"deletion: $(cat "${recheck_err_file}")" >&2
 				rm -f "${recheck_err_file}"
