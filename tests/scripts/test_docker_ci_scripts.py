@@ -23,6 +23,8 @@ _REPO_ROOT = Path(__file__).resolve().parent.parent.parent
         "scripts/ci/cosign-sign-images.sh",
         "scripts/ci/testing/pull-ci-docker-images.sh",
         "scripts/ci/testing/load-ci-docker-images.sh",
+        "scripts/ci/testing/pull-lintro-image.sh",
+        "scripts/ci/testing/resolve-lintro-image.sh",
         "scripts/ci/maintenance/delete-ci-ghcr-tags.sh",
         "scripts/ci/maintenance/sweep-ci-ghcr-tags.sh",
         "scripts/ci/validate-docker-backfill-inputs.sh",

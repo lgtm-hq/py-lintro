@@ -145,18 +145,28 @@ def _is_result_skipped(result: object) -> tuple[bool, str]:
 
 
 def count_affected_files(tool_results: Sequence[object]) -> int:
-    """Count unique file paths with issues across all tool results.
+    """Count unique file paths affected across all tool results.
+
+    A file is "affected" when it had at least one issue that was either
+    fixed or still remains. In fix mode this unions the pre-fix
+    ``initial_issues`` with the post-fix ``issues`` so files that were fully
+    reformatted (and therefore have no remaining issues) are still counted;
+    previously only ``issues`` was consulted, so a file fixed clean reported
+    ``Affected Files 0``. In check mode ``initial_issues`` is absent and the
+    count falls back to ``issues``.
 
     Args:
         tool_results: Sequence of tool results to inspect.
 
     Returns:
-        Number of unique files that have at least one issue.
+        Number of unique files affected (fixed or remaining).
     """
     files: set[str] = set()
     for result in tool_results:
-        issues = getattr(result, "issues", None)
-        if issues:
+        for attr in ("initial_issues", "issues"):
+            issues = getattr(result, attr, None)
+            if not issues:
+                continue
             for issue in issues:
                 file_path = getattr(issue, "file", "")
                 if file_path:
