@@ -21,6 +21,13 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.91.30] - 2026-07-24
+
+### Fixed
+
+- **tools**: keep commitlint install hint when companion version is unresolvable (#1668)
+  (deba2f2)
+
 ## [0.91.29] - 2026-07-24
 
 ### Fixed
