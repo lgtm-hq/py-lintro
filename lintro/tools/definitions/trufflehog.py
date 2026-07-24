@@ -31,6 +31,7 @@ from lintro.models.core.tool_result import ToolResult
 from lintro.parsers.trufflehog.trufflehog_errors import (
     extract_trufflehog_scan_errors,
     scan_errors_are_all_benign,
+    stderr_reports_scan_errors,
 )
 from lintro.parsers.trufflehog.trufflehog_parser import parse_trufflehog_output
 from lintro.plugins.base import BaseToolPlugin
@@ -474,11 +475,12 @@ class TrufflehogPlugin(BaseToolPlugin):
             )
 
         # TruffleHog exits 0 even when it fails to read a scan target (it logs
-        # "encountered errors during scan" to stderr). Fail closed on genuine
-        # incomplete scans (#1044), but ignore benign ``lstat``/``stat``
-        # missing-path errors for targets that were never part of the resolved
-        # scan set — typically CI-only artifact dirs (#1631).
-        if "encountered errors during scan" in stderr:
+        # "encountered errors during scan" to stderr, and/or a standalone
+        # error-severity JSON record). Fail closed on genuine incomplete scans
+        # (#1044), but ignore benign ``lstat``/``stat`` missing-path errors for
+        # targets that were never part of the resolved scan set — typically
+        # CI-only artifact dirs (#1631).
+        if stderr_reports_scan_errors(stderr):
             scan_errors = extract_trufflehog_scan_errors(stderr)
             scan_path_set = frozenset(source_paths)
             if scan_errors_are_all_benign(scan_errors, scan_paths=scan_path_set):

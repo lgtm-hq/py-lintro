@@ -246,6 +246,73 @@ def test_check_realistic_json_log_stream_with_benign_error_passes(
     assert_that(result.issues_count).is_equal_to(0)
 
 
+def test_check_standalone_error_record_without_aggregate_fails(
+    trufflehog_plugin: TrufflehogPlugin,
+    tmp_path: Path,
+) -> None:
+    """An unreadable target logged without an aggregate must still fail closed.
+
+    This is the stderr TruffleHog emits when the unreadable file is reached
+    through a scanned directory: a standalone error record and no
+    ``encountered errors during scan`` banner at all.
+
+    Args:
+        trufflehog_plugin: The plugin under test.
+        tmp_path: Temporary directory path.
+    """
+    test_file = tmp_path / "module.py"
+    test_file.write_text('"""Module."""\n')
+
+    stderr = (
+        '{"level":"info-0","msg":"running source","with_units":true}\n'
+        '{"level":"error","msg":"error scanning file","unit_kind":"unit",'
+        '"path":"/nope/locked.py",'
+        '"error":"unable to open file: open /nope/locked.py: permission denied"}\n'
+        '{"level":"info-0","msg":"finished scanning","chunks":1}\n'
+    )
+    with patch.object(
+        trufflehog_plugin,
+        "_run_subprocess_result",
+        return_value=make_subprocess_result(stdout="", stderr=stderr, returncode=0),
+    ):
+        result = trufflehog_plugin.check([str(test_file)], {})
+
+    assert_that(result.success).is_false()
+    assert_that(result.parse_failures_count).is_equal_to(1)
+
+
+def test_check_json_error_record_beside_benign_aggregate_fails(
+    trufflehog_plugin: TrufflehogPlugin,
+    tmp_path: Path,
+) -> None:
+    """A JSON error record must fail the batch despite a benign aggregate.
+
+    Args:
+        trufflehog_plugin: The plugin under test.
+        tmp_path: Temporary directory path.
+    """
+    test_file = tmp_path / "module.py"
+    test_file.write_text('"""Module."""\n')
+
+    stderr = (
+        '{"level":"info-0","msg":"running source"}\n'
+        '{"level":"error","msg":"error scanning file","path":"/nope/secret.txt",'
+        '"error":"unable to open file: open /nope/secret.txt: permission denied"}\n'
+        '{"level":"error","msg":"encountered errors during scan",'
+        '"errors":["lstat /nope/coverage: no such file or directory"]}\n'
+        '{"level":"info-0","msg":"finished scanning","chunks":1}\n'
+    )
+    with patch.object(
+        trufflehog_plugin,
+        "_run_subprocess_result",
+        return_value=make_subprocess_result(stdout="", stderr=stderr, returncode=0),
+    ):
+        result = trufflehog_plugin.check([str(test_file)], {})
+
+    assert_that(result.success).is_false()
+    assert_that(result.parse_failures_count).is_equal_to(1)
+
+
 def test_check_unclassified_error_beside_benign_one_fails(
     trufflehog_plugin: TrufflehogPlugin,
     tmp_path: Path,
