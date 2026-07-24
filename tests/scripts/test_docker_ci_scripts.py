@@ -354,7 +354,8 @@ def test_promote_ci_docker_images_rejects_non_numeric_attempts(
     """A non-numeric PROMOTE_MAX_ATTEMPTS fails fast before any registry call."""
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
-    _write_stub(bin_dir, "docker", "exit 0")
+    docker_log = tmp_path / "docker.log"
+    _write_stub(bin_dir, "docker", 'echo "$*" >> "$DOCKER_LOG"\nexit 0')
 
     result = _run_with_stubs(
         "scripts/ci/promote-ci-docker-images.sh",
@@ -364,11 +365,13 @@ def test_promote_ci_docker_images_rejects_non_numeric_attempts(
             "CI_TAG": "ci-1",
             "TAGS": "ghcr.io/example/app:main",
             "PROMOTE_MAX_ATTEMPTS": "not-a-number",
+            "DOCKER_LOG": str(docker_log),
         },
     )
 
     assert_that(result.returncode).is_equal_to(2)
     assert_that(result.stderr).contains("PROMOTE_MAX_ATTEMPTS must be")
+    assert_that(docker_log.exists()).is_false()
 
 
 def test_promote_ci_docker_images_does_not_retry_fatal_error(
