@@ -10,6 +10,7 @@ from assertpy import assert_that
 
 from lintro.utils.path_filtering import (
     _is_venv_directory,
+    resolve_exclude_anchors,
     should_exclude_path,
     walk_files_with_excludes,
 )
@@ -295,3 +296,130 @@ def test_is_venv_directory(dirname: str, expected: bool) -> None:
     """
     result = _is_venv_directory(dirname)
     assert_that(result).is_equal_to(expected)
+
+
+# =============================================================================
+# Tests for exclude-pattern anchoring (issue #1678)
+# =============================================================================
+
+
+@pytest.fixture
+def project_under_excluded_ancestor(tmp_path: Path) -> Path:
+    """Create a project whose parent directory name is an exclude pattern.
+
+    Mirrors a checkout living at ``<repo>/.claude/worktrees/<id>`` or under
+    ``~/build``: the project itself is fine, but an ancestor matches a
+    gitignore-style exclude pattern.
+
+    Args:
+        tmp_path: Temporary directory path.
+
+    Returns:
+        Path to the project root created beneath the excluded ancestor.
+    """
+    project = tmp_path / ".claude" / "worktrees" / "agent-1" / "checkout"
+    project.mkdir(parents=True)
+    (project / "pyproject.toml").write_text("[project]\n", encoding="utf-8")
+    (project / "README.md").write_text("# readme\n", encoding="utf-8")
+    nested = project / "docs"
+    nested.mkdir()
+    (nested / "guide.md").write_text("# guide\n", encoding="utf-8")
+    return project
+
+
+def test_ancestor_above_project_root_does_not_exclude_project(
+    project_under_excluded_ancestor: Path,
+) -> None:
+    """A ``.claude`` ancestor above the project must not exclude every file.
+
+    Args:
+        project_under_excluded_ancestor: Project root beneath ``.claude``.
+    """
+    files = walk_files_with_excludes(
+        paths=[str(project_under_excluded_ancestor)],
+        file_patterns=["*.md"],
+        exclude_patterns=[".claude", "node_modules", "build"],
+    )
+
+    names = sorted(Path(f).name for f in files)
+    assert_that(names).is_equal_to(["README.md", "guide.md"])
+
+
+def test_single_file_under_excluded_ancestor_is_still_discovered(
+    project_under_excluded_ancestor: Path,
+) -> None:
+    """An explicitly named file under an excluded ancestor is still scanned.
+
+    Args:
+        project_under_excluded_ancestor: Project root beneath ``.claude``.
+    """
+    target = project_under_excluded_ancestor / "README.md"
+
+    files = walk_files_with_excludes(
+        paths=[str(target)],
+        file_patterns=["*.md"],
+        exclude_patterns=[".claude"],
+    )
+
+    assert_that(files).is_length(1)
+
+
+def test_excluded_directory_inside_project_is_still_excluded(
+    project_under_excluded_ancestor: Path,
+) -> None:
+    """Exclusions below the project root keep working.
+
+    Args:
+        project_under_excluded_ancestor: Project root beneath ``.claude``.
+    """
+    vendored = project_under_excluded_ancestor / "node_modules" / "pkg"
+    vendored.mkdir(parents=True)
+    (vendored / "readme.md").write_text("# vendored\n", encoding="utf-8")
+
+    files = walk_files_with_excludes(
+        paths=[str(project_under_excluded_ancestor)],
+        file_patterns=["*.md"],
+        exclude_patterns=[".claude", "node_modules"],
+    )
+
+    names = sorted(Path(f).name for f in files)
+    assert_that(names).is_equal_to(["README.md", "guide.md"])
+
+
+def test_nested_exclude_pattern_still_matches_inside_project(
+    project_under_excluded_ancestor: Path,
+) -> None:
+    """Sub-path exclude patterns keep matching at any depth in the project.
+
+    Args:
+        project_under_excluded_ancestor: Project root beneath ``.claude``.
+    """
+    generated = project_under_excluded_ancestor / "pkg" / "test_samples"
+    generated.mkdir(parents=True)
+    (generated / "sample.md").write_text("# sample\n", encoding="utf-8")
+
+    files = walk_files_with_excludes(
+        paths=[str(project_under_excluded_ancestor)],
+        file_patterns=["*.md"],
+        exclude_patterns=["test_samples/*"],
+    )
+
+    names = sorted(Path(f).name for f in files)
+    assert_that(names).is_equal_to(["README.md", "guide.md"])
+
+
+def test_resolve_exclude_anchors_prefers_project_root(
+    monkeypatch: pytest.MonkeyPatch,
+    project_under_excluded_ancestor: Path,
+) -> None:
+    """The project root is the first anchor when one can be resolved.
+
+    Args:
+        monkeypatch: Pytest monkeypatch fixture.
+        project_under_excluded_ancestor: Project root beneath ``.claude``.
+    """
+    monkeypatch.chdir(project_under_excluded_ancestor)
+
+    anchors = resolve_exclude_anchors([str(project_under_excluded_ancestor)])
+
+    assert_that(anchors[0]).is_equal_to(str(project_under_excluded_ancestor))

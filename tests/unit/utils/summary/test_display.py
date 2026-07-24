@@ -16,6 +16,7 @@ from assertpy import assert_that
 from lintro.enums.action import Action
 from lintro.utils.summary_tables import (
     DEFAULT_REMAINING_COUNT,
+    NO_FILES_NOTE,
     print_summary_table,
 )
 
@@ -484,3 +485,58 @@ def test_default_remaining_count_used_in_fix_output(
     combined = "".join(output)
     # The "?" should appear in the remaining column when count is unknown
     assert_that(combined).contains(DEFAULT_REMAINING_COUNT)
+
+
+# =============================================================================
+# Tests for the no-files note (issue #1678)
+# =============================================================================
+
+
+def test_check_pass_with_no_files_is_annotated(
+    console_capture: tuple[Callable[[str], None], list[str]],
+    fake_tool_result_factory: Callable[..., FakeToolResult],
+) -> None:
+    """A pass over zero files is annotated so it is not read as a clean scan.
+
+    Args:
+        console_capture: Mock console output capture.
+        fake_tool_result_factory: Factory for creating fake tool results.
+    """
+    capture, output = console_capture
+    result = fake_tool_result_factory(
+        name="prettier",
+        success=True,
+        issues_count=0,
+        output="No .md files found to check.",
+    )
+
+    print_summary_table(capture, Action.CHECK, [result])
+
+    combined = "".join(output)
+    assert_that(combined).contains("PASS")
+    assert_that(combined).contains(NO_FILES_NOTE)
+
+
+def test_check_pass_over_real_files_has_no_note(
+    console_capture: tuple[Callable[[str], None], list[str]],
+    fake_tool_result_factory: Callable[..., FakeToolResult],
+) -> None:
+    """A genuine clean scan is not annotated with the no-files note.
+
+    Args:
+        console_capture: Mock console output capture.
+        fake_tool_result_factory: Factory for creating fake tool results.
+    """
+    capture, output = console_capture
+    result = fake_tool_result_factory(
+        name="prettier",
+        success=True,
+        issues_count=0,
+        output=None,
+    )
+
+    print_summary_table(capture, Action.CHECK, [result])
+
+    combined = "".join(output)
+    assert_that(combined).contains("PASS")
+    assert_that(combined).does_not_contain(NO_FILES_NOTE)

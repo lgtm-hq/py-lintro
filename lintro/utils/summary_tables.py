@@ -21,6 +21,16 @@ from lintro.utils.console import (
 # Constants
 DEFAULT_REMAINING_COUNT: str = "?"
 
+# Note shown when a tool passed without inspecting a single file. A zero-file
+# run and a genuinely clean run are both ``PASS 0``; without this note they are
+# indistinguishable, which is how a fully excluded scan reads as green (#1678).
+NO_FILES_NOTE: str = "no files matched"
+_NO_FILES_SUFFIXES: tuple[str, ...] = (
+    " found to check.",
+    " files to check.",
+    " files to format.",
+)
+
 # ANSI color codes — only emit when stdout is a terminal
 _USE_COLOR = sys.stdout.isatty()
 _GREEN = "\033[92m" if _USE_COLOR else ""
@@ -111,6 +121,21 @@ def _get_ai_verified_count(result: object) -> int:
 def _get_ai_unverified_count(result: object) -> int:
     """Get count of AI-applied fixes that remain unresolved."""
     return get_ai_count(result, "unverified_count")
+
+
+def _is_no_files_result(output: object) -> bool:
+    """Report whether a tool result means "no files were inspected".
+
+    Args:
+        output: The tool result ``output`` value.
+
+    Returns:
+        True when the output is one of the framework's no-files messages.
+    """
+    if not isinstance(output, str):
+        return False
+    text = output.strip()
+    return text.startswith("No ") and text.endswith(_NO_FILES_SUFFIXES)
 
 
 def _is_result_skipped(result: object) -> tuple[bool, str]:
@@ -401,11 +426,12 @@ def print_summary_table(
                 ai_verified_value = _get_ai_verified_count(result)
                 ai_verified_display: str = f"{_GREEN}{ai_verified_value}{_RESET}"
                 ai_unverified_value = _get_ai_unverified_count(result)
-                notes_display = (
-                    f"{_YELLOW}{ai_unverified_value} unresolved{_RESET}"
-                    if ai_unverified_value > 0
-                    else ""
-                )
+                if ai_unverified_value > 0:
+                    notes_display = f"{_YELLOW}{ai_unverified_value} unresolved{_RESET}"
+                elif _is_no_files_result(result_output):
+                    notes_display = f"{_YELLOW}{NO_FILES_NOTE}{_RESET}"
+                else:
+                    notes_display = ""
 
                 # Remaining issues display
                 if isinstance(remaining_count, str):
@@ -449,7 +475,11 @@ def print_summary_table(
                     or "tool execution failed" in result_output.lower()
                 )
 
-                notes_display = ""
+                notes_display = (
+                    f"{_YELLOW}{NO_FILES_NOTE}{_RESET}"
+                    if _is_no_files_result(result_output)
+                    else ""
+                )
 
                 # Check for framework deferral pattern in output
                 if (
