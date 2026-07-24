@@ -143,7 +143,9 @@ def test_check_with_no_typescript_files(
         result = tsc_plugin.check([str(non_ts_file)], {})
 
     assert_that(result.success).is_true()
-    assert_that(result.output).contains("No .ts/.tsx/.mts/.cts files")
+    assert_that(result.output).contains(
+        "No .ts/.tsx/.mts/.cts/.js/.mjs/.cjs/.jsx files",
+    )
 
 
 def test_check_parses_multiple_issues(
