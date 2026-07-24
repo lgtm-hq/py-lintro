@@ -26,7 +26,7 @@ scripts/ci/
 | `docker-ci.yml`               | Fork detect, image pull/load, lgtm-ci quality, test summary, security audit                                                      |
 | `publish-pypi-on-tag.yml`     | lgtm-ci quality/SBOM; `build-artifacts` + PyPI publish + GitHub release                                                          |
 | `pr-comment-cleanup.yml`      | `post-pr-delete-previous.sh`                                                                                                     |
-| `lintro-report-scheduled.yml` | `lintro-report-generate.sh`                                                                                                      |
+| `lintro-report-scheduled.yml` | `resolve-lintro-image.sh`, `pull-lintro-image.sh`, `lintro-report-generate.sh`                                                   |
 | GHCR cleanup (docker-ci)      | `maintenance/delete-ci-ghcr-tags.sh`                                                                                             |
 | GHCR cleanup (scheduled)      | lgtm-ci `reusable-ghcr-cleanup.yml` (`ghcr-cleanup.yml`)                                                                         |
 | Vuln suppression check        | lgtm-ci `reusable-vuln-suppression-check.yml`; local `security/install-osv-scanner.sh` and `security/check-vuln-suppressions.sh` |

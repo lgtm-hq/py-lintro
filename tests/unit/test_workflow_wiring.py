@@ -914,7 +914,7 @@ def test_lintro_report_runs_full_codebase_analysis_exactly_once() -> None:
 
     # The step summary must reuse the already-written report rather than trigger
     # a second analysis. ``list-tools`` is lightweight and allowed.
-    assert_that(script).contains("tail -n +3 lintro-report/report.md")
+    assert_that(script).contains("tail -n +5 lintro-report/report.md")
     assert_that(script).contains("--output-format markdown")
 
 
