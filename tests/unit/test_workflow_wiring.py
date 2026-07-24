@@ -1685,14 +1685,18 @@ def test_dependency_vuln_gate_filter_globs_match_committed_manifests() -> None:
         check=True,
     ).stdout.splitlines()
 
+    # Genuine dependency-manifest basenames the release gate's syft scan
+    # catalogs. Deliberately excludes ``setup.py`` / ``setup.cfg``: the filter
+    # still lists them for future-proofing, but this repo's only committed
+    # ``setup.py`` is a Click command module (lintro/cli_utils/commands/), not
+    # packaging metadata, and syft does not catalog it — so it is not a manifest
+    # this drift guard should assert on.
     manifest_names = {
         "pyproject.toml",
         "uv.lock",
         "poetry.lock",
         "Pipfile",
         "Pipfile.lock",
-        "setup.py",
-        "setup.cfg",
         "package.json",
         "package-lock.json",
         "pnpm-lock.yaml",
