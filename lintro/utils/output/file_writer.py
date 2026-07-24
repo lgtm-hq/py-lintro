@@ -22,10 +22,12 @@ from typing import TYPE_CHECKING, Any
 # Import parser_registration to auto-register all parsers
 import lintro.utils.output.parser_registration  # noqa: F401
 from lintro.enums.action import Action
+from lintro.enums.group_by import GroupBy, normalize_group_by
 from lintro.enums.output_format import OutputFormat, normalize_output_format
 from lintro.enums.tool_name import ToolName
 from lintro.formatters.formatter import (
     format_issues,
+    format_issues_by_category,
     format_issues_with_sections,
     merge_detected_and_remaining,
 )
@@ -461,6 +463,7 @@ def format_tool_output(
     *,
     success: bool | None = None,
     issues_count: int | None = None,
+    group_by: str | GroupBy | None = None,
 ) -> str:
     """Format tool output using the specified format.
 
@@ -475,11 +478,14 @@ def format_tool_output(
             noise for clean passes (#1534).
         issues_count: int | None: The tool-reported issue count, used together
             with ``success`` to detect a clean zero-issue pass.
+        group_by: Optional grouping strategy. When ``category``, issues are
+            sectioned by concern taxonomy instead of fixable status.
 
     Returns:
         str: Formatted output string.
     """
     output_format = normalize_output_format(output_format)
+    group_by_enum = normalize_group_by(group_by) if group_by is not None else None
 
     # Pytest output is already formatted by build_output_with_failures
     # in pytest_output_processor.py, so return it directly
@@ -488,6 +494,13 @@ def format_tool_output(
 
     # If parsed issues are provided, use the unified formatter
     if issues:
+        if group_by_enum == GroupBy.CATEGORY:
+            return format_issues_by_category(
+                issues=issues,
+                output_format=output_format,
+                tool_name=tool_name,
+            )
+
         # Get fixability predicate from registry (O(1) lookup)
         is_fixable = ParserRegistry.get_fixability_predicate(tool_name)
 
