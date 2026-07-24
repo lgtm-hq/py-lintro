@@ -1726,10 +1726,7 @@ def test_dependency_vuln_gate_filter_globs_match_committed_manifests() -> None:
         p
         for p in tracked
         if p.endswith(".txt")
-        and (
-            "requirements" in Path(p).name
-            or "requirements" in Path(p).parent.parts
-        )
+        and ("requirements" in Path(p).name or "requirements" in Path(p).parent.parts)
     ]
     assert_that(manifests).is_not_empty()
 
