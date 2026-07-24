@@ -21,6 +21,13 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.91.33] - 2026-07-24
+
+### Fixed
+
+- **ci**: backtick-wrap `snake_case` identifiers in generated CHANGELOG (MD037) (#1687)
+  (f042074)
+
 ## [0.91.32] - 2026-07-24
 
 ### Changed
