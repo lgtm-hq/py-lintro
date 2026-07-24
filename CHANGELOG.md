@@ -21,6 +21,14 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.91.35] - 2026-07-24
+
+### Fixed
+
+- **ci**: absorb dogfooding lint infra flakes in code-quality gate (#1650) (0491ae2)
+- **core**: prettier reports PASS when `node_modules` is absent instead of skipping
+  loudly (#1683) (c0fe1c1)
+
 ## [0.91.34] - 2026-07-24
 
 ### Fixed
