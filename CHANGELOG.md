@@ -21,6 +21,12 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.91.26] - 2026-07-24
+
+### Fixed
+
+- **security**: re-enable release SBOM fail-on-severity high (#1648) (cf953e3)
+
 ## [0.91.25] - 2026-07-24
 
 ### Fixed
