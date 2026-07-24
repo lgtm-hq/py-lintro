@@ -1444,21 +1444,29 @@ def _vuln_gate_job() -> dict[str, Any]:
 
 
 def _vuln_gate_step(*, uses_prefix: str) -> dict[str, Any]:
-    """Return the first gate step whose ``uses`` starts with ``uses_prefix``.
+    """Return the gate step whose action path equals ``uses_prefix``.
+
+    Matches on the action path before the ``@<ref>`` pin exactly, so a
+    similarly named action (e.g. ``scan-vulnerabilities-other@<ref>``) is not
+    accepted.
 
     Args:
-        uses_prefix: Action reference prefix to match.
+        uses_prefix: Full action path (without ``@<ref>``) to match.
 
     Returns:
         The matching step mapping.
     """
     steps = _vuln_gate_job()["steps"]
     step = next(
-        (step for step in steps if step.get("uses", "").startswith(uses_prefix)),
+        (
+            step
+            for step in steps
+            if str(step.get("uses", "")).partition("@")[0] == uses_prefix
+        ),
         None,
     )
     assert_that(step).described_as(
-        f"gate step with uses prefix {uses_prefix!r}",
+        f"gate step for action {uses_prefix!r}",
     ).is_not_none()
     return cast(dict[str, Any], step)
 
