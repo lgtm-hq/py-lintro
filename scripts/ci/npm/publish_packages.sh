@@ -81,10 +81,11 @@ max_attempts="${NPM_PUBLISH_MAX_ATTEMPTS:-3}"
 retry_base_delay="${NPM_PUBLISH_RETRY_DELAY:-5}"
 
 # Transient failures that are safe to retry: the Rekor transparency-log 409
-# (TLOG_CREATE_ENTRY_ERROR), other Sigstore/tlog hiccups, registry 5xx, and
-# transient network errors. Auth (E401/E403/ENEEDAUTH/EOTP) and validation
-# errors do NOT match and therefore fall through to a hard failure.
-TRANSIENT_ERROR_RE='TLOG_CREATE_ENTRY_ERROR|creating tlog entry|transparency log|rekor|fulcio|sigstore|ETIMEDOUT|ECONNRESET|EAI_AGAIN|ENOTFOUND|socket hang up|5[0-9][0-9] (internal server error|bad gateway|service unavailable|gateway time-?out)|internal server error|bad gateway|service unavailable|gateway time-?out|EAGAIN'
+# (TLOG_CREATE_ENTRY_ERROR), other Sigstore/tlog hiccups, registry 5xx,
+# rate-limit 429s, and transient network errors. Auth (E401/E403/ENEEDAUTH/EOTP)
+# and validation errors do NOT match and therefore fall through to a hard
+# failure.
+TRANSIENT_ERROR_RE='TLOG_CREATE_ENTRY_ERROR|creating tlog entry|transparency log|rekor|fulcio|sigstore|ETIMEDOUT|ECONNRESET|EAI_AGAIN|ENOTFOUND|socket hang up|5[0-9][0-9] (internal server error|bad gateway|service unavailable|gateway time-?out)|internal server error|bad gateway|service unavailable|gateway time-?out|EAGAIN|E429|429 too many requests'
 # A publish conflict means the exact name@version is already on the registry —
 # the desired end state. Treat it as an idempotent success (a prior attempt in
 # this loop or an earlier run landed the tarball) rather than a failure.

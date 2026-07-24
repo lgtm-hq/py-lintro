@@ -116,6 +116,10 @@ def _run(
     )
     _write_stub(bin_dir, "npm", npm)
     _write_stub(bin_dir, "node", _node_stub_body())
+    # Record backoff durations without actually sleeping so retry tests stay
+    # fast even with a non-zero NPM_PUBLISH_RETRY_DELAY.
+    sleep_log = tmp_path / "sleep.log"
+    _write_stub(bin_dir, "sleep", f'echo "$1" >> "{sleep_log}"')
 
     env = {
         **os.environ.copy(),
@@ -142,9 +146,14 @@ def _run(
         timeout=60,
     )
     result_log = log.read_text() if log.exists() else ""
-    # Fold stderr (warnings/errors) into stdout, then append the publish log so
-    # a single ``result.stdout`` carries everything the assertions inspect.
-    result.stdout = f"{result.stdout}\n{result.stderr}\n---LOG---\n{result_log}"
+    sleep_record = sleep_log.read_text() if sleep_log.exists() else ""
+    # Fold stderr (warnings/errors) into stdout, then append the publish and
+    # sleep logs so a single ``result.stdout`` carries everything the
+    # assertions inspect.
+    result.stdout = (
+        f"{result.stdout}\n{result.stderr}\n"
+        f"---LOG---\n{result_log}\n---SLEEP---\n{sleep_record}"
+    )
     return result
 
 
@@ -169,7 +178,7 @@ def test_all_packages_publish_when_absent(tmp_path: Path) -> None:
     for pkg in _PACKAGES:
         assert_that(result.stdout).contains(f"Publishing {pkg}")
     # Meta package is published last.
-    log = result.stdout.split("---LOG---", 1)[1]
+    log = result.stdout.split("---LOG---", 1)[1].split("---SLEEP---", 1)[0]
     assert_that(log.strip().splitlines()).is_length(len(_PACKAGES))
     assert_that(log.strip().splitlines()[-1]).contains("lintro")
 
@@ -177,7 +186,7 @@ def test_all_packages_publish_when_absent(tmp_path: Path) -> None:
 def test_provenance_flag_is_passed(tmp_path: Path) -> None:
     """Each publish carries --provenance so signing is never dropped."""
     result = _run(tmp_path, npm_body="exit 0")
-    log = result.stdout.split("---LOG---", 1)[1]
+    log = result.stdout.split("---LOG---", 1)[1].split("---SLEEP---", 1)[0]
     for line in log.strip().splitlines():
         assert_that(line).contains("--provenance")
 
@@ -203,6 +212,51 @@ def test_transient_tlog_409_is_retried_then_succeeds(tmp_path: Path) -> None:
     assert_that(result.stdout).contains("attempt 2/3")
 
 
+def test_backoff_delay_doubles_between_retries(tmp_path: Path) -> None:
+    """Retry backoff is exponential: the recorded sleeps double each attempt."""
+    # linux-arm64 fails transiently on the first two attempts, then succeeds,
+    # so publish_one sleeps twice before the third attempt lands.
+    npm_body = (
+        'if [[ "$(basename "$PWD")" == "linux-arm64" ]]; then\n'
+        '  n="$(cat "$STATE" 2>/dev/null || echo 0)"\n'
+        '  if [[ "$n" -lt 2 ]]; then\n'
+        '    echo "$((n + 1))" > "$STATE"\n'
+        '    echo "npm error code TLOG_CREATE_ENTRY_ERROR" >&2\n'
+        "    exit 1\n"
+        "  fi\n"
+        "fi\n"
+        "exit 0"
+    )
+    state = tmp_path / "state"
+    result = _run(
+        tmp_path,
+        npm_body=npm_body,
+        # Base delay 5s; the stubbed sleep records without waiting.
+        extra_env={"STATE": str(state), "NPM_PUBLISH_RETRY_DELAY": "5"},
+    )
+    assert_that(result.returncode).is_equal_to(0)
+    sleeps = result.stdout.split("---SLEEP---", 1)[1].strip().splitlines()
+    # 5 then 10 — exponential doubling of the base delay.
+    assert_that(sleeps).is_equal_to(["5", "10"])
+
+
+def test_rate_limit_429_is_retried_then_succeeds(tmp_path: Path) -> None:
+    """A registry 429 (rate limit) is transient and retried, not a hard fail."""
+    npm_body = (
+        'if [[ "$(basename "$PWD")" == "linux-arm64" && ! -f "$STATE" ]]; then\n'
+        '  touch "$STATE"\n'
+        '  echo "npm error code E429" >&2\n'
+        '  echo "npm error 429 Too Many Requests - PUT registry" >&2\n'
+        "  exit 1\n"
+        "fi\n"
+        "exit 0"
+    )
+    state = tmp_path / "state"
+    result = _run(tmp_path, npm_body=npm_body, extra_env={"STATE": str(state)})
+    assert_that(result.returncode).is_equal_to(0)
+    assert_that(result.stdout).contains("transient publish error for linux-arm64")
+
+
 def test_transient_error_exhausts_attempts_and_fails(tmp_path: Path) -> None:
     """A persistently transient error fails after the bounded attempt budget."""
     npm_body = (
@@ -220,7 +274,7 @@ def test_transient_error_exhausts_attempts_and_fails(tmp_path: Path) -> None:
     assert_that(result.returncode).is_not_equal_to(0)
     assert_that(result.stdout).contains("failed after 3 attempts")
     # linux-x64 and the meta package must NOT publish after the hard failure.
-    log = result.stdout.split("---LOG---", 1)[1]
+    log = result.stdout.split("---LOG---", 1)[1].split("---SLEEP---", 1)[0]
     assert_that(log).does_not_contain("linux-x64")
     assert_that(log).does_not_contain("lintro")
 
@@ -239,7 +293,7 @@ def test_auth_failure_is_not_retried(tmp_path: Path) -> None:
     assert_that(result.returncode).is_not_equal_to(0)
     assert_that(result.stdout).contains("non-transient error")
     # Only one publish attempt for darwin-arm64 (no retry).
-    log = result.stdout.split("---LOG---", 1)[1]
+    log = result.stdout.split("---LOG---", 1)[1].split("---SLEEP---", 1)[0]
     darwin_attempts = [
         line for line in log.strip().splitlines() if "darwin-arm64" in line
     ]
@@ -263,7 +317,7 @@ def test_already_published_versions_are_skipped(tmp_path: Path) -> None:
     assert_that(result.stdout).contains("Skipping @lgtm-hq/lintro-darwin-arm64")
     assert_that(result.stdout).contains("Skipping @lgtm-hq/lintro-darwin-x64")
     # Only the three remaining packages actually publish.
-    log = result.stdout.split("---LOG---", 1)[1]
+    log = result.stdout.split("---LOG---", 1)[1].split("---SLEEP---", 1)[0]
     published = log.strip().splitlines()
     assert_that(published).is_length(3)
     assert_that(log).does_not_contain("darwin")
@@ -306,7 +360,7 @@ def test_ambiguous_view_failure_falls_through_to_publish(tmp_path: Path) -> None
     assert_that(result.stdout).contains("could not verify @lgtm-hq/lintro-linux-arm64")
     assert_that(result.stdout).contains("proceeding to publish")
     # linux-arm64 is still published despite the ambiguous check.
-    log = result.stdout.split("---LOG---", 1)[1]
+    log = result.stdout.split("---LOG---", 1)[1].split("---SLEEP---", 1)[0]
     assert_that(log).contains("linux-arm64")
 
 
@@ -322,5 +376,5 @@ def test_dry_run_publishes_without_existence_check(tmp_path: Path) -> None:
     )
     assert_that(result.returncode).is_equal_to(0)
     assert_that(result.stdout).does_not_contain("VIEW SHOULD NOT RUN")
-    log = result.stdout.split("---LOG---", 1)[1]
+    log = result.stdout.split("---LOG---", 1)[1].split("---SLEEP---", 1)[0]
     assert_that(log.strip().splitlines()).is_length(len(_PACKAGES))
