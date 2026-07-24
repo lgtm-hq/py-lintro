@@ -439,6 +439,10 @@ def _run_sweep_validation(
     finds no candidate versions and exits 0. Only input validation is
     exercised.
 
+    Sweep-specific variables the caller does not set are blanked rather than
+    inherited, so an ambient ``MIN_AGE_DAYS``/``TAG_PREFIX`` in the developer
+    or CI environment cannot mask the script's own defaults.
+
     Args:
         tmp_path: Pytest temporary directory for the PATH shim.
         env: Extra environment variables for the script.
@@ -449,12 +453,18 @@ def _run_sweep_validation(
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
     _write_stub(bin_dir, "gh", "exit 0")
+    scrubbed = {
+        name: ""
+        for name in ("MIN_AGE_DAYS", "TAG_PREFIX", "ALLOW_SHORT_RETENTION", "DRY_RUN")
+        if name not in env
+    }
     return _run_with_stubs(
         "scripts/ci/maintenance/sweep-ci-ghcr-tags.sh",
         bin_dir,
         {
             "GH_TOKEN": "dummy",  # nosec B105 - fake token, gh is stubbed
             "PACKAGES": "py-lintro",
+            **scrubbed,
             **env,
         },
     )
@@ -478,15 +488,17 @@ def test_sweep_ci_ghcr_tags_rejects_short_retention(
 
 
 def test_sweep_ci_ghcr_tags_short_retention_override(tmp_path: Path) -> None:
-    """ALLOW_SHORT_RETENTION=true must permit a MIN_AGE_DAYS below the floor."""
+    """ALLOW_SHORT_RETENTION=true permits a sub-floor MIN_AGE_DAYS, loudly."""
     result = _run_sweep_validation(
         tmp_path,
         {"MIN_AGE_DAYS": "0", "ALLOW_SHORT_RETENTION": "true"},
     )
 
     assert_that(result.returncode).is_equal_to(0)
-    assert_that(result.stderr).does_not_contain("rerun-retention window")
     assert_that(result.stdout).contains("Sweeping ci-* tags older than 0d")
+    # The bypass must never be silent: an inherited value has to be visible.
+    assert_that(result.stderr).contains("::warning::ALLOW_SHORT_RETENTION=true")
+    assert_that(result.stderr).contains("waives the 91d guard")
 
 
 def test_sweep_ci_ghcr_tags_accepts_floor_value(tmp_path: Path) -> None:

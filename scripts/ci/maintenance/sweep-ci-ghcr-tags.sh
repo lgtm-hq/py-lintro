@@ -53,6 +53,9 @@ Environment:
                  retention window. Only for testing: a shorter window
                  sweeps ci-<run_id> tags of still-running workflows and
                  re-creates the "manifest unknown" failure of #1138.
+                 Taking the bypass logs a ::warning:: so an inherited
+                 value can never waive the guard silently.
+                 ghcr-cleanup.yml never sets it.
   DRY_RUN        When "true", log candidates without deleting (default: false)
 EOF
 	exit 0
@@ -81,12 +84,19 @@ if ! [[ "$min_age_days" =~ ^[0-9]+$ ]]; then
 	exit 2
 fi
 
-if [[ "$min_age_days" -lt "$SAFE_MIN_AGE_DAYS" &&
-	"${ALLOW_SHORT_RETENTION:-false}" != "true" ]]; then
-	echo "MIN_AGE_DAYS=${min_age_days} is below the ${SAFE_MIN_AGE_DAYS}d" \
-		"rerun-retention window (#1138)." >&2
-	echo "Set ALLOW_SHORT_RETENTION=true to override." >&2
-	exit 2
+if [[ "$min_age_days" -lt "$SAFE_MIN_AGE_DAYS" ]]; then
+	if [[ "${ALLOW_SHORT_RETENTION:-false}" != "true" ]]; then
+		echo "MIN_AGE_DAYS=${min_age_days} is below the ${SAFE_MIN_AGE_DAYS}d" \
+			"rerun-retention window (#1138)." >&2
+		echo "Set ALLOW_SHORT_RETENTION=true to override." >&2
+		exit 2
+	fi
+	# Never let an inherited ALLOW_SHORT_RETENTION bypass go unnoticed: an
+	# operator reading the log must see that the #1138 guard was waived.
+	echo "::warning::ALLOW_SHORT_RETENTION=true waives the" \
+		"${SAFE_MIN_AGE_DAYS}d guard; sweeping with" \
+		"MIN_AGE_DAYS=${min_age_days} can delete ci-<run_id> tags of" \
+		"workflows that are still re-runnable (#1138)." >&2
 fi
 
 # TAG_PREFIX is interpolated into the gh api --jq program below (gh has no
