@@ -25,10 +25,18 @@ DEFAULT_REMAINING_COUNT: str = "?"
 # run and a genuinely clean run are both ``PASS 0``; without this note they are
 # indistinguishable, which is how a fully excluded scan reads as green (#1678).
 NO_FILES_NOTE: str = "no files matched"
+# Fragments (any terminal period stripped before matching) that a framework
+# "nothing to do" message ends with. Covers every discovery outcome —
+# ``No <ext> found to check``, ``No files to format``, ``No .py/.pyi files
+# found`` — across check and fix. Deliberately excludes ``No issues found``
+# and ``No configuration found``, which mean the tool *did* run.
 _NO_FILES_SUFFIXES: tuple[str, ...] = (
-    " found to check.",
-    " files to check.",
-    " files to format.",
+    " found to check",
+    " found to fix",
+    " files to check",
+    " files to fix",
+    " files to format",
+    " files found",
 )
 
 # ANSI color codes — only emit when stdout is a terminal
@@ -134,7 +142,7 @@ def _is_no_files_result(output: object) -> bool:
     """
     if not isinstance(output, str):
         return False
-    text = output.strip()
+    text = output.strip().rstrip(".")
     return text.startswith("No ") and text.endswith(_NO_FILES_SUFFIXES)
 
 
