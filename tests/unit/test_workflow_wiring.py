@@ -1045,6 +1045,42 @@ def test_publish_npm_exposes_dist_tag_for_backfills() -> None:
     assert_that(publish_step["env"]["NPM_DIST_TAG"]).contains("inputs.dist_tag")
 
 
+def test_publish_npm_delegates_publish_to_hardened_script() -> None:
+    """The publish step runs publish_packages.sh (retry/idempotency live there).
+
+    The retry + existence-check logic (issue #1682) must live in a testable
+    script under scripts/ci/npm/, not inline in the workflow, so the publish
+    step's ``run`` invokes that script rather than a raw ``npm publish`` loop.
+    """
+    workflow = _load_workflow(name="publish-npm.yml")
+    publish_step = next(
+        (
+            step
+            for step in workflow["jobs"]["publish"]["steps"]
+            if step.get("name") == "Publish to npm"
+        ),
+        None,
+    )
+    assert_that(publish_step).is_not_none()
+    assert publish_step is not None  # narrow type for mypy
+    # The step must delegate to the script as its command, not merely mention
+    # it — an inline ``npm publish`` loop that referenced the path in a comment
+    # would slip past a substring check.
+    assert_that(publish_step["run"].strip()).is_equal_to(
+        "scripts/ci/npm/publish_packages.sh",
+    )
+    # Provenance must not be dropped on a live publish.
+    assert_that(publish_step["env"]["NPM_PROVENANCE"]).contains("'0'")
+    assert_that(publish_step["env"]["NPM_PROVENANCE"]).contains("'1'")
+
+
+# The retry/idempotency behaviour of publish_packages.sh itself is covered by
+# executable stub-based tests in tests/scripts/test_npm_publish_packages.py
+# (transient-retry-success, attempt-exhaustion, auth-not-retried, skip and
+# conflict idempotency). That is a stronger guard than asserting on script
+# substrings here, so this module only asserts the workflow-to-script wiring.
+
+
 # Canonical lgtm-ci pin used by all py-lintro workflows (v0.52.4).
 # Pages deploy must not regress to v0.32.3 (missing GH_TOKEN in bundler).
 # The 40-hex git SHA trips trufflehog's Github legacy-token detector under
