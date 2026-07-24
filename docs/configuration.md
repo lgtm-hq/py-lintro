@@ -47,9 +47,10 @@ The configuration system works in a specific order:
    - `fail_fast`: Whether to stop on first tool failure
    - `parallel`: Whether to run tools in parallel (default: `true`)
    - `max_workers`: Maximum parallel workers, 1-32 (default: CPU count)
-   - `auto_install_deps`: Auto-install Node.js dependencies if missing. Unset by
-     default, in which case Lintro falls back to container auto-detection (enabled
-     inside containers, disabled otherwise)
+   - `auto_install_deps`: Auto-install Node.js dependencies if missing, for the tools
+     that need a project dependency tree (`tsc`, `vue-tsc`, `svelte-check`,
+     `astro-check`). Unset by default, in which case Lintro falls back to container
+     auto-detection (enabled inside containers, disabled otherwise)
 
 2. **Enforce Tier** - Cross-cutting settings injected as CLI flags
    - These settings override native configs via CLI arguments
@@ -308,9 +309,15 @@ lintro check src/ --tools tsc,oxlint --auto-install
 ```
 
 The `--auto-install` flag is available for both `check` and `format` commands. When
-enabled, Lintro will automatically run `bun install` (or `npm install` if bun is
-unavailable) before running Node.js-based tools like tsc, oxlint, oxfmt, prettier, or
-markdownlint-cli2.
+enabled, Lintro runs `bun install` (or `npm install` if bun is unavailable) before
+running the tools that need a project's dependency tree to work: `tsc`, `vue-tsc`,
+`svelte-check` and `astro-check`.
+
+It does **not** apply to standalone Node.js binaries such as `prettier`, `oxlint`,
+`oxfmt`, `stylelint` or `markdownlint-cli2`. Those are invoked from `PATH` (or via
+`bunx`/`npx`) and run fine without a local `node_modules`. When one of them cannot be
+resolved at all, Lintro reports a `⏭️ SKIP` row with the reason instead of a pass —
+installing project dependencies would not have helped.
 
 You can also enable this globally via configuration:
 

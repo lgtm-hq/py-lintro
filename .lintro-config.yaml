@@ -15,7 +15,10 @@ execution:
   fail_fast: false
   parallel: true
   max_workers: 10 # 1-32, defaults to CPU count if omitted
-  auto_install_deps: true # Auto-install Node.js deps if node_modules missing
+  # Auto-install Node.js deps if node_modules is missing. Applies only to tools
+  # that need a project dependency tree (tsc, vue-tsc, svelte-check, astro-check);
+  # standalone binaries like prettier and oxlint run without node_modules.
+  auto_install_deps: true
   # artifacts: ['sarif', 'json']  # Side-channel outputs alongside primary display
   # Supported: json, csv, markdown, html, sarif, plain
   # SARIF auto-emits in GitHub Actions even without this

@@ -111,6 +111,10 @@ Scripts for GitHub Actions workflows and continuous integration.
 | `dogfood-skip-gate.sh`               | Fail dogfood CI on non-allowlisted skipped tools                      | `LINTRO_IMAGE=<image> ./scripts/ci/dogfood-skip-gate.sh`                                    |
 | `check-dogfood-skips.py`             | Validate dogfood skip JSON against the committed allowlist            | `python3 scripts/ci/check-dogfood-skips.py --help`                                          |
 | `evaluate-test-gate.sh`              | Evaluate upstream compat/coverage results for required-check gate     | `COMPAT_RESULT=success COVERAGE_RESULT=success ./scripts/ci/evaluate-test-gate.sh`          |
+| `evaluate-code-quality-gate.sh`      | Select effective dogfooding lint attempt for code-quality gate        | `./scripts/ci/evaluate-code-quality-gate.sh --help`                                         |
+| `run-code-quality-gate.sh`           | Evaluate + assert docker-ci code-quality gate for required rollup     | `./scripts/ci/run-code-quality-gate.sh --help`                                              |
+| `assert-required-check.sh`           | Fail required check unless upstream passed or infra flake             | `./scripts/ci/assert-required-check.sh --help`                                              |
+| `is-infra-flake-failure.sh`          | Classify runner infra flakes (exit 143, ETIMEDOUT, cancelled)         | `./scripts/ci/is-infra-flake-failure.sh --help`                                             |
 | `fail-on-security-audit.sh`          | Fail CI when security audit finds vulnerabilities                     | `./scripts/ci/fail-on-security-audit.sh`                                                    |
 | `free-disk-space.sh`                 | Free disk space on CI runner for Docker builds                        | `./scripts/ci/free-disk-space.sh`                                                           |
 | `validate-docker-backfill-inputs.sh` | Validate workflow-dispatch backfill version/ref inputs                | `BACKFILL_VERSION=<ver> BACKFILL_REF=<ref> ./scripts/ci/validate-docker-backfill-inputs.sh` |
