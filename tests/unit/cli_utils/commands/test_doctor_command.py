@@ -123,13 +123,16 @@ def test_check_tool_ok() -> None:
     assert_that(result.path).is_equal_to("/usr/bin/ruff")
 
 
-def test_check_tool_outdated() -> None:
-    """Tool found but version below recommended."""
+def test_check_tool_outdated_enriches_advisory_from_path() -> None:
+    """Outdated tools get a path-based update advisory."""
     tool = _make_tool(version="1.0.0", min_version="0.3.0")
     ctx = _make_context()
 
     with (
-        patch("shutil.which", return_value="/usr/bin/ruff"),
+        patch(
+            "shutil.which",
+            return_value="/Users/me/.local/share/uv/tools/ruff/bin/ruff",
+        ),
         patch("subprocess.run") as mock_run,
     ):
         mock_run.return_value = MagicMock(
@@ -140,7 +143,10 @@ def test_check_tool_outdated() -> None:
         result = _check_tool(tool, ctx)
 
     assert_that(result.status).is_equal_to(ToolStatus.OUTDATED)
-    assert_that(result.installed_version).is_equal_to("0.5.0")
+    assert_that(result.advisory).is_not_none()
+    assert result.advisory is not None
+    assert_that(result.advisory.channel.value).is_equal_to("uv_tool")
+    assert_that(result.upgrade_hint).is_equal_to("uv tool upgrade ruff")
 
 
 def test_check_tool_incompatible() -> None:
