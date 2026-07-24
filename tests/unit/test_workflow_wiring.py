@@ -5,13 +5,13 @@ from __future__ import annotations
 import ast
 import re
 import subprocess  # nosec B404 - subprocess runs fixed git argv against this repo
-from fnmatch import fnmatch
 from pathlib import Path
 from typing import Any, cast
 
 import pytest
 import yaml
 from assertpy import assert_that
+from pathspec import GitIgnoreSpec
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _LINTRO_REPORT_SCRIPT = (
@@ -1642,17 +1642,11 @@ def test_dependency_vuln_gate_filter_globs_match_committed_manifests() -> None:
         "go.sum",
     }
 
-    def matches(path: str, pattern: str) -> bool:
-        # A ``**/`` pattern with no further slash matches any file whose
-        # basename matches the glob (any depth including root). A ``**/`` pattern
-        # that still contains a slash (e.g. ``**/requirements/*.txt``) matches
-        # against the path tail at any depth. Anything else is an exact path.
-        if pattern.startswith("**/"):
-            rest = pattern[3:]
-            if "/" in rest:
-                return fnmatch(path, rest) or fnmatch(path, f"*/{rest}")
-            return fnmatch(Path(path).name, rest)
-        return path == pattern
+    # Match with pathspec's gitignore semantics, which support ``**`` globstar
+    # natively (``**/foo`` matches ``foo`` at any depth including root), rather
+    # than a hand-rolled matcher. The filter is a pure allow-list, so a manifest
+    # is covered iff it matches any pattern.
+    spec = GitIgnoreSpec.from_lines(patterns)
 
     manifests = [p for p in tracked if Path(p).name in manifest_names]
     # requirements files are a glob family: `*requirements*.txt` basenames, and
@@ -1669,10 +1663,6 @@ def test_dependency_vuln_gate_filter_globs_match_committed_manifests() -> None:
     ]
     assert_that(manifests).is_not_empty()
 
-    unmatched = [
-        path
-        for path in manifests
-        if not any(matches(path, pattern) for pattern in patterns)
-    ]
+    unmatched = [path for path in manifests if not spec.match_file(path)]
 
     assert_that(unmatched).is_empty()
