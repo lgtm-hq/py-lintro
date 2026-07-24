@@ -4,10 +4,12 @@ from __future__ import annotations
 
 import json
 from collections.abc import Generator
+from pathlib import Path
 from unittest.mock import patch
 
 import pytest
 
+from lintro.models.core.tool_result import ToolResult
 from lintro.plugins.subprocess_executor import SubprocessResult
 from lintro.tools.definitions.trufflehog import TrufflehogPlugin
 
@@ -48,6 +50,41 @@ def make_subprocess_result(
         stderr=stderr,
         output=(stdout + stderr),
     )
+
+
+def run_check_with_stderr(
+    *,
+    plugin: TrufflehogPlugin,
+    tmp_path: Path,
+    stderr: str,
+    stdout: str = "",
+    returncode: int = 0,
+) -> ToolResult:
+    """Run a check over one throwaway module with a canned subprocess result.
+
+    Args:
+        plugin: The plugin under test.
+        tmp_path: Temporary directory to hold the scanned module.
+        stderr: Captured standard error to feed the plugin.
+        stdout: Captured standard output to feed the plugin.
+        returncode: Process exit code to feed the plugin.
+
+    Returns:
+        The ToolResult produced by the check.
+    """
+    test_file = tmp_path / "module.py"
+    test_file.write_text('"""Module."""\n')
+
+    with patch.object(
+        plugin,
+        "_run_subprocess_result",
+        return_value=make_subprocess_result(
+            stdout=stdout,
+            stderr=stderr,
+            returncode=returncode,
+        ),
+    ):
+        return plugin.check([str(test_file)], {})
 
 
 def sample_finding_line(*, file: str, line: int = 8, verified: bool = False) -> str:
