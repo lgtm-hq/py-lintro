@@ -21,6 +21,13 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.91.34] - 2026-07-24
+
+### Fixed
+
+- **ci**: retry cosign OIDC token fetch flakes in docker publish (#1690) (cbe8c90)
+- **trufflehog**: fail closed when scan errors cannot be classified (#1671) (54cc33b)
+
 ## [0.91.33] - 2026-07-24
 
 ### Fixed
