@@ -1227,3 +1227,129 @@ def test_publish_pypi_sbom_fails_on_high_severity() -> None:
     sbom = publish["jobs"]["sbom"]
     assert_that(sbom["with"]).contains_entry({"fail-on-severity": "high"})
     assert_that(sbom["with"].get("scan-vulnerabilities")).is_true()
+
+
+# --- Pre-merge dependency vulnerability gate (#1667) ------------------------
+#
+# The release gate (publish-pypi-on-tag.yml `sbom`) only runs on a version-tag
+# push, so a lockfile that trips grype merges green and breaks the publish at a
+# ref that can no longer be fixed (v0.91.26 / v0.91.27).
+# dependency-vuln-gate.yml runs the same scan pre-merge; these tests pin it to
+# the release gate so the two cannot drift, and pin its required-check-safe
+# shape (#1196).
+
+_VULN_GATE_WORKFLOW = "dependency-vuln-gate.yml"
+_VULN_GATE_JOB = "dependency-vuln-scan"
+_VULN_SCAN_ACTION = "lgtm-hq/lgtm-ci/.github/actions/scan-vulnerabilities"
+_VULN_SBOM_ACTION = "lgtm-hq/lgtm-ci/.github/actions/generate-sbom"
+_VULN_DETECT_ACTION = "lgtm-hq/lgtm-ci/.github/actions/detect-changes"
+
+
+def _vuln_gate_job() -> dict[str, Any]:
+    """Return the pre-merge dependency vulnerability gate job definition.
+
+    Returns:
+        The ``dependency-vuln-scan`` job mapping.
+    """
+    workflow = _load_workflow(name=_VULN_GATE_WORKFLOW)
+    return cast(dict[str, Any], workflow["jobs"][_VULN_GATE_JOB])
+
+
+def _vuln_gate_step(*, uses_prefix: str) -> dict[str, Any]:
+    """Return the first gate step whose ``uses`` starts with ``uses_prefix``.
+
+    Args:
+        uses_prefix: Action reference prefix to match.
+
+    Returns:
+        The matching step mapping.
+    """
+    steps = _vuln_gate_job()["steps"]
+    step = next(step for step in steps if step.get("uses", "").startswith(uses_prefix))
+    return cast(dict[str, Any], step)
+
+
+def test_dependency_vuln_gate_job_exists() -> None:
+    """The pre-merge gate job exists and scans the repo dependency set."""
+    job = _vuln_gate_job()
+    assert_that(job["name"]).contains("Dependency Vulnerability Gate")
+
+    sbom_step = _vuln_gate_step(uses_prefix=_VULN_SBOM_ACTION)
+    assert_that(sbom_step["with"]).contains_entry({"target": "."})
+    assert_that(sbom_step["with"]).contains_entry({"target-type": "dir"})
+
+    scan_step = _vuln_gate_step(uses_prefix=_VULN_SCAN_ACTION)
+    assert_that(scan_step["with"]).contains_entry({"target-type": "sbom"})
+    assert_that(str(scan_step["with"]["target"])).contains("steps.sbom.outputs")
+
+
+def test_dependency_vuln_gate_matches_release_fail_on_threshold() -> None:
+    """Pre-merge threshold must equal the release gate's (#1667).
+
+    A pre-merge scan looser than publish-pypi-on-tag.yml's ``sbom`` job
+    manufactures false confidence, so the threshold is asserted equal to the
+    release gate rather than merely asserted to be ``high``.
+    """
+    publish = _load_workflow(name="publish-pypi-on-tag.yml")
+    release_threshold = publish["jobs"]["sbom"]["with"]["fail-on-severity"]
+
+    scan_step = _vuln_gate_step(uses_prefix=_VULN_SCAN_ACTION)
+
+    assert_that(scan_step["with"]["fail-on"]).is_equal_to(release_threshold)
+
+
+def test_dependency_vuln_gate_shares_release_tooling_ref() -> None:
+    """Gate actions are pinned at the release gate's lgtm-ci tooling-ref."""
+    publish = _load_workflow(name="publish-pypi-on-tag.yml")
+    release_ref = str(publish["jobs"]["sbom"]["with"]["tooling-ref"])
+
+    pinned = [
+        step["uses"]
+        for step in _vuln_gate_job()["steps"]
+        if step.get("uses", "").startswith("lgtm-hq/lgtm-ci/")
+    ]
+
+    assert_that(pinned).is_not_empty()
+    for uses in pinned:
+        assert_that(uses).contains(f"@{release_ref}")
+
+
+def test_dependency_vuln_gate_is_required_check_safe() -> None:
+    """The gate must always report its context (#1196).
+
+    A ``paths:`` filter, or a job-level ``if:``, would stop the context from
+    ever being created — which deadlocks the merge queue the moment the
+    context is added to the ``checks-py-lintro`` ruleset. Path scoping
+    therefore lives on the steps inside the job, not on the trigger or the job.
+    """
+    workflow = _load_workflow(name=_VULN_GATE_WORKFLOW)
+    triggers = workflow["on"]
+
+    assert_that(triggers).contains_key(_GITHUB_PULL_REQUEST_EVENT)
+    assert_that(triggers).contains_key("merge_group")
+    for event in (_GITHUB_PULL_REQUEST_EVENT, "merge_group"):
+        assert_that(triggers[event] or {}).does_not_contain_key("paths")
+        assert_that(triggers[event] or {}).does_not_contain_key("paths-ignore")
+
+    job = _vuln_gate_job()
+    assert_that(job).does_not_contain_key("if")
+    # A skipped reusable *caller* collapses its nested contexts, so the gate
+    # must stay a plain job that always reports its own check run.
+    assert_that(job).does_not_contain_key("uses")
+    assert_that(job).contains_key("runs-on")
+
+    # The expensive steps are the ones that skip.
+    for prefix in (_VULN_SBOM_ACTION, _VULN_SCAN_ACTION):
+        step_if = _normalize_github_expr(_vuln_gate_step(uses_prefix=prefix)["if"])
+        assert_that(step_if).contains("steps.changes.outputs.changes")
+
+
+def test_dependency_vuln_gate_scopes_to_dependency_paths() -> None:
+    """The scan is scoped to files that can change the resolved dep set."""
+    detect_step = _vuln_gate_step(uses_prefix=_VULN_DETECT_ACTION)
+    filters = yaml.safe_load(detect_step["with"]["filters"])
+
+    assert_that(filters).contains_key("deps")
+    assert_that(filters["deps"]).contains("uv.lock")
+    assert_that(filters["deps"]).contains("pyproject.toml")
+    assert_that(filters["deps"]).contains(".github/workflows/publish-pypi-on-tag.yml")

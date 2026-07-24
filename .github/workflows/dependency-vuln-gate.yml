@@ -1,0 +1,148 @@
+# SPDX-License-Identifier: MIT
+# For license details, see the repository root LICENSE file.
+---
+name: Security - Dependency Vulnerability Gate
+
+# Pre-merge mirror of the release SBOM vulnerability gate (#1667).
+#
+# publish-pypi-on-tag.yml runs grype at `fail-on-severity: high` in its `sbom`
+# job, and every publish job depends on it — but that job only ever runs on a
+# version-tag push, i.e. after merge, at a ref whose lockfile can no longer be
+# fixed. #1648 enabled that gate, merged with all required checks green, and
+# then broke the v0.91.26 and v0.91.27 publishes permanently; both versions had
+# to be abandoned. This workflow runs the same scan, at the same threshold,
+# from the same lgtm-ci pin, on the PR that introduces the change.
+#
+# Required-check safety (#1196; see also the header of test-ci.yml). There is
+# deliberately NO `paths:` filter here, and no job-level `if:` on the scan job:
+# a path-filtered workflow never reports its contexts, and a skipped reusable
+# *caller* collapses its nested contexts into a single check named after the
+# caller job — either way a required context is never created and the merge
+# queue waits on it forever. Instead this is a plain (non-reusable) job that
+# always runs and therefore always reports `🔐 Dependency Vulnerability Gate`,
+# with the expensive steps skipped INSIDE the job when the PR touches none of
+# the dependency-resolving paths. That is the same shape docker-ci.yml uses for
+# its required `🔐 Security Audit`, so the context is safe to add to the
+# `checks-py-lintro` ruleset later without re-plumbing anything.
+#
+# Drift safety: `fail-on: high` and the lgtm-ci pin below must stay equal to
+# the ones in publish-pypi-on-tag.yml's `sbom` job — a pre-merge gate that is
+# looser than the release gate manufactures false confidence.
+# tests/unit/test_workflow_wiring.py asserts that equality, so changing one
+# side without the other fails the test suite.
+
+'on':
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened, ready_for_review]
+  merge_group:
+    types: [checks_requested]
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: dependency-vuln-gate-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+jobs:
+  dependency-vuln-scan:
+    name: 🔐 Dependency Vulnerability Gate
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      # read: checkout only. Unlike the release gate this job uploads no SARIF
+      # (security-events) and creates no attestation (id-token/attestations) —
+      # it only has to fail the way the release gate fails.
+      contents: read
+    steps:
+      - name: Harden Runner
+        # yamllint disable-line rule:line-length
+        uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
+        with:
+          egress-policy: block
+          # lgtm-ci egress preset `sbom` (scripts/ci/lib/egress/presets.sh),
+          # minus the sigstore/uploads hosts that only release-asset signing
+          # needs. The anchore hosts serve the syft/grype binaries and the
+          # grype vulnerability database.
+          allowed-endpoints: >
+            github.com:443
+            api.github.com:443
+            codeload.github.com:443
+            objects.githubusercontent.com:443
+            release-assets.githubusercontent.com:443
+            raw.githubusercontent.com:443
+            pipelines.actions.githubusercontent.com:443
+            anchore.io:443
+            get.anchore.io:443
+            toolbox-data.anchore.io:443
+            grype.anchore.io:443
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # Full history so dorny can resolve the merge_group base by git;
+          # an unresolvable base fails open (all filters true) and scans.
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Detect dependency-resolving changes
+        id: changes
+        # Required-check-safe replacement for `on.pull_request.paths` (see the
+        # header): the job always runs, this step decides whether the scan
+        # steps below do. Fails open — an unresolvable diff base reports every
+        # filter true, so infrastructure trouble scans rather than silently
+        # skipping the gate.
+        # yamllint disable-line rule:line-length
+        uses: lgtm-hq/lgtm-ci/.github/actions/detect-changes@ee8484ca71db3a2c2c33da6128bbf2330fcd7c88 # v0.59.2
+        with:
+          filters: |
+            # Anything that can change the resolved dependency set the
+            # release gate scans, plus the two workflow files that define
+            # the gate itself (so changes to the gate exercise the gate).
+            deps:
+              - 'uv.lock'
+              - 'pyproject.toml'
+              - '.github/workflows/publish-pypi-on-tag.yml'
+              - '.github/workflows/dependency-vuln-gate.yml'
+      - name: Generate SBOM
+        id: sbom
+        # Same syft action, target and format as the release gate; the
+        # artifact upload is release-only, the PR path just needs the file.
+        if: >-
+          steps.changes.outputs.changes == '' ||
+          fromJSON(steps.changes.outputs.changes).deps
+        # yamllint disable-line rule:line-length
+        uses: lgtm-hq/lgtm-ci/.github/actions/generate-sbom@ee8484ca71db3a2c2c33da6128bbf2330fcd7c88 # v0.59.2
+        with:
+          target: .
+          target-type: dir
+          format: cyclonedx-json
+          upload-artifact: 'false'
+          upload-release-assets: 'false'
+      - name: Scan SBOM for vulnerabilities
+        # The gate itself: identical grype action, pin and threshold as the
+        # `sbom` job of publish-pypi-on-tag.yml. Keep `fail-on` in lockstep
+        # with that job (test_workflow_wiring.py enforces it).
+        if: >-
+          steps.changes.outputs.changes == '' ||
+          fromJSON(steps.changes.outputs.changes).deps
+        # yamllint disable-line rule:line-length
+        uses: lgtm-hq/lgtm-ci/.github/actions/scan-vulnerabilities@ee8484ca71db3a2c2c33da6128bbf2330fcd7c88 # v0.59.2
+        with:
+          target: ${{ steps.sbom.outputs.sbom-file }}
+          target-type: sbom
+          fail-on: high
+      - name: Report skipped scan
+        if: >-
+          steps.changes.outputs.changes != '' &&
+          !fromJSON(steps.changes.outputs.changes).deps
+        env:
+          SUMMARY: >-
+            No changes to uv.lock, pyproject.toml or the release publish
+            workflow — the release SBOM vulnerability gate cannot change
+            result for this PR, so the scan was skipped.
+        run: |
+          {
+            echo "### 🔐 Dependency Vulnerability Gate"
+            echo
+            echo "$SUMMARY"
+          } >>"$GITHUB_STEP_SUMMARY"
