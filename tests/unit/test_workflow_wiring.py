@@ -1206,3 +1206,9 @@ def test_ghcr_cleanup_sweeps_ephemeral_ci_tags() -> None:
         and step.get("run") == "scripts/ci/maintenance/sweep-ci-ghcr-tags.sh"
     )
     assert_that(str(sweep_env.get("MIN_AGE_DAYS", ""))).contains("90")
+def test_publish_pypi_sbom_fails_on_high_severity() -> None:
+    """Release SBOM must gate publishes on high/critical vulns (#1118)."""
+    publish = _load_workflow(name="publish-pypi-on-tag.yml")
+    sbom = publish["jobs"]["sbom"]
+    assert_that(sbom["with"]).contains_entry({"fail-on-severity": "high"})
+    assert_that(sbom["with"].get("scan-vulnerabilities")).is_true()
