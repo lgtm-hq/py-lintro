@@ -38,6 +38,62 @@ if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
 	exit 0
 fi
 
+# Bounded exponential-backoff retry for the registry read/retag calls. A
+# single transient CDN blip ("connection reset by peer", "httpReadSeeker
+# failed") from GitHub's registry otherwise fails the whole main-push
+# promote (#1696). Overridable so tests can drive them fast.
+PROMOTE_MAX_ATTEMPTS="${PROMOTE_MAX_ATTEMPTS:-4}"
+PROMOTE_BACKOFF_SECONDS="${PROMOTE_BACKOFF_SECONDS:-2}"
+
+if ! [[ "$PROMOTE_MAX_ATTEMPTS" =~ ^[1-9][0-9]*$ ]]; then
+	echo "PROMOTE_MAX_ATTEMPTS must be a positive integer (got: ${PROMOTE_MAX_ATTEMPTS})" >&2
+	exit 2
+fi
+if ! [[ "$PROMOTE_BACKOFF_SECONDS" =~ ^[0-9]+$ ]]; then
+	echo "PROMOTE_BACKOFF_SECONDS must be a non-negative integer (got: ${PROMOTE_BACKOFF_SECONDS})" >&2
+	exit 2
+fi
+
+# Transient network/registry errors worth retrying. A genuine auth/denied/
+# manifest-unknown failure is deliberately NOT here: those are permanent and
+# must fail on the first attempt rather than be retried away (#1696).
+_promote_transient_re='connection reset by peer|httpReadSeeker|broken pipe|i/o timeout|TLS handshake|unexpected EOF|temporarily unavailable|toomanyrequests|50[0234] (Internal Server Error|Bad Gateway|Service Unavailable|Gateway Time-out)'
+
+# retry_registry <cmd...>
+#
+# Run a registry command, retrying only on a transient signature. Command
+# stdout is captured and re-emitted verbatim on success so callers can still
+# `digest="$(retry_registry docker ... inspect ...)"`. stderr is streamed
+# through on every attempt so progress/errors stay visible in the job log.
+retry_registry() {
+	local attempt=1 delay="$PROMOTE_BACKOFF_SECONDS" out rc err
+	err="$(mktemp)"
+	# Clean up explicitly at each return rather than via a RETURN trap, which
+	# would overwrite/leak into the caller's shell trap context.
+	while true; do
+		if out="$("$@" 2>"$err")"; then
+			cat "$err" >&2
+			rm -f "$err"
+			[[ -n "$out" ]] && printf '%s\n' "$out"
+			return 0
+		else
+			# Capture the failed command's status here: a bodyless `if`
+			# that falls through would leave $? as the `if`'s own 0.
+			rc=$?
+		fi
+		cat "$err" >&2
+		if ((attempt >= PROMOTE_MAX_ATTEMPTS)) ||
+			! grep -qiE "$_promote_transient_re" "$err"; then
+			rm -f "$err"
+			return "$rc"
+		fi
+		echo "Transient registry error on '$1' (attempt ${attempt}/${PROMOTE_MAX_ATTEMPTS}); retrying in ${delay}s..." >&2
+		sleep "$delay"
+		delay=$((delay * 2))
+		attempt=$((attempt + 1))
+	done
+}
+
 source_image="${SOURCE_IMAGE:-}"
 ci_tag="${CI_TAG:-}"
 tags="${TAGS:-}"
@@ -59,7 +115,7 @@ fi
 
 source_ref="${source_image}:${ci_tag}"
 
-digest="$(docker buildx imagetools inspect \
+digest="$(retry_registry docker buildx imagetools inspect \
 	--format '{{.Manifest.Digest}}' "$source_ref")"
 
 if [[ "$digest" != sha256:* ]]; then
@@ -86,13 +142,13 @@ fi
 # built with provenance disabled), the default prefer-index=true would
 # wrap the manifest in a new one-entry index — a different digest. A
 # carbon copy keeps the promoted tags on the exact CI-validated digest.
-docker buildx imagetools create --prefer-index=false \
+retry_registry docker buildx imagetools create --prefer-index=false \
 	"${source_image}@${digest}" "${tag_args[@]}"
 
 # Verify the retag preserved the manifest: every promoted tag must resolve
 # to the exact digest CI validated.
 for tag in "${tag_list[@]}"; do
-	promoted="$(docker buildx imagetools inspect \
+	promoted="$(retry_registry docker buildx imagetools inspect \
 		--format '{{.Manifest.Digest}}' "$tag")"
 	if [[ "$promoted" != "$digest" ]]; then
 		echo "Digest mismatch after promotion: ${tag} resolved to" \
