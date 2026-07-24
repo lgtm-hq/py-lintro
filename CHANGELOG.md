@@ -21,6 +21,13 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.91.23] - 2026-07-23
+
+### Fixed
+
+- **ai**: AI-module hygiene — remove dead code, JSONL audit log, test coverage (#1188)
+  (d9a0203)
+
 ## [0.91.22] - 2026-07-23
 
 ### Fixed
