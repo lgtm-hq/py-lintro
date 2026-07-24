@@ -6,6 +6,13 @@
 # is via npm trusted publishing (OIDC), so no NODE_AUTH_TOKEN is required.
 # Caller must provide npm ≥ 11.5.1 (Node 24 bundled npm in CI). Do not
 # self-upgrade npm in-place before invoking this script.
+#
+# Resilience (see issue #1682): each publish is wrapped in bounded exponential
+# backoff that retries ONLY transient Sigstore/registry failures (notably the
+# `TLOG_CREATE_ENTRY_ERROR` Rekor 409 that half-published v0.91.15). Auth and
+# validation failures are never retried — retrying them only hides the real
+# problem. Combined with the idempotency skip below, a re-run repairs a partial
+# publish instead of compounding it.
 
 set -euo pipefail
 
@@ -20,12 +27,19 @@ Publish lintro npm packages.
 Usage: publish_packages.sh
 
 Environment:
-  LIVE=1              Perform a real publish. Default (unset) is --dry-run.
-  NPM_PROVENANCE=0    Disable --provenance (default: enabled).
-  NPM_DIST_TAG        Dist-tag for npm publish (default: latest). Use a
-                      non-latest tag (e.g. backfill) when publishing a version
-                      lower than the current latest — npm refuses to move
-                      latest backwards without an explicit --tag.
+  LIVE=1                     Perform a real publish. Default (unset) is
+                             --dry-run.
+  NPM_PROVENANCE=0           Disable --provenance (default: enabled). The retry
+                             re-attempts the same signed publish; it never
+                             falls back to an unsigned one.
+  NPM_DIST_TAG               Dist-tag for npm publish (default: latest). Use a
+                             non-latest tag (e.g. backfill) when publishing a
+                             version lower than the current latest — npm refuses
+                             to move latest backwards without an explicit --tag.
+  NPM_PUBLISH_MAX_ATTEMPTS   Max publish attempts per package on a transient
+                             error (default: 3).
+  NPM_PUBLISH_RETRY_DELAY    Base backoff in seconds; doubles each retry
+                             (default: 5).
 
 Publishes @lgtm-hq/lintro-<platform> packages first, then the root meta-package,
 so consumers never resolve a meta-package whose optional deps are missing.
@@ -63,6 +77,89 @@ else
 	echo "LIVE mode: packages WILL be published to the registry (dist-tag=$dist_tag)."
 fi
 
+max_attempts="${NPM_PUBLISH_MAX_ATTEMPTS:-3}"
+retry_base_delay="${NPM_PUBLISH_RETRY_DELAY:-5}"
+# Ceiling for the exponential backoff. Without it, a high attempt count would
+# double the delay unboundedly and stall the release job for hours.
+retry_max_delay="${NPM_PUBLISH_MAX_DELAY:-60}"
+# Reject non-integer / negative / octal-looking values up front: bad values
+# would otherwise break arithmetic in the retry loop or loop unexpectedly.
+if [[ ! "$max_attempts" =~ ^[1-9][0-9]*$ ]]; then
+	echo "ERROR: NPM_PUBLISH_MAX_ATTEMPTS must be a positive integer (got '$max_attempts')" >&2
+	exit 1
+fi
+if [[ ! "$retry_base_delay" =~ ^(0|[1-9][0-9]*)$ ]]; then
+	echo "ERROR: NPM_PUBLISH_RETRY_DELAY must be a non-negative integer (got '$retry_base_delay')" >&2
+	exit 1
+fi
+if [[ ! "$retry_max_delay" =~ ^(0|[1-9][0-9]*)$ ]]; then
+	echo "ERROR: NPM_PUBLISH_MAX_DELAY must be a non-negative integer (got '$retry_max_delay')" >&2
+	exit 1
+fi
+
+# Non-retryable failures: authentication, permission, and validation errors.
+# These are checked BEFORE the transient patterns because an auth message can
+# also mention a Sigstore component (e.g. "sigstore authentication failed
+# (E401)"), and retrying it would only hide the real problem.
+NON_RETRYABLE_ERROR_RE='E401|E403|E402|ENEEDAUTH|EOTP|EPERM|unauthorized|forbidden|authentication failed|permission denied'
+# Transient failures that are safe to retry: the Rekor transparency-log 409
+# (TLOG_CREATE_ENTRY_ERROR), other Sigstore/tlog hiccups, registry 5xx,
+# rate-limit 429s, and transient network errors.
+TRANSIENT_ERROR_RE='TLOG_CREATE_ENTRY_ERROR|creating tlog entry|transparency log|rekor|fulcio|sigstore|ETIMEDOUT|ECONNRESET|EAI_AGAIN|ENOTFOUND|socket hang up|5[0-9][0-9] (internal server error|bad gateway|service unavailable|gateway time-?out)|internal server error|bad gateway|service unavailable|gateway time-?out|EAGAIN|E429|429 too many requests'
+# A publish conflict means the exact name@version is already on the registry —
+# the desired end state. Treat it as an idempotent success (a prior attempt in
+# this loop or an earlier run landed the tarball) rather than a failure.
+ALREADY_PUBLISHED_RE='EPUBLISHCONFLICT|cannot publish over|previously published version|already published'
+
+# Publish one package directory with bounded, exponential-backoff retry on
+# transient Sigstore/registry errors only.
+#
+# Args:
+#   $1: package subdirectory under $NPM_DIR (e.g. "linux-arm64").
+# Returns:
+#   0 on a successful (or idempotently already-present) publish; 1 otherwise.
+publish_one() {
+	local pkg="$1"
+	local pkg_dir="$NPM_DIR/$pkg"
+	local attempt=1
+	local delay="$retry_base_delay"
+	local output rc
+	while :; do
+		echo "==> Publishing $pkg (attempt $attempt/$max_attempts) (${publish_flags[*]})"
+		# Re-run the identical signed publish each attempt (provenance intact).
+		# Capture combined output so we can both echo it and classify the error.
+		output="$( (cd "$pkg_dir" && npm publish "${publish_flags[@]}") 2>&1)" && rc=0 || rc=$?
+		printf '%s\n' "$output"
+		if [[ "$rc" -eq 0 ]]; then
+			return 0
+		fi
+		if grep -qiE "$ALREADY_PUBLISHED_RE" <<<"$output"; then
+			echo "==> $pkg already present on the registry (publish conflict); treating as an idempotent success." >&2
+			return 0
+		fi
+		if grep -qiE "$NON_RETRYABLE_ERROR_RE" <<<"$output"; then
+			echo "ERROR: $pkg publish failed with a non-retryable auth/validation error; not retrying." >&2
+			return 1
+		fi
+		if grep -qiE "$TRANSIENT_ERROR_RE" <<<"$output"; then
+			if [[ "$attempt" -ge "$max_attempts" ]]; then
+				echo "ERROR: $pkg publish failed after $max_attempts attempts on a transient error." >&2
+				return 1
+			fi
+			echo "WARNING: transient publish error for $pkg (attempt $attempt/$max_attempts); retrying in ${delay}s." >&2
+			sleep "$delay"
+			attempt=$((attempt + 1))
+			delay=$((delay * 2))
+			if [[ "$delay" -gt "$retry_max_delay" ]]; then
+				delay="$retry_max_delay"
+			fi
+			continue
+		fi
+		echo "ERROR: $pkg publish failed with a non-transient error (exit $rc); not retrying." >&2
+		return 1
+	done
+}
+
 for pkg in "${PACKAGES[@]}"; do
 	pkg_dir="$NPM_DIR/$pkg"
 	# Idempotency: if this exact name@version is already on the registry
@@ -74,22 +171,29 @@ for pkg in "${PACKAGES[@]}"; do
 		pkg_name="$(node -p "require('$pkg_dir/package.json').name")"
 		pkg_version="$(node -p "require('$pkg_dir/package.json').version")"
 		# Distinguish "version not published" (npm E404) from a lookup that
-		# failed for another reason (network, rate-limit, auth). Only a real
-		# 404 means "safe to publish". Any other failure must abort rather
-		# than fall through to a publish that would error on a duplicate and
-		# leave the release partially published.
+		# failed for another reason (network, rate-limit, 5xx).
+		# Redirect order is intentional: inside $() stdout is the capture pipe,
+		# so `2>&1` routes stderr into it and `>/dev/null` then discards stdout
+		# only. view_err therefore holds just the error text. Do NOT "simplify"
+		# this to `>/dev/null 2>&1` — that discards both streams and would
+		# break the E404 classification below.
 		view_err="$(npm view "$pkg_name@$pkg_version" version 2>&1 >/dev/null)" && view_ok=1 || view_ok=0
 		if [[ "$view_ok" == "1" ]]; then
 			echo "==> Skipping $pkg_name@$pkg_version (already published)"
 			continue
-		elif ! grep -qi 'E404\|404 Not Found\|is not in this registry' <<<"$view_err"; then
-			echo "ERROR: could not verify $pkg_name@$pkg_version on the registry" >&2
+		elif ! grep -qiE 'E404|404 Not Found|is not in this registry' <<<"$view_err"; then
+			# The existence check itself failed, so we cannot prove the version
+			# is absent. Fail safe by neither skipping nor aborting the whole
+			# release: proceed to publish. publish_one() is conflict-safe — if
+			# the version is in fact already present, npm's publish conflict is
+			# treated as an idempotent success, and a genuine transient error is
+			# retried. Aborting here would instead risk leaving a multi-package
+			# release partially published on a mere lookup hiccup.
+			echo "WARNING: could not verify $pkg_name@$pkg_version on the registry; proceeding to publish (publish is conflict-safe)." >&2
 			echo "$view_err" >&2
-			exit 1
 		fi
 	fi
-	echo "==> Publishing $pkg (${publish_flags[*]})"
-	(cd "$pkg_dir" && npm publish "${publish_flags[@]}")
+	publish_one "$pkg"
 done
 
 echo "npm publish step complete."
