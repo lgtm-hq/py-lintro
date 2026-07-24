@@ -97,6 +97,7 @@ Scripts for GitHub Actions workflows and continuous integration.
 | `pull-lintro-image.sh`               | Pull lintro Docker image from GHCR and log digest                     | `./scripts/ci/testing/pull-lintro-image.sh`                                                 |
 | `resolve-lintro-image.sh`            | Resolve GHCR image for scheduled lintro analysis with sha fallback    | `LINTRO_SHA=<sha> ./scripts/ci/testing/resolve-lintro-image.sh`                             |
 | `maintenance/delete-ci-ghcr-tags.sh` | Manually delete a specific ephemeral CI GHCR tag (sole-tag versions)  | `CI_TAG=<tag> ./scripts/ci/maintenance/delete-ci-ghcr-tags.sh`                              |
+| `maintenance/sweep-ci-ghcr-tags.sh`  | Age-based sweep of ephemeral `ci-*` GHCR tags (weekly ghcr-cleanup)   | `./scripts/ci/maintenance/sweep-ci-ghcr-tags.sh`                                            |
 | `promote-ci-docker-images.sh`        | Promote CI-validated image to release tags by digest retag            | `./scripts/ci/promote-ci-docker-images.sh --help`                                           |
 | `cosign-sign-images.sh`              | Sign promoted image digests with Cosign keyless OIDC                  | `./scripts/ci/cosign-sign-images.sh --help`                                                 |
 | `coverage-badge-update.sh`           | Generate and update coverage badge                                    | `./scripts/ci/coverage-badge-update.sh --help`                                              |

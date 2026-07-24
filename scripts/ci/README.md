@@ -29,6 +29,7 @@ scripts/ci/
 | `lintro-report-scheduled.yml` | `resolve-lintro-image.sh`, `pull-lintro-image.sh`, `lintro-report-generate.sh`                                                   |
 | GHCR cleanup (docker-ci)      | `maintenance/delete-ci-ghcr-tags.sh`                                                                                             |
 | GHCR cleanup (scheduled)      | lgtm-ci `reusable-ghcr-cleanup.yml` (`ghcr-cleanup.yml`)                                                                         |
+| GHCR cleanup (scheduled)      | lgtm-ci `reusable-ghcr-cleanup.yml` + `maintenance/sweep-ci-ghcr-tags.sh` (`ghcr-cleanup.yml`, #1138)                            |
 | Vuln suppression check        | lgtm-ci `reusable-vuln-suppression-check.yml`; local `security/install-osv-scanner.sh` and `security/check-vuln-suppressions.sh` |
 
 Release versioning and auto-tagging use lgtm-ci reusable workflows
@@ -40,6 +41,8 @@ BuildKit registry cache is stored on production packages as `:cache` (not separa
 `*-buildcache` repos). Scheduled cleanup uses lgtm-ci `reusable-ghcr-cleanup.yml`, which
 reaps ephemeral `pr-*` / `mq-*` / `dispatch-*` cache exports from `py-lintro` and
 `py-lintro-base` while preserving referenced digests and the permanent `:cache` tag.
+Ephemeral run-scoped `ci-*` tags from docker-ci are retained for partial reruns and
+reclaimed by `sweep-ci-ghcr-tags.sh` (age-based, default 91 days; #1138).
 
 ## Local Development
 

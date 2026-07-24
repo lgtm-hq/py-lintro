@@ -3,7 +3,10 @@ set -euo pipefail
 
 # delete-ci-ghcr-tags.sh
 #
-# Delete ephemeral CI tags from py-lintro and py-lintro-base GHCR packages.
+# Manually delete a specific ephemeral CI tag from py-lintro and
+# py-lintro-base GHCR packages. Not wired into docker-ci.yml — run-scoped
+# tags survive for the life of the run (all attempts) and are reclaimed by
+# the age-based weekly sweep (sweep-ci-ghcr-tags.sh / #1138).
 #
 # The GHCR Packages API deletes whole *versions* (one version = one digest
 # carrying every tag that points at it), not individual tags. Two safety

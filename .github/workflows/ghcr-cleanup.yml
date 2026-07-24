@@ -21,9 +21,20 @@ name: Maintenance - GHCR Registry Cleanup
         default: false
         type: boolean
       min_age_days:
-        description: 'Minimum age in days before deletion (protects multi-arch deps)'
+        description: >-
+          Minimum age in days before pruning untagged package versions
+          (py-lintro / py-lintro-base). Scheduled runs always use 7.
         required: false
         default: 7
+        type: number
+      sweep_min_age_days:
+        description: >-
+          Minimum age in days before sweeping ephemeral ci-<run_id> tags.
+          Default 91 = Actions' 90-day run retention plus one day so the
+          push-time updated_at cutoff cannot precede the completion-based
+          rerun window (#1138). Scheduled runs always use 91.
+        required: false
+        default: 91
         type: number
 
 concurrency:
@@ -64,6 +75,45 @@ jobs:
       runner-image: ubuntu-24.04
     secrets:
       token: ${{ secrets.GITHUB_TOKEN }}
+
+  # Age-based sweep of ephemeral CI tags (ci-<run_id>) left behind by
+  # docker-ci.yml. These are deferred (not deleted on run completion) so that
+  # partial reruns can still pull the run-scoped image — see issue #1138.
+  sweep-ci-tags:
+    name: 🧹 Sweep ephemeral CI tags
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read # checkout sweep-ci-ghcr-tags.sh
+      packages: write # delete aged-out CI tags from GHCR
+    timeout-minutes: 10
+    steps:
+      - name: Harden Runner
+        # yamllint disable-line rule:line-length
+        uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
+        with:
+          egress-policy: 'block'
+          allowed-endpoints: >
+            github.com:443
+            api.github.com:443
+            codeload.github.com:443
+            objects.githubusercontent.com:443
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Sweep aged-out CI tags
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # 91d = Actions' 90-day run retention + 1d buffer: package
+          # updated_at is push time (docker-build), while Actions retention
+          # is completion-based — without the buffer a late partial rerun
+          # near day 90 could hit an already-swept ci-<run_id> (#1138).
+          # Dedicated dispatch input — do not share min_age_days with the
+          # untagged prune jobs (those default to 7).
+          # yamllint disable-line rule:line-length
+          MIN_AGE_DAYS: ${{ github.event_name != 'workflow_dispatch' && 91 || inputs.sweep_min_age_days }}
+          DRY_RUN: ${{ inputs.dry_run == true }}
+        run: scripts/ci/maintenance/sweep-ci-ghcr-tags.sh
 
   prune-untagged-base:
     # yamllint disable-line rule:line-length
