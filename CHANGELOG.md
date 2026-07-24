@@ -21,6 +21,19 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.91.29] - 2026-07-24
+
+### Fixed
+
+- **ci**: built-package validation cancels itself on consecutive main pushes (#1676)
+  (0f89b40)
+
+## [0.91.28] - 2026-07-24
+
+### Fixed
+
+- **security**: override mcp>=1.28.1 and bump click>=8.3.3 (#1660) (092ddf1)
+
 ## [0.91.27] - 2026-07-24
 
 ### Fixed

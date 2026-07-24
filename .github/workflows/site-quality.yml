@@ -25,8 +25,13 @@ name: Quality - Documentation Site
 permissions:
   contents: read
 
+# Same self-cancellation hazard as #1673: on push, github.ref is
+# `refs/heads/main` for every commit, so consecutive merges would cancel each
+# other's site build. Key pushes on the unique github.sha; other events keep
+# github.ref so a force-push still supersedes that PR's in-flight run.
 concurrency:
-  group: site-quality-${{ github.ref }}
+  group: >-
+    site-quality-${{ github.event_name == 'push' && github.sha || github.ref }}
   cancel-in-progress: true
 
 jobs:
