@@ -43,6 +43,85 @@ _HTML_COMMENT_RE = re.compile(r"^\s*<!--")
 _LINK_REF_RE = re.compile(r"^\s*\[[^\]]+\]:\s")
 _FENCE_RE = re.compile(r"^(?P<indent>\s*)(?P<marker>`{3,}|~{3,})")
 
+# Word-boundary run of identifier characters that contains at least one
+# underscore. The lookarounds refuse to start or end the match adjacent to a
+# word character (so we grab whole tokens), a backtick (already a code span), an
+# asterisk (an existing ``**bold**`` / ``*em*`` marker — e.g. the ``**scope**``
+# prefix of a conventional-commit changelog entry must stay intact), or a slash
+# (a path/URL segment that must not be broken). This targets snake_case and
+# SCREAMING_SNAKE_CASE code identifiers copied verbatim from commit subjects.
+_IDENT_RE = re.compile(r"(?<![\w`*/])([A-Za-z0-9_]*_[A-Za-z0-9_]*)(?![\w`*/])")
+
+
+def _wrap_identifiers(segment: str) -> str:
+    """Wrap bare underscore identifiers in a code-span-free text segment.
+
+    ``markdownlint`` (and CommonMark) treat a leading or trailing underscore on
+    a word as a potential emphasis delimiter, so a snake_case identifier lifted
+    from a commit subject (e.g. ``_rotate_audit_log``) can pair with another
+    stray underscore on the line to open a spurious emphasis span and trip
+    ``MD037`` ("spaces inside emphasis markers"). Rendering the identifier as an
+    inline code span is both the correct presentation for code and immune to
+    emphasis parsing, so the generated changelog stays fully lintable without
+    excluding the file or disabling the rule.
+
+    Args:
+        segment: Inline text known to contain no backtick code spans.
+
+    Returns:
+        str: The segment with underscore identifiers wrapped in backticks.
+    """
+
+    def _replace(match: re.Match[str]) -> str:
+        core = match.group(1)
+        # Skip purely numeric runs like ``1_000`` — they are not identifiers and
+        # never open emphasis, so wrapping them would only add noise.
+        if not any(char.isalpha() for char in core):
+            return core
+        return f"`{core}`"
+
+    return _IDENT_RE.sub(_replace, segment)
+
+
+def _protect_code_identifiers(text: str) -> str:
+    """Wrap underscore identifiers in backticks outside existing code spans.
+
+    Inline code spans are preserved verbatim (their contents are already immune
+    to emphasis parsing and must not be re-wrapped), and only the text between
+    them is transformed. Backtick tracking mirrors :func:`_tokenize` so the two
+    agree on what counts as a code span. The transform is idempotent: an
+    identifier already inside backticks is left untouched.
+
+    Args:
+        text: The raw inline text of a paragraph or list item.
+
+    Returns:
+        str: The text with bare underscore identifiers wrapped in code spans.
+    """
+    parts: list[str] = []
+    buffer: list[str] = []
+    in_code = False
+    for char in text:
+        if char == "`":
+            if in_code:
+                buffer.append(char)
+                parts.append("".join(buffer))
+                buffer = []
+                in_code = False
+            else:
+                parts.append(_wrap_identifiers("".join(buffer)))
+                buffer = [char]
+                in_code = True
+        else:
+            buffer.append(char)
+    if in_code:
+        # An unterminated code span: emit the remainder verbatim rather than
+        # transforming inside what markdown will still treat as code-ish text.
+        parts.append("".join(buffer))
+    else:
+        parts.append(_wrap_identifiers("".join(buffer)))
+    return "".join(parts)
+
 
 def _tokenize(text: str) -> list[str]:
     """Split text into wrap tokens, treating inline code spans as atomic.
@@ -164,7 +243,7 @@ def format_changelog(text: str) -> str:
             marker = list_match.group("marker")
             first_prefix = f"{indent}{marker} "
             cont_prefix = " " * len(first_prefix)
-            tokens = _tokenize(list_match.group("text"))
+            tokens = _tokenize(_protect_code_identifiers(list_match.group("text")))
             index += 1
             while index < total:
                 nxt = lines[index]
@@ -177,7 +256,7 @@ def format_changelog(text: str) -> str:
                     # markers are not stripped by flatten-and-rewrap.
                     if nxt.rstrip().endswith("\\") or nxt.rstrip("\n").endswith("  "):
                         break
-                    tokens.extend(_tokenize(nxt.strip()))
+                    tokens.extend(_tokenize(_protect_code_identifiers(nxt.strip())))
                     index += 1
                 else:
                     break
@@ -205,7 +284,7 @@ def format_changelog(text: str) -> str:
                 out.append(candidate.rstrip("\n"))
                 index += 1
                 break
-            paragraph.extend(_tokenize(candidate.strip()))
+            paragraph.extend(_tokenize(_protect_code_identifiers(candidate.strip())))
             index += 1
         if paragraph:
             out.extend(_wrap(paragraph, "", ""))

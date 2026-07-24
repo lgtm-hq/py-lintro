@@ -146,6 +146,79 @@ def test_hard_break_lines_are_not_flattened(module: ModuleType) -> None:
     assert_that(result).contains("second line continues here")
 
 
+def test_boundary_underscore_identifier_is_wrapped(module: ModuleType) -> None:
+    """A snake_case identifier from a commit subject becomes an inline code span.
+
+    Regression for #1686: ``_rotate_audit_log`` paired with the earlier
+    ``AUDIT_FILE`` underscore to open a spurious emphasis span and trip MD037.
+    Wrapping both identifiers in backticks renders them as code and removes the
+    emphasis ambiguity.
+    """
+    src = (
+        "### Changed\n\n"
+        "- **ai**: remove dead AUDIT_FILE constant and unused _rotate_audit_log "
+        "wrapper (#1669) (d6367ff)\n"
+    )
+    result = module.format_changelog(src)
+
+    assert_that(result).contains("`AUDIT_FILE`")
+    assert_that(result).contains("`_rotate_audit_log`")
+    # The bare, emphasis-capable underscore token must no longer be present.
+    assert_that(result).does_not_contain(" _rotate_audit_log ")
+
+
+def test_bold_scope_prefix_is_not_wrapped(module: ModuleType) -> None:
+    """A ``**scope**`` prefix containing an underscore stays a bold marker."""
+    src = "- **pip_audit**: close parity gaps with osv_scanner (#1525) (1171941)\n"
+    result = module.format_changelog(src)
+
+    # The conventional-commit bold scope must be preserved verbatim.
+    assert_that(result).contains("**pip_audit**:")
+    assert_that(result).does_not_contain("`pip_audit`")
+    # The subject-body identifier is still wrapped.
+    assert_that(result).contains("`osv_scanner`")
+
+
+def test_existing_code_span_is_not_double_wrapped(module: ModuleType) -> None:
+    """An identifier already in a code span is not re-wrapped."""
+    src = "- **x**: keep `_already_code` intact and wrap _new_ident_ here (#1)\n"
+    result = module.format_changelog(src)
+
+    assert_that(result).contains("`_already_code`")
+    assert_that(result).does_not_contain("``_already_code``")
+    assert_that(result).contains("`_new_ident_`")
+
+
+def test_purely_numeric_underscore_run_is_left_alone(module: ModuleType) -> None:
+    """A numeric group separator like ``1_000`` is not treated as an identifier."""
+    src = "- **perf**: cut allocations from 1_000 to 10 per call (#1) (abc1234)\n"
+    result = module.format_changelog(src)
+
+    assert_that(result).contains("1_000")
+    assert_that(result).does_not_contain("`1_000`")
+
+
+def test_slash_delimited_path_underscore_is_not_wrapped(module: ModuleType) -> None:
+    """An underscore inside a slash-delimited path/URL segment is left intact."""
+    src = "- **docs**: link https://example.com/a_b/c_d guide (#1) (abc1234)\n"
+    result = module.format_changelog(src)
+
+    assert_that(result).contains("https://example.com/a_b/c_d")
+    assert_that(result).does_not_contain("`a_b`")
+    assert_that(result).does_not_contain("`c_d`")
+
+
+def test_identifier_wrapping_is_idempotent(module: ModuleType) -> None:
+    """Wrapping identifiers twice yields the same output."""
+    src = "- **ci**: validate MIN_AGE_DAYS floor and TAG_PREFIX sweep (#1674)\n"
+    once = module.format_changelog(src)
+    twice = module.format_changelog(once)
+
+    assert_that(once).contains("`MIN_AGE_DAYS`")
+    assert_that(once).contains("`TAG_PREFIX`")
+    assert_that(twice).is_equal_to(once)
+
+
 def test_missing_file_is_a_non_fatal_skip(
     module: ModuleType,
     tmp_path: Path,
