@@ -21,6 +21,18 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.91.25] - 2026-07-24
+
+### Fixed
+
+- **output**: summary accuracy for black, files, init (#1465) (048459b)
+
+## [0.91.24] - 2026-07-24
+
+### Fixed
+
+- **ci**: add preflight fallback for scheduled lintro analysis (#1326) (0578175)
+
 ## [0.91.23] - 2026-07-23
 
 ### Fixed
