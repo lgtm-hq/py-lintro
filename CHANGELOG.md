@@ -21,6 +21,13 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.91.39] - 2026-07-24
+
+### Fixed
+
+- **ci**: retry and idempotency for npm publish to survive Sigstore tlog 409 (#1688)
+  (fcc6024)
+
 ## [0.91.38] - 2026-07-24
 
 ### Fixed
