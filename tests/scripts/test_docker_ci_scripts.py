@@ -299,6 +299,78 @@ def test_promote_ci_docker_images_retries_transient_promote_error(
     assert_that(create_calls).is_equal_to(3)
 
 
+def test_promote_ci_docker_images_retries_transient_inspect_error(
+    tmp_path: Path,
+) -> None:
+    """A transient error during the source digest resolve is retried too.
+
+    The retry wraps every registry call, not just the retag — the source
+    digest `inspect` must recover from a transient blip as well.
+    """
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    docker_log = tmp_path / "docker.log"
+    # The first inspect (source digest resolve) flakes once, then every
+    # inspect resolves the digest and create succeeds.
+    _write_stub(
+        bin_dir,
+        "docker",
+        (
+            'echo "$*" >> "$DOCKER_LOG"\n'
+            'if [[ "$*" == *" inspect "* ]]; then\n'
+            '  n="$(grep -c " inspect " "$DOCKER_LOG")"\n'
+            "  if (( n == 1 )); then\n"
+            '    echo "ERROR: httpReadSeeker: failed open: read: connection'
+            ' reset by peer" >&2\n'
+            "    exit 1\n"
+            "  fi\n"
+            '  echo "sha256:aaa111"\n'
+            "  exit 0\n"
+            "fi\n"
+            "exit 0"
+        ),
+    )
+
+    result = _run_with_stubs(
+        "scripts/ci/promote-ci-docker-images.sh",
+        bin_dir,
+        {
+            "SOURCE_IMAGE": "ghcr.io/example/app",
+            "CI_TAG": "ci-1",
+            "TAGS": "ghcr.io/example/app:main",
+            "DOCKER_LOG": str(docker_log),
+            "PROMOTE_BACKOFF_SECONDS": "0",
+            "PROMOTE_MAX_ATTEMPTS": "4",
+        },
+    )
+
+    assert_that(result.returncode).is_equal_to(0)
+    assert_that(result.stderr).contains("Transient registry error")
+
+
+def test_promote_ci_docker_images_rejects_non_numeric_attempts(
+    tmp_path: Path,
+) -> None:
+    """A non-numeric PROMOTE_MAX_ATTEMPTS fails fast before any registry call."""
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    _write_stub(bin_dir, "docker", "exit 0")
+
+    result = _run_with_stubs(
+        "scripts/ci/promote-ci-docker-images.sh",
+        bin_dir,
+        {
+            "SOURCE_IMAGE": "ghcr.io/example/app",
+            "CI_TAG": "ci-1",
+            "TAGS": "ghcr.io/example/app:main",
+            "PROMOTE_MAX_ATTEMPTS": "not-a-number",
+        },
+    )
+
+    assert_that(result.returncode).is_equal_to(2)
+    assert_that(result.stderr).contains("PROMOTE_MAX_ATTEMPTS must be")
+
+
 def test_promote_ci_docker_images_does_not_retry_fatal_error(
     tmp_path: Path,
 ) -> None:

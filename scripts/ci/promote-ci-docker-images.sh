@@ -45,6 +45,15 @@ fi
 PROMOTE_MAX_ATTEMPTS="${PROMOTE_MAX_ATTEMPTS:-4}"
 PROMOTE_BACKOFF_SECONDS="${PROMOTE_BACKOFF_SECONDS:-2}"
 
+if ! [[ "$PROMOTE_MAX_ATTEMPTS" =~ ^[1-9][0-9]*$ ]]; then
+	echo "PROMOTE_MAX_ATTEMPTS must be a positive integer (got: ${PROMOTE_MAX_ATTEMPTS})" >&2
+	exit 2
+fi
+if ! [[ "$PROMOTE_BACKOFF_SECONDS" =~ ^[0-9]+$ ]]; then
+	echo "PROMOTE_BACKOFF_SECONDS must be a non-negative integer (got: ${PROMOTE_BACKOFF_SECONDS})" >&2
+	exit 2
+fi
+
 # Transient network/registry errors worth retrying. A genuine auth/denied/
 # manifest-unknown failure is deliberately NOT here: those are permanent and
 # must fail on the first attempt rather than be retried away (#1696).
@@ -59,11 +68,12 @@ _promote_transient_re='connection reset by peer|httpReadSeeker|broken pipe|i/o t
 retry_registry() {
 	local attempt=1 delay="$PROMOTE_BACKOFF_SECONDS" out rc err
 	err="$(mktemp)"
-	# shellcheck disable=SC2064 # expand err now so the trap removes this file
-	trap "rm -f '$err'" RETURN
+	# Clean up explicitly at each return rather than via a RETURN trap, which
+	# would overwrite/leak into the caller's shell trap context.
 	while true; do
 		if out="$("$@" 2>"$err")"; then
 			cat "$err" >&2
+			rm -f "$err"
 			[[ -n "$out" ]] && printf '%s\n' "$out"
 			return 0
 		else
@@ -74,6 +84,7 @@ retry_registry() {
 		cat "$err" >&2
 		if ((attempt >= PROMOTE_MAX_ATTEMPTS)) ||
 			! grep -qiE "$_promote_transient_re" "$err"; then
+			rm -f "$err"
 			return "$rc"
 		fi
 		echo "Transient registry error on '$1' (attempt ${attempt}/${PROMOTE_MAX_ATTEMPTS}); retrying in ${delay}s..." >&2
