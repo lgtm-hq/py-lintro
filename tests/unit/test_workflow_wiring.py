@@ -1562,6 +1562,7 @@ def test_dependency_vuln_gate_scopes_to_dependency_paths() -> None:
     assert_that(deps).contains("**/pyproject.toml")
     assert_that(deps).contains("**/requirements*.txt")
     assert_that(deps).contains("**/requirements/*.txt")
+    assert_that(deps).contains("**/requirements/**/*.txt")
     # JavaScript / TypeScript (root bun.lock, apps/site, npm/ manifests)
     assert_that(deps).contains("**/package.json")
     assert_that(deps).contains("**/bun.lock")
@@ -1647,14 +1648,15 @@ def test_dependency_vuln_gate_filter_globs_match_committed_manifests() -> None:
 
     manifests = [p for p in tracked if Path(p).name in manifest_names]
     # requirements files are a glob family: `*requirements*.txt` basenames, and
-    # any `.txt` inside a `requirements/` directory (requirements/base.txt).
+    # any `.txt` under a `requirements/` directory at any depth
+    # (requirements/base.txt, requirements/dev/base.txt).
     manifests += [
         p
         for p in tracked
         if p.endswith(".txt")
         and (
             Path(p).name.startswith("requirements")
-            or Path(p).parent.name == "requirements"
+            or "requirements" in Path(p).parent.parts
         )
     ]
     assert_that(manifests).is_not_empty()
