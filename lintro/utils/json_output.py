@@ -37,7 +37,7 @@ def serialize_issue(issue: "BaseIssue") -> dict[str, Any]:
     data: dict[str, Any] = {
         "file": getattr(issue, "file", "") or "",
         "line": getattr(issue, "line", None) or 0,
-        "code": getattr(issue, "code", "") or "",
+        "code": issue.get_code(),
         "message": getattr(issue, "message", "") or "",
     }
     doc_url = getattr(issue, "doc_url", "") or ""
