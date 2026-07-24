@@ -86,12 +86,13 @@ def resolve_exclude_anchors(paths: "Sequence[str] | None" = None) -> tuple[str, 
     scan that never happened (#1678).
 
     Args:
-        paths: Input paths for the current scan. Directory inputs — and the
-            project root of any file input — act as fallback anchors for trees
-            outside the current project (temporary directories, sibling
-            checkouts). They are only consulted when the current project root
-            does not contain the file, so exclusions inside the project are
-            unaffected.
+        paths: Input paths for the current scan. Each input contributes its
+            enclosing project root (falling back to a directory input's own
+            path, or a file input's own directory, when no marker exists) as a
+            fallback anchor for trees outside the current project — temporary
+            directories, sibling checkouts. Fallbacks are only consulted when
+            the current project root does not contain the file, so exclusions
+            inside the project are unaffected.
 
     Returns:
         Anchor directories in preference order, project root first.
@@ -110,8 +111,13 @@ def resolve_exclude_anchors(paths: "Sequence[str] | None" = None) -> tuple[str, 
         except (ValueError, OSError):  # pragma: no cover - defensive
             continue
         if os.path.isdir(abs_path):
-            if abs_path not in anchors:
-                anchors.append(abs_path)
+            # Resolve the enclosing project root first, for symmetry with the
+            # file-input branch: a passed subdirectory that contains no marker
+            # (e.g. ``src/pkg``) must still anchor slash-patterns like
+            # ``src/build`` at the true project root, not at the subdirectory.
+            dir_root = find_project_root(abs_path) or abs_path
+            if dir_root not in anchors:
+                anchors.append(dir_root)
             continue
         # A file named outside the current project still belongs to *some*
         # project; anchor on its own root rather than the filesystem root.

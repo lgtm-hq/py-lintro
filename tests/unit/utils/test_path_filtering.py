@@ -482,3 +482,36 @@ def test_markerless_named_file_still_matched_by_filename_pattern(
     )
 
     assert_that(files).is_empty()
+
+
+def test_directory_input_anchors_at_project_root_not_subdir(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A marker-less subdirectory input anchors slash-patterns at the root.
+
+    Args:
+        tmp_path: Temporary directory path.
+        monkeypatch: Pytest monkeypatch fixture.
+    """
+    project = tmp_path / "proj"
+    (project / "src" / "pkg").mkdir(parents=True)
+    (project / "pyproject.toml").write_text("[project]\n", encoding="utf-8")
+    # A slash-anchored pattern that should only match at the project root.
+    keep = project / "src" / "pkg" / "build.md"
+    keep.write_text("# keep\n", encoding="utf-8")
+
+    # Run from an unrelated cwd so the project root is not cwd-derived.
+    workdir = tmp_path / "elsewhere"
+    workdir.mkdir()
+    monkeypatch.chdir(workdir)
+
+    files = walk_files_with_excludes(
+        paths=[str(project / "src" / "pkg")],
+        file_patterns=["*.md"],
+        exclude_patterns=["src/build"],
+    )
+
+    # ``src/build`` is anchored at the project root and does not match
+    # ``src/pkg/build.md``, so the file is kept.
+    assert_that([Path(f).name for f in files]).is_equal_to(["build.md"])
