@@ -25,12 +25,12 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Changed
 
-- **ai**: remove dead AUDIT_FILE constant and unused _rotate_audit_log wrapper (#1669)
-  (d6367ff)
+- **ai**: remove dead `AUDIT_FILE` constant and unused `_rotate_audit_log` wrapper
+  (#1669) (d6367ff)
 
 ### Fixed
 
-- **ci**: validate MIN_AGE_DAYS floor and TAG_PREFIX in GHCR CI-tag sweep (#1674)
+- **ci**: validate `MIN_AGE_DAYS` floor and `TAG_PREFIX` in GHCR CI-tag sweep (#1674)
   (aaa4124)
 
 ## [0.91.31] - 2026-07-24
@@ -147,13 +147,13 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Fixed
 
-- **ci**: upload build-binary artifacts on workflow_dispatch (#1634) (60572af)
+- **ci**: upload build-binary artifacts on `workflow_dispatch` (#1634) (60572af)
 
 ## [0.91.13] - 2026-07-23
 
 ### Fixed
 
-- **cli**: let explicit --tools bypass enabled_tools allowlist (#1451) (9def246)
+- **cli**: let explicit --tools bypass `enabled_tools` allowlist (#1451) (9def246)
 
 ## [0.91.12] - 2026-07-23
 
@@ -313,7 +313,7 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 ### Added
 
 - **oxlint**: add type-aware linting support with doctor checks (#1526) (1f6a979)
-- **pip_audit**: close parity gaps with osv_scanner (#1525) (1171941)
+- **pip_audit**: close parity gaps with `osv_scanner` (#1525) (1171941)
 - **ci**: run verify-manifest-tools inside built and pinned images to catch
   manifest-vs-image drift (#1528) (1ee3b3b)
 
@@ -417,7 +417,7 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Changed
 
-- **idiom-review**: remove dead DEFAULT_ENABLED ClassVar (#1520) (fd4ad29)
+- **idiom-review**: remove dead `DEFAULT_ENABLED` ClassVar (#1520) (fd4ad29)
 
 ## [0.81.3] - 2026-07-18
 
@@ -430,7 +430,7 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Fixed
 
-- **deps**: exclude test_samples fixtures from Renovate tracking (#1504) (a8e051e)
+- **deps**: exclude `test_samples` fixtures from Renovate tracking (#1504) (a8e051e)
 
 ## [0.81.1] - 2026-07-18
 
@@ -471,8 +471,8 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 - **repo**: add root CONTRIBUTING.md pointer and remove stray findings.md (#1455)
   (504e31d)
-- replace bare assert with assertpy assert_that across test suite (#1389) (4fc76f4)
-- move inline tool sample inputs to test_samples fixtures (#1382) (9f75984)
+- replace bare assert with assertpy `assert_that` across test suite (#1389) (4fc76f4)
+- move inline tool sample inputs to `test_samples` fixtures (#1382) (9f75984)
 
 ### Fixed
 
@@ -488,7 +488,7 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Fixed
 
-- **tools**: preserve explicit timeout=0 and route ruff through _prepare_execution
+- **tools**: preserve explicit timeout=0 and route ruff through `_prepare_execution`
   (#1266) (ca1b013)
 
 ## [0.80.7] - 2026-07-17
@@ -550,7 +550,7 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Fixed
 
-- **ai/review**: preserve Findings in section-aware _cap_body truncation (#1334)
+- **ai/review**: preserve Findings in section-aware `_cap_body` truncation (#1334)
   (f3d98f2)
 
 ## [0.80.3] - 2026-07-16
@@ -646,8 +646,8 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Changed
 
-- **security**: verify ANTHROPIC_API_KEY exposure ordering for dogfood AI review (#1325)
-  (c5caf17)
+- **security**: verify `ANTHROPIC_API_KEY` exposure ordering for dogfood AI review
+  (#1325) (c5caf17)
 
 ### Fixed
 
@@ -932,7 +932,7 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Fixed
 
-- **ai/review**: classify ValueError as INVALID_RESPONSE before shared severity
+- **ai/review**: classify ValueError as `INVALID_RESPONSE` before shared severity
   signatures (#1122) (14b618f)
 
 ## [0.69.0] - 2026-07-06
@@ -978,7 +978,7 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 ### Changed
 
 - **changelog**: wrap release-note lines to satisfy lint gate (#1088) (1180000)
-- **tools**: deduplicate tsc and vue_tsc definitions (76% identical) (#1092) (e13bb69)
+- **tools**: deduplicate tsc and `vue_tsc` definitions (76% identical) (#1092) (e13bb69)
 - **tools**: replace repetitive tool-option type validation with schema-based checks
   (#1076) (caa0540)
 
@@ -1022,9 +1022,9 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 - **config**: enforce module size limit via lint gate (#1078) (276929e)
 - **output**: SARIF output should emit standard lint results, not only AI metadata
   (#1079) (4a423f1)
-- **utils**: extract shared find_file_upward helper for duplicated config-walk logic
+- **utils**: extract shared `find_file_upward` helper for duplicated config-walk logic
   (#1077) (8d983ca)
-- pin merge_group activity type to checks_requested (#1059) (5f8edcd)
+- pin `merge_group` activity type to `checks_requested` (#1059) (5f8edcd)
 - **plugins**: separate stdout/stderr from subprocess and harden parsers (#1061)
   (23f6f09)
 - **deps**: update actions/attest-build-provenance to v4.1.1 (#874) (d839d3d)
