@@ -483,7 +483,7 @@ def test_sweep_ci_ghcr_tags_deletes_ci_only_versions(
     # Two rechecks per deleted (sole-tag) version before DELETE.
     assert_that(log.count("versions/202")).is_greater_than_or_equal_to(2)
     assert_that(log).does_not_contain(
-        "--method DELETE orgs/lgtm-hq/packages/container/py-lintro/versions/201"
+        "--method DELETE orgs/lgtm-hq/packages/container/py-lintro/versions/201",
     )
 
 
