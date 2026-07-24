@@ -1627,11 +1627,11 @@ def test_dependency_vuln_gate_scopes_to_dependency_paths() -> None:
     deps = filters["deps"]
 
     assert_that(filters).contains_key("deps")
-    # Python — both requirements*.txt basenames and the requirements/ dir
-    # layout (requirements/base.txt), which the basename glob would miss.
+    # Python — `*requirements*.txt` basenames ("requirements" anywhere, e.g.
+    # dev-requirements.txt) and the requirements/ dir layout at any depth.
     assert_that(deps).contains("**/uv.lock")
     assert_that(deps).contains("**/pyproject.toml")
-    assert_that(deps).contains("**/requirements*.txt")
+    assert_that(deps).contains("**/*requirements*.txt")
     assert_that(deps).contains("**/requirements/*.txt")
     assert_that(deps).contains("**/requirements/**/*.txt")
     # JavaScript / TypeScript (root bun.lock, apps/site, npm/ manifests)
@@ -1724,7 +1724,7 @@ def test_dependency_vuln_gate_filter_globs_match_committed_manifests() -> None:
         for p in tracked
         if p.endswith(".txt")
         and (
-            Path(p).name.startswith("requirements")
+            "requirements" in Path(p).name
             or "requirements" in Path(p).parent.parts
         )
     ]

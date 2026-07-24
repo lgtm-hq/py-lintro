@@ -129,12 +129,13 @@ jobs:
               # Python
               - '**/pyproject.toml'
               - '**/uv.lock'
-              # requirements files both as `*requirements*.txt` basenames
-              # (services/api/requirements.txt, dev-requirements.txt) and as a
-              # `requirements/` directory layout at any nesting depth
-              # (requirements/base.txt, requirements/dev/base.txt), which the
-              # basename glob would miss.
-              - '**/requirements*.txt'
+              # requirements files as `*requirements*.txt` basenames with
+              # "requirements" ANYWHERE (requirements.txt, dev-requirements.txt,
+              # services/api/requirements.txt) — matching what syft's python
+              # cataloger picks up — and as a `requirements/` directory layout
+              # at any nesting depth (requirements/base.txt,
+              # requirements/dev/base.txt) that the basename glob would miss.
+              - '**/*requirements*.txt'
               - '**/requirements/*.txt'
               - '**/requirements/**/*.txt'
               - '**/poetry.lock'
