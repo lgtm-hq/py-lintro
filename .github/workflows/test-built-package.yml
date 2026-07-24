@@ -44,8 +44,16 @@ jobs:
             build-flag: --wheel
           - package-type: sdist
             build-flag: --sdist
+    # On push, github.ref is `refs/heads/main` for every commit, so keying the
+    # group on it collapses consecutive merges into a single slot and
+    # cancel-in-progress kills the earlier commit's validation (#1673).
+    # github.sha is unique per commit, so pushes no longer cancel each other.
+    # Other events keep github.ref: for pull_request it is `refs/pull/<n>/merge`,
+    # already unique per PR, so a force-push still supersedes that PR's run.
     concurrency:
-      group: built-package-${{ matrix.package-type }}-${{ github.ref }}
+      group: >-
+        built-package-${{ matrix.package-type }}-${{ github.event_name ==
+        'push' && github.sha || github.ref }}
       cancel-in-progress: true
     defaults:
       run:
