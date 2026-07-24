@@ -21,6 +21,12 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.91.27] - 2026-07-24
+
+### Fixed
+
+- **ci**: defer GHCR CI-tag cleanup for partial reruns (#1645) (2da2225)
+
 ## [0.91.26] - 2026-07-24
 
 ### Fixed
