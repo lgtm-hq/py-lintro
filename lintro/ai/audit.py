@@ -15,9 +15,6 @@ if TYPE_CHECKING:
     from lintro.ai.models import AIFixSuggestion
 
 AUDIT_DIR = ".lintro-cache/ai"
-AUDIT_FILE = "audit.json"
-"""Legacy single-run audit filename (no longer written; kept for reference)."""
-
 AUDIT_JSONL_FILE = "audit.jsonl"
 """JSON Lines audit log — one run record appended per line."""
 
@@ -179,20 +176,3 @@ def _rotate_audit_log_atomic(
         with suppress(OSError):
             os.unlink(tmp_name)
         raise
-
-
-def _rotate_audit_log(audit_path: Path, max_entries: int | None) -> None:
-    """Trim the JSONL audit log to its most recent ``max_entries`` records.
-
-    Args:
-        audit_path: Path to the ``audit.jsonl`` file.
-        max_entries: Maximum records to retain; ``None`` or non-positive
-            leaves the file untouched.
-    """
-    lock_path = audit_path.parent / AUDIT_LOCK_FILE
-    with lock_path.open("a+", encoding="utf-8") as lock_fh:
-        _lock_file(lock_fh)
-        try:
-            _rotate_audit_log_atomic(audit_path, max_entries)
-        finally:
-            _unlock_file(lock_fh)
