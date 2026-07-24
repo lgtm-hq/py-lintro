@@ -242,10 +242,24 @@ def _is_error_record(payload: dict[str, object]) -> bool:
         if stem in _ERROR_LEVELS:
             return True
 
-    return any(
-        isinstance(payload.get(key), str) and payload[key].strip()  # type: ignore[union-attr]
-        for key in ("error", "err")
-    )
+    return _error_field_text(payload) is not None
+
+
+def _error_field_text(payload: dict[str, object]) -> str | None:
+    """Return the record's error-reason text, if it carries one.
+
+    Args:
+        payload: A decoded JSON log record from TruffleHog stderr.
+
+    Returns:
+        The stripped ``error``/``err`` text, or None when neither field holds
+        a non-empty string.
+    """
+    for key in ("error", "err"):
+        value = payload.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return None
 
 
 def _reason_from_error_record(payload: dict[str, object], *, raw: str) -> str:
@@ -260,11 +274,7 @@ def _reason_from_error_record(payload: dict[str, object], *, raw: str) -> str:
         The record's ``error``/``err`` text when present, otherwise the raw
         line so no diagnostic detail is lost.
     """
-    for key in ("error", "err"):
-        value = payload.get(key)
-        if isinstance(value, str) and value.strip():
-            return value.strip()
-    return raw
+    return _error_field_text(payload) or raw
 
 
 def _errors_from_payload(payload: dict[str, object]) -> list[str]:
