@@ -1078,9 +1078,8 @@ def test_publish_npm_script_retries_only_transient_errors() -> None:
     class is retried with bounded backoff while auth/validation failures are
     not, and the registry existence check makes a re-run idempotent.
     """
-    script = (
-        _REPO_ROOT / "scripts" / "ci" / "npm" / "publish_packages.sh"
-    ).read_text()
+    script_path = _REPO_ROOT / "scripts" / "ci" / "npm" / "publish_packages.sh"
+    script = script_path.read_text()
     assert_that(script).contains("TLOG_CREATE_ENTRY_ERROR")
     assert_that(script).contains("NPM_PUBLISH_MAX_ATTEMPTS")
     # Exponential backoff and a bounded attempt budget.

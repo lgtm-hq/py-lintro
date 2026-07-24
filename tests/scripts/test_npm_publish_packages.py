@@ -16,7 +16,6 @@ import os
 import subprocess  # nosec B404 - drives the script under test with shell=False
 from pathlib import Path
 
-import pytest
 from assertpy import assert_that
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent.parent

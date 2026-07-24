@@ -107,7 +107,7 @@ publish_one() {
 		echo "==> Publishing $pkg (attempt $attempt/$max_attempts) (${publish_flags[*]})"
 		# Re-run the identical signed publish each attempt (provenance intact).
 		# Capture combined output so we can both echo it and classify the error.
-		output="$( (cd "$pkg_dir" && npm publish "${publish_flags[@]}") 2>&1 )" && rc=0 || rc=$?
+		output="$( (cd "$pkg_dir" && npm publish "${publish_flags[@]}") 2>&1)" && rc=0 || rc=$?
 		printf '%s\n' "$output"
 		if [[ "$rc" -eq 0 ]]; then
 			return 0
