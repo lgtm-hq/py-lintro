@@ -26,7 +26,7 @@
     "oxlint": "1.74.0",
     "prettier": "3.9.4",
     "prettier-plugin-astro": "0.14.1",
-    "stylelint": "17.14.0",
+    "stylelint": "17.14.1",
     "svelte": "5.56.6",
     "svelte-check": "4.7.3",
     "typescript": "6.0.3",
