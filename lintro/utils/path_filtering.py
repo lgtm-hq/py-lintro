@@ -103,6 +103,7 @@ def resolve_exclude_anchors(paths: "Sequence[str] | None" = None) -> tuple[str, 
         anchors.append(project_root)
 
     file_roots: list[str] = []
+    seen_parents: set[str] = set()
     for path in paths or ():
         try:
             abs_path = os.path.abspath(path)
@@ -115,10 +116,11 @@ def resolve_exclude_anchors(paths: "Sequence[str] | None" = None) -> tuple[str, 
         # A file named outside the current project still belongs to *some*
         # project; anchor on its own root rather than the filesystem root.
         parent = os.path.dirname(abs_path)
-        if not parent:
+        if not parent or parent in seen_parents:
             continue
+        seen_parents.add(parent)
         file_root = find_project_root(parent)
-        if file_root is not None and file_root not in anchors:
+        if file_root is not None and file_root not in file_roots:
             file_roots.append(file_root)
 
     anchors.extend(root for root in file_roots if root not in anchors)
