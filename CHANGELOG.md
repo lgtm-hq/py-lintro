@@ -21,6 +21,12 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.91.31] - 2026-07-24
+
+### Fixed
+
+- **output**: --output-format csv emits doubled CR on Windows stdout (#1672) (0e33b4d)
+
 ## [0.91.30] - 2026-07-24
 
 ### Fixed
