@@ -246,6 +246,103 @@ def test_promote_ci_docker_images_fails_on_digest_mismatch(
     assert_that(result.stderr).contains("Digest mismatch after promotion")
 
 
+def test_promote_ci_docker_images_retries_transient_promote_error(
+    tmp_path: Path,
+) -> None:
+    """A transient CDN error during the retag is retried and then succeeds."""
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    docker_log = tmp_path / "docker.log"
+    # inspect always resolves the digest; the first two `create` calls flake
+    # with the exact registry-CDN signature from run 30097353380, the third
+    # succeeds. The verify inspects then confirm the promoted digest matches.
+    _write_stub(
+        bin_dir,
+        "docker",
+        (
+            'echo "$*" >> "$DOCKER_LOG"\n'
+            'if [[ "$*" == *" inspect "* ]]; then\n'
+            '  echo "sha256:aaa111"\n'
+            "  exit 0\n"
+            "fi\n"
+            'if [[ "$*" == *" create "* ]]; then\n'
+            '  n="$(grep -c " create " "$DOCKER_LOG")"\n'
+            "  if (( n < 3 )); then\n"
+            '    echo "ERROR: httpReadSeeker: failed open: read tcp'
+            " 10.1.1.153->185.199.108.154:443: read: connection reset by"
+            ' peer" >&2\n'
+            "    exit 1\n"
+            "  fi\n"
+            "  exit 0\n"
+            "fi\n"
+            "exit 0"
+        ),
+    )
+
+    result = _run_with_stubs(
+        "scripts/ci/promote-ci-docker-images.sh",
+        bin_dir,
+        {
+            "SOURCE_IMAGE": "ghcr.io/example/app",
+            "CI_TAG": "ci-1",
+            "TAGS": "ghcr.io/example/app:main",
+            "DOCKER_LOG": str(docker_log),
+            "PROMOTE_BACKOFF_SECONDS": "0",
+            "PROMOTE_MAX_ATTEMPTS": "4",
+        },
+    )
+
+    assert_that(result.returncode).is_equal_to(0)
+    assert_that(result.stderr).contains("Transient registry error")
+    # Two flakes + one success == three create attempts.
+    create_calls = docker_log.read_text().count("imagetools create")
+    assert_that(create_calls).is_equal_to(3)
+
+
+def test_promote_ci_docker_images_does_not_retry_fatal_error(
+    tmp_path: Path,
+) -> None:
+    """A genuine denied/auth error fails on the first attempt (no retry)."""
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    docker_log = tmp_path / "docker.log"
+    _write_stub(
+        bin_dir,
+        "docker",
+        (
+            'echo "$*" >> "$DOCKER_LOG"\n'
+            'if [[ "$*" == *" inspect "* ]]; then\n'
+            '  echo "sha256:aaa111"\n'
+            "  exit 0\n"
+            "fi\n"
+            'if [[ "$*" == *" create "* ]]; then\n'
+            '  echo "denied: requested access to the resource is denied"'
+            " >&2\n"
+            "  exit 1\n"
+            "fi\n"
+            "exit 0"
+        ),
+    )
+
+    result = _run_with_stubs(
+        "scripts/ci/promote-ci-docker-images.sh",
+        bin_dir,
+        {
+            "SOURCE_IMAGE": "ghcr.io/example/app",
+            "CI_TAG": "ci-1",
+            "TAGS": "ghcr.io/example/app:main",
+            "DOCKER_LOG": str(docker_log),
+            "PROMOTE_BACKOFF_SECONDS": "0",
+            "PROMOTE_MAX_ATTEMPTS": "4",
+        },
+    )
+
+    assert_that(result.returncode).is_not_equal_to(0)
+    assert_that(result.stderr).does_not_contain("Transient registry error")
+    create_calls = docker_log.read_text().count("imagetools create")
+    assert_that(create_calls).is_equal_to(1)
+
+
 def test_cosign_sign_images_requires_images() -> None:
     """cosign-sign-images.sh should fail when IMAGES is missing."""
     script_path = (_REPO_ROOT / "scripts/ci/cosign-sign-images.sh").resolve()
