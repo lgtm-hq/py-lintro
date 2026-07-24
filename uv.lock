@@ -1264,6 +1264,9 @@ full = [
     { name = "ruff" },
     { name = "yamllint" },
 ]
+mcp = [
+    { name = "mcp" },
+]
 test = [
     { name = "assertpy" },
     { name = "pytest" },
@@ -1323,6 +1326,7 @@ requires-dist = [
     { name = "httpx", marker = "extra == 'dev'", specifier = ">=0.28.1" },
     { name = "identify", specifier = ">=2.6.19" },
     { name = "loguru", specifier = ">=0.7.3" },
+    { name = "mcp", marker = "extra == 'mcp'", specifier = ">=1.0.0" },
     { name = "mypy", marker = "extra == 'dev'", specifier = ">=1.19.1" },
     { name = "mypy", marker = "extra == 'full'", specifier = ">=1.19.1" },
     { name = "openai", marker = "extra == 'ai'", specifier = ">=1.50.0" },
@@ -1352,7 +1356,7 @@ requires-dist = [
     { name = "types-tabulate", marker = "extra == 'typing'", specifier = ">=0.9.0.20241207" },
     { name = "yamllint", marker = "extra == 'full'", specifier = ">=1.37.1" },
 ]
-provides-extras = ["dev", "test", "typing", "full", "ai", "tools"]
+provides-extras = ["dev", "test", "typing", "full", "ai", "mcp", "tools"]
 
 [package.metadata.requires-dev]
 build = [

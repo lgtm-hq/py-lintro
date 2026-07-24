@@ -79,6 +79,7 @@ from lintro.cli_utils.commands.init import init_command  # noqa: E402
 from lintro.cli_utils.commands.install import install_command  # noqa: E402
 from lintro.cli_utils.commands.licenses import licenses_command  # noqa: E402
 from lintro.cli_utils.commands.list_tools import list_tools_command  # noqa: E402
+from lintro.cli_utils.commands.mcp import mcp_command  # noqa: E402
 from lintro.cli_utils.commands.review import review_command  # noqa: E402
 from lintro.cli_utils.commands.setup import setup_command  # noqa: E402
 from lintro.cli_utils.commands.test import test_command  # noqa: E402
@@ -253,6 +254,7 @@ cast(Any, licenses_command)._canonical_name = "licenses"
 cast(Any, setup_command)._canonical_name = "setup"
 cast(Any, test_command)._canonical_name = "test"
 cast(Any, list_tools_command)._canonical_name = "list-tools"
+cast(Any, mcp_command)._canonical_name = "mcp"
 cast(Any, review_command)._canonical_name = "review"
 cast(Any, versions_command)._canonical_name = "versions"
 
@@ -267,6 +269,7 @@ cli.add_command(licenses_command, name="licenses")
 cli.add_command(setup_command, name="setup")
 cli.add_command(test_command, name="test")
 cli.add_command(list_tools_command, name="list-tools")
+cli.add_command(mcp_command, name="mcp")
 cli.add_command(review_command, name="review")
 cli.add_command(versions_command, name="versions")
 

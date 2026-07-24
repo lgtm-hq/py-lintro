@@ -18,6 +18,7 @@ from rich.text import Text
 
 from lintro.ai.doctor_checks import AICheckResult, check_ai_configuration
 from lintro.enums.tool_status import ToolStatus
+from lintro.mcp import is_mcp_available
 from lintro.tools.core.install_context import RuntimeContext
 from lintro.tools.core.install_strategies import get_strategy
 from lintro.tools.core.tool_registry import (
@@ -343,6 +344,48 @@ def _render_ai_checks(console: Console, checks: list[AICheckResult]) -> None:
         console.print(line)
         if check.hint:
             console.print(f"         [dim]{check.hint}[/dim]")
+
+
+def _mcp_extra_status() -> dict[str, str]:
+    """Return informational status for the optional ``lintro[mcp]`` extra.
+
+    Missing MCP is reported but never treated as a doctor failure.
+
+    Returns:
+        Dict with ``name``, ``status``, ``message``, and ``hint`` keys.
+    """
+    if is_mcp_available():
+        return {
+            "name": "mcp",
+            "status": ToolStatus.OK.value,
+            "message": "Python mcp SDK installed (lintro[mcp])",
+            "hint": "Start with: lintro mcp",
+        }
+    return {
+        "name": "mcp",
+        "status": ToolStatus.DISABLED.value,
+        "message": "optional extra not installed",
+        "hint": "uv pip install 'lintro[mcp]'",
+    }
+
+
+def _render_mcp_extra(console: Console) -> None:
+    """Render optional MCP extra availability (informational only)."""
+    info = _mcp_extra_status()
+    console.print()
+    console.print("  [bold]Optional extras[/bold]")
+    line = Text("    ")
+    if info["status"] == ToolStatus.OK.value:
+        line.append("[OK] ", style="green")
+        line.append(f"{info['name']:<20}", style="cyan")
+        line.append(info["message"], style="dim")
+    else:
+        line.append("[--] ", style="dim")
+        line.append(f"{info['name']:<20}", style="cyan")
+        line.append(info["message"], style="dim")
+    console.print(line)
+    if info["hint"]:
+        console.print(f"         [dim]{info['hint']}[/dim]")
 
 
 def _oxlint_check_is_failure(check: OxlintCheckResult) -> bool:
@@ -696,6 +739,7 @@ def doctor_command(
 
     _render_ai_checks(display_console, ai_checks)
     _render_oxlint_checks(display_console, oxlint_checks)
+    _render_mcp_extra(display_console)
 
     # Summary
     display_console.print()
@@ -889,6 +933,7 @@ def _output_json(
         "issues": issues,
         "ai": ai_json,
         "oxlint": oxlint_json,
+        "optional_extras": [_mcp_extra_status()],
         "summary": {
             "total": (
                 ok_count
