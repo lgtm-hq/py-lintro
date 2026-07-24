@@ -460,9 +460,16 @@ def _run_sweep_validation(
     )
 
 
-def test_sweep_ci_ghcr_tags_rejects_short_retention(tmp_path: Path) -> None:
-    """MIN_AGE_DAYS below the 91d rerun window must be rejected (#1138)."""
-    result = _run_sweep_validation(tmp_path, {"MIN_AGE_DAYS": "0"})
+@pytest.mark.parametrize("min_age_days", ["0", "1", "90"])
+def test_sweep_ci_ghcr_tags_rejects_short_retention(
+    tmp_path: Path,
+    min_age_days: str,
+) -> None:
+    """MIN_AGE_DAYS below the 91d rerun window must be rejected (#1138).
+
+    90 pins the boundary so a regressed floor cannot pass unnoticed.
+    """
+    result = _run_sweep_validation(tmp_path, {"MIN_AGE_DAYS": min_age_days})
 
     assert_that(result.returncode).is_equal_to(2)
     assert_that(result.stderr).contains("below the 91d")
@@ -482,9 +489,17 @@ def test_sweep_ci_ghcr_tags_short_retention_override(tmp_path: Path) -> None:
     assert_that(result.stdout).contains("Sweeping ci-* tags older than 0d")
 
 
-def test_sweep_ci_ghcr_tags_accepts_default_floor(tmp_path: Path) -> None:
+def test_sweep_ci_ghcr_tags_accepts_floor_value(tmp_path: Path) -> None:
     """MIN_AGE_DAYS equal to the 91d floor must pass validation."""
     result = _run_sweep_validation(tmp_path, {"MIN_AGE_DAYS": "91"})
+
+    assert_that(result.returncode).is_equal_to(0)
+    assert_that(result.stdout).contains("Sweeping ci-* tags older than 91d")
+
+
+def test_sweep_ci_ghcr_tags_default_min_age_is_the_floor(tmp_path: Path) -> None:
+    """With MIN_AGE_DAYS unset the script must default to the 91d floor."""
+    result = _run_sweep_validation(tmp_path, {})
 
     assert_that(result.returncode).is_equal_to(0)
     assert_that(result.stdout).contains("Sweeping ci-* tags older than 91d")
