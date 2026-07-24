@@ -107,7 +107,7 @@ jobs:
           # 91d = Actions' 90-day run retention + 1d buffer: package
           # updated_at is push time (docker-build), while Actions retention
           # is completion-based — without the buffer a late partial rerun
-          # near day 90 could hit a already-swept ci-<run_id> (#1138).
+          # near day 90 could hit an already-swept ci-<run_id> (#1138).
           # Dedicated dispatch input — do not share min_age_days with the
           # untagged prune jobs (those default to 7).
           MIN_AGE_DAYS: >-

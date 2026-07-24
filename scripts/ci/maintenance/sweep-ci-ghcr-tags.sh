@@ -16,7 +16,7 @@ set -euo pipefail
 # Default MIN_AGE_DAYS is 91: Actions keeps runs for 90 days from
 # *completion*, but GHCR version updated_at reflects the docker-build
 # *push*. The +1 day buffer covers that skew so a partial rerun near the
-# end of retention cannot hit a already-swept ci-<run_id> (#1138).
+# end of retention cannot hit an already-swept ci-<run_id> (#1138).
 #
 # The GHCR Packages API deletes whole *versions* (one version = one digest
 # carrying every tag that points at it). Safety rules match
