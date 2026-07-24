@@ -13,9 +13,10 @@ set -euo pipefail
 # the whole life of the run (all attempts) while still bounding GHCR storage:
 # tags older than MIN_AGE_DAYS are pruned on the weekly schedule.
 #
-# Default MIN_AGE_DAYS is 90 to match GitHub Actions' default workflow-run
-# retention: maintainers can re-run failed jobs for as long as the run is
-# kept, and the ci-<run_id> tag must still resolve for those partial reruns.
+# Default MIN_AGE_DAYS is 91: Actions keeps runs for 90 days from
+# *completion*, but GHCR version updated_at reflects the docker-build
+# *push*. The +1 day buffer covers that skew so a partial rerun near the
+# end of retention cannot hit a already-swept ci-<run_id> (#1138).
 #
 # The GHCR Packages API deletes whole *versions* (one version = one digest
 # carrying every tag that points at it). Safety rules match
@@ -42,7 +43,7 @@ Environment:
   PACKAGES       Space-separated package names
                  (default: "py-lintro py-lintro-base")
   TAG_PREFIX     Only sweep tags starting with this (default: ci-)
-  MIN_AGE_DAYS   Only delete versions older than N days (default: 90)
+  MIN_AGE_DAYS   Only delete versions older than N days (default: 91)
   DRY_RUN        When "true", log candidates without deleting (default: false)
 EOF
 	exit 0
@@ -52,7 +53,7 @@ gh_token="${GH_TOKEN:-}"
 org="${ORG:-lgtm-hq}"
 packages="${PACKAGES:-py-lintro py-lintro-base}"
 tag_prefix="${TAG_PREFIX:-ci-}"
-min_age_days="${MIN_AGE_DAYS:-90}"
+min_age_days="${MIN_AGE_DAYS:-91}"
 dry_run="${DRY_RUN:-false}"
 sweep_errors=0
 

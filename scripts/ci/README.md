@@ -42,7 +42,7 @@ BuildKit registry cache is stored on production packages as `:cache` (not separa
 reaps ephemeral `pr-*` / `mq-*` / `dispatch-*` cache exports from `py-lintro` and
 `py-lintro-base` while preserving referenced digests and the permanent `:cache` tag.
 Ephemeral run-scoped `ci-*` tags from docker-ci are retained for partial reruns and
-reclaimed by `sweep-ci-ghcr-tags.sh` (age-based, default 90 days; #1138).
+reclaimed by `sweep-ci-ghcr-tags.sh` (age-based, default 91 days; #1138).
 
 ## Local Development
 
