@@ -21,6 +21,12 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.91.37] - 2026-07-24
+
+### Fixed
+
+- **security**: bump postcss to >=8.5.18 (GHSA-r28c-9q8g-f849) (#1700) (d1a1f58)
+
 ## [0.91.36] - 2026-07-24
 
 ### Fixed
