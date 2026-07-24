@@ -21,6 +21,12 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.91.38] - 2026-07-24
+
+### Fixed
+
+- **ci**: retry transient registry blips in CI image promote (#1696) (#1698) (625789d)
+
 ## [0.91.37] - 2026-07-24
 
 ### Fixed
