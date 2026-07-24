@@ -59,6 +59,7 @@ def run_check_with_stderr(
     stderr: str,
     stdout: str = "",
     returncode: int = 0,
+    scan_path: Path | None = None,
 ) -> ToolResult:
     """Run a check over one throwaway module with a canned subprocess result.
 
@@ -68,12 +69,16 @@ def run_check_with_stderr(
         stderr: Captured standard error to feed the plugin.
         stdout: Captured standard output to feed the plugin.
         returncode: Process exit code to feed the plugin.
+        scan_path: File to scan. When omitted, a throwaway ``module.py`` is
+            created under ``tmp_path``. Pass this when the stderr payload
+            references the scanned path so the two stay coupled.
 
     Returns:
         The ToolResult produced by the check.
     """
-    test_file = tmp_path / "module.py"
-    test_file.write_text('"""Module."""\n')
+    if scan_path is None:
+        scan_path = tmp_path / "module.py"
+        scan_path.write_text('"""Module."""\n')
 
     with patch.object(
         plugin,
@@ -84,7 +89,7 @@ def run_check_with_stderr(
             returncode=returncode,
         ),
     ):
-        return plugin.check([str(test_file)], {})
+        return plugin.check([str(scan_path)], {})
 
 
 def sample_finding_line(*, file: str, line: int = 8, verified: bool = False) -> str:

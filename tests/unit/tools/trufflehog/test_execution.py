@@ -369,6 +369,7 @@ def test_check_missing_scan_set_path_fails(
         plugin=trufflehog_plugin,
         tmp_path=tmp_path,
         stderr=stderr,
+        scan_path=test_file,
     )
 
     assert_that(result.success).is_false()
