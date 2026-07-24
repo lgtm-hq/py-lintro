@@ -95,14 +95,58 @@ jobs:
         uses: lgtm-hq/lgtm-ci/.github/actions/detect-changes@ee8484ca71db3a2c2c33da6128bbf2330fcd7c88 # v0.59.2
         with:
           filters: |
-            # Anything that can change the resolved dependency set the
-            # release gate scans, plus the two workflow files that define
-            # the gate itself (so changes to the gate exercise the gate).
+            # Anything that can change the dependency graph the release gate
+            # scans, plus the two workflow files that define the gate itself
+            # (so changes to the gate exercise the gate).
+            #
+            # The release gate runs `syft scan dir:.` over the WHOLE repo, not
+            # just the Python lock, then `grype --fail-on high` over the result
+            # (verified: this repo's SBOM is cataloged by syft's javascript,
+            # python, rust and go catalogers — root `bun.lock`, `apps/site`,
+            # the `npm/` package manifests, and `Cargo.lock`/`go.mod` under
+            # `test_samples`). A pre-merge filter that watched only `uv.lock`
+            # would be LOOSER than the release gate: a PR bumping any of those
+            # other manifests to a vulnerable version would pass here and break
+            # the tagged publish — the exact drift #1667 exists to prevent. So
+            # match every language dependency manifest at any depth, then
+            # subtract vendored / generated trees that are not the resolved set
+            # (dorny evaluates negations last, so they remove earlier matches).
             deps:
-              - 'uv.lock'
-              - 'pyproject.toml'
+              # Python
+              - '**/pyproject.toml'
+              - '**/uv.lock'
+              - '**/requirements*.txt'
+              - '**/poetry.lock'
+              - '**/Pipfile'
+              - '**/Pipfile.lock'
+              - '**/setup.py'
+              - '**/setup.cfg'
+              # JavaScript / TypeScript
+              - '**/package.json'
+              - '**/package-lock.json'
+              - '**/pnpm-lock.yaml'
+              - '**/yarn.lock'
+              - '**/bun.lock'
+              - '**/bun.lockb'
+              # Rust
+              - '**/Cargo.toml'
+              - '**/Cargo.lock'
+              # Go
+              - '**/go.mod'
+              - '**/go.sum'
+              # The gate + release publish workflow themselves
               - '.github/workflows/publish-pypi-on-tag.yml'
               - '.github/workflows/dependency-vuln-gate.yml'
+              # Vendored / generated trees are never the resolved dependency
+              # set; exclude them so a committed vendor manifest cannot trigger.
+              - '!**/node_modules/**'
+              - '!**/.venv/**'
+              - '!**/venv/**'
+              - '!**/vendor/**'
+              - '!**/__pycache__/**'
+              - '!**/*.egg-info/**'
+              - '!build/**'
+              - '!dist/**'
       - name: Generate SBOM
         id: sbom
         # Same syft action, target and format as the release gate; the

@@ -5,6 +5,7 @@ from __future__ import annotations
 import ast
 import re
 import subprocess  # nosec B404 - subprocess runs fixed git argv against this repo
+from fnmatch import fnmatch
 from pathlib import Path
 from typing import Any, cast
 
@@ -1498,7 +1499,11 @@ def test_dependency_vuln_gate_shares_release_tooling_ref() -> None:
 
     assert_that(pinned).is_not_empty()
     for uses in pinned:
-        assert_that(uses).contains(f"@{release_ref}")
+        # Exact equality on the ref after ``@`` — a substring/``contains``
+        # check would also pass on a longer ref that merely ends with the
+        # release pin, which is the drift this guard exists to forbid.
+        ref = uses.split("@", 1)[1]
+        assert_that(ref).is_equal_to(release_ref)
 
 
 def test_dependency_vuln_gate_is_required_check_safe() -> None:
@@ -1532,11 +1537,113 @@ def test_dependency_vuln_gate_is_required_check_safe() -> None:
 
 
 def test_dependency_vuln_gate_scopes_to_dependency_paths() -> None:
-    """The scan is scoped to files that can change the resolved dep set."""
+    """The scan covers every language manifest the release gate scans.
+
+    The release gate is ``syft scan dir:.`` over the whole repo, so the
+    pre-merge filter must react to any file that can change that graph — not
+    just the Python lock — or it is looser than the release gate (#1667). This
+    repo's SBOM is cataloged from JavaScript, Python, Rust and Go manifests,
+    so all four families must be watched, at any depth.
+    """
     detect_step = _vuln_gate_step(uses_prefix=_VULN_DETECT_ACTION)
     filters = yaml.safe_load(detect_step["with"]["filters"])
+    deps = filters["deps"]
 
     assert_that(filters).contains_key("deps")
-    assert_that(filters["deps"]).contains("uv.lock")
-    assert_that(filters["deps"]).contains("pyproject.toml")
-    assert_that(filters["deps"]).contains(".github/workflows/publish-pypi-on-tag.yml")
+    # Python
+    assert_that(deps).contains("**/uv.lock")
+    assert_that(deps).contains("**/pyproject.toml")
+    assert_that(deps).contains("**/requirements*.txt")
+    # JavaScript / TypeScript (root bun.lock, apps/site, npm/ manifests)
+    assert_that(deps).contains("**/package.json")
+    assert_that(deps).contains("**/bun.lock")
+    # Rust and Go (test_samples manifests are in the scanned tree)
+    assert_that(deps).contains("**/Cargo.lock")
+    assert_that(deps).contains("**/go.mod")
+    # The gate exercises itself and the real release gate.
+    assert_that(deps).contains(".github/workflows/publish-pypi-on-tag.yml")
+    # Vendored / generated trees are excluded so they cannot trigger.
+    assert_that(deps).contains("!**/node_modules/**")
+
+
+def test_dependency_vuln_gate_filter_globs_match_committed_manifests() -> None:
+    """Every committed dependency manifest matches the gate's ``deps`` filter.
+
+    Guards the #1667 drift concern directly: if a real manifest the release
+    gate scans is not matched by any ``deps`` pattern, a PR could change the
+    scanned graph through it without the pre-merge gate reacting. Enumerates
+    the repo's tracked manifests and asserts each matches a positive pattern
+    and survives the negations, using the same picomatch-style semantics dorny
+    applies.
+    """
+    detect_step = _vuln_gate_step(uses_prefix=_VULN_DETECT_ACTION)
+    patterns = yaml.safe_load(detect_step["with"]["filters"])["deps"]
+
+    positives = [p for p in patterns if not p.startswith("!")]
+    negatives = [p[1:] for p in patterns if p.startswith("!")]
+
+    tracked = subprocess.run(  # nosec B603 B607 - fixed argv against this repo
+        ["git", "ls-files"],
+        cwd=_REPO_ROOT,
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout.splitlines()
+
+    manifest_names = {
+        "pyproject.toml",
+        "uv.lock",
+        "poetry.lock",
+        "Pipfile",
+        "Pipfile.lock",
+        "setup.py",
+        "setup.cfg",
+        "package.json",
+        "package-lock.json",
+        "pnpm-lock.yaml",
+        "yarn.lock",
+        "bun.lock",
+        "bun.lockb",
+        "Cargo.toml",
+        "Cargo.lock",
+        "go.mod",
+        "go.sum",
+    }
+
+    def matches_positive(path: str, pattern: str) -> bool:
+        # Every positive pattern is either ``**/<glob-with-no-slash>`` (matches
+        # any file whose basename matches the glob, at any depth including root)
+        # or an exact repo-relative path.
+        if pattern.startswith("**/"):
+            return fnmatch(Path(path).name, pattern[3:])
+        return path == pattern
+
+    def matches_negative(path: str, pattern: str) -> bool:
+        segments = path.split("/")
+        if pattern.startswith("**/") and pattern.endswith("/**"):
+            # ``**/DIR/**`` — DIR appears as a path segment (glob on the segment
+            # covers ``*.egg-info``).
+            needle = pattern[3:-3]
+            return any(fnmatch(seg, needle) for seg in segments)
+        if pattern.endswith("/**"):
+            # ``PREFIX/**`` — path is under PREFIX.
+            return path.startswith(pattern[:-3] + "/")
+        return fnmatch(path, pattern)
+
+    manifests = [p for p in tracked if Path(p).name in manifest_names]
+    # requirements*.txt is a glob family rather than a fixed name.
+    manifests += [
+        p
+        for p in tracked
+        if Path(p).name.startswith("requirements") and p.endswith(".txt")
+    ]
+    assert_that(manifests).is_not_empty()
+
+    unmatched = []
+    for path in manifests:
+        if any(matches_negative(path, neg) for neg in negatives):
+            continue  # legitimately excluded (vendored/generated)
+        if not any(matches_positive(path, pos) for pos in positives):
+            unmatched.append(path)
+
+    assert_that(unmatched).is_empty()
