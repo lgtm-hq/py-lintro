@@ -474,13 +474,13 @@ def test_sweep_ci_ghcr_tags_deletes_ci_only_versions(
 
     assert_that(result.returncode).is_equal_to(0)
     assert_that(result.stdout).contains("Deleted py-lintro version 202")
-    assert_that(result.stdout).contains("Deleted py-lintro version 201")
+    assert_that(result.stdout).contains("not sole-tagged")
+    assert_that(result.stdout).does_not_contain("Deleted py-lintro version 201")
     log = gh_log.read_text()
-    assert_that(log).contains("versions/201")
     assert_that(log).contains("versions/202")
-    # Two rechecks per deleted version before DELETE.
-    assert_that(log.count("versions/201")).is_greater_than_or_equal_to(2)
+    # Two rechecks per deleted (sole-tag) version before DELETE.
     assert_that(log.count("versions/202")).is_greater_than_or_equal_to(2)
+    assert_that(log).does_not_contain("--method DELETE orgs/lgtm-hq/packages/container/py-lintro/versions/201")
 
 
 def test_sweep_ci_ghcr_tags_recheck_aborts_on_persistent_tag(

@@ -140,6 +140,18 @@ sweep_package() {
 				"[${tags}] (#1138)"
 			continue
 		fi
+		# Sole-tag only: shared digests (multiple ci-* tags) and residual
+		# promotion TOCTOU blast radius stay lower — same rule as
+		# delete-ci-ghcr-tags.sh (#1138, follow-up #1652).
+		tag_count=0
+		for _t in $tags; do
+			tag_count=$((tag_count + 1))
+		done
+		if [[ "$tag_count" -ne 1 ]]; then
+			echo "Skipping version ${vid} (${pkg}): not sole-tagged" \
+				"[${tags}] (#1138/#1652)"
+			continue
+		fi
 		if [[ "$dry_run" == "true" ]]; then
 			echo "[dry-run] Would delete ${pkg} version ${vid} (tags: ${tags})"
 			continue
