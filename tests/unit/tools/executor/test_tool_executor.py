@@ -450,7 +450,18 @@ def test_executor_csv_stdout_bytes_match_file_artifact(
     from lintro.parsers.ruff.ruff_issue import RuffIssue
     from lintro.utils.output.file_writer import write_output_file
 
-    issue = RuffIssue(file="a.py", line=1, column=1, message="unused", code="F401")
+    # A non-ASCII message exercises the explicit UTF-8 encode that the fix
+    # relies on; an ASCII-only payload would pass even if the encoding were
+    # swapped or left to the platform default.
+    non_ascii_message = "unused import café"
+
+    issue = RuffIssue(
+        file="a.py",
+        line=1,
+        column=1,
+        message=non_ascii_message,
+        code="F401",
+    )
 
     def _make_result() -> ToolResult:
         return ToolResult(
@@ -498,6 +509,10 @@ def test_executor_csv_stdout_bytes_match_file_artifact(
     assert_that(artifact_bytes).does_not_contain(b"\r\r")
     # RFC 4180 terminators survive intact.
     assert_that(stdout_bytes).contains(b"\r\n")
+    # The non-ASCII field must go out as UTF-8 on both sides, pinning the
+    # explicit encode rather than any platform-default codec.
+    assert_that(stdout_bytes).contains(non_ascii_message.encode("utf-8"))
+    assert_that(artifact_bytes).contains(non_ascii_message.encode("utf-8"))
     # The payload still round-trips through csv.reader.
     rows = list(_csv.reader(_io.StringIO(stdout_bytes.decode("utf-8"))))
     assert_that(rows[0]).is_equal_to(
@@ -506,6 +521,7 @@ def test_executor_csv_stdout_bytes_match_file_artifact(
     assert_that(rows).is_length(2)
     assert_that(rows[1][0]).is_equal_to("ruff")
     assert_that(rows[1][4]).is_equal_to("F401")
+    assert_that(rows[1][5]).is_equal_to(non_ascii_message)
 
 
 def test_executor_csv_stdout_survives_windows_newline_translation(
