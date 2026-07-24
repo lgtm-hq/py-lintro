@@ -27,6 +27,7 @@ class FakeToolResult:
     issues_count: int = 0
     output: str = ""
     issues: list[Any] = field(default_factory=list)
+    initial_issues: list[Any] | None = None
     fixed_issues_count: int | None = None
     remaining_issues_count: int | None = None
     pytest_summary: dict[str, Any] | None = None
