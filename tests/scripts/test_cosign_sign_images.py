@@ -45,6 +45,7 @@ def _write_fake_cosign(bin_dir: Path, mode: str, *, fail_until: int = 0) -> Path
         Path: Path to the counter file the stub increments on each call.
     """
     counter = bin_dir / "cosign.calls"
+    args_log = bin_dir / "cosign.args"
     oidc = _OIDC_MESSAGE % "REF"
     reject = _REJECT_MESSAGE % "REF"
     script = textwrap.dedent(
@@ -52,10 +53,14 @@ def _write_fake_cosign(bin_dir: Path, mode: str, *, fail_until: int = 0) -> Path
         #!/usr/bin/env bash
         set -euo pipefail
         counter="{counter}"
+        args_log="{args_log}"
         n=0
         if [[ -f "$counter" ]]; then n=$(cat "$counter"); fi
         n=$((n + 1))
         echo "$n" >"$counter"
+        # Record every ref cosign was asked to sign so tests can assert
+        # coverage, not just invocation count.
+        echo "$*" >>"$args_log"
         case "{mode}" in
           success) exit 0 ;;
           reject) echo "{reject}" >&2; exit 1 ;;
@@ -81,6 +86,7 @@ def _run(
     *,
     images: str,
     max_attempts: str = "4",
+    max_delay: str = "30",
 ) -> subprocess.CompletedProcess[str]:
     """Run the signing script with the stub PATH and no backoff wait.
 
@@ -88,6 +94,7 @@ def _run(
         bin_dir: Directory holding the stub ``cosign`` to prepend to PATH.
         images: Value for the IMAGES environment variable.
         max_attempts: Value for COSIGN_SIGN_MAX_ATTEMPTS.
+        max_delay: Value for COSIGN_SIGN_MAX_DELAY.
 
     Returns:
         subprocess.CompletedProcess: The completed run.
@@ -98,6 +105,7 @@ def _run(
         "IMAGES": images,
         "COSIGN_SIGN_MAX_ATTEMPTS": max_attempts,
         "COSIGN_SIGN_BASE_DELAY": "0",
+        "COSIGN_SIGN_MAX_DELAY": max_delay,
     }
     return subprocess.run(  # nosec B603 - fixed argv, controlled env, shell=False
         [str(_SCRIPT)],
@@ -120,6 +128,21 @@ def _calls(counter: Path) -> int:
     if not counter.exists():
         return 0
     return int(counter.read_text().strip())
+
+
+def _signed_refs(bin_dir: Path) -> list[str]:
+    """Return the refs the stub cosign was asked to sign, in order.
+
+    Args:
+        bin_dir: Directory holding the stub's ``cosign.args`` log.
+
+    Returns:
+        list[str]: One entry per cosign invocation (the ``--yes <ref>`` argv).
+    """
+    args_log = bin_dir / "cosign.args"
+    if not args_log.exists():
+        return []
+    return [line for line in args_log.read_text().splitlines() if line]
 
 
 def test_help_flag_exits_zero() -> None:
@@ -167,6 +190,11 @@ def test_multiple_digests_each_signed(tmp_path: Path) -> None:
     assert_that(result.returncode).is_equal_to(0)
     assert_that(_calls(counter)).is_equal_to(2)
     assert_that(result.stdout).contains("Signed 2 image(s)")
+    # Both digests must actually be handed to cosign, not just counted.
+    signed = _signed_refs(tmp_path)
+    assert_that(signed).is_length(2)
+    assert_that(any(_DIGEST in ref for ref in signed)).is_true()
+    assert_that(any(_DIGEST_TWO in ref for ref in signed)).is_true()
 
 
 def test_transient_oidc_flake_is_retried_then_succeeds(tmp_path: Path) -> None:
@@ -208,5 +236,17 @@ def test_invalid_max_attempts_is_fatal(tmp_path: Path, bad_value: str) -> None:
     """A non-positive or non-integer max-attempts value exits 2."""
     counter = _write_fake_cosign(tmp_path, "success")
     result = _run(tmp_path, images=_DIGEST, max_attempts=bad_value)
+    assert_that(result.returncode).is_equal_to(2)
+    assert_that(_calls(counter)).is_equal_to(0)
+
+
+@pytest.mark.parametrize(
+    "bad_value",
+    ["-1", "abc", "1.5"],
+)
+def test_invalid_max_delay_is_fatal(tmp_path: Path, bad_value: str) -> None:
+    """A negative or non-integer max-delay value exits 2 before signing."""
+    counter = _write_fake_cosign(tmp_path, "success")
+    result = _run(tmp_path, images=_DIGEST, max_delay=bad_value)
     assert_that(result.returncode).is_equal_to(2)
     assert_that(_calls(counter)).is_equal_to(0)

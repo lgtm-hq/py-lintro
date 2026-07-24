@@ -32,6 +32,8 @@ Environment:
                             transient OIDC token-fetch flake (default: 4)
   COSIGN_SIGN_BASE_DELAY    Base backoff in seconds; delay doubles each retry
                             (default: 2). Set 0 for no wait.
+  COSIGN_SIGN_MAX_DELAY     Upper bound in seconds for any single backoff wait,
+                            regardless of attempt number (default: 30).
 
 Only the ambient-OIDC / ID-token-fetch failure class is retried. A genuine
 signing rejection, a policy failure, or a non-digest ref fails immediately.
@@ -46,6 +48,7 @@ fi
 images="${IMAGES:-}"
 max_attempts="${COSIGN_SIGN_MAX_ATTEMPTS:-4}"
 base_delay="${COSIGN_SIGN_BASE_DELAY:-2}"
+max_delay="${COSIGN_SIGN_MAX_DELAY:-30}"
 
 if [[ -z "$images" ]]; then
 	echo "IMAGES is required" >&2
@@ -59,6 +62,11 @@ fi
 
 if ! [[ "$base_delay" =~ ^[0-9]+$ ]]; then
 	echo "COSIGN_SIGN_BASE_DELAY must be a non-negative integer, got: ${base_delay}" >&2
+	exit 2
+fi
+
+if ! [[ "$max_delay" =~ ^[0-9]+$ ]]; then
+	echo "COSIGN_SIGN_MAX_DELAY must be a non-negative integer, got: ${max_delay}" >&2
 	exit 2
 fi
 
@@ -124,6 +132,11 @@ sign_ref_with_retry() {
 		fi
 
 		delay=$((base_delay * (1 << (attempt - 1))))
+		# Cap the exponential growth so a large max-attempts value can never
+		# schedule an unbounded wait.
+		if [[ "$delay" -gt "$max_delay" ]]; then
+			delay="$max_delay"
+		fi
 		echo "Transient OIDC token-fetch flake signing ${ref}; retrying in ${delay}s." >&2
 		if [[ "$delay" -gt 0 ]]; then
 			sleep "$delay"
