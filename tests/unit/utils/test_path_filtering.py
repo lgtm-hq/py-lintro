@@ -10,6 +10,8 @@ from assertpy import assert_that
 
 from lintro.utils.path_filtering import (
     _is_venv_directory,
+    filter_existing_paths,
+    is_readable_target,
     resolve_exclude_anchors,
     should_exclude_path,
     walk_files_with_excludes,
@@ -515,3 +517,121 @@ def test_directory_input_anchors_at_project_root_not_subdir(
     # ``src/build`` is anchored at the project root and does not match
     # ``src/pkg/build.md``, so the file is kept.
     assert_that([Path(f).name for f in files]).is_equal_to(["build.md"])
+
+
+# =============================================================================
+# Tests for dangling-symlink filtering (#1716, #1726)
+# =============================================================================
+
+
+def test_dangling_symlink_is_not_discovered(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A link whose target is absent must never enter the discovered set.
+
+    ``os.walk`` reports a dangling symlink as a file; handing it to a tool
+    makes the tool resolve it to a missing target and fail the run.
+
+    Args:
+        tmp_path: Temporary directory path.
+        monkeypatch: Pytest monkeypatch fixture.
+    """
+    project = tmp_path / "proj"
+    (project / "reports").mkdir(parents=True)
+    (project / "pyproject.toml").write_text("[project]\n", encoding="utf-8")
+    real = project / "keep.txt"
+    real.write_text("keep\n", encoding="utf-8")
+    # Committed link to a build artifact directory absent on a clean checkout.
+    (project / "reports" / "coverage").symlink_to(project / "coverage")
+    monkeypatch.chdir(project)
+
+    files = walk_files_with_excludes(
+        paths=[str(project)],
+        file_patterns=["*"],
+        exclude_patterns=[],
+    )
+
+    assert_that([Path(f).name for f in files]).does_not_contain("coverage")
+    assert_that([Path(f).name for f in files]).contains("keep.txt")
+
+
+def test_symlink_to_existing_file_is_still_discovered(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A link with a live target stays in the scan set.
+
+    Args:
+        tmp_path: Temporary directory path.
+        monkeypatch: Pytest monkeypatch fixture.
+    """
+    project = tmp_path / "proj"
+    project.mkdir()
+    (project / "pyproject.toml").write_text("[project]\n", encoding="utf-8")
+    target = project / "real.txt"
+    target.write_text("data\n", encoding="utf-8")
+    (project / "alias.txt").symlink_to(target)
+    monkeypatch.chdir(project)
+
+    files = walk_files_with_excludes(
+        paths=[str(project)],
+        file_patterns=["*.txt"],
+        exclude_patterns=[],
+    )
+
+    assert_that(sorted(Path(f).name for f in files)).is_equal_to(
+        ["alias.txt", "real.txt"],
+    )
+
+
+def test_ignored_directory_is_never_a_scan_target(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Ignore entries subtract from the scan set and never add to it.
+
+    Covers all three cases from #1716: an ignored directory that exists, an
+    ignored directory that does not, and a non-ignored directory that does.
+
+    Args:
+        tmp_path: Temporary directory path.
+        monkeypatch: Pytest monkeypatch fixture.
+    """
+    project = tmp_path / "proj"
+    (project / "coverage").mkdir(parents=True)
+    (project / "src").mkdir()
+    (project / "pyproject.toml").write_text("[project]\n", encoding="utf-8")
+    (project / "coverage" / "report.txt").write_text("cov\n", encoding="utf-8")
+    (project / "src" / "app.txt").write_text("app\n", encoding="utf-8")
+    monkeypatch.chdir(project)
+
+    files = walk_files_with_excludes(
+        paths=[str(project)],
+        file_patterns=["*.txt"],
+        # ``playwright-report`` does not exist on disk at all.
+        exclude_patterns=["coverage", "playwright-report"],
+    )
+
+    relative = sorted(str(Path(f).relative_to(project)) for f in files)
+    assert_that(relative).is_equal_to(["src/app.txt"])
+    assert_that(relative).does_not_contain("playwright-report")
+
+
+def test_filter_existing_paths_drops_missing_entries(tmp_path: Path) -> None:
+    """The shared existence filter keeps order and drops missing paths.
+
+    Args:
+        tmp_path: Temporary directory path.
+    """
+    present = tmp_path / "present.txt"
+    present.write_text("x\n", encoding="utf-8")
+    missing = tmp_path / "gone.txt"
+    dangling = tmp_path / "dangling"
+    dangling.symlink_to(missing)
+
+    kept = filter_existing_paths([str(present), str(missing), str(dangling)])
+
+    assert_that(kept).is_equal_to([str(present)])
+    assert_that(is_readable_target(str(present))).is_true()
+    assert_that(is_readable_target(str(dangling))).is_false()

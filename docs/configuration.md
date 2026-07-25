@@ -486,6 +486,23 @@ and a note explaining the reason. Common skip reasons:
 Skipped tools do not affect exit codes — only tools that run and find issues contribute
 to a non-zero exit.
 
+#### Disabling a tool from `pyproject.toml`
+
+The `tools:` section of `.lintro-config.yaml` has two equivalent `pyproject.toml`
+spellings — a flat per-tool table, or a nested `tool`/`tools` table:
+
+```toml
+[tool.lintro.trufflehog]
+enabled = false
+
+# Equivalent, mirroring the YAML `tools:` section
+[tool.lintro.tool.trufflehog]
+enabled = false
+```
+
+`pyproject.toml` is a _fallback_: when a `.lintro-config.yaml` exists, it is the only
+configuration source and these tables are not consulted.
+
 ### Project Setup with `lintro init`
 
 Run `lintro init` to detect project languages, select an install profile, and generate a
