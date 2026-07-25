@@ -105,7 +105,8 @@ jobs:
     permissions:
       contents: read
       packages: read # pull the pinned release image from GHCR
-    timeout-minutes: 30
+    # ~14 min median (10–17 observed); 20 fails a stalled run fast (#1704).
+    timeout-minutes: 20
     steps:
       - name: Harden Runner
         # yamllint disable-line rule:line-length

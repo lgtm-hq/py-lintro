@@ -772,6 +772,30 @@ def test_docker_ci_retries_dogfooding_lint_on_failure() -> None:
     assert_that(retry_condition).contains("needs.docker-build.result == 'success'")
 
 
+def test_dogfood_skip_gate_has_bounded_timeout() -> None:
+    """The no-silent-skip gate must fail predictably on a stall (#1704).
+
+    The gate's healthy range is 10–17 min (median ~14), but its hosted
+    runner can be terminated mid-run with no diagnostic signal. A bounded
+    ``timeout-minutes`` — above the observed healthy max so healthy runs
+    never trip it, at most ~2x the median so a stall fails fast instead of
+    lingering until the runner dies — keeps the failure mode predictable.
+    Applies to both copies of the gate (docker-ci.yml and
+    dogfood-nightly.yml); the owner-approved value is 20.
+    """
+    for workflow_name in ("docker-ci.yml", "dogfood-nightly.yml"):
+        workflow = _load_workflow(name=workflow_name)
+        gate = workflow["jobs"]["dogfood-skip-gate"]
+        assert_that(gate["name"]).is_equal_to("🚦 Dogfood No-Silent-Skip Gate")
+        timeout = gate.get("timeout-minutes")
+        assert_that(
+            timeout,
+            f"{workflow_name} dogfood-skip-gate must set timeout-minutes",
+        ).is_not_none()
+        # Above the 17 min observed healthy max; at most ~2x the ~14 median.
+        assert_that(timeout).is_between(18, 30)
+
+
 # --- Deny-by-default pipeline skip-list drift guard (#1369) ------------------
 #
 # docker-ci pipeline relevance is decided by
