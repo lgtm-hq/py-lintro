@@ -2000,3 +2000,80 @@ def test_pinned_release_image_manager_covers_both_workflows() -> None:
         path = f".github/workflows/{filename}"
         covered = any(pattern.search(path) for pattern in file_patterns)
         assert_that(covered).described_as(path).is_true()
+
+
+_COSIGN_SIGN_SCRIPT = _REPO_ROOT / "scripts" / "ci" / "cosign-sign-images.sh"
+
+
+def _auto_rerun_signatures() -> list[str]:
+    """Return the extra signatures wired into the auto-rerun matcher.
+
+    Returns:
+        The non-blank lines of the ``signatures`` input passed to the
+        reusable auto-rerun workflow, one fixed-string signature per line.
+    """
+    workflow = _load_workflow(name="auto-rerun-on-infra-failure.yml")
+    signatures = str(workflow["jobs"]["rerun"]["with"]["signatures"])
+    return [line.strip() for line in signatures.splitlines() if line.strip()]
+
+
+def _cosign_oidc_flake_markers() -> list[str]:
+    """Return the fixed-string markers the in-step cosign retry keys off.
+
+    Returns:
+        The entries of the ``oidc_flake_markers`` bash array declared in
+        ``scripts/ci/cosign-sign-images.sh``.
+    """
+    script = _COSIGN_SIGN_SCRIPT.read_text(encoding="utf-8")
+    array_match = re.search(r"oidc_flake_markers=\(([^)]*)\)", script)
+    assert_that(
+        array_match,
+        description="oidc_flake_markers array not found",
+    ).is_not_none()
+    assert array_match is not None  # narrow for mypy
+    return re.findall(r'"([^"]+)"', array_match.group(1))
+
+
+def test_auto_rerun_passes_cosign_oidc_flake_signatures() -> None:
+    """The auto-rerun matcher must know the cosign ambient-OIDC signatures.
+
+    #1646 retries the transient OIDC token-fetch flake in-step; when that
+    bounded retry is exhausted the signing job still fails and the publish
+    run needs a run-level re-run. The auto-rerun safety net only fires when
+    the failed-job logs match a known signature, so the reusable matcher
+    receives the cosign flake markers via its ``signatures`` input (#1689).
+    Upstream matches with ``grep -qF``, so these must stay fixed strings.
+    """
+    signatures = _auto_rerun_signatures()
+
+    assert_that(signatures).contains("fetching ambient OIDC credentials")
+    assert_that(signatures).contains("retrieving ID token")
+    assert_that(signatures).contains("reading ID token")
+
+
+def test_auto_rerun_signatures_cover_in_step_retry_markers() -> None:
+    """Every in-step cosign retry marker must also reach the auto-rerun net.
+
+    The safety net inspects the final failed attempt's logs, which contain
+    whichever marker the retry loop in scripts/ci/cosign-sign-images.sh
+    matched. A marker missing from the workflow ``signatures`` input would
+    leave that exhausted-retry failure mode needing a manual backfill.
+    """
+    signatures = _auto_rerun_signatures()
+    markers = _cosign_oidc_flake_markers()
+
+    assert_that(markers).is_not_empty()
+    assert_that(markers).is_subset_of(signatures)
+
+
+def test_auto_rerun_signatures_are_fixed_strings() -> None:
+    """Extra signatures must be plain fixed strings, not regexes.
+
+    ``rerun-on-infra-failure.sh`` matches with ``grep -qF``, so a regex or
+    an anchor would be compared literally and silently never match.
+    """
+    signatures = _auto_rerun_signatures()
+
+    assert_that(signatures).is_not_empty()
+    for signature in signatures:
+        assert_that(signature).does_not_match(r"[\\^$*+?\[\]()|]")

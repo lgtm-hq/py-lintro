@@ -47,3 +47,13 @@ jobs:
       run-attempt: ${{ format('{0}', github.event.workflow_run.run_attempt) }}
       egress-policy: block
       egress-preset: github-minimal
+      # Cosign ambient-OIDC token-fetch flake (#1567, #1689): appended to
+      # lgtm-ci's built-in infra signatures and matched with grep -qF, so
+      # keep these fixed strings (no regex). Kept in parity with
+      # oidc_flake_markers in scripts/ci/cosign-sign-images.sh so a signing
+      # job that exhausts the in-step retry (#1646) is auto-rerun instead
+      # of needing a manual backfill.
+      signatures: |-
+        fetching ambient OIDC credentials
+        retrieving ID token
+        reading ID token
