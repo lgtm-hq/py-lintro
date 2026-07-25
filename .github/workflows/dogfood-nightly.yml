@@ -41,9 +41,14 @@ jobs:
       egress-policy: block
       # No CI build in this workflow: lint main with the pinned release
       # image (same digest the fork-PR fallback in docker-ci.yml uses).
-      # Pinned digest — keep in sync with pyproject.toml lintro pin
+      # Pinned release digest. Renovate keeps every pin site in this file
+      # and in docker-ci.yml on the same release (see the customManager in
+      # renovate.json matching ghcr.io/lgtm-hq/py-lintro); the tag is carried
+      # alongside the digest so the pinned release is readable at a glance
+      # and Renovate has a version to bump. Do not hand-edit one site alone —
+      # tests/unit/test_workflow_wiring.py fails on a partial bump.
       lintro-image: >-
-        ghcr.io/lgtm-hq/py-lintro@sha256:0e8f3892f31f7bb6ce56a33d037d983591b82c325bf56281f9d9e2fec488aa5c
+        ghcr.io/lgtm-hq/py-lintro:0.80.3@sha256:0e8f3892f31f7bb6ce56a33d037d983591b82c325bf56281f9d9e2fec488aa5c
 
   verify-pinned-image-tools:
     name: 🔎 Verify Pinned Image Tools
@@ -85,10 +90,10 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
       - name: Verify pinned digest tools against manifest
         env:
-          # Pinned digest — keep in sync with the dogfood-full job above, the
-          # docker-ci.yml fork-PR fallback, and the pyproject.toml lintro pin.
+          # Same pinned release image dogfood-full lints with; bumped as one
+          # set by Renovate (see the dogfood-full job above).
           IMAGE: >-
-            ghcr.io/lgtm-hq/py-lintro@sha256:0e8f3892f31f7bb6ce56a33d037d983591b82c325bf56281f9d9e2fec488aa5c
+            ghcr.io/lgtm-hq/py-lintro:0.80.3@sha256:0e8f3892f31f7bb6ce56a33d037d983591b82c325bf56281f9d9e2fec488aa5c
         run: scripts/ci/verify-image-manifest-tools.sh
 
   # No-silent-skip gate (#1510, epic #1508): dogfood-full runs an external
@@ -162,9 +167,9 @@ jobs:
           TOOL_OPTIONS: >-
             pydoclint:timeout=120,bandit:timeout=120,prettier:timeout=120,mypy:timeout=120,osv_scanner:check_suppressions=false
           # Same pinned release image dogfood-full lints with.
-          # Pinned digest — keep in sync with pyproject.toml lintro pin
+          # Bumped as one set by Renovate (see the dogfood-full job above).
           LINTRO_IMAGE: >-
-            ghcr.io/lgtm-hq/py-lintro@sha256:0e8f3892f31f7bb6ce56a33d037d983591b82c325bf56281f9d9e2fec488aa5c
+            ghcr.io/lgtm-hq/py-lintro:0.80.3@sha256:0e8f3892f31f7bb6ce56a33d037d983591b82c325bf56281f9d9e2fec488aa5c
         run: scripts/ci/dogfood-skip-gate.sh
 
   notify-failure:
