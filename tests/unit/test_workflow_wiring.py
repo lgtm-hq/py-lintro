@@ -1329,6 +1329,116 @@ def test_publish_pypi_sbom_fails_on_high_severity() -> None:
     assert_that(sbom["with"].get("scan-vulnerabilities")).is_true()
 
 
+# --- Binary build job timeouts (#1702) ---------------------------------------
+#
+# No job in build-binary.yml set timeout-minutes, so every binary build
+# inherited GitHub's 6-hour default. The Linux x64 Nuitka compile twice hung
+# until runner loss at ~57 min (v0.80.4, v0.91.24), silently desyncing the
+# npm publish and Homebrew chain via `needs:`.
+
+_BUILD_BINARY_WORKFLOW = "build-binary.yml"
+
+
+def test_build_binary_every_job_declares_timeout_minutes() -> None:
+    """Every build-binary job is bounded instead of inheriting the 6h default."""
+    workflow = _load_workflow(name=_BUILD_BINARY_WORKFLOW)
+    for job_id, job in workflow["jobs"].items():
+        assert_that(job).described_as(job_id).contains_key("timeout-minutes")
+        assert_that(job["timeout-minutes"]).described_as(job_id).is_instance_of(int)
+
+
+def test_build_binary_compile_step_has_step_level_timeout() -> None:
+    """The Build binary step is bounded tighter than its job.
+
+    A stalled compile must be attributable to the compile itself (25 min vs
+    the observed healthy norm of 16-24 min), not surface as a whole-job
+    timeout with no failed step.
+    """
+    workflow = _load_workflow(name=_BUILD_BINARY_WORKFLOW)
+    for job_id in ("build-macos", "build-linux"):
+        steps = workflow["jobs"][job_id]["steps"]
+        build_steps = [step for step in steps if step.get("name") == "Build binary"]
+        assert_that(build_steps).described_as(job_id).is_length(1)
+        assert_that(build_steps[0]["timeout-minutes"]).is_equal_to(25)
+
+
+def test_build_binary_job_timeout_leaves_diagnostic_headroom() -> None:
+    """The job deadline must not preempt the failure diagnostics.
+
+    Setup (harden-runner, checkout, setup-python, uv sync) can consume five
+    minutes or more, so a job deadline only 5 minutes past the 25-minute
+    compile bound can arrive during the post-timeout evidence steps and kill
+    the runner before the OOM artifacts upload. Require at least 10 minutes
+    of non-compile budget.
+    """
+    workflow = _load_workflow(name=_BUILD_BINARY_WORKFLOW)
+    for job_id in ("build-macos", "build-linux"):
+        job = workflow["jobs"][job_id]
+        build_steps = [
+            step for step in job["steps"] if step.get("name") == "Build binary"
+        ]
+        headroom = job["timeout-minutes"] - build_steps[0]["timeout-minutes"]
+        assert_that(headroom).described_as(job_id).is_greater_than_or_equal_to(10)
+
+
+def test_build_binary_compile_is_wrapped_by_memory_sampler() -> None:
+    """Build binary is bracketed by the #1707 sampler with failure-only upload.
+
+    The Linux x64 Nuitka compile repeatedly dies of runner loss with no
+    retrievable log, so the sampler (memory-sampler.sh) and the OOM evidence
+    collector (collect-oom-evidence.sh) must stay wired around the compile:
+    sampler stopped via ``always()``, evidence + artifact upload failure-only.
+    """
+    workflow = _load_workflow(name=_BUILD_BINARY_WORKFLOW)
+    for job_id in ("build-macos", "build-linux"):
+        steps = workflow["jobs"][job_id]["steps"]
+        by_name = {step.get("name"): step for step in steps}
+
+        start = by_name["Start memory sampler"]
+        assert_that(start["run"]).is_equal_to(
+            "scripts/ci/memory-sampler.sh start memory-sampler.log memory-sampler.pid",
+        )
+
+        stop = by_name["Stop memory sampler"]
+        assert_that(stop["run"]).is_equal_to(
+            "scripts/ci/memory-sampler.sh stop memory-sampler.log memory-sampler.pid",
+        )
+        # always(): the sampler must not outlive a failed compile, and the
+        # final snapshot it appends is part of the failure evidence.
+        assert_that(stop["if"]).is_equal_to("always()")
+
+        collect = by_name["Collect OOM evidence"]
+        assert_that(collect["if"]).is_equal_to("failure()")
+        assert_that(collect["run"]).is_equal_to(
+            "scripts/ci/collect-oom-evidence.sh oom-evidence.txt",
+        )
+
+        upload = by_name["Upload memory diagnostics"]
+        assert_that(upload["if"]).is_equal_to("failure()")
+        assert_that(upload["uses"]).contains("actions/upload-artifact@")
+        assert_that(str(upload["with"]["name"])).contains("matrix.arch")
+        assert_that(upload["with"]["path"]).contains("memory-sampler.log")
+        assert_that(upload["with"]["path"]).contains("oom-evidence.txt")
+
+        # Ordering: sampler starts right before the compile and stops right
+        # after, so the log brackets exactly the compile window.
+        names = [step.get("name") for step in steps]
+        assert_that(names.index("Start memory sampler")).is_equal_to(
+            names.index("Build binary") - 1,
+        )
+        assert_that(names.index("Stop memory sampler")).is_equal_to(
+            names.index("Build binary") + 1,
+        )
+
+    # The wired scripts exist and stay shellcheck/actionlint-clean via lintro.
+    assert_that(
+        (_REPO_ROOT / "scripts/ci/memory-sampler.sh").is_file(),
+    ).is_true()
+    assert_that(
+        (_REPO_ROOT / "scripts/ci/collect-oom-evidence.sh").is_file(),
+    ).is_true()
+
+
 _PUSH_SHA_TERNARY = "github.event_name == 'push' && github.sha || github.ref"
 
 # Job-level concurrency groups that legitimately key on ``github.ref`` even
