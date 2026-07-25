@@ -23,6 +23,8 @@ Environment variables:
   STATUS_OUTPUT         When non-empty, must equal STATUS_EXPECTED unless infra flake
   STATUS_EXPECTED       Expected STATUS_OUTPUT value (default: passed)
   EXIT_CODE_OUTPUT      Upstream lint exit code for infra flake detection
+  TIMEOUT_FLAKE         'true' when a proven tool-execution timeout with zero
+                        findings explains the failure (#1653)
 
 Writes exit-code, status, and infra-flake to GITHUB_OUTPUT when set. An
 infra-flake of true means the required check passed without a lint verdict,
@@ -57,6 +59,7 @@ if [[ "${UPSTREAM_RESULT}" != "success" ]]; then
 		UPSTREAM_CONCLUSION="${UPSTREAM_CONCLUSION:-}" \
 		STATUS_OUTPUT="${STATUS_OUTPUT:-}" \
 		EXIT_CODE_OUTPUT="${EXIT_CODE_OUTPUT:-}" \
+		TIMEOUT_FLAKE="${TIMEOUT_FLAKE:-}" \
 		bash "${SCRIPT_DIR}/is-infra-flake-failure.sh"; then
 		echo "::warning::Treating upstream ${UPSTREAM_RESULT} as infra flake (non-blocking)"
 		write_gate_outputs 0 passed true
@@ -79,6 +82,7 @@ if [[ -n "${STATUS_OUTPUT:-}" && "${STATUS_OUTPUT}" != "${STATUS_EXPECTED}" ]]; 
 		UPSTREAM_CONCLUSION="${UPSTREAM_CONCLUSION:-}" \
 		STATUS_OUTPUT="${STATUS_OUTPUT}" \
 		EXIT_CODE_OUTPUT="${EXIT_CODE_OUTPUT:-}" \
+		TIMEOUT_FLAKE="${TIMEOUT_FLAKE:-}" \
 		bash "${SCRIPT_DIR}/is-infra-flake-failure.sh"; then
 		echo "::warning::Treating upstream status ${STATUS_OUTPUT} as infra flake (non-blocking)"
 		write_gate_outputs 0 passed true

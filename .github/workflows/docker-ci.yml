@@ -615,6 +615,13 @@ jobs:
       packages: read # pull the CI lint image from GHCR
     # ~14 min median (10–17 observed); 20 fails a stalled run fast (#1704).
     timeout-minutes: 20
+    outputs:
+      # 'true' when this run's structured report proves the only failures were
+      # tool-execution timeouts and every tool reported zero findings (#1653).
+      # Consumed by code-quality-gate to absorb mypy perf flakes without ever
+      # masking a real lint verdict.
+      timeout-flake: ${{ steps.skips.outputs.timeout-flake }}
+      timed-out-tools: ${{ steps.skips.outputs.timed-out-tools }}
     steps:
       - name: Harden Runner
         # Same allowlist as dogfooding-lint-changed: the container sets
@@ -668,6 +675,7 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
       - name: Check for silent tool skips
+        id: skips
         env:
           # Same tool coverage as the dogfooding run so skip behaviour matches.
           TOOL_OPTIONS: >-
@@ -734,6 +742,9 @@ jobs:
       - dogfooding-lint
       - dogfooding-lint-changed
       - dogfooding_lint_retry
+      # Supplies the tool-execution-timeout verdict (#1653). Skipped/failed
+      # leaves the output empty, which disables the classification (fail closed).
+      - dogfood-skip-gate
     if: >-
       always() &&
       !cancelled() &&
@@ -790,6 +801,11 @@ jobs:
             || needs.dogfooding-lint.outputs.exit-code }}
           RETRY_LINT_STATUS: ${{ needs.dogfooding_lint_retry.outputs.status }}
           RETRY_LINT_EXIT_CODE: ${{ needs.dogfooding_lint_retry.outputs.exit-code }}
+          # Tool-execution timeout evidence (#1653). The no-silent-skip gate
+          # lints the same tree from the same image and only reports 'true'
+          # when a tool timed out AND every tool reported zero findings, so a
+          # real lint verdict can never be absorbed by it.
+          TIMEOUT_FLAKE: ${{ needs.dogfood-skip-gate.outputs.timeout-flake }}
         run: scripts/ci/run-code-quality-gate.sh
 
   dogfooding-pr-comment:

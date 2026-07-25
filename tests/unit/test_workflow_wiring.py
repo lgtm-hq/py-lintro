@@ -2273,3 +2273,64 @@ def test_auto_rerun_matches_docker_hub_buildx_pull_timeout() -> None:
     )
     # A bare timeout string is too broad to auto-rerun on.
     assert_that(signatures).does_not_contain("context deadline exceeded")
+
+
+# --- Tool-execution timeout classification wiring (#1653) --------------------
+
+
+def test_dogfood_skip_gate_publishes_timeout_flake_outputs() -> None:
+    """The no-silent-skip gate must publish its timeout verdict as job outputs."""
+    docker_ci = _load_workflow(name="docker-ci.yml")
+    gate = docker_ci["jobs"]["dogfood-skip-gate"]
+
+    outputs = gate.get("outputs") or {}
+    assert_that(outputs).contains_key("timeout-flake")
+    assert_that(_normalize_github_expr(outputs["timeout-flake"])).contains(
+        "steps.skips.outputs.timeout-flake",
+    )
+
+    step_ids = [step.get("id") for step in gate["steps"]]
+    assert_that(step_ids).contains("skips")
+
+
+def test_code_quality_gate_consumes_timeout_flake_from_skip_gate() -> None:
+    """The code-quality gate must read the timeout proof from the skip gate."""
+    docker_ci = _load_workflow(name="docker-ci.yml")
+    gate_job = docker_ci["jobs"]["code-quality-gate"]
+
+    assert_that(gate_job["needs"]).contains("dogfood-skip-gate")
+
+    gate_step = next(step for step in gate_job["steps"] if step.get("id") == "gate")
+    assert_that(_normalize_github_expr(gate_step["env"]["TIMEOUT_FLAKE"])).contains(
+        "needs.dogfood-skip-gate.outputs.timeout-flake",
+    )
+
+
+def test_dogfood_skip_gate_checks_out_the_timeout_classifier() -> None:
+    """The skip gate script must be able to reach the classifier it calls."""
+    script = (_REPO_ROOT / "scripts" / "ci" / "dogfood-skip-gate.sh").read_text(
+        encoding="utf-8",
+    )
+    assert_that(script).contains("classify-lint-timeout.py")
+    classifier = _REPO_ROOT / "scripts" / "ci" / "classify-lint-timeout.py"
+    assert_that(classifier.exists()).is_true()
+
+
+def test_code_quality_gate_sparse_checkout_covers_gate_scripts() -> None:
+    """Every script run by the gate job must be in its sparse checkout."""
+    docker_ci = _load_workflow(name="docker-ci.yml")
+    gate_job = docker_ci["jobs"]["code-quality-gate"]
+    checkout = next(
+        step
+        for step in gate_job["steps"]
+        if str(step.get("uses", "")).startswith("actions/checkout")
+    )
+    sparse = checkout["with"]["sparse-checkout"]
+
+    for script in (
+        "scripts/ci/run-code-quality-gate.sh",
+        "scripts/ci/evaluate-code-quality-gate.sh",
+        "scripts/ci/assert-required-check.sh",
+        "scripts/ci/is-infra-flake-failure.sh",
+    ):
+        assert_that(sparse).contains(script)

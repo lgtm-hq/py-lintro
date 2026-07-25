@@ -16,6 +16,11 @@ set -euo pipefail
 # state matters here — real lint issues are gated by the dogfood job itself, so
 # lintro's own exit code is intentionally ignored.
 #
+# The same report is also classified for tool-execution timeouts (#1653) via
+# scripts/ci/classify-lint-timeout.py, and the verdict is published as the
+# `timeout-flake` / `timed-out-tools` job outputs so the code-quality gate can
+# tell a mypy perf flake (zero findings anywhere) from a real lint verdict.
+#
 # Usage:
 #   LINTRO_IMAGE=ghcr.io/lgtm-hq/py-lintro:ci-123 scripts/ci/dogfood-skip-gate.sh
 #
@@ -36,6 +41,7 @@ Usage:
   LINTRO_IMAGE=<image> scripts/ci/dogfood-skip-gate.sh
 
 Run lintro chk (JSON) in Docker and fail on non-allowlisted tool skips.
+Also publishes timeout-flake / timed-out-tools to GITHUB_OUTPUT (#1653).
 
 Environment:
   LINTRO_IMAGE   Required. Pinned py-lintro image (CI tag or digest).
@@ -113,6 +119,20 @@ log_info "lintro exited ${lintro_exit_code} (ignored; gate checks skips only)"
 if [[ ! -s "$REPORT_JSON" ]]; then
 	log_error "lintro produced no JSON report at ${REPORT_JSON}; cannot gate skips"
 	exit 2
+fi
+
+# Classify tool-execution timeouts before the skip check so the outputs are
+# published even when the skip gate itself fails (#1653). Stdlib-only, so it
+# runs on the host rather than in the container. Never fails the gate: a
+# non-classifiable report simply yields timeout-flake=false (fail closed).
+log_info "Classifying tool-execution timeouts..."
+set +e
+python3 "$(dirname "${BASH_SOURCE[0]}")/classify-lint-timeout.py" \
+	--report "${REPORT_JSON}"
+classify_exit_code=$?
+set -e
+if [[ "${classify_exit_code}" -ne 0 ]]; then
+	log_error "timeout classification failed (exit ${classify_exit_code}); continuing"
 fi
 
 # Run the checker inside the image: it ships PyYAML, so no host Python deps are
