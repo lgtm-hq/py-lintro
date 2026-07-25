@@ -42,8 +42,8 @@ jobs:
       # No CI build in this workflow: lint main with the pinned release
       # image (same digest the fork-PR fallback in docker-ci.yml uses).
       # Pinned release digest. Renovate keeps every pin site in this file
-      # and in docker-ci.yml on the same release (see renovate.json,
-      # customManager `pinned-lintro-release-image`); the tag is carried
+      # and in docker-ci.yml on the same release (see the customManager in
+      # renovate.json matching ghcr.io/lgtm-hq/py-lintro); the tag is carried
       # alongside the digest so the pinned release is readable at a glance
       # and Renovate has a version to bump. Do not hand-edit one site alone —
       # tests/unit/test_workflow_wiring.py fails on a partial bump.
