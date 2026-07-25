@@ -2066,17 +2066,38 @@ def test_auto_rerun_signatures_cover_in_step_retry_markers() -> None:
     assert_that(markers).is_subset_of(signatures)
 
 
+# Constructs that only make sense if the author believed the signature was a
+# regex. Bare metacharacters are deliberately NOT listed: ``grep -qF`` compares
+# literally, so parentheses, brackets and plus signs are ordinary text and
+# occur naturally in tool output (``getting cert (403)``). Rejecting those
+# would force future markers to diverge from the log lines they must match.
+_REGEX_INTENT_TELLS = (
+    r"^\^",  # leading anchor
+    r"\$$",  # trailing anchor
+    r"\.\*",  # .*
+    r"\.\+",  # .+
+    r"\\[dwsb]",  # \d \w \s \b
+    r"\(\?",  # (?: (?= (?<
+    r"\[[^\]]*-[^\]]*\]",  # character class with a range, e.g. [0-9]
+)
+
+
 def test_auto_rerun_signatures_are_fixed_strings() -> None:
     """Extra signatures must be plain fixed strings, not regexes.
 
     ``rerun-on-infra-failure.sh`` matches with ``grep -qF``, so a regex or
-    an anchor would be compared literally and silently never match.
+    an anchor would be compared literally and silently never match. The check
+    targets constructs that betray regex *intent* rather than any
+    metacharacter, since literal punctuation is legitimate under ``-F``.
     """
     signatures = _auto_rerun_signatures()
 
     assert_that(signatures).is_not_empty()
     for signature in signatures:
-        assert_that(signature).does_not_match(r"[\\^$*+?\[\]()|]")
+        for tell in _REGEX_INTENT_TELLS:
+            assert_that(re.search(tell, signature)).described_as(
+                f"{signature!r} looks like a regex ({tell})",
+            ).is_none()
 
 
 def test_auto_rerun_matches_docker_hub_buildx_pull_timeout() -> None:
