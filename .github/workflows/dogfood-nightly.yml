@@ -37,7 +37,7 @@ jobs:
       tooling-ref: 'ee8484ca71db3a2c2c33da6128bbf2330fcd7c88' # v0.59.2
       job-name: '🌙 Nightly Dogfooding Lint'
       lintro-tool-options: >-
-        pydoclint:timeout=120,bandit:timeout=120,prettier:timeout=120,osv_scanner:check_suppressions=false
+        pydoclint:timeout=120,bandit:timeout=120,prettier:timeout=120,mypy:timeout=120,osv_scanner:check_suppressions=false
       egress-policy: block
       # No CI build in this workflow: lint main with the pinned release
       # image (same digest the fork-PR fallback in docker-ci.yml uses).
@@ -105,7 +105,8 @@ jobs:
     permissions:
       contents: read
       packages: read # pull the pinned release image from GHCR
-    timeout-minutes: 30
+    # ~14 min median (10–17 observed); 20 fails a stalled run fast (#1704).
+    timeout-minutes: 20
     steps:
       - name: Harden Runner
         # yamllint disable-line rule:line-length
@@ -159,7 +160,7 @@ jobs:
         env:
           # Same tool coverage as dogfood-full so skip behaviour matches.
           TOOL_OPTIONS: >-
-            pydoclint:timeout=120,bandit:timeout=120,prettier:timeout=120,osv_scanner:check_suppressions=false
+            pydoclint:timeout=120,bandit:timeout=120,prettier:timeout=120,mypy:timeout=120,osv_scanner:check_suppressions=false
           # Same pinned release image dogfood-full lints with.
           # Pinned digest — keep in sync with pyproject.toml lintro pin
           LINTRO_IMAGE: >-
