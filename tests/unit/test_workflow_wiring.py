@@ -1108,6 +1108,150 @@ def test_publish_npm_delegates_publish_to_hardened_script() -> None:
 # substrings here, so this module only asserts the workflow-to-script wiring.
 
 
+_UV_ARG_PATTERN = re.compile(r"^ARG UV_VERSION=(?P<version>[0-9]+\.[0-9]+\.[0-9]+)$")
+
+
+def _tools_dockerfile_uv_version() -> str:
+    """Return the uv version pinned by ``docker/tools.Dockerfile``.
+
+    Returns:
+        The ``ARG UV_VERSION`` value declared in the tools image Dockerfile.
+    """
+    dockerfile = _REPO_ROOT / "docker" / "tools.Dockerfile"
+    for line in dockerfile.read_text(encoding="utf-8").splitlines():
+        match = _UV_ARG_PATTERN.match(line.strip())
+        if match is not None:
+            return match.group("version")
+    pytest.fail("ARG UV_VERSION not found in docker/tools.Dockerfile")
+
+
+def test_build_binary_pins_setup_uv_version() -> None:
+    """Binary builds must pin setup-uv to an exact version, not latest.
+
+    ``version: latest`` forces astral-sh/setup-uv to fetch
+    astral-sh/versions uv.ndjson, which has timed out repeatedly under
+    harden-runner during tag publishes (#1487). An exact pin uses the
+    ExactVersionResolver path; the continue-on-error retry remains.
+
+    The pin must also equal the tools image's ``ARG UV_VERSION`` so the two
+    Renovate-managed uv pins cannot silently drift apart.
+    """
+    workflow = _load_workflow(name="build-binary.yml")
+    pinned = workflow["env"]["UV_VERSION"]
+    assert_that(pinned).matches(r"^\d+\.\d+\.\d+$")
+    assert_that(pinned).described_as(
+        "build-binary UV_VERSION must match docker/tools.Dockerfile ARG UV_VERSION",
+    ).is_equal_to(_tools_dockerfile_uv_version())
+
+    setup_uv_steps: list[dict[str, Any]] = []
+    for job in workflow["jobs"].values():
+        for step in job.get("steps") or []:
+            uses = step.get("uses") or ""
+            if "astral-sh/setup-uv@" in uses:
+                setup_uv_steps.append(step)
+
+    assert_that(setup_uv_steps).is_not_empty()
+    for step in setup_uv_steps:
+        version = step.get("with", {}).get("version", "")
+        assert_that(version).does_not_contain("latest")
+        assert_that(version).contains("env.UV_VERSION")
+
+
+def test_renovate_manages_build_binary_uv_pin() -> None:
+    """A Renovate customManager must match the build-binary UV_VERSION line.
+
+    The workflow pin is not a native manager target, so without a regex
+    manager whose pattern actually matches the file's text it would silently
+    rot while the Dockerfile pin advanced (#1487).
+    """
+    config = json.loads((_REPO_ROOT / "renovate.json").read_text(encoding="utf-8"))
+    workflow_text = (
+        _REPO_ROOT / ".github" / "workflows" / "build-binary.yml"
+    ).read_text(encoding="utf-8")
+
+    matching = [
+        manager
+        for manager in config["customManagers"]
+        if any(
+            "build-binary.yml" in pattern
+            for pattern in manager.get("managerFilePatterns", [])
+        )
+    ]
+    assert_that(matching).described_as(
+        "no Renovate customManager targets build-binary.yml",
+    ).is_not_empty()
+
+    for manager in matching:
+        assert_that(manager["packageNameTemplate"]).is_equal_to("astral-sh/uv")
+        for match_string in manager["matchStrings"]:
+            # Renovate uses JS named groups, `(?<name>...)`; Python wants
+            # `(?P<name>...)`.
+            pattern = re.sub(r"\(\?<(\w+)>", r"(?P<\1>", match_string)
+            found = re.search(pattern, workflow_text)
+            assert_that(found).described_as(
+                f"matchString {match_string!r} does not match build-binary.yml",
+            ).is_not_none()
+
+
+def test_build_binary_retries_setup_uv_on_failure() -> None:
+    """Each setup-uv job keeps a continue-on-error + retry pair (#1513)."""
+    workflow = _load_workflow(name="build-binary.yml")
+    jobs_with_setup_uv = [
+        job_id
+        for job_id, job in workflow["jobs"].items()
+        if any(
+            "astral-sh/setup-uv@" in (step.get("uses") or "")
+            for step in job.get("steps") or []
+        )
+    ]
+    assert_that(jobs_with_setup_uv).is_not_empty()
+
+    for job_id in jobs_with_setup_uv:
+        steps = workflow["jobs"][job_id]["steps"]
+        first = next(step for step in steps if step.get("id") == "setup-uv")
+        assert_that(first.get("continue-on-error")).is_true()
+        retry = next(step for step in steps if step.get("name") == "Install uv (retry)")
+        assert_that(retry.get("if")).contains("steps.setup-uv.outcome == 'failure'")
+
+
+def test_auto_rerun_covers_tag_publish_workflows() -> None:
+    """Auto-rerun must watch publish workflows and not filter to main only.
+
+    Tag publishes set workflow_run.head_branch to the tag name, so
+    ``branches: [main]`` would never see Publish - PyPI Production failures.
+    Fork abuse is blocked by the same-repo job guard instead (#1487).
+    """
+    workflow = _load_workflow(name="auto-rerun-on-infra-failure.yml")
+    trigger = workflow["on"]["workflow_run"]
+    watched = set(trigger["workflows"])
+
+    assert_that(watched).contains("Publish - PyPI Production")
+    assert_that(watched).contains("Publish - Homebrew Tap")
+    assert_that(watched).contains("Publish - npm")
+    # branches: would exclude tag head_branch values; omit it entirely.
+    assert_that(trigger).does_not_contain_key("branches")
+    assert_that(trigger).does_not_contain_key("branches-ignore")
+
+    # workflow_run matches on the workflow's `name:`, and an unknown name is
+    # silently ignored by GitHub — so every watched entry must name a real
+    # workflow in this repo.
+    declared = {
+        _load_workflow(name=path.name)["name"]
+        for path in sorted((_REPO_ROOT / ".github" / "workflows").glob("*.yml"))
+    }
+    assert_that(watched).described_as(
+        "watched workflow_run names must exist as workflow `name:` values",
+    ).is_subset_of(declared)
+
+    rerun_if = _normalize_github_expr(workflow["jobs"]["rerun"]["if"])
+    assert_that(rerun_if).contains(
+        "github.event.workflow_run.head_repository.full_name == github.repository",
+    )
+    assert_that(rerun_if).contains(
+        "github.event.workflow_run.conclusion == 'failure'",
+    )
+
+
 # Canonical lgtm-ci pin used by all py-lintro workflows (v0.52.4).
 # Pages deploy must not regress to v0.32.3 (missing GH_TOKEN in bundler).
 # The 40-hex git SHA trips trufflehog's Github legacy-token detector under

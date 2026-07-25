@@ -201,6 +201,18 @@
       "packageNameTemplate": "astral-sh/uv"
     },
     {
+      "description": "Exact uv pin for setup-uv in the binary build workflow (avoids the astral-sh/versions manifest fetch); must track the Dockerfile ARG UV_VERSION",
+      "customType": "regex",
+      "managerFilePatterns": [
+        ".github/workflows/build-binary.yml"
+      ],
+      "matchStrings": [
+        "UV_VERSION: '(?<currentValue>[0-9]+\\.[0-9]+\\.[0-9]+)'"
+      ],
+      "datasourceTemplate": "github-releases",
+      "packageNameTemplate": "astral-sh/uv"
+    },
+    {
       "description": "Bundled Go toolchain in the lintro-tools image (checksum fetched at build time, so only the version pins here)",
       "customType": "regex",
       "managerFilePatterns": [
