@@ -1,0 +1,99 @@
+# SPDX-License-Identifier: MIT
+# For license details, see the repository root LICENSE file.
+---
+name: Audit - Release Version Skew
+
+# Post-release version-agreement alarm (#1712, follow-up to #1702).
+#
+# A partially failed release leaves PyPI, npm and the Homebrew tap on different
+# versions while every visible check still reports success: on v0.91.24 the
+# binary build died, the npm publish skipped through its `needs:` chain (a
+# correct fail-safe) and Homebrew kept the old pin — and nothing alarmed. This
+# scheduled audit compares the three published channels and opens/pings the
+# deduplicated main-failure issue when they disagree.
+#
+# It is an alarm, never a gate: it does not block, retry or reorder the release
+# pipeline, and the deliberate `needs:` coupling in build-binary/publish-npm
+# stays untouched. Expected lag is suppressed by the script's settle window and
+# by the in-flight release check (the manual PyPI approval gate surfaces as a
+# `waiting` run, which is intentional and must not alarm).
+
+'on':
+  schedule:
+    # Daily at 05:15 UTC — after the nightly jobs, before EU morning.
+    - cron: '15 5 * * *'
+  workflow_dispatch:
+    inputs:
+      expected_version:
+        description: 'Version every channel must report (default: newest wins)'
+        required: false
+        type: string
+      settle_minutes:
+        description: 'Minutes of propagation lag to tolerate'
+        required: false
+        default: '120'
+        type: string
+
+permissions: {}
+
+concurrency:
+  group: release-version-skew-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  audit:
+    name: 🔀 Release Version Skew Audit
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read # sparse checkout of the audit script
+    timeout-minutes: 10
+    steps:
+      - name: Harden Runner
+        # yamllint disable-line rule:line-length
+        uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
+        with:
+          egress-policy: block
+          allowed-endpoints: >
+            github.com:443
+            api.github.com:443
+            codeload.github.com:443
+            objects.githubusercontent.com:443
+            raw.githubusercontent.com:443
+            pypi.org:443
+            registry.npmjs.org:443
+      - name: Checkout audit script
+        # yamllint disable-line rule:line-length
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          sparse-checkout: scripts/ci/check-release-version-skew.py
+          sparse-checkout-cone-mode: false
+      - name: Compare published channel versions
+        env:
+          # Read-only token: authenticates the release-run lookup that
+          # suppresses the alarm while a release is still in flight.
+          GITHUB_TOKEN: ${{ github.token }}
+          EXPECTED_VERSION: ${{ inputs.expected_version }}
+          SETTLE_MINUTES: ${{ inputs.settle_minutes || '120' }}
+        run: >-
+          python3 scripts/ci/check-release-version-skew.py
+          --settle-minutes "${SETTLE_MINUTES}"
+          --expected "${EXPECTED_VERSION}"
+
+  notify-failure:
+    needs: [audit]
+    # Main-only: a manual dispatch from a feature branch must not open or ping
+    # the main-failure issue for the release-version-skew key.
+    if: failure() && github.ref == 'refs/heads/main'
+    # Deduplicated failure issue (same mechanism as dogfood-nightly.yml): the
+    # first failure opens `fix(ci): main workflow failed: release-version-skew`,
+    # repeat failures comment on it instead of piling up one issue per run.
+    # yamllint disable-line rule:line-length
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-main-failure-notifier.yml@ee8484ca71db3a2c2c33da6128bbf2330fcd7c88 # v0.59.2
+    permissions:
+      actions: read # read workflow/job metadata for the failure context
+      contents: read # repository context for the issue body
+      issues: write # open or ping the deduplicated failure issue
+    with:
+      workflow-key: release-version-skew
+      tooling-ref: 'ee8484ca71db3a2c2c33da6128bbf2330fcd7c88' # v0.59.2
