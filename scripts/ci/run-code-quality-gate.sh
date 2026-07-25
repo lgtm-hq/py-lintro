@@ -9,7 +9,6 @@
 #   RETRY_LINT_RESULT
 #   PRIMARY_LINT_STATUS, PRIMARY_LINT_EXIT_CODE, PRIMARY_LINT_CONCLUSION
 #   RETRY_LINT_STATUS, RETRY_LINT_EXIT_CODE, RETRY_LINT_CONCLUSION
-#   PRIMARY_FAILURE_REASON, RETRY_FAILURE_REASON
 
 set -euo pipefail
 
@@ -74,14 +73,12 @@ upstream_result="$(grep -E '^upstream-result=' "${EVALUATE_OUTPUT}" | tail -1 | 
 status_output="$(grep -E '^status-output=' "${EVALUATE_OUTPUT}" | tail -1 | cut -d= -f2-)"
 exit_code_output="$(grep -E '^exit-code-output=' "${EVALUATE_OUTPUT}" | tail -1 | cut -d= -f2-)"
 upstream_conclusion="$(grep -E '^upstream-conclusion=' "${EVALUATE_OUTPUT}" | tail -1 | cut -d= -f2-)"
-failure_reason="$(grep -E '^failure-reason=' "${EVALUATE_OUTPUT}" | tail -1 | cut -d= -f2-)"
 
 if UPSTREAM_RESULT="${upstream_result}" \
 	STATUS_OUTPUT="${status_output}" \
 	STATUS_EXPECTED=passed \
 	EXIT_CODE_OUTPUT="${exit_code_output}" \
 	UPSTREAM_CONCLUSION="${upstream_conclusion}" \
-	FAILURE_REASON="${failure_reason}" \
 	GITHUB_OUTPUT="${ASSERT_OUTPUT}" \
 	bash "${SCRIPT_DIR}/assert-required-check.sh"; then
 	# infra-flake=true means the required check is green without a lint

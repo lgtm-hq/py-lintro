@@ -14,7 +14,6 @@
 #   RETRY_LINT_RESULT
 #   PRIMARY_LINT_STATUS, PRIMARY_LINT_EXIT_CODE, PRIMARY_LINT_CONCLUSION
 #   RETRY_LINT_STATUS, RETRY_LINT_EXIT_CODE, RETRY_LINT_CONCLUSION
-#   PRIMARY_FAILURE_REASON, RETRY_FAILURE_REASON
 
 set -euo pipefail
 
@@ -26,8 +25,8 @@ Usage:
   DOCKER_BUILD_RESULT=success MANIFEST_SYNC_RESULT=success \
     PRIMARY_LINT_RESULT=success scripts/ci/evaluate-code-quality-gate.sh
 
-Writes upstream-result, status-output, exit-code-output, upstream-conclusion,
-and failure-reason to GITHUB_OUTPUT when set.
+Writes upstream-result, status-output, exit-code-output, and
+upstream-conclusion to GITHUB_OUTPUT when set.
 EOF
 	exit 0
 fi
@@ -37,11 +36,10 @@ fi
 : "${PRIMARY_LINT_RESULT:?}"
 
 # GITHUB_OUTPUT is a line-oriented key=value file, so a newline inside a value
-# would be parsed as a new record. FAILURE_REASON is free text (a step log
-# snippet once #1655 wires it), and a value such as
-# $'boom\nstatus-output=passed' would otherwise forge a passing verdict. Refuse
-# to write instead of emitting a malformed record — the caller runs under
-# `set -e`, so the gate fails closed (red) rather than green.
+# would be parsed as a new record. These values are env-derived, and a value
+# such as $'boom\nstatus-output=passed' would otherwise forge a passing
+# verdict. Refuse to write instead of emitting a malformed record — the caller
+# runs under `set -e`, so the gate fails closed (red) rather than green.
 write_output() {
 	local key="$1"
 	local value="$2"
@@ -59,7 +57,6 @@ if [[ "${DOCKER_BUILD_RESULT}" != "success" ]]; then
 	write_output status-output "failed"
 	write_output exit-code-output "1"
 	write_output upstream-conclusion "${DOCKER_BUILD_RESULT}"
-	write_output failure-reason "docker-build ${DOCKER_BUILD_RESULT}"
 	exit 0
 fi
 
@@ -68,7 +65,6 @@ if [[ "${MANIFEST_SYNC_RESULT}" != "success" && "${MANIFEST_SYNC_RESULT}" != "sk
 	write_output status-output "failed"
 	write_output exit-code-output "1"
 	write_output upstream-conclusion "${MANIFEST_SYNC_RESULT}"
-	write_output failure-reason "manifest-sync ${MANIFEST_SYNC_RESULT}"
 	exit 0
 fi
 
@@ -83,7 +79,6 @@ effective_result="${PRIMARY_LINT_RESULT}"
 effective_status="${PRIMARY_LINT_STATUS:-}"
 effective_exit_code="${PRIMARY_LINT_EXIT_CODE:-}"
 effective_conclusion="${PRIMARY_LINT_CONCLUSION:-}"
-effective_failure_reason="${PRIMARY_FAILURE_REASON:-}"
 
 # The retry (full-run only) exists to give a genuinely flaked primary a second
 # chance, so it becomes authoritative only when it is itself authoritative:
@@ -103,7 +98,6 @@ if [[ "${RETRY_LINT_RESULT:-}" == "success" || "${RETRY_LINT_RESULT:-}" == "fail
 		effective_status="${RETRY_LINT_STATUS:-}"
 		effective_exit_code="${RETRY_LINT_EXIT_CODE:-}"
 		effective_conclusion="${RETRY_LINT_CONCLUSION:-}"
-		effective_failure_reason="${RETRY_FAILURE_REASON:-}"
 	fi
 fi
 
@@ -112,7 +106,6 @@ if [[ "${effective_result}" == "success" ]]; then
 	write_output status-output "${effective_status:-passed}"
 	write_output exit-code-output "${effective_exit_code:-0}"
 	write_output upstream-conclusion success
-	write_output failure-reason ""
 	exit 0
 fi
 
@@ -120,4 +113,3 @@ write_output upstream-result "${effective_result}"
 write_output status-output "${effective_status}"
 write_output exit-code-output "${effective_exit_code}"
 write_output upstream-conclusion "${effective_conclusion}"
-write_output failure-reason "${effective_failure_reason}"

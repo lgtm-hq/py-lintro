@@ -54,34 +54,30 @@ def test_code_quality_gate_scripts_expose_help(script: str) -> None:
 
 
 @pytest.mark.parametrize(
-    ("result", "status", "exit_code", "conclusion", "reason", "expected_infra"),
+    ("result", "status", "exit_code", "conclusion", "expected_infra"),
     [
-        ("cancelled", "", "", "", "", True),
-        ("failure", "", "", "cancelled", "", True),
-        ("failure", "", "", "timed_out", "", True),
+        ("cancelled", "", "", "", True),
+        ("failure", "", "", "cancelled", True),
+        ("failure", "", "", "timed_out", True),
         # Runner shutdown propagates SIGTERM; lintro never exits 143 for lint.
-        ("failure", "", "143", "", "", True),
-        ("failure", "", "", "", "runner shutdown signal", True),
-        ("failure", "", "", "", "Failed to CreateArtifact: ETIMEDOUT", True),
-        # Lint reported success; only the surrounding job failed (artifact
-        # upload), so the lint verdict is authoritative.
-        ("failure", "passed", "0", "", "Failed to CreateArtifact: ETIMEDOUT", True),
-        ("failure", "passed", "0", "", "", True),
-        # Genuine lint failures must never be absorbed, whatever the reason.
-        ("failure", "failed", "1", "", "Failed to CreateArtifact: ETIMEDOUT", False),
-        ("failure", "failed", "1", "", "runner shutdown signal", False),
+        ("failure", "", "143", "", True),
+        # Lint reported success; only the surrounding job failed (e.g. the
+        # report artifact upload before lgtm-ci#696 made it non-fatal), so
+        # the lint verdict is authoritative.
+        ("failure", "passed", "0", "", True),
+        # Genuine lint failures must never be absorbed.
+        ("failure", "failed", "1", "", False),
+        ("failure", "failed", "", "", False),
+        ("failure", "", "1", "", False),
         # A cancellation on top of a reported lint verdict must not absorb it.
-        ("cancelled", "failed", "1", "", "", False),
-        ("failure", "failed", "1", "cancelled", "", False),
+        ("cancelled", "failed", "1", "", False),
+        ("failure", "failed", "1", "cancelled", False),
         # SIGTERM still wins: lintro exits 143 only when the runner kills it.
-        ("cancelled", "failed", "143", "", "", True),
-        ("failure", "failed", "", "", "Failed to CreateArtifact: ETIMEDOUT", False),
-        ("failure", "", "1", "", "Failed to CreateArtifact: ETIMEDOUT", False),
-        ("failure", "failed", "1", "", "", False),
+        ("cancelled", "failed", "143", "", True),
         # Absence of evidence is not infra evidence: a job that never reported
         # a lint verdict must not be claimed to have passed one (#1313).
-        ("failure", "", "", "", "", False),
-        ("success", "passed", "0", "", "", False),
+        ("failure", "", "", "", False),
+        ("success", "passed", "0", "", False),
     ],
 )
 def test_is_infra_flake_failure_classification(
@@ -90,7 +86,6 @@ def test_is_infra_flake_failure_classification(
     status: str,
     exit_code: str,
     conclusion: str,
-    reason: str,
     expected_infra: bool,
 ) -> None:
     """Infra flake classifier should match shutdown and lint-failure cases."""
@@ -101,13 +96,41 @@ def test_is_infra_flake_failure_classification(
             "STATUS_OUTPUT": status,
             "EXIT_CODE_OUTPUT": exit_code,
             "UPSTREAM_CONCLUSION": conclusion,
-            "FAILURE_REASON": reason,
         },
     )
     if expected_infra:
         assert_that(proc.returncode).is_equal_to(0)
     else:
         assert_that(proc.returncode).is_equal_to(1)
+
+
+@pytest.mark.parametrize(
+    "reason",
+    [
+        "Failed to CreateArtifact: ETIMEDOUT",
+        "runner shutdown signal received",
+        "ETIMEDOUT",
+    ],
+)
+def test_is_infra_flake_failure_ignores_free_text_reason(reason: str) -> None:
+    """Free-text log snippets must never green the required check (#1655).
+
+    The substring branches Greptile flagged on #1650 are removed: a log (or a
+    lint report) that merely contains ETIMEDOUT/CreateArtifact/shutdown text
+    must not absorb a job that never reported a lint verdict. FAILURE_REASON
+    is no longer consumed, so these stay red.
+    """
+    proc = _run_script(
+        "scripts/ci/is-infra-flake-failure.sh",
+        env={
+            "UPSTREAM_RESULT": "failure",
+            "STATUS_OUTPUT": "",
+            "EXIT_CODE_OUTPUT": "",
+            "UPSTREAM_CONCLUSION": "",
+            "FAILURE_REASON": reason,
+        },
+    )
+    assert_that(proc.returncode).is_equal_to(1)
 
 
 def test_assert_required_check_passes_on_success() -> None:
@@ -153,7 +176,11 @@ def test_assert_required_check_fails_on_genuine_lint_failure() -> None:
 def test_assert_required_check_does_not_absorb_lint_failure_with_artifact_reason() -> (
     None
 ):
-    """Genuine lint failures stay red even if FAILURE_REASON mentions CreateArtifact."""
+    """Genuine lint failures stay red even if FAILURE_REASON mentions CreateArtifact.
+
+    FAILURE_REASON is no longer consumed (#1655); this pins the invariant that
+    surrounding free text can never flip a genuine lint failure.
+    """
     result = _run_script(
         "scripts/ci/assert-required-check.sh",
         env={
@@ -244,10 +271,10 @@ def test_evaluate_code_quality_gate_prefers_retry_success() -> None:
 
 
 @pytest.mark.parametrize("injection", ["\n", "\r"])
-def test_evaluate_code_quality_gate_rejects_newline_in_failure_reason(
+def test_evaluate_code_quality_gate_rejects_newline_in_lint_status(
     injection: str,
 ) -> None:
-    """A newline in free-text input must not forge a second GITHUB_OUTPUT record."""
+    """A newline in env-derived input must not forge a second GITHUB_OUTPUT record."""
     with tempfile.NamedTemporaryFile(mode="w+", delete=False) as output_file:
         output_path = output_file.name
 
@@ -259,9 +286,8 @@ def test_evaluate_code_quality_gate_rejects_newline_in_failure_reason(
                 "DOCKER_BUILD_RESULT": "success",
                 "MANIFEST_SYNC_RESULT": "success",
                 "PRIMARY_LINT_RESULT": "failure",
-                "PRIMARY_LINT_STATUS": "failed",
+                "PRIMARY_LINT_STATUS": f"boom{injection}status-output=passed",
                 "PRIMARY_LINT_EXIT_CODE": "1",
-                "PRIMARY_FAILURE_REASON": f"boom{injection}status-output=passed",
             },
         )
         assert_that(result.returncode).is_equal_to(1)
@@ -275,7 +301,7 @@ def test_evaluate_code_quality_gate_rejects_newline_in_failure_reason(
         Path(output_path).unlink(missing_ok=True)
 
 
-def test_run_code_quality_gate_fails_closed_on_injected_failure_reason() -> None:
+def test_run_code_quality_gate_fails_closed_on_injected_lint_status() -> None:
     """The gate must go red, not green, when evaluation refuses to write."""
     with tempfile.NamedTemporaryFile(mode="w+", delete=False) as output_file:
         output_path = output_file.name
@@ -288,9 +314,8 @@ def test_run_code_quality_gate_fails_closed_on_injected_failure_reason() -> None
                 "DOCKER_BUILD_RESULT": "success",
                 "MANIFEST_SYNC_RESULT": "success",
                 "PRIMARY_LINT_RESULT": "failure",
-                "PRIMARY_LINT_STATUS": "failed",
+                "PRIMARY_LINT_STATUS": "boom\nstatus-output=passed",
                 "PRIMARY_LINT_EXIT_CODE": "1",
-                "PRIMARY_FAILURE_REASON": "boom\nstatus-output=passed",
             },
         )
         assert_that(result.returncode).is_not_equal_to(0)
@@ -458,6 +483,38 @@ def test_run_code_quality_gate_passes_after_runner_shutdown() -> None:
         assert_that(output).contains("result=success")
         assert_that(output).contains("passed=true")
         # Absorbed noise proves nothing about lint, so publish must be blocked.
+        assert_that(output).contains("infra-flake=true")
+    finally:
+        Path(output_path).unlink(missing_ok=True)
+
+
+def test_run_code_quality_gate_absorbs_post_lint_failure_after_passed_lint() -> None:
+    """End-to-end artifact-upload shape: lint passed, then the job failed (#1655).
+
+    Regression asked for by CodeRabbit on the gate env block in docker-ci.yml:
+    with an authoritative passed/0 lint verdict, a surrounding job failure
+    (e.g. the report upload, fatal before lgtm-ci#696) is absorbed and the
+    gate marks infra-flake=true so publish refuses to promote.
+    """
+    with tempfile.NamedTemporaryFile(mode="w+", delete=False) as output_file:
+        output_path = output_file.name
+
+    try:
+        result = _run_script(
+            "scripts/ci/run-code-quality-gate.sh",
+            env={
+                "GITHUB_OUTPUT": output_path,
+                "DOCKER_BUILD_RESULT": "success",
+                "MANIFEST_SYNC_RESULT": "success",
+                "PRIMARY_LINT_RESULT": "failure",
+                "PRIMARY_LINT_STATUS": "passed",
+                "PRIMARY_LINT_EXIT_CODE": "0",
+            },
+        )
+        assert_that(result.returncode).is_equal_to(0)
+        output = Path(output_path).read_text()
+        assert_that(output).contains("result=success")
+        assert_that(output).contains("passed=true")
         assert_that(output).contains("infra-flake=true")
     finally:
         Path(output_path).unlink(missing_ok=True)

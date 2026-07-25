@@ -114,7 +114,7 @@ Scripts for GitHub Actions workflows and continuous integration.
 | `evaluate-code-quality-gate.sh`      | Select effective dogfooding lint attempt for code-quality gate             | `./scripts/ci/evaluate-code-quality-gate.sh --help`                                         |
 | `run-code-quality-gate.sh`           | Evaluate + assert docker-ci code-quality gate for required rollup          | `./scripts/ci/run-code-quality-gate.sh --help`                                              |
 | `assert-required-check.sh`           | Fail required check unless upstream passed or infra flake                  | `./scripts/ci/assert-required-check.sh --help`                                              |
-| `is-infra-flake-failure.sh`          | Classify runner infra flakes (exit 143, ETIMEDOUT, cancelled)              | `./scripts/ci/is-infra-flake-failure.sh --help`                                             |
+| `is-infra-flake-failure.sh`          | Classify runner infra flakes (exit 143, cancelled, passed lint)            | `./scripts/ci/is-infra-flake-failure.sh --help`                                             |
 | `fail-on-security-audit.sh`          | Fail CI when security audit finds vulnerabilities                          | `./scripts/ci/fail-on-security-audit.sh`                                                    |
 | `free-disk-space.sh`                 | Free disk space on CI runner for Docker builds                             | `./scripts/ci/free-disk-space.sh`                                                           |
 | `memory-sampler.sh`                  | Background vmstat/free memory sampler around binary builds (#1707)         | `./scripts/ci/memory-sampler.sh start <log> <pid-file>`                                     |
