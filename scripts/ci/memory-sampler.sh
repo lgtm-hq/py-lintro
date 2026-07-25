@@ -78,20 +78,44 @@ snapshot() {
 	esac
 }
 
+# Return 0 when $1 is a live PID whose command line is this sampler. A bare
+# kill -0 is not enough: PID reuse could make start/stop signal or "reuse" an
+# unrelated process that inherited the recorded PID (CodeRabbit on #1707).
+is_sampler_pid() {
+	local pid="$1"
+	[[ -n "$pid" ]] || return 1
+	kill -0 "$pid" 2>/dev/null || return 1
+	local cmdline
+	cmdline="$(ps -p "$pid" -o command= 2>/dev/null)" || return 1
+	[[ "$cmdline" == *"memory-sampler.sh"* ]]
+}
+
 cmd_start() {
 	local log_file="${1:?Log file is required}"
 	local pid_file="${2:?PID file is required}"
 	local interval="${3:-$DEFAULT_INTERVAL}"
 
+	if ! [[ "$interval" =~ ^[1-9][0-9]*$ ]]; then
+		echo "Error: interval must be a positive integer (seconds), got '$interval'" >&2
+		return 2
+	fi
+
 	if [[ -f "$pid_file" ]]; then
 		local existing_pid
 		existing_pid="$(cat "$pid_file")"
-		if [[ -n "$existing_pid" ]] && kill -0 "$existing_pid" 2>/dev/null; then
+		if is_sampler_pid "$existing_pid"; then
 			log_warning "Memory sampler already running (PID $existing_pid); reusing it"
 			return 0
 		fi
 		log_warning "Removing stale sampler PID file ($pid_file)"
 		rm -f "$pid_file"
+	fi
+
+	# Preflight: the diagnostic log must be appendable before a sampler PID is
+	# recorded or success is reported (CodeRabbit on #1707).
+	if ! : >>"$log_file"; then
+		echo "Error: cannot append sampler output to '$log_file'" >&2
+		return 1
 	fi
 
 	# Detach the loop from this step's stdio so it survives the step shell
@@ -123,7 +147,7 @@ cmd_stop() {
 
 	local sampler_pid
 	sampler_pid="$(cat "$pid_file")"
-	if [[ -n "$sampler_pid" ]] && kill -0 "$sampler_pid" 2>/dev/null; then
+	if is_sampler_pid "$sampler_pid"; then
 		kill -TERM "$sampler_pid" 2>/dev/null || true
 		# The sampler PID belongs to an earlier step's shell, so `wait` cannot
 		# reap it here; poll briefly instead, then escalate to SIGKILL.
@@ -137,7 +161,7 @@ cmd_stop() {
 		fi
 		log_info "Memory sampler stopped (PID $sampler_pid)"
 	else
-		log_warning "Sampler PID ${sampler_pid:-unknown} is not running; cleaning up"
+		log_warning "Sampler PID ${sampler_pid:-unknown} is not a live sampler; cleaning up"
 	fi
 	rm -f "$pid_file"
 

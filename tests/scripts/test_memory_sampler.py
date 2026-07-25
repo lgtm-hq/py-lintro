@@ -263,10 +263,70 @@ def test_stop_cleans_up_stale_pid_file(stub_bin: Path, tmp_path: Path) -> None:
     result = _run(["stop", str(log_file), str(pid_file)], stub_bin=stub_bin)
 
     assert_that(result.returncode).is_equal_to(0)
-    assert_that(result.stdout + result.stderr).contains("not running")
+    assert_that(result.stdout + result.stderr).contains("is not a live sampler")
     assert_that(pid_file.exists()).is_false()
     # Even the cleanup path appends the stop marker for log bracketing.
     assert_that(log_file.read_text()).contains("=== sampler stopped ")
+
+
+def test_stop_does_not_signal_unrelated_process(stub_bin: Path, tmp_path: Path) -> None:
+    """A pid file pointing at a live NON-sampler is never signalled (#1707).
+
+    PID reuse must not turn stop into a kill of an innocent process: the
+    sampler only signals PIDs whose command line is the sampler itself.
+    """
+    log_file = tmp_path / "memory-sampler.log"
+    pid_file = tmp_path / "memory-sampler.pid"
+    bystander = subprocess.Popen(  # nosec B603 B607 - fixed sleep argv
+        ["sleep", "60"],
+    )
+    pid_file.write_text(str(bystander.pid))
+
+    try:
+        result = _run(["stop", str(log_file), str(pid_file)], stub_bin=stub_bin)
+
+        assert_that(result.returncode).is_equal_to(0)
+        assert_that(result.stdout + result.stderr).contains("is not a live sampler")
+        assert_that(pid_file.exists()).is_false()
+        # The bystander survived: stop never signalled it.
+        assert_that(bystander.poll()).is_none()
+    finally:
+        bystander.kill()
+        bystander.wait()
+
+
+@pytest.mark.parametrize("interval", ["0", "-5", "abc", "1.5"])
+def test_start_rejects_invalid_interval(
+    stub_bin: Path,
+    tmp_path: Path,
+    interval: str,
+) -> None:
+    """Non-positive-integer intervals fail before any sampler is forked."""
+    log_file = tmp_path / "memory-sampler.log"
+    pid_file = tmp_path / "memory-sampler.pid"
+
+    result = _run(["start", str(log_file), str(pid_file), interval], stub_bin=stub_bin)
+
+    assert_that(result.returncode).is_equal_to(2)
+    assert_that(result.stderr).contains("interval must be a positive integer")
+    assert_that(pid_file.exists()).is_false()
+
+
+def test_start_fails_when_log_not_appendable(stub_bin: Path, tmp_path: Path) -> None:
+    """An unwritable log path fails start without recording a sampler PID."""
+    pid_file = tmp_path / "memory-sampler.pid"
+
+    result = _run(
+        ["start", str(tmp_path / "missing-dir" / "sampler.log"), str(pid_file), "1"],
+        stub_bin=stub_bin,
+    )
+
+    assert_that(result.returncode).is_equal_to(1)
+    assert_that(result.stderr).contains("cannot append sampler output")
+    assert_that(pid_file.exists()).is_false()
+    assert_that(result.stdout + result.stderr).does_not_contain(
+        "Memory sampler started",
+    )
 
 
 # --- CLI contract -----------------------------------------------------------------

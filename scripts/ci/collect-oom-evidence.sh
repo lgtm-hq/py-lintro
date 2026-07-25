@@ -87,8 +87,17 @@ run_bounded() {
 
 		if [[ "${DMESG_RC:-127}" -ne 0 ]] && command -v journalctl &>/dev/null; then
 			echo "--- journalctl -k fallback OOM matches ---"
-			journalctl -k --no-pager 2>&1 | grep -iE "$OOM_PATTERN" ||
-				echo "(no OOM-killer signatures found in the kernel journal)"
+			JOURNAL_OUT="$(journalctl -k --no-pager 2>&1)"
+			JOURNAL_RC=$?
+			if [[ $JOURNAL_RC -ne 0 ]]; then
+				# A failed probe is not a clean scan: report it instead of
+				# claiming no signatures (CodeRabbit on #1707).
+				echo "(journalctl failed, rc=$JOURNAL_RC; output follows)"
+				echo "$JOURNAL_OUT"
+			else
+				echo "$JOURNAL_OUT" | grep -iE "$OOM_PATTERN" ||
+					echo "(no OOM-killer signatures found in the kernel journal)"
+			fi
 		elif [[ "${DMESG_RC:-127}" -ne 0 ]]; then
 			echo "--- journalctl not available; no kernel-log fallback ---"
 		fi
@@ -104,6 +113,10 @@ run_bounded() {
 			LOG_RC=$?
 			if [[ $LOG_RC -eq 137 ]]; then
 				echo "(log show timed out after ${LOG_SHOW_TIMEOUT}s; skipped)"
+			elif [[ $LOG_RC -ne 0 ]]; then
+				# A failed probe is not a clean scan (CodeRabbit on #1707).
+				echo "(log show failed, rc=$LOG_RC; output follows)"
+				cat "$LOG_CAPTURE"
 			else
 				grep -i "memorystatus" "$LOG_CAPTURE" ||
 					echo "(no Jetsam/memorystatus events found in the last 30m)"

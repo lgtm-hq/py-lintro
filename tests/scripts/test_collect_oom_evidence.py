@@ -141,18 +141,61 @@ def test_restricted_dmesg_without_journalctl_still_exits_zero(
     stub_bin: Path,
     tmp_path: Path,
 ) -> None:
-    """Fully degraded collection (no dmesg, no journal) never fails the job."""
+    """Fully degraded collection (no dmesg, no journal) never fails the job.
+
+    PATH is constrained to the stubs plus coreutils so journalctl is genuinely
+    unresolvable — a Linux dev box that ships it must not flip the branch.
+    """
     _write_stub(stub_bin, "uname", 'echo "Linux"')
     _write_stub(stub_bin, "dmesg", "exit 1")
-    # No journalctl stub; it is absent from PATH on macOS runners locally.
+    core_dir = tmp_path / "core"
+    core_dir.mkdir()
+    for tool in ("bash", "date", "grep", "cat"):
+        for base in ("/bin", "/usr/bin", "/usr/local/bin", "/opt/homebrew/bin"):
+            candidate = Path(base) / tool
+            if candidate.exists():
+                (core_dir / tool).symlink_to(candidate)
+                break
+    out = tmp_path / "oom-evidence.txt"
+
+    result = _run_collect(
+        out,
+        stub_bin=stub_bin,
+        extra_env={"PATH": f"{stub_bin}:{core_dir}"},
+    )
+
+    assert_that(result.returncode).is_equal_to(0)
+    report = out.read_text()
+    assert_that(report).contains("dmesg restricted or failed")
+    assert_that(report).contains(
+        "--- journalctl not available; no kernel-log fallback ---",
+    )
+    assert_that(result.stdout).contains("best-effort")
+
+
+def test_journalctl_failure_is_reported_not_clean(
+    stub_bin: Path,
+    tmp_path: Path,
+) -> None:
+    """A failing journalctl is a failed probe, not a clean scan (#1707)."""
+    _write_stub(stub_bin, "uname", 'echo "Linux"')
+    _write_stub(stub_bin, "dmesg", "exit 1")
+    _write_stub(
+        stub_bin,
+        "journalctl",
+        'echo "Journal file /var/log/journal is truncated" >&2\nexit 1',
+    )
     out = tmp_path / "oom-evidence.txt"
 
     result = _run_collect(out, stub_bin=stub_bin)
 
     assert_that(result.returncode).is_equal_to(0)
     report = out.read_text()
-    assert_that(report).contains("dmesg restricted or failed")
-    assert_that(result.stdout).contains("best-effort")
+    assert_that(report).contains("(journalctl failed, rc=1; output follows)")
+    assert_that(report).contains("Journal file /var/log/journal is truncated")
+    assert_that(report).does_not_contain(
+        "(no OOM-killer signatures found in the kernel journal)",
+    )
 
 
 def test_missing_dmesg_uses_journalctl_when_present(
@@ -232,6 +275,28 @@ def test_darwin_log_show_is_wall_clock_bounded(stub_bin: Path, tmp_path: Path) -
 
     assert_that(result.returncode).is_equal_to(0)
     assert_that(out.read_text()).contains("(log show timed out after 1s; skipped)")
+
+
+def test_darwin_log_show_failure_is_reported_not_clean(
+    stub_bin: Path,
+    tmp_path: Path,
+) -> None:
+    """A failing log show is a failed probe, not a clean scan (#1707)."""
+    _write_stub(stub_bin, "uname", 'echo "Darwin"')
+    _write_stub(
+        stub_bin,
+        "log",
+        'echo "log: unable to open database" >&2\nexit 1',
+    )
+    out = tmp_path / "oom-evidence.txt"
+
+    result = _run_collect(out, stub_bin=stub_bin)
+
+    assert_that(result.returncode).is_equal_to(0)
+    report = out.read_text()
+    assert_that(report).contains("(log show failed, rc=1; output follows)")
+    assert_that(report).contains("log: unable to open database")
+    assert_that(report).does_not_contain("(no Jetsam/memorystatus events found")
 
 
 def test_unsupported_platform_still_exits_zero(
