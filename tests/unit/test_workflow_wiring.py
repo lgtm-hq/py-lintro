@@ -1911,6 +1911,17 @@ def test_dependency_vuln_gate_filter_globs_match_committed_manifests() -> None:
     assert_that(unmatched).is_empty()
 
 
+def _js_regex_to_python(pattern: str) -> str:
+    """Translate a JavaScript regex to Python's named-group spelling.
+
+    Renovate config is JS-flavoured: named groups are ``(?<name>`` where Python
+    spells them ``(?P<name>``. Lookbehind assertions (``(?<=``, ``(?<!``) share
+    the ``(?<`` prefix but are identical in both flavours, so they must be left
+    alone — rewriting them yields invalid Python syntax.
+    """
+    return re.sub(r"\(\?<(?![=!])", "(?P<", pattern)
+
+
 def _renovate_pinned_image_manager() -> dict[str, Any]:
     """Return the customManager governing the pinned py-lintro release image."""
     config = json.loads(
@@ -1952,10 +1963,8 @@ def test_pinned_release_image_sites_share_one_reference() -> None:
     is reworded out of the manager's reach fails here rather than silently
     dropping out of coverage.
     """
-    # Renovate uses JS regex syntax for named groups; Python spells them
-    # ``(?P<name>``. The translation is purely syntactic.
     match_string = _renovate_pinned_image_manager()["matchStrings"][0]
-    pattern = re.compile(match_string.replace("(?<", "(?P<"))
+    pattern = re.compile(_js_regex_to_python(match_string))
 
     references: set[str] = set()
     for filename, expected_sites in _PINNED_IMAGE_SITES.items():
@@ -1984,7 +1993,7 @@ def test_pinned_release_image_manager_covers_both_workflows() -> None:
     # Renovate matches file patterns against repo-relative paths; assert each
     # workflow this repo pins in is actually reachable by one of them.
     file_patterns = [
-        re.compile(pattern.strip("/").replace("(?<", "(?P<"))
+        re.compile(_js_regex_to_python(pattern.strip("/")))
         for pattern in manager.get("managerFilePatterns", [])
     ]
     for filename in _PINNED_IMAGE_SITES:
