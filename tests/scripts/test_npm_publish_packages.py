@@ -663,6 +663,62 @@ def test_dist_tag_failure_on_skip_path_is_fatal(tmp_path: Path) -> None:
     assert_that(result.returncode).is_not_equal_to(0)
     assert_that(result.stdout).contains("could not reconcile dist-tag")
     assert_that(result.stdout).contains("npm/cli#8547")
+    # Auth rejections are never retried: exactly one dist-tag attempt.
+    assert_that(_dist_tag_log(result).strip().splitlines()).is_length(1)
+    # The run aborts at the first unreconciled tag: nothing is published.
+    assert_that(_publish_log(result).strip()).is_equal_to("")
+
+
+def test_dist_tag_transient_error_is_retried_then_succeeds(tmp_path: Path) -> None:
+    """A transient dist-tag failure is retried with backoff, then reconciled.
+
+    A single registry 5xx must not abort the ordered reconcile after only a
+    prefix of tags; the bounded retry (same error classification as publish)
+    rides out the blip.
+    """
+    # npm view reports every version as present, so each package hits the skip
+    # path; the first dist-tag attempt fails with a transient 503.
+    view_body = 'echo "9.9.9"\nexit 0'
+    count_file = tmp_path / "dt-attempts"
+    dist_tag_body = (
+        f'attempts=$(cat "{count_file}" 2>/dev/null || echo 0)\n'
+        f"attempts=$((attempts + 1))\n"
+        f'echo "$attempts" > "{count_file}"\n'
+        'if [[ "$attempts" -eq 1 ]]; then\n'
+        '  echo "npm error 503 Service Unavailable" >&2\n'
+        "  exit 1\n"
+        "fi\n"
+        "exit 0"
+    )
+    result = _run(
+        tmp_path,
+        npm_body="exit 0",
+        view_body=view_body,
+        dist_tag_body=dist_tag_body,
+    )
+    assert_that(result.returncode).is_equal_to(0)
+    assert_that(result.stdout).contains("transient dist-tag error")
+    tags = _dist_tag_log(result).strip().splitlines()
+    # Five packages reconciled; the first needed one retry.
+    assert_that(tags).is_length(len(_PACKAGES) + 1)
+    assert_that(tags[0]).is_equal_to(tags[1])
+    assert_that(_sleep_log(result).strip().splitlines()).is_length(1)
+
+
+def test_dist_tag_transient_error_exhausts_attempts(tmp_path: Path) -> None:
+    """A persistent transient dist-tag failure is fatal after bounded retries."""
+    view_body = 'echo "9.9.9"\nexit 0'
+    dist_tag_body = 'echo "npm error 502 Bad Gateway" >&2\nexit 1'
+    result = _run(
+        tmp_path,
+        npm_body="exit 0",
+        view_body=view_body,
+        dist_tag_body=dist_tag_body,
+        extra_env={"NPM_PUBLISH_MAX_ATTEMPTS": "2"},
+    )
+    assert_that(result.returncode).is_not_equal_to(0)
+    assert_that(result.stdout).contains("after 2 attempts on a transient error")
+    assert_that(_dist_tag_log(result).strip().splitlines()).is_length(2)
     # The run aborts at the first unreconciled tag: nothing is published.
     assert_that(_publish_log(result).strip()).is_equal_to("")
 
