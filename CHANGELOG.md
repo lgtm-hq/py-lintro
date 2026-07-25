@@ -21,6 +21,12 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.91.44] - 2026-07-25
+
+### Fixed
+
+- **ci**: bound dogfood no-silent-skip gate timeout at 20 min (#1704) (#1708) (ce6bace)
+
 ## [0.91.43] - 2026-07-25
 
 ### Fixed
