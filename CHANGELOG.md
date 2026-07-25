@@ -21,6 +21,13 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.91.42] - 2026-07-25
+
+### Fixed
+
+- **ci**: reconcile npm dist-tag on idempotent publish skip/conflict paths (#1710)
+  (aa9a1c9)
+
 ## [0.91.41] - 2026-07-25
 
 ### Fixed
