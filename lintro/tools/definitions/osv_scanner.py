@@ -22,6 +22,7 @@ from lintro.enums.tool_name import ToolName
 from lintro.enums.tool_type import ToolType
 from lintro.models.core.tool_result import ToolResult
 from lintro.parsers.osv_scanner import (
+    OsvScannerIssue,
     classify_suppressions,
     extract_osv_scanner_payload,
     parse_osv_scanner_output,
@@ -35,10 +36,15 @@ from lintro.plugins.execution_preparation import (
 from lintro.plugins.protocol import ToolDefinition
 from lintro.plugins.registry import register_tool
 from lintro.tools.core.option_validators import validate_bool, validate_positive_int
+from lintro.utils.path_filtering import resolve_exclude_anchors, should_exclude_path
 
 # Constants
 OSV_SCANNER_DEFAULT_TIMEOUT: int = 120  # Network operations can be slow
 OSV_SCANNER_DEFAULT_PRIORITY: int = 90  # High priority for security tool
+
+# Placeholder source path used by the parser when a result carries no source.
+# It is not a real filesystem path and must never be exclusion-matched.
+_UNKNOWN_SOURCE: str = "lockfile"
 
 
 @register_tool
@@ -51,7 +57,10 @@ class OsvScannerPlugin(BaseToolPlugin):
 
     Unlike other tool plugins, osv-scanner handles its own file discovery
     via --recursive, so file_patterns is empty and check() bypasses the
-    standard file discovery pipeline.
+    standard file discovery pipeline. Because that discovery cannot be
+    steered from the outside, lintro's resolved exclusion set
+    (``.lintro-ignore`` plus ``--exclude``) is applied to the reported
+    lockfile paths instead — see :meth:`filter_excluded_issues` (#1725).
     """
 
     @property
@@ -212,6 +221,66 @@ class OsvScannerPlugin(BaseToolPlugin):
         except ValueError:
             return resolved[0]
 
+    def _active_exclude_patterns(self) -> list[str]:
+        """Return the resolved exclusion patterns for this run.
+
+        ``self.exclude_patterns`` is populated by the base plugin from the
+        built-in defaults plus ``.lintro-ignore`` entries, and extended with
+        ``--exclude`` patterns by ``set_options``. Both mechanisms therefore
+        feed the same list, which is what makes them behave identically here
+        (see #1725).
+
+        Returns:
+            Non-empty, stripped exclusion patterns.
+        """
+        return [p.strip() for p in self.exclude_patterns if p and p.strip()]
+
+    def filter_excluded_issues(
+        self,
+        issues: list[OsvScannerIssue],
+        paths: list[str],
+    ) -> list[OsvScannerIssue]:
+        """Drop issues whose lockfile is covered by the exclusion set.
+
+        osv-scanner performs its own recursive lockfile discovery, so lintro
+        cannot hand it a pre-filtered target list without re-implementing (and
+        eventually falling behind) that discovery for every ecosystem. Instead
+        the resolved exclusion set is applied to the reported source paths,
+        which honours both directory patterns (``.claude``) and file patterns
+        (``bun.lock``, ``*.lock``) with the same gitignore semantics used for
+        file discovery (#1725).
+
+        Args:
+            issues: Parsed osv-scanner issues.
+            paths: Input paths for the run, used to anchor relative patterns.
+
+        Returns:
+            Issues whose source path is not excluded.
+        """
+        patterns = self._active_exclude_patterns()
+        if not patterns or not issues:
+            return list(issues)
+
+        anchors = resolve_exclude_anchors(paths)
+        kept: list[OsvScannerIssue] = []
+        for issue in issues:
+            source = issue.file or ""
+            if (
+                source
+                and source != _UNKNOWN_SOURCE
+                and should_exclude_path(
+                    path=source,
+                    exclude_patterns=patterns,
+                    anchors=anchors,
+                )
+            ):
+                logger.debug(
+                    f"[osv-scanner] Excluding finding from ignored path: {source}",
+                )
+                continue
+            kept.append(issue)
+        return kept
+
     def doc_url(self, code: str) -> str | None:
         """Return OSV vulnerability database URL for the given ID.
 
@@ -287,7 +356,12 @@ class OsvScannerPlugin(BaseToolPlugin):
         # log lines that must not corrupt JSON parsing (see #1043). ``output``
         # (combined) is retained for display and plain-text signal detection.
         output = proc.output
-        issues = parse_osv_scanner_output(proc.stdout)
+        parsed_issues = parse_osv_scanner_output(proc.stdout)
+        # Apply .lintro-ignore / --exclude patterns to the reported lockfile
+        # paths. osv-scanner does its own discovery and has no equivalent
+        # ignore mechanism, so exclusions are enforced here (#1725).
+        issues = self.filter_excluded_issues(issues=parsed_issues, paths=paths)
+        excluded_count = len(parsed_issues) - len(issues)
         payload = extract_osv_scanner_payload(proc.stdout)
         parse_failures_count = 0 if payload is not None else None
         no_op_success = False
@@ -311,6 +385,19 @@ class OsvScannerPlugin(BaseToolPlugin):
             and payload is not None
             and self._payload_has_valid_results(payload)
             and len(payload["results"]) == 0
+        ):
+            success = True
+
+        # Every finding lived under an excluded path. osv-scanner still exits
+        # non-zero because it saw vulnerabilities, but for lintro the scan is
+        # clean. Gated on a valid payload so genuine execution failures still
+        # fail closed (#1725).
+        if (
+            not success
+            and excluded_count
+            and not issues
+            and payload is not None
+            and self._payload_has_valid_results(payload)
         ):
             success = True
 
@@ -348,6 +435,7 @@ class OsvScannerPlugin(BaseToolPlugin):
             scan_root=scan_root,
             timeout=timeout,
             options=merged_options,
+            paths=paths,
         )
 
         if no_op_success and parse_failures_count is None:
@@ -368,6 +456,7 @@ class OsvScannerPlugin(BaseToolPlugin):
         scan_root: Path,
         timeout: float,
         options: dict[str, object],
+        paths: list[str] | None = None,
     ) -> dict[str, Any] | None:
         """Run a probe scan to classify suppression entries.
 
@@ -378,6 +467,9 @@ class OsvScannerPlugin(BaseToolPlugin):
             scan_root: Root directory for the scan.
             timeout: Timeout for subprocess execution.
             options: Merged runtime options.
+            paths: Input paths for the run, used to anchor exclude patterns so
+                probe findings from ignored trees cannot keep a suppression
+                looking active (#1725).
 
         Returns:
             Metadata dict with suppression classifications, or None.
@@ -409,7 +501,10 @@ class OsvScannerPlugin(BaseToolPlugin):
             logger.debug("[osv-scanner] Probe scan timed out, skipping staleness check")
             return None
 
-        probe_issues = parse_osv_scanner_output(probe.stdout)
+        probe_issues = self.filter_excluded_issues(
+            issues=parse_osv_scanner_output(probe.stdout),
+            paths=list(paths) if paths else [str(scan_root)],
+        )
 
         # If probe failed and returned no parseable issues, skip classification
         # to avoid incorrectly marking all suppressions as stale.

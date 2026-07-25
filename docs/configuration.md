@@ -1040,7 +1040,17 @@ lintro check --tools osv_scanner --tool-options "osv_scanner:timeout=300"
 
 # Skip suppression staleness check
 lintro check --tools osv_scanner --tool-options "osv_scanner:check_suppressions=false"
+
+# Ignore vendored or nested checkouts (equivalent to a .lintro-ignore entry)
+lintro check --tools osv_scanner --exclude ".claude"
 ```
+
+**Excluding lockfiles:** osv-scanner performs its own recursive lockfile discovery, so
+lintro applies the resolved exclusion set — `.lintro-ignore` entries plus `--exclude`
+patterns — to the lockfile paths it reports. Both mechanisms use the same gitignore
+semantics as file discovery and yield identical results. Directory patterns (`.claude`,
+`vendor/`) drop every finding from that tree — useful when nested checkouts multiply the
+same finding — and file patterns (`bun.lock`, `*.lock`) suppress individual lockfiles.
 
 #### pip-audit Configuration
 
