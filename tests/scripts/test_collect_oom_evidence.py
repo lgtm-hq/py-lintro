@@ -220,17 +220,10 @@ def test_missing_dmesg_uses_journalctl_when_present(
                 break
     out = tmp_path / "oom-evidence.txt"
 
-    env = {
-        **os.environ.copy(),
-        "PATH": f"{stub_bin}:{core_dir}",
-        "NO_COLOR": "1",
-    }
-    result = subprocess.run(  # nosec B603 - fixed argv, shell=False
-        [str(_SCRIPT), str(out)],
-        capture_output=True,
-        text=True,
-        check=False,
-        env=env,
+    result = _run_collect(
+        out,
+        stub_bin=stub_bin,
+        extra_env={"PATH": f"{stub_bin}:{core_dir}"},
     )
 
     assert_that(result.returncode).is_equal_to(0)

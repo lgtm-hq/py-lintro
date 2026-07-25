@@ -252,12 +252,7 @@ def test_stop_cleans_up_stale_pid_file(stub_bin: Path, tmp_path: Path) -> None:
     log_file = tmp_path / "memory-sampler.log"
     pid_file = tmp_path / "memory-sampler.pid"
     log_file.write_text("")
-    # Reapable-but-dead PID: start and exit a child, then record its PID.
-    dead = subprocess.run(  # nosec B603 B607 - fixed argv
-        ["true"],
-        check=False,
-    )
-    del dead
+    # A hardcoded high PID that is implausible to be live on the test runner.
     pid_file.write_text("999999")
 
     result = _run(["stop", str(log_file), str(pid_file)], stub_bin=stub_bin)

@@ -1362,6 +1362,25 @@ def test_build_binary_compile_step_has_step_level_timeout() -> None:
         assert_that(build_steps[0]["timeout-minutes"]).is_equal_to(25)
 
 
+def test_build_binary_job_timeout_leaves_diagnostic_headroom() -> None:
+    """The job deadline must not preempt the failure diagnostics.
+
+    Setup (harden-runner, checkout, setup-python, uv sync) can consume five
+    minutes or more, so a job deadline only 5 minutes past the 25-minute
+    compile bound can arrive during the post-timeout evidence steps and kill
+    the runner before the OOM artifacts upload. Require at least 10 minutes
+    of non-compile budget.
+    """
+    workflow = _load_workflow(name=_BUILD_BINARY_WORKFLOW)
+    for job_id in ("build-macos", "build-linux"):
+        job = workflow["jobs"][job_id]
+        build_steps = [
+            step for step in job["steps"] if step.get("name") == "Build binary"
+        ]
+        headroom = job["timeout-minutes"] - build_steps[0]["timeout-minutes"]
+        assert_that(headroom).described_as(job_id).is_greater_than_or_equal_to(10)
+
+
 def test_build_binary_compile_is_wrapped_by_memory_sampler() -> None:
     """Build binary is bracketed by the #1707 sampler with failure-only upload.
 

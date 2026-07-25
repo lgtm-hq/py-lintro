@@ -136,7 +136,9 @@ jobs:
     name: Build macOS Binary
     needs: get-release-info
     runs-on: ${{ matrix.arch == 'x86_64' && 'macos-15-intel' || 'macos-latest' }}
-    timeout-minutes: 30
+    # 25 min compile bound + 10 min of setup/diagnostic headroom: a tighter
+    # job deadline can preempt the failure-only OOM evidence upload.
+    timeout-minutes: 35
     permissions:
       contents: write
     strategy:
@@ -207,9 +209,12 @@ jobs:
         timeout-minutes: 25
         run: |
           uv run python scripts/build/build_macos.py \
-            --arch ${{ matrix.arch }} \
+            --arch "$BUILD_ARCH" \
             --skip-verify
         env:
+          # matrix.arch via env, not template expansion: workflow_call passes
+          # inputs.arch as a free-form string (template-injection hardening).
+          BUILD_ARCH: ${{ matrix.arch }}
           PYTHONUNBUFFERED: '1'
 
       - name: Stop memory sampler
@@ -282,7 +287,9 @@ jobs:
     name: Build Linux Binary
     needs: get-release-info
     runs-on: ${{ matrix.runner }}
-    timeout-minutes: 30
+    # 25 min compile bound + 10 min of setup/diagnostic headroom: a tighter
+    # job deadline can preempt the failure-only OOM evidence upload.
+    timeout-minutes: 35
     permissions:
       contents: write
     strategy:
