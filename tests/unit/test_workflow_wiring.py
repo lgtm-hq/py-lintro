@@ -2077,3 +2077,25 @@ def test_auto_rerun_signatures_are_fixed_strings() -> None:
     assert_that(signatures).is_not_empty()
     for signature in signatures:
         assert_that(signature).does_not_match(r"[\\^$*+?\[\]()|]")
+
+
+def test_auto_rerun_matches_docker_hub_buildx_pull_timeout() -> None:
+    """The matcher must know the Docker Hub buildkit-pull timeout.
+
+    `Setup Docker Buildx` boots buildkit by pulling moby/buildkit from
+    Docker Hub. When Docker Hub is slow the daemon times out and the job
+    dies before doing any real work -- purely transient, and not a
+    harden-runner block (registry-1.docker.io:443 is already allowed).
+    None of lgtm-ci's default signatures match it, so the v0.91.42 release
+    run (30148763859, Merge Manifests job 89692290242) was never
+    auto-rerun. The signature is scoped to the registry URL rather than a
+    bare "context deadline exceeded", which would absorb genuine timeouts
+    elsewhere that deserve a human.
+    """
+    signatures = _auto_rerun_signatures()
+
+    assert_that(signatures).contains(
+        'Get "https://registry-1.docker.io/v2/": context deadline exceeded',
+    )
+    # A bare timeout string is too broad to auto-rerun on.
+    assert_that(signatures).does_not_contain("context deadline exceeded")
