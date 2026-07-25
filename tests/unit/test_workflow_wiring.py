@@ -1911,8 +1911,35 @@ def test_dependency_vuln_gate_filter_globs_match_committed_manifests() -> None:
     assert_that(unmatched).is_empty()
 
 
+def _renovate_pinned_image_manager() -> dict[str, Any]:
+    """Return the customManager governing the pinned py-lintro release image."""
+    config = json.loads(
+        (_REPO_ROOT / "renovate.json").read_text(encoding="utf-8"),
+    )
+    covering = [
+        manager
+        for manager in config.get("customManagers", [])
+        if any(
+            "py-lintro" in match_string
+            for match_string in manager.get("matchStrings", [])
+        )
+    ]
+    assert_that(covering).is_length(1)
+    return cast(dict[str, Any], covering[0])
+
+
+# Every workflow file carrying a pinned release reference, and how many sites
+# it must carry. Hard-coding the counts is deliberate: asserting only that the
+# surviving references agree would stay green if a refactor deleted all but one
+# pin, which is exactly the drift this guard exists to catch (#1751).
+_PINNED_IMAGE_SITES = {
+    "dogfood-nightly.yml": 3,
+    "docker-ci.yml": 4,
+}
+
+
 def test_pinned_release_image_sites_share_one_reference() -> None:
-    """Every pinned py-lintro release reference must name the same release.
+    """Every pinned py-lintro release site must name the same release.
 
     The nightly dogfood run and the docker-ci fork-PR fallback pin a released
     ``py-lintro`` image by digest. The pin is deliberately frozen so the
@@ -1920,50 +1947,47 @@ def test_pinned_release_image_sites_share_one_reference() -> None:
     meaningful, and Renovate bumps every site as one set (#1751). A partial
     bump would leave the two workflows linting with different images while
     both claim to use "the pinned release" — this asserts that cannot happen.
+
+    The pattern is the one Renovate itself is configured with, so a pin that
+    is reworded out of the manager's reach fails here rather than silently
+    dropping out of coverage.
     """
-    workflows = [
-        _REPO_ROOT / ".github" / "workflows" / "dogfood-nightly.yml",
-        _REPO_ROOT / ".github" / "workflows" / "docker-ci.yml",
-    ]
-    pattern = re.compile(
-        r"ghcr\.io/lgtm-hq/py-lintro:(\d+\.\d+\.\d+)@(sha256:[a-f0-9]{64})",
-    )
+    # Renovate uses JS regex syntax for named groups; Python spells them
+    # ``(?P<name>``. The translation is purely syntactic.
+    match_string = _renovate_pinned_image_manager()["matchStrings"][0]
+    pattern = re.compile(match_string.replace("(?<", "(?P<"))
 
-    references: list[tuple[str, str]] = []
-    for workflow in workflows:
+    references: set[str] = set()
+    for filename, expected_sites in _PINNED_IMAGE_SITES.items():
+        workflow = _REPO_ROOT / ".github" / "workflows" / filename
         assert_that(workflow.is_file()).is_true()
-        references.extend(pattern.findall(workflow.read_text(encoding="utf-8")))
+        matches = pattern.findall(workflow.read_text(encoding="utf-8"))
+        # Per-file count, so deleting pins from one workflow cannot hide
+        # behind pins that remain in the other.
+        assert_that(matches).described_as(filename).is_length(expected_sites)
+        references.update(matches)
 
-    # Both workflows must actually carry pins; a refactor that drops them
-    # silently would otherwise make this test vacuously pass.
-    assert_that(references).is_not_empty()
-    assert_that(set(references)).is_length(1)
+    assert_that(references).is_length(1)
 
 
-def test_pinned_release_image_is_renovate_managed() -> None:
-    """A custom manager must cover the pinned release image sites.
+def test_pinned_release_image_manager_covers_both_workflows() -> None:
+    """The custom manager must still target every pinned-image workflow.
 
     Without it the pin is a manual multi-site edit that only ever moves when
     something breaks (#1751) — the failure mode behind #1590, where the pinned
     image lagged the manifest by seven tool versions and one absent binary.
     """
-    config = json.loads(
-        (_REPO_ROOT / "renovate.json").read_text(encoding="utf-8"),
-    )
-    managers = config.get("customManagers", [])
+    manager = _renovate_pinned_image_manager()
 
-    covering = [
-        manager
-        for manager in managers
-        if any(
-            "py-lintro" in match_string
-            for match_string in manager.get("matchStrings", [])
-        )
-    ]
-
-    assert_that(covering).is_length(1)
-    manager = covering[0]
     assert_that(manager.get("datasourceTemplate")).is_equal_to("docker")
-    file_patterns = " ".join(manager.get("managerFilePatterns", []))
-    assert_that(file_patterns).contains("dogfood-nightly")
-    assert_that(file_patterns).contains("docker-ci")
+
+    # Renovate matches file patterns against repo-relative paths; assert each
+    # workflow this repo pins in is actually reachable by one of them.
+    file_patterns = [
+        re.compile(pattern.strip("/").replace("(?<", "(?P<"))
+        for pattern in manager.get("managerFilePatterns", [])
+    ]
+    for filename in _PINNED_IMAGE_SITES:
+        path = f".github/workflows/{filename}"
+        covered = any(pattern.search(path) for pattern in file_patterns)
+        assert_that(covered).described_as(path).is_true()
