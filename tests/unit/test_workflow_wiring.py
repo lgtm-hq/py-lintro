@@ -1329,6 +1329,39 @@ def test_publish_pypi_sbom_fails_on_high_severity() -> None:
     assert_that(sbom["with"].get("scan-vulnerabilities")).is_true()
 
 
+# --- Binary build job timeouts (#1702) ---------------------------------------
+#
+# No job in build-binary.yml set timeout-minutes, so every binary build
+# inherited GitHub's 6-hour default. The Linux x64 Nuitka compile twice hung
+# until runner loss at ~57 min (v0.80.4, v0.91.24), silently desyncing the
+# npm publish and Homebrew chain via `needs:`.
+
+_BUILD_BINARY_WORKFLOW = "build-binary.yml"
+
+
+def test_build_binary_every_job_declares_timeout_minutes() -> None:
+    """Every build-binary job is bounded instead of inheriting the 6h default."""
+    workflow = _load_workflow(name=_BUILD_BINARY_WORKFLOW)
+    for job_id, job in workflow["jobs"].items():
+        assert_that(job).described_as(job_id).contains_key("timeout-minutes")
+        assert_that(job["timeout-minutes"]).described_as(job_id).is_instance_of(int)
+
+
+def test_build_binary_compile_step_has_step_level_timeout() -> None:
+    """The Build binary step is bounded tighter than its job.
+
+    A stalled compile must be attributable to the compile itself (25 min vs
+    the observed healthy norm of 16-24 min), not surface as a whole-job
+    timeout with no failed step.
+    """
+    workflow = _load_workflow(name=_BUILD_BINARY_WORKFLOW)
+    for job_id in ("build-macos", "build-linux"):
+        steps = workflow["jobs"][job_id]["steps"]
+        build_steps = [step for step in steps if step.get("name") == "Build binary"]
+        assert_that(build_steps).described_as(job_id).is_length(1)
+        assert_that(build_steps[0]["timeout-minutes"]).is_equal_to(25)
+
+
 _PUSH_SHA_TERNARY = "github.event_name == 'push' && github.sha || github.ref"
 
 # Job-level concurrency groups that legitimately key on ``github.ref`` even
