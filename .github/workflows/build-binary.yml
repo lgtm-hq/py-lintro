@@ -199,6 +199,10 @@ jobs:
         run: |
           uv sync --group build --group dev
 
+      - name: Start memory sampler
+        # #1707: background vmstat/free sampler; log uploads on failure only.
+        run: scripts/ci/memory-sampler.sh start memory-sampler.log memory-sampler.pid
+
       - name: Build binary
         timeout-minutes: 25
         run: |
@@ -207,6 +211,24 @@ jobs:
             --skip-verify
         env:
           PYTHONUNBUFFERED: '1'
+
+      - name: Stop memory sampler
+        if: always()
+        run: scripts/ci/memory-sampler.sh stop memory-sampler.log memory-sampler.pid
+
+      - name: Collect OOM evidence
+        if: failure()
+        run: scripts/ci/collect-oom-evidence.sh oom-evidence.txt
+
+      - name: Upload memory diagnostics
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: memory-diagnostics-macos-${{ matrix.arch }}
+          path: |
+            memory-sampler.log
+            oom-evidence.txt
+          retention-days: 7
 
       - name: Verify binary
         run: |
@@ -322,6 +344,10 @@ jobs:
         run: |
           uv sync --group build --group dev
 
+      - name: Start memory sampler
+        # #1707: background vmstat/free sampler; log uploads on failure only.
+        run: scripts/ci/memory-sampler.sh start memory-sampler.log memory-sampler.pid
+
       - name: Build binary
         timeout-minutes: 25
         run: |
@@ -331,6 +357,24 @@ jobs:
             --skip-verify
         env:
           PYTHONUNBUFFERED: '1'
+
+      - name: Stop memory sampler
+        if: always()
+        run: scripts/ci/memory-sampler.sh stop memory-sampler.log memory-sampler.pid
+
+      - name: Collect OOM evidence
+        if: failure()
+        run: scripts/ci/collect-oom-evidence.sh oom-evidence.txt
+
+      - name: Upload memory diagnostics
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: memory-diagnostics-linux-${{ matrix.arch }}
+          path: |
+            memory-sampler.log
+            oom-evidence.txt
+          retention-days: 7
 
       - name: Verify binary
         run: |
