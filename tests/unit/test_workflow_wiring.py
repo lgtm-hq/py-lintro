@@ -793,7 +793,9 @@ def test_dogfood_skip_gate_has_bounded_timeout() -> None:
             f"{workflow_name} dogfood-skip-gate must set timeout-minutes",
         ).is_not_none()
         # Above the 17 min observed healthy max; at most ~2x the ~14 median.
-        assert_that(timeout).is_between(18, 30)
+        # Upper bound 28 so the previous 30-minute configuration this PR
+        # removes would fail the contract.
+        assert_that(timeout).is_between(18, 28)
 
 
 # --- Deny-by-default pipeline skip-list drift guard (#1369) ------------------
