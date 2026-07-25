@@ -29,11 +29,12 @@ permissions: {}
 
 # Exact uv pin so setup-uv's ExactVersionResolver skips resolving "latest"
 # via astral-sh/versions uv.ndjson (the dominant tag-publish flake under
-# harden-runner). Keep in sync with docker/tools.Dockerfile ARG UV_VERSION.
-# Artifact URL lookup may still consult the manifest, so the continue-on-error
-# retry below remains as belt-and-suspenders (#1487, #1513).
+# harden-runner). Renovate keeps this in step with docker/tools.Dockerfile's
+# ARG UV_VERSION via a customManager on this line; a contract test asserts the
+# two stay equal. Artifact URL lookup may still consult the manifest, so the
+# continue-on-error retry below remains as belt-and-suspenders (#1487, #1513).
 env:
-  UV_VERSION: '0.11.29'
+  UV_VERSION: '0.11.31'
 
 jobs:
   get-release-info:

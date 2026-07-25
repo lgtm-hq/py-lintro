@@ -16,9 +16,18 @@ name: Auto Rerun on Infra Failure
 # so changes here take effect after merging to main.
 #
 # No branches: filter — tag-triggered publish runs set head_branch to the
-# tag name (e.g. v0.88.1), so branches: [main] would miss them.
-# workflow_run has no separate tags: filter. Fork abuse is blocked by the
-# same-repo guard on the job below (head_repository.full_name).
+# tag name (e.g. v0.88.1), so branches: [main] would miss them, and
+# workflow_run has no separate tags: filter. Dropping it also makes PR-branch
+# runs of the watched CI workflows eligible, which is intended: the reusable
+# workflow only reruns on a matched infra signature and only once per attempt.
+# Fork abuse is blocked by the same-repo guard on the job below
+# (head_repository.full_name), which is now the only such guard.
+#
+# Homebrew Tap / npm are reusable workflows invoked with `uses:` from the
+# PyPI tag pipeline, so during a release they are jobs inside the
+# "Publish - PyPI Production" run and emit no workflow_run event of their
+# own — rerunning that run's failed jobs covers them. They are listed here
+# for their standalone workflow_dispatch (backfill) runs.
 
 'on':
   workflow_run:

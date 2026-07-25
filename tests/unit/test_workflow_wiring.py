@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import ast
+import json
 import re
 import subprocess  # nosec B404 - subprocess runs fixed git argv against this repo
 from pathlib import Path
@@ -1107,9 +1108,21 @@ def test_publish_npm_delegates_publish_to_hardened_script() -> None:
 # substrings here, so this module only asserts the workflow-to-script wiring.
 
 
-# Exact uv pin for binary builds (#1487). Keep in sync with
-# docker/tools.Dockerfile ARG UV_VERSION.
-_BINARY_BUILD_UV_VERSION = "0.11.29"
+_UV_ARG_PATTERN = re.compile(r"^ARG UV_VERSION=(?P<version>[0-9]+\.[0-9]+\.[0-9]+)$")
+
+
+def _tools_dockerfile_uv_version() -> str:
+    """Return the uv version pinned by ``docker/tools.Dockerfile``.
+
+    Returns:
+        The ``ARG UV_VERSION`` value declared in the tools image Dockerfile.
+    """
+    dockerfile = _REPO_ROOT / "docker" / "tools.Dockerfile"
+    for line in dockerfile.read_text(encoding="utf-8").splitlines():
+        match = _UV_ARG_PATTERN.match(line.strip())
+        if match is not None:
+            return match.group("version")
+    pytest.fail("ARG UV_VERSION not found in docker/tools.Dockerfile")
 
 
 def test_build_binary_pins_setup_uv_version() -> None:
@@ -1119,9 +1132,16 @@ def test_build_binary_pins_setup_uv_version() -> None:
     astral-sh/versions uv.ndjson, which has timed out repeatedly under
     harden-runner during tag publishes (#1487). An exact pin uses the
     ExactVersionResolver path; the continue-on-error retry remains.
+
+    The pin must also equal the tools image's ``ARG UV_VERSION`` so the two
+    Renovate-managed uv pins cannot silently drift apart.
     """
     workflow = _load_workflow(name="build-binary.yml")
-    assert_that(workflow["env"]["UV_VERSION"]).is_equal_to(_BINARY_BUILD_UV_VERSION)
+    pinned = workflow["env"]["UV_VERSION"]
+    assert_that(pinned).matches(r"^\d+\.\d+\.\d+$")
+    assert_that(pinned).described_as(
+        "build-binary UV_VERSION must match docker/tools.Dockerfile ARG UV_VERSION",
+    ).is_equal_to(_tools_dockerfile_uv_version())
 
     setup_uv_steps: list[dict[str, Any]] = []
     for job in workflow["jobs"].values():
@@ -1135,6 +1155,42 @@ def test_build_binary_pins_setup_uv_version() -> None:
         version = step.get("with", {}).get("version", "")
         assert_that(version).does_not_contain("latest")
         assert_that(version).contains("env.UV_VERSION")
+
+
+def test_renovate_manages_build_binary_uv_pin() -> None:
+    """A Renovate customManager must match the build-binary UV_VERSION line.
+
+    The workflow pin is not a native manager target, so without a regex
+    manager whose pattern actually matches the file's text it would silently
+    rot while the Dockerfile pin advanced (#1487).
+    """
+    config = json.loads((_REPO_ROOT / "renovate.json").read_text(encoding="utf-8"))
+    workflow_text = (
+        _REPO_ROOT / ".github" / "workflows" / "build-binary.yml"
+    ).read_text(encoding="utf-8")
+
+    matching = [
+        manager
+        for manager in config["customManagers"]
+        if any(
+            "build-binary.yml" in pattern
+            for pattern in manager.get("managerFilePatterns", [])
+        )
+    ]
+    assert_that(matching).described_as(
+        "no Renovate customManager targets build-binary.yml",
+    ).is_not_empty()
+
+    for manager in matching:
+        assert_that(manager["packageNameTemplate"]).is_equal_to("astral-sh/uv")
+        for match_string in manager["matchStrings"]:
+            # Renovate uses JS named groups, `(?<name>...)`; Python wants
+            # `(?P<name>...)`.
+            pattern = re.sub(r"\(\?<(\w+)>", r"(?P<\1>", match_string)
+            found = re.search(pattern, workflow_text)
+            assert_that(found).described_as(
+                f"matchString {match_string!r} does not match build-binary.yml",
+            ).is_not_none()
 
 
 def test_build_binary_retries_setup_uv_on_failure() -> None:
@@ -1175,6 +1231,17 @@ def test_auto_rerun_covers_tag_publish_workflows() -> None:
     # branches: would exclude tag head_branch values; omit it entirely.
     assert_that(trigger).does_not_contain_key("branches")
     assert_that(trigger).does_not_contain_key("branches-ignore")
+
+    # workflow_run matches on the workflow's `name:`, and an unknown name is
+    # silently ignored by GitHub — so every watched entry must name a real
+    # workflow in this repo.
+    declared = {
+        _load_workflow(name=path.name)["name"]
+        for path in sorted((_REPO_ROOT / ".github" / "workflows").glob("*.yml"))
+    }
+    assert_that(watched).described_as(
+        "watched workflow_run names must exist as workflow `name:` values",
+    ).is_subset_of(declared)
 
     rerun_if = _normalize_github_expr(workflow["jobs"]["rerun"]["if"])
     assert_that(rerun_if).contains(
