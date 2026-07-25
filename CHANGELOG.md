@@ -21,6 +21,13 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.91.43] - 2026-07-25
+
+### Fixed
+
+- **ci**: bound binary build timeouts and instrument OOM diagnostics (#1702, #1707)
+  (#1713) (a4a8fee)
+
 ## [0.91.42] - 2026-07-25
 
 ### Fixed
