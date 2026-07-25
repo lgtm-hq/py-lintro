@@ -21,6 +21,13 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.91.40] - 2026-07-25
+
+### Fixed
+
+- **ci**: drop dead free-text failure-reason heuristic from code-quality gate (#1711)
+  (cfe670c)
+
 ## [0.91.39] - 2026-07-24
 
 ### Fixed
