@@ -96,6 +96,9 @@ cmd_start() {
 
 	# Detach the loop from this step's stdio so it survives the step shell
 	# exiting (each workflow `run:` block is a separate shell process).
+	# Trap note: if SIGTERM lands between iterations, $! still points at the
+	# completed sleep's PID and the kill no-ops — exit 0 still fires, and
+	# cmd_stop escalates to SIGKILL after 5s regardless, so the gap is cosmetic.
 	(
 		trap 'kill $! 2>/dev/null; exit 0' TERM INT
 		while :; do

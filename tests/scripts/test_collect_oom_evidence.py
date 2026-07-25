@@ -55,6 +55,7 @@ def _run_collect(
     *,
     stub_bin: Path,
     args: list[str] | None = None,
+    extra_env: dict[str, str] | None = None,
 ) -> subprocess.CompletedProcess[str]:
     """Run collect-oom-evidence.sh with stub binaries on PATH.
 
@@ -62,6 +63,7 @@ def _run_collect(
         output_file: Report file argument passed to the script.
         stub_bin: Directory of stub binaries to prepend to PATH.
         args: Full argument list overriding the default output-file form.
+        extra_env: Extra environment variables for the script.
 
     Returns:
         subprocess.CompletedProcess[str]: The completed process.
@@ -70,6 +72,7 @@ def _run_collect(
         **os.environ.copy(),
         "PATH": f"{stub_bin}:{os.environ['PATH']}",
         "NO_COLOR": "1",
+        **(extra_env or {}),
     }
     return subprocess.run(  # nosec B603 - fixed argv, shell=False
         [str(_SCRIPT), *(args if args is not None else [str(output_file)])],
@@ -209,6 +212,26 @@ def test_darwin_checks_jetsam_events(stub_bin: Path, tmp_path: Path) -> None:
     report = out.read_text()
     assert_that(report).contains("checking Jetsam events")
     assert_that(report).contains("memorystatus: killing process 4242")
+
+
+def test_darwin_log_show_is_wall_clock_bounded(stub_bin: Path, tmp_path: Path) -> None:
+    """A hung log show is killed instead of eating the failure-path budget.
+
+    The step runs if: failure() inside a job whose timeout the compile has
+    mostly consumed, so the unified-log query is bounded (Greptile on #1707).
+    """
+    _write_stub(stub_bin, "uname", 'echo "Darwin"')
+    _write_stub(stub_bin, "log", "sleep 120")
+    out = tmp_path / "oom-evidence.txt"
+
+    result = _run_collect(
+        out,
+        stub_bin=stub_bin,
+        extra_env={"OOM_LOG_SHOW_TIMEOUT": "1"},
+    )
+
+    assert_that(result.returncode).is_equal_to(0)
+    assert_that(out.read_text()).contains("(log show timed out after 1s; skipped)")
 
 
 def test_unsupported_platform_still_exits_zero(
