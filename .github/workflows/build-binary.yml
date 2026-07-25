@@ -34,7 +34,7 @@ permissions: {}
 # two stay equal. Artifact URL lookup may still consult the manifest, so the
 # continue-on-error retry below remains as belt-and-suspenders (#1487, #1513).
 env:
-  UV_VERSION: '0.11.31'
+  UV_VERSION: '0.11.32'
 
 jobs:
   get-release-info:
