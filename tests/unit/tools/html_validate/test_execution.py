@@ -11,7 +11,10 @@ from assertpy import assert_that
 
 from lintro.parsers.html_validate.html_validate_issue import HtmlValidateIssue
 from lintro.plugins.subprocess_executor import SubprocessResult
-from lintro.tools.definitions.html_validate import HtmlValidatePlugin
+from lintro.tools.definitions.html_validate import (
+    HtmlValidatePlugin,
+    contains_glob_syntax,
+)
 
 _ISSUE_JSON = (
     '[{"filePath":"index.html","messages":['
@@ -140,6 +143,86 @@ def test_check_returns_early_when_skipped(
         result = html_validate_plugin.check(["x.html"], {})
 
     assert_that(result).is_same_as(early)
+
+
+def test_check_passes_literal_paths_and_pinned_executable(
+    html_validate_plugin: HtmlValidatePlugin,
+    tmp_path: Path,
+) -> None:
+    """Only literal discovered paths are passed, with a pinned executable.
+
+    html-validate expands glob patterns through ``fs.globSync``, which aborts
+    the run on Bun builds lacking it, and an unpinned ``@latest`` spec resolves
+    a fresh release on every run (issue #1727).
+
+    Args:
+        html_validate_plugin: The plugin under test.
+        tmp_path: Temporary directory for the fixture files.
+    """
+    first = tmp_path / "index.html"
+    second = tmp_path / "about.html"
+    for html_file in (first, second):
+        html_file.write_text("<p>ok</p>\n")
+
+    mock_result = SubprocessResult(returncode=0, stdout="[]", stderr="", output="[]")
+    rel_files = ["index.html", "about.html"]
+
+    with (
+        patch.object(html_validate_plugin, "_prepare_execution") as mock_prepare,
+        patch.object(
+            html_validate_plugin,
+            "_run_subprocess_result",
+            return_value=mock_result,
+        ) as mock_run,
+    ):
+        ctx = _mock_ctx(tmp_path, rel_files)
+        mock_prepare.return_value = ctx
+        html_validate_plugin.check([str(tmp_path)], {})
+
+    cmd = cast(list[str], mock_run.call_args.kwargs["cmd"])
+    assert_that(cmd[-2:]).is_equal_to(rel_files)
+    for argument in cmd:
+        assert_that(contains_glob_syntax(argument)).described_as(argument).is_false()
+    assert_that(" ".join(cmd)).does_not_contain("@latest")
+
+
+def test_contains_glob_syntax_detects_metacharacters() -> None:
+    """Glob metacharacters are detected; plain paths are not flagged."""
+    assert_that(contains_glob_syntax("src/**/*.html")).is_true()
+    assert_that(contains_glob_syntax("page[1].html")).is_true()
+    assert_that(contains_glob_syntax("src/index.html")).is_false()
+
+
+def test_check_falls_back_to_absolute_files(
+    html_validate_plugin: HtmlValidatePlugin,
+    tmp_path: Path,
+) -> None:
+    """Absolute discovered files are used when no relative paths are available.
+
+    Args:
+        html_validate_plugin: The plugin under test.
+        tmp_path: Temporary directory for the fixture file.
+    """
+    html_file = tmp_path / "index.html"
+    html_file.write_text("<p>ok</p>\n")
+
+    mock_result = SubprocessResult(returncode=0, stdout="[]", stderr="", output="[]")
+
+    with (
+        patch.object(html_validate_plugin, "_prepare_execution") as mock_prepare,
+        patch.object(
+            html_validate_plugin,
+            "_run_subprocess_result",
+            return_value=mock_result,
+        ) as mock_run,
+    ):
+        ctx = _mock_ctx(tmp_path, [str(html_file)])
+        ctx.rel_files = []
+        mock_prepare.return_value = ctx
+        html_validate_plugin.check([str(html_file)], {})
+
+    cmd = cast(list[str], mock_run.call_args.kwargs["cmd"])
+    assert_that(cmd[-1]).is_equal_to(str(html_file))
 
 
 def test_fix_raises_not_implemented(

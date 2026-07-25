@@ -5,6 +5,11 @@ best practices, standards, and accessibility (WCAG) rules. It is a Node.js tool
 invoked via bun/bunx, mirroring lintro's other Node tools (markdownlint,
 prettier).
 
+Executable resolution prefers a consumer-local ``node_modules/.bin`` install,
+then a binary on PATH, and only then a ``bunx``/``npx`` invocation pinned to the
+version in ``package.json``; ``@latest`` is never resolved at runtime. Files are
+always passed as literal paths so html-validate's glob expansion never runs.
+
 No configuration is required: when no ``.htmlvalidate.*`` config is found,
 html-validate applies its built-in ``html-validate:recommended`` preset, so the
 tool produces sensible results out of the box.
@@ -41,6 +46,24 @@ HTML_VALIDATE_CONFIG_FILENAMES: list[str] = [
     ".htmlvalidate.cjs",
     ".htmlvalidate.mjs",
 ]
+
+# Characters html-validate's CLI treats as glob syntax. Passing any of them
+# would push its ``expandFiles`` helper down the directory-walking branch of
+# ``fs.globSync``, which is not implemented on every Bun release and aborts the
+# run before any file is validated (see issue #1727).
+_GLOB_METACHARACTERS: frozenset[str] = frozenset("*?[]{}")
+
+
+def contains_glob_syntax(argument: str) -> bool:
+    """Report whether an argument would be interpreted as a glob pattern.
+
+    Args:
+        argument: Command-line argument destined for html-validate.
+
+    Returns:
+        True when the argument contains glob metacharacters.
+    """
+    return any(char in _GLOB_METACHARACTERS for char in argument)
 
 
 @register_tool
@@ -121,10 +144,24 @@ class HtmlValidatePlugin(BaseToolPlugin):
             )
         logger.debug(f"[HtmlValidatePlugin] Working directory: {ctx.cwd}")
 
-        # Build command: resolve executable (bunx/npx/direct) + JSON formatter.
+        # Build command: resolve executable (local/PATH/pinned bunx) + JSON
+        # formatter. ``_get_executable_command`` never yields an unpinned
+        # ``@latest`` spec for html-validate (see NodeJSBuilder.pinned_tools).
         cmd: list[str] = self._get_executable_command(tool_name="html_validate")
         cmd.extend(["--formatter", "json"])
-        cmd.extend(ctx.rel_files)
+
+        # Always pass the literal files lintro discovered, never a glob or a
+        # directory: html-validate expands those through ``fs.globSync``, which
+        # aborts the whole run on Bun builds that lack it (issue #1727).
+        file_args: list[str] = ctx.rel_files or ctx.files
+        globbed = [path for path in file_args if contains_glob_syntax(path)]
+        if globbed:
+            logger.warning(
+                f"[HtmlValidatePlugin] {len(globbed)} path(s) contain glob "
+                f"metacharacters and may be re-expanded by html-validate: "
+                f"{globbed[:5]}",
+            )
+        cmd.extend(file_args)
 
         logger.debug(
             f"[HtmlValidatePlugin] Running: {' '.join(cmd)} (cwd={ctx.cwd})",
