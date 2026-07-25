@@ -13,6 +13,19 @@
 # validation failures are never retried — retrying them only hides the real
 # problem. Combined with the idempotency skip below, a re-run repairs a partial
 # publish instead of compounding it.
+#
+# Dist-tag reconciliation (see issue #1691): on both idempotent paths — the
+# `npm view` pre-check skip and the EPUBLISHCONFLICT conflict-as-success
+# branch — the requested dist-tag is reconciled with `npm dist-tag add` (a
+# no-op when the tag already matches). A fresh publish never calls dist-tag
+# because publish applies --tag atomically. Reconciliation failures are FATAL,
+# never swallowed: publish-npm.yml authenticates via npm trusted publishing
+# (OIDC), whose exchanged token is scoped to `npm publish` only — the registry
+# rejects dist-tag operations under it (npm/cli#8547 is still open). Failing
+# loudly surfaces a skipped-but-mistagged version for manual repair instead of
+# silently claiming a reconcile that never happened. Transient registry/network
+# blips on the reconcile itself get the same bounded backoff as publish, so a
+# single 5xx does not abort the ordered rerun after only a prefix of tags.
 
 set -euo pipefail
 
@@ -36,8 +49,8 @@ Environment:
                              non-latest tag (e.g. backfill) when publishing a
                              version lower than the current latest — npm refuses
                              to move latest backwards without an explicit --tag.
-  NPM_PUBLISH_MAX_ATTEMPTS   Max publish attempts per package on a transient
-                             error (default: 3).
+  NPM_PUBLISH_MAX_ATTEMPTS   Max attempts per package publish or dist-tag
+                             reconcile on a transient error (default: 3).
   NPM_PUBLISH_RETRY_DELAY    Base backoff in seconds; doubles each retry
                              (default: 5).
 
@@ -111,6 +124,65 @@ TRANSIENT_ERROR_RE='TLOG_CREATE_ENTRY_ERROR|creating tlog entry|transparency log
 # this loop or an earlier run landed the tarball) rather than a failure.
 ALREADY_PUBLISHED_RE='EPUBLISHCONFLICT|cannot publish over|previously published version|already published'
 
+# Reconcile the requested dist-tag for an already-published name@version.
+#
+# `npm dist-tag add` is idempotent: a no-op when the tag already points at
+# that version, and (unlike publish) allowed to move latest. A failure is
+# returned non-zero — never swallowed — because the OIDC trusted-publishing
+# token used by publish-npm.yml is publish-scoped and cannot run dist-tag
+# (npm/cli#8547); silently "succeeding" would leave the registry mistagged.
+#
+# Transient failures (network, registry 5xx, 429) get the same bounded
+# exponential-backoff retry as publish_one: a single-attempt mutation would
+# abort the ordered reconcile after only a prefix of package tags on a mere
+# blip. Auth and validation rejections are never retried — they surface the
+# OIDC remediation immediately.
+#
+# Args:
+#   $1: package name (e.g. "@lgtm-hq/lintro-linux-x64").
+#   $2: package version.
+# Returns:
+#   0 when the tag was reconciled; 1 when npm rejected the operation.
+reconcile_dist_tag() {
+	local dt_name="$1"
+	local dt_version="$2"
+	local attempt=1
+	local delay="$retry_base_delay"
+	local dt_output dt_rc
+	while :; do
+		echo "==> Reconciling dist-tag '$dist_tag' for $dt_name@$dt_version (attempt $attempt/$max_attempts)"
+		dt_output="$(npm dist-tag add "$dt_name@$dt_version" "$dist_tag" 2>&1)" && dt_rc=0 || dt_rc=$?
+		printf '%s\n' "$dt_output"
+		if [[ "$dt_rc" -eq 0 ]]; then
+			return 0
+		fi
+		# The OIDC remediation only applies to auth-scope rejections; retrying
+		# those would only hide the real problem.
+		if grep -qiE "$NON_RETRYABLE_ERROR_RE" <<<"$dt_output"; then
+			echo "ERROR: could not reconcile dist-tag '$dist_tag' for $dt_name@$dt_version (exit $dt_rc)." >&2
+			echo "ERROR: npm trusted publishing (OIDC) tokens are publish-scoped and cannot run 'npm dist-tag' (npm/cli#8547)." >&2
+			echo "ERROR: re-apply the tag with classic auth: npm dist-tag add $dt_name@$dt_version $dist_tag" >&2
+			return 1
+		fi
+		if grep -qiE "$TRANSIENT_ERROR_RE" <<<"$dt_output"; then
+			if [[ "$attempt" -ge "$max_attempts" ]]; then
+				echo "ERROR: could not reconcile dist-tag '$dist_tag' for $dt_name@$dt_version after $max_attempts attempts on a transient error." >&2
+				return 1
+			fi
+			echo "WARNING: transient dist-tag error for $dt_name@$dt_version (attempt $attempt/$max_attempts); retrying in ${delay}s." >&2
+			sleep "$delay"
+			attempt=$((attempt + 1))
+			delay=$((delay * 2))
+			if [[ "$delay" -gt "$retry_max_delay" ]]; then
+				delay="$retry_max_delay"
+			fi
+			continue
+		fi
+		echo "ERROR: could not reconcile dist-tag '$dist_tag' for $dt_name@$dt_version (exit $dt_rc)." >&2
+		return 1
+	done
+}
+
 # Publish one package directory with bounded, exponential-backoff retry on
 # transient Sigstore/registry errors only.
 #
@@ -135,6 +207,15 @@ publish_one() {
 		fi
 		if grep -qiE "$ALREADY_PUBLISHED_RE" <<<"$output"; then
 			echo "==> $pkg already present on the registry (publish conflict); treating as an idempotent success." >&2
+			# A fresh publish applies --tag atomically, but this version was
+			# published earlier (possibly under a different tag): reconcile the
+			# requested tag. Fatal on failure (see reconcile_dist_tag). Dry-runs
+			# never mutate the registry, so they skip reconciliation.
+			if [[ "${LIVE:-0}" == "1" ]]; then
+				reconcile_dist_tag \
+					"$(node -p "require('$pkg_dir/package.json').name")" \
+					"$(node -p "require('$pkg_dir/package.json').version")" || return 1
+			fi
 			return 0
 		fi
 		if grep -qiE "$NON_RETRYABLE_ERROR_RE" <<<"$output"; then
@@ -180,6 +261,10 @@ for pkg in "${PACKAGES[@]}"; do
 		view_err="$(npm view "$pkg_name@$pkg_version" version 2>&1 >/dev/null)" && view_ok=1 || view_ok=0
 		if [[ "$view_ok" == "1" ]]; then
 			echo "==> Skipping $pkg_name@$pkg_version (already published)"
+			# The version exists but may carry a different tag than this run
+			# requested; reconcile it. Fatal on failure (see reconcile_dist_tag);
+			# set -e aborts the release rather than leaving a stale tag.
+			reconcile_dist_tag "$pkg_name" "$pkg_version"
 			continue
 		elif ! grep -qiE 'E404|404 Not Found|is not in this registry' <<<"$view_err"; then
 			# The existence check itself failed, so we cannot prove the version
