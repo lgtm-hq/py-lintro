@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import ast
+import json
 import re
 import subprocess  # nosec B404 - subprocess runs fixed git argv against this repo
 from pathlib import Path
@@ -1253,9 +1254,12 @@ def test_dogfood_nightly_gates_pinned_digest_tools() -> None:
         if step.get("run") == "scripts/ci/verify-image-manifest-tools.sh"
     ]
     assert_that(verify_steps).is_length(1)
-    # Verifies the same pinned release digest the nightly dogfood run lints with.
-    assert_that(verify_steps[0]["env"]["IMAGE"]).contains(
-        "ghcr.io/lgtm-hq/py-lintro@sha256:",
+    # Verifies the same pinned release image the nightly dogfood run lints
+    # with. The reference carries both the release tag and the digest (#1751):
+    # the digest is what Docker resolves, the tag makes the pinned release
+    # readable and gives Renovate a version to bump.
+    assert_that(verify_steps[0]["env"]["IMAGE"]).matches(
+        r"ghcr\.io/lgtm-hq/py-lintro:\d+\.\d+\.\d+@sha256:[a-f0-9]{64}",
     )
 
     # A pinned-digest failure must reach the deduplicated failure notifier.
@@ -1905,3 +1909,61 @@ def test_dependency_vuln_gate_filter_globs_match_committed_manifests() -> None:
     unmatched = [path for path in manifests if not spec.match_file(path)]
 
     assert_that(unmatched).is_empty()
+
+
+def test_pinned_release_image_sites_share_one_reference() -> None:
+    """Every pinned py-lintro release reference must name the same release.
+
+    The nightly dogfood run and the docker-ci fork-PR fallback pin a released
+    ``py-lintro`` image by digest. The pin is deliberately frozen so the
+    digest-lag gate in ``scripts/ci/verify-image-manifest-tools.sh`` stays
+    meaningful, and Renovate bumps every site as one set (#1751). A partial
+    bump would leave the two workflows linting with different images while
+    both claim to use "the pinned release" — this asserts that cannot happen.
+    """
+    workflows = [
+        _REPO_ROOT / ".github" / "workflows" / "dogfood-nightly.yml",
+        _REPO_ROOT / ".github" / "workflows" / "docker-ci.yml",
+    ]
+    pattern = re.compile(
+        r"ghcr\.io/lgtm-hq/py-lintro:(\d+\.\d+\.\d+)@(sha256:[a-f0-9]{64})",
+    )
+
+    references: list[tuple[str, str]] = []
+    for workflow in workflows:
+        assert_that(workflow.is_file()).is_true()
+        references.extend(pattern.findall(workflow.read_text(encoding="utf-8")))
+
+    # Both workflows must actually carry pins; a refactor that drops them
+    # silently would otherwise make this test vacuously pass.
+    assert_that(references).is_not_empty()
+    assert_that(set(references)).is_length(1)
+
+
+def test_pinned_release_image_is_renovate_managed() -> None:
+    """A custom manager must cover the pinned release image sites.
+
+    Without it the pin is a manual multi-site edit that only ever moves when
+    something breaks (#1751) — the failure mode behind #1590, where the pinned
+    image lagged the manifest by seven tool versions and one absent binary.
+    """
+    config = json.loads(
+        (_REPO_ROOT / "renovate.json").read_text(encoding="utf-8"),
+    )
+    managers = config.get("customManagers", [])
+
+    covering = [
+        manager
+        for manager in managers
+        if any(
+            "py-lintro" in match_string
+            for match_string in manager.get("matchStrings", [])
+        )
+    ]
+
+    assert_that(covering).is_length(1)
+    manager = covering[0]
+    assert_that(manager.get("datasourceTemplate")).is_equal_to("docker")
+    file_patterns = " ".join(manager.get("managerFilePatterns", []))
+    assert_that(file_patterns).contains("dogfood-nightly")
+    assert_that(file_patterns).contains("docker-ci")

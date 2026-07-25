@@ -429,6 +429,19 @@
       "datasourceTemplate": "github-tags",
       "packageNameTemplate": "rust-lang/rustfmt",
       "extractVersionTemplate": "^v(?<version>.*)$"
+    },
+    {
+      "description": "Pinned py-lintro release image (nightly dogfood + docker-ci fork fallback, #1751); all pin sites bump together",
+      "customType": "regex",
+      "managerFilePatterns": [
+        "\\.github/workflows/dogfood-nightly\\.yml",
+        "\\.github/workflows/docker-ci\\.yml"
+      ],
+      "matchStrings": [
+        "(?<depName>ghcr\\.io/lgtm-hq/py-lintro):(?<currentValue>[0-9]+\\.[0-9]+\\.[0-9]+)@(?<currentDigest>sha256:[a-f0-9]{64})"
+      ],
+      "datasourceTemplate": "docker",
+      "versioningTemplate": "semver"
     }
   ]
 }
