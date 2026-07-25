@@ -13,7 +13,6 @@
 #   UPSTREAM_CONCLUSION - Job conclusion when distinct from result
 #   STATUS_OUTPUT       - Upstream lint status output (passed, failed, or empty)
 #   EXIT_CODE_OUTPUT    - Upstream lint exit code (0, 1, 143, or empty)
-#   FAILURE_REASON      - Free-text step log snippet for flake signatures
 
 set -euo pipefail
 
@@ -30,7 +29,6 @@ Environment variables:
   UPSTREAM_CONCLUSION   Job conclusion when distinct from result
   STATUS_OUTPUT         Upstream lint status output
   EXIT_CODE_OUTPUT      Upstream lint exit code
-  FAILURE_REASON        Free-text step log snippet
 EOF
 	exit 0
 fi
@@ -58,7 +56,6 @@ is_infra_flake_failure() {
 	local conclusion="${2:-}"
 	local status_output="${3:-}"
 	local exit_code_output="${4:-}"
-	local failure_reason="${5:-}"
 
 	# Nothing to classify when the upstream job succeeded.
 	if [[ "${result}" == "success" ]]; then
@@ -90,21 +87,18 @@ is_infra_flake_failure() {
 		return 0
 	fi
 
-	# Lint completed and passed, yet the job still failed — e.g. the
-	# `Upload linting report` step hitting `CreateArtifact: ETIMEDOUT`. The
-	# lint verdict is authoritative, so this is non-lint (infra) noise.
+	# Lint completed and passed, yet the job still failed — e.g. a post-lint
+	# step such as the report artifact upload flaking (non-fatal upstream
+	# since lgtm-ci#696). The lint verdict is authoritative, so this is
+	# non-lint (infra) noise.
 	if [[ "${status_output}" == "passed" && "${exit_code_output}" == "0" ]]; then
 		return 0
 	fi
 
-	if [[ "${failure_reason}" == *"shutdown signal"* ]]; then
-		return 0
-	fi
-
-	if [[ "${failure_reason}" == *"ETIMEDOUT"* || "${failure_reason}" == *"CreateArtifact"* ]]; then
-		return 0
-	fi
-
+	# No free-text log matching here on purpose: a substring like ETIMEDOUT
+	# appearing anywhere in a job log (including inside a lint report) must
+	# never green the required check — the Greptile concern on #1650/#1655.
+	# Infra classes are recognized only from structural signals above.
 	return 1
 }
 
@@ -112,8 +106,7 @@ if is_infra_flake_failure \
 	"${UPSTREAM_RESULT}" \
 	"${UPSTREAM_CONCLUSION:-}" \
 	"${STATUS_OUTPUT:-}" \
-	"${EXIT_CODE_OUTPUT:-}" \
-	"${FAILURE_REASON:-}"; then
+	"${EXIT_CODE_OUTPUT:-}"; then
 	exit 0
 fi
 

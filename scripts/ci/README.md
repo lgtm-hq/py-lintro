@@ -55,7 +55,7 @@ reclaimed by `sweep-ci-ghcr-tags.sh` (age-based, default 91 days; #1138).
 - `run-code-quality-gate.sh` — orchestrate evaluation plus `assert-required-check.sh`
   for the required gate job.
 - `is-infra-flake-failure.sh` — classify runner infra flakes (cancelled jobs, exit 143,
-  artifact timeouts).
+  lint passed on a failed job).
 - `assert-required-check.sh` — enforce the required check contract for
   lintro-code-quality.
 
