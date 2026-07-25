@@ -21,6 +21,12 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.91.45] - 2026-07-25
+
+### Fixed
+
+- **ci**: bump dogfooding mypy timeout to 120s (#1721) (8275a3b)
+
 ## [0.91.44] - 2026-07-25
 
 ### Fixed
