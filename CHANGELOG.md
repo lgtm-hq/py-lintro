@@ -21,6 +21,12 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.91.47] - 2026-07-25
+
+### Fixed
+
+- **ci**: retry transient infra failures in tag publish pipeline (#1571) (73fb1e6)
+
 ## [0.91.46] - 2026-07-25
 
 ### Changed
