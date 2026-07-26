@@ -29,6 +29,24 @@ name: Auto Rerun on Infra Failure
 # own — rerunning that run's failed jobs covers them. They are listed here
 # for their standalone workflow_dispatch (backfill) runs.
 
+# Which workflows belong here (#1775): every workflow whose failure marks a
+# commit on main red, because that is the red a human has to chase. A pure
+# infra kill on any of them is noise, and noise on main trains people to stop
+# reading it. Publish workflows are listed for the release-pipeline reasons
+# described above rather than for this criterion.
+#
+# Deliberately NOT listed:
+#   - Release - Auto Tag / Release - Version PR. Both mutate repository state
+#     (tags, release PRs) rather than just reporting on it, so an automatic
+#     rerun after a partial run could double-tag or resurrect a version PR.
+#     A human decides these.
+#   - Security - Dependency Vulnerability Gate, and the other PR-scoped
+#     helpers (labeler, auto-assign, PR title, action pinning, dependency
+#     review). They run on pull_request only and never redden main; the next
+#     push re-runs them anyway.
+#   - Cron-only reporting (Scorecard, vuln-suppression, version-skew audit,
+#     nightly dogfood). No main commit carries their status, and the next
+#     scheduled run supersedes a flaked one.
 'on':
   workflow_run:
     workflows:
@@ -40,6 +58,11 @@ name: Auto Rerun on Infra Failure
       - Publish - Homebrew Tap
       - Publish - npm
       - Publish - PyPI Production
+      - Quality - Documentation Site
+      - Reporting - Scheduled Lintro Analysis
+      - Security - CodeQL Code Scanning
+      - Security - SBOM Generation
+      - Testing - Built Package Validation
     types: [completed]
 
 permissions: {}

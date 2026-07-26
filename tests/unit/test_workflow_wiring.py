@@ -1252,6 +1252,89 @@ def test_auto_rerun_covers_tag_publish_workflows() -> None:
     )
 
 
+_DELIBERATELY_UNWATCHED = frozenset(
+    {
+        # Mutate repository state (tags, release PRs) rather than reporting on
+        # it, so an automatic rerun could double-tag or resurrect a version PR.
+        "Release - Auto Tag",
+        "Release - Version PR",
+        # The watcher itself. Adding it to its own `workflows:` list would let
+        # a failed rerun attempt trigger another rerun attempt.
+        "Auto Rerun on Infra Failure",
+    },
+)
+
+
+def _trigger_can_run_on_main(trigger: dict[str, Any]) -> bool:
+    """Report whether a push/workflow_run trigger can fire for ``main``.
+
+    Default-open rather than default-closed: anything not demonstrably scoped
+    away from ``main`` counts. An earlier version asked only whether
+    ``branches`` contained ``main``, which silently passes over a trigger that
+    omits the filter entirely — and an omitted filter means *every* branch,
+    ``main`` included. Erring toward inclusion means a new workflow is flagged
+    for triage rather than quietly left unprotected.
+
+    Args:
+        trigger: The parsed ``push`` or ``workflow_run`` mapping.
+
+    Returns:
+        True when the trigger can produce a run whose status lands on ``main``.
+    """
+    branches = trigger.get("branches")
+    if branches is not None:
+        return any(pattern in {"main", "*", "**"} for pattern in branches)
+    ignored = trigger.get("branches-ignore")
+    if ignored is not None:
+        return not any(pattern in {"main", "*", "**"} for pattern in ignored)
+    # No branch filter at all. A tags-only push targets a tag ref rather than a
+    # branch, so it never marks a branch head; anything else runs everywhere.
+    return "tags" not in trigger and "tags-ignore" not in trigger
+
+
+def test_auto_rerun_covers_every_workflow_that_can_redden_main() -> None:
+    """Anything that marks a main commit red must be auto-rerun eligible.
+
+    A pure infra kill (exit 143 / runner shutdown) on a workflow triggered by
+    push-to-main leaves main red until a human reruns it by hand. That happened
+    to Reporting - Scheduled Lintro Analysis, which was simply absent from the
+    watched list, so the rerun mechanism never even evaluated it (#1775).
+
+    Workflows that deliberately stay out are enumerated above with a reason,
+    so adding one is a conscious act rather than an oversight.
+    """
+    workflow = _load_workflow(name="auto-rerun-on-infra-failure.yml")
+    watched = set(workflow["on"]["workflow_run"]["workflows"])
+
+    reddens_main: set[str] = set()
+    for path in sorted((_REPO_ROOT / ".github" / "workflows").glob("*.yml")):
+        parsed = _load_workflow(name=path.name)
+        # Every workflow here quotes `'on':`, so it stays a string key rather
+        # than YAML 1.1's boolean True.
+        triggers = parsed.get("on") or {}
+        # Both shapes attach a status to a main commit: a direct push, and a
+        # workflow_run chained off one. Checking only `push` would have missed
+        # Reporting - Scheduled Lintro Analysis, which is workflow_run-driven
+        # and is precisely the workflow whose absence caused #1775.
+        for key in ("push", "workflow_run"):
+            trigger = triggers.get(key)
+            if isinstance(trigger, dict) and _trigger_can_run_on_main(trigger):
+                reddens_main.add(parsed["name"])
+
+    unwatched = reddens_main - watched - _DELIBERATELY_UNWATCHED
+    assert_that(unwatched).described_as(
+        "workflows that redden main but are not auto-rerun eligible",
+    ).is_empty()
+
+    # Keep the exclusion list honest in the other direction too. Without this,
+    # a workflow that stops reddening main (renamed, retriggered, deleted)
+    # leaves a stale entry behind that still reads as a considered decision,
+    # and the next person adding an exclusion inherits dead reasoning.
+    assert_that(_DELIBERATELY_UNWATCHED).described_as(
+        "every deliberate exclusion must still be a workflow that reddens main",
+    ).is_subset_of(reddens_main)
+
+
 # Canonical lgtm-ci pin used by all py-lintro workflows (v0.52.4).
 # Pages deploy must not regress to v0.32.3 (missing GH_TOKEN in bundler).
 # The 40-hex git SHA trips trufflehog's Github legacy-token detector under
