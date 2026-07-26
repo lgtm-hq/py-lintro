@@ -232,6 +232,42 @@ def should_exclude_path(
     )
 
 
+def is_readable_target(path: str) -> bool:
+    """Return whether ``path`` still resolves to something on disk.
+
+    Existence is checked *through* symlinks (``os.path.exists`` follows them),
+    so a dangling symlink — a committed link whose target is only produced by a
+    build, absent on a clean checkout — reports False. Such entries must never
+    reach a tool's argv: the tool resolves the link, stats the missing target,
+    and reports a scan error that fails an otherwise clean run (#1716, #1726).
+
+    Args:
+        path: Filesystem path to test.
+
+    Returns:
+        True when the path (or, for a symlink, its target) exists and can be
+        stat'ed, False when it is missing or unstat-able.
+    """
+    try:
+        return os.path.exists(path)
+    except (OSError, ValueError):  # pragma: no cover - defensive
+        return False
+
+
+def filter_existing_paths(paths: "Sequence[str]") -> list[str]:
+    """Return the subset of ``paths`` that still resolves on disk.
+
+    Order is preserved so callers keep deterministic batching and output.
+
+    Args:
+        paths: Candidate filesystem paths, in the caller's order.
+
+    Returns:
+        The paths for which :func:`is_readable_target` holds.
+    """
+    return [path for path in paths if is_readable_target(path)]
+
+
 def walk_files_with_excludes(
     paths: list[str],
     file_patterns: list[str],
@@ -293,6 +329,16 @@ def walk_files_with_excludes(
                 for file in files:
                     file_path: str = os.path.join(root, file)
                     abs_file_path: str = os.path.abspath(file_path)
+
+                    # ``os.walk`` reports a dangling symlink as a *file* (its
+                    # target cannot be stat'ed, so it is not a directory).
+                    # Handing such an entry to a tool makes the tool resolve it
+                    # to a target that does not exist — TruffleHog then dies
+                    # with ``lstat <target>: no such file or directory`` and
+                    # fails the whole run (#1716, #1726). Nothing can read a
+                    # broken link, so drop it during discovery.
+                    if not is_readable_target(abs_file_path):
+                        continue
 
                     # Check if file matches any file pattern
                     matches_pattern: bool = False
