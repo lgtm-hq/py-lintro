@@ -454,6 +454,18 @@
       ],
       "datasourceTemplate": "docker",
       "versioningTemplate": "semver"
+    },
+    {
+      "description": "lgtm-ci tooling checkout in site-quality.yml pins through actions/checkout `with.ref:`, a shape the github-actions manager does not see, so every lgtm-ci bump left this one site behind and failed the single-pin invariant (#1771/#1280)",
+      "customType": "regex",
+      "managerFilePatterns": [
+        "\\.github/workflows/site-quality\\.yml"
+      ],
+      "matchStrings": [
+        "ref: (?<currentDigest>[a-f0-9]{40}) # (?<currentValue>v[0-9]+\\.[0-9]+\\.[0-9]+)"
+      ],
+      "datasourceTemplate": "github-tags",
+      "depNameTemplate": "lgtm-hq/lgtm-ci"
     }
   ]
 }
