@@ -62,6 +62,12 @@ PINNED_SITES: dict[str, int] = {
 ORG = "lgtm-hq"
 PACKAGE = "py-lintro"
 
+# The package carries thousands of ephemeral versions, so the newest release
+# is not guaranteed to sit on page one. Walk pages until a release tag is
+# found, bounded so a pathological listing cannot spin (#1590).
+_PER_PAGE = 100
+_MAX_PAGES = 20
+
 _PIN_PATTERN = re.compile(
     r"ghcr\.io/lgtm-hq/py-lintro:(?P<version>\d+\.\d+\.\d+)"
     r"@(?P<digest>sha256:[a-f0-9]{64})",
@@ -99,9 +105,43 @@ def _fetch_package_versions(token: str) -> list[dict[str, Any]]:
     Returns:
         Parsed version records, or an empty list when unavailable.
     """
+    versions: list[dict[str, Any]] = []
+    for page in range(1, _MAX_PAGES + 1):
+        page_records = _fetch_page(token=token, page=page)
+        if not page_records:
+            break
+        versions.extend(page_records)
+        if len(page_records) < _PER_PAGE:
+            break  # short page means the last one
+        if latest_published_release(versions) is not None:
+            # A release tag is in hand; deeper pages are older by construction
+            # (the API returns newest first), so stop rather than walk them all.
+            break
+    else:
+        _warn(
+            f"stopped after {_MAX_PAGES} pages of package versions; "
+            "pin may be based on an incomplete list",
+        )
+    return versions
+
+
+def _fetch_page(*, token: str, page: int) -> list[dict[str, Any]]:
+    """Fetch one page of container versions.
+
+    The package carries thousands of ``sha-``/``ci-`` versions, so a single
+    page is not enough to guarantee a release tag is visible — the exact
+    enumeration problem that stopped Renovate maintaining this pin (#1590).
+
+    Args:
+        token: GitHub token with ``read:packages``.
+        page: 1-based page number.
+
+    Returns:
+        Version records for the page, or an empty list when unavailable.
+    """
     url = (
         f"https://api.github.com/orgs/{ORG}/packages/container/"
-        f"{PACKAGE}/versions?per_page=100"
+        f"{PACKAGE}/versions?per_page={_PER_PAGE}&page={page}"
     )
     if not url.startswith("https://"):  # pragma: no cover - constant URL
         _warn("refusing to fetch a non-HTTPS URL; pin unchanged")
@@ -183,8 +223,12 @@ def apply_pin(*, version: str, digest: str, dry_run: bool = False) -> bool:
         True when a change was made (or would be), False when already current.
     """
     replacement = f"ghcr.io/lgtm-hq/py-lintro:{version}@{digest}"
-    changed = False
 
+    # Two phases on purpose. Validating and writing in one pass would rewrite
+    # dogfood-nightly.yml and then bail on docker-ci.yml, leaving the workflows
+    # pinned to different images — the exact partial bump the wiring test in
+    # #1752 exists to catch, reached here without any failure being reported.
+    planned: list[tuple[Path, str]] = []
     for relative_path, expected_sites in PINNED_SITES.items():
         path = _REPO_ROOT / relative_path
         if not path.is_file():
@@ -195,18 +239,22 @@ def apply_pin(*, version: str, digest: str, dry_run: bool = False) -> bool:
         matches = _PIN_PATTERN.findall(text)
         if len(matches) != expected_sites:
             # A changed pin shape means this script no longer understands the
-            # file. Rewriting part of it would leave the workflows disagreeing.
+            # file, so no file is touched.
             _warn(
                 f"{relative_path}: expected {expected_sites} pinned sites, "
                 f"found {len(matches)}; pin unchanged",
             )
             return False
 
-        updated = _PIN_PATTERN.sub(replacement, text)
-        if updated != text:
-            changed = True
-            if not dry_run:
-                path.write_text(updated, encoding="utf-8")
+        planned.append((path, _PIN_PATTERN.sub(replacement, text)))
+
+    changed = False
+    for path, updated in planned:
+        if path.read_text(encoding="utf-8") == updated:
+            continue
+        changed = True
+        if not dry_run:
+            path.write_text(updated, encoding="utf-8")
 
     return changed
 

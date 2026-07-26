@@ -180,3 +180,103 @@ def test_every_pinned_site_is_declared(module: Any) -> None:
         text = (ROOT / relative_path).read_text(encoding="utf-8")
         found = len(module._PIN_PATTERN.findall(text))  # noqa: SLF001
         assert_that(found).described_as(relative_path).is_equal_to(expected_sites)
+
+
+def test_apply_pin_writes_nothing_when_a_later_file_is_invalid(
+    module: Any,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A bad second file must leave the first untouched.
+
+    Validating and writing in one pass would rewrite the first workflow and
+    then bail on the second, leaving them pinned to different images — the
+    exact partial bump the wiring test guards against, reached without any
+    failure being reported (#1590 review).
+
+    Args:
+        module: The loaded sync module.
+        tmp_path: Temporary repo root.
+        monkeypatch: Fixture used to repoint the module at the fake repo.
+    """
+    good = tmp_path / "good.yml"
+    bad = tmp_path / "bad.yml"
+    original_good = f"image: ghcr.io/lgtm-hq/py-lintro:0.1.0@{DIGEST_A}\n"
+    good.write_text(original_good)
+    # Declared as holding one site, but holds none.
+    bad.write_text("image: something-else\n")
+
+    monkeypatch.setattr(module, "_REPO_ROOT", tmp_path)
+    monkeypatch.setattr(module, "PINNED_SITES", {"good.yml": 1, "bad.yml": 1})
+
+    changed = module.apply_pin(version="0.9.9", digest=DIGEST_B)
+
+    assert_that(changed).is_false()
+    # The decisive assertion: the valid file was not written.
+    assert_that(good.read_text()).is_equal_to(original_good)
+
+
+def test_fetch_walks_pages_until_a_release_is_found(
+    module: Any,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Pagination continues past pages holding only ephemeral versions.
+
+    The package carries thousands of ``sha-``/``ci-`` versions, so the newest
+    release is not guaranteed to be on page one. Reading a single page is the
+    same enumeration failure that stopped Renovate maintaining this pin.
+
+    Args:
+        module: The loaded sync module.
+        monkeypatch: Fixture used to stub the per-page fetch.
+    """
+    pages = {
+        1: [
+            _version_record(digest=DIGEST_A, tags=[f"sha-{i:07x}"]) for i in range(100)
+        ],
+        2: [_version_record(digest=DIGEST_B, tags=["0.91.49"])],
+    }
+    seen: list[int] = []
+
+    def _fake_page(*, token: str, page: int) -> list[dict[str, Any]]:
+        seen.append(page)
+        return pages.get(page, [])
+
+    monkeypatch.setattr(module, "_fetch_page", _fake_page)
+
+    versions = module._fetch_package_versions("token")  # noqa: SLF001
+
+    assert_that(seen).is_equal_to([1, 2])
+    assert_that(module.latest_published_release(versions)).is_equal_to(
+        ("0.91.49", DIGEST_B),
+    )
+
+
+def test_fetch_stops_once_a_release_is_in_hand(
+    module: Any,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Paging stops at the first page carrying a release tag.
+
+    The API returns newest first, so deeper pages are older by construction
+    and walking them would only cost requests.
+
+    Args:
+        module: The loaded sync module.
+        monkeypatch: Fixture used to stub the per-page fetch.
+    """
+    seen: list[int] = []
+
+    def _fake_page(*, token: str, page: int) -> list[dict[str, Any]]:
+        seen.append(page)
+        records = [
+            _version_record(digest=DIGEST_A, tags=[f"sha-{i:07x}"]) for i in range(99)
+        ]
+        records.append(_version_record(digest=DIGEST_B, tags=["0.91.49"]))
+        return records
+
+    monkeypatch.setattr(module, "_fetch_page", _fake_page)
+
+    module._fetch_package_versions("token")  # noqa: SLF001
+
+    assert_that(seen).is_equal_to([1])
