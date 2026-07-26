@@ -21,6 +21,12 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.91.54] - 2026-07-26
+
+### Fixed
+
+- **ci**: verify persistent GHCR tags survive the CI-tag sweep (#1652) (#1772) (dc304b6)
+
 ## [0.91.53] - 2026-07-26
 
 ### Changed
