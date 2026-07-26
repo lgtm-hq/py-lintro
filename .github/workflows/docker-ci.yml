@@ -616,10 +616,13 @@ jobs:
     # ~14 min median (10–17 observed); 20 fails a stalled run fast (#1704).
     timeout-minutes: 20
     outputs:
-      # 'true' when this run's structured report proves the only failures were
-      # tool-execution timeouts and every tool reported zero findings (#1653).
-      # Consumed by code-quality-gate to absorb mypy perf flakes without ever
-      # masking a real lint verdict.
+      # Diagnostic only (#1653): 'true' when THIS job's report shows the only
+      # failures were tool-execution timeouts with zero findings anywhere.
+      # Deliberately NOT wired into code-quality-gate: this job always lints the
+      # full repo, so its verdict is not evidence about the authoritative lint
+      # run (which may be changed-files scoped, and is a separate run subject to
+      # its own timing). Absorbing on it can green a genuine finding — see the
+      # PR discussion and lgtm-ci#746.
       timeout-flake: ${{ steps.skips.outputs.timeout-flake }}
       timed-out-tools: ${{ steps.skips.outputs.timed-out-tools }}
     steps:
@@ -742,9 +745,6 @@ jobs:
       - dogfooding-lint
       - dogfooding-lint-changed
       - dogfooding_lint_retry
-      # Supplies the tool-execution-timeout verdict (#1653). Skipped/failed
-      # leaves the output empty, which disables the classification (fail closed).
-      - dogfood-skip-gate
     if: >-
       always() &&
       !cancelled() &&
@@ -801,11 +801,6 @@ jobs:
             || needs.dogfooding-lint.outputs.exit-code }}
           RETRY_LINT_STATUS: ${{ needs.dogfooding_lint_retry.outputs.status }}
           RETRY_LINT_EXIT_CODE: ${{ needs.dogfooding_lint_retry.outputs.exit-code }}
-          # Tool-execution timeout evidence (#1653). The no-silent-skip gate
-          # lints the same tree from the same image and only reports 'true'
-          # when a tool timed out AND every tool reported zero findings, so a
-          # real lint verdict can never be absorbed by it.
-          TIMEOUT_FLAKE: ${{ needs.dogfood-skip-gate.outputs.timeout-flake }}
         run: scripts/ci/run-code-quality-gate.sh
 
   dogfooding-pr-comment:

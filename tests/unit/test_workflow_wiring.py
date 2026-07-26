@@ -2293,17 +2293,25 @@ def test_dogfood_skip_gate_publishes_timeout_flake_outputs() -> None:
     assert_that(step_ids).contains("skips")
 
 
-def test_code_quality_gate_consumes_timeout_flake_from_skip_gate() -> None:
-    """The code-quality gate must read the timeout proof from the skip gate."""
+def test_code_quality_gate_does_not_consume_the_timeout_verdict() -> None:
+    """The timeout verdict must stay diagnostic, never a gate input.
+
+    ``dogfood-skip-gate`` always lints the full repo, so its verdict is not
+    evidence about the authoritative lint run: under ``lint-scope == 'changed'``
+    that run lints only changed files, and a tool that times out reports zero
+    findings precisely because it did not finish. Wiring the verdict into the
+    gate lets a genuine finding be absorbed and the required check turn green.
+
+    A sound implementation needs the authoritative run's own structured report,
+    which the upstream reusable lint workflow does not publish (lgtm-ci#746).
+    """
     docker_ci = _load_workflow(name="docker-ci.yml")
     gate_job = docker_ci["jobs"]["code-quality-gate"]
 
-    assert_that(gate_job["needs"]).contains("dogfood-skip-gate")
+    assert_that(gate_job["needs"]).does_not_contain("dogfood-skip-gate")
 
     gate_step = next(step for step in gate_job["steps"] if step.get("id") == "gate")
-    assert_that(_normalize_github_expr(gate_step["env"]["TIMEOUT_FLAKE"])).contains(
-        "needs.dogfood-skip-gate.outputs.timeout-flake",
-    )
+    assert_that(gate_step.get("env") or {}).does_not_contain_key("TIMEOUT_FLAKE")
 
 
 def test_dogfood_skip_gate_checks_out_the_timeout_classifier() -> None:

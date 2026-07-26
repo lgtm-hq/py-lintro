@@ -13,8 +13,6 @@
 #   UPSTREAM_CONCLUSION - Job conclusion when distinct from result
 #   STATUS_OUTPUT       - Upstream lint status output (passed, failed, or empty)
 #   EXIT_CODE_OUTPUT    - Upstream lint exit code (0, 1, 143, or empty)
-#   TIMEOUT_FLAKE       - 'true' when the dogfood no-silent-skip gate proved the
-#                         run failed only on tool-execution timeouts (#1653)
 
 set -euo pipefail
 
@@ -31,8 +29,6 @@ Environment variables:
   UPSTREAM_CONCLUSION   Job conclusion when distinct from result
   STATUS_OUTPUT         Upstream lint status output
   EXIT_CODE_OUTPUT      Upstream lint exit code
-  TIMEOUT_FLAKE         'true' when a tool-execution timeout with zero findings
-                        was proven by the dogfood no-silent-skip gate (#1653)
 EOF
 	exit 0
 fi
@@ -60,25 +56,10 @@ is_infra_flake_failure() {
 	local conclusion="${2:-}"
 	local status_output="${3:-}"
 	local exit_code_output="${4:-}"
-	local timeout_flake="${5:-}"
 
 	# Nothing to classify when the upstream job succeeded.
 	if [[ "${result}" == "success" ]]; then
 		return 1
-	fi
-
-	# Tool-execution timeout (#1653). A tool that blows its deadline (e.g.
-	# `mypy execution timed out (120.0s limit exceeded)`) makes lintro exit 1
-	# with status=failed — indistinguishable from a real verdict from job
-	# outputs alone. The dogfood no-silent-skip gate lints the same tree from
-	# the same image and publishes a structured verdict
-	# (scripts/ci/classify-lint-timeout.py); it is only 'true' when at least
-	# one tool timed out AND every tool reported zero findings. That is
-	# positive evidence there is no lint finding to mask, which is why this
-	# sits above the lint-verdict guard. It is still an infra flake, so
-	# infra-flake=true propagates and image promotion stays blocked.
-	if [[ "${timeout_flake}" == "true" ]]; then
-		return 0
 	fi
 
 	# Runner shutdown propagates SIGTERM to lintro, which exits 143. lintro
@@ -125,8 +106,7 @@ if is_infra_flake_failure \
 	"${UPSTREAM_RESULT}" \
 	"${UPSTREAM_CONCLUSION:-}" \
 	"${STATUS_OUTPUT:-}" \
-	"${EXIT_CODE_OUTPUT:-}" \
-	"${TIMEOUT_FLAKE:-}"; then
+	"${EXIT_CODE_OUTPUT:-}"; then
 	exit 0
 fi
 

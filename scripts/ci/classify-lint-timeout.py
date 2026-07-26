@@ -5,15 +5,22 @@
 
 A tool that exceeds its execution timeout (``mypy execution timed out
 (120.0s limit exceeded)``) makes lintro exit ``1`` with ``status=failed`` —
-structurally identical to a real lint verdict. The code-quality gate therefore
-cannot tell a perf flake from genuine findings using job outputs alone
-(issue #1653).
+structurally identical to a real lint verdict. A consumer therefore cannot tell
+a perf flake from genuine findings using job outputs alone (issue #1653).
 
-This script supplies the missing evidence. It reads the structured report
-produced by ``lintro chk --output-format json --output <file>`` (the same
-report the no-silent-skip gate already generates from the same image and the
-same tree) and answers one question: *did this run fail only because a tool
-timed out, with zero lint findings anywhere?*
+This script answers that question for **one** report: it reads the structured
+document produced by ``lintro chk --output-format json --output <file>`` and
+reports whether *that run* failed only because a tool timed out, with zero lint
+findings anywhere.
+
+Scope warning. The verdict describes only the run whose report is passed in. It
+is NOT evidence about a different lint run: a tool that times out contributes
+zero findings precisely because it did not finish, so a clean verdict here
+cannot clear a failure reported elsewhere — different file scope or ordinary
+timing variance is enough for the two to disagree. Using this verdict to absorb
+another job's failure can turn a required check green over a genuine finding.
+The code-quality gate therefore does not consume it; wiring it there needs the
+authoritative run to publish its own report (lgtm-ci#746).
 
 Classification is deliberately conservative and fails closed. It reports
 ``timeout-flake=true`` only when **all** of the following hold:

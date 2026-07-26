@@ -604,198 +604,51 @@ def test_run_code_quality_gate_fails_when_retry_reports_real_lint_failure() -> N
 # --- Tool-execution timeout classification (#1653) ---------------------------
 
 
-@pytest.mark.parametrize(
-    ("timeout_flake", "expected_infra"),
-    [
-        # Proven timeout with zero findings anywhere: absorbed as infra noise.
-        ("true", True),
-        # Anything other than the exact string 'true' is no evidence at all:
-        # an empty output (skipped supplier job) must stay red.
-        ("false", False),
-        ("", False),
-        ("TRUE", False),
-        ("1", False),
-    ],
-)
-def test_is_infra_flake_failure_honours_timeout_flake(
-    *,
-    timeout_flake: str,
-    expected_infra: bool,
-) -> None:
-    """TIMEOUT_FLAKE absorbs a lint-shaped verdict only when exactly 'true'."""
+def test_gate_never_absorbs_on_a_timeout_claim() -> None:
+    """A tool-timeout claim must not green a lint-shaped verdict.
+
+    #1653 originally absorbed a lint failure when the no-silent-skip gate
+    reported ``timeout-flake=true``. That evidence comes from a *different*
+    job which always lints the full repo, so it is not evidence about the
+    authoritative run: under ``lint-scope == 'changed'`` the verdict comes from
+    changed files only, and a tool that times out contributes zero findings
+    precisely because it did not finish. A genuine finding could therefore be
+    absorbed and the required check turned green (lgtm-ci#746).
+
+    The absorb was removed. This asserts it stays removed: an unknown
+    environment variable must not change the classification of a lint verdict.
+    """
     proc = _run_script(
         "scripts/ci/is-infra-flake-failure.sh",
         env={
             "UPSTREAM_RESULT": "failure",
             "STATUS_OUTPUT": "failed",
             "EXIT_CODE_OUTPUT": "1",
-            "UPSTREAM_CONCLUSION": "",
-            "TIMEOUT_FLAKE": timeout_flake,
-        },
-    )
-    assert_that(proc.returncode).is_equal_to(0 if expected_infra else 1)
-
-
-def test_is_infra_flake_failure_timeout_flake_does_not_absorb_success() -> None:
-    """A successful upstream job is never reclassified as a flake."""
-    proc = _run_script(
-        "scripts/ci/is-infra-flake-failure.sh",
-        env={
-            "UPSTREAM_RESULT": "success",
-            "STATUS_OUTPUT": "passed",
-            "EXIT_CODE_OUTPUT": "0",
+            # Whatever a future caller passes, a real lint verdict stays red.
             "TIMEOUT_FLAKE": "true",
         },
     )
+
     assert_that(proc.returncode).is_equal_to(1)
 
 
-def test_assert_required_check_absorbs_proven_tool_timeout() -> None:
-    """A proven tool-execution timeout greens the check and flags the flake."""
-    with tempfile.NamedTemporaryFile(mode="w+", delete=False) as output_file:
-        output_path = output_file.name
+def test_gate_scripts_carry_no_timeout_flake_plumbing() -> None:
+    """No gate script may consume a tool-timeout flag.
 
-    try:
-        result = _run_script(
-            "scripts/ci/assert-required-check.sh",
-            env={
-                "GITHUB_OUTPUT": output_path,
-                "UPSTREAM_RESULT": "failure",
-                "STATUS_OUTPUT": "failed",
-                "EXIT_CODE_OUTPUT": "1",
-                "TIMEOUT_FLAKE": "true",
-            },
+    Guards against the absorb being reintroduced by wiring the flag back in
+    (lgtm-ci#746). A sound implementation must classify the authoritative
+    run's own structured report, which the upstream reusable lint workflow
+    does not publish today.
+    """
+    for name in (
+        "is-infra-flake-failure.sh",
+        "assert-required-check.sh",
+        "run-code-quality-gate.sh",
+    ):
+        script = (_REPO_ROOT / "scripts" / "ci" / name).read_text(
+            encoding="utf-8",
         )
-        assert_that(result.returncode).is_equal_to(0)
-        assert_that(Path(output_path).read_text()).contains("infra-flake=true")
-    finally:
-        Path(output_path).unlink(missing_ok=True)
-
-
-def test_run_code_quality_gate_absorbs_proven_tool_timeout() -> None:
-    """The gate goes green on a proven timeout but reports infra-flake=true."""
-    with tempfile.NamedTemporaryFile(mode="w+", delete=False) as output_file:
-        output_path = output_file.name
-
-    try:
-        result = _run_script(
-            "scripts/ci/run-code-quality-gate.sh",
-            env={
-                "GITHUB_OUTPUT": output_path,
-                "DOCKER_BUILD_RESULT": "success",
-                "MANIFEST_SYNC_RESULT": "success",
-                "PRIMARY_LINT_RESULT": "failure",
-                "PRIMARY_LINT_STATUS": "failed",
-                "PRIMARY_LINT_EXIT_CODE": "1",
-                "TIMEOUT_FLAKE": "true",
-            },
-        )
-        assert_that(result.returncode).is_equal_to(0)
-        output = Path(output_path).read_text()
-        assert_that(output).contains("result=success")
-        assert_that(output).contains("infra-flake=true")
-    finally:
-        Path(output_path).unlink(missing_ok=True)
-
-
-def test_run_code_quality_gate_keeps_lint_failure_red_without_timeout_proof() -> None:
-    """Without the supplier's proof, a lint-shaped verdict stays red."""
-    with tempfile.NamedTemporaryFile(mode="w+", delete=False) as output_file:
-        output_path = output_file.name
-
-    try:
-        result = _run_script(
-            "scripts/ci/run-code-quality-gate.sh",
-            env={
-                "GITHUB_OUTPUT": output_path,
-                "DOCKER_BUILD_RESULT": "success",
-                "MANIFEST_SYNC_RESULT": "success",
-                "PRIMARY_LINT_RESULT": "failure",
-                "PRIMARY_LINT_STATUS": "failed",
-                "PRIMARY_LINT_EXIT_CODE": "1",
-                "TIMEOUT_FLAKE": "",
-            },
-        )
-        assert_that(result.returncode).is_equal_to(1)
-        output = Path(output_path).read_text()
-        assert_that(output).contains("result=failure")
-        assert_that(output).contains("passed=false")
-    finally:
-        Path(output_path).unlink(missing_ok=True)
-
-
-def test_run_code_quality_gate_timeout_proof_does_not_alter_clean_pass() -> None:
-    """A clean lint run stays a real pass, never a flagged flake."""
-    with tempfile.NamedTemporaryFile(mode="w+", delete=False) as output_file:
-        output_path = output_file.name
-
-    try:
-        result = _run_script(
-            "scripts/ci/run-code-quality-gate.sh",
-            env={
-                "GITHUB_OUTPUT": output_path,
-                "DOCKER_BUILD_RESULT": "success",
-                "MANIFEST_SYNC_RESULT": "success",
-                "PRIMARY_LINT_RESULT": "success",
-                "PRIMARY_LINT_STATUS": "passed",
-                "PRIMARY_LINT_EXIT_CODE": "0",
-                "TIMEOUT_FLAKE": "true",
-            },
-        )
-        assert_that(result.returncode).is_equal_to(0)
-        output = Path(output_path).read_text()
-        assert_that(output).contains("result=success")
-        assert_that(output).contains("infra-flake=false")
-    finally:
-        Path(output_path).unlink(missing_ok=True)
-
-
-def test_run_code_quality_gate_timeout_proof_does_not_absorb_build_failure() -> None:
-    """A failed docker build stays red regardless of a timeout verdict."""
-    with tempfile.NamedTemporaryFile(mode="w+", delete=False) as output_file:
-        output_path = output_file.name
-
-    try:
-        result = _run_script(
-            "scripts/ci/run-code-quality-gate.sh",
-            env={
-                "GITHUB_OUTPUT": output_path,
-                "DOCKER_BUILD_RESULT": "failure",
-                "MANIFEST_SYNC_RESULT": "success",
-                "PRIMARY_LINT_RESULT": "success",
-                "PRIMARY_LINT_STATUS": "passed",
-                "PRIMARY_LINT_EXIT_CODE": "0",
-                "TIMEOUT_FLAKE": "true",
-            },
-        )
-        assert_that(result.returncode).is_equal_to(1)
-        assert_that(Path(output_path).read_text()).contains("passed=false")
-    finally:
-        Path(output_path).unlink(missing_ok=True)
-
-
-def test_run_code_quality_gate_timeout_proof_does_not_absorb_manifest_failure() -> None:
-    """A failed manifest sync stays red regardless of a timeout verdict."""
-    with tempfile.NamedTemporaryFile(mode="w+", delete=False) as output_file:
-        output_path = output_file.name
-
-    try:
-        result = _run_script(
-            "scripts/ci/run-code-quality-gate.sh",
-            env={
-                "GITHUB_OUTPUT": output_path,
-                "DOCKER_BUILD_RESULT": "success",
-                "MANIFEST_SYNC_RESULT": "failure",
-                "PRIMARY_LINT_RESULT": "success",
-                "PRIMARY_LINT_STATUS": "passed",
-                "PRIMARY_LINT_EXIT_CODE": "0",
-                "TIMEOUT_FLAKE": "true",
-            },
-        )
-        assert_that(result.returncode).is_equal_to(1)
-        assert_that(Path(output_path).read_text()).contains("passed=false")
-    finally:
-        Path(output_path).unlink(missing_ok=True)
+        assert_that(script).described_as(name).does_not_contain("TIMEOUT_FLAKE")
 
 
 @pytest.mark.parametrize(

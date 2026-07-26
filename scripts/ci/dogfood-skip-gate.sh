@@ -18,8 +18,11 @@ set -euo pipefail
 #
 # The same report is also classified for tool-execution timeouts (#1653) via
 # scripts/ci/classify-lint-timeout.py, and the verdict is published as the
-# `timeout-flake` / `timed-out-tools` job outputs so the code-quality gate can
-# tell a mypy perf flake (zero findings anywhere) from a real lint verdict.
+# `timeout-flake` / `timed-out-tools` job outputs. These are DIAGNOSTIC ONLY:
+# this job always lints the full repo, so its verdict is not evidence about the
+# authoritative lint run (which may be changed-files scoped, and is a separate
+# run with its own timing). The code-quality gate deliberately does not consume
+# them — doing so can green a genuine finding. See lgtm-ci#746.
 #
 # Usage:
 #   LINTRO_IMAGE=ghcr.io/lgtm-hq/py-lintro:ci-123 scripts/ci/dogfood-skip-gate.sh

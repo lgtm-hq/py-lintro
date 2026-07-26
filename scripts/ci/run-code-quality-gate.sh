@@ -9,8 +9,6 @@
 #   RETRY_LINT_RESULT
 #   PRIMARY_LINT_STATUS, PRIMARY_LINT_EXIT_CODE, PRIMARY_LINT_CONCLUSION
 #   RETRY_LINT_STATUS, RETRY_LINT_EXIT_CODE, RETRY_LINT_CONCLUSION
-#   TIMEOUT_FLAKE - 'true' when the dogfood no-silent-skip gate proved the run
-#                   failed only on tool-execution timeouts with zero findings
 
 set -euo pipefail
 
@@ -27,9 +25,6 @@ Usage:
 Writes result, passed, status, exit-code, and infra-flake to GITHUB_OUTPUT
 when set. infra-flake=true means the gate passed by absorbing runner noise
 rather than by observing a successful lint run.
-
-Set TIMEOUT_FLAKE=true (from the dogfood no-silent-skip gate) to absorb a
-failure proven to be a tool-execution timeout with zero findings (#1653).
 EOF
 	exit 0
 fi
@@ -78,23 +73,18 @@ upstream_result="$(grep -E '^upstream-result=' "${EVALUATE_OUTPUT}" | tail -1 | 
 status_output="$(grep -E '^status-output=' "${EVALUATE_OUTPUT}" | tail -1 | cut -d= -f2-)"
 exit_code_output="$(grep -E '^exit-code-output=' "${EVALUATE_OUTPUT}" | tail -1 | cut -d= -f2-)"
 upstream_conclusion="$(grep -E '^upstream-conclusion=' "${EVALUATE_OUTPUT}" | tail -1 | cut -d= -f2-)"
-verdict_source="$(grep -E '^verdict-source=' "${EVALUATE_OUTPUT}" | tail -1 | cut -d= -f2-)"
-
-# The tool-execution timeout proof (#1653) is evidence about the *lint* run
-# only. A failed docker-build/manifest-sync also surfaces as failed/1 here, so
-# forwarding the flag unconditionally would absorb an upstream build failure.
-# Scope it to a lint verdict.
-timeout_flake="${TIMEOUT_FLAKE:-}"
-if [[ "${verdict_source}" != "lint" ]]; then
-	timeout_flake=""
-fi
+# evaluate-code-quality-gate.sh also writes verdict-source (docker-build,
+# manifest-sync, or lint). Nothing consumes it yet: it exists so lint-only
+# evidence can be scoped to a lint verdict once the authoritative run publishes
+# a structured report (#1653, lgtm-ci#746) — an upstream build failure also
+# surfaces as failed/1 here, so that scoping is mandatory before any such
+# evidence is trusted.
 
 if UPSTREAM_RESULT="${upstream_result}" \
 	STATUS_OUTPUT="${status_output}" \
 	STATUS_EXPECTED=passed \
 	EXIT_CODE_OUTPUT="${exit_code_output}" \
 	UPSTREAM_CONCLUSION="${upstream_conclusion}" \
-	TIMEOUT_FLAKE="${timeout_flake}" \
 	GITHUB_OUTPUT="${ASSERT_OUTPUT}" \
 	bash "${SCRIPT_DIR}/assert-required-check.sh"; then
 	# infra-flake=true means the required check is green without a lint
