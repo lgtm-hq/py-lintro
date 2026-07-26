@@ -64,6 +64,7 @@ fi
 
 TRACE_LOG="${MEMORY_TRACE_LOG:-memory-trace.log}"
 TRACE_PID_FILE="${TRACE_LOG}.pid"
+TRACE_CURSOR_FILE="${TRACE_LOG}.cursor"
 TRACE_INTERVAL="${MEMORY_TRACE_INTERVAL:-30}"
 
 tail_pid=""
@@ -106,35 +107,46 @@ log_info "Starting memory trace (interval ${TRACE_INTERVAL}s) -> ${TRACE_LOG}"
 # Emitting line-by-line with printf also avoids the block buffering a pipe
 # through `sed` would introduce -- the samples closest to a kill are the ones
 # that matter, and they would sit unflushed.
-streamed_lines=0
+#
+# The cursor lives in a file, not a variable. `stream_trace` runs in a
+# background subshell, so any progress it recorded in a shell variable would be
+# invisible to the parent's cleanup flush -- which would then re-emit the whole
+# trace from line 1 and duplicate every sample already in the job log. Only one
+# of the two reads the cursor at a time: cleanup kills the streamer before
+# flushing, so there is no concurrent writer.
+printf '0\n' >"${TRACE_CURSOR_FILE}"
 
-# shellcheck disable=SC2329 # Invoked from cleanup(), which runs via trap.
-flush_trace() {
-	local total
-	total="$(wc -l <"${TRACE_LOG}" 2>/dev/null || echo 0)"
-	total="${total//[[:space:]]/}"
-	if [[ "${total}" -gt "${streamed_lines}" ]]; then
-		tail -n "+$((streamed_lines + 1))" "${TRACE_LOG}" 2>/dev/null |
-			while IFS= read -r trace_line; do
-				printf '[mem] %s\n' "${trace_line}"
-			done
-		streamed_lines="${total}"
+# shellcheck disable=SC2329 # Invoked from cleanup() and stream_trace().
+emit_new_trace_lines() {
+	local cursor emitted=0
+	cursor="$(cat "${TRACE_CURSOR_FILE}" 2>/dev/null || echo 0)"
+	cursor="${cursor//[[:space:]]/}"
+	[[ "${cursor}" =~ ^[0-9]+$ ]] || cursor=0
+	# Advance the cursor by what was actually printed, never by a separately
+	# measured line count. The sampler appends while we read, so a `wc -l`
+	# taken before `tail` under-reports what `tail` then emits, and the
+	# difference is replayed on the next pass. Counting inside the loop makes
+	# the cursor exact by construction.
+	#
+	# Process substitution, not a pipe: a piped `while` runs in a subshell and
+	# its counter would be lost.
+	while IFS= read -r trace_line; do
+		printf '[mem] %s\n' "${trace_line}"
+		emitted=$((emitted + 1))
+	done < <(tail -n "+$((cursor + 1))" "${TRACE_LOG}" 2>/dev/null)
+	if [[ "${emitted}" -gt 0 ]]; then
+		printf '%s\n' "$((cursor + emitted))" >"${TRACE_CURSOR_FILE}"
 	fi
 }
 
+# shellcheck disable=SC2329 # Invoked from cleanup(), which runs via trap.
+flush_trace() {
+	emit_new_trace_lines
+}
+
 stream_trace() {
-	local last=0
 	while :; do
-		local total
-		total="$(wc -l <"${TRACE_LOG}" 2>/dev/null || echo 0)"
-		total="${total//[[:space:]]/}"
-		if [[ "${total}" -gt "${last}" ]]; then
-			tail -n "+$((last + 1))" "${TRACE_LOG}" 2>/dev/null |
-				while IFS= read -r trace_line; do
-					printf '[mem] %s\n' "${trace_line}"
-				done
-			last="${total}"
-		fi
+		emit_new_trace_lines
 		sleep 2
 	done
 }

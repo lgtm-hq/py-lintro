@@ -159,6 +159,38 @@ def test_final_snapshot_reaches_stdout(tmp_path: Path) -> None:
     assert_that(result.stdout).contains("sampler stopped")
 
 
+def test_each_trace_line_is_streamed_exactly_once(tmp_path: Path) -> None:
+    """Streamed samples must not be replayed by the cleanup flush.
+
+    The streamer runs in a background subshell, so a cursor kept in a shell
+    variable stayed at zero in the parent and the cleanup flush re-emitted the
+    whole trace — duplicating every ``[mem]`` line already in the job log
+    (#1761 review). The cursor is shared through a file instead.
+
+    Args:
+        tmp_path: Temporary directory for the trace log.
+    """
+    trace_log = tmp_path / "trace.log"
+    result = _run(
+        "bash",
+        "-c",
+        "sleep 5",
+        trace_log=trace_log,
+        interval="1",
+    )
+
+    assert_that(result.returncode).is_equal_to(0)
+    trace_lines = trace_log.read_text().splitlines()
+    assert_that(trace_lines).is_not_empty()
+
+    streamed = [
+        line.removeprefix("[mem] ")
+        for line in result.stdout.splitlines()
+        if line.startswith("[mem] ")
+    ]
+    assert_that(streamed).is_equal_to(trace_lines)
+
+
 def test_wrapper_terminates_when_no_samples_are_written(tmp_path: Path) -> None:
     """A run shorter than the sample interval still exits promptly.
 
