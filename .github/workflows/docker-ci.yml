@@ -691,7 +691,14 @@ jobs:
             ${{ needs.docker-build.outputs.is-fork == 'true' &&
             'ghcr.io/lgtm-hq/py-lintro:0.91.49@sha256:268e9a5c3c09998c4e42f59309fe47de74bb1dc8e0a7f6d4e88cf07a7cb1d738'
             || format('ghcr.io/lgtm-hq/py-lintro:ci-{0}', github.run_id) }}
-        run: scripts/ci/dogfood-skip-gate.sh
+          # Memory trace (#1761): this job is repeatedly killed mid-lint with
+          # "runner has received a shutdown signal" + container EOF, and
+          # memory pressure is the leading hypothesis. Samples stream into
+          # this step's log rather than an artifact, because a runner death
+          # skips later steps and would discard the evidence.
+        run: >-
+          scripts/ci/run-with-memory-trace.sh
+          scripts/ci/dogfood-skip-gate.sh
 
   # Bounded retry (1 attempt) when the full-repo dogfooding-lint fails —
   # absorbs runner shutdown (exit 143) and artifact ETIMEDOUT flakes without a
