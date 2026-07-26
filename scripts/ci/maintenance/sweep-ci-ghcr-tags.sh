@@ -29,6 +29,21 @@ set -euo pipefail
 # The persistent ":cache" tag never matches the CI prefix. Architecture-
 # specific child manifests that become untagged are left for the weekly
 # untagged prune (reusable-ghcr-cleanup.yml).
+#
+# Conditional delete: NOT available (checked 2026-07-26, #1652). GitHub's
+# REST API supports conditional requests only through ETag/If-None-Match and
+# Last-Modified/If-Modified-Since on reads; "conditional requests for unsafe
+# methods, such as POST, PUT, PATCH, and DELETE are not supported unless
+# otherwise noted", and the delete-package-version endpoint documents no
+# If-Match. So the recheck -> DELETE window cannot be closed atomically and
+# the guards below (sole-tag rule, dual recheck, post-delete verification)
+# are the mitigation. Re-check the docs before re-investigating this.
+#
+# Post-delete verification (#1652): the sweep only ever deletes versions whose
+# sole tag is a ci-* tag, so no persistent (non-CI) tag may disappear while it
+# runs. The package's persistent tag set is snapshotted before the deletions
+# and re-read after them; a tag that vanished means the residual race actually
+# fired, and that is reported as an ::error:: which fails the job.
 
 if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
 	cat <<'EOF'
@@ -56,6 +71,13 @@ Environment:
                  Taking the bypass logs a ::warning:: so an inherited
                  value can never waive the guard silently.
                  ghcr-cleanup.yml never sets it.
+  VOLATILE_TAG_PREFIXES
+                 Space-separated tag prefixes excluded from the post-delete
+                 verification baseline (default: "ci- sha-"). ghcr-cleanup.yml
+                 runs the ci-* and sha-* sweeps as parallel jobs, so each one
+                 sees the other's deletions; without this the sha-* sweep
+                 would report swept ci-* tags as lost (#1652). Each entry must
+                 match ^[A-Za-z0-9._-]+$ (interpolated into the jq filter).
   DRY_RUN        When "true", log candidates without deleting (default: false)
 EOF
 	exit 0
@@ -66,6 +88,7 @@ org="${ORG:-lgtm-hq}"
 packages="${PACKAGES:-py-lintro py-lintro-base}"
 tag_prefix="${TAG_PREFIX:-ci-}"
 min_age_days="${MIN_AGE_DAYS:-91}"
+volatile_prefixes="${VOLATILE_TAG_PREFIXES:-ci- sha-}"
 dry_run="${DRY_RUN:-false}"
 sweep_errors=0
 
@@ -108,6 +131,22 @@ if ! [[ "$tag_prefix" =~ ^[A-Za-z0-9._-]+$ ]]; then
 	exit 2
 fi
 
+# The verification baseline must ignore every tag family that some sweep may
+# legitimately delete, otherwise a sibling job's work reads as a lost tag
+# (#1652). TAG_PREFIX is always excluded; the rest come from
+# VOLATILE_TAG_PREFIXES and are interpolated into jq, so apply the same
+# character class.
+volatile_prefixes_jq="\"${tag_prefix}\""
+for prefix in $volatile_prefixes; do
+	if ! [[ "$prefix" =~ ^[A-Za-z0-9._-]+$ ]]; then
+		echo "VOLATILE_TAG_PREFIXES entries must match" \
+			"^[A-Za-z0-9._-]+\$, got: ${prefix}" >&2
+		exit 2
+	fi
+	volatile_prefixes_jq+=",\"${prefix}\""
+done
+readonly volatile_prefixes_jq
+
 cutoff_epoch=$(($(date -u +%s) - min_age_days * 86400))
 
 tags_are_ci_only() {
@@ -130,6 +169,99 @@ fetch_version_state() {
 	gh api \
 		"orgs/${org}/packages/container/${pkg}/versions/${vid}" \
 		--jq '[.updated_at, ((.metadata.container.tags // []) | join(" "))] | @tsv'
+}
+
+# Print the package's persistent tags (those carrying none of the volatile
+# prefixes), one per line, sorted. This is the invariant the post-delete
+# verification checks: the sweep only deletes sole-ci-tagged versions, so this
+# set may never shrink (#1652).
+fetch_persistent_tags() {
+	local pkg="$1"
+	gh api \
+		"orgs/${org}/packages/container/${pkg}/versions" \
+		--paginate \
+		--jq ".[]
+			| (.metadata.container.tags // [])[]
+			| . as \$tag
+			| select([${volatile_prefixes_jq}]
+				| any(. as \$p | \$tag | startswith(\$p))
+				| not)" |
+		LC_ALL=C sort -u
+}
+
+# Print the entries of newline-separated list "$1" absent from list "$2".
+# Container tags cannot contain whitespace, so line-wise matching is exact.
+tags_missing_from() {
+	local expected="$1"
+	local actual="$2"
+	local tag=""
+	while IFS= read -r tag; do
+		[[ -z "$tag" ]] && continue
+		case $'\n'"${actual}"$'\n' in
+		*$'\n'"${tag}"$'\n'*) ;;
+		*) printf '%s\n' "$tag" ;;
+		esac
+	done <<<"$expected"
+}
+
+# Verify no persistent tag was collateral damage of this package's deletions.
+#
+# One check per package rather than one per DELETE: re-listing thousands of
+# versions after every deletion would be prohibitively expensive, and the
+# invariant is identical either way.
+#
+# A false "we deleted a release tag" alarm is worse than no alarm, so a tag is
+# only reported after it is missing from two independent reads — a paginated
+# listing on a busy registry can momentarily under-report. A read that fails
+# outright is reported as "could not verify" and still fails the job, keeping
+# the sweep fail-closed without claiming a loss that was never observed.
+#
+# Known limit: a tag first created after the baseline read and destroyed by a
+# DELETE in the same run is invisible to this check. That is the deliberate
+# trade — detecting it needs a per-delete listing, whose cost and raciness buy
+# false alarms. The realistic race (a byte-identical rebuild letting promotion
+# move latest/main/a release tag onto an aged ci-* digest) moves tags that the
+# baseline already holds, so it is caught.
+verify_persistent_tags_survived() {
+	local pkg="$1"
+	local baseline="$2"
+	local deleted_ids="$3"
+	local after=""
+	local missing=""
+	local err_file=""
+
+	err_file="$(mktemp)"
+	if ! after=$(fetch_persistent_tags "$pkg" 2>"${err_file}"); then
+		echo "::error::Could not verify persistent tags for ${pkg} after" \
+			"deleting [${deleted_ids}]: $(cat "${err_file}") (#1652)" >&2
+		rm -f "${err_file}"
+		sweep_errors=1
+		return
+	fi
+	rm -f "${err_file}"
+
+	missing="$(tags_missing_from "$baseline" "$after")"
+	[[ -z "$missing" ]] && return
+
+	# Second, independent read before alarming.
+	err_file="$(mktemp)"
+	if ! after=$(fetch_persistent_tags "$pkg" 2>"${err_file}"); then
+		echo "::error::Could not confirm persistent tags for ${pkg} after" \
+			"deleting [${deleted_ids}]: $(cat "${err_file}") (#1652)" >&2
+		rm -f "${err_file}"
+		sweep_errors=1
+		return
+	fi
+	rm -f "${err_file}"
+
+	missing="$(tags_missing_from "$missing" "$after")"
+	[[ -z "$missing" ]] && return
+
+	echo "::error::Persistent tags disappeared from ${pkg} during the sweep:" \
+		"[$(printf '%s' "$missing" | tr '\n' ' ')]. Deleted versions:" \
+		"[${deleted_ids}]. A promotion very likely raced the DELETE and its" \
+		"tag was removed with the CI version (#1652)." >&2
+	sweep_errors=1
 }
 
 sweep_package() {
@@ -168,6 +300,27 @@ sweep_package() {
 	if [[ -z "$versions" ]]; then
 		echo "No ${tag_prefix}* tags older than ${min_age_days}d for ${pkg}"
 		return
+	fi
+
+	# Snapshot the persistent tags that must survive the deletions (#1652).
+	# Fail closed: without a baseline the post-delete verification is blind,
+	# so skip the package rather than delete unverifiably. DRY_RUN deletes
+	# nothing, so it needs no baseline.
+	local baseline_tags=""
+	local deleted_ids=""
+	if [[ "$dry_run" != "true" ]]; then
+		local baseline_err_file=""
+		baseline_err_file="$(mktemp)"
+		if ! baseline_tags=$(fetch_persistent_tags "$pkg" \
+			2>"${baseline_err_file}"); then
+			echo "::error::Failed to snapshot persistent tags for ${pkg};" \
+				"skipping its deletions: $(cat "${baseline_err_file}")" \
+				"(#1652)" >&2
+			rm -f "${baseline_err_file}"
+			sweep_errors=1
+			return
+		fi
+		rm -f "${baseline_err_file}"
 	fi
 
 	while IFS=$'\t' read -r vid snap_updated tags; do
@@ -260,6 +413,7 @@ sweep_package() {
 			"orgs/${org}/packages/container/${pkg}/versions/${vid}" \
 			>/dev/null 2>"${delete_err_file}"; then
 			rm -f "${delete_err_file}"
+			deleted_ids+="${vid} "
 			echo "Deleted ${pkg} version ${vid} (tags: ${current_tags})"
 		else
 			echo "::error::Failed to delete ${pkg} version ${vid}: $(cat "${delete_err_file}")" >&2
@@ -267,6 +421,11 @@ sweep_package() {
 			sweep_errors=1
 		fi
 	done <<<"$versions"
+
+	if [[ -n "$deleted_ids" ]]; then
+		verify_persistent_tags_survived "$pkg" "$baseline_tags" \
+			"${deleted_ids% }"
+	fi
 }
 
 echo "Sweeping ${tag_prefix}* tags older than ${min_age_days}d (dry_run=${dry_run})"
