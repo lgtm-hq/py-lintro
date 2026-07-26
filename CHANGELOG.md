@@ -21,6 +21,28 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.91.47] - 2026-07-25
+
+### Fixed
+
+- **ci**: retry transient infra failures in tag publish pipeline (#1571) (73fb1e6)
+
+## [0.91.46] - 2026-07-25
+
+### Changed
+
+- **deps**: update dependency devalue to 5.8.2 (patch) (#1753) (c0bc3fc)
+- **deps**: update ghcr.io/lgtm-hq/lintro-tools:latest docker digest to 4c5f412 (#1750)
+  (0680e0c)
+- **deps**: update dependency astral-sh/uv to 0.11.32 (patch) (#1749) (3c60a2f)
+- **deps**: update ghcr.io/lgtm-hq/lintro-tools:latest docker digest to 7c309ca (#1604)
+  (77fba17)
+
+### Fixed
+
+- **ci**: manage the pinned py-lintro release image as one Renovate set (#1751) (#1752)
+  (9d70078)
+
 ## [0.91.45] - 2026-07-25
 
 ### Fixed

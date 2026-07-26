@@ -201,6 +201,18 @@
       "packageNameTemplate": "astral-sh/uv"
     },
     {
+      "description": "Exact uv pin for setup-uv in the binary build workflow (avoids the astral-sh/versions manifest fetch); must track the Dockerfile ARG UV_VERSION",
+      "customType": "regex",
+      "managerFilePatterns": [
+        ".github/workflows/build-binary.yml"
+      ],
+      "matchStrings": [
+        "UV_VERSION: '(?<currentValue>[0-9]+\\.[0-9]+\\.[0-9]+)'"
+      ],
+      "datasourceTemplate": "github-releases",
+      "packageNameTemplate": "astral-sh/uv"
+    },
+    {
       "description": "Bundled Go toolchain in the lintro-tools image (checksum fetched at build time, so only the version pins here)",
       "customType": "regex",
       "managerFilePatterns": [
@@ -429,6 +441,19 @@
       "datasourceTemplate": "github-tags",
       "packageNameTemplate": "rust-lang/rustfmt",
       "extractVersionTemplate": "^v(?<version>.*)$"
+    },
+    {
+      "description": "Pinned py-lintro release image (nightly dogfood + docker-ci fork fallback, #1751); all pin sites bump together",
+      "customType": "regex",
+      "managerFilePatterns": [
+        "\\.github/workflows/dogfood-nightly\\.yml",
+        "\\.github/workflows/docker-ci\\.yml"
+      ],
+      "matchStrings": [
+        "(?<depName>ghcr\\.io/lgtm-hq/py-lintro):(?<currentValue>[0-9]+\\.[0-9]+\\.[0-9]+)@(?<currentDigest>sha256:[a-f0-9]{64})"
+      ],
+      "datasourceTemplate": "docker",
+      "versioningTemplate": "semver"
     }
   ]
 }
