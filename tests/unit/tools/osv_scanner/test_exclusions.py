@@ -297,7 +297,39 @@ def test_unrelated_pattern_keeps_all_findings(in_fixture_repo: Path) -> None:
 
 
 def test_filter_keeps_placeholder_source(in_fixture_repo: Path) -> None:
-    """Findings without a real source path are never filtered out."""
+    """The unknown-source sentinel is never exclusion-matched.
+
+    The parser substitutes ``lockfile`` when a result carries no source. That
+    is not a real path, so a pattern that happens to match the sentinel must
+    not drop the finding. The pattern here matches the sentinel exactly — with
+    a non-matching pattern this test would pass even without the guard.
+    """
+    from lintro.parsers.osv_scanner import OsvScannerIssue
+
+    plugin = _plugin()
+    plugin.set_options(exclude_patterns=["lockfile"])
+    issue = OsvScannerIssue(
+        file="lockfile",
+        line=0,
+        column=0,
+        message="",
+        vuln_id="GHSA-placeholder",
+    )
+
+    kept = plugin.filter_excluded_issues(
+        issues=[issue],
+        paths=[str(in_fixture_repo)],
+    )
+
+    assert_that(kept).is_length(1)
+
+
+def test_filter_keeps_empty_source(in_fixture_repo: Path) -> None:
+    """A finding with no source at all is kept.
+
+    Distinct from the sentinel case: an empty source short-circuits before the
+    sentinel comparison, so both paths need their own coverage.
+    """
     from lintro.parsers.osv_scanner import OsvScannerIssue
 
     plugin = _plugin()
