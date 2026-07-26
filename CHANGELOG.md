@@ -21,6 +21,12 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.91.56] - 2026-07-26
+
+### Fixed
+
+- **ci**: make the lgtm-ci pin self-maintaining across bumps (#1779) (b2ad050)
+
 ## [0.91.55] - 2026-07-26
 
 ### Changed
