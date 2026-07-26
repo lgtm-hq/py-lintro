@@ -473,13 +473,12 @@ jobs:
       # Fork PRs: CI images are not pushed to GHCR (artifact tarball only), so
       # fall back to the pinned release image — integration tests still use the
       # fork-built image via the tarball path.
-      # Pinned digest — keep in sync with pyproject.toml lintro pin
+      # Pinned release digest for the fork path. Renovate bumps this and
+      # every other pin site (here and in dogfood-nightly.yml) as one set —
+      # see renovate.json, customManager for ghcr.io/lgtm-hq/py-lintro.
       lintro-image: >-
-        ${{ needs.docker-build.outputs.is-fork == 'true'
-        && format(
-          'ghcr.io/lgtm-hq/py-lintro@sha256:{0}',
-          '0e8f3892f31f7bb6ce56a33d037d983591b82c325bf56281f9d9e2fec488aa5c'
-        )
+        ${{ needs.docker-build.outputs.is-fork == 'true' &&
+        'ghcr.io/lgtm-hq/py-lintro:0.91.49@sha256:268e9a5c3c09998c4e42f59309fe47de74bb1dc8e0a7f6d4e88cf07a7cb1d738'
         || format('ghcr.io/lgtm-hq/py-lintro:ci-{0}', github.run_id) }}
 
   # Changed-files dogfooding (#1361): PR-only counterpart of dogfooding-lint
@@ -575,13 +574,11 @@ jobs:
             pydoclint:timeout=120,bandit:timeout=120,prettier:timeout=120,mypy:timeout=120,osv_scanner:check_suppressions=false
           # Same image selection as dogfooding-lint: CI-built image for
           # same-repo PRs, pinned release digest for forks (no CI push).
-          # Pinned digest — keep in sync with pyproject.toml lintro pin
+          # Pinned release digest for the fork path; bumped as one set by
+          # Renovate together with the other pin sites.
           LINTRO_IMAGE: >-
-            ${{ needs.docker-build.outputs.is-fork == 'true'
-            && format(
-              'ghcr.io/lgtm-hq/py-lintro@sha256:{0}',
-              '0e8f3892f31f7bb6ce56a33d037d983591b82c325bf56281f9d9e2fec488aa5c'
-            )
+            ${{ needs.docker-build.outputs.is-fork == 'true' &&
+            'ghcr.io/lgtm-hq/py-lintro:0.91.49@sha256:268e9a5c3c09998c4e42f59309fe47de74bb1dc8e0a7f6d4e88cf07a7cb1d738'
             || format('ghcr.io/lgtm-hq/py-lintro:ci-{0}', github.run_id) }}
         run: scripts/ci/dogfood-changed-files.sh
       - name: Upload linting report
@@ -618,6 +615,16 @@ jobs:
       packages: read # pull the CI lint image from GHCR
     # ~14 min median (10–17 observed); 20 fails a stalled run fast (#1704).
     timeout-minutes: 20
+    outputs:
+      # Diagnostic only (#1653): 'true' when THIS job's report shows the only
+      # failures were tool-execution timeouts with zero findings anywhere.
+      # Deliberately NOT wired into code-quality-gate: this job always lints the
+      # full repo, so its verdict is not evidence about the authoritative lint
+      # run (which may be changed-files scoped, and is a separate run subject to
+      # its own timing). Absorbing on it can green a genuine finding — see the
+      # PR discussion and lgtm-ci#746.
+      timeout-flake: ${{ steps.skips.outputs.timeout-flake }}
+      timed-out-tools: ${{ steps.skips.outputs.timed-out-tools }}
     steps:
       - name: Harden Runner
         # Same allowlist as dogfooding-lint-changed: the container sets
@@ -671,19 +678,18 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
       - name: Check for silent tool skips
+        id: skips
         env:
           # Same tool coverage as the dogfooding run so skip behaviour matches.
           TOOL_OPTIONS: >-
             pydoclint:timeout=120,bandit:timeout=120,prettier:timeout=120,mypy:timeout=120,osv_scanner:check_suppressions=false
           # Same image selection as dogfooding-lint: CI-built image for
           # same-repo PRs, pinned release digest for forks (no CI push).
-          # Pinned digest — keep in sync with pyproject.toml lintro pin
+          # Pinned release digest for the fork path; bumped as one set by
+          # Renovate together with the other pin sites.
           LINTRO_IMAGE: >-
-            ${{ needs.docker-build.outputs.is-fork == 'true'
-            && format(
-              'ghcr.io/lgtm-hq/py-lintro@sha256:{0}',
-              '0e8f3892f31f7bb6ce56a33d037d983591b82c325bf56281f9d9e2fec488aa5c'
-            )
+            ${{ needs.docker-build.outputs.is-fork == 'true' &&
+            'ghcr.io/lgtm-hq/py-lintro:0.91.49@sha256:268e9a5c3c09998c4e42f59309fe47de74bb1dc8e0a7f6d4e88cf07a7cb1d738'
             || format('ghcr.io/lgtm-hq/py-lintro:ci-{0}', github.run_id) }}
         run: scripts/ci/dogfood-skip-gate.sh
 
@@ -716,13 +722,12 @@ jobs:
       egress-policy: block
       # Same image selection as dogfooding-lint: CI-built image for
       # same-repo PRs, pinned release digest for forks (no CI push).
-      # Pinned digest — keep in sync with pyproject.toml lintro pin
+      # Pinned release digest for the fork path. Renovate bumps this and
+      # every other pin site (here and in dogfood-nightly.yml) as one set —
+      # see renovate.json, customManager for ghcr.io/lgtm-hq/py-lintro.
       lintro-image: >-
-        ${{ needs.docker-build.outputs.is-fork == 'true'
-        && format(
-          'ghcr.io/lgtm-hq/py-lintro@sha256:{0}',
-          '0e8f3892f31f7bb6ce56a33d037d983591b82c325bf56281f9d9e2fec488aa5c'
-        )
+        ${{ needs.docker-build.outputs.is-fork == 'true' &&
+        'ghcr.io/lgtm-hq/py-lintro:0.91.49@sha256:268e9a5c3c09998c4e42f59309fe47de74bb1dc8e0a7f6d4e88cf07a7cb1d738'
         || format('ghcr.io/lgtm-hq/py-lintro:ci-{0}', github.run_id) }}
 
   # Rolls the effective dogfooding result up into a single required-check

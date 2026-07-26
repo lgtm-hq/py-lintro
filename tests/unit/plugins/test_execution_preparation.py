@@ -72,3 +72,50 @@ def test_version_lag_disallowed_when_unset(monkeypatch: pytest.MonkeyPatch) -> N
     """
     monkeypatch.delenv("LINTRO_ALLOW_VERSION_LAG", raising=False)
     assert_that(_version_lag_allowed("trufflehog")).is_false()
+
+
+def test_verify_tool_version_resolves_from_the_execution_cwd() -> None:
+    """The version check must resolve the binary the run will actually use.
+
+    Verification previously resolved from the process working directory while
+    execution resolved from the target project. A missing or outdated
+    process-visible binary could then skip the run even though the target had
+    a valid lockfile-pinned install — and the reverse, passing on a binary
+    that never executes (#1727).
+
+    """
+    from unittest.mock import patch
+
+    from lintro.plugins.execution_preparation import verify_tool_version
+
+    seen: dict[str, object] = {}
+
+    def _capture(tool_name: str, cwd: object = None) -> list[str]:
+        seen["cwd"] = cwd
+        return ["html-validate"]
+
+    definition = type("Def", (), {"name": "html_validate"})()
+
+    with (
+        patch(
+            "lintro.plugins.execution_preparation.get_executable_command",
+            side_effect=_capture,
+        ),
+        patch(
+            "lintro.tools.core.version_requirements.check_tool_version",
+        ) as mock_check,
+    ):
+        mock_check.return_value = type(
+            "Info",
+            (),
+            {
+                "version_check_passed": True,
+                "below_recommended": False,
+                "current_version": "1.0.0",
+                "recommended_version": "1.0.0",
+                "min_version": "1.0.0",
+            },
+        )()
+        verify_tool_version(definition, cwd="/tmp/target-project")
+
+    assert_that(seen.get("cwd")).is_equal_to("/tmp/target-project")

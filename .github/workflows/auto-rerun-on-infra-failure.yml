@@ -8,10 +8,26 @@ name: Auto Rerun on Infra Failure
 # runner shutdown signals, harden-runner allowed-domain resolution errors),
 # re-run only the failed jobs — once (run-attempt guard upstream). This repo
 # saw a ghcr.io login timeout (run 29325278849) and a runner shutdown during
-# #1370's CI, both manually rerun. See #1374 and Rustume's equivalent (#474).
+# #1370's CI, both manually rerun. Tag publishes also flake on setup-uv
+# manifest timeouts and runner loss (#1487). See #1374 and Rustume's
+# equivalent (#474).
 #
 # workflow_run triggers only run from the definition on the default branch,
 # so changes here take effect after merging to main.
+#
+# No branches: filter — tag-triggered publish runs set head_branch to the
+# tag name (e.g. v0.88.1), so branches: [main] would miss them, and
+# workflow_run has no separate tags: filter. Dropping it also makes PR-branch
+# runs of the watched CI workflows eligible, which is intended: the reusable
+# workflow only reruns on a matched infra signature and only once per attempt.
+# Fork abuse is blocked by the same-repo guard on the job below
+# (head_repository.full_name), which is now the only such guard.
+#
+# Homebrew Tap / npm are reusable workflows invoked with `uses:` from the
+# PyPI tag pipeline, so during a release they are jobs inside the
+# "Publish - PyPI Production" run and emit no workflow_run event of their
+# own — rerunning that run's failed jobs covers them. They are listed here
+# for their standalone workflow_dispatch (backfill) runs.
 
 'on':
   workflow_run:
@@ -21,16 +37,18 @@ name: Auto Rerun on Infra Failure
       - CI - Docker
       - CI - Tests
       - Deploy - GitHub Pages
+      - Publish - Homebrew Tap
+      - Publish - npm
+      - Publish - PyPI Production
     types: [completed]
-    branches: [main]
 
 permissions: {}
 
 jobs:
   rerun:
-    # Same-repo guard: the branches filter matches the triggering run's head
-    # branch name, so a fork branch named "main" would otherwise reach the
-    # actions:write rerun with the upstream token.
+    # Same-repo guard: without a branches filter, a fork PR workflow that
+    # shares a watched name would otherwise reach the actions:write rerun
+    # with the upstream token. Restrict to runs whose head repo is this one.
     if: >-
       github.event.workflow_run.conclusion == 'failure' &&
       github.event.workflow_run.head_repository.full_name == github.repository
@@ -47,3 +65,27 @@ jobs:
       run-attempt: ${{ format('{0}', github.event.workflow_run.run_attempt) }}
       egress-policy: block
       egress-preset: github-minimal
+      # Extra transient-infra signatures, appended to lgtm-ci's built-in
+      # defaults and matched with grep -qF. Keep every line a FIXED string
+      # (no regex, no anchors) and narrow enough that it cannot absorb a
+      # real failure that deserves a human. The embedded double quotes in
+      # the Docker Hub line are part of the log text and this literal block
+      # scalar must preserve them verbatim.
+      #
+      # 1-3. Cosign ambient-OIDC token-fetch flake (#1567, #1689), kept in
+      #      parity with oidc_flake_markers in
+      #      scripts/ci/cosign-sign-images.sh so a signing job that exhausts
+      #      the in-step retry (#1646) is auto-rerun instead of needing a
+      #      manual backfill.
+      # 4.   Docker Hub timeout while Setup Docker Buildx pulls the buildkit
+      #      image. registry-1.docker.io:443 is already allowed, so this is
+      #      Docker Hub slowness, not a harden-runner block. Seen in the
+      #      v0.91.42 release run (30148763859, Merge Manifests job
+      #      89692290242), which no default signature matched. Scoped to the
+      #      registry URL on purpose: a bare "context deadline exceeded"
+      #      would swallow genuine timeouts elsewhere.
+      signatures: |-
+        fetching ambient OIDC credentials
+        retrieving ID token
+        reading ID token
+        Get "https://registry-1.docker.io/v2/": context deadline exceeded

@@ -37,15 +37,25 @@ A clean document emits `[]` and exits `0`; any error exits `1`.
 
 ## Installation
 
-html-validate is a Node.js tool. Lintro installs and invokes it via `bun` (falling back
-to `npx`, then a direct binary):
+html-validate is a Node.js tool. Lintro resolves the executable in this order:
+
+1. A consumer-local `node_modules/.bin/html-validate` (searched upwards from the working
+   directory), so the version is whatever the consumer's lockfile pins.
+2. An `html-validate` binary on `PATH` (how the lintro container runs it).
+3. `bunx html-validate@<version>`, falling back to `npx html-validate@<version>`.
 
 ```bash
 bun add -g html-validate        # or: npm install -g html-validate
 ```
 
 The pinned version lives in `package.json` and is mirrored into
-`lintro/tools/manifest.json` by the tool-version generator.
+`lintro/tools/manifest.json` by the tool-version generator; Renovate bumps it there. The
+registry fallback is always version-pinned — `@latest` is never resolved at runtime, so
+a broken upstream release cannot take every consumer down at once.
+
+Files are passed as literal paths, never globs or directories. html-validate expands
+those through `fs.globSync`, which is missing on some Bun builds and aborts the run
+before any file is validated.
 
 ## Output format
 

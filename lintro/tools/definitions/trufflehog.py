@@ -43,6 +43,7 @@ from lintro.tools.core.option_validators import (
     validate_positive_int,
     validate_str,
 )
+from lintro.utils.path_filtering import filter_existing_paths
 
 # Constants for TruffleHog configuration
 TRUFFLEHOG_DEFAULT_TIMEOUT: int = 60
@@ -330,24 +331,39 @@ class TrufflehogPlugin(BaseToolPlugin):
                 output="No files to check.",
                 issues_count=0,
             )
+        # Resolution can turn a discovered entry into a path that does not
+        # exist — a dangling symlink resolves to its absent target (#1716,
+        # #1726). TruffleHog ``lstat``s every source path and fails the run on
+        # the first missing one, so drop unreachable targets here instead of
+        # handing them over. Discovery already filters dangling links, so this
+        # is the narrow race window between discovery and exec.
+        present_scan_paths = filter_existing_paths(source_paths)
         missing_scan_paths = [
             source_path
             for source_path in source_paths
-            if not Path(source_path).exists()
+            if source_path not in set(present_scan_paths)
         ]
         if missing_scan_paths:
             missing_list = "\n".join(f"  - {path}" for path in missing_scan_paths)
-            return ToolResult(
-                name=self.definition.name,
-                success=False,
-                output=(
-                    "TruffleHog scan incomplete: resolved scan target(s) "
-                    "disappeared before execution.\n"
-                    f"{missing_list}"
-                ),
-                issues_count=0,
-                parse_failures_count=1,
+            if not present_scan_paths:
+                # Every target vanished: there is nothing left to scan, so a
+                # clean pass would be a lie. Fail closed (#1044).
+                return ToolResult(
+                    name=self.definition.name,
+                    success=False,
+                    output=(
+                        "TruffleHog scan incomplete: resolved scan target(s) "
+                        "disappeared before execution.\n"
+                        f"{missing_list}"
+                    ),
+                    issues_count=0,
+                    parse_failures_count=1,
+                )
+            logger.warning(
+                "[trufflehog] Skipping scan target(s) that do not exist:\n"
+                f"{missing_list}",
             )
+            source_paths = present_scan_paths
 
         # Expanding every file into one invocation can exceed ARG_MAX on large
         # repositories, so batch the paths under a byte budget and merge the

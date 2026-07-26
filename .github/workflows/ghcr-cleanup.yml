@@ -115,6 +115,50 @@ jobs:
           DRY_RUN: ${{ inputs.dry_run == true }}
         run: scripts/ci/maintenance/sweep-ci-ghcr-tags.sh
 
+  # Age-based sweep of per-commit tags (sha-<commit>) published alongside
+  # releases. Unbounded growth here is not just storage: the tag list is what
+  # Renovate's docker datasource must enumerate to find newer versions, and
+  # at >1000 tags the first page held neither the pinned release nor any
+  # recent one — over half of it was sha-* (#1590).
+  #
+  # Reuses the ci-* sweeper via TAG_PREFIX. Its safety rule does the heavy
+  # lifting: only versions whose EVERY tag matches the prefix are candidates,
+  # so a release version carrying both sha-<commit> and 0.91.49 is skipped
+  # and can never be deleted by this job.
+  sweep-sha-tags:
+    name: 🧹 Sweep aged commit tags
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read # checkout sweep-ci-ghcr-tags.sh
+      packages: write # delete aged-out CI tags from GHCR
+    timeout-minutes: 10
+    steps:
+      - name: Harden Runner
+        # yamllint disable-line rule:line-length
+        uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
+        with:
+          egress-policy: 'block'
+          allowed-endpoints: >
+            github.com:443
+            api.github.com:443
+            codeload.github.com:443
+            objects.githubusercontent.com:443
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Sweep aged-out commit tags
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG_PREFIX: sha-
+          # Same 91-day window as the ci-* sweep. sha-<commit> tags have no
+          # rerun-retention constraint of their own, but a shared floor keeps
+          # one knob instead of two and stays clear of the #1138 hazard.
+          # yamllint disable-line rule:line-length
+          MIN_AGE_DAYS: ${{ github.event_name != 'workflow_dispatch' && 91 || inputs.sweep_min_age_days }}
+          DRY_RUN: ${{ inputs.dry_run == true }}
+        run: scripts/ci/maintenance/sweep-ci-ghcr-tags.sh
+
   prune-untagged-base:
     # yamllint disable-line rule:line-length
     uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-ghcr-cleanup.yml@ee8484ca71db3a2c2c33da6128bbf2330fcd7c88 # v0.59.2

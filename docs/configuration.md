@@ -486,6 +486,23 @@ and a note explaining the reason. Common skip reasons:
 Skipped tools do not affect exit codes — only tools that run and find issues contribute
 to a non-zero exit.
 
+#### Disabling a tool from `pyproject.toml`
+
+The `tools:` section of `.lintro-config.yaml` has two equivalent `pyproject.toml`
+spellings — a flat per-tool table, or a nested `tool`/`tools` table:
+
+```toml
+[tool.lintro.trufflehog]
+enabled = false
+
+# Equivalent, mirroring the YAML `tools:` section
+[tool.lintro.tool.trufflehog]
+enabled = false
+```
+
+`pyproject.toml` is a _fallback_: when a `.lintro-config.yaml` exists, it is the only
+configuration source and these tables are not consulted.
+
 ### Project Setup with `lintro init`
 
 Run `lintro init` to detect project languages, select an install profile, and generate a
@@ -1040,7 +1057,17 @@ lintro check --tools osv_scanner --tool-options "osv_scanner:timeout=300"
 
 # Skip suppression staleness check
 lintro check --tools osv_scanner --tool-options "osv_scanner:check_suppressions=false"
+
+# Ignore vendored or nested checkouts (equivalent to a .lintro-ignore entry)
+lintro check --tools osv_scanner --exclude ".claude"
 ```
+
+**Excluding lockfiles:** osv-scanner performs its own recursive lockfile discovery, so
+lintro applies the resolved exclusion set — `.lintro-ignore` entries plus `--exclude`
+patterns — to the lockfile paths it reports. Both mechanisms use the same gitignore
+semantics as file discovery and yield identical results. Directory patterns (`.claude`,
+`vendor/`) drop every finding from that tree — useful when nested checkouts multiply the
+same finding — and file patterns (`bun.lock`, `*.lock`) suppress individual lockfiles.
 
 #### pip-audit Configuration
 

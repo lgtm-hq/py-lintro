@@ -40,7 +40,7 @@ def unresolvable_binary(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
         execution_preparation,
         "get_executable_command",
-        lambda tool_name: [_MISSING_BINARY],
+        lambda tool_name, cwd=None: [_MISSING_BINARY],
     )
 
 

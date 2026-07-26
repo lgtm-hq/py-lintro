@@ -521,6 +521,18 @@ def _convert_pyproject_to_config(data: dict[str, Any]) -> dict[str, Any]:
             # Tool-specific config - normalize aliases to canonical names
             canonical_name = tool_aliases.get(key_lower, key_lower)
             result["tools"][canonical_name] = value
+        elif key_lower in ("tool", "tools") and isinstance(value, dict):
+            # Nested per-tool table, mirroring the ``tools:`` section of
+            # .lintro-config.yaml: ``[tool.lintro.tool.trufflehog]`` /
+            # ``[tool.lintro.tools.trufflehog]``. Without this the whole table
+            # was dropped, so ``enabled = false`` silently did nothing and the
+            # tool kept running (#1716).
+            for nested_key, nested_value in value.items():
+                nested_lower = str(nested_key).lower()
+                if nested_lower not in known_tools:
+                    continue
+                nested_canonical = tool_aliases.get(nested_lower, nested_lower)
+                result["tools"].setdefault(nested_canonical, nested_value)
         elif key in execution_keys or key.replace("-", "_") in execution_keys:
             # Execution config
             result["execution"][key.replace("-", "_")] = value

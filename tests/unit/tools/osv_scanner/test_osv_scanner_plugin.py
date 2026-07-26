@@ -784,3 +784,77 @@ def test_set_options_validates_check_suppressions(
     """set_options rejects non-boolean check_suppressions."""
     with pytest.raises(ValueError, match="check_suppressions must be a boolean"):
         osv_scanner_plugin.set_options(check_suppressions="yes")
+
+
+def test_suppressions_classified_when_probe_findings_are_all_excluded(
+    osv_scanner_plugin: OsvScannerPlugin,
+    tmp_path: Path,
+) -> None:
+    """A probe whose findings are all excluded still classifies suppressions.
+
+    osv-scanner exits non-zero whenever vulnerabilities exist, so a probe that
+    found only excluded findings looks identical to an unreadable probe if the
+    "no parseable output" guard is evaluated after exclusion filtering. That
+    conflation would skip classification entirely, so suppressions covering
+    excluded findings would never be reported stale — the opposite of the
+    exclusion contract (#1725).
+
+    Args:
+        osv_scanner_plugin: The plugin under test.
+        tmp_path: Temporary directory for the fixture project.
+    """
+    lockfile = tmp_path / "requirements.txt"
+    copy_sample(
+        tmp_path,
+        "tools",
+        "security",
+        "osv_scanner",
+        "osv_scanner_fixture_requests_2_32_3.txt",
+        dest_name=lockfile.name,
+    )
+
+    config = tmp_path / ".osv-scanner.toml"
+    config.write_text(
+        "[[IgnoredVulns]]\n"
+        'id = "GHSA-stale-1234"\n'
+        "ignoreUntil = 2027-12-31\n"
+        'reason = "Test suppression"\n',
+    )
+
+    # The probe finds a real vulnerability, but only inside an excluded path,
+    # and exits non-zero because a vulnerability exists.
+    probe_report = json.dumps(
+        {
+            "results": [
+                {
+                    "source": {"path": "vendor/requirements.txt"},
+                    "packages": [
+                        {
+                            "package": {"name": "requests", "version": "2.32.3"},
+                            "vulnerabilities": [{"id": "GHSA-excluded-9999"}],
+                            "groups": [{"ids": ["GHSA-excluded-9999"]}],
+                        },
+                    ],
+                },
+            ],
+        },
+    )
+
+    osv_scanner_plugin.set_options(exclude_patterns=["vendor"])
+
+    with patch.object(
+        osv_scanner_plugin,
+        "_run_subprocess_result",
+        side_effect=[
+            _proc(success=True),  # gating scan
+            _proc(success=False, stdout=probe_report),  # probe: excluded finding
+        ],
+    ):
+        result = osv_scanner_plugin.check([str(lockfile)], {})
+
+    assert_that(result.ai_metadata).is_not_none()
+    assert result.ai_metadata is not None  # narrow type for mypy
+    suppressions = result.ai_metadata["suppressions"]
+    assert_that(suppressions).is_length(1)
+    # The excluded finding must not count as evidence the suppression is live.
+    assert_that(suppressions[0]["status"]).is_equal_to("stale")

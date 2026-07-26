@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import ast
+import json
 import re
 import subprocess  # nosec B404 - subprocess runs fixed git argv against this repo
 from pathlib import Path
@@ -1107,6 +1108,150 @@ def test_publish_npm_delegates_publish_to_hardened_script() -> None:
 # substrings here, so this module only asserts the workflow-to-script wiring.
 
 
+_UV_ARG_PATTERN = re.compile(r"^ARG UV_VERSION=(?P<version>[0-9]+\.[0-9]+\.[0-9]+)$")
+
+
+def _tools_dockerfile_uv_version() -> str:
+    """Return the uv version pinned by ``docker/tools.Dockerfile``.
+
+    Returns:
+        The ``ARG UV_VERSION`` value declared in the tools image Dockerfile.
+    """
+    dockerfile = _REPO_ROOT / "docker" / "tools.Dockerfile"
+    for line in dockerfile.read_text(encoding="utf-8").splitlines():
+        match = _UV_ARG_PATTERN.match(line.strip())
+        if match is not None:
+            return match.group("version")
+    pytest.fail("ARG UV_VERSION not found in docker/tools.Dockerfile")
+
+
+def test_build_binary_pins_setup_uv_version() -> None:
+    """Binary builds must pin setup-uv to an exact version, not latest.
+
+    ``version: latest`` forces astral-sh/setup-uv to fetch
+    astral-sh/versions uv.ndjson, which has timed out repeatedly under
+    harden-runner during tag publishes (#1487). An exact pin uses the
+    ExactVersionResolver path; the continue-on-error retry remains.
+
+    The pin must also equal the tools image's ``ARG UV_VERSION`` so the two
+    Renovate-managed uv pins cannot silently drift apart.
+    """
+    workflow = _load_workflow(name="build-binary.yml")
+    pinned = workflow["env"]["UV_VERSION"]
+    assert_that(pinned).matches(r"^\d+\.\d+\.\d+$")
+    assert_that(pinned).described_as(
+        "build-binary UV_VERSION must match docker/tools.Dockerfile ARG UV_VERSION",
+    ).is_equal_to(_tools_dockerfile_uv_version())
+
+    setup_uv_steps: list[dict[str, Any]] = []
+    for job in workflow["jobs"].values():
+        for step in job.get("steps") or []:
+            uses = step.get("uses") or ""
+            if "astral-sh/setup-uv@" in uses:
+                setup_uv_steps.append(step)
+
+    assert_that(setup_uv_steps).is_not_empty()
+    for step in setup_uv_steps:
+        version = step.get("with", {}).get("version", "")
+        assert_that(version).does_not_contain("latest")
+        assert_that(version).contains("env.UV_VERSION")
+
+
+def test_renovate_manages_build_binary_uv_pin() -> None:
+    """A Renovate customManager must match the build-binary UV_VERSION line.
+
+    The workflow pin is not a native manager target, so without a regex
+    manager whose pattern actually matches the file's text it would silently
+    rot while the Dockerfile pin advanced (#1487).
+    """
+    config = json.loads((_REPO_ROOT / "renovate.json").read_text(encoding="utf-8"))
+    workflow_text = (
+        _REPO_ROOT / ".github" / "workflows" / "build-binary.yml"
+    ).read_text(encoding="utf-8")
+
+    matching = [
+        manager
+        for manager in config["customManagers"]
+        if any(
+            "build-binary.yml" in pattern
+            for pattern in manager.get("managerFilePatterns", [])
+        )
+    ]
+    assert_that(matching).described_as(
+        "no Renovate customManager targets build-binary.yml",
+    ).is_not_empty()
+
+    for manager in matching:
+        assert_that(manager["packageNameTemplate"]).is_equal_to("astral-sh/uv")
+        for match_string in manager["matchStrings"]:
+            # Renovate uses JS named groups, `(?<name>...)`; Python wants
+            # `(?P<name>...)`.
+            pattern = re.sub(r"\(\?<(\w+)>", r"(?P<\1>", match_string)
+            found = re.search(pattern, workflow_text)
+            assert_that(found).described_as(
+                f"matchString {match_string!r} does not match build-binary.yml",
+            ).is_not_none()
+
+
+def test_build_binary_retries_setup_uv_on_failure() -> None:
+    """Each setup-uv job keeps a continue-on-error + retry pair (#1513)."""
+    workflow = _load_workflow(name="build-binary.yml")
+    jobs_with_setup_uv = [
+        job_id
+        for job_id, job in workflow["jobs"].items()
+        if any(
+            "astral-sh/setup-uv@" in (step.get("uses") or "")
+            for step in job.get("steps") or []
+        )
+    ]
+    assert_that(jobs_with_setup_uv).is_not_empty()
+
+    for job_id in jobs_with_setup_uv:
+        steps = workflow["jobs"][job_id]["steps"]
+        first = next(step for step in steps if step.get("id") == "setup-uv")
+        assert_that(first.get("continue-on-error")).is_true()
+        retry = next(step for step in steps if step.get("name") == "Install uv (retry)")
+        assert_that(retry.get("if")).contains("steps.setup-uv.outcome == 'failure'")
+
+
+def test_auto_rerun_covers_tag_publish_workflows() -> None:
+    """Auto-rerun must watch publish workflows and not filter to main only.
+
+    Tag publishes set workflow_run.head_branch to the tag name, so
+    ``branches: [main]`` would never see Publish - PyPI Production failures.
+    Fork abuse is blocked by the same-repo job guard instead (#1487).
+    """
+    workflow = _load_workflow(name="auto-rerun-on-infra-failure.yml")
+    trigger = workflow["on"]["workflow_run"]
+    watched = set(trigger["workflows"])
+
+    assert_that(watched).contains("Publish - PyPI Production")
+    assert_that(watched).contains("Publish - Homebrew Tap")
+    assert_that(watched).contains("Publish - npm")
+    # branches: would exclude tag head_branch values; omit it entirely.
+    assert_that(trigger).does_not_contain_key("branches")
+    assert_that(trigger).does_not_contain_key("branches-ignore")
+
+    # workflow_run matches on the workflow's `name:`, and an unknown name is
+    # silently ignored by GitHub — so every watched entry must name a real
+    # workflow in this repo.
+    declared = {
+        _load_workflow(name=path.name)["name"]
+        for path in sorted((_REPO_ROOT / ".github" / "workflows").glob("*.yml"))
+    }
+    assert_that(watched).described_as(
+        "watched workflow_run names must exist as workflow `name:` values",
+    ).is_subset_of(declared)
+
+    rerun_if = _normalize_github_expr(workflow["jobs"]["rerun"]["if"])
+    assert_that(rerun_if).contains(
+        "github.event.workflow_run.head_repository.full_name == github.repository",
+    )
+    assert_that(rerun_if).contains(
+        "github.event.workflow_run.conclusion == 'failure'",
+    )
+
+
 # Canonical lgtm-ci pin used by all py-lintro workflows (v0.52.4).
 # Pages deploy must not regress to v0.32.3 (missing GH_TOKEN in bundler).
 # The 40-hex git SHA trips trufflehog's Github legacy-token detector under
@@ -1253,9 +1398,12 @@ def test_dogfood_nightly_gates_pinned_digest_tools() -> None:
         if step.get("run") == "scripts/ci/verify-image-manifest-tools.sh"
     ]
     assert_that(verify_steps).is_length(1)
-    # Verifies the same pinned release digest the nightly dogfood run lints with.
-    assert_that(verify_steps[0]["env"]["IMAGE"]).contains(
-        "ghcr.io/lgtm-hq/py-lintro@sha256:",
+    # Verifies the same pinned release image the nightly dogfood run lints
+    # with. The reference carries both the release tag and the digest (#1751):
+    # the digest is what Docker resolves, the tag makes the pinned release
+    # readable and gives Renovate a version to bump.
+    assert_that(verify_steps[0]["env"]["IMAGE"]).matches(
+        r"ghcr\.io/lgtm-hq/py-lintro:\d+\.\d+\.\d+@sha256:[a-f0-9]{64}",
     )
 
     # A pinned-digest failure must reach the deduplicated failure notifier.
@@ -1905,3 +2053,385 @@ def test_dependency_vuln_gate_filter_globs_match_committed_manifests() -> None:
     unmatched = [path for path in manifests if not spec.match_file(path)]
 
     assert_that(unmatched).is_empty()
+
+
+def _js_regex_to_python(pattern: str) -> str:
+    """Translate a JavaScript regex to Python's named-group spelling.
+
+    Renovate config is JS-flavoured: named groups are ``(?<name>`` where Python
+    spells them ``(?P<name>``. Lookbehind assertions (``(?<=``, ``(?<!``) share
+    the ``(?<`` prefix but are identical in both flavours, so they must be left
+    alone — rewriting them yields invalid Python syntax.
+    """
+    return re.sub(r"\(\?<(?![=!])", "(?P<", pattern)
+
+
+def _renovate_pinned_image_manager() -> dict[str, Any]:
+    """Return the customManager governing the pinned py-lintro release image."""
+    config = json.loads(
+        (_REPO_ROOT / "renovate.json").read_text(encoding="utf-8"),
+    )
+    covering = [
+        manager
+        for manager in config.get("customManagers", [])
+        if any(
+            "py-lintro" in match_string
+            for match_string in manager.get("matchStrings", [])
+        )
+    ]
+    assert_that(covering).is_length(1)
+    return cast(dict[str, Any], covering[0])
+
+
+# Every workflow file carrying a pinned release reference, and how many sites
+# it must carry. Hard-coding the counts is deliberate: asserting only that the
+# surviving references agree would stay green if a refactor deleted all but one
+# pin, which is exactly the drift this guard exists to catch (#1751).
+_PINNED_IMAGE_SITES = {
+    "dogfood-nightly.yml": 3,
+    "docker-ci.yml": 4,
+}
+
+
+def test_pinned_release_image_sites_share_one_reference() -> None:
+    """Every pinned py-lintro release site must name the same release.
+
+    The nightly dogfood run and the docker-ci fork-PR fallback pin a released
+    ``py-lintro`` image by digest. The pin is deliberately frozen so the
+    digest-lag gate in ``scripts/ci/verify-image-manifest-tools.sh`` stays
+    meaningful, and Renovate bumps every site as one set (#1751). A partial
+    bump would leave the two workflows linting with different images while
+    both claim to use "the pinned release" — this asserts that cannot happen.
+
+    The pattern is the one Renovate itself is configured with, so a pin that
+    is reworded out of the manager's reach fails here rather than silently
+    dropping out of coverage.
+    """
+    match_string = _renovate_pinned_image_manager()["matchStrings"][0]
+    pattern = re.compile(_js_regex_to_python(match_string))
+
+    references: set[str] = set()
+    for filename, expected_sites in _PINNED_IMAGE_SITES.items():
+        workflow = _REPO_ROOT / ".github" / "workflows" / filename
+        assert_that(workflow.is_file()).is_true()
+        matches = pattern.findall(workflow.read_text(encoding="utf-8"))
+        # Per-file count, so deleting pins from one workflow cannot hide
+        # behind pins that remain in the other.
+        assert_that(matches).described_as(filename).is_length(expected_sites)
+        references.update(matches)
+
+    assert_that(references).is_length(1)
+
+
+def test_pinned_release_image_manager_covers_both_workflows() -> None:
+    """The custom manager must still target every pinned-image workflow.
+
+    Without it the pin is a manual multi-site edit that only ever moves when
+    something breaks (#1751) — the failure mode behind #1590, where the pinned
+    image lagged the manifest by seven tool versions and one absent binary.
+    """
+    manager = _renovate_pinned_image_manager()
+
+    assert_that(manager.get("datasourceTemplate")).is_equal_to("docker")
+
+    # Renovate matches file patterns against repo-relative paths; assert each
+    # workflow this repo pins in is actually reachable by one of them.
+    file_patterns = [
+        re.compile(_js_regex_to_python(pattern.strip("/")))
+        for pattern in manager.get("managerFilePatterns", [])
+    ]
+    for filename in _PINNED_IMAGE_SITES:
+        path = f".github/workflows/{filename}"
+        covered = any(pattern.search(path) for pattern in file_patterns)
+        assert_that(covered).described_as(path).is_true()
+
+
+_COSIGN_SIGN_SCRIPT = _REPO_ROOT / "scripts" / "ci" / "cosign-sign-images.sh"
+
+
+def _auto_rerun_signatures() -> list[str]:
+    """Return the extra signatures wired into the auto-rerun matcher.
+
+    Returns:
+        The non-blank lines of the ``signatures`` input passed to the
+        reusable auto-rerun workflow, one fixed-string signature per line.
+    """
+    workflow = _load_workflow(name="auto-rerun-on-infra-failure.yml")
+    signatures = str(workflow["jobs"]["rerun"]["with"]["signatures"])
+    return [line.strip() for line in signatures.splitlines() if line.strip()]
+
+
+def _cosign_oidc_flake_markers() -> list[str]:
+    """Return the fixed-string markers the in-step cosign retry keys off.
+
+    Returns:
+        The entries of the ``oidc_flake_markers`` bash array declared in
+        ``scripts/ci/cosign-sign-images.sh``.
+    """
+    script = _COSIGN_SIGN_SCRIPT.read_text(encoding="utf-8")
+    # Terminate on the array's own closing line (``)`` alone) rather than the
+    # first ``)`` character: markers are fixed strings under ``grep -F`` and may
+    # legitimately contain parentheses, e.g. ``getting cert (403)``. A
+    # character-class scan would truncate there and silently drop the rest,
+    # letting the parity test pass while a marker is missing from the workflow.
+    array_match = re.search(
+        r"^oidc_flake_markers=\((.*?)^\)",
+        script,
+        re.DOTALL | re.MULTILINE,
+    )
+    assert_that(
+        array_match,
+        description="oidc_flake_markers array not found",
+    ).is_not_none()
+    assert array_match is not None  # narrow for mypy
+    return re.findall(r'"([^"]+)"', array_match.group(1))
+
+
+def test_auto_rerun_passes_cosign_oidc_flake_signatures() -> None:
+    """The auto-rerun matcher must know the cosign ambient-OIDC signatures.
+
+    #1646 retries the transient OIDC token-fetch flake in-step; when that
+    bounded retry is exhausted the signing job still fails and the publish
+    run needs a run-level re-run. The auto-rerun safety net only fires when
+    the failed-job logs match a known signature, so the reusable matcher
+    receives the cosign flake markers via its ``signatures`` input (#1689).
+    Upstream matches with ``grep -qF``, so these must stay fixed strings.
+    """
+    signatures = _auto_rerun_signatures()
+
+    assert_that(signatures).contains("fetching ambient OIDC credentials")
+    assert_that(signatures).contains("retrieving ID token")
+    assert_that(signatures).contains("reading ID token")
+
+
+def test_auto_rerun_signatures_cover_in_step_retry_markers() -> None:
+    """Every in-step cosign retry marker must also reach the auto-rerun net.
+
+    The safety net inspects the final failed attempt's logs, which contain
+    whichever marker the retry loop in scripts/ci/cosign-sign-images.sh
+    matched. A marker missing from the workflow ``signatures`` input would
+    leave that exhausted-retry failure mode needing a manual backfill.
+    """
+    signatures = _auto_rerun_signatures()
+    markers = _cosign_oidc_flake_markers()
+
+    assert_that(markers).is_not_empty()
+    assert_that(markers).is_subset_of(signatures)
+
+
+# Constructs that only make sense if the author believed the signature was a
+# regex. Bare metacharacters are deliberately NOT listed: ``grep -qF`` compares
+# literally, so parentheses, brackets and plus signs are ordinary text and
+# occur naturally in tool output (``getting cert (403)``). Rejecting those
+# would force future markers to diverge from the log lines they must match.
+_REGEX_INTENT_TELLS = (
+    r"^\^",  # leading anchor
+    r"\$$",  # trailing anchor
+    r"\.\*",  # .*
+    r"\.\+",  # .+
+    r"\\[dwsb]",  # \d \w \s \b
+    r"\(\?",  # (?: (?= (?<
+    r"\[[^\]]*-[^\]]*\]",  # character class with a range, e.g. [0-9]
+)
+
+
+def test_auto_rerun_signatures_are_fixed_strings() -> None:
+    """Extra signatures must be plain fixed strings, not regexes.
+
+    ``rerun-on-infra-failure.sh`` matches with ``grep -qF``, so a regex or
+    an anchor would be compared literally and silently never match. The check
+    targets constructs that betray regex *intent* rather than any
+    metacharacter, since literal punctuation is legitimate under ``-F``.
+    """
+    signatures = _auto_rerun_signatures()
+
+    assert_that(signatures).is_not_empty()
+    for signature in signatures:
+        for tell in _REGEX_INTENT_TELLS:
+            assert_that(re.search(tell, signature)).described_as(
+                f"{signature!r} looks like a regex ({tell})",
+            ).is_none()
+
+
+def test_auto_rerun_matches_docker_hub_buildx_pull_timeout() -> None:
+    """The matcher must know the Docker Hub buildkit-pull timeout.
+
+    `Setup Docker Buildx` boots buildkit by pulling moby/buildkit from
+    Docker Hub. When Docker Hub is slow the daemon times out and the job
+    dies before doing any real work -- purely transient, and not a
+    harden-runner block (registry-1.docker.io:443 is already allowed).
+    None of lgtm-ci's default signatures match it, so the v0.91.42 release
+    run (30148763859, Merge Manifests job 89692290242) was never
+    auto-rerun. The signature is scoped to the registry URL rather than a
+    bare "context deadline exceeded", which would absorb genuine timeouts
+    elsewhere that deserve a human.
+    """
+    signatures = _auto_rerun_signatures()
+
+    assert_that(signatures).contains(
+        'Get "https://registry-1.docker.io/v2/": context deadline exceeded',
+    )
+    # A bare timeout string is too broad to auto-rerun on.
+    assert_that(signatures).does_not_contain("context deadline exceeded")
+
+
+# --- Tool-execution timeout classification wiring (#1653) --------------------
+
+
+def test_dogfood_skip_gate_publishes_timeout_flake_outputs() -> None:
+    """The no-silent-skip gate must publish its timeout verdict as job outputs."""
+    docker_ci = _load_workflow(name="docker-ci.yml")
+    gate = docker_ci["jobs"]["dogfood-skip-gate"]
+
+    outputs = gate.get("outputs") or {}
+    assert_that(outputs).contains_key("timeout-flake")
+    assert_that(_normalize_github_expr(outputs["timeout-flake"])).contains(
+        "steps.skips.outputs.timeout-flake",
+    )
+
+    step_ids = [step.get("id") for step in gate["steps"]]
+    assert_that(step_ids).contains("skips")
+
+
+def test_code_quality_gate_does_not_consume_the_timeout_verdict() -> None:
+    """The timeout verdict must stay diagnostic, never a gate input.
+
+    ``dogfood-skip-gate`` always lints the full repo, so its verdict is not
+    evidence about the authoritative lint run: under ``lint-scope == 'changed'``
+    that run lints only changed files, and a tool that times out reports zero
+    findings precisely because it did not finish. Wiring the verdict into the
+    gate lets a genuine finding be absorbed and the required check turn green.
+
+    A sound implementation needs the authoritative run's own structured report,
+    which the upstream reusable lint workflow does not publish (lgtm-ci#746).
+    """
+    docker_ci = _load_workflow(name="docker-ci.yml")
+    gate_job = docker_ci["jobs"]["code-quality-gate"]
+
+    assert_that(gate_job["needs"]).does_not_contain("dogfood-skip-gate")
+
+    gate_step = next(step for step in gate_job["steps"] if step.get("id") == "gate")
+    assert_that(gate_step.get("env") or {}).does_not_contain_key("TIMEOUT_FLAKE")
+
+
+def test_dogfood_skip_gate_checks_out_the_timeout_classifier() -> None:
+    """The skip gate script must be able to reach the classifier it calls."""
+    script = (_REPO_ROOT / "scripts" / "ci" / "dogfood-skip-gate.sh").read_text(
+        encoding="utf-8",
+    )
+    assert_that(script).contains("classify-lint-timeout.py")
+    classifier = _REPO_ROOT / "scripts" / "ci" / "classify-lint-timeout.py"
+    assert_that(classifier.exists()).is_true()
+
+
+def test_code_quality_gate_sparse_checkout_covers_gate_scripts() -> None:
+    """Every script run by the gate job must be in its sparse checkout."""
+    docker_ci = _load_workflow(name="docker-ci.yml")
+    gate_job = docker_ci["jobs"]["code-quality-gate"]
+    checkout = next(
+        step
+        for step in gate_job["steps"]
+        if str(step.get("uses", "")).startswith("actions/checkout")
+    )
+    sparse = checkout["with"]["sparse-checkout"]
+
+    for script in (
+        "scripts/ci/run-code-quality-gate.sh",
+        "scripts/ci/evaluate-code-quality-gate.sh",
+        "scripts/ci/assert-required-check.sh",
+        "scripts/ci/is-infra-flake-failure.sh",
+    ):
+        assert_that(sparse).contains(script)
+
+
+# --- Release version-skew audit wiring (#1712) ------------------------------
+
+_SKEW_WORKFLOW = "release-version-skew-audit.yml"
+_SKEW_SCRIPT = "scripts/ci/check-release-version-skew.py"
+
+
+def test_version_skew_audit_runs_on_schedule_and_dispatch() -> None:
+    """The skew audit is a scheduled backstop, also runnable on demand.
+
+    Propagation lag means the settle window matters more than immediacy, so
+    the alarm runs as a periodic audit rather than inline in the release run.
+    """
+    workflow = _load_workflow(name=_SKEW_WORKFLOW)
+    triggers = workflow["on"]
+    assert_that(triggers).contains_key("schedule")
+    assert_that(triggers).contains_key("workflow_dispatch")
+    assert_that(triggers["schedule"]).is_not_empty()
+    assert_that(workflow["permissions"]).is_equal_to({})
+
+
+def test_version_skew_audit_invokes_the_checked_in_script() -> None:
+    """The audit job calls the dedicated script, not inline shell logic."""
+    workflow = _load_workflow(name=_SKEW_WORKFLOW)
+    steps = workflow["jobs"]["audit"]["steps"]
+    run_steps = [step for step in steps if "run" in step]
+    assert_that(run_steps).is_length(1)
+    assert_that(run_steps[0]["run"]).contains(_SKEW_SCRIPT)
+    assert_that((_REPO_ROOT / _SKEW_SCRIPT).exists()).is_true()
+    # Alarm, not gate: the audit must not be wired into any release job's
+    # ``needs:`` chain, and must not carry write permissions.
+    assert_that(workflow["jobs"]["audit"]["permissions"]).is_equal_to(
+        {"contents": "read"},
+    )
+
+
+def test_version_skew_audit_notifies_via_deduplicated_notifier() -> None:
+    """Skew alarms ping one deduplicated issue instead of one issue per run."""
+    workflow = _load_workflow(name=_SKEW_WORKFLOW)
+    notify = workflow["jobs"]["notify-failure"]
+    assert_that(notify["needs"]).contains("audit")
+    assert_that(notify["uses"]).contains("reusable-main-failure-notifier.yml")
+    assert_that(notify["with"]["workflow-key"]).is_equal_to("release-version-skew")
+    # Main-only: a dispatch from a feature branch must not open the issue.
+    assert_that(_normalize_github_expr(notify["if"])).contains(
+        "github.ref == 'refs/heads/main'",
+    )
+
+
+def test_version_skew_audit_allows_every_channel_endpoint() -> None:
+    """Egress policy allows exactly the hosts the audit must reach."""
+    workflow = _load_workflow(name=_SKEW_WORKFLOW)
+    steps = workflow["jobs"]["audit"]["steps"]
+    harden = next(
+        step for step in steps if str(step.get("uses", "")).startswith("step-security/")
+    )
+    assert_that(harden["with"]["egress-policy"]).is_equal_to("block")
+    allowed = harden["with"]["allowed-endpoints"].split()
+    for endpoint in (
+        "pypi.org:443",
+        "registry.npmjs.org:443",
+        "raw.githubusercontent.com:443",
+        "api.github.com:443",
+    ):
+        assert_that(allowed).contains(endpoint)
+
+
+def test_ghcr_cleanup_sweeps_commit_tags_with_the_shared_safety_rule() -> None:
+    """Per-commit tags must be swept, reusing the ci-* sweeper's guardrails.
+
+    Unbounded ``sha-<commit>`` growth is not only storage: the tag list is what
+    Renovate's docker datasource enumerates to find newer versions, and past
+    1000 tags the first page held no recent release at all (#1590).
+
+    The sweep must go through ``sweep-ci-ghcr-tags.sh`` rather than a bespoke
+    deletion path, because that script only deletes versions whose *every* tag
+    matches the prefix — so a release carrying both ``sha-<commit>`` and a
+    version tag can never be removed by it.
+    """
+    cleanup = _load_workflow(name="ghcr-cleanup.yml")
+    jobs = cleanup["jobs"]
+    assert_that(jobs).contains_key("sweep-sha-tags")
+
+    job = jobs["sweep-sha-tags"]
+    sweep_steps = [
+        step
+        for step in job["steps"]
+        if step.get("run") == "scripts/ci/maintenance/sweep-ci-ghcr-tags.sh"
+    ]
+    assert_that(sweep_steps).is_length(1)
+    assert_that(sweep_steps[0]["env"]["TAG_PREFIX"]).is_equal_to("sha-")
+    assert_that(job["permissions"]["packages"]).is_equal_to("write")

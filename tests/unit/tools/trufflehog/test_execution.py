@@ -523,3 +523,101 @@ def test_check_genuine_scan_error_with_findings_still_fails(
 
     assert_that(result.success).is_false()
     assert_that(result.issues_count).is_equal_to(1)
+
+
+def test_check_skips_missing_targets_and_scans_the_rest(
+    trufflehog_plugin: TrufflehogPlugin,
+    tmp_path: Path,
+) -> None:
+    """One vanished target must not fail a run that still has live files.
+
+    A committed symlink to a build artifact resolves to an absent path;
+    TruffleHog ``lstat``s every source path and fails the whole scan on it
+    (#1716, #1726). The absent path is dropped, the live file still scanned.
+
+    Args:
+        trufflehog_plugin: The plugin under test.
+        tmp_path: Temporary directory path.
+    """
+    live = tmp_path / "module.py"
+    live.write_text('"""Module."""\n')
+    vanished = tmp_path / "coverage"
+    prepared = ExecutionContext(
+        files=[str(live), str(vanished)],
+        cwd=str(tmp_path),
+        timeout=60,
+    )
+
+    captured: dict[str, list[str]] = {}
+
+    def fake_run(cmd: list[str], **_kwargs: object) -> object:
+        """Capture the argv and return a clean scan.
+
+        Args:
+            cmd: The command TruffleHog would have been invoked with.
+            **_kwargs: Ignored subprocess keyword arguments.
+
+        Returns:
+            A clean-scan subprocess result.
+        """
+        captured["cmd"] = cmd
+        return make_subprocess_result(stdout="", returncode=0)
+
+    with (
+        patch.object(trufflehog_plugin, "_prepare_execution", return_value=prepared),
+        patch.object(
+            trufflehog_plugin,
+            "_run_subprocess_result",
+            side_effect=fake_run,
+        ),
+    ):
+        result = trufflehog_plugin.check([str(tmp_path)], {})
+
+    assert_that(result.success).is_true()
+    assert_that(captured["cmd"]).contains(str(live.resolve()))
+    assert_that(captured["cmd"]).does_not_contain(str(vanished.resolve()))
+
+
+def test_check_does_not_scan_dangling_symlink_targets(
+    trufflehog_plugin: TrufflehogPlugin,
+    tmp_path: Path,
+) -> None:
+    """Discovery must not route a dangling symlink into the scan argv.
+
+    Args:
+        trufflehog_plugin: The plugin under test.
+        tmp_path: Temporary directory path.
+    """
+    project = tmp_path / "proj"
+    (project / "reports").mkdir(parents=True)
+    (project / "pyproject.toml").write_text("[project]\n", encoding="utf-8")
+    live = project / "module.py"
+    live.write_text('"""Module."""\n')
+    absent_target = project / "coverage"
+    (project / "reports" / "coverage").symlink_to(absent_target)
+
+    captured: dict[str, list[str]] = {}
+
+    def fake_run(cmd: list[str], **_kwargs: object) -> object:
+        """Capture the argv and return a clean scan.
+
+        Args:
+            cmd: The command TruffleHog would have been invoked with.
+            **_kwargs: Ignored subprocess keyword arguments.
+
+        Returns:
+            A clean-scan subprocess result.
+        """
+        captured["cmd"] = cmd
+        return make_subprocess_result(stdout="", returncode=0)
+
+    with patch.object(
+        trufflehog_plugin,
+        "_run_subprocess_result",
+        side_effect=fake_run,
+    ):
+        result = trufflehog_plugin.check([str(project)], {})
+
+    assert_that(result.success).is_true()
+    assert_that(captured["cmd"]).contains(str(live.resolve()))
+    assert_that(captured["cmd"]).does_not_contain(str(absent_target))

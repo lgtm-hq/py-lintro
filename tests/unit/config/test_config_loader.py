@@ -8,7 +8,7 @@ from unittest.mock import patch
 import pytest
 from assertpy import assert_that
 
-from lintro.config.config_loader import _load_pyproject_fallback
+from lintro.config.config_loader import _load_pyproject_fallback, load_config
 from lintro.utils.config import (
     clear_pyproject_cache,
     load_lintro_tool_config,
@@ -134,3 +134,54 @@ def test_load_pyproject_os_error_logs_debug(
         mock_logger.debug.assert_called_once()
         debug_msg = mock_logger.debug.call_args[0][0]
         assert_that(debug_msg).contains("Could not read pyproject.toml")
+
+
+def test_pyproject_nested_tool_table_disables_a_tool(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """``[tool.lintro.tool.<name>] enabled = false`` must disable the tool.
+
+    The nested table mirrors the ``tools:`` section of .lintro-config.yaml.
+    It used to be dropped during conversion, so the disable flag was silently
+    ignored and the tool kept running (#1716).
+
+    Args:
+        tmp_path: Pytest temporary directory fixture.
+        monkeypatch: Pytest monkeypatch fixture for chdir.
+    """
+    clear_pyproject_cache()
+
+    pyproject = tmp_path / "pyproject.toml"
+    pyproject.write_text(
+        "[tool.lintro]\n[tool.lintro.tool.trufflehog]\nenabled = false\n",
+    )
+    monkeypatch.chdir(tmp_path)
+
+    config = load_config()
+
+    assert_that(config.is_tool_enabled("trufflehog")).is_false()
+    assert_that(config.is_tool_enabled("ruff")).is_true()
+
+
+def test_pyproject_plural_tools_table_disables_a_tool(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """``[tool.lintro.tools.<name>]`` is accepted alongside the singular form.
+
+    Args:
+        tmp_path: Pytest temporary directory fixture.
+        monkeypatch: Pytest monkeypatch fixture for chdir.
+    """
+    clear_pyproject_cache()
+
+    pyproject = tmp_path / "pyproject.toml"
+    pyproject.write_text(
+        "[tool.lintro]\n[tool.lintro.tools.trufflehog]\nenabled = false\n",
+    )
+    monkeypatch.chdir(tmp_path)
+
+    config = load_config()
+
+    assert_that(config.is_tool_enabled("trufflehog")).is_false()

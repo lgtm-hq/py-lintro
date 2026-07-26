@@ -21,6 +21,62 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.91.52] - 2026-07-26
+
+### Fixed
+
+- **ci**: bump the pinned release image and keep it synced (#1590) (#1764) (058acea)
+
+## [0.91.51] - 2026-07-26
+
+### Fixed
+
+- **osv_scanner**: honor .lintro-ignore and --exclude patterns (#1732) (bf334fe)
+
+## [0.91.50] - 2026-07-26
+
+### Fixed
+
+- **ci**: alarm on post-release version skew across PyPI, npm, and Homebrew (#1712)
+  (#1738) (9383923)
+
+## [0.91.49] - 2026-07-26
+
+### Fixed
+
+- **ci**: classify dogfood tool-execution timeouts (diagnostic; gate absorb deferred to
+  lgtm-ci#746) (#1733) (98de8ac)
+- **html-validate**: pin executable resolution and pass literal paths (#1731) (50a9c26)
+
+## [0.91.48] - 2026-07-26
+
+### Fixed
+
+- **ci**: wire transient-infra signatures into the auto-rerun matcher (#1728) (324ded5)
+- **trufflehog**: stop routing absent paths into the scan set (#1736) (7a1e873)
+
+## [0.91.47] - 2026-07-25
+
+### Fixed
+
+- **ci**: retry transient infra failures in tag publish pipeline (#1571) (73fb1e6)
+
+## [0.91.46] - 2026-07-25
+
+### Changed
+
+- **deps**: update dependency devalue to 5.8.2 (patch) (#1753) (c0bc3fc)
+- **deps**: update ghcr.io/lgtm-hq/lintro-tools:latest docker digest to 4c5f412 (#1750)
+  (0680e0c)
+- **deps**: update dependency astral-sh/uv to 0.11.32 (patch) (#1749) (3c60a2f)
+- **deps**: update ghcr.io/lgtm-hq/lintro-tools:latest docker digest to 7c309ca (#1604)
+  (77fba17)
+
+### Fixed
+
+- **ci**: manage the pinned py-lintro release image as one Renovate set (#1751) (#1752)
+  (9d70078)
+
 ## [0.91.45] - 2026-07-25
 
 ### Fixed
