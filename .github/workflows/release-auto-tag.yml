@@ -23,10 +23,10 @@ concurrency:
 jobs:
   auto-tag:
     # yamllint disable-line rule:line-length
-    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-release-auto-tag.yml@ea2eef45ec331a743dffd362a7397a0863501bd4 # v0.59.25
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-release-auto-tag.yml@46cd4f431a6501230b629433c690bbc45d6c01ac # v0.59.28
     with:
       create-release: false
-      tooling-ref: 'ea2eef45ec331a743dffd362a7397a0863501bd4' # v0.59.25
+      tooling-ref: '46cd4f431a6501230b629433c690bbc45d6c01ac' # v0.59.28
       egress-policy: block
       # Paired with release-version-pr.yml (egress-preset: pypi).
       # Guarded by test_release_workflows_use_paired_egress_presets.
