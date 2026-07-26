@@ -21,6 +21,17 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.91.55] - 2026-07-26
+
+### Changed
+
+- **deps**: update linting tools (#1607) (517d70a)
+- **deps**: update dependency lgtm-hq/lgtm-ci to v0.59.25 (patch) (#1769) (50e5484)
+
+### Fixed
+
+- **ci**: auto-rerun every workflow whose failure reddens main (#1777) (a766c4d)
+
 ## [0.91.54] - 2026-07-26
 
 ### Fixed
