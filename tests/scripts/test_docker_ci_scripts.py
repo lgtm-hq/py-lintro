@@ -1052,7 +1052,7 @@ def test_sweep_ci_ghcr_tags_dry_run_skips_delete(
     assert_that(result.stdout).contains("[dry-run] Would delete")
     assert_that(gh_log.read_text()).does_not_contain("--method DELETE")
     # A dry run deletes nothing, so it must not pay for a baseline listing.
-    assert_that(gh_log.read_text()).does_not_contain("select(startswith(")
+    assert_that(gh_log.read_text()).does_not_contain(_PERSISTENT_QUERY_MARKER)
 
 
 # The persistent-tag listing is the only gh call whose jq program binds the tag

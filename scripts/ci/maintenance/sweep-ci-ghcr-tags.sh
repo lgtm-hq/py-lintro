@@ -143,6 +143,10 @@ for prefix in $volatile_prefixes; do
 			"^[A-Za-z0-9._-]+\$, got: ${prefix}" >&2
 		exit 2
 	fi
+	# The default VOLATILE_TAG_PREFIXES repeats the default TAG_PREFIX, so
+	# skip what the seed already covers. `any` short-circuits either way;
+	# this just keeps the array matching what the comment above promises.
+	[[ "$prefix" == "$tag_prefix" ]] && continue
 	volatile_prefixes_jq+=",\"${prefix}\""
 done
 readonly volatile_prefixes_jq
