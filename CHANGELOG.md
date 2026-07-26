@@ -21,6 +21,14 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.91.49] - 2026-07-26
+
+### Fixed
+
+- **ci**: classify dogfood tool-execution timeouts (diagnostic; gate absorb deferred to
+  lgtm-ci#746) (#1733) (98de8ac)
+- **html-validate**: pin executable resolution and pass literal paths (#1731) (50a9c26)
+
 ## [0.91.48] - 2026-07-26
 
 ### Fixed
