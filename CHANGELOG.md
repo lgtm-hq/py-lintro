@@ -21,6 +21,13 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.91.48] - 2026-07-26
+
+### Fixed
+
+- **ci**: wire transient-infra signatures into the auto-rerun matcher (#1728) (324ded5)
+- **trufflehog**: stop routing absent paths into the scan set (#1736) (7a1e873)
+
 ## [0.91.47] - 2026-07-25
 
 ### Fixed
