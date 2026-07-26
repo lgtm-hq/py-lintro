@@ -517,20 +517,27 @@ class OsvScannerPlugin(BaseToolPlugin):
             logger.debug("[osv-scanner] Probe scan timed out, skipping staleness check")
             return None
 
-        probe_issues = self.filter_excluded_issues(
-            issues=parse_osv_scanner_output(probe.stdout),
-            paths=list(paths) if paths else [str(scan_root)],
-            scan_root=scan_root,
-        )
+        parsed_probe_issues = parse_osv_scanner_output(probe.stdout)
 
-        # If probe failed and returned no parseable issues, skip classification
-        # to avoid incorrectly marking all suppressions as stale.
-        if not probe.success and not probe_issues:
+        # Decide "unreadable probe" on the UNFILTERED parse. osv-scanner exits
+        # non-zero whenever vulnerabilities exist, so probe.success is False
+        # both when the probe produced nothing readable and when it found
+        # vulnerabilities that are all under excluded paths. Testing the
+        # filtered list conflates the two, and suppressions covering only
+        # excluded findings would never be classified as stale — the opposite
+        # of the exclusion contract (#1725).
+        if not probe.success and not parsed_probe_issues:
             logger.debug(
                 "[osv-scanner] Probe scan failed with no parseable output, "
                 "skipping staleness check",
             )
             return None
+
+        probe_issues = self.filter_excluded_issues(
+            issues=parsed_probe_issues,
+            paths=list(paths) if paths else [str(scan_root)],
+            scan_root=scan_root,
+        )
 
         probe_vuln_ids = {issue.vuln_id for issue in probe_issues}
 
