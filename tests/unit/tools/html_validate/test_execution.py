@@ -235,3 +235,48 @@ def test_fix_raises_not_implemented(
     """
     with pytest.raises(NotImplementedError):
         html_validate_plugin.fix(["x.html"], {})
+
+
+def test_check_prefers_the_target_projects_local_binary(
+    html_validate_plugin: HtmlValidatePlugin,
+    tmp_path: Path,
+) -> None:
+    """The executable resolves from ctx.cwd, not the process working directory.
+
+    When lintro checks a project outside its own working directory (``--diff``
+    against another checkout, a package inside a monorepo), the run must use
+    that project's lockfile-pinned ``node_modules/.bin/html-validate``.
+    Resolving from the process cwd instead silently falls back to PATH or a
+    registry fetch, so diagnostics come from a different installation than the
+    one the project pins (#1727).
+
+    Args:
+        html_validate_plugin: The plugin under test.
+        tmp_path: Temporary directory standing in for the target project.
+    """
+    project = tmp_path / "target-project"
+    local_bin = project / "node_modules" / ".bin"
+    local_bin.mkdir(parents=True)
+    binary = local_bin / "html-validate"
+    binary.write_text("#!/bin/sh\n")
+    binary.chmod(0o755)
+
+    html_file = project / "index.html"
+    html_file.write_text("<p>ok</p>\n")
+
+    mock_result = SubprocessResult(returncode=0, stdout="[]", stderr="", output="[]")
+
+    with (
+        patch.object(html_validate_plugin, "_prepare_execution") as mock_prepare,
+        patch.object(
+            html_validate_plugin,
+            "_run_subprocess_result",
+            return_value=mock_result,
+        ) as mock_run,
+    ):
+        mock_prepare.return_value = _mock_ctx(project, [str(html_file)])
+        html_validate_plugin.check([str(html_file)], {})
+
+    cmd = cast(list[str], mock_run.call_args.kwargs["cmd"])
+    # The project's own binary, not "html-validate" from PATH or a bunx spec.
+    assert_that(cmd[0]).is_equal_to(binary.as_posix())
