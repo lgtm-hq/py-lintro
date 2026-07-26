@@ -21,6 +21,17 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.91.53] - 2026-07-26
+
+### Changed
+
+- **ci**: trace gate memory to diagnose the repeated runner kills (#1761) (#1766)
+  (ad8ba8e)
+
+### Fixed
+
+- **tools**: pin down builder cwd resolution contract (#1758) (#1770) (73c395d)
+
 ## [0.91.52] - 2026-07-26
 
 ### Fixed
