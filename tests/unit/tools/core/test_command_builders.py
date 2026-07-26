@@ -861,3 +861,101 @@ def test_registry_without_cwd_preserves_process_relative_resolution() -> None:
         CommandBuilderRegistry.get_command("html_validate", ToolName.HTML_VALIDATE)
 
     assert_that(seen).is_equal_to([None])
+
+
+# =============================================================================
+# Execution-directory (cwd) resolution contract, per builder (#1758)
+# =============================================================================
+
+
+def test_node_get_command_matches_get_command_in_without_cwd() -> None:
+    """``get_command`` is ``get_command_in`` with no execution directory.
+
+    The pinned path used to reach ``_get_pinned_command`` twice, once with a
+    ``start`` and once without, so a direct caller could get a different search
+    origin than the registry. Both now share one resolver (#1758).
+    """
+    builder = NodeJSBuilder()
+    seen: list[Path | None] = []
+
+    def _record(binary_name: str, *, start: Path | None = None) -> str | None:
+        seen.append(start)
+        return None
+
+    with (
+        patch("shutil.which", _which_only("bunx")),
+        patch(
+            "lintro.tools.core.command_builders.find_local_node_binary",
+            side_effect=_record,
+        ),
+    ):
+        direct = builder.get_command("html_validate", ToolName.HTML_VALIDATE)
+        threaded = builder.get_command_in(
+            "html_validate",
+            ToolName.HTML_VALIDATE,
+            None,
+        )
+
+    assert_that(direct).is_equal_to(threaded)
+    assert_that(seen).is_equal_to([None, None])
+
+
+def test_python_bundled_builder_ignores_the_execution_directory(
+    tmp_path: Path,
+) -> None:
+    """Bundled Python tools resolve from Lintro's own environment.
+
+    They are Lintro's declared dependencies, gated on the manifest minimum and
+    parsed by version-specific parsers, so a checked project's virtualenv must
+    not win. Locks the documented decision for #1758.
+    """
+    builder = PythonBundledBuilder()
+    with patch("shutil.which", _which_only("ruff")):
+        external = builder.get_command_in("ruff", ToolName.RUFF, tmp_path)
+        process_relative = builder.get_command("ruff", ToolName.RUFF)
+
+    assert_that(external).is_equal_to(process_relative)
+
+
+def test_pytest_builder_ignores_the_execution_directory(tmp_path: Path) -> None:
+    """Pytest resolves from the running interpreter, not the target tree.
+
+    Walking up from the execution directory for a ``.venv`` would select an
+    interpreter whose plugins and dependencies Lintro knows nothing about.
+    Locks the documented decision for #1758.
+    """
+    builder = PytestBuilder()
+    with patch("shutil.which", _which_only("pytest")):
+        external = builder.get_command_in("pytest", ToolName.PYTEST, tmp_path)
+        process_relative = builder.get_command("pytest", ToolName.PYTEST)
+
+    assert_that(external).is_equal_to(process_relative)
+
+
+def test_cargo_builder_ignores_the_execution_directory(tmp_path: Path) -> None:
+    """Cargo resolves from PATH; cargo itself does the project-relative work.
+
+    Workspace root, ``target/`` and ``rust-toolchain.toml`` are found by cargo
+    and rustup from the cwd the executor sets, so the command never varies.
+    Locks the documented decision for #1758.
+    """
+    builder = CargoBuilder()
+    external = builder.get_command_in("clippy", ToolName.CLIPPY, tmp_path)
+
+    assert_that(external).is_equal_to(["cargo", "clippy"])
+    assert_that(external).is_equal_to(builder.get_command("clippy", ToolName.CLIPPY))
+
+
+def test_standalone_builder_ignores_the_execution_directory(tmp_path: Path) -> None:
+    """Standalone binaries resolve against PATH only.
+
+    None of these ecosystems define a project-local install directory, so there
+    is no per-directory candidate to prefer. Locks the decision for #1758.
+    """
+    builder = StandaloneBuilder()
+    external = builder.get_command_in("hadolint", ToolName.HADOLINT, tmp_path)
+
+    assert_that(external).is_equal_to(["hadolint"])
+    assert_that(external).is_equal_to(
+        builder.get_command("hadolint", ToolName.HADOLINT),
+    )
