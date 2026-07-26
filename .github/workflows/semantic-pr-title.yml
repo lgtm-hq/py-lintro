@@ -22,7 +22,7 @@ jobs:
     with:
       # Org ruleset (checks-py-lintro): semantic-title / 📝 Validate PR Title
       job-name: '📝 Validate PR Title'
-      tooling-ref: 'ea2eef45ec331a743dffd362a7397a0863501bd4'  # v0.59.25
+      tooling-ref: 'ea2eef45ec331a743dffd362a7397a0863501bd4' # v0.59.25
       egress-policy: block
       egress-preset: github-tooling
     permissions:

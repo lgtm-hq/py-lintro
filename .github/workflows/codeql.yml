@@ -38,7 +38,7 @@ jobs:
       build-mode: none
       config-file: .github/codeql/codeql-config.yml
       category: '/language:all'
-      tooling-ref: 'ea2eef45ec331a743dffd362a7397a0863501bd4'  # v0.59.25
+      tooling-ref: 'ea2eef45ec331a743dffd362a7397a0863501bd4' # v0.59.25
       egress-policy: block
       egress-preset: github-tooling
       # Full list (v0.50.0+ replace semantics): the reusable passes

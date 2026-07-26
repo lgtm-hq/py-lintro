@@ -1256,7 +1256,7 @@ def test_auto_rerun_covers_tag_publish_workflows() -> None:
 # Pages deploy must not regress to v0.32.3 (missing GH_TOKEN in bundler).
 # The 40-hex git SHA trips trufflehog's Github legacy-token detector under
 # --no-verification; it is a commit pin, not a credential.
-_LGTM_CI_PIN = "ee8484ca71db3a2c2c33da6128bbf2330fcd7c88"  # trufflehog:ignore
+_LGTM_CI_PIN = "ea2eef45ec331a743dffd362a7397a0863501bd4"  # trufflehog:ignore
 
 
 def test_all_lgtm_ci_refs_use_the_canonical_pin() -> None:

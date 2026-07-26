@@ -95,7 +95,7 @@ jobs:
       cosign-sign: true
       scan: true
       scan-exit-code: '0'
-      tooling-ref: 'ea2eef45ec331a743dffd362a7397a0863501bd4'  # v0.59.25
+      tooling-ref: 'ea2eef45ec331a743dffd362a7397a0863501bd4' # v0.59.25
       egress-policy: block
       egress-preset: docker
       # Full list (v0.50.0+ replace semantics): the reusable passes
