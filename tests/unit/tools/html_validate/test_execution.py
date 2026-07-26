@@ -280,3 +280,50 @@ def test_check_prefers_the_target_projects_local_binary(
     cmd = cast(list[str], mock_run.call_args.kwargs["cmd"])
     # The project's own binary, not "html-validate" from PATH or a bunx spec.
     assert_that(cmd[0]).is_equal_to(binary.as_posix())
+
+
+def test_check_does_not_fall_back_to_lintros_own_node_modules(
+    html_validate_plugin: HtmlValidatePlugin,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A target without its own install must not use lintro's node_modules.
+
+    Falling back to a process-cwd search would select an unrelated
+    ``node_modules/.bin/html-validate`` ahead of PATH, making resolution depend
+    on where lintro happens to be invoked from (#1727).
+
+    Args:
+        html_validate_plugin: The plugin under test.
+        tmp_path: Temporary directory root.
+        monkeypatch: Fixture used to relocate the process working directory.
+    """
+    # lintro's own tree has an install; the target project does not.
+    lintro_tree = tmp_path / "lintro-cwd"
+    stray_bin = lintro_tree / "node_modules" / ".bin"
+    stray_bin.mkdir(parents=True)
+    stray = stray_bin / "html-validate"
+    stray.write_text("#!/bin/sh\n")
+    stray.chmod(0o755)
+    monkeypatch.chdir(lintro_tree)
+
+    project = tmp_path / "target-project"
+    project.mkdir()
+    html_file = project / "index.html"
+    html_file.write_text("<p>ok</p>\n")
+
+    mock_result = SubprocessResult(returncode=0, stdout="[]", stderr="", output="[]")
+
+    with (
+        patch.object(html_validate_plugin, "_prepare_execution") as mock_prepare,
+        patch.object(
+            html_validate_plugin,
+            "_run_subprocess_result",
+            return_value=mock_result,
+        ) as mock_run,
+    ):
+        mock_prepare.return_value = _mock_ctx(project, [str(html_file)])
+        html_validate_plugin.check([str(html_file)], {})
+
+    cmd = cast(list[str], mock_run.call_args.kwargs["cmd"])
+    assert_that(cmd[0]).is_not_equal_to(stray.as_posix())

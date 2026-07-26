@@ -6,6 +6,7 @@ This module provides execution preparation, version checking, and config injecti
 from __future__ import annotations
 
 import os
+from pathlib import Path
 from typing import Any
 
 from loguru import logger
@@ -98,13 +99,18 @@ def get_effective_timeout(
     return float(default_timeout)
 
 
-def get_executable_command(tool_name: str) -> list[str]:
+def get_executable_command(
+    tool_name: str,
+    cwd: str | Path | None = None,
+) -> list[str]:
     """Get the command prefix to execute a tool.
 
     Delegates to CommandBuilderRegistry for language-specific logic.
 
     Args:
         tool_name: Name of the tool executable.
+        cwd: Directory the tool will execute in, when known. Used by builders
+            whose resolution is project-local (#1727).
 
     Returns:
         Command prefix list.
@@ -117,11 +123,18 @@ def get_executable_command(tool_name: str) -> list[str]:
     except ValueError:
         tool_name_enum = None
 
-    result: list[str] = CommandBuilderRegistry.get_command(tool_name, tool_name_enum)
+    result: list[str] = CommandBuilderRegistry.get_command(
+        tool_name,
+        tool_name_enum,
+        Path(cwd) if cwd is not None else None,
+    )
     return result
 
 
-def verify_tool_version(definition: ToolDefinition) -> ToolResult | None:
+def verify_tool_version(
+    definition: ToolDefinition,
+    cwd: str | Path | None = None,
+) -> ToolResult | None:
     """Verify that the tool meets minimum version requirements.
 
     When ``LINTRO_ALLOW_VERSION_LAG`` lists the tool (or is ``*``) and the
@@ -130,15 +143,20 @@ def verify_tool_version(definition: ToolDefinition) -> ToolResult | None:
     still skip. This matches the CI image gate's ``--allow-version-lag``
     policy for Renovate tool bumps against a digest-pinned base image.
 
+    The check must resolve the same binary the run will use. Verifying a
+    different installation can skip the run even though the target project has
+    a valid pinned binary, or pass on a binary that never executes (#1727).
+
     Args:
         definition: Tool definition with name.
+        cwd: Directory the tool will execute in, when known.
 
     Returns:
         None if version check passes, or a skip result if it fails.
     """
     from lintro.tools.core.version_requirements import check_tool_version
 
-    command = get_executable_command(definition.name)
+    command = get_executable_command(definition.name, cwd=cwd)
     version_info = check_tool_version(definition.name, command)
 
     if version_info.version_check_passed:
@@ -278,11 +296,6 @@ def prepare_execution(
             ),
         }
 
-    # Check version requirements (only when files exist to check)
-    version_result = verify_tool_version(definition)
-    if version_result is not None:
-        return {"early_result": version_result}
-
     logger.debug(f"Files to process: {files}")
 
     # Compute cwd and relative paths. Anchor the tool subprocess to the files'
@@ -290,7 +303,17 @@ def prepare_execution(
     # each tool sees for a given file — and thus config ``overrides`` keyed on
     # it — is identical whether the user passed a file, a directory, or ``.``
     # (#1616).
+    #
+    # Derived before the version check on purpose: the check must resolve the
+    # same binary the run will use, which for project-local tools depends on
+    # this directory (#1727).
     cwd = get_execution_cwd(files)
+
+    # Check version requirements (only when files exist to check)
+    version_result = verify_tool_version(definition, cwd=cwd)
+    if version_result is not None:
+        return {"early_result": version_result}
+
     rel_files = [os.path.relpath(os.path.abspath(f), cwd) for f in files]
 
     # Get timeout (keep as float to preserve precision)

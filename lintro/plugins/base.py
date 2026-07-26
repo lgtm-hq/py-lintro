@@ -24,6 +24,7 @@ from __future__ import annotations
 import copy
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import TYPE_CHECKING, Any, Self
 
 import click
@@ -667,7 +668,11 @@ class BaseToolPlugin(ABC):
 
         return aggregated
 
-    def _get_executable_command(self, tool_name: str) -> list[str]:
+    def _get_executable_command(
+        self,
+        tool_name: str,
+        cwd: str | Path | None = None,
+    ) -> list[str]:
         """Get the command prefix to execute a tool.
 
         Delegates to CommandBuilderRegistry for language-specific logic.
@@ -675,11 +680,13 @@ class BaseToolPlugin(ABC):
 
         Args:
             tool_name: Name of the tool executable.
+            cwd: Directory the tool will execute in, when known. Project-local
+                ecosystems resolve their binary relative to it (#1727).
 
         Returns:
             Command prefix list.
         """
-        return get_executable_command(tool_name)
+        return get_executable_command(tool_name, cwd=cwd)
 
     def _verify_tool_version(self) -> ToolResult | None:
         """Verify that the tool meets minimum version requirements.

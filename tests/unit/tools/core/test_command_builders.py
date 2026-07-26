@@ -786,3 +786,78 @@ def test_registry_clear() -> None:
 
     CommandBuilderRegistry.clear()
     assert_that(CommandBuilderRegistry._builders).is_empty()
+
+
+def test_html_validate_prefers_bunx_when_both_runners_are_present() -> None:
+    """Bunx wins over npx when both resolve on PATH.
+
+    The individual fallback tests each stub a single runner, so neither pins
+    the precedence between them: a regression that flipped the preferred
+    runner, or picked one non-deterministically, would pass both.
+    """
+    builder = NodeJSBuilder()
+    with (
+        # Both runners present, but the tool itself is NOT on PATH — a PATH
+        # hit would correctly win before either runner and mask the ordering.
+        patch(
+            "shutil.which",
+            lambda name: f"/usr/bin/{name}" if name in {"bunx", "npx"} else None,
+        ),
+        patch(
+            "lintro.tools.core.command_builders.find_local_node_binary",
+            return_value=None,
+        ),
+    ):
+        cmd = builder.get_command("html_validate", ToolName.HTML_VALIDATE)
+
+    assert_that(cmd[0]).is_equal_to("bunx")
+
+
+def test_registry_resolves_node_tools_from_the_given_cwd() -> None:
+    """A supplied cwd scopes node_modules/.bin resolution to that directory.
+
+    Without it the search starts at lintro's own working directory, which can
+    select an unrelated install ahead of PATH (#1727).
+    """
+    seen: list[Path | None] = []
+
+    def _record(binary_name: str, *, start: Path | None = None) -> None:
+        seen.append(start)
+        return None
+
+    target = Path("/tmp/some-target-project")
+    with (
+        patch("shutil.which", _which_only("bunx")),
+        patch(
+            "lintro.tools.core.command_builders.find_local_node_binary",
+            side_effect=_record,
+        ),
+    ):
+        CommandBuilderRegistry.get_command(
+            "html_validate",
+            ToolName.HTML_VALIDATE,
+            target,
+        )
+
+    # Exactly one lookup, scoped to the target — no second, process-cwd search.
+    assert_that(seen).is_equal_to([target])
+
+
+def test_registry_without_cwd_preserves_process_relative_resolution() -> None:
+    """Omitting cwd keeps the previous behaviour for every builder."""
+    seen: list[Path | None] = []
+
+    def _record(binary_name: str, *, start: Path | None = None) -> None:
+        seen.append(start)
+        return None
+
+    with (
+        patch("shutil.which", _which_only("bunx")),
+        patch(
+            "lintro.tools.core.command_builders.find_local_node_binary",
+            side_effect=_record,
+        ),
+    ):
+        CommandBuilderRegistry.get_command("html_validate", ToolName.HTML_VALIDATE)
+
+    assert_that(seen).is_equal_to([None])

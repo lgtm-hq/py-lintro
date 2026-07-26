@@ -19,7 +19,6 @@ from __future__ import annotations
 
 import subprocess  # nosec B404 - used safely with shell disabled
 from dataclasses import dataclass
-from pathlib import Path
 
 from loguru import logger
 
@@ -34,7 +33,6 @@ from lintro.parsers.html_validate.html_validate_parser import (
 from lintro.plugins.base import BaseToolPlugin
 from lintro.plugins.protocol import ToolDefinition
 from lintro.plugins.registry import register_tool
-from lintro.tools.core.command_builders import find_local_node_binary
 from lintro.tools.core.timeout_utils import create_timeout_result
 from lintro.utils.unified_config import DEFAULT_TOOL_PRIORITIES
 
@@ -150,24 +148,18 @@ class HtmlValidatePlugin(BaseToolPlugin):
         # formatter. ``_get_executable_command`` never yields an unpinned
         # ``@latest`` spec for html-validate (see NodeJSBuilder.pinned_tools).
         #
-        # Resolve node_modules/.bin from the directory the tool will actually
-        # run in. ``_get_executable_command`` searches upward from the *process*
-        # working directory, so when lintro checks a project elsewhere (--diff
-        # against another checkout, a monorepo package) it misses that
-        # project's lockfile-pinned html-validate and silently falls back to
-        # PATH or a registry fetch — diagnostics would then come from a
-        # different installation than the one the project pins. Tracked
-        # generally for every Node tool in #1758.
-        # ctx.cwd is str | None; None means "run in the process cwd", which is
-        # also find_local_node_binary's default, so the fallback is identical.
-        local_binary = find_local_node_binary(
-            "html-validate",
-            start=Path(ctx.cwd) if ctx.cwd else None,
-        )
-        cmd: list[str] = (
-            [local_binary]
-            if local_binary is not None
-            else self._get_executable_command(tool_name="html_validate")
+        # Pass ctx.cwd so node_modules/.bin resolves from the directory the
+        # tool actually runs in. Without it the search starts at lintro's own
+        # working directory, which misses the target project's lockfile-pinned
+        # html-validate and can select an unrelated install ahead of PATH,
+        # making the result depend on where lintro was invoked from (#1727).
+        # Precedence is target-local, then PATH, then the pinned bunx/npx spec.
+        #
+        # ctx.cwd is str | None; None means the process cwd, which is the
+        # default resolution, so that path is unchanged.
+        cmd: list[str] = self._get_executable_command(
+            tool_name="html_validate",
+            cwd=ctx.cwd,
         )
         cmd.extend(["--formatter", "json"])
 

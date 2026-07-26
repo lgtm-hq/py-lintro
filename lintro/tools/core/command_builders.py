@@ -76,6 +76,28 @@ class CommandBuilder(ABC):
         """
         ...
 
+    def get_command_in(
+        self,
+        tool_name: str,
+        tool_name_enum: ToolName | None,
+        cwd: Path | None = None,
+    ) -> list[str]:
+        """Get the command, resolved relative to the execution directory.
+
+        Builders whose resolution depends on where the tool runs override this.
+        The default ignores ``cwd`` and matches :meth:`get_command`, so
+        ecosystems with directory-independent resolution need no change.
+
+        Args:
+            tool_name: String name of the tool.
+            tool_name_enum: Tool name enum, or None if unknown.
+            cwd: Directory the tool will execute in, when known.
+
+        Returns:
+            Command list to execute the tool.
+        """
+        return self.get_command(tool_name, tool_name_enum)
+
 
 class CommandBuilderRegistry:
     """Registry for command builders.
@@ -103,6 +125,7 @@ class CommandBuilderRegistry:
         cls,
         tool_name: str,
         tool_name_enum: ToolName | None,
+        cwd: Path | None = None,
     ) -> list[str]:
         """Get command for a tool using registered builders.
 
@@ -112,13 +135,16 @@ class CommandBuilderRegistry:
         Args:
             tool_name: String name of the tool.
             tool_name_enum: Tool name enum, or None if unknown.
+            cwd: Directory the tool will execute in, when known. Builders that
+                resolve project-local installs use it so the binary comes from
+                the project being checked rather than lintro's own tree.
 
         Returns:
             Command list, or [tool_name] as fallback.
         """
         for builder in cls._builders:
             if builder.can_handle(tool_name_enum):
-                return builder.get_command(tool_name, tool_name_enum)
+                return builder.get_command_in(tool_name, tool_name_enum, cwd)
 
         # Fallback: just use the tool name directly
         return [tool_name]
@@ -531,17 +557,24 @@ class NodeJSBuilder(CommandBuilder):
         """
         return tool_name_enum in self.package_names
 
-    def _get_pinned_command(self, binary_name: str, package_name: str) -> list[str]:
+    def _get_pinned_command(
+        self,
+        binary_name: str,
+        package_name: str,
+        start: Path | None = None,
+    ) -> list[str]:
         """Resolve a Node.js tool without ever resolving ``@latest``.
 
         Args:
             binary_name: Executable name (``node_modules/.bin`` entry).
             package_name: npm package name used for the registry fallback.
+            start: Directory to resolve ``node_modules/.bin`` from. Defaults to
+                the process working directory.
 
         Returns:
             Command list executing the tool at a known, pinned version.
         """
-        local = find_local_node_binary(binary_name)
+        local = find_local_node_binary(binary_name, start=start)
         if local is not None:
             logger.debug(f"Using project-local {binary_name}: {local}")
             return [local]
@@ -593,6 +626,41 @@ class NodeJSBuilder(CommandBuilder):
         if shutil.which("npx"):
             return ["npx", binary_name]
         return [binary_name]
+
+    def get_command_in(
+        self,
+        tool_name: str,
+        tool_name_enum: ToolName | None,
+        cwd: Path | None = None,
+    ) -> list[str]:
+        """Resolve a Node.js tool relative to the execution directory.
+
+        ``node_modules/.bin`` is project-local, so resolution must start from
+        the directory the tool will run in. Searching lintro's own working
+        directory instead can miss the target project's lockfile-pinned binary
+        and — worse — select an unrelated install ahead of PATH, making the
+        result depend on where lintro happened to be invoked from (#1727).
+
+        Args:
+            tool_name: String name of the tool.
+            tool_name_enum: Tool name enum, or None if unknown.
+            cwd: Directory the tool will execute in, when known.
+
+        Returns:
+            Command list to execute the tool.
+        """
+        if tool_name_enum is None or tool_name_enum not in self.pinned_tools:
+            return self.get_command(tool_name, tool_name_enum)
+
+        binary_name = self.binary_names.get(
+            tool_name_enum,
+            self.package_names.get(tool_name_enum, tool_name),
+        )
+        return self._get_pinned_command(
+            binary_name=binary_name,
+            package_name=self.package_names.get(tool_name_enum, tool_name),
+            start=cwd,
+        )
 
 
 @register_command_builder
