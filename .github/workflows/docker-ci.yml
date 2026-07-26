@@ -615,6 +615,16 @@ jobs:
       packages: read # pull the CI lint image from GHCR
     # ~14 min median (10–17 observed); 20 fails a stalled run fast (#1704).
     timeout-minutes: 20
+    outputs:
+      # Diagnostic only (#1653): 'true' when THIS job's report shows the only
+      # failures were tool-execution timeouts with zero findings anywhere.
+      # Deliberately NOT wired into code-quality-gate: this job always lints the
+      # full repo, so its verdict is not evidence about the authoritative lint
+      # run (which may be changed-files scoped, and is a separate run subject to
+      # its own timing). Absorbing on it can green a genuine finding — see the
+      # PR discussion and lgtm-ci#746.
+      timeout-flake: ${{ steps.skips.outputs.timeout-flake }}
+      timed-out-tools: ${{ steps.skips.outputs.timed-out-tools }}
     steps:
       - name: Harden Runner
         # Same allowlist as dogfooding-lint-changed: the container sets
@@ -668,6 +678,7 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
       - name: Check for silent tool skips
+        id: skips
         env:
           # Same tool coverage as the dogfooding run so skip behaviour matches.
           TOOL_OPTIONS: >-

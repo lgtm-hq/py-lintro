@@ -73,6 +73,12 @@ upstream_result="$(grep -E '^upstream-result=' "${EVALUATE_OUTPUT}" | tail -1 | 
 status_output="$(grep -E '^status-output=' "${EVALUATE_OUTPUT}" | tail -1 | cut -d= -f2-)"
 exit_code_output="$(grep -E '^exit-code-output=' "${EVALUATE_OUTPUT}" | tail -1 | cut -d= -f2-)"
 upstream_conclusion="$(grep -E '^upstream-conclusion=' "${EVALUATE_OUTPUT}" | tail -1 | cut -d= -f2-)"
+# evaluate-code-quality-gate.sh also writes verdict-source (docker-build,
+# manifest-sync, or lint). Nothing consumes it yet: it exists so lint-only
+# evidence can be scoped to a lint verdict once the authoritative run publishes
+# a structured report (#1653, lgtm-ci#746) — an upstream build failure also
+# surfaces as failed/1 here, so that scoping is mandatory before any such
+# evidence is trusted.
 
 if UPSTREAM_RESULT="${upstream_result}" \
 	STATUS_OUTPUT="${status_output}" \

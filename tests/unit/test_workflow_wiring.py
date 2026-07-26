@@ -2273,3 +2273,72 @@ def test_auto_rerun_matches_docker_hub_buildx_pull_timeout() -> None:
     )
     # A bare timeout string is too broad to auto-rerun on.
     assert_that(signatures).does_not_contain("context deadline exceeded")
+
+
+# --- Tool-execution timeout classification wiring (#1653) --------------------
+
+
+def test_dogfood_skip_gate_publishes_timeout_flake_outputs() -> None:
+    """The no-silent-skip gate must publish its timeout verdict as job outputs."""
+    docker_ci = _load_workflow(name="docker-ci.yml")
+    gate = docker_ci["jobs"]["dogfood-skip-gate"]
+
+    outputs = gate.get("outputs") or {}
+    assert_that(outputs).contains_key("timeout-flake")
+    assert_that(_normalize_github_expr(outputs["timeout-flake"])).contains(
+        "steps.skips.outputs.timeout-flake",
+    )
+
+    step_ids = [step.get("id") for step in gate["steps"]]
+    assert_that(step_ids).contains("skips")
+
+
+def test_code_quality_gate_does_not_consume_the_timeout_verdict() -> None:
+    """The timeout verdict must stay diagnostic, never a gate input.
+
+    ``dogfood-skip-gate`` always lints the full repo, so its verdict is not
+    evidence about the authoritative lint run: under ``lint-scope == 'changed'``
+    that run lints only changed files, and a tool that times out reports zero
+    findings precisely because it did not finish. Wiring the verdict into the
+    gate lets a genuine finding be absorbed and the required check turn green.
+
+    A sound implementation needs the authoritative run's own structured report,
+    which the upstream reusable lint workflow does not publish (lgtm-ci#746).
+    """
+    docker_ci = _load_workflow(name="docker-ci.yml")
+    gate_job = docker_ci["jobs"]["code-quality-gate"]
+
+    assert_that(gate_job["needs"]).does_not_contain("dogfood-skip-gate")
+
+    gate_step = next(step for step in gate_job["steps"] if step.get("id") == "gate")
+    assert_that(gate_step.get("env") or {}).does_not_contain_key("TIMEOUT_FLAKE")
+
+
+def test_dogfood_skip_gate_checks_out_the_timeout_classifier() -> None:
+    """The skip gate script must be able to reach the classifier it calls."""
+    script = (_REPO_ROOT / "scripts" / "ci" / "dogfood-skip-gate.sh").read_text(
+        encoding="utf-8",
+    )
+    assert_that(script).contains("classify-lint-timeout.py")
+    classifier = _REPO_ROOT / "scripts" / "ci" / "classify-lint-timeout.py"
+    assert_that(classifier.exists()).is_true()
+
+
+def test_code_quality_gate_sparse_checkout_covers_gate_scripts() -> None:
+    """Every script run by the gate job must be in its sparse checkout."""
+    docker_ci = _load_workflow(name="docker-ci.yml")
+    gate_job = docker_ci["jobs"]["code-quality-gate"]
+    checkout = next(
+        step
+        for step in gate_job["steps"]
+        if str(step.get("uses", "")).startswith("actions/checkout")
+    )
+    sparse = checkout["with"]["sparse-checkout"]
+
+    for script in (
+        "scripts/ci/run-code-quality-gate.sh",
+        "scripts/ci/evaluate-code-quality-gate.sh",
+        "scripts/ci/assert-required-check.sh",
+        "scripts/ci/is-infra-flake-failure.sh",
+    ):
+        assert_that(sparse).contains(script)

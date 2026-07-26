@@ -599,3 +599,92 @@ def test_run_code_quality_gate_fails_when_retry_reports_real_lint_failure() -> N
         assert_that(output).contains("passed=false")
     finally:
         Path(output_path).unlink(missing_ok=True)
+
+
+# --- Tool-execution timeout classification (#1653) ---------------------------
+
+
+def test_gate_never_absorbs_on_a_timeout_claim() -> None:
+    """A tool-timeout claim must not green a lint-shaped verdict.
+
+    #1653 originally absorbed a lint failure when the no-silent-skip gate
+    reported ``timeout-flake=true``. That evidence comes from a *different*
+    job which always lints the full repo, so it is not evidence about the
+    authoritative run: under ``lint-scope == 'changed'`` the verdict comes from
+    changed files only, and a tool that times out contributes zero findings
+    precisely because it did not finish. A genuine finding could therefore be
+    absorbed and the required check turned green (lgtm-ci#746).
+
+    The absorb was removed. This asserts it stays removed: an unknown
+    environment variable must not change the classification of a lint verdict.
+    """
+    proc = _run_script(
+        "scripts/ci/is-infra-flake-failure.sh",
+        env={
+            "UPSTREAM_RESULT": "failure",
+            "STATUS_OUTPUT": "failed",
+            "EXIT_CODE_OUTPUT": "1",
+            # Whatever a future caller passes, a real lint verdict stays red.
+            "TIMEOUT_FLAKE": "true",
+        },
+    )
+
+    assert_that(proc.returncode).is_equal_to(1)
+
+
+def test_gate_scripts_carry_no_timeout_flake_plumbing() -> None:
+    """No gate script may consume a tool-timeout flag.
+
+    Guards against the absorb being reintroduced by wiring the flag back in
+    (lgtm-ci#746). A sound implementation must classify the authoritative
+    run's own structured report, which the upstream reusable lint workflow
+    does not publish today.
+    """
+    for name in (
+        "is-infra-flake-failure.sh",
+        "assert-required-check.sh",
+        "run-code-quality-gate.sh",
+    ):
+        script = (_REPO_ROOT / "scripts" / "ci" / name).read_text(
+            encoding="utf-8",
+        )
+        assert_that(script).described_as(name).does_not_contain("TIMEOUT_FLAKE")
+
+
+@pytest.mark.parametrize(
+    ("docker_build", "manifest_sync", "expected_source"),
+    [
+        ("failure", "success", "docker-build"),
+        ("success", "failure", "manifest-sync"),
+        ("success", "success", "lint"),
+        ("success", "skipped", "lint"),
+    ],
+)
+def test_evaluate_code_quality_gate_reports_verdict_source(
+    *,
+    docker_build: str,
+    manifest_sync: str,
+    expected_source: str,
+) -> None:
+    """The evaluator names the job its verdict came from (#1653)."""
+    with tempfile.NamedTemporaryFile(mode="w+", delete=False) as output_file:
+        output_path = output_file.name
+
+    try:
+        result = _run_script(
+            "scripts/ci/evaluate-code-quality-gate.sh",
+            env={
+                "GITHUB_OUTPUT": output_path,
+                "DOCKER_BUILD_RESULT": docker_build,
+                "MANIFEST_SYNC_RESULT": manifest_sync,
+                "PRIMARY_LINT_RESULT": "failure",
+                "PRIMARY_LINT_STATUS": "failed",
+                "PRIMARY_LINT_EXIT_CODE": "1",
+            },
+        )
+        assert_that(result.returncode).is_equal_to(0)
+        assert_that(Path(output_path).read_text()).contains(
+            f"verdict-source={expected_source}",
+        )
+    finally:
+        Path(output_path).unlink(missing_ok=True)
