@@ -403,3 +403,105 @@ def test_execution_failure_still_fails_when_all_findings_excluded(
 
     assert_that(result.success).is_false()
     assert_that(result.parse_failures_count).is_equal_to(1)
+
+
+def test_relative_source_is_resolved_against_the_scan_root(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A relative source is made absolute against the scan root.
+
+    osv-scanner runs with ``cwd=scan_root`` and reports sources relative to it,
+    while ``should_exclude_path`` resolves relative paths with
+    ``os.path.abspath`` — against lintro's own working directory. Scanning a
+    project elsewhere would anchor the match on the wrong tree (#1725).
+
+    Asserts the path handed to the matcher directly: an end-to-end assertion on
+    kept/dropped can coincide via a different anchor and pass either way.
+
+    Args:
+        tmp_path: Temporary directory root.
+        monkeypatch: Fixture used to move the process working directory.
+    """
+    from unittest.mock import patch
+
+    from lintro.parsers.osv_scanner import OsvScannerIssue
+
+    scan_root = tmp_path / "target-project"
+    scan_root.mkdir()
+    elsewhere = tmp_path / "lintro-cwd"
+    elsewhere.mkdir()
+    monkeypatch.chdir(elsewhere)
+
+    plugin = _plugin()
+    plugin.set_options(exclude_patterns=["vendor"])
+    issue = OsvScannerIssue(
+        file="vendor/bun.lock",
+        line=0,
+        column=0,
+        message="",
+        vuln_id="GHSA-vendor",
+    )
+
+    seen: dict[str, object] = {}
+
+    def _capture(*, path: str, exclude_patterns: object, anchors: object) -> bool:
+        seen["path"] = path
+        return False
+
+    with patch(
+        "lintro.tools.definitions.osv_scanner.should_exclude_path",
+        side_effect=_capture,
+    ):
+        plugin.filter_excluded_issues(
+            issues=[issue],
+            paths=[str(scan_root)],
+            scan_root=scan_root,
+        )
+
+    assert_that(seen.get("path")).is_equal_to(
+        str(scan_root / "vendor" / "bun.lock"),
+    )
+
+
+def test_absolute_source_is_left_untouched(tmp_path: Path) -> None:
+    """An absolute source is passed through unchanged.
+
+    Args:
+        tmp_path: Temporary directory root.
+    """
+    from unittest.mock import patch
+
+    from lintro.parsers.osv_scanner import OsvScannerIssue
+
+    scan_root = tmp_path / "target-project"
+    scan_root.mkdir()
+    absolute = str(tmp_path / "elsewhere" / "bun.lock")
+
+    plugin = _plugin()
+    plugin.set_options(exclude_patterns=["vendor"])
+    issue = OsvScannerIssue(
+        file=absolute,
+        line=0,
+        column=0,
+        message="",
+        vuln_id="GHSA-abs",
+    )
+
+    seen: dict[str, object] = {}
+
+    def _capture(*, path: str, exclude_patterns: object, anchors: object) -> bool:
+        seen["path"] = path
+        return False
+
+    with patch(
+        "lintro.tools.definitions.osv_scanner.should_exclude_path",
+        side_effect=_capture,
+    ):
+        plugin.filter_excluded_issues(
+            issues=[issue],
+            paths=[str(scan_root)],
+            scan_root=scan_root,
+        )
+
+    assert_that(seen.get("path")).is_equal_to(absolute)

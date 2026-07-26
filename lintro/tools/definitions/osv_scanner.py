@@ -239,6 +239,7 @@ class OsvScannerPlugin(BaseToolPlugin):
         self,
         issues: list[OsvScannerIssue],
         paths: list[str],
+        scan_root: Path | None = None,
     ) -> list[OsvScannerIssue]:
         """Drop issues whose lockfile is covered by the exclusion set.
 
@@ -253,6 +254,9 @@ class OsvScannerPlugin(BaseToolPlugin):
         Args:
             issues: Parsed osv-scanner issues.
             paths: Input paths for the run, used to anchor relative patterns.
+            scan_root: Directory osv-scanner ran in. Reported source paths are
+                relative to it, so relative sources are resolved against it
+                rather than lintro's own working directory (#1725).
 
         Returns:
             Issues whose source path is not excluded.
@@ -265,11 +269,19 @@ class OsvScannerPlugin(BaseToolPlugin):
         kept: list[OsvScannerIssue] = []
         for issue in issues:
             source = issue.file or ""
+            # osv-scanner runs with cwd=scan_root and reports sources relative
+            # to it. should_exclude_path resolves a relative path with
+            # os.path.abspath, which uses lintro's own working directory — so
+            # scanning a project elsewhere would anchor the match on the wrong
+            # tree and keep or drop the wrong findings (#1725).
+            resolved = source
+            if source and scan_root is not None and not os.path.isabs(source):
+                resolved = os.path.join(str(scan_root), source)
             if (
                 source
                 and source != _UNKNOWN_SOURCE
                 and should_exclude_path(
-                    path=source,
+                    path=resolved,
                     exclude_patterns=patterns,
                     anchors=anchors,
                 )
@@ -360,7 +372,11 @@ class OsvScannerPlugin(BaseToolPlugin):
         # Apply .lintro-ignore / --exclude patterns to the reported lockfile
         # paths. osv-scanner does its own discovery and has no equivalent
         # ignore mechanism, so exclusions are enforced here (#1725).
-        issues = self.filter_excluded_issues(issues=parsed_issues, paths=paths)
+        issues = self.filter_excluded_issues(
+            issues=parsed_issues,
+            paths=paths,
+            scan_root=scan_root,
+        )
         excluded_count = len(parsed_issues) - len(issues)
         payload = extract_osv_scanner_payload(proc.stdout)
         parse_failures_count = 0 if payload is not None else None
@@ -504,6 +520,7 @@ class OsvScannerPlugin(BaseToolPlugin):
         probe_issues = self.filter_excluded_issues(
             issues=parse_osv_scanner_output(probe.stdout),
             paths=list(paths) if paths else [str(scan_root)],
+            scan_root=scan_root,
         )
 
         # If probe failed and returned no parseable issues, skip classification
