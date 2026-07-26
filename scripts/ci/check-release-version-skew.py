@@ -278,20 +278,29 @@ def release_pipeline_pending(
     repo: str,
     workflow: str,
     fetch: TextFetcher,
+    expected: str | None = None,
 ) -> bool:
-    """Return whether a release workflow run is still in flight.
+    """Return whether the release being audited is still in flight.
 
     PyPI publishes sit behind a manual approval gate, which surfaces as a
-    ``waiting`` run. While such a run exists the downstream channels are
-    expected to lag, so skew must not alarm.
+    ``waiting`` run. While such a run exists for *this* release the downstream
+    channels are expected to lag, so skew must not alarm.
+
+    The run must be correlated with ``expected``. A pending run for a different
+    version is not evidence about this one: the approval gate is manual, so a
+    release that is never approved stays ``waiting`` indefinitely and would
+    otherwise suppress the alarm for every later release, permanently. When
+    ``expected`` is None the correlation cannot be made and any pending run
+    suppresses, which is the conservative direction (no false alarm).
 
     Args:
         repo: Repository in ``owner/name`` form.
         workflow: Release workflow file name.
         fetch: Text fetcher used for the GitHub API request.
+        expected: Version under audit. Runs for other versions are ignored.
 
     Returns:
-        ``True`` when at least one recent run has not completed.
+        ``True`` when a recent run for ``expected`` has not completed.
 
     Raises:
         RuntimeError: If the GitHub API could not be queried or parsed.
@@ -309,9 +318,17 @@ def release_pipeline_pending(
     runs = payload.get("workflow_runs", [])
     if not isinstance(runs, list):
         raise RuntimeError("Unexpected GitHub API payload: workflow_runs missing")
-    return any(
-        isinstance(run, dict) and str(run.get("status", "")) in _PENDING_RUN_STATES
+    pending_runs = [
+        run
         for run in runs
+        if isinstance(run, dict) and str(run.get("status", "")) in _PENDING_RUN_STATES
+    ]
+    if expected is None:
+        return bool(pending_runs)
+    wanted = expected.strip().lstrip("vV")
+    return any(
+        str(run.get("head_branch", "")).strip().lstrip("vV") == wanted
+        for run in pending_runs
     )
 
 
@@ -467,6 +484,7 @@ def audit(
             repo=args.repo,
             workflow=args.release_workflow,
             fetch=fetch,
+            expected=expected,
         )
     except RuntimeError as exc:
         return EXIT_DEGRADED, (

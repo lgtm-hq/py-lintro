@@ -74,9 +74,27 @@ def _formula_body(*, version: str) -> str:
     )
 
 
-def _runs_body(*, statuses: list[str]) -> str:
-    """Build a stub GitHub workflow-runs payload."""
-    return json.dumps({"workflow_runs": [{"status": status} for status in statuses]})
+def _runs_body(*, statuses: list[str], version: str = "1.2.3") -> str:
+    """Build a stub GitHub workflow-runs payload.
+
+    Runs are tagged with ``version`` because suppression is correlated with the
+    release under audit: a pending run for some *other* version is not evidence
+    about this one (#1712 review).
+
+    Args:
+        statuses: Run statuses, newest first.
+        version: Tag the runs belong to, without the ``v`` prefix.
+
+    Returns:
+        A JSON payload shaped like the GitHub workflow-runs API.
+    """
+    return json.dumps(
+        {
+            "workflow_runs": [
+                {"status": status, "head_branch": f"v{version}"} for status in statuses
+            ],
+        },
+    )
 
 
 def _fetcher(
@@ -310,3 +328,96 @@ def test_main_writes_step_summary(
     )
     assert_that(module.main([])).is_equal_to(0)
     assert_that(summary.read_text(encoding="utf-8")).contains("all channels agree")
+
+
+def test_pending_run_for_another_version_does_not_suppress() -> None:
+    """A pending run for a different release must not suppress this audit.
+
+    The PyPI approval gate is manual, so a release that is never approved sits
+    in ``waiting`` indefinitely. Treating any recent pending run as evidence
+    would let that one stale run suppress the skew alarm for every subsequent
+    release, permanently (#1712 review).
+    """
+    module = _load_module()
+    payload = json.dumps(
+        {
+            "workflow_runs": [
+                {"status": "waiting", "head_branch": "v0.91.48"},
+                {"status": "completed", "head_branch": "v0.91.47"},
+            ],
+        },
+    )
+
+    pending = module.release_pipeline_pending(
+        repo="lgtm-hq/py-lintro",
+        workflow="publish-pypi-on-tag.yml",
+        fetch=lambda url: payload,
+        expected="0.91.47",
+    )
+
+    assert_that(pending).is_false()
+
+
+def test_pending_run_for_the_audited_version_suppresses() -> None:
+    """The release under audit still publishing is expected lag, not skew."""
+    module = _load_module()
+    payload = json.dumps(
+        {
+            "workflow_runs": [
+                {"status": "waiting", "head_branch": "v0.91.48"},
+            ],
+        },
+    )
+
+    pending = module.release_pipeline_pending(
+        repo="lgtm-hq/py-lintro",
+        workflow="publish-pypi-on-tag.yml",
+        fetch=lambda url: payload,
+        expected="0.91.48",
+    )
+
+    assert_that(pending).is_true()
+
+
+def test_pending_correlation_without_expected_is_conservative() -> None:
+    """With no version to correlate against, any pending run suppresses.
+
+    Failing towards suppression avoids a false alarm when the audit has no
+    expected version to reason about.
+    """
+    module = _load_module()
+    payload = json.dumps(
+        {"workflow_runs": [{"status": "waiting", "head_branch": "v0.91.48"}]},
+    )
+
+    pending = module.release_pipeline_pending(
+        repo="lgtm-hq/py-lintro",
+        workflow="publish-pypi-on-tag.yml",
+        fetch=lambda url: payload,
+        expected=None,
+    )
+
+    assert_that(pending).is_true()
+
+
+def test_stale_waiting_run_for_older_release_still_alarms(module: Any) -> None:
+    """A never-approved older release must not mask skew in a later one.
+
+    End-to-end counterpart of the correlation unit tests: the PyPI gate is
+    manual, so an unapproved run stays ``waiting`` forever. Before correlation
+    that single run suppressed every subsequent audit (#1712 review).
+    """
+    code, report = module.audit(
+        args=_args(module),
+        fetch=_fetcher(
+            pypi=_pypi_body(version="1.2.2"),
+            npm=_npm_body(version="1.2.3"),
+            formula=_formula_body(version="1.2.3"),
+            # Waiting run belongs to an unrelated, older tag.
+            runs=_runs_body(statuses=["waiting"], version="0.9.9"),
+        ),
+        now=NOW,
+    )
+
+    assert_that(code).is_equal_to(1)
+    assert_that(report).contains("FAILED")
