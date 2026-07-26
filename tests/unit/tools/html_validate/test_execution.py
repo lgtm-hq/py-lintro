@@ -26,6 +26,10 @@ _ISSUE_JSON = (
 )
 
 
+# Deterministic stand-in so tests assert behaviour, not host PATH contents.
+_PINNED_EXECUTABLE = "/pinned/html-validate"
+
+
 def _mock_ctx(tmp_path: Path, files: list[str]) -> MagicMock:
     """Build a mock ExecutionContext.
 
@@ -169,6 +173,15 @@ def test_check_passes_literal_paths_and_pinned_executable(
 
     with (
         patch.object(html_validate_plugin, "_prepare_execution") as mock_prepare,
+        # Pin resolution: ctx.cwd is a real tmp_path, so without this the
+        # command depends on whatever the host has on PATH or in an ancestor
+        # node_modules. These two tests are about argument handling, not about
+        # which executable the host happens to expose.
+        patch.object(
+            html_validate_plugin,
+            "_get_executable_command",
+            return_value=[_PINNED_EXECUTABLE],
+        ),
         patch.object(
             html_validate_plugin,
             "_run_subprocess_result",
@@ -210,6 +223,15 @@ def test_check_falls_back_to_absolute_files(
 
     with (
         patch.object(html_validate_plugin, "_prepare_execution") as mock_prepare,
+        # Pin resolution: ctx.cwd is a real tmp_path, so without this the
+        # command depends on whatever the host has on PATH or in an ancestor
+        # node_modules. These two tests are about argument handling, not about
+        # which executable the host happens to expose.
+        patch.object(
+            html_validate_plugin,
+            "_get_executable_command",
+            return_value=[_PINNED_EXECUTABLE],
+        ),
         patch.object(
             html_validate_plugin,
             "_run_subprocess_result",
