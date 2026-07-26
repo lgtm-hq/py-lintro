@@ -21,6 +21,13 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.91.50] - 2026-07-26
+
+### Fixed
+
+- **ci**: alarm on post-release version skew across PyPI, npm, and Homebrew (#1712)
+  (#1738) (9383923)
+
 ## [0.91.49] - 2026-07-26
 
 ### Fixed
