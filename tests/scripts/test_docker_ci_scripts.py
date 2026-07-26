@@ -631,7 +631,13 @@ def _run_sweep_validation(
     _write_stub(bin_dir, "gh", "exit 0")
     scrubbed = {
         name: ""
-        for name in ("MIN_AGE_DAYS", "TAG_PREFIX", "ALLOW_SHORT_RETENTION", "DRY_RUN")
+        for name in (
+            "MIN_AGE_DAYS",
+            "TAG_PREFIX",
+            "ALLOW_SHORT_RETENTION",
+            "DRY_RUN",
+            "VOLATILE_TAG_PREFIXES",
+        )
         if name not in env
     }
     return _run_with_stubs(
@@ -1045,3 +1051,241 @@ def test_sweep_ci_ghcr_tags_dry_run_skips_delete(
     assert_that(result.returncode).is_equal_to(0)
     assert_that(result.stdout).contains("[dry-run] Would delete")
     assert_that(gh_log.read_text()).does_not_contain("--method DELETE")
+    # A dry run deletes nothing, so it must not pay for a baseline listing.
+    assert_that(gh_log.read_text()).does_not_contain(_PERSISTENT_QUERY_MARKER)
+
+
+# The persistent-tag listing is the only gh call whose jq program binds the tag
+# to ``$tag``; the candidate query filters with ``all(startswith(...))``.
+_PERSISTENT_QUERY_MARKER = ". as $tag"
+
+_SWEEP_VERIFY_GH_STUB = (
+    'echo "$*" >> "$GH_LOG"\n'
+    'if [[ "$*" == *"DELETE"* ]]; then\n'
+    "  exit 0\n"
+    "fi\n"
+    f'if [[ "$*" == *"{_PERSISTENT_QUERY_MARKER}"* ]]; then\n'
+    "  n=0\n"
+    '  if [[ -f "$GH_PERSISTENT_COUNT" ]]; then\n'
+    '    n="$(cat "$GH_PERSISTENT_COUNT")"\n'
+    "  fi\n"
+    "  n=$((n + 1))\n"
+    '  echo "$n" > "$GH_PERSISTENT_COUNT"\n'
+    '  case " ${GH_PERSISTENT_FAIL} " in\n'
+    '  *" ${n} "*)\n'
+    '    echo "API rate limit exceeded" >&2\n'
+    "    exit 1\n"
+    "    ;;\n"
+    "  esac\n"
+    '  var="GH_PERSISTENT_${n}"\n'
+    '  if [[ -n "${!var:-}" ]]; then\n'
+    '    printf "%s\\n" "${!var}"\n'
+    "  else\n"
+    '    printf "%s\\n" "$GH_PERSISTENT_DEFAULT"\n'
+    "  fi\n"
+    "  exit 0\n"
+    "fi\n"
+    'if [[ "$*" =~ /versions/([0-9]+) ]]; then\n'
+    "  printf '%s\\t%s\\n' '2026-01-02T00:00:00Z' 'ci-old'\n"
+    "  exit 0\n"
+    "fi\n"
+    'printf "%s\\n" "$GH_VERSIONS_TSV"'
+)
+
+
+def _run_sweep_with_persistent_tags(
+    tmp_path: Path,
+    gh_log: Path,
+    env: dict[str, str],
+) -> subprocess.CompletedProcess[str]:
+    """Run the sweep against a ``gh`` stub that scripts the persistent listings.
+
+    The stub answers the persistent-tag listing from ``GH_PERSISTENT_<n>``
+    (1-based call order, falling back to ``GH_PERSISTENT_DEFAULT``) so a test
+    can make a tag vanish, come back, or make a read fail outright.
+
+    Args:
+        tmp_path: Pytest temporary directory for the PATH shim.
+        gh_log: File the stub appends every ``gh`` invocation to.
+        env: Extra environment variables, typically ``GH_PERSISTENT_*``.
+
+    Returns:
+        subprocess.CompletedProcess[str]: The completed process.
+    """
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    _write_stub(bin_dir, "gh", _SWEEP_VERIFY_GH_STUB)
+
+    return _run_with_stubs(
+        "scripts/ci/maintenance/sweep-ci-ghcr-tags.sh",
+        bin_dir,
+        {
+            "GH_TOKEN": "dummy",  # nosec B105 - fake token for stubbed gh
+            "PACKAGES": "py-lintro",
+            "MIN_AGE_DAYS": "0",
+            "ALLOW_SHORT_RETENTION": "true",
+            "GH_LOG": str(gh_log),
+            "GH_VERSIONS_TSV": "202\t2026-01-02T00:00:00Z\tci-old",
+            "GH_PERSISTENT_COUNT": str(tmp_path / "persistent.count"),
+            "GH_PERSISTENT_DEFAULT": "latest\n0.9.9",
+            "GH_PERSISTENT_FAIL": "",
+            **env,
+        },
+    )
+
+
+def test_sweep_ci_ghcr_tags_verifies_persistent_tags_after_delete(
+    tmp_path: Path,
+) -> None:
+    """A clean sweep still re-reads the persistent tags and stays green (#1652)."""
+    gh_log = tmp_path / "gh.log"
+
+    result = _run_sweep_with_persistent_tags(tmp_path, gh_log, {})
+
+    assert_that(result.returncode).is_equal_to(0)
+    assert_that(result.stdout).contains("Deleted py-lintro version 202")
+    assert_that(result.stderr).does_not_contain("Persistent tags disappeared")
+    # Baseline before the delete, one confirmation after it.
+    assert_that(gh_log.read_text().count(_PERSISTENT_QUERY_MARKER)).is_equal_to(2)
+
+
+def test_sweep_ci_ghcr_tags_alerts_when_a_persistent_tag_disappears(
+    tmp_path: Path,
+) -> None:
+    """A release tag lost to the recheck/DELETE race must fail the job (#1652).
+
+    This is the residual TOCTOU the sole-tag rule and dual recheck cannot
+    close: GHCR has no conditional delete, so a promotion landing in the
+    window takes its tag down with the CI version.
+    """
+    gh_log = tmp_path / "gh.log"
+
+    result = _run_sweep_with_persistent_tags(
+        tmp_path,
+        gh_log,
+        {
+            # Baseline sees the release tag; both post-delete reads do not.
+            "GH_PERSISTENT_1": "latest\n0.9.9",
+            "GH_PERSISTENT_2": "latest",
+            "GH_PERSISTENT_3": "latest",
+        },
+    )
+
+    assert_that(result.returncode).is_equal_to(1)
+    assert_that(result.stdout).contains("Deleted py-lintro version 202")
+    assert_that(result.stderr).contains("Persistent tags disappeared from py-lintro")
+    assert_that(result.stderr).contains("0.9.9")
+    assert_that(result.stderr).contains("202")
+
+
+def test_sweep_ci_ghcr_tags_tolerates_a_transient_listing_gap(
+    tmp_path: Path,
+) -> None:
+    """A tag missing from one read only is not reported (#1652).
+
+    A paginated listing on a busy registry can momentarily under-report, and a
+    false "we deleted a release tag" alarm is worse than no alarm at all.
+    """
+    gh_log = tmp_path / "gh.log"
+
+    result = _run_sweep_with_persistent_tags(
+        tmp_path,
+        gh_log,
+        {
+            "GH_PERSISTENT_1": "latest\n0.9.9",
+            "GH_PERSISTENT_2": "latest",
+            "GH_PERSISTENT_3": "latest\n0.9.9",
+        },
+    )
+
+    assert_that(result.returncode).is_equal_to(0)
+    assert_that(result.stderr).does_not_contain("Persistent tags disappeared")
+    assert_that(gh_log.read_text().count(_PERSISTENT_QUERY_MARKER)).is_equal_to(3)
+
+
+def test_sweep_ci_ghcr_tags_skips_deletes_when_the_baseline_fails(
+    tmp_path: Path,
+) -> None:
+    """Without a baseline the verification is blind, so nothing is deleted."""
+    gh_log = tmp_path / "gh.log"
+
+    result = _run_sweep_with_persistent_tags(
+        tmp_path,
+        gh_log,
+        {"GH_PERSISTENT_FAIL": "1"},
+    )
+
+    assert_that(result.returncode).is_equal_to(1)
+    assert_that(result.stderr).contains("Failed to snapshot persistent tags")
+    assert_that(gh_log.read_text()).does_not_contain("--method DELETE")
+
+
+def test_sweep_ci_ghcr_tags_fails_when_verification_cannot_read(
+    tmp_path: Path,
+) -> None:
+    """An unreadable post-delete listing fails closed without claiming a loss."""
+    gh_log = tmp_path / "gh.log"
+
+    result = _run_sweep_with_persistent_tags(
+        tmp_path,
+        gh_log,
+        {"GH_PERSISTENT_FAIL": "2"},
+    )
+
+    assert_that(result.returncode).is_equal_to(1)
+    assert_that(result.stderr).contains("Could not verify persistent tags")
+    # Never accuse the sweep of a deletion it did not observe.
+    assert_that(result.stderr).does_not_contain("Persistent tags disappeared")
+
+
+def test_sweep_ci_ghcr_tags_fails_when_the_confirmation_read_cannot_run(
+    tmp_path: Path,
+) -> None:
+    """A failed confirmation read must not be treated as proof of loss."""
+    gh_log = tmp_path / "gh.log"
+
+    result = _run_sweep_with_persistent_tags(
+        tmp_path,
+        gh_log,
+        {
+            "GH_PERSISTENT_1": "latest\n0.9.9",
+            "GH_PERSISTENT_2": "latest",
+            "GH_PERSISTENT_FAIL": "3",
+        },
+    )
+
+    assert_that(result.returncode).is_equal_to(1)
+    assert_that(result.stderr).contains("Could not confirm persistent tags")
+    assert_that(result.stderr).does_not_contain("Persistent tags disappeared")
+
+
+def test_sweep_ci_ghcr_tags_baseline_excludes_volatile_prefixes(
+    tmp_path: Path,
+) -> None:
+    """The baseline must ignore tag families a sibling sweep may delete (#1652).
+
+    ghcr-cleanup.yml runs the ci-* and sha-* sweeps as parallel jobs. Without
+    the exclusion the sha-* sweep would report the ci-* sweep's legitimate
+    deletions as lost release tags — exactly the false alarm to avoid.
+    """
+    gh_log = tmp_path / "gh.log"
+
+    result = _run_sweep_with_persistent_tags(tmp_path, gh_log, {})
+
+    assert_that(result.returncode).is_equal_to(0)
+    listing = gh_log.read_text()
+    assert_that(listing).contains('"ci-"')
+    assert_that(listing).contains('"sha-"')
+
+
+def test_sweep_ci_ghcr_tags_rejects_unsafe_volatile_prefix(
+    tmp_path: Path,
+) -> None:
+    """VOLATILE_TAG_PREFIXES is interpolated into jq, so it must be validated."""
+    result = _run_sweep_validation(
+        tmp_path,
+        {"VOLATILE_TAG_PREFIXES": 'ci-" or true or "'},
+    )
+
+    assert_that(result.returncode).is_equal_to(2)
+    assert_that(result.stderr).contains("VOLATILE_TAG_PREFIXES entries must match")
