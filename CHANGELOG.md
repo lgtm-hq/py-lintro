@@ -21,6 +21,12 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.91.51] - 2026-07-26
+
+### Fixed
+
+- **osv_scanner**: honor .lintro-ignore and --exclude patterns (#1732) (bf334fe)
+
 ## [0.91.50] - 2026-07-26
 
 ### Fixed
