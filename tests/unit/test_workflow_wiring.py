@@ -2408,3 +2408,30 @@ def test_version_skew_audit_allows_every_channel_endpoint() -> None:
         "api.github.com:443",
     ):
         assert_that(allowed).contains(endpoint)
+
+
+def test_ghcr_cleanup_sweeps_commit_tags_with_the_shared_safety_rule() -> None:
+    """Per-commit tags must be swept, reusing the ci-* sweeper's guardrails.
+
+    Unbounded ``sha-<commit>`` growth is not only storage: the tag list is what
+    Renovate's docker datasource enumerates to find newer versions, and past
+    1000 tags the first page held no recent release at all (#1590).
+
+    The sweep must go through ``sweep-ci-ghcr-tags.sh`` rather than a bespoke
+    deletion path, because that script only deletes versions whose *every* tag
+    matches the prefix — so a release carrying both ``sha-<commit>`` and a
+    version tag can never be removed by it.
+    """
+    cleanup = _load_workflow(name="ghcr-cleanup.yml")
+    jobs = cleanup["jobs"]
+    assert_that(jobs).contains_key("sweep-sha-tags")
+
+    job = jobs["sweep-sha-tags"]
+    sweep_steps = [
+        step
+        for step in job["steps"]
+        if step.get("run") == "scripts/ci/maintenance/sweep-ci-ghcr-tags.sh"
+    ]
+    assert_that(sweep_steps).is_length(1)
+    assert_that(sweep_steps[0]["env"]["TAG_PREFIX"]).is_equal_to("sha-")
+    assert_that(job["permissions"]["packages"]).is_equal_to("write")

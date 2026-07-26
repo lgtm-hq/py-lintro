@@ -15,6 +15,10 @@ committed. This orchestrator runs the two repo-side finalizers in order:
    ``major.minor`` line so minor/major bumps do not go stale and break the
    unattended release PR (#1372), via
    :func:`update_security_support.main`.
+3. Point the pinned py-lintro release image at the newest published release so
+   the digest-lag gate cannot drift (#1590), via
+   :func:`sync_pinned_release_image.main`. Deliberately last, and non-fatal:
+   it reports problems as warnings and never blocks a release.
 
 The finalizer scripts have hyphenated filenames, so they are loaded by path
 rather than imported as packages. That job has no Node toolchain and blocks npm
@@ -64,11 +68,17 @@ def main() -> int:
     """
     changelog = _load("format_changelog", "format-changelog.py")
     security = _load("update_security_support", "update-security-support.py")
+    pin_sync = _load("sync_pinned_release_image", "sync-pinned-release-image.py")
 
     result = int(changelog.main([]))
     if result != 0:
         return result
-    return int(security.main([]))
+    result = int(security.main([]))
+    if result != 0:
+        return result
+    # Always 0 by design — the pin sync warns instead of failing, so a
+    # registry hiccup or a missing token cannot block an unattended release.
+    return int(pin_sync.main([]))
 
 
 if __name__ == "__main__":
