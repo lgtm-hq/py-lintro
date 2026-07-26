@@ -15,13 +15,13 @@ NPM_VERSIONS: dict[str, str] = {
     "astro": "7.1.3",
     "html-validate": "11.5.6",
     "markdownlint-cli2": "0.23.1",
-    "oxfmt": "0.59.0",
-    "oxlint": "1.74.0",
+    "oxfmt": "0.60.0",
+    "oxlint": "1.75.0",
     "prettier": "3.9.4",
-    "stylelint": "17.14.0",
+    "stylelint": "17.14.1",
     "svelte-check": "4.7.3",
     "typescript": "6.0.3",
-    "vue-tsc": "3.3.7",
+    "vue-tsc": "3.3.8",
 }
 
 PYPI_VERSIONS: dict[str, str] = {

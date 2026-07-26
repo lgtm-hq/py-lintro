@@ -266,7 +266,7 @@
     },
     {
       "name": "oxfmt",
-      "version": "0.59.0",
+      "version": "0.60.0",
       "install": {
         "type": "npm",
         "package": "oxfmt"
@@ -279,7 +279,7 @@
     },
     {
       "name": "oxlint",
-      "version": "1.74.0",
+      "version": "1.75.0",
       "install": {
         "type": "npm",
         "package": "oxlint"
@@ -432,7 +432,7 @@
     },
     {
       "name": "stylelint",
-      "version": "17.14.0",
+      "version": "17.14.1",
       "install": {
         "type": "npm",
         "package": "stylelint",
@@ -472,7 +472,7 @@
     },
     {
       "name": "trufflehog",
-      "version": "3.95.9",
+      "version": "3.96.0",
       "install": {
         "type": "binary"
       },
@@ -498,7 +498,7 @@
     },
     {
       "name": "vale",
-      "version": "3.15.1",
+      "version": "3.15.2",
       "install": {
         "type": "binary"
       },
@@ -510,7 +510,7 @@
     },
     {
       "name": "vue_tsc",
-      "version": "3.3.7",
+      "version": "3.3.8",
       "install": {
         "type": "npm",
         "package": "vue-tsc",
