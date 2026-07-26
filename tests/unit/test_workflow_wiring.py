@@ -1418,6 +1418,25 @@ def test_all_lgtm_ci_refs_use_the_canonical_pin() -> None:
     assert_that(offenders).is_empty()
 
 
+def _strip_regex_delimiters(pattern: str) -> str:
+    r"""Return a ``managerFilePatterns`` entry as a bare regex.
+
+    Renovate accepts both spellings and this repo uses each: bare
+    (``\\.github/workflows/docker-ci\\.yml``) and slash-delimited
+    (``/^\\.github/workflows/sbom-on-main\\.yml$/``). Only the delimited form
+    needs unwrapping, and a lone ``/`` must not be mistaken for one.
+
+    Args:
+        pattern: A single ``managerFilePatterns`` entry.
+
+    Returns:
+        The entry with any surrounding delimiters removed.
+    """
+    if len(pattern) > 1 and pattern.startswith("/") and pattern.endswith("/"):
+        return pattern[1:-1]
+    return pattern
+
+
 def _js_named_groups_to_python(pattern: str) -> str:
     """Rewrite JavaScript named capture groups into Python's spelling.
 
@@ -1453,14 +1472,34 @@ def test_every_odd_shaped_lgtm_ci_pin_is_renovate_managed() -> None:
     renovate = json.loads(
         (_REPO_ROOT / "renovate.json").read_text(encoding="utf-8"),
     )
-    custom_patterns = [
-        re.compile(_js_named_groups_to_python(pattern))
+    # Keep each manager's regexes bound to the files it is scoped to. Renovate
+    # only applies a customManager where its managerFilePatterns match, so
+    # flattening every matchStrings across all managers would let a regex
+    # scoped to one file vouch for a pin in another -- reporting an unmanaged
+    # site as covered, which is the exact blindness #1771 exists to remove.
+    scoped_managers = [
+        (
+            [
+                re.compile(_strip_regex_delimiters(file_pattern))
+                for file_pattern in manager.get("managerFilePatterns") or []
+            ],
+            [
+                re.compile(_js_named_groups_to_python(pattern))
+                for pattern in manager.get("matchStrings") or []
+            ],
+        )
         for manager in renovate.get("customManagers") or []
-        for pattern in manager.get("matchStrings") or []
     ]
 
     unmanaged: list[str] = []
     for path in _workflow_paths():
+        relative = path.relative_to(_REPO_ROOT).as_posix()
+        applicable = [
+            pattern
+            for file_matchers, patterns in scoped_managers
+            if any(matcher.search(relative) for matcher in file_matchers)
+            for pattern in patterns
+        ]
         for lineno, line in enumerate(
             path.read_text(encoding="utf-8").splitlines(),
             start=1,
@@ -1469,8 +1508,8 @@ def test_every_odd_shaped_lgtm_ci_pin_is_renovate_managed() -> None:
                 continue
             if "uses:" in line or "tooling-ref:" in line:
                 continue
-            if not any(pattern.search(line) for pattern in custom_patterns):
-                unmanaged.append(f"{path.name}:{lineno}: {line.strip()}")
+            if not any(pattern.search(line) for pattern in applicable):
+                unmanaged.append(f"{relative}:{lineno}: {line.strip()}")
 
     assert_that(unmanaged).described_as(
         "lgtm-ci pin sites no Renovate manager updates",
