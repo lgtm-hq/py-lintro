@@ -262,6 +262,18 @@ class PythonBundledBuilder(CommandBuilder):
     Prefers PATH-based discovery to support various installation methods
     (Homebrew, system packages, pipx, uv tool). Falls back to Python module
     execution for pip installs where the binary isn't in PATH.
+
+    Resolution is deliberately directory-independent, so the inherited
+    :meth:`CommandBuilder.get_command_in` default is correct and this class does
+    not override it (#1758). Every candidate — the venv scripts directory from
+    :mod:`sysconfig`, ``PATH``, and ``sys.executable -m`` — is a property of the
+    process Lintro runs in, not of the directory being checked. That is the
+    intended source: these tools are Lintro's own declared dependencies, gated
+    on the version manifest's minimums and parsed by version-specific parsers,
+    so a checked project's own virtualenv is **not** consulted. Running an
+    arbitrary project-supplied version would break both the version gate and
+    output parsing. Project-relative work (config discovery, ``per-file-ignores``
+    and friends) is done by the tool itself from the cwd the executor sets.
     """
 
     _tools: frozenset[ToolName] | None = None
@@ -355,6 +367,17 @@ class PytestBuilder(CommandBuilder):
 
     Pytest is handled separately because it uses a different module
     invocation pattern. Prefers PATH-based discovery like PythonBundledBuilder.
+
+    Like :class:`PythonBundledBuilder`, resolution is directory-independent and
+    the inherited :meth:`CommandBuilder.get_command_in` default is kept (#1758):
+    the venv scripts directory, ``PATH`` and ``sys.executable -m pytest`` are all
+    process-scoped. Pytest must run in the environment whose interpreter can
+    import the code under test, and Lintro supports that by being invoked from
+    inside that environment (``uv run lintro ...``), where ``sys.prefix`` already
+    *is* the project's virtualenv. Discovering some other project's ``.venv`` by
+    walking up from the execution directory is intentionally not done — it would
+    silently pick an interpreter whose installed plugins and dependencies Lintro
+    knows nothing about.
     """
 
     def can_handle(self, tool_name_enum: ToolName | None) -> bool:
@@ -590,19 +613,27 @@ class NodeJSBuilder(CommandBuilder):
             return ["npx", spec]
         return [binary_name]
 
-    def get_command(
+    def _resolve(
         self,
         tool_name: str,
         tool_name_enum: ToolName | None,
+        start: Path | None,
     ) -> list[str]:
-        """Get command for Node.js tool.
+        """Resolve a Node.js tool command from a single search origin.
+
+        Both public entry points funnel through here so they cannot drift:
+        ``get_command`` is exactly ``get_command_in`` with no execution
+        directory known, rather than a second, subtly different code path
+        (#1758).
 
         Args:
             tool_name: String name of the tool.
-            tool_name_enum: Tool name enum.
+            tool_name_enum: Tool name enum, or None if unknown.
+            start: Directory to resolve project-local installs from, or None to
+                use the process working directory.
 
         Returns:
-            Command list to execute the tool via bunx or directly.
+            Command list to execute the tool via bunx/npx or directly.
         """
         if tool_name_enum is None:
             return [tool_name]
@@ -618,6 +649,7 @@ class NodeJSBuilder(CommandBuilder):
             return self._get_pinned_command(
                 binary_name=binary_name,
                 package_name=self.package_names.get(tool_name_enum, tool_name),
+                start=start,
             )
 
         # Prefer bunx (bun), fall back to npx (npm), then direct tool invocation
@@ -626,6 +658,27 @@ class NodeJSBuilder(CommandBuilder):
         if shutil.which("npx"):
             return ["npx", binary_name]
         return [binary_name]
+
+    def get_command(
+        self,
+        tool_name: str,
+        tool_name_enum: ToolName | None,
+    ) -> list[str]:
+        """Get command for Node.js tool, resolved from the process directory.
+
+        Prefer :meth:`get_command_in` whenever the execution directory is known;
+        this overload can only search from :func:`pathlib.Path.cwd`, which for a
+        project-local install is the wrong tree unless Lintro happens to have
+        been invoked from it.
+
+        Args:
+            tool_name: String name of the tool.
+            tool_name_enum: Tool name enum.
+
+        Returns:
+            Command list to execute the tool via bunx or directly.
+        """
+        return self._resolve(tool_name, tool_name_enum, None)
 
     def get_command_in(
         self,
@@ -649,18 +702,7 @@ class NodeJSBuilder(CommandBuilder):
         Returns:
             Command list to execute the tool.
         """
-        if tool_name_enum is None or tool_name_enum not in self.pinned_tools:
-            return self.get_command(tool_name, tool_name_enum)
-
-        binary_name = self.binary_names.get(
-            tool_name_enum,
-            self.package_names.get(tool_name_enum, tool_name),
-        )
-        return self._get_pinned_command(
-            binary_name=binary_name,
-            package_name=self.package_names.get(tool_name_enum, tool_name),
-            start=cwd,
-        )
+        return self._resolve(tool_name, tool_name_enum, cwd)
 
 
 @register_command_builder
@@ -668,6 +710,18 @@ class CargoBuilder(CommandBuilder):
     """Builder for Cargo/Rust tools (Clippy, cargo-audit, cargo-deny).
 
     Invokes Rust tools via cargo subcommands.
+
+    Resolution is directory-independent, so the inherited
+    :meth:`CommandBuilder.get_command_in` default is correct and is not
+    overridden (#1758). The command is a bare ``cargo`` looked up on ``PATH``
+    (in practice the rustup shim), and everything project-relative is resolved
+    by cargo itself from *its own* process cwd, which the executor sets to the
+    crate root: the workspace root and ``target/`` come from the enclosing
+    ``Cargo.toml``, and ``rust-toolchain.toml`` is found by rustup walking up
+    from that same directory. Subcommand binaries (``cargo-audit``,
+    ``cargo-deny``) live in ``$CARGO_HOME/bin`` or on ``PATH`` — Cargo has no
+    project-local ``node_modules``-style install location for them, so there is
+    nothing under the checked directory that could or should win.
     """
 
     def can_handle(self, tool_name_enum: ToolName | None) -> bool:
@@ -723,6 +777,15 @@ class StandaloneBuilder(CommandBuilder):
     These tools are invoked directly by name without any wrapper.
     Uses an explicit mapping for tools whose binary name differs
     from their internal tool name.
+
+    Resolution is directory-independent, so the inherited
+    :meth:`CommandBuilder.get_command_in` default is correct and is not
+    overridden (#1758). The builder emits a bare binary name that the OS
+    resolves against ``PATH``; none of these ecosystems define a project-local
+    install directory that a checked project could ship, so there is no
+    per-directory candidate to prefer. Anything project-relative — config
+    discovery, lockfile reading, the dependency set ``pip-audit`` audits — is
+    done by the tool itself from the cwd the executor sets.
     """
 
     _tools: frozenset[ToolName] | None = None
