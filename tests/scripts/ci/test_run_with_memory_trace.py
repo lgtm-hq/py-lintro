@@ -18,6 +18,7 @@ def _run(
     *args: str,
     trace_log: Path,
     interval: str = "1",
+    timeout: float = 120,
 ) -> subprocess.CompletedProcess[str]:
     """Run the wrapper with a scoped trace log.
 
@@ -25,6 +26,7 @@ def _run(
         *args: Command and arguments to wrap.
         trace_log: Sampler log path for this invocation.
         interval: Seconds between snapshots.
+        timeout: Seconds to wait before giving up on the wrapper.
 
     Returns:
         The completed process.
@@ -39,7 +41,7 @@ def _run(
         capture_output=True,
         text=True,
         env=env,
-        timeout=120,
+        timeout=timeout,
         check=False,
     )
 
@@ -197,6 +199,10 @@ def test_wrapper_terminates_when_no_samples_are_written(tmp_path: Path) -> None:
     An earlier design backgrounded a pipeline and killed the wrong PID, leaving
     ``tail -F`` alive holding stdout open so the step never finished.
 
+    The short timeout is the assertion: the whole point is that the wrapper
+    returns without waiting for a sample, so a regression should surface in
+    seconds rather than sitting on the default two-minute budget.
+
     Args:
         tmp_path: Temporary directory for the trace log.
     """
@@ -204,6 +210,7 @@ def test_wrapper_terminates_when_no_samples_are_written(tmp_path: Path) -> None:
         "true",
         trace_log=tmp_path / "trace.log",
         interval="3600",
+        timeout=15,
     )
 
     assert_that(result.returncode).is_equal_to(0)
