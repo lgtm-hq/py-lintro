@@ -6,6 +6,7 @@ import ast
 import json
 import re
 import subprocess  # nosec B404 - subprocess runs fixed git argv against this repo
+from collections import Counter
 from pathlib import Path
 from typing import Any, cast
 
@@ -1335,11 +1336,44 @@ def test_auto_rerun_covers_every_workflow_that_can_redden_main() -> None:
     ).is_subset_of(reddens_main)
 
 
-# Canonical lgtm-ci pin used by all py-lintro workflows (v0.52.4).
-# Pages deploy must not regress to v0.32.3 (missing GH_TOKEN in bundler).
-# The 40-hex git SHA trips trufflehog's Github legacy-token detector under
-# --no-verification; it is a commit pin, not a credential.
-_LGTM_CI_PIN = "ea2eef45ec331a743dffd362a7397a0863501bd4"  # trufflehog:ignore
+_LGTM_CI_USES = re.compile(r"lgtm-hq/lgtm-ci/[^@\s]+@([0-9a-f]{40})")
+
+
+def _canonical_lgtm_ci_pin() -> str:
+    """Return the lgtm-ci commit the repo's `uses:` refs agree on.
+
+    Derived rather than hardcoded (#1771). A literal here had to be edited by
+    hand on every lgtm-ci bump, and nothing updated it: Renovate's
+    github-actions manager rewrites the ~49 `uses:` refs but cannot see a
+    constant in a test file. The bump then failed *this* test and listed all 49
+    correctly-updated refs as offenders, because the one stale value was the
+    thing they were compared against — 49 right answers reported as wrong.
+
+    The modal `uses:` ref is the source of truth precisely because that is the
+    shape Renovate maintains reliably and en masse. Sites it cannot reach are
+    the ones that drift, so they are what this must catch, not define.
+
+    Returns:
+        The 40-character commit SHA shared by the majority of `uses:` refs.
+    """
+    refs: Counter[str] = Counter()
+    for path in _workflow_paths():
+        refs.update(_LGTM_CI_USES.findall(path.read_text(encoding="utf-8")))
+
+    assert_that(refs).described_as(
+        "no pinned lgtm-ci `uses:` refs found",
+    ).is_not_empty()
+    return refs.most_common(1)[0][0]
+
+
+def _workflow_paths() -> list[Path]:
+    """Return every workflow file, both YAML extensions, in stable order.
+
+    Returns:
+        Sorted list of workflow file paths.
+    """
+    workflows_dir = _REPO_ROOT / ".github" / "workflows"
+    return sorted((*workflows_dir.glob("*.yml"), *workflows_dir.glob("*.yaml")))
 
 
 def test_all_lgtm_ci_refs_use_the_canonical_pin() -> None:
@@ -1351,22 +1385,19 @@ def test_all_lgtm_ci_refs_use_the_canonical_pin() -> None:
     silently drift apart again. Any ref shape (tag, branch, short SHA,
     any quoting) that is not the canonical pin is an offender.
     """
+    canonical = _canonical_lgtm_ci_pin()
     ref_pattern = re.compile(
         r"lgtm-hq/lgtm-ci/[^@\s]+@([^\s#]+)|tooling-ref:\s*[\"']?([^\"'\s#]+)",
     )
-    workflows_dir = _REPO_ROOT / ".github" / "workflows"
     offenders: list[str] = []
-    workflow_paths = sorted(
-        (*workflows_dir.glob("*.yml"), *workflows_dir.glob("*.yaml")),
-    )
-    for path in workflow_paths:
+    for path in _workflow_paths():
         for lineno, line in enumerate(
             path.read_text(encoding="utf-8").splitlines(),
             start=1,
         ):
             for match in ref_pattern.finditer(line):
                 ref = match.group(1) or match.group(2)
-                if ref != _LGTM_CI_PIN:
+                if ref != canonical:
                     offenders.append(f"{path.name}:{lineno}: {ref}")
 
         # Manual lgtm-ci tooling checkouts pin via a separate `ref:` field
@@ -1378,13 +1409,72 @@ def test_all_lgtm_ci_refs_use_the_canonical_pin() -> None:
                 with_block = step.get("with") or {}
                 if with_block.get("repository") != "lgtm-hq/lgtm-ci":
                     continue
-                if with_block.get("ref") != _LGTM_CI_PIN:
+                if with_block.get("ref") != canonical:
                     offenders.append(
                         f"{path.name}:{job_id}: checkout ref "
                         f"{with_block.get('ref')!r}",
                     )
 
     assert_that(offenders).is_empty()
+
+
+def _js_named_groups_to_python(pattern: str) -> str:
+    """Rewrite JavaScript named capture groups into Python's spelling.
+
+    Renovate's regexes are evaluated by RE2/JS, which writes a named group as
+    ``(?<name>...)``; Python's ``re`` requires ``(?P<name>...)`` and raises on
+    the JS form. Lookbehinds (``(?<=`` and ``(?<!``) share the prefix and must
+    survive untouched, so the rewrite requires a name character after ``?<``.
+
+    Args:
+        pattern: A regex written in Renovate's dialect.
+
+    Returns:
+        The same regex, compilable by Python's ``re``.
+    """
+    return re.sub(r"\(\?<(?=[A-Za-z_])", "(?P<", pattern)
+
+
+def test_every_odd_shaped_lgtm_ci_pin_is_renovate_managed() -> None:
+    """Pin sites Renovate cannot see must be taught to it, not left to drift.
+
+    Renovate's github-actions manager rewrites ``uses:`` refs, and the org
+    preset covers ``tooling-ref:`` inputs. Anything else holding the same SHA
+    is invisible to it, so a bump updates the rest of the repo and strands that
+    line — breaking the single-pin invariant (#1280) on every release. The
+    v0.59.2 pin sat 22 releases stale exactly this way, which also left the
+    ``overwrite: true`` retry fix (#1737) unadopted long after it shipped.
+
+    Rather than name the known offender, derive the set: any lgtm-ci SHA in a
+    workflow that is not a ``uses:`` or ``tooling-ref:`` line must be matched
+    by one of this repo's own ``customManagers`` regexes (#1771).
+    """
+    canonical = _canonical_lgtm_ci_pin()
+    renovate = json.loads(
+        (_REPO_ROOT / "renovate.json").read_text(encoding="utf-8"),
+    )
+    custom_patterns = [
+        re.compile(_js_named_groups_to_python(pattern))
+        for manager in renovate.get("customManagers") or []
+        for pattern in manager.get("matchStrings") or []
+    ]
+
+    unmanaged: list[str] = []
+    for path in _workflow_paths():
+        for lineno, line in enumerate(
+            path.read_text(encoding="utf-8").splitlines(),
+            start=1,
+        ):
+            if canonical not in line:
+                continue
+            if "uses:" in line or "tooling-ref:" in line:
+                continue
+            if not any(pattern.search(line) for pattern in custom_patterns):
+                unmanaged.append(f"{path.name}:{lineno}: {line.strip()}")
+
+    assert_that(unmanaged).described_as(
+        "lgtm-ci pin sites no Renovate manager updates",
+    ).is_empty()
 
 
 def test_stage_coverage_html_allows_setup_uv_manifest_host() -> None:
@@ -1411,14 +1501,15 @@ def test_deploy_pages_pins_bundler_with_github_token() -> None:
     bundle-workflow-artifacts. v0.32.3 omitted GH_TOKEN; v0.32.4+ (lgtm-ci#300)
     sets ``GH_TOKEN: ${{ github.token }}``. Stay on the repo-standard v0.52.4 pin.
     """
+    canonical = _canonical_lgtm_ci_pin()
     workflow = _load_workflow(name="deploy-pages.yml")
     deploy = workflow["jobs"]["deploy"]
     uses = deploy["uses"]
     tooling_ref = deploy["with"]["tooling-ref"]
 
-    assert_that(uses).contains(_LGTM_CI_PIN)
+    assert_that(uses).contains(canonical)
     assert_that(uses).contains("reusable-deploy-site-with-reports.yml")
-    assert_that(tooling_ref).contains(_LGTM_CI_PIN)
+    assert_that(tooling_ref).contains(canonical)
     # v0.52.4 build job requests actions: write (lgtm-ci#415 rerun
     # self-heal); a lower caller grant is a parse-time startup_failure.
     assert_that(deploy["permissions"]).contains_entry({"actions": "write"})
