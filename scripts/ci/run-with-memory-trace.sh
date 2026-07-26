@@ -70,14 +70,20 @@ tail_pid=""
 
 # shellcheck disable=SC2329 # Invoked via `trap cleanup EXIT` below.
 cleanup() {
-	# Stop the streamer first so the sampler's final snapshot is not raced,
-	# then stop the sampler. Both are idempotent and must never fail the run.
+	# Order matters. Stopping the streamer first would discard the sampler's
+	# final snapshot -- the measurement closest to a kill, and the whole point
+	# of the trace -- leaving it only in a local file that a dying runner never
+	# uploads. So stop the sampler first, then the streamer.
+	"${SCRIPT_DIR}/memory-sampler.sh" stop "${TRACE_LOG}" "${TRACE_PID_FILE}" \
+		>/dev/null 2>&1 || true
 	if [[ -n "${tail_pid}" ]] && kill -0 "${tail_pid}" 2>/dev/null; then
 		kill "${tail_pid}" 2>/dev/null || true
 		wait "${tail_pid}" 2>/dev/null || true
 	fi
-	"${SCRIPT_DIR}/memory-sampler.sh" stop "${TRACE_LOG}" "${TRACE_PID_FILE}" \
-		>/dev/null 2>&1 || true
+	# Flush synchronously once the streamer is gone, so the sampler's final
+	# snapshot reaches the job log rather than only the local file that a
+	# dying runner never uploads.
+	flush_trace || true
 }
 trap cleanup EXIT
 
@@ -90,17 +96,50 @@ log_info "Starting memory trace (interval ${TRACE_INTERVAL}s) -> ${TRACE_LOG}"
 	exec "$@"
 }
 
-# Stream the sampler log into this step's stdout. `tail -F` tolerates the file
-# not existing yet and keeps following if it is rotated.
+# Stream new sampler output into this step's stdout.
 #
-# Piping through `sed` would block-buffer: its stdout is a pipe, so up to 4KB
-# of samples sit unflushed. That is fine for a clean exit and useless here --
-# the samples closest to a runner kill are exactly the ones needed, and they
-# would be discarded with the buffer. A read loop with printf issues one write
-# per line, so every sample reaches the log as it is taken.
-tail -F "${TRACE_LOG}" 2>/dev/null | while IFS= read -r trace_line; do
-	printf '[mem] %s\n' "${trace_line}"
-done &
+# Not `tail -F ... | while read`: `$!` after a pipeline is the PID of its LAST
+# element, so killing it leaves `tail -F` alive holding stdout open and the
+# step never finishes. This loop runs as a single background subshell whose PID
+# is exactly what `$!` reports, so cleanup can stop it deterministically.
+#
+# Emitting line-by-line with printf also avoids the block buffering a pipe
+# through `sed` would introduce -- the samples closest to a kill are the ones
+# that matter, and they would sit unflushed.
+streamed_lines=0
+
+# shellcheck disable=SC2329 # Invoked from cleanup(), which runs via trap.
+flush_trace() {
+	local total
+	total="$(wc -l <"${TRACE_LOG}" 2>/dev/null || echo 0)"
+	total="${total//[[:space:]]/}"
+	if [[ "${total}" -gt "${streamed_lines}" ]]; then
+		tail -n "+$((streamed_lines + 1))" "${TRACE_LOG}" 2>/dev/null |
+			while IFS= read -r trace_line; do
+				printf '[mem] %s\n' "${trace_line}"
+			done
+		streamed_lines="${total}"
+	fi
+}
+
+stream_trace() {
+	local last=0
+	while :; do
+		local total
+		total="$(wc -l <"${TRACE_LOG}" 2>/dev/null || echo 0)"
+		total="${total//[[:space:]]/}"
+		if [[ "${total}" -gt "${last}" ]]; then
+			tail -n "+$((last + 1))" "${TRACE_LOG}" 2>/dev/null |
+				while IFS= read -r trace_line; do
+					printf '[mem] %s\n' "${trace_line}"
+				done
+			last="${total}"
+		fi
+		sleep 2
+	done
+}
+
+stream_trace &
 tail_pid=$!
 
 set +e

@@ -132,3 +132,46 @@ def test_wrapper_exposes_help() -> None:
 
     assert_that(result.returncode).is_equal_to(0)
     assert_that(result.stdout).contains("memory trace")
+
+
+def test_final_snapshot_reaches_stdout(tmp_path: Path) -> None:
+    """The sampler's last snapshot must be streamed, not just written to file.
+
+    Cleanup originally stopped the streamer before the sampler, so the final
+    snapshot — the measurement closest to a kill, and the point of the trace —
+    landed only in a local file that a dying runner never uploads (#1761
+    review).
+
+    Args:
+        tmp_path: Temporary directory for the trace log.
+    """
+    result = _run(
+        "bash",
+        "-c",
+        "sleep 3",
+        trace_log=tmp_path / "trace.log",
+        interval="2",
+    )
+
+    assert_that(result.returncode).is_equal_to(0)
+    # The stop marker is appended after the final snapshot, so seeing it on
+    # stdout proves the tail of the trace was flushed rather than discarded.
+    assert_that(result.stdout).contains("sampler stopped")
+
+
+def test_wrapper_terminates_when_no_samples_are_written(tmp_path: Path) -> None:
+    """A run shorter than the sample interval still exits promptly.
+
+    An earlier design backgrounded a pipeline and killed the wrong PID, leaving
+    ``tail -F`` alive holding stdout open so the step never finished.
+
+    Args:
+        tmp_path: Temporary directory for the trace log.
+    """
+    result = _run(
+        "true",
+        trace_log=tmp_path / "trace.log",
+        interval="3600",
+    )
+
+    assert_that(result.returncode).is_equal_to(0)
