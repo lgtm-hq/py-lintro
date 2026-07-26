@@ -2342,3 +2342,69 @@ def test_code_quality_gate_sparse_checkout_covers_gate_scripts() -> None:
         "scripts/ci/is-infra-flake-failure.sh",
     ):
         assert_that(sparse).contains(script)
+
+
+# --- Release version-skew audit wiring (#1712) ------------------------------
+
+_SKEW_WORKFLOW = "release-version-skew-audit.yml"
+_SKEW_SCRIPT = "scripts/ci/check-release-version-skew.py"
+
+
+def test_version_skew_audit_runs_on_schedule_and_dispatch() -> None:
+    """The skew audit is a scheduled backstop, also runnable on demand.
+
+    Propagation lag means the settle window matters more than immediacy, so
+    the alarm runs as a periodic audit rather than inline in the release run.
+    """
+    workflow = _load_workflow(name=_SKEW_WORKFLOW)
+    triggers = workflow["on"]
+    assert_that(triggers).contains_key("schedule")
+    assert_that(triggers).contains_key("workflow_dispatch")
+    assert_that(triggers["schedule"]).is_not_empty()
+    assert_that(workflow["permissions"]).is_equal_to({})
+
+
+def test_version_skew_audit_invokes_the_checked_in_script() -> None:
+    """The audit job calls the dedicated script, not inline shell logic."""
+    workflow = _load_workflow(name=_SKEW_WORKFLOW)
+    steps = workflow["jobs"]["audit"]["steps"]
+    run_steps = [step for step in steps if "run" in step]
+    assert_that(run_steps).is_length(1)
+    assert_that(run_steps[0]["run"]).contains(_SKEW_SCRIPT)
+    assert_that((_REPO_ROOT / _SKEW_SCRIPT).exists()).is_true()
+    # Alarm, not gate: the audit must not be wired into any release job's
+    # ``needs:`` chain, and must not carry write permissions.
+    assert_that(workflow["jobs"]["audit"]["permissions"]).is_equal_to(
+        {"contents": "read"},
+    )
+
+
+def test_version_skew_audit_notifies_via_deduplicated_notifier() -> None:
+    """Skew alarms ping one deduplicated issue instead of one issue per run."""
+    workflow = _load_workflow(name=_SKEW_WORKFLOW)
+    notify = workflow["jobs"]["notify-failure"]
+    assert_that(notify["needs"]).contains("audit")
+    assert_that(notify["uses"]).contains("reusable-main-failure-notifier.yml")
+    assert_that(notify["with"]["workflow-key"]).is_equal_to("release-version-skew")
+    # Main-only: a dispatch from a feature branch must not open the issue.
+    assert_that(_normalize_github_expr(notify["if"])).contains(
+        "github.ref == 'refs/heads/main'",
+    )
+
+
+def test_version_skew_audit_allows_every_channel_endpoint() -> None:
+    """Egress policy allows exactly the hosts the audit must reach."""
+    workflow = _load_workflow(name=_SKEW_WORKFLOW)
+    steps = workflow["jobs"]["audit"]["steps"]
+    harden = next(
+        step for step in steps if str(step.get("uses", "")).startswith("step-security/")
+    )
+    assert_that(harden["with"]["egress-policy"]).is_equal_to("block")
+    allowed = harden["with"]["allowed-endpoints"].split()
+    for endpoint in (
+        "pypi.org:443",
+        "registry.npmjs.org:443",
+        "raw.githubusercontent.com:443",
+        "api.github.com:443",
+    ):
+        assert_that(allowed).contains(endpoint)
