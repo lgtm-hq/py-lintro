@@ -2025,7 +2025,16 @@ def _cosign_oidc_flake_markers() -> list[str]:
         ``scripts/ci/cosign-sign-images.sh``.
     """
     script = _COSIGN_SIGN_SCRIPT.read_text(encoding="utf-8")
-    array_match = re.search(r"oidc_flake_markers=\(([^)]*)\)", script)
+    # Terminate on the array's own closing line (``)`` alone) rather than the
+    # first ``)`` character: markers are fixed strings under ``grep -F`` and may
+    # legitimately contain parentheses, e.g. ``getting cert (403)``. A
+    # character-class scan would truncate there and silently drop the rest,
+    # letting the parity test pass while a marker is missing from the workflow.
+    array_match = re.search(
+        r"^oidc_flake_markers=\((.*?)^\)",
+        script,
+        re.DOTALL | re.MULTILINE,
+    )
     assert_that(
         array_match,
         description="oidc_flake_markers array not found",
