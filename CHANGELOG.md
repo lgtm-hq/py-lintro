@@ -21,6 +21,12 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.91.52] - 2026-07-26
+
+### Fixed
+
+- **ci**: bump the pinned release image and keep it synced (#1590) (#1764) (058acea)
+
 ## [0.91.51] - 2026-07-26
 
 ### Fixed
