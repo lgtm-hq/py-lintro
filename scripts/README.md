@@ -119,6 +119,7 @@ Scripts for GitHub Actions workflows and continuous integration.
 | `fail-on-security-audit.sh`          | Fail CI when security audit finds vulnerabilities                          | `./scripts/ci/fail-on-security-audit.sh`                                                    |
 | `free-disk-space.sh`                 | Free disk space on CI runner for Docker builds                             | `./scripts/ci/free-disk-space.sh`                                                           |
 | `memory-sampler.sh`                  | Background vmstat/free memory sampler around binary builds (#1707)         | `./scripts/ci/memory-sampler.sh start <log> <pid-file>`                                     |
+| `run-with-memory-trace.sh`           | Run a command with a live memory trace streamed to the job log (#1761)     | `./scripts/ci/run-with-memory-trace.sh <command> [args...]`                                 |
 | `collect-oom-evidence.sh`            | Best-effort dmesg/journal OOM-killer evidence after a failed build (#1707) | `./scripts/ci/collect-oom-evidence.sh <output-file>`                                        |
 | `validate-docker-backfill-inputs.sh` | Validate workflow-dispatch backfill version/ref inputs                     | `BACKFILL_VERSION=<ver> BACKFILL_REF=<ref> ./scripts/ci/validate-docker-backfill-inputs.sh` |
 | `security-comment.sh`                | Run osv-scanner via lintro in Docker and generate security PR comment      | `./scripts/ci/security-comment.sh --help`                                                   |
