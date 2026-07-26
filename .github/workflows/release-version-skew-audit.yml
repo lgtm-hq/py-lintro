@@ -96,4 +96,4 @@ jobs:
       issues: write # open or ping the deduplicated failure issue
     with:
       workflow-key: release-version-skew
-      tooling-ref: '46cd4f431a6501230b629433c690bbc45d6c01ac'  # v0.59.28
+      tooling-ref: '46cd4f431a6501230b629433c690bbc45d6c01ac' # v0.59.28

@@ -464,7 +464,7 @@ jobs:
       contents: read
       packages: read # pull lintro-image from GHCR in reusable-quality-lint
     with:
-      tooling-ref: '46cd4f431a6501230b629433c690bbc45d6c01ac'  # v0.59.28
+      tooling-ref: '46cd4f431a6501230b629433c690bbc45d6c01ac' # v0.59.28
       job-name: '🛠️ Dogfooding Lint'
       lintro-tool-options: >-
         pydoclint:timeout=120,bandit:timeout=120,prettier:timeout=120,mypy:timeout=120,osv_scanner:check_suppressions=false
@@ -722,7 +722,7 @@ jobs:
       contents: read
       packages: read # pull lintro-image from GHCR in reusable-quality-lint
     with:
-      tooling-ref: '46cd4f431a6501230b629433c690bbc45d6c01ac'  # v0.59.28
+      tooling-ref: '46cd4f431a6501230b629433c690bbc45d6c01ac' # v0.59.28
       job-name: '🛠️ Dogfooding Lint (retry)'
       lintro-tool-options: >-
         pydoclint:timeout=120,bandit:timeout=120,prettier:timeout=120,mypy:timeout=120,osv_scanner:check_suppressions=false
@@ -859,7 +859,7 @@ jobs:
           needs.dogfooding_lint_retry.outputs.exit-code
         )
         || needs.dogfooding-lint.outputs.exit-code }}
-      tooling-ref: '46cd4f431a6501230b629433c690bbc45d6c01ac'  # v0.59.28
+      tooling-ref: '46cd4f431a6501230b629433c690bbc45d6c01ac' # v0.59.28
       job-name: '🛠️ Dogfooding Lint PR Comment'
       egress-policy: block
 
@@ -883,7 +883,7 @@ jobs:
     permissions:
       contents: read
     with:
-      tooling-ref: '46cd4f431a6501230b629433c690bbc45d6c01ac'  # v0.59.28
+      tooling-ref: '46cd4f431a6501230b629433c690bbc45d6c01ac' # v0.59.28
       job-name: '🛠️ Lintro Code Quality'
       runner-image: ubuntu-24.04
       # Consumes the rolled-up gate verdict (#1313), which itself mirrors

@@ -54,7 +54,7 @@ jobs:
       draft-pr-skip: true
       job-name: Python Compatibility
       runner-image: ubuntu-24.04
-      tooling-ref: '46cd4f431a6501230b629433c690bbc45d6c01ac'  # v0.59.28
+      tooling-ref: '46cd4f431a6501230b629433c690bbc45d6c01ac' # v0.59.28
       egress-policy: block
       egress-preset: pypi
       # Full list (v0.50.0+ replace semantics): the reusable passes
@@ -96,7 +96,7 @@ jobs:
       draft-pr-skip: true
       job-name: Python Coverage
       runner-image: ubuntu-24.04
-      tooling-ref: '46cd4f431a6501230b629433c690bbc45d6c01ac'  # v0.59.28
+      tooling-ref: '46cd4f431a6501230b629433c690bbc45d6c01ac' # v0.59.28
       egress-policy: block
       egress-preset: pypi
       # Full list (v0.50.0+ replace semantics): the reusable passes
@@ -162,7 +162,7 @@ jobs:
     permissions:
       contents: read
     with:
-      tooling-ref: '46cd4f431a6501230b629433c690bbc45d6c01ac'  # v0.59.28
+      tooling-ref: '46cd4f431a6501230b629433c690bbc45d6c01ac' # v0.59.28
       job-name: '🧪 Test Suite & Coverage'
       runner-image: ubuntu-24.04
       upstream-result: ${{ needs.test-gate.outputs.result }}
