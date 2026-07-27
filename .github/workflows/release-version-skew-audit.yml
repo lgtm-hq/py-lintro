@@ -89,11 +89,11 @@ jobs:
     # first failure opens `fix(ci): main workflow failed: release-version-skew`,
     # repeat failures comment on it instead of piling up one issue per run.
     # yamllint disable-line rule:line-length
-    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-main-failure-notifier.yml@c56ab38274492c6842807c6e1047b9000bd5c0a6 # v0.61.0
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-main-failure-notifier.yml@d8fff0c6025ddf39c1ae048c04c5a050c7729a6e # v0.62.0
     permissions:
       actions: read # read workflow/job metadata for the failure context
       contents: read # repository context for the issue body
       issues: write # open or ping the deduplicated failure issue
     with:
       workflow-key: release-version-skew
-      tooling-ref: 'c56ab38274492c6842807c6e1047b9000bd5c0a6' # v0.61.0
+      tooling-ref: 'd8fff0c6025ddf39c1ae048c04c5a050c7729a6e' # v0.62.0

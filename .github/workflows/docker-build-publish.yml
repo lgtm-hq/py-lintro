@@ -64,7 +64,7 @@ jobs:
     # Base image (tools layer) publishes before full; a full-image failure must
     # not block repairing py-lintro-base tags during backfill dispatch.
     # yamllint disable-line rule:line-length
-    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-docker.yml@c56ab38274492c6842807c6e1047b9000bd5c0a6 # v0.61.0
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-docker.yml@d8fff0c6025ddf39c1ae048c04c5a050c7729a6e # v0.62.0
     permissions:
       contents: read
       packages: write
@@ -112,7 +112,7 @@ jobs:
       provenance: false
       sbom: false
       cosign-sign: true
-      tooling-ref: 'c56ab38274492c6842807c6e1047b9000bd5c0a6' # v0.61.0
+      tooling-ref: 'd8fff0c6025ddf39c1ae048c04c5a050c7729a6e' # v0.62.0
       egress-policy: block
       egress-preset: docker
       # Full list (v0.50.0+ replace semantics): the reusable passes
@@ -166,7 +166,7 @@ jobs:
       needs.validate-backfill-inputs.result == 'skipped') &&
       needs.docker-base.result == 'success'
     # yamllint disable-line rule:line-length
-    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-docker.yml@c56ab38274492c6842807c6e1047b9000bd5c0a6 # v0.61.0
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-docker.yml@d8fff0c6025ddf39c1ae048c04c5a050c7729a6e # v0.62.0
     permissions:
       contents: read
       packages: write
@@ -214,7 +214,7 @@ jobs:
       provenance: false
       sbom: false
       cosign-sign: true
-      tooling-ref: 'c56ab38274492c6842807c6e1047b9000bd5c0a6' # v0.61.0
+      tooling-ref: 'd8fff0c6025ddf39c1ae048c04c5a050c7729a6e' # v0.62.0
       egress-policy: block
       egress-preset: docker
       # Full list (v0.50.0+ replace semantics): the reusable passes
