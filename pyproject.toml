@@ -130,7 +130,6 @@ packages = [
   "lintro.ai.integrations",
   "lintro.ai.metadata",
   "lintro.ai.models",
-  "lintro.ai.output",
   "lintro.ai.prompts",
   "lintro.ai.prompts.templates",
   "lintro.ai.providers",
@@ -205,6 +204,7 @@ packages = [
   "lintro.utils.environment",
   "lintro.utils.execution",
   "lintro.utils.output",
+  "lintro.utils.output.sarif",
 ]
 
 [tool.setuptools.package-data]

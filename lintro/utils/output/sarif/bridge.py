@@ -1,20 +1,24 @@
-"""SARIF bridge: reconstruct typed AI objects from ToolResult metadata.
+"""SARIF bridge: derive SARIF inputs from ``ToolResult`` objects.
 
-This module provides functions to reconstruct ``AIFixSuggestion`` and
-``AISummary`` instances from the serialized metadata dictionaries that
-are attached to ``ToolResult.ai_metadata`` during AI-enhanced runs.
+``standard_issues_from_results`` normalizes parsed lint issues and has no
+dependency on the AI layer. ``suggestions_from_results`` and
+``summary_from_results`` reconstruct ``AIFixSuggestion`` and ``AISummary``
+instances from the serialized metadata dictionaries attached to
+``ToolResult.ai_metadata`` during AI-enhanced runs; they import the AI
+models lazily so that plain SARIF rendering never loads
+:mod:`lintro.ai`.
 """
 
 from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-from lintro.ai.enums import ConfidenceLevel
-from lintro.ai.models import AIFixSuggestion, AISummary
-from lintro.ai.output.sarif import StandardIssue
+from lintro.enums.confidence_level import ConfidenceLevel
 from lintro.enums.severity_level import SeverityLevel
+from lintro.utils.output.sarif.document import StandardIssue
 
 if TYPE_CHECKING:
+    from lintro.ai.models import AIFixSuggestion, AISummary
     from lintro.models.core.tool_result import ToolResult
     from lintro.parsers.base_issue import BaseIssue
 
@@ -107,6 +111,8 @@ def suggestions_from_results(
     Returns:
         List of reconstructed AIFixSuggestion objects across all results.
     """
+    from lintro.ai.models import AIFixSuggestion
+
     suggestions: list[AIFixSuggestion] = []
     for result in all_results:
         if result.ai_metadata is None:
@@ -155,6 +161,8 @@ def summary_from_results(
     Returns:
         Reconstructed AISummary, or None if no summary metadata is found.
     """
+    from lintro.ai.models import AISummary
+
     for result in all_results:
         if result.ai_metadata is None:
             continue

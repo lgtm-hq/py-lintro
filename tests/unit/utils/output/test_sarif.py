@@ -9,7 +9,7 @@ import pytest
 from assertpy import assert_that
 
 from lintro.ai.models import AIFixSuggestion, AISummary
-from lintro.ai.output.sarif import (
+from lintro.utils.output.sarif.document import (
     SARIF_SCHEMA,
     SARIF_VERSION,
     _confidence_to_score,
@@ -63,7 +63,7 @@ def test_confidence_to_score(input_val: str, expected: float) -> None:
 
 def test_empty_suggestions_produces_valid_sarif() -> None:
     """Produce valid SARIF structure with no suggestions."""
-    sarif = to_sarif([])
+    sarif = to_sarif()
     assert_that(sarif["$schema"]).is_equal_to(SARIF_SCHEMA)
     assert_that(sarif["version"]).is_equal_to(SARIF_VERSION)
     assert_that(sarif["runs"]).is_length(1)
@@ -83,7 +83,7 @@ def test_single_suggestion_produces_result() -> None:
         suggested_code="if not x:\n    raise ValueError",
         cost_estimate=0.002,
     )
-    sarif = to_sarif([s])
+    sarif = to_sarif(ai_suggestions=[s])
 
     run = sarif["runs"][0]
     assert_that(run["tool"]["driver"]["name"]).is_equal_to("lintro-ai")
@@ -131,7 +131,7 @@ def test_multiple_suggestions_same_rule_deduplicates_rules() -> None:
             risk_level="low",
         ),
     ]
-    sarif = to_sarif(suggestions)
+    sarif = to_sarif(ai_suggestions=suggestions)
     rules = sarif["runs"][0]["tool"]["driver"]["rules"]
     assert_that(rules).is_length(1)
     results = sarif["runs"][0]["results"]
@@ -144,7 +144,7 @@ def test_different_rules_create_separate_entries() -> None:
         AIFixSuggestion(code="B101", explanation="Fix 1", risk_level="low"),
         AIFixSuggestion(code="E501", explanation="Fix 2", risk_level="medium"),
     ]
-    sarif = to_sarif(suggestions)
+    sarif = to_sarif(ai_suggestions=suggestions)
     rules = sarif["runs"][0]["tool"]["driver"]["rules"]
     assert_that(rules).is_length(2)
 
@@ -156,7 +156,7 @@ def test_risk_level_maps_correctly() -> None:
         AIFixSuggestion(code="B", risk_level="medium", explanation="y"),
         AIFixSuggestion(code="C", risk_level="low", explanation="z"),
     ]
-    sarif = to_sarif(suggestions)
+    sarif = to_sarif(ai_suggestions=suggestions)
     levels = [r["level"] for r in sarif["runs"][0]["results"]]
     assert_that(levels).is_equal_to(["error", "warning", "note"])
 
@@ -169,7 +169,7 @@ def test_summary_attached_as_run_properties() -> None:
         priority_actions=["Add type hints"],
         estimated_effort="2 hours",
     )
-    sarif = to_sarif([], summary=summary)
+    sarif = to_sarif(ai_summary=summary)
     props = sarif["runs"][0]["properties"]["aiSummary"]
     assert_that(props["overview"]).is_equal_to("High-level assessment")
     assert_that(props["keyPatterns"]).contains("Missing types")
@@ -179,13 +179,13 @@ def test_summary_attached_as_run_properties() -> None:
 
 def test_no_summary_omits_run_properties() -> None:
     """Omit run properties when no summary is provided."""
-    sarif = to_sarif([])
+    sarif = to_sarif()
     assert_that(sarif["runs"][0]).does_not_contain_key("properties")
 
 
 def test_custom_tool_name_and_version() -> None:
     """Use custom tool name and version in driver metadata."""
-    sarif = to_sarif([], tool_name="custom-tool", tool_version="1.2.3")
+    sarif = to_sarif(tool_name="custom-tool", tool_version="1.2.3")
     driver = sarif["runs"][0]["tool"]["driver"]
     assert_that(driver["name"]).is_equal_to("custom-tool")
     assert_that(driver["version"]).is_equal_to("1.2.3")
@@ -194,7 +194,7 @@ def test_custom_tool_name_and_version() -> None:
 def test_no_file_omits_locations() -> None:
     """Omit locations when no file is specified."""
     s = AIFixSuggestion(code="X", explanation="No file", risk_level="low")
-    sarif = to_sarif([s])
+    sarif = to_sarif(ai_suggestions=[s])
     result = sarif["runs"][0]["results"][0]
     assert_that(result).does_not_contain_key("locations")
 
@@ -208,7 +208,7 @@ def test_no_suggested_code_omits_fixes() -> None:
         explanation="No fix",
         risk_level="low",
     )
-    sarif = to_sarif([s])
+    sarif = to_sarif(ai_suggestions=[s])
     result = sarif["runs"][0]["results"][0]
     assert_that(result).does_not_contain_key("fixes")
 
@@ -221,7 +221,7 @@ def test_tool_name_in_rule_properties() -> None:
         explanation="Fix",
         risk_level="low",
     )
-    sarif = to_sarif([s])
+    sarif = to_sarif(ai_suggestions=[s])
     rule = sarif["runs"][0]["tool"]["driver"]["rules"][0]
     assert_that(rule["properties"]["tool"]).is_equal_to("bandit")
 
@@ -232,14 +232,14 @@ def test_tool_name_in_rule_properties() -> None:
 def test_returns_valid_json() -> None:
     """Return valid JSON string from suggestions."""
     s = AIFixSuggestion(code="B101", explanation="Fix", risk_level="low")
-    result = render_fixes_sarif([s])
+    result = render_fixes_sarif(ai_suggestions=[s])
     parsed = json.loads(result)
     assert_that(parsed["version"]).is_equal_to(SARIF_VERSION)
 
 
 def test_empty_suggestions_returns_valid_json() -> None:
     """Return valid JSON string with empty suggestions."""
-    result = render_fixes_sarif([])
+    result = render_fixes_sarif()
     parsed = json.loads(result)
     assert_that(parsed["runs"][0]["results"]).is_empty()
 
@@ -247,7 +247,7 @@ def test_empty_suggestions_returns_valid_json() -> None:
 def test_includes_summary_when_provided() -> None:
     """Include summary in rendered SARIF output."""
     summary = AISummary(overview="Test overview")
-    result = render_fixes_sarif([], summary=summary)
+    result = render_fixes_sarif(ai_summary=summary)
     parsed = json.loads(result)
     assert_that(
         parsed["runs"][0]["properties"]["aiSummary"]["overview"],
@@ -269,7 +269,7 @@ def test_writes_valid_sarif_file(tmp_path: Path) -> None:
         explanation="Replace assert",
         risk_level="low",
     )
-    write_sarif([s], output_path=output)
+    write_sarif(ai_suggestions=[s], output_path=output)
 
     assert_that(output.exists()).is_true()
     parsed = json.loads(output.read_text())
@@ -280,7 +280,7 @@ def test_writes_valid_sarif_file(tmp_path: Path) -> None:
 def test_creates_parent_directories(tmp_path: Path) -> None:
     """Create parent directories when they do not exist."""
     output = tmp_path / "sub" / "dir" / "results.sarif"
-    write_sarif([], output_path=output)
+    write_sarif(output_path=output)
     assert_that(output.exists()).is_true()
 
 
@@ -288,7 +288,7 @@ def test_writes_with_summary(tmp_path: Path) -> None:
     """Write SARIF file including summary properties."""
     output = tmp_path / "results.sarif"
     summary = AISummary(overview="Summary text")
-    write_sarif([], summary=summary, output_path=output)
+    write_sarif(ai_summary=summary, output_path=output)
 
     parsed = json.loads(output.read_text())
     assert_that(

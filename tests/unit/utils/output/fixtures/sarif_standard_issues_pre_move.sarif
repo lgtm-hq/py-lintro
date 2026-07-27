@@ -1,0 +1,117 @@
+{
+  "$schema": "https://raw.githubusercontent.com/oasis-tcs/sarif-spec/main/sarif-2.1/schema/sarif-schema-2.1.0.json",
+  "version": "2.1.0",
+  "runs": [
+    {
+      "tool": {
+        "driver": {
+          "name": "lintro-ai",
+          "rules": [
+            {
+              "id": "ruff/E501",
+              "shortDescription": {
+                "text": "E501"
+              },
+              "helpUri": "https://docs.astral.sh/ruff/rules/line-too-long/",
+              "properties": {
+                "tool": "ruff"
+              }
+            },
+            {
+              "id": "ruff/F401",
+              "shortDescription": {
+                "text": "F401"
+              },
+              "properties": {
+                "tool": "ruff"
+              }
+            },
+            {
+              "id": "bandit/E501",
+              "shortDescription": {
+                "text": "E501"
+              },
+              "helpUri": "https://docs.astral.sh/ruff/rules/line-too-long/",
+              "properties": {
+                "tool": "bandit"
+              }
+            }
+          ]
+        }
+      },
+      "results": [
+        {
+          "ruleId": "ruff/E501",
+          "level": "warning",
+          "message": {
+            "text": "Line too long (100 > 88)"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "src/alpha.py"
+                },
+                "region": {
+                  "startLine": 12,
+                  "startColumn": 5
+                }
+              }
+            }
+          ],
+          "properties": {
+            "tool": "ruff",
+            "code": "E501"
+          }
+        },
+        {
+          "ruleId": "ruff/F401",
+          "level": "warning",
+          "message": {
+            "text": "Unused import: os"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "src/alpha.py"
+                },
+                "region": {
+                  "startLine": 30
+                }
+              }
+            }
+          ],
+          "properties": {
+            "tool": "ruff",
+            "code": "F401"
+          }
+        },
+        {
+          "ruleId": "bandit/E501",
+          "level": "warning",
+          "message": {
+            "text": "Line too long (95 > 88)"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "src/beta.py"
+                },
+                "region": {
+                  "startLine": 7,
+                  "startColumn": 1
+                }
+              }
+            }
+          ],
+          "properties": {
+            "tool": "bandit",
+            "code": "E501"
+          }
+        }
+      ]
+    }
+  ]
+}

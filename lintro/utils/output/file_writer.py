@@ -406,23 +406,19 @@ def write_output_file(
         output_file.write_text("\n".join(html_lines), encoding="utf-8")
 
     elif output_format == OutputFormat.SARIF:
-        from lintro.ai.output.sarif import write_sarif
-        from lintro.ai.output.sarif_bridge import (
+        from lintro.utils.output.sarif import (
             standard_issues_from_results,
             suggestions_from_results,
             summary_from_results,
+            write_sarif,
         )
 
-        suggestions = suggestions_from_results(all_results)
-        summary = summary_from_results(all_results)
-        standard_issues = standard_issues_from_results(all_results)
-
         write_sarif(
-            suggestions,
-            summary,
+            standard_issues_from_results(all_results),
             output_path=output_file,
             doc_urls=build_doc_url_map(all_results) or None,
-            standard_issues=standard_issues,
+            ai_suggestions=suggestions_from_results(all_results),
+            ai_summary=summary_from_results(all_results),
         )
 
     else:
