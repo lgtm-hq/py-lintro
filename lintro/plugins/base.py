@@ -640,6 +640,7 @@ class BaseToolPlugin(ABC):
                         output="",
                         issues=[],
                         skipped=True,
+                        timed_out=True,
                     )
 
             result = self._process_files_with_progress(

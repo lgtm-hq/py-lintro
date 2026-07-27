@@ -213,6 +213,7 @@ class SqlfluffPlugin(BaseToolPlugin):
                 output="",
                 issues=[],
                 skipped=True,
+                timed_out=True,
             )
         except (OSError, ValueError, RuntimeError) as e:
             return FileProcessingResult(
@@ -253,6 +254,7 @@ class SqlfluffPlugin(BaseToolPlugin):
                     output="",
                     issues=[],
                     skipped=True,
+                    timed_out=True,
                 ),
                 initial_count=0,
                 fixed_count=0,
@@ -313,6 +315,7 @@ class SqlfluffPlugin(BaseToolPlugin):
                     output="",
                     issues=check_issues,
                     skipped=True,
+                    timed_out=True,
                 ),
                 initial_count=len(check_issues),
                 fixed_count=0,
@@ -351,6 +354,7 @@ class SqlfluffPlugin(BaseToolPlugin):
                     output=fix_output,
                     issues=check_issues,
                     error=str(e),
+                    timed_out=isinstance(e, subprocess.TimeoutExpired),
                 ),
                 initial_count=len(check_issues),
                 fixed_count=0,
@@ -434,6 +438,7 @@ class SqlfluffPlugin(BaseToolPlugin):
             success=result.all_success,
             output=result.build_output(timeout=ctx.timeout),
             issues_count=result.total_issues,
+            timed_out=result.timed_out,
             issues=result.all_issues,
         )
 
@@ -488,4 +493,5 @@ class SqlfluffPlugin(BaseToolPlugin):
             fixed_issues_count=fixed_count,
             remaining_issues_count=remaining_count,
             initial_issues=all_initial_issues if all_initial_issues else None,
+            timed_out=result.timed_out,
         )

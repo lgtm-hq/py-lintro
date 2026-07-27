@@ -134,9 +134,12 @@ def test_check_timeout_handling(oxlint_plugin: OxlintPlugin, tmp_path: Path) -> 
         assert_that(result.success).is_false()
         assert_that(result.output).contains("timed out")
         assert_that(result.output).contains("30s")
-        assert_that(result.issues_count).is_equal_to(1)
-        issue = cast(OxlintIssue, result.issues[0])  # type: ignore[index]  # validated via is_not_none
-        assert_that(issue.code).is_equal_to("TIMEOUT")
+        # A timeout is an execution failure, not a lint finding: it is reported
+        # via ``timed_out`` rather than a synthetic TIMEOUT pseudo-issue, so it
+        # never inflates the issue counts (#1768).
+        assert_that(result.timed_out).is_true()
+        assert_that(result.issues_count).is_equal_to(0)
+        assert_that(list(result.issues or [])).is_empty()
 
 
 def test_check_early_skip(oxlint_plugin: OxlintPlugin, tmp_path: Path) -> None:

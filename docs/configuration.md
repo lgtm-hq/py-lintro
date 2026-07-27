@@ -234,6 +234,67 @@ In `--output-format json` the score is added **additively** under
 }
 ```
 
+### Tool Timeouts in the JSON Report
+
+A tool timeout is an **execution failure, never a lint finding**. Every tool accounts
+for one the same way, so a consumer can tell an infrastructure flake apart from a
+genuine finding using evidence about its own run.
+
+A timed-out tool reports:
+
+- `success: false` — the run failed, and the process exit code stays non-zero.
+- `timed_out: true` — the machine-readable marker to classify on. No need to regex-match
+  the human-readable `output` string.
+- `issues_count` counting **only** genuine findings. No synthetic `TIMEOUT` pseudo-issue
+  is invented, and the timeout never reaches `summary.total_issues`. Issues legitimately
+  detected _before_ the timeout (for example the pre-fix check of a `format` run) are
+  still reported.
+
+`summary.timed_out_tools` lists the tools that timed out, in execution order:
+
+```json
+{
+  "summary": {
+    "total_issues": 0,
+    "total_fixed": 0,
+    "total_remaining": 0,
+    "timed_out_tools": ["mypy"]
+  },
+  "results": [
+    {
+      "tool": "mypy",
+      "success": false,
+      "issues_count": 0,
+      "timed_out": true,
+      "output": "mypy execution timed out (300s limit exceeded)..."
+    }
+  ]
+}
+```
+
+This makes the conservative CI classification expressible: **at least one tool timed out
+AND `total_issues == 0`**. A run with a real finding still reports a non-zero
+`total_issues`, and a non-timeout tool failure reports `timed_out: false`, so neither is
+ever mistaken for a flake.
+
+### Artifacts Under GitHub Actions
+
+When `GITHUB_ACTIONS=true` is detected, lintro auto-emits two side-channel artifacts
+regardless of `--output-format`, so the console/grid output every existing consumer
+parses is untouched and no second invocation is needed:
+
+| Format | Path                                         | Purpose                            |
+| ------ | -------------------------------------------- | ---------------------------------- |
+| SARIF  | `.lintro/artifacts/sarif/results.sarif.json` | GitHub Code Scanning ingestion     |
+| JSON   | `.lintro/artifacts/json/results.json`        | Structured CI evidence (see above) |
+
+SARIF omits clean tools and omits failures that produced no issues, so it cannot be used
+to classify a timeout without failing open. The JSON report covers every tool that ran
+and carries the per-tool `timed_out` flag.
+
+Any format listed in `execution.artifacts` is emitted in addition to these, in every
+environment.
+
 ### Output Presentation
 
 Purely cosmetic console output is controlled by the `output` section. These settings
