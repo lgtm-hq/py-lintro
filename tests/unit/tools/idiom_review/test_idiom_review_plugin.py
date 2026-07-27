@@ -70,13 +70,23 @@ class _FakeEngine:
     def __init__(self, *_args: object, **_kwargs: object) -> None:
         pass
 
-    def review_file(
+    async def review_file(
         self,
         *,
         file_path: str,
         source: str,  # noqa: ARG002
         language: str = "python",  # noqa: ARG002
     ) -> list[IdiomReviewIssue]:
+        """Return canned per-file findings.
+
+        Args:
+            file_path: Path recorded on each finding.
+            source: Ignored source text.
+            language: Ignored target language.
+
+        Returns:
+            Two canned findings of differing confidence.
+        """
         return [
             IdiomReviewIssue(
                 file=file_path,
@@ -96,10 +106,18 @@ class _FakeEngine:
             ),
         ]
 
-    def review_duplication(
+    async def review_duplication(
         self,
         _signatures: object,
     ) -> list[IdiomReviewIssue]:
+        """Return no duplication findings.
+
+        Args:
+            _signatures: Ignored signature list.
+
+        Returns:
+            An empty list.
+        """
         return []
 
 
@@ -152,7 +170,18 @@ def test_ai_error_degrades_gracefully(
     monkeypatch.setattr(plugin_module, "get_provider", lambda _cfg: object())
 
     class _RaisingEngine(_FakeEngine):
-        def review_file(self, **_kwargs: object) -> list[IdiomReviewIssue]:
+        async def review_file(self, **_kwargs: object) -> list[IdiomReviewIssue]:
+            """Fail as a provider with depleted credits would.
+
+            Args:
+                **_kwargs: Ignored keyword arguments.
+
+            Returns:
+                Never returns.
+
+            Raises:
+                AIAuthenticationError: Always.
+            """
             raise AIAuthenticationError("no credits")
 
     monkeypatch.setattr(plugin_module, "IdiomReviewEngine", _RaisingEngine)

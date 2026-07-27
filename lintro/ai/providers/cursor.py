@@ -234,7 +234,7 @@ class CursorProvider(BaseAIProvider):
         self._session_id = None
         self._durable_repo_root = None
 
-    def complete(
+    async def complete(
         self,
         prompt: str,
         *,
@@ -299,7 +299,7 @@ class CursorProvider(BaseAIProvider):
                 OptionalArg(flag="--resume", values=(self._session_id,)),
             )
 
-        optional_args = self._cli.apply_optional_args(cmd, candidates)
+        optional_args = await self._cli.apply_optional_args(cmd, candidates)
 
         logger.debug(
             f"Cursor CLI request: model={effective_model}, "
@@ -309,7 +309,7 @@ class CursorProvider(BaseAIProvider):
         )
 
         effective_timeout = max(timeout, CURSOR_MIN_TIMEOUT)
-        result = self._cli.run_guarded(
+        result = await self._cli.run_guarded(
             cmd,
             optional_args=optional_args,
             input_text=combined_prompt,

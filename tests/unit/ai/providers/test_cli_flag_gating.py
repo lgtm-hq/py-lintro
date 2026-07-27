@@ -20,6 +20,7 @@ from lintro.ai.json_response import CliSchemaRequest
 from lintro.ai.providers.anthropic import AnthropicProvider
 from lintro.ai.providers.cursor import CursorProvider
 from lintro.ai.providers.openai import OpenAIProvider
+from tests.unit.ai.conftest import patch_cli_exec
 
 _CLAUDE_COMPLETION = json.dumps(
     {
@@ -57,7 +58,7 @@ def _runner(
     reject: str | None = None,
     calls: list[list[str]],
 ) -> Callable[..., subprocess.CompletedProcess[str]]:
-    """Build a ``subprocess.run`` stand-in for a guarded CLI provider.
+    """Build a spawn stand-in for a guarded CLI provider.
 
     Args:
         help_text: Text returned for the ``--help`` capability probe.
@@ -67,7 +68,7 @@ def _runner(
         calls: Sink recording every argv the provider invoked.
 
     Returns:
-        A callable suitable for ``patch("subprocess.run", side_effect=...)``.
+        A callable suitable for ``patch_cli_exec(side_effect=...)``.
     """
 
     def _run(
@@ -149,7 +150,7 @@ def _codex_on_path() -> Iterator[None]:
 # -- Anthropic --------------------------------------------------------------
 
 
-def test_claude_sends_schema_name_when_advertised(_claude_on_path: None) -> None:
+async def test_claude_sends_schema_name_when_advertised(_claude_on_path: None) -> None:
     """Send --json-schema-name to a binary whose help advertises it."""
     calls: list[list[str]] = []
     runner = _runner(
@@ -159,14 +160,16 @@ def test_claude_sends_schema_name_when_advertised(_claude_on_path: None) -> None
         calls=calls,
     )
     provider = AnthropicProvider(transport=AITransport.CLI)
-    with patch("subprocess.run", side_effect=runner):
-        provider.complete("Review this diff", cli_schema=_SCHEMA)
+    with patch_cli_exec(side_effect=runner):
+        await provider.complete("Review this diff", cli_schema=_SCHEMA)
 
     cmd = _completion_calls(calls)[-1]
     assert_that(cmd).contains("--json-schema-name", "lintro_review")
 
 
-def test_claude_omits_schema_name_when_not_advertised(_claude_on_path: None) -> None:
+async def test_claude_omits_schema_name_when_not_advertised(
+    _claude_on_path: None,
+) -> None:
     """Keep --json-schema but omit --json-schema-name on a current claude.
 
     Regression for #1611: ``@anthropic-ai/claude-code`` 2.1.218 removed the
@@ -180,15 +183,17 @@ def test_claude_omits_schema_name_when_not_advertised(_claude_on_path: None) -> 
         calls=calls,
     )
     provider = AnthropicProvider(transport=AITransport.CLI)
-    with patch("subprocess.run", side_effect=runner):
-        provider.complete("Review this diff", cli_schema=_SCHEMA)
+    with patch_cli_exec(side_effect=runner):
+        await provider.complete("Review this diff", cli_schema=_SCHEMA)
 
     cmd = _completion_calls(calls)[-1]
     assert_that(cmd).does_not_contain("--json-schema-name")
     assert_that(cmd).contains("--json-schema")
 
 
-def test_claude_backstop_retries_without_schema_name(_claude_on_path: None) -> None:
+async def test_claude_backstop_retries_without_schema_name(
+    _claude_on_path: None,
+) -> None:
     """Retry without --json-schema-name when help lied about supporting it."""
     calls: list[list[str]] = []
     runner = _runner(
@@ -199,8 +204,8 @@ def test_claude_backstop_retries_without_schema_name(_claude_on_path: None) -> N
         calls=calls,
     )
     provider = AnthropicProvider(transport=AITransport.CLI)
-    with patch("subprocess.run", side_effect=runner):
-        response = provider.complete("Review this diff", cli_schema=_SCHEMA)
+    with patch_cli_exec(side_effect=runner):
+        response = await provider.complete("Review this diff", cli_schema=_SCHEMA)
 
     completions = _completion_calls(calls)
     assert_that(completions).is_length(2)
@@ -208,7 +213,7 @@ def test_claude_backstop_retries_without_schema_name(_claude_on_path: None) -> N
     assert_that(response.content).contains("summary")
 
 
-def test_claude_below_version_floor_raises(_claude_on_path: None) -> None:
+async def test_claude_below_version_floor_raises(_claude_on_path: None) -> None:
     """Refuse a claude binary older than the declared floor."""
     from lintro.ai.exceptions import AINotAvailableError
 
@@ -221,13 +226,13 @@ def test_claude_below_version_floor_raises(_claude_on_path: None) -> None:
     )
     provider = AnthropicProvider(transport=AITransport.CLI)
     with (
-        patch("subprocess.run", side_effect=runner),
+        patch_cli_exec(side_effect=runner),
         pytest.raises(AINotAvailableError, match="1.0.88"),
     ):
-        provider.complete("Review this diff")
+        await provider.complete("Review this diff")
 
 
-def test_claude_durable_session_hooks_reset_resume(_claude_on_path: None) -> None:
+async def test_claude_durable_session_hooks_reset_resume(_claude_on_path: None) -> None:
     """Resume within a durable session and drop the id when it ends."""
     calls: list[list[str]] = []
     runner = _runner(
@@ -237,15 +242,15 @@ def test_claude_durable_session_hooks_reset_resume(_claude_on_path: None) -> Non
         calls=calls,
     )
     provider = AnthropicProvider(transport=AITransport.CLI)
-    with patch("subprocess.run", side_effect=runner):
+    with patch_cli_exec(side_effect=runner):
         provider.begin_durable_session(repo_root="/tmp/repo")
-        provider.complete("first")
-        provider.complete("second")
+        await provider.complete("first")
+        await provider.complete("second")
         second = _completion_calls(calls)[1]
         assert_that(second).contains("--resume", "sess-123")
 
         provider.end_durable_session()
-        provider.complete("third")
+        await provider.complete("third")
         third = _completion_calls(calls)[2]
         assert_that(third).does_not_contain("--resume")
 
@@ -253,7 +258,7 @@ def test_claude_durable_session_hooks_reset_resume(_claude_on_path: None) -> Non
 # -- Cursor -----------------------------------------------------------------
 
 
-def test_cursor_omits_trust_when_not_advertised(_agent_on_path: None) -> None:
+async def test_cursor_omits_trust_when_not_advertised(_agent_on_path: None) -> None:
     """Drop --trust when the installed agent CLI does not advertise it."""
     calls: list[list[str]] = []
     runner = _runner(
@@ -263,15 +268,15 @@ def test_cursor_omits_trust_when_not_advertised(_agent_on_path: None) -> None:
         calls=calls,
     )
     provider = CursorProvider(cursor_trust_workspace=True)
-    with patch("subprocess.run", side_effect=runner):
-        provider.complete("Hello", repo_root="/tmp/repo")
+    with patch_cli_exec(side_effect=runner):
+        await provider.complete("Hello", repo_root="/tmp/repo")
 
     cmd = _completion_calls(calls)[-1]
     assert_that(cmd).does_not_contain("--trust")
     assert_that(cmd).contains("--workspace", "/tmp/repo")
 
 
-def test_cursor_backstop_retries_without_resume(_agent_on_path: None) -> None:
+async def test_cursor_backstop_retries_without_resume(_agent_on_path: None) -> None:
     """Retry without --resume when the agent CLI rejects it."""
     calls: list[list[str]] = []
     runner = _runner(
@@ -282,10 +287,10 @@ def test_cursor_backstop_retries_without_resume(_agent_on_path: None) -> None:
         calls=calls,
     )
     provider = CursorProvider()
-    with patch("subprocess.run", side_effect=runner):
+    with patch_cli_exec(side_effect=runner):
         provider.begin_durable_session(repo_root="/tmp/repo")
-        provider.complete("first", repo_root="/tmp/repo")
-        provider.complete("second", repo_root="/tmp/repo")
+        await provider.complete("first", repo_root="/tmp/repo")
+        await provider.complete("second", repo_root="/tmp/repo")
 
     completions = _completion_calls(calls)
     # first (no session yet) + second's --resume attempt + its retry = 3.
@@ -297,7 +302,7 @@ def test_cursor_backstop_retries_without_resume(_agent_on_path: None) -> None:
 # -- Codex ------------------------------------------------------------------
 
 
-def test_codex_sends_output_schema_when_advertised(_codex_on_path: None) -> None:
+async def test_codex_sends_output_schema_when_advertised(_codex_on_path: None) -> None:
     """Send --output-schema to a codex binary that advertises it."""
     calls: list[list[str]] = []
     runner = _runner(
@@ -307,8 +312,8 @@ def test_codex_sends_output_schema_when_advertised(_codex_on_path: None) -> None
         calls=calls,
     )
     provider = OpenAIProvider(transport=AITransport.CLI)
-    with patch("subprocess.run", side_effect=runner):
-        provider.complete("hello", repo_root="/tmp/repo", cli_schema=_SCHEMA)
+    with patch_cli_exec(side_effect=runner):
+        await provider.complete("hello", repo_root="/tmp/repo", cli_schema=_SCHEMA)
 
     cmd = _completion_calls(calls)[-1]
     assert_that(cmd).contains("--output-schema")
@@ -316,7 +321,9 @@ def test_codex_sends_output_schema_when_advertised(_codex_on_path: None) -> None
     assert_that(cmd[-1]).is_equal_to("hello")
 
 
-def test_codex_omits_output_schema_when_not_advertised(_codex_on_path: None) -> None:
+async def test_codex_omits_output_schema_when_not_advertised(
+    _codex_on_path: None,
+) -> None:
     """Fall back to prose parsing when codex has no --output-schema."""
     calls: list[list[str]] = []
     runner = _runner(
@@ -326,15 +333,17 @@ def test_codex_omits_output_schema_when_not_advertised(_codex_on_path: None) -> 
         calls=calls,
     )
     provider = OpenAIProvider(transport=AITransport.CLI)
-    with patch("subprocess.run", side_effect=runner):
-        provider.complete("hello", repo_root="/tmp/repo", cli_schema=_SCHEMA)
+    with patch_cli_exec(side_effect=runner):
+        await provider.complete("hello", repo_root="/tmp/repo", cli_schema=_SCHEMA)
 
     cmd = _completion_calls(calls)[-1]
     assert_that(cmd).does_not_contain("--output-schema")
     assert_that(cmd[-1]).is_equal_to("hello")
 
 
-def test_codex_backstop_retries_without_output_schema(_codex_on_path: None) -> None:
+async def test_codex_backstop_retries_without_output_schema(
+    _codex_on_path: None,
+) -> None:
     """Retry without --output-schema when codex rejects it."""
     calls: list[list[str]] = []
     runner = _runner(
@@ -345,8 +354,8 @@ def test_codex_backstop_retries_without_output_schema(_codex_on_path: None) -> N
         calls=calls,
     )
     provider = OpenAIProvider(transport=AITransport.CLI)
-    with patch("subprocess.run", side_effect=runner):
-        response = provider.complete(
+    with patch_cli_exec(side_effect=runner):
+        response = await provider.complete(
             "hello",
             repo_root="/tmp/repo",
             cli_schema=_SCHEMA,

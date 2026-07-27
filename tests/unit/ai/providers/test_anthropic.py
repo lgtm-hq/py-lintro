@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Generator
 from types import SimpleNamespace
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from assertpy import assert_that
@@ -138,7 +138,7 @@ def test_anthropic_provider_get_client_no_key_raises():
             provider._get_client()
 
 
-def test_anthropic_complete_parses_response():
+async def test_anthropic_complete_parses_response():
     """complete() extracts content, tokens, and cost from SDK response."""
     with patch.object(mod, "_has_anthropic", True):
         provider = AnthropicProvider()
@@ -156,11 +156,11 @@ def test_anthropic_complete_parses_response():
         mock_response.usage = mock_usage
 
         mock_client = MagicMock()
-        mock_client.messages.create.return_value = mock_response
+        mock_client.messages.create = AsyncMock(return_value=mock_response)
         provider._client = mock_client
 
         with patch.dict("os.environ", {"TEST_KEY": "sk-test"}):
-            result = provider.complete("test prompt", system="be helpful")
+            result = await provider.complete("test prompt", system="be helpful")
 
         assert_that(result.content).is_equal_to("Hello, world!")
         assert_that(result.input_tokens).is_equal_to(100)
@@ -175,7 +175,7 @@ def test_anthropic_complete_parses_response():
         )
 
 
-def test_anthropic_complete_multiple_text_blocks():
+async def test_anthropic_complete_multiple_text_blocks():
     """complete() concatenates multiple text blocks."""
     with patch.object(mod, "_has_anthropic", True):
         provider = AnthropicProvider()
@@ -194,16 +194,16 @@ def test_anthropic_complete_multiple_text_blocks():
         mock_response.usage = mock_usage
 
         mock_client = MagicMock()
-        mock_client.messages.create.return_value = mock_response
+        mock_client.messages.create = AsyncMock(return_value=mock_response)
         provider._client = mock_client
 
         with patch.dict("os.environ", {"ANTHROPIC_API_KEY": "sk-test"}):
-            result = provider.complete("prompt")
+            result = await provider.complete("prompt")
 
         assert_that(result.content).is_equal_to("Hello, world!")
 
 
-def test_anthropic_complete_respects_max_tokens_cap():
+async def test_anthropic_complete_respects_max_tokens_cap():
     """complete() uses the lower of per-call and provider-level max_tokens."""
     with patch.object(mod, "_has_anthropic", True):
         provider = AnthropicProvider(max_tokens=2048)
@@ -217,11 +217,11 @@ def test_anthropic_complete_respects_max_tokens_cap():
         mock_response.usage = mock_usage
 
         mock_client = MagicMock()
-        mock_client.messages.create.return_value = mock_response
+        mock_client.messages.create = AsyncMock(return_value=mock_response)
         provider._client = mock_client
 
         with patch.dict("os.environ", {"ANTHROPIC_API_KEY": "sk-test"}):
-            provider.complete("prompt", max_tokens=4096)
+            await provider.complete("prompt", max_tokens=4096)
 
         call_kwargs = mock_client.messages.create.call_args[1]
         assert_that(call_kwargs["max_tokens"]).is_equal_to(2048)

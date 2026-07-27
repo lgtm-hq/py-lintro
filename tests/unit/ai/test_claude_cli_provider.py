@@ -14,6 +14,7 @@ from lintro.ai.enums import AITransport
 from lintro.ai.exceptions import AIAuthenticationError, AINotAvailableError
 from lintro.ai.providers.anthropic import AnthropicProvider, _find_claude
 from lintro.ai.registry import AIProvider
+from tests.unit.ai.conftest import patch_cli_exec
 
 
 @pytest.fixture()
@@ -65,21 +66,21 @@ class TestClaudeCliInit:
 class TestClaudeCliComplete:
     """Tests for claude -p completions."""
 
-    def test_success(self, _mock_claude_on_path: None) -> None:
+    async def test_success(self, _mock_claude_on_path: None) -> None:
         """Parse JSON output from a successful claude -p invocation."""
         provider = AnthropicProvider(
             model="claude-sonnet-4-6",
             transport=AITransport.CLI,
         )
         stdout = _cli_json(result='{"summary": "ok"}')
-        with patch("subprocess.run") as mock_run:
+        with patch_cli_exec() as mock_run:
             mock_run.return_value = subprocess.CompletedProcess(
                 args=[],
                 returncode=0,
                 stdout=stdout,
                 stderr="",
             )
-            response = provider.complete("Review this diff", system="Be concise")
+            response = await provider.complete("Review this diff", system="Be concise")
 
         assert_that(response.content).contains("summary")
         assert_that(response.provider).is_equal_to(AIProvider.ANTHROPIC)
@@ -88,7 +89,10 @@ class TestClaudeCliComplete:
         assert_that(cmd).contains("--append-system-prompt", "Be concise")
         assert_that(cmd).contains("--model", "claude-sonnet-4-6")
 
-    def test_cli_schema_flag_when_requested(self, _mock_claude_on_path: None) -> None:
+    async def test_cli_schema_flag_when_requested(
+        self,
+        _mock_claude_on_path: None,
+    ) -> None:
         """Pass --json-schema when cli_schema is provided."""
         from lintro.ai.json_response import CliSchemaRequest
 
@@ -98,14 +102,14 @@ class TestClaudeCliComplete:
             schema_name="lintro_review",
         )
         stdout = _cli_json(result='{"summary": "ok"}')
-        with patch("subprocess.run") as mock_run:
+        with patch_cli_exec() as mock_run:
             mock_run.return_value = subprocess.CompletedProcess(
                 args=[],
                 returncode=0,
                 stdout=stdout,
                 stderr="",
             )
-            provider.complete(
+            await provider.complete(
                 "Review this diff",
                 system="Be concise",
                 cli_schema=schema,
@@ -116,7 +120,7 @@ class TestClaudeCliComplete:
         schema_arg = cmd[cmd.index("--json-schema") + 1]
         assert_that(schema_arg).contains('"type"')
 
-    def test_json_schema_name_sent_when_cli_advertises_it(
+    async def test_json_schema_name_sent_when_cli_advertises_it(
         self,
         _mock_claude_on_path: None,
     ) -> None:
@@ -149,8 +153,8 @@ class TestClaudeCliComplete:
                 stderr="",
             )
 
-        with patch("subprocess.run", side_effect=fake_run) as mock_run:
-            provider.complete("Review this diff", cli_schema=schema)
+        with patch_cli_exec(side_effect=fake_run) as mock_run:
+            await provider.complete("Review this diff", cli_schema=schema)
 
         completion_calls = [
             call for call in mock_run.call_args_list if "--help" not in call.args[0]
@@ -158,7 +162,7 @@ class TestClaudeCliComplete:
         cmd = completion_calls[-1].args[0]
         assert_that(cmd).contains("--json-schema-name", "lintro_review")
 
-    def test_json_schema_name_omitted_when_cli_lacks_it(
+    async def test_json_schema_name_omitted_when_cli_lacks_it(
         self,
         _mock_claude_on_path: None,
     ) -> None:
@@ -195,8 +199,8 @@ class TestClaudeCliComplete:
                 stderr="",
             )
 
-        with patch("subprocess.run", side_effect=fake_run) as mock_run:
-            provider.complete("Review this diff", cli_schema=schema)
+        with patch_cli_exec(side_effect=fake_run) as mock_run:
+            await provider.complete("Review this diff", cli_schema=schema)
 
         completion_calls = [
             call for call in mock_run.call_args_list if "--help" not in call.args[0]
@@ -205,11 +209,11 @@ class TestClaudeCliComplete:
         assert_that(cmd).does_not_contain("--json-schema-name")
         assert_that(cmd).contains("--json-schema")
 
-    def test_auth_error(self, _mock_claude_on_path: None) -> None:
+    async def test_auth_error(self, _mock_claude_on_path: None) -> None:
         """Surface authentication failures from claude stderr."""
         provider = AnthropicProvider(transport=AITransport.CLI)
         with (
-            patch("subprocess.run") as mock_run,
+            patch_cli_exec() as mock_run,
             pytest.raises(AIAuthenticationError, match="login"),
         ):
             mock_run.return_value = subprocess.CompletedProcess(
@@ -218,7 +222,7 @@ class TestClaudeCliComplete:
                 stdout="",
                 stderr="Authentication required. Please login.",
             )
-            provider.complete("hello")
+            await provider.complete("hello")
 
 
 class TestFindClaude:

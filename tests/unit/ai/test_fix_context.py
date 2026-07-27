@@ -19,7 +19,7 @@ from tests.unit.ai.conftest import MockAIProvider, MockIssue
 # ---------------------------------------------------------------------------
 
 
-def test_full_file_context_for_small_file(tmp_path):
+async def test_full_file_context_for_small_file(tmp_path):
     """Small files should send full content as context (lines 1-N)."""
     source = tmp_path / "small.py"
     source.write_text("x = 1\ny = 2\nz = 3\n")
@@ -32,7 +32,7 @@ def test_full_file_context_for_small_file(tmp_path):
     )
 
     provider = MockAIProvider()
-    generate_fixes(
+    await generate_fixes(
         [issue],
         provider,
         tool_name="ruff",
@@ -47,7 +47,7 @@ def test_full_file_context_for_small_file(tmp_path):
     assert_that(prompt).contains("z = 3")
 
 
-def test_full_file_skipped_when_file_exceeds_threshold(tmp_path):
+async def test_full_file_skipped_when_file_exceeds_threshold(tmp_path):
     """Files over full_file_threshold should use windowed context."""
     # Create a file with 50 lines but set threshold to 5
     source = tmp_path / "big.py"
@@ -63,7 +63,7 @@ def test_full_file_skipped_when_file_exceeds_threshold(tmp_path):
     provider = MockAIProvider()
     ai_config = AIConfig(enabled=True, transport=AITransport.API, max_retries=0)
 
-    _generate_single_fix(
+    await _generate_single_fix(
         issue,
         provider,
         "ruff",
@@ -83,7 +83,7 @@ def test_full_file_skipped_when_file_exceeds_threshold(tmp_path):
     assert_that(prompt).contains("line_25")
 
 
-def test_full_file_skipped_when_over_token_budget(tmp_path):
+async def test_full_file_skipped_when_over_token_budget(tmp_path):
     """Full file that exceeds token budget should fall back to windowed context."""
     # Create a file with 20 lines, set a tight token budget so full-file
     # context is rejected and windowed context is used instead.
@@ -101,7 +101,7 @@ def test_full_file_skipped_when_over_token_budget(tmp_path):
     provider = MockAIProvider()
     ai_config = AIConfig(enabled=True, transport=AITransport.API, max_retries=0)
 
-    _generate_single_fix(
+    await _generate_single_fix(
         issue,
         provider,
         "ruff",

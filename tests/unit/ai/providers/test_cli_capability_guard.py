@@ -2,13 +2,13 @@
 
 from __future__ import annotations
 
+import asyncio
 import subprocess  # nosec B404 - CompletedProcess objects are constructed to drive the transport under test
-from unittest.mock import patch
 
 import pytest
 from assertpy import assert_that
 
-from lintro.ai.exceptions import AINotAvailableError
+from lintro.ai.exceptions import AINotAvailableError, AIProviderError
 from lintro.ai.provider_enum import AIProvider
 from lintro.ai.providers.cli_contracts import (
     CLI_CONTRACTS,
@@ -17,6 +17,13 @@ from lintro.ai.providers.cli_contracts import (
     format_version,
 )
 from lintro.ai.providers.cli_transport import CliTransport, OptionalArg
+from tests.unit.ai.conftest import (
+    HANG,
+    patch_cli_exec,
+)
+from tests.unit.ai.conftest import (
+    completed_process as _completed,
+)
 
 _TEST_CONTRACT = CliContract(
     binary="fake",
@@ -43,32 +50,6 @@ class _FakeTransport(CliTransport):
             The unmodified stdout.
         """
         return stdout
-
-
-def _completed(
-    *,
-    returncode: int = 0,
-    stdout: str = "",
-    stderr: str = "",
-    args: list[str] | None = None,
-) -> subprocess.CompletedProcess[str]:
-    """Build a CompletedProcess stand-in.
-
-    Args:
-        returncode: Process exit code.
-        stdout: Process stdout.
-        stderr: Process stderr.
-        args: Argv the process was invoked with.
-
-    Returns:
-        A populated CompletedProcess.
-    """
-    return subprocess.CompletedProcess(
-        args=args or [],
-        returncode=returncode,
-        stdout=stdout,
-        stderr=stderr,
-    )
 
 
 def _is_probe(cmd: list[str]) -> bool:
@@ -125,40 +106,39 @@ def test_format_version_renders_unknown() -> None:
     assert_that(format_version((2, 1, 218))).is_equal_to("2.1.218")
 
 
-def test_binary_version_probes_once(transport: _FakeTransport) -> None:
+async def test_binary_version_probes_once(transport: _FakeTransport) -> None:
     """Cache the version probe so repeated calls spawn one subprocess."""
-    with patch("subprocess.run", return_value=_completed(stdout="3.1.0")) as mock_run:
-        assert_that(transport.binary_version()).is_equal_to((3, 1, 0))
-        assert_that(transport.binary_version()).is_equal_to((3, 1, 0))
+    with patch_cli_exec(return_value=_completed(stdout="3.1.0")) as mock_run:
+        assert_that(await transport.binary_version()).is_equal_to((3, 1, 0))
+        assert_that(await transport.binary_version()).is_equal_to((3, 1, 0))
 
     assert_that(mock_run.call_count).is_equal_to(1)
 
 
-def test_binary_version_none_when_probe_fails(transport: _FakeTransport) -> None:
+async def test_binary_version_none_when_probe_fails(transport: _FakeTransport) -> None:
     """Report an unknown version when the probe cannot be spawned."""
-    with patch("subprocess.run", side_effect=PermissionError()):
-        assert_that(transport.binary_version()).is_none()
+    with patch_cli_exec(side_effect=PermissionError()):
+        assert_that(await transport.binary_version()).is_none()
 
 
-def test_binary_version_none_on_nonzero_probe(transport: _FakeTransport) -> None:
+async def test_binary_version_none_on_nonzero_probe(transport: _FakeTransport) -> None:
     """Distrust a non-zero --version exit."""
-    with patch(
-        "subprocess.run",
-        return_value=_completed(returncode=1, stdout="9.9.9"),
-    ):
-        assert_that(transport.binary_version()).is_none()
+    with patch_cli_exec(return_value=_completed(returncode=1, stdout="9.9.9")):
+        assert_that(await transport.binary_version()).is_none()
 
 
 # -- Version floor ----------------------------------------------------------
 
 
-def test_check_version_floor_raises_below_floor(transport: _FakeTransport) -> None:
+async def test_check_version_floor_raises_below_floor(
+    transport: _FakeTransport,
+) -> None:
     """Raise an actionable error when the binary predates the floor."""
     with (
-        patch("subprocess.run", return_value=_completed(stdout="1.9.9")),
+        patch_cli_exec(return_value=_completed(stdout="1.9.9")),
         pytest.raises(AINotAvailableError) as excinfo,
     ):
-        transport.check_version_floor()
+        await transport.check_version_floor()
 
     message = str(excinfo.value)
     assert_that(message).contains("1.9.9")
@@ -166,29 +146,31 @@ def test_check_version_floor_raises_below_floor(transport: _FakeTransport) -> No
     assert_that(message).contains("Upgrade the fake CLI.")
 
 
-def test_check_version_floor_accepts_floor_exactly(transport: _FakeTransport) -> None:
+async def test_check_version_floor_accepts_floor_exactly(
+    transport: _FakeTransport,
+) -> None:
     """Accept a binary sitting exactly on the floor."""
-    with patch("subprocess.run", return_value=_completed(stdout="2.0.0")):
-        transport.check_version_floor()
+    with patch_cli_exec(return_value=_completed(stdout="2.0.0")):
+        await transport.check_version_floor()
 
 
-def test_check_version_floor_allows_unknown_version(
+async def test_check_version_floor_allows_unknown_version(
     transport: _FakeTransport,
 ) -> None:
     """Never block on an unreadable version -- the other guards still apply."""
-    with patch("subprocess.run", return_value=_completed(stdout="mystery build")):
-        transport.check_version_floor()
+    with patch_cli_exec(return_value=_completed(stdout="mystery build")):
+        await transport.check_version_floor()
 
 
-def test_check_version_floor_is_inert_without_contract() -> None:
+async def test_check_version_floor_is_inert_without_contract() -> None:
     """Skip the floor check entirely for transports with no contract."""
     unguarded = _FakeTransport(
         binary_path="/usr/local/bin/fake",
         binary_name="Fake",
         install_hint="Install the fake CLI.",
     )
-    with patch("subprocess.run") as mock_run:
-        unguarded.check_version_floor()
+    with patch_cli_exec(return_value=_completed()) as mock_run:
+        await unguarded.check_version_floor()
 
     assert_that(mock_run.call_count).is_equal_to(0)
 
@@ -196,64 +178,72 @@ def test_check_version_floor_is_inert_without_contract() -> None:
 # -- Proactive --help gate --------------------------------------------------
 
 
-def test_supports_flag_true_when_advertised(transport: _FakeTransport) -> None:
+async def test_supports_flag_true_when_advertised(transport: _FakeTransport) -> None:
     """Report a flag supported when the help text advertises it."""
     help_text = "  --resume <id>  Resume a session\n"
-    with patch("subprocess.run", return_value=_completed(stdout=help_text)):
-        assert_that(transport.supports_flag("--resume")).is_true()
+    with patch_cli_exec(return_value=_completed(stdout=help_text)):
+        assert_that(await transport.supports_flag("--resume")).is_true()
 
 
-def test_supports_flag_false_when_absent(transport: _FakeTransport) -> None:
+async def test_supports_flag_false_when_absent(transport: _FakeTransport) -> None:
     """Report a flag unsupported when readable help text omits it."""
     help_text = "  --json-schema <schema>  Provide a JSON schema\n"
-    with patch("subprocess.run", return_value=_completed(stdout=help_text)):
-        assert_that(transport.supports_flag("--json-schema-name")).is_false()
+    with patch_cli_exec(return_value=_completed(stdout=help_text)):
+        assert_that(await transport.supports_flag("--json-schema-name")).is_false()
 
 
-def test_supports_flag_optimistic_on_nonzero_help(transport: _FakeTransport) -> None:
+async def test_supports_flag_optimistic_on_nonzero_help(
+    transport: _FakeTransport,
+) -> None:
     """Fall back to the backstop when --help exits non-zero."""
     result = _completed(returncode=1, stderr="error near --json-schema-name")
-    with patch("subprocess.run", return_value=result):
-        assert_that(transport.supports_flag("--json-schema-name")).is_true()
+    with patch_cli_exec(return_value=result):
+        assert_that(await transport.supports_flag("--json-schema-name")).is_true()
 
 
-def test_supports_flag_optimistic_when_probe_fails(transport: _FakeTransport) -> None:
+async def test_supports_flag_optimistic_when_probe_fails(
+    transport: _FakeTransport,
+) -> None:
     """Send the flag when help cannot be read, leaving it to the backstop."""
-    with patch("subprocess.run", side_effect=PermissionError()):
-        assert_that(transport.supports_flag("--resume")).is_true()
+    with patch_cli_exec(side_effect=PermissionError()):
+        assert_that(await transport.supports_flag("--resume")).is_true()
 
 
-def test_supports_flag_does_not_match_on_prefix(transport: _FakeTransport) -> None:
+async def test_supports_flag_does_not_match_on_prefix(
+    transport: _FakeTransport,
+) -> None:
     """A flag is not deemed supported by appearing inside a longer flag name.
 
     Help advertising only ``--json-schema-name`` must not report the prefix
     ``--json-schema`` as supported.
     """
     help_text = "  --json-schema-name <name>  Name the structured schema\n"
-    with patch("subprocess.run", return_value=_completed(stdout=help_text)):
-        assert_that(transport.supports_flag("--json-schema")).is_false()
-        assert_that(transport.supports_flag("--json-schema-name")).is_true()
+    with patch_cli_exec(return_value=_completed(stdout=help_text)):
+        assert_that(await transport.supports_flag("--json-schema")).is_false()
+        assert_that(await transport.supports_flag("--json-schema-name")).is_true()
 
 
-def test_supports_flag_caches_help_probe(transport: _FakeTransport) -> None:
+async def test_supports_flag_caches_help_probe(transport: _FakeTransport) -> None:
     """Probe --help once no matter how many flags are queried."""
     help_text = "  --resume <id>\n  --json-schema-name <name>\n"
-    with patch("subprocess.run", return_value=_completed(stdout=help_text)) as mock_run:
-        assert_that(transport.supports_flag("--resume")).is_true()
-        assert_that(transport.supports_flag("--json-schema-name")).is_true()
+    with patch_cli_exec(return_value=_completed(stdout=help_text)) as mock_run:
+        assert_that(await transport.supports_flag("--resume")).is_true()
+        assert_that(await transport.supports_flag("--json-schema-name")).is_true()
 
     assert_that(mock_run.call_count).is_equal_to(1)
 
 
-def test_filter_optional_args_drops_unadvertised(transport: _FakeTransport) -> None:
+async def test_filter_optional_args_drops_unadvertised(
+    transport: _FakeTransport,
+) -> None:
     """Keep only optional args the installed binary advertises."""
     help_text = "  --resume <id>  Resume a session\n"
     candidates = [
         OptionalArg(flag="--json-schema-name", values=("lintro_review",)),
         OptionalArg(flag="--resume", values=("abc123",)),
     ]
-    with patch("subprocess.run", return_value=_completed(stdout=help_text)):
-        kept = transport.filter_optional_args(candidates)
+    with patch_cli_exec(return_value=_completed(stdout=help_text)):
+        kept = await transport.filter_optional_args(candidates)
 
     assert_that([arg.flag for arg in kept]).is_equal_to(["--resume"])
 
@@ -267,7 +257,7 @@ def test_optional_arg_as_argv() -> None:
 # -- Reactive backstop ------------------------------------------------------
 
 
-def test_run_guarded_retries_without_rejected_flag(
+async def test_run_guarded_retries_without_rejected_flag(
     transport: _FakeTransport,
 ) -> None:
     """Drop a rejected optional flag and retry rather than failing the call."""
@@ -300,8 +290,8 @@ def test_run_guarded_retries_without_rejected_flag(
         "--model",
         "m",
     ]
-    with patch("subprocess.run", side_effect=fake_run):
-        result = transport.run_guarded(
+    with patch_cli_exec(side_effect=fake_run):
+        result = await transport.run_guarded(
             cmd,
             optional_args=optional_args,
             timeout=30.0,
@@ -316,7 +306,7 @@ def test_run_guarded_retries_without_rejected_flag(
     assert_that(retried).contains("m")
 
 
-def test_run_guarded_remembers_rejected_flag(transport: _FakeTransport) -> None:
+async def test_run_guarded_remembers_rejected_flag(transport: _FakeTransport) -> None:
     """Cache a backstop rejection so the flag is not sent again."""
 
     def fake_run(
@@ -335,16 +325,16 @@ def test_run_guarded_remembers_rejected_flag(transport: _FakeTransport) -> None:
         return _completed(stdout="done", args=cmd)
 
     optional_args = [OptionalArg(flag="--resume", values=("abc123",))]
-    with patch("subprocess.run", side_effect=fake_run):
-        transport.run_guarded(
+    with patch_cli_exec(side_effect=fake_run):
+        await transport.run_guarded(
             ["/usr/local/bin/fake", "--resume", "abc123"],
             optional_args=optional_args,
             timeout=30.0,
         )
-        assert_that(transport.supports_flag("--resume")).is_false()
+        assert_that(await transport.supports_flag("--resume")).is_false()
 
 
-def test_run_guarded_drops_flags_one_at_a_time(transport: _FakeTransport) -> None:
+async def test_run_guarded_drops_flags_one_at_a_time(transport: _FakeTransport) -> None:
     """Peel off each rejected optional flag until the call succeeds."""
     rejected: list[str] = []
 
@@ -376,8 +366,8 @@ def test_run_guarded_drops_flags_one_at_a_time(transport: _FakeTransport) -> Non
         "--resume",
         "abc123",
     ]
-    with patch("subprocess.run", side_effect=fake_run):
-        result = transport.run_guarded(
+    with patch_cli_exec(side_effect=fake_run):
+        result = await transport.run_guarded(
             cmd,
             optional_args=optional_args,
             timeout=30.0,
@@ -387,7 +377,7 @@ def test_run_guarded_drops_flags_one_at_a_time(transport: _FakeTransport) -> Non
     assert_that(rejected).is_equal_to(["--json-schema-name", "--resume"])
 
 
-def test_run_guarded_returns_unrelated_failure(transport: _FakeTransport) -> None:
+async def test_run_guarded_returns_unrelated_failure(transport: _FakeTransport) -> None:
     """Leave non-flag failures alone so callers map them to real errors."""
     calls: list[list[str]] = []
 
@@ -406,8 +396,8 @@ def test_run_guarded_returns_unrelated_failure(transport: _FakeTransport) -> Non
         )
 
     optional_args = [OptionalArg(flag="--resume", values=("abc123",))]
-    with patch("subprocess.run", side_effect=fake_run):
-        result = transport.run_guarded(
+    with patch_cli_exec(side_effect=fake_run):
+        result = await transport.run_guarded(
             ["/usr/local/bin/fake", "--resume", "abc123"],
             optional_args=optional_args,
             timeout=30.0,
@@ -418,7 +408,7 @@ def test_run_guarded_returns_unrelated_failure(transport: _FakeTransport) -> Non
     assert_that(completion_calls).is_length(1)
 
 
-def test_run_guarded_ignores_unknown_option_for_required_flag(
+async def test_run_guarded_ignores_unknown_option_for_required_flag(
     transport: _FakeTransport,
 ) -> None:
     """Do not retry when the rejected flag is not a declared optional one."""
@@ -436,8 +426,8 @@ def test_run_guarded_ignores_unknown_option_for_required_flag(
             args=cmd,
         )
 
-    with patch("subprocess.run", side_effect=fake_run):
-        result = transport.run_guarded(
+    with patch_cli_exec(side_effect=fake_run):
+        result = await transport.run_guarded(
             ["/usr/local/bin/fake", "--always"],
             optional_args=[],
             timeout=30.0,
@@ -446,19 +436,19 @@ def test_run_guarded_ignores_unknown_option_for_required_flag(
     assert_that(result.returncode).is_equal_to(1)
 
 
-def test_run_guarded_enforces_version_floor(transport: _FakeTransport) -> None:
+async def test_run_guarded_enforces_version_floor(transport: _FakeTransport) -> None:
     """Refuse to invoke a binary below the declared floor."""
     with (
-        patch("subprocess.run", return_value=_completed(stdout="1.0.0")),
+        patch_cli_exec(return_value=_completed(stdout="1.0.0")),
         pytest.raises(AINotAvailableError),
     ):
-        transport.run_guarded(
+        await transport.run_guarded(
             ["/usr/local/bin/fake", "--always"],
             timeout=30.0,
         )
 
 
-def test_run_guarded_matches_flag_on_token_boundary(
+async def test_run_guarded_matches_flag_on_token_boundary(
     transport: _FakeTransport,
 ) -> None:
     """Drop only the rejected flag, not a candidate that is its prefix.
@@ -495,8 +485,8 @@ def test_run_guarded_matches_flag_on_token_boundary(
         "--json-schema-name",
         "lintro_review",
     ]
-    with patch("subprocess.run", side_effect=fake_run):
-        result = transport.run_guarded(
+    with patch_cli_exec(side_effect=fake_run):
+        result = await transport.run_guarded(
             cmd,
             optional_args=optional_args,
             timeout=30.0,
@@ -507,6 +497,56 @@ def test_run_guarded_matches_flag_on_token_boundary(
     retried = [call for call in calls if not _is_probe(call)][-1]
     assert_that(retried).does_not_contain("--json-schema-name")
     assert_that(retried).contains("--json-schema", "{}")
+
+
+# -- Subprocess execution ---------------------------------------------------
+
+
+async def test_run_raises_provider_error_on_timeout(transport: _FakeTransport) -> None:
+    """Map a hung child process to an AIProviderError naming the timeout."""
+    with (
+        patch_cli_exec(return_value=HANG),
+        pytest.raises(AIProviderError, match="timed out after 0s"),
+    ):
+        await transport.run(["/usr/local/bin/fake", "--always"], timeout=0.01)
+
+
+async def test_run_raises_not_available_when_binary_missing(
+    transport: _FakeTransport,
+) -> None:
+    """Map a failed spawn to an actionable AINotAvailableError."""
+    with (
+        patch_cli_exec(side_effect=FileNotFoundError()),
+        pytest.raises(AINotAvailableError, match="Install the fake CLI."),
+    ):
+        await transport.run(["/usr/local/bin/fake", "--always"], timeout=5.0)
+
+
+async def test_run_kills_child_when_cancelled(transport: _FakeTransport) -> None:
+    """Cancelling a call stops the child instead of orphaning the CLI."""
+    with patch_cli_exec(return_value=HANG):
+        task = asyncio.ensure_future(
+            transport.run(["/usr/local/bin/fake", "--always"], timeout=60.0),
+        )
+        # Let the spawn happen before cancelling so a child exists to kill.
+        await asyncio.sleep(0)
+        await asyncio.sleep(0)
+        task.cancel()
+
+        with pytest.raises(asyncio.CancelledError):
+            await task
+
+
+async def test_run_decodes_stdout_and_stderr(transport: _FakeTransport) -> None:
+    """Return decoded stdout/stderr and the child exit code."""
+    with patch_cli_exec(
+        return_value=_completed(returncode=3, stdout="out", stderr="err"),
+    ):
+        result = await transport.run(["/usr/local/bin/fake"], timeout=5.0)
+
+    assert_that(result.returncode).is_equal_to(3)
+    assert_that(result.stdout).is_equal_to("out")
+    assert_that(result.stderr).is_equal_to("err")
 
 
 # -- Declared contracts -----------------------------------------------------

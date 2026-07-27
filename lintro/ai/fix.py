@@ -2,15 +2,16 @@
 
 Generates fix suggestions for issues that native tools cannot auto-fix.
 Reads file contents, asks the AI for a corrected version, and produces
-unified diffs. Supports parallel API calls for improved performance.
+unified diffs. Runs concurrent API calls as asyncio tasks under a
+semaphore for improved performance.
 """
 
 from __future__ import annotations
 
+import asyncio
 import threading
 from collections import defaultdict
 from collections.abc import Callable, Sequence
-from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -82,7 +83,7 @@ def _build_ai_config_for_fix(
     )
 
 
-def _call_fix_ai(
+async def _call_fix_ai(
     *,
     provider: BaseAIProvider,
     ai_config: AIConfig,
@@ -91,8 +92,20 @@ def _call_fix_ai(
     workspace_root: Path,
     batch: bool = False,
 ) -> AIResponse:
-    """Invoke the unified AI transport for fix generation."""
-    return call_ai(
+    """Invoke the unified AI transport for fix generation.
+
+    Args:
+        provider: AI provider instance.
+        ai_config: AI configuration for retry, transport, and fallback.
+        prompt: The fully built fix prompt.
+        max_tokens: Maximum tokens to request.
+        workspace_root: Root directory forwarded as the provider repo root.
+        batch: Whether this is a multi-issue batch prompt.
+
+    Returns:
+        The provider response.
+    """
+    return await call_ai(
         provider=provider,
         ai_config=ai_config,
         user_prompt=prompt,
@@ -111,7 +124,7 @@ def _call_fix_ai(
 DEFAULT_MAX_WORKERS = 5
 
 
-def _call_and_cache_fix(
+async def _call_and_cache_fix(
     prompt: str,
     issue_file: str,
     issue: BaseIssue,
@@ -126,7 +139,7 @@ def _call_and_cache_fix(
 ) -> AIFixSuggestion | None:
     """Call the provider, parse the response, and optionally cache the result."""
     try:
-        response = _call_fix_ai(
+        response = await _call_fix_ai(
             provider=provider,
             ai_config=ai_config,
             prompt=prompt,
@@ -171,7 +184,7 @@ def _call_and_cache_fix(
     return None
 
 
-def _generate_single_fix(
+async def _generate_single_fix(
     issue: BaseIssue,
     provider: BaseAIProvider,
     tool_name: str,
@@ -191,14 +204,18 @@ def _generate_single_fix(
 ) -> AIFixSuggestion | None:
     """Generate a fix suggestion for a single issue.
 
-    Thread-safe — uses a lock for the shared file cache.
+    The shared file cache is guarded by a lock. Concurrent fixes now run
+    as tasks on one event loop, where the guarded sections contain no
+    ``await`` and so cannot interleave; the lock is kept because the cache
+    is also reachable from tool plugins that drive their own loop on a
+    worker thread.
 
     Args:
         issue: The issue to fix.
         provider: AI provider instance.
         tool_name: Name of the tool.
         file_cache: Shared file content cache.
-        cache_lock: Lock for thread-safe cache access.
+        cache_lock: Lock guarding shared cache access.
         workspace_root: Root directory AI is allowed to edit/read.
         max_tokens: Maximum tokens to request from provider.
         ai_config: AI configuration for retry, transport, and fallback.
@@ -255,7 +272,7 @@ def _generate_single_fix(
     if prompt is None:
         return None
 
-    return _call_and_cache_fix(
+    return await _call_and_cache_fix(
         prompt,
         issue_file,
         issue,
@@ -270,7 +287,7 @@ def _generate_single_fix(
     )
 
 
-def _generate_batch_fixes(
+async def _generate_batch_fixes(
     file_path: str,
     file_issues: list[BaseIssue],
     provider: BaseAIProvider,
@@ -356,7 +373,7 @@ def _generate_batch_fixes(
         return None
 
     try:
-        response = _call_fix_ai(
+        response = await _call_fix_ai(
             provider=provider,
             ai_config=ai_config,
             prompt=prompt,
@@ -407,7 +424,7 @@ def _generate_batch_fixes(
         return None
 
 
-def generate_fixes(
+async def generate_fixes(
     issues: Sequence[BaseIssue],
     provider: BaseAIProvider,
     *,
@@ -492,7 +509,7 @@ def generate_fixes(
         fallback_models=fallback_models,
     )
 
-    # Shared file cache with thread safety (capped to limit memory usage).
+    # Shared file cache guarded by a lock (capped to limit memory usage).
     file_cache: dict[str, str | None] = {}
     cache_lock = threading.Lock()
 
@@ -533,7 +550,7 @@ def generate_fixes(
                 del file_cache[oldest_key]
             file_cache[resolved_path] = content
 
-        batch_result = _generate_batch_fixes(
+        batch_result = await _generate_batch_fixes(
             resolved_path,
             group,
             provider,
@@ -565,7 +582,7 @@ def generate_fixes(
 
     if workers <= 1:
         for issue in single_issues:
-            result = _generate_single_fix(
+            result = await _generate_single_fix(
                 issue,
                 provider,
                 tool_name,
@@ -588,10 +605,22 @@ def generate_fixes(
             if progress_callback is not None:
                 progress_callback(completed_count, total_count)
     else:
-        with ThreadPoolExecutor(max_workers=workers) as executor:
-            futures = [
-                executor.submit(
-                    _generate_single_fix,
+        # Bounded concurrency on one event loop replaces the former thread
+        # pool: provider calls are I/O-bound, so tasks + a semaphore give the
+        # same ``max_workers`` ceiling without the thread overhead.
+        semaphore = asyncio.Semaphore(workers)
+
+        async def _run_one(issue: BaseIssue) -> AIFixSuggestion | None:
+            """Generate one fix under the concurrency ceiling.
+
+            Args:
+                issue: The issue to fix.
+
+            Returns:
+                The suggestion, or None when generation fails.
+            """
+            async with semaphore:
+                return await _generate_single_fix(
                     issue,
                     provider,
                     tool_name,
@@ -608,11 +637,12 @@ def generate_fixes(
                     sanitize_mode=sanitize_mode,
                     cache_max_entries=cache_max_entries,
                 )
-                for issue in single_issues
-            ]
-            for future in as_completed(futures):
+
+        tasks = [asyncio.ensure_future(_run_one(issue)) for issue in single_issues]
+        try:
+            for completed in asyncio.as_completed(tasks):
                 try:
-                    result = future.result()
+                    result = await completed
                 except (KeyboardInterrupt, SystemExit):
                     raise
                 except Exception as exc:
@@ -629,9 +659,16 @@ def generate_fixes(
                 completed_count += 1
                 if progress_callback is not None:
                     progress_callback(completed_count, total_count)
+        finally:
+            for task in tasks:
+                if not task.done():
+                    task.cancel()
+            # Drain the cancellations so no provider call (and no CLI child
+            # process) outlives this function.
+            await asyncio.gather(*tasks, return_exceptions=True)
 
-    # Sort by (file, line) for deterministic ordering regardless of
-    # thread completion order from as_completed().
+    # Sort by (file, line) for deterministic ordering regardless of the
+    # completion order tasks arrive in from as_completed().
     suggestions.sort(key=lambda s: (s.file, s.line))
 
     logger.debug(
@@ -641,7 +678,7 @@ def generate_fixes(
     return suggestions
 
 
-def generate_fixes_from_params(
+async def generate_fixes_from_params(
     issues: Sequence[BaseIssue],
     provider: BaseAIProvider,
     params: FixGenParams,
@@ -659,7 +696,7 @@ def generate_fixes_from_params(
     Returns:
         List of fix suggestions.
     """
-    return generate_fixes(
+    return await generate_fixes(
         issues,
         provider,
         tool_name=params.tool_name,

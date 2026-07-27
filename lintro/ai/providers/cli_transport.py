@@ -17,6 +17,8 @@ The flag surface itself is declared in :mod:`lintro.ai.providers.cli_contracts`.
 
 from __future__ import annotations
 
+import asyncio
+import contextlib
 import json
 import os
 import re
@@ -82,6 +84,33 @@ def _flag_named_in(lowered_stderr: str, flag: str) -> bool:
     """
     pattern = rf"(?<!{_FLAG_CHAR}){re.escape(flag.lower())}(?!{_FLAG_CHAR})"
     return re.search(pattern, lowered_stderr) is not None
+
+
+async def _terminate(process: asyncio.subprocess.Process) -> None:
+    """Kill a child process and reap it so it cannot linger as a zombie.
+
+    Args:
+        process: The child process to stop.
+    """
+    with contextlib.suppress(ProcessLookupError):
+        process.kill()
+    with contextlib.suppress(ProcessLookupError):
+        await process.wait()
+
+
+def _decode(raw: bytes | None) -> str:
+    """Decode subprocess output, tolerating invalid byte sequences.
+
+    Args:
+        raw: Raw bytes captured from the child process, or ``None``.
+
+    Returns:
+        Decoded text; never ``None`` so callers can treat it like
+        ``subprocess.run(text=True)`` output.
+    """
+    if not raw:
+        return ""
+    return raw.decode("utf-8", errors="replace")
 
 
 @dataclass(frozen=True, slots=True)
@@ -173,8 +202,13 @@ class CliTransport(ABC):
             return None
         return tuple(int(part) for part in match.groups())
 
-    def binary_version(self) -> tuple[int, ...] | None:
+    async def binary_version(self) -> tuple[int, ...] | None:
         """Return the installed binary's version, probing at most once.
+
+        The subprocess probe runs outside the memo lock -- holding a
+        thread lock across an ``await`` would stall the event loop. Racing
+        callers may therefore each spawn one probe; the probe is read-only
+        and idempotent, so the only cost is a duplicated ``--version``.
 
         Returns:
             Parsed version components, or ``None`` when the probe fails or the
@@ -183,17 +217,22 @@ class CliTransport(ABC):
         with self._capability_lock:
             if self._version_probed:
                 return self._version
-            self._version_probed = True
-            args = self._contract.version_args if self._contract else ("--version",)
-            output = self._probe([self._binary_path, *args])
-            self._version = self.parse_version(output) if output is not None else None
-            logger.debug(
-                f"{self._binary_name} CLI version probe: "
-                f"{format_version(self._version)}",
-            )
-            return self._version
 
-    def check_version_floor(self) -> None:
+        args = self._contract.version_args if self._contract else ("--version",)
+        output = await self._probe([self._binary_path, *args])
+        version = self.parse_version(output) if output is not None else None
+
+        with self._capability_lock:
+            if not self._version_probed:
+                self._version_probed = True
+                self._version = version
+            resolved = self._version
+        logger.debug(
+            f"{self._binary_name} CLI version probe: {format_version(resolved)}",
+        )
+        return resolved
+
+    async def check_version_floor(self) -> None:
         """Verify the installed binary meets the declared version floor.
 
         The comparison runs on every call rather than latching a
@@ -213,7 +252,7 @@ class CliTransport(ABC):
         if contract is None or contract.version_floor is None:
             return
 
-        version = self.binary_version()
+        version = await self.binary_version()
         if version is None or version >= contract.version_floor:
             return
 
@@ -223,8 +262,12 @@ class CliTransport(ABC):
             f"{contract.upgrade_hint}",
         )
 
-    def help_text(self) -> str | None:
+    async def help_text(self) -> str | None:
         """Return the binary's help output, probing at most once.
+
+        As with :meth:`binary_version`, the probe runs outside the memo
+        lock so the event loop is never blocked; a racing caller may
+        duplicate the (free, read-only) ``--help`` invocation.
 
         Returns:
             Help text, or ``None`` when the probe failed or exited non-zero.
@@ -234,12 +277,16 @@ class CliTransport(ABC):
         with self._capability_lock:
             if self._help_text is not None:
                 return self._help_text or None
-            args = self._contract.help_args if self._contract else ("--help",)
-            output = self._probe([self._binary_path, *args])
-            self._help_text = output or ""
+
+        args = self._contract.help_args if self._contract else ("--help",)
+        output = await self._probe([self._binary_path, *args])
+
+        with self._capability_lock:
+            if self._help_text is None:
+                self._help_text = output or ""
             return self._help_text or None
 
-    def supports_flag(self, flag: str) -> bool:
+    async def supports_flag(self, flag: str) -> bool:
         """Return whether the installed binary advertises *flag*.
 
         A flag the reactive backstop has already seen rejected is remembered as
@@ -259,7 +306,7 @@ class CliTransport(ABC):
         if cached is not None:
             return cached
 
-        help_text = self.help_text()
+        help_text = await self.help_text()
         # Token-boundary match, not substring: a bare ``flag in help_text`` would
         # read ``--json-schema`` as advertised whenever the help lists only
         # ``--json-schema-name``.
@@ -270,7 +317,7 @@ class CliTransport(ABC):
             self._flag_support.setdefault(flag, supported)
             return self._flag_support[flag]
 
-    def filter_optional_args(
+    async def filter_optional_args(
         self,
         optional_args: list[OptionalArg],
     ) -> list[OptionalArg]:
@@ -284,7 +331,7 @@ class CliTransport(ABC):
         """
         kept: list[OptionalArg] = []
         for arg in optional_args:
-            if self.supports_flag(arg.flag):
+            if await self.supports_flag(arg.flag):
                 kept.append(arg)
                 continue
             logger.debug(
@@ -292,7 +339,7 @@ class CliTransport(ABC):
             )
         return kept
 
-    def apply_optional_args(
+    async def apply_optional_args(
         self,
         cmd: list[str],
         candidates: list[OptionalArg],
@@ -311,12 +358,12 @@ class CliTransport(ABC):
         Returns:
             The optional args that passed the proactive gate.
         """
-        accepted = self.filter_optional_args(candidates)
+        accepted = await self.filter_optional_args(candidates)
         for arg in accepted:
             cmd.extend(arg.as_argv())
         return accepted
 
-    def run_guarded(
+    async def run_guarded(
         self,
         cmd: list[str],
         *,
@@ -344,12 +391,12 @@ class CliTransport(ABC):
             ``AINotAvailableError`` from :meth:`check_version_floor` when the
             binary is below its declared floor.
         """
-        self.check_version_floor()
+        await self.check_version_floor()
 
         argv = list(cmd)
         remaining = list(optional_args or [])
         while True:
-            result = self.run(
+            result = await self.run(
                 argv,
                 input_text=input_text,
                 timeout=timeout,
@@ -432,7 +479,7 @@ class CliTransport(ABC):
         del stripped[index : index + 1 + len(arg.values)]
         return stripped
 
-    def _probe(self, cmd: list[str]) -> str | None:
+    async def _probe(self, cmd: list[str]) -> str | None:
         """Run a free capability probe and return its combined output.
 
         Args:
@@ -443,7 +490,7 @@ class CliTransport(ABC):
             failed or exited non-zero.
         """
         try:
-            result = self.run(cmd, timeout=PROBE_TIMEOUT)
+            result = await self.run(cmd, timeout=PROBE_TIMEOUT)
         except (AIProviderError, AINotAvailableError, OSError) as exc:
             # OSError covers PermissionError and other spawn failures that
             # run() does not remap.
@@ -465,7 +512,7 @@ class CliTransport(ABC):
         """
         return shutil.which(name)
 
-    def run(
+    async def run(
         self,
         cmd: list[str],
         *,
@@ -474,6 +521,11 @@ class CliTransport(ABC):
         cwd: str | None = None,
     ) -> subprocess.CompletedProcess[str]:
         """Execute a CLI command with timeout and env forwarding.
+
+        Spawns the child with ``asyncio.create_subprocess_exec`` so provider
+        calls never block the event loop. The return type stays
+        ``subprocess.CompletedProcess`` so stdout parsers and
+        :meth:`check_exit_code` are unchanged.
 
         Args:
             cmd: Full argv including the binary path.
@@ -487,6 +539,7 @@ class CliTransport(ABC):
         Raises:
             AIProviderError: On timeout.
             AINotAvailableError: When the binary disappears from ``PATH``.
+            asyncio.CancelledError: Re-raised after the child is stopped.
         """
         env = os.environ.copy()
 
@@ -496,24 +549,42 @@ class CliTransport(ABC):
         )
 
         try:
-            return subprocess.run(  # nosec B603 - argv is an internally-built list run with shell=False; binary resolved from a known command, no user shell input
-                cmd,
-                input=input_text,
-                capture_output=True,
-                text=True,
-                timeout=timeout,
-                check=False,
+            process = await asyncio.create_subprocess_exec(  # nosec B603 - argv is an internally-built list; exec form takes no shell
+                *cmd,
+                stdin=asyncio.subprocess.PIPE if input_text is not None else None,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
                 env=env,
                 cwd=cwd,
             )
-        except subprocess.TimeoutExpired as exc:
-            raise AIProviderError(
-                f"{self._binary_name} CLI timed out after {timeout:.0f}s",
-            ) from exc
         except FileNotFoundError as exc:
             raise AINotAvailableError(
                 f"{self._binary_name} CLI not found on PATH. {self._install_hint}",
             ) from exc
+
+        payload = input_text.encode() if input_text is not None else None
+        try:
+            stdout_bytes, stderr_bytes = await asyncio.wait_for(
+                process.communicate(payload),
+                timeout=timeout,
+            )
+        except TimeoutError as exc:
+            await _terminate(process)
+            raise AIProviderError(
+                f"{self._binary_name} CLI timed out after {timeout:.0f}s",
+            ) from exc
+        except asyncio.CancelledError:
+            # A cancelled review (e.g. a sibling chunk failed) must not leave
+            # an agent CLI running against the repository.
+            await _terminate(process)
+            raise
+
+        return subprocess.CompletedProcess(
+            args=list(cmd),
+            returncode=process.returncode if process.returncode is not None else 0,
+            stdout=_decode(stdout_bytes),
+            stderr=_decode(stderr_bytes),
+        )
 
     def check_exit_code(
         self,
