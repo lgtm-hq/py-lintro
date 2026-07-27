@@ -28,9 +28,11 @@ jobs:
       egress-policy: block
       egress-preset: sbom
     permissions:
-      # write: reusable-sbom v0.52.3 requests contents: write (release SBOM
-      # asset upload); a lower caller grant is a parse-time startup_failure
-      contents: write
+      # read: SBOM generation, vuln scan and attestation only read the repo.
+      # The contents:write release-asset upload moved out to
+      # reusable-sbom-release-upload.yml upstream (lgtm-ci#770), so every job
+      # in reusable-sbom.yml now declares contents: read.
+      contents: read
       security-events: write
       id-token: write
       attestations: write
