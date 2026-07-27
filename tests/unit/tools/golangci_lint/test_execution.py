@@ -377,9 +377,10 @@ def test_check_timeout_in_one_module_preserves_others(
 ) -> None:
     """A timeout in one module does not discard earlier modules' findings.
 
-    The timed-out module is aggregated as one execution failure (matching
-    ``create_timeout_result``'s standardized timeout contract), so the total
-    count is the earlier module's two findings plus one for the timeout.
+    The timed-out module is aggregated as an execution failure, not as a lint
+    finding (matching ``create_timeout_result``'s standardized timeout
+    contract, #1768), so the total count stays at the earlier module's two
+    genuine findings while ``timed_out`` records the timeout.
 
     Args:
         golangci_lint_plugin: Plugin under test.
@@ -409,7 +410,8 @@ def test_check_timeout_in_one_module_preserves_others(
         )
 
     assert_that(result.success).is_false()
-    assert_that(result.issues_count).is_equal_to(3)
+    assert_that(result.issues_count).is_equal_to(2)
+    assert_that(result.timed_out).is_true()
     assert_that(result.output).contains("timed out")
 
 

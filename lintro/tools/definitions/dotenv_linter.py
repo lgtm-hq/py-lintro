@@ -198,6 +198,7 @@ class DotenvLinterPlugin(BaseToolPlugin):
                 output="",
                 issues=[],
                 skipped=True,
+                timed_out=True,
             )
         except (OSError, ValueError, RuntimeError) as e:
             return FileProcessingResult(
@@ -268,6 +269,7 @@ class DotenvLinterPlugin(BaseToolPlugin):
                     output="",
                     issues=initial_issues,
                     skipped=True,
+                    timed_out=True,
                 ),
                 initial_count=len(initial_issues),
                 fixed_count=0,
@@ -360,6 +362,7 @@ class DotenvLinterPlugin(BaseToolPlugin):
             success=result.all_success and result.total_issues == 0,
             output=result.build_output(timeout=ctx.timeout),
             issues_count=result.total_issues,
+            timed_out=result.timed_out,
             issues=result.all_issues,
         )
 
@@ -456,4 +459,5 @@ class DotenvLinterPlugin(BaseToolPlugin):
             fixed_issues_count=fixed_issues_total,
             remaining_issues_count=remaining_issues,
             initial_issues=all_initial_issues if all_initial_issues else None,
+            timed_out=result.timed_out,
         )

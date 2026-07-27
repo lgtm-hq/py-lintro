@@ -29,7 +29,10 @@ def test_execute_ruff_check_handles_timeout(
 
         assert_that(result.success).is_false()
         assert_that(result.output).contains("timed out")
-        assert_that(result.issues_count).is_equal_to(1)
+        # A timeout is an execution failure, not a lint finding: it never
+        # inflates the issue counts; ``timed_out`` carries the signal (#1768).
+        assert_that(result.issues_count).is_equal_to(0)
+        assert_that(result.timed_out).is_true()
 
 
 def test_execute_ruff_check_handles_format_timeout(

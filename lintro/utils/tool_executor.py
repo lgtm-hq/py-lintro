@@ -326,8 +326,11 @@ def _write_artifacts(
     """Write side-channel artifact files alongside primary output.
 
     Emits artifact files into ``.lintro/artifacts/<format>/`` for each
-    format listed in ``execution.artifacts``.  SARIF is also auto-emitted
-    when ``GITHUB_ACTIONS=true`` is detected (for Code Scanning).
+    format listed in ``execution.artifacts``.  SARIF (for Code Scanning) and
+    JSON (for structured CI evidence, including per-tool ``timed_out`` state)
+    are also auto-emitted when ``GITHUB_ACTIONS=true`` is detected, landing at
+    ``.lintro/artifacts/sarif/results.sarif.json`` and
+    ``.lintro/artifacts/json/results.json`` respectively.
 
     Supported formats match ``OutputFormat``: json, csv, markdown,
     html, sarif, plain.
@@ -354,6 +357,15 @@ def _write_artifacts(
     # Auto-emit SARIF in GitHub Actions for Code Scanning integration.
     if is_gha and "sarif" not in artifacts:
         artifacts.append("sarif")
+
+    # Auto-emit the JSON report in GitHub Actions too. SARIF omits clean tools
+    # and omits failures that produced no issues, so a CI consumer cannot use
+    # it to tell a tool timeout from a genuine finding without failing open.
+    # The JSON report covers every tool and carries the ``timed_out`` flag,
+    # and emitting it here keeps ``--output-format`` (and therefore the
+    # console/grid output every existing consumer parses) untouched.
+    if is_gha and "json" not in artifacts:
+        artifacts.append("json")
 
     if not artifacts:
         return

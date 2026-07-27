@@ -165,6 +165,12 @@ class OxlintPlugin(BaseToolPlugin):
             initial_count: Optional count of initial issues.
             cwd: Working directory for the tool result.
 
+        Follows the shared timeout accounting model (see
+        :mod:`lintro.tools.core.timeout_utils`): the timeout is reported via
+        ``timed_out=True`` and ``success=False`` rather than as a synthetic
+        ``TIMEOUT`` pseudo-issue, so it never inflates the issue counts. Only
+        genuine issues detected before the timeout are reported.
+
         Returns:
             ToolResult: ToolResult instance representing timeout failure.
         """
@@ -174,15 +180,6 @@ class OxlintPlugin(BaseToolPlugin):
             "  - Large codebase taking too long to process\n"
             "  - Need to increase timeout via --tool-options oxlint:timeout=N"
         )
-        timeout_issue = OxlintIssue(
-            file="execution",
-            line=1,
-            column=1,
-            code="TIMEOUT",
-            message=timeout_msg,
-            severity="error",
-            fixable=False,
-        )
         if initial_issues is not None:
             pre_fix_count = len(initial_issues)
         else:
@@ -191,11 +188,12 @@ class OxlintPlugin(BaseToolPlugin):
             name=self.definition.name,
             success=False,
             output=timeout_msg,
-            issues_count=1,
-            issues=[timeout_issue],
+            issues_count=pre_fix_count,
+            issues=list(initial_issues or []),
             initial_issues_count=pre_fix_count,
             initial_issues=initial_issues if initial_issues is not None else None,
             cwd=cwd,
+            timed_out=True,
         )
 
     def _build_oxlint_args(self, options: dict[str, object]) -> list[str]:

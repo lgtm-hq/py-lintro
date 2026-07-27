@@ -13,6 +13,7 @@ Both build each per-tool object via :func:`serialize_tool_result` so their
 schemas cannot silently drift.
 """
 
+from collections.abc import Sequence
 from typing import TYPE_CHECKING, Any
 
 from lintro.ai.metadata import normalize_ai_metadata
@@ -46,6 +47,30 @@ def serialize_issue(issue: "BaseIssue") -> dict[str, Any]:
     return data
 
 
+def timed_out_tool_names(results: Sequence[ToolResult]) -> list[str]:
+    """Collect the names of tools whose execution timed out.
+
+    Used to populate ``summary.timed_out_tools`` in every JSON payload so a
+    consumer can classify "the only failure was a timeout" without walking
+    ``results`` or regex-matching the human-readable ``output`` string.
+
+    Args:
+        results: Tool results from the run, in execution order.
+
+    Returns:
+        Tool names that timed out, in execution order and de-duplicated.
+        Empty when nothing timed out.
+    """
+    names: list[str] = []
+    for result in results:
+        if not getattr(result, "timed_out", False):
+            continue
+        name = result.name
+        if name not in names:
+            names.append(name)
+    return names
+
+
 def serialize_tool_result(
     result: ToolResult,
     *,
@@ -63,15 +88,23 @@ def serialize_tool_result(
     ``issues`` array in fix mode, where ``merge_detected_and_remaining``
     collapses duplicate detected/remaining entries.
 
+    ``timed_out`` reports whether the tool's subprocess exceeded its deadline.
+    Per the timeout accounting model in
+    :mod:`lintro.tools.core.timeout_utils`, a timeout is an execution failure
+    rather than a lint finding, so a timed-out tool serializes
+    ``timed_out: true``, ``success: false`` and contributes nothing to
+    ``issues_count``.
+
     Args:
         result: The tool result to serialize.
         action: The action being performed (check, fmt, test).
 
     Returns:
         The per-tool JSON object: always ``tool``, ``success``,
-        ``issues_count``, ``skipped``, ``skip_reason`` and ``output``; plus
-        ``parse_failures_count`` when set, ``fixed``/``remaining`` in FIX mode,
-        normalized ``ai_metadata`` when present, and ``issues`` when any exist.
+        ``issues_count``, ``skipped``, ``skip_reason``, ``timed_out`` and
+        ``output``; plus ``parse_failures_count`` when set,
+        ``fixed``/``remaining`` in FIX mode, normalized ``ai_metadata`` when
+        present, and ``issues`` when any exist.
     """
     merged_issues = merge_detected_and_remaining(
         getattr(result, "initial_issues", None),
@@ -83,6 +116,7 @@ def serialize_tool_result(
         "issues_count": len(merged_issues),
         "skipped": getattr(result, "skipped", False),
         "skip_reason": getattr(result, "skip_reason", None),
+        "timed_out": bool(getattr(result, "timed_out", False)),
         "output": getattr(result, "output", ""),
     }
     if result.parse_failures_count is not None:
@@ -142,6 +176,10 @@ def create_json_output(
             "total_remaining": (
                 total_remaining if action_enum == Action.FIX else total_issues
             ),
+            # Names of tools whose execution timed out. Timeouts are execution
+            # failures, not findings, so they never appear in ``total_issues``;
+            # this list is where a consumer reads them instead.
+            "timed_out_tools": timed_out_tool_names(results),
         },
     }
     # Additive: include the health score under summary when supplied so the

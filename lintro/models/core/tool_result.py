@@ -73,6 +73,14 @@ class ToolResult:
     skipped: bool = field(default=False)
     skip_reason: str | None = field(default=None)
 
+    # Execution-timeout tracking. ``True`` when the tool's subprocess exceeded
+    # its deadline and was killed. A timeout is an *execution failure*, not a
+    # lint finding: it never contributes to ``issues_count``. Consumers use
+    # this flag (surfaced as ``timed_out`` in the JSON report) to tell an
+    # infrastructure flake apart from a genuine finding without regex-matching
+    # the human-readable ``output`` string.
+    timed_out: bool = field(default=False)
+
     # Parser failures (items that could not be parsed from tool output).
     # Omitted from JSON output unless the tool sets this explicitly.
     parse_failures_count: int | None = field(default=None)

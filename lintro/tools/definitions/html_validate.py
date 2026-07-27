@@ -237,6 +237,7 @@ class HtmlValidatePlugin(BaseToolPlugin):
             return ToolResult(
                 name=self.definition.name,
                 success=timeout_result.success,
+                timed_out=timeout_result.timed_out,
                 output=self._append_fallback_guidance(
                     output=timeout_result.output,
                     used_registry_fallback=used_registry_fallback,

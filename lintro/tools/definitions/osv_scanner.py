@@ -361,6 +361,7 @@ class OsvScannerPlugin(BaseToolPlugin):
                 success=False,
                 output=f"OSV-Scanner timed out after {timeout}s",
                 issues_count=0,
+                timed_out=True,
             )
 
         success = proc.success

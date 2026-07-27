@@ -91,7 +91,9 @@ def test_create_timeout_result() -> None:
     assert_that(result.output).contains(
         "pytest execution timed out (30s limit exceeded)",
     )
-    assert_that(result.issues_count).is_equal_to(1)
+    # A timeout is an execution failure, not a lint finding, so it contributes
+    # nothing to the issue counts; ``timed_out`` carries the signal (#1768).
+    assert_that(result.issues_count).is_equal_to(0)
     assert_that(result.issues).is_empty()
     assert_that(result.timed_out).is_true()
     assert_that(result.timeout_seconds).is_equal_to(30)
