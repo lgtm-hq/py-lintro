@@ -21,6 +21,16 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.91.59] - 2026-07-27
+
+### Changed
+
+- **deps**: update dependency lgtm-hq/lgtm-ci to v0.60.0 (minor) (#1794) (a0c2ee9)
+
+### Fixed
+
+- **deps**: update dependency @lgtm-hq/turbo-themes to 0.40.3 (minor) (#1792) (dd73751)
+
 ## [0.91.58] - 2026-07-27
 
 ### Changed
