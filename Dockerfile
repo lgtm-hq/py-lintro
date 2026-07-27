@@ -176,6 +176,8 @@ RUN --mount=type=cache,target=/root/.cache/uv,sharing=locked \
 RUN echo "Smoke-testing AI agent CLIs..." && \
     claude --version && codex --version && agent --version && \
     gosu lintro claude --version && \
+    gosu lintro codex --version && \
+    gosu lintro agent --version && \
     echo "AI CLI smoke check passed."
 
 # ENTRYPOINT, CMD and HEALTHCHECK are inherited from `full`.
