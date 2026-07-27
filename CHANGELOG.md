@@ -21,6 +21,18 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.91.58] - 2026-07-27
+
+### Changed
+
+- **deps**: update ghcr.io/lgtm-hq/lintro-tools:latest docker digest to 0c902d3 (#1788)
+  (ddef117)
+- **deps**: update github-actions (#1790) (b79fef7)
+
+### Fixed
+
+- **config**: keep plugin tool config and warn on unknown keys (#1757) (#1785) (90ca51f)
+
 ## [0.91.57] - 2026-07-27
 
 ### Changed
