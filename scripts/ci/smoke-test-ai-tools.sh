@@ -51,7 +51,9 @@ BINARIES=(claude codex agent)
 
 for binary in "${BINARIES[@]}"; do
 	echo "==> ${PLATFORM}: ${binary} --version"
-	docker run --rm --platform "$PLATFORM" "$IMAGE" "$binary" --version
+	# Bound each invocation: a stalled or unexpectedly interactive CLI must
+	# fail the smoke test instead of hanging the job until the runner timeout.
+	timeout 60 docker run --rm --platform "$PLATFORM" "$IMAGE" "$binary" --version
 done
 
 echo "==> ${PLATFORM}: all AI agent CLIs responded"
