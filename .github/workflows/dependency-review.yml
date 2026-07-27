@@ -18,10 +18,10 @@ concurrency:
 jobs:
   dependency-review:
     # yamllint disable-line rule:line-length
-    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-dependency-review.yml@bab120fff62b419489d26a18b5cdccbc26703394 # v0.60.0
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-dependency-review.yml@c56ab38274492c6842807c6e1047b9000bd5c0a6 # v0.61.0
     with:
       fail-on-severity: high
-      tooling-ref: 'bab120fff62b419489d26a18b5cdccbc26703394' # v0.60.0
+      tooling-ref: 'c56ab38274492c6842807c6e1047b9000bd5c0a6' # v0.61.0
       egress-policy: block
       egress-preset: scorecard
       # Full list (v0.50.0+ replace semantics): the reusable passes
