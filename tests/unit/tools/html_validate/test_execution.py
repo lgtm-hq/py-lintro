@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import subprocess  # nosec B404 - subprocess is used for TimeoutExpired in mocked tool execution tests
 from pathlib import Path
 from typing import cast
 from unittest.mock import MagicMock, patch
@@ -11,6 +12,7 @@ from assertpy import assert_that
 
 from lintro.parsers.html_validate.html_validate_issue import HtmlValidateIssue
 from lintro.plugins.subprocess_executor import SubprocessResult
+from lintro.tools.core.command_builders import pinned_npm_spec
 from lintro.tools.definitions.html_validate import (
     HtmlValidatePlugin,
     contains_glob_syntax,
@@ -28,6 +30,11 @@ _ISSUE_JSON = (
 
 # Deterministic stand-in so tests assert behaviour, not host PATH contents.
 _PINNED_EXECUTABLE = "/pinned/html-validate"
+
+# The registry fallback command, derived from the pin so the expected guidance
+# never hardcodes a version that Renovate will bump.
+_SPEC = pinned_npm_spec("html-validate")
+_FALLBACK_COMMAND = ("bunx", _SPEC)
 
 
 def _mock_ctx(tmp_path: Path, files: list[str]) -> MagicMock:
@@ -349,3 +356,151 @@ def test_check_does_not_fall_back_to_lintros_own_node_modules(
 
     cmd = cast(list[str], mock_run.call_args.kwargs["cmd"])
     assert_that(cmd[0]).is_not_equal_to(stray.as_posix())
+
+
+def _run_with_fallback(
+    plugin: HtmlValidatePlugin,
+    tmp_path: Path,
+    result: SubprocessResult,
+) -> str | None:
+    """Run ``check`` with resolution forced onto the bunx registry fallback.
+
+    Args:
+        plugin: The plugin under test.
+        tmp_path: Temporary directory used as the execution context cwd.
+        result: Subprocess result the mocked runner should return.
+
+    Returns:
+        The output recorded on the resulting ToolResult.
+    """
+    html_file = tmp_path / "index.html"
+    html_file.write_text("<p>ok</p>\n")
+
+    with (
+        patch.object(plugin, "_prepare_execution") as mock_prepare,
+        patch.object(
+            plugin,
+            "_get_executable_command",
+            return_value=list(_FALLBACK_COMMAND),
+        ),
+        patch.object(plugin, "_run_subprocess_result", return_value=result),
+    ):
+        mock_prepare.return_value = _mock_ctx(tmp_path, ["index.html"])
+        tool_result = plugin.check([str(tmp_path)], {})
+
+    return tool_result.output
+
+
+def test_check_appends_install_guidance_when_the_fallback_fails(
+    html_validate_plugin: HtmlValidatePlugin,
+    tmp_path: Path,
+) -> None:
+    """A crashed bunx fallback is explained with the local-install fix (#1767).
+
+    Args:
+        html_validate_plugin: The plugin under test.
+        tmp_path: Temporary directory for the fixture file.
+    """
+    crash = SubprocessResult(
+        returncode=1,
+        stdout="",
+        stderr="TypeError: fs.globSync is not a function",
+        output="TypeError: fs.globSync is not a function",
+    )
+
+    output = _run_with_fallback(html_validate_plugin, tmp_path, crash)
+
+    assert_that(output).is_not_none()
+    assert_that(cast(str, output)).contains("TypeError: fs.globSync is not a function")
+    assert_that(cast(str, output)).contains(f"could not be run via `bunx {_SPEC}`")
+    assert_that(cast(str, output)).contains(f"bun add -D {_SPEC}")
+    assert_that(cast(str, output)).contains(f"npm install -D {_SPEC}")
+    assert_that(cast(str, output)).contains("requires Node")
+
+
+def test_check_does_not_add_guidance_for_real_validation_failures(
+    html_validate_plugin: HtmlValidatePlugin,
+    tmp_path: Path,
+) -> None:
+    """Reported issues exit non-zero but are not a fallback failure.
+
+    Args:
+        html_validate_plugin: The plugin under test.
+        tmp_path: Temporary directory for the fixture file.
+    """
+    reported = SubprocessResult(
+        returncode=1,
+        stdout=_ISSUE_JSON,
+        stderr="",
+        output=_ISSUE_JSON,
+    )
+
+    output = _run_with_fallback(html_validate_plugin, tmp_path, reported)
+
+    assert_that(cast(str, output)).does_not_contain("bun add -D")
+
+
+def test_check_does_not_add_guidance_when_a_local_binary_failed(
+    html_validate_plugin: HtmlValidatePlugin,
+    tmp_path: Path,
+) -> None:
+    """A local install that crashes is not fixed by installing it again.
+
+    Args:
+        html_validate_plugin: The plugin under test.
+        tmp_path: Temporary directory for the fixture file.
+    """
+    html_file = tmp_path / "index.html"
+    html_file.write_text("<p>ok</p>\n")
+    crash = SubprocessResult(returncode=1, stdout="", stderr="boom", output="boom")
+
+    with (
+        patch.object(html_validate_plugin, "_prepare_execution") as mock_prepare,
+        patch.object(
+            html_validate_plugin,
+            "_get_executable_command",
+            return_value=[_PINNED_EXECUTABLE],
+        ),
+        patch.object(
+            html_validate_plugin,
+            "_run_subprocess_result",
+            return_value=crash,
+        ),
+    ):
+        mock_prepare.return_value = _mock_ctx(tmp_path, ["index.html"])
+        result = html_validate_plugin.check([str(tmp_path)], {})
+
+    assert_that(cast(str, result.output)).is_equal_to("boom")
+
+
+def test_check_explains_a_fallback_timeout(
+    html_validate_plugin: HtmlValidatePlugin,
+    tmp_path: Path,
+) -> None:
+    """A timed-out registry fetch also gets the local-install guidance.
+
+    Args:
+        html_validate_plugin: The plugin under test.
+        tmp_path: Temporary directory for the fixture file.
+    """
+    html_file = tmp_path / "index.html"
+    html_file.write_text("<p>ok</p>\n")
+
+    with (
+        patch.object(html_validate_plugin, "_prepare_execution") as mock_prepare,
+        patch.object(
+            html_validate_plugin,
+            "_get_executable_command",
+            return_value=list(_FALLBACK_COMMAND),
+        ),
+        patch.object(
+            html_validate_plugin,
+            "_run_subprocess_result",
+            side_effect=subprocess.TimeoutExpired(cmd="bunx", timeout=30),
+        ),
+    ):
+        mock_prepare.return_value = _mock_ctx(tmp_path, ["index.html"])
+        result = html_validate_plugin.check([str(tmp_path)], {})
+
+    assert_that(result.success).is_false()
+    assert_that(cast(str, result.output)).contains(f"bun add -D {_SPEC}")

@@ -35,6 +35,7 @@ from typing import TYPE_CHECKING, ClassVar
 from loguru import logger
 
 from lintro.plugins.subprocess_executor import is_compiled_binary
+from lintro.tools.core.node_fallback import notify_registry_fallback_selected
 
 if TYPE_CHECKING:
     from lintro.enums.tool_name import ToolName
@@ -588,6 +589,10 @@ class NodeJSBuilder(CommandBuilder):
     ) -> list[str]:
         """Resolve a Node.js tool without ever resolving ``@latest``.
 
+        Landing on the ``bunx``/``npx`` branch emits a one-time notice, because
+        it is the fragile path: it needs registry access and imposes the pinned
+        package's own ``engines`` floor on the consumer's runtime (#1767).
+
         Args:
             binary_name: Executable name (``node_modules/.bin`` entry).
             package_name: npm package name used for the registry fallback.
@@ -607,10 +612,11 @@ class NodeJSBuilder(CommandBuilder):
             return [binary_name]
 
         spec = pinned_npm_spec(package_name)
-        if shutil.which("bunx"):
-            return ["bunx", spec]
-        if shutil.which("npx"):
-            return ["npx", spec]
+        for runner in ("bunx", "npx"):
+            if shutil.which(runner):
+                command = [runner, spec]
+                notify_registry_fallback_selected(command)
+                return command
         return [binary_name]
 
     def _resolve(
