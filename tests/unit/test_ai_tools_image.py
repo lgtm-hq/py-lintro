@@ -5,9 +5,6 @@ no runtime link: the binaries lintro's CLI transports look up
 (``lintro/ai/providers/cli_contracts.py``), the binaries the ai-tools image
 actually bakes (``scripts/utils/install-ai-tools.sh``), and the build/publish
 wiring that ships them.
-
-The root Dockerfile's ``ai`` stage and its publish job land in the follow-up
-that pins this image's digest, so nothing here asserts on them yet.
 """
 
 from __future__ import annotations
@@ -25,6 +22,7 @@ from lintro.ai.providers.cli_contracts import CLI_CONTRACTS
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _AI_TOOLS_DOCKERFILE = _REPO_ROOT / "docker" / "ai-tools.Dockerfile"
+_ROOT_DOCKERFILE = _REPO_ROOT / "Dockerfile"
 _INSTALLER = _REPO_ROOT / "scripts" / "utils" / "install-ai-tools.sh"
 _RENOVATE = _REPO_ROOT / "renovate.json"
 _WORKFLOWS = _REPO_ROOT / ".github" / "workflows"
@@ -135,3 +133,51 @@ def test_ai_tools_publish_workflow_rebuilds_on_installer_changes() -> None:
             "scripts/utils/install-ai-tools.sh",
             "scripts/ci/smoke-test-ai-tools.sh",
         )
+
+
+def test_ai_stage_copies_from_the_pinned_ai_tools_image() -> None:
+    """The root ``ai`` stage layers the baked CLIs onto the full image."""
+    dockerfile = _read(_ROOT_DOCKERFILE)
+
+    assert_that(dockerfile).contains("FROM full AS ai\n")
+    assert_that(dockerfile).contains("COPY --from=aitools /opt/ai-tools /opt/ai-tools")
+    assert_that(dockerfile).matches(
+        r"FROM ghcr\.io/lgtm-hq/lintro-ai-tools:latest@sha256:[a-f0-9]{64} AS aitools",
+    )
+
+
+def test_ai_stage_installs_the_ai_extra() -> None:
+    """The AI variant carries the provider SDKs the API transports need."""
+    ai_stage = _read(_ROOT_DOCKERFILE).split("FROM full AS ai\n", maxsplit=1)[1]
+
+    assert_that(ai_stage).contains("--extra ai")
+
+
+def test_ai_stage_smoke_tests_every_declared_cli_as_non_root() -> None:
+    """A root-only-readable CLI tree would break every real review.
+
+    The entrypoint drops privileges to the UID owning the mounted volume, so a
+    root-run check alone would pass while the image is unusable in practice.
+    """
+    ai_stage = _read(_ROOT_DOCKERFILE).split("FROM full AS ai\n", maxsplit=1)[1]
+
+    assert_that(ai_stage).contains("gosu lintro")
+    for binary in _contract_binaries():
+        assert_that(ai_stage).contains(f"{binary} --version")
+
+
+def test_ai_variant_publishes_to_its_own_package() -> None:
+    """The AI image never shares a GHCR package with the release image.
+
+    The reusable always emits floating ``sha-<ref>`` and branch tags, so a
+    shared package would let the AI variant clobber the tags docker-ci
+    promotes for the release image.
+    """
+    workflow = _load_workflow(name="docker-build-publish.yml")
+    ai_job = workflow["jobs"]["docker-ai"]
+    full_job = workflow["jobs"]["docker-full"]
+
+    assert_that(ai_job["with"]["target"]).is_equal_to("ai")
+    assert_that(ai_job["with"]["image-name"]).is_not_equal_to(
+        full_job["with"]["image-name"],
+    )
