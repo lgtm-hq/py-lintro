@@ -1640,6 +1640,30 @@ bun add -D html-validate
 npm install -D html-validate
 ```
 
+A project-local devDependency is the **supported configuration**. It is the first and
+most reliable branch of Lintro's executable resolution, it is lockfile-pinned, and it
+needs no registry access at check time. A global install (`-g`) does _not_ populate
+`node_modules/.bin`, so it lands on a later, weaker branch.
+
+**Executable resolution order:**
+
+1. `node_modules/.bin/html-validate`, searched upward from the directory being checked
+   (the target project's own install, not Lintro's).
+2. `html-validate` on `PATH` (e.g. a global install).
+3. `bunx html-validate@<pinned>` — registry fallback, only if `bunx` is available.
+4. `npx html-validate@<pinned>` — registry fallback, only if `npx` is available.
+5. bare `html-validate` (fails if nothing is installed).
+
+`<pinned>` is the version Lintro pins in its manifest; `@latest` is never resolved at
+runtime. Branches 3 and 4 emit a one-time warning because they require network access to
+the npm registry, and a failure on either path is reported with install guidance rather
+than html-validate's raw error.
+
+**Node runtime requirement:** the pinned html-validate (currently `11.5.6`) declares
+`engines: { "node": "^22.22.0 || >= 24.8.0" }`. Any consumer that installs it, or that
+reaches the `bunx`/`npx` fallback, needs a Node runtime satisfying that range — Node 20,
+21, and 22.0–22.21 are not supported. Size your CI matrix accordingly.
+
 **Native Config:** `.htmlvalidate.json`, `.htmlvalidate.js`, `.htmlvalidate.cjs`, or
 `.htmlvalidate.mjs`
 
