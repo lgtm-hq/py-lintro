@@ -103,6 +103,33 @@ def test_cli_help_works() -> None:
         pytest.fail("lintro --help timed out")
 
 
+def _heading_anchors(markdown: str) -> set[str]:
+    """Collect the anchors a Markdown document exposes.
+
+    Supports both GitHub's implicit heading slugs and the explicit
+    ``{#custom-anchor}`` suffix used in the longer guides.
+
+    Args:
+        markdown: Full text of a Markdown document.
+
+    Returns:
+        Set of anchor names (without the leading ``#``).
+    """
+    anchors: set[str] = set()
+    for line in markdown.splitlines():
+        match = re.match(r"^#{1,6}\s+(.*)$", line)
+        if match is None:
+            continue
+        heading = match.group(1).strip()
+        explicit = re.search(r"\{#([^}]+)\}\s*$", heading)
+        if explicit is not None:
+            anchors.add(explicit.group(1))
+            heading = heading[: explicit.start()].strip()
+        slug = re.sub(r"[^\w\- ]", "", heading.lower())
+        anchors.add(slug.replace(" ", "-"))
+    return anchors
+
+
 def test_internal_doc_links() -> None:
     """Test that internal documentation links are valid."""
     doc_files = [
@@ -127,12 +154,21 @@ def test_internal_doc_links() -> None:
         for link_text, link_url in links:
             if link_url.startswith("docs/") or link_url.startswith("./docs/"):
                 # Internal documentation link
-                link_path = link_url
+                link_path, _, fragment = link_url.partition("#")
                 if link_path.startswith("./"):
                     link_path = link_path[2:]
 
-                if not Path(link_path).exists():
+                target = Path(link_path)
+                if not target.exists():
                     broken_links.append(f"{doc_file}: {link_text} -> {link_url}")
+                    continue
+
+                if fragment and target.is_file():
+                    anchors = _heading_anchors(target.read_text(encoding="utf-8"))
+                    if fragment not in anchors:
+                        broken_links.append(
+                            f"{doc_file}: {link_text} -> {link_url} (missing anchor)",
+                        )
 
     if broken_links:
         pytest.fail("Broken internal links:\n" + "\n".join(broken_links))
