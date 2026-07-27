@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from assertpy import assert_that
@@ -16,6 +16,14 @@ from lintro.ai.providers.response import AIResponse
 
 
 def _response(*, cost: float = 0.01) -> AIResponse:
+    """Build a stub provider response.
+
+    Args:
+        cost: Cost estimate recorded on the response.
+
+    Returns:
+        A populated ``AIResponse``.
+    """
     return AIResponse(
         content='{"ok": true}',
         model="test-model",
@@ -26,9 +34,10 @@ def _response(*, cost: float = 0.01) -> AIResponse:
     )
 
 
-def test_call_ai_returns_response_and_records_budget() -> None:
+async def test_call_ai_returns_response_and_records_budget() -> None:
     """call_ai records cost against the session budget."""
     provider = MagicMock()
+    provider.complete = AsyncMock()
     provider.complete.return_value = _response(cost=0.02)
     config = AIConfig(
         enabled=True,
@@ -37,7 +46,7 @@ def test_call_ai_returns_response_and_records_budget() -> None:
     )
     budget = CostBudget(max_cost_usd=1.0)
 
-    response = call_ai(
+    response = await call_ai(
         provider=provider,
         ai_config=config,
         user_prompt="hello",
@@ -49,9 +58,10 @@ def test_call_ai_returns_response_and_records_budget() -> None:
     assert_that(budget.spent).is_equal_to(0.02)
 
 
-def test_call_ai_retries_on_provider_error() -> None:
+async def test_call_ai_retries_on_provider_error() -> None:
     """Transient provider errors are retried according to config."""
     provider = MagicMock()
+    provider.complete = AsyncMock()
     provider.complete.side_effect = [
         AIProviderError("temporary"),
         _response(),
@@ -64,8 +74,8 @@ def test_call_ai_retries_on_provider_error() -> None:
         retry_max_delay=1.0,
     )
 
-    with patch("lintro.ai.retry.time.sleep"):
-        response = call_ai(
+    with patch("lintro.ai.retry.asyncio.sleep"):
+        response = await call_ai(
             provider=provider,
             ai_config=config,
             user_prompt="hello",
@@ -77,9 +87,10 @@ def test_call_ai_retries_on_provider_error() -> None:
     assert_that(provider.complete.call_count).is_equal_to(2)
 
 
-def test_call_ai_returns_response_when_single_call_exceeds_budget() -> None:
+async def test_call_ai_returns_response_when_single_call_exceeds_budget() -> None:
     """A completed call is returned even when it pushes spent over the limit."""
     provider = MagicMock()
+    provider.complete = AsyncMock()
     provider.complete.return_value = _response(cost=0.50)
     config = AIConfig(
         enabled=True,
@@ -88,7 +99,7 @@ def test_call_ai_returns_response_when_single_call_exceeds_budget() -> None:
     )
     budget = CostBudget(max_cost_usd=0.10)
 
-    response = call_ai(
+    response = await call_ai(
         provider=provider,
         ai_config=config,
         user_prompt="hello",
@@ -100,9 +111,10 @@ def test_call_ai_returns_response_when_single_call_exceeds_budget() -> None:
     assert_that(budget.spent).is_equal_to(0.50)
 
 
-def test_call_ai_raises_when_budget_already_exceeded() -> None:
+async def test_call_ai_raises_when_budget_already_exceeded() -> None:
     """Subsequent calls fail once the budget ceiling has been reached."""
     provider = MagicMock()
+    provider.complete = AsyncMock()
     provider.complete.return_value = _response(cost=0.50)
     config = AIConfig(
         enabled=True,
@@ -113,7 +125,7 @@ def test_call_ai_raises_when_budget_already_exceeded() -> None:
     budget.record(0.10)
 
     with pytest.raises(AIError, match="budget exceeded"):
-        call_ai(
+        await call_ai(
             provider=provider,
             ai_config=config,
             user_prompt="hello",

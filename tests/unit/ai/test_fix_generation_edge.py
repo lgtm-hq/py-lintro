@@ -48,7 +48,7 @@ def _make_ai_response(
 # ---------------------------------------------------------------------------
 
 
-def test_generate_fixes_handles_provider_error(tmp_path):
+async def test_generate_fixes_handles_provider_error(tmp_path):
     """Verify that a provider exception results in an empty fix list."""
     source = tmp_path / "test.py"
     source.write_text("x = 1\n")
@@ -61,11 +61,11 @@ def test_generate_fixes_handles_provider_error(tmp_path):
     )
 
     class ErrorProvider(MockAIProvider):
-        def complete(self, prompt, **kwargs):
+        async def complete(self, prompt, **kwargs):
             raise RuntimeError("API down")
 
     provider = ErrorProvider()
-    result = generate_fixes(
+    result = await generate_fixes(
         [issue],
         provider,
         tool_name="ruff",
@@ -79,7 +79,7 @@ def test_generate_fixes_handles_provider_error(tmp_path):
 # ---------------------------------------------------------------------------
 
 
-def test_concurrent_generation_with_multiple_workers(tmp_path):
+async def test_concurrent_generation_with_multiple_workers(tmp_path):
     """generate_fixes with max_workers=3 exercises the ThreadPoolExecutor path."""
     # Use separate files so batching does not group them,
     # exercising the ThreadPoolExecutor path for single-issue calls.
@@ -119,7 +119,7 @@ def test_concurrent_generation_with_multiple_workers(tmp_path):
     ]
     provider = MockAIProvider(responses=responses)
 
-    result = generate_fixes(
+    result = await generate_fixes(
         issues,
         provider,
         tool_name="ruff",
@@ -131,7 +131,7 @@ def test_concurrent_generation_with_multiple_workers(tmp_path):
     assert_that(result).is_length(3)
 
 
-def test_concurrent_mixed_success_and_failure(tmp_path):
+async def test_concurrent_mixed_success_and_failure(tmp_path):
     """Concurrent mode: one success, one failure -> 1 suggestion returned."""
     # Use separate files so batching does not group them
     source1 = tmp_path / "test1.py"
@@ -181,7 +181,7 @@ def test_concurrent_mixed_success_and_failure(tmp_path):
     ]
     provider = MockAIProvider(responses=responses)
 
-    result = generate_fixes(
+    result = await generate_fixes(
         issues,
         provider,
         tool_name="ruff",
@@ -198,7 +198,7 @@ def test_concurrent_mixed_success_and_failure(tmp_path):
 # ---------------------------------------------------------------------------
 
 
-def test_retries_on_provider_error(tmp_path):
+async def test_retries_on_provider_error(tmp_path):
     """Transient AIProviderError triggers retries, then succeeds."""
     from lintro.ai.exceptions import AIProviderError
 
@@ -216,14 +216,14 @@ def test_retries_on_provider_error(tmp_path):
     success_response = _make_ai_response()
 
     class RetryProvider(MockAIProvider):
-        def complete(self, prompt, **kwargs):
+        async def complete(self, prompt, **kwargs):
             call_count["n"] += 1
             if call_count["n"] < 3:
                 raise AIProviderError("transient")
             return success_response
 
     provider = RetryProvider()
-    result = generate_fixes(
+    result = await generate_fixes(
         [issue],
         provider,
         tool_name="ruff",
@@ -235,7 +235,7 @@ def test_retries_on_provider_error(tmp_path):
     assert_that(result).is_length(1)
 
 
-def test_no_retry_on_auth_error(tmp_path):
+async def test_no_retry_on_auth_error(tmp_path):
     """AIAuthenticationError is never retried."""
     from lintro.ai.exceptions import AIAuthenticationError
 
@@ -252,12 +252,12 @@ def test_no_retry_on_auth_error(tmp_path):
     call_count = {"n": 0}
 
     class AuthErrorProvider(MockAIProvider):
-        def complete(self, prompt, **kwargs):
+        async def complete(self, prompt, **kwargs):
             call_count["n"] += 1
             raise AIAuthenticationError("bad key")
 
     provider = AuthErrorProvider()
-    result = generate_fixes(
+    result = await generate_fixes(
         [issue],
         provider,
         tool_name="ruff",
@@ -270,7 +270,7 @@ def test_no_retry_on_auth_error(tmp_path):
     assert_that(result).is_empty()
 
 
-def test_max_retries_zero_means_no_retry(tmp_path):
+async def test_max_retries_zero_means_no_retry(tmp_path):
     """max_retries=0 means no retry on transient error — only one call."""
     from lintro.ai.exceptions import AIProviderError
 
@@ -287,12 +287,12 @@ def test_max_retries_zero_means_no_retry(tmp_path):
     call_count = {"n": 0}
 
     class FailOnceProvider(MockAIProvider):
-        def complete(self, prompt, **kwargs):
+        async def complete(self, prompt, **kwargs):
             call_count["n"] += 1
             raise AIProviderError("transient failure")
 
     provider = FailOnceProvider()
-    result = generate_fixes(
+    result = await generate_fixes(
         [issue],
         provider,
         tool_name="ruff",

@@ -1,8 +1,8 @@
-"""Tests for AI retry decorator."""
+"""Tests for the async AI retry decorator."""
 
 from __future__ import annotations
 
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 from assertpy import assert_that
@@ -15,102 +15,167 @@ from lintro.ai.exceptions import (
 from lintro.ai.retry import with_retry
 
 
-def test_retry_succeeds_on_first_attempt():
+async def test_retry_succeeds_on_first_attempt() -> None:
     """Verify decorated function returns immediately on success without retrying."""
     call_count = 0
 
     @with_retry(max_retries=3)
-    def fn():
+    async def fn() -> str:
+        """Succeed immediately.
+
+        Returns:
+            A fixed marker value.
+        """
         nonlocal call_count
         call_count += 1
         return "ok"
 
-    result = fn()
+    result = await fn()
     assert_that(result).is_equal_to("ok")
     assert_that(call_count).is_equal_to(1)
 
 
-@patch("lintro.ai.retry.time.sleep")
-def test_retry_retries_on_provider_error(mock_sleep):
-    """Verify AIProviderError triggers retries until success."""
+@patch("lintro.ai.retry.asyncio.sleep")
+async def test_retry_retries_on_provider_error(mock_sleep: MagicMock) -> None:
+    """Verify AIProviderError triggers retries until success.
+
+    Args:
+        mock_sleep: Patched ``asyncio.sleep``.
+    """
     call_count = 0
 
     @with_retry(max_retries=3, base_delay=1.0)
-    def fn():
+    async def fn() -> str:
+        """Fail twice, then succeed.
+
+        Returns:
+            A fixed marker value.
+
+        Raises:
+            AIProviderError: On the first two attempts.
+        """
         nonlocal call_count
         call_count += 1
         if call_count < 3:
             raise AIProviderError("server error")
         return "ok"
 
-    result = fn()
+    result = await fn()
     assert_that(result).is_equal_to("ok")
     assert_that(call_count).is_equal_to(3)
     assert_that(mock_sleep.call_count).is_equal_to(2)
 
 
-@patch("lintro.ai.retry.time.sleep")
-def test_retry_retries_on_rate_limit_error(mock_sleep):
-    """Verify AIRateLimitError triggers retries until success."""
+@patch("lintro.ai.retry.asyncio.sleep")
+async def test_retry_retries_on_rate_limit_error(mock_sleep: MagicMock) -> None:
+    """Verify AIRateLimitError triggers retries until success.
+
+    Args:
+        mock_sleep: Patched ``asyncio.sleep``.
+    """
     call_count = 0
 
     @with_retry(max_retries=2, base_delay=1.0)
-    def fn():
+    async def fn() -> str:
+        """Fail once with a rate limit, then succeed.
+
+        Returns:
+            A fixed marker value.
+
+        Raises:
+            AIRateLimitError: On the first attempt.
+        """
         nonlocal call_count
         call_count += 1
         if call_count < 2:
             raise AIRateLimitError("rate limited")
         return "ok"
 
-    result = fn()
+    result = await fn()
     assert_that(result).is_equal_to("ok")
     assert_that(call_count).is_equal_to(2)
     mock_sleep.assert_called_once()
 
 
-def test_retry_does_not_retry_on_authentication_error():
+async def test_retry_does_not_retry_on_authentication_error() -> None:
     """Verify AIAuthenticationError is raised immediately without retrying."""
     call_count = 0
 
     @with_retry(max_retries=3)
-    def fn():
+    async def fn() -> str:
+        """Always fail with an authentication error.
+
+        Returns:
+            Never returns.
+
+        Raises:
+            AIAuthenticationError: Always.
+        """
         nonlocal call_count
         call_count += 1
         raise AIAuthenticationError("bad key")
 
     with pytest.raises(AIAuthenticationError):
-        fn()
+        await fn()
     assert_that(call_count).is_equal_to(1)
 
 
-@patch("lintro.ai.retry.time.sleep")
-def test_retry_raises_after_max_retries_exhausted(mock_sleep):
-    """Verify the original error is raised after all retry attempts are exhausted."""
+@patch("lintro.ai.retry.asyncio.sleep")
+async def test_retry_raises_after_max_retries_exhausted(mock_sleep: MagicMock) -> None:
+    """Verify the original error is raised after all retry attempts are exhausted.
+
+    Args:
+        mock_sleep: Patched ``asyncio.sleep``.
+    """
 
     @with_retry(max_retries=2, base_delay=0.1)
-    def fn():
+    async def fn() -> str:
+        """Always fail with a provider error.
+
+        Returns:
+            Never returns.
+
+        Raises:
+            AIProviderError: Always.
+        """
         raise AIProviderError("always fails")
 
     with pytest.raises(AIProviderError, match="always fails"):
-        fn()
+        await fn()
     assert_that(mock_sleep.call_count).is_equal_to(2)
 
 
 @patch("lintro.ai.retry.random.uniform", return_value=1.0)
-@patch("lintro.ai.retry.time.sleep")
-def test_retry_exponential_backoff_delays(mock_sleep, _mock_uniform):
-    """Verify retry delays follow exponential backoff progression."""
+@patch("lintro.ai.retry.asyncio.sleep")
+async def test_retry_exponential_backoff_delays(
+    mock_sleep: MagicMock,
+    _mock_uniform: MagicMock,
+) -> None:
+    """Verify retry delays follow exponential backoff progression.
+
+    Args:
+        mock_sleep: Patched ``asyncio.sleep``.
+        _mock_uniform: Patched jitter source pinned to 1.0.
+    """
     call_count = 0
 
     @with_retry(max_retries=3, base_delay=1.0, backoff_factor=2.0)
-    def fn():
+    async def fn() -> str:
+        """Fail three times, then succeed.
+
+        Returns:
+            A fixed marker value.
+
+        Raises:
+            AIProviderError: On the first three attempts.
+        """
         nonlocal call_count
         call_count += 1
         if call_count <= 3:
             raise AIProviderError("fail")
         return "ok"
 
-    result = fn()
+    result = await fn()
     assert_that(result).is_equal_to("ok")
 
     delays = [call.args[0] for call in mock_sleep.call_args_list]
@@ -118,9 +183,17 @@ def test_retry_exponential_backoff_delays(mock_sleep, _mock_uniform):
 
 
 @patch("lintro.ai.retry.random.uniform", return_value=1.0)
-@patch("lintro.ai.retry.time.sleep")
-def test_retry_max_delay_cap(mock_sleep, _mock_uniform):
-    """Verify retry delays are capped at the configured max_delay value."""
+@patch("lintro.ai.retry.asyncio.sleep")
+async def test_retry_max_delay_cap(
+    mock_sleep: MagicMock,
+    _mock_uniform: MagicMock,
+) -> None:
+    """Verify retry delays are capped at the configured max_delay value.
+
+    Args:
+        mock_sleep: Patched ``asyncio.sleep``.
+        _mock_uniform: Patched jitter source pinned to 1.0.
+    """
     call_count = 0
 
     @with_retry(
@@ -129,41 +202,61 @@ def test_retry_max_delay_cap(mock_sleep, _mock_uniform):
         backoff_factor=3.0,
         max_delay=25.0,
     )
-    def fn():
+    async def fn() -> str:
+        """Fail five times, then succeed.
+
+        Returns:
+            A fixed marker value.
+
+        Raises:
+            AIProviderError: On the first five attempts.
+        """
         nonlocal call_count
         call_count += 1
         if call_count <= 5:
             raise AIProviderError("fail")
         return "ok"
 
-    fn()
+    await fn()
     delays = [call.args[0] for call in mock_sleep.call_args_list]
     assert_that(delays).is_length(5)
     assert_that(delays).is_equal_to([10.0, 25.0, 25.0, 25.0, 25.0])
 
 
-def test_retry_does_not_retry_non_ai_exceptions():
+async def test_retry_does_not_retry_non_ai_exceptions() -> None:
     """Verify non-AI exceptions propagate immediately without retrying."""
     call_count = 0
 
     @with_retry(max_retries=3)
-    def fn():
+    async def fn() -> str:
+        """Always fail with a non-AI exception.
+
+        Returns:
+            Never returns.
+
+        Raises:
+            ValueError: Always.
+        """
         nonlocal call_count
         call_count += 1
         raise ValueError("not an AI error")
 
     with pytest.raises(ValueError, match="not an AI error"):
-        fn()
+        await fn()
     assert_that(call_count).is_equal_to(1)
 
 
-def test_retry_preserves_function_metadata():
+def test_retry_preserves_function_metadata() -> None:
     """Verify the retry decorator preserves the wrapped function name and docstring."""
 
     @with_retry(max_retries=1)
-    def my_function():
-        """My docstring."""
+    async def my_function() -> int:
+        """My docstring.
+
+        Returns:
+            A fixed value.
+        """
         return 42
 
     assert_that(my_function.__name__).is_equal_to("my_function")
-    assert_that(my_function.__doc__).is_equal_to("My docstring.")
+    assert_that(my_function.__doc__).starts_with("My docstring.")

@@ -1,10 +1,16 @@
-"""Shared fixtures for AI tests."""
+"""Shared fixtures and doubles for AI tests."""
 
 from __future__ import annotations
 
+import asyncio
+import subprocess  # nosec B404 - only CompletedProcess objects are constructed here
 import threading
+from collections.abc import Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass
+from types import SimpleNamespace
 from typing import Any
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -12,8 +18,202 @@ from lintro.ai.config import AIConfig
 from lintro.ai.enums import AITransport
 from lintro.ai.models import AIFixSuggestion
 from lintro.ai.providers.base import AIResponse, BaseAIProvider
+from lintro.ai.providers.cli_transport import CliTransport
 from lintro.ai.registry import AIProvider
 from lintro.parsers.base_issue import BaseIssue
+
+
+def completed_process(
+    *,
+    returncode: int = 0,
+    stdout: str = "",
+    stderr: str = "",
+    args: list[str] | None = None,
+) -> subprocess.CompletedProcess[str]:
+    """Build a ``CompletedProcess`` stand-in for CLI transport tests.
+
+    Args:
+        returncode: Process exit code.
+        stdout: Process stdout.
+        stderr: Process stderr.
+        args: Argv the process was invoked with.
+
+    Returns:
+        A populated CompletedProcess.
+    """
+    return subprocess.CompletedProcess(
+        args=args or [],
+        returncode=returncode,
+        stdout=stdout,
+        stderr=stderr,
+    )
+
+
+class _FakeProcess:
+    """Stand-in for ``asyncio.subprocess.Process``.
+
+    Replays a canned :class:`subprocess.CompletedProcess`, or hangs
+    forever when the test is exercising the timeout path.
+    """
+
+    def __init__(
+        self,
+        result: subprocess.CompletedProcess[str] | None,
+        *,
+        hang: bool = False,
+    ) -> None:
+        """Store the canned outcome.
+
+        Args:
+            result: Result to replay; ``None`` behaves like a clean exit.
+            hang: When True, ``communicate`` never returns so the caller's
+                timeout fires.
+        """
+        self._result = result
+        self._hang = hang
+        self.returncode: int | None = None
+        self.killed = False
+
+    async def communicate(
+        self,
+        payload: bytes | None = None,
+    ) -> tuple[bytes, bytes]:
+        """Return the canned stdout/stderr pair.
+
+        Args:
+            payload: Ignored stdin payload.
+
+        Returns:
+            Encoded ``(stdout, stderr)``.
+        """
+        del payload
+        if self._hang:
+            await asyncio.Event().wait()
+        stdout = (self._result.stdout or "") if self._result else ""
+        stderr = (self._result.stderr or "") if self._result else ""
+        self.returncode = self._result.returncode if self._result else 0
+        return stdout.encode(), stderr.encode()
+
+    def kill(self) -> None:
+        """Record that the transport killed the timed-out process."""
+        self.killed = True
+
+    async def wait(self) -> int:
+        """Reap the killed process.
+
+        Returns:
+            The exit code attributed to the kill.
+        """
+        self.returncode = -9
+        return -9
+
+
+#: Sentinel result telling the fake process to never return output, so the
+#: transport's own timeout fires.
+HANG = object()
+
+
+@contextmanager
+def patch_cli_exec(**mock_kwargs: Any) -> Iterator[MagicMock]:
+    """Patch ``asyncio.create_subprocess_exec`` for CLI transport tests.
+
+    The yielded ``MagicMock`` behaves exactly like a patched
+    ``subprocess.run``: configure it with ``return_value`` or
+    ``side_effect``, and read recorded argv back as
+    ``mock.call_args.args[0]``. Only the spawn mechanism differs -- the
+    transport is async, so a fake process replays the configured
+    ``CompletedProcess``.
+
+    Args:
+        **mock_kwargs: Forwarded to the recording ``MagicMock`` (e.g.
+            ``return_value=...`` or ``side_effect=...``). Returning
+            :data:`HANG` makes that spawn hang so a timeout can be tested.
+
+    Yields:
+        MagicMock: The recording mock standing in for each spawn. Its extra
+        ``transport_calls`` attribute records the ``CliTransport.run``
+        arguments (``cmd``, ``input_text``, ``timeout``, ``cwd``) that the
+        argv alone cannot show, since stdin and timeouts are applied after
+        the spawn. Its ``processes`` attribute records every spawned
+        :class:`_FakeProcess` so tests can assert on child lifecycle (for
+        example that a cancelled call actually killed the child).
+    """
+    recorder = MagicMock(**mock_kwargs)
+    transport_calls: list[SimpleNamespace] = []
+    recorder.transport_calls = transport_calls
+    processes: list[_FakeProcess] = []
+    recorder.processes = processes
+    original_run = CliTransport.run
+
+    async def _recording_run(
+        transport: CliTransport,
+        cmd: list[str],
+        *,
+        input_text: str | None = None,
+        timeout: float,
+        cwd: str | None = None,
+    ) -> subprocess.CompletedProcess[str]:
+        """Record the transport-level call, then run the real implementation.
+
+        Args:
+            transport: The transport instance under test.
+            cmd: Full argv including the binary path.
+            input_text: Optional stdin payload.
+            timeout: Subprocess timeout in seconds.
+            cwd: Optional working directory.
+
+        Returns:
+            Whatever the real ``CliTransport.run`` returns.
+        """
+        transport_calls.append(
+            SimpleNamespace(
+                cmd=list(cmd),
+                input_text=input_text,
+                timeout=timeout,
+                cwd=cwd,
+            ),
+        )
+        return await original_run(
+            transport,
+            cmd,
+            input_text=input_text,
+            timeout=timeout,
+            cwd=cwd,
+        )
+
+    async def _fake_exec(*argv: str, **spawn_kwargs: Any) -> _FakeProcess:
+        """Spawn a fake process, recording the argv.
+
+        Args:
+            *argv: The command argv.
+            **spawn_kwargs: Ignored spawn keyword arguments.
+
+        Returns:
+            A fake process replaying the configured outcome.
+
+        Raises:
+            TypeError: When the configured result is not a CompletedProcess.
+        """
+        del spawn_kwargs
+        result = recorder(list(argv))
+        if result is HANG:
+            hung_process = _FakeProcess(None, hang=True)
+            processes.append(hung_process)
+            return hung_process
+        if not isinstance(result, subprocess.CompletedProcess):
+            raise TypeError(
+                "patch_cli_exec needs a CompletedProcess result; "
+                f"got {type(result).__name__}",
+            )
+        process = _FakeProcess(result)
+        processes.append(process)
+        return process
+
+    with (
+        patch("asyncio.create_subprocess_exec", side_effect=_fake_exec),
+        patch.object(CliTransport, "run", _recording_run),
+    ):
+        yield recorder
 
 
 class MockAIProvider(BaseAIProvider):
@@ -48,7 +248,7 @@ class MockAIProvider(BaseAIProvider):
         """Return a mock client."""
         return None
 
-    def complete(
+    async def complete(
         self,
         prompt: str,
         *,
@@ -60,7 +260,21 @@ class MockAIProvider(BaseAIProvider):
         model: str | None = None,
         cli_schema: object | None = None,
     ) -> AIResponse:
-        """Return the next queued response or a default."""
+        """Return the next queued response or a default.
+
+        Args:
+            prompt: The user prompt.
+            system: Optional system prompt.
+            max_tokens: Maximum tokens to generate.
+            timeout: Request timeout in seconds.
+            repo_root: Optional repository root.
+            use_one_shot: When True, avoid durable sessions.
+            model: Optional per-call model override.
+            cli_schema: Optional native CLI JSON schema request.
+
+        Returns:
+            The next queued response, or a generic default.
+        """
         with self._lock:
             self.calls.append(
                 {

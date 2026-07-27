@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import json
 import os
-from collections.abc import Iterator
+from collections.abc import AsyncIterator, Iterator
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
@@ -26,7 +26,7 @@ from lintro.ai.exceptions import (
 from lintro.ai.json_response import CliSchemaRequest
 from lintro.ai.providers.base import (
     AIResponse,
-    AIStreamResult,
+    AsyncAIStreamResult,
     BaseAIProvider,
     ProviderCapabilities,
 )
@@ -244,12 +244,12 @@ class OpenAIProvider(BaseAIProvider):
             api_key: The resolved API key.
 
         Returns:
-            openai.OpenAI: The API client.
+            openai.AsyncOpenAI: The async API client.
         """
         kwargs: dict[str, Any] = {"api_key": api_key}
         if self._base_url:
             kwargs["base_url"] = self._base_url
-        return openai.OpenAI(**kwargs)
+        return openai.AsyncOpenAI(**kwargs)
 
     def is_available(self) -> bool:
         """Return True when the configured transport is usable."""
@@ -277,7 +277,7 @@ class OpenAIProvider(BaseAIProvider):
             supports_streaming=True,
         )
 
-    def _complete_cli(
+    async def _complete_cli(
         self,
         prompt: str,
         *,
@@ -308,7 +308,7 @@ class OpenAIProvider(BaseAIProvider):
                 ),
             )
 
-        optional_args = self._cli.apply_optional_args(cmd, candidates)
+        optional_args = await self._cli.apply_optional_args(cmd, candidates)
         # The prompt is a trailing positional, so it must follow every flag.
         cmd.append(prompt)
 
@@ -316,7 +316,7 @@ class OpenAIProvider(BaseAIProvider):
             f"Codex CLI request: model={effective_model}, prompt_len={len(prompt)}",
         )
 
-        result = self._cli.run_guarded(
+        result = await self._cli.run_guarded(
             cmd,
             optional_args=optional_args,
             timeout=timeout,
@@ -329,7 +329,7 @@ class OpenAIProvider(BaseAIProvider):
         )
         return self._cli.parse_stdout(result.stdout)
 
-    def complete(
+    async def complete(
         self,
         prompt: str,
         *,
@@ -361,7 +361,7 @@ class OpenAIProvider(BaseAIProvider):
             combined = prompt
             if system:
                 combined = f"{system}\n\n---\n\n{prompt}"
-            return self._complete_cli(
+            return await self._complete_cli(
                 combined,
                 timeout=timeout,
                 repo_root=repo_root,
@@ -382,7 +382,7 @@ class OpenAIProvider(BaseAIProvider):
                 messages.append({"role": "system", "content": system})
             messages.append({"role": "user", "content": prompt})
 
-            response = client.chat.completions.create(
+            response = await client.chat.completions.create(
                 model=effective_model,
                 messages=messages,
                 max_tokens=effective_max,
@@ -408,7 +408,7 @@ class OpenAIProvider(BaseAIProvider):
                 provider=AIProvider.OPENAI,
             )
 
-    def stream_complete(
+    async def stream_complete(
         self,
         prompt: str,
         *,
@@ -416,7 +416,7 @@ class OpenAIProvider(BaseAIProvider):
         max_tokens: int = DEFAULT_PER_CALL_MAX_TOKENS,
         timeout: float = DEFAULT_TIMEOUT,
         model: str | None = None,
-    ) -> AIStreamResult:
+    ) -> AsyncAIStreamResult:
         """Stream a completion from the OpenAI API token-by-token.
 
         Args:
@@ -427,10 +427,10 @@ class OpenAIProvider(BaseAIProvider):
             model: Optional per-call model override.
 
         Returns:
-            An AIStreamResult wrapping the token stream.
+            An AsyncAIStreamResult wrapping the token stream.
         """
         if self._transport == AITransport.CLI:
-            return super().stream_complete(
+            return await super().stream_complete(
                 prompt,
                 system=system,
                 max_tokens=max_tokens,
@@ -454,9 +454,14 @@ class OpenAIProvider(BaseAIProvider):
         final_response: list[AIResponse] = []
         accumulated_text: list[str] = []
 
-        def _generate() -> Iterator[str]:
+        async def _generate() -> AsyncIterator[str]:
+            """Yield tokens from the OpenAI stream and capture usage.
+
+            Yields:
+                str: Content deltas in arrival order.
+            """
             with self._map_errors():
-                stream = client.chat.completions.create(
+                stream = await client.chat.completions.create(
                     model=effective_model,
                     messages=messages,
                     max_tokens=effective_max,
@@ -468,7 +473,7 @@ class OpenAIProvider(BaseAIProvider):
                 input_tokens = 0
                 output_tokens = 0
 
-                for chunk in stream:
+                async for chunk in stream:
                     if chunk.choices and chunk.choices[0].delta.content:
                         text = chunk.choices[0].delta.content
                         accumulated_text.append(text)
@@ -496,7 +501,7 @@ class OpenAIProvider(BaseAIProvider):
                 )
             return final_response[0]
 
-        return AIStreamResult(
+        return AsyncAIStreamResult(
             _chunks=_generate(),
             _on_done=_on_done,
         )

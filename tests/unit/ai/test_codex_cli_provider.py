@@ -14,6 +14,7 @@ from lintro.ai.enums import AITransport
 from lintro.ai.exceptions import AIAuthenticationError, AINotAvailableError
 from lintro.ai.providers.openai import OpenAIProvider, _find_codex
 from lintro.ai.registry import AIProvider
+from tests.unit.ai.conftest import patch_cli_exec
 
 
 @pytest.fixture()
@@ -64,18 +65,21 @@ class TestCodexCliInit:
 class TestCodexCliComplete:
     """Tests for codex exec completions."""
 
-    def test_success(self, _mock_codex_on_path: None) -> None:
+    async def test_success(self, _mock_codex_on_path: None) -> None:
         """Parse JSONL output from a successful codex exec invocation."""
         provider = OpenAIProvider(model="gpt-5.2-codex", transport=AITransport.CLI)
         stdout = _jsonl_response()
-        with patch("subprocess.run") as mock_run:
+        with patch_cli_exec() as mock_run:
             mock_run.return_value = subprocess.CompletedProcess(
                 args=[],
                 returncode=0,
                 stdout=stdout,
                 stderr="",
             )
-            response = provider.complete("Review this diff", repo_root="/tmp/repo")
+            response = await provider.complete(
+                "Review this diff",
+                repo_root="/tmp/repo",
+            )
 
         assert_that(response.content).contains("summary")
         assert_that(response.provider).is_equal_to(AIProvider.OPENAI)
@@ -83,11 +87,11 @@ class TestCodexCliComplete:
         assert_that(cmd).contains("exec", "--json", "--sandbox", "read-only")
         assert_that(cmd).contains("--model", "gpt-5.2-codex")
 
-    def test_auth_error(self, _mock_codex_on_path: None) -> None:
+    async def test_auth_error(self, _mock_codex_on_path: None) -> None:
         """Surface authentication failures from codex stderr."""
         provider = OpenAIProvider(transport=AITransport.CLI)
         with (
-            patch("subprocess.run") as mock_run,
+            patch_cli_exec() as mock_run,
             pytest.raises(AIAuthenticationError, match="login"),
         ):
             mock_run.return_value = subprocess.CompletedProcess(
@@ -96,7 +100,7 @@ class TestCodexCliComplete:
                 stdout="",
                 stderr="Not authenticated. Run codex login.",
             )
-            provider.complete("hello", repo_root="/tmp/repo")
+            await provider.complete("hello", repo_root="/tmp/repo")
 
 
 class TestFindCodex:

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 from assertpy import assert_that
 
@@ -66,7 +66,7 @@ def test_revert_fix_returns_false_when_apply_fails(tmp_path: Path) -> None:
 # -- refine_unverified_fixes -----------------------------------------------
 
 
-def test_refine_returns_empty_when_no_unverified_keys(tmp_path: Path) -> None:
+async def test_refine_returns_empty_when_no_unverified_keys(tmp_path: Path) -> None:
     """refine_unverified_fixes returns empty list when no detail matches."""
     suggestion = _make_suggestion()
     validation = ValidationResult(
@@ -75,6 +75,7 @@ def test_refine_returns_empty_when_no_unverified_keys(tmp_path: Path) -> None:
         details=["[E001] test.py:10 — fix verified"],
     )
     provider = MagicMock()
+    provider.complete = AsyncMock()
     ai_config = MagicMock()
     ai_config.fallback_models = []
     ai_config.max_retries = 0
@@ -82,7 +83,7 @@ def test_refine_returns_empty_when_no_unverified_keys(tmp_path: Path) -> None:
     ai_config.retry_max_delay = 30.0
     ai_config.retry_backoff_factor = 2.0
 
-    refined, cost = refine_unverified_fixes(
+    refined, cost = await refine_unverified_fixes(
         applied_suggestions=[suggestion],
         validation=validation,
         provider=provider,
@@ -94,7 +95,7 @@ def test_refine_returns_empty_when_no_unverified_keys(tmp_path: Path) -> None:
     assert_that(cost).is_equal_to(0.0)
 
 
-def test_refine_parses_detail_strings_correctly(tmp_path: Path) -> None:
+async def test_refine_parses_detail_strings_correctly(tmp_path: Path) -> None:
     """Parses '[code] file:line - issue still present' details."""
     suggestion = _make_suggestion(code="W123", line=42, file="src/main.py")
     validation = ValidationResult(
@@ -104,6 +105,7 @@ def test_refine_parses_detail_strings_correctly(tmp_path: Path) -> None:
     )
 
     provider = MagicMock()
+    provider.complete = AsyncMock()
     ai_config = MagicMock()
     ai_config.fallback_models = []
     ai_config.max_retries = 0
@@ -140,7 +142,7 @@ def test_refine_parses_detail_strings_correctly(tmp_path: Path) -> None:
         mock_parse.return_value = refined_sugg
         mock_apply.return_value = [refined_sugg]
 
-        refined, cost = refine_unverified_fixes(
+        refined, cost = await refine_unverified_fixes(
             applied_suggestions=[suggestion],
             validation=validation,
             provider=provider,
@@ -152,7 +154,7 @@ def test_refine_parses_detail_strings_correctly(tmp_path: Path) -> None:
     assert_that(cost).is_close_to(0.001, 0.0001)
 
 
-def test_refine_skips_when_revert_fails(tmp_path: Path) -> None:
+async def test_refine_skips_when_revert_fails(tmp_path: Path) -> None:
     """refine_unverified_fixes skips a suggestion when revert fails."""
     suggestion = _make_suggestion(code="E001", line=10)
     validation = ValidationResult(
@@ -162,6 +164,7 @@ def test_refine_skips_when_revert_fails(tmp_path: Path) -> None:
     )
 
     provider = MagicMock()
+    provider.complete = AsyncMock()
     ai_config = MagicMock()
     ai_config.fallback_models = []
     ai_config.max_retries = 0
@@ -171,7 +174,7 @@ def test_refine_skips_when_revert_fails(tmp_path: Path) -> None:
 
     with patch("lintro.ai.refinement._revert_fix") as mock_revert:
         mock_revert.return_value = False
-        refined, cost = refine_unverified_fixes(
+        refined, cost = await refine_unverified_fixes(
             applied_suggestions=[suggestion],
             validation=validation,
             provider=provider,
@@ -183,7 +186,7 @@ def test_refine_skips_when_revert_fails(tmp_path: Path) -> None:
     assert_that(cost).is_equal_to(0.0)
 
 
-def test_refine_skips_when_parse_returns_none(tmp_path: Path) -> None:
+async def test_refine_skips_when_parse_returns_none(tmp_path: Path) -> None:
     """refine_unverified_fixes skips when _parse_fix_response returns None."""
     suggestion = _make_suggestion(code="E001", line=10)
     validation = ValidationResult(
@@ -193,6 +196,7 @@ def test_refine_skips_when_parse_returns_none(tmp_path: Path) -> None:
     )
 
     provider = MagicMock()
+    provider.complete = AsyncMock()
     ai_config = MagicMock()
     ai_config.fallback_models = []
     ai_config.max_retries = 0
@@ -223,7 +227,7 @@ def test_refine_skips_when_parse_returns_none(tmp_path: Path) -> None:
 
         mock_parse.return_value = None
 
-        refined, _cost = refine_unverified_fixes(
+        refined, _cost = await refine_unverified_fixes(
             applied_suggestions=[suggestion],
             validation=validation,
             provider=provider,

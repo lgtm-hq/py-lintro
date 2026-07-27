@@ -208,16 +208,16 @@ def test_parse_summary_response_non_dict_json_int():
 # -- generate_summary ---------------------------------------------------------
 
 
-def test_generate_summary_returns_none_for_no_issues():
+async def test_generate_summary_returns_none_for_no_issues():
     """Returns None and skips provider when no issues exist."""
     provider = MockAIProvider()
     result = ToolResult(name="ruff", success=True, issues_count=0)
-    summary = generate_summary([result], provider)
+    summary = await generate_summary([result], provider)
     assert_that(summary).is_none()
     assert_that(provider.calls).is_empty()
 
 
-def test_generate_summary_generates_summary():
+async def test_generate_summary_generates_summary():
     """Verify generate_summary calls the provider and returns a parsed AISummary."""
     issues = [
         MockIssue(file="a.py", line=1, message="bad code", code="E501"),
@@ -245,13 +245,13 @@ def test_generate_summary_generates_summary():
     )
     provider = MockAIProvider(responses=[response])
 
-    summary = generate_summary([result], provider)
+    summary = await generate_summary([result], provider)
     assert_that(summary).is_not_none()
     assert_that(summary.overview).is_equal_to("One issue found")  # type: ignore[union-attr]  # assertpy is_not_none narrows this
     assert_that(provider.calls).is_length(1)
 
 
-def test_generate_summary_handles_provider_error():
+async def test_generate_summary_handles_provider_error():
     """Verify generate_summary returns None when the provider raises an error."""
     issues = [
         MockIssue(file="a.py", line=1, message="bad", code="E501"),
@@ -264,8 +264,8 @@ def test_generate_summary_handles_provider_error():
     )
 
     class ErrorProvider(MockAIProvider):
-        def complete(self, prompt, **kwargs):
+        async def complete(self, prompt, **kwargs):
             raise RuntimeError("API down")
 
-    summary = generate_summary([result], ErrorProvider())
+    summary = await generate_summary([result], ErrorProvider())
     assert_that(summary).is_none()

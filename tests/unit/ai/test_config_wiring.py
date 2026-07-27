@@ -59,7 +59,7 @@ def _make_fix_issues() -> tuple[
 @patch(f"{_PIPELINE}.review_fixes_interactive")
 @patch(f"{_PIPELINE}.apply_fixes")
 @patch(f"{_PIPELINE}.generate_fixes_from_params")
-def test_context_lines_flows_to_generate_fixes(
+async def test_context_lines_flows_to_generate_fixes(
     mock_generate_fixes,
     mock_apply_fixes,
     _mock_review,
@@ -74,7 +74,7 @@ def test_context_lines_flows_to_generate_fixes(
 
     ai_config = AIConfig(enabled=True, transport=AITransport.API, context_lines=42)
 
-    run_fix_pipeline(
+    await run_fix_pipeline(
         fix_issues=fix_issues,
         provider=MockAIProvider(),
         ai_config=ai_config,
@@ -97,7 +97,7 @@ def test_context_lines_flows_to_generate_fixes(
 @patch(f"{_PIPELINE}.review_fixes_interactive")
 @patch(f"{_PIPELINE}.apply_fixes")
 @patch(f"{_PIPELINE}.generate_fixes_from_params")
-def test_fix_search_radius_flows_to_apply_fixes(
+async def test_fix_search_radius_flows_to_apply_fixes(
     mock_generate_fixes,
     mock_apply_fixes,
     _mock_review,
@@ -120,7 +120,7 @@ def test_fix_search_radius_flows_to_apply_fixes(
         fix_search_radius=25,
     )
 
-    run_fix_pipeline(
+    await run_fix_pipeline(
         fix_issues=fix_issues,
         provider=MockAIProvider(),
         ai_config=ai_config,
@@ -143,7 +143,7 @@ def test_fix_search_radius_flows_to_apply_fixes(
 @patch(f"{_PIPELINE}.review_fixes_interactive")
 @patch(f"{_PIPELINE}.apply_fixes")
 @patch(f"{_PIPELINE}.generate_fixes_from_params")
-def test_retry_delays_flow_to_generate_fixes(
+async def test_retry_delays_flow_to_generate_fixes(
     mock_generate_fixes,
     mock_apply_fixes,
     _mock_review,
@@ -164,7 +164,7 @@ def test_retry_delays_flow_to_generate_fixes(
         retry_backoff_factor=3.0,
     )
 
-    run_fix_pipeline(
+    await run_fix_pipeline(
         fix_issues=fix_issues,
         provider=MockAIProvider(),
         ai_config=ai_config,
@@ -189,7 +189,7 @@ def test_retry_delays_flow_to_generate_fixes(
 @patch(f"{_PIPELINE}.review_fixes_interactive")
 @patch(f"{_PIPELINE}.apply_fixes")
 @patch(f"{_PIPELINE}.generate_fixes_from_params")
-def test_timeout_and_retries_flow_to_post_fix_summary(
+async def test_timeout_and_retries_flow_to_post_fix_summary(
     mock_generate_fixes,
     mock_apply_fixes,
     _mock_review,
@@ -222,7 +222,7 @@ def test_timeout_and_retries_flow_to_post_fix_summary(
         retry_backoff_factor=4.0,
     )
 
-    run_fix_pipeline(
+    await run_fix_pipeline(
         fix_issues=fix_issues,
         provider=MockAIProvider(),
         ai_config=ai_config,

@@ -5,6 +5,7 @@ Thin coordinator that delegates to pipeline and rerun services.
 
 from __future__ import annotations
 
+import asyncio
 import dataclasses
 import os
 from pathlib import Path
@@ -40,6 +41,48 @@ if TYPE_CHECKING:
 
 
 def run_ai_enhancement(
+    *,
+    action: Action,
+    all_results: list[ToolResult],
+    lintro_config: LintroConfig,
+    logger: ThreadSafeConsoleLogger,
+    output_format: str,
+    ai_fix: bool = False,
+    transport: str | None = None,
+) -> AIResult:
+    """Run AI enhancement from synchronous code.
+
+    This is the sync/async boundary for the check/fix products: the whole
+    AI layer below it is async, and ``asyncio.run`` is entered exactly
+    once here so a single event loop (and a single provider HTTP client)
+    serves every call in the run.
+
+    Args:
+        action: The action being performed (CHECK or FIX).
+        all_results: Tool results from the linting run.
+        lintro_config: Full lintro configuration.
+        logger: Thread-safe console logger.
+        output_format: Output format (e.g. "terminal", "json").
+        ai_fix: Whether to generate AI fix suggestions.
+        transport: Optional CLI override for ``ai.transport``.
+
+    Returns:
+        AIResult with structured outcome data for exit code decisions.
+    """
+    return asyncio.run(
+        run_ai_enhancement_async(
+            action=action,
+            all_results=all_results,
+            lintro_config=lintro_config,
+            logger=logger,
+            output_format=output_format,
+            ai_fix=ai_fix,
+            transport=transport,
+        ),
+    )
+
+
+async def run_ai_enhancement_async(
     *,
     action: Action,
     all_results: list[ToolResult],
@@ -85,7 +128,7 @@ def run_ai_enhancement(
             )
 
         if action == Action.CHECK:
-            return _run_ai_check(
+            return await _run_ai_check(
                 all_results=all_results,
                 provider=provider,
                 ai_config=ai_config,
@@ -96,7 +139,7 @@ def run_ai_enhancement(
                 output_format=output_format,
             )
         elif action == Action.FIX:
-            return _run_ai_fix(
+            return await _run_ai_fix(
                 all_results=all_results,
                 provider=provider,
                 ai_config=ai_config,
@@ -121,7 +164,7 @@ def run_ai_enhancement(
         return AIResult(error=True)
 
 
-def _run_ai_check(
+async def _run_ai_check(
     *,
     all_results: list[ToolResult],
     provider: BaseAIProvider,
@@ -132,10 +175,24 @@ def _run_ai_check(
     workspace_root: Path,
     output_format: str = "auto",
 ) -> AIResult:
-    """Run AI summary and optional AI fix suggestions for check action."""
+    """Run AI summary and optional AI fix suggestions for check action.
+
+    Args:
+        all_results: Tool results from the linting run.
+        provider: AI provider instance.
+        ai_config: AI configuration.
+        logger: Thread-safe console logger.
+        is_json: Whether output is JSON.
+        ai_fix: Whether to generate AI fix suggestions.
+        workspace_root: Workspace root path.
+        output_format: Output format string.
+
+    Returns:
+        AIResult with structured outcome data.
+    """
     budget = CostBudget(max_cost_usd=ai_config.max_cost_usd)
 
-    summary = generate_summary(
+    summary = await generate_summary(
         all_results,
         provider,
         ai_config=ai_config,
@@ -203,7 +260,7 @@ def _run_ai_check(
                 fix_issue = dataclasses.replace(issue, file=str(resolved))
                 all_fix_issues.append((result, fix_issue))
 
-    return _collect_and_fix(
+    return await _collect_and_fix(
         fix_issues=all_fix_issues,
         provider=provider,
         ai_config=ai_config,
@@ -214,7 +271,7 @@ def _run_ai_check(
     )
 
 
-def _run_ai_fix(
+async def _run_ai_fix(
     *,
     all_results: list[ToolResult],
     provider: BaseAIProvider,
@@ -223,7 +280,19 @@ def _run_ai_fix(
     is_json: bool,
     workspace_root: Path,
 ) -> AIResult:
-    """Run AI fix suggestions for format action."""
+    """Run AI fix suggestions for format action.
+
+    Args:
+        all_results: Tool results from the linting run.
+        provider: AI provider instance.
+        ai_config: AI configuration.
+        logger: Thread-safe console logger.
+        is_json: Whether output is JSON.
+        workspace_root: Workspace root path.
+
+    Returns:
+        AIResult with structured outcome data.
+    """
     budget = CostBudget(max_cost_usd=ai_config.max_cost_usd)
 
     all_fix_issues: list[tuple[ToolResult, BaseIssue]] = []
@@ -252,7 +321,7 @@ def _run_ai_fix(
                 fix_issue = dataclasses.replace(issue, file=str(resolved))
                 all_fix_issues.append((result, fix_issue))
 
-    return _collect_and_fix(
+    return await _collect_and_fix(
         fix_issues=all_fix_issues,
         provider=provider,
         ai_config=ai_config,
@@ -263,7 +332,7 @@ def _run_ai_fix(
     )
 
 
-def _collect_and_fix(
+async def _collect_and_fix(
     *,
     fix_issues: list[tuple[ToolResult, BaseIssue]],
     provider: BaseAIProvider,
@@ -276,12 +345,24 @@ def _collect_and_fix(
     """Run the fix pipeline and build an AIResult.
 
     Shared by ``_run_ai_check`` and ``_run_ai_fix``.
+
+    Args:
+        fix_issues: Issues to attempt fixing, paired with their tool result.
+        provider: AI provider instance.
+        ai_config: AI configuration.
+        logger: Thread-safe console logger.
+        is_json: Whether output is JSON.
+        workspace_root: Workspace root path.
+        budget: Session cost budget tracker.
+
+    Returns:
+        AIResult with structured outcome data.
     """
     fixes_applied = 0
     fixes_failed = 0
     fix_suggestions: list[AIFixSuggestion] = []
     if fix_issues:
-        fixes_applied, fixes_failed, fix_suggestions = run_fix_pipeline(
+        fixes_applied, fixes_failed, fix_suggestions = await run_fix_pipeline(
             fix_issues=fix_issues,
             provider=provider,
             ai_config=ai_config,

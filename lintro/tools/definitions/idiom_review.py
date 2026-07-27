@@ -19,6 +19,7 @@ skipped result rather than failing the run.
 
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass
 from typing import cast
 
@@ -234,27 +235,18 @@ class IdiomReviewPlugin(BaseToolPlugin):
             IdiomReviewMode.BOTH.value,
         )
 
-        scoped = files[:max_files]
-        issues: list[IdiomReviewIssue] = []
-        signatures: list[Signature] = []
-
-        for file_path in scoped:
-            source = self._read_source(file_path)
-            if source is None:
-                continue
-            if run_per_file:
-                issues.extend(
-                    engine.review_file(
-                        file_path=file_path,
-                        source=source,
-                        language=language,
-                    ),
-                )
-            if run_dupe:
-                signatures.extend(extract_python_signatures(file_path, source))
-
-        if run_dupe:
-            issues.extend(engine.review_duplication(signatures))
+        # The engine is async end to end; this tool runs inside the
+        # synchronous plugin protocol, so ``asyncio.run`` is entered once
+        # here for the whole review rather than per provider call.
+        issues = asyncio.run(
+            self._collect_issues(
+                engine=engine,
+                scoped=files[:max_files],
+                run_per_file=run_per_file,
+                run_dupe=run_dupe,
+                language=language,
+            ),
+        )
 
         min_rank = _confidence_rank(min_conf)
         filtered = [i for i in issues if _confidence_rank(i.confidence) >= min_rank]
@@ -266,6 +258,50 @@ class IdiomReviewPlugin(BaseToolPlugin):
             issues_count=len(filtered),
             issues=filtered,
         )
+
+    async def _collect_issues(
+        self,
+        *,
+        engine: IdiomReviewEngine,
+        scoped: list[str],
+        run_per_file: bool,
+        run_dupe: bool,
+        language: str,
+    ) -> list[IdiomReviewIssue]:
+        """Drive the async engine over the scoped files.
+
+        Args:
+            engine: Configured idiom-review engine.
+            scoped: Absolute paths of files to review.
+            run_per_file: Whether to run the per-file review mode.
+            run_dupe: Whether to run the cross-file duplication mode.
+            language: Target language for the per-file prompts.
+
+        Returns:
+            All issues reported across the requested modes.
+        """
+        issues: list[IdiomReviewIssue] = []
+        signatures: list[Signature] = []
+
+        for file_path in scoped:
+            source = self._read_source(file_path)
+            if source is None:
+                continue
+            if run_per_file:
+                issues.extend(
+                    await engine.review_file(
+                        file_path=file_path,
+                        source=source,
+                        language=language,
+                    ),
+                )
+            if run_dupe:
+                signatures.extend(extract_python_signatures(file_path, source))
+
+        if run_dupe:
+            issues.extend(await engine.review_duplication(signatures))
+
+        return issues
 
     @staticmethod
     def _read_source(file_path: str) -> str | None:

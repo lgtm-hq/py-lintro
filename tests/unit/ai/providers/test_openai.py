@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Generator
 from types import SimpleNamespace
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from assertpy import assert_that
@@ -137,7 +137,7 @@ def test_openai_provider_get_client_no_key_raises():
             provider._get_client()
 
 
-def test_openai_complete_parses_response():
+async def test_openai_complete_parses_response():
     """complete() extracts content, tokens, and cost from SDK response."""
     with patch.object(mod, "_has_openai", True):
         provider = OpenAIProvider()
@@ -158,11 +158,11 @@ def test_openai_complete_parses_response():
         mock_response.usage = mock_usage
 
         mock_client = MagicMock()
-        mock_client.chat.completions.create.return_value = mock_response
+        mock_client.chat.completions.create = AsyncMock(return_value=mock_response)
         provider._client = mock_client
 
         with patch.dict("os.environ", {"TEST_KEY": "sk-test"}):
-            result = provider.complete(
+            result = await provider.complete(
                 "test prompt",
                 system="be helpful",
             )
@@ -182,7 +182,7 @@ def test_openai_complete_parses_response():
         )
 
 
-def test_openai_complete_without_system_prompt():
+async def test_openai_complete_without_system_prompt():
     """complete() omits system message when system is None."""
     with patch.object(mod, "_has_openai", True):
         provider = OpenAIProvider()
@@ -202,11 +202,11 @@ def test_openai_complete_without_system_prompt():
         mock_response.usage = mock_usage
 
         mock_client = MagicMock()
-        mock_client.chat.completions.create.return_value = mock_response
+        mock_client.chat.completions.create = AsyncMock(return_value=mock_response)
         provider._client = mock_client
 
         with patch.dict("os.environ", {"OPENAI_API_KEY": "sk-test"}):
-            provider.complete("prompt")
+            await provider.complete("prompt")
 
         call_kwargs = mock_client.chat.completions.create.call_args[1]
         assert_that(call_kwargs["messages"]).is_equal_to(
@@ -214,7 +214,7 @@ def test_openai_complete_without_system_prompt():
         )
 
 
-def test_openai_complete_handles_none_usage():
+async def test_openai_complete_handles_none_usage():
     """complete() handles None usage gracefully (tokens default to 0)."""
     with patch.object(mod, "_has_openai", True):
         provider = OpenAIProvider()
@@ -230,17 +230,17 @@ def test_openai_complete_handles_none_usage():
         mock_response.usage = None
 
         mock_client = MagicMock()
-        mock_client.chat.completions.create.return_value = mock_response
+        mock_client.chat.completions.create = AsyncMock(return_value=mock_response)
         provider._client = mock_client
 
         with patch.dict("os.environ", {"OPENAI_API_KEY": "sk-test"}):
-            result = provider.complete("prompt")
+            result = await provider.complete("prompt")
 
         assert_that(result.input_tokens).is_equal_to(0)
         assert_that(result.output_tokens).is_equal_to(0)
 
 
-def test_openai_complete_respects_max_tokens_cap():
+async def test_openai_complete_respects_max_tokens_cap():
     """complete() uses the lower of per-call and provider-level max_tokens."""
     with patch.object(mod, "_has_openai", True):
         provider = OpenAIProvider(max_tokens=2048)
@@ -258,11 +258,11 @@ def test_openai_complete_respects_max_tokens_cap():
         mock_response.usage = mock_usage
 
         mock_client = MagicMock()
-        mock_client.chat.completions.create.return_value = mock_response
+        mock_client.chat.completions.create = AsyncMock(return_value=mock_response)
         provider._client = mock_client
 
         with patch.dict("os.environ", {"OPENAI_API_KEY": "sk-test"}):
-            provider.complete("prompt", max_tokens=4096)
+            await provider.complete("prompt", max_tokens=4096)
 
         call_kwargs = mock_client.chat.completions.create.call_args[1]
         assert_that(call_kwargs["max_tokens"]).is_equal_to(2048)

@@ -18,6 +18,7 @@ from lintro.ai.exceptions import (
 )
 from lintro.ai.providers.cursor import CURSOR_MIN_TIMEOUT, CursorProvider, _find_agent
 from lintro.ai.registry import AIProvider
+from tests.unit.ai.conftest import HANG, patch_cli_exec
 
 
 @pytest.fixture()
@@ -81,7 +82,7 @@ def _fake_run_with_probes(
         stdout: Stdout to return for the actual completion call.
 
     Returns:
-        A callable suitable for ``patch("subprocess.run", side_effect=...)``.
+        A callable suitable for ``patch_cli_exec(side_effect=...)``.
     """
 
     def _run(
@@ -171,7 +172,7 @@ def test_cursor_provider_custom_model():
     assert_that(p.model_name).is_equal_to("claude-opus-4-8-thinking-high")
 
 
-def test_cursor_provider_is_available(provider):
+async def test_cursor_provider_is_available(provider):
     """Report available when agent binary is present."""
     assert_that(provider.is_available()).is_true()
 
@@ -179,17 +180,17 @@ def test_cursor_provider_is_available(provider):
 # -- CursorProvider.complete() ---------------------------------------------
 
 
-def test_complete_parses_successful_cli_json(provider):
+async def test_complete_parses_successful_cli_json(provider):
     """Parse successful CLI JSON into AIResponse."""
     stdout = _cli_json(result="review output")
-    with patch("subprocess.run") as mock_run:
+    with patch_cli_exec() as mock_run:
         mock_run.return_value = subprocess.CompletedProcess(
             args=[],
             returncode=0,
             stdout=stdout,
             stderr="",
         )
-        resp = provider.complete("Hello", repo_root="/tmp/repo")
+        resp = await provider.complete("Hello", repo_root="/tmp/repo")
     assert_that(resp.content).is_equal_to("review output")
     assert_that(resp.provider).is_equal_to(AIProvider.CURSOR)
     assert_that(resp.input_tokens).is_equal_to(100)
@@ -198,24 +199,21 @@ def test_complete_parses_successful_cli_json(provider):
     assert_that(cmd).contains("--workspace", "/tmp/repo")
 
 
-def test_complete_durable_session_uses_resume(provider):
+async def test_complete_durable_session_uses_resume(provider):
     """Second call in a durable session resumes the CLI session id."""
     stdout = _cli_json(result="ok")
-    with patch(
-        "subprocess.run",
-        side_effect=_fake_run_with_probes(stdout),
-    ) as mock_run:
+    with patch_cli_exec(side_effect=_fake_run_with_probes(stdout)) as mock_run:
         provider.begin_durable_session(repo_root="/tmp/repo")
-        provider.complete("first", repo_root="/tmp/repo")
-        provider.complete("second", repo_root="/tmp/repo")
+        await provider.complete("first", repo_root="/tmp/repo")
+        await provider.complete("second", repo_root="/tmp/repo")
         second_cmd = _completion_calls(mock_run)[1]
         assert_that(second_cmd).contains("--resume", "sess-123")
 
 
-def test_complete_one_shot_skips_resume(provider):
+async def test_complete_one_shot_skips_resume(provider):
     """One-shot calls do not resume an existing durable session."""
     stdout = _cli_json(result="ok")
-    with patch("subprocess.run") as mock_run:
+    with patch_cli_exec() as mock_run:
         mock_run.return_value = subprocess.CompletedProcess(
             args=[],
             returncode=0,
@@ -223,7 +221,7 @@ def test_complete_one_shot_skips_resume(provider):
             stderr="",
         )
         provider.begin_durable_session(repo_root="/tmp/repo")
-        provider.complete(
+        await provider.complete(
             "chunk",
             repo_root="/tmp/repo",
             use_one_shot=True,
@@ -232,54 +230,69 @@ def test_complete_one_shot_skips_resume(provider):
         assert_that(cmd).does_not_contain("--resume")
 
 
-def test_timeout_floor_is_six_hundred_seconds(provider):
+async def test_timeout_floor_is_six_hundred_seconds(provider):
     """Enforce Cursor CLI minimum timeout of 600 seconds."""
     stdout = _cli_json(result="ok")
-    with patch("subprocess.run") as mock_run:
+    with patch_cli_exec() as mock_run:
         mock_run.return_value = subprocess.CompletedProcess(
             args=[],
             returncode=0,
             stdout=stdout,
             stderr="",
         )
-        provider.complete("Hello", timeout=120.0, repo_root="/tmp/repo")
-    assert_that(mock_run.call_args.kwargs["timeout"]).is_equal_to(
+        await provider.complete("Hello", timeout=120.0, repo_root="/tmp/repo")
+    assert_that(mock_run.transport_calls[-1].timeout).is_equal_to(
         CURSOR_MIN_TIMEOUT,
     )
 
 
-def test_complete_prepends_system_prompt_via_stdin(provider):
+async def test_complete_prepends_system_prompt_via_stdin(provider):
     """Prepend system prompt to user message via stdin."""
     stdout = _cli_json(result="ok")
-    with patch("subprocess.run") as mock_run:
+    with patch_cli_exec() as mock_run:
         mock_run.return_value = subprocess.CompletedProcess(
             args=[],
             returncode=0,
             stdout=stdout,
             stderr="",
         )
-        provider.complete("user msg", system="sys prompt")
-        call_kwargs = mock_run.call_args
-        input_text = call_kwargs.kwargs.get("input", "")
+        await provider.complete("user msg", system="sys prompt")
+        input_text = mock_run.transport_calls[-1].input_text or ""
         assert_that(input_text).contains("sys prompt")
         assert_that(input_text).contains("user msg")
 
 
-def test_complete_raises_on_subprocess_timeout(provider):
+async def test_complete_raises_on_subprocess_timeout(provider):
     """Raise AIProviderError when CLI times out."""
+
+    def _hang_completion(cmd: list[str]) -> object:
+        """Answer the capability probes, then hang on the real call.
+
+        Args:
+            cmd: Argv the transport invoked.
+
+        Returns:
+            A probe result, or the HANG sentinel for the completion call.
+        """
+        if "--version" in cmd:
+            return subprocess.CompletedProcess(cmd, 0, "2026.07.09-a3815c0\n", "")
+        if "--help" in cmd:
+            return subprocess.CompletedProcess(cmd, 0, _AGENT_HELP, "")
+        return HANG
+
     with (
-        patch(
-            "subprocess.run",
-            side_effect=subprocess.TimeoutExpired(cmd="agent", timeout=60),
-        ),
+        # The agent CLI enforces a 600s floor (covered separately), so the
+        # floor is lowered here to keep the timeout path fast.
+        patch("lintro.ai.providers.cursor.CURSOR_MIN_TIMEOUT", 0.01),
+        patch_cli_exec(side_effect=_hang_completion),
         pytest.raises(AIProviderError, match="timed out"),
     ):
-        provider.complete("Hello")
+        await provider.complete("Hello", timeout=0.01)
 
 
-def test_complete_raises_auth_error(provider):
+async def test_complete_raises_auth_error(provider):
     """Raise AIAuthenticationError on auth failure stderr."""
-    with patch("subprocess.run") as mock_run:
+    with patch_cli_exec() as mock_run:
         mock_run.return_value = subprocess.CompletedProcess(
             args=[],
             returncode=1,
@@ -287,12 +300,12 @@ def test_complete_raises_auth_error(provider):
             stderr="Authentication required. Run 'agent login' first.",
         )
         with pytest.raises(AIAuthenticationError, match="login"):
-            provider.complete("Hello")
+            await provider.complete("Hello")
 
 
-def test_complete_raises_on_nonzero_exit(provider):
+async def test_complete_raises_on_nonzero_exit(provider):
     """Raise AIProviderError on non-zero CLI exit code."""
-    with patch("subprocess.run") as mock_run:
+    with patch_cli_exec() as mock_run:
         mock_run.return_value = subprocess.CompletedProcess(
             args=[],
             returncode=2,
@@ -300,12 +313,12 @@ def test_complete_raises_on_nonzero_exit(provider):
             stderr="something broke",
         )
         with pytest.raises(AIProviderError, match="exited with code 2"):
-            provider.complete("Hello")
+            await provider.complete("Hello")
 
 
-def test_complete_raises_on_invalid_json_stdout(provider):
+async def test_complete_raises_on_invalid_json_stdout(provider):
     """Raise AIProviderError when stdout is not valid JSON."""
-    with patch("subprocess.run") as mock_run:
+    with patch_cli_exec() as mock_run:
         mock_run.return_value = subprocess.CompletedProcess(
             args=[],
             returncode=0,
@@ -313,17 +326,17 @@ def test_complete_raises_on_invalid_json_stdout(provider):
             stderr="",
         )
         with pytest.raises(AIProviderError, match="invalid JSON"):
-            provider.complete("Hello")
+            await provider.complete("Hello")
 
 
-def test_complete_raises_on_cli_error_in_response(provider):
+async def test_complete_raises_on_cli_error_in_response(provider):
     """Raise AIProviderError when JSON reports is_error."""
     stdout = _cli_json(
         result="something failed",
         is_error=True,
         subtype="error",
     )
-    with patch("subprocess.run") as mock_run:
+    with patch_cli_exec() as mock_run:
         mock_run.return_value = subprocess.CompletedProcess(
             args=[],
             returncode=0,
@@ -331,116 +344,113 @@ def test_complete_raises_on_cli_error_in_response(provider):
             stderr="",
         )
         with pytest.raises(AIProviderError, match="reported error"):
-            provider.complete("Hello")
+            await provider.complete("Hello")
 
 
-def test_complete_appends_max_tokens_to_prompt(provider):
+async def test_complete_appends_max_tokens_to_prompt(provider):
     """Append token budget constraint to the CLI stdin prompt."""
     stdout = _cli_json(result="ok")
-    with patch("subprocess.run") as mock_run:
+    with patch_cli_exec() as mock_run:
         mock_run.return_value = subprocess.CompletedProcess(
             args=[],
             returncode=0,
             stdout=stdout,
             stderr="",
         )
-        provider.complete("Hello", max_tokens=512)
-        input_text = mock_run.call_args.kwargs.get("input", "")
+        await provider.complete("Hello", max_tokens=512)
+        input_text = mock_run.transport_calls[-1].input_text or ""
         assert_that(input_text).contains("Respond in at most 512 tokens")
 
 
-def test_complete_uses_minimum_timeout_for_agent(provider):
+async def test_complete_uses_minimum_timeout_for_agent(provider):
     """Agent CLI calls enforce a minimum subprocess timeout."""
     stdout = _cli_json(result="ok")
-    with patch("subprocess.run") as mock_run:
+    with patch_cli_exec() as mock_run:
         mock_run.return_value = subprocess.CompletedProcess(
             args=[],
             returncode=0,
             stdout=stdout,
             stderr="",
         )
-        provider.complete("Hello", timeout=45.0)
-        assert_that(mock_run.call_args.kwargs.get("timeout")).is_equal_to(
+        await provider.complete("Hello", timeout=45.0)
+        assert_that(mock_run.transport_calls[-1].timeout).is_equal_to(
             CURSOR_MIN_TIMEOUT,
         )
 
 
-def test_complete_estimates_nonzero_cost_from_cli_usage(provider):
+async def test_complete_estimates_nonzero_cost_from_cli_usage(provider):
     """Cursor prices reported usage with a non-zero floor for the budget."""
     stdout = _cli_json(result="ok", input_tokens=5000, output_tokens=2000)
-    with patch("subprocess.run") as mock_run:
+    with patch_cli_exec() as mock_run:
         mock_run.return_value = subprocess.CompletedProcess(
             args=[],
             returncode=0,
             stdout=stdout,
             stderr="",
         )
-        resp = provider.complete("Hello")
+        resp = await provider.complete("Hello")
     assert_that(resp.input_tokens).is_equal_to(5000)
     assert_that(resp.output_tokens).is_equal_to(2000)
     assert_that(resp.cost_estimate).is_greater_than(0.0)
 
 
-def test_complete_estimates_tokens_when_cli_omits_usage(provider):
+async def test_complete_estimates_tokens_when_cli_omits_usage(provider):
     """When the CLI omits usage, tokens are estimated locally from text."""
     stdout = _cli_json(
         result="a fairly long review answer",
         input_tokens=0,
         output_tokens=0,
     )
-    with patch("subprocess.run") as mock_run:
+    with patch_cli_exec() as mock_run:
         mock_run.return_value = subprocess.CompletedProcess(
             args=[],
             returncode=0,
             stdout=stdout,
             stderr="",
         )
-        resp = provider.complete("Hello there, please review this code carefully")
+        resp = await provider.complete("Hello there, please review this code carefully")
     assert_that(resp.input_tokens).is_greater_than(0)
     assert_that(resp.output_tokens).is_greater_than(0)
     assert_that(resp.cost_estimate).is_greater_than(0.0)
 
 
-def test_cursor_cost_accrues_into_budget(provider):
+async def test_cursor_cost_accrues_into_budget(provider):
     """A Cursor response's estimated cost is recorded by CostBudget."""
     stdout = _cli_json(result="ok", input_tokens=5000, output_tokens=2000)
     budget = CostBudget(max_cost_usd=1.0)
-    with patch("subprocess.run") as mock_run:
+    with patch_cli_exec() as mock_run:
         mock_run.return_value = subprocess.CompletedProcess(
             args=[],
             returncode=0,
             stdout=stdout,
             stderr="",
         )
-        resp = provider.complete("Hello")
+        resp = await provider.complete("Hello")
     budget.record(resp.cost_estimate)
     assert_that(budget.spent).is_greater_than(0.0)
 
 
-def test_complete_omits_trust_flag_by_default(provider):
+async def test_complete_omits_trust_flag_by_default(provider):
     """The '--trust' flag is absent unless workspace trust is opted in."""
     stdout = _cli_json(result="ok")
-    with patch("subprocess.run") as mock_run:
+    with patch_cli_exec() as mock_run:
         mock_run.return_value = subprocess.CompletedProcess(
             args=[],
             returncode=0,
             stdout=stdout,
             stderr="",
         )
-        provider.complete("Hello", repo_root="/tmp/repo")
+        await provider.complete("Hello", repo_root="/tmp/repo")
     cmd = mock_run.call_args.args[0]
     assert_that(cmd).does_not_contain("--trust")
 
 
-def test_complete_includes_trust_flag_when_opted_in(_mock_agent_on_path):
+async def test_complete_includes_trust_flag_when_opted_in(_mock_agent_on_path):
     """The '--trust' flag is present only when the opt-in is set."""
     trusting = CursorProvider(cursor_trust_workspace=True)
     stdout = _cli_json(result="ok")
-    with patch(
-        "subprocess.run",
-        side_effect=_fake_run_with_probes(stdout),
-    ) as mock_run:
-        trusting.complete("Hello", repo_root="/tmp/repo")
+    with patch_cli_exec(side_effect=_fake_run_with_probes(stdout)) as mock_run:
+        await trusting.complete("Hello", repo_root="/tmp/repo")
     cmd = _completion_calls(mock_run)[-1]
     assert_that(cmd).contains("--trust")
 
@@ -486,21 +496,21 @@ def test_extract_json_object_returns_original_when_no_json():
     ).is_equal_to(text)
 
 
-def test_extract_json_object_returns_empty_string_unchanged():
+async def test_extract_json_object_returns_empty_string_unchanged():
     """Return empty string unchanged."""
     assert_that(CursorProvider._extract_json_object("")).is_equal_to("")
 
 
-def test_complete_preserves_plain_text_with_braces(provider):
+async def test_complete_preserves_plain_text_with_braces(provider):
     """Do not truncate plain-text answers that contain balanced braces."""
     result_text = "Use destructuring like { userId } in your handler."
     stdout = _cli_json(result=result_text)
-    with patch("subprocess.run") as mock_run:
+    with patch_cli_exec() as mock_run:
         mock_run.return_value = subprocess.CompletedProcess(
             args=[],
             returncode=0,
             stdout=stdout,
             stderr="",
         )
-        resp = provider.complete("Hello")
+        resp = await provider.complete("Hello")
     assert_that(resp.content).is_equal_to(result_text)

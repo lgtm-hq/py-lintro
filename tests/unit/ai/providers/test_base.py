@@ -34,7 +34,7 @@ def test_ai_response_with_all_fields():
     assert_that(resp.cost_estimate).is_equal_to(0.005)
 
 
-def test_base_ai_provider_complete_subclass():
+async def test_base_ai_provider_complete_subclass():
     """A complete BaseAIProvider subclass can be instantiated."""
 
     class TestProvider(BaseAIProvider):
@@ -50,7 +50,7 @@ def test_base_ai_provider_complete_subclass():
         def _create_client(self, *, api_key: str) -> object:
             return None
 
-        def complete(
+        async def complete(
             self,
             prompt: str,
             *,
@@ -62,6 +62,21 @@ def test_base_ai_provider_complete_subclass():
             model: str | None = None,
             cli_schema: CliSchemaRequest | None = None,
         ) -> AIResponse:
+            """Return a canned response.
+
+            Args:
+                prompt: Ignored user prompt.
+                system: Ignored system prompt.
+                max_tokens: Ignored token cap.
+                timeout: Ignored timeout.
+                repo_root: Ignored repository root.
+                use_one_shot: Ignored session flag.
+                model: Ignored model override.
+                cli_schema: Ignored schema request.
+
+            Returns:
+                A canned response.
+            """
             del model, cli_schema
             return AIResponse(
                 content="ok",
@@ -72,7 +87,7 @@ def test_base_ai_provider_complete_subclass():
     assert_that(provider.name).is_equal_to("test")
     assert_that(provider.model_name).is_equal_to("test-model")
 
-    result = provider.complete("hello")
+    result = await provider.complete("hello")
     assert_that(result.content).is_equal_to("ok")
 
 

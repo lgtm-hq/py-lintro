@@ -9,7 +9,7 @@ from __future__ import annotations
 import json
 import os
 import threading
-from collections.abc import Iterator
+from collections.abc import AsyncIterator, Iterator
 from contextlib import contextmanager
 from typing import Any
 
@@ -26,7 +26,7 @@ from lintro.ai.exceptions import (
 from lintro.ai.json_response import CliSchemaRequest
 from lintro.ai.providers.base import (
     AIResponse,
-    AIStreamResult,
+    AsyncAIStreamResult,
     BaseAIProvider,
     ProviderCapabilities,
 )
@@ -233,12 +233,12 @@ class AnthropicProvider(BaseAIProvider):
             api_key: The resolved API key.
 
         Returns:
-            anthropic.Anthropic: The API client.
+            anthropic.AsyncAnthropic: The async API client.
         """
         kwargs: dict[str, Any] = {"api_key": api_key}
         if self._base_url:
             kwargs["base_url"] = self._base_url
-        return anthropic.Anthropic(**kwargs)
+        return anthropic.AsyncAnthropic(**kwargs)
 
     def is_available(self) -> bool:
         """Return True when the configured transport is usable."""
@@ -284,7 +284,7 @@ class AnthropicProvider(BaseAIProvider):
         with self._session_lock:
             self._session_id = None
 
-    def _complete_cli(
+    async def _complete_cli(
         self,
         prompt: str,
         *,
@@ -331,7 +331,7 @@ class AnthropicProvider(BaseAIProvider):
                 OptionalArg(flag="--resume", values=(resume_session_id,)),
             )
 
-        optional_args = self._cli.apply_optional_args(cmd, candidates)
+        optional_args = await self._cli.apply_optional_args(cmd, candidates)
 
         logger.debug(
             f"Claude CLI request: model={effective_model}, "
@@ -339,7 +339,7 @@ class AnthropicProvider(BaseAIProvider):
             f"prompt_len={len(prompt)}",
         )
 
-        result = self._cli.run_guarded(
+        result = await self._cli.run_guarded(
             cmd,
             optional_args=optional_args,
             timeout=timeout,
@@ -360,7 +360,7 @@ class AnthropicProvider(BaseAIProvider):
                 self._session_id = session_id
         return response
 
-    def complete(
+    async def complete(
         self,
         prompt: str,
         *,
@@ -389,7 +389,7 @@ class AnthropicProvider(BaseAIProvider):
         """
         if self._transport == AITransport.CLI:
             del max_tokens
-            return self._complete_cli(
+            return await self._complete_cli(
                 prompt,
                 system=system,
                 timeout=timeout,
@@ -416,7 +416,7 @@ class AnthropicProvider(BaseAIProvider):
             if system:
                 kwargs["system"] = system
 
-            response = client.messages.create(**kwargs)
+            response = await client.messages.create(**kwargs)
 
             content = ""
             for block in response.content:
@@ -436,7 +436,7 @@ class AnthropicProvider(BaseAIProvider):
                 provider=AIProvider.ANTHROPIC,
             )
 
-    def stream_complete(
+    async def stream_complete(
         self,
         prompt: str,
         *,
@@ -444,7 +444,7 @@ class AnthropicProvider(BaseAIProvider):
         max_tokens: int = DEFAULT_PER_CALL_MAX_TOKENS,
         timeout: float = DEFAULT_TIMEOUT,
         model: str | None = None,
-    ) -> AIStreamResult:
+    ) -> AsyncAIStreamResult:
         """Stream a completion from the Anthropic API token-by-token.
 
         Args:
@@ -455,10 +455,10 @@ class AnthropicProvider(BaseAIProvider):
             model: Optional per-call model override.
 
         Returns:
-            An AIStreamResult wrapping the token stream.
+            An AsyncAIStreamResult wrapping the token stream.
         """
         if self._transport == AITransport.CLI:
-            return super().stream_complete(
+            return await super().stream_complete(
                 prompt,
                 system=system,
                 max_tokens=max_tokens,
@@ -485,11 +485,17 @@ class AnthropicProvider(BaseAIProvider):
 
         final_response: list[AIResponse] = []
 
-        def _generate() -> Iterator[str]:
+        async def _generate() -> AsyncIterator[str]:
+            """Yield tokens from the Anthropic stream and capture usage.
+
+            Yields:
+                str: Text deltas in arrival order.
+            """
             with self._map_errors():
-                with client.messages.stream(**kwargs) as stream:
-                    yield from stream.text_stream
-                    final_message = stream.get_final_message()
+                async with client.messages.stream(**kwargs) as stream:
+                    async for text in stream.text_stream:
+                        yield text
+                    final_message = await stream.get_final_message()
 
                 input_tokens = final_message.usage.input_tokens
                 output_tokens = final_message.usage.output_tokens
@@ -512,7 +518,7 @@ class AnthropicProvider(BaseAIProvider):
                 )
             return final_response[0]
 
-        return AIStreamResult(
+        return AsyncAIStreamResult(
             _chunks=_generate(),
             _on_done=_on_done,
         )

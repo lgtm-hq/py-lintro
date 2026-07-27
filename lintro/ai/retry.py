@@ -1,15 +1,19 @@
-"""Retry decorator for AI API calls with exponential backoff.
+"""Async retry decorator for AI API calls with exponential backoff.
 
 Retries transient failures (network errors, rate limits) while
 immediately propagating permanent failures (authentication errors).
+
+The decorator wraps *coroutine functions*: backoff waits use
+``asyncio.sleep`` so a retrying call never blocks the event loop or the
+other AI calls running concurrently on it.
 """
 
 from __future__ import annotations
 
+import asyncio
 import functools
 import random
-import time
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from typing import Any
 
 from loguru import logger
@@ -33,8 +37,13 @@ def with_retry(
     base_delay: float = DEFAULT_BASE_DELAY,
     max_delay: float = DEFAULT_MAX_DELAY,
     backoff_factor: float = DEFAULT_BACKOFF_FACTOR,
-) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
+) -> Callable[
+    [Callable[..., Awaitable[Any]]],
+    Callable[..., Awaitable[Any]],
+]:
     """Decorator for retrying AI API calls with exponential backoff and jitter.
+
+    Wraps a coroutine function and returns a coroutine function.
 
     Retries on ``AIProviderError`` and ``AIRateLimitError``.
     Does NOT retry on ``AIAuthenticationError`` (permanent failure).
@@ -73,14 +82,24 @@ def with_retry(
         raise ValueError(msg)
 
     def decorator(
-        func: Callable[..., Any],
-    ) -> Callable[..., Any]:
+        func: Callable[..., Awaitable[Any]],
+    ) -> Callable[..., Awaitable[Any]]:
+        """Wrap *func* with the configured retry loop.
+
+        Args:
+            func: The coroutine function to wrap.
+
+        Returns:
+            A coroutine function with retry behavior.
+        """
+
         @functools.wraps(func)
-        def wrapper(*args: Any, **kwargs: Any) -> Any:
+        async def wrapper(*args: Any, **kwargs: Any) -> Any:
+            """Await the wrapped call, retrying transient failures."""
             last_exception: Exception | None = None
             for attempt in range(max_retries + 1):
                 try:
-                    return func(*args, **kwargs)
+                    return await func(*args, **kwargs)
                 except AIAuthenticationError:
                     raise  # Never retry auth errors
                 except (AIProviderError, AIRateLimitError) as e:
@@ -100,7 +119,7 @@ def with_retry(
                         f"AI retry {attempt + 1}/{max_retries}: {e}, "
                         f"waiting {delay:.1f}s",
                     )
-                    time.sleep(delay)
+                    await asyncio.sleep(delay)
             assert (
                 last_exception is not None
             ), "Retry loop exhausted without capturing an exception"

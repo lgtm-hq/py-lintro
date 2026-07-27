@@ -242,7 +242,7 @@ def _parse_summary_response(
     )
 
 
-def _call_summary_provider(
+async def _call_summary_provider(
     prompt: str,
     *,
     provider: BaseAIProvider,
@@ -250,9 +250,20 @@ def _call_summary_provider(
     max_tokens: int,
     workspace_root: Path | None,
 ) -> AISummary | None:
-    """Shared call/parse helper for summary generation."""
+    """Shared call/parse helper for summary generation.
+
+    Args:
+        prompt: The fully built summary prompt.
+        provider: AI provider instance.
+        ai_config: AI configuration for retry, transport, and fallback.
+        max_tokens: Maximum tokens to request.
+        workspace_root: Optional workspace root forwarded as repo root.
+
+    Returns:
+        The parsed summary, or None when the call or parse fails.
+    """
     try:
-        response = call_ai(
+        response = await call_ai(
             provider=provider,
             ai_config=ai_config,
             user_prompt=prompt,
@@ -273,7 +284,7 @@ def _call_summary_provider(
         return None
 
 
-def generate_summary(
+async def generate_summary(
     results: Sequence[ToolResult],
     provider: BaseAIProvider,
     *,
@@ -340,7 +351,7 @@ def generate_summary(
         fallback_models=fallback_models,
     )
 
-    return _call_summary_provider(
+    return await _call_summary_provider(
         prompt,
         provider=provider,
         ai_config=effective_config,
@@ -349,7 +360,7 @@ def generate_summary(
     )
 
 
-def generate_post_fix_summary(
+async def generate_post_fix_summary(
     *,
     applied: int,
     rejected: int,
@@ -427,7 +438,7 @@ def generate_post_fix_summary(
         fallback_models=fallback_models,
     )
 
-    return _call_summary_provider(
+    return await _call_summary_provider(
         prompt,
         provider=provider,
         ai_config=effective_config,
