@@ -30,7 +30,7 @@ from lintro.formatters.formatter import (
     merge_detected_and_remaining,
 )
 from lintro.parsers.base_issue import BaseIssue
-from lintro.utils.json_output import serialize_tool_result
+from lintro.utils.json_output import serialize_tool_result, timed_out_tool_names
 from lintro.utils.output.helpers import sanitize_csv_value
 from lintro.utils.output.parser_registration import ParserError
 from lintro.utils.output.parser_registry import ParserRegistry
@@ -322,6 +322,9 @@ def write_output_file(
                 "total_issues": total_issues,
                 "total_fixed": total_fixed,
                 "tools_run": len(all_results),
+                # Timeouts are execution failures, not findings, so they never
+                # appear in ``total_issues``; a consumer reads them here.
+                "timed_out_tools": timed_out_tool_names(all_results),
             },
             "results": [],
         }

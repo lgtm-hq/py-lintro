@@ -21,6 +21,23 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.92.0] - 2026-07-27
+
+### Added
+
+- **ai**: hybrid capability guard for CLI transports (#1804) (a84a103)
+
+### Changed
+
+- **deps**: update dependency lgtm-hq/lgtm-ci to v0.62.0 (minor) (#1801) (3fe101a)
+- **deps**: update ghcr.io/lgtm-hq/lintro-tools:latest docker digest to e7afee4 (#1797)
+  (3c6b0a9)
+- **deps**: update ghcr.io/lgtm-hq/py-lintro docker tag to 0.91.58 (patch) (#1800)
+  (96a0cd2)
+- **deps**: update dependency lgtm-hq/lgtm-ci to v0.61.0 (minor) (#1795) (95e9580)
+- **deps**: update ghcr.io/lgtm-hq/py-lintro docker tag to 0.91.57 (patch) (#1798)
+  (8aa3617)
+
 ## [0.91.59] - 2026-07-27
 
 ### Changed

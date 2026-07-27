@@ -310,6 +310,7 @@ class PipAuditPlugin(BaseToolPlugin):
         output_chunks: list[str] = []
         all_success = True
         parse_failures_count = 0
+        any_timed_out = False
 
         for target in targets:
             source = _target_source(target)
@@ -331,6 +332,7 @@ class PipAuditPlugin(BaseToolPlugin):
                 # failure for this target and keep auditing the rest, so a
                 # timeout can never silently skip coverage of later targets.
                 all_success = False
+                any_timed_out = True
                 output_chunks.append(
                     f"pip-audit timed out after {timeout}s for {source}",
                 )
@@ -369,6 +371,7 @@ class PipAuditPlugin(BaseToolPlugin):
             issues_count=len(issues),
             issues=issues if issues else None,
             parse_failures_count=parse_failures_count,
+            timed_out=any_timed_out,
         )
 
     def fix(self, paths: list[str], options: dict[str, object]) -> ToolResult:

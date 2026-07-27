@@ -380,6 +380,7 @@ class PytestPlugin(BaseToolPlugin):
                     success=False,
                     output=f"Pytest execution timed out ({timeout_val}s)",
                     issues_count=0,
+                    timed_out=True,
                 )
 
             return self.error_handler.handle_timeout_error(

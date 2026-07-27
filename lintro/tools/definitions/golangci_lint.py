@@ -257,7 +257,7 @@ class GolangciLintPlugin(BaseToolPlugin):
 
         all_issues: list[GolangciLintIssue] = []
         failure_outputs: list[str] = []
-        timeout_failures = 0
+        any_timed_out = False
         overall_success = True
         for module_root in module_roots:
             try:
@@ -279,11 +279,10 @@ class GolangciLintPlugin(BaseToolPlugin):
                     tool_name="golangci_lint",
                 )
                 overall_success = False
-                # create_timeout_result() counts a timeout as one execution
-                # failure (issues_count=1) with an intentionally empty issues
-                # list. Preserve that count so a lone module timeout is not
-                # silently reported as issues_count=0.
-                timeout_failures += timeout_result.issues_count or 0
+                # A timeout is an execution failure, not a lint finding: it
+                # never inflates issues_count. The tool-level ``timed_out``
+                # flag (plus success=False) is what surfaces it instead.
+                any_timed_out = True
                 all_issues.extend(timeout_result.issues or [])
                 if timeout_result.output:
                     failure_outputs.append(timeout_result.output)
@@ -303,8 +302,9 @@ class GolangciLintPlugin(BaseToolPlugin):
             name=self.definition.name,
             success=overall_success,
             output="\n".join(failure_outputs) if failure_outputs else None,
-            issues_count=len(all_issues) + timeout_failures,
+            issues_count=len(all_issues),
             issues=all_issues,
+            timed_out=any_timed_out,
         )
 
     def fix(self, paths: list[str], options: dict[str, object]) -> ToolResult:
@@ -379,6 +379,7 @@ class GolangciLintPlugin(BaseToolPlugin):
             return ToolResult(
                 name=self.definition.name,
                 success=timeout_result.success,
+                timed_out=timeout_result.timed_out,
                 output=timeout_result.output,
                 issues_count=timeout_result.issues_count,
                 issues=timeout_result.issues,
@@ -425,6 +426,7 @@ class GolangciLintPlugin(BaseToolPlugin):
             return ToolResult(
                 name=self.definition.name,
                 success=timeout_result.success,
+                timed_out=timeout_result.timed_out,
                 output=timeout_result.output,
                 issues_count=initial_count,
                 issues=initial_issues,
@@ -453,6 +455,7 @@ class GolangciLintPlugin(BaseToolPlugin):
             return ToolResult(
                 name=self.definition.name,
                 success=timeout_result.success,
+                timed_out=timeout_result.timed_out,
                 output=timeout_result.output,
                 issues_count=initial_count,
                 issues=initial_issues,

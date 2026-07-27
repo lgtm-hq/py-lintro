@@ -263,6 +263,7 @@ class ShellcheckPlugin(BaseToolPlugin):
                 output="",
                 issues=[],
                 skipped=True,
+                timed_out=True,
             )
         except (OSError, ValueError, RuntimeError) as e:
             return FileProcessingResult(
@@ -297,6 +298,7 @@ class ShellcheckPlugin(BaseToolPlugin):
             success=result.all_success and result.total_issues == 0,
             output=result.build_output(timeout=ctx.timeout),
             issues_count=result.total_issues,
+            timed_out=result.timed_out,
             issues=result.all_issues,
         )
 

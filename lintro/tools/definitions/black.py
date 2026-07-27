@@ -201,6 +201,11 @@ class BlackPlugin(BaseToolPlugin):
             initial_count: Optional initial issues count for fix operations.
             cwd: Working directory for the tool result.
 
+        Follows the shared timeout accounting model (see
+        :mod:`lintro.tools.core.timeout_utils`): a timeout is an execution
+        failure reported via ``timed_out=True`` and ``success=False``, never a
+        lint finding, so it does not contribute to the issue counts.
+
         Returns:
             Standardized timeout error result.
         """
@@ -219,14 +224,16 @@ class BlackPlugin(BaseToolPlugin):
                 issues=[],
                 initial_issues_count=initial_count,
                 cwd=cwd,
+                timed_out=True,
             )
         return ToolResult(
             name=self.definition.name,
             success=False,
             output=timeout_msg,
-            issues_count=1,
+            issues_count=0,
             issues=[],
             cwd=cwd,
+            timed_out=True,
         )
 
     def check(self, paths: list[str], options: dict[str, object]) -> ToolResult:
