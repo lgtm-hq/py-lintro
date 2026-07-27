@@ -37,7 +37,6 @@ from lintro.ai.prompts.review import (
     format_changed_files_for_prompt,
     format_lint_results_section,
 )
-from lintro.ai.registry import AIProvider
 from lintro.ai.review.chunker import chunk_review_context
 from lintro.ai.review.enums.review_strictness import ReviewStrictness
 from lintro.ai.review.errors_taxonomy import (
@@ -588,21 +587,18 @@ def run_review(
     )
     tracker = progress or NullReviewProgress()
     budget = CostBudget(max_cost_usd=ai_config.max_cost_usd)
-    use_cursor_durable = (
-        provider.name == AIProvider.CURSOR
-        and len(chunks) == 1
-        and hasattr(provider, "begin_durable_session")
-    )
+    # Branch on the provider's declared capability, not its identity (#1241):
+    # a durable session only helps when the transport can resume one.
+    # begin/end_durable_session are concrete no-ops on BaseAIProvider, so no
+    # hasattr guard is needed -- every provider answers them.
+    use_durable_session = provider.capabilities.supports_sessions and len(chunks) == 1
     repo_root = context.repo_root or os.getcwd()
     use_one_shot = len(chunks) > 1
 
-    if use_cursor_durable:
-        provider.begin_durable_session(repo_root=repo_root)
-
-    tracker.on_start(total_chunks=len(chunks), depth=depth)
     total_findings = 0
     completed = False
     partial = False
+    durable_session_started = False
     stopped_reason = ""
     collected: list[_ChunkReviewPartial] = []
     partials: list[_ChunkReviewPartial] = []
@@ -610,6 +606,12 @@ def run_review(
     filtered_findings: tuple[ReviewFinding, ...] = ()
     started_at = time.monotonic()
     try:
+        # Open the session inside the try so a failure before or during
+        # on_start() still reaches the finally that tears it down.
+        if use_durable_session:
+            provider.begin_durable_session(repo_root=repo_root)
+            durable_session_started = True
+        tracker.on_start(total_chunks=len(chunks), depth=depth)
         partials = _review_all_chunks(
             chunks=chunks,
             context=context,
@@ -667,7 +669,7 @@ def run_review(
             cause=str(exc),
         )
     finally:
-        if use_cursor_durable and hasattr(provider, "end_durable_session"):
+        if durable_session_started:
             provider.end_durable_session()
         with suppress(Exception):
             if completed:

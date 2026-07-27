@@ -24,8 +24,14 @@ from lintro.ai.exceptions import (
     AIRateLimitError,
 )
 from lintro.ai.json_response import CliSchemaRequest
-from lintro.ai.providers.base import AIResponse, AIStreamResult, BaseAIProvider
-from lintro.ai.providers.cli_transport import CliTransport
+from lintro.ai.providers.base import (
+    AIResponse,
+    AIStreamResult,
+    BaseAIProvider,
+    ProviderCapabilities,
+)
+from lintro.ai.providers.cli_contracts import cli_contract_for
+from lintro.ai.providers.cli_transport import CliTransport, OptionalArg
 from lintro.ai.providers.constants import (
     DEFAULT_MAX_TOKENS,
     DEFAULT_PER_CALL_MAX_TOKENS,
@@ -73,6 +79,7 @@ class _CodexCliTransport(CliTransport):
             binary_name="Codex",
             install_hint="Install Codex CLI: https://developers.openai.com/codex/cli",
             api_key_env="CODEX_API_KEY",
+            contract=cli_contract_for(AIProvider.OPENAI),
         )
         self._model = model
 
@@ -250,6 +257,26 @@ class OpenAIProvider(BaseAIProvider):
             return _find_codex() is not None
         return super().is_available()
 
+    @property
+    def capabilities(self) -> ProviderCapabilities:
+        """Declare OpenAI capabilities for the configured transport.
+
+        Returns:
+            CLI transport accepts a native output schema but exposes no
+            resumable session to lintro; API transport streams natively.
+        """
+        if self._transport == AITransport.CLI:
+            return ProviderCapabilities(
+                supports_sessions=False,
+                supports_structured_output=True,
+                supports_streaming=False,
+            )
+        return ProviderCapabilities(
+            supports_sessions=False,
+            supports_structured_output=False,
+            supports_streaming=True,
+        )
+
     def _complete_cli(
         self,
         prompt: str,
@@ -272,16 +299,26 @@ class OpenAIProvider(BaseAIProvider):
             "--model",
             effective_model,
         ]
+        candidates: list[OptionalArg] = []
         if cli_schema is not None:
-            cmd.extend(["--output-schema", json.dumps(cli_schema.schema)])
+            candidates.append(
+                OptionalArg(
+                    flag="--output-schema",
+                    values=(json.dumps(cli_schema.schema),),
+                ),
+            )
+
+        optional_args = self._cli.apply_optional_args(cmd, candidates)
+        # The prompt is a trailing positional, so it must follow every flag.
         cmd.append(prompt)
 
         logger.debug(
             f"Codex CLI request: model={effective_model}, prompt_len={len(prompt)}",
         )
 
-        result = self._cli.run(
+        result = self._cli.run_guarded(
             cmd,
+            optional_args=optional_args,
             timeout=timeout,
             cwd=repo_root or os.getcwd(),
         )

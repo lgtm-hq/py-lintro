@@ -23,8 +23,13 @@ from lintro.ai.exceptions import (
     AIProviderError,
 )
 from lintro.ai.json_response import CliSchemaRequest
-from lintro.ai.providers.base import AIResponse, BaseAIProvider
-from lintro.ai.providers.cli_transport import CliTransport
+from lintro.ai.providers.base import (
+    AIResponse,
+    BaseAIProvider,
+    ProviderCapabilities,
+)
+from lintro.ai.providers.cli_contracts import cli_contract_for
+from lintro.ai.providers.cli_transport import CliTransport, OptionalArg
 from lintro.ai.providers.constants import (
     DEFAULT_MAX_TOKENS,
     DEFAULT_PER_CALL_MAX_TOKENS,
@@ -115,6 +120,7 @@ class _CursorCliTransport(CliTransport):
             binary_name="Cursor agent",
             install_hint="Install with: curl https://cursor.com/install -fsS | bash",
             api_key_env=DEFAULT_API_KEY_ENV,
+            contract=cli_contract_for(AIProvider.CURSOR),
         )
         self._model = model
 
@@ -200,6 +206,20 @@ class CursorProvider(BaseAIProvider):
         """
         return _find_agent() is not None
 
+    @property
+    def capabilities(self) -> ProviderCapabilities:
+        """Declare Cursor capabilities.
+
+        Returns:
+            The ``agent`` CLI resumes sessions but exposes neither native
+            structured output nor token streaming to lintro.
+        """
+        return ProviderCapabilities(
+            supports_sessions=True,
+            supports_structured_output=False,
+            supports_streaming=False,
+        )
+
     def begin_durable_session(self, *, repo_root: str) -> None:
         """Start a reusable CLI session for single-chunk reviews.
 
@@ -263,21 +283,23 @@ class CursorProvider(BaseAIProvider):
             "--print",
             "--output-format",
             "json",
+            "--mode",
+            "ask",
+            "--model",
+            effective_model,
+            "--workspace",
+            effective_root,
         ]
+
+        candidates: list[OptionalArg] = []
         if self._trust_workspace:
-            cmd.append("--trust")
-        cmd.extend(
-            [
-                "--mode",
-                "ask",
-                "--model",
-                effective_model,
-                "--workspace",
-                effective_root,
-            ],
-        )
+            candidates.append(OptionalArg(flag="--trust"))
         if resume_session and self._session_id is not None:
-            cmd.extend(["--resume", self._session_id])
+            candidates.append(
+                OptionalArg(flag="--resume", values=(self._session_id,)),
+            )
+
+        optional_args = self._cli.apply_optional_args(cmd, candidates)
 
         logger.debug(
             f"Cursor CLI request: model={effective_model}, "
@@ -287,8 +309,9 @@ class CursorProvider(BaseAIProvider):
         )
 
         effective_timeout = max(timeout, CURSOR_MIN_TIMEOUT)
-        result = self._cli.run(
+        result = self._cli.run_guarded(
             cmd,
+            optional_args=optional_args,
             input_text=combined_prompt,
             timeout=effective_timeout,
         )
