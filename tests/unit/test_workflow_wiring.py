@@ -1716,6 +1716,27 @@ def test_publish_pypi_sbom_fails_on_high_severity() -> None:
     assert_that(sbom["with"].get("scan-vulnerabilities")).is_true()
 
 
+@pytest.mark.parametrize(
+    "workflow_name",
+    ["publish-pypi-on-tag.yml", "sbom-on-main.yml"],
+)
+def test_sbom_callers_grant_contents_read_only(workflow_name: str) -> None:
+    """SBOM callers stay read-only on contents (#1807).
+
+    Generation, vulnerability scan and attestation only read the repository.
+    The ``contents: write`` release-asset upload moved into
+    ``reusable-sbom-release-upload.yml`` upstream (lgtm-ci#770), so a
+    ``contents: write`` grant here is silent over-permissioning on the
+    production tag-publish path.
+    """
+    permissions = _load_workflow(name=workflow_name)["jobs"]["sbom"]["permissions"]
+    assert_that(permissions).contains_entry({"contents": "read"})
+    # Attestation signing and code-scanning upload still need these.
+    assert_that(permissions).contains_entry({"security-events": "write"})
+    assert_that(permissions).contains_entry({"id-token": "write"})
+    assert_that(permissions).contains_entry({"attestations": "write"})
+
+
 # --- Binary build job timeouts (#1702) ---------------------------------------
 #
 # No job in build-binary.yml set timeout-minutes, so every binary build
