@@ -26,6 +26,7 @@ from __future__ import annotations
 import importlib
 import importlib.metadata
 import os
+from functools import lru_cache
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
@@ -495,6 +496,60 @@ def is_discovered() -> bool:
     return _discovered
 
 
+@lru_cache(maxsize=1)
+def _advertised_plugin_tool_names() -> frozenset[str]:
+    """Read the tool names advertised by installed plugin entry points.
+
+    Only the entry-point *metadata* is read: no plugin module is imported and
+    no plugin class is instantiated, so this stays cheap enough to call from
+    config parsing. The result is cached for the process lifetime because
+    installed distributions cannot change while lintro is running; call
+    :func:`reset_discovery` to drop the cache in tests.
+
+    Returns:
+        frozenset[str]: Lowercased entry-point names from both the current and
+        the legacy plugin entry-point groups.
+    """
+    names: set[str] = set()
+    for group in (ENTRY_POINT_GROUP, LEGACY_ENTRY_POINT_GROUP):
+        try:
+            entry_points = importlib.metadata.entry_points(group=group)
+        except (TypeError, AttributeError, KeyError) as e:
+            logger.debug(f"Could not read {group!r} entry points: {e}")
+            continue
+        for ep in entry_points:
+            name = str(getattr(ep, "name", "") or "").strip().lower()
+            if name:
+                names.add(name)
+    return frozenset(names)
+
+
+def get_known_plugin_tool_names() -> frozenset[str]:
+    """Return the tool names contributed by external plugins.
+
+    Combines two cheap sources so callers never pay for a full discovery pass:
+
+    - Names already present in :class:`~lintro.plugins.registry.ToolRegistry`,
+      but only when discovery has already run. This is the authoritative
+      spelling (the plugin's ``definition.name``) and costs nothing once
+      discovery has happened.
+    - Names advertised by installed ``lintro.tools`` entry points, read from
+      distribution metadata and cached. This covers the common case where a
+      caller runs before tool discovery.
+
+    Builtin tool names may also appear via the registry source; callers that
+    care about the distinction should union this with the builtin names they
+    already know.
+
+    Returns:
+        frozenset[str]: Lowercased tool names known to come from plugins.
+    """
+    names: set[str] = set(_advertised_plugin_tool_names())
+    if _discovered:
+        names.update(ToolRegistry.get_names())
+    return frozenset(names)
+
+
 def reset_discovery() -> None:
     """Reset the discovery state.
 
@@ -502,3 +557,4 @@ def reset_discovery() -> None:
     """
     global _discovered
     _discovered = False
+    _advertised_plugin_tool_names.cache_clear()

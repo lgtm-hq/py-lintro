@@ -15,6 +15,7 @@ from lintro.plugins.discovery import (
     discover_all_tools,
     discover_builtin_tools,
     discover_external_plugins,
+    get_known_plugin_tool_names,
     is_discovered,
     reset_discovery,
 )
@@ -396,3 +397,44 @@ def test_builtin_definitions_path_is_directory() -> None:
 def test_entry_point_group_value() -> None:
     """Entry point group is correct."""
     assert_that(ENTRY_POINT_GROUP).is_equal_to("lintro.tools")
+
+
+# =============================================================================
+# Tests for get_known_plugin_tool_names
+# =============================================================================
+
+
+def test_known_plugin_tool_names_reads_entry_point_metadata() -> None:
+    """Advertised entry-point names are returned without importing plugins."""
+    ep = MagicMock()
+    ep.name = "My-Plugin"
+    ep.load.side_effect = AssertionError("must not import the plugin")
+
+    try:
+        with patch("importlib.metadata.entry_points", return_value=[ep]):
+            names = get_known_plugin_tool_names()
+    finally:
+        # The lookup is process-cached; drop the fake so later tests in the
+        # session do not inherit a plugin that does not exist.
+        reset_discovery()
+
+    assert_that(names).contains("my-plugin")
+
+
+def test_known_plugin_tool_names_does_not_trigger_discovery() -> None:
+    """Asking for plugin names must not run a full discovery pass."""
+    with patch("importlib.metadata.entry_points", return_value=[]):
+        names = get_known_plugin_tool_names()
+
+    assert_that(names).is_empty()
+    assert_that(is_discovered()).is_false()
+
+
+def test_known_plugin_tool_names_includes_registry_after_discovery() -> None:
+    """Once discovery has run, registered tool names are included."""
+    discover_all_tools()
+
+    with patch("importlib.metadata.entry_points", return_value=[]):
+        names = get_known_plugin_tool_names()
+
+    assert_that(names).contains("ruff")
