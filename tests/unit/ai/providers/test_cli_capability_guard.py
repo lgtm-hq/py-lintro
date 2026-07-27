@@ -524,7 +524,7 @@ async def test_run_raises_not_available_when_binary_missing(
 
 async def test_run_kills_child_when_cancelled(transport: _FakeTransport) -> None:
     """Cancelling a call stops the child instead of orphaning the CLI."""
-    with patch_cli_exec(return_value=HANG):
+    with patch_cli_exec(return_value=HANG) as mock_run:
         task = asyncio.ensure_future(
             transport.run(["/usr/local/bin/fake", "--always"], timeout=60.0),
         )
@@ -535,6 +535,9 @@ async def test_run_kills_child_when_cancelled(transport: _FakeTransport) -> None
 
         with pytest.raises(asyncio.CancelledError):
             await task
+
+    assert_that(mock_run.processes).is_length(1)
+    assert_that(mock_run.processes[0].killed).is_true()
 
 
 async def test_run_decodes_stdout_and_stderr(transport: _FakeTransport) -> None:

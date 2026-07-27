@@ -134,11 +134,15 @@ def patch_cli_exec(**mock_kwargs: Any) -> Iterator[MagicMock]:
         ``transport_calls`` attribute records the ``CliTransport.run``
         arguments (``cmd``, ``input_text``, ``timeout``, ``cwd``) that the
         argv alone cannot show, since stdin and timeouts are applied after
-        the spawn.
+        the spawn. Its ``processes`` attribute records every spawned
+        :class:`_FakeProcess` so tests can assert on child lifecycle (for
+        example that a cancelled call actually killed the child).
     """
     recorder = MagicMock(**mock_kwargs)
     transport_calls: list[SimpleNamespace] = []
     recorder.transport_calls = transport_calls
+    processes: list[_FakeProcess] = []
+    recorder.processes = processes
     original_run = CliTransport.run
 
     async def _recording_run(
@@ -193,13 +197,17 @@ def patch_cli_exec(**mock_kwargs: Any) -> Iterator[MagicMock]:
         del spawn_kwargs
         result = recorder(list(argv))
         if result is HANG:
-            return _FakeProcess(None, hang=True)
+            hung_process = _FakeProcess(None, hang=True)
+            processes.append(hung_process)
+            return hung_process
         if not isinstance(result, subprocess.CompletedProcess):
             raise TypeError(
                 "patch_cli_exec needs a CompletedProcess result; "
                 f"got {type(result).__name__}",
             )
-        return _FakeProcess(result)
+        process = _FakeProcess(result)
+        processes.append(process)
+        return process
 
     with (
         patch("asyncio.create_subprocess_exec", side_effect=_fake_exec),
