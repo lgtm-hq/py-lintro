@@ -384,3 +384,41 @@ def test_known_keys_do_not_warn() -> None:
     )
 
     assert_that(output).is_empty()
+
+
+def test_externally_parsed_keys_do_not_warn() -> None:
+    """Documented keys parsed by other loaders must not trip the warning.
+
+    ``licenses`` is read by ``lintro.config.licenses_config`` and the ordering
+    keys by ``lintro.utils.config.get_tool_order_config``; none of them reach
+    this converter, so warning about them would cry wolf on valid config.
+    """
+    output = _capture_warnings(
+        lambda: _convert_pyproject_to_config(
+            {
+                "licenses": {"allow": ["MIT"]},
+                "tool_order": "custom",
+                "tool_order_custom": ["ruff", "black"],
+                "tool_priorities": {"ruff": 5},
+            },
+        ),
+    )
+
+    assert_that(output).is_empty()
+
+
+def test_plugin_cannot_shadow_reserved_config_keys(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An entry point named like a config key must not hijack that key.
+
+    Args:
+        monkeypatch: Pytest monkeypatch fixture.
+    """
+    _fake_plugin_names(monkeypatch, "fail-fast", "line-length")
+
+    result = _convert_pyproject_to_config({"fail_fast": True, "line_length": 100})
+
+    assert_that(result["execution"]["fail_fast"]).is_true()
+    assert_that(result["enforce"]["line_length"]).is_equal_to(100)
+    assert_that(result["tools"]).is_empty()

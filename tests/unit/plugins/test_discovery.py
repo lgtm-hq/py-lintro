@@ -7,11 +7,13 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 from assertpy import assert_that
+from loguru import logger
 
 from lintro.plugins.discovery import (
     BUILTIN_DEFINITIONS_PATH,
     ENTRY_POINT_GROUP,
     ENV_ENABLE_EXTERNAL_PLUGINS,
+    _load_external_entry_point,
     discover_all_tools,
     discover_builtin_tools,
     discover_external_plugins,
@@ -438,3 +440,101 @@ def test_known_plugin_tool_names_includes_registry_after_discovery() -> None:
         names = get_known_plugin_tool_names()
 
     assert_that(names).contains("ruff")
+
+
+def test_known_plugin_tool_names_survives_metadata_backend_failure() -> None:
+    """A broken metadata backend must not abort the caller (config loading).
+
+    ``get_known_plugin_tool_names`` runs inside pyproject config conversion,
+    so an unreadable dist-info directory has to degrade to "no plugin names"
+    rather than take valid core configuration down with it.
+    """
+    with patch(
+        "importlib.metadata.entry_points",
+        side_effect=OSError("dist-info unreadable"),
+    ):
+        names = get_known_plugin_tool_names()
+
+    assert_that(names).is_empty()
+
+
+def test_entry_point_name_divergence_is_reported(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A plugin registering under a different name than it advertises warns.
+
+    Config keys are matched against the advertised entry-point name before
+    discovery has run, so a divergent definition name would silently strand
+    the user's config under a key nothing ever reads.
+
+    Args:
+        monkeypatch: Pytest monkeypatch fixture.
+    """
+    instance = MagicMock()
+    instance.definition.name = "acmelint"
+    plugin_class = MagicMock(return_value=instance)
+
+    ep = MagicMock()
+    ep.name = "acme-tools"
+    ep.load.return_value = plugin_class
+
+    registry = MagicMock()
+    registry.is_registered.return_value = False
+
+    messages: list[str] = []
+    monkeypatch.setattr(
+        "lintro.plugins.discovery._validate_plugin_class",
+        lambda ep, plugin_class: True,
+    )
+    monkeypatch.setattr("lintro.plugins.discovery.ToolRegistry", registry)
+    handler_id = logger.add(
+        lambda message: messages.append(str(message)),
+        level="WARNING",
+    )
+    try:
+        loaded = _load_external_entry_point(ep=ep)
+    finally:
+        logger.remove(handler_id)
+
+    assert_that(loaded).is_equal_to(1)
+    output = "".join(messages)
+    assert_that(output).contains("acme-tools")
+    assert_that(output).contains("[tool.lintro.acmelint]")
+
+
+def test_matching_entry_point_name_stays_quiet(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Spelling-only differences are not a divergence and must not warn.
+
+    Args:
+        monkeypatch: Pytest monkeypatch fixture.
+    """
+    instance = MagicMock()
+    instance.definition.name = "acme_lint"
+    plugin_class = MagicMock(return_value=instance)
+
+    ep = MagicMock()
+    ep.name = "Acme-Lint"
+    ep.load.return_value = plugin_class
+
+    registry = MagicMock()
+    registry.is_registered.return_value = False
+
+    messages: list[str] = []
+    monkeypatch.setattr(
+        "lintro.plugins.discovery._validate_plugin_class",
+        lambda ep, plugin_class: True,
+    )
+    monkeypatch.setattr("lintro.plugins.discovery.ToolRegistry", registry)
+    handler_id = logger.add(
+        lambda message: messages.append(str(message)),
+        level="WARNING",
+    )
+    try:
+        loaded = _load_external_entry_point(ep=ep)
+    finally:
+        logger.remove(handler_id)
+
+    assert_that(loaded).is_equal_to(1)
+    assert_that("".join(messages)).does_not_contain("registers the tool under")

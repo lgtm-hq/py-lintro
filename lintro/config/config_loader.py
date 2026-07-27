@@ -499,22 +499,6 @@ def _convert_pyproject_to_config(data: dict[str, Any]) -> dict[str, Any]:
     # Add common aliases for tools
     tool_aliases = {"markdownlint-cli2": "markdownlint"}
 
-    # ToolName never sees entry-point-discovered tools, so config for an
-    # externally installed plugin used to be dropped on the floor (#1757).
-    # ``get_known_plugin_tool_names`` reads cached entry-point metadata and
-    # the already-populated registry; it never triggers a discovery pass.
-    for plugin_name in get_known_plugin_tool_names():
-        variants = {
-            plugin_name,
-            plugin_name.replace("_", "-"),
-            plugin_name.replace("-", "_"),
-        }
-        for variant in variants:
-            if variant not in known_tools:
-                tool_aliases.setdefault(variant, plugin_name)
-
-    known_tools.update(tool_aliases.keys())
-
     # Known execution settings
     execution_keys = {
         "enabled_tools",
@@ -530,10 +514,56 @@ def _convert_pyproject_to_config(data: dict[str, Any]) -> dict[str, Any]:
     # Known enforce settings (formerly global)
     enforce_keys = {"line_length", "target_python"}
 
-    # Sections that are valid under [tool.lintro] but are parsed by other
-    # loaders, not by this converter. Listing them keeps the unknown-key
-    # warning below from crying wolf about legitimate config.
-    externally_handled_sections = {"module_size", "plugins"}
+    # Keys and sections that are valid under [tool.lintro] but are parsed by
+    # other loaders, not by this converter: ``module_size`` and ``post_checks``
+    # by lintro.utils.config, ``licenses`` by lintro.config.licenses_config,
+    # ``plugins`` by lintro.plugins.discovery, and the ordering keys by
+    # ``get_tool_order_config``. Listing them keeps the unknown-key warning
+    # below from crying wolf about legitimate config.
+    externally_handled_sections = {
+        "licenses",
+        "module_size",
+        "plugins",
+        "tool_order_custom",
+        "tool_priorities",
+    }
+
+    # Names this converter interprets as config rather than as a tool section.
+    # A plugin must not be able to shadow them by advertising a colliding
+    # entry-point name.
+    reserved_keys = (
+        execution_keys
+        | enforce_keys
+        | externally_handled_sections
+        | {
+            "ai",
+            "defaults",
+            "output",
+            "review",
+            "score",
+            "tool",
+            "tools",
+            ConfigKey.POST_CHECKS.value.lower(),
+            ConfigKey.VERSIONS.value.lower(),
+        }
+    )
+    reserved_keys |= {name.replace("_", "-") for name in reserved_keys}
+
+    # ToolName never sees entry-point-discovered tools, so config for an
+    # externally installed plugin used to be dropped on the floor (#1757).
+    # ``get_known_plugin_tool_names`` reads cached entry-point metadata and
+    # the already-populated registry; it never triggers a discovery pass.
+    for plugin_name in get_known_plugin_tool_names():
+        variants = {
+            plugin_name,
+            plugin_name.replace("_", "-"),
+            plugin_name.replace("-", "_"),
+        }
+        for variant in variants:
+            if variant not in known_tools and variant not in reserved_keys:
+                tool_aliases.setdefault(variant, plugin_name)
+
+    known_tools.update(tool_aliases.keys())
 
     unknown_keys: list[str] = []
 

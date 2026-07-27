@@ -424,6 +424,21 @@ def _load_external_entry_point(*, ep: EntryPoint) -> int:
         instance = plugin_type()
         name = instance.definition.name.lower()
 
+        # Config keys are matched against the advertised entry-point name
+        # before discovery has run (see get_known_plugin_tool_names), but the
+        # tool is registered under its definition name. When the two diverge by
+        # more than spelling, config written under the entry-point name would
+        # be accepted and then never read. Say so instead of dropping it
+        # silently (#1757).
+        advertised = str(ep.name).strip().lower()
+        if advertised.replace("-", "_") != name.replace("-", "_"):
+            logger.warning(
+                f"Plugin entry point {ep.name!r} registers the tool under the "
+                f"different name {name!r}. Configure it as "
+                f"[tool.lintro.{name}]; config written under {ep.name!r} is "
+                "not applied.",
+            )
+
         # Builtins are discovered first and always win a name collision so a
         # third-party plugin can never silently shadow a curated core tool.
         if ToolRegistry.is_registered(name):
@@ -514,7 +529,11 @@ def _advertised_plugin_tool_names() -> frozenset[str]:
     for group in (ENTRY_POINT_GROUP, LEGACY_ENTRY_POINT_GROUP):
         try:
             entry_points = importlib.metadata.entry_points(group=group)
-        except (TypeError, AttributeError, KeyError) as e:
+        except Exception as e:  # noqa: BLE001 - config loading must not abort
+            # This runs inside config loading. A broken metadata backend (an
+            # unreadable dist-info directory, a third-party finder raising)
+            # must degrade to "no plugin names known", never take the whole
+            # configuration down with it.
             logger.debug(f"Could not read {group!r} entry points: {e}")
             continue
         for ep in entry_points:
