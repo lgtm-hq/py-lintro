@@ -1,23 +1,12 @@
-"""Review strictness / sensitivity presets."""
+"""Review strictness / sensitivity presets.
+
+Compatibility re-export: the enum now lives in :mod:`lintro.enums` so that
+``lintro.config.review_config`` can reference it without importing
+``lintro.ai`` (issue #724).
+"""
 
 from __future__ import annotations
 
-from enum import auto
-
-from lintro.enums.hyphenated_str_enum import HyphenatedStrEnum
+from lintro.enums.review_strictness import ReviewStrictness
 
 __all__ = ["ReviewStrictness"]
-
-
-class ReviewStrictness(HyphenatedStrEnum):
-    """How aggressively lintro review surfaces non-blocking findings.
-
-    * **focused** — merge blockers and behavioral issues; skip doc-only P3 nits.
-    * **balanced** — default; report checklist yes answers as findings.
-    * **thorough** — balanced plus explicit hunt for migration notes and doc
-      drift (prompt-only; does not change chunking).
-    """
-
-    FOCUSED = auto()
-    BALANCED = auto()
-    THOROUGH = auto()

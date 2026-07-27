@@ -240,6 +240,8 @@ def check_command(
         ",".join(tool_option_parts) if tool_option_parts else None
     )
 
+    from lintro.ai.interface import render_ai_status, run_ai_layer
+
     # Run with simplified approach
     exit_code: int = run_lint_tools_simple(
         action=DEFAULT_ACTION,
@@ -265,6 +267,8 @@ def check_command(
         transport=transport,
         score=score,
         fail_under=fail_under,
+        ai_runner=run_ai_layer,
+        ai_status_renderer=render_ai_status,
         no_art=no_art,
     )
 

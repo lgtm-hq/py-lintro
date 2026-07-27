@@ -27,10 +27,10 @@ from loguru import logger
 
 from lintro.ai.availability import is_ai_available
 from lintro.ai.budget import CostBudget
-from lintro.ai.enums import ConfidenceLevel
 from lintro.ai.exceptions import AIError
 from lintro.ai.paths import resolve_workspace_root
 from lintro.ai.providers import get_provider
+from lintro.enums.confidence_level import ConfidenceLevel
 from lintro.enums.tool_type import ToolType
 from lintro.models.core.tool_result import ToolResult
 from lintro.parsers.idiom_review.idiom_review_issue import IdiomReviewIssue

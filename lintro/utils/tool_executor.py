@@ -38,6 +38,7 @@ from lintro.utils.unified_config import UnifiedConfigManager
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
 
+    from lintro.models.core.ai_seam import AIOutcome, AIRunner, AIStatusRenderer
     from lintro.parsers.base_issue import BaseIssue
     from lintro.plugins.base import BaseToolPlugin
 
@@ -182,27 +183,6 @@ def _run_fix_with_retry(
         )
 
     return result
-
-
-def _warn_ai_fix_disabled(
-    *,
-    action: Action,
-    ai_fix: bool,
-    ai_lint_enabled: bool,
-    logger: Any,
-    output_format: str = "",
-) -> None:
-    """Warn when users request AI fixes but AI lint is disabled in config."""
-    if action != Action.CHECK or not ai_fix or ai_lint_enabled:
-        return
-    # Suppress plain-text warnings for machine-readable output formats
-    if output_format.lower() in ("json", "sarif"):
-        return
-    logger.console_output(
-        "AI fixes requested with --fix, but AI lint is disabled in "
-        ".lintro-config.yaml (set ai.enabled and ai.lint: true); "
-        "skipping AI enhancements.",
-    )
 
 
 def _display_fix_result(
@@ -529,6 +509,8 @@ def run_lint_tools_simple(
     fail_under: float | None = None,
     diff_base: str | None = None,
     no_art: bool = False,
+    ai_runner: AIRunner | None = None,
+    ai_status_renderer: AIStatusRenderer | None = None,
 ) -> int:
     """Simplified runner using Loguru-based logging with rich formatting.
 
@@ -575,6 +557,13 @@ def run_lint_tools_simple(
         no_art: When True, suppress decorative ASCII art regardless of the
             ``output.art`` config value. Art is also suppressed automatically
             when ``output.art`` is ``False`` or stdout is not a TTY.
+        ai_runner: Optional AI layer entry point injected by the caller
+            (``run_ai_layer`` from the AI interface facade). When None, no AI
+            enhancement runs and no AI exit-code adjustment is applied.
+        ai_status_renderer: Optional renderer for the AI rows of the
+            pre-execution configuration summary (``render_ai_status`` from the
+            AI interface facade). When None, the AI row reports a missing
+            configuration.
 
     Returns:
         Exit code (0 for success, 1 for failures).
@@ -582,7 +571,6 @@ def run_lint_tools_simple(
     Raises:
         TypeError: If a programming error occurs during tool execution.
         AttributeError: If a programming error occurs during tool execution.
-        Exception: Re-raised from AI hook when ``ai.fail_on_ai_error`` is enabled.
     """
     # Normalize action to enum
     action = normalize_action(action)
@@ -860,7 +848,11 @@ def run_lint_tools_simple(
             is_container=is_container,
             is_ci=is_ci,
             per_tool_auto_install=per_tool_auto if per_tool_auto else None,
-            ai_config=lintro_config.ai,
+            ai_status_lines=(
+                ai_status_renderer(ai_config=lintro_config.ai, is_ci=is_ci)
+                if ai_status_renderer is not None
+                else None
+            ),
         )
 
         # Confirmation prompt — skip when non-interactive
@@ -1075,44 +1067,21 @@ def run_lint_tools_simple(
             action,
         )
 
-    # AI enhancement via hook pattern
-    effective_ai_fix = ai_fix or lintro_config.ai.default_fix
-    _warn_ai_fix_disabled(
-        action=action,
-        ai_fix=effective_ai_fix,
-        ai_lint_enabled=lintro_config.ai.lint_enabled,
-        logger=logger,
-        output_format=output_format,
-    )
-
-    from lintro.ai.hook import AIPostExecutionHook
-
-    ai_hook = AIPostExecutionHook(
-        lintro_config,
-        ai_fix=effective_ai_fix,
-        transport=transport,
-    )
-    ai_result = None
-    if ai_hook.should_run(action):
-        try:
-            ai_result = ai_hook.execute(
-                action,
-                all_results,
-                console_logger=logger,
-                output_format=output_format,
-            )
-        except Exception as exc:
-            from loguru import logger as loguru_logger
-
-            loguru_logger.opt(exception=True).debug(f"AI hook failed: {exc}")
-            if getattr(lintro_config.ai, "fail_on_ai_error", False):
-                raise
-            if output_format.lower() not in ("json", "sarif"):
-                logger.console_output(f"Warning: AI enhancement failed: {exc}")
-            from lintro.ai.models import AIResult
-
-            ai_result = AIResult(error=True, message=str(exc))
-        if ai_result is not None:
+    # AI enhancement through the injected seam. The AI layer itself lives
+    # behind the AI interface facade; core never imports it (issue #724).
+    ai_outcome: AIOutcome | None = None
+    if ai_runner is not None:
+        ai_outcome = ai_runner(
+            action=action,
+            all_results=all_results,
+            lintro_config=lintro_config,
+            console_logger=logger,
+            output_format=output_format,
+            ai_fix=ai_fix,
+            transport=transport,
+        )
+        if ai_outcome.ran:
+            # The AI layer may mutate results in place, so re-aggregate.
             total_issues, total_fixed, total_remaining = aggregate_tool_results(
                 all_results,
                 action,
@@ -1129,13 +1098,11 @@ def run_lint_tools_simple(
         ),
     )
 
-    # AI-driven exit code adjustments
-    if ai_result is not None:
-        ai_config = lintro_config.ai
-        if ai_config.fail_on_unfixed and ai_result.unfixed_issues > 0:
-            final_exit_code = 1
-        if ai_config.fail_on_ai_error and ai_result.error:
-            final_exit_code = 1
+    # AI-driven exit code adjustments. Must stay after determine_exit_code and
+    # before the fail_under score gate, so the score gate can still fail a run
+    # that AI left at 0.
+    if ai_outcome is not None and ai_outcome.force_failure:
+        final_exit_code = 1
 
     # Compute the deterministic 0-100 health score from the aggregated results.
     from lintro.utils.health_score import health_score_for_results
