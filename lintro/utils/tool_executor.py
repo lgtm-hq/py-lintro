@@ -1171,22 +1171,19 @@ def run_lint_tools_simple(
             )
             print(json.dumps(json_data, indent=2))
         elif output_format.lower() == "sarif":
-            from lintro.ai.output.sarif import render_fixes_sarif
-            from lintro.ai.output.sarif_bridge import (
+            from lintro.utils.output.file_writer import build_doc_url_map
+            from lintro.utils.output.sarif import (
+                render_fixes_sarif,
                 standard_issues_from_results,
                 suggestions_from_results,
                 summary_from_results,
             )
-            from lintro.utils.output.file_writer import build_doc_url_map
 
-            suggestions = suggestions_from_results(all_results)
-            summary = summary_from_results(all_results)
-            standard_issues = standard_issues_from_results(all_results)
             sarif_json = render_fixes_sarif(
-                suggestions,
-                summary,
+                standard_issues_from_results(all_results),
                 doc_urls=build_doc_url_map(all_results) or None,
-                standard_issues=standard_issues,
+                ai_suggestions=suggestions_from_results(all_results),
+                ai_summary=summary_from_results(all_results),
             )
             print(sarif_json)
         elif output_format.lower() == "csv":
@@ -1291,23 +1288,20 @@ def run_lint_tools_simple(
                 if fmt == OutputFormat.SARIF:
                     from pathlib import Path
 
-                    from lintro.ai.output.sarif import write_sarif
-                    from lintro.ai.output.sarif_bridge import (
+                    from lintro.utils.output.file_writer import build_doc_url_map
+                    from lintro.utils.output.sarif import (
                         standard_issues_from_results,
                         suggestions_from_results,
                         summary_from_results,
+                        write_sarif,
                     )
-                    from lintro.utils.output.file_writer import build_doc_url_map
 
-                    suggestions = suggestions_from_results(all_results)
-                    summary = summary_from_results(all_results)
-                    standard_issues = standard_issues_from_results(all_results)
                     write_sarif(
-                        suggestions,
-                        summary,
+                        standard_issues_from_results(all_results),
                         output_path=Path(output_file),
                         doc_urls=build_doc_url_map(all_results) or None,
-                        standard_issues=standard_issues,
+                        ai_suggestions=suggestions_from_results(all_results),
+                        ai_summary=summary_from_results(all_results),
                     )
                 else:
                     write_output_file(

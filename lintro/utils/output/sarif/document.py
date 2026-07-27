@@ -1,8 +1,14 @@
-"""SARIF v2.1.0 output for AI findings.
+"""SARIF v2.1.0 output for lint findings.
 
-Generates SARIF (Static Analysis Results Interchange Format) output
-from AI fix suggestions and summaries. Compatible with GitHub Code
-Scanning, VS Code SARIF Viewer, and other SARIF-consuming tools.
+Generates SARIF (Static Analysis Results Interchange Format) output from
+normalized lint issues, with optional AI enrichment layered on top.
+Compatible with GitHub Code Scanning, VS Code SARIF Viewer, and other
+SARIF-consuming tools.
+
+This is a core output format: it renders standard lint issues with the AI
+layer entirely disabled. AI enrichment is injected by the caller and is
+typed loosely at runtime so this module carries no runtime dependency on
+:mod:`lintro.ai`.
 
 Spec: https://docs.oasis-open.org/sarif/sarif/v2.1.0/
 """
@@ -13,11 +19,14 @@ import json
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-from lintro.ai.enums import ConfidenceLevel, RiskLevel
-from lintro.ai.models import AIFixSuggestion, AISummary
+from lintro.enums.confidence_level import ConfidenceLevel
+from lintro.enums.risk_level import RiskLevel
 from lintro.enums.severity_level import SeverityLevel
+
+if TYPE_CHECKING:
+    from lintro.ai.models import AIFixSuggestion, AISummary
 
 SARIF_SCHEMA = (
     "https://raw.githubusercontent.com/oasis-tcs/sarif-spec"
@@ -187,29 +196,29 @@ def _add_standard_issues(
 
 
 def to_sarif(
-    suggestions: Sequence[AIFixSuggestion],
-    summary: AISummary | None = None,
+    standard_issues: Sequence[StandardIssue] | None = None,
     *,
     tool_name: str = "lintro-ai",
     tool_version: str = "",
     doc_urls: dict[str, str] | None = None,
-    standard_issues: Sequence[StandardIssue] | None = None,
+    ai_suggestions: Sequence[AIFixSuggestion] | None = None,
+    ai_summary: AISummary | None = None,
 ) -> dict[str, Any]:
     """Convert lint and AI findings to a SARIF v2.1.0 document.
 
     Standard lint issues are emitted directly from ``standard_issues`` so
     SARIF output is populated even without AI features. AI fix suggestions
-    are added additively on top.
+    are added additively on top when supplied by the caller.
 
     Args:
-        suggestions: AI fix suggestions to include as results.
-        summary: Optional AI summary to attach as run properties.
+        standard_issues: Normalized lint issues to emit as standard SARIF
+            results, independent of any AI enrichment.
         tool_name: Name for the SARIF tool driver.
         tool_version: Version string for the tool driver.
         doc_urls: Optional mapping of rule codes to documentation URLs.
             When provided, matching rules get a ``helpUri`` property.
-        standard_issues: Normalized lint issues to emit as standard SARIF
-            results, independent of any AI enrichment.
+        ai_suggestions: Optional AI fix suggestions to include as results.
+        ai_summary: Optional AI summary to attach as run properties.
 
     Returns:
         SARIF document as a dictionary.
@@ -225,7 +234,7 @@ def to_sarif(
             doc_urls=doc_urls,
         )
 
-    for s in suggestions:
+    for s in ai_suggestions or ():
         if s.tool_name and s.code:
             rule_id = f"{s.tool_name}/{s.code}"
         else:
@@ -319,20 +328,20 @@ def to_sarif(
     }
 
     # Attach summary as run properties when any field is populated
-    if summary and (
-        summary.overview
-        or summary.key_patterns
-        or summary.priority_actions
-        or summary.triage_suggestions
-        or summary.estimated_effort
+    if ai_summary and (
+        ai_summary.overview
+        or ai_summary.key_patterns
+        or ai_summary.priority_actions
+        or ai_summary.triage_suggestions
+        or ai_summary.estimated_effort
     ):
         run["properties"] = {
             "aiSummary": {
-                "overview": summary.overview,
-                "keyPatterns": summary.key_patterns,
-                "priorityActions": summary.priority_actions,
-                "triageSuggestions": summary.triage_suggestions,
-                "estimatedEffort": summary.estimated_effort,
+                "overview": ai_summary.overview,
+                "keyPatterns": ai_summary.key_patterns,
+                "priorityActions": ai_summary.priority_actions,
+                "triageSuggestions": ai_summary.triage_suggestions,
+                "estimatedEffort": ai_summary.estimated_effort,
             },
         }
 
@@ -344,66 +353,66 @@ def to_sarif(
 
 
 def render_fixes_sarif(
-    suggestions: Sequence[AIFixSuggestion],
-    summary: AISummary | None = None,
+    standard_issues: Sequence[StandardIssue] | None = None,
     *,
     tool_name: str = "lintro-ai",
     tool_version: str = "",
     doc_urls: dict[str, str] | None = None,
-    standard_issues: Sequence[StandardIssue] | None = None,
+    ai_suggestions: Sequence[AIFixSuggestion] | None = None,
+    ai_summary: AISummary | None = None,
 ) -> str:
     """Render lint and AI findings as a SARIF JSON string.
 
     Args:
-        suggestions: AI fix suggestions.
-        summary: Optional AI summary.
+        standard_issues: Normalized lint issues to emit as standard results.
         tool_name: Name for the SARIF tool driver.
         tool_version: Version string for the tool driver.
         doc_urls: Optional mapping of rule codes to documentation URLs.
-        standard_issues: Normalized lint issues to emit as standard results.
+        ai_suggestions: Optional AI fix suggestions.
+        ai_summary: Optional AI summary.
 
     Returns:
         Pretty-printed SARIF JSON string.
     """
     sarif = to_sarif(
-        suggestions,
-        summary,
+        standard_issues,
         tool_name=tool_name,
         tool_version=tool_version,
         doc_urls=doc_urls,
-        standard_issues=standard_issues,
+        ai_suggestions=ai_suggestions,
+        ai_summary=ai_summary,
     )
     return json.dumps(sarif, indent=2)
 
 
 def write_sarif(
-    suggestions: Sequence[AIFixSuggestion],
-    summary: AISummary | None = None,
+    standard_issues: Sequence[StandardIssue] | None = None,
     *,
     output_path: Path,
     tool_name: str = "lintro-ai",
     tool_version: str = "",
     doc_urls: dict[str, str] | None = None,
-    standard_issues: Sequence[StandardIssue] | None = None,
+    ai_suggestions: Sequence[AIFixSuggestion] | None = None,
+    ai_summary: AISummary | None = None,
 ) -> None:
     """Write lint and AI findings as a SARIF file.
 
     Args:
-        suggestions: AI fix suggestions.
-        summary: Optional AI summary.
+        standard_issues: Normalized lint issues to emit as standard results.
         output_path: Path to write the SARIF file.
         tool_name: Name for the SARIF tool driver.
         tool_version: Version string for the tool driver.
         doc_urls: Optional mapping of rule codes to documentation URLs.
-        standard_issues: Normalized lint issues to emit as standard results.
+        ai_suggestions: Optional AI fix suggestions.
+        ai_summary: Optional AI summary.
     """
     sarif = to_sarif(
-        suggestions,
-        summary,
+        standard_issues,
         tool_name=tool_name,
         tool_version=tool_version,
         doc_urls=doc_urls,
-        standard_issues=standard_issues,
+        ai_suggestions=ai_suggestions,
+        ai_summary=ai_summary,
     )
     output_path.parent.mkdir(parents=True, exist_ok=True)
     output_path.write_text(

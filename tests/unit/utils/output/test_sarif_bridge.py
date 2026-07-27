@@ -7,15 +7,16 @@ import json
 from assertpy import assert_that
 
 from lintro.ai.models import AISummary
-from lintro.ai.output.sarif import StandardIssue, to_sarif
-from lintro.ai.output.sarif_bridge import (
-    standard_issues_from_results,
-    suggestions_from_results,
-    summary_from_results,
-)
 from lintro.enums.severity_level import SeverityLevel
 from lintro.models.core.tool_result import ToolResult
 from lintro.parsers.ruff.ruff_issue import RuffIssue
+from lintro.utils.output.sarif import (
+    StandardIssue,
+    standard_issues_from_results,
+    suggestions_from_results,
+    summary_from_results,
+    to_sarif,
+)
 
 
 def test_suggestions_from_results_with_metadata() -> None:
@@ -162,11 +163,14 @@ def test_sarif_format_end_to_end() -> None:
         },
     )
 
-    from lintro.ai.output.sarif import render_fixes_sarif
+    from lintro.utils.output.sarif import render_fixes_sarif
 
     suggestions = suggestions_from_results([result])
     summary = summary_from_results([result])
-    sarif_json = render_fixes_sarif(suggestions, summary)
+    sarif_json = render_fixes_sarif(
+        ai_suggestions=suggestions,
+        ai_summary=summary,
+    )
 
     sarif = json.loads(sarif_json)
 
@@ -280,7 +284,7 @@ def test_standard_sarif_without_ai_has_result_per_issue() -> None:
     )
 
     standard = standard_issues_from_results([result])
-    sarif = to_sarif([], None, standard_issues=standard)
+    sarif = to_sarif(standard)
 
     assert_that(sarif["version"]).is_equal_to("2.1.0")
     assert_that(sarif).contains_key("$schema")
@@ -339,7 +343,7 @@ def test_standard_and_ai_results_are_additive() -> None:
 
     suggestions = suggestions_from_results([result])
     standard = standard_issues_from_results([result])
-    sarif = to_sarif(suggestions, None, standard_issues=standard)
+    sarif = to_sarif(standard, ai_suggestions=suggestions)
 
     results = sarif["runs"][0]["results"]
     assert_that(results).is_length(2)
@@ -376,7 +380,7 @@ def test_standard_issue_severity_maps_to_sarif_level() -> None:
         ),
     ]
 
-    sarif = to_sarif([], None, standard_issues=issues)
+    sarif = to_sarif(issues)
     levels = [r["level"] for r in sarif["runs"][0]["results"]]
 
     assert_that(levels).is_equal_to(["error", "warning", "note"])
