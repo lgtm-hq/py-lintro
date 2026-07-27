@@ -99,6 +99,7 @@ Scripts for GitHub Actions workflows and continuous integration.
 | `maintenance/delete-ci-ghcr-tags.sh` | Manually delete a specific ephemeral CI GHCR tag (sole-tag versions)       | `CI_TAG=<tag> ./scripts/ci/maintenance/delete-ci-ghcr-tags.sh`                              |
 | `maintenance/sweep-ci-ghcr-tags.sh`  | Age-based sweep of ephemeral `ci-*` GHCR tags (weekly ghcr-cleanup)        | `./scripts/ci/maintenance/sweep-ci-ghcr-tags.sh`                                            |
 | `promote-ci-docker-images.sh`        | Promote CI-validated image to release tags by digest retag                 | `./scripts/ci/promote-ci-docker-images.sh --help`                                           |
+| `smoke-test-ai-tools.sh`             | Run every baked agent CLI in the ai-tools staging image                    | `IMAGE=<ref> PLATFORM=linux/arm64 ./scripts/ci/smoke-test-ai-tools.sh`                      |
 | `cosign-sign-images.sh`              | Sign promoted image digests with Cosign keyless OIDC                       | `./scripts/ci/cosign-sign-images.sh --help`                                                 |
 | `coverage-badge-update.sh`           | Generate and update coverage badge                                         | `./scripts/ci/coverage-badge-update.sh --help`                                              |
 | `sbom-generate.sh`                   | Generate and export SBOMs via bomctl                                       | `./scripts/ci/sbom-generate.sh --help`                                                      |
@@ -230,6 +231,7 @@ Shared utilities and helper scripts.
 | `extract-version.py`                 | Print `version=X.Y.Z` from TOML                     | `python scripts/utils/extract-version.py`                               |
 | `find_comment_with_marker.py`        | Find GitHub comment ID containing a specific marker | `python scripts/utils/find_comment_with_marker.py <json> <marker>`      |
 | `generate_docs.py`                   | Generate documentation from docstrings              | `python scripts/utils/generate_docs.py`                                 |
+| `install-ai-tools.sh`                | Install the AI agent CLIs (claude, codex, agent)    | `./scripts/utils/install-ai-tools.sh --help`                            |
 | `install-tools.sh`                   | Install external tools (hadolint, prettier, etc.)   | `./scripts/utils/install-tools.sh [--dry-run] [--verbose] --local`      |
 | `install.sh`                         | Install Lintro with dependencies                    | `./scripts/utils/install.sh`                                            |
 | `json_encode_body.py`                | JSON encode comment body for GitHub API requests    | `python scripts/utils/json_encode_body.py <file_or_stdin>`              |
@@ -493,6 +495,32 @@ Installs all external tools required by Lintro.
 
 # Docker installation
 ./scripts/utils/install-tools.sh --docker
+```
+
+#### `install-ai-tools.sh`
+
+Installs the agent CLIs lintro's `--transport cli` providers shell out to. Used by
+`docker/ai-tools.Dockerfile` to build `ghcr.io/lgtm-hq/lintro-ai-tools`; not part of a
+normal local setup, where the CLIs are bring-your-own.
+
+**Features:**
+
+- Installs `claude`, `codex` and Cursor's `agent` under one prefix
+- Bundles the Node.js runtime those CLIs need, so the image's bun-as-node alias keeps
+  serving the lint toolchain unchanged
+- Pins every version and the Cursor tarball hashes through the environment, and verifies
+  each binary runs
+
+**Usage:**
+
+```bash
+NODE_VERSION=24.18.0 \
+CLAUDE_CODE_VERSION=2.1.220 \
+CODEX_VERSION=0.145.0 \
+CURSOR_AGENT_VERSION=2026.07.23-e383d2b \
+CURSOR_AGENT_SHA256_X64=<sha256 of the linux/x64 tarball> \
+CURSOR_AGENT_SHA256_ARM64=<sha256 of the linux/arm64 tarball> \
+  ./scripts/utils/install-ai-tools.sh
 ```
 
 #### `utils.sh`

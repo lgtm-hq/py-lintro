@@ -113,6 +113,21 @@
       "automerge": false
     },
     {
+      "description": "Agent CLIs release close to daily; batch them into one weekly PR — the hybrid capability guard (#1612) tolerates the lag",
+      "groupName": "ai agent CLIs",
+      "groupSlug": "ai-agent-clis",
+      "matchFileNames": [
+        "docker/ai-tools.Dockerfile"
+      ],
+      "matchPackageNames": [
+        "@anthropic-ai/claude-code",
+        "@openai/codex",
+        "node"
+      ],
+      "schedule": ["before 5am on monday"],
+      "automerge": false
+    },
+    {
       "description": "Regenerate version artifacts when tool version sources change",
       "matchManagers": [
         "custom.regex",
@@ -211,6 +226,42 @@
       ],
       "datasourceTemplate": "github-releases",
       "packageNameTemplate": "astral-sh/uv"
+    },
+    {
+      "description": "Bundled Node.js runtime in the lintro-ai-tools image; the agent CLIs are Node apps and the lint image aliases node to bun (checksum fetched at build time, so only the version pins here)",
+      "customType": "regex",
+      "managerFilePatterns": [
+        "docker/ai-tools.Dockerfile"
+      ],
+      "matchStrings": [
+        "ARG NODE_VERSION=(?<currentValue>[0-9]+\\.[0-9]+\\.[0-9]+)"
+      ],
+      "datasourceTemplate": "node-version",
+      "depNameTemplate": "node"
+    },
+    {
+      "description": "Claude Code CLI baked into the lintro-ai-tools image (no CURSOR_AGENT_VERSION equivalent: Cursor publishes no registry or release feed for the agent CLI, so that ARG is hand-bumped)",
+      "customType": "regex",
+      "managerFilePatterns": [
+        "docker/ai-tools.Dockerfile"
+      ],
+      "matchStrings": [
+        "ARG CLAUDE_CODE_VERSION=(?<currentValue>[0-9]+\\.[0-9]+\\.[0-9]+)"
+      ],
+      "datasourceTemplate": "npm",
+      "depNameTemplate": "@anthropic-ai/claude-code"
+    },
+    {
+      "description": "Codex CLI baked into the lintro-ai-tools image",
+      "customType": "regex",
+      "managerFilePatterns": [
+        "docker/ai-tools.Dockerfile"
+      ],
+      "matchStrings": [
+        "ARG CODEX_VERSION=(?<currentValue>[0-9]+\\.[0-9]+\\.[0-9]+)"
+      ],
+      "datasourceTemplate": "npm",
+      "depNameTemplate": "@openai/codex"
     },
     {
       "description": "Bundled Go toolchain in the lintro-tools image (checksum fetched at build time, so only the version pins here)",
