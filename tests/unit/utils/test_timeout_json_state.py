@@ -41,7 +41,7 @@ from lintro.utils.json_output import (
     serialize_tool_result,
     timed_out_tool_names,
 )
-from lintro.utils.tool_executor import _write_artifacts
+from lintro.utils.tool_executor import _run_fix_with_retry, _write_artifacts
 
 
 @dataclass
@@ -71,6 +71,25 @@ def _raise_timeout(*args: object, **kwargs: object) -> tuple[bool, str]:
     raise subprocess.TimeoutExpired(cmd=["stub"], timeout=1)
 
 
+def _assume_tool_installed(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Neutralize the pre-run version gate so the timeout path is reached.
+
+    ``prepare_execution`` verifies the tool binary before running it and
+    returns a ``skipped=True`` early result when it is missing. Test runners
+    without the npm-managed binaries (prettier, oxlint, ...) would therefore
+    never reach the subprocess stub, and the run would be reported as skipped
+    and successful rather than timed out. Stubbing the gate keeps these tests
+    hermetic and asserting the timeout contract on every runner.
+
+    Args:
+        monkeypatch: Fixture used to stub the version gate.
+    """
+    monkeypatch.setattr(
+        "lintro.plugins.execution_preparation.verify_tool_version",
+        lambda definition, cwd=None: None,
+    )
+
+
 def _timed_out_mypy_result(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
@@ -86,6 +105,7 @@ def _timed_out_mypy_result(
     """
     target = tmp_path / "sample.py"
     target.write_text("x: int = 1\n", encoding="utf-8")
+    _assume_tool_installed(monkeypatch)
     plugin = MypyPlugin()
     monkeypatch.setattr(plugin, "_run_subprocess", _raise_timeout)
     return plugin.check(paths=[str(target)], options={})
@@ -106,6 +126,7 @@ def _timed_out_prettier_result(
     """
     target = tmp_path / "sample.json"
     target.write_text('{"a":1}\n', encoding="utf-8")
+    _assume_tool_installed(monkeypatch)
     plugin = PrettierPlugin()
     monkeypatch.setattr(plugin, "_run_subprocess", _raise_timeout)
     return plugin.check(paths=[str(target)], options={})
@@ -475,3 +496,79 @@ def test_json_artifact_not_duplicated_when_already_configured(
         (tmp_path / ".lintro" / "artifacts" / "json" / "results.json").exists(),
     ).is_true()
     logger.console_output.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# The flag must survive result post-processing
+# ---------------------------------------------------------------------------
+
+
+def _timing_out_fix_tool(initial_issues_count: int) -> Any:
+    """Build a fix-capable tool whose every pass times out.
+
+    Args:
+        initial_issues_count: Genuine issues detected before the timeout.
+
+    Returns:
+        A stub exposing the ``fix`` shape the real implementations return on
+        timeout, with pre-timeout counts populated.
+    """
+    tool = MagicMock()
+    tool.definition.name = "ruff"
+    tool.fix.return_value = ToolResult(
+        name="ruff",
+        success=False,
+        output="ruff execution timed out (1s limit exceeded)",
+        issues_count=initial_issues_count,
+        issues=[],
+        initial_issues_count=initial_issues_count,
+        fixed_issues_count=0,
+        remaining_issues_count=initial_issues_count,
+        timed_out=True,
+    )
+    return tool
+
+
+@pytest.mark.parametrize("initial_issues_count", [0, 3])
+def test_fix_retry_merge_preserves_timed_out(initial_issues_count: int) -> None:
+    """The retry merge must not erase ``timed_out``.
+
+    ``_run_fix_with_retry`` rebuilds the ``ToolResult`` field-by-field after
+    the final pass. Omitting ``timed_out`` there would make every ``lintro
+    fmt`` run report ``timed_out: false`` for a tool that really did time out
+    — a false negative worse than the original bug, because a consumer would
+    read an infrastructure flake as a genuine lint failure.
+
+    Args:
+        initial_issues_count: Pre-timeout issue count, exercising both the
+            zero and non-zero merge branches.
+    """
+    tool = _timing_out_fix_tool(initial_issues_count=initial_issues_count)
+
+    merged = _run_fix_with_retry(tool=tool, paths=[], options={}, max_retries=3)
+
+    assert_that(merged.timed_out).is_true()
+    assert_that(merged.success).is_false()
+    assert_that(serialize_tool_result(merged, action=Action.FIX)["timed_out"]).is_true()
+    assert_that(timed_out_tool_names([merged])).is_equal_to(["ruff"])
+
+
+def test_fix_retry_merge_leaves_clean_result_not_timed_out() -> None:
+    """A successful fix run must not be mislabelled as timed out."""
+    tool = MagicMock()
+    tool.definition.name = "ruff"
+    tool.fix.return_value = ToolResult(
+        name="ruff",
+        success=True,
+        output="",
+        issues_count=0,
+        issues=[],
+        initial_issues_count=2,
+        fixed_issues_count=2,
+        remaining_issues_count=0,
+    )
+
+    merged = _run_fix_with_retry(tool=tool, paths=[], options={}, max_retries=3)
+
+    assert_that(merged.timed_out).is_false()
+    assert_that(timed_out_tool_names([merged])).is_empty()

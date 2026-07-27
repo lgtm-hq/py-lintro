@@ -314,6 +314,7 @@ class DotenvLinterPlugin(BaseToolPlugin):
                     output=recheck.output or recheck.error or fix_output,
                     issues=[replace(issue, fixable=False) for issue in initial_issues],
                     error=recheck.error or "dotenv-linter recheck failed",
+                    timed_out=recheck.timed_out,
                 ),
                 initial_count=len(initial_issues),
                 fixed_count=0,

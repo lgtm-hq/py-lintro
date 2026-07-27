@@ -144,7 +144,9 @@ def _run_fix_with_retry(
         remaining = _get_remaining_count(result)
 
     # Merge: keep initial_issues_count and initial_issues from first pass,
-    # rest from last pass
+    # rest from last pass. ``timed_out`` must be carried over from the final
+    # pass: rebuilding the result field-by-field would otherwise erase it, and
+    # a tool that really did time out would serialize ``timed_out: false``.
     if initial_issues_count is not None:
         fixed = max(0, initial_issues_count - remaining)
         result = ToolResult(
@@ -159,6 +161,7 @@ def _run_fix_with_retry(
             formatted_output=result.formatted_output,
             initial_issues=first_pass_initial_issues,
             cwd=result.cwd,
+            timed_out=result.timed_out,
         )
     elif first_pass_initial_issues is not None:
         # Preserve initial_issues even when initial_issues_count is absent
@@ -175,6 +178,7 @@ def _run_fix_with_retry(
             formatted_output=result.formatted_output,
             initial_issues=first_pass_initial_issues,
             cwd=result.cwd,
+            timed_out=result.timed_out,
         )
 
     return result

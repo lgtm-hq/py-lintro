@@ -354,6 +354,7 @@ class SqlfluffPlugin(BaseToolPlugin):
                     output=fix_output,
                     issues=check_issues,
                     error=str(e),
+                    timed_out=isinstance(e, subprocess.TimeoutExpired),
                 ),
                 initial_count=len(check_issues),
                 fixed_count=0,

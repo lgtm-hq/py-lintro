@@ -67,8 +67,11 @@ def test_execute_ruff_check_handles_format_timeout(
 
         assert_that(result.success).is_false()
         assert_that(result.output).contains("timed out")
-        # Should include lint issues count plus timeout issue
-        assert_that(result.issues_count).is_greater_than_or_equal_to(1)
+        # The timeout contributes nothing; only the genuine lint finding
+        # detected before it is counted, and ``timed_out`` carries the
+        # execution-failure signal (#1768).
+        assert_that(result.issues_count).is_equal_to(1)
+        assert_that(result.timed_out).is_true()
 
 
 def test_execute_ruff_check_subprocess_failure_respected(

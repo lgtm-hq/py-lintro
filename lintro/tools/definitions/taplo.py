@@ -348,6 +348,7 @@ class TaploPlugin(BaseToolPlugin):
             return self._handle_timeout_error(
                 timeout_val=ctx.timeout,
                 initial_count=initial_count,
+                initial_issues=initial_issues,
             )
 
         lint_issues = parse_taplo_output(output=lint_output)
@@ -370,6 +371,7 @@ class TaploPlugin(BaseToolPlugin):
             return self._handle_timeout_error(
                 timeout_val=ctx.timeout,
                 initial_count=initial_count,
+                initial_issues=initial_issues,
             )
 
         # Check for remaining formatting issues
@@ -383,6 +385,7 @@ class TaploPlugin(BaseToolPlugin):
             return self._handle_timeout_error(
                 timeout_val=ctx.timeout,
                 initial_count=initial_count,
+                initial_issues=initial_issues,
             )
 
         remaining_format_issues = parse_taplo_output(output=final_output)
@@ -398,6 +401,7 @@ class TaploPlugin(BaseToolPlugin):
             return self._handle_timeout_error(
                 timeout_val=ctx.timeout,
                 initial_count=initial_count,
+                initial_issues=initial_issues,
             )
 
         remaining_lint_issues = parse_taplo_output(output=final_lint_output)

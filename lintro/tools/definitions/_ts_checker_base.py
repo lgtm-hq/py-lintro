@@ -626,6 +626,7 @@ class TypeScriptCheckerPlugin(BaseToolPlugin):
         temp_files: list[Path] = []
         any_succeeded = False
         had_subproject_error = False
+        any_subproject_timed_out = False
 
         try:
             for tsconfig_info, project_files in partitions:
@@ -695,6 +696,8 @@ class TypeScriptCheckerPlugin(BaseToolPlugin):
                         e,
                     )
                     had_subproject_error = True
+                    if isinstance(e, subprocess.TimeoutExpired):
+                        any_subproject_timed_out = True
                     continue
 
                 if proc_success:
@@ -723,6 +726,7 @@ class TypeScriptCheckerPlugin(BaseToolPlugin):
                 output=output_text,
                 issues_count=total_issues,
                 issues=all_issues,
+                timed_out=any_subproject_timed_out,
             )
         finally:
             for temp in temp_files:
