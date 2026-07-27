@@ -2,8 +2,12 @@
 
 SARIF is a first-class lintro output format (``--output-format sarif``) and
 works with the AI layer fully disabled. AI enrichment is optional and is
-injected by callers, so nothing in this package imports :mod:`lintro.ai` at
-runtime.
+injected by callers: :mod:`lintro.utils.output.sarif.document` renders it
+without importing :mod:`lintro.ai` at all, and
+:mod:`lintro.utils.output.sarif.bridge` imports
+:mod:`lintro.ai.models` only when it has enrichment metadata to
+reconstruct. A standard-only render therefore never resolves an AI model
+through this package.
 """
 
 from lintro.utils.output.sarif.bridge import (
