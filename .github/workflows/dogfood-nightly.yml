@@ -29,12 +29,12 @@ jobs:
     # Same reusable workflow and tool options as the docker-ci.yml full run
     # (dogfooding-lint) so nightly coverage matches the pre-merge gate.
     # yamllint disable-line rule:line-length
-    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-quality-lint.yml@bab120fff62b419489d26a18b5cdccbc26703394 # v0.60.0
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-quality-lint.yml@c56ab38274492c6842807c6e1047b9000bd5c0a6 # v0.61.0
     permissions:
       contents: read
       packages: read # pull lintro-image from GHCR in reusable-quality-lint
     with:
-      tooling-ref: 'bab120fff62b419489d26a18b5cdccbc26703394' # v0.60.0
+      tooling-ref: 'c56ab38274492c6842807c6e1047b9000bd5c0a6' # v0.61.0
       job-name: '🌙 Nightly Dogfooding Lint'
       lintro-tool-options: >-
         pydoclint:timeout=120,bandit:timeout=120,prettier:timeout=120,mypy:timeout=120,osv_scanner:check_suppressions=false
@@ -48,7 +48,7 @@ jobs:
       # and Renovate has a version to bump. Do not hand-edit one site alone —
       # tests/unit/test_workflow_wiring.py fails on a partial bump.
       lintro-image: >-
-        ghcr.io/lgtm-hq/py-lintro:0.91.56@sha256:84059e02c1d0c3463f67316709b2bdc3ebdb44c661a57c2328c67faec4bde954
+        ghcr.io/lgtm-hq/py-lintro:0.91.58@sha256:9325cf9f498cda71c3a181002d3f23da8188188f507ab414b5defab0c15fa088
 
   verify-pinned-image-tools:
     name: 🔎 Verify Pinned Image Tools
@@ -93,7 +93,7 @@ jobs:
           # Same pinned release image dogfood-full lints with; bumped as one
           # set by Renovate (see the dogfood-full job above).
           IMAGE: >-
-            ghcr.io/lgtm-hq/py-lintro:0.91.56@sha256:84059e02c1d0c3463f67316709b2bdc3ebdb44c661a57c2328c67faec4bde954
+            ghcr.io/lgtm-hq/py-lintro:0.91.58@sha256:9325cf9f498cda71c3a181002d3f23da8188188f507ab414b5defab0c15fa088
         run: scripts/ci/verify-image-manifest-tools.sh
 
   # No-silent-skip gate (#1510, epic #1508): dogfood-full runs an external
@@ -169,7 +169,7 @@ jobs:
           # Same pinned release image dogfood-full lints with.
           # Bumped as one set by Renovate (see the dogfood-full job above).
           LINTRO_IMAGE: >-
-            ghcr.io/lgtm-hq/py-lintro:0.91.56@sha256:84059e02c1d0c3463f67316709b2bdc3ebdb44c661a57c2328c67faec4bde954
+            ghcr.io/lgtm-hq/py-lintro:0.91.58@sha256:9325cf9f498cda71c3a181002d3f23da8188188f507ab414b5defab0c15fa088
         # Memory trace (#1761): this job is repeatedly killed mid-lint with
         # "runner has received a shutdown signal" + container EOF, and memory
         # pressure is the leading hypothesis. Samples stream into this step's
@@ -189,11 +189,11 @@ jobs:
     # first failure opens `fix(ci): main workflow failed: dogfood-nightly`,
     # repeat failures comment on the open issue instead of piling up.
     # yamllint disable-line rule:line-length
-    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-main-failure-notifier.yml@bab120fff62b419489d26a18b5cdccbc26703394 # v0.60.0
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-main-failure-notifier.yml@c56ab38274492c6842807c6e1047b9000bd5c0a6 # v0.61.0
     permissions:
       actions: read # read workflow/job metadata for the failure context
       contents: read # repository context for the issue body
       issues: write # open or ping the deduplicated failure issue
     with:
       workflow-key: dogfood-nightly
-      tooling-ref: 'bab120fff62b419489d26a18b5cdccbc26703394' # v0.60.0
+      tooling-ref: 'c56ab38274492c6842807c6e1047b9000bd5c0a6' # v0.61.0

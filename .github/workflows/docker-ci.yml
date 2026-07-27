@@ -111,7 +111,7 @@ jobs:
         id: detect
         if: github.event_name == 'pull_request'
         # yamllint disable-line rule:line-length
-        uses: lgtm-hq/lgtm-ci/.github/actions/detect-changes@bab120fff62b419489d26a18b5cdccbc26703394 # v0.60.0
+        uses: lgtm-hq/lgtm-ci/.github/actions/detect-changes@c56ab38274492c6842807c6e1047b9000bd5c0a6 # v0.61.0
         with:
           # Pipeline relevance is NOT decided here (#1369): the resolve
           # step below computes it deny-by-default from the changed-file
@@ -459,12 +459,12 @@ jobs:
         needs.manifest-sync.result == 'skipped'
       )
     # yamllint disable-line rule:line-length
-    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-quality-lint.yml@bab120fff62b419489d26a18b5cdccbc26703394 # v0.60.0
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-quality-lint.yml@c56ab38274492c6842807c6e1047b9000bd5c0a6 # v0.61.0
     permissions:
       contents: read
       packages: read # pull lintro-image from GHCR in reusable-quality-lint
     with:
-      tooling-ref: 'bab120fff62b419489d26a18b5cdccbc26703394' # v0.60.0
+      tooling-ref: 'c56ab38274492c6842807c6e1047b9000bd5c0a6' # v0.61.0
       job-name: '🛠️ Dogfooding Lint'
       lintro-tool-options: >-
         pydoclint:timeout=120,bandit:timeout=120,prettier:timeout=120,mypy:timeout=120,osv_scanner:check_suppressions=false
@@ -478,7 +478,7 @@ jobs:
       # see renovate.json, customManager for ghcr.io/lgtm-hq/py-lintro.
       lintro-image: >-
         ${{ needs.docker-build.outputs.is-fork == 'true' &&
-        'ghcr.io/lgtm-hq/py-lintro:0.91.56@sha256:84059e02c1d0c3463f67316709b2bdc3ebdb44c661a57c2328c67faec4bde954'
+        'ghcr.io/lgtm-hq/py-lintro:0.91.58@sha256:9325cf9f498cda71c3a181002d3f23da8188188f507ab414b5defab0c15fa088'
         || format('ghcr.io/lgtm-hq/py-lintro:ci-{0}', github.run_id) }}
 
   # Changed-files dogfooding (#1361): PR-only counterpart of dogfooding-lint
@@ -578,7 +578,7 @@ jobs:
           # Renovate together with the other pin sites.
           LINTRO_IMAGE: >-
             ${{ needs.docker-build.outputs.is-fork == 'true' &&
-            'ghcr.io/lgtm-hq/py-lintro:0.91.56@sha256:84059e02c1d0c3463f67316709b2bdc3ebdb44c661a57c2328c67faec4bde954'
+            'ghcr.io/lgtm-hq/py-lintro:0.91.58@sha256:9325cf9f498cda71c3a181002d3f23da8188188f507ab414b5defab0c15fa088'
             || format('ghcr.io/lgtm-hq/py-lintro:ci-{0}', github.run_id) }}
         run: scripts/ci/dogfood-changed-files.sh
       - name: Upload linting report
@@ -689,7 +689,7 @@ jobs:
           # Renovate together with the other pin sites.
           LINTRO_IMAGE: >-
             ${{ needs.docker-build.outputs.is-fork == 'true' &&
-            'ghcr.io/lgtm-hq/py-lintro:0.91.56@sha256:84059e02c1d0c3463f67316709b2bdc3ebdb44c661a57c2328c67faec4bde954'
+            'ghcr.io/lgtm-hq/py-lintro:0.91.58@sha256:9325cf9f498cda71c3a181002d3f23da8188188f507ab414b5defab0c15fa088'
             || format('ghcr.io/lgtm-hq/py-lintro:ci-{0}', github.run_id) }}
           # Memory trace (#1761): this job is repeatedly killed mid-lint with
           # "runner has received a shutdown signal" + container EOF, and
@@ -717,12 +717,12 @@ jobs:
         needs.manifest-sync.result == 'skipped'
       )
     # yamllint disable-line rule:line-length
-    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-quality-lint.yml@bab120fff62b419489d26a18b5cdccbc26703394 # v0.60.0
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-quality-lint.yml@c56ab38274492c6842807c6e1047b9000bd5c0a6 # v0.61.0
     permissions:
       contents: read
       packages: read # pull lintro-image from GHCR in reusable-quality-lint
     with:
-      tooling-ref: 'bab120fff62b419489d26a18b5cdccbc26703394' # v0.60.0
+      tooling-ref: 'c56ab38274492c6842807c6e1047b9000bd5c0a6' # v0.61.0
       job-name: '🛠️ Dogfooding Lint (retry)'
       lintro-tool-options: >-
         pydoclint:timeout=120,bandit:timeout=120,prettier:timeout=120,mypy:timeout=120,osv_scanner:check_suppressions=false
@@ -734,7 +734,7 @@ jobs:
       # see renovate.json, customManager for ghcr.io/lgtm-hq/py-lintro.
       lintro-image: >-
         ${{ needs.docker-build.outputs.is-fork == 'true' &&
-        'ghcr.io/lgtm-hq/py-lintro:0.91.56@sha256:84059e02c1d0c3463f67316709b2bdc3ebdb44c661a57c2328c67faec4bde954'
+        'ghcr.io/lgtm-hq/py-lintro:0.91.58@sha256:9325cf9f498cda71c3a181002d3f23da8188188f507ab414b5defab0c15fa088'
         || format('ghcr.io/lgtm-hq/py-lintro:ci-{0}', github.run_id) }}
 
   # Rolls the effective dogfooding result up into a single required-check
@@ -845,7 +845,7 @@ jobs:
       github.event.pull_request.head.repo.fork == false &&
       github.event.pull_request.draft == false
     # yamllint disable-line rule:line-length
-    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-publish-quality-summary.yml@bab120fff62b419489d26a18b5cdccbc26703394 # v0.60.0
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-publish-quality-summary.yml@c56ab38274492c6842807c6e1047b9000bd5c0a6 # v0.61.0
     permissions:
       contents: read
       pull-requests: write # post lintro results as PR comment
@@ -859,7 +859,7 @@ jobs:
           needs.dogfooding_lint_retry.outputs.exit-code
         )
         || needs.dogfooding-lint.outputs.exit-code }}
-      tooling-ref: 'bab120fff62b419489d26a18b5cdccbc26703394' # v0.60.0
+      tooling-ref: 'c56ab38274492c6842807c6e1047b9000bd5c0a6' # v0.61.0
       job-name: '🛠️ Dogfooding Lint PR Comment'
       egress-policy: block
 
@@ -879,11 +879,11 @@ jobs:
         github.event.pull_request.draft == false
       )
     # yamllint disable-line rule:line-length
-    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-required-check.yml@bab120fff62b419489d26a18b5cdccbc26703394 # v0.60.0
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-required-check.yml@c56ab38274492c6842807c6e1047b9000bd5c0a6 # v0.61.0
     permissions:
       contents: read
     with:
-      tooling-ref: 'bab120fff62b419489d26a18b5cdccbc26703394' # v0.60.0
+      tooling-ref: 'c56ab38274492c6842807c6e1047b9000bd5c0a6' # v0.61.0
       job-name: '🛠️ Lintro Code Quality'
       runner-image: ubuntu-24.04
       # Consumes the rolled-up gate verdict (#1313), which itself mirrors
@@ -975,7 +975,7 @@ jobs:
           github.event_name == 'pull_request'
         continue-on-error: true
         # yamllint disable-line rule:line-length
-        uses: lgtm-hq/lgtm-ci/.github/actions/post-pr-comment@bab120fff62b419489d26a18b5cdccbc26703394 # v0.60.0
+        uses: lgtm-hq/lgtm-ci/.github/actions/post-pr-comment@c56ab38274492c6842807c6e1047b9000bd5c0a6 # v0.61.0
         with:
           file: security-audit-comment.txt
           marker: security-audit-report
