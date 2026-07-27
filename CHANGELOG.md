@@ -21,6 +21,24 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.91.57] - 2026-07-27
+
+### Changed
+
+- **deps**: update all major dependencies (major) (#1606) (1884d0a)
+- **deps**: update ghcr.io/lgtm-hq/py-lintro docker tag to 0.91.56 (patch) (#1789)
+  (6bf34f0)
+- **deps**: update lockfile (#1783) (eac1f56)
+- **deps**: update dependency lgtm-hq/lgtm-ci to v0.59.30 (patch) (#1782) (410c6ff)
+- **deps**: update dependency svelte to 5.56.7 (patch) (#1784) (c8b846b)
+- **deps**: update ghcr.io/lgtm-hq/lintro-tools:latest docker digest to 1b6b254 (#1755)
+  (5fbd2fd)
+- **deps**: update dependency lgtm-hq/lgtm-ci to v0.59.28 (patch) (#1776) (9e6558f)
+
+### Fixed
+
+- **html-validate**: make the bunx fallback fail actionably (#1786) (ed54f6e)
+
 ## [0.91.56] - 2026-07-26
 
 ### Fixed
