@@ -205,3 +205,18 @@ def test_ai_variant_publishes_to_its_own_package() -> None:
     assert_that(ai_job["with"]["image-name"]).is_not_equal_to(
         full_job["with"]["image-name"],
     )
+
+
+def test_ai_stage_is_built_on_prs() -> None:
+    """The AI stage is validated before a release depends on it.
+
+    docker-build-publish.yml never runs on PRs, so without a build here the
+    stage would first be exercised during a release.
+    """
+    workflow = _load_workflow(name="docker-ci.yml")
+    steps = workflow["jobs"]["docker-build"]["steps"]
+    ai_builds = [step for step in steps if step.get("with", {}).get("target") == "ai"]
+
+    assert_that(ai_builds).is_not_empty()
+    for step in ai_builds:
+        assert_that(step["with"]["push"]).is_false()
