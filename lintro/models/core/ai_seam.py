@@ -1,0 +1,86 @@
+"""Core-side seam types for the optional AI layer.
+
+The core runner (:mod:`lintro.utils.tool_executor`) must not import
+:mod:`lintro.ai`. Instead, callers that want AI enhancement inject the
+callables declared here, and the runner consumes the small core-owned
+:class:`AIOutcome` value they return. See issue #724.
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+from typing import TYPE_CHECKING, Any, Protocol
+
+if TYPE_CHECKING:
+    from lintro.config.lintro_config import LintroConfig
+    from lintro.enums.action import Action
+    from lintro.models.core.tool_result import ToolResult
+    from lintro.utils.console.logger import ThreadSafeConsoleLogger
+
+
+@dataclass(frozen=True)
+class AIOutcome:
+    """Result of an AI layer invocation, expressed in core-only terms.
+
+    Attributes:
+        ran: Whether the AI layer actually executed for this action. When
+            True the runner re-aggregates tool results, because the AI
+            layer may have mutated them in place.
+        force_failure: Whether AI outcomes force a non-zero exit code.
+    """
+
+    ran: bool = False
+    force_failure: bool = False
+
+
+class AIRunner(Protocol):
+    """Callable that runs the AI layer after tool execution."""
+
+    def __call__(
+        self,
+        *,
+        action: Action,
+        all_results: list[ToolResult],
+        lintro_config: LintroConfig,
+        console_logger: ThreadSafeConsoleLogger,
+        output_format: str,
+        ai_fix: bool = False,
+        transport: str | None = None,
+    ) -> AIOutcome:
+        """Run the AI layer and report its effect on the run.
+
+        Args:
+            action: The action that was performed.
+            all_results: Results from all tools, possibly mutated in place.
+            lintro_config: Full Lintro configuration.
+            console_logger: Logger for console output.
+            output_format: Output format string.
+            ai_fix: Whether AI fix suggestions were requested via CLI.
+            transport: Optional CLI override for ``ai.transport``.
+
+        Returns:
+            The :class:`AIOutcome` describing whether AI ran and whether it
+            forces a failing exit code.
+        """
+        ...  # pragma: no cover - protocol declaration
+
+
+class AIStatusRenderer(Protocol):
+    """Callable that renders pre-execution AI status lines."""
+
+    def __call__(
+        self,
+        *,
+        ai_config: Any | None,
+        is_ci: bool,
+    ) -> list[str]:
+        """Render the AI rows for the pre-execution configuration summary.
+
+        Args:
+            ai_config: AI configuration object, or None when unavailable.
+            is_ci: Whether the run is in a CI environment.
+
+        Returns:
+            Rich-markup lines to place in the summary table.
+        """
+        ...  # pragma: no cover - protocol declaration

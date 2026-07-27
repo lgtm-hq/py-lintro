@@ -253,6 +253,8 @@ def test_command(
         ",".join(tool_option_parts) if tool_option_parts else None
     )
 
+    from lintro.ai.interface import render_ai_status
+
     # Run with pytest tool
     exit_code: int = run_lint_tools_simple(
         action=DEFAULT_ACTION,
@@ -266,6 +268,7 @@ def test_command(
         verbose=verbose,
         raw_output=raw_output,
         output_file=output,
+        ai_status_renderer=render_ai_status,
         debug=debug,
         yes=yes,
     )

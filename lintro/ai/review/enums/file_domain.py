@@ -1,22 +1,12 @@
-"""File domain enumeration for review file classification."""
+"""File domain enumeration for review file classification.
+
+Compatibility re-export: the enum now lives in :mod:`lintro.enums` so that
+``lintro.config.review_config`` can reference it without importing
+``lintro.ai`` (issue #724).
+"""
 
 from __future__ import annotations
 
-from enum import auto
+from lintro.enums.file_domain import FileDomain
 
-from lintro.enums.hyphenated_str_enum import HyphenatedStrEnum
-
-
-class FileDomain(HyphenatedStrEnum):
-    """Domain labels assigned to changed files during review."""
-
-    SHELL = auto()
-    CI = auto()
-    SOURCE = auto()
-    TEST = auto()
-    DOCS = auto()
-    API = auto()
-    SECURITY = auto()
-    DEPS = auto()
-    CONFIG = auto()
-    E2E = auto()
+__all__ = ["FileDomain"]

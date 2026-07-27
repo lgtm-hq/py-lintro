@@ -1,4 +1,9 @@
-"""Unit tests for pre-execution summary AI rendering."""
+"""Unit tests for pre-execution summary AI rendering.
+
+The AI lines themselves are rendered by the AI layer (issue #724 PR 2); the
+summary only places pre-rendered lines in the table. These tests feed it the
+real AI renderer output so the end-to-end text stays pinned.
+"""
 
 from __future__ import annotations
 
@@ -10,13 +15,30 @@ from rich.console import Console
 
 from lintro.ai.config import AIConfig
 from lintro.ai.enums import AITransport
+from lintro.ai.interface import render_ai_status
 from lintro.ai.registry import AIProvider
 from lintro.utils.console.pre_execution_summary import print_pre_execution_summary
 
 
-def _render_summary(ai_config: AIConfig | None) -> str:
-    """Render the pre-execution summary and return plain text output."""
+def _render_summary(
+    ai_config: AIConfig | None,
+    *,
+    use_renderer: bool = True,
+) -> str:
+    """Render the pre-execution summary and return plain text output.
+
+    Args:
+        ai_config: AI configuration passed to the AI status renderer.
+        use_renderer: When False, no AI lines are supplied at all, mimicking a
+            caller that did not inject an AI status renderer.
+
+    Returns:
+        The recorded console text.
+    """
     console = Console(record=True, force_terminal=False, width=160)
+    ai_status_lines = (
+        render_ai_status(ai_config=ai_config, is_ci=False) if use_renderer else None
+    )
     with patch(
         "lintro.utils.console.pre_execution_summary.Console",
         return_value=console,
@@ -28,7 +50,7 @@ def _render_summary(ai_config: AIConfig | None) -> str:
             is_container=False,
             is_ci=False,
             per_tool_auto_install=None,
-            ai_config=ai_config,
+            ai_status_lines=ai_status_lines,
         )
     return console.export_text()
 
@@ -83,3 +105,11 @@ def test_pre_execution_summary_shows_ai_when_config_missing() -> None:
 
     assert_that(output).contains("AI")
     assert_that(output).contains("disabled (no config)")
+
+
+def test_pre_execution_summary_falls_back_without_ai_lines() -> None:
+    """Omitting the AI lines renders the same row as a missing config."""
+    with_renderer = _render_summary(ai_config=None)
+    without_renderer = _render_summary(ai_config=None, use_renderer=False)
+
+    assert_that(without_renderer).is_equal_to(with_renderer)
