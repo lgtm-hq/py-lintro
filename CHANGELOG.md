@@ -21,6 +21,13 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.93.0] - 2026-07-27
+
+### Added
+
+- **json**: serialize tool timeout state and auto-emit the JSON artifact in CI (#1802)
+  (5743b2b)
+
 ## [0.92.0] - 2026-07-27
 
 ### Added

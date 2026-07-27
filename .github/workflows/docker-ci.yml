@@ -478,7 +478,7 @@ jobs:
       # see renovate.json, customManager for ghcr.io/lgtm-hq/py-lintro.
       lintro-image: >-
         ${{ needs.docker-build.outputs.is-fork == 'true' &&
-        'ghcr.io/lgtm-hq/py-lintro:0.91.58@sha256:9325cf9f498cda71c3a181002d3f23da8188188f507ab414b5defab0c15fa088'
+        'ghcr.io/lgtm-hq/py-lintro:0.92.0@sha256:d20fe74c9449d3f5c574731753df3e56628b9a4c78a7b270042e4f4ef5e816f7'
         || format('ghcr.io/lgtm-hq/py-lintro:ci-{0}', github.run_id) }}
 
   # Changed-files dogfooding (#1361): PR-only counterpart of dogfooding-lint
@@ -578,7 +578,7 @@ jobs:
           # Renovate together with the other pin sites.
           LINTRO_IMAGE: >-
             ${{ needs.docker-build.outputs.is-fork == 'true' &&
-            'ghcr.io/lgtm-hq/py-lintro:0.91.58@sha256:9325cf9f498cda71c3a181002d3f23da8188188f507ab414b5defab0c15fa088'
+            'ghcr.io/lgtm-hq/py-lintro:0.92.0@sha256:d20fe74c9449d3f5c574731753df3e56628b9a4c78a7b270042e4f4ef5e816f7'
             || format('ghcr.io/lgtm-hq/py-lintro:ci-{0}', github.run_id) }}
         run: scripts/ci/dogfood-changed-files.sh
       - name: Upload linting report
@@ -689,7 +689,7 @@ jobs:
           # Renovate together with the other pin sites.
           LINTRO_IMAGE: >-
             ${{ needs.docker-build.outputs.is-fork == 'true' &&
-            'ghcr.io/lgtm-hq/py-lintro:0.91.58@sha256:9325cf9f498cda71c3a181002d3f23da8188188f507ab414b5defab0c15fa088'
+            'ghcr.io/lgtm-hq/py-lintro:0.92.0@sha256:d20fe74c9449d3f5c574731753df3e56628b9a4c78a7b270042e4f4ef5e816f7'
             || format('ghcr.io/lgtm-hq/py-lintro:ci-{0}', github.run_id) }}
           # Memory trace (#1761): this job is repeatedly killed mid-lint with
           # "runner has received a shutdown signal" + container EOF, and
@@ -734,7 +734,7 @@ jobs:
       # see renovate.json, customManager for ghcr.io/lgtm-hq/py-lintro.
       lintro-image: >-
         ${{ needs.docker-build.outputs.is-fork == 'true' &&
-        'ghcr.io/lgtm-hq/py-lintro:0.91.58@sha256:9325cf9f498cda71c3a181002d3f23da8188188f507ab414b5defab0c15fa088'
+        'ghcr.io/lgtm-hq/py-lintro:0.92.0@sha256:d20fe74c9449d3f5c574731753df3e56628b9a4c78a7b270042e4f4ef5e816f7'
         || format('ghcr.io/lgtm-hq/py-lintro:ci-{0}', github.run_id) }}
 
   # Rolls the effective dogfooding result up into a single required-check
