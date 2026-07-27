@@ -136,6 +136,9 @@ def _heading_anchors(markdown: str) -> set[str]:
     are skipped so that shell comments such as ``# install foo`` do not
     register as headings and silently validate a link that does not resolve.
 
+    Repeated headings get the ``-1``, ``-2`` … suffixes ``github-slugger``
+    assigns, so a link to the second occurrence is not reported as broken.
+
     Args:
         markdown: Full text of a Markdown document.
 
@@ -143,6 +146,7 @@ def _heading_anchors(markdown: str) -> set[str]:
         Set of anchor names (without the leading ``#``).
     """
     anchors: set[str] = set()
+    seen: dict[str, int] = {}
     fence: str | None = None
     for line in markdown.splitlines():
         fence_match = re.match(r"^\s*(`{3,}|~{3,})", line)
@@ -164,7 +168,11 @@ def _heading_anchors(markdown: str) -> set[str]:
         if explicit is not None:
             anchors.add(explicit.group(1))
             heading = heading[: explicit.start()].strip()
-        anchors.add(_slugify_heading(heading))
+
+        slug = _slugify_heading(heading)
+        occurrence = seen.get(slug, 0)
+        seen[slug] = occurrence + 1
+        anchors.add(slug if occurrence == 0 else f"{slug}-{occurrence}")
     return anchors
 
 
@@ -200,6 +208,15 @@ def test_heading_anchors_ignore_fenced_code_blocks() -> None:
     assert_that(anchors).does_not_contain("npm-install--g-typescript")
 
 
+def test_heading_anchors_number_repeated_headings() -> None:
+    """Repeated headings get GitHub's ``-1``/``-2`` occurrence suffixes."""
+    markdown = "## Installation\n\n## Installation\n\n## Installation\n"
+
+    anchors = _heading_anchors(markdown)
+
+    assert_that(anchors).contains("installation", "installation-1", "installation-2")
+
+
 def test_internal_doc_links() -> None:
     """Test that internal documentation links are valid."""
     doc_files = [
@@ -222,23 +239,27 @@ def test_internal_doc_links() -> None:
         # Find markdown links
         links = re.findall(r"\[([^\]]+)\]\(([^)]+)\)", content)
         for link_text, link_url in links:
-            if link_url.startswith("docs/") or link_url.startswith("./docs/"):
-                # Internal documentation link
-                link_path, _, fragment = link_url.partition("#")
-                if link_path.startswith("./"):
-                    link_path = link_path[2:]
+            # Skip anything that leaves the repository or is not a file link.
+            if re.match(r"^[a-zA-Z][a-zA-Z0-9+.-]*:", link_url) or link_url.startswith(
+                "//",
+            ):
+                continue
 
-                target = Path(link_path)
-                if not target.exists():
-                    broken_links.append(f"{doc_file}: {link_text} -> {link_url}")
-                    continue
+            link_path, _, fragment = link_url.partition("#")
+            # A bare "#anchor" points at the current document.
+            source = Path(doc_file)
+            target = source if not link_path else (source.parent / link_path).resolve()
 
-                if fragment and target.is_file():
-                    anchors = _heading_anchors(target.read_text(encoding="utf-8"))
-                    if fragment not in anchors:
-                        broken_links.append(
-                            f"{doc_file}: {link_text} -> {link_url} (missing anchor)",
-                        )
+            if not target.exists():
+                broken_links.append(f"{doc_file}: {link_text} -> {link_url}")
+                continue
+
+            if fragment and target.is_file() and target.suffix == ".md":
+                anchors = _heading_anchors(target.read_text(encoding="utf-8"))
+                if fragment not in anchors:
+                    broken_links.append(
+                        f"{doc_file}: {link_text} -> {link_url} (missing anchor)",
+                    )
 
     if broken_links:
         pytest.fail("Broken internal links:\n" + "\n".join(broken_links))
