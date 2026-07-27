@@ -424,21 +424,6 @@ def _load_external_entry_point(*, ep: EntryPoint) -> int:
         instance = plugin_type()
         name = instance.definition.name.lower()
 
-        # Config keys are matched against the advertised entry-point name
-        # before discovery has run (see get_known_plugin_tool_names), but the
-        # tool is registered under its definition name. When the two diverge by
-        # more than spelling, config written under the entry-point name would
-        # be accepted and then never read. Say so instead of dropping it
-        # silently (#1757).
-        advertised = str(ep.name).strip().lower()
-        if advertised.replace("-", "_") != name.replace("-", "_"):
-            logger.warning(
-                f"Plugin entry point {ep.name!r} registers the tool under the "
-                f"different name {name!r}. Configure it as "
-                f"[tool.lintro.{name}]; config written under {ep.name!r} is "
-                "not applied.",
-            )
-
         # Builtins are discovered first and always win a name collision so a
         # third-party plugin can never silently shadow a curated core tool.
         if ToolRegistry.is_registered(name):
@@ -448,6 +433,22 @@ def _load_external_entry_point(*, ep: EntryPoint) -> int:
                 "skipping the external plugin to avoid shadowing it",
             )
             return 0
+
+        # Config keys are matched against the advertised entry-point name
+        # before discovery has run (see get_known_plugin_tool_names), but the
+        # tool is registered under its definition name. When the two diverge by
+        # more than spelling, config written under the entry-point name would
+        # be accepted and then never read. Say so instead of dropping it
+        # silently (#1757). Checked after the collision guard so a plugin that
+        # is skipped entirely does not also get config advice it cannot use.
+        advertised = str(ep.name).strip().lower()
+        if advertised.replace("-", "_") != name.replace("-", "_"):
+            logger.warning(
+                f"Plugin entry point {ep.name!r} registers the tool under the "
+                f"different name {name!r}. Configure it as "
+                f"[tool.lintro.{name}]; config written under {ep.name!r} is "
+                "not applied.",
+            )
 
         origin = _entry_point_origin(ep)
         ToolRegistry.register(plugin_type, origin=origin, instance=instance)

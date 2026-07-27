@@ -538,3 +538,43 @@ def test_matching_entry_point_name_stays_quiet(
 
     assert_that(loaded).is_equal_to(1)
     assert_that("".join(messages)).does_not_contain("registers the tool under")
+
+
+def test_shadowed_plugin_gets_no_divergence_advice(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A plugin skipped for a name collision is not also given config advice.
+
+    Args:
+        monkeypatch: Pytest monkeypatch fixture.
+    """
+    instance = MagicMock()
+    instance.definition.name = "ruff"
+    plugin_class = MagicMock(return_value=instance)
+
+    ep = MagicMock()
+    ep.name = "acme-tools"
+    ep.load.return_value = plugin_class
+
+    registry = MagicMock()
+    registry.is_registered.return_value = True
+
+    messages: list[str] = []
+    monkeypatch.setattr(
+        "lintro.plugins.discovery._validate_plugin_class",
+        lambda ep, plugin_class: True,
+    )
+    monkeypatch.setattr("lintro.plugins.discovery.ToolRegistry", registry)
+    handler_id = logger.add(
+        lambda message: messages.append(str(message)),
+        level="WARNING",
+    )
+    try:
+        loaded = _load_external_entry_point(ep=ep)
+    finally:
+        logger.remove(handler_id)
+
+    output = "".join(messages)
+    assert_that(loaded).is_equal_to(0)
+    assert_that(output).contains("avoid shadowing it")
+    assert_that(output).does_not_contain("registers the tool under")
