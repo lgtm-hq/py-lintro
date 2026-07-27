@@ -5,6 +5,7 @@ from __future__ import annotations
 import sys
 from collections.abc import Callable, Generator
 from pathlib import Path
+from typing import cast
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -22,6 +23,13 @@ from lintro.tools.core.command_builders import (
     StandaloneBuilder,
     find_local_node_binary,
     pinned_npm_spec,
+)
+from lintro.tools.core.node_fallback import (
+    NODE_ENGINE_REQUIREMENTS,
+    is_registry_fallback_command,
+    registry_fallback_guidance,
+    reset_registry_fallback_notices,
+    split_npm_spec,
 )
 
 
@@ -959,3 +967,125 @@ def test_standalone_builder_ignores_the_execution_directory(tmp_path: Path) -> N
     assert_that(external).is_equal_to(
         builder.get_command("hadolint", ToolName.HADOLINT),
     )
+
+
+# =============================================================================
+# Registry fallback guidance (#1767)
+# =============================================================================
+
+
+@pytest.fixture
+def clean_fallback_notices() -> Generator[None, None, None]:
+    """Reset the one-time fallback notice cache around a test.
+
+    Yields:
+        None: With the notice cache cleared before and after the test.
+    """
+    reset_registry_fallback_notices()
+    yield
+    reset_registry_fallback_notices()
+
+
+def test_is_registry_fallback_command_detects_package_runners() -> None:
+    """Only ``bunx``/``npx`` invocations count as the registry fallback."""
+    assert_that(is_registry_fallback_command(["bunx", "html-validate@1.0.0"])).is_true()
+    assert_that(is_registry_fallback_command(["npx", "html-validate@1.0.0"])).is_true()
+    assert_that(is_registry_fallback_command(["/local/html-validate"])).is_false()
+    assert_that(is_registry_fallback_command(["html-validate"])).is_false()
+    assert_that(is_registry_fallback_command(["bunx"])).is_false()
+
+
+def test_split_npm_spec_handles_scoped_packages() -> None:
+    """The version separator is the last ``@``, not the scope marker."""
+    assert_that(split_npm_spec("html-validate@11.5.6")).is_equal_to(
+        ("html-validate", "11.5.6"),
+    )
+    assert_that(split_npm_spec("@scope/pkg@1.2.3")).is_equal_to(
+        ("@scope/pkg", "1.2.3"),
+    )
+    assert_that(split_npm_spec("html-validate")).is_equal_to(("html-validate", None))
+
+
+def test_registry_fallback_guidance_names_local_install_and_node_floor() -> None:
+    """A failed fallback is explained with the pinned local install commands."""
+    spec = pinned_npm_spec("html-validate")
+    guidance = registry_fallback_guidance(["bunx", spec])
+
+    assert_that(guidance).contains(f"could not be run via `bunx {spec}`")
+    assert_that(guidance).contains(f"bun add -D {spec}")
+    assert_that(guidance).contains(f"npm install -D {spec}")
+    assert_that(guidance).contains(
+        f"requires Node {NODE_ENGINE_REQUIREMENTS['html-validate']}",
+    )
+    # The pinned version is derived, never hardcoded in the message builder.
+    assert_that(spec).contains(str(get_tool_version("html-validate")))
+
+
+def test_registry_fallback_guidance_omits_unknown_node_floor() -> None:
+    """Packages with no recorded ``engines`` floor get no Node note."""
+    guidance = registry_fallback_guidance(["npx", "some-linter@1.0.0"])
+
+    assert_that(guidance).contains("npm install -D some-linter@1.0.0")
+    assert_that(guidance).does_not_contain("requires Node")
+
+
+def test_html_validate_bunx_fallback_warns_once(
+    clean_fallback_notices: None,
+) -> None:
+    """Selecting the bunx fallback warns, and only once per process.
+
+    Args:
+        clean_fallback_notices: Fixture clearing the one-time notice cache.
+    """
+    builder = NodeJSBuilder()
+    with (
+        patch("shutil.which", _which_only("bunx")),
+        patch(
+            "lintro.tools.core.command_builders.find_local_node_binary",
+            return_value=None,
+        ),
+        patch("lintro.tools.core.node_fallback.logger") as mock_logger,
+    ):
+        first = builder.get_command("html_validate", ToolName.HTML_VALIDATE)
+        second = builder.get_command("html_validate", ToolName.HTML_VALIDATE)
+
+    assert_that(first).is_equal_to(second)
+    assert_that(mock_logger.warning.call_count).is_equal_to(1)
+    message = cast(str, mock_logger.warning.call_args.args[0])
+    assert_that(message).contains("No project-local or PATH install of html-validate")
+    assert_that(message).contains(f"bun add -D {pinned_npm_spec('html-validate')}")
+    assert_that(message).contains(
+        NODE_ENGINE_REQUIREMENTS["html-validate"],
+    )
+
+
+def test_local_install_emits_no_fallback_notice(
+    clean_fallback_notices: None,
+    tmp_path: Path,
+) -> None:
+    """A project-local install is the good path and stays silent.
+
+    Args:
+        clean_fallback_notices: Fixture clearing the one-time notice cache.
+        tmp_path: Temporary project root holding the local install.
+    """
+    local_bin = tmp_path / "node_modules" / ".bin"
+    local_bin.mkdir(parents=True)
+    binary = local_bin / (
+        "html-validate.cmd" if sys.platform == "win32" else "html-validate"
+    )
+    binary.write_text("#!/bin/sh\n")
+
+    builder = NodeJSBuilder()
+    with (
+        patch("shutil.which", _which_only("bunx")),
+        patch("lintro.tools.core.node_fallback.logger") as mock_logger,
+    ):
+        cmd = builder.get_command_in(
+            "html_validate",
+            ToolName.HTML_VALIDATE,
+            tmp_path,
+        )
+
+    assert_that(cmd).is_equal_to([binary.resolve().as_posix()])
+    assert_that(mock_logger.warning.call_count).is_equal_to(0)

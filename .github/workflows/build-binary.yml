@@ -107,13 +107,13 @@ jobs:
       - name: Install uv
         id: setup-uv
         continue-on-error: true
-        uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990 # v8.3.2
+        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
         with:
           version: ${{ env.UV_VERSION }}
 
       - name: Install uv (retry)
         if: steps.setup-uv.outcome == 'failure'
-        uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990 # v8.3.2
+        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
         with:
           version: ${{ env.UV_VERSION }}
 
@@ -193,7 +193,7 @@ jobs:
       - name: Install uv
         id: setup-uv
         continue-on-error: true
-        uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990 # v8.3.2
+        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
         with:
           version: ${{ env.UV_VERSION }}
 
@@ -202,7 +202,7 @@ jobs:
       # one retry runs on a warm network path. See #1513 / #1487.
       - name: Install uv (retry)
         if: steps.setup-uv.outcome == 'failure'
-        uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990 # v8.3.2
+        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
         with:
           version: ${{ env.UV_VERSION }}
 
@@ -343,7 +343,7 @@ jobs:
       - name: Install uv
         id: setup-uv
         continue-on-error: true
-        uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990 # v8.3.2
+        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
         with:
           version: ${{ env.UV_VERSION }}
 
@@ -352,7 +352,7 @@ jobs:
       # one retry runs on a warm network path. See #1513 / #1487.
       - name: Install uv (retry)
         if: steps.setup-uv.outcome == 'failure'
-        uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990 # v8.3.2
+        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
         with:
           version: ${{ env.UV_VERSION }}
 
@@ -574,7 +574,7 @@ jobs:
 
       - name: Dispatch formula update
         # yamllint disable-line rule:line-length
-        uses: lgtm-hq/lgtm-ci/.github/actions/trigger-homebrew-update@46cd4f431a6501230b629433c690bbc45d6c01ac # v0.59.28
+        uses: lgtm-hq/lgtm-ci/.github/actions/trigger-homebrew-update@cc5b3cc982868fa4c0718d4b26045ca9f56f0f5b # v0.59.30
         with:
           formula: lintro
           version: ${{ steps.version.outputs.version }}

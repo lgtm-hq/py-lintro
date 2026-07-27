@@ -10,6 +10,11 @@ then a binary on PATH, and only then a ``bunx``/``npx`` invocation pinned to the
 version in ``package.json``; ``@latest`` is never resolved at runtime. Files are
 always passed as literal paths so html-validate's glob expansion never runs.
 
+The ``bunx``/``npx`` fallback is second-class: it needs registry access and it
+imposes html-validate's own Node ``engines`` floor on the consumer. Selecting it
+warns once, and a failure on that path is reported with install guidance naming
+the pinned devDependency to add instead (see issue #1767).
+
 No configuration is required: when no ``.htmlvalidate.*`` config is found,
 html-validate applies its built-in ``html-validate:recommended`` preset, so the
 tool produces sensible results out of the box.
@@ -33,6 +38,10 @@ from lintro.parsers.html_validate.html_validate_parser import (
 from lintro.plugins.base import BaseToolPlugin
 from lintro.plugins.protocol import ToolDefinition
 from lintro.plugins.registry import register_tool
+from lintro.tools.core.node_fallback import (
+    is_registry_fallback_command,
+    registry_fallback_guidance,
+)
 from lintro.tools.core.timeout_utils import create_timeout_result
 from lintro.utils.unified_config import DEFAULT_TOOL_PRIORITIES
 
@@ -119,6 +128,33 @@ class HtmlValidatePlugin(BaseToolPlugin):
             return DocUrlTemplate.HTML_VALIDATE.format(code=code)
         return None
 
+    @staticmethod
+    def _append_fallback_guidance(
+        *,
+        output: str | None,
+        used_registry_fallback: bool,
+        command: list[str],
+    ) -> str | None:
+        """Append registry-fallback install guidance to a failure message.
+
+        Without this the user sees html-validate's raw error with no hint that
+        a project-local devDependency is the supported configuration (#1767).
+
+        Args:
+            output: Existing failure output, if any.
+            used_registry_fallback: Whether the tool was invoked through
+                ``bunx``/``npx`` rather than a local or PATH install.
+            command: The ``[runner, spec]`` prefix of the resolved command.
+
+        Returns:
+            The output with guidance appended, unchanged when the fallback was
+            not used.
+        """
+        if not used_registry_fallback:
+            return output
+        guidance = registry_fallback_guidance(command)
+        return f"{output}\n\n{guidance}" if output else guidance
+
     def check(self, paths: list[str], options: dict[str, object]) -> ToolResult:
         """Check files with html-validate.
 
@@ -161,6 +197,12 @@ class HtmlValidatePlugin(BaseToolPlugin):
             tool_name="html_validate",
             cwd=ctx.cwd,
         )
+        # Remember whether resolution landed on the fragile registry runner so
+        # a failure can be reported with install guidance instead of
+        # html-validate's raw error (#1767). Checked before the command grows
+        # extra arguments; only the runner and spec matter.
+        used_registry_fallback: bool = is_registry_fallback_command(cmd)
+        fallback_command: list[str] = list(cmd[:2])
         cmd.extend(["--formatter", "json"])
 
         # Always pass the literal files lintro discovered, never a glob or a
@@ -195,7 +237,11 @@ class HtmlValidatePlugin(BaseToolPlugin):
             return ToolResult(
                 name=self.definition.name,
                 success=timeout_result.success,
-                output=timeout_result.output,
+                output=self._append_fallback_guidance(
+                    output=timeout_result.output,
+                    used_registry_fallback=used_registry_fallback,
+                    command=fallback_command,
+                ),
                 issues_count=timeout_result.issues_count,
                 cwd=ctx.cwd,
             )
@@ -208,6 +254,16 @@ class HtmlValidatePlugin(BaseToolPlugin):
         # Suppress output when no issues found; otherwise surface the raw
         # combined output for diagnostics (e.g. a crash producing no JSON).
         final_output: str | None = None if success_flag else result.output
+
+        # html-validate exits non-zero whenever it reports issues, so a failure
+        # is only a *tool* failure when nothing was parsed out of stdout. That
+        # is the case worth explaining: the registry fallback could not run.
+        if not result.success and issues_count == 0:
+            final_output = self._append_fallback_guidance(
+                output=final_output,
+                used_registry_fallback=used_registry_fallback,
+                command=fallback_command,
+            )
 
         return ToolResult(
             name=self.definition.name,
