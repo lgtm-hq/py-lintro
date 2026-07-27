@@ -275,7 +275,9 @@ jobs:
     permissions:
       contents: read # checkout and build context
       packages: write # push CI-tagged images to GHCR
-    timeout-minutes: 30
+    # 40 rather than 30: the `ai` target adds a large base-image pull plus a
+    # second uv sync on top of the full/base builds already in this job.
+    timeout-minutes: 40
     defaults:
       run:
         shell: bash
@@ -417,6 +419,25 @@ jobs:
             type=registry,ref=ghcr.io/lgtm-hq/py-lintro-base:cache
           cache-to: >-
             type=registry,ref=ghcr.io/lgtm-hq/py-lintro-base:cache,${{ env.CACHE_OPTS }}
+          provenance: false
+      # The `ai` variant is published only from docker-build-publish.yml, which
+      # never runs on PRs — so without this step the stage would first build
+      # during a release, and a failure there would surface mid-release. Build
+      # only (no push, no load): the stage's own RUN steps smoke-test all three
+      # agent CLIs as root and under gosu, so a successful build IS the
+      # validation. Needs no registry auth — lintro-ai-tools is public — so it
+      # covers fork PRs too.
+      - name: Build AI Docker image (validation only)
+        if: needs.changes.outputs.pipeline != 'false'
+        # yamllint disable-line rule:line-length
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7
+        with:
+          context: .
+          target: ai
+          push: false
+          cache-from: |
+            type=gha
+            type=registry,ref=ghcr.io/lgtm-hq/py-lintro:cache
           provenance: false
       - name: Save Docker images to tarball (fork fallback)
         if: >-

@@ -113,6 +113,15 @@
       "automerge": false
     },
     {
+      "description": "lintro-ai-tools base image digest pin (FROM in the Dockerfile 'aitools' stage); full CI validates the bump",
+      "matchDatasources": ["docker"],
+      "matchPackageNames": [
+        "ghcr.io/lgtm-hq/lintro-ai-tools"
+      ],
+      "matchUpdateTypes": ["digest"],
+      "automerge": false
+    },
+    {
       "description": "Agent CLIs release close to daily; batch them into one weekly PR — the hybrid capability guard (#1612) tolerates the lag",
       "groupName": "ai agent CLIs",
       "groupSlug": "ai-agent-clis",

@@ -5,9 +5,6 @@ no runtime link: the binaries lintro's CLI transports look up
 (``lintro/ai/providers/cli_contracts.py``), the binaries the ai-tools image
 actually bakes (``scripts/utils/install-ai-tools.sh``), and the build/publish
 wiring that ships them.
-
-The root Dockerfile's ``ai`` stage and its publish job land in the follow-up
-that pins this image's digest, so nothing here asserts on them yet.
 """
 
 from __future__ import annotations
@@ -25,6 +22,7 @@ from lintro.ai.providers.cli_contracts import CLI_CONTRACTS
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _AI_TOOLS_DOCKERFILE = _REPO_ROOT / "docker" / "ai-tools.Dockerfile"
+_ROOT_DOCKERFILE = _REPO_ROOT / "Dockerfile"
 _INSTALLER = _REPO_ROOT / "scripts" / "utils" / "install-ai-tools.sh"
 _RENOVATE = _REPO_ROOT / "renovate.json"
 _WORKFLOWS = _REPO_ROOT / ".github" / "workflows"
@@ -53,6 +51,33 @@ def _load_workflow(*, name: str) -> dict[str, Any]:
 
 def _dockerfile_args(text: str) -> set[str]:
     return set(re.findall(r"^ARG (\w+)=", text, flags=re.MULTILINE))
+
+
+def _ai_stage_body() -> str:
+    """Return the root Dockerfile's ``ai`` stage, excluding later stages.
+
+    Returns:
+        The stage body, from its ``FROM`` line up to the next stage.
+    """
+    body = _read(_ROOT_DOCKERFILE).split("FROM full AS ai\n", maxsplit=1)[1]
+    return re.split(r"^FROM ", body, maxsplit=1, flags=re.MULTILINE)[0]
+
+
+def _from_line(*, stage: str) -> str:
+    """Return the ``FROM`` line declaring *stage* in the root Dockerfile.
+
+    Args:
+        stage: Stage name as written after ``AS``.
+
+    Returns:
+        The single matching ``FROM`` line. A missing stage fails the test by
+        raising, which is the intended signal.
+    """
+    return next(
+        line
+        for line in _read(_ROOT_DOCKERFILE).splitlines()
+        if line.startswith("FROM ") and line.endswith(f" AS {stage}")
+    )
 
 
 def _contract_binaries() -> list[str]:
@@ -135,3 +160,63 @@ def test_ai_tools_publish_workflow_rebuilds_on_installer_changes() -> None:
             "scripts/utils/install-ai-tools.sh",
             "scripts/ci/smoke-test-ai-tools.sh",
         )
+
+
+def test_ai_stage_copies_from_the_pinned_ai_tools_image() -> None:
+    """The root ``ai`` stage layers the baked CLIs onto the full image."""
+    assert_that(_read(_ROOT_DOCKERFILE)).contains("FROM full AS ai\n")
+    assert_that(_ai_stage_body()).contains(
+        "COPY --from=aitools /opt/ai-tools /opt/ai-tools",
+    )
+    assert_that(_from_line(stage="aitools")).matches(
+        r"^FROM ghcr\.io/lgtm-hq/lintro-ai-tools:latest@sha256:[a-f0-9]{64} AS aitools$",
+    )
+
+
+def test_ai_stage_installs_the_ai_extra() -> None:
+    """The AI variant carries the provider SDKs the API transports need."""
+    assert_that(_ai_stage_body()).contains("--extra ai")
+
+
+def test_ai_stage_smoke_tests_every_declared_cli_as_non_root() -> None:
+    """A root-only-readable CLI tree would break every real review.
+
+    The entrypoint drops privileges to the UID owning the mounted volume, so a
+    root-run check alone would pass while the image is unusable in practice.
+    """
+    ai_stage = _ai_stage_body()
+
+    for binary in _contract_binaries():
+        assert_that(ai_stage).contains(f"gosu lintro {binary} --version")
+
+
+def test_ai_variant_publishes_to_its_own_package() -> None:
+    """The AI image never shares a GHCR package with the release image.
+
+    The reusable always emits floating ``sha-<ref>`` and branch tags, so a
+    shared package would let the AI variant clobber the tags docker-ci
+    promotes for the release image.
+    """
+    workflow = _load_workflow(name="docker-build-publish.yml")
+    ai_job = workflow["jobs"]["docker-ai"]
+    full_job = workflow["jobs"]["docker-full"]
+
+    assert_that(ai_job["with"]["target"]).is_equal_to("ai")
+    assert_that(ai_job["with"]["image-name"]).is_not_equal_to(
+        full_job["with"]["image-name"],
+    )
+
+
+def test_ai_stage_is_built_on_prs() -> None:
+    """The AI stage is validated before a release depends on it.
+
+    docker-build-publish.yml never runs on PRs, so without a build here the
+    stage would first be exercised during a release.
+    """
+    workflow = _load_workflow(name="docker-ci.yml")
+    steps = workflow["jobs"]["docker-build"]["steps"]
+    ai_builds = [step for step in steps if step.get("with", {}).get("target") == "ai"]
+
+    assert_that(ai_builds).is_not_empty()
+    for step in ai_builds:
+        assert_that(step["with"]["push"]).is_false()
