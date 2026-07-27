@@ -5,8 +5,13 @@ dependency on the AI layer. ``suggestions_from_results`` and
 ``summary_from_results`` reconstruct ``AIFixSuggestion`` and ``AISummary``
 instances from the serialized metadata dictionaries attached to
 ``ToolResult.ai_metadata`` during AI-enhanced runs; they import the AI
-models lazily so that plain SARIF rendering never loads
-:mod:`lintro.ai`.
+models only once a usable metadata payload has been found, so this module
+never pulls :mod:`lintro.ai.models` in on a standard-only render.
+
+Note that ``lintro.utils.json_output`` still imports :mod:`lintro.ai`
+eagerly, so a standard-only render is not yet fully AI-free at the process
+level. Removing that remaining core-to-AI edge is tracked separately under
+issue #724.
 """
 
 from __future__ import annotations
@@ -111,8 +116,6 @@ def suggestions_from_results(
     Returns:
         List of reconstructed AIFixSuggestion objects across all results.
     """
-    from lintro.ai.models import AIFixSuggestion
-
     suggestions: list[AIFixSuggestion] = []
     for result in all_results:
         if result.ai_metadata is None:
@@ -123,6 +126,8 @@ def suggestions_from_results(
         for raw in raw_suggestions:
             if not isinstance(raw, dict):
                 continue
+            from lintro.ai.models import AIFixSuggestion
+
             try:
                 suggestions.append(
                     AIFixSuggestion(
@@ -161,14 +166,15 @@ def summary_from_results(
     Returns:
         Reconstructed AISummary, or None if no summary metadata is found.
     """
-    from lintro.ai.models import AISummary
-
     for result in all_results:
         if result.ai_metadata is None:
             continue
         raw_summary: dict[str, Any] | None = result.ai_metadata.get("summary")
         if not isinstance(raw_summary, dict):
             continue
+
+        from lintro.ai.models import AISummary
+
         try:
             in_tok = int(raw_summary.get("input_tokens", 0))
         except (TypeError, ValueError):

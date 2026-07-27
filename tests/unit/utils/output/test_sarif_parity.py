@@ -14,7 +14,11 @@ byte for byte.
 
 from __future__ import annotations
 
+import contextlib
+import importlib.abc
 import json
+import sys
+from collections.abc import Iterator
 from pathlib import Path
 
 from assertpy import assert_that
@@ -24,6 +28,8 @@ from lintro.parsers.ruff.ruff_issue import RuffIssue
 from lintro.utils.output.sarif import (
     render_fixes_sarif,
     standard_issues_from_results,
+    suggestions_from_results,
+    summary_from_results,
     to_sarif,
     write_sarif,
 )
@@ -125,6 +131,81 @@ def test_ai_enrichment_absent_leaves_no_ai_properties() -> None:
         assert_that(result["properties"]).does_not_contain_key("confidence")
         assert_that(result["properties"]).does_not_contain_key("riskLevel")
         assert_that(result).does_not_contain_key("fixes")
+
+
+class _BlockAIModels(importlib.abc.MetaPathFinder):
+    """Meta path finder that refuses to import ``lintro.ai.models``."""
+
+    def find_spec(
+        self,
+        fullname: str,
+        path: object = None,
+        target: object = None,
+    ) -> None:
+        """Raise for blocked module names, otherwise defer to later finders.
+
+        Args:
+            fullname: Fully qualified module name being imported.
+            path: Parent package search path (unused).
+            target: Existing module being reloaded (unused).
+
+        Returns:
+            ``None`` to let the next finder on ``sys.meta_path`` handle it.
+
+        Raises:
+            ImportError: If ``lintro.ai.models`` is being imported.
+        """
+        if fullname == "lintro.ai.models" or fullname.startswith(
+            "lintro.ai.models.",
+        ):
+            raise ImportError(f"blocked import of {fullname}")
+        return None
+
+
+@contextlib.contextmanager
+def _ai_models_unimportable() -> Iterator[None]:
+    """Make ``lintro.ai.models`` unimportable for the duration of the block.
+
+    Evicts any already-imported ``lintro.ai.models`` modules so that a
+    function-local ``from lintro.ai.models import ...`` re-enters the import
+    system and hits the blocking finder.
+
+    Yields:
+        None: While the blocking finder is installed.
+    """
+    finder = _BlockAIModels()
+    saved = {
+        name: module
+        for name, module in sys.modules.items()
+        if name == "lintro.ai.models" or name.startswith("lintro.ai.models.")
+    }
+    for name in saved:
+        del sys.modules[name]
+    sys.meta_path.insert(0, finder)
+    try:
+        yield
+    finally:
+        sys.meta_path.remove(finder)
+        sys.modules.update(saved)
+
+
+def test_standard_only_render_does_not_import_ai_models() -> None:
+    """Render standard-only SARIF without importing ``lintro.ai.models``.
+
+    The bridge helpers are called unconditionally by every SARIF caller, so
+    their AI-model imports must stay behind a usable-metadata check or plain
+    ``--output-format sarif`` drags the AI models in.
+    """
+    results = _fixture_results()
+
+    with _ai_models_unimportable():
+        rendered = render_fixes_sarif(
+            standard_issues_from_results(results),
+            ai_suggestions=suggestions_from_results(results),
+            ai_summary=summary_from_results(results),
+        )
+
+    assert_that(json.loads(rendered)["runs"][0]["results"]).is_length(3)
 
 
 def test_golden_artifact_is_valid_sarif() -> None:
