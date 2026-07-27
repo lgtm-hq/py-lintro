@@ -103,7 +103,7 @@ system.
 <td><a href="https://commitlint.js.org/"><img src="https://img.shields.io/badge/commitlint-f7b93e?logo=commitlint&logoColor=black" alt="commitlint"></a></td>
 <td>🔀 Git commits</td>
 <td>-</td>
-<td><code>bun add -D @commitlint/cli @commitlint/config-conventional</code><br><code>npm install -D @commitlint/cli @commitlint/config-conventional</code></td>
+<td><code>bun add -g @commitlint/cli @commitlint/config-conventional</code><br><code>brew install commitlint</code></td>
 </tr>
 <tr>
 <td><a href="https://github.com/golangci/golangci-lint"><img src="https://img.shields.io/badge/golangci--lint-00ADD8?logo=go&logoColor=white" alt="golangci-lint"></a></td>
@@ -127,7 +127,7 @@ system.
 <td><a href="https://github.com/DavidAnson/markdownlint-cli2"><img src="https://img.shields.io/badge/Markdownlint--cli2-000000?logo=markdown&logoColor=white" alt="Markdownlint"></a></td>
 <td>📝 Markdown</td>
 <td>-</td>
-<td><code>bun add -D markdownlint-cli2</code><br><code>npm install -D markdownlint-cli2</code></td>
+<td><code>bun add -g markdownlint-cli2</code><br><code>npm install -g markdownlint-cli2</code></td>
 </tr>
 <tr>
 <td><a href="https://vale.sh/"><img src="https://img.shields.io/badge/Vale-2ea44f?logo=markdown&logoColor=white" alt="Vale"></a></td>
@@ -244,7 +244,7 @@ system.
 <td><a href="https://www.typescriptlang.org/"><img src="https://img.shields.io/badge/TypeScript-3178c6?logo=typescript&logoColor=white" alt="TypeScript"></a></td>
 <td>🟨 JS/TS</td>
 <td>-</td>
-<td><code>bun add -D typescript</code><br><code>npm install -D typescript</code></td>
+<td><code>bun add -g typescript</code><br><code>npm install -g typescript</code><br><code>brew install typescript</code></td>
 </tr>
 <tr>
 <td><a href="https://github.com/vuejs/language-tools"><img src="https://img.shields.io/badge/vue--tsc-42b883?logo=vuedotjs&logoColor=white" alt="vue-tsc"></a></td>
@@ -313,11 +313,11 @@ system.
 
 > 📦 = bundled with lintro — no separate install needed\
 > ⚡ Node.js tools support `--auto-install` to install dependencies automatically\
-> 🟨 Node.js tools installed with `-D` above are run via `bunx`/`npx`, which resolve the
-> **project's own** `node_modules` — install them into the project you check. A global
-> (`-g`) install or a Homebrew formula only lands on `PATH`, which that path does not
-> consult. Prettier is the exception: it is invoked by bare name and resolved from
-> `PATH`, so a global install is what it needs. See
+> 🟨 Node.js tools do not all resolve the same way — the command above is the one that
+> works for that tool. Tools shown with `-D` (oxlint, oxfmt, stylelint, html-validate)
+> are run through `bunx`/`npx`, which look in the checked project's `node_modules` and
+> never at `PATH`, so a global or Homebrew install is not what Lintro picks up. The rest
+> prefer a binary on `PATH`, which is what `-g` and `brew install` provide. See
 > [Node.js tool resolution](docs/configuration.md#nodejs-tool-resolution).
 
 <!-- markdownlint-enable MD013 MD033 MD060 -->

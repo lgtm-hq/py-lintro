@@ -103,11 +103,38 @@ def test_cli_help_works() -> None:
         pytest.fail("lintro --help timed out")
 
 
+def _slugify_heading(heading: str) -> str:
+    """Slugify heading text the way GitHub does.
+
+    GitHub renders the heading first and then slugs the resulting *text*, so
+    inline markup (emphasis, inline code, links) contributes its content but
+    not its markers. ``github-slugger`` then lowercases, drops punctuation and
+    turns spaces into hyphens. Its character class keeps ``-`` and ``_`` — both
+    survive into the anchor — which is why underscores are retained here.
+
+    Args:
+        heading: Raw heading text, without the leading ``#`` markers.
+
+    Returns:
+        The anchor GitHub would generate for that heading.
+    """
+    # Render-ish pass: keep the text inside inline markup, drop the markers.
+    text = re.sub(r"!?\[([^\]]*)\]\([^)]*\)", r"\1", heading)  # links/images
+    text = re.sub(r"`([^`]*)`", r"\1", text)  # inline code
+    text = re.sub(r"(\*{1,3})(\S.*?\S|\S)\1", r"\2", text)  # *em* / **strong**
+    text = re.sub(r"(?<!\w)(_{1,3})(\S.*?\S|\S)\1(?!\w)", r"\2", text)  # _em_
+    # github-slugger: lowercase, strip punctuation except "-" and "_", " " -> "-"
+    slug = re.sub(r"[^\w\- ]", "", text.lower())
+    return slug.replace(" ", "-")
+
+
 def _heading_anchors(markdown: str) -> set[str]:
     """Collect the anchors a Markdown document exposes.
 
     Supports both GitHub's implicit heading slugs and the explicit
-    ``{#custom-anchor}`` suffix used in the longer guides.
+    ``{#custom-anchor}`` suffix used in the longer guides. Fenced code blocks
+    are skipped so that shell comments such as ``# install foo`` do not
+    register as headings and silently validate a link that does not resolve.
 
     Args:
         markdown: Full text of a Markdown document.
@@ -116,7 +143,19 @@ def _heading_anchors(markdown: str) -> set[str]:
         Set of anchor names (without the leading ``#``).
     """
     anchors: set[str] = set()
+    fence: str | None = None
     for line in markdown.splitlines():
+        fence_match = re.match(r"^\s*(`{3,}|~{3,})", line)
+        if fence_match is not None:
+            marker = fence_match.group(1)
+            if fence is None:
+                fence = marker[0]
+            elif marker[0] == fence:
+                fence = None
+            continue
+        if fence is not None:
+            continue
+
         match = re.match(r"^#{1,6}\s+(.*)$", line)
         if match is None:
             continue
@@ -125,9 +164,40 @@ def _heading_anchors(markdown: str) -> set[str]:
         if explicit is not None:
             anchors.add(explicit.group(1))
             heading = heading[: explicit.start()].strip()
-        slug = re.sub(r"[^\w\- ]", "", heading.lower())
-        anchors.add(slug.replace(" ", "-"))
+        anchors.add(_slugify_heading(heading))
     return anchors
+
+
+def test_slugify_heading_matches_github() -> None:
+    """Heading slugs match anchors GitHub's renderer actually emits.
+
+    Expected values were taken from GitHub's ``POST /markdown`` API, which
+    returns ``id="user-content-<anchor>"`` for each rendered heading. Note that
+    underscores survive (``github-slugger`` keeps ``_`` and ``-``) while
+    emphasis markers do not, because GitHub slugs the rendered text.
+    """
+    assert_that(_slugify_heading("snake_case option names")).is_equal_to(
+        "snake_case-option-names",
+    )
+    assert_that(_slugify_heading("What Lintro does _not_ do yet")).is_equal_to(
+        "what-lintro-does-not-do-yet",
+    )
+    assert_that(_slugify_heading("Ruff vs. Black Policy (Python)")).is_equal_to(
+        "ruff-vs-black-policy-python",
+    )
+    assert_that(_slugify_heading("Node.js Tool Resolution")).is_equal_to(
+        "nodejs-tool-resolution",
+    )
+
+
+def test_heading_anchors_ignore_fenced_code_blocks() -> None:
+    """Shell comments inside fences must not register as headings."""
+    markdown = "# Real\n\n```bash\n# npm install -g typescript\n```\n\n## Second\n"
+
+    anchors = _heading_anchors(markdown)
+
+    assert_that(anchors).contains("real", "second")
+    assert_that(anchors).does_not_contain("npm-install--g-typescript")
 
 
 def test_internal_doc_links() -> None:

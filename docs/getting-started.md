@@ -82,16 +82,18 @@ are centrally managed in `manifest.json` and `pyproject.toml`:
 ### Optional External Tools
 
 Some tools require separate installation. Their minimum versions are also managed in
-`pyproject.toml`. Most Node.js tools are run through `bunx`/`npx`, which resolve the
-checked project's `node_modules` rather than `PATH` — install those as project
-dependencies, not globally. See
-[Node.js Tool Resolution](configuration.md#nodejs-tool-resolution) for the exceptions.
+`pyproject.toml`. Node.js tools do not all resolve the same way — some prefer a binary
+on `PATH` (a `-g` or Homebrew install), others are only ever run through `bunx`/`npx`
+and so must be a dependency of the project you check. See
+[Node.js Tool Resolution](configuration.md#nodejs-tool-resolution) before choosing an
+install mode.
 
 - `prettier` - JavaScript/TypeScript formatter (install via npm)
-- `commitlint` - Conventional Commits message linter (install into the project with
-  `bun add -D @commitlint/cli @commitlint/config-conventional` or
-  `npm install -D @commitlint/cli @commitlint/config-conventional`); requires a
-  commitlint config, skipped otherwise
+- `commitlint` - Conventional Commits message linter
+  (`bun add -g @commitlint/cli @commitlint/config-conventional` or
+  `brew install commitlint`); resolved from `PATH` first with only a `bunx` fallback, so
+  a devDependency is unreachable without `bun`; requires a commitlint config, skipped
+  otherwise
 - `hadolint` - Dockerfile linter (download from GitHub releases)
 - `actionlint` - GitHub Actions linter (download from GitHub releases)
 - `semgrep` - Security scanner and code analyzer (`pipx install semgrep`,
@@ -107,9 +109,10 @@ dependencies, not globally. See
 - `dotenv-linter` - `.env` file linter and fixer (`brew install dotenv-linter`,
   `cargo install dotenv-linter`, or GitHub releases)
 - `sqlfluff` - SQL linter and formatter (`pip install sqlfluff`)
-- `stylelint` - CSS/SCSS/Sass/Less linter and fixer (install into the project with
-  `bun add -D stylelint` or `npm install -D stylelint`); skips cleanly when no stylelint
-  config is found — add one (e.g. `.stylelintrc.json`) to enable linting
+- `stylelint` - CSS/SCSS/Sass/Less linter and fixer (install into the project you check
+  with `bun add -D stylelint` or `npm install -D stylelint`; it is run through
+  `bunx`/`npx`, which never consult `PATH`); skips cleanly when no stylelint config is
+  found — add one (e.g. `.stylelintrc.json`) to enable linting
 - `pip-audit` - Python dependency vulnerability scanner (`pip install pip-audit`,
   `uv add pip-audit`, or `brew install pip-audit`)
 - `taplo` - TOML linter and formatter (`brew install taplo` or GitHub releases)
@@ -120,8 +123,9 @@ dependencies, not globally. See
 - `osv-scanner` - Multi-ecosystem vulnerability scanner using the OSV database
   (`go install github.com/google/osv-scanner/v2/cmd/osv-scanner@latest` or GitHub
   releases)
-- `typescript` - TypeScript compiler for type checking (install into the project with
-  `bun add -D typescript` or `npm install -D typescript`)
+- `typescript` - TypeScript compiler for type checking (`brew install typescript`,
+  `bun add -g typescript`, or `npm install -g typescript`; a project devDependency also
+  works via the `bunx`/`npx` fallback)
 - `astro` - Astro type checker for `.astro` files (install locally with
   `bun add -d astro @astrojs/check` or `npm install --save-dev astro @astrojs/check`,
   then invoke with `bunx astro check` or `npx astro check`)
