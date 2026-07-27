@@ -74,7 +74,12 @@ def test_review_refuses_when_only_lint_enabled() -> None:
     """Lint-only config refuses `lintro review` naming the ai.review key."""
     runner = CliRunner()
     mock_config = MagicMock(
-        ai=AIConfig(enabled=True, lint=True, review=False, transport=AITransport.API),
+        ai=AIConfig(
+            enabled=True,
+            lint=True,
+            review=False,
+            transport=AITransport.API,
+        ).model_dump(),
     )
 
     with (
@@ -98,7 +103,12 @@ def test_review_runs_when_review_enabled_without_lint() -> None:
     )
     patches = _mock_review_pipeline(mock_collect=mock_collect)
     review_config = MagicMock(
-        ai=AIConfig(enabled=True, lint=False, review=True, transport=AITransport.API),
+        ai=AIConfig(
+            enabled=True,
+            lint=False,
+            review=True,
+            transport=AITransport.API,
+        ).model_dump(),
     )
     review_config.review.depth = 1
     review_config.review.strictness = ReviewStrictness.BALANCED
@@ -132,7 +142,7 @@ def test_review_json_output_echoes_payload() -> None:
     mock_context = MagicMock()
     mock_context.changed_files = []
     mock_context.unified_diff = ""
-    mock_config = MagicMock(ai=MagicMock(enabled=True))
+    mock_config = MagicMock(ai={"enabled": True})
     mock_config.review.depth = 1
     mock_config.review.strictness = ReviewStrictness.BALANCED
     mock_config.review.sensitivity = MagicMock()
@@ -200,7 +210,7 @@ def test_review_passes_transport_override_to_provider() -> None:
     mock_context.changed_files = []
     mock_context.unified_diff = ""
     mock_config = MagicMock(
-        ai=AIConfig(enabled=True, transport=AITransport.API),
+        ai=AIConfig(enabled=True, transport=AITransport.API).model_dump(),
     )
     mock_config.review.depth = 1
     mock_config.review.strictness = ReviewStrictness.BALANCED
@@ -263,7 +273,7 @@ def test_review_exits_zero_without_p1_findings() -> None:
     mock_context = MagicMock()
     mock_context.changed_files = []
     mock_context.unified_diff = ""
-    mock_config = MagicMock(ai=MagicMock(enabled=True))
+    mock_config = MagicMock(ai={"enabled": True})
     mock_config.review.depth = 1
     mock_config.review.strictness = ReviewStrictness.BALANCED
     mock_config.review.sensitivity = MagicMock()
@@ -327,7 +337,7 @@ def _mock_review_pipeline(
     mock_context = MagicMock()
     mock_context.changed_files = []
     mock_context.unified_diff = ""
-    mock_config = MagicMock(ai=MagicMock(enabled=True))
+    mock_config = MagicMock(ai={"enabled": True})
     mock_config.review.depth = 1
     mock_config.review.strictness = ReviewStrictness.BALANCED
     mock_config.review.sensitivity = MagicMock()
@@ -529,7 +539,7 @@ def test_review_plain_with_github_repository_env() -> None:
 def test_review_repo_without_pr_fails() -> None:
     """Explicit --repo without --pr fails fast instead of reviewing locally."""
     runner = CliRunner()
-    mock_config = MagicMock(ai=MagicMock(enabled=True))
+    mock_config = MagicMock(ai={"enabled": True})
 
     with (
         patch("lintro.cli_utils.commands.review.require_ai"),
@@ -601,7 +611,7 @@ def test_review_failure_renders_friendly_error_without_traceback() -> None:
         completed_chunks=2,
         cause_message="Cursor CLI timed out after 300s",
     )
-    mock_config = MagicMock(ai=MagicMock(enabled=True))
+    mock_config = MagicMock(ai={"enabled": True})
     mock_config.review.depth = 1
     mock_config.review.strictness = ReviewStrictness.BALANCED
     mock_config.review.sensitivity = MagicMock()

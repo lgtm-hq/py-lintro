@@ -144,7 +144,7 @@ def _ai_enabled_config() -> LintroConfig:
             enabled=True,
             transport=AITransport.API,
             auto_apply=True,
-        ),
+        ).model_dump(),
     )
 
 

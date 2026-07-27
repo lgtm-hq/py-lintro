@@ -269,7 +269,7 @@ def test_timeout_and_retries_flow_to_generate_summary(
             retry_base_delay=1.5,
             retry_max_delay=20.0,
             retry_backoff_factor=2.5,
-        ),
+        ).model_dump(),
     )
 
     result = ToolResult(

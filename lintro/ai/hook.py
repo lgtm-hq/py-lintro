@@ -15,6 +15,7 @@ from lintro.ai.models import AIResult
 from lintro.enums.action import Action
 
 if TYPE_CHECKING:
+    from lintro.ai.config import AIConfig
     from lintro.config.lintro_config import LintroConfig
     from lintro.models.core.tool_result import ToolResult
     from lintro.utils.console.logger import ThreadSafeConsoleLogger
@@ -27,6 +28,7 @@ class AIPostExecutionHook:
         self,
         lintro_config: LintroConfig,
         *,
+        ai_config: AIConfig | None = None,
         ai_fix: bool = False,
         transport: str | None = None,
     ) -> None:
@@ -34,10 +36,18 @@ class AIPostExecutionHook:
 
         Args:
             lintro_config: Full Lintro configuration.
+            ai_config: Pre-resolved AI configuration. Passed by callers that
+                already resolved it so the raw ``ai:`` mapping is parsed once
+                per run; resolved here when omitted.
             ai_fix: Whether AI fix suggestions were requested.
             transport: Optional CLI override for ``ai.transport``.
         """
+        from lintro.ai.interface import resolve_ai_config
+
         self._lintro_config = lintro_config
+        self._ai_config = (
+            ai_config if ai_config is not None else resolve_ai_config(lintro_config)
+        )
         self._ai_fix = ai_fix
         self._transport = transport
 
@@ -51,7 +61,7 @@ class AIPostExecutionHook:
             True if AI lint summarization is enabled and action is CHECK or
             FIX.
         """
-        return self._lintro_config.ai.lint_enabled and action in {
+        return self._ai_config.lint_enabled and action in {
             Action.CHECK,
             Action.FIX,
         }
@@ -85,6 +95,7 @@ class AIPostExecutionHook:
                 action=action,
                 all_results=all_results,
                 lintro_config=self._lintro_config,
+                ai_config=self._ai_config,
                 logger=console_logger,
                 output_format=output_format,
                 ai_fix=self._ai_fix,
@@ -92,7 +103,7 @@ class AIPostExecutionHook:
             )
         except Exception as e:
             logger.opt(exception=True).debug(f"AI post-execution hook failed: {e}")
-            if getattr(self._lintro_config.ai, "fail_on_ai_error", False):
+            if self._ai_config.fail_on_ai_error:
                 raise
             if output_format.lower() not in ("json", "sarif"):
                 console_logger.warning(f"AI enhancement unavailable: {e}")

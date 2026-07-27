@@ -28,6 +28,7 @@ from loguru import logger
 from lintro.ai.availability import is_ai_available
 from lintro.ai.budget import CostBudget
 from lintro.ai.exceptions import AIError
+from lintro.ai.interface import resolve_ai_config
 from lintro.ai.paths import resolve_workspace_root
 from lintro.ai.providers import get_provider
 from lintro.enums.confidence_level import ConfidenceLevel
@@ -178,7 +179,7 @@ class IdiomReviewPlugin(BaseToolPlugin):
             ToolResult with the aggregated, confidence-filtered findings.
         """
         lintro_config = self._get_lintro_config()
-        ai_config = lintro_config.ai
+        ai_config = resolve_ai_config(lintro_config)
         provider = get_provider(ai_config)
         budget = CostBudget(max_cost_usd=ai_config.max_cost_usd)
         workspace_root = resolve_workspace_root(lintro_config.config_path)

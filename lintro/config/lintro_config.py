@@ -4,7 +4,6 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from lintro.ai.config import AIConfig
 from lintro.config.enforce_config import EnforceConfig
 from lintro.config.execution_config import ExecutionConfig
 from lintro.config.output_config import OutputConfig
@@ -13,7 +12,6 @@ from lintro.config.score_config import ScoreConfig
 from lintro.config.tool_config import LintroToolConfig
 
 __all__ = [
-    "AIConfig",
     "EnforceConfig",
     "ExecutionConfig",
     "LintroConfig",
@@ -52,7 +50,7 @@ class LintroConfig(BaseModel):
     2. enforce: Cross-cutting settings that override native configs
     3. defaults: Fallback config when no native config exists
     4. tools: Per-tool enable/disable and config source
-    5. ai: Optional AI-powered issue intelligence
+    5. ai: Optional AI-powered issue intelligence (raw mapping)
 
     Attributes:
         model_config: Pydantic model configuration.
@@ -60,7 +58,9 @@ class LintroConfig(BaseModel):
         enforce: Cross-cutting settings enforced via CLI flags.
         defaults: Fallback configs for tools without native configs.
         tools: Per-tool configuration, keyed by tool name.
-        ai: AI-powered features configuration (optional, disabled by default).
+        ai: Raw ``ai:`` section from config, stored verbatim. The AI layer
+            parses it into ``AIConfig`` via ``resolve_ai_config`` so that
+            core config never imports the AI package (issue #724).
         review: Diff review command configuration (checklist items).
         score: Health score weights and scale (0-100 metric).
         output: Console output presentation settings (e.g. ASCII art toggle).
@@ -73,7 +73,7 @@ class LintroConfig(BaseModel):
     enforce: EnforceConfig = Field(default_factory=EnforceConfig)
     defaults: dict[str, dict[str, Any]] = Field(default_factory=dict)
     tools: dict[str, LintroToolConfig] = Field(default_factory=dict)
-    ai: AIConfig = Field(default_factory=AIConfig)
+    ai: dict[str, Any] = Field(default_factory=dict)
     review: ReviewConfig = Field(default_factory=ReviewConfig)
     score: ScoreConfig = Field(default_factory=ScoreConfig)
     output: OutputConfig = Field(default_factory=OutputConfig)

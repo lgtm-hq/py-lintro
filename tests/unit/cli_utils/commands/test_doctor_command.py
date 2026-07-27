@@ -10,7 +10,9 @@ from unittest.mock import MagicMock, patch
 import pytest
 from assertpy import assert_that
 from click.testing import CliRunner
+from loguru import logger
 
+from lintro.ai.config import AIConfig
 from lintro.cli_utils.commands.doctor import (
     ToolCheckResult,
     _check_tool,
@@ -19,6 +21,7 @@ from lintro.cli_utils.commands.doctor import (
     _output_json,
     doctor_command,
 )
+from lintro.config.lintro_config import LintroConfig
 from lintro.enums.install_context import InstallContext, PackageManager
 from lintro.enums.tool_status import ToolStatus
 from lintro.tools.core.install_context import RuntimeContext
@@ -520,3 +523,68 @@ def test_doctor_unknown_tool_name_exit_1() -> None:
 
     assert_that(result.exit_code).is_equal_to(1)
     assert_that(result.output).contains("Unknown tools")
+
+
+def test_doctor_resolves_ai_checks_from_a_raw_ai_mapping() -> None:
+    """Doctor parses the raw ``ai:`` mapping before running AI checks.
+
+    Issue #724 PR 3 made ``LintroConfig.ai`` a plain dict, so ``doctor`` now
+    resolves it through the AI facade. This pins that the checks still receive
+    a typed configuration and that a typo'd key is reported to the user.
+    """
+    runner = CliRunner()
+    p1, p2 = _patch_doctor_deps()
+    lintro_config = LintroConfig(
+        ai={"enabled": True, "lint": True, "provdier": "anthropic"},
+    )
+    received: list[Any] = []
+
+    def _record(config: Any) -> list[Any]:
+        """Record the AI config the doctor command resolved.
+
+        Args:
+            config: The configuration passed to the AI checks.
+
+        Returns:
+            An empty list of AI check results.
+        """
+        received.append(config)
+        return []
+
+    messages: list[str] = []
+    handler_id = logger.add(
+        lambda message: messages.append(str(message)),
+        level="WARNING",
+    )
+
+    try:
+        with (
+            p1,
+            p2,
+            patch(
+                "lintro.config.config_loader.get_config",
+                return_value=lintro_config,
+            ),
+            patch(
+                "lintro.cli_utils.commands.doctor.check_ai_configuration",
+                side_effect=_record,
+            ),
+            patch("subprocess.run") as mock_run,
+            patch("shutil.which", return_value="/usr/bin/ruff"),
+        ):
+            mock_run.return_value = MagicMock(
+                returncode=0,
+                stdout="ruff 0.14.4",
+                stderr="",
+            )
+            result = runner.invoke(doctor_command, [])
+    finally:
+        logger.remove(handler_id)
+
+    assert_that(result.exit_code).is_equal_to(0)
+    assert_that(received).is_length(1)
+    assert_that(received[0]).is_instance_of(AIConfig)
+    assert_that(received[0].lint_enabled).is_true()
+    assert_that("".join(messages)).contains(
+        "Unknown AI config keys ignored: provdier",
+    )

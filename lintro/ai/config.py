@@ -16,6 +16,8 @@ is the primary interface; the grouping is for documentation only.
 from __future__ import annotations
 
 import warnings
+from collections.abc import Mapping
+from typing import Any
 
 from loguru import logger
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -251,6 +253,48 @@ class AIConfig(BaseModel):
             )
             raise ValueError(msg)
         return self
+
+    # -- Construction from raw config data ---------------------------------
+
+    @classmethod
+    def from_mapping(
+        cls,
+        data: Mapping[str, Any] | None,
+        *,
+        warn_unknown: bool = True,
+    ) -> AIConfig:
+        """Build an :class:`AIConfig` from a raw ``ai:`` config mapping.
+
+        Only recognized keys are passed through, so the model's own defaults
+        apply to every omitted field. Unknown keys are dropped rather than
+        rejected, because ``AIConfig`` itself forbids extras and a stale key
+        in ``.lintro-config.yaml`` must not break the whole run.
+
+        This is the boundary that keeps :mod:`lintro.config` free of any
+        knowledge of ``AIConfig``'s field set (see issue #724): the loader
+        stores the ``ai:`` section verbatim and the AI layer parses it.
+
+        Args:
+            data: Raw ``ai`` section from config, or None when absent.
+            warn_unknown: Whether to log a warning listing dropped keys.
+                Display-only callers pass False so that rendering a summary
+                never emits diagnostics; resolvers leave it True.
+
+        Returns:
+            AIConfig: Parsed AI configuration.
+        """
+        if not data:
+            return cls()
+
+        known_fields = set(cls.model_fields)
+        unknown = set(data) - known_fields
+        if unknown and warn_unknown:
+            logger.warning(
+                "Unknown AI config keys ignored: {}",
+                ", ".join(sorted(unknown)),
+            )
+        filtered = {k: v for k, v in data.items() if k in known_fields}
+        return cls(**filtered)
 
     # -- Effective feature state -------------------------------------------
 
