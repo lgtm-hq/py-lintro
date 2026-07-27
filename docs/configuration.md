@@ -375,10 +375,12 @@ running the tools that need a project's dependency tree to work: `tsc`, `vue-tsc
 `svelte-check` and `astro-check`.
 
 It does **not** apply to standalone Node.js binaries such as `prettier`, `oxlint`,
-`oxfmt`, `stylelint` or `markdownlint-cli2`. Those are invoked from `PATH` (or via
-`bunx`/`npx`) and run fine without a local `node_modules`. When one of them cannot be
-resolved at all, Lintro reports a `⏭️ SKIP` row with the reason instead of a pass —
-installing project dependencies would not have helped.
+`oxfmt`, `stylelint` or `markdownlint-cli2`. Those run fine without a local
+`node_modules`: `oxlint`, `oxfmt` and `stylelint` are fetched on demand by `bunx`/`npx`,
+while `prettier` and `markdownlint-cli2` are resolved from `PATH` — see
+[Node.js Tool Resolution](#nodejs-tool-resolution). When one of them cannot be resolved
+at all, Lintro reports a `⏭️ SKIP` row with the reason instead of a pass — installing
+project dependencies would not have helped.
 
 You can also enable this globally via configuration:
 
@@ -804,6 +806,53 @@ Rationale:
   Ruff’s stricter lint rules (e.g., `COM812`, `E501`).
 - Black’s safe wrapping is preferred for long lines; Ruff continues to enforce lint
   limits during checks.
+
+### Node.js Tool Resolution {#nodejs-tool-resolution}
+
+How Lintro locates a Node.js tool decides which install actually works, and the answer
+is not the same for every tool. Four resolution modes are in use; the tool's own
+definition, not a single shared code path, decides which one applies.
+
+**1. Runner-only tools — install as a project dependency.** `oxlint`, `oxfmt` and
+`stylelint` go through `NodeJSBuilder` in `lintro/tools/core/command_builders.py`:
+
+1. `bunx <binary>` — if `bunx` is available.
+2. `npx <binary>` — if only `npx` is available.
+3. bare `<binary>` — if neither runner exists.
+
+`bunx`/`npx` resolve the **checked project's** `node_modules/.bin` first and otherwise
+fetch the package from the npm registry. Neither branch looks at `PATH`, so a global
+install (`bun add -g`, `npm install -g`) or a Homebrew formula is not what Lintro picks
+up on any machine that has `bun` or `npm`. Install these as a dependency of the project
+you check (`bun add -D <pkg>` / `npm install -D <pkg>`); that also pins the version
+through your lockfile instead of resolving `@latest` at check time.
+
+**2. `PATH`-first tools — a global install is what they prefer.** `commitlint`,
+`markdownlint-cli2`, `tsc`, `vue-tsc` and `svelte-check` resolve in their own tool
+definitions, and each checks the binary **before** any runner:
+
+1. `<binary>` from `PATH` — a global install (`-g`) or a Homebrew formula.
+2. `bunx <binary>`.
+3. `npx <binary>` — **not available for `commitlint` or `markdownlint-cli2`**, which
+   fall straight through to step 4.
+4. bare `<binary>` — fails if nothing is installed.
+
+The `npx` gap matters: on a machine with npm but no bun, a `commitlint` or
+`markdownlint-cli2` devDependency is never reached and the tool reports a skip. Install
+those two globally, or make sure `bun` is available.
+
+**3. Local-first with a runner fallback.** `astro check` prefers the project's
+`node_modules/.bin/astro` (which also avoids the interactive "install @astrojs/check?"
+prompt that hangs without a TTY), then `PATH`, then `bunx`/`npx`. `html-validate` uses a
+similar chain with a **version-pinned** registry fallback; see
+[html-validate Configuration](#html-validate-configuration) for the full order. A global
+install works for both, though a project-local one is preferred.
+
+**4. `PATH` only.** `prettier` has no Node-specific builder at all — the command builder
+registry falls through to its bare-name default and the OS resolves `prettier` against
+`PATH`. A global install (`npm install -g prettier`, `brew install prettier`) is
+therefore the correct one; a project devDependency alone does not put `prettier` on
+`PATH`.
 
 ### Python Tools
 
@@ -1294,6 +1343,10 @@ npm install -g typescript
 bun add -g typescript
 ```
 
+Lintro prefers a `tsc` binary on `PATH` and only falls back to `bunx`/`npx`, so any of
+the above works; a project-local devDependency is picked up through the `bunx`/`npx`
+fallback. See [Node.js Tool Resolution](#nodejs-tool-resolution).
+
 **File:** `tsconfig.json`
 
 ```json
@@ -1355,13 +1408,16 @@ When a native config exists, Lintro uses it automatically and skips generating d
 **Installation:**
 
 ```bash
-# npm/bun
-npm install -g oxlint
-bun add -g oxlint
+# bun (recommended)
+bun add -D oxlint
 
-# Homebrew (macOS)
-brew install oxlint
+# npm
+npm install -D oxlint
 ```
+
+Lintro invokes oxlint via `bunx`/`npx`, which resolve the project's `node_modules` and
+not `PATH` — a global or Homebrew install is not what gets used. See
+[Node.js Tool Resolution](#nodejs-tool-resolution).
 
 **File:** `.oxlintrc.json`
 
@@ -1437,13 +1493,16 @@ Stylelint resolves configuration per file (walking upward). Lintro supports:
 **Installation:**
 
 ```bash
-# npm/bun
-npm install -g stylelint
-bun add -g stylelint
+# bun (recommended, with a shareable config)
+bun add -D stylelint stylelint-config-standard
 
-# Per-project (recommended, with a shareable config)
-bun add -d stylelint stylelint-config-standard
+# npm
+npm install -D stylelint stylelint-config-standard
 ```
+
+Lintro invokes stylelint via `bunx`/`npx`, which resolve the project's `node_modules`
+and not `PATH` — a global install is not what gets used. See
+[Node.js Tool Resolution](#nodejs-tool-resolution).
 
 **File:** `.stylelintrc.json`
 
@@ -1499,13 +1558,16 @@ When a native config exists, Lintro uses it automatically and skips generating d
 **Installation:**
 
 ```bash
-# npm/bun
-npm install -g oxfmt
-bun add -g oxfmt
+# bun (recommended)
+bun add -D oxfmt
 
-# Homebrew (macOS)
-brew install oxfmt
+# npm
+npm install -D oxfmt
 ```
+
+Lintro invokes oxfmt via `bunx`/`npx`, which resolve the project's `node_modules` and
+not `PATH` — a global or Homebrew install is not what gets used. See
+[Node.js Tool Resolution](#nodejs-tool-resolution).
 
 **File:** `.oxfmtrc.json` or `.oxfmtrc.jsonc`
 
@@ -1705,6 +1767,10 @@ A project-local devDependency is the **supported configuration**. It is the firs
 most reliable branch of Lintro's executable resolution, it is lockfile-pinned, and it
 needs no registry access at check time. A global install (`-g`) does _not_ populate
 `node_modules/.bin`, so it lands on a later, weaker branch.
+
+html-validate is the only tool on this pinned chain; see
+[Node.js Tool Resolution](#nodejs-tool-resolution) for how the other Node.js tools
+resolve.
 
 **Executable resolution order:**
 
@@ -2538,7 +2604,9 @@ repository's most recent commit message.
 - Requires a config; Lintro skips it as a non-error when none is present.
 - Install: `bun add -g @commitlint/cli @commitlint/config-conventional`,
   `npm install -g @commitlint/cli @commitlint/config-conventional`, or
-  `brew install commitlint`.
+  `brew install commitlint`. Lintro checks `PATH` first and falls back only to `bunx` —
+  there is no `npx` branch, so a devDependency is unreachable without `bun`. See
+  [Node.js Tool Resolution](#nodejs-tool-resolution).
 - Cannot auto-fix — amend the commit to satisfy the rules.
 
 **File:** `commitlint.config.js` (or `.commitlintrc.{js,cjs,json,yaml,yml}`, or a
