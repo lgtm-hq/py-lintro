@@ -21,6 +21,19 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.93.1] - 2026-07-27
+
+### Changed
+
+- **deps**: update ghcr.io/lgtm-hq/py-lintro docker tag to 0.91.59 (patch) (#1803)
+  (a9f6c02)
+- **deps**: update ghcr.io/lgtm-hq/lintro-tools:latest docker digest to 8ad3e30 (#1805)
+  (7cf5397)
+
+### Fixed
+
+- **ci**: drop unnecessary contents:write from SBOM jobs (#1809) (0aa0ece)
+
 ## [0.93.0] - 2026-07-27
 
 ### Added
