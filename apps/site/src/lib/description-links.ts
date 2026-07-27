@@ -25,6 +25,17 @@ function setHref(node: Element, href: string): void {
   node.properties = { ...node.properties, href };
 }
 
+/** Split a hast `rel` property (string or array form) into discrete tokens. */
+function relTokens(existing: unknown): string[] {
+  if (typeof existing === 'string') {
+    return existing.split(/\s+/).filter(Boolean);
+  }
+  if (Array.isArray(existing)) {
+    return existing.flatMap((v) => String(v).split(/\s+/)).filter(Boolean);
+  }
+  return [];
+}
+
 function mergeRel(node: Element): void {
   const target = node.properties?.target;
   const hasTarget = target === '_blank' || (Array.isArray(target) && target.includes('_blank'));
@@ -32,22 +43,10 @@ function mergeRel(node: Element): void {
     return;
   }
 
-  const existing = node.properties?.rel;
-  const tokens = new Set<string>();
-  if (typeof existing === 'string') {
-    existing
-      .split(/\s+/)
-      .filter(Boolean)
-      .forEach((t) => tokens.add(t));
-  } else if (Array.isArray(existing)) {
-    existing
-      .flatMap((v) => String(v).split(/\s+/))
-      .filter(Boolean)
-      .forEach((t) => tokens.add(t));
-  }
+  const tokens = new Set<string>(relTokens(node.properties?.rel));
   tokens.add('noopener');
   tokens.add('noreferrer');
-  node.properties = { ...node.properties, rel: [...tokens].join(' ') };
+  node.properties = { ...node.properties, rel: [...tokens] };
 }
 
 function transformFormatAnchors(tree: Root, base: string): void {
@@ -73,7 +72,7 @@ function transformFormatAnchors(tree: Root, base: string): void {
         node.properties = {
           ...node.properties,
           target: '_blank',
-          rel: 'noopener noreferrer',
+          rel: ['noopener', 'noreferrer'],
         };
       }
       return;
