@@ -34,7 +34,7 @@ jobs:
       contents: read
       packages: read # pull lintro-image from GHCR in reusable-quality-lint
     with:
-      tooling-ref: 'cc5b3cc982868fa4c0718d4b26045ca9f56f0f5b'  # v0.59.30
+      tooling-ref: 'cc5b3cc982868fa4c0718d4b26045ca9f56f0f5b' # v0.59.30
       job-name: '🌙 Nightly Dogfooding Lint'
       lintro-tool-options: >-
         pydoclint:timeout=120,bandit:timeout=120,prettier:timeout=120,mypy:timeout=120,osv_scanner:check_suppressions=false
@@ -196,4 +196,4 @@ jobs:
       issues: write # open or ping the deduplicated failure issue
     with:
       workflow-key: dogfood-nightly
-      tooling-ref: 'cc5b3cc982868fa4c0718d4b26045ca9f56f0f5b'  # v0.59.30
+      tooling-ref: 'cc5b3cc982868fa4c0718d4b26045ca9f56f0f5b' # v0.59.30

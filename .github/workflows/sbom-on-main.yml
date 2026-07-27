@@ -24,7 +24,7 @@ jobs:
       sbom-format: cyclonedx-json
       scan-vulnerabilities: true
       create-attestation: true
-      tooling-ref: 'cc5b3cc982868fa4c0718d4b26045ca9f56f0f5b'  # v0.59.30
+      tooling-ref: 'cc5b3cc982868fa4c0718d4b26045ca9f56f0f5b' # v0.59.30
       egress-policy: block
       egress-preset: sbom
     permissions:

@@ -24,7 +24,7 @@ jobs:
       pull-requests: write # open PRs for stale/expired suppressions
     with:
       job-name: '🔍 Check Vulnerability Suppressions'
-      tooling-ref: 'cc5b3cc982868fa4c0718d4b26045ca9f56f0f5b'  # v0.59.30
+      tooling-ref: 'cc5b3cc982868fa4c0718d4b26045ca9f56f0f5b' # v0.59.30
       workflow-file: vuln-suppression-check.yml
       install-script: scripts/ci/security/install-osv-scanner.sh
       check-script: scripts/ci/security/check-vuln-suppressions.sh

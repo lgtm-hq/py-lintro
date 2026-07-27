@@ -21,7 +21,7 @@ jobs:
     uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-dependency-review.yml@cc5b3cc982868fa4c0718d4b26045ca9f56f0f5b # v0.59.30
     with:
       fail-on-severity: high
-      tooling-ref: 'cc5b3cc982868fa4c0718d4b26045ca9f56f0f5b'  # v0.59.30
+      tooling-ref: 'cc5b3cc982868fa4c0718d4b26045ca9f56f0f5b' # v0.59.30
       egress-policy: block
       egress-preset: scorecard
       # Full list (v0.50.0+ replace semantics): the reusable passes

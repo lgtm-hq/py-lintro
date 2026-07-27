@@ -112,7 +112,7 @@ jobs:
       provenance: false
       sbom: false
       cosign-sign: true
-      tooling-ref: 'cc5b3cc982868fa4c0718d4b26045ca9f56f0f5b'  # v0.59.30
+      tooling-ref: 'cc5b3cc982868fa4c0718d4b26045ca9f56f0f5b' # v0.59.30
       egress-policy: block
       egress-preset: docker
       # Full list (v0.50.0+ replace semantics): the reusable passes
@@ -214,7 +214,7 @@ jobs:
       provenance: false
       sbom: false
       cosign-sign: true
-      tooling-ref: 'cc5b3cc982868fa4c0718d4b26045ca9f56f0f5b'  # v0.59.30
+      tooling-ref: 'cc5b3cc982868fa4c0718d4b26045ca9f56f0f5b' # v0.59.30
       egress-policy: block
       egress-preset: docker
       # Full list (v0.50.0+ replace semantics): the reusable passes

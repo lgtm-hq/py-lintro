@@ -75,7 +75,7 @@ jobs:
       # Remediation landed in #1126; Dependabot shows no open high alerts.
       fail-on-severity: high
       create-attestation: true
-      tooling-ref: 'cc5b3cc982868fa4c0718d4b26045ca9f56f0f5b'  # v0.59.30
+      tooling-ref: 'cc5b3cc982868fa4c0718d4b26045ca9f56f0f5b' # v0.59.30
       egress-policy: block
       egress-preset: sbom
     permissions:
@@ -103,7 +103,7 @@ jobs:
     with:
       python-version: '3.14'
       artifact-name: python-dist
-      tooling-ref: 'cc5b3cc982868fa4c0718d4b26045ca9f56f0f5b'  # v0.59.30
+      tooling-ref: 'cc5b3cc982868fa4c0718d4b26045ca9f56f0f5b' # v0.59.30
       egress-policy: block
       egress-preset: pypi
       # Full list (v0.50.0+ replace semantics): the reusable passes
@@ -173,7 +173,7 @@ jobs:
         with:
           artifact-name: python-dist
           python-version: '3.14'
-          tooling-ref: 'cc5b3cc982868fa4c0718d4b26045ca9f56f0f5b'  # v0.59.30
+          tooling-ref: 'cc5b3cc982868fa4c0718d4b26045ca9f56f0f5b' # v0.59.30
       - name: Upload to PyPI
         # yamllint disable-line rule:line-length
         uses: pypa/gh-action-pypi-publish@ba38be9e461d3875417946c167d0b5f3d385a247 # v1.14.1
@@ -199,7 +199,7 @@ jobs:
     with:
       artifact-name: python-dist
       generate-release-notes: true
-      tooling-ref: 'cc5b3cc982868fa4c0718d4b26045ca9f56f0f5b'  # v0.59.30
+      tooling-ref: 'cc5b3cc982868fa4c0718d4b26045ca9f56f0f5b' # v0.59.30
       egress-policy: block
       egress-preset: github-tooling
       # Full list (v0.50.0+ replace semantics): the reusable passes
