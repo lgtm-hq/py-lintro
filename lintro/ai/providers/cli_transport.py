@@ -595,20 +595,30 @@ class CliTransport(ABC):
     ) -> None:
         """Raise mapped AI exceptions when a CLI exits non-zero.
 
+        The failure cause is taken from stderr, falling back to stdout when
+        stderr is empty or whitespace-only. Several agent CLIs report fatal
+        errors on stdout inside their JSON envelope while leaving stderr empty
+        (a logged-out ``claude`` exits 1 with
+        ``{"is_error": true, ..., "result": "Not logged in ..."}``), so a
+        stderr-only cause silently drops the diagnostic and defeats the auth
+        patterns. stderr stays preferred when present so a chatty but
+        successfully parsed stdout cannot pollute a real stderr diagnostic.
+
         Args:
             result: Completed subprocess result.
-            auth_patterns: Substrings in stderr that indicate auth failure.
+            auth_patterns: Substrings in the resolved cause text (stderr, or
+                stdout when stderr is empty) that indicate auth failure.
             auth_hint: Guidance appended to authentication errors.
 
         Raises:
-            AIAuthenticationError: When stderr matches auth patterns.
+            AIAuthenticationError: When the cause text matches auth patterns.
             AIProviderError: For other non-zero exits.
         """
         if result.returncode == 0:
             return
 
-        stderr = result.stderr.strip()
-        lowered = stderr.lower()
+        cause = result.stderr.strip() or result.stdout.strip()
+        lowered = cause.lower()
         for pattern in auth_patterns:
             if pattern in lowered:
                 message = f"{self._binary_name} CLI authentication required."
@@ -617,7 +627,7 @@ class CliTransport(ABC):
                 raise AIAuthenticationError(message)
 
         raise AIProviderError(
-            f"{self._binary_name} CLI exited with code {result.returncode}: {stderr}",
+            f"{self._binary_name} CLI exited with code {result.returncode}: {cause}",
         )
 
     @staticmethod
