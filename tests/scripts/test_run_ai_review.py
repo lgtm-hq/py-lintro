@@ -158,25 +158,54 @@ def test_shell_help_exits_zero() -> None:
     assert_that(result.stdout).contains("Usage:")
 
 
-def test_shell_skips_without_api_key() -> None:
-    """An empty ANTHROPIC_API_KEY skips gracefully with exit 0."""
+def test_shell_fails_visibly_without_api_key() -> None:
+    """A missing credential is a visible failure, never a silent green pass.
+
+    This is the #1826 regression guard: the script used to exit 0 here, so a PR
+    whose review never ran still showed ``AI Review ✓``.
+    """
     result = _run_shell(
         args=[],
         env_overrides={"ANTHROPIC_API_KEY": "", "PR_NUMBER": "123"},
     )
 
-    assert_that(result.returncode).is_equal_to(0)
-    assert_that(result.stdout).contains("skipping AI review")
+    assert_that(result.returncode).is_equal_to(1)
+    assert_that(result.stdout).contains("::error")
+    assert_that(result.stdout).contains("no provider credential")
+    assert_that(result.stderr).contains("nothing was reviewed")
 
 
-def test_shell_skips_without_pr_number() -> None:
-    """A configured key but no PR number skips gracefully with exit 0."""
+def test_shell_fails_visibly_without_pr_number() -> None:
+    """A configured key but no PR number fails rather than skipping quietly."""
     result = _run_shell(
         args=[],
         env_overrides={"ANTHROPIC_API_KEY": "dummy-key", "PR_NUMBER": ""},
     )
 
-    assert_that(result.returncode).is_equal_to(0)
+    assert_that(result.returncode).is_equal_to(1)
+    assert_that(result.stderr).contains("Nothing to review")
+
+
+def test_shell_writes_outcome_to_step_summary(tmp_path: Path) -> None:
+    """The outcome is appended to the job summary so the PR list is readable.
+
+    Args:
+        tmp_path: Temporary directory holding the fake step-summary file.
+    """
+    summary = tmp_path / "summary.md"
+    result = _run_shell(
+        args=[],
+        env_overrides={
+            "ANTHROPIC_API_KEY": "",
+            "PR_NUMBER": "123",
+            "GITHUB_STEP_SUMMARY": str(summary),
+        },
+    )
+
+    assert_that(result.returncode).is_equal_to(1)
+    written = summary.read_text(encoding="utf-8")
+    assert_that(written).contains("AI Review")
+    assert_that(written).contains("no provider credential")
 
 
 def test_review_cli_accepts_script_flags() -> None:
@@ -201,17 +230,22 @@ def test_workflow_yaml_parses() -> None:
     assert_that(trigger).contains_key("pull_request")
 
 
-def test_workflow_job_is_non_blocking() -> None:
-    """The review job is non-blocking at the job level.
+def test_workflow_never_rewrites_its_conclusion_to_success() -> None:
+    """No ``continue-on-error`` anywhere, so a failed review shows as failed.
 
-    Job-level ``continue-on-error`` keeps setup failures (uv sync, egress,
-    checkout) from turning the PR check red, matching the informational intent.
+    Job-level ``continue-on-error`` rewrites the job conclusion to ``success``,
+    which is exactly how a review that produced nothing kept reading as a pass for
+    months (#1826). The check is not required, so a red conclusion is visible
+    without being blocking — that is the whole trade this asserts.
     """
     loaded = yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))
 
     job = loaded["jobs"]["ai-review"]
-    assert_that(job).contains_key("continue-on-error")
-    assert_that(job["continue-on-error"]).is_true()
+    assert_that(job).does_not_contain_key("continue-on-error")
+    for step in job["steps"]:
+        assert_that(step).described_as(
+            f"step {step.get('name')!r} must not swallow its own failure",
+        ).does_not_contain_key("continue-on-error")
 
 
 def test_workflow_job_is_same_repo_only() -> None:
@@ -297,9 +331,7 @@ def test_workflow_secret_scoped_to_review_step_only() -> None:
     ]
 
     assert_that(steps_with_key).is_length(1)
-    assert_that(steps_with_key[0]).is_equal_to(
-        "Run AI review (posts comment, non-blocking)",
-    )
+    assert_that(steps_with_key[0]).starts_with("Run AI review")
 
 
 def test_workflow_reviews_pr_via_gh_not_working_tree() -> None:

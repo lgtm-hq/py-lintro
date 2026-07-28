@@ -80,6 +80,7 @@ def test_auth_401_envelope_shape(auth_error: AIAuthenticationError) -> None:
                 "provider": "anthropic",
                 "status": 401,
                 "retryable": False,
+                "provider_unavailable": True,
                 "message": (
                     "Anthropic authentication failed: Error code: 401 - "
                     "authentication_error"
@@ -100,6 +101,7 @@ def test_rate_limit_429_envelope_shape(rate_limit_error: AIRateLimitError) -> No
                 "provider": "anthropic",
                 "status": 429,
                 "retryable": True,
+                "provider_unavailable": True,
                 "message": (
                     "Anthropic rate limit exceeded: Error code: 429 - "
                     "rate_limit_error"
@@ -132,6 +134,7 @@ def test_server_5xx_envelope_shape(server_error: AIProviderError) -> None:
                 "provider": "anthropic",
                 "status": 529,
                 "retryable": True,
+                "provider_unavailable": True,
                 "message": "Anthropic API error: Error code: 529 - overloaded_error",
             },
         },
@@ -151,6 +154,7 @@ def test_invalid_response_envelope_shape(
                 "provider": "anthropic",
                 "status": None,
                 "retryable": False,
+                "provider_unavailable": False,
                 "message": "Expecting value: line 1 column 1 (char 0)",
             },
         },
@@ -183,7 +187,14 @@ def test_envelope_keys_are_stable(auth_error: AIAuthenticationError) -> None:
 
     assert_that(list(contract.keys())).is_equal_to(["error"])
     assert_that(set(contract["error"].keys())).is_equal_to(
-        {"kind", "provider", "status", "retryable", "message"},
+        {
+            "kind",
+            "provider",
+            "status",
+            "retryable",
+            "provider_unavailable",
+            "message",
+        },
     )
 
 
