@@ -83,6 +83,38 @@ def test_payload_failures_still_prove_the_credential_is_live(
     assert_that(liveness_state_for_kind(kind=kind)).is_equal_to(LivenessState.OK)
 
 
+@pytest.mark.xfail(
+    reason=(
+        "#1836: a logged-out `claude` CLI reports 'Not logged in · Please run "
+        "/login' on stdout, but the transport builds its cause text from stderr "
+        "alone, so the classifier never sees it. Anthropic's signature map also "
+        "lacks the auth substrings (only Cursor's has them), so both halves of "
+        "#1836 are needed before this passes. Strict: when it starts passing, "
+        "delete this marker."
+    ),
+    strict=True,
+)
+def test_logged_out_cli_should_classify_as_auth_failed() -> None:
+    """A logged-out agent CLI must be an auth verdict, not an unknown one.
+
+    Pinned as the *intended* behaviour rather than the current behaviour: today
+    this resolves to UNKNOWN, which is what makes an unauthenticated CLI surface
+    as a mysterious failure instead of "authenticate the CLI". Asserting today's
+    UNKNOWN would bake the defect into the suite.
+    """
+    result = liveness_from_error(
+        provider="anthropic",
+        transport=AITransport.CLI,
+        error=AIProviderError(
+            "Claude CLI exited with code 1: Not logged in · Please run /login",
+        ),
+        quota_verified=False,
+    )
+
+    assert_that(result.state).is_equal_to(LivenessState.AUTH_FAILED)
+    assert_that(result.is_live).is_false()
+
+
 def test_every_state_has_copy() -> None:
     """No state may reach a user without a message, so copy must be exhaustive."""
     for state in LivenessState:
