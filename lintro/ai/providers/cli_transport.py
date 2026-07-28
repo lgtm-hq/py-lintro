@@ -42,7 +42,11 @@ from lintro.ai.liveness import (
     incompatible_cli_result,
     live_result,
 )
-from lintro.ai.providers.cli_contracts import CliContract, format_version
+from lintro.ai.providers.cli_contracts import (
+    CliContract,
+    format_version,
+    unadvertised_flags,
+)
 
 __all__ = ["CliTransport", "OptionalArg", "flag_named_in"]
 
@@ -288,9 +292,9 @@ class CliTransport(ABC):
         help_text = await self.help_text()
         if help_text is None:
             return ()
-        lowered = help_text.lower()
-        return tuple(
-            flag for flag in contract.required_flags if not flag_named_in(lowered, flag)
+        return unadvertised_flags(
+            lowered_help=help_text.lower(),
+            flags=contract.required_flags,
         )
 
     async def probe_liveness(self, *, provider_name: str) -> LivenessResult:

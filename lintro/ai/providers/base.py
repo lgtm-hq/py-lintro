@@ -319,7 +319,18 @@ class BaseAIProvider(ABC):
                     message="CLI transport is not initialized",
                     hint="Install the provider CLI and ensure it is on PATH",
                 )
-            return await cli.probe_liveness(provider_name=self._provider_name)
+            try:
+                return await cli.probe_liveness(provider_name=self._provider_name)
+            except Exception as exc:  # noqa: BLE001 - every failure is a verdict
+                # Same contract as the API branch below: this method promises a
+                # classified result, so an unexpected probe failure must not
+                # escape as a traceback to `lintro doctor` or the contract suite.
+                return liveness_from_error(
+                    provider=self._provider_name,
+                    transport=transport,
+                    error=exc,
+                    quota_verified=False,
+                )
 
         if not self.is_available():
             return missing_credential_result(

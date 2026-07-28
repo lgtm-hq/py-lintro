@@ -33,12 +33,9 @@ from lintro.ai.providers.cli_contracts import (
     CliContract,
     cli_contract_for,
     format_version,
+    unadvertised_flags,
 )
-from lintro.ai.providers.cli_transport import (
-    PROBE_TIMEOUT,
-    CliTransport,
-    flag_named_in,
-)
+from lintro.ai.providers.cli_transport import PROBE_TIMEOUT, CliTransport
 
 __all__ = [
     "CliSurfaceReport",
@@ -242,13 +239,13 @@ async def probe_cli_surface(*, provider: AIProvider) -> CliSurfaceReport:
         binary_path=binary_path,
         version=version,
         help_readable=True,
-        missing_required_flags=tuple(
-            flag for flag in contract.required_flags if not flag_named_in(lowered, flag)
+        missing_required_flags=unadvertised_flags(
+            lowered_help=lowered,
+            flags=contract.required_flags,
         ),
-        unadvertised_optional_flags=tuple(
-            flag
-            for flag in contract.optional_flag_names
-            if not flag_named_in(lowered, flag)
+        unadvertised_optional_flags=unadvertised_flags(
+            lowered_help=lowered,
+            flags=contract.optional_flag_names,
         ),
     )
 

@@ -37,6 +37,7 @@ __all__ = [
     "OptionalCliFlag",
     "cli_contract_for",
     "format_version",
+    "unadvertised_flags",
 ]
 
 
@@ -92,6 +93,30 @@ class CliContract:
             Tuple of optional flag strings.
         """
         return tuple(item.flag for item in self.optional_flags)
+
+
+def unadvertised_flags(
+    *,
+    lowered_help: str,
+    flags: tuple[str, ...],
+) -> tuple[str, ...]:
+    """Return the flags *lowered_help* does not advertise, in declaration order.
+
+    Shared by the runtime guard and the contract gate on purpose. The gate exists
+    to certify what the guard relies on, so if the two ever matched flags
+    differently the gate could pass a binary the guard then fails on. One helper
+    makes that divergence impossible rather than merely unlikely.
+
+    Args:
+        lowered_help: Already-lowercased help output from the binary.
+        flags: Declared flag names to look for.
+
+    Returns:
+        The subset of *flags* not present as whole tokens.
+    """
+    from lintro.ai.providers.cli_transport import flag_named_in
+
+    return tuple(flag for flag in flags if not flag_named_in(lowered_help, flag))
 
 
 def format_version(version: tuple[int, ...] | None) -> str:

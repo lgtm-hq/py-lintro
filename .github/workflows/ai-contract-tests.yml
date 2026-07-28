@@ -97,8 +97,8 @@ jobs:
     needs: [tier1-flag-surface]
     runs-on: ubuntu-24.04
     permissions:
-      contents: read
-      packages: read
+      contents: read # checkout the contract suite and the image pin
+      packages: read # pull the pinned lintro-ai-tools image from GHCR
     timeout-minutes: 25
     steps:
       - name: Harden Runner

@@ -23,7 +23,11 @@ from lintro.ai.providers.cli_contract_check import (
     declared_cli_providers,
     probe_cli_surface,
 )
-from lintro.ai.providers.cli_contracts import CliContract, cli_contract_for
+from lintro.ai.providers.cli_contracts import (
+    CliContract,
+    cli_contract_for,
+    unadvertised_flags,
+)
 
 _CONTRACT = CliContract(
     binary="fake-agent",
@@ -249,6 +253,35 @@ async def test_probe_distrusts_a_non_zero_help_probe(
 
 
 # --- registry coverage -------------------------------------------------------
+
+
+def test_guard_and_gate_share_one_flag_matcher() -> None:
+    """The runtime guard and the contract gate must not diverge on matching.
+
+    The gate exists to certify what the guard depends on, so two independent
+    matchers could let the gate pass a binary the guard then fails on. Both now
+    route through ``unadvertised_flags``; this pins the semantics they share,
+    including the token-boundary rule that stops ``--json-schema`` matching
+    inside ``--json-schema-name``.
+    """
+    help_text = "usage: fake\n  --json-schema-name\n  --print\n"
+
+    missing = unadvertised_flags(
+        lowered_help=help_text,
+        flags=("--print", "--json-schema", "--absent"),
+    )
+
+    assert_that(missing).is_equal_to(("--json-schema", "--absent"))
+
+
+def test_unadvertised_flags_preserves_declaration_order() -> None:
+    """Order is contract order, so failure messages read predictably."""
+    missing = unadvertised_flags(
+        lowered_help="usage: fake",
+        flags=("--zebra", "--alpha"),
+    )
+
+    assert_that(missing).is_equal_to(("--zebra", "--alpha"))
 
 
 def test_declared_providers_cover_every_contract() -> None:
