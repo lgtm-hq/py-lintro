@@ -53,6 +53,22 @@ def test_both_keywords_together_is_a_type_error() -> None:
         )
 
 
+def test_explicit_metadata_none_still_rejects_the_alias() -> None:
+    """An explicit ``metadata=None`` counts as supplied, not as absent.
+
+    Presence of the keyword is what matters; otherwise
+    ``ToolResult(metadata=None, ai_metadata=...)`` would silently accept both
+    names and quietly honour the deprecated one.
+    """
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", DeprecationWarning)
+        assert_that(ToolResult).raises(TypeError).when_called_with(
+            name="ruff",
+            metadata=None,
+            ai_metadata={"b": 2},
+        )
+
+
 def test_alias_read_and_write_share_one_dict() -> None:
     """Both names are views onto the same underlying dict."""
     result = ToolResult(name="ruff", metadata={"fixed_count": 1})

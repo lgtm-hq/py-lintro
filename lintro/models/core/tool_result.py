@@ -193,13 +193,13 @@ def _tool_result_init(self: ToolResult, *args: Any, **kwargs: Any) -> None:
         TypeError: If both ``metadata`` and ``ai_metadata`` are supplied.
     """
     if "ai_metadata" in kwargs:
-        alias_value = kwargs.pop("ai_metadata")
-        _warn_ai_metadata(stacklevel=2)
-        if kwargs.get("metadata") is not None:
+        if "metadata" in kwargs:
             raise TypeError(
                 "ToolResult() got both 'metadata' and the deprecated "
                 "'ai_metadata'; pass only 'metadata'",
             )
+        alias_value = kwargs.pop("ai_metadata")
+        _warn_ai_metadata(stacklevel=2)
         kwargs["metadata"] = alias_value
     _dataclass_init(self, *args, **kwargs)
 
