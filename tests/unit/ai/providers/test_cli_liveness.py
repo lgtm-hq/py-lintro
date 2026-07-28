@@ -16,9 +16,11 @@ from collections.abc import Callable
 import pytest
 from assertpy import assert_that
 
+from lintro.ai.enums import AITransport
 from lintro.ai.exceptions import AINotAvailableError
 from lintro.ai.liveness import LivenessState
 from lintro.ai.provider_enum import AIProvider
+from lintro.ai.providers.base import AIResponse, BaseAIProvider
 from lintro.ai.providers.cli_contracts import CliContract, cli_contract_for
 from lintro.ai.providers.cli_transport import CliTransport
 from tests.unit.ai.conftest import completed_process as _completed
@@ -49,6 +51,50 @@ class _FakeTransport(CliTransport):
             The unmodified stdout.
         """
         return stdout
+
+
+class _NoTransportProvider(BaseAIProvider):
+    """A CLI-transport provider whose CLI transport was never constructed."""
+
+    def __init__(self) -> None:
+        """Initialise a minimal CLI-transport provider with no SDK client."""
+        super().__init__(
+            provider_name="fake",
+            has_sdk=True,
+            sdk_package="fake",
+            default_model="fake-model",
+            default_api_key_env="FAKE_API_KEY",
+            transport=AITransport.CLI,
+        )
+
+    def _create_client(self, *, api_key: str) -> None:
+        """Return no client; the CLI transport owns invocation.
+
+        Args:
+            api_key: Ignored.
+        """
+        del api_key
+
+    async def complete(
+        self,
+        prompt: str,
+        **kwargs: object,
+    ) -> AIResponse:
+        """Never called: the probe short-circuits on the absent transport.
+
+        Args:
+            prompt: Ignored.
+            **kwargs: Ignored.
+
+        Returns:
+            Never returns.
+
+        Raises:
+            AssertionError: Always, so an accidental invocation is visible.
+        """
+        del prompt, kwargs
+        msg = "the probe must not invoke a provider with no CLI transport"
+        raise AssertionError(msg)
 
 
 def _transport() -> _FakeTransport:
@@ -211,14 +257,12 @@ async def test_cli_branch_without_a_transport_reports_missing_credential() -> No
 
     Doctor and the contract suite both need a verdict to display; a traceback
     here would be the difference between an actionable message and a crash.
-    """
-    from lintro.ai.enums import AITransport
-    from lintro.ai.providers.anthropic import AnthropicProvider
 
-    provider = AnthropicProvider(transport=AITransport.CLI)
-    # Simulate the "claude not found at construction time" state, which leaves the
-    # transport unset while the provider object still exists.
-    provider._cli = None
+    Exercised against the base class rather than a real provider: constructing
+    ``AnthropicProvider(transport=CLI)`` requires ``claude`` on PATH, which would
+    make this pass or fail on whatever the machine happens to have installed.
+    """
+    provider = _NoTransportProvider()
 
     result = await provider.check_liveness()
 
@@ -238,7 +282,6 @@ async def test_cli_backed_providers_expose_their_transport(
         provider: Provider whose CLI transport hook is checked.
     """
     from lintro.ai.config import AIConfig
-    from lintro.ai.enums import AITransport
     from lintro.ai.providers import get_provider
 
     try:
