@@ -72,13 +72,13 @@ PROBE_TIMEOUT: float = 10.0
 # ancient.
 _VERSION_RE = re.compile(r"(?:^|[\s(v=])(\d+)\.(\d+)\.(\d+)(?![\d.])")
 
-# Flag characters that continue a flag token. Used to bound flag matches in
-# stderr so ``--foo`` does not match inside ``--foobar``.
+# Flag characters that continue a flag token. Used to bound flag matches in CLI
+# output so ``--foo`` does not match inside ``--foobar``.
 _FLAG_CHAR = r"[0-9a-z-]"
 
 
-def flag_named_in(lowered_stderr: str, flag: str) -> bool:
-    """Return whether *flag* is named in *lowered_stderr* as a whole token.
+def flag_named_in(lowered_text: str, flag: str) -> bool:
+    """Return whether *flag* is named in *lowered_text* as a whole token.
 
     A plain substring test would let a rejection of ``--foobar`` also match a
     candidate ``--foo``, dropping the wrong optional flag. Matching on flag-token
@@ -86,14 +86,16 @@ def flag_named_in(lowered_stderr: str, flag: str) -> bool:
     that share a prefix.
 
     Args:
-        lowered_stderr: The already-lowercased stderr text.
+        lowered_text: Already-lowercased CLI output. Either a rejection on stderr
+            or ``--help`` text: the runtime guard and the contract gate share
+            this matcher precisely so both read a flag the same way.
         flag: The candidate flag, e.g. ``--resume``.
 
     Returns:
         True when the flag appears as a complete token.
     """
     pattern = rf"(?<!{_FLAG_CHAR}){re.escape(flag.lower())}(?!{_FLAG_CHAR})"
-    return re.search(pattern, lowered_stderr) is not None
+    return re.search(pattern, lowered_text) is not None
 
 
 async def _terminate(process: asyncio.subprocess.Process) -> None:

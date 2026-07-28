@@ -264,6 +264,7 @@ async def test_probe_terminates_the_child_when_cancelled() -> None:
     ``CliTransport.run`` makes.
     """
     killed: list[bool] = []
+    waited: list[bool] = []
 
     class _StubProcess:
         returncode = None
@@ -276,6 +277,7 @@ async def test_probe_terminates_the_child_when_cancelled() -> None:
             killed.append(True)
 
         async def wait(self) -> int:
+            waited.append(True)
             return -9
 
     async def _fake_exec(*args: object, **kwargs: object) -> _StubProcess:
@@ -289,6 +291,9 @@ async def test_probe_terminates_the_child_when_cancelled() -> None:
             await task
 
     assert_that(killed).described_as("child killed on cancellation").is_not_empty()
+    # Killing without reaping leaves a zombie, which is the same leak in a
+    # different shape — so the wait is asserted, not just the kill.
+    assert_that(waited).described_as("child reaped on cancellation").is_length(1)
 
 
 # --- registry coverage -------------------------------------------------------

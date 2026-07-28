@@ -82,6 +82,9 @@ docker_args=(
 	# checkout, so a container-created .venv would overwrite a developer's own
 	# and leave root-owned files behind for later CI steps.
 	--env "UV_PROJECT_ENVIRONMENT=/tmp/contract-venv"
+	# Same reason, for the two caches uv does not control: importing the test
+	# modules writes __pycache__ and pytest writes its own cache directory.
+	--env "PYTHONPYCACHEPREFIX=/tmp/pycache"
 	# The cache and the mounted workspace are on different filesystems, so uv
 	# cannot hardlink packages between them.
 	--env "UV_LINK_MODE=copy"
@@ -111,5 +114,6 @@ echo "==> Tier ${TIER} contract tests in ${IMAGE}"
 # a partial picture the maintainer has to re-run to complete.
 docker "${docker_args[@]}" "$IMAGE" bash -euo pipefail -c "
 	uv sync --extra ai --group dev --quiet
-	uv run pytest tests/contract -m ${pytest_marker} -p no:randomly --maxfail=0
+	uv run pytest tests/contract -m ${pytest_marker} -p no:randomly --maxfail=0 \\
+		-o cache_dir=/tmp/pytest-cache
 "
