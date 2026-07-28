@@ -255,6 +255,8 @@ def test_declared_providers_cover_every_contract() -> None:
     """The tier-1 suite parametrises from here, so it must not under-report."""
     providers = declared_cli_providers()
 
-    assert_that(providers).is_length(3)
+    # Every provider, not just a count: a provider added to the enum without a
+    # declared contract would silently drop out of the tier-1 gate.
+    assert_that(set(providers)).is_equal_to(set(AIProvider))
     for provider in providers:
         assert_that(cli_contract_for(provider).binary).is_not_empty()

@@ -538,6 +538,12 @@ def doctor_command(
     """
     display_console = Console()
 
+    # Reject incompatible flag combinations before doing any work. This has to
+    # precede --ai-liveness in particular: that probe makes a real provider call,
+    # and an invocation destined to be rejected must not spend one first.
+    if fix and (report or json_output):
+        raise click.UsageError("--fix cannot be combined with --report or --json")
+
     registry = ManifestRegistry.load()
     context = RuntimeContext.detect()
 
@@ -628,10 +634,6 @@ def doctor_command(
     dev_ok = sum(1 for r in dev_results if r.status == ToolStatus.OK)
     dev_total = len(dev_results)
     total_prod = len(prod_results)
-
-    # ── Reject incompatible flag combinations ──
-    if fix and (report or json_output):
-        raise click.UsageError("--fix cannot be combined with --report or --json")
 
     # ── Markdown report mode ──
     if report:

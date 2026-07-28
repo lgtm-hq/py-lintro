@@ -10,10 +10,11 @@ hot path, and it walks the full chain before spending anything:
 
     is_available()  ->  check_liveness()  ->  invoke
 
-Each link that fails short-circuits to a *visible* skip naming the link. The
-liveness link is the one that matters most here: a depleted balance is a valid
-credential with zero credits, so it passes presence and would otherwise be
-reported as a mysterious invocation failure instead of "top up the account".
+Each link that fails short-circuits to a *visible* skip naming the link. On CLI
+transport the liveness link is presence-only by design -- it proves the binary is
+runnable and still advertises the flags lintro sends, but it cannot see a depleted
+subscription. That is precisely why the invocation below matters: it is the only
+step that can distinguish a usable credential from a merely present one.
 """
 
 from __future__ import annotations
@@ -41,6 +42,11 @@ SMOKE_PROMPT = "Reply with the single word: pong"
 #: Cap on the smoke response. Large enough for a word, small enough that a
 #: runaway generation cannot turn a smoke test into a bill.
 SMOKE_MAX_TOKENS = 32
+
+#: Provider timeout for the smoke call. Deliberately well under pytest's 120s
+#: per-test limit: a call allowed to consume the whole budget would be reported as
+#: a test-harness timeout rather than as the provider failing to answer.
+SMOKE_TIMEOUT = 60.0
 
 
 def _build_provider(provider: AIProvider) -> BaseAIProvider:
@@ -138,10 +144,17 @@ def test_live_cli_completes_a_minimal_invocation(
         instance.complete(
             SMOKE_PROMPT,
             max_tokens=SMOKE_MAX_TOKENS,
-            timeout=120.0,
+            timeout=SMOKE_TIMEOUT,
         ),
     )
     assert_that(response.content).described_as(
         f"{instance.name} returned an empty response to a trivial prompt",
     ).is_not_empty()
+    # Content, not just non-emptiness: a provider that answers with a refusal, a
+    # progress banner, or a wrapper envelope has still failed to complete a call.
+    # Substring rather than equality -- agent CLIs are entitled to surrounding
+    # prose, and pinning the exact shape would make this brittle by design.
+    assert_that(response.content.casefold()).described_as(
+        f"{instance.name} did not answer the prompt it was given",
+    ).contains("pong")
     assert_that(response.model).is_not_empty()

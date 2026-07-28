@@ -119,6 +119,60 @@ def test_doctor_does_not_probe_without_the_flag(monkeypatch: Any) -> None:
     assert_that(probed).is_false()
 
 
+def test_doctor_probes_when_the_flag_is_given(monkeypatch: Any) -> None:
+    """The flag must actually drive the probe, not merely exist in --help.
+
+    Args:
+        monkeypatch: Pytest monkeypatch fixture.
+    """
+    calls: list[AIConfig] = []
+
+    def _probe(*, config: AIConfig) -> LivenessResult:
+        calls.append(config)
+        return _stub_result(state=LivenessState.NO_QUOTA)
+
+    monkeypatch.setattr("lintro.ai.doctor_checks.check_liveness_sync", _probe)
+    monkeypatch.setattr(
+        "lintro.ai.doctor_checks.check_ai_configuration",
+        lambda config: [],
+    )
+    monkeypatch.setattr(
+        "lintro.cli_utils.commands.doctor.resolve_ai_config",
+        lambda config: AIConfig(enabled=True, review=True, transport=AITransport.API),
+    )
+
+    CliRunner().invoke(cli, ["doctor", "--tools", "ruff"])
+    assert_that(calls).described_as("no probe without the flag").is_empty()
+
+    CliRunner().invoke(cli, ["doctor", "--tools", "ruff", "--ai-liveness"])
+    assert_that(calls).described_as("the flag must reach the probe").is_length(1)
+
+
+def test_doctor_rejects_fix_with_json_before_probing(monkeypatch: Any) -> None:
+    """An invocation destined to be rejected must not spend a provider call first.
+
+    Args:
+        monkeypatch: Pytest monkeypatch fixture.
+    """
+    probed = False
+
+    def _probe(*, config: AIConfig) -> LivenessResult:
+        nonlocal probed
+        probed = True
+        del config
+        return _stub_result(state=LivenessState.OK)
+
+    monkeypatch.setattr("lintro.ai.doctor_checks.check_liveness_sync", _probe)
+
+    result = CliRunner().invoke(
+        cli,
+        ["doctor", "--fix", "--json", "--ai-liveness"],
+    )
+
+    assert_that(result.exit_code).is_not_equal_to(0)
+    assert_that(probed).is_false()
+
+
 def test_doctor_exposes_the_liveness_flag() -> None:
     """The opt-in must be discoverable, and say that it costs a real call."""
     result = CliRunner().invoke(cli, ["doctor", "--help"])

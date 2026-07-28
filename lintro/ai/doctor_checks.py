@@ -64,6 +64,11 @@ def check_ai_liveness(config: AIConfig) -> list[AICheckResult]:
     """
     if not config.any_feature_enabled or config.transport is None:
         return []
+    if config.provider == AIProvider.CURSOR and config.transport == AITransport.API:
+        # Structurally impossible pairing. check_ai_configuration already reports
+        # it; probing anyway would fail on provider construction and surface a
+        # misleading "no credential" verdict for what is a configuration error.
+        return []
 
     result = check_liveness_sync(config=config)
     return [

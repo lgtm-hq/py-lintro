@@ -211,9 +211,11 @@ async def probe_cli_surface(*, provider: AIProvider) -> CliSurfaceReport:
             help_readable=False,
         )
 
-    version_output = await _probe(
-        binary_path=binary_path,
-        args=contract.version_args,
+    # Both probes are free, independent, and read-only, so there is no reason to
+    # pay for them serially across three providers.
+    version_output, help_output = await asyncio.gather(
+        _probe(binary_path=binary_path, args=contract.version_args),
+        _probe(binary_path=binary_path, args=contract.help_args),
     )
     version = (
         CliTransport.parse_version(version_output)
@@ -221,7 +223,6 @@ async def probe_cli_surface(*, provider: AIProvider) -> CliSurfaceReport:
         else None
     )
 
-    help_output = await _probe(binary_path=binary_path, args=contract.help_args)
     if help_output is None:
         return CliSurfaceReport(
             provider=provider,

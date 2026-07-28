@@ -15,7 +15,9 @@ from lintro.ai.exceptions import (
 from lintro.ai.review.error_contract import (
     RETRYABLE_KINDS,
     REVIEW_ERROR_EXIT_CODE,
+    UNAVAILABLE_KINDS,
     build_error_contract,
+    is_provider_unavailable_kind,
     is_retryable_kind,
     render_error_contract_json,
 )
@@ -206,6 +208,54 @@ def test_retryable_kinds_membership() -> None:
     assert_that(is_retryable_kind(kind=ReviewErrorKind.AUTH_FAILED)).is_false()
     assert_that(is_retryable_kind(kind=ReviewErrorKind.INVALID_RESPONSE)).is_false()
     assert_that(RETRYABLE_KINDS).contains(ReviewErrorKind.RATE_LIMITED)
+
+
+@pytest.mark.parametrize(
+    ("kind", "unavailable"),
+    [
+        (ReviewErrorKind.AUTH_FAILED, True),
+        (ReviewErrorKind.INSUFFICIENT_CREDITS, True),
+        (ReviewErrorKind.QUOTA_EXCEEDED, True),
+        (ReviewErrorKind.RATE_LIMITED, True),
+        (ReviewErrorKind.SERVER_ERROR, True),
+        (ReviewErrorKind.TIMEOUT, True),
+        # Both prove the provider *did* serve the request; the payload lintro sent
+        # or the response it got back is what failed, not the account.
+        (ReviewErrorKind.CONTEXT_LENGTH, False),
+        (ReviewErrorKind.INVALID_RESPONSE, False),
+        (ReviewErrorKind.UNKNOWN, False),
+    ],
+)
+def test_provider_unavailable_membership_is_exhaustive(
+    *,
+    kind: ReviewErrorKind,
+    unavailable: bool,
+) -> None:
+    """Every kind is classified, so a new one cannot default into the wrong bucket.
+
+    Args:
+        kind: The canonical error classification.
+        unavailable: Whether the provider is expected to have served nothing.
+    """
+    assert_that(is_provider_unavailable_kind(kind=kind)).is_equal_to(unavailable)
+    assert_that(kind in UNAVAILABLE_KINDS).is_equal_to(unavailable)
+
+
+def test_every_error_kind_is_covered_by_the_unavailable_partition() -> None:
+    """The parametrised cases above must not silently miss a new kind."""
+    covered = {
+        ReviewErrorKind.AUTH_FAILED,
+        ReviewErrorKind.INSUFFICIENT_CREDITS,
+        ReviewErrorKind.QUOTA_EXCEEDED,
+        ReviewErrorKind.RATE_LIMITED,
+        ReviewErrorKind.SERVER_ERROR,
+        ReviewErrorKind.TIMEOUT,
+        ReviewErrorKind.CONTEXT_LENGTH,
+        ReviewErrorKind.INVALID_RESPONSE,
+        ReviewErrorKind.UNKNOWN,
+    }
+
+    assert_that(covered).is_equal_to(set(ReviewErrorKind))
 
 
 def test_render_json_is_parseable_and_indented(

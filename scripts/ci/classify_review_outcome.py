@@ -113,18 +113,19 @@ def _parse_error_envelope(*, text: str) -> dict[str, Any] | None:
     Returns:
         The ``error`` mapping, or ``None`` when no envelope is present.
     """
-    start = text.find('{\n  "error"')
-    if start == -1:
-        start = text.find('{"error"')
-    if start == -1:
-        return None
     decoder = json.JSONDecoder()
-    try:
-        payload, _end = decoder.raw_decode(text[start:])
-    except ValueError:
-        return None
-    error = payload.get("error") if isinstance(payload, dict) else None
-    return error if isinstance(error, dict) else None
+    index = text.find("{")
+    while index != -1:
+        try:
+            payload, _end = decoder.raw_decode(text[index:])
+        except ValueError:
+            index = text.find("{", index + 1)
+            continue
+        error = payload.get("error") if isinstance(payload, dict) else None
+        if isinstance(error, dict):
+            return error
+        index = text.find("{", index + 1)
+    return None
 
 
 def classify(*, status: int, output: str) -> OutcomeReport:
@@ -166,6 +167,12 @@ def classify(*, status: int, output: str) -> OutcomeReport:
     error = _parse_error_envelope(text=output) or {}
     kind = str(error.get("kind") or "unknown")
     message = str(error.get("message") or "").strip()
+    if not message and output.strip():
+        # No envelope means lintro itself broke (crash, bad flag, missing
+        # dependency) rather than the provider failing. Fall back to the tail of
+        # the raw output so the annotation and summary are never blank — an empty
+        # reason is how a red check still fails to explain itself.
+        message = output.strip().splitlines()[-1][:500]
 
     if status != REVIEW_STATUS_ERROR:
         # An exit status lintro does not define means the wrapper itself broke

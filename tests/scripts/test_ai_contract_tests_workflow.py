@@ -93,11 +93,11 @@ def test_tier2_never_runs_on_a_pull_request(workflow: Any) -> None:
     Args:
         workflow: The parsed workflow mapping.
     """
-    guard = workflow["jobs"][TIER2_JOB]["if"]
-
-    assert_that(guard).contains("schedule")
-    assert_that(guard).contains("workflow_dispatch")
-    assert_that(guard).does_not_contain("pull_request")
+    # Exact, not substring: an added `|| github.event_name == 'push'` would slip
+    # past independent contains() checks while widening what spends quota.
+    assert_that(workflow["jobs"][TIER2_JOB]["if"]).is_equal_to(
+        "github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'",
+    )
 
 
 def test_tier2_waits_on_the_free_tier(workflow: Any) -> None:

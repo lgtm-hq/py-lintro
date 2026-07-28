@@ -78,6 +78,9 @@ docker_args=(
 	--env LINTRO_CONTRACT_REQUIRE_BINARIES=1
 	# uv must not try to write to a read-only or absent HOME inside the image.
 	--env "UV_CACHE_DIR=/tmp/uv-cache"
+	# The cache and the mounted workspace are on different filesystems, so uv
+	# cannot hardlink packages between them.
+	--env "UV_LINK_MODE=copy"
 	--env "HOME=/tmp"
 )
 

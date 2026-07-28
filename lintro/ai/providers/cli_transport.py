@@ -299,8 +299,8 @@ class CliTransport(ABC):
         Deliberately presence-only. A real invocation of a subscription agent CLI
         is slow and may consume a metered turn, so the probe is limited to the
         free capability surface the hybrid guard already reads: the binary is on
-        ``PATH``, it meets the declared version floor, and it still advertises
-        every required flag. The result therefore carries
+        ``PATH``, it answers at least one probe, it meets the declared version
+        floor, and it still advertises every required flag. The result carries
         ``quota_verified=False`` -- a depleted subscription is invisible here and
         only surfaces at invocation time, where the shared error taxonomy turns it
         into a visible failure rather than a silent one.
@@ -330,6 +330,21 @@ class CliTransport(ABC):
             )
 
         version = await self.binary_version()
+        if version is None and await self.help_text() is None:
+            # Neither free probe produced usable output. Being on ``PATH`` is not
+            # the same as being runnable — a broken install (missing native
+            # binary, wrong architecture, bad permissions) looks exactly like
+            # this, and reporting it live would be the silent pass this probe
+            # exists to prevent.
+            return incompatible_cli_result(
+                provider=provider_name,
+                message=(
+                    f"{self._binary_name} CLI at {self._binary_path} answered "
+                    "neither --version nor --help; the install is not runnable"
+                ),
+                hint=self._install_hint,
+            )
+
         return live_result(
             provider=provider_name,
             transport=AITransport.CLI,

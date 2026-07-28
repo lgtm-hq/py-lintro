@@ -190,6 +190,9 @@ def test_error_status_without_an_envelope_still_fails(
 
     assert_that(report.outcome.produced_review).is_false()
     assert_that(report.exit_code).is_equal_to(1)
+    # A red check with no reason attached is barely better than a green one, so
+    # the raw output stands in when there is no envelope to read.
+    assert_that(report.detail).contains("boom")
 
 
 # --- envelope parsing --------------------------------------------------------

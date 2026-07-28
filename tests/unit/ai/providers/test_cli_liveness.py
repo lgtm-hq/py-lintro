@@ -16,6 +16,7 @@ from collections.abc import Callable
 import pytest
 from assertpy import assert_that
 
+from lintro.ai.exceptions import AINotAvailableError
 from lintro.ai.liveness import LivenessState
 from lintro.ai.provider_enum import AIProvider
 from lintro.ai.providers.cli_contracts import CliContract, cli_contract_for
@@ -88,6 +89,11 @@ def _probe_replies(
         del kwargs
         if "--version" in cmd:
             return _completed(stdout=version)
+        if "--help" not in cmd:
+            # The probe must stay free. A command that is neither --version nor
+            # --help would mean the presence-only probe started invoking the CLI.
+            msg = f"unexpected liveness probe command: {cmd!r}"
+            raise AssertionError(msg)
         return _completed(stdout=help_text, returncode=help_returncode)
 
     return _reply
@@ -154,6 +160,41 @@ async def test_unreadable_help_is_not_treated_as_missing_flags() -> None:
     assert_that(result.state).is_equal_to(LivenessState.OK)
 
 
+async def test_unrunnable_binary_is_not_reported_live() -> None:
+    """On PATH is not the same as runnable, and only one of them is liveness.
+
+    A broken install — missing native binary, wrong architecture, bad permissions
+    — answers neither free probe. Reporting it live would be exactly the silent
+    pass this probe exists to prevent.
+    """
+
+    def _fail(cmd: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        del kwargs
+        return _completed(args=cmd, returncode=1, stderr="spawn ENOENT")
+
+    with patch_cli_exec(side_effect=_fail):
+        result = await _transport().probe_liveness(provider_name="anthropic")
+
+    assert_that(result.is_live).is_false()
+    assert_that(result.state).is_equal_to(LivenessState.INCOMPATIBLE_CLI)
+    assert_that(result.message).contains("not runnable")
+    assert_that(result.hint).contains("Install the fake CLI")
+
+
+async def test_spawn_failure_is_not_reported_live() -> None:
+    """A CLI that cannot even be spawned is a failure, not an unknown."""
+
+    def _raise(cmd: list[str], **kwargs: object) -> None:
+        del cmd, kwargs
+        raise OSError("Permission denied")
+
+    with patch_cli_exec(side_effect=_raise):
+        result = await _transport().probe_liveness(provider_name="anthropic")
+
+    assert_that(result.is_live).is_false()
+    assert_that(result.state).is_equal_to(LivenessState.INCOMPATIBLE_CLI)
+
+
 async def test_missing_required_flags_is_inert_without_a_contract() -> None:
     """An unguarded transport declares nothing, so it can report nothing."""
     transport = _FakeTransport(
@@ -183,7 +224,9 @@ async def test_cli_backed_providers_expose_their_transport(
         instance = get_provider(
             AIConfig(enabled=True, provider=provider, transport=AITransport.CLI),
         )
-    except Exception:  # noqa: BLE001 - CLI absent on this machine; nothing to wire
-        pytest.skip(f"{provider.value} CLI transport not constructible here")
+    except AINotAvailableError:
+        # Only an absent CLI is a legitimate skip here; any other construction
+        # failure is the wiring bug this test exists to catch.
+        pytest.skip(f"{provider.value} CLI is not installed on this machine")
 
     assert_that(instance._cli_transport()).is_not_none()
