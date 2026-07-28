@@ -21,6 +21,22 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.94.2] - 2026-07-28
+
+### Changed
+
+- **ai**: tiered agent-CLI contract tests + presence→liveness gating (#1834) (e901053)
+- **deps**: update ghcr.io/lgtm-hq/py-lintro docker tag to 0.94.1 (patch) (#1842)
+  (34e857a)
+- **deps**: update docker/login-action action to v4.5.2 (patch) (#1841) (427bb4a)
+- **deps**: update dependency astral-sh/uv to 0.11.33 (patch) (#1840) (0f6cff8)
+- **deps**: update ghcr.io/lgtm-hq/py-lintro docker tag to 0.94.0 (minor) (#1835)
+  (824a5f8)
+
+### Fixed
+
+- **deps**: update dependency @lgtm-hq/turbo-themes to 0.40.5 (patch) (#1843) (7f1b917)
+
 ## [0.94.1] - 2026-07-28
 
 ### Fixed
