@@ -49,7 +49,11 @@ def single_issue_result():
 def check_config():
     """LintroConfig with AI enabled and max_fix_attempts=5."""
     return LintroConfig(
-        ai=AIConfig(enabled=True, transport=AITransport.API, max_fix_attempts=5),
+        ai=AIConfig(
+            enabled=True,
+            transport=AITransport.API,
+            max_fix_attempts=5,
+        ).model_dump(),
     )
 
 
@@ -159,7 +163,9 @@ def test_summary_attachment_summary_attached_to_all_results_with_issues(
             ),
         ],
     )
-    config = LintroConfig(ai=AIConfig(enabled=True, transport=AITransport.API))
+    config = LintroConfig(
+        ai=AIConfig(enabled=True, transport=AITransport.API).model_dump(),
+    )
     logger = MagicMock()
 
     mock_get_provider.return_value = MockAIProvider()
@@ -272,7 +278,9 @@ def test_integration_orchestrator_end_to_end_check_with_real_summary_generation(
     )
 
     mock_get_provider.return_value = MockAIProvider(responses=[summary_response])
-    config = LintroConfig(ai=AIConfig(enabled=True, transport=AITransport.API))
+    config = LintroConfig(
+        ai=AIConfig(enabled=True, transport=AITransport.API).model_dump(),
+    )
     logger = MagicMock()
 
     run_ai_enhancement(

@@ -18,7 +18,6 @@ from typing import Any
 
 from loguru import logger
 
-from lintro.ai.config import AIConfig
 from lintro.config.lintro_config import (
     EnforceConfig,
     ExecutionConfig,
@@ -278,32 +277,6 @@ def _parse_defaults(data: dict[str, Any]) -> dict[str, dict[str, Any]]:
             defaults[tool_name.lower()] = tool_defaults
 
     return defaults
-
-
-def _parse_ai_config(data: dict[str, Any]) -> AIConfig:
-    """Parse AI configuration section.
-
-    Passes only recognized keys through to AIConfig so the model's
-    own defaults apply for any omitted fields.
-
-    Args:
-        data: Raw 'ai' section from config.
-
-    Returns:
-        AIConfig: Parsed AI configuration.
-    """
-    if not data:
-        return AIConfig()
-
-    known_fields = set(AIConfig.model_fields)
-    unknown = set(data) - known_fields
-    if unknown:
-        logger.warning(
-            "Unknown AI config keys ignored: {}",
-            ", ".join(sorted(unknown)),
-        )
-    filtered = {k: v for k, v in data.items() if k in known_fields}
-    return AIConfig(**filtered)
 
 
 def _parse_review_checklist_item_config(data: Any) -> dict[str, Any]:
@@ -688,7 +661,8 @@ def load_config(
     execution_config = _parse_execution_config(data.get("execution", {}))
     defaults = _parse_defaults(data.get("defaults", {}))
     tools_config = _parse_tools_config(data.get("tools", {}))
-    ai_config = _parse_ai_config(data.get("ai", {}))
+    # Stored verbatim: parsing belongs to the AI layer (issue #724).
+    ai_config = data.get("ai") or {}
     review_config = _parse_review_config(data.get("review", {}))
     score_config = _parse_score_config(data.get("score", {}))
     output_config = _parse_output_config(data.get("output", {}))

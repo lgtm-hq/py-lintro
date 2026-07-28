@@ -70,7 +70,7 @@ def test_run_ai_enhancement_fix_action_noninteractive_applies_safe_then_reviews_
             transport=AITransport.API,
             auto_apply=False,
             auto_apply_safe_fixes=True,
-        ),
+        ).model_dump(),
     )
     logger = MagicMock()
 
@@ -159,7 +159,7 @@ def test_run_ai_enhancement_fix_action_json_auto_applies_safe_style_suggestions(
             max_fix_attempts=5,
             auto_apply=False,
             auto_apply_safe_fixes=True,
-        ),
+        ).model_dump(),
     )
     logger = MagicMock()
 
@@ -247,7 +247,7 @@ def test_run_ai_enhancement_fix_action_json_uses_fresh_rerun_results(
             enabled=True,
             transport=AITransport.API,
             auto_apply=True,
-        ),
+        ).model_dump(),
     )
     logger = MagicMock()
 

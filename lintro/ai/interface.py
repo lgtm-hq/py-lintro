@@ -13,6 +13,7 @@ that importing this module stays cheap on the no-AI path.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from typing import TYPE_CHECKING, Any
 
 from lintro.enums.action import Action
@@ -28,8 +29,33 @@ if TYPE_CHECKING:
 __all__ = [
     "ai_exit_code_override",
     "render_ai_status",
+    "resolve_ai_config",
     "run_ai_layer",
 ]
+
+
+def resolve_ai_config(lintro_config: LintroConfig) -> AIConfig:
+    """Parse the raw ``ai:`` mapping on a config into an :class:`AIConfig`.
+
+    :class:`~lintro.config.lintro_config.LintroConfig` stores the ``ai:``
+    section verbatim as a mapping so that :mod:`lintro.config` never imports
+    :mod:`lintro.ai` (issue #724). Every caller that needs typed AI settings
+    goes through this function.
+
+    Unknown keys are dropped with a warning, so resolving is also what makes
+    a typo'd ``ai.*`` key discoverable. Callers should resolve once per run
+    and pass the result down rather than re-resolving, which would repeat
+    that warning.
+
+    Args:
+        lintro_config: Full Lintro configuration.
+
+    Returns:
+        The parsed AI configuration, with model defaults for omitted fields.
+    """
+    from lintro.ai.config import AIConfig
+
+    return AIConfig.from_mapping(lintro_config.ai)
 
 
 def _warn_ai_fix_disabled(
@@ -65,13 +91,13 @@ def _warn_ai_fix_disabled(
 def ai_exit_code_override(
     *,
     ai_result: AIResult | None,
-    lintro_config: LintroConfig,
+    ai_config: AIConfig,
 ) -> bool:
     """Whether AI outcomes force a non-zero exit.
 
     Args:
         ai_result: Result of the AI run, or None when AI did not run.
-        lintro_config: Full Lintro configuration.
+        ai_config: Resolved AI configuration.
 
     Returns:
         True when ``ai.fail_on_unfixed`` or ``ai.fail_on_ai_error`` is
@@ -79,7 +105,6 @@ def ai_exit_code_override(
     """
     if ai_result is None:
         return False
-    ai_config = lintro_config.ai
     if ai_config.fail_on_unfixed and ai_result.unfixed_issues > 0:
         return True
     return bool(ai_config.fail_on_ai_error and ai_result.error)
@@ -119,11 +144,12 @@ def run_ai_layer(
     Raises:
         Exception: Re-raised when ``ai.fail_on_ai_error`` is enabled.
     """
-    effective_ai_fix = ai_fix or lintro_config.ai.default_fix
+    ai_config = resolve_ai_config(lintro_config)
+    effective_ai_fix = ai_fix or ai_config.default_fix
     _warn_ai_fix_disabled(
         action=action,
         ai_fix=effective_ai_fix,
-        ai_lint_enabled=lintro_config.ai.lint_enabled,
+        ai_lint_enabled=ai_config.lint_enabled,
         logger=console_logger,
         output_format=output_format,
     )
@@ -132,6 +158,7 @@ def run_ai_layer(
 
     ai_hook = AIPostExecutionHook(
         lintro_config,
+        ai_config=ai_config,
         ai_fix=effective_ai_fix,
         transport=transport,
     )
@@ -150,7 +177,7 @@ def run_ai_layer(
         from loguru import logger as loguru_logger
 
         loguru_logger.opt(exception=True).debug(f"AI hook failed: {exc}")
-        if getattr(lintro_config.ai, "fail_on_ai_error", False):
+        if ai_config.fail_on_ai_error:
             raise
         if output_format.lower() not in ("json", "sarif"):
             console_logger.console_output(f"Warning: AI enhancement failed: {exc}")
@@ -162,20 +189,22 @@ def run_ai_layer(
         ran=True,
         force_failure=ai_exit_code_override(
             ai_result=ai_result,
-            lintro_config=lintro_config,
+            ai_config=ai_config,
         ),
     )
 
 
 def render_ai_status(
     *,
-    ai_config: AIConfig | None,
+    ai_config: AIConfig | Mapping[str, Any] | None,
     is_ci: bool,
 ) -> list[str]:
     """Render the pre-execution AI status lines.
 
     Args:
-        ai_config: AI configuration, or None when unavailable.
+        ai_config: Raw ``ai:`` mapping from the config (what the core
+            executor holds), an already-parsed :class:`AIConfig`, or None
+            when unavailable.
         is_ci: Whether the run is in a CI environment.
 
     Returns:

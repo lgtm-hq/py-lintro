@@ -77,7 +77,11 @@ class AIStatusRenderer(Protocol):
         """Render the AI rows for the pre-execution configuration summary.
 
         Args:
-            ai_config: AI configuration object, or None when unavailable.
+            ai_config: The raw ``ai:`` mapping held by
+                :class:`~lintro.config.lintro_config.LintroConfig`, or None
+                when unavailable. The core runner passes it through
+                untouched; parsing it into a typed AI configuration is the
+                renderer's job, so core stays free of AI imports.
             is_ci: Whether the run is in a CI environment.
 
         Returns:

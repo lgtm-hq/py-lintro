@@ -8,7 +8,8 @@ lives in the AI package so the core summary renderer
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from collections.abc import Mapping
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from lintro.ai.config import AIConfig
@@ -19,13 +20,17 @@ AI_STATUS_NO_CONFIG = "[dim]disabled (no config)[/dim]"
 
 def render_ai_status(
     *,
-    ai_config: AIConfig | None,
+    ai_config: AIConfig | Mapping[str, Any] | None,
     is_ci: bool,
 ) -> list[str]:
     """Render the pre-execution AI status lines.
 
     Args:
-        ai_config: AI configuration, or None when unavailable.
+        ai_config: Raw ``ai:`` mapping as held by the core executor, an
+            already-parsed :class:`AIConfig`, or None when unavailable. A
+            mapping is parsed here with diagnostics off, because rendering a
+            summary must not emit unknown-key warnings or migration hints
+            (the resolver on the AI entry path already reports them).
         is_ci: Whether the run is in a CI environment (affects the
             ``auto_apply`` warning wording).
 
@@ -37,6 +42,10 @@ def render_ai_status(
     if ai_config is None:
         ai_parts.append(AI_STATUS_NO_CONFIG)
         return ai_parts
+    if isinstance(ai_config, Mapping):
+        from lintro.ai.config import AIConfig as _AIConfig
+
+        ai_config = _AIConfig.from_mapping(ai_config, diagnostics=False)
     if not ai_config.enabled:
         ai_parts.append("[dim]disabled[/dim]")
         return ai_parts

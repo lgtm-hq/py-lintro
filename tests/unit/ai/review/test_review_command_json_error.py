@@ -25,7 +25,7 @@ def patched_review(monkeypatch: pytest.MonkeyPatch) -> None:
     ``--output json`` error branch.
     """
     config = MagicMock()
-    config.ai.enabled = True
+    config.ai = {"enabled": True}
     config.review.depth = 1
     config.review.strictness = ReviewStrictness.BALANCED
     config.review.sensitivity = {}

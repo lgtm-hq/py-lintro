@@ -12,6 +12,7 @@ from typing import cast
 
 import pytest
 from assertpy import assert_that
+from loguru import logger
 
 from lintro.ai.config import AIConfig
 from lintro.ai.display.status import render_ai_status
@@ -177,6 +178,107 @@ def test_render_ai_status_model_marks_default(
         "[dim](default)[/dim]",
     )
     assert_that(explicit_lines).contains("  model: some-model")
+
+
+def test_render_ai_status_accepts_empty_mapping_as_disabled() -> None:
+    """An empty ``ai:`` mapping renders ``disabled``, not ``no config``.
+
+    The core executor now holds the raw mapping, and a config file without an
+    ``ai:`` section yields ``{}``. That must keep rendering the same line the
+    default ``AIConfig`` used to produce; only a literal None means no config.
+    """
+    assert_that(render_ai_status(ai_config={}, is_ci=False)).is_equal_to(
+        ["[dim]disabled[/dim]"],
+    )
+
+
+@pytest.mark.parametrize(
+    "mapping",
+    [
+        {},
+        {"enabled": False},
+        {"enabled": True, "provider": "anthropic"},
+        {"enabled": True, "provider": "anthropic", "auto_apply": True},
+        {"enabled": True, "provider": "anthropic", "api_key_env": "CUSTOM_AI_KEY"},
+        {"enabled": True, "provider": "anthropic", "model": "some-model"},
+    ],
+)
+@pytest.mark.parametrize("is_ci", [False, True])
+def test_render_ai_status_mapping_matches_parsed_config(
+    monkeypatch: pytest.MonkeyPatch,
+    mapping: dict[str, object],
+    is_ci: bool,
+) -> None:
+    """Feeding the raw mapping renders exactly what the parsed model renders.
+
+    Args:
+        monkeypatch: pytest monkeypatch fixture.
+        mapping: Raw ``ai:`` section as stored on ``LintroConfig``.
+        is_ci: Whether the run is treated as CI.
+    """
+    monkeypatch.setattr(
+        "lintro.ai.availability.is_provider_available",
+        lambda _provider: True,
+    )
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+    monkeypatch.delenv("CUSTOM_AI_KEY", raising=False)
+
+    from_mapping = render_ai_status(ai_config=mapping, is_ci=is_ci)
+    from_model = render_ai_status(
+        ai_config=AIConfig.from_mapping(mapping),
+        is_ci=is_ci,
+    )
+
+    assert_that(from_mapping).is_equal_to(from_model)
+
+
+def test_render_ai_status_ignores_unknown_keys_without_warning() -> None:
+    """Rendering drops unknown keys silently; diagnostics belong to resolvers."""
+    messages: list[str] = []
+    handler_id = logger.add(
+        lambda message: messages.append(str(message)),
+        level="WARNING",
+    )
+    try:
+        lines = render_ai_status(
+            ai_config={"enabled": False, "provdier": "anthropic"},
+            is_ci=False,
+        )
+    finally:
+        logger.remove(handler_id)
+
+    assert_that(lines).is_equal_to(["[dim]disabled[/dim]"])
+    assert_that(messages).is_empty()
+
+
+def test_render_ai_status_does_not_repeat_legacy_deprecation_hint(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A legacy ``enabled``-only mapping renders without a migration hint.
+
+    The resolver on the AI entry path already emits it once per run; the
+    pre-execution summary must not duplicate it.
+
+    Args:
+        monkeypatch: Pytest monkeypatch fixture.
+    """
+    monkeypatch.setattr(
+        "lintro.ai.availability.is_provider_available",
+        lambda provider: True,
+    )
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "x")
+    messages: list[str] = []
+    handler_id = logger.add(
+        lambda message: messages.append(str(message)),
+        level="WARNING",
+    )
+    try:
+        lines = render_ai_status(ai_config={"enabled": True}, is_ci=False)
+    finally:
+        logger.remove(handler_id)
+
+    assert_that(lines).is_not_empty()
+    assert_that(messages).is_empty()
 
 
 def test_render_ai_status_respects_custom_api_key_env(

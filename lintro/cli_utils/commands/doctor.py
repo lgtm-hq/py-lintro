@@ -17,6 +17,7 @@ from rich.console import Console
 from rich.text import Text
 
 from lintro.ai.doctor_checks import AICheckResult, check_ai_configuration
+from lintro.ai.interface import resolve_ai_config
 from lintro.enums.tool_status import ToolStatus
 from lintro.tools.core.install_context import RuntimeContext
 from lintro.tools.core.install_strategies import get_strategy
@@ -530,7 +531,7 @@ def doctor_command(
     from lintro.config.config_loader import get_config
 
     config = get_config()
-    ai_checks = check_ai_configuration(config.ai)
+    ai_checks = check_ai_configuration(resolve_ai_config(config))
     ai_failure_count = sum(1 for check in ai_checks if _ai_check_is_failure(check))
 
     oxlint_type_aware = bool(config.get_tool_defaults("oxlint").get("type_aware"))

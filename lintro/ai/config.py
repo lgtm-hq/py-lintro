@@ -16,6 +16,10 @@ is the primary interface; the grouping is for documentation only.
 from __future__ import annotations
 
 import warnings
+from collections.abc import Iterator, Mapping
+from contextlib import contextmanager
+from contextvars import ContextVar
+from typing import Any
 
 from loguru import logger
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -30,6 +34,29 @@ __all__ = [
     "AIOutputConfig",
     "AIProviderConfig",
 ]
+
+_SUPPRESS_DIAGNOSTICS: ContextVar[bool] = ContextVar(
+    "ai_config_suppress_diagnostics",
+    default=False,
+)
+
+
+@contextmanager
+def _suppressed_diagnostics() -> Iterator[None]:
+    """Silence validator-emitted diagnostics for the duration of the block.
+
+    Model validators on :class:`AIConfig` log migration hints as a side
+    effect of construction. Display-only parses re-build a config that the
+    resolver already parsed, so they must not repeat those hints.
+
+    Yields:
+        None: Control, with diagnostics suppressed on the current context.
+    """
+    token = _SUPPRESS_DIAGNOSTICS.set(True)
+    try:
+        yield
+    finally:
+        _SUPPRESS_DIAGNOSTICS.reset(token)
 
 
 class AIConfig(BaseModel):
@@ -231,6 +258,8 @@ class AIConfig(BaseModel):
         if self.enabled and "lint" not in fields_set and "review" not in fields_set:
             self.lint = True
             self.review = True
+            if _SUPPRESS_DIAGNOSTICS.get():
+                return self
             message = (
                 "ai.enabled without ai.lint/ai.review is deprecated; both AI "
                 "lint summarization and AI review were enabled for backward "
@@ -251,6 +280,53 @@ class AIConfig(BaseModel):
             )
             raise ValueError(msg)
         return self
+
+    # -- Construction from raw config data ---------------------------------
+
+    @classmethod
+    def from_mapping(
+        cls,
+        data: Mapping[str, Any] | None,
+        *,
+        diagnostics: bool = True,
+    ) -> AIConfig:
+        """Build an :class:`AIConfig` from a raw ``ai:`` config mapping.
+
+        Only recognized keys are passed through, so the model's own defaults
+        apply to every omitted field. Unknown keys are dropped rather than
+        rejected, because ``AIConfig`` itself forbids extras and a stale key
+        in ``.lintro-config.yaml`` must not break the whole run.
+
+        This is the boundary that keeps :mod:`lintro.config` free of any
+        knowledge of ``AIConfig``'s field set (see issue #724): the loader
+        stores the ``ai:`` section verbatim and the AI layer parses it.
+
+        Args:
+            data: Raw ``ai`` section from config, or None when absent.
+            diagnostics: Whether this parse may emit user-facing diagnostics
+                — the dropped-unknown-key warning and the validators'
+                migration hints. Display-only callers pass False, because
+                they re-parse a mapping the resolver already reported on and
+                must not duplicate its output; resolvers leave it True.
+
+        Returns:
+            AIConfig: Parsed AI configuration.
+        """
+        if not data:
+            return cls()
+
+        known_fields = set(cls.model_fields)
+        unknown = set(data) - known_fields
+        if unknown and diagnostics:
+            logger.warning(
+                "Unknown AI config keys ignored: {}",
+                ", ".join(sorted(unknown)),
+            )
+        filtered = {k: v for k, v in data.items() if k in known_fields}
+        if diagnostics:
+            return cls(**filtered)
+        with _suppressed_diagnostics():
+            return cls(**filtered)
 
     # -- Effective feature state -------------------------------------------
 

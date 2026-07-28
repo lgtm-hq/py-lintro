@@ -102,14 +102,26 @@ def _config(**ai_kwargs: Any) -> LintroConfig:
     Returns:
         A :class:`LintroConfig` carrying the requested AI settings.
     """
-    return LintroConfig(ai=AIConfig(transport=AITransport.API, **ai_kwargs))
+    return LintroConfig(ai=_ai_config(**ai_kwargs).model_dump())
+
+
+def _ai_config(**ai_kwargs: Any) -> AIConfig:
+    """Build an AIConfig with the given AI settings.
+
+    Args:
+        **ai_kwargs: Keyword arguments for :class:`AIConfig`.
+
+    Returns:
+        The requested AI configuration, pinned to the API transport.
+    """
+    return AIConfig(transport=AITransport.API, **ai_kwargs)
 
 
 def test_ai_exit_code_override_is_false_without_result():
     """No AI result means no override."""
     override = ai_exit_code_override(
         ai_result=None,
-        lintro_config=_config(enabled=True, fail_on_unfixed=True),
+        ai_config=_ai_config(enabled=True, fail_on_unfixed=True),
     )
 
     assert_that(override).is_false()
@@ -119,7 +131,7 @@ def test_ai_exit_code_override_true_for_unfixed_issues():
     """``fail_on_unfixed`` with remaining issues forces failure."""
     override = ai_exit_code_override(
         ai_result=AIResult(unfixed_issues=2),
-        lintro_config=_config(enabled=True, fail_on_unfixed=True),
+        ai_config=_ai_config(enabled=True, fail_on_unfixed=True),
     )
 
     assert_that(override).is_true()
@@ -129,7 +141,7 @@ def test_ai_exit_code_override_false_when_unfixed_not_configured():
     """Unfixed issues alone do not force failure."""
     override = ai_exit_code_override(
         ai_result=AIResult(unfixed_issues=2),
-        lintro_config=_config(enabled=True),
+        ai_config=_ai_config(enabled=True),
     )
 
     assert_that(override).is_false()
@@ -139,7 +151,7 @@ def test_ai_exit_code_override_true_for_ai_error():
     """``fail_on_ai_error`` with an AI error forces failure."""
     override = ai_exit_code_override(
         ai_result=AIResult(error=True),
-        lintro_config=_config(enabled=True, fail_on_ai_error=True),
+        ai_config=_ai_config(enabled=True, fail_on_ai_error=True),
     )
 
     assert_that(override).is_true()
@@ -149,7 +161,7 @@ def test_ai_exit_code_override_false_for_ai_error_when_not_configured():
     """An AI error alone does not force failure."""
     override = ai_exit_code_override(
         ai_result=AIResult(error=True),
-        lintro_config=_config(enabled=True),
+        ai_config=_ai_config(enabled=True),
     )
 
     assert_that(override).is_false()
@@ -185,9 +197,11 @@ def _stub_hook(
             self,
             lintro_config: LintroConfig,
             *,
+            ai_config: AIConfig | None = None,
             ai_fix: bool = False,
             transport: str | None = None,
         ) -> None:
+            recorded["ai_config"] = ai_config
             recorded["ai_fix"] = ai_fix
             recorded["transport"] = transport
 
@@ -386,7 +400,12 @@ def test_render_ai_status_delegates_to_display_module():
 
 
 def test_interface_public_surface_stays_small():
-    """The facade exposes exactly three public names."""
+    """The facade exposes exactly four public names."""
     assert_that(sorted(interface.__all__)).is_equal_to(
-        ["ai_exit_code_override", "render_ai_status", "run_ai_layer"],
+        [
+            "ai_exit_code_override",
+            "render_ai_status",
+            "resolve_ai_config",
+            "run_ai_layer",
+        ],
     )

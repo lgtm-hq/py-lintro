@@ -45,7 +45,9 @@ def test_ai_result_default_no_error(
             ),
         ],
     )
-    config = LintroConfig(ai=AIConfig(enabled=True, transport=AITransport.API))
+    config = LintroConfig(
+        ai=AIConfig(enabled=True, transport=AITransport.API).model_dump(),
+    )
     logger = MagicMock()
 
     mock_get_provider.return_value = MockAIProvider()
@@ -97,7 +99,11 @@ def test_ai_result_unfixed_issues_when_fixes_fail(
         ],
     )
     config = LintroConfig(
-        ai=AIConfig(enabled=True, transport=AITransport.API, fail_on_unfixed=True),
+        ai=AIConfig(
+            enabled=True,
+            transport=AITransport.API,
+            fail_on_unfixed=True,
+        ).model_dump(),
     )
     logger = MagicMock()
 
@@ -121,7 +127,9 @@ def test_ai_result_unfixed_issues_when_fixes_fail(
 
 def test_ai_result_error_on_exception():
     """AIResult.error is True when AI enhancement raises an exception."""
-    config = LintroConfig(ai=AIConfig(enabled=True, transport=AITransport.API))
+    config = LintroConfig(
+        ai=AIConfig(enabled=True, transport=AITransport.API).model_dump(),
+    )
     logger = MagicMock()
 
     with patch(
@@ -143,7 +151,11 @@ def test_ai_result_error_on_exception():
 def test_ai_result_error_propagates_when_fail_on_ai_error():
     """Exceptions propagate when fail_on_ai_error=True."""
     config = LintroConfig(
-        ai=AIConfig(enabled=True, transport=AITransport.API, fail_on_ai_error=True),
+        ai=AIConfig(
+            enabled=True,
+            transport=AITransport.API,
+            fail_on_ai_error=True,
+        ).model_dump(),
     )
     logger = MagicMock()
 
@@ -216,7 +228,11 @@ def test_ai_result_tracks_applied_fixes(
         tool_name="ruff",
     )
     config = LintroConfig(
-        ai=AIConfig(enabled=True, transport=AITransport.API, auto_apply=True),
+        ai=AIConfig(
+            enabled=True,
+            transport=AITransport.API,
+            auto_apply=True,
+        ).model_dump(),
     )
     logger = MagicMock()
 

@@ -11,6 +11,7 @@ from rich.console import Console
 
 from lintro.ai.availability import require_ai
 from lintro.ai.exceptions import AIError
+from lintro.ai.interface import resolve_ai_config
 from lintro.ai.providers import get_provider
 from lintro.ai.review import (
     classify_changed_files,
@@ -160,7 +161,8 @@ def review_command(
     """Run AI-powered diff-based code review."""
     require_ai()
     lintro_config = get_config()
-    if not lintro_config.ai.review_enabled:
+    ai_config = resolve_ai_config(lintro_config)
+    if not ai_config.review_enabled:
         raise click.UsageError(
             "AI review is disabled in configuration. Set ai.review: true "
             "(and ai.enabled: true) in .lintro-config.yaml",
@@ -238,7 +240,7 @@ def review_command(
                 issue_count,
             )
 
-    effective_ai_config = apply_transport_override(lintro_config.ai, transport)
+    effective_ai_config = apply_transport_override(ai_config, transport)
     if timeout is not None:
         effective_ai_config = effective_ai_config.model_copy(
             update={"api_timeout": timeout},
