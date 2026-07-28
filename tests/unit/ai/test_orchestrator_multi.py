@@ -198,9 +198,9 @@ def test_run_ai_enhancement_fix_action_json_auto_applies_safe_style_suggestions(
     assert_that(applied_batch).is_length(1)
     assert_that(applied_batch[0].code).is_equal_to("E501")
     assert_that(mock_verify_fixes.call_count).is_equal_to(1)
-    assert_that(result.ai_metadata).is_not_none()
-    assert_that(result.ai_metadata).contains_key("fixed_count")
-    assert_that(result.ai_metadata["fixed_count"]).is_equal_to(1)  # type: ignore[index]  # assertpy is_not_none narrows this
+    assert_that(result.metadata).is_not_none()
+    assert_that(result.metadata).contains_key("fixed_count")
+    assert_that(result.metadata["fixed_count"]).is_equal_to(1)  # type: ignore[index]  # assertpy is_not_none narrows this
 
 
 @patch("lintro.ai.orchestrator.require_ai")

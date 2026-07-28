@@ -29,6 +29,7 @@ from lintro.formatters.formatter import (
     format_issues_with_sections,
     merge_detected_and_remaining,
 )
+from lintro.models.core.ai_seam import AISarifEnrichment
 from lintro.parsers.base_issue import BaseIssue
 from lintro.utils.json_output import serialize_tool_result, timed_out_tool_names
 from lintro.utils.output.helpers import sanitize_csv_value
@@ -299,6 +300,7 @@ def write_output_file(
     action: Action,
     total_issues: int,
     total_fixed: int,
+    ai_enrichment: AISarifEnrichment | None = None,
 ) -> None:
     """Write results to user-specified output file.
 
@@ -309,6 +311,9 @@ def write_output_file(
         action: Action: The action performed (check, fmt, test).
         total_issues: int: Total number of issues found.
         total_fixed: int: Total number of issues fixed.
+        ai_enrichment: Optional AI objects for SARIF output, supplied by the
+            caller via the AI seam. Ignored for non-SARIF formats. When None,
+            SARIF is rendered without AI enrichment.
     """
     output_file = Path(output_path)
     output_file.parent.mkdir(parents=True, exist_ok=True)
@@ -408,17 +413,16 @@ def write_output_file(
     elif output_format == OutputFormat.SARIF:
         from lintro.utils.output.sarif import (
             standard_issues_from_results,
-            suggestions_from_results,
-            summary_from_results,
             write_sarif,
         )
 
+        enrichment = ai_enrichment or AISarifEnrichment()
         write_sarif(
             standard_issues_from_results(all_results),
             output_path=output_file,
             doc_urls=build_doc_url_map(all_results) or None,
-            ai_suggestions=suggestions_from_results(all_results),
-            ai_summary=summary_from_results(all_results),
+            ai_suggestions=enrichment.suggestions,
+            ai_summary=enrichment.summary,
         )
 
     else:

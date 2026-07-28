@@ -400,12 +400,13 @@ def test_render_ai_status_delegates_to_display_module():
 
 
 def test_interface_public_surface_stays_small():
-    """The facade exposes exactly four public names."""
+    """The facade exposes exactly five public names."""
     assert_that(sorted(interface.__all__)).is_equal_to(
         [
             "ai_exit_code_override",
             "render_ai_status",
             "resolve_ai_config",
             "run_ai_layer",
+            "sarif_enrichment_from_results",
         ],
     )

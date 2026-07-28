@@ -21,18 +21,18 @@ _DIM = "\033[2m"
 
 def _print_suppression_table(
     console_output_func: Callable[..., None],
-    ai_metadata: dict[str, object] | None,
+    metadata: dict[str, object] | None,
 ) -> None:
-    """Print suppression details table if ai_metadata contains suppressions.
+    """Print suppression details table if metadata contains suppressions.
 
     Args:
         console_output_func: Function to output text to console.
-        ai_metadata: Tool metadata dict with optional suppressions list.
+        metadata: Tool metadata dict with optional suppressions list.
     """
-    if not isinstance(ai_metadata, dict):
+    if not isinstance(metadata, dict):
         return
 
-    suppressions = ai_metadata.get("suppressions", [])
+    suppressions = metadata.get("suppressions", [])
     if not isinstance(suppressions, list) or not suppressions:
         return
 
@@ -96,7 +96,7 @@ def print_tool_result(
     raw_output_for_meta: str | None = None,
     action: str | Action = "check",
     success: bool | None = None,
-    ai_metadata: dict[str, object] | None = None,
+    metadata: dict[str, object] | None = None,
     parse_failures_count: int = 0,
 ) -> None:
     """Print the result for a tool.
@@ -113,7 +113,7 @@ def print_tool_result(
         success: bool | None: Whether the tool run succeeded. When False,
             the result is treated as a failure even if no issues were
             counted (e.g., parse or runtime errors).
-        ai_metadata: dict[str, object] | None: Tool-specific metadata
+        metadata: dict[str, object] | None: Tool-specific metadata
             (e.g. suppression classifications for osv-scanner).
         parse_failures_count: Number of tool-output items that could not be parsed.
     """
@@ -430,6 +430,6 @@ def print_tool_result(
                     )
 
     # Display suppression table for osv-scanner when suppressions exist
-    _print_suppression_table(console_output_func, ai_metadata)
+    _print_suppression_table(console_output_func, metadata)
 
     console_output_func(text="")  # Blank line after each tool

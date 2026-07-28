@@ -19,7 +19,6 @@ from loguru import logger
 from lintro.enums.action import Action, normalize_action
 from lintro.enums.severity_level import SeverityLevel
 from lintro.enums.tool_name import ToolName
-from lintro.utils.ai_metadata import get_ai_count as _get_ai_count
 from lintro.utils.console.constants import (
     BORDER_LENGTH,
     RE_CANNOT_AUTOFIX,
@@ -31,6 +30,7 @@ from lintro.utils.display_helpers import (
     print_final_status,
     print_final_status_format,
 )
+from lintro.utils.tool_metadata import get_ai_count as _get_ai_count
 
 
 class ThreadSafeConsoleLogger:

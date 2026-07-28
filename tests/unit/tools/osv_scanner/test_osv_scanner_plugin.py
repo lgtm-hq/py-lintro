@@ -623,9 +623,9 @@ def test_check_with_suppressions_detects_stale(
         result = osv_scanner_plugin.check([str(lockfile)], {})
 
     assert_that(result.success).is_true()
-    assert_that(result.ai_metadata).is_not_none()
-    assert result.ai_metadata is not None  # narrow type for mypy
-    suppressions = result.ai_metadata["suppressions"]
+    assert_that(result.metadata).is_not_none()
+    assert result.metadata is not None  # narrow type for mypy
+    suppressions = result.metadata["suppressions"]
     assert_that(suppressions).is_length(1)
     assert_that(suppressions[0]["id"]).is_equal_to("GHSA-stale-1234")
     assert_that(suppressions[0]["status"]).is_equal_to("stale")
@@ -635,7 +635,7 @@ def test_check_without_config_no_metadata(
     osv_scanner_plugin: OsvScannerPlugin,
     tmp_path: Path,
 ) -> None:
-    """Check returns no ai_metadata when no .osv-scanner.toml exists."""
+    """Check returns no metadata when no .osv-scanner.toml exists."""
     lockfile = tmp_path / "requirements.txt"
     copy_sample(
         tmp_path,
@@ -654,7 +654,7 @@ def test_check_without_config_no_metadata(
         result = osv_scanner_plugin.check([str(lockfile)], {})
 
     assert_that(result.success).is_true()
-    assert_that(result.ai_metadata).is_none()
+    assert_that(result.metadata).is_none()
 
 
 def test_check_suppressions_disabled(
@@ -692,7 +692,7 @@ def test_check_suppressions_disabled(
 
     # Only one subprocess call (gating scan, no probe)
     assert_that(mock_run.call_count).is_equal_to(1)
-    assert_that(result.ai_metadata).is_none()
+    assert_that(result.metadata).is_none()
 
 
 def test_check_suppressions_probe_timeout(
@@ -729,7 +729,7 @@ def test_check_suppressions_probe_timeout(
         result = osv_scanner_plugin.check([str(lockfile)], {})
 
     assert_that(result.success).is_true()
-    assert_that(result.ai_metadata).is_none()
+    assert_that(result.metadata).is_none()
 
 
 def test_build_probe_command_internal(
@@ -852,9 +852,9 @@ def test_suppressions_classified_when_probe_findings_are_all_excluded(
     ):
         result = osv_scanner_plugin.check([str(lockfile)], {})
 
-    assert_that(result.ai_metadata).is_not_none()
-    assert result.ai_metadata is not None  # narrow type for mypy
-    suppressions = result.ai_metadata["suppressions"]
+    assert_that(result.metadata).is_not_none()
+    assert result.metadata is not None  # narrow type for mypy
+    suppressions = result.metadata["suppressions"]
     assert_that(suppressions).is_length(1)
     # The excluded finding must not count as evidence the suppression is live.
     assert_that(suppressions[0]["status"]).is_equal_to("stale")

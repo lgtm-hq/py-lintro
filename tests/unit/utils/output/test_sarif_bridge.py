@@ -7,24 +7,23 @@ import json
 from assertpy import assert_that
 
 from lintro.ai.models import AISummary
+from lintro.ai.sarif_bridge import suggestions_from_results, summary_from_results
 from lintro.enums.severity_level import SeverityLevel
 from lintro.models.core.tool_result import ToolResult
 from lintro.parsers.ruff.ruff_issue import RuffIssue
 from lintro.utils.output.sarif import (
     StandardIssue,
     standard_issues_from_results,
-    suggestions_from_results,
-    summary_from_results,
     to_sarif,
 )
 
 
 def test_suggestions_from_results_with_metadata() -> None:
-    """Reconstruct AIFixSuggestion objects from ai_metadata dicts."""
+    """Reconstruct AIFixSuggestion objects from result metadata dicts."""
     result = ToolResult(
         name="ruff",
         success=True,
-        ai_metadata={
+        metadata={
             "fix_suggestions": [
                 {
                     "file": "src/main.py",
@@ -72,18 +71,18 @@ def test_suggestions_from_results_empty_fix_suggestions() -> None:
     result = ToolResult(
         name="ruff",
         success=True,
-        ai_metadata={"fix_suggestions": []},
+        metadata={"fix_suggestions": []},
     )
 
     assert_that(suggestions_from_results([result])).is_empty()
 
 
 def test_summary_from_results_with_metadata() -> None:
-    """Reconstruct AISummary from ai_metadata dict."""
+    """Reconstruct AISummary from a result metadata dict."""
     result = ToolResult(
         name="ruff",
         success=True,
-        ai_metadata={
+        metadata={
             "summary": {
                 "overview": "Found 3 issues across 2 files.",
                 "key_patterns": ["assert usage", "line length"],
@@ -119,12 +118,12 @@ def test_summary_from_results_picks_first() -> None:
     result1 = ToolResult(
         name="ruff",
         success=True,
-        ai_metadata={"summary": {"overview": "First summary"}},
+        metadata={"summary": {"overview": "First summary"}},
     )
     result2 = ToolResult(
         name="mypy",
         success=True,
-        ai_metadata={"summary": {"overview": "Second summary"}},
+        metadata={"summary": {"overview": "Second summary"}},
     )
 
     summary = summary_from_results([result1, result2])
@@ -139,7 +138,7 @@ def test_sarif_format_end_to_end() -> None:
     result = ToolResult(
         name="ruff",
         success=True,
-        ai_metadata={
+        metadata={
             "fix_suggestions": [
                 {
                     "file": "src/main.py",
@@ -325,7 +324,7 @@ def test_standard_and_ai_results_are_additive() -> None:
         issues=[
             RuffIssue(file="a.py", line=1, code="F401", message="unused"),
         ],
-        ai_metadata={
+        metadata={
             "fix_suggestions": [
                 {
                     "file": "a.py",

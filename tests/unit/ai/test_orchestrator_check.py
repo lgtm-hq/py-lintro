@@ -111,13 +111,13 @@ def test_run_ai_enhancement_check_fix_preserves_summary_and_fix_metadata(
         ai_fix=True,
     )
 
-    assert_that(result.ai_metadata).is_not_none()
-    assert_that(result.ai_metadata).contains_key("summary")
-    assert_that(result.ai_metadata).contains_key("fix_suggestions")
-    assert_that(result.ai_metadata["summary"]["overview"]).is_equal_to(
+    assert_that(result.metadata).is_not_none()
+    assert_that(result.metadata).contains_key("summary")
+    assert_that(result.metadata).contains_key("fix_suggestions")
+    assert_that(result.metadata["summary"]["overview"]).is_equal_to(
         "AI overview",
     )
-    assert_that(result.ai_metadata["fix_suggestions"]).is_length(1)
+    assert_that(result.metadata["fix_suggestions"]).is_length(1)
     summary_kwargs = mock_generate_summary.call_args.kwargs
     assert_that(summary_kwargs.get("max_tokens")).is_equal_to(4096)
     assert_that(summary_kwargs).contains_key("workspace_root")
@@ -179,14 +179,14 @@ def test_summary_attachment_summary_attached_to_all_results_with_issues(
         output_format="json",
     )
 
-    assert_that(result_a.ai_metadata).is_not_none()
-    assert_that(result_b.ai_metadata).is_not_none()
-    assert_that(result_a.ai_metadata).contains_key("summary")
-    assert_that(result_b.ai_metadata).contains_key("summary")
-    assert_that(result_a.ai_metadata["summary"]["overview"]).is_equal_to(  # type: ignore[index]  # assertpy is_not_none narrows this
+    assert_that(result_a.metadata).is_not_none()
+    assert_that(result_b.metadata).is_not_none()
+    assert_that(result_a.metadata).contains_key("summary")
+    assert_that(result_b.metadata).contains_key("summary")
+    assert_that(result_a.metadata["summary"]["overview"]).is_equal_to(  # type: ignore[index]  # assertpy is_not_none narrows this
         "overview",
     )
-    assert_that(result_b.ai_metadata["summary"]["overview"]).is_equal_to(  # type: ignore[index]  # assertpy is_not_none narrows this
+    assert_that(result_b.metadata["summary"]["overview"]).is_equal_to(  # type: ignore[index]  # assertpy is_not_none narrows this
         "overview",
     )
 
@@ -291,8 +291,8 @@ def test_integration_orchestrator_end_to_end_check_with_real_summary_generation(
         output_format="json",
     )
 
-    assert_that(result.ai_metadata).is_not_none()
-    assert_that(result.ai_metadata).contains_key("summary")
-    assert_that(result.ai_metadata["summary"]["overview"]).is_equal_to(  # type: ignore[index]  # assertpy is_not_none narrows this
+    assert_that(result.metadata).is_not_none()
+    assert_that(result.metadata).contains_key("summary")
+    assert_that(result.metadata["summary"]["overview"]).is_equal_to(  # type: ignore[index]  # assertpy is_not_none narrows this
         "Found 1 issue",
     )

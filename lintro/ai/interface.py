@@ -17,7 +17,7 @@ from collections.abc import Mapping
 from typing import TYPE_CHECKING, Any
 
 from lintro.enums.action import Action
-from lintro.models.core.ai_seam import AIOutcome
+from lintro.models.core.ai_seam import AIOutcome, AISarifEnrichment
 
 if TYPE_CHECKING:
     from lintro.ai.config import AIConfig
@@ -31,7 +31,38 @@ __all__ = [
     "render_ai_status",
     "resolve_ai_config",
     "run_ai_layer",
+    "sarif_enrichment_from_results",
 ]
+
+
+def sarif_enrichment_from_results(
+    *,
+    all_results: list[ToolResult],
+) -> AISarifEnrichment:
+    """Reconstruct SARIF AI enrichment from the metadata on tool results.
+
+    Satisfies :class:`~lintro.models.core.ai_seam.AISarifEnricher`. Core SARIF
+    emitters call the injected seam rather than importing
+    :mod:`lintro.ai.sarif_bridge`, which is what keeps
+    :mod:`lintro.utils.tool_executor` and :mod:`lintro.utils.output` free of
+    AI imports (issue #724).
+
+    Args:
+        all_results: Results from all tools, possibly carrying AI metadata.
+
+    Returns:
+        The reconstructed fix suggestions and run summary. Both are empty
+        when no result carries AI metadata.
+    """
+    from lintro.ai.sarif_bridge import (
+        suggestions_from_results,
+        summary_from_results,
+    )
+
+    return AISarifEnrichment(
+        suggestions=list(suggestions_from_results(all_results)),
+        summary=summary_from_results(all_results),
+    )
 
 
 def resolve_ai_config(lintro_config: LintroConfig) -> AIConfig:

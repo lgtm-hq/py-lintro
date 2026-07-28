@@ -10,13 +10,13 @@ from typing import Any
 
 from lintro.enums.action import Action
 from lintro.enums.tool_name import ToolName, normalize_tool_name
-from lintro.utils.ai_metadata import get_ai_count
 from lintro.utils.console import (
     RE_CANNOT_AUTOFIX,
     RE_REMAINING_OR_CANNOT,
     get_summary_value,
     get_tool_emoji,
 )
+from lintro.utils.tool_metadata import get_ai_count
 
 # Constants
 DEFAULT_REMAINING_COUNT: str = "?"
@@ -498,10 +498,10 @@ def print_summary_table(
                     notes_display = f"{_YELLOW}deferred to framework checker{_RESET}"
 
                 # Surface stale/expired suppression counts for security tools
-                ai_meta = getattr(result, "ai_metadata", None)
-                if not isinstance(ai_meta, dict):
-                    ai_meta = {}
-                suppressions = ai_meta.get("suppressions", [])
+                tool_meta = getattr(result, "metadata", None)
+                if not isinstance(tool_meta, dict):
+                    tool_meta = {}
+                suppressions = tool_meta.get("suppressions", [])
                 if suppressions:
                     stale = sum(
                         1

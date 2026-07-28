@@ -15,6 +15,7 @@ import sys
 from typing import TYPE_CHECKING, Any
 
 from lintro.enums.action import Action, normalize_action
+from lintro.models.core.ai_seam import AISarifEnrichment
 from lintro.models.core.tool_result import ToolResult
 from lintro.tools import tool_manager
 from lintro.utils.config import load_post_checks_config
@@ -38,7 +39,12 @@ from lintro.utils.unified_config import UnifiedConfigManager
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
 
-    from lintro.models.core.ai_seam import AIOutcome, AIRunner, AIStatusRenderer
+    from lintro.models.core.ai_seam import (
+        AIOutcome,
+        AIRunner,
+        AISarifEnricher,
+        AIStatusRenderer,
+    )
     from lintro.parsers.base_issue import BaseIssue
     from lintro.plugins.base import BaseToolPlugin
 
@@ -235,7 +241,7 @@ def _display_fix_result(
             raw_output_for_meta=result.output,
             action=action,
             success=result.success,
-            ai_metadata=result.ai_metadata,
+            metadata=result.metadata,
             parse_failures_count=result.parse_failures_count or 0,
         )
         return
@@ -266,7 +272,7 @@ def _display_fix_result(
             raw_output_for_meta=result.output,
             action=action,
             success=result.success,
-            ai_metadata=result.ai_metadata,
+            metadata=result.metadata,
             parse_failures_count=result.parse_failures_count or 0,
         )
     elif (
@@ -282,7 +288,7 @@ def _display_fix_result(
             issues_count=0,
             action=action,
             success=result.success,
-            ai_metadata=result.ai_metadata,
+            metadata=result.metadata,
             parse_failures_count=result.parse_failures_count or 0,
         )
 
@@ -297,6 +303,29 @@ _ARTIFACT_EXTENSIONS: dict[str, str] = {
 }
 
 
+def _resolve_sarif_enrichment(
+    ai_sarif_enricher: AISarifEnricher | None,
+    all_results: list[ToolResult],
+) -> AISarifEnrichment:
+    """Obtain SARIF AI enrichment through the injected seam.
+
+    The runner must not import :mod:`lintro.ai` (issue #724), so it never
+    reconstructs AI objects itself; it asks the injected enricher, and falls
+    back to empty enrichment when the caller did not supply one.
+
+    Args:
+        ai_sarif_enricher: Optional enricher injected by the caller.
+        all_results: Results from all tools, possibly carrying AI metadata.
+
+    Returns:
+        The enrichment to hand to the SARIF renderer; empty when no enricher
+        was injected.
+    """
+    if ai_sarif_enricher is None:
+        return AISarifEnrichment()
+    return ai_sarif_enricher(all_results=all_results)
+
+
 def _write_artifacts(
     all_results: list[ToolResult],
     lintro_config: Any,
@@ -306,6 +335,7 @@ def _write_artifacts(
     total_fixed: int,
     *,
     warn_func: Any = None,
+    ai_sarif_enricher: AISarifEnricher | None = None,
 ) -> None:
     """Write side-channel artifact files alongside primary output.
 
@@ -328,6 +358,9 @@ def _write_artifacts(
         total_fixed: Total number of issues fixed.
         warn_func: Optional callback for emitting warnings.  When ``None``,
             falls back to ``logger.console_output``.
+        ai_sarif_enricher: Optional AI seam used to build enrichment for a
+            SARIF artifact. Resolved only when SARIF is actually among the
+            artifacts, so a non-SARIF run never touches the AI layer.
     """
     import os
     from pathlib import Path
@@ -356,6 +389,12 @@ def _write_artifacts(
 
     _emit = warn_func if warn_func is not None else logger.console_output
 
+    ai_enrichment = (
+        _resolve_sarif_enrichment(ai_sarif_enricher, all_results)
+        if "sarif" in artifacts
+        else None
+    )
+
     for artifact in artifacts:
         filename = _ARTIFACT_EXTENSIONS.get(artifact)
         if filename is None:
@@ -372,6 +411,7 @@ def _write_artifacts(
                 action=action,
                 total_issues=total_issues,
                 total_fixed=total_fixed,
+                ai_enrichment=ai_enrichment,
             )
         except (OSError, ValueError, TypeError) as e:
             _emit(f"Warning: Failed to write {artifact} artifact: {e}")
@@ -511,6 +551,7 @@ def run_lint_tools_simple(
     no_art: bool = False,
     ai_runner: AIRunner | None = None,
     ai_status_renderer: AIStatusRenderer | None = None,
+    ai_sarif_enricher: AISarifEnricher | None = None,
 ) -> int:
     """Simplified runner using Loguru-based logging with rich formatting.
 
@@ -564,6 +605,10 @@ def run_lint_tools_simple(
             pre-execution configuration summary (``render_ai_status`` from the
             AI interface facade). When None, the AI row reports a missing
             configuration.
+        ai_sarif_enricher: Optional callable that reconstructs SARIF AI
+            enrichment from tool metadata (``sarif_enrichment_from_results``
+            from the AI interface facade). When None, SARIF renders without
+            AI enrichment.
 
     Returns:
         Exit code (0 for success, 1 for failures).
@@ -1142,15 +1187,17 @@ def run_lint_tools_simple(
             from lintro.utils.output.sarif import (
                 render_fixes_sarif,
                 standard_issues_from_results,
-                suggestions_from_results,
-                summary_from_results,
             )
 
+            enrichment = _resolve_sarif_enrichment(
+                ai_sarif_enricher,
+                all_results,
+            )
             sarif_json = render_fixes_sarif(
                 standard_issues_from_results(all_results),
                 doc_urls=build_doc_url_map(all_results) or None,
-                ai_suggestions=suggestions_from_results(all_results),
-                ai_summary=summary_from_results(all_results),
+                ai_suggestions=enrichment.suggestions,
+                ai_summary=enrichment.summary,
             )
             print(sarif_json)
         elif output_format.lower() == "csv":
@@ -1258,17 +1305,19 @@ def run_lint_tools_simple(
                     from lintro.utils.output.file_writer import build_doc_url_map
                     from lintro.utils.output.sarif import (
                         standard_issues_from_results,
-                        suggestions_from_results,
-                        summary_from_results,
                         write_sarif,
                     )
 
+                    enrichment = _resolve_sarif_enrichment(
+                        ai_sarif_enricher,
+                        all_results,
+                    )
                     write_sarif(
                         standard_issues_from_results(all_results),
                         output_path=Path(output_file),
                         doc_urls=build_doc_url_map(all_results) or None,
-                        ai_suggestions=suggestions_from_results(all_results),
-                        ai_summary=summary_from_results(all_results),
+                        ai_suggestions=enrichment.suggestions,
+                        ai_summary=enrichment.summary,
                     )
                 else:
                     write_output_file(
@@ -1292,6 +1341,7 @@ def run_lint_tools_simple(
             total_issues=total_issues,
             total_fixed=total_fixed,
             warn_func=_warn,
+            ai_sarif_enricher=ai_sarif_enricher,
         )
 
         # Clean up old run directories to prevent unbounded growth

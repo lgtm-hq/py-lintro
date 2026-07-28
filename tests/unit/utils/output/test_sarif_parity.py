@@ -23,13 +23,12 @@ from pathlib import Path
 
 from assertpy import assert_that
 
+from lintro.ai.sarif_bridge import suggestions_from_results, summary_from_results
 from lintro.models.core.tool_result import ToolResult
 from lintro.parsers.ruff.ruff_issue import RuffIssue
 from lintro.utils.output.sarif import (
     render_fixes_sarif,
     standard_issues_from_results,
-    suggestions_from_results,
-    summary_from_results,
     to_sarif,
     write_sarif,
 )
