@@ -23,6 +23,7 @@ from lintro.ai.exceptions import (
     AIRateLimitError,
 )
 from lintro.ai.liveness import (
+    LIVENESS_PROBE_PROMPT,
     STATE_COPY,
     LivenessResult,
     LivenessState,
@@ -33,7 +34,9 @@ from lintro.ai.liveness import (
     liveness_state_for_kind,
     missing_credential_result,
 )
+from lintro.ai.providers.base import AIResponse
 from lintro.ai.review.errors_taxonomy import ReviewErrorKind
+from tests.unit.ai.conftest import MockAIProvider
 
 # --- kind -> state mapping ---------------------------------------------------
 
@@ -211,43 +214,25 @@ def test_incompatible_cli_result_is_cli_scoped() -> None:
 # --- provider-level probing --------------------------------------------------
 
 
-async def test_api_probe_makes_a_minimal_real_call(monkeypatch: Any) -> None:
+async def test_api_probe_makes_a_minimal_real_call() -> None:
     """The API probe must actually invoke the model, one token at a time.
 
     A presence-only probe cannot see a depleted balance, so this asserts the call
-    happens and stays minimal.
-
-    Args:
-        monkeypatch: Pytest monkeypatch fixture.
+    happens and stays minimal. Driven through the base class rather than a real
+    provider: constructing one needs the ``anthropic`` SDK, which the SDK-less CI
+    job does not install.
     """
-    from lintro.ai.providers.anthropic import AnthropicProvider
-    from lintro.ai.providers.base import AIResponse
-    from lintro.ai.registry import AIProvider
-
-    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test")
-    provider = AnthropicProvider(transport=AITransport.API)
-    recorded: dict[str, Any] = {}
-
-    async def _fake_complete(prompt: str, **kwargs: Any) -> AIResponse:
-        recorded["prompt"] = prompt
-        recorded.update(kwargs)
-        return AIResponse(
-            content="ok",
-            model="claude",
-            input_tokens=1,
-            output_tokens=1,
-            cost_estimate=0.0,
-            provider=AIProvider.ANTHROPIC,
-        )
-
-    monkeypatch.setattr(provider, "complete", _fake_complete)
+    provider = MockAIProvider()
 
     result = await provider.check_liveness()
 
     assert_that(result.is_live).is_true()
-    assert_that(result.quota_verified).is_true()
-    assert_that(recorded["max_tokens"]).is_equal_to(1)
-    assert_that(recorded["prompt"]).is_not_empty()
+    assert_that(result.quota_verified).described_as(
+        "a real call is the only thing that can verify quota",
+    ).is_true()
+    assert_that(provider.calls).is_length(1)
+    assert_that(provider.calls[0]["max_tokens"]).is_equal_to(1)
+    assert_that(provider.calls[0]["prompt"]).is_equal_to(LIVENESS_PROBE_PROMPT)
 
 
 async def test_api_probe_reports_depleted_balance(monkeypatch: Any) -> None:
@@ -256,53 +241,34 @@ async def test_api_probe_reports_depleted_balance(monkeypatch: Any) -> None:
     Args:
         monkeypatch: Pytest monkeypatch fixture.
     """
-    from lintro.ai.providers.anthropic import AnthropicProvider
+    provider = MockAIProvider()
 
-    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test")
-    provider = AnthropicProvider(transport=AITransport.API)
-
-    async def _fake_complete(prompt: str, **kwargs: Any) -> None:
+    async def _depleted(prompt: str, **kwargs: object) -> AIResponse:
         del prompt, kwargs
         raise AIProviderError(
             "Anthropic API error: Error code: 400 - Your credit balance is too low",
         )
 
-    monkeypatch.setattr(provider, "complete", _fake_complete)
+    monkeypatch.setattr(provider, "complete", _depleted)
 
     result = await provider.check_liveness()
 
     assert_that(result.state).is_equal_to(LivenessState.NO_QUOTA)
     assert_that(result.is_live).is_false()
+    assert_that(result.message).contains("credit balance is too low")
 
 
-async def test_api_probe_short_circuits_without_a_credential(
-    monkeypatch: Any,
-) -> None:
-    """No key means no call: the chain stops at presence.
-
-    Args:
-        monkeypatch: Pytest monkeypatch fixture.
-    """
-    from lintro.ai.providers.anthropic import AnthropicProvider
-
-    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test")
-    provider = AnthropicProvider(transport=AITransport.API)
-    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
-
-    called = False
-
-    async def _fake_complete(prompt: str, **kwargs: Any) -> None:
-        nonlocal called
-        called = True
-        del prompt, kwargs
-
-    monkeypatch.setattr(provider, "complete", _fake_complete)
+async def test_api_probe_short_circuits_without_a_credential() -> None:
+    """No credential means no call: the chain stops at presence."""
+    provider = MockAIProvider(available=False)
 
     result = await provider.check_liveness()
 
     assert_that(result.state).is_equal_to(LivenessState.MISSING_CREDENTIAL)
-    assert_that(called).is_false()
-    assert_that(result.message).contains("ANTHROPIC_API_KEY")
+    assert_that(provider.calls).described_as(
+        "presence must short-circuit before any provider call",
+    ).is_empty()
+    assert_that(result.message).contains("MOCK_API_KEY")
 
 
 # --- synchronous entry point -------------------------------------------------
