@@ -9,11 +9,13 @@ emitters reach them only through
 
 from __future__ import annotations
 
+import ast
 import json
 from pathlib import Path
 
 from assertpy import assert_that
 
+import lintro
 from lintro.ai.interface import sarif_enrichment_from_results
 from lintro.enums.action import Action
 from lintro.enums.output_format import OutputFormat
@@ -105,3 +107,33 @@ def test_empty_enrichment_is_the_no_ai_default() -> None:
 
     assert_that(enrichment.suggestions).is_empty()
     assert_that(enrichment.summary).is_none()
+
+
+def test_every_runner_call_site_injects_the_enricher() -> None:
+    """Every ``run_lint_tools_simple`` caller must inject the SARIF seam.
+
+    The seam is opt-in: a caller that forgets it silently drops AI enrichment
+    from SARIF output instead of failing. Assert wiring at the source level so
+    a new entrypoint cannot regress the way ``test_command`` once did.
+    """
+    package_root = Path(lintro.__file__).parent
+    missing: list[str] = []
+
+    for source_path in sorted(package_root.rglob("*.py")):
+        tree = ast.parse(source_path.read_text(encoding="utf-8"))
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call):
+                continue
+            func = node.func
+            name = func.id if isinstance(func, ast.Name) else None
+            if name != "run_lint_tools_simple":
+                continue
+            keywords = {kw.arg for kw in node.keywords}
+            if "ai_sarif_enricher" not in keywords:
+                missing.append(
+                    f"{source_path.relative_to(package_root)}:{node.lineno}",
+                )
+
+    assert_that(missing).described_as(
+        "call sites missing ai_sarif_enricher",
+    ).is_empty()

@@ -134,7 +134,7 @@ def serialize_tool_result(
             data["metadata"] = normalized_metadata
             # Deprecated duplicate of ``metadata``, emitted for one release
             # cycle so existing consumers keep working. Removed in a future
-            # release; see docs/json-output.md.
+            # release; see the deprecation note in docs/ai-features.md.
             data["ai_metadata"] = normalized_metadata
     if merged_issues:
         data["issues"] = [serialize_issue(issue) for issue in merged_issues]

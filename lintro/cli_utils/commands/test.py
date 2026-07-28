@@ -253,7 +253,10 @@ def test_command(
         ",".join(tool_option_parts) if tool_option_parts else None
     )
 
-    from lintro.ai.interface import render_ai_status
+    from lintro.ai.interface import (
+        render_ai_status,
+        sarif_enrichment_from_results,
+    )
 
     # Run with pytest tool
     exit_code: int = run_lint_tools_simple(
@@ -269,6 +272,7 @@ def test_command(
         raw_output=raw_output,
         output_file=output,
         ai_status_renderer=render_ai_status,
+        ai_sarif_enricher=sarif_enrichment_from_results,
         debug=debug,
         yes=yes,
     )
