@@ -464,7 +464,7 @@ class OsvScannerPlugin(BaseToolPlugin):
             output=output if should_show_output else None,
             issues_count=len(issues),
             issues=issues if issues else None,
-            ai_metadata=suppression_metadata,
+            metadata=suppression_metadata,
             parse_failures_count=parse_failures_count,
         )
 

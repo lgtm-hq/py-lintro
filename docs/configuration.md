@@ -1154,7 +1154,8 @@ When `check_suppressions` is enabled, lintro runs a second osv-scanner scan with
 suppressions to classify each `.osv-scanner.toml` entry as **Active** (vulnerability
 still present), **Stale** (vulnerability resolved upstream — safe to remove), or
 **Expired** (past the `ignoreUntil` date). Results appear in the summary table Notes
-column and in JSON output under `ai_metadata.suppressions`.
+column and in JSON output under `metadata.suppressions` (also emitted under the
+deprecated `ai_metadata.suppressions` key for one release cycle).
 
 **Usage Examples:**
 

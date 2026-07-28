@@ -8,7 +8,7 @@ callables declared here, and the runner consumes the small core-owned
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Protocol
 
 if TYPE_CHECKING:
@@ -86,5 +86,44 @@ class AIStatusRenderer(Protocol):
 
         Returns:
             Rich-markup lines to place in the summary table.
+        """
+        ...  # pragma: no cover - protocol declaration
+
+
+@dataclass(frozen=True)
+class AISarifEnrichment:
+    """Optional AI objects to fold into a SARIF render.
+
+    The core SARIF renderer accepts ``ai_suggestions``/``ai_summary`` keywords
+    but must not know how to build them, because reconstructing them from
+    tool metadata requires :mod:`lintro.ai.models`. Core therefore passes this
+    value object straight through, typed as ``Any`` on both members so no AI
+    type is named outside the AI layer.
+
+    Attributes:
+        suggestions: Reconstructed AI fix suggestions, empty when AI is off.
+        summary: Reconstructed AI run summary, or None when absent.
+    """
+
+    suggestions: list[Any] = field(default_factory=list)
+    summary: Any | None = None
+
+
+class AISarifEnricher(Protocol):
+    """Callable that derives SARIF AI enrichment from tool results."""
+
+    def __call__(
+        self,
+        *,
+        all_results: list[ToolResult],
+    ) -> AISarifEnrichment:
+        """Reconstruct AI enrichment from the metadata on tool results.
+
+        Args:
+            all_results: Results from all tools, carrying any AI metadata the
+                AI layer attached during the run.
+
+        Returns:
+            The :class:`AISarifEnrichment` to pass to the SARIF renderer.
         """
         ...  # pragma: no cover - protocol declaration

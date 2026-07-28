@@ -16,10 +16,10 @@ schemas cannot silently drift.
 from collections.abc import Sequence
 from typing import TYPE_CHECKING, Any
 
-from lintro.ai.metadata import normalize_ai_metadata
 from lintro.enums.action import Action, normalize_action
 from lintro.formatters.formatter import merge_detected_and_remaining
 from lintro.models.core.tool_result import ToolResult
+from lintro.utils.tool_metadata import normalize_tool_metadata
 
 if TYPE_CHECKING:
     from lintro.parsers.base_issue import BaseIssue
@@ -103,8 +103,9 @@ def serialize_tool_result(
         The per-tool JSON object: always ``tool``, ``success``,
         ``issues_count``, ``skipped``, ``skip_reason``, ``timed_out`` and
         ``output``; plus ``parse_failures_count`` when set,
-        ``fixed``/``remaining`` in FIX mode, normalized ``ai_metadata`` when
-        present, and ``issues`` when any exist.
+        ``fixed``/``remaining`` in FIX mode, normalized ``metadata`` (plus its
+        deprecated ``ai_metadata`` duplicate) when present, and ``issues``
+        when any exist.
     """
     merged_issues = merge_detected_and_remaining(
         getattr(result, "initial_issues", None),
@@ -126,11 +127,15 @@ def serialize_tool_result(
         remaining = getattr(result, "remaining_issues_count", None)
         data["fixed"] = fixed if fixed is not None else 0
         data["remaining"] = remaining if remaining is not None else 0
-    ai_metadata = getattr(result, "ai_metadata", None)
-    if isinstance(ai_metadata, dict) and ai_metadata:
-        normalized_ai_metadata = normalize_ai_metadata(ai_metadata)
-        if normalized_ai_metadata:
-            data["ai_metadata"] = normalized_ai_metadata
+    metadata = getattr(result, "metadata", None)
+    if isinstance(metadata, dict) and metadata:
+        normalized_metadata = normalize_tool_metadata(metadata)
+        if normalized_metadata:
+            data["metadata"] = normalized_metadata
+            # Deprecated duplicate of ``metadata``, emitted for one release
+            # cycle so existing consumers keep working. Removed in a future
+            # release; see the deprecation note in docs/ai-features.md.
+            data["ai_metadata"] = normalized_metadata
     if merged_issues:
         data["issues"] = [serialize_issue(issue) for issue in merged_issues]
     return data
@@ -189,13 +194,13 @@ def create_json_output(
     for result in results:
         result_data = serialize_tool_result(result, action=action_enum)
         # Extract AI summary from the first result that has one.
-        ai_metadata = result_data.get("ai_metadata")
+        metadata = result_data.get("metadata")
         if (
-            isinstance(ai_metadata, dict)
-            and "summary" in ai_metadata
+            isinstance(metadata, dict)
+            and "summary" in metadata
             and "ai_summary" not in json_data
         ):
-            json_data["ai_summary"] = ai_metadata["summary"]
+            json_data["ai_summary"] = metadata["summary"]
         json_data["results"].append(result_data)
 
     return json_data

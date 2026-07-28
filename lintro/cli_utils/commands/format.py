@@ -180,7 +180,11 @@ def format_command(
     # Default to current directory if no paths provided
     normalized_paths: list[str] = list(paths) if paths else list(DEFAULT_PATHS)
 
-    from lintro.ai.interface import render_ai_status, run_ai_layer
+    from lintro.ai.interface import (
+        render_ai_status,
+        run_ai_layer,
+        sarif_enrichment_from_results,
+    )
 
     # Run with simplified approach
     exit_code: int = run_lint_tools_simple(
@@ -203,6 +207,7 @@ def format_command(
         yes=yes,
         ai_runner=run_ai_layer,
         ai_status_renderer=render_ai_status,
+        ai_sarif_enricher=sarif_enrichment_from_results,
         dry_run=dry_run,
         no_art=no_art,
     )

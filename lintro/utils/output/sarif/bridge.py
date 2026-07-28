@@ -1,29 +1,21 @@
 """SARIF bridge: derive SARIF inputs from ``ToolResult`` objects.
 
 ``standard_issues_from_results`` normalizes parsed lint issues and has no
-dependency on the AI layer. ``suggestions_from_results`` and
-``summary_from_results`` reconstruct ``AIFixSuggestion`` and ``AISummary``
-instances from the serialized metadata dictionaries attached to
-``ToolResult.ai_metadata`` during AI-enhanced runs; they import the AI
-models only once a usable metadata payload has been found, so this module
-never pulls :mod:`lintro.ai.models` in on a standard-only render.
-
-Note that ``lintro.utils.json_output`` still imports :mod:`lintro.ai`
-eagerly, so a standard-only render is not yet fully AI-free at the process
-level. Removing that remaining core-to-AI edge is tracked separately under
-issue #724.
+dependency on the AI layer, so this module never imports :mod:`lintro.ai`.
+Reconstructing the optional AI enrichment (fix suggestions and the run
+summary) needs :mod:`lintro.ai.models`, so it lives in
+:mod:`lintro.ai.sarif_bridge` and reaches core through the injected
+:class:`~lintro.models.core.ai_seam.AISarifEnricher` seam (issue #724).
 """
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
-from lintro.enums.confidence_level import ConfidenceLevel
 from lintro.enums.severity_level import SeverityLevel
 from lintro.utils.output.sarif.document import StandardIssue
 
 if TYPE_CHECKING:
-    from lintro.ai.models import AIFixSuggestion, AISummary
     from lintro.models.core.tool_result import ToolResult
     from lintro.parsers.base_issue import BaseIssue
 
@@ -87,122 +79,3 @@ def _to_standard_issue(
             getattr(issue, "doc_url", "") or getattr(issue, "url", "") or "",
         ),
     )
-
-
-def _coerce_confidence(value: object) -> ConfidenceLevel:
-    """Coerce a raw confidence value to the ``ConfidenceLevel`` enum.
-
-    Accepts enum members, their string names (case-insensitive), or
-    falls back to ``MEDIUM`` for unrecognised values.
-    """
-    if isinstance(value, ConfidenceLevel):
-        return value
-    if isinstance(value, str):
-        try:
-            return ConfidenceLevel(value.lower())
-        except ValueError:
-            return ConfidenceLevel.MEDIUM
-    return ConfidenceLevel.MEDIUM
-
-
-def suggestions_from_results(
-    all_results: list[ToolResult],
-) -> list[AIFixSuggestion]:
-    """Reconstruct AIFixSuggestion objects from ToolResult AI metadata.
-
-    Args:
-        all_results: List of tool results potentially carrying AI metadata.
-
-    Returns:
-        List of reconstructed AIFixSuggestion objects across all results.
-    """
-    suggestions: list[AIFixSuggestion] = []
-    for result in all_results:
-        if result.ai_metadata is None:
-            continue
-        raw_suggestions = result.ai_metadata.get("fix_suggestions", [])
-        if not isinstance(raw_suggestions, list):
-            continue
-        for raw in raw_suggestions:
-            if not isinstance(raw, dict):
-                continue
-            from lintro.ai.models import AIFixSuggestion
-
-            try:
-                suggestions.append(
-                    AIFixSuggestion(
-                        file=str(raw.get("file", "")),
-                        line=int(raw.get("line", 0)),
-                        code=str(raw.get("code", "")),
-                        tool_name=str(raw.get("tool_name", "")),
-                        original_code=str(raw.get("original_code", "")),
-                        suggested_code=str(raw.get("suggested_code", "")),
-                        diff=str(raw.get("diff", "")),
-                        explanation=str(raw.get("explanation", "")),
-                        confidence=_coerce_confidence(
-                            raw.get("confidence", ConfidenceLevel.MEDIUM),
-                        ),
-                        risk_level=str(raw.get("risk_level", "")),
-                        input_tokens=int(raw.get("input_tokens", 0)),
-                        output_tokens=int(raw.get("output_tokens", 0)),
-                        cost_estimate=float(
-                            raw.get("cost_estimate", 0.0),
-                        ),
-                    ),
-                )
-            except (TypeError, ValueError):
-                continue
-    return suggestions
-
-
-def summary_from_results(
-    all_results: list[ToolResult],
-) -> AISummary | None:
-    """Reconstruct an AISummary from the first ToolResult that carries one.
-
-    Args:
-        all_results: List of tool results potentially carrying AI metadata.
-
-    Returns:
-        Reconstructed AISummary, or None if no summary metadata is found.
-    """
-    for result in all_results:
-        if result.ai_metadata is None:
-            continue
-        raw_summary: dict[str, Any] | None = result.ai_metadata.get("summary")
-        if not isinstance(raw_summary, dict):
-            continue
-
-        from lintro.ai.models import AISummary
-
-        try:
-            in_tok = int(raw_summary.get("input_tokens", 0))
-        except (TypeError, ValueError):
-            in_tok = 0
-        try:
-            out_tok = int(raw_summary.get("output_tokens", 0))
-        except (TypeError, ValueError):
-            out_tok = 0
-        try:
-            cost = float(raw_summary.get("cost_estimate", 0.0))
-        except (TypeError, ValueError):
-            cost = 0.0
-
-        def _str_list(val: object) -> list[str]:
-            if isinstance(val, list):
-                return [str(x) for x in val]
-            if val is None:
-                return []
-            return [str(val)]
-
-        return AISummary(
-            overview=str(raw_summary.get("overview", "")),
-            key_patterns=_str_list(raw_summary.get("key_patterns")),
-            priority_actions=_str_list(raw_summary.get("priority_actions")),
-            triage_suggestions=_str_list(raw_summary.get("triage_suggestions")),
-            estimated_effort=str(raw_summary.get("estimated_effort", "")),
-            input_tokens=in_tok,
-            output_tokens=out_tok,
-            cost_estimate=cost,
-        )
-    return None

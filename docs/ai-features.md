@@ -305,11 +305,17 @@ AI output adapts to the environment:
 | Terminal       | Rich Panels with color and structure     |
 | GitHub Actions | `::group::` / `::endgroup::` collapsible |
 | Markdown       | `<details>` / `</details>` collapsible   |
-| JSON           | `ai_summary` and `ai_metadata` fields    |
+| JSON           | `ai_summary` and `metadata` fields       |
 
 ### JSON Output
 
-When using `--output-format json`, AI data is included in the output:
+When using `--output-format json`, AI data is included in the output.
+
+> **Deprecation:** the per-tool key is now `metadata`. The old `ai_metadata` key is
+> still emitted with identical content for one release cycle and will be removed in a
+> future release — migrate consumers to `metadata`. The key was renamed because it is
+> not AI-specific: osv-scanner writes its suppression classifications there with AI
+> fully disabled.
 
 ```json
 {
@@ -317,7 +323,7 @@ When using `--output-format json`, AI data is included in the output:
     {
       "tool": "ruff",
       "issues": [...],
-      "ai_metadata": {
+      "metadata": {
         "summary": {
           "overview": "Code quality assessment...",
           "key_patterns": ["Pattern 1", "Pattern 2"],
@@ -325,7 +331,8 @@ When using `--output-format json`, AI data is included in the output:
           "estimated_effort": "20-30 minutes"
         },
         "fix_suggestions": [...]
-      }
+      },
+      "ai_metadata": { "...": "deprecated duplicate of metadata" }
     }
   ],
   "summary": {...},

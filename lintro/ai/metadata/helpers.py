@@ -1,4 +1,10 @@
-"""Helper functions for attaching and normalizing AI metadata."""
+"""Helper functions for attaching AI metadata to tool results.
+
+``normalize_ai_metadata`` is re-exported here as a deprecated alias for
+:func:`lintro.utils.tool_metadata.normalize_tool_metadata`, which moved to
+core in issue #724: it is a pure dict whitelist with no AI dependency, and
+leaving it here forced the JSON output path to import :mod:`lintro.ai`.
+"""
 
 from __future__ import annotations
 
@@ -6,6 +12,7 @@ from typing import TYPE_CHECKING, Any
 
 from lintro.ai.metadata.fix_suggestion_payload import AIFixSuggestionPayload
 from lintro.ai.metadata.summary_payload import AISummaryPayload
+from lintro.utils.tool_metadata import normalize_tool_metadata
 
 if TYPE_CHECKING:
     from lintro.ai.models import AIFixSuggestion, AISummary
@@ -49,10 +56,17 @@ def suggestion_to_payload(
 
 
 def ensure_ai_metadata(result: ToolResult) -> dict[str, Any]:
-    """Ensure a ToolResult has a mutable AI metadata container."""
-    if result.ai_metadata is None:
-        result.ai_metadata = {}
-    return result.ai_metadata
+    """Ensure a ToolResult has a mutable metadata container.
+
+    Args:
+        result: Tool result to attach metadata to.
+
+    Returns:
+        The result's mutable ``metadata`` dict.
+    """
+    if result.metadata is None:
+        result.metadata = {}
+    return result.metadata
 
 
 def attach_summary_metadata(
@@ -110,49 +124,6 @@ def attach_telemetry_metadata(
     metadata["ai_metrics"] = telemetry.to_dict()
 
 
-def normalize_ai_metadata(raw: dict[str, Any]) -> dict[str, Any]:
-    """Normalize legacy and current AI metadata into one stable shape."""
-    normalized: dict[str, Any] = {}
-
-    summary = raw.get("summary")
-    if isinstance(summary, dict):
-        normalized["summary"] = summary
-
-    fix_suggestions = raw.get("fix_suggestions")
-    if fix_suggestions is None:
-        fix_suggestions = raw.get("suggestions")
-    if isinstance(fix_suggestions, list):
-        normalized["fix_suggestions"] = [
-            item for item in fix_suggestions if isinstance(item, dict)
-        ]
-
-    fixed_count = raw.get("fixed_count")
-    if isinstance(fixed_count, int):
-        normalized["fixed_count"] = fixed_count
-
-    applied_count = raw.get("applied_count")
-    if isinstance(applied_count, int):
-        normalized["applied_count"] = applied_count
-    elif isinstance(fixed_count, int):
-        normalized["applied_count"] = fixed_count
-
-    verified_count = raw.get("verified_count")
-    if isinstance(verified_count, int):
-        normalized["verified_count"] = verified_count
-
-    unverified_count = raw.get("unverified_count")
-    if isinstance(unverified_count, int):
-        normalized["unverified_count"] = unverified_count
-
-    ai_metrics = raw.get("ai_metrics")
-    if isinstance(ai_metrics, dict):
-        import copy
-
-        normalized["ai_metrics"] = copy.deepcopy(ai_metrics)
-
-    # Pass through tool-specific metadata (e.g. osv-scanner suppressions)
-    suppressions = raw.get("suppressions")
-    if isinstance(suppressions, list):
-        normalized["suppressions"] = [s for s in suppressions if isinstance(s, dict)]
-
-    return normalized
+#: Deprecated alias retained for backwards compatibility; the implementation
+#: moved to :mod:`lintro.utils.tool_metadata` (issue #724).
+normalize_ai_metadata = normalize_tool_metadata

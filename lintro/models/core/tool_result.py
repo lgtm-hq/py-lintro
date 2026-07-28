@@ -7,12 +7,34 @@ fixed vs remaining counts for fix-capable tools.
 
 from __future__ import annotations
 
+import functools
+import warnings
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from lintro.parsers.base_issue import BaseIssue
+
+_AI_METADATA_DEPRECATION = (
+    "ToolResult.ai_metadata is deprecated and will be removed in a future "
+    "release; use ToolResult.metadata instead. The field is not AI-specific "
+    "(osv-scanner stores suppression data in it)."
+)
+
+
+def _warn_ai_metadata(*, stacklevel: int) -> None:
+    """Emit the ``ai_metadata`` deprecation warning.
+
+    Args:
+        stacklevel: Stack level to attribute the warning to, so the warning
+            points at the caller rather than at this module.
+    """
+    warnings.warn(
+        _AI_METADATA_DEPRECATION,
+        DeprecationWarning,
+        stacklevel=stacklevel,
+    )
 
 
 @dataclass
@@ -55,15 +77,18 @@ class ToolResult:
     # Optional pytest-specific summary data for display
     pytest_summary: dict[str, Any] | None = field(default=None)
 
-    # Optional AI-generated metadata (explanations, fix suggestions).
+    # Optional tool metadata. Most keys are AI-generated (explanations, fix
+    # suggestions), but the field is not AI-specific: osv-scanner stores its
+    # suppression classifications here with the AI layer fully disabled.
     # Expected keys (all optional):
     #   "fix_suggestions": list[AIFixSuggestionPayload]  (serialized)
     #   "fixed_count": int
     #   "verified_count": int
     #   "unverified_count": int
     #   "telemetry": dict with api_calls, tokens, cost, latency
-    # Built incrementally via helpers in lintro.ai.metadata.
-    ai_metadata: dict[str, Any] | None = field(default=None)
+    #   "suppressions": list[dict]  (osv-scanner, non-AI)
+    # AI keys are built incrementally via helpers in lintro.ai.metadata.
+    metadata: dict[str, Any] | None = field(default=None)
 
     # Working directory used during tool execution (for resolving relative
     # issue file paths in AI fix generation)
@@ -84,6 +109,31 @@ class ToolResult:
     # Parser failures (items that could not be parsed from tool output).
     # Omitted from JSON output unless the tool sets this explicitly.
     parse_failures_count: int | None = field(default=None)
+
+    @property
+    def ai_metadata(self) -> dict[str, Any] | None:
+        """Deprecated alias for :attr:`metadata`.
+
+        Defined without a type annotation so :func:`dataclasses.dataclass`
+        does not treat it as a second field: ``dataclasses.fields`` still
+        reports only ``metadata``, and both names are views onto the same
+        dict.
+
+        Returns:
+            The value of :attr:`metadata`.
+        """
+        _warn_ai_metadata(stacklevel=3)
+        return self.metadata
+
+    @ai_metadata.setter
+    def ai_metadata(self, value: dict[str, Any] | None) -> None:
+        """Deprecated alias setter that writes through to :attr:`metadata`.
+
+        Args:
+            value: Metadata dict to store on :attr:`metadata`.
+        """
+        _warn_ai_metadata(stacklevel=3)
+        self.metadata = value
 
     def __post_init__(self) -> None:
         """Validate that the issue counts and skip state are consistent.
@@ -118,3 +168,40 @@ class ToolResult:
                 f"remaining={self.remaining_issues_count}. "
                 f"Expected: initial = fixed + remaining",
             )
+
+
+_dataclass_init = ToolResult.__init__
+
+
+@functools.wraps(_dataclass_init)
+def _tool_result_init(self: ToolResult, *args: Any, **kwargs: Any) -> None:
+    """Accept the deprecated ``ai_metadata`` keyword during construction.
+
+    ``ai_metadata`` is an alias property rather than a dataclass field, so the
+    generated ``__init__`` does not know about it. This wrapper folds the
+    deprecated keyword into ``metadata`` before delegating, which keeps
+    ``ToolResult(ai_metadata=...)``, ``dataclasses.replace`` and
+    ``__post_init__`` all working while ``dataclasses.fields`` still reports a
+    single ``metadata`` field.
+
+    Args:
+        self: The instance being initialized.
+        *args: Positional arguments for the generated ``__init__``.
+        **kwargs: Keyword arguments, optionally including ``ai_metadata``.
+
+    Raises:
+        TypeError: If both ``metadata`` and ``ai_metadata`` are supplied.
+    """
+    if "ai_metadata" in kwargs:
+        if "metadata" in kwargs:
+            raise TypeError(
+                "ToolResult() got both 'metadata' and the deprecated "
+                "'ai_metadata'; pass only 'metadata'",
+            )
+        alias_value = kwargs.pop("ai_metadata")
+        _warn_ai_metadata(stacklevel=2)
+        kwargs["metadata"] = alias_value
+    _dataclass_init(self, *args, **kwargs)
+
+
+ToolResult.__init__ = _tool_result_init  # type: ignore[method-assign]

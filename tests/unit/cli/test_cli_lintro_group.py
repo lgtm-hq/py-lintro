@@ -5,7 +5,11 @@ from unittest.mock import patch
 from assertpy import assert_that
 from click.testing import CliRunner
 
-from lintro.ai.interface import render_ai_status, run_ai_layer
+from lintro.ai.interface import (
+    render_ai_status,
+    run_ai_layer,
+    sarif_enrichment_from_results,
+)
 from lintro.cli import cli
 
 
@@ -114,6 +118,7 @@ def test_invoke_with_comma_separated_commands() -> None:
             fail_under=None,
             ai_runner=run_ai_layer,
             ai_status_renderer=render_ai_status,
+            ai_sarif_enricher=sarif_enrichment_from_results,
             no_art=False,
         )
         mock_fmt.assert_any_call(
@@ -137,6 +142,7 @@ def test_invoke_with_comma_separated_commands() -> None:
             dry_run=False,
             ai_runner=run_ai_layer,
             ai_status_renderer=render_ai_status,
+            ai_sarif_enricher=sarif_enrichment_from_results,
             no_art=False,
         )
 

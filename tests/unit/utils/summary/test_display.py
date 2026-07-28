@@ -254,7 +254,7 @@ def test_fix_shows_ai_fixed_count_from_metadata(
         fixed_issues_count=6,
         remaining_issues_count=5,
     )
-    result.ai_metadata = {
+    result.metadata = {
         "applied_count": 4,
         "verified_count": 3,
         "unverified_count": 1,

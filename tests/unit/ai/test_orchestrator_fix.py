@@ -88,15 +88,15 @@ def test_run_ai_enhancement_fix_action_generates_fix_metadata(
         output_format="terminal",
     )
 
-    assert_that(result.ai_metadata).is_not_none()
-    assert_that(result.ai_metadata).contains_key("fix_suggestions")
-    assert_that(result.ai_metadata).contains_key("applied_count")
-    assert_that(result.ai_metadata).contains_key("verified_count")
-    assert_that(result.ai_metadata).contains_key("unverified_count")
-    assert_that(result.ai_metadata["fix_suggestions"]).is_length(1)  # type: ignore[index]  # assertpy is_not_none narrows this
-    assert_that(result.ai_metadata["applied_count"]).is_equal_to(1)  # type: ignore[index]  # assertpy is_not_none narrows this
-    assert_that(result.ai_metadata["verified_count"]).is_equal_to(1)  # type: ignore[index]  # assertpy is_not_none narrows this
-    assert_that(result.ai_metadata["unverified_count"]).is_equal_to(0)  # type: ignore[index]  # assertpy is_not_none narrows this
+    assert_that(result.metadata).is_not_none()
+    assert_that(result.metadata).contains_key("fix_suggestions")
+    assert_that(result.metadata).contains_key("applied_count")
+    assert_that(result.metadata).contains_key("verified_count")
+    assert_that(result.metadata).contains_key("unverified_count")
+    assert_that(result.metadata["fix_suggestions"]).is_length(1)  # type: ignore[index]  # assertpy is_not_none narrows this
+    assert_that(result.metadata["applied_count"]).is_equal_to(1)  # type: ignore[index]  # assertpy is_not_none narrows this
+    assert_that(result.metadata["verified_count"]).is_equal_to(1)  # type: ignore[index]  # assertpy is_not_none narrows this
+    assert_that(result.metadata["unverified_count"]).is_equal_to(0)  # type: ignore[index]  # assertpy is_not_none narrows this
 
 
 @patch("lintro.ai.orchestrator.require_ai")
