@@ -21,6 +21,28 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.94.0] - 2026-07-28
+
+### Added
+
+- **output**: rename ToolResult.ai_metadata to metadata and drop the last core->AI
+  import (#1830) (1bb73b5)
+
+### Changed
+
+- correct Node tool install advice to match resolution (#1799) (#1810) (e7c1c4c)
+- **config**: decouple AIConfig from LintroConfig (#1829) (397a657)
+- **deps**: update dependency svelte to 5.56.8 (patch) (#1828) (1fc7a28)
+- **ai**: add AI interface facade and move AI out of the executor (#1827) (fb8a862)
+- **ai**: migrate providers to async/await (#1825) (5633d00)
+- **output**: move SARIF rendering out of the AI package (#1824) (89e6254)
+- **ai**: add baked ai image variant (#1819) (0c91443)
+- **deps**: update ghcr.io/lgtm-hq/py-lintro docker tag to 0.93.1 (patch) (#1820)
+  (4e4fb40)
+- **deps**: update ghcr.io/lgtm-hq/py-lintro docker tag to 0.93.0 (minor) (#1816)
+  (dbe200b)
+- **ai**: add lintro-ai-tools base image (#1812) (dc13707)
+
 ## [0.93.1] - 2026-07-27
 
 ### Changed
