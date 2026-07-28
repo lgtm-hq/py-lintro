@@ -176,6 +176,71 @@ def test_doctor_rejects_fix_with_json_before_probing(monkeypatch: Any) -> None:
     assert_that(probed).is_false()
 
 
+@pytest.mark.parametrize(
+    ("state", "expected_status"),
+    [
+        (LivenessState.OK, "OK"),
+        (LivenessState.NO_QUOTA, "INCOMPATIBLE"),
+    ],
+)
+def test_report_mode_renders_the_liveness_result(
+    monkeypatch: Any,
+    state: LivenessState,
+    expected_status: str,
+) -> None:
+    """``--report --ai-liveness`` must show the probe it just paid for.
+
+    A failed probe can be the only reason the command exits non-zero, so a report
+    that omits it hands the operator a failing command and a document showing
+    nothing wrong.
+
+    Args:
+        monkeypatch: Pytest monkeypatch fixture.
+        state: The state the stubbed probe reports.
+        expected_status: Doctor status expected in the rendered table.
+    """
+
+    def _probe(*, config: AIConfig) -> LivenessResult:
+        del config
+        return _stub_result(state=state)
+
+    monkeypatch.setattr("lintro.ai.doctor_checks.check_liveness_sync", _probe)
+    monkeypatch.setattr(
+        "lintro.cli_utils.commands.doctor.check_ai_configuration",
+        lambda config: [],
+    )
+    monkeypatch.setattr(
+        "lintro.cli_utils.commands.doctor.resolve_ai_config",
+        lambda config: AIConfig(enabled=True, review=True, transport=AITransport.API),
+    )
+
+    result = CliRunner().invoke(
+        cli,
+        ["doctor", "--tools", "ruff", "--report", "--ai-liveness"],
+    )
+
+    assert_that(result.output).contains("### AI transport")
+    assert_that(result.output).contains("ai.liveness.anthropic")
+    assert_that(result.output).contains(f"stubbed {state.value}")
+    assert_that(result.output).contains(expected_status)
+
+
+def test_report_mode_omits_the_ai_section_without_checks(monkeypatch: Any) -> None:
+    """No AI checks means no empty section cluttering the report.
+
+    Args:
+        monkeypatch: Pytest monkeypatch fixture.
+    """
+    monkeypatch.setattr(
+        "lintro.cli_utils.commands.doctor.check_ai_configuration",
+        lambda config: [],
+    )
+
+    result = CliRunner().invoke(cli, ["doctor", "--tools", "ruff", "--report"])
+
+    assert_that(result.output).does_not_contain("### AI transport")
+
+
 def test_doctor_exposes_the_liveness_flag() -> None:
     """The opt-in must be discoverable, and say that it costs a real call."""
     result = CliRunner().invoke(cli, ["doctor", "--help"])

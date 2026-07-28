@@ -397,6 +397,7 @@ def _generate_markdown_report(
     context: RuntimeContext,
     results_by_cat: dict[str, list[ToolCheckResult]],
     dev_results: list[ToolCheckResult],
+    ai_checks: list[AICheckResult] | None = None,
 ) -> str:
     """Generate a markdown report for GitHub issues.
 
@@ -405,6 +406,7 @@ def _generate_markdown_report(
         context: Runtime context.
         results_by_cat: Results grouped by category.
         dev_results: Dev-tier tool results.
+        ai_checks: AI configuration and liveness checks, if any.
 
     Returns:
         Markdown string.
@@ -453,6 +455,22 @@ def _generate_markdown_report(
             lines.append(
                 f"| Dev (optional) | {r.tool.name} | {installed} "
                 f"| {r.tool.version} | {status} |",
+            )
+
+    # An AI check can be the sole reason --report exits non-zero, so the report
+    # has to say so. Omitting the section left the operator with a failing
+    # command and a document that showed nothing wrong.
+    if ai_checks:
+        lines.append("")
+        lines.append("### AI transport")
+        lines.append("")
+        lines.append("| Check | Status | Message | Hint |")
+        lines.append("|-------|--------|---------|------|")
+        for check in ai_checks:
+            hint = check.hint or "-"
+            lines.append(
+                f"| {check.name} | {check.status.upper()} "
+                f"| {check.message} | {hint} |",
             )
 
     lines.append("")
@@ -647,6 +665,7 @@ def doctor_command(
             context,
             results_by_cat,
             dev_results,
+            ai_checks=ai_checks,
         )
         click.echo(markdown)
         if (
