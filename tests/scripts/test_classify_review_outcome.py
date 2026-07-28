@@ -195,6 +195,67 @@ def test_error_status_without_an_envelope_still_fails(
     assert_that(report.detail).contains("boom")
 
 
+def test_never_invoked_status_reports_the_supplied_reason(
+    classifier: ModuleType,
+) -> None:
+    """A wrapper-side abort must still explain itself, not just go red.
+
+    Args:
+        classifier: The loaded classifier module.
+    """
+    report = classifier.classify(
+        status=classifier.NOT_INVOKED_STATUS,
+        output="",
+        reason="No PR number provided.",
+    )
+
+    assert_that(report.outcome).is_equal_to(classifier.ReviewOutcome.BROKEN)
+    assert_that(report.exit_code).is_equal_to(1)
+    assert_that(report.headline).contains("never invoked")
+    assert_that(report.detail).contains("No PR number provided.")
+
+
+def test_never_invoked_falls_back_to_captured_output(
+    classifier: ModuleType,
+) -> None:
+    """With no reason supplied, the captured output stands in.
+
+    Args:
+        classifier: The loaded classifier module.
+    """
+    report = classifier.classify(
+        status=classifier.NOT_INVOKED_STATUS,
+        output="uv: command not found",
+    )
+
+    assert_that(report.detail).contains("uv: command not found")
+
+
+def test_annotation_percent_signs_are_escaped(
+    classifier: ModuleType,
+    capsys: object,
+) -> None:
+    """Workflow commands need `%` percent-encoded or the payload is mangled.
+
+    Args:
+        classifier: The loaded classifier module.
+        capsys: Pytest capture fixture.
+    """
+    report = classifier.OutcomeReport(
+        outcome=classifier.ReviewOutcome.BROKEN,
+        headline="quota 100% consumed",
+        detail="",
+        exit_code=1,
+    )
+    classifier._emit(report=report)
+
+    captured = capsys.readouterr()  # type: ignore[attr-defined]
+    annotation = next(
+        line for line in captured.out.splitlines() if line.startswith("::error")
+    )
+    assert_that(annotation).contains("100%25 consumed")
+
+
 # --- envelope parsing --------------------------------------------------------
 
 

@@ -26,6 +26,7 @@ from assertpy import assert_that
 
 from lintro.ai.config import AIConfig
 from lintro.ai.enums import AITransport
+from lintro.ai.exceptions import AIAuthenticationError
 from lintro.ai.liveness import LIVENESS_TIMEOUT, LivenessResult, LivenessState
 from lintro.ai.provider_enum import AIProvider
 from lintro.ai.providers import get_provider
@@ -136,17 +137,31 @@ def test_live_cli_completes_a_minimal_invocation(
 
     Args:
         cli_provider: Provider under test.
+
+    Raises:
+        AIAuthenticationError: Never in practice -- ``unmet_precondition``
+            aborts first; the re-raise only satisfies static analysis.
     """
     instance = _build_provider(cli_provider)
     _resolve_liveness(instance)
 
-    response = asyncio.run(
-        instance.complete(
-            SMOKE_PROMPT,
-            max_tokens=SMOKE_MAX_TOKENS,
-            timeout=SMOKE_TIMEOUT,
-        ),
-    )
+    try:
+        response = asyncio.run(
+            instance.complete(
+                SMOKE_PROMPT,
+                max_tokens=SMOKE_MAX_TOKENS,
+                timeout=SMOKE_TIMEOUT,
+            ),
+        )
+    except AIAuthenticationError as exc:
+        # CLI liveness is presence-only, so an unauthenticated CLI only reveals
+        # itself here. That is a missing precondition (link 3 of 3), not
+        # behavioural drift — and in the scheduled gate, where the credential is
+        # supposed to be provided, unmet_precondition turns it into a failure.
+        unmet_precondition(
+            f"{instance.name}: CLI is not authenticated (link 3 of 3) — {exc}",
+        )
+        raise  # pragma: no cover - unmet_precondition always raises
     assert_that(response.content).described_as(
         f"{instance.name} returned an empty response to a trivial prompt",
     ).is_not_empty()

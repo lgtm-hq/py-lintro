@@ -64,23 +64,34 @@ fi
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-# Sentinel understood by classify_review_outcome.py: the review was never
-# invoked because no credential was available.
+# Sentinels understood by classify_review_outcome.py: the review was never
+# invoked, either for want of a credential or for some other reason.
 NO_CREDENTIAL_STATUS=-1
+NOT_INVOKED_STATUS=-2
+
+# Every "no review happened" path goes through the classifier rather than exiting
+# directly, so each one produces the same annotation and job summary. An `exit 1`
+# on its own reddens the check without saying why.
+#
+# python3, not `uv run`: the classifier is stdlib-only, so the visible-failure
+# path must not depend on a synced virtualenv being present — which is exactly the
+# kind of thing that breaks when a setup step is what failed.
+report_not_invoked() {
+	python3 "${script_dir}/classify_review_outcome.py" \
+		--status "$NOT_INVOKED_STATUS" \
+		--reason "$1"
+	exit 1
+}
 
 pr_number="${1:-${PR_NUMBER:-}}"
 
 if [[ -z "${ANTHROPIC_API_KEY:-}" ]]; then
-	# python3, not `uv run`: the classifier is stdlib-only, so the visible-skip
-	# path must not depend on a synced virtualenv being present.
 	exec python3 "${script_dir}/classify_review_outcome.py" \
 		--status "$NO_CREDENTIAL_STATUS"
 fi
 
 if [[ -z "$pr_number" ]]; then
-	echo "No PR number provided (set PR_NUMBER or pass it as an argument)." >&2
-	echo "Nothing to review — failing so the missing input is visible." >&2
-	exit 1
+	report_not_invoked "No PR number provided (set PR_NUMBER or pass it as an argument)."
 fi
 
 echo "Running AI review on PR #${pr_number} (posts comment)..."
@@ -90,7 +101,9 @@ echo "Running AI review on PR #${pr_number} (posts comment)..."
 # it here rather than passing non-existent flags. The config comes from the base
 # ref, not the PR, so a PR cannot loosen the cost cap. Transport/provider are
 # pinned too.
-uv run python "${script_dir}/enable_review_config.py"
+if ! uv run python "${script_dir}/enable_review_config.py"; then
+	report_not_invoked "Could not enable AI review in .lintro-config.yaml; see the log above."
+fi
 
 # `--post` maintains the sticky review comment (and inline findings) on the PR.
 # It needs GITHUB_TOKEN (write) and the repo; the diff is still fetched via `gh`.

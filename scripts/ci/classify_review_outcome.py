@@ -58,6 +58,12 @@ REVIEW_STATUS_ERROR: Final[int] = 2
 # special-cased into a silent skip.
 NO_CREDENTIAL_STATUS: Final[int] = -1
 
+# Sentinel for every other way the review never got invoked -- no PR number, a
+# failed config patch, a broken setup step. These used to abort the wrapper under
+# `set -e`, which reddened the check but produced no annotation and no summary: a
+# red check that does not say why is only marginally better than a green one.
+NOT_INVOKED_STATUS: Final[int] = -2
+
 
 class ReviewOutcome(StrEnum):
     """What actually happened to a review invocation.
@@ -128,18 +134,27 @@ def _parse_error_envelope(*, text: str) -> dict[str, Any] | None:
     return None
 
 
-def classify(*, status: int, output: str) -> OutcomeReport:
+def classify(*, status: int, output: str, reason: str = "") -> OutcomeReport:
     """Classify a review invocation into a CI-facing outcome.
 
     Args:
-        status: Exit status from ``lintro review``, or
-            :data:`NO_CREDENTIAL_STATUS` when it was never invoked for want of a
-            credential.
+        status: Exit status from ``lintro review``, or one of
+            :data:`NO_CREDENTIAL_STATUS` / :data:`NOT_INVOKED_STATUS` when the
+            review was never reached.
         output: Combined stdout/stderr captured from the run.
+        reason: Wrapper-supplied explanation for a never-invoked run.
 
     Returns:
         The outcome, the copy to surface, and the exit code to terminate with.
     """
+    if status == NOT_INVOKED_STATUS:
+        return OutcomeReport(
+            outcome=ReviewOutcome.BROKEN,
+            headline="the review was never invoked — nothing was reviewed",
+            detail=reason or output.strip()[-500:],
+            exit_code=1,
+        )
+
     if status == NO_CREDENTIAL_STATUS:
         return OutcomeReport(
             outcome=ReviewOutcome.NO_CREDENTIAL,
@@ -238,8 +253,10 @@ def _emit(*, report: OutcomeReport) -> None:
     body = report.headline
     if report.detail:
         body = f"{body}: {report.detail}"
-    # Newlines are not permitted inside a workflow command payload.
-    print(f"::{annotation} title={title}::{body.replace(chr(10), ' ')}")
+    # Workflow-command payloads need `%`, CR and LF percent-encoded, in that
+    # order -- escaping `%` last would re-escape the escapes.
+    escaped = body.replace("%", "%25").replace("\r", "%0D").replace("\n", " ")
+    print(f"::{annotation} title={title}::{escaped}")
 
     summary_path = os.environ.get("GITHUB_STEP_SUMMARY")
     if summary_path:
@@ -263,14 +280,23 @@ def main(*, argv: list[str] | None = None) -> int:
         type=int,
         required=True,
         help=(
-            "Exit status from `lintro review`, or "
-            f"{NO_CREDENTIAL_STATUS} when no credential was available."
+            "Exit status from `lintro review`; "
+            f"{NO_CREDENTIAL_STATUS} when no credential was available, "
+            f"{NOT_INVOKED_STATUS} when it was never invoked at all."
         ),
     )
     parser.add_argument(
         "--output-file",
         default=None,
         help="File holding the captured review output (omit for none).",
+    )
+    parser.add_argument(
+        "--reason",
+        default="",
+        help=(
+            "Why the review was never invoked; surfaced as the outcome detail "
+            f"when --status is {NOT_INVOKED_STATUS}."
+        ),
     )
     args = parser.parse_args(argv)
 
@@ -280,7 +306,7 @@ def main(*, argv: list[str] | None = None) -> int:
         if path.exists():
             output = path.read_text(encoding="utf-8", errors="replace")
 
-    report = classify(status=args.status, output=output)
+    report = classify(status=args.status, output=output, reason=args.reason)
     _emit(report=report)
     if not report.outcome.produced_review:
         print(f"AI Review: {report.headline}", file=sys.stderr)

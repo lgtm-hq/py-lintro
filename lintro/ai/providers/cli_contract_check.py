@@ -162,6 +162,9 @@ async def _probe(*, binary_path: str, args: tuple[str, ...]) -> str | None:
         process = await asyncio.create_subprocess_exec(  # nosec B603 - fixed argv from a declared contract, shell=False
             binary_path,
             *args,
+            # A probe must never block on input: an agent CLI that decides to
+            # prompt would otherwise hang until the probe timeout.
+            stdin=asyncio.subprocess.DEVNULL,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )

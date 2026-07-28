@@ -206,6 +206,27 @@ async def test_missing_required_flags_is_inert_without_a_contract() -> None:
         assert_that(await transport.missing_required_flags()).is_empty()
 
 
+async def test_cli_branch_without_a_transport_reports_missing_credential() -> None:
+    """A CLI provider with no transport constructed must not raise on probe.
+
+    Doctor and the contract suite both need a verdict to display; a traceback
+    here would be the difference between an actionable message and a crash.
+    """
+    from lintro.ai.enums import AITransport
+    from lintro.ai.providers.anthropic import AnthropicProvider
+
+    provider = AnthropicProvider(transport=AITransport.CLI)
+    # Simulate the "claude not found at construction time" state, which leaves the
+    # transport unset while the provider object still exists.
+    provider._cli = None
+
+    result = await provider.check_liveness()
+
+    assert_that(result.state).is_equal_to(LivenessState.MISSING_CREDENTIAL)
+    assert_that(result.message).contains("not initialized")
+    assert_that(result.is_live).is_false()
+
+
 @pytest.mark.parametrize("provider", list(AIProvider))
 async def test_cli_backed_providers_expose_their_transport(
     *,

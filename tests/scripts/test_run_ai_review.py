@@ -176,14 +176,20 @@ def test_shell_fails_visibly_without_api_key() -> None:
 
 
 def test_shell_fails_visibly_without_pr_number() -> None:
-    """A configured key but no PR number fails rather than skipping quietly."""
+    """A configured key but no PR number fails *through the classifier*.
+
+    Exiting directly would redden the check without emitting an annotation or a
+    summary, which is a red check that cannot explain itself.
+    """
     result = _run_shell(
         args=[],
         env_overrides={"ANTHROPIC_API_KEY": "dummy-key", "PR_NUMBER": ""},
     )
 
     assert_that(result.returncode).is_equal_to(1)
-    assert_that(result.stderr).contains("Nothing to review")
+    assert_that(result.stdout).contains("::error")
+    assert_that(result.stdout).contains("never invoked")
+    assert_that(result.stdout).contains("No PR number provided")
 
 
 def test_shell_writes_outcome_to_step_summary(tmp_path: Path) -> None:

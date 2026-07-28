@@ -547,6 +547,21 @@ def doctor_command(
     registry = ManifestRegistry.load()
     context = RuntimeContext.detect()
 
+    # Validate --tools here rather than further down, for the same reason as the
+    # flag-combination check above: an invocation that is going to be rejected
+    # must not first spend the real provider call --ai-liveness makes.
+    tool_names = [t.strip() for t in (tools or "").split(",") if t.strip()]
+    unknown_names = [n for n in tool_names if n not in registry]
+    if unknown_names:
+        display_console.print(
+            f"  [red]Unknown tools: {', '.join(unknown_names)}[/red]",
+        )
+        available = ", ".join(
+            sorted(t.name for t in registry.all_tools(include_dev=True)),
+        )
+        display_console.print(f"  [dim]Available: {available}[/dim]")
+        raise SystemExit(1)
+
     env_report = None
     if verbose or report or json_output:
         env_report = collect_full_environment()
@@ -568,19 +583,8 @@ def doctor_command(
         1 for check in oxlint_checks if _oxlint_check_is_failure(check)
     )
 
-    # Determine which tools to check
+    # Determine which tools to check (names were validated above)
     if tools:
-        tool_names = [t.strip() for t in tools.split(",") if t.strip()]
-        unknown_names = [n for n in tool_names if n not in registry]
-        if unknown_names:
-            display_console.print(
-                f"  [red]Unknown tools: {', '.join(unknown_names)}[/red]",
-            )
-            available = ", ".join(
-                sorted(t.name for t in registry.all_tools(include_dev=True)),
-            )
-            display_console.print(f"  [dim]Available: {available}[/dim]")
-            raise SystemExit(1)
         tools_to_check = [registry.get(n) for n in tool_names]
         disabled_results: list[ToolCheckResult] = []
     else:
