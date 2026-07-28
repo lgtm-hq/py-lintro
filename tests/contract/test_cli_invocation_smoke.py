@@ -1,0 +1,147 @@
+"""Tier 2: prove a provider can actually complete a call, end to end.
+
+Tier 1 proves the flags still exist. It cannot prove the CLI still *behaves* — a
+renamed JSON field, a changed exit convention, or a credential that authenticates
+but has no credits all pass a ``--help`` check and fail every real review. Only an
+invocation catches those, so this tier makes one.
+
+It costs quota, so it is opt-in and scheduled rather than run on the pull-request
+hot path, and it walks the full chain before spending anything:
+
+    is_available()  ->  check_liveness()  ->  invoke
+
+Each link that fails short-circuits to a *visible* skip naming the link. The
+liveness link is the one that matters most here: a depleted balance is a valid
+credential with zero credits, so it passes presence and would otherwise be
+reported as a mysterious invocation failure instead of "top up the account".
+"""
+
+from __future__ import annotations
+
+import asyncio
+
+import pytest
+from assertpy import assert_that
+
+from lintro.ai.config import AIConfig
+from lintro.ai.enums import AITransport
+from lintro.ai.liveness import LIVENESS_TIMEOUT, LivenessResult, LivenessState
+from lintro.ai.provider_enum import AIProvider
+from lintro.ai.providers import get_provider
+from lintro.ai.providers.base import BaseAIProvider
+from tests.contract.gating import unmet_precondition
+
+pytestmark = pytest.mark.contract_tier2
+
+#: Prompt for the smoke invocation. Trivially cheap, but the answer is checkable,
+#: so a provider that returns an empty or malformed envelope is caught rather than
+#: counted as a pass.
+SMOKE_PROMPT = "Reply with the single word: pong"
+
+#: Cap on the smoke response. Large enough for a word, small enough that a
+#: runaway generation cannot turn a smoke test into a bill.
+SMOKE_MAX_TOKENS = 32
+
+
+def _build_provider(provider: AIProvider) -> BaseAIProvider:
+    """Construct a CLI-transport provider, skipping visibly when impossible.
+
+    Args:
+        provider: Provider under test.
+
+    Returns:
+        The constructed provider.
+
+    Raises:
+        Exception: Never in practice -- ``unmet_precondition`` always aborts the
+            test first; the re-raise only satisfies static analysis.
+    """
+    config = AIConfig(
+        enabled=True,
+        provider=provider,
+        transport=AITransport.CLI,
+    )
+    try:
+        return get_provider(config)
+    except Exception as exc:  # noqa: BLE001 - construction failure is a skip reason
+        unmet_precondition(f"{provider.value} provider could not be constructed: {exc}")
+        raise  # pragma: no cover - unmet_precondition always raises
+
+
+def _resolve_liveness(instance: BaseAIProvider) -> LivenessResult:
+    """Run the presence and liveness links, skipping visibly on failure.
+
+    Args:
+        instance: The provider under test.
+
+    Returns:
+        A liveness result in :attr:`LivenessState.OK`.
+    """
+    if not instance.is_available():
+        unmet_precondition(f"{instance.name}: presence check failed (link 1 of 3)")
+
+    result = asyncio.run(instance.check_liveness(timeout=LIVENESS_TIMEOUT))
+    if not result.is_live:
+        unmet_precondition(
+            f"{instance.name}: liveness check failed (link 2 of 3) — "
+            f"{result.state.value}: {result.message}",
+        )
+    return result
+
+
+def test_liveness_states_are_reported_not_swallowed(
+    cli_provider: AIProvider,
+) -> None:
+    """A liveness probe must always yield a classified state, never raise.
+
+    Args:
+        cli_provider: Provider under test.
+    """
+    instance = _build_provider(cli_provider)
+    result = asyncio.run(instance.check_liveness(timeout=LIVENESS_TIMEOUT))
+    assert_that(list(LivenessState)).contains(result.state)
+    assert_that(result.message).is_not_empty()
+    if not result.is_live:
+        assert_that(result.hint).described_as(
+            "a failed liveness probe must tell the operator what to do",
+        ).is_not_empty()
+
+
+def test_cli_transport_liveness_is_presence_only(
+    cli_provider: AIProvider,
+) -> None:
+    """CLI liveness must not claim a quota verdict it never checked.
+
+    A presence-only probe that reported ``quota_verified`` would recreate exactly
+    the false confidence this tier exists to remove.
+
+    Args:
+        cli_provider: Provider under test.
+    """
+    instance = _build_provider(cli_provider)
+    result = asyncio.run(instance.check_liveness(timeout=LIVENESS_TIMEOUT))
+    assert_that(result.quota_verified).is_false()
+
+
+def test_live_cli_completes_a_minimal_invocation(
+    cli_provider: AIProvider,
+) -> None:
+    """A live CLI must return a non-empty, attributed response.
+
+    Args:
+        cli_provider: Provider under test.
+    """
+    instance = _build_provider(cli_provider)
+    _resolve_liveness(instance)
+
+    response = asyncio.run(
+        instance.complete(
+            SMOKE_PROMPT,
+            max_tokens=SMOKE_MAX_TOKENS,
+            timeout=120.0,
+        ),
+    )
+    assert_that(response.content).described_as(
+        f"{instance.name} returned an empty response to a trivial prompt",
+    ).is_not_empty()
+    assert_that(response.model).is_not_empty()
