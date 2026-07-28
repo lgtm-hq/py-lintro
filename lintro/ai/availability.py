@@ -1,18 +1,44 @@
-"""Transport-aware AI availability checks."""
+"""Transport-aware AI availability checks.
+
+These are *presence* checks — is the SDK importable, is the binary on ``PATH``,
+is the API-key variable set. Presence is only the first link of the chain lintro
+gates AI work on::
+
+    is_provider_available()  ->  check_liveness()  ->  invoke
+
+A present credential is not a working one: a depleted account passes every check
+in this module and fails every real call (#1826). The liveness step lives in
+:mod:`lintro.ai.liveness` and is re-exported here so the whole chain is reachable
+from one import.
+"""
 
 from __future__ import annotations
 
 import os
 from pathlib import Path
-from typing import TYPE_CHECKING
 
 import click
 
 from lintro.ai.enums import AITransport
+from lintro.ai.liveness import (
+    LivenessResult,
+    LivenessState,
+    check_liveness_sync,
+)
 from lintro.ai.registry import AIProvider
 
-if TYPE_CHECKING:
-    pass
+__all__ = [
+    "LivenessResult",
+    "LivenessState",
+    "check_liveness_sync",
+    "codex_auth_configured",
+    "is_ai_available",
+    "is_provider_available",
+    "provider_api_key_env",
+    "provider_cli_binary",
+    "require_ai",
+    "reset_availability_cache",
+]
 
 _AI_AVAILABLE: bool | None = None
 

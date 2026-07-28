@@ -257,6 +257,14 @@ class OpenAIProvider(BaseAIProvider):
             return _find_codex() is not None
         return super().is_available()
 
+    def _cli_transport(self) -> _CodexCliTransport | None:
+        """Return the ``codex`` CLI transport, when one was constructed.
+
+        Returns:
+            The CLI transport, or ``None`` under API transport.
+        """
+        return self._cli
+
     @property
     def capabilities(self) -> ProviderCapabilities:
         """Declare OpenAI capabilities for the configured transport.

@@ -16,7 +16,11 @@ import click
 from rich.console import Console
 from rich.text import Text
 
-from lintro.ai.doctor_checks import AICheckResult, check_ai_configuration
+from lintro.ai.doctor_checks import (
+    AICheckResult,
+    check_ai_configuration,
+    check_ai_liveness,
+)
 from lintro.ai.interface import resolve_ai_config
 from lintro.enums.tool_status import ToolStatus
 from lintro.tools.core.install_context import RuntimeContext
@@ -484,6 +488,16 @@ def _generate_markdown_report(
     is_flag=True,
     help="Check all tools regardless of config enablement.",
 )
+@click.option(
+    "--ai-liveness",
+    "ai_liveness",
+    is_flag=True,
+    help=(
+        "Probe the configured AI credential for real. Detects a valid key with a "
+        "depleted balance, which no presence check can see. Costs one minimal "
+        "API call under transport: api."
+    ),
+)
 def doctor_command(
     json_output: bool,
     tools: str | None,
@@ -492,6 +506,7 @@ def doctor_command(
     report: bool,
     fix: bool,
     check_all: bool,
+    ai_liveness: bool,
 ) -> None:
     """Check tool installation status and version compatibility.
 
@@ -507,6 +522,7 @@ def doctor_command(
         report: Generate markdown report.
         fix: Attempt to install missing tools.
         check_all: Check all tools regardless of project config.
+        ai_liveness: Probe the configured AI credential with a real call.
 
     Raises:
         SystemExit: When missing or broken tools are detected.
@@ -518,6 +534,7 @@ def doctor_command(
         lintro doctor --json
         lintro doctor --verbose
         lintro doctor --fix
+        lintro doctor --ai-liveness
     """
     display_console = Console()
 
@@ -531,7 +548,12 @@ def doctor_command(
     from lintro.config.config_loader import get_config
 
     config = get_config()
-    ai_checks = check_ai_configuration(resolve_ai_config(config))
+    ai_config = resolve_ai_config(config)
+    ai_checks = check_ai_configuration(ai_config)
+    if ai_liveness:
+        # Appended after the presence checks so the chain reads in order:
+        # present -> live. Opt-in because the API-transport probe is a real call.
+        ai_checks.extend(check_ai_liveness(ai_config))
     ai_failure_count = sum(1 for check in ai_checks if _ai_check_is_failure(check))
 
     oxlint_type_aware = bool(config.get_tool_defaults("oxlint").get("type_aware"))
