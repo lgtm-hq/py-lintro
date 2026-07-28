@@ -108,8 +108,19 @@ PROVIDER_ERROR_SIGNATURES: dict[str, dict[ReviewErrorKind, ErrorMatcher]] = {
             substrings=("rate_limit_error", "rate limit"),
             statuses=(429,),
         ),
+        # API-transport signatures first, then the claude CLI wording (the CLI
+        # reports a logged-out session on stdout, e.g.
+        # "Not logged in · Please run /login"; "run /login" also subsumes
+        # "Not signed in to Claude. Run /login first.").
         ReviewErrorKind.AUTH_FAILED: ErrorMatcher(
-            substrings=("authentication_error", "invalid x-api-key", "invalid api key"),
+            substrings=(
+                "authentication_error",
+                "invalid x-api-key",
+                "invalid api key",
+                "not logged in",
+                "not signed in",
+                "run /login",
+            ),
             statuses=(401,),
         ),
         ReviewErrorKind.CONTEXT_LENGTH: ErrorMatcher(
@@ -129,8 +140,18 @@ PROVIDER_ERROR_SIGNATURES: dict[str, dict[ReviewErrorKind, ErrorMatcher]] = {
             substrings=("rate_limit_exceeded", "rate limit"),
             statuses=(429,),
         ),
+        # The openai provider also drives the codex CLI, which reports a
+        # logged-out session as "Not logged in" / "Not signed in. Please run
+        # 'codex login' ..." with no HTTP status.
         ReviewErrorKind.AUTH_FAILED: ErrorMatcher(
-            substrings=("invalid_api_key", "invalid api key"),
+            substrings=(
+                "invalid_api_key",
+                "invalid api key",
+                "not logged in",
+                "not signed in",
+                "not authenticated",
+                "codex login",
+            ),
             statuses=(401,),
         ),
         ReviewErrorKind.CONTEXT_LENGTH: ErrorMatcher(
@@ -154,9 +175,13 @@ PROVIDER_ERROR_SIGNATURES: dict[str, dict[ReviewErrorKind, ErrorMatcher]] = {
         ReviewErrorKind.RATE_LIMITED: ErrorMatcher(
             substrings=("rate limit", "too many requests"),
         ),
+        # cursor-agent emits "Error: Authentication required. Run
+        # 'cursor-agent login' ...", "Not logged in" and "Not authenticated";
+        # "agent login" matches the quoted 'cursor-agent login' hint.
         ReviewErrorKind.AUTH_FAILED: ErrorMatcher(
             substrings=(
                 "not logged in",
+                "not authenticated",
                 "authentication",
                 "unauthorized",
                 "invalid api key",
