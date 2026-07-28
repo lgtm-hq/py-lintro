@@ -353,7 +353,7 @@ jobs:
           needs.changes.outputs.pipeline != 'false' &&
           steps.fork-check.outputs.is-fork != 'true'
         # yamllint disable-line rule:line-length
-        uses: docker/login-action@abd2ef45e78c5afb21d64d4ca52ee8550d9572c7 # v4.5.1
+        uses: docker/login-action@371161bbe7024a29a25c5e19bfcbc0804fe9ad2c # v4.5.2
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
@@ -580,7 +580,7 @@ jobs:
       - name: Log in to GitHub Container Registry
         if: needs.docker-build.outputs.is-fork != 'true'
         # yamllint disable-line rule:line-length
-        uses: docker/login-action@abd2ef45e78c5afb21d64d4ca52ee8550d9572c7 # v4.5.1
+        uses: docker/login-action@371161bbe7024a29a25c5e19bfcbc0804fe9ad2c # v4.5.2
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
@@ -693,7 +693,7 @@ jobs:
       - name: Log in to GitHub Container Registry
         if: needs.docker-build.outputs.is-fork != 'true'
         # yamllint disable-line rule:line-length
-        uses: docker/login-action@abd2ef45e78c5afb21d64d4ca52ee8550d9572c7 # v4.5.1
+        uses: docker/login-action@371161bbe7024a29a25c5e19bfcbc0804fe9ad2c # v4.5.2
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
@@ -954,7 +954,7 @@ jobs:
           needs.changes.outputs.pipeline != 'false' &&
           needs.docker-build.outputs.is-fork != 'true'
         # yamllint disable-line rule:line-length
-        uses: docker/login-action@abd2ef45e78c5afb21d64d4ca52ee8550d9572c7 # v4.5.1
+        uses: docker/login-action@371161bbe7024a29a25c5e19bfcbc0804fe9ad2c # v4.5.2
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
@@ -1072,7 +1072,7 @@ jobs:
           needs.changes.outputs.pipeline != 'false' &&
           needs.docker-build.outputs.is-fork != 'true'
         # yamllint disable-line rule:line-length
-        uses: docker/login-action@abd2ef45e78c5afb21d64d4ca52ee8550d9572c7 # v4.5.1
+        uses: docker/login-action@371161bbe7024a29a25c5e19bfcbc0804fe9ad2c # v4.5.2
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
