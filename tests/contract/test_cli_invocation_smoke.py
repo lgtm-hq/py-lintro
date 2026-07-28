@@ -159,15 +159,13 @@ def test_live_cli_completes_a_minimal_invocation(
         # behavioural drift — and in the scheduled gate, where the credential is
         # supposed to be provided, unmet_precondition turns it into a failure.
         #
-        # TODO(#1836): this branch does not fire for a logged-out `claude` today.
-        # The CLI prints "Not logged in · Please run /login" on *stdout*, the
-        # transport builds its cause text from stderr alone, and Anthropic's
-        # signature map lacks the auth substrings — so the failure arrives as a
-        # generic AIProviderError classified `unknown` and lands in the assertions
-        # below as an opaque failure. Deliberately not worked around here: catching
-        # `unknown` would encode the defect and would also swallow genuine drift,
-        # which is the opposite of what this tier is for. The intended end state is
-        # pinned by the strict xfail in tests/unit/ai/test_liveness.py.
+        # This branch reaches a logged-out `claude`: the CLI prints "Not logged in
+        # · Please run /login" on *stdout* with empty stderr, and the transport
+        # now resolves its cause as stderr-or-stdout, so the auth patterns match
+        # and `AIAuthenticationError` is raised rather than a generic provider
+        # error. Only that typed exception belongs here — catching a `unknown`
+        # classification would encode a defect and swallow the genuine drift this
+        # tier exists to detect.
         unmet_precondition(
             f"{instance.name}: CLI is not authenticated (link 3 of 3) — {exc}",
         )
