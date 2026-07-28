@@ -15,7 +15,9 @@ from lintro.ai.exceptions import (
 from lintro.ai.review.error_contract import (
     RETRYABLE_KINDS,
     REVIEW_ERROR_EXIT_CODE,
+    UNAVAILABLE_KINDS,
     build_error_contract,
+    is_provider_unavailable_kind,
     is_retryable_kind,
     render_error_contract_json,
 )
@@ -80,6 +82,7 @@ def test_auth_401_envelope_shape(auth_error: AIAuthenticationError) -> None:
                 "provider": "anthropic",
                 "status": 401,
                 "retryable": False,
+                "provider_unavailable": True,
                 "message": (
                     "Anthropic authentication failed: Error code: 401 - "
                     "authentication_error"
@@ -100,6 +103,7 @@ def test_rate_limit_429_envelope_shape(rate_limit_error: AIRateLimitError) -> No
                 "provider": "anthropic",
                 "status": 429,
                 "retryable": True,
+                "provider_unavailable": True,
                 "message": (
                     "Anthropic rate limit exceeded: Error code: 429 - "
                     "rate_limit_error"
@@ -132,6 +136,7 @@ def test_server_5xx_envelope_shape(server_error: AIProviderError) -> None:
                 "provider": "anthropic",
                 "status": 529,
                 "retryable": True,
+                "provider_unavailable": True,
                 "message": "Anthropic API error: Error code: 529 - overloaded_error",
             },
         },
@@ -151,6 +156,7 @@ def test_invalid_response_envelope_shape(
                 "provider": "anthropic",
                 "status": None,
                 "retryable": False,
+                "provider_unavailable": False,
                 "message": "Expecting value: line 1 column 1 (char 0)",
             },
         },
@@ -183,7 +189,14 @@ def test_envelope_keys_are_stable(auth_error: AIAuthenticationError) -> None:
 
     assert_that(list(contract.keys())).is_equal_to(["error"])
     assert_that(set(contract["error"].keys())).is_equal_to(
-        {"kind", "provider", "status", "retryable", "message"},
+        {
+            "kind",
+            "provider",
+            "status",
+            "retryable",
+            "provider_unavailable",
+            "message",
+        },
     )
 
 
@@ -195,6 +208,54 @@ def test_retryable_kinds_membership() -> None:
     assert_that(is_retryable_kind(kind=ReviewErrorKind.AUTH_FAILED)).is_false()
     assert_that(is_retryable_kind(kind=ReviewErrorKind.INVALID_RESPONSE)).is_false()
     assert_that(RETRYABLE_KINDS).contains(ReviewErrorKind.RATE_LIMITED)
+
+
+@pytest.mark.parametrize(
+    ("kind", "unavailable"),
+    [
+        (ReviewErrorKind.AUTH_FAILED, True),
+        (ReviewErrorKind.INSUFFICIENT_CREDITS, True),
+        (ReviewErrorKind.QUOTA_EXCEEDED, True),
+        (ReviewErrorKind.RATE_LIMITED, True),
+        (ReviewErrorKind.SERVER_ERROR, True),
+        (ReviewErrorKind.TIMEOUT, True),
+        # Both prove the provider *did* serve the request; the payload lintro sent
+        # or the response it got back is what failed, not the account.
+        (ReviewErrorKind.CONTEXT_LENGTH, False),
+        (ReviewErrorKind.INVALID_RESPONSE, False),
+        (ReviewErrorKind.UNKNOWN, False),
+    ],
+)
+def test_provider_unavailable_membership_is_exhaustive(
+    *,
+    kind: ReviewErrorKind,
+    unavailable: bool,
+) -> None:
+    """Every kind is classified, so a new one cannot default into the wrong bucket.
+
+    Args:
+        kind: The canonical error classification.
+        unavailable: Whether the provider is expected to have served nothing.
+    """
+    assert_that(is_provider_unavailable_kind(kind=kind)).is_equal_to(unavailable)
+    assert_that(kind in UNAVAILABLE_KINDS).is_equal_to(unavailable)
+
+
+def test_every_error_kind_is_covered_by_the_unavailable_partition() -> None:
+    """The parametrised cases above must not silently miss a new kind."""
+    covered = {
+        ReviewErrorKind.AUTH_FAILED,
+        ReviewErrorKind.INSUFFICIENT_CREDITS,
+        ReviewErrorKind.QUOTA_EXCEEDED,
+        ReviewErrorKind.RATE_LIMITED,
+        ReviewErrorKind.SERVER_ERROR,
+        ReviewErrorKind.TIMEOUT,
+        ReviewErrorKind.CONTEXT_LENGTH,
+        ReviewErrorKind.INVALID_RESPONSE,
+        ReviewErrorKind.UNKNOWN,
+    }
+
+    assert_that(covered).is_equal_to(set(ReviewErrorKind))
 
 
 def test_render_json_is_parseable_and_indented(

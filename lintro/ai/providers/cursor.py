@@ -206,6 +206,15 @@ class CursorProvider(BaseAIProvider):
         """
         return _find_agent() is not None
 
+    def _cli_transport(self) -> _CursorCliTransport:
+        """Return the ``agent`` CLI transport.
+
+        Returns:
+            The CLI transport; Cursor supports no other transport, so one is
+            always constructed.
+        """
+        return self._cli
+
     @property
     def capabilities(self) -> ProviderCapabilities:
         """Declare Cursor capabilities.

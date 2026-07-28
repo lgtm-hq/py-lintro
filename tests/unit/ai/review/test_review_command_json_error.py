@@ -84,8 +84,25 @@ def test_json_error_emits_envelope_and_exits_two(
     result = runner.invoke(review_command, ["--output", "json"])
 
     assert_that(result.exit_code).is_equal_to(2)
-    payload = json.loads(result.output)
+    # Locate the envelope: lintro may log warnings ahead of it on stdout.
+    payload = json.loads(result.output[result.output.index("{") :])
     assert_that(payload["error"]["kind"]).is_equal_to("auth_failed")
     assert_that(payload["error"]["provider"]).is_equal_to("anthropic")
     assert_that(payload["error"]["status"]).is_equal_to(401)
     assert_that(payload["error"]["retryable"]).is_false()
+    assert_that(payload["error"]["provider_unavailable"]).is_true()
+
+
+def test_terminal_error_exits_two_not_one(patched_review: None) -> None:
+    """Terminal output uses the same error exit code as JSON output.
+
+    Exit ``1`` means "reviewed, found P1 issues". Reusing it for "could not
+    review" is what let a CI wrapper report a green check for a review that never
+    ran (#1826), so the two must stay distinguishable in every output format.
+
+    Args:
+        patched_review: Fixture neutralizing the review command's collaborators.
+    """
+    result = CliRunner().invoke(review_command, ["--output", "terminal"])
+
+    assert_that(result.exit_code).is_equal_to(2)

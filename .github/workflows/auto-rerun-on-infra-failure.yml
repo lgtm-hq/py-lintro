@@ -50,6 +50,7 @@ name: Auto Rerun on Infra Failure
 'on':
   workflow_run:
     workflows:
+      - AI - CLI Contract Tests
       - Build - Docker Image & Registry
       - Build - Lintro AI Tools Image
       - Build - Lintro Tools Image

@@ -246,6 +246,14 @@ class AnthropicProvider(BaseAIProvider):
             return _find_claude() is not None
         return super().is_available()
 
+    def _cli_transport(self) -> _AnthropicCliTransport | None:
+        """Return the ``claude`` CLI transport, when one was constructed.
+
+        Returns:
+            The CLI transport, or ``None`` under API transport.
+        """
+        return self._cli
+
     @property
     def capabilities(self) -> ProviderCapabilities:
         """Declare Anthropic capabilities for the configured transport.

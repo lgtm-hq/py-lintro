@@ -292,21 +292,25 @@ def review_command(
                     pr_number=resolved_pr,
                     repo=effective_repo,
                 )
-        if output_format == "json":
-            from lintro.ai.review.error_contract import (
-                REVIEW_ERROR_EXIT_CODE,
-                render_error_contract_json,
-            )
+        from lintro.ai.review.error_contract import (
+            REVIEW_ERROR_EXIT_CODE,
+            render_error_contract_json,
+        )
 
+        if output_format == "json":
             click.echo(
                 render_error_contract_json(
                     provider=str(provider.name),
                     error=exc,
                 ),
             )
-            raise SystemExit(REVIEW_ERROR_EXIT_CODE) from exc
-        render_review_error(error=exc, console=console)
-        raise SystemExit(1) from exc
+        else:
+            render_review_error(error=exc, console=console)
+        # Same exit code in both output formats: no review was produced, which
+        # must never be confusable with "reviewed, found P1 issues" (exit 1).
+        # A wrapper that cannot tell the two apart reports a green check for a
+        # review that never ran (#1826).
+        raise SystemExit(REVIEW_ERROR_EXIT_CODE) from exc
 
     result = enrich_review_result(result=result, question_map=question_map)
 

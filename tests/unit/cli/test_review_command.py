@@ -656,7 +656,9 @@ def test_review_failure_renders_friendly_error_without_traceback() -> None:
                                     ):
                                         result = runner.invoke(cli, ["review"])
 
-    assert_that(result.exit_code).is_equal_to(1)
+    # Exit 2, not 1: no review was produced. Exit 1 stays reserved for a review
+    # that ran and found P1 issues (#1826).
+    assert_that(result.exit_code).is_equal_to(2)
     assert_that(result.output).contains("Review failed")
     assert_that(result.output).contains("chunk 3/6")
     assert_that(result.output).contains("api_timeout")

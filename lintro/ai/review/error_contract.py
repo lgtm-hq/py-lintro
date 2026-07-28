@@ -15,6 +15,7 @@ The envelope shape is::
         "provider": "anthropic",             # provider identifier, lowercased
         "status": 401,                        # extracted HTTP status, or null
         "retryable": false,                   # safe to retry unchanged?
+        "provider_unavailable": true,         # provider served nothing at all?
         "message": "..."                      # most specific cause text
       }
     }
@@ -40,14 +41,19 @@ from lintro.ai.review.errors_taxonomy import (
 __all__ = [
     "REVIEW_ERROR_EXIT_CODE",
     "RETRYABLE_KINDS",
+    "UNAVAILABLE_KINDS",
     "build_error_contract",
+    "is_provider_unavailable_kind",
     "is_retryable_kind",
     "render_error_contract_json",
 ]
 
-# Distinct exit code for a provider/execution failure under ``--output json``.
-# Exit ``1`` stays reserved for a *successful* review that found P1 issues, so
-# consumers never have to disambiguate "findings" from "error" by exit code.
+# Distinct exit code for a provider/execution failure. Exit ``1`` stays reserved
+# for a *successful* review that found P1 issues, so consumers never have to
+# disambiguate "findings" from "error" by exit code. It is emitted for both
+# ``--output json`` and terminal output: a CI wrapper that cannot tell "reviewed,
+# found issues" from "could not review" is exactly the green-check defect in
+# #1826, and the distinction must not depend on the output format.
 REVIEW_ERROR_EXIT_CODE: Final[int] = 2
 
 # Kinds that are safe to retry unchanged (transient transport conditions).
@@ -55,6 +61,26 @@ REVIEW_ERROR_EXIT_CODE: Final[int] = 2
 # the diff) or is a lintro-side parse failure, so retrying as-is will not help.
 RETRYABLE_KINDS: Final[frozenset[ReviewErrorKind]] = frozenset(
     {
+        ReviewErrorKind.RATE_LIMITED,
+        ReviewErrorKind.SERVER_ERROR,
+        ReviewErrorKind.TIMEOUT,
+    },
+)
+
+# Kinds that mean *the provider could not serve the request at all* — the
+# credential, the account balance, or the endpoint is the problem, not the diff.
+# These are the conditions a credential-liveness probe is meant to catch before a
+# review is even attempted (#1614), and the ones whose green check #1826 is
+# about: nothing was reviewed, so the check must never read as a pass.
+#
+# CONTEXT_LENGTH and INVALID_RESPONSE are deliberately excluded — both prove the
+# provider *did* serve the request; the failure is the payload lintro sent or the
+# response it got back.
+UNAVAILABLE_KINDS: Final[frozenset[ReviewErrorKind]] = frozenset(
+    {
+        ReviewErrorKind.AUTH_FAILED,
+        ReviewErrorKind.INSUFFICIENT_CREDITS,
+        ReviewErrorKind.QUOTA_EXCEEDED,
         ReviewErrorKind.RATE_LIMITED,
         ReviewErrorKind.SERVER_ERROR,
         ReviewErrorKind.TIMEOUT,
@@ -74,6 +100,19 @@ def is_retryable_kind(*, kind: ReviewErrorKind) -> bool:
     return kind in RETRYABLE_KINDS
 
 
+def is_provider_unavailable_kind(*, kind: ReviewErrorKind) -> bool:
+    """Return whether an error kind means the provider served nothing.
+
+    Args:
+        kind: The canonical error classification.
+
+    Returns:
+        True when the credential, the account balance, or the endpoint — rather
+        than the request lintro built — is what stopped the review.
+    """
+    return kind in UNAVAILABLE_KINDS
+
+
 def build_error_contract(*, provider: str, error: Exception) -> dict[str, Any]:
     """Build the machine-readable error envelope for a review failure.
 
@@ -84,7 +123,8 @@ def build_error_contract(*, provider: str, error: Exception) -> dict[str, Any]:
     Returns:
         A JSON-serializable ``{"error": {...}}`` envelope with a canonical
         ``kind``, the ``provider``, the extracted HTTP ``status`` (or ``None``),
-        a ``retryable`` flag, and the most specific cause ``message``.
+        ``retryable`` and ``provider_unavailable`` flags, and the most specific
+        cause ``message``.
     """
     kind = classify_provider_error(provider=provider, error=error)
     message = resolve_cause_text(error=error)
@@ -95,6 +135,9 @@ def build_error_contract(*, provider: str, error: Exception) -> dict[str, Any]:
             "provider": (provider or "").lower(),
             "status": status,
             "retryable": is_retryable_kind(kind=kind),
+            # Pre-resolved so a CI wrapper can branch on "no review was
+            # produced" without re-implementing the kind taxonomy in shell.
+            "provider_unavailable": is_provider_unavailable_kind(kind=kind),
             "message": message,
         },
     }

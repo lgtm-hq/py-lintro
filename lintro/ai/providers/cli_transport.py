@@ -31,14 +31,24 @@ from typing import Any
 
 from loguru import logger
 
+from lintro.ai.enums import AITransport
 from lintro.ai.exceptions import (
     AIAuthenticationError,
     AINotAvailableError,
     AIProviderError,
 )
-from lintro.ai.providers.cli_contracts import CliContract, format_version
+from lintro.ai.liveness import (
+    LivenessResult,
+    incompatible_cli_result,
+    live_result,
+)
+from lintro.ai.providers.cli_contracts import (
+    CliContract,
+    format_version,
+    unadvertised_flags,
+)
 
-__all__ = ["CliTransport", "OptionalArg"]
+__all__ = ["CliTransport", "OptionalArg", "flag_named_in"]
 
 #: stderr fragments emitted by argument parsers when a flag is not recognised.
 #: Covers commander.js (claude, cursor agent) and clap (codex).
@@ -62,13 +72,13 @@ PROBE_TIMEOUT: float = 10.0
 # ancient.
 _VERSION_RE = re.compile(r"(?:^|[\s(v=])(\d+)\.(\d+)\.(\d+)(?![\d.])")
 
-# Flag characters that continue a flag token. Used to bound flag matches in
-# stderr so ``--foo`` does not match inside ``--foobar``.
+# Flag characters that continue a flag token. Used to bound flag matches in CLI
+# output so ``--foo`` does not match inside ``--foobar``.
 _FLAG_CHAR = r"[0-9a-z-]"
 
 
-def _flag_named_in(lowered_stderr: str, flag: str) -> bool:
-    """Return whether *flag* is named in *lowered_stderr* as a whole token.
+def flag_named_in(lowered_text: str, flag: str) -> bool:
+    """Return whether *flag* is named in *lowered_text* as a whole token.
 
     A plain substring test would let a rejection of ``--foobar`` also match a
     candidate ``--foo``, dropping the wrong optional flag. Matching on flag-token
@@ -76,14 +86,16 @@ def _flag_named_in(lowered_stderr: str, flag: str) -> bool:
     that share a prefix.
 
     Args:
-        lowered_stderr: The already-lowercased stderr text.
+        lowered_text: Already-lowercased CLI output. Either a rejection on stderr
+            or ``--help`` text: the runtime guard and the contract gate share
+            this matcher precisely so both read a flag the same way.
         flag: The candidate flag, e.g. ``--resume``.
 
     Returns:
         True when the flag appears as a complete token.
     """
     pattern = rf"(?<!{_FLAG_CHAR}){re.escape(flag.lower())}(?!{_FLAG_CHAR})"
-    return re.search(pattern, lowered_stderr) is not None
+    return re.search(pattern, lowered_text) is not None
 
 
 async def _terminate(process: asyncio.subprocess.Process) -> None:
@@ -262,6 +274,94 @@ class CliTransport(ABC):
             f"{contract.upgrade_hint}",
         )
 
+    async def missing_required_flags(self) -> tuple[str, ...]:
+        """Return declared required flags the installed binary no longer offers.
+
+        Required flags are never gated at runtime -- dropping one would hang or
+        badly degrade a call -- so this is the check that turns their
+        disappearance into a signal instead of a mystery failure. It is also what
+        the tier-1 contract test asserts on, so flag drift breaks CI rather than a
+        user's review.
+
+        Returns:
+            The missing flags in contract order. Empty when the contract declares
+            none, when there is no contract, or when the help text could not be
+            read at all -- an unreadable help surface is not evidence of absence.
+        """
+        contract = self._contract
+        if contract is None or not contract.required_flags:
+            return ()
+        help_text = await self.help_text()
+        if help_text is None:
+            return ()
+        return unadvertised_flags(
+            lowered_help=help_text.lower(),
+            flags=contract.required_flags,
+        )
+
+    async def probe_liveness(self, *, provider_name: str) -> LivenessResult:
+        """Probe whether this CLI can serve a call, without making one.
+
+        Deliberately presence-only. A real invocation of a subscription agent CLI
+        is slow and may consume a metered turn, so the probe is limited to the
+        free capability surface the hybrid guard already reads: the binary is on
+        ``PATH``, it answers at least one probe, it meets the declared version
+        floor, and it still advertises every required flag. The result carries
+        ``quota_verified=False`` -- a depleted subscription is invisible here and
+        only surfaces at invocation time, where the shared error taxonomy turns it
+        into a visible failure rather than a silent one.
+
+        Args:
+            provider_name: Provider identifier used in the result.
+
+        Returns:
+            The liveness result for this CLI transport.
+        """
+        try:
+            await self.check_version_floor()
+        except AINotAvailableError as exc:
+            return incompatible_cli_result(provider=provider_name, message=str(exc))
+
+        missing = await self.missing_required_flags()
+        if missing:
+            contract = self._contract
+            hint = contract.upgrade_hint if contract is not None else None
+            return incompatible_cli_result(
+                provider=provider_name,
+                message=(
+                    f"{self._binary_name} CLI no longer advertises required "
+                    f"flag(s): {', '.join(missing)}"
+                ),
+                hint=hint,
+            )
+
+        version = await self.binary_version()
+        if version is None and await self.help_text() is None:
+            # Neither free probe produced usable output. Being on ``PATH`` is not
+            # the same as being runnable — a broken install (missing native
+            # binary, wrong architecture, bad permissions) looks exactly like
+            # this, and reporting it live would be the silent pass this probe
+            # exists to prevent.
+            return incompatible_cli_result(
+                provider=provider_name,
+                message=(
+                    f"{self._binary_name} CLI at {self._binary_path} answered "
+                    "neither --version nor --help; the install is not runnable"
+                ),
+                hint=self._install_hint,
+            )
+
+        return live_result(
+            provider=provider_name,
+            transport=AITransport.CLI,
+            quota_verified=False,
+            message=(
+                f"{self._binary_name} CLI {format_version(version)} is installed "
+                "and matches lintro's declared flag surface (quota not verified — "
+                "presence-only probe)"
+            ),
+        )
+
     async def help_text(self) -> str | None:
         """Return the binary's help output, probing at most once.
 
@@ -311,7 +411,7 @@ class CliTransport(ABC):
         # read ``--json-schema`` as advertised whenever the help lists only
         # ``--json-schema-name``.
         supported = (
-            True if help_text is None else _flag_named_in(help_text.lower(), flag)
+            True if help_text is None else flag_named_in(help_text.lower(), flag)
         )
         with self._capability_lock:
             self._flag_support.setdefault(flag, supported)
@@ -453,7 +553,7 @@ class CliTransport(ABC):
         if not any(pattern in lowered for pattern in UNKNOWN_OPTION_PATTERNS):
             return None
         for candidate in candidates:
-            if _flag_named_in(lowered, candidate.flag):
+            if flag_named_in(lowered, candidate.flag):
                 return candidate
         return None
 

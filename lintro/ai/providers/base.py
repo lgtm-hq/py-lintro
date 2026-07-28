@@ -13,7 +13,16 @@ from abc import ABC, abstractmethod
 from collections.abc import AsyncIterator
 from typing import TYPE_CHECKING, Any
 
+from lintro.ai.enums import AITransport
 from lintro.ai.exceptions import AIAuthenticationError, AINotAvailableError
+from lintro.ai.liveness import (
+    LIVENESS_PROBE_PROMPT,
+    LIVENESS_TIMEOUT,
+    LivenessResult,
+    live_result,
+    liveness_from_error,
+    missing_credential_result,
+)
 from lintro.ai.providers.async_stream_result import AsyncAIStreamResult
 from lintro.ai.providers.capabilities import ProviderCapabilities
 from lintro.ai.providers.constants import (
@@ -25,14 +34,15 @@ from lintro.ai.providers.response import AIResponse  # noqa: F401
 from lintro.ai.providers.stream_result import AIStreamResult  # noqa: F401
 
 if TYPE_CHECKING:
-    from lintro.ai.enums import AITransport
     from lintro.ai.json_response import CliSchemaRequest
+    from lintro.ai.providers.cli_transport import CliTransport
 
 __all__ = [
     "AIResponse",
     "AIStreamResult",
     "AsyncAIStreamResult",
     "BaseAIProvider",
+    "LivenessResult",
     "ProviderCapabilities",
 ]
 
@@ -258,6 +268,98 @@ class BaseAIProvider(ABC):
             The provider's capability declaration.
         """
         return ProviderCapabilities()
+
+    # -- Credential liveness -----------------------------------------------
+
+    def _cli_transport(self) -> CliTransport | None:
+        """Return the CLI transport backing this provider, when it has one.
+
+        Declared here so credential liveness can branch on transport in one
+        place rather than being re-implemented per provider. CLI-backed providers
+        override it; API-only providers inherit ``None``.
+
+        Returns:
+            The provider's CLI transport, or ``None``.
+        """
+        return None
+
+    async def check_liveness(
+        self,
+        *,
+        timeout: float = LIVENESS_TIMEOUT,
+    ) -> LivenessResult:
+        """Probe whether this provider's credential can actually serve a call.
+
+        Second step of the ``is_available() -> check_liveness() -> invoke``
+        chain. Presence is checked first, then a **minimal real call** is made:
+        one token, content-free prompt, response discarded. The real call is the
+        point — a depleted account authenticates and lists models perfectly well,
+        so nothing short of asking it to generate something distinguishes
+        "authed" from "authed and able to serve" (#1826).
+
+        CLI transports take the presence-only path instead (see
+        :meth:`~lintro.ai.providers.cli_transport.CliTransport.probe_liveness`):
+        a real invocation of a subscription agent CLI is slow and may consume a
+        metered turn, so their result reports ``quota_verified=False``.
+
+        Args:
+            timeout: Seconds allowed for the probe.
+
+        Returns:
+            The classified liveness result; failures are returned, never raised,
+            so the caller can surface a visible skip instead of a traceback.
+        """
+        transport = self._transport
+        if transport == AITransport.CLI:
+            cli = self._cli_transport()
+            if cli is None:
+                return missing_credential_result(
+                    provider=self._provider_name,
+                    transport=transport,
+                    message="CLI transport is not initialized",
+                    hint="Install the provider CLI and ensure it is on PATH",
+                )
+            try:
+                return await cli.probe_liveness(provider_name=self._provider_name)
+            except Exception as exc:  # noqa: BLE001 - every failure is a verdict
+                # Same contract as the API branch below: this method promises a
+                # classified result, so an unexpected probe failure must not
+                # escape as a traceback to `lintro doctor` or the contract suite.
+                return liveness_from_error(
+                    provider=self._provider_name,
+                    transport=transport,
+                    error=exc,
+                    quota_verified=False,
+                )
+
+        if not self.is_available():
+            return missing_credential_result(
+                provider=self._provider_name,
+                transport=transport,
+                message=f"{self._api_key_env} is not set",
+                hint=f"Export {self._api_key_env} to enable {self._provider_name}",
+            )
+
+        try:
+            await self.complete(
+                LIVENESS_PROBE_PROMPT,
+                max_tokens=1,
+                timeout=timeout,
+            )
+        except Exception as exc:  # noqa: BLE001 - every failure is a verdict
+            return liveness_from_error(
+                provider=self._provider_name,
+                transport=transport,
+                error=exc,
+                quota_verified=True,
+            )
+
+        return live_result(
+            provider=self._provider_name,
+            transport=transport,
+            quota_verified=True,
+            message="credential authenticated and served a probe call",
+        )
 
     def begin_durable_session(self, *, repo_root: str) -> None:
         """Optional hook for providers that reuse CLI sessions.
