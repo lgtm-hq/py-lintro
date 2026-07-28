@@ -251,6 +251,36 @@ def test_render_ai_status_ignores_unknown_keys_without_warning() -> None:
     assert_that(messages).is_empty()
 
 
+def test_render_ai_status_does_not_repeat_legacy_deprecation_hint(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A legacy ``enabled``-only mapping renders without a migration hint.
+
+    The resolver on the AI entry path already emits it once per run; the
+    pre-execution summary must not duplicate it.
+
+    Args:
+        monkeypatch: Pytest monkeypatch fixture.
+    """
+    monkeypatch.setattr(
+        "lintro.ai.availability.is_provider_available",
+        lambda provider: True,
+    )
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "x")
+    messages: list[str] = []
+    handler_id = logger.add(
+        lambda message: messages.append(str(message)),
+        level="WARNING",
+    )
+    try:
+        lines = render_ai_status(ai_config={"enabled": True}, is_ci=False)
+    finally:
+        logger.remove(handler_id)
+
+    assert_that(lines).is_not_empty()
+    assert_that(messages).is_empty()
+
+
 def test_render_ai_status_respects_custom_api_key_env(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

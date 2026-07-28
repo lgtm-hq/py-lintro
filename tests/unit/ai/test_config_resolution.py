@@ -12,6 +12,7 @@ reported exactly once on the paths a user actually runs.
 
 from __future__ import annotations
 
+import warnings
 from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
@@ -101,9 +102,46 @@ def test_from_mapping_can_suppress_the_unknown_key_warning(
     Args:
         warnings_captured: Captured loguru warning messages.
     """
-    config = AIConfig.from_mapping({"lint": True, "typo": 1}, warn_unknown=False)
+    config = AIConfig.from_mapping({"lint": True, "typo": 1}, diagnostics=False)
 
     assert_that(config.lint).is_true()
+    assert_that(warnings_captured).is_empty()
+
+
+def test_from_mapping_warns_on_legacy_enabled_only_config(
+    warnings_captured: list[str],
+) -> None:
+    """A legacy ``enabled``-only mapping still gets the migration hint.
+
+    Args:
+        warnings_captured: Captured loguru warning messages.
+    """
+    config = AIConfig.from_mapping({"enabled": True})
+
+    assert_that(config.lint).is_true()
+    assert_that(config.review).is_true()
+    assert_that("".join(warnings_captured)).contains(
+        "ai.enabled without ai.lint/ai.review is deprecated",
+    )
+
+
+def test_from_mapping_suppresses_the_legacy_deprecation_hint(
+    warnings_captured: list[str],
+) -> None:
+    """Display-only parsing does not repeat the legacy migration hint.
+
+    Regression guard: the resolver reports it once per run, so the
+    pre-execution status renderer must not emit a second copy.
+
+    Args:
+        warnings_captured: Captured loguru warning messages.
+    """
+    with warnings.catch_warnings():
+        warnings.simplefilter("error", DeprecationWarning)
+        config = AIConfig.from_mapping({"enabled": True}, diagnostics=False)
+
+    assert_that(config.lint).is_true()
+    assert_that(config.review).is_true()
     assert_that(warnings_captured).is_empty()
 
 

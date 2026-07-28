@@ -16,7 +16,9 @@ is the primary interface; the grouping is for documentation only.
 from __future__ import annotations
 
 import warnings
-from collections.abc import Mapping
+from collections.abc import Iterator, Mapping
+from contextlib import contextmanager
+from contextvars import ContextVar
 from typing import Any
 
 from loguru import logger
@@ -32,6 +34,29 @@ __all__ = [
     "AIOutputConfig",
     "AIProviderConfig",
 ]
+
+_SUPPRESS_DIAGNOSTICS: ContextVar[bool] = ContextVar(
+    "ai_config_suppress_diagnostics",
+    default=False,
+)
+
+
+@contextmanager
+def _suppressed_diagnostics() -> Iterator[None]:
+    """Silence validator-emitted diagnostics for the duration of the block.
+
+    Model validators on :class:`AIConfig` log migration hints as a side
+    effect of construction. Display-only parses re-build a config that the
+    resolver already parsed, so they must not repeat those hints.
+
+    Yields:
+        None: Control, with diagnostics suppressed on the current context.
+    """
+    token = _SUPPRESS_DIAGNOSTICS.set(True)
+    try:
+        yield
+    finally:
+        _SUPPRESS_DIAGNOSTICS.reset(token)
 
 
 class AIConfig(BaseModel):
@@ -233,6 +258,8 @@ class AIConfig(BaseModel):
         if self.enabled and "lint" not in fields_set and "review" not in fields_set:
             self.lint = True
             self.review = True
+            if _SUPPRESS_DIAGNOSTICS.get():
+                return self
             message = (
                 "ai.enabled without ai.lint/ai.review is deprecated; both AI "
                 "lint summarization and AI review were enabled for backward "
@@ -261,7 +288,7 @@ class AIConfig(BaseModel):
         cls,
         data: Mapping[str, Any] | None,
         *,
-        warn_unknown: bool = True,
+        diagnostics: bool = True,
     ) -> AIConfig:
         """Build an :class:`AIConfig` from a raw ``ai:`` config mapping.
 
@@ -276,9 +303,11 @@ class AIConfig(BaseModel):
 
         Args:
             data: Raw ``ai`` section from config, or None when absent.
-            warn_unknown: Whether to log a warning listing dropped keys.
-                Display-only callers pass False so that rendering a summary
-                never emits diagnostics; resolvers leave it True.
+            diagnostics: Whether this parse may emit user-facing diagnostics
+                — the dropped-unknown-key warning and the validators'
+                migration hints. Display-only callers pass False, because
+                they re-parse a mapping the resolver already reported on and
+                must not duplicate its output; resolvers leave it True.
 
         Returns:
             AIConfig: Parsed AI configuration.
@@ -288,13 +317,16 @@ class AIConfig(BaseModel):
 
         known_fields = set(cls.model_fields)
         unknown = set(data) - known_fields
-        if unknown and warn_unknown:
+        if unknown and diagnostics:
             logger.warning(
                 "Unknown AI config keys ignored: {}",
                 ", ".join(sorted(unknown)),
             )
         filtered = {k: v for k, v in data.items() if k in known_fields}
-        return cls(**filtered)
+        if diagnostics:
+            return cls(**filtered)
+        with _suppressed_diagnostics():
+            return cls(**filtered)
 
     # -- Effective feature state -------------------------------------------
 
