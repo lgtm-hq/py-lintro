@@ -127,6 +127,9 @@ def test_auth_failure_is_not_confused_with_no_quota() -> None:
     )
 
     assert_that(result.state).is_equal_to(LivenessState.AUTH_FAILED)
+    assert_that(result.quota_verified).described_as(
+        "an auth rejection happens before quota is consulted",
+    ).is_false()
 
 
 def test_unreachable_provider_does_not_claim_a_quota_verdict() -> None:
@@ -153,6 +156,7 @@ def test_rate_limited_credential_is_not_live_but_is_not_broken() -> None:
 
     assert_that(result.state).is_equal_to(LivenessState.RATE_LIMITED)
     assert_that(result.is_live).is_false()
+    assert_that(result.quota_verified).is_false()
     assert_that(result.hint).contains("usable")
 
 

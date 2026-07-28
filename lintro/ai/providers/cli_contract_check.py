@@ -23,6 +23,7 @@ binary is on ``PATH``, with no SDK, no credential, and no configuration.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import shutil
 from dataclasses import dataclass
 
@@ -173,8 +174,12 @@ async def _probe(*, binary_path: str, args: tuple[str, ...]) -> str | None:
             timeout=PROBE_TIMEOUT,
         )
     except TimeoutError:
-        process.kill()
-        await process.wait()
+        # The child may already have exited between the timeout and the kill, so
+        # a stalled probe must not turn into a ProcessLookupError traceback.
+        with contextlib.suppress(ProcessLookupError):
+            process.kill()
+        with contextlib.suppress(ProcessLookupError):
+            await process.wait()
         return None
 
     if process.returncode != 0:

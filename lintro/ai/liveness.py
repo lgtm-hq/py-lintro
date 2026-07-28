@@ -144,6 +144,13 @@ STATE_COPY: Final[dict[LivenessState, tuple[str, str]]] = {
 }
 
 
+#: States whose verdict actually says something about quota. Everything else is
+#: reached before quota is consulted, so a probe cannot claim to have checked it.
+_QUOTA_BEARING_STATES: Final[frozenset[LivenessState]] = frozenset(
+    {LivenessState.OK, LivenessState.NO_QUOTA},
+)
+
+
 @dataclass(frozen=True, slots=True)
 class LivenessResult:
     """The result of probing one provider's credential on one transport.
@@ -262,7 +269,11 @@ def liveness_from_error(
         state=state,
         message=message,
         hint=hint,
-        quota_verified=quota_verified and state is not LivenessState.UNREACHABLE,
+        # Only two verdicts actually speak to quota: the call went through, or it
+        # was refused for lack of credits. An auth rejection, a throttle, or an
+        # unreachable endpoint all short-circuit before quota is consulted, so
+        # claiming a quota verdict there would be inventing information.
+        quota_verified=quota_verified and state in _QUOTA_BEARING_STATES,
     )
 
 
