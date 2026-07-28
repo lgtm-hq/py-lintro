@@ -132,8 +132,11 @@ def test_doctor_probes_when_the_flag_is_given(monkeypatch: Any) -> None:
         return _stub_result(state=LivenessState.NO_QUOTA)
 
     monkeypatch.setattr("lintro.ai.doctor_checks.check_liveness_sync", _probe)
+    # Patched where it is *used*: doctor.py binds this name at import time, so
+    # patching it on lintro.ai.doctor_checks would leave the real function in
+    # place and the stub would never run.
     monkeypatch.setattr(
-        "lintro.ai.doctor_checks.check_ai_configuration",
+        "lintro.cli_utils.commands.doctor.check_ai_configuration",
         lambda config: [],
     )
     monkeypatch.setattr(

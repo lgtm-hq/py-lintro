@@ -114,6 +114,8 @@ def unadvertised_flags(
     Returns:
         The subset of *flags* not present as whole tokens.
     """
+    # Imported inside the function on purpose: cli_transport imports this module
+    # at load time, so a module-level import here would close the cycle.
     from lintro.ai.providers.cli_transport import flag_named_in
 
     return tuple(flag for flag in flags if not flag_named_in(lowered_help, flag))

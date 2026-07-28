@@ -143,6 +143,20 @@ class CliSurfaceReport:
         )
 
 
+async def _terminate(process: asyncio.subprocess.Process) -> None:
+    """Kill a probe child and reap it so it cannot linger as a zombie.
+
+    Args:
+        process: The child process to stop.
+    """
+    # The child may already have exited between the decision to stop it and the
+    # kill, so stopping a finished probe must not raise ProcessLookupError.
+    with contextlib.suppress(ProcessLookupError):
+        process.kill()
+    with contextlib.suppress(ProcessLookupError):
+        await process.wait()
+
+
 async def _probe(*, binary_path: str, args: tuple[str, ...]) -> str | None:
     """Run a free capability probe and return its combined output.
 
@@ -154,6 +168,9 @@ async def _probe(*, binary_path: str, args: tuple[str, ...]) -> str | None:
         Combined stdout/stderr on a clean exit, or ``None`` when the probe failed
         or exited non-zero. A non-zero probe is never trusted: an error message
         can echo a flag the binary does not actually support.
+
+    Raises:
+        asyncio.CancelledError: Re-raised after the child is stopped.
     """
     try:
         process = await asyncio.create_subprocess_exec(  # nosec B603 - fixed argv from a declared contract, shell=False
@@ -174,13 +191,14 @@ async def _probe(*, binary_path: str, args: tuple[str, ...]) -> str | None:
             timeout=PROBE_TIMEOUT,
         )
     except TimeoutError:
-        # The child may already have exited between the timeout and the kill, so
-        # a stalled probe must not turn into a ProcessLookupError traceback.
-        with contextlib.suppress(ProcessLookupError):
-            process.kill()
-        with contextlib.suppress(ProcessLookupError):
-            await process.wait()
+        await _terminate(process)
         return None
+    except asyncio.CancelledError:
+        # Mirrors CliTransport.run(): a cancelled probe — doctor aborted, or a
+        # sibling contract check failing the gather — must not leave an agent
+        # CLI running against the repository.
+        await _terminate(process)
+        raise
 
     if process.returncode != 0:
         return None

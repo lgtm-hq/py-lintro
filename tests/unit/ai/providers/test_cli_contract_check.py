@@ -11,8 +11,10 @@ every flag at once.
 
 from __future__ import annotations
 
+import asyncio
 import stat
 from pathlib import Path
+from unittest import mock
 
 import pytest
 from assertpy import assert_that
@@ -20,6 +22,7 @@ from assertpy import assert_that
 from lintro.ai.provider_enum import AIProvider
 from lintro.ai.providers.cli_contract_check import (
     CliSurfaceReport,
+    _probe,
     declared_cli_providers,
     probe_cli_surface,
 )
@@ -250,6 +253,42 @@ async def test_probe_distrusts_a_non_zero_help_probe(
     assert_that(report.help_readable).is_false()
     assert_that(report.missing_required_flags).is_empty()
     assert_that(list(report.violations)).is_empty()
+
+
+async def test_probe_terminates_the_child_when_cancelled() -> None:
+    """A cancelled probe must not leave an agent CLI running.
+
+    ``_probe`` already killed and reaped on timeout, but cancellation — a
+    ``lintro doctor`` abort, or a sibling contract check failing the gather —
+    escaped without stopping the child. This pins the same guarantee
+    ``CliTransport.run`` makes.
+    """
+    killed: list[bool] = []
+
+    class _StubProcess:
+        returncode = None
+
+        async def communicate(self) -> tuple[bytes, bytes]:
+            await asyncio.sleep(3600)
+            raise AssertionError("unreachable")  # pragma: no cover
+
+        def kill(self) -> None:
+            killed.append(True)
+
+        async def wait(self) -> int:
+            return -9
+
+    async def _fake_exec(*args: object, **kwargs: object) -> _StubProcess:
+        return _StubProcess()
+
+    with mock.patch.object(asyncio, "create_subprocess_exec", _fake_exec):
+        task = asyncio.create_task(_probe(binary_path="/bin/fake", args=("--help",)))
+        await asyncio.sleep(0)  # let the task reach communicate()
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+
+    assert_that(killed).described_as("child killed on cancellation").is_not_empty()
 
 
 # --- registry coverage -------------------------------------------------------
