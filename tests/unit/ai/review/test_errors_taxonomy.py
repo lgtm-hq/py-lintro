@@ -112,6 +112,45 @@ def test_cursor_auth_failed_stderr() -> None:
     assert_that(kind).is_equal_to(ReviewErrorKind.AUTH_FAILED)
 
 
+def test_cursor_auth_failed_not_authenticated() -> None:
+    """Cursor CLI 'Not authenticated' wording classifies as AUTH_FAILED."""
+    error = AIProviderError("cursor-agent CLI exited with code 1: Not authenticated")
+    kind = classify_provider_error(provider="cursor", error=error)
+
+    assert_that(kind).is_equal_to(ReviewErrorKind.AUTH_FAILED)
+
+
+def test_anthropic_cli_logged_out_classifies_as_auth_failed() -> None:
+    """A logged-out claude CLI cause classifies as AUTH_FAILED, not UNKNOWN."""
+    error = AIProviderError(
+        "claude CLI exited with code 1: Not logged in · Please run /login",
+    )
+    kind = classify_provider_error(provider="anthropic", error=error)
+
+    assert_that(kind).is_equal_to(ReviewErrorKind.AUTH_FAILED)
+
+
+def test_anthropic_cli_not_signed_in_classifies_as_auth_failed() -> None:
+    """The claude CLI 'Not signed in' wording classifies as AUTH_FAILED."""
+    error = AIProviderError(
+        "claude CLI exited with code 1: Not signed in to Claude. Run /login first.",
+    )
+    kind = classify_provider_error(provider="anthropic", error=error)
+
+    assert_that(kind).is_equal_to(ReviewErrorKind.AUTH_FAILED)
+
+
+def test_codex_cli_logged_out_classifies_as_auth_failed() -> None:
+    """A logged-out codex CLI cause classifies as AUTH_FAILED under openai."""
+    error = AIProviderError(
+        "codex CLI exited with code 1: Not signed in. Please run 'codex login' "
+        "to sign in with ChatGPT, then re-run.",
+    )
+    kind = classify_provider_error(provider="openai", error=error)
+
+    assert_that(kind).is_equal_to(ReviewErrorKind.AUTH_FAILED)
+
+
 def test_cursor_timeout_stderr() -> None:
     """Cursor CLI timeout stderr classifies as TIMEOUT."""
     error = AIProviderError("cursor-agent: request timed out after 600s")

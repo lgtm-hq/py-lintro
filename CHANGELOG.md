@@ -21,6 +21,12 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.94.1] - 2026-07-28
+
+### Fixed
+
+- **ai**: surface CLI stdout causes and classify CLI auth failures (#1837) (f9ebca5)
+
 ## [0.94.0] - 2026-07-28
 
 ### Added
