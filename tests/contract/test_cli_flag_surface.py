@@ -119,12 +119,14 @@ def test_unadvertised_optional_flags_are_reported_not_fatal(
     """
     report = _require_surface(cli_provider)
     declared = set(report.contract.optional_flag_names)
-    for flag in report.unadvertised_optional_flags:
-        assert_that(declared).described_as(
-            f"{flag} was reported unadvertised but is not a declared optional flag",
-        ).contains(flag)
+    # Asserted over the *declared* set, not over the findings: iterating the
+    # findings makes both assertions vacuous on a fully conforming CLI, which is
+    # the common case and exactly when the test still has to mean something.
+    assert_that(set(report.unadvertised_optional_flags)).described_as(
+        "only declared optional flags may be reported as unadvertised",
+    ).is_subset_of(declared)
     violation_text = " ".join(report.violations)
-    for flag in report.unadvertised_optional_flags:
+    for flag in declared:
         assert_that(violation_text).described_as(
             f"optional flag {flag} must not be treated as a contract violation",
         ).does_not_contain(flag)

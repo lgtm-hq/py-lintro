@@ -58,10 +58,6 @@ def _build_provider(provider: AIProvider) -> BaseAIProvider:
 
     Returns:
         The constructed provider.
-
-    Raises:
-        Exception: Never in practice -- ``unmet_precondition`` always aborts the
-            test first; the re-raise only satisfies static analysis.
     """
     config = AIConfig(
         enabled=True,
@@ -72,7 +68,6 @@ def _build_provider(provider: AIProvider) -> BaseAIProvider:
         return get_provider(config)
     except Exception as exc:  # noqa: BLE001 - construction failure is a skip reason
         unmet_precondition(f"{provider.value} provider could not be constructed: {exc}")
-        raise  # pragma: no cover - unmet_precondition always raises
 
 
 def _resolve_liveness(instance: BaseAIProvider) -> LivenessResult:
@@ -137,10 +132,6 @@ def test_live_cli_completes_a_minimal_invocation(
 
     Args:
         cli_provider: Provider under test.
-
-    Raises:
-        AIAuthenticationError: Never in practice -- ``unmet_precondition``
-            aborts first; the re-raise only satisfies static analysis.
     """
     instance = _build_provider(cli_provider)
     _resolve_liveness(instance)
@@ -169,7 +160,6 @@ def test_live_cli_completes_a_minimal_invocation(
         unmet_precondition(
             f"{instance.name}: CLI is not authenticated (link 3 of 3) — {exc}",
         )
-        raise  # pragma: no cover - unmet_precondition always raises
     assert_that(response.content).described_as(
         f"{instance.name} returned an empty response to a trivial prompt",
     ).is_not_empty()

@@ -15,7 +15,7 @@ both #1826 and this issue.
 from __future__ import annotations
 
 import os
-from typing import Final
+from typing import Final, NoReturn
 
 import pytest
 
@@ -60,7 +60,7 @@ def tier2_enabled() -> bool:
     return _flag_enabled(ENABLE_TIER2_ENV)
 
 
-def unmet_precondition(reason: str) -> None:
+def unmet_precondition(reason: str) -> NoReturn:
     """Fail or skip on an unmet precondition, never pass silently.
 
     Never returns: both branches abort the calling test. In the contract gate,

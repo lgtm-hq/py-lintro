@@ -78,6 +78,10 @@ docker_args=(
 	--env LINTRO_CONTRACT_REQUIRE_BINARIES=1
 	# uv must not try to write to a read-only or absent HOME inside the image.
 	--env "UV_CACHE_DIR=/tmp/uv-cache"
+	# The synced environment stays off the bind mount: /work is the caller's
+	# checkout, so a container-created .venv would overwrite a developer's own
+	# and leave root-owned files behind for later CI steps.
+	--env "UV_PROJECT_ENVIRONMENT=/tmp/contract-venv"
 	# The cache and the mounted workspace are on different filesystems, so uv
 	# cannot hardlink packages between them.
 	--env "UV_LINK_MODE=copy"
@@ -101,7 +105,11 @@ echo "==> Tier ${TIER} contract tests in ${IMAGE}"
 
 # `uv sync` inside the container: pytest and assertpy are dev dependencies and
 # the image ships only the lint toolchain.
+#
+# --maxfail=0 overrides pytest.ini's default of 3. Drift across three providers
+# can easily exceed that, and a gate that stops after the third failure reports
+# a partial picture the maintainer has to re-run to complete.
 docker "${docker_args[@]}" "$IMAGE" bash -euo pipefail -c "
 	uv sync --extra ai --group dev --quiet
-	uv run pytest tests/contract -m ${pytest_marker} -p no:randomly
+	uv run pytest tests/contract -m ${pytest_marker} -p no:randomly --maxfail=0
 "
