@@ -158,8 +158,8 @@ ai:
   enabled: true # master switch (AND-ed with the toggles below)
   lint: true # AI lint summaries during chk/fmt
   review: true # the `lintro review` AI diff review
-  provider: anthropic # or "openai" / "cursor"
-  transport: api # "api" (SDK) or "cli" (local agent binary); required
+  provider: anthropic # or "openai" / "cursor" ("cursor" needs transport: cli)
+  transport: api # "api" (SDK) or "cli" (local agent binary); no default
   # model: claude-sonnet-4-6  # uses provider default if omitted
   # api_key_env: ANTHROPIC_API_KEY   # uses provider default if omitted
 ```
@@ -205,7 +205,8 @@ ai:
   provider: anthropic
 
   # How to invoke the provider: "api" (SDK) or "cli" (local agent binary).
-  # Required whenever ai.lint or ai.review is enabled. See "Transports".
+  # No default — set it explicitly whenever ai.lint or ai.review is enabled.
+  # "cursor" requires "cli". See "Transports".
   transport: api
 
   # Model override (uses provider default if omitted)
@@ -310,12 +311,15 @@ Lintro reaches a provider one of two ways, selected by `ai.transport`:
 - **`cli`** — a subprocess call to a locally installed agent binary (`claude`, `codex`,
   Cursor's `agent`).
 
-`ai.transport` is required whenever `ai.lint` or `ai.review` is enabled. Omitting it is
-not a hard error — `lintro doctor` reports it as an incompatible configuration, and the
-provider factory falls back to `api` so the run still works. Legacy configs that set
-only `ai.enabled: true` (which implicitly switches `lint` and `review` on) inherit that
-same `api` fallback. Set it explicitly; the fallback is a safety net, not a default to
-rely on.
+`ai.transport` has **no default**, so set it explicitly whenever `ai.lint` or
+`ai.review` is enabled. Omitting it is not fatal: `lintro doctor` reports the config as
+incompatible, and the provider factory falls back to `api` so an existing run keeps
+working. That fallback exists for backward compatibility — legacy configs that set only
+`ai.enabled: true` (which implicitly switches `lint` and `review` on) rely on it — and
+is not something to depend on in new config.
+
+`cursor` is a CLI-only provider: pair it with `transport: cli`. `anthropic` and `openai`
+support both transports.
 
 ```yaml
 ai:
@@ -584,25 +588,27 @@ To use AI features, pass your API key as an environment variable. The **provider
 from `ai.provider` in the `.lintro-config.yaml` of the mounted workspace — there is no
 provider CLI flag or environment override, and exporting `OPENAI_API_KEY` alone does not
 switch lintro off its `anthropic` default. `--transport` is the one part of the AI
-config the CLI can override per run.
+config the CLI can override per run. The examples pass the key by **name** (`-e VAR`, no
+`=value`), so the secret is inherited from the shell's environment instead of appearing
+in the container's argument list.
 
 ```bash
 # API transport, with `ai: {provider: anthropic}` in the mounted config
 docker run --rm \
-  -e ANTHROPIC_API_KEY=$ANTHROPIC_API_KEY \
+  -e ANTHROPIC_API_KEY \
   -v $(pwd):/code \
   ghcr.io/lgtm-hq/py-lintro-ai:latest check . --transport api
 
 # API transport, with `ai: {provider: openai}` in the mounted config
 docker run --rm \
-  -e OPENAI_API_KEY=$OPENAI_API_KEY \
+  -e OPENAI_API_KEY \
   -v $(pwd):/code \
   ghcr.io/lgtm-hq/py-lintro-ai:latest check . --transport api
 
 # CLI transport — the agent binaries are already on PATH in this image.
 # The credential is still required (see "Transport authentication" above).
 docker run --rm \
-  -e ANTHROPIC_API_KEY=$ANTHROPIC_API_KEY \
+  -e ANTHROPIC_API_KEY \
   -v $(pwd):/code \
   ghcr.io/lgtm-hq/py-lintro-ai:latest check . --transport cli
 ```
@@ -694,9 +700,11 @@ persistent rate limiting:
 
 ### What is NOT sent
 
-- **Full files** — only a small context window around the issue line
+- **Full files** — only a small context window around the issue line (summary and fix
+  modes), or the changed hunks of the diff (review mode)
 - **Absolute paths** — all paths are made relative to the workspace root before sending
-- **Other project files** — only files with reported issues are read
+- **Other project files** — in summary and fix modes, only files with reported issues
+  are read; in review mode, only files that the diff under review touches
 
 ### Workspace boundary enforcement
 
