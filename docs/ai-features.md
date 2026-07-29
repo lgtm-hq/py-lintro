@@ -310,7 +310,12 @@ Lintro reaches a provider one of two ways, selected by `ai.transport`:
 - **`cli`** — a subprocess call to a locally installed agent binary (`claude`, `codex`,
   Cursor's `agent`).
 
-`ai.transport` is required whenever `ai.lint` or `ai.review` is enabled:
+`ai.transport` is required whenever `ai.lint` or `ai.review` is enabled. Omitting it is
+not a hard error — `lintro doctor` reports it as an incompatible configuration, and the
+provider factory falls back to `api` so the run still works. Legacy configs that set
+only `ai.enabled: true` (which implicitly switches `lint` and `review` on) inherit that
+same `api` fallback. Set it explicitly; the fallback is a safety net, not a default to
+rely on.
 
 ```yaml
 ai:
@@ -575,16 +580,20 @@ cosign-signed. The `ai` variant is a strict superset built `FROM` the base image
 `full` stage, so nothing is lost by using it — it is simply larger, which is why the
 lint image stays free of it.
 
-To use AI features, pass your API key as an environment variable:
+To use AI features, pass your API key as an environment variable. The **provider** comes
+from `ai.provider` in the `.lintro-config.yaml` of the mounted workspace — there is no
+provider CLI flag or environment override, and exporting `OPENAI_API_KEY` alone does not
+switch lintro off its `anthropic` default. `--transport` is the one part of the AI
+config the CLI can override per run.
 
 ```bash
-# API transport (Anthropic)
+# API transport, with `ai: {provider: anthropic}` in the mounted config
 docker run --rm \
   -e ANTHROPIC_API_KEY=$ANTHROPIC_API_KEY \
   -v $(pwd):/code \
   ghcr.io/lgtm-hq/py-lintro-ai:latest check . --transport api
 
-# API transport (OpenAI)
+# API transport, with `ai: {provider: openai}` in the mounted config
 docker run --rm \
   -e OPENAI_API_KEY=$OPENAI_API_KEY \
   -v $(pwd):/code \
@@ -672,10 +681,16 @@ persistent rate limiting:
 - **Review mode** (`lintro review`): The unified diff under review — changed lines with
   their surrounding hunk context — the workspace-relative paths of the changed files,
   and, when lint results are available, a digest of them. The diff passes through
-  lintro's secret-redaction step first. Setting
-  `ai.review_allow_unredacted_git_native: true` opts out of that: the CLI transport then
-  asks the provider to run `git diff` itself, so the diff never crosses lintro's
-  redaction choke point. It defaults to `false` for that reason.
+  lintro's secret-redaction step first.
+
+> **Warning — `ai.review_allow_unredacted_git_native` sends unredacted diffs.**
+>
+> With this option enabled, the CLI transport asks the provider to run `git diff` itself
+> instead of embedding lintro's redacted diff. The result never crosses lintro's
+> redaction choke point, so **any secret, token or other sensitive content present in
+> the diff reaches the provider's backend verbatim**. It defaults to `false`. Enable it
+> only in a controlled, trusted environment, on diffs you have confirmed carry no
+> secrets, and only when delegated retrieval is needed for a very large diff.
 
 ### What is NOT sent
 
