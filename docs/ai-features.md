@@ -158,7 +158,8 @@ ai:
   enabled: true # master switch (AND-ed with the toggles below)
   lint: true # AI lint summaries during chk/fmt
   review: true # the `lintro review` AI diff review
-  provider: anthropic # or "openai"
+  provider: anthropic # or "openai" / "cursor"
+  transport: api # "api" (SDK) or "cli" (local agent binary); required
   # model: claude-sonnet-4-6  # uses provider default if omitted
   # api_key_env: ANTHROPIC_API_KEY   # uses provider default if omitted
 ```
@@ -262,6 +263,7 @@ If you always want `--fix` without typing it, set the default in config:
 ```yaml
 ai:
   enabled: true
+  transport: api
   default_fix: true # equivalent to always passing --fix
 ```
 
@@ -580,13 +582,13 @@ To use AI features, pass your API key as an environment variable:
 docker run --rm \
   -e ANTHROPIC_API_KEY=$ANTHROPIC_API_KEY \
   -v $(pwd):/code \
-  ghcr.io/lgtm-hq/py-lintro-ai:latest check .
+  ghcr.io/lgtm-hq/py-lintro-ai:latest check . --transport api
 
 # API transport (OpenAI)
 docker run --rm \
   -e OPENAI_API_KEY=$OPENAI_API_KEY \
   -v $(pwd):/code \
-  ghcr.io/lgtm-hq/py-lintro-ai:latest check .
+  ghcr.io/lgtm-hq/py-lintro-ai:latest check . --transport api
 
 # CLI transport — the agent binaries are already on PATH in this image.
 # The credential is still required (see "Transport authentication" above).
@@ -667,6 +669,13 @@ persistent rate limiting:
   issue messages, and workspace-relative file paths. No source code is sent.
 - **Fix mode** (`--fix` or `lintro format`): A ~30-line code context window around each
   issue line, plus the issue message and error code. One API call per issue.
+- **Review mode** (`lintro review`): The unified diff under review — changed lines with
+  their surrounding hunk context — the workspace-relative paths of the changed files,
+  and, when lint results are available, a digest of them. The diff passes through
+  lintro's secret-redaction step first. Setting
+  `ai.review_allow_unredacted_git_native: true` opts out of that: the CLI transport then
+  asks the provider to run `git diff` itself, so the diff never crosses lintro's
+  redaction choke point. It defaults to `false` for that reason.
 
 ### What is NOT sent
 
