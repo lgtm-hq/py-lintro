@@ -21,6 +21,19 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.94.6] - 2026-07-29
+
+### Changed
+
+- **ai**: compatibility floors, ai image variant, and CI transport auth (#1854)
+  (dbdb863)
+- **deps**: update ghcr.io/lgtm-hq/py-lintro docker tag to 0.94.3 (patch) (#1855)
+  (e4352c6)
+
+### Fixed
+
+- **deps**: update dependency @lgtm-hq/turbo-themes to 0.40.13 (patch) (#1856) (520002c)
+
 ## [0.94.5] - 2026-07-29
 
 ### Fixed
