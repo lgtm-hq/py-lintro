@@ -200,8 +200,12 @@ ai:
   lint: true # AI lint summaries during chk/fmt
   review: true # the `lintro review` AI diff review
 
-  # Provider: "anthropic" or "openai"
+  # Provider: "anthropic", "openai" or "cursor" ("cursor" is CLI-only)
   provider: anthropic
+
+  # How to invoke the provider: "api" (SDK) or "cli" (local agent binary).
+  # Required whenever ai.lint or ai.review is enabled. See "Transports".
+  transport: api
 
   # Model override (uses provider default if omitted)
   # model: claude-sonnet-4-6
@@ -295,6 +299,143 @@ ai:
 
 See the [OpenAI API docs](https://platform.openai.com/docs/api-reference/) for model
 options and pricing.
+
+## Transports
+
+Lintro reaches a provider one of two ways, selected by `ai.transport`:
+
+- **`api`** — the provider's Python SDK over HTTPS. Requires the `ai` extra.
+- **`cli`** — a subprocess call to a locally installed agent binary (`claude`, `codex`,
+  Cursor's `agent`).
+
+`ai.transport` is required whenever `ai.lint` or `ai.review` is enabled:
+
+```yaml
+ai:
+  enabled: true
+  review: true
+  provider: anthropic
+  transport: api # or "cli"
+```
+
+Both `lintro check` and `lintro review` accept `--transport api|cli` to override the
+config for a single invocation.
+
+### Transport authentication
+
+**Every transport needs a credential of its own — CLI transport is not
+credential-free.**
+
+| Provider    | Transport | Credential                                                      |
+| ----------- | --------- | --------------------------------------------------------------- |
+| `anthropic` | `api`     | `ANTHROPIC_API_KEY`                                             |
+| `anthropic` | `cli`     | `ANTHROPIC_API_KEY` (or a `claude` `apiKeyHelper`) — see below  |
+| `openai`    | `api`     | `OPENAI_API_KEY`                                                |
+| `openai`    | `cli`     | `codex login` session (`~/.codex/auth.json`) or `CODEX_API_KEY` |
+| `cursor`    | `cli`     | `agent login` session or `CURSOR_API_KEY` (CLI-only provider)   |
+
+`ai.api_key_env` overrides the API-transport variable name if you keep the key somewhere
+else.
+
+> **Anthropic `--transport cli` needs an API key — an interactive Claude login is not
+> enough.**
+>
+> Lintro invokes the Claude CLI as `claude --bare -p …`, and `--bare` disables OAuth
+> session login. Consequences:
+>
+> - `CLAUDE_CODE_OAUTH_TOKEN` and a logged-in interactive `claude` session **do not**
+>   authenticate this path; it fails with `Not logged in · Please run /login` even
+>   though the same binary works in the same shell.
+> - `--transport cli` bills an `ANTHROPIC_API_KEY` exactly like `--transport api`.
+>   **There is no subscription-billed path today.**
+>
+> This is tracked in [#1838](https://github.com/lgtm-hq/py-lintro/issues/1838); the
+> CLI's own error hint ("`--bare` mode does not use OAuth login") describes the same
+> constraint. Codex and Cursor are unaffected — both accept a CLI login session.
+
+### Failures are visible, never a green no-op
+
+A missing, rejected, or depleted credential is reported, not swallowed. Lintro walks a
+`presence → liveness → invoke` chain, and each step's failure short-circuits to a
+**visible** skip or failure:
+
+- **Presence** — is the SDK importable, the binary on `PATH`, the key variable set?
+- **Liveness** — under `api`, a minimal one-token real call, because a valid key with a
+  depleted balance authenticates and lists models but cannot serve a review. Under
+  `cli`, presence plus the free `--version` / `--help` capability gate (no quota spent,
+  so the result is reported as unverified quota).
+- **Invoke** — an auth or quota error at call time is classified through the same
+  taxonomy: `auth_failed`, `no_quota`, `rate_limited`, `unreachable`,
+  `incompatible_cli`, `missing_credential`.
+
+Probe it directly:
+
+```bash
+lintro doctor              # presence checks (free)
+lintro doctor --ai-liveness # adds the liveness probe (one minimal API call on `api`)
+```
+
+`lintro review` distinguishes the two red states by exit code, so a wrapper can never
+mistake one for the other:
+
+| Exit | Meaning                                                                                                                |
+| ---- | ---------------------------------------------------------------------------------------------------------------------- |
+| `0`  | A review was produced (clean, or findings below P1)                                                                    |
+| `1`  | A review was produced and contains P1 findings                                                                         |
+| `2`  | **No review was produced** — missing/dead credential, depleted balance, unreachable provider, or a lintro-side failure |
+
+### CLI compatibility floors
+
+Each CLI transport declares a **minimum supported version** of the agent binary. These
+are _known-incompatible-below_ floors, not known-good pins: a binary below the floor
+predates the flag surface lintro drives, so lintro fails with an actionable upgrade hint
+instead of a confusing runtime error.
+
+| Provider    | Binary   | Minimum version | Upgrade                                           |
+| ----------- | -------- | --------------- | ------------------------------------------------- |
+| `anthropic` | `claude` | `2.0.0`         | `npm install -g @anthropic-ai/claude-code@latest` |
+| `openai`    | `codex`  | `0.20.0`        | `npm install -g @openai/codex@latest`             |
+| `cursor`    | `agent`  | `2025.1.1`      | `curl https://cursor.com/install -fsS \| bash`    |
+
+Source of truth: `lintro/ai/providers/cli_contracts.py`.
+
+Above the floor, lintro tolerates flag-surface drift with a three-part guard:
+
+1. **Version floor** — refuse binaries known to be too old.
+2. **Proactive gate** — optional flags (`--json-schema-name`, `--resume`,
+   `--output-schema`, `--trust`) are checked against the binary's `--help` before being
+   sent, and simply dropped when unsupported. Only their extra capability is lost.
+3. **Reactive backstop** — a call that still fails with `unknown option` drops the
+   offending optional flag and retries.
+
+Required flags are not gated — dropping them would degrade a review silently. Instead,
+CI's contract tests assert the installed binaries still advertise them, so drift breaks
+CI rather than a user's review.
+
+### Transports in CI
+
+Both transports need their credential injected explicitly; nothing is inherited from a
+developer's login.
+
+- **Fork PRs cannot read secrets.** GitHub withholds repository secrets from
+  `pull_request` runs originating in a fork, so any AI job must either skip on forks or
+  degrade to a visible skip. Lintro's own `ai-review.yml` requires
+  `head.repo.full_name == github.repository`, so the keyed job never runs for a fork.
+- **Never default an unset secret.** Forwarding `${{ secrets.X }}` unset lets the run
+  report a visible skip naming the missing credential; substituting a placeholder turns
+  it into a false pass.
+- **Trusted install.** Lintro installs itself from the PR's _base_ ref before the step
+  that holds `ANTHROPIC_API_KEY`, so PR-controlled code never executes with the secret
+  in scope. The PR is reviewed as data (the diff is fetched through the GitHub API).
+- **Two tiers of contract testing.** The flag-surface tier runs `--version` / `--help`
+  only — no credential, no quota — on every PR. The real-invocation tier spends quota
+  and runs weekly, gated behind the free tier.
+
+Security notes: provider API keys are secrets — store them in the repository/org secret
+store (or a local shell profile), never in `.lintro-config.yaml`, which only names the
+_variable_ through `ai.api_key_env`. A key with billing attached should be scoped and
+rotatable; `lintro doctor --ai-liveness` is the cheap way to confirm a rotation took
+effect.
 
 ## Environment Support
 
@@ -420,27 +561,58 @@ at a glance.
 
 ## Docker with AI
 
-To use AI features in Docker, pass your API key as an environment variable:
+Two images are published. Which one you need depends on the transport.
+
+| Image                          | Contains                                                                                          | Use when                                               |
+| ------------------------------ | ------------------------------------------------------------------------------------------------- | ------------------------------------------------------ |
+| `ghcr.io/lgtm-hq/py-lintro`    | The lint toolchain. Lean; **no** provider SDKs, **no** agent CLIs.                                | Linting only, or AI off.                               |
+| `ghcr.io/lgtm-hq/py-lintro-ai` | Everything above **plus** the `ai` extra and the baked `claude`, `codex` and Cursor `agent` CLIs. | `--transport api` or `--transport cli` in a container. |
+
+Both carry the same tag scheme (`latest`, `0.94`, `0.94.2`, `sha-<commit>`) and are
+cosign-signed. The `ai` variant is a strict superset built `FROM` the base image's
+`full` stage, so nothing is lost by using it — it is simply larger, which is why the
+lint image stays free of it.
+
+To use AI features, pass your API key as an environment variable:
 
 ```bash
-# Docker with AI features (Anthropic)
+# API transport (Anthropic)
 docker run --rm \
   -e ANTHROPIC_API_KEY=$ANTHROPIC_API_KEY \
   -v $(pwd):/code \
-  ghcr.io/lgtm-hq/py-lintro:latest check .
+  ghcr.io/lgtm-hq/py-lintro-ai:latest check .
 
-# Docker with AI features (OpenAI)
+# API transport (OpenAI)
 docker run --rm \
   -e OPENAI_API_KEY=$OPENAI_API_KEY \
   -v $(pwd):/code \
-  ghcr.io/lgtm-hq/py-lintro:latest check .
+  ghcr.io/lgtm-hq/py-lintro-ai:latest check .
+
+# CLI transport — the agent binaries are already on PATH in this image.
+# The credential is still required (see "Transport authentication" above).
+docker run --rm \
+  -e ANTHROPIC_API_KEY=$ANTHROPIC_API_KEY \
+  -v $(pwd):/code \
+  ghcr.io/lgtm-hq/py-lintro-ai:latest check . --transport cli
 ```
 
-The Docker image includes the AI extras when built with `WITH_AI=true`:
+The agent CLIs live in `/opt/ai-tools`, installed from the digest-pinned
+`ghcr.io/lgtm-hq/lintro-ai-tools` base image and refreshed weekly. Only
+`/opt/ai-tools/bin` goes on `PATH`, so the lint toolchain's own runtimes are untouched.
+Because the bundled CLIs are rebuilt on a weekly cadence while the vendors release far
+more often, the capability guard above is what absorbs the lag.
+
+Building locally, the base image adds the AI _extras_ (SDKs, not CLIs) with
+`WITH_AI=true`, and the full `ai` variant is its own build target:
 
 ```bash
-docker build --build-arg WITH_AI=true -t lintro-ai .
+docker build --build-arg WITH_AI=true -t lintro-ai .   # API transport only
+docker build --target ai -t lintro-ai-full .           # + baked agent CLIs
 ```
+
+Outside Docker, the agent CLIs are bring-your-own: install them yourself (pip, Homebrew,
+npm, the vendor installer) and keep them at or above the
+[compatibility floors](#cli-compatibility-floors).
 
 ## Troubleshooting
 
@@ -469,7 +641,8 @@ export OPENAI_API_KEY=sk-...
 
 **Unknown provider:**
 
-Only `anthropic` and `openai` are supported. Check your `ai.provider` value.
+Only `anthropic`, `openai` and `cursor` are supported (`cursor` is CLI-transport only).
+Check your `ai.provider` value.
 
 ### Rate Limits
 
