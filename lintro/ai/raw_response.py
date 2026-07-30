@@ -14,6 +14,8 @@ produced is ever unrecoverable.
 from __future__ import annotations
 
 import hashlib
+import os
+import re
 import tempfile
 import time
 from pathlib import Path
@@ -26,6 +28,7 @@ __all__ = [
     "describe_raw_response",
     "persist_raw_response",
     "recover_prose_envelope",
+    "sanitize_for_display",
 ]
 
 #: Workspace-relative directory holding captured raw responses.
@@ -33,6 +36,36 @@ RAW_RESPONSE_DIR = ".lintro-cache/ai/raw-responses"
 
 #: Stage label for a CLI envelope that did not parse as JSON.
 CLI_ENVELOPE_STAGE = "cli-envelope"
+
+#: Directory mode for capture directories (owner-only: captures can embed diff
+#: context and other repository content).
+_DIR_MODE = 0o700
+
+#: File mode for captured responses.
+_FILE_MODE = 0o600
+
+# ANSI/OSC escape sequences and other C0 control characters (tab and newline
+# excluded). A model answer is untrusted text that lands in an error message
+# printed to a terminal, so escape sequences are neutralised for display. The
+# capture file keeps the bytes exactly as received.
+_ESCAPE_SEQUENCE_RE = re.compile(
+    r"\x1b\[[0-9;?]*[ -/]*[@-~]|\x1b][^\x07\x1b]*(?:\x07|\x1b\\)",
+)
+_CONTROL_CHAR_RE = re.compile(r"[\x00-\x08\x0b-\x1f\x7f]")
+
+
+def sanitize_for_display(*, text: str) -> str:
+    """Return *text* with terminal escape sequences neutralised.
+
+    Args:
+        text: Untrusted model output destined for a terminal.
+
+    Returns:
+        The text with ANSI/OSC sequences and stray control characters replaced
+        by visible placeholders. Tabs and newlines are preserved.
+    """
+    stripped = _ESCAPE_SEQUENCE_RE.sub("", text)
+    return _CONTROL_CHAR_RE.sub("?", stripped)
 
 
 def _slug(*, label: str) -> str:
@@ -45,7 +78,8 @@ def _slug(*, label: str) -> str:
         A lowercase slug containing only ``[a-z0-9-]``, never empty.
     """
     cleaned = "".join(
-        char if char.isalnum() else "-" for char in (label or "").strip().lower()
+        char if char.isascii() and char.isalnum() else "-"
+        for char in (label or "").strip().lower()
     ).strip("-")
     return cleaned or "unknown"
 
@@ -98,9 +132,17 @@ def persist_raw_response(
     )
     for directory in _candidate_dirs(workspace_root=workspace_root):
         try:
-            directory.mkdir(parents=True, exist_ok=True)
+            directory.mkdir(parents=True, exist_ok=True, mode=_DIR_MODE)
             target = directory / name
-            target.write_text(raw, encoding="utf-8")
+            # Captures can embed diff context, so they are created owner-only
+            # rather than at the process umask.
+            descriptor = os.open(
+                target,
+                os.O_WRONLY | os.O_CREAT | os.O_TRUNC,
+                _FILE_MODE,
+            )
+            with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
+                handle.write(raw)
         except OSError:
             continue
         return target
@@ -127,7 +169,9 @@ def describe_raw_response(
         workspace_root: Workspace root for the capture directory.
 
     Returns:
-        A multi-line evidence block. Never truncates *raw*.
+        A multi-line evidence block. Never truncates *raw*; terminal escape
+        sequences are neutralised for display only, and the capture file keeps
+        the original bytes.
     """
     path = persist_raw_response(
         provider=provider,
@@ -138,7 +182,10 @@ def describe_raw_response(
     header = f"Full raw output ({len(raw)} chars)"
     if path is not None:
         header = f"{header} saved to {path}"
-    return f"{header}:\n----- raw output start -----\n{raw}\n----- raw output end -----"
+    body = sanitize_for_display(text=raw)
+    return (
+        f"{header}:\n----- raw output start -----\n{body}\n----- raw output end -----"
+    )
 
 
 def recover_prose_envelope(*, provider: str, stdout: str, reason: str) -> str | None:

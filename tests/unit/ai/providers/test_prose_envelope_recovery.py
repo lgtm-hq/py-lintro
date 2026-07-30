@@ -8,6 +8,7 @@ genuinely unrecoverable output is reported in full and written to disk.
 
 from __future__ import annotations
 
+import json
 import subprocess  # nosec B404 - subprocess types drive the CLI doubles under test
 from collections.abc import Iterator
 from pathlib import Path
@@ -19,6 +20,7 @@ from assertpy import assert_that
 from lintro.ai.enums import AITransport, CliBareMode
 from lintro.ai.exceptions import AIProviderError
 from lintro.ai.providers.anthropic import AnthropicProvider
+from lintro.ai.providers.base import BaseAIProvider
 from lintro.ai.providers.cursor import CursorProvider
 from lintro.ai.providers.openai import OpenAIProvider
 from lintro.ai.raw_response import RAW_RESPONSE_DIR
@@ -77,7 +79,7 @@ def _completed(stdout: str) -> subprocess.CompletedProcess[str]:
     return subprocess.CompletedProcess(args=[], returncode=0, stdout=stdout, stderr="")
 
 
-def _providers() -> dict[str, object]:
+def _providers() -> dict[str, BaseAIProvider]:
     """Return one CLI-transport provider per implementation.
 
     Returns:
@@ -160,16 +162,22 @@ async def test_prose_with_an_inline_json_span_is_not_reduced_to_it(
     assert_that(response.content).is_equal_to(prose.strip())
 
 
-@pytest.mark.parametrize("name", ["anthropic", "cursor", "openai"])
-async def test_error_evidence_is_never_truncated_to_500_chars(
+@pytest.mark.parametrize("name", ["anthropic", "cursor"])
+async def test_error_envelope_evidence_is_never_truncated_to_500_chars(
     name: str,
     _binaries_on_path: None,
 ) -> None:
-    """The historical ``stdout[:500]`` cap is gone from every provider."""
+    """The historical ``stdout[:500]`` cap is gone from the error path too."""
     provider = _providers()[name]
+    # An ``is_error`` envelope with no ``result`` used to fall back to
+    # ``stdout[:500]``; the whole envelope must now reach the user.
+    envelope = json.dumps({"is_error": True, "result": "", "note": _PROSE})
+    tail = _PROSE[-40:]
 
     with patch_cli_exec() as mock_run:
-        mock_run.return_value = _completed(_PROSE)
-        response = await provider.complete("Review this")
+        mock_run.return_value = _completed(envelope)
+        with pytest.raises(AIProviderError) as excinfo:
+            await provider.complete("Review this")
 
-    assert_that(len(response.content)).is_greater_than(500)
+    assert_that(len(envelope)).is_greater_than(500)
+    assert_that(str(excinfo.value)).contains(tail)

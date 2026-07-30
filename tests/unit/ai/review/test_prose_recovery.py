@@ -17,11 +17,12 @@ from assertpy import assert_that
 
 from lintro.ai.config import AIConfig
 from lintro.ai.enums import AITransport
-from lintro.ai.exceptions import AIProviderError
+from lintro.ai.exceptions import AICostBudgetExceededError, AIProviderError
 from lintro.ai.providers.capabilities import ProviderCapabilities
 from lintro.ai.providers.response import AIResponse
 from lintro.ai.review.models.changed_file import ChangedFile
 from lintro.ai.review.models.review_context import ReviewContext
+from lintro.ai.review.models.review_result import ReviewResult
 from lintro.ai.review.orchestrator import run_review
 from lintro.ai.review.response_recovery import (
     SCHEMA_RETRY_MIN_TIMEOUT,
@@ -99,7 +100,11 @@ def _context() -> ReviewContext:
     )
 
 
-def _run(*, responses: list[AIResponse], api_timeout: float = 900.0):  # noqa: ANN202
+def _run(
+    *,
+    responses: list[AIResponse],
+    api_timeout: float = 900.0,
+) -> tuple[ReviewResult, list[dict[str, object]]]:
     """Run a single-chunk review against a scripted sequence of responses.
 
     Args:
@@ -234,7 +239,7 @@ def test_short_timeout_budget_skips_the_retry() -> None:
 
 def test_failed_retry_still_recovers_the_original_answer() -> None:
     """A retry that errors is never worse than not retrying at all."""
-    queue: list[object] = [
+    queue: list[AIResponse | Exception] = [
         _response(_PROSE),
         AIProviderError("provider exploded"),
     ]
@@ -265,6 +270,40 @@ def test_failed_retry_still_recovers_the_original_answer() -> None:
     assert_that(calls).is_length(2)
     assert_that(result.findings[0].category).is_equal_to(UNSTRUCTURED_CATEGORY)
     assert_that(result.findings[0].description).is_equal_to(_PROSE.strip())
+
+
+def test_cost_cap_on_the_retry_is_not_swallowed() -> None:
+    """The budget stop must propagate, not be recovered as prose."""
+    queue: list[AIResponse | Exception] = [
+        _response(_PROSE),
+        AICostBudgetExceededError("cost cap reached"),
+    ]
+
+    async def _call_ai(**_kwargs: object) -> AIResponse:
+        item = queue.pop(0)
+        if isinstance(item, Exception):
+            raise item
+        return item
+
+    with patch("lintro.ai.review.orchestrator.call_ai", side_effect=_call_ai):
+        result = run_review(
+            _context(),
+            provider=_provider(),
+            ai_config=AIConfig(
+                enabled=True,
+                transport=AITransport.API,
+                api_timeout=900.0,
+            ),
+            depth=1,
+            checklist_items=[],
+            checklist_text="1. [logic-bug] Example?",
+            classifications=[],
+        )
+
+    # The orchestrator finalizes a partial review on the cost cap rather than
+    # continuing; the prose fallback must not have masked the stop.
+    assert_that(result.metadata.partial).is_true()
+    assert_that(result.metadata.stopped_reason).is_not_empty()
 
 
 def test_retry_usage_is_charged_to_the_chunk() -> None:

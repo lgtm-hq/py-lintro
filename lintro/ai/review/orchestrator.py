@@ -1275,6 +1275,11 @@ async def _parse_review_payload_with_recovery(
     Returns:
         The response whose usage should be attributed to the chunk (the retry's
         usage folded in when a retry ran) and the parsed review payload.
+
+    Raises:
+        AICostBudgetExceededError: When the schema-reminder retry hits the cost
+            ceiling. That is a graceful stop the caller finalizes a partial
+            review on, so it is never recovered as prose.
     """
     try:
         return response, parse_review_response(content=response.content)
@@ -1317,6 +1322,11 @@ async def _parse_review_payload_with_recovery(
             cli_schema=cli_schema_for_review(transport=ai_config.transport),
             timeout=retry_timeout,
         )
+    except AICostBudgetExceededError:
+        # The cost cap is a graceful stop the caller finalizes a partial review
+        # on, not a provider failure: swallowing it here would let the run keep
+        # spending past the ceiling.
+        raise
     except AIError as retry_exc:
         # The reminder is best-effort: a failed retry must never be worse than
         # not retrying, so the original answer is still recovered.
