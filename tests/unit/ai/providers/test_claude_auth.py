@@ -12,6 +12,7 @@ import pytest
 from assertpy import assert_that
 
 from lintro.ai.enums import AITransport, CliBareMode
+from lintro.ai.providers import claude_auth
 from lintro.ai.providers.anthropic import AnthropicProvider
 from lintro.ai.providers.claude_auth import (
     BARE_MODE_ENV,
@@ -43,6 +44,13 @@ def isolated_auth_env(
     config_dir = tmp_path / "claude-config"
     config_dir.mkdir()
     monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(config_dir))
+    # A real machine-level managed settings file would otherwise leak into
+    # every "no credential" assertion.
+    monkeypatch.setattr(
+        claude_auth,
+        "_managed_settings_path",
+        lambda: tmp_path / "managed-settings.json",
+    )
     workdir = tmp_path / "repo"
     workdir.mkdir()
     yield workdir
@@ -136,6 +144,43 @@ class TestClaudeApiKeyAvailable:
     ) -> None:
         """Treat a blank apiKeyHelper as absent."""
         _write_settings(isolated_auth_env, {"apiKeyHelper": "  "})
+        assert_that(
+            claude_api_key_available(cwd=str(isolated_auth_env)),
+        ).is_false()
+
+    def test_true_when_managed_settings_declare_helper(
+        self,
+        isolated_auth_env: Path,
+    ) -> None:
+        """Report an API key from the enterprise-managed settings file."""
+        managed = isolated_auth_env.parent / "managed-settings.json"
+        managed.write_text(
+            json.dumps({"apiKeyHelper": "/bin/echo key"}),
+            encoding="utf-8",
+        )
+        assert_that(
+            claude_api_key_available(cwd=str(isolated_auth_env)),
+        ).is_true()
+
+    def test_oversized_settings_are_ignored(
+        self,
+        isolated_auth_env: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Refuse to read a settings file far larger than a settings file."""
+        monkeypatch.setattr(claude_auth, "_MAX_SETTINGS_BYTES", 16)
+        _write_settings(isolated_auth_env, {"apiKeyHelper": "/bin/echo key"})
+        assert_that(
+            claude_api_key_available(cwd=str(isolated_auth_env)),
+        ).is_false()
+
+    def test_non_regular_settings_path_is_ignored(
+        self,
+        isolated_auth_env: Path,
+    ) -> None:
+        """Refuse a directory sitting where a settings file should be."""
+        (isolated_auth_env / ".claude").mkdir()
+        (isolated_auth_env / ".claude" / "settings.json").mkdir()
         assert_that(
             claude_api_key_available(cwd=str(isolated_auth_env)),
         ).is_false()

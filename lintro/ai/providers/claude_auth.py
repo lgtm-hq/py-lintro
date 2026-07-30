@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import json
 import os
+import sys
 from pathlib import Path
 
 from loguru import logger
@@ -62,13 +63,35 @@ _BOOLEAN_ALIASES: dict[str, CliBareMode] = {
 }
 
 
+#: Upper bound on settings-file bytes read. A Claude settings file is a few
+#: hundred bytes; the cap keeps a pathological or hostile file at one of these
+#: well-known paths from being slurped into memory on every provider call.
+_MAX_SETTINGS_BYTES = 256 * 1024
+
+
+def _managed_settings_path() -> Path | None:
+    """Return the platform's enterprise-managed Claude settings file.
+
+    Returns:
+        The managed settings path for this platform, or ``None`` when the
+        platform has no documented location.
+    """
+    if sys.platform == "darwin":
+        return Path("/Library/Application Support/ClaudeCode/managed-settings.json")
+    if sys.platform == "win32":
+        return Path("C:/ProgramData/ClaudeCode/managed-settings.json")
+    if sys.platform.startswith("linux"):
+        return Path("/etc/claude-code/managed-settings.json")
+    return None
+
+
 def _settings_candidates(*, cwd: str | None) -> tuple[Path, ...]:
     """Return the Claude Code settings files that may declare ``apiKeyHelper``.
 
     Mirrors Claude Code's own settings hierarchy closely enough for a
-    presence check: the user-level file (relocatable via
-    ``CLAUDE_CONFIG_DIR``) plus the project-level files under the working
-    directory the CLI is spawned in.
+    presence check: the enterprise-managed file, the user-level file
+    (relocatable via ``CLAUDE_CONFIG_DIR``), and the project-level files under
+    the working directory the CLI is spawned in.
 
     Args:
         cwd: Working directory the CLI subprocess runs in, or ``None`` for the
@@ -81,11 +104,38 @@ def _settings_candidates(*, cwd: str | None) -> tuple[Path, ...]:
     config_dir = os.environ.get("CLAUDE_CONFIG_DIR", "").strip()
     user_dir = Path(config_dir) if config_dir else Path.home() / ".claude"
     project_dir = Path(cwd) if cwd else Path.cwd()
+    managed = _managed_settings_path()
     return (
+        *((managed,) if managed is not None else ()),
         user_dir / "settings.json",
         project_dir / ".claude" / "settings.json",
         project_dir / ".claude" / "settings.local.json",
     )
+
+
+def _read_settings(path: Path) -> str | None:
+    """Read a candidate settings file, refusing anything that is not one.
+
+    Args:
+        path: Candidate settings file.
+
+    Returns:
+        The file's text, or ``None`` when *path* is not a regular file, is
+        unreadable, or is larger than a settings file plausibly is. Refusing
+        non-regular files matters: a FIFO left at one of these well-known paths
+        would otherwise block every provider call forever.
+    """
+    try:
+        if not path.is_file():
+            return None
+        with path.open(encoding="utf-8") as handle:
+            raw = handle.read(_MAX_SETTINGS_BYTES + 1)
+    except (OSError, ValueError):
+        return None
+    if len(raw) > _MAX_SETTINGS_BYTES:
+        logger.debug(f"Ignoring oversized Claude settings file: {path}")
+        return None
+    return raw
 
 
 def _declares_api_key_helper(path: Path) -> bool:
@@ -100,13 +150,12 @@ def _declares_api_key_helper(path: Path) -> bool:
         "no helper" rather than as an error: settings files are outside
         lintro's control and a broken one must not fail a review.
     """
-    try:
-        raw = path.read_text(encoding="utf-8")
-    except (OSError, ValueError):
+    raw = _read_settings(path)
+    if raw is None:
         return False
     try:
         data = json.loads(raw)
-    except json.JSONDecodeError:
+    except (json.JSONDecodeError, RecursionError):
         logger.debug(f"Ignoring unparseable Claude settings file: {path}")
         return False
     if not isinstance(data, dict):
