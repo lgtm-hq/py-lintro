@@ -136,6 +136,12 @@ class OxfmtPlugin(BaseToolPlugin):
             initial_count: Optional count of initial issues.
             cwd: Working directory for the tool result.
 
+        Follows the shared timeout accounting model (see
+        :mod:`lintro.tools.core.timeout_utils`): the timeout is reported via
+        ``timed_out=True`` and ``success=False`` rather than as a synthetic
+        ``TIMEOUT`` pseudo-issue, so it never inflates the issue counts. Only
+        genuine issues detected before the timeout are reported.
+
         Returns:
             ToolResult: ToolResult instance representing timeout failure.
         """
@@ -145,14 +151,7 @@ class OxfmtPlugin(BaseToolPlugin):
             "  - Large codebase taking too long to process\n"
             "  - Need to increase timeout via --tool-options oxfmt:timeout=N"
         )
-        timeout_issue = OxfmtIssue(
-            file="execution",
-            line=1,
-            code="TIMEOUT",
-            message=timeout_msg,
-            column=1,
-        )
-        combined_issues = (initial_issues or []) + [timeout_issue]
+        combined_issues = list(initial_issues or [])
         combined_count = len(combined_issues)
         return ToolResult(
             name=self.definition.name,
@@ -164,6 +163,7 @@ class OxfmtPlugin(BaseToolPlugin):
             fixed_issues_count=0,
             remaining_issues_count=combined_count,
             cwd=cwd,
+            timed_out=True,
         )
 
     def _build_oxfmt_args(self, options: dict[str, object]) -> list[str]:

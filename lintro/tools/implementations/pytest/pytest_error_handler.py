@@ -67,7 +67,10 @@ class PytestErrorHandler:
             success=False,
             issues=[],
             output=error_msg,
-            issues_count=max(initial_count, 1),  # Count timeout as execution failure
+            # A timeout is an execution failure, not a finding: only genuine
+            # pre-timeout issues are counted (see timeout_utils' model).
+            issues_count=initial_count,
+            timed_out=True,
         )
 
     def handle_execution_error(
@@ -124,5 +127,6 @@ class PytestErrorHandler:
             success=False,
             issues=[],
             output=error_msg,
-            issues_count=1 if isinstance(error, subprocess.TimeoutExpired) else 0,
+            issues_count=0,
+            timed_out=isinstance(error, subprocess.TimeoutExpired),
         )

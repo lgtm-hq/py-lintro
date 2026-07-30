@@ -56,6 +56,7 @@ def sample_results() -> list[ToolResult]:
     mock_issue.file = "test.py"
     mock_issue.line = 10
     mock_issue.code = "E001"
+    mock_issue.get_code.return_value = "E001"
     mock_issue.message = "Test error message"
     mock_issue.doc_url = ""
 
@@ -270,6 +271,7 @@ def test_json_with_issues_details(tmp_path: Path) -> None:
     mock_issue.file = "error.py"
     mock_issue.line = 42
     mock_issue.code = "W999"
+    mock_issue.get_code.return_value = "W999"
     mock_issue.message = "Warning message"
     mock_issue.doc_url = ""
 
@@ -311,6 +313,7 @@ def test_doc_url_rendered_in_json_markdown_html(tmp_path: Path) -> None:
     mock_issue.file = "foo.py"
     mock_issue.line = 7
     mock_issue.code = "E501"
+    mock_issue.get_code.return_value = "E501"
     mock_issue.message = "Line too long"
     mock_issue.doc_url = doc_link
 
@@ -372,6 +375,7 @@ def test_empty_doc_url_omitted_from_json(tmp_path: Path) -> None:
     mock_issue.file = "bar.py"
     mock_issue.line = 10
     mock_issue.code = "W001"
+    mock_issue.get_code.return_value = "W001"
     mock_issue.message = "Some warning"
     mock_issue.doc_url = ""
 
@@ -407,6 +411,7 @@ def test_html_escapes_special_characters(tmp_path: Path) -> None:
     mock_issue.file = "test.py"
     mock_issue.line = 1
     mock_issue.code = "E001"
+    mock_issue.get_code.return_value = "E001"
     mock_issue.message = "<script>alert('xss')</script>"
     mock_issue.doc_url = ""
 
@@ -444,6 +449,7 @@ def test_markdown_escapes_pipe_characters(tmp_path: Path) -> None:
     mock_issue.file = "test|file.py"
     mock_issue.line = 1
     mock_issue.code = "E|001"
+    mock_issue.get_code.return_value = "E|001"
     mock_issue.message = "Message with | pipe"
     mock_issue.doc_url = ""
 
@@ -507,6 +513,7 @@ def test_doc_url_rendered_in_csv(tmp_path: Path) -> None:
     mock_issue.file = "foo.py"
     mock_issue.line = 7
     mock_issue.code = "E501"
+    mock_issue.get_code.return_value = "E501"
     mock_issue.message = "Line too long"
     mock_issue.doc_url = doc_link
 
@@ -542,6 +549,7 @@ def test_empty_doc_url_is_empty_string_in_csv(tmp_path: Path) -> None:
     mock_issue.file = "bar.py"
     mock_issue.line = 10
     mock_issue.code = "W001"
+    mock_issue.get_code.return_value = "W001"
     mock_issue.message = "Some warning"
     mock_issue.doc_url = ""
 

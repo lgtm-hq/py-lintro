@@ -1,0 +1,57 @@
+# Single source of truth for the harden-runner egress allowlist used by the
+# docker-base / docker-full / docker-ai jobs in
+# .github/workflows/docker-build-publish.yml (#1821).
+#
+# The lgtm-ci reusable-docker workflow passes `allowed-endpoints` verbatim to
+# step-security/harden-runner under v0.50.0+ replace semantics, so this list
+# must include the docker preset baseline itself, not just the extras. The
+# sigstore hosts cover cosign keyless signing in the merge job.
+#
+# Format: one `host:port` per line. Blank lines and `#` comments are ignored.
+# Read by scripts/ci/resolve-allowed-endpoints.sh, which flattens it into the
+# single space-separated string harden-runner expects.
+
+# GitHub
+github.com:443
+api.github.com:443
+codeload.github.com:443
+objects.githubusercontent.com:443
+raw.githubusercontent.com:443
+release-assets.githubusercontent.com:443
+github-releases.githubusercontent.com:443
+pipelines.actions.githubusercontent.com:443
+
+# Container registries (docker preset baseline)
+ghcr.io:443
+pkg-containers.githubusercontent.com:443
+docker.io:443
+registry-1.docker.io:443
+auth.docker.io:443
+production.cloudflare.docker.com:443
+production.cloudfront.docker.com:443
+
+# Image build: OS, Python, Rust, JS toolchains
+deb.debian.org:80
+pypi.org:443
+files.pythonhosted.org:443
+static.rust-lang.org:443
+bun.sh:443
+astral.sh:443
+releases.astral.sh:443
+sh.rustup.rs:443
+registry.npmjs.org:443
+crates.io:443
+static.crates.io:443
+index.crates.io:443
+
+# Wrapped tools that self-register during install
+semgrep.dev:443
+metrics.semgrep.dev:443
+
+# Cosign keyless signing (merge job)
+token.actions.githubusercontent.com:443
+fulcio.sigstore.dev:443
+rekor.sigstore.dev:443
+tuf-repo-cdn.sigstore.dev:443
+timestamp.sigstore.dev:443
+oauth2.sigstore.dev:443

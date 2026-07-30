@@ -130,6 +130,49 @@ def test_count_affected_files_empty_file_paths_excluded(
     assert_that(count_affected_files(results)).is_equal_to(1)
 
 
+def test_count_affected_files_counts_fixed_files_from_initial_issues(
+    fake_tool_result_factory: Callable[..., FakeToolResult],
+    fake_issue_factory: Callable[..., FakeIssue],
+) -> None:
+    """Files fixed clean (no remaining issues) are still counted as affected.
+
+    Regression test for #1423: a formatter that reformats a file leaves no
+    remaining ``issues`` but records the file under ``initial_issues``. The
+    Totals "Affected Files" count must reflect that file rather than reporting
+    0.
+
+    Args:
+        fake_tool_result_factory: Factory for creating FakeToolResult instances.
+        fake_issue_factory: Factory for creating FakeIssue instances.
+    """
+    results = [
+        fake_tool_result_factory(
+            issues=[],
+            initial_issues=[fake_issue_factory(file="src/reformatted.py")],
+        ),
+    ]
+    assert_that(count_affected_files(results)).is_equal_to(1)
+
+
+def test_count_affected_files_unions_initial_and_remaining(
+    fake_tool_result_factory: Callable[..., FakeToolResult],
+    fake_issue_factory: Callable[..., FakeIssue],
+) -> None:
+    """Affected files union pre-fix detected and post-fix remaining files.
+
+    Args:
+        fake_tool_result_factory: Factory for creating FakeToolResult instances.
+        fake_issue_factory: Factory for creating FakeIssue instances.
+    """
+    results = [
+        fake_tool_result_factory(
+            issues=[fake_issue_factory(file="src/remaining.py")],
+            initial_issues=[fake_issue_factory(file="src/fixed.py")],
+        ),
+    ]
+    assert_that(count_affected_files(results)).is_equal_to(2)
+
+
 def test_count_affected_files_path_objects_deduplicated(
     fake_tool_result_factory: Callable[..., FakeToolResult],
     fake_issue_factory: Callable[..., FakeIssue],

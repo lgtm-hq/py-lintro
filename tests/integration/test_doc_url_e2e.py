@@ -251,7 +251,7 @@ def test_cargo_audit_advisory_url() -> None:
 def test_sarif_includes_help_uri() -> None:
     """SARIF rule descriptors include helpUri from doc_urls map."""
     from lintro.ai.models import AIFixSuggestion
-    from lintro.ai.output.sarif import to_sarif
+    from lintro.utils.output.sarif import to_sarif
 
     suggestion = AIFixSuggestion(
         file="src/main.py",
@@ -263,7 +263,7 @@ def test_sarif_includes_help_uri() -> None:
     )
 
     doc_urls = {"E501": "https://docs.astral.sh/ruff/rules/line-too-long/"}
-    sarif = to_sarif([suggestion], doc_urls=doc_urls)
+    sarif = to_sarif(ai_suggestions=[suggestion], doc_urls=doc_urls)
 
     rules = sarif["runs"][0]["tool"]["driver"]["rules"]
     assert_that(rules).is_length(1)
@@ -275,7 +275,7 @@ def test_sarif_includes_help_uri() -> None:
 def test_sarif_omits_help_uri_when_no_doc_urls() -> None:
     """SARIF rule descriptors omit helpUri when no doc_urls provided."""
     from lintro.ai.models import AIFixSuggestion
-    from lintro.ai.output.sarif import to_sarif
+    from lintro.utils.output.sarif import to_sarif
 
     suggestion = AIFixSuggestion(
         file="src/main.py",
@@ -286,7 +286,7 @@ def test_sarif_omits_help_uri_when_no_doc_urls() -> None:
         suggested_code="x = 1",
     )
 
-    sarif = to_sarif([suggestion])
+    sarif = to_sarif(ai_suggestions=[suggestion])
 
     rules = sarif["runs"][0]["tool"]["driver"]["rules"]
     assert_that(rules[0]).does_not_contain_key("helpUri")

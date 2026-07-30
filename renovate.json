@@ -8,6 +8,11 @@
   ],
   "packageRules": [
     {
+      "description": "test_samples are fixed tool-test inputs; never update them",
+      "matchFileNames": ["test_samples/**"],
+      "enabled": false
+    },
+    {
       "description": "Hold prettier 3.9.5+ until Docker integration prettier fixtures are updated",
       "matchPackageNames": ["prettier"],
       "allowedVersions": "<=3.9.4"
@@ -69,6 +74,7 @@
         "markdownlint-cli2",
         "@commitlint/cli",
         "@commitlint/config-conventional",
+        "html-validate",
         "oxlint",
         "oxfmt",
         "stylelint",
@@ -80,6 +86,8 @@
         "mvdan/sh",
         "taplo",
         "tamasfe/taplo",
+        "trufflehog",
+        "trufflesecurity/trufflehog",
         "vale",
         "errata-ai/vale",
         "astro",
@@ -102,6 +110,30 @@
         "ghcr.io/lgtm-hq/lintro-tools"
       ],
       "matchUpdateTypes": ["digest"],
+      "automerge": false
+    },
+    {
+      "description": "lintro-ai-tools base image digest pin (FROM in the Dockerfile 'aitools' stage); full CI validates the bump",
+      "matchDatasources": ["docker"],
+      "matchPackageNames": [
+        "ghcr.io/lgtm-hq/lintro-ai-tools"
+      ],
+      "matchUpdateTypes": ["digest"],
+      "automerge": false
+    },
+    {
+      "description": "Agent CLIs release close to daily; batch them into one weekly PR — the hybrid capability guard (#1612) tolerates the lag",
+      "groupName": "ai agent CLIs",
+      "groupSlug": "ai-agent-clis",
+      "matchFileNames": [
+        "docker/ai-tools.Dockerfile"
+      ],
+      "matchPackageNames": [
+        "@anthropic-ai/claude-code",
+        "@openai/codex",
+        "node"
+      ],
+      "schedule": ["before 5am on monday"],
       "automerge": false
     },
     {
@@ -193,6 +225,66 @@
       "packageNameTemplate": "astral-sh/uv"
     },
     {
+      "description": "Exact uv pin for setup-uv in the binary build workflow (avoids the astral-sh/versions manifest fetch); must track the Dockerfile ARG UV_VERSION",
+      "customType": "regex",
+      "managerFilePatterns": [
+        ".github/workflows/build-binary.yml"
+      ],
+      "matchStrings": [
+        "UV_VERSION: '(?<currentValue>[0-9]+\\.[0-9]+\\.[0-9]+)'"
+      ],
+      "datasourceTemplate": "github-releases",
+      "packageNameTemplate": "astral-sh/uv"
+    },
+    {
+      "description": "Bundled Node.js runtime in the lintro-ai-tools image; the agent CLIs are Node apps and the lint image aliases node to bun (checksum fetched at build time, so only the version pins here)",
+      "customType": "regex",
+      "managerFilePatterns": [
+        "docker/ai-tools.Dockerfile"
+      ],
+      "matchStrings": [
+        "ARG NODE_VERSION=(?<currentValue>[0-9]+\\.[0-9]+\\.[0-9]+)"
+      ],
+      "datasourceTemplate": "node-version",
+      "depNameTemplate": "node"
+    },
+    {
+      "description": "Claude Code CLI baked into the lintro-ai-tools image (no CURSOR_AGENT_VERSION equivalent: Cursor publishes no registry or release feed for the agent CLI, so that ARG is hand-bumped)",
+      "customType": "regex",
+      "managerFilePatterns": [
+        "docker/ai-tools.Dockerfile"
+      ],
+      "matchStrings": [
+        "ARG CLAUDE_CODE_VERSION=(?<currentValue>[0-9]+\\.[0-9]+\\.[0-9]+)"
+      ],
+      "datasourceTemplate": "npm",
+      "depNameTemplate": "@anthropic-ai/claude-code"
+    },
+    {
+      "description": "Codex CLI baked into the lintro-ai-tools image",
+      "customType": "regex",
+      "managerFilePatterns": [
+        "docker/ai-tools.Dockerfile"
+      ],
+      "matchStrings": [
+        "ARG CODEX_VERSION=(?<currentValue>[0-9]+\\.[0-9]+\\.[0-9]+)"
+      ],
+      "datasourceTemplate": "npm",
+      "depNameTemplate": "@openai/codex"
+    },
+    {
+      "description": "Bundled Go toolchain in the lintro-tools image (checksum fetched at build time, so only the version pins here)",
+      "customType": "regex",
+      "managerFilePatterns": [
+        "docker/tools.Dockerfile"
+      ],
+      "matchStrings": [
+        "ARG GO_VERSION=(?<currentValue>[0-9]+\\.[0-9]+\\.[0-9]+)"
+      ],
+      "datasourceTemplate": "golang-version",
+      "packageNameTemplate": "golang"
+    },
+    {
       "customType": "regex",
       "managerFilePatterns": [
         "/^\\.github/workflows/sbom-on-main\\.yml$/"
@@ -241,6 +333,19 @@
       ],
       "datasourceTemplate": "github-releases",
       "packageNameTemplate": "gitleaks/gitleaks",
+      "extractVersionTemplate": "^v(?<version>.*)$"
+    },
+    {
+      "description": "Update golangci-lint in _tool_versions.py (manifest follows via generator)",
+      "customType": "regex",
+      "managerFilePatterns": [
+        "lintro/_tool_versions\\.py"
+      ],
+      "matchStrings": [
+        "ToolName\\.GOLANGCI_LINT:\\s*\"(?<currentValue>[0-9]+\\.[0-9]+\\.[0-9]+)\""
+      ],
+      "datasourceTemplate": "github-releases",
+      "packageNameTemplate": "golangci/golangci-lint",
       "extractVersionTemplate": "^v(?<version>.*)$"
     },
     {
@@ -307,6 +412,19 @@
       "datasourceTemplate": "github-releases",
       "packageNameTemplate": "tamasfe/taplo",
       "extractVersionTemplate": "^(?<version>[0-9]+\\.[0-9]+\\.[0-9]+)$"
+    },
+    {
+      "description": "Update trufflehog version in _tool_versions.py (manifest follows via generator)",
+      "customType": "regex",
+      "managerFilePatterns": [
+        "lintro/_tool_versions\\.py"
+      ],
+      "matchStrings": [
+        "ToolName\\.TRUFFLEHOG:\\s*\"(?<currentValue>[0-9]+\\.[0-9]+\\.[0-9]+)\""
+      ],
+      "datasourceTemplate": "github-releases",
+      "packageNameTemplate": "trufflesecurity/trufflehog",
+      "extractVersionTemplate": "^v(?<version>.*)$"
     },
     {
       "description": "Update vale version in _tool_versions.py",
@@ -383,6 +501,31 @@
       "datasourceTemplate": "github-tags",
       "packageNameTemplate": "rust-lang/rustfmt",
       "extractVersionTemplate": "^v(?<version>.*)$"
+    },
+    {
+      "description": "Pinned py-lintro release image (nightly dogfood + docker-ci fork fallback, #1751); all pin sites bump together",
+      "customType": "regex",
+      "managerFilePatterns": [
+        "\\.github/workflows/dogfood-nightly\\.yml",
+        "\\.github/workflows/docker-ci\\.yml"
+      ],
+      "matchStrings": [
+        "(?<depName>ghcr\\.io/lgtm-hq/py-lintro):(?<currentValue>[0-9]+\\.[0-9]+\\.[0-9]+)@(?<currentDigest>sha256:[a-f0-9]{64})"
+      ],
+      "datasourceTemplate": "docker",
+      "versioningTemplate": "semver"
+    },
+    {
+      "description": "lgtm-ci tooling checkout in site-quality.yml pins through actions/checkout `with.ref:`, a shape the github-actions manager does not see, so every lgtm-ci bump left this one site behind and failed the single-pin invariant (#1771/#1280)",
+      "customType": "regex",
+      "managerFilePatterns": [
+        "\\.github/workflows/site-quality\\.yml"
+      ],
+      "matchStrings": [
+        "ref: (?<currentDigest>[a-f0-9]{40}) # (?<currentValue>v[0-9]+\\.[0-9]+\\.[0-9]+)"
+      ],
+      "datasourceTemplate": "github-tags",
+      "depNameTemplate": "lgtm-hq/lgtm-ci"
     }
   ]
 }

@@ -7,7 +7,7 @@ Authentication errors are never retried.
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from typing import TypeVar
 
 from loguru import logger
@@ -18,14 +18,18 @@ from lintro.ai.exceptions import (
     AIRateLimitError,
 )
 from lintro.ai.json_response import CliSchemaRequest
-from lintro.ai.providers.base import AIResponse, AIStreamResult, BaseAIProvider
+from lintro.ai.providers.base import (
+    AIResponse,
+    AsyncAIStreamResult,
+    BaseAIProvider,
+)
 
 _T = TypeVar("_T")
 
 
-def _with_fallback(
+async def _with_fallback(
     provider: BaseAIProvider,
-    attempt_fn: Callable[[str, str | None, int, float, str], _T],
+    attempt_fn: Callable[[str, str | None, int, float, str], Awaitable[_T]],
     prompt: str,
     *,
     fallback_models: list[str] | None = None,
@@ -46,7 +50,7 @@ def _with_fallback(
 
     Args:
         provider: AI provider instance.
-        attempt_fn: Callable with signature
+        attempt_fn: Coroutine function with signature
             ``(prompt, system, max_tokens, timeout, model) -> T``.
         prompt: The user prompt.
         fallback_models: Ordered list of fallback model identifiers.
@@ -83,7 +87,7 @@ def _with_fallback(
                 idx + 1,
                 len(models_to_try),
             )
-            return attempt_fn(
+            return await attempt_fn(
                 prompt,
                 system,
                 max_tokens,
@@ -118,7 +122,7 @@ def _with_fallback(
     raise AIProviderError(f"{label_prefix} exhausted")
 
 
-def complete_with_fallback(
+async def complete_with_fallback(
     provider: BaseAIProvider,
     prompt: str,
     *,
@@ -154,14 +158,26 @@ def complete_with_fallback(
         The first successful ``AIResponse``.
     """
 
-    def _attempt(
+    async def _attempt(
         prompt: str,
         system: str | None,
         max_tokens: int,
         timeout: float,
         model: str,
     ) -> AIResponse:
-        return provider.complete(
+        """Call the provider once with an explicit model override.
+
+        Args:
+            prompt: The user prompt.
+            system: Optional system prompt.
+            max_tokens: Maximum tokens to generate.
+            timeout: Request timeout in seconds.
+            model: The model identifier for this attempt.
+
+        Returns:
+            The provider response.
+        """
+        return await provider.complete(
             prompt,
             system=system,
             max_tokens=max_tokens,
@@ -172,7 +188,7 @@ def complete_with_fallback(
             cli_schema=cli_schema,
         )
 
-    return _with_fallback(
+    return await _with_fallback(
         provider,
         _attempt,
         prompt,
@@ -184,7 +200,7 @@ def complete_with_fallback(
     )
 
 
-def stream_complete_with_fallback(
+async def stream_complete_with_fallback(
     provider: BaseAIProvider,
     prompt: str,
     *,
@@ -192,7 +208,7 @@ def stream_complete_with_fallback(
     system: str | None = None,
     max_tokens: int = 1024,
     timeout: float = 60.0,
-) -> AIStreamResult:
+) -> AsyncAIStreamResult:
     """Call ``provider.stream_complete()`` with automatic model fallback.
 
     Same fallback logic as ``complete_with_fallback`` but returns a
@@ -209,17 +225,29 @@ def stream_complete_with_fallback(
         timeout: Request timeout in seconds.
 
     Returns:
-        The first successful ``AIStreamResult``.
+        The first successful ``AsyncAIStreamResult``.
     """
 
-    def _attempt(
+    async def _attempt(
         prompt: str,
         system: str | None,
         max_tokens: int,
         timeout: float,
         model: str,
-    ) -> AIStreamResult:
-        return provider.stream_complete(
+    ) -> AsyncAIStreamResult:
+        """Open one stream with an explicit model override.
+
+        Args:
+            prompt: The user prompt.
+            system: Optional system prompt.
+            max_tokens: Maximum tokens to generate.
+            timeout: Request timeout in seconds.
+            model: The model identifier for this attempt.
+
+        Returns:
+            The opened stream result.
+        """
+        return await provider.stream_complete(
             prompt,
             system=system,
             max_tokens=max_tokens,
@@ -227,7 +255,7 @@ def stream_complete_with_fallback(
             model=model,
         )
 
-    return _with_fallback(
+    return await _with_fallback(
         provider,
         _attempt,
         prompt,

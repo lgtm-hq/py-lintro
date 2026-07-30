@@ -118,14 +118,23 @@ class IdiomReviewEngine:
         except OSError as exc:
             logger.debug("[idiom-review] Failed to write cache: {}", exc)
 
-    def _complete(self, *, system: str, user: str, cache_key: str) -> str:
-        """Return the model response for a prompt, using the cache if set."""
+    async def _complete(self, *, system: str, user: str, cache_key: str) -> str:
+        """Return the model response for a prompt, using the cache if set.
+
+        Args:
+            system: System prompt for the call.
+            user: User prompt for the call.
+            cache_key: Key identifying the cached response.
+
+        Returns:
+            The model response text.
+        """
         cached = self._cache_get(cache_key)
         if cached is not None:
             logger.debug("[idiom-review] Cache hit for {}", cache_key)
             return cached
 
-        response = call_ai(
+        response = await call_ai(
             provider=self.provider,
             ai_config=self.ai_config,
             user_prompt=user,
@@ -137,7 +146,7 @@ class IdiomReviewEngine:
 
     # -- Public API --------------------------------------------------------
 
-    def review_file(
+    async def review_file(
         self,
         *,
         file_path: str,
@@ -162,10 +171,10 @@ class IdiomReviewEngine:
             language=language,
         )
         key = _cache_key(f"idiom:{language}", source)
-        content = self._complete(system=system, user=user, cache_key=key)
+        content = await self._complete(system=system, user=user, cache_key=key)
         return self.parser.parse_file_review(content, file_path)
 
-    def review_duplication(
+    async def review_duplication(
         self,
         signatures: list[Signature],
     ) -> list[IdiomReviewIssue]:
@@ -182,5 +191,5 @@ class IdiomReviewEngine:
             return []
         system, user = build_duplication_prompt(signature_map)
         key = _cache_key("idiom:duplication", signature_map)
-        content = self._complete(system=system, user=user, cache_key=key)
+        content = await self._complete(system=system, user=user, cache_key=key)
         return self.parser.parse_duplication_review(content)

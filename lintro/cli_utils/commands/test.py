@@ -165,6 +165,8 @@ def test_command(
 
     This CLI command wraps pytest with lintro's output formatting.
 
+    \u000c
+
     Args:
         paths: Paths to test files or directories.
         exclude: Pattern to exclude paths.
@@ -251,6 +253,11 @@ def test_command(
         ",".join(tool_option_parts) if tool_option_parts else None
     )
 
+    from lintro.ai.interface import (
+        render_ai_status,
+        sarif_enrichment_from_results,
+    )
+
     # Run with pytest tool
     exit_code: int = run_lint_tools_simple(
         action=DEFAULT_ACTION,
@@ -264,6 +271,8 @@ def test_command(
         verbose=verbose,
         raw_output=raw_output,
         output_file=output,
+        ai_status_renderer=render_ai_status,
+        ai_sarif_enricher=sarif_enrichment_from_results,
         debug=debug,
         yes=yes,
     )

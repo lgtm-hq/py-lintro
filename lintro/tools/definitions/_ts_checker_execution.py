@@ -359,6 +359,7 @@ def _check_multi_project(
     temp_files: list[Path] = []
     any_succeeded = False
     had_subproject_error = False
+    any_subproject_timed_out = False
 
     try:
         for tsconfig_info, project_files in partitions:
@@ -428,6 +429,8 @@ def _check_multi_project(
                     e,
                 )
                 had_subproject_error = True
+                if isinstance(e, subprocess.TimeoutExpired):
+                    any_subproject_timed_out = True
                 continue
 
             if proc_success:
@@ -454,6 +457,7 @@ def _check_multi_project(
             output=output_text,
             issues_count=total_issues,
             issues=all_issues,
+            timed_out=any_subproject_timed_out,
         )
     finally:
         for temp in temp_files:
@@ -508,6 +512,7 @@ def _run_and_parse(
         return ToolResult(
             name=plugin.definition.name,
             success=timeout_result.success,
+            timed_out=timeout_result.timed_out,
             output=timeout_result.output,
             issues_count=timeout_result.issues_count,
             issues=timeout_result.issues,

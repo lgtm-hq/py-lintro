@@ -164,6 +164,7 @@ class CargoAuditPlugin(BaseToolPlugin):
                 success=False,
                 output=f"cargo-audit timed out after {ctx.timeout}s",
                 issues_count=0,
+                timed_out=True,
             )
 
         success = proc.success

@@ -8,6 +8,7 @@ available, the ``license`` fields of installed packages under
 from __future__ import annotations
 
 import json
+from collections import deque
 from pathlib import Path
 from typing import Any
 
@@ -45,6 +46,159 @@ def _extract_license_field(data: dict[str, Any]) -> str | None:
     return None
 
 
+def _dep_folder(name: str) -> Path:
+    """Return the ``node_modules`` relative path for a dependency name.
+
+    Args:
+        name: npm package name, including scoped names.
+
+    Returns:
+        Path: Relative path segment under ``node_modules``.
+    """
+    if name.startswith("@"):
+        scope, package = name.split("/", 1)
+        return Path(scope) / package
+    return Path(name)
+
+
+def _manifest_for_dep(node_modules: Path, dep_name: str) -> Path | None:
+    """Resolve a direct dependency manifest under a ``node_modules`` root.
+
+    Args:
+        node_modules: ``node_modules`` directory to search.
+        dep_name: Dependency package name.
+
+    Returns:
+        Path | None: Path to ``package.json`` when present.
+    """
+    manifest = node_modules / _dep_folder(dep_name) / "package.json"
+    return manifest if manifest.is_file() else None
+
+
+def _resolve_dependency_manifest(
+    parent_manifest: Path,
+    dep_name: str,
+) -> Path | None:
+    """Resolve a dependency manifest reachable from an installed package.
+
+    Searches the package's nested ``node_modules`` first, then walks up
+    through ancestor ``node_modules`` directories for hoisted installs.
+
+    Args:
+        parent_manifest: Path to the parent package's ``package.json``.
+        dep_name: Dependency package name.
+
+    Returns:
+        Path | None: Resolved dependency manifest, if installed.
+    """
+    search_roots: list[Path] = []
+    seen: set[Path] = set()
+    # A package's own nested node_modules shadows any hoisted install, so it
+    # must be searched before walking up to ancestor node_modules roots.
+    nested_node_modules = parent_manifest.parent / "node_modules"
+    search_roots.append(nested_node_modules)
+    seen.add(nested_node_modules)
+    for ancestor in parent_manifest.parents:
+        if ancestor.name == "node_modules" and ancestor not in seen:
+            search_roots.append(ancestor)
+            seen.add(ancestor)
+
+    for node_modules in search_roots:
+        manifest = _manifest_for_dep(node_modules=node_modules, dep_name=dep_name)
+        if manifest is not None:
+            return manifest
+    return None
+
+
+def _build_dev_prod_map(
+    root_data: dict[str, Any],
+    node_modules: Path,
+) -> dict[Path, bool]:
+    """Classify installed manifests as production or development dependencies.
+
+    Walks the installed dependency graph from root ``dependencies`` and
+    ``devDependencies``. Transitive ``dependencies``, ``optionalDependencies``,
+    ``peerDependencies``, and ``bundled``/``bundleDependencies`` inherit the
+    classification of their parent. Production classification wins when a
+    package is reachable via both prod and dev paths.
+
+    Args:
+        root_data: Parsed root ``package.json`` contents.
+        node_modules: Root ``node_modules`` directory.
+
+    Returns:
+        dict[Path, bool]: Manifest path to ``is_dev`` flag.
+    """
+    classification: dict[Path, bool] = {}
+    queue: deque[tuple[Path, bool]] = deque()
+
+    for dep_name in root_data.get("dependencies", {}):
+        manifest = _manifest_for_dep(node_modules=node_modules, dep_name=dep_name)
+        if manifest is not None:
+            queue.append((manifest, False))
+
+    for dep_name in root_data.get("devDependencies", {}):
+        manifest = _manifest_for_dep(node_modules=node_modules, dep_name=dep_name)
+        if manifest is not None:
+            queue.append((manifest, True))
+
+    while queue:
+        manifest, is_dev = queue.popleft()
+        # Process each node at most twice: once when first seen, and once more
+        # only to downgrade dev -> prod. npm permits circular dependencies
+        # (notably via peer/optional edges), so without this guard a dev-side
+        # cycle (A -> B -> A) would re-enqueue forever and acyclic diamonds
+        # would re-process exponentially.
+        if manifest in classification:
+            if not classification[manifest]:
+                # Already finalized as production; nothing more to do.
+                continue
+            if is_dev:
+                # Already dev and re-seen as dev; do not reprocess.
+                continue
+            # Downgrade dev -> prod, then reprocess children as production.
+            classification[manifest] = False
+        else:
+            classification[manifest] = is_dev
+
+        try:
+            data = json.loads(manifest.read_text())
+        except (OSError, json.JSONDecodeError):
+            continue
+
+        parent_is_dev = classification[manifest]
+        # Follow every edge that installs a nested package, not just runtime
+        # ``dependencies``. An ``optionalDependencies``, ``peerDependencies``,
+        # or ``bundled``/``bundleDependencies`` child of a dev-only tool is
+        # installed under node_modules and must inherit its parent's dev
+        # classification; otherwise it falls back to production and
+        # ``ignore_dev_dependencies=True`` would still evaluate (and can fail)
+        # a dev-only package against the deny policy.
+        child_dep_names: set[str] = set()
+        for mapping_key in (
+            "dependencies",
+            "optionalDependencies",
+            "peerDependencies",
+        ):
+            mapping = data.get(mapping_key)
+            if isinstance(mapping, dict):
+                child_dep_names.update(str(name) for name in mapping)
+        # ``bundledDependencies``/``bundleDependencies`` are a list of names.
+        for bundled_key in ("bundledDependencies", "bundleDependencies"):
+            bundled = data.get(bundled_key)
+            if isinstance(bundled, list):
+                child_dep_names.update(str(name) for name in bundled)
+        for dep_name in child_dep_names:
+            child_manifest = _resolve_dependency_manifest(
+                parent_manifest=manifest,
+                dep_name=dep_name,
+            )
+            if child_manifest is not None:
+                queue.append((child_manifest, parent_is_dev))
+
+    return classification
+
+
 class NpmLicenseAdapter:
     """Collect license information for npm packages."""
 
@@ -70,18 +224,15 @@ class NpmLicenseAdapter:
         except (OSError, json.JSONDecodeError):
             return []
 
-        packages: list[PackageLicense] = []
-        prod_names = set(root_data.get("dependencies", {}).keys())
-        dev_names = set(root_data.get("devDependencies", {}).keys())
-
         node_modules = path.parent / "node_modules"
-        packages.extend(
-            self._collect_node_modules(
-                node_modules,
-                prod_names=prod_names,
-                dev_names=dev_names,
-                source=str(path),
-            ),
+        dev_prod_map = _build_dev_prod_map(
+            root_data=root_data,
+            node_modules=node_modules,
+        )
+        packages = self._collect_node_modules(
+            node_modules=node_modules,
+            dev_prod_map=dev_prod_map,
+            source=str(path),
         )
 
         return sorted(packages, key=lambda p: p.name.lower())
@@ -90,8 +241,7 @@ class NpmLicenseAdapter:
         self,
         node_modules: Path,
         *,
-        prod_names: set[str],
-        dev_names: set[str],
+        dev_prod_map: dict[Path, bool],
         source: str,
     ) -> list[PackageLicense]:
         """Collect licenses from installed packages under ``node_modules``.
@@ -101,8 +251,7 @@ class NpmLicenseAdapter:
 
         Args:
             node_modules: Path to the ``node_modules`` directory.
-            prod_names: Names declared in root ``dependencies``.
-            dev_names: Names declared as root ``devDependencies``.
+            dev_prod_map: Manifest path to development-dependency flag.
             source: Source file label recorded on each package.
 
         Returns:
@@ -112,12 +261,10 @@ class NpmLicenseAdapter:
             return []
 
         results: list[PackageLicense] = []
-        seen: set[str] = set()
+        seen: set[tuple[str, str, str]] = set()
         for manifest in sorted(node_modules.rglob("package.json")):
-            # Skip the root project's own package.json if somehow present.
             if manifest.parent == node_modules.parent:
                 continue
-            # Only treat package.json files that live inside a node_modules tree.
             if "node_modules" not in manifest.parts:
                 continue
             try:
@@ -125,16 +272,20 @@ class NpmLicenseAdapter:
             except (OSError, json.JSONDecodeError):
                 continue
             name = data.get("name")
-            if not name or name in seen:
+            if not name:
                 continue
-            seen.add(name)
+            version = data.get("version", "unknown")
+            install_path = str(manifest.parent)
+            dedupe_key = (name, version, install_path)
+            if dedupe_key in seen:
+                continue
+            seen.add(dedupe_key)
             raw = _extract_license_field(data)
-            # Production wins when a package appears in both maps.
-            is_dev = name in dev_names and name not in prod_names
+            is_dev = dev_prod_map.get(manifest, False)
             results.append(
                 PackageLicense(
                     name=name,
-                    version=data.get("version", "unknown"),
+                    version=version,
                     license_id=normalize_to_spdx(raw),
                     license_name=raw,
                     source_file=source,

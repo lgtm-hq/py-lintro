@@ -1,0 +1,4 @@
+# Sample requirements file with no known vulnerabilities.
+# Used for manual testing of the clean-scan path.
+# See: lintro check test_samples/ --tools pip_audit
+packaging==25.0

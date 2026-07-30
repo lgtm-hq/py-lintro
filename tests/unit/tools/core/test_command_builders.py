@@ -3,12 +3,15 @@
 from __future__ import annotations
 
 import sys
-from collections.abc import Generator
+from collections.abc import Callable, Generator
+from pathlib import Path
+from typing import cast
 from unittest.mock import MagicMock, patch
 
 import pytest
 from assertpy import assert_that
 
+from lintro._tool_versions import get_tool_version
 from lintro.enums.tool_name import ToolName
 from lintro.tools.core.command_builders import (
     CargoBuilder,
@@ -18,6 +21,15 @@ from lintro.tools.core.command_builders import (
     PytestBuilder,
     PythonBundledBuilder,
     StandaloneBuilder,
+    find_local_node_binary,
+    pinned_npm_spec,
+)
+from lintro.tools.core.node_fallback import (
+    NODE_ENGINE_REQUIREMENTS,
+    is_registry_fallback_command,
+    registry_fallback_guidance,
+    reset_registry_fallback_notices,
+    split_npm_spec,
 )
 
 
@@ -497,6 +509,153 @@ def test_nodejs_builder_vue_tsc_uses_vue_tsc_binary() -> None:
 
 
 # =============================================================================
+# Pinned Node.js tool resolution (issue #1727)
+# =============================================================================
+
+
+def _which_only(*available: str) -> Callable[..., str | None]:
+    """Build a ``shutil.which`` stub that only finds the named executables.
+
+    Args:
+        *available: Executable names that should resolve.
+
+    Returns:
+        Callable usable as a ``shutil.which`` replacement.
+    """
+
+    def _which(name: str, *_args: object, **_kwargs: object) -> str | None:
+        return f"/usr/local/bin/{name}" if name in available else None
+
+    return _which
+
+
+def test_html_validate_is_pinned() -> None:
+    """html-validate is registered as a version-pinned Node.js tool."""
+    builder = NodeJSBuilder()
+    assert_that(builder.pinned_tools).contains(ToolName.HTML_VALIDATE)
+
+
+def test_html_validate_prefers_local_node_modules_binary(tmp_path: Path) -> None:
+    """A consumer-local install wins over any registry fetch."""
+    local_bin = tmp_path / "node_modules" / ".bin"
+    local_bin.mkdir(parents=True)
+    binary = local_bin / (
+        "html-validate.cmd" if sys.platform == "win32" else "html-validate"
+    )
+    binary.write_text("#!/bin/sh\n")
+
+    builder = NodeJSBuilder()
+    with (
+        patch("shutil.which", _which_only("bunx")),
+        patch("pathlib.Path.cwd", return_value=tmp_path),
+    ):
+        cmd = builder.get_command("html_validate", ToolName.HTML_VALIDATE)
+
+    assert_that(cmd).is_equal_to([binary.resolve().as_posix()])
+
+
+def test_html_validate_prefers_path_binary_over_bunx() -> None:
+    """A binary on PATH is used before falling back to bunx."""
+    builder = NodeJSBuilder()
+    with (
+        patch("shutil.which", _which_only("bunx", "html-validate")),
+        patch(
+            "lintro.tools.core.command_builders.find_local_node_binary",
+            return_value=None,
+        ),
+    ):
+        cmd = builder.get_command("html_validate", ToolName.HTML_VALIDATE)
+
+    assert_that(cmd).is_equal_to(["html-validate"])
+
+
+def test_html_validate_bunx_fallback_is_version_pinned() -> None:
+    """The bunx fallback carries an explicit version, never ``@latest``."""
+    builder = NodeJSBuilder()
+    with (
+        patch("shutil.which", _which_only("bunx")),
+        patch(
+            "lintro.tools.core.command_builders.find_local_node_binary",
+            return_value=None,
+        ),
+    ):
+        cmd = builder.get_command("html_validate", ToolName.HTML_VALIDATE)
+
+    expected_version = get_tool_version("html-validate")
+    assert_that(expected_version).is_not_none()
+    assert_that(cmd).is_equal_to(["bunx", f"html-validate@{expected_version}"])
+    assert_that(cmd[1]).does_not_contain("@latest")
+
+
+def test_html_validate_npx_fallback_is_version_pinned() -> None:
+    """The npx fallback is pinned the same way as the bunx fallback."""
+    builder = NodeJSBuilder()
+    with (
+        patch("shutil.which", _which_only("npx")),
+        patch(
+            "lintro.tools.core.command_builders.find_local_node_binary",
+            return_value=None,
+        ),
+    ):
+        cmd = builder.get_command("html_validate", ToolName.HTML_VALIDATE)
+
+    assert_that(cmd).is_equal_to(
+        ["npx", f"html-validate@{get_tool_version('html-validate')}"],
+    )
+
+
+def test_html_validate_falls_back_to_bare_binary() -> None:
+    """Without any package runner the bare binary name is used."""
+    builder = NodeJSBuilder()
+    with (
+        patch("shutil.which", _which_only()),
+        patch(
+            "lintro.tools.core.command_builders.find_local_node_binary",
+            return_value=None,
+        ),
+    ):
+        cmd = builder.get_command("html_validate", ToolName.HTML_VALIDATE)
+
+    assert_that(cmd).is_equal_to(["html-validate"])
+
+
+def test_pinned_npm_spec_falls_back_to_bare_name() -> None:
+    """An unknown package yields a bare name rather than an ``@latest`` spec."""
+    spec = pinned_npm_spec("definitely-not-a-lintro-tool")
+    assert_that(spec).is_equal_to("definitely-not-a-lintro-tool")
+
+
+def test_find_local_node_binary_walks_up_to_project_root(tmp_path: Path) -> None:
+    """Resolution walks up so subdirectories still find the project install."""
+    local_bin = tmp_path / "node_modules" / ".bin"
+    local_bin.mkdir(parents=True)
+    binary = local_bin / (
+        "html-validate.cmd" if sys.platform == "win32" else "html-validate"
+    )
+    binary.write_text("#!/bin/sh\n")
+    nested = tmp_path / "src" / "pages"
+    nested.mkdir(parents=True)
+
+    found = find_local_node_binary("html-validate", start=nested)
+
+    assert_that(found).is_equal_to(binary.resolve().as_posix())
+
+
+def test_find_local_node_binary_returns_none_when_absent(tmp_path: Path) -> None:
+    """No local install resolves to None."""
+    found = find_local_node_binary("html-validate", start=tmp_path)
+    assert_that(found).is_none()
+
+
+def test_unpinned_node_tools_keep_bunx_behaviour() -> None:
+    """Tools outside the pinned set are unaffected by the pinning branch."""
+    builder = NodeJSBuilder()
+    with patch("shutil.which", _which_only("bunx", "markdownlint-cli2")):
+        cmd = builder.get_command("markdownlint", ToolName.MARKDOWNLINT)
+    assert_that(cmd).is_equal_to(["bunx", "markdownlint-cli2"])
+
+
+# =============================================================================
 # CargoBuilder tests
 # =============================================================================
 
@@ -563,6 +722,24 @@ def test_standalone_builder_returns_tool_name() -> None:
     assert_that(cmd).is_equal_to(["hadolint"])
 
 
+def test_standalone_builder_handles_pip_audit() -> None:
+    """StandaloneBuilder can handle pip_audit."""
+    builder = StandaloneBuilder()
+    assert_that(builder.can_handle(ToolName.PIP_AUDIT)).is_true()
+
+
+def test_standalone_builder_maps_pip_audit_to_hyphenated_binary() -> None:
+    """pip_audit resolves to the ``pip-audit`` binary, not ``pip_audit``.
+
+    The internal tool name uses an underscore, but the installed executable
+    is ``pip-audit``; without the binary mapping the version check would exec
+    a nonexistent ``pip_audit`` and the tool would always skip.
+    """
+    builder = StandaloneBuilder()
+    cmd = builder.get_command("pip_audit", ToolName.PIP_AUDIT)
+    assert_that(cmd).is_equal_to(["pip-audit"])
+
+
 # =============================================================================
 # CommandBuilderRegistry tests
 # =============================================================================
@@ -617,3 +794,298 @@ def test_registry_clear() -> None:
 
     CommandBuilderRegistry.clear()
     assert_that(CommandBuilderRegistry._builders).is_empty()
+
+
+def test_html_validate_prefers_bunx_when_both_runners_are_present() -> None:
+    """Bunx wins over npx when both resolve on PATH.
+
+    The individual fallback tests each stub a single runner, so neither pins
+    the precedence between them: a regression that flipped the preferred
+    runner, or picked one non-deterministically, would pass both.
+    """
+    builder = NodeJSBuilder()
+    with (
+        # Both runners present, but the tool itself is NOT on PATH — a PATH
+        # hit would correctly win before either runner and mask the ordering.
+        patch(
+            "shutil.which",
+            lambda name: f"/usr/bin/{name}" if name in {"bunx", "npx"} else None,
+        ),
+        patch(
+            "lintro.tools.core.command_builders.find_local_node_binary",
+            return_value=None,
+        ),
+    ):
+        cmd = builder.get_command("html_validate", ToolName.HTML_VALIDATE)
+
+    assert_that(cmd[0]).is_equal_to("bunx")
+
+
+def test_registry_resolves_node_tools_from_the_given_cwd() -> None:
+    """A supplied cwd scopes node_modules/.bin resolution to that directory.
+
+    Without it the search starts at lintro's own working directory, which can
+    select an unrelated install ahead of PATH (#1727).
+    """
+    seen: list[Path | None] = []
+
+    def _record(binary_name: str, *, start: Path | None = None) -> None:
+        seen.append(start)
+        return None
+
+    target = Path("/tmp/some-target-project")
+    with (
+        patch("shutil.which", _which_only("bunx")),
+        patch(
+            "lintro.tools.core.command_builders.find_local_node_binary",
+            side_effect=_record,
+        ),
+    ):
+        CommandBuilderRegistry.get_command(
+            "html_validate",
+            ToolName.HTML_VALIDATE,
+            target,
+        )
+
+    # Exactly one lookup, scoped to the target — no second, process-cwd search.
+    assert_that(seen).is_equal_to([target])
+
+
+def test_registry_without_cwd_preserves_process_relative_resolution() -> None:
+    """Omitting cwd keeps the previous behaviour for every builder."""
+    seen: list[Path | None] = []
+
+    def _record(binary_name: str, *, start: Path | None = None) -> None:
+        seen.append(start)
+        return None
+
+    with (
+        patch("shutil.which", _which_only("bunx")),
+        patch(
+            "lintro.tools.core.command_builders.find_local_node_binary",
+            side_effect=_record,
+        ),
+    ):
+        CommandBuilderRegistry.get_command("html_validate", ToolName.HTML_VALIDATE)
+
+    assert_that(seen).is_equal_to([None])
+
+
+# =============================================================================
+# Execution-directory (cwd) resolution contract, per builder (#1758)
+# =============================================================================
+
+
+def test_node_get_command_matches_get_command_in_without_cwd() -> None:
+    """``get_command`` is ``get_command_in`` with no execution directory.
+
+    The pinned path used to reach ``_get_pinned_command`` twice, once with a
+    ``start`` and once without, so a direct caller could get a different search
+    origin than the registry. Both now share one resolver (#1758).
+    """
+    builder = NodeJSBuilder()
+    seen: list[Path | None] = []
+
+    def _record(binary_name: str, *, start: Path | None = None) -> str | None:
+        seen.append(start)
+        return None
+
+    with (
+        patch("shutil.which", _which_only("bunx")),
+        patch(
+            "lintro.tools.core.command_builders.find_local_node_binary",
+            side_effect=_record,
+        ),
+    ):
+        direct = builder.get_command("html_validate", ToolName.HTML_VALIDATE)
+        threaded = builder.get_command_in(
+            "html_validate",
+            ToolName.HTML_VALIDATE,
+            None,
+        )
+
+    assert_that(direct).is_equal_to(threaded)
+    assert_that(seen).is_equal_to([None, None])
+
+
+def test_python_bundled_builder_ignores_the_execution_directory(
+    tmp_path: Path,
+) -> None:
+    """Bundled Python tools resolve from Lintro's own environment.
+
+    They are Lintro's declared dependencies, gated on the manifest minimum and
+    parsed by version-specific parsers, so a checked project's virtualenv must
+    not win. Locks the documented decision for #1758.
+    """
+    builder = PythonBundledBuilder()
+    with patch("shutil.which", _which_only("ruff")):
+        external = builder.get_command_in("ruff", ToolName.RUFF, tmp_path)
+        process_relative = builder.get_command("ruff", ToolName.RUFF)
+
+    assert_that(external).is_equal_to(process_relative)
+
+
+def test_pytest_builder_ignores_the_execution_directory(tmp_path: Path) -> None:
+    """Pytest resolves from the running interpreter, not the target tree.
+
+    Walking up from the execution directory for a ``.venv`` would select an
+    interpreter whose plugins and dependencies Lintro knows nothing about.
+    Locks the documented decision for #1758.
+    """
+    builder = PytestBuilder()
+    with patch("shutil.which", _which_only("pytest")):
+        external = builder.get_command_in("pytest", ToolName.PYTEST, tmp_path)
+        process_relative = builder.get_command("pytest", ToolName.PYTEST)
+
+    assert_that(external).is_equal_to(process_relative)
+
+
+def test_cargo_builder_ignores_the_execution_directory(tmp_path: Path) -> None:
+    """Cargo resolves from PATH; cargo itself does the project-relative work.
+
+    Workspace root, ``target/`` and ``rust-toolchain.toml`` are found by cargo
+    and rustup from the cwd the executor sets, so the command never varies.
+    Locks the documented decision for #1758.
+    """
+    builder = CargoBuilder()
+    external = builder.get_command_in("clippy", ToolName.CLIPPY, tmp_path)
+
+    assert_that(external).is_equal_to(["cargo", "clippy"])
+    assert_that(external).is_equal_to(builder.get_command("clippy", ToolName.CLIPPY))
+
+
+def test_standalone_builder_ignores_the_execution_directory(tmp_path: Path) -> None:
+    """Standalone binaries resolve against PATH only.
+
+    None of these ecosystems define a project-local install directory, so there
+    is no per-directory candidate to prefer. Locks the decision for #1758.
+    """
+    builder = StandaloneBuilder()
+    external = builder.get_command_in("hadolint", ToolName.HADOLINT, tmp_path)
+
+    assert_that(external).is_equal_to(["hadolint"])
+    assert_that(external).is_equal_to(
+        builder.get_command("hadolint", ToolName.HADOLINT),
+    )
+
+
+# =============================================================================
+# Registry fallback guidance (#1767)
+# =============================================================================
+
+
+@pytest.fixture
+def clean_fallback_notices() -> Generator[None, None, None]:
+    """Reset the one-time fallback notice cache around a test.
+
+    Yields:
+        None: With the notice cache cleared before and after the test.
+    """
+    reset_registry_fallback_notices()
+    yield
+    reset_registry_fallback_notices()
+
+
+def test_is_registry_fallback_command_detects_package_runners() -> None:
+    """Only ``bunx``/``npx`` invocations count as the registry fallback."""
+    assert_that(is_registry_fallback_command(["bunx", "html-validate@1.0.0"])).is_true()
+    assert_that(is_registry_fallback_command(["npx", "html-validate@1.0.0"])).is_true()
+    assert_that(is_registry_fallback_command(["/local/html-validate"])).is_false()
+    assert_that(is_registry_fallback_command(["html-validate"])).is_false()
+    assert_that(is_registry_fallback_command(["bunx"])).is_false()
+
+
+def test_split_npm_spec_handles_scoped_packages() -> None:
+    """The version separator is the last ``@``, not the scope marker."""
+    assert_that(split_npm_spec("html-validate@11.5.6")).is_equal_to(
+        ("html-validate", "11.5.6"),
+    )
+    assert_that(split_npm_spec("@scope/pkg@1.2.3")).is_equal_to(
+        ("@scope/pkg", "1.2.3"),
+    )
+    assert_that(split_npm_spec("html-validate")).is_equal_to(("html-validate", None))
+
+
+def test_registry_fallback_guidance_names_local_install_and_node_floor() -> None:
+    """A failed fallback is explained with the pinned local install commands."""
+    spec = pinned_npm_spec("html-validate")
+    guidance = registry_fallback_guidance(["bunx", spec])
+
+    assert_that(guidance).contains(f"could not be run via `bunx {spec}`")
+    assert_that(guidance).contains(f"bun add -D {spec}")
+    assert_that(guidance).contains(f"npm install -D {spec}")
+    assert_that(guidance).contains(
+        f"requires Node {NODE_ENGINE_REQUIREMENTS['html-validate']}",
+    )
+    # The pinned version is derived, never hardcoded in the message builder.
+    assert_that(spec).contains(str(get_tool_version("html-validate")))
+
+
+def test_registry_fallback_guidance_omits_unknown_node_floor() -> None:
+    """Packages with no recorded ``engines`` floor get no Node note."""
+    guidance = registry_fallback_guidance(["npx", "some-linter@1.0.0"])
+
+    assert_that(guidance).contains("npm install -D some-linter@1.0.0")
+    assert_that(guidance).does_not_contain("requires Node")
+
+
+def test_html_validate_bunx_fallback_warns_once(
+    clean_fallback_notices: None,
+) -> None:
+    """Selecting the bunx fallback warns, and only once per process.
+
+    Args:
+        clean_fallback_notices: Fixture clearing the one-time notice cache.
+    """
+    builder = NodeJSBuilder()
+    with (
+        patch("shutil.which", _which_only("bunx")),
+        patch(
+            "lintro.tools.core.command_builders.find_local_node_binary",
+            return_value=None,
+        ),
+        patch("lintro.tools.core.node_fallback.logger") as mock_logger,
+    ):
+        first = builder.get_command("html_validate", ToolName.HTML_VALIDATE)
+        second = builder.get_command("html_validate", ToolName.HTML_VALIDATE)
+
+    assert_that(first).is_equal_to(second)
+    assert_that(mock_logger.warning.call_count).is_equal_to(1)
+    message = cast(str, mock_logger.warning.call_args.args[0])
+    assert_that(message).contains("No project-local or PATH install of html-validate")
+    assert_that(message).contains(f"bun add -D {pinned_npm_spec('html-validate')}")
+    assert_that(message).contains(
+        NODE_ENGINE_REQUIREMENTS["html-validate"],
+    )
+
+
+def test_local_install_emits_no_fallback_notice(
+    clean_fallback_notices: None,
+    tmp_path: Path,
+) -> None:
+    """A project-local install is the good path and stays silent.
+
+    Args:
+        clean_fallback_notices: Fixture clearing the one-time notice cache.
+        tmp_path: Temporary project root holding the local install.
+    """
+    local_bin = tmp_path / "node_modules" / ".bin"
+    local_bin.mkdir(parents=True)
+    binary = local_bin / (
+        "html-validate.cmd" if sys.platform == "win32" else "html-validate"
+    )
+    binary.write_text("#!/bin/sh\n")
+
+    builder = NodeJSBuilder()
+    with (
+        patch("shutil.which", _which_only("bunx")),
+        patch("lintro.tools.core.node_fallback.logger") as mock_logger,
+    ):
+        cmd = builder.get_command_in(
+            "html_validate",
+            ToolName.HTML_VALIDATE,
+            tmp_path,
+        )
+
+    assert_that(cmd).is_equal_to([binary.resolve().as_posix()])
+    assert_that(mock_logger.warning.call_count).is_equal_to(0)

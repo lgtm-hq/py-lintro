@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import sys
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -47,7 +48,7 @@ def _confidence_numeric(value: ConfidenceLevel | str) -> int:
         return 1
 
 
-def _generate_all_suggestions(
+async def _generate_all_suggestions(
     by_tool: dict[str, tuple[ToolResult, list[BaseIssue]]],
     provider: BaseAIProvider,
     ai_config: AIConfig,
@@ -57,7 +58,21 @@ def _generate_all_suggestions(
     telemetry: AITelemetry,
     budget: CostBudget | None,
 ) -> list[AIFixSuggestion]:
-    """Iterate tools, generate fix suggestions, and collect telemetry."""
+    """Iterate tools, generate fix suggestions, and collect telemetry.
+
+    Args:
+        by_tool: Issues grouped by tool name with their tool result.
+        provider: AI provider instance.
+        ai_config: AI configuration.
+        logger: Console logger for progress output.
+        workspace_root: Workspace root path.
+        is_json: Whether output is JSON (suppresses console progress).
+        telemetry: Telemetry accumulator to update.
+        budget: Optional cost budget tracker.
+
+    Returns:
+        All generated fix suggestions across tools.
+    """
     all_suggestions: list[AIFixSuggestion] = []
     remaining_budget = ai_config.max_fix_attempts
 
@@ -107,7 +122,7 @@ def _generate_all_suggestions(
             sanitize_mode=ai_config.sanitize_mode,
             ai_config=ai_config,
         )
-        suggestions = generate_fixes_from_params(issues, provider, fix_params)
+        suggestions = await generate_fixes_from_params(issues, provider, fix_params)
         for suggestion in suggestions:
             if not suggestion.tool_name:
                 suggestion.tool_name = tool_name
@@ -255,7 +270,7 @@ def _apply_or_review(
     return applied, rejected, applied_suggestions
 
 
-def _verify_and_refine(
+async def _verify_and_refine(
     applied_suggestions: list[AIFixSuggestion],
     by_tool: dict[str, tuple[ToolResult, list[BaseIssue]]],
     provider: BaseAIProvider,
@@ -284,7 +299,7 @@ def _verify_and_refine(
         and validation.unverified > 0
         and ai_config.max_refinement_attempts >= 1
     ):
-        refined, refinement_cost = refine_unverified_fixes(
+        refined, refinement_cost = await refine_unverified_fixes(
             applied_suggestions=applied_suggestions,
             validation=validation,
             provider=provider,
@@ -328,7 +343,7 @@ def _verify_and_refine(
     return validation
 
 
-def run_fix_pipeline(
+async def run_fix_pipeline(
     *,
     fix_issues: list[tuple[ToolResult, BaseIssue]],
     provider: BaseAIProvider,
@@ -371,7 +386,7 @@ def run_fix_pipeline(
     is_json = output_format.lower() == OutputFormat.JSON
 
     # Step 1: Generate suggestions across all tools
-    all_suggestions = _generate_all_suggestions(
+    all_suggestions = await _generate_all_suggestions(
         by_tool,
         provider,
         ai_config,
@@ -390,7 +405,13 @@ def run_fix_pipeline(
     if not all_suggestions:
         telemetry.successful_fixes = 0
         telemetry.failed_fixes = total_generated
-        write_audit_log(workspace_root, [], 0, telemetry.total_cost_usd)
+        await asyncio.to_thread(
+            write_audit_log,
+            workspace_root,
+            [],
+            0,
+            telemetry.total_cost_usd,
+        )
         attach_telemetry_metadata(
             [r for r, _ in by_tool.values()],
             telemetry,
@@ -426,7 +447,7 @@ def run_fix_pipeline(
     # Step 4: Verify and refine applied fixes
     validation = None
     if applied_suggestions:
-        validation = _verify_and_refine(
+        validation = await _verify_and_refine(
             applied_suggestions,
             by_tool,
             provider,
@@ -479,7 +500,7 @@ def run_fix_pipeline(
             unique_results = _unique_results_from_fix_issues(fix_issues)
 
         if unique_results:
-            post_summary = generate_post_fix_summary(
+            post_summary = await generate_post_fix_summary(
                 applied=applied_for_summary,
                 rejected=rejected,
                 remaining_results=unique_results,
@@ -502,7 +523,10 @@ def run_fix_pipeline(
                 if output:
                     logger.console_output(output)
 
-    write_audit_log(
+    # Audit-log writing takes a blocking inter-process file lock (with a
+    # sleep-based retry on Windows), so it runs off the event loop.
+    await asyncio.to_thread(
+        write_audit_log,
         workspace_root,
         applied_suggestions,
         rejected,

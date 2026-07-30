@@ -125,6 +125,12 @@ def check(
     """
     path_list: list[str] = list(paths) if paths else list(DEFAULT_PATHS)
 
+    from lintro.ai.interface import (
+        render_ai_status,
+        run_ai_layer,
+        sarif_enrichment_from_results,
+    )
+
     exit_code: int = run_lint_tools_simple(
         action=Action.CHECK,
         paths=path_list,
@@ -149,6 +155,9 @@ def check(
         transport=transport,
         score=score,
         fail_under=fail_under,
+        ai_runner=run_ai_layer,
+        ai_status_renderer=render_ai_status,
+        ai_sarif_enricher=sarif_enrichment_from_results,
     )
     return LintroResult(action="check", exit_code=exit_code)
 
@@ -199,6 +208,12 @@ def format(
     """
     path_list: list[str] = list(paths) if paths else list(DEFAULT_PATHS)
 
+    from lintro.ai.interface import (
+        render_ai_status,
+        run_ai_layer,
+        sarif_enrichment_from_results,
+    )
+
     exit_code: int = run_lint_tools_simple(
         action="fmt",
         paths=path_list,
@@ -218,6 +233,9 @@ def format(
         auto_install=auto_install,
         yes=yes,
         dry_run=dry_run,
+        ai_runner=run_ai_layer,
+        ai_status_renderer=render_ai_status,
+        ai_sarif_enricher=sarif_enrichment_from_results,
     )
     return LintroResult(action="fmt", exit_code=exit_code)
 
@@ -327,6 +345,11 @@ def test(
         ",".join(tool_option_parts) if tool_option_parts else None
     )
 
+    from lintro.ai.interface import (
+        render_ai_status,
+        sarif_enrichment_from_results,
+    )
+
     exit_code: int = run_lint_tools_simple(
         action=Action.TEST,
         paths=path_list,
@@ -341,5 +364,7 @@ def test(
         output_file=output,
         debug=debug,
         yes=yes,
+        ai_status_renderer=render_ai_status,
+        ai_sarif_enricher=sarif_enrichment_from_results,
     )
     return LintroResult(action="test", exit_code=exit_code)

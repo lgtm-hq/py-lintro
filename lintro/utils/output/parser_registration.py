@@ -77,6 +77,13 @@ class ParserError(Exception):
     """
 
 
+# Informational, non-JSON messages that Lintro's bandit wrapper may surface for
+# a successful, zero-issue run. These are not diagnostic output and must not be
+# treated as parse failures (#1534). Real unparseable bandit output (e.g. from
+# an actual bandit run) is still surfaced as an error to preserve #1044.
+_BANDIT_INFORMATIONAL_SENTINELS: tuple[str, ...] = ("No .py/.pyi files found",)
+
+
 def _parse_bandit_output(output: str) -> list[Any]:
     """Parse Bandit output, handling JSON format.
 
@@ -89,6 +96,11 @@ def _parse_bandit_output(output: str) -> list[Any]:
     Raises:
         ParserError: If the output cannot be parsed as valid JSON.
     """
+    # Treat known informational, non-JSON sentinels as "no issues" rather than a
+    # parse failure so a clean pass never emits parse-error noise (#1534).
+    if any(sentinel in output for sentinel in _BANDIT_INFORMATIONAL_SENTINELS):
+        return []
+
     try:
         return parse_bandit_output(bandit_data=json.loads(output))
     except (json.JSONDecodeError, KeyError, TypeError, ValueError) as e:

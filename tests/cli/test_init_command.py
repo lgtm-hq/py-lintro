@@ -108,3 +108,17 @@ def test_init_via_cli() -> None:
         result = runner.invoke(cli, ["init"])
         assert_that(result.exit_code).is_equal_to(0)
         assert_that(Path(".lintro-config.yaml").exists()).is_true()
+
+
+def test_init_always_prints_detected_line_in_empty_project() -> None:
+    """The Detected line prints even when no languages are detected.
+
+    Regression test for #1423: init output must be consistent across runs;
+    an empty project shows "Detected: none" rather than dropping the line.
+    """
+    runner = CliRunner()
+    with runner.isolated_filesystem():
+        result = runner.invoke(init_command, [])
+        assert_that(result.exit_code).is_equal_to(0)
+        assert_that(result.output).contains("Detected:")
+        assert_that(result.output).contains("Profile:")

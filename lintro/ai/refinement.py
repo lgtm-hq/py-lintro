@@ -66,7 +66,7 @@ def _revert_fix(
     return len(applied) > 0
 
 
-def refine_unverified_fixes(
+async def refine_unverified_fixes(
     *,
     applied_suggestions: list[AIFixSuggestion],
     validation: ValidationResult,
@@ -200,7 +200,7 @@ def refine_unverified_fixes(
 
         # Step 3: Generate refined fix
         try:
-            response = _call_fix_ai(
+            response = await _call_fix_ai(
                 provider=provider,
                 ai_config=ai_config,
                 prompt=prompt,

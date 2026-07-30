@@ -6,12 +6,15 @@ The AI provider is always mocked; no test requires live API access.
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any
 
 import pytest
 from assertpy import assert_that
 
 import lintro.tools.definitions.idiom_review as plugin_module
+from lintro.ai.config import AIConfig
 from lintro.ai.exceptions import AIAuthenticationError
+from lintro.config.lintro_config import LintroConfig
 from lintro.parsers.idiom_review.idiom_review_issue import IdiomReviewIssue
 from lintro.plugins.registry import ToolRegistry
 from lintro.tools.definitions.idiom_review import IdiomReviewPlugin
@@ -70,13 +73,23 @@ class _FakeEngine:
     def __init__(self, *_args: object, **_kwargs: object) -> None:
         pass
 
-    def review_file(
+    async def review_file(
         self,
         *,
         file_path: str,
         source: str,  # noqa: ARG002
         language: str = "python",  # noqa: ARG002
     ) -> list[IdiomReviewIssue]:
+        """Return canned per-file findings.
+
+        Args:
+            file_path: Path recorded on each finding.
+            source: Ignored source text.
+            language: Ignored target language.
+
+        Returns:
+            Two canned findings of differing confidence.
+        """
         return [
             IdiomReviewIssue(
                 file=file_path,
@@ -96,10 +109,18 @@ class _FakeEngine:
             ),
         ]
 
-    def review_duplication(
+    async def review_duplication(
         self,
         _signatures: object,
     ) -> list[IdiomReviewIssue]:
+        """Return no duplication findings.
+
+        Args:
+            _signatures: Ignored signature list.
+
+        Returns:
+            An empty list.
+        """
         return []
 
 
@@ -124,6 +145,48 @@ def test_enabled_with_mocked_engine_reports_issues(
     assert_that(result.skipped).is_false()
     assert_that(result.success).is_false()
     assert_that(result.issues_count).is_equal_to(2)
+
+
+def test_engine_is_built_from_the_raw_ai_mapping(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The tool resolves ``LintroConfig.ai`` (a raw mapping) into an AIConfig.
+
+    Issue #724 PR 3 turned ``LintroConfig.ai`` into a plain dict, so the tool
+    must go through the AI facade before reading provider and budget settings.
+
+    Args:
+        tmp_path: Temporary directory holding the sample module.
+        monkeypatch: pytest monkeypatch fixture.
+    """
+    recorded: dict[str, Any] = {}
+
+    class _RecordingEngine(_FakeEngine):
+        def __init__(self, *args: object, **kwargs: object) -> None:
+            recorded.update(kwargs)
+            super().__init__(*args, **kwargs)
+
+    monkeypatch.setattr(plugin_module, "is_ai_available", lambda: True)
+    monkeypatch.setattr(plugin_module, "get_provider", lambda cfg: cfg)
+    monkeypatch.setattr(plugin_module, "IdiomReviewEngine", _RecordingEngine)
+    monkeypatch.setattr(
+        IdiomReviewPlugin,
+        "_get_lintro_config",
+        lambda _self: LintroConfig(
+            ai={"enabled": True, "lint": True, "max_cost_usd": 2.5, "cache_ttl": 99},
+        ),
+    )
+
+    IdiomReviewPlugin().check(
+        [_write_py(tmp_path)],
+        {"enabled": True, "min_confidence": "low"},
+    )
+
+    assert_that(recorded["ai_config"]).is_instance_of(AIConfig)
+    assert_that(recorded["ai_config"].max_cost_usd).is_equal_to(2.5)
+    assert_that(recorded["budget"].max_cost_usd).is_equal_to(2.5)
+    assert_that(recorded["cache_ttl"]).is_equal_to(99)
 
 
 def test_min_confidence_filters_low_findings(
@@ -152,7 +215,18 @@ def test_ai_error_degrades_gracefully(
     monkeypatch.setattr(plugin_module, "get_provider", lambda _cfg: object())
 
     class _RaisingEngine(_FakeEngine):
-        def review_file(self, **_kwargs: object) -> list[IdiomReviewIssue]:
+        async def review_file(self, **_kwargs: object) -> list[IdiomReviewIssue]:
+            """Fail as a provider with depleted credits would.
+
+            Args:
+                **_kwargs: Ignored keyword arguments.
+
+            Returns:
+                Never returns.
+
+            Raises:
+                AIAuthenticationError: Always.
+            """
             raise AIAuthenticationError("no credits")
 
     monkeypatch.setattr(plugin_module, "IdiomReviewEngine", _RaisingEngine)

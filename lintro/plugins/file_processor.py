@@ -41,6 +41,10 @@ class FileProcessingResult:
         issues: List of issues found in this file.
         skipped: Whether the file was skipped (e.g., due to timeout).
         error: Error message if processing failed.
+        timed_out: Whether this file was abandoned because the tool's
+            subprocess exceeded its deadline. Propagated to the tool-level
+            ``ToolResult.timed_out`` so a timeout stays distinguishable from a
+            genuine finding in the JSON report.
     """
 
     success: bool
@@ -48,6 +52,7 @@ class FileProcessingResult:
     issues: Sequence[BaseIssue]
     skipped: bool = False
     error: str | None = None
+    timed_out: bool = False
 
 
 @dataclass
@@ -113,6 +118,8 @@ class AggregatedResult:
         skipped_files: List of file paths that were skipped.
         execution_failures: Count of files that failed to process.
         total_issues: Total count of issues across all files.
+        timed_out: Whether at least one file was abandoned due to a
+            subprocess timeout.
     """
 
     all_success: bool = True
@@ -121,6 +128,7 @@ class AggregatedResult:
     skipped_files: list[str] = field(default_factory=list)
     execution_failures: int = 0
     total_issues: int = 0
+    timed_out: bool = False
 
     def add_file_result(self, file_path: str, result: FileProcessingResult) -> None:
         """Add a single file's result to the aggregate.
@@ -129,6 +137,9 @@ class AggregatedResult:
             file_path: Path to the file that was processed.
             result: The processing result for this file.
         """
+        if result.timed_out:
+            self.timed_out = True
+
         if result.skipped:
             self.skipped_files.append(file_path)
             self.all_success = False

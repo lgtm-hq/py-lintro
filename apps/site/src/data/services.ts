@@ -80,4 +80,10 @@ export const services = {
     url: 'https://google.github.io/osv-scanner/',
     description: 'Vulnerability scanning',
   },
+  pipAudit: {
+    id: 'pip-audit',
+    name: 'pip-audit',
+    url: 'https://github.com/pypa/pip-audit',
+    description: 'Python dependency vulnerability scanning',
+  },
 } as const satisfies Record<string, ServiceLink>;

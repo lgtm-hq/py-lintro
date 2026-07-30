@@ -56,6 +56,23 @@ def _parse_version(output: str, tool_name: str) -> str | None:
     return match.group(0)
 
 
+def _versions_match(tool_name: str, expected: str, actual: str) -> bool:
+    # `cargo clippy --version` reports only `clippy 0.1.<minor>`; it never
+    # exposes the toolchain patch level, so `_parse_version` synthesizes a
+    # trailing `.0`. Comparing that against a manifest patch (e.g. 1.97.1)
+    # would always fail. Match clippy at major.minor granularity — the patch
+    # is unobservable from the binary, while any real minor/major drift is
+    # still caught.
+    if tool_name == "clippy":
+        # Compare only over the segments the manifest actually declares (still
+        # capped at major.minor), so a major-only manifest version like "1"
+        # matches "1.97.0" instead of erroring on a missing minor segment.
+        expected_parts = expected.split(".")[:2]
+        actual_parts = actual.split(".")[: len(expected_parts)]
+        return actual_parts == expected_parts
+    return expected == actual
+
+
 def _tool_command(
     tool_name: str,
     tool_entry: dict[str, Any],
@@ -110,6 +127,96 @@ def _iter_tools(
     return selected
 
 
+# Exit code returned by `_run` when the binary itself cannot be found on PATH
+# (FileNotFoundError). This is the ONLY failure mode tolerated for an
+# allow-missing tool: the tool the PR introduces is not yet baked into the
+# digest-pinned base image, so its binary is simply absent. Any other non-zero
+# exit means the binary IS present but misbehaving, which stays a hard failure
+# even for an allow-missing tool.
+_MISSING_BINARY_EXIT = 127
+
+
+def _parse_allow_missing(values: list[str] | None) -> set[str]:
+    """Parse repeated/comma-separated --allow-missing values into a name set.
+
+    Args:
+        values: Raw ``--allow-missing`` argument values, each of which may
+            itself be a comma-separated list of tool names. ``None`` when the
+            flag was never supplied.
+
+    Returns:
+        The set of tool names whose missing binary should be tolerated.
+    """
+    if not values:
+        return set()
+    names: set[str] = set()
+    for value in values:
+        names.update(part.strip() for part in value.split(",") if part.strip())
+    return names
+
+
+# Alias: --allow-version-lag uses the same comma/repeat parsing as allow-missing.
+_parse_allow_version_lag = _parse_allow_missing
+
+
+def _version_tuple(version: str) -> tuple[int, ...]:
+    """Parse a dotted numeric version into a comparable integer tuple.
+
+    Non-numeric trailing segments (pre-release tags) are dropped so
+    ``7.1.0-rc.1`` compares as ``(7, 1, 0)``.
+
+    Args:
+        version: A dotted version string.
+
+    Returns:
+        Integer segments for lexicographic comparison. Empty when no digits
+        are found.
+    """
+    parts: list[int] = []
+    for segment in version.split("."):
+        digits = ""
+        for char in segment:
+            if char.isdigit():
+                digits += char
+            else:
+                break
+        if not digits:
+            break
+        parts.append(int(digits))
+        if len(digits) != len(segment):
+            # Segment had trailing non-digit content (e.g. "0-rc"): stop
+            # entirely so a pre-release tag drops everything after it and
+            # "7.1.0-rc.1" compares as (7, 1, 0), per the documented contract.
+            break
+    return tuple(parts)
+
+
+def _is_image_older_than_manifest(*, expected: str, actual: str) -> bool:
+    """Return True when the installed version is strictly older than expected.
+
+    Used by ``--allow-version-lag``: an image that still ships the pre-bump
+    version is tolerated; an image that is *newer* than the manifest (or
+    equal) must not use this escape hatch.
+
+    Args:
+        expected: Manifest-declared version.
+        actual: Version parsed from the installed binary.
+
+    Returns:
+        True when ``actual < expected`` under numeric segment comparison.
+        False when equal, newer, or either side cannot be parsed.
+    """
+    expected_parts = _version_tuple(expected)
+    actual_parts = _version_tuple(actual)
+    if not expected_parts or not actual_parts:
+        return False
+    # Pad the shorter tuple with zeros so 7.1 vs 7.1.0 compares fairly.
+    width = max(len(expected_parts), len(actual_parts))
+    expected_padded = expected_parts + (0,) * (width - len(expected_parts))
+    actual_padded = actual_parts + (0,) * (width - len(actual_parts))
+    return actual_padded < expected_padded
+
+
 def main() -> int:
     """Verify tools in manifest.json are installed with correct versions."""
     parser = argparse.ArgumentParser()
@@ -123,9 +230,36 @@ def main() -> int:
         default=os.environ.get("LINTRO_MANIFEST_TIERS", "tools"),
         help="Comma-separated tiers to verify (default: tools)",
     )
+    parser.add_argument(
+        "--allow-missing",
+        action="append",
+        default=None,
+        help=(
+            "Tool name(s) whose missing binary downgrades to a warning instead "
+            "of failing. Repeatable and/or comma-separated. Intended for the "
+            "tool a PR introduces, which is not yet in the digest-pinned base "
+            "image. An allow-missing tool that IS present must still "
+            "version-match; every other tool keeps hard-fail behavior."
+        ),
+    )
+    parser.add_argument(
+        "--allow-version-lag",
+        action="append",
+        default=None,
+        help=(
+            "Tool name(s) whose *older-than-manifest* installed version "
+            "downgrades to a warning instead of failing. Repeatable and/or "
+            "comma-separated. Intended for a PR that bumps a baked tool's "
+            "manifest version before the digest-pinned base image republishes "
+            "(#1582). Missing binaries, parse failures, and image-newer-than-"
+            "manifest mismatches still hard-fail for these tools."
+        ),
+    )
     args = parser.parse_args()
 
     tiers = [t.strip() for t in args.tiers.split(",")]
+    allow_missing = _parse_allow_missing(args.allow_missing)
+    allow_version_lag = _parse_allow_version_lag(args.allow_version_lag)
     try:
         all_tools = _load_manifest(args.manifest)
     except (ValueError, OSError, json.JSONDecodeError) as exc:
@@ -138,6 +272,7 @@ def main() -> int:
         return 2
 
     failures: list[str] = []
+    warnings: list[str] = []
     for tool in tools:
         name = str(tool.get("name", "")).strip()
         expected = str(tool.get("version", "")).strip()
@@ -153,6 +288,19 @@ def main() -> int:
         code, output = _run(cmd)
         if code != 0:
             cmd_str = " ".join(cmd)
+            # Tolerate ONLY a genuinely-absent binary (127) for a tool the PR
+            # introduces: the digest-pinned base image cannot yet contain it,
+            # so downgrade to a loud warning instead of a hard failure. The
+            # post-merge tools-image republish + digest bump restores full
+            # coverage. Any other exit code means the binary is present but
+            # broken, which stays a failure even for an allow-missing tool.
+            if name in allow_missing and code == _MISSING_BINARY_EXIT:
+                warnings.append(
+                    f"{name}: binary not found in image ({cmd_str}); tolerated "
+                    f"because this tool is newly added by the PR and is not yet "
+                    f"in the digest-pinned base image",
+                )
+                continue
             diagnostic = output.strip()
             message = f"{name}: command failed with exit code {code} ({cmd_str})"
             if diagnostic:
@@ -165,10 +313,34 @@ def main() -> int:
             failures.append(f"{name}: failed to parse version from '{output}'")
             continue
 
-        if actual != expected:
+        if not _versions_match(name, expected, actual):
+            # Digest-lag version bump (#1582): when the PR raised the manifest
+            # version and the digest-pinned base image still ships the older
+            # build, tolerate with a loud warning. Image-newer-than-manifest
+            # (or unparseable ordering) stays a hard failure.
+            if name in allow_version_lag and _is_image_older_than_manifest(
+                expected=expected,
+                actual=actual,
+            ):
+                warnings.append(
+                    f"{name}: version lag (manifest {expected}, image {actual}); "
+                    f"tolerated because this PR bumped the tool version and the "
+                    f"digest-pinned base image has not republished yet",
+                )
+                continue
             failures.append(
                 f"{name}: version mismatch (expected {expected}, got {actual})",
             )
+
+    if warnings:
+        # GitHub Actions annotation (::warning::) plus a human-readable block so
+        # the tolerated tool is prominent in both the checks UI and raw logs.
+        print("::warning::Tool verification tolerated digest-lag tool(s):")
+        for item in warnings:
+            print(f"::warning::{item}")
+        print("Tolerated tool(s) (newly added or version-bumped by this PR):")
+        for item in warnings:
+            print(f"  - {item}")
 
     if failures:
         print("Tool verification failed:")
@@ -176,7 +348,11 @@ def main() -> int:
             print(f"  - {item}")
         return 1
 
-    print(f"Verified {len(tools)} tool(s) against manifest tiers: {', '.join(tiers)}")
+    tiers_str = ", ".join(tiers)
+    summary = f"Verified {len(tools)} tool(s) against manifest tiers: {tiers_str}"
+    if warnings:
+        summary = f"{summary} ({len(warnings)} digest-lag tool(s) tolerated)"
+    print(summary)
     return 0
 
 

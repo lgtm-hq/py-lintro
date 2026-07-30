@@ -40,14 +40,17 @@ configure specific commands rather than tool resolution.
 The configuration system works in a specific order:
 
 1. **Execution Tier** - Determines which tools run and in what order
-   - `enabled_tools`: Empty list means all enabled tools run
+   - `enabled_tools`: Empty list means all enabled tools run. An explicit named
+     `--tools` list on the CLI bypasses this allowlist; default runs and `--tools all`
+     remain filtered by it.
    - `tool_order`: Controls execution order (priority, alphabetical, or custom)
    - `fail_fast`: Whether to stop on first tool failure
    - `parallel`: Whether to run tools in parallel (default: `true`)
    - `max_workers`: Maximum parallel workers, 1-32 (default: CPU count)
-   - `auto_install_deps`: Auto-install Node.js dependencies if missing. Unset by
-     default, in which case Lintro falls back to container auto-detection (enabled
-     inside containers, disabled otherwise)
+   - `auto_install_deps`: Auto-install Node.js dependencies if missing, for the tools
+     that need a project dependency tree (`tsc`, `vue-tsc`, `svelte-check`,
+     `astro-check`). Unset by default, in which case Lintro falls back to container
+     auto-detection (enabled inside containers, disabled otherwise)
 
 2. **Enforce Tier** - Cross-cutting settings injected as CLI flags
    - These settings override native configs via CLI arguments
@@ -231,6 +234,93 @@ In `--output-format json` the score is added **additively** under
 }
 ```
 
+### Tool Timeouts in the JSON Report
+
+A tool timeout is an **execution failure, never a lint finding**. Every tool accounts
+for one the same way, so a consumer can tell an infrastructure flake apart from a
+genuine finding using evidence about its own run.
+
+A timed-out tool reports:
+
+- `success: false` — the run failed, and the process exit code stays non-zero.
+- `timed_out: true` — the machine-readable marker to classify on. No need to regex-match
+  the human-readable `output` string.
+- `issues_count` counting **only** genuine findings. No synthetic `TIMEOUT` pseudo-issue
+  is invented, and the timeout never reaches `summary.total_issues`. Issues legitimately
+  detected _before_ the timeout (for example the pre-fix check of a `format` run) are
+  still reported.
+
+`summary.timed_out_tools` lists the tools that timed out, in execution order:
+
+```json
+{
+  "summary": {
+    "total_issues": 0,
+    "total_fixed": 0,
+    "total_remaining": 0,
+    "timed_out_tools": ["mypy"]
+  },
+  "results": [
+    {
+      "tool": "mypy",
+      "success": false,
+      "issues_count": 0,
+      "timed_out": true,
+      "output": "mypy execution timed out (300s limit exceeded)..."
+    }
+  ]
+}
+```
+
+This makes the conservative CI classification expressible: **at least one tool timed out
+AND `total_issues == 0`**. A run with a real finding still reports a non-zero
+`total_issues`, and a non-timeout tool failure reports `timed_out: false`, so neither is
+ever mistaken for a flake.
+
+### Artifacts Under GitHub Actions
+
+When `GITHUB_ACTIONS=true` is detected, lintro auto-emits two side-channel artifacts
+regardless of `--output-format`, so the console/grid output every existing consumer
+parses is untouched and no second invocation is needed:
+
+| Format | Path                                         | Purpose                            |
+| ------ | -------------------------------------------- | ---------------------------------- |
+| SARIF  | `.lintro/artifacts/sarif/results.sarif.json` | GitHub Code Scanning ingestion     |
+| JSON   | `.lintro/artifacts/json/results.json`        | Structured CI evidence (see above) |
+
+SARIF omits clean tools and omits failures that produced no issues, so it cannot be used
+to classify a timeout without failing open. The JSON report covers every tool that ran
+and carries the per-tool `timed_out` flag.
+
+Any format listed in `execution.artifacts` is emitted in addition to these, in every
+environment.
+
+### Output Presentation
+
+Purely cosmetic console output is controlled by the `output` section. These settings
+never affect machine-readable documents (JSON/SARIF) or on-disk artifacts.
+
+```yaml
+# .lintro-config.yaml
+output:
+  art: true # Show decorative ASCII art after a run (default: true)
+```
+
+The decorative ASCII art printed after `check`/`fmt` is only emitted to an interactive
+terminal. It is always suppressed when:
+
+- stdout is not a TTY (piped output, CI logs, redirected files), or
+- `output.art: false` is set in config, or
+- the `--no-art` flag is passed to `lintro check` / `lintro format`.
+
+The art is never written to `.lintro/run-*/report.md`, `console.log`, or any
+`--output-format` stream regardless of these settings.
+
+```bash
+lintro check --no-art   # suppress art for this run only
+lintro format --no-art
+```
+
 ### Command-Line Options
 
 #### Global Options
@@ -280,9 +370,17 @@ lintro check src/ --tools tsc,oxlint --auto-install
 ```
 
 The `--auto-install` flag is available for both `check` and `format` commands. When
-enabled, Lintro will automatically run `bun install` (or `npm install` if bun is
-unavailable) before running Node.js-based tools like tsc, oxlint, oxfmt, prettier, or
-markdownlint-cli2.
+enabled, Lintro runs `bun install` (or `npm install` if bun is unavailable) before
+running the tools that need a project's dependency tree to work: `tsc`, `vue-tsc`,
+`svelte-check` and `astro-check`.
+
+It does **not** apply to standalone Node.js binaries such as `prettier`, `oxlint`,
+`oxfmt`, `stylelint` or `markdownlint-cli2`. Those run fine without a local
+`node_modules`: `oxlint`, `oxfmt` and `stylelint` are fetched on demand by `bunx`/`npx`,
+while `prettier` and `markdownlint-cli2` are resolved from `PATH` — see
+[Node.js Tool Resolution](#nodejs-tool-resolution). When one of them cannot be resolved
+at all, Lintro reports a `⏭️ SKIP` row with the reason instead of a pass — installing
+project dependencies would not have helped.
 
 You can also enable this globally via configuration:
 
@@ -352,14 +450,18 @@ export LINTRO_VERSION_TIMEOUT=60
 
 # Force Docker install-context detection (set to 1)
 export LINTRO_DOCKER=1
+
+# Opt in to loading external (third-party) plugins. Disabled by default.
+export LINTRO_ENABLE_EXTERNAL_PLUGINS=1
 ```
 
-| Variable                 | Description                                                  | Default   |
-| ------------------------ | ------------------------------------------------------------ | --------- |
-| `LINTRO_LOG_DIR`         | Base directory for run logs and artifacts                    | `.lintro` |
-| `LINTRO_VERSION_TIMEOUT` | Timeout in seconds for tool version checks (must be `>= 1`)  | `30`      |
-| `LINTRO_DOCKER`          | Force Docker install-context detection when set to `1`       | -         |
-| `LINTRO_CONFIG`          | Shown in the `lintro` environment report; informational only | -         |
+| Variable                         | Description                                                  | Default   |
+| -------------------------------- | ------------------------------------------------------------ | --------- |
+| `LINTRO_LOG_DIR`                 | Base directory for run logs and artifacts                    | `.lintro` |
+| `LINTRO_VERSION_TIMEOUT`         | Timeout in seconds for tool version checks (must be `>= 1`)  | `30`      |
+| `LINTRO_DOCKER`                  | Force Docker install-context detection when set to `1`       | -         |
+| `LINTRO_CONFIG`                  | Shown in the `lintro` environment report; informational only | -         |
+| `LINTRO_ENABLE_EXTERNAL_PLUGINS` | Opt in to loading external (third-party) plugins (`1`/`0`)   | `0`       |
 
 > **Note:** There is no environment variable for tool timeouts, verbosity, exclude
 > patterns, output format, or auto-install. Use CLI flags (`--exclude`,
@@ -367,6 +469,56 @@ export LINTRO_DOCKER=1
 > Auto-install is resolved from the `--auto-install` flag, then
 > `execution.auto_install_deps`, then container auto-detection — not from an environment
 > variable.
+
+### External Plugins (Trust Model)
+
+Lintro can load third-party tool plugins published as Python packages that expose a
+`lintro.plugins` entry point. Because loading a plugin imports and executes its code,
+**external plugins are disabled by default** — a default installation never runs
+third-party plugin code at startup. This is a security boundary: any package installed
+in the same environment could otherwise execute arbitrary code every time Lintro runs.
+See [SECURITY.md](../SECURITY.md) for the full threat model.
+
+Enable external plugins only after you have reviewed and trust them, using either
+mechanism:
+
+```yaml
+# .lintro-config.yaml
+plugins:
+  # Opt in and restrict loading to an explicit allowlist (recommended).
+  # Names match the entry-point name or the distribution (package) name.
+  trusted:
+    - my-org-tool
+    - another-plugin
+  # Optional: enable loading of ALL discovered plugins (no allowlist).
+  # Prefer 'trusted' over this blanket toggle.
+  enabled: false
+```
+
+Equivalent `pyproject.toml`:
+
+```toml
+[tool.lintro.plugins]
+trusted = ["my-org-tool", "another-plugin"]
+enabled = false
+```
+
+Or, for a one-off/CI run, the environment variable:
+
+```bash
+export LINTRO_ENABLE_EXTERNAL_PLUGINS=1
+```
+
+Resolution rules:
+
+- Loading is enabled when `LINTRO_ENABLE_EXTERNAL_PLUGINS` is truthy **or** the
+  `plugins` config opts in (a `trusted` allowlist is itself an opt-in, as is
+  `enabled: true`).
+- When a `trusted` allowlist is present, only plugins whose entry-point name or
+  distribution name is listed are loaded; all others are skipped and logged, regardless
+  of how loading was enabled.
+- With no allowlist configured, enabling loads all discovered `lintro.plugins` entry
+  points — use this only in fully trusted environments.
 
 ### Pre-Execution Summary
 
@@ -386,16 +538,33 @@ This summary is shown for all output formats except JSON (`--output-format json`
 When tools are skipped, Lintro reports them in the summary table with a `SKIP` status
 and a note explaining the reason. Common skip reasons:
 
-| Reason                   | Description                                       |
-| ------------------------ | ------------------------------------------------- |
-| `node_modules not found` | Node.js deps missing and auto-install is disabled |
-| `disabled in config`     | Tool disabled via `tools.<name>.enabled: false`   |
-| `not in enabled_tools`   | Tool not in `execution.enabled_tools` allowlist   |
-| `deferred to <tool>`     | Framework tool preferred (e.g., tsc to vue-tsc)   |
-| Version check messages   | Tool version below minimum required               |
+| Reason                   | Description                                                                                            |
+| ------------------------ | ------------------------------------------------------------------------------------------------------ |
+| `node_modules not found` | Node.js deps missing and auto-install is disabled                                                      |
+| `disabled in config`     | Tool disabled via `tools.<name>.enabled: false`                                                        |
+| `not in enabled_tools`   | Tool not in `execution.enabled_tools` allowlist (default/`--tools all` only; named `--tools` bypasses) |
+| `deferred to <tool>`     | Framework tool preferred (e.g., tsc to vue-tsc)                                                        |
+| Version check messages   | Tool version below minimum required                                                                    |
 
 Skipped tools do not affect exit codes — only tools that run and find issues contribute
 to a non-zero exit.
+
+#### Disabling a tool from `pyproject.toml`
+
+The `tools:` section of `.lintro-config.yaml` has two equivalent `pyproject.toml`
+spellings — a flat per-tool table, or a nested `tool`/`tools` table:
+
+```toml
+[tool.lintro.trufflehog]
+enabled = false
+
+# Equivalent, mirroring the YAML `tools:` section
+[tool.lintro.tool.trufflehog]
+enabled = false
+```
+
+`pyproject.toml` is a _fallback_: when a `.lintro-config.yaml` exists, it is the only
+configuration source and these tables are not consulted.
 
 ### Project Setup with `lintro init`
 
@@ -535,19 +704,20 @@ tool_priorities = { ruff = 5, black = 10, prettier = 1 }
 
 **Default Tool Priorities:**
 
-| Tool         | Priority | Type             |
-| ------------ | -------- | ---------------- |
-| prettier     | 10       | Formatter        |
-| black        | 15       | Formatter        |
-| ruff         | 20       | Linter/Formatter |
-| markdownlint | 30       | Linter           |
-| yamllint     | 35       | Linter           |
-| vale         | 50       | Linter (docs)    |
-| pydoclint    | 40       | Linter           |
-| bandit       | 45       | Security         |
-| hadolint     | 50       | Infrastructure   |
-| actionlint   | 55       | Infrastructure   |
-| pytest       | 100      | Test Runner      |
+| Tool          | Priority | Type             |
+| ------------- | -------- | ---------------- |
+| prettier      | 10       | Formatter        |
+| black         | 15       | Formatter        |
+| ruff          | 20       | Linter/Formatter |
+| markdownlint  | 30       | Linter           |
+| html_validate | 30       | Linter           |
+| yamllint      | 35       | Linter           |
+| pydoclint     | 40       | Linter           |
+| bandit        | 45       | Security         |
+| hadolint      | 50       | Infrastructure   |
+| vale          | 50       | Linter (docs)    |
+| actionlint    | 55       | Infrastructure   |
+| pytest        | 100      | Test Runner      |
 
 Lower priority values run first. This ensures formatters run before linters, avoiding
 false positives from linters detecting issues that formatters would fix.
@@ -636,6 +806,53 @@ Rationale:
   Ruff’s stricter lint rules (e.g., `COM812`, `E501`).
 - Black’s safe wrapping is preferred for long lines; Ruff continues to enforce lint
   limits during checks.
+
+### Node.js Tool Resolution {#nodejs-tool-resolution}
+
+How Lintro locates a Node.js tool decides which install actually works, and the answer
+is not the same for every tool. Four resolution modes are in use; the tool's own
+definition, not a single shared code path, decides which one applies.
+
+**1. Runner-only tools — install as a project dependency.** `oxlint`, `oxfmt` and
+`stylelint` go through `NodeJSBuilder` in `lintro/tools/core/command_builders.py`:
+
+1. `bunx <binary>` — if `bunx` is available.
+2. `npx <binary>` — if only `npx` is available.
+3. bare `<binary>` — if neither runner exists.
+
+`bunx`/`npx` resolve the **checked project's** `node_modules/.bin` first and otherwise
+fetch the package from the npm registry. Neither branch looks at `PATH`, so a global
+install (`bun add -g`, `npm install -g`) or a Homebrew formula is not what Lintro picks
+up on any machine that has `bun` or `npm`. Install these as a dependency of the project
+you check (`bun add -D <pkg>` / `npm install -D <pkg>`); that also pins the version
+through your lockfile instead of resolving `@latest` at check time.
+
+**2. `PATH`-first tools — a global install is what they prefer.** `commitlint`,
+`markdownlint-cli2`, `tsc`, `vue-tsc` and `svelte-check` resolve in their own tool
+definitions, and each checks the binary **before** any runner:
+
+1. `<binary>` from `PATH` — a global install (`-g`) or a Homebrew formula.
+2. `bunx <binary>`.
+3. `npx <binary>` — **not available for `commitlint` or `markdownlint-cli2`**, which
+   fall straight through to step 4.
+4. bare `<binary>` — fails if nothing is installed.
+
+The `npx` gap matters: on a machine with npm but no bun, a `commitlint` or
+`markdownlint-cli2` devDependency is never reached and the tool reports a skip. Install
+those two globally, or make sure `bun` is available.
+
+**3. Local-first with a runner fallback.** `astro check` prefers the project's
+`node_modules/.bin/astro` (which also avoids the interactive "install @astrojs/check?"
+prompt that hangs without a TTY), then `PATH`, then `bunx`/`npx`. `html-validate` uses a
+similar chain with a **version-pinned** registry fallback; see
+[html-validate Configuration](#html-validate-configuration) for the full order. A global
+install works for both, though a project-local one is preferred.
+
+**4. `PATH` only.** `prettier` has no Node-specific builder at all — the command builder
+registry falls through to its bare-name default and the OS resolves `prettier` against
+`PATH`. A global install (`npm install -g prettier`, `brew install prettier`) is
+therefore the correct one; a project devDependency alone does not put `prettier` on
+`PATH`.
 
 ### Python Tools
 
@@ -858,6 +1075,48 @@ lintro check --tools gitleaks --tool-options gitleaks:baseline_path=gitleaks-bas
 lintro check --tools gitleaks --tool-options gitleaks:max_target_megabytes=10
 ```
 
+#### TruffleHog Configuration
+
+TruffleHog is a secrets scanner with 800+ provider-specific detectors and optional live
+credential verification. Lintro runs it in `filesystem` mode. **Verification is disabled
+by default** (`--no-verification`) so default scans make no outbound network calls;
+verification can be re-enabled per run, in which case TruffleHog may contact third-party
+providers to test candidate credentials (accept that trade-off before enabling it).
+TruffleHog is configured via CLI options (there is no default config file).
+
+**Install:** `brew install trufflehog` or
+[GitHub Releases](https://github.com/trufflesecurity/trufflehog/releases)
+
+**Available Options:**
+
+| Option            | Type    | Description                                          |
+| ----------------- | ------- | ---------------------------------------------------- |
+| `no_verification` | boolean | Disable live credential verification (default: true) |
+| `results`         | string  | Filter result type — single value (see note below)   |
+| `config`          | string  | Path to a custom detector configuration file         |
+| `exclude_paths`   | string  | Path to a file of newline-separated exclude regexes  |
+| `concurrency`     | integer | Number of concurrent workers                         |
+
+> **Note:** `--tool-options` uses commas to separate options, so a comma-separated
+> `results` value (e.g. `verified,unverified`) cannot be passed on the CLI. Use a single
+> value such as `results=unverified`, or leave it unset to report every result type.
+
+**Usage Examples:**
+
+```bash
+# Basic scan (verification disabled by default)
+lintro check --tools trufflehog
+
+# Raise worker concurrency
+lintro check --tools trufflehog --tool-options trufflehog:concurrency=8
+
+# Only report unverified results (single value; commas are not CLI-safe here)
+lintro check --tools trufflehog --tool-options trufflehog:results=unverified
+
+# Explicitly enable live verification (makes network calls — off by default)
+lintro check --tools trufflehog --tool-options trufflehog:no_verification=False
+```
+
 #### OSV-Scanner Configuration
 
 OSV-Scanner is Google's vulnerability scanner using the Open-Source Vulnerabilities
@@ -895,7 +1154,7 @@ When `check_suppressions` is enabled, lintro runs a second osv-scanner scan with
 suppressions to classify each `.osv-scanner.toml` entry as **Active** (vulnerability
 still present), **Stale** (vulnerability resolved upstream — safe to remove), or
 **Expired** (past the `ignoreUntil` date). Results appear in the summary table Notes
-column and in JSON output under `ai_metadata.suppressions`.
+column and in JSON output under `metadata.suppressions`.
 
 **Usage Examples:**
 
@@ -908,6 +1167,56 @@ lintro check --tools osv_scanner --tool-options "osv_scanner:timeout=300"
 
 # Skip suppression staleness check
 lintro check --tools osv_scanner --tool-options "osv_scanner:check_suppressions=false"
+
+# Ignore vendored or nested checkouts (equivalent to a .lintro-ignore entry)
+lintro check --tools osv_scanner --exclude ".claude"
+```
+
+**Excluding lockfiles:** osv-scanner performs its own recursive lockfile discovery, so
+lintro applies the resolved exclusion set — `.lintro-ignore` entries plus `--exclude`
+patterns — to the lockfile paths it reports. Both mechanisms use the same gitignore
+semantics as file discovery and yield identical results. Directory patterns (`.claude`,
+`vendor/`) drop every finding from that tree — useful when nested checkouts multiply the
+same finding — and file patterns (`bun.lock`, `*.lock`) suppress individual lockfiles.
+
+#### pip-audit Configuration
+
+pip-audit is the Python Packaging Authority (PyPA) scanner for Python dependencies with
+known vulnerabilities. It queries the PyPI Advisory Database and OSV, complementing
+bandit (which scans source code) by scanning the dependency surface. It audits
+`requirements*.txt` files (via `-r`) and Python projects declared in `pyproject.toml` /
+`setup.py`.
+
+**Install:** `pip install pip-audit`, `uv add pip-audit`, or `brew install pip-audit`.
+
+**File:** none. pip-audit has no native config file; suppressions are passed on the
+command line by upstream and are not exposed via lintro.
+
+**Available Options:**
+
+| Option    | Type    | Description                            |
+| --------- | ------- | -------------------------------------- |
+| `timeout` | integer | Scan timeout in seconds (default: 120) |
+
+**Notes:**
+
+- pip-audit's JSON output carries no severity field, so lintro reports severity as
+  `UNKNOWN`.
+- Advisory IDs (PYSEC/GHSA/CVE) link to the corresponding [osv.dev](https://osv.dev)
+  page.
+- Requirements discovery is recursive: nested files such as `requirements/base.txt` or
+  `services/api/requirements.txt` are picked up, while vendored/generated trees
+  (`node_modules`, `.venv`, `venv`, `vendor`, `.git`, `__pycache__`) are skipped. To
+  audit a file outside this scope, pass it explicitly on the command line.
+
+**Usage Examples:**
+
+```bash
+# Scan requirements and project manifests for vulnerable dependencies
+lintro check --tools pip_audit
+
+# With a longer timeout for slow networks
+lintro check --tools pip_audit --tool-options "pip_audit:timeout=300"
 ```
 
 #### pydoclint Configuration
@@ -1034,6 +1343,10 @@ npm install -g typescript
 bun add -g typescript
 ```
 
+Lintro prefers a `tsc` binary on `PATH` and only falls back to `bunx`/`npx`, so any of
+the above works; a project-local devDependency is picked up through the `bunx`/`npx`
+fallback. See [Node.js Tool Resolution](#nodejs-tool-resolution).
+
 **File:** `tsconfig.json`
 
 ```json
@@ -1095,13 +1408,16 @@ When a native config exists, Lintro uses it automatically and skips generating d
 **Installation:**
 
 ```bash
-# npm/bun
-npm install -g oxlint
-bun add -g oxlint
+# bun (recommended)
+bun add -D oxlint
 
-# Homebrew (macOS)
-brew install oxlint
+# npm
+npm install -D oxlint
 ```
+
+Lintro invokes oxlint via `bunx`/`npx`, which resolve the project's `node_modules` and
+not `PATH` — a global or Homebrew install is not what gets used. See
+[Node.js Tool Resolution](#nodejs-tool-resolution).
 
 **File:** `.oxlintrc.json`
 
@@ -1177,13 +1493,16 @@ Stylelint resolves configuration per file (walking upward). Lintro supports:
 **Installation:**
 
 ```bash
-# npm/bun
-npm install -g stylelint
-bun add -g stylelint
+# bun (recommended, with a shareable config)
+bun add -D stylelint stylelint-config-standard
 
-# Per-project (recommended, with a shareable config)
-bun add -d stylelint stylelint-config-standard
+# npm
+npm install -D stylelint stylelint-config-standard
 ```
+
+Lintro invokes stylelint via `bunx`/`npx`, which resolve the project's `node_modules`
+and not `PATH` — a global install is not what gets used. See
+[Node.js Tool Resolution](#nodejs-tool-resolution).
 
 **File:** `.stylelintrc.json`
 
@@ -1239,13 +1558,16 @@ When a native config exists, Lintro uses it automatically and skips generating d
 **Installation:**
 
 ```bash
-# npm/bun
-npm install -g oxfmt
-bun add -g oxfmt
+# bun (recommended)
+bun add -D oxfmt
 
-# Homebrew (macOS)
-brew install oxfmt
+# npm
+npm install -D oxfmt
 ```
+
+Lintro invokes oxfmt via `bunx`/`npx`, which resolve the project's `node_modules` and
+not `PATH` — a global or Homebrew install is not what gets used. See
+[Node.js Tool Resolution](#nodejs-tool-resolution).
 
 **File:** `.oxfmtrc.json` or `.oxfmtrc.jsonc`
 
@@ -1422,6 +1744,76 @@ lintro check src/ --tools vue-tsc --tool-options "vue-tsc:strict=true"
 
 # Auto-install dependencies before checking
 lintro check src/ --tools vue-tsc --auto-install
+```
+
+#### html-validate Configuration
+
+html-validate is an offline HTML validator that checks documents for standards
+compliance, best practices, and accessibility (WCAG) issues. It is check-only — the tool
+ships no autofixer. By default it inspects `*.html`, `*.htm`, `*.vue`, and `*.svelte`
+files.
+
+**Installation:**
+
+```bash
+# bun (recommended)
+bun add -D html-validate
+
+# npm
+npm install -D html-validate
+```
+
+A project-local devDependency is the **supported configuration**. It is the first and
+most reliable branch of Lintro's executable resolution, it is lockfile-pinned, and it
+needs no registry access at check time. A global install (`-g`) does _not_ populate
+`node_modules/.bin`, so it lands on a later, weaker branch.
+
+html-validate is the only tool on this pinned chain; see
+[Node.js Tool Resolution](#nodejs-tool-resolution) for how the other Node.js tools
+resolve.
+
+**Executable resolution order:**
+
+1. `node_modules/.bin/html-validate`, searched upward from the directory being checked
+   (the target project's own install, not Lintro's).
+2. `html-validate` on `PATH` (e.g. a global install).
+3. `bunx html-validate@<pinned>` — registry fallback, only if `bunx` is available.
+4. `npx html-validate@<pinned>` — registry fallback, only if `npx` is available.
+5. bare `html-validate` (fails if nothing is installed).
+
+`<pinned>` is the version Lintro pins in its manifest; `@latest` is never resolved at
+runtime. Branches 3 and 4 emit a one-time warning because they require network access to
+the npm registry, and a failure on either path is reported with install guidance rather
+than html-validate's raw error.
+
+**Node runtime requirement:** the pinned html-validate (currently `11.5.6`) declares
+`engines: { "node": "^22.22.0 || >= 24.8.0" }`. Any consumer that installs it, or that
+reaches the `bunx`/`npx` fallback, needs a Node runtime satisfying that range — Node 20,
+21, and 22.0–22.21 are not supported. Size your CI matrix accordingly.
+
+**Native Config:** `.htmlvalidate.json`, `.htmlvalidate.js`, `.htmlvalidate.cjs`, or
+`.htmlvalidate.mjs`
+
+html-validate reads its rule configuration from the project's native config file when
+present. No additional configuration is required for Lintro.
+
+**Available Options via `--tool-options`:**
+
+| Option    | Type    | Description                                 |
+| --------- | ------- | ------------------------------------------- |
+| `timeout` | integer | Execution timeout in seconds (default: 120) |
+
+**Usage Examples:**
+
+```bash
+# Check HTML files
+lintro check src/ --tools html-validate
+
+# Check the whole project
+lintro check . --tools html-validate
+
+# Auto-install dependencies before checking
+lintro check src/ --tools html-validate --auto-install
 ```
 
 ### SQL Tools
@@ -1719,6 +2111,55 @@ lintro format --tools clippy
 
 # Check specific Rust directories
 lintro check src/ --tools clippy
+```
+
+#### golangci-lint Configuration
+
+golangci-lint is the de-facto Go meta-linter, running 100+ sub-linters in parallel.
+Lintro targets golangci-lint **v2** and automatically discovers Go modules by finding
+`go.mod` files; non-Go projects are skipped. It requires the Go toolchain to be
+installed. Linter selection and rule tuning are configured through the project's native
+config file.
+
+**Installation:**
+
+```bash
+brew install golangci-lint
+# or see https://golangci-lint.run/welcome/install/
+```
+
+**File:** `.golangci.yml` (also `.golangci.yaml`, `.golangci.toml`, `.golangci.json`)
+
+```yaml
+version: '2'
+linters:
+  enable:
+    - errcheck
+    - staticcheck
+    - ineffassign
+    - govet
+```
+
+**Available Options:**
+
+| Option    | Type    | Description                        |
+| --------- | ------- | ---------------------------------- |
+| `timeout` | integer | Execution timeout in seconds (120) |
+
+Linter enable/disable and per-linter settings live in the native `.golangci.*` config
+file rather than as lintro `--tool-options`.
+
+**Lintro usage:**
+
+```bash
+# Check Go code with golangci-lint
+lintro check --tools golangci_lint
+
+# Auto-fix issues where the underlying linters support it
+lintro format --tools golangci_lint
+
+# Increase the timeout for a large module
+lintro check --tools golangci_lint --tool-options golangci_lint:timeout=300
 ```
 
 #### Cargo-deny Configuration
@@ -2163,7 +2604,9 @@ repository's most recent commit message.
 - Requires a config; Lintro skips it as a non-error when none is present.
 - Install: `bun add -g @commitlint/cli @commitlint/config-conventional`,
   `npm install -g @commitlint/cli @commitlint/config-conventional`, or
-  `brew install commitlint`.
+  `brew install commitlint`. Lintro checks `PATH` first and falls back only to `bunx` —
+  there is no `npx` branch, so a devDependency is unreachable without `bun`. See
+  [Node.js Tool Resolution](#nodejs-tool-resolution).
 - Cannot auto-fix — amend the commit to satisfy the rules.
 
 **File:** `commitlint.config.js` (or `.commitlintrc.{js,cjs,json,yaml,yml}`, or a
@@ -2324,6 +2767,67 @@ ai:
 | `retry_base_delay`      | float  | `1.0`       | Initial retry delay in seconds (min 0.1)         |
 | `retry_max_delay`       | float  | `30.0`      | Maximum retry delay in seconds (min 1.0)         |
 | `retry_backoff_factor`  | float  | `2.0`       | Retry delay multiplier (min 1.0)                 |
+
+### Idiom Review Tool (`idiom-review`)
+
+The `idiom-review` tool uses AI to find issues that syntax-matching linters cannot: code
+that is syntactically correct but non-idiomatic or redundantly duplicated across files.
+Unlike the AI summary and `--fix` flows, it is a first-class `ToolDefinition` plugin
+that runs as part of the normal `lintro check` pipeline — distinct from the
+`lintro review` diff-review command.
+
+**Install:**
+
+```bash
+uv pip install 'lintro[ai]'
+export ANTHROPIC_API_KEY=sk-ant-...   # or OPENAI_API_KEY for OpenAI
+```
+
+The tool is **disabled by default** and is a no-op until explicitly opted in. When no AI
+provider is available (missing SDK, key, or credits), it degrades gracefully to a
+skipped result rather than failing the run. Findings are cached by content hash under
+`.lintro-cache/idiom`, so unchanged files cost nothing on repeat runs.
+
+**Options:**
+
+| Option           | Type   | Default    | Description                                            |
+| ---------------- | ------ | ---------- | ------------------------------------------------------ |
+| `enabled`        | bool   | `false`    | Opt-in gate — must be `true` to run                    |
+| `mode`           | string | `per-file` | `per-file` · `duplication` · `both`                    |
+| `min_confidence` | string | `medium`   | Drop findings below this level (`low`/`medium`/`high`) |
+| `max_files`      | int    | `25`       | Cap on files reviewed per run (cost bound)             |
+| `language`       | string | `python`   | Language to review; set explicitly for other languages |
+
+**Modes:**
+
+- **`per-file`** — flags idiomatic misses per file (e.g. verbose loops instead of
+  `any()`/`all()` comprehensions).
+- **`duplication`** — flags the same utility logic reimplemented across files, invisible
+  to per-file linters, with a suggested extraction point.
+- **`both`** — runs both modes in one pass.
+
+**Usage example:**
+
+```yaml
+# .lintro-config.yaml
+ai:
+  enabled: true
+  provider: anthropic
+  transport: api
+tools:
+  idiom-review:
+    options:
+      enabled: true # opt-in gate (default: false)
+      mode: per-file # per-file | duplication | both
+      min_confidence: medium
+      max_files: 25 # cap files reviewed per run (cost bound)
+```
+
+Or enable ad hoc from the CLI without modifying config:
+
+```bash
+lintro check --tools idiom-review --tool-options idiom-review:enabled=true
+```
 
 ## Advanced Configuration
 

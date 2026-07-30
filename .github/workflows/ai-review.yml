@@ -13,11 +13,17 @@ name: AI Review - Dogfood
 #
 # Posts a review comment: the review runs with `--post`, so lintro maintains a
 # single sticky comment on the PR (rich findings + cumulative telemetry) and
-# posts inline review comments for diff-mappable findings. It runs with
-# continue-on-error and the script always exits 0, so it can never fail a PR.
-# When the ANTHROPIC_API_KEY secret is absent (not configured yet, or a fork PR
-# that cannot read secrets) the script skips gracefully. This is intentionally
-# NOT a required check.
+# posts inline review comments for diff-mappable findings.
+#
+# NO-SILENT-SKIP (#1826): this job is intentionally NOT a required check, but it
+# is no longer unconditionally green. It previously carried continue-on-error at
+# both the job and step level, so the check reported success even when the review
+# aborted — for months `AI Review ✓` meant nothing, because a depleted Anthropic
+# balance made every run a no-op. The job now reddens whenever no review was
+# produced (missing/dead credential, depleted balance, unreachable provider,
+# lintro-side failure); scripts/ci/run-ai-review.sh decides which case it is.
+# Since the check is not required, a billing condition is loud but never blocks a
+# merge. P1 findings still pass: the review ran, and its findings are advisory.
 #
 # ACTIVATION PRECONDITION (audited #1317, follow-up to #1072/#1074):
 # Safe to add the ANTHROPIC_API_KEY repository secret only when all of the
@@ -46,9 +52,11 @@ jobs:
   ai-review:
     name: AI Review
     runs-on: ubuntu-24.04
-    # Fully informational: any failure (setup, egress, checkout, or the review
-    # step itself) is non-blocking and never fails the PR.
-    continue-on-error: true
+    # No continue-on-error, at either level: a job-level continue-on-error
+    # rewrites the conclusion to `success`, which is precisely how a review that
+    # never ran kept reading as a pass (#1826). The check is not required, so a
+    # red conclusion here is visible without being blocking.
+    #
     # Skip draft PRs and never run for fork PRs. Fork PRs already cannot read
     # secrets, but requiring head.repo == the base repo makes it explicit that
     # the keyed job only runs for same-repository pull requests.
@@ -95,26 +103,25 @@ jobs:
         # code that runs with ANTHROPIC_API_KEY must be trusted; the PR diff is
         # fetched separately via `gh` in the review step. base.sha is the exact
         # commit the PR targets and is already merged into main, so it is safe.
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ github.event.pull_request.base.sha }}
           fetch-depth: 1
 
       - name: Set up Python
-        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
         with:
           python-version: '3.14'
 
       - name: Install uv
-        uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990 # v8.3.2
+        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
         with:
           version: 'latest'
 
       - name: Install dependencies
         run: uv sync --extra ai
 
-      - name: Run AI review (posts comment, non-blocking)
-        continue-on-error: true
+      - name: Run AI review (posts comment; fails when nothing was reviewed)
         run: scripts/ci/run-ai-review.sh
         env:
           PR_NUMBER: ${{ github.event.number }}

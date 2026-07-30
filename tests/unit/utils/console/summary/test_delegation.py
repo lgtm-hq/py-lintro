@@ -7,6 +7,7 @@ including summary table, final status, and ASCII art delegation.
 
 from __future__ import annotations
 
+import sys
 from typing import TYPE_CHECKING
 from unittest.mock import patch
 
@@ -325,16 +326,20 @@ def test_print_final_status_format_various_counts(
 def test_print_ascii_art_delegates_correctly() -> None:
     """Verify _print_ascii_art delegates with correct parameters.
 
-    The method should pass the console output function and issue count
-    to the module-level print_ascii_art function.
+    The method should pass the untracked console writer, issue count, and
+    the resolved ``enabled`` flag to the module-level print_ascii_art
+    function. Art must use the untracked writer so it never lands in the
+    captured buffer backing report.md/console.log.
     """
     logger = ThreadSafeConsoleLogger()
 
     with patch("lintro.utils.console.logger.print_ascii_art") as mock_print:
         logger._print_ascii_art(5)
         mock_print.assert_called_once_with(
-            console_output_func=logger.console_output,
+            console_output_func=logger._emit_untracked,
             issue_count=5,
+            enabled=True,
+            output_stream=sys.stdout,
         )
 
 
@@ -354,8 +359,43 @@ def test_print_ascii_art_various_counts(issue_count: int) -> None:
     with patch("lintro.utils.console.logger.print_ascii_art") as mock_print:
         logger._print_ascii_art(issue_count)
         mock_print.assert_called_once_with(
-            console_output_func=logger.console_output,
+            console_output_func=logger._emit_untracked,
             issue_count=issue_count,
+            enabled=True,
+            output_stream=sys.stdout,
+        )
+
+
+def test_print_ascii_art_delegates_disabled_flag() -> None:
+    """Verify _print_ascii_art forwards a disabled art flag.
+
+    When the logger is constructed with ``art_enabled=False`` (config
+    ``output.art: false`` or ``--no-art``), the disabled state must be passed
+    through so no art is emitted.
+    """
+    logger = ThreadSafeConsoleLogger(art_enabled=False)
+
+    with patch("lintro.utils.console.logger.print_ascii_art") as mock_print:
+        logger._print_ascii_art(0)
+        mock_print.assert_called_once_with(
+            console_output_func=logger._emit_untracked,
+            issue_count=0,
+            enabled=False,
+            output_stream=sys.stdout,
+        )
+
+
+def test_print_ascii_art_uses_stderr_tty_gate_when_routed() -> None:
+    """Verify stderr routing checks stderr for interactive output."""
+    logger = ThreadSafeConsoleLogger(route_stderr=True)
+
+    with patch("lintro.utils.console.logger.print_ascii_art") as mock_print:
+        logger._print_ascii_art(0)
+        mock_print.assert_called_once_with(
+            console_output_func=logger._emit_untracked,
+            issue_count=0,
+            enabled=True,
+            output_stream=sys.stderr,
         )
 
 

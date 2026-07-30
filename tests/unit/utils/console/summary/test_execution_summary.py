@@ -6,6 +6,7 @@ including tests for CHECK and FIX action handling.
 
 from __future__ import annotations
 
+import re
 from typing import TYPE_CHECKING
 from unittest.mock import patch
 
@@ -19,6 +20,9 @@ if TYPE_CHECKING:
     from collections.abc import Callable
 
     from tests.unit.utils.conftest import FakeToolResult
+
+# Braille block used by the decorative ASCII art (U+2800..U+28FF).
+_BRAILLE_RE = re.compile(r"[\u2800-\u28ff]")
 
 
 # =============================================================================
@@ -336,6 +340,89 @@ def test_execution_summary_fix_handles_string_sentinel_remaining(
     ):
         # Should not raise or add string sentinel to numeric total
         logger.print_execution_summary(Action.FIX, results)
+
+
+# =============================================================================
+# ASCII Art Gating - Buffer / TTY / Toggle
+# =============================================================================
+
+
+def test_art_never_enters_tracked_buffer_on_tty(
+    fake_tool_result_factory: Callable[..., FakeToolResult],
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Verify braille art reaches the TTY but never the captured buffer.
+
+    ``report.md`` and ``console.log`` are rendered from ``get_buffer()``. Art
+    must be emitted via the untracked writer so those machine-facing artifacts
+    stay free of the non-ASCII braille blob, even during an interactive run.
+
+    Args:
+        fake_tool_result_factory: Factory for creating FakeToolResult instances.
+        capsys: Pytest capture fixture for stdout/stderr.
+    """
+    logger = ThreadSafeConsoleLogger()
+    results = [fake_tool_result_factory(success=False, issues_count=3)]
+
+    with patch(
+        "lintro.utils.display_helpers.sys.stdout.isatty",
+        return_value=True,
+    ):
+        logger.print_execution_summary(Action.CHECK, results)
+
+    captured = capsys.readouterr()
+    # Art is emitted to the terminal on a TTY...
+    assert_that(bool(_BRAILLE_RE.search(captured.out))).is_true()
+    # ...but must not leak into the tracked buffer backing report.md.
+    assert_that(bool(_BRAILLE_RE.search(logger.get_buffer()))).is_false()
+
+
+def test_art_suppressed_in_buffer_and_stdout_when_not_tty(
+    fake_tool_result_factory: Callable[..., FakeToolResult],
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Verify no braille art on stdout or in the buffer when not a TTY.
+
+    Args:
+        fake_tool_result_factory: Factory for creating FakeToolResult instances.
+        capsys: Pytest capture fixture for stdout/stderr.
+    """
+    logger = ThreadSafeConsoleLogger()
+    results = [fake_tool_result_factory(success=False, issues_count=3)]
+
+    with patch(
+        "lintro.utils.display_helpers.sys.stdout.isatty",
+        return_value=False,
+    ):
+        logger.print_execution_summary(Action.CHECK, results)
+
+    captured = capsys.readouterr()
+    assert_that(bool(_BRAILLE_RE.search(captured.out))).is_false()
+    assert_that(bool(_BRAILLE_RE.search(logger.get_buffer()))).is_false()
+
+
+def test_art_suppressed_when_art_disabled_even_on_tty(
+    fake_tool_result_factory: Callable[..., FakeToolResult],
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Verify ``art_enabled=False`` suppresses art on an interactive TTY.
+
+    Args:
+        fake_tool_result_factory: Factory for creating FakeToolResult instances.
+        capsys: Pytest capture fixture for stdout/stderr.
+    """
+    logger = ThreadSafeConsoleLogger(art_enabled=False)
+    results = [fake_tool_result_factory(success=False, issues_count=3)]
+
+    with patch(
+        "lintro.utils.display_helpers.sys.stdout.isatty",
+        return_value=True,
+    ):
+        logger.print_execution_summary(Action.CHECK, results)
+
+    captured = capsys.readouterr()
+    assert_that(bool(_BRAILLE_RE.search(captured.out))).is_false()
+    assert_that(bool(_BRAILLE_RE.search(logger.get_buffer()))).is_false()
 
 
 @pytest.mark.parametrize(

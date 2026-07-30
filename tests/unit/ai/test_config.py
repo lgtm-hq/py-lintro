@@ -7,7 +7,7 @@ from assertpy import assert_that
 from pydantic import ValidationError
 
 from lintro.ai.config import AIConfig
-from lintro.ai.enums import AITransport
+from lintro.ai.enums import AITransport, CliBareMode
 from lintro.ai.registry import AIProvider
 
 # -- Defaults --------------------------------------------------------------
@@ -42,6 +42,24 @@ def test_cursor_trust_workspace_opt_in() -> None:
     """Cursor workspace trust can be explicitly enabled via config."""
     config = AIConfig(cursor_trust_workspace=True)
     assert_that(config.cursor_trust_workspace).is_true()
+
+
+def test_cli_bare_defaults_to_auto() -> None:
+    """The Claude CLI bare-mode policy auto-detects by default."""
+    config = AIConfig()
+    assert_that(config.cli_bare).is_equal_to(CliBareMode.AUTO)
+
+
+def test_cli_bare_accepts_explicit_override() -> None:
+    """The bare-mode policy is settable from a plain config string."""
+    config = AIConfig.from_mapping({"cli_bare": "never"})
+    assert_that(config.cli_bare).is_equal_to(CliBareMode.NEVER)
+
+
+def test_cli_bare_rejects_unknown_value() -> None:
+    """An unrecognised bare-mode value is a config error, not a guess."""
+    with pytest.raises(ValidationError):
+        AIConfig(cli_bare="sometimes")  # type: ignore[arg-type]
 
 
 def test_default_config_numeric_fields() -> None:

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from assertpy import assert_that
@@ -31,9 +31,10 @@ def _response(content: str) -> AIResponse:
     )
 
 
-def test_review_file_parses_mocked_response() -> None:
+async def test_review_file_parses_mocked_response() -> None:
     """review_file returns issues parsed from the provider response."""
     provider = MagicMock()
+    provider.complete = AsyncMock()
     provider.complete.return_value = _response(
         json.dumps(
             {
@@ -50,7 +51,7 @@ def test_review_file_parses_mocked_response() -> None:
     )
     engine = IdiomReviewEngine(provider=provider, ai_config=_config())
 
-    issues = engine.review_file(
+    issues = await engine.review_file(
         file_path="m.py",
         source="found = False\nfor x in items:\n    found = True\n",
     )
@@ -60,20 +61,22 @@ def test_review_file_parses_mocked_response() -> None:
     assert_that(provider.complete.call_count).is_equal_to(1)
 
 
-def test_review_file_empty_source_skips_provider() -> None:
+async def test_review_file_empty_source_skips_provider() -> None:
     """Whitespace-only source never calls the provider."""
     provider = MagicMock()
+    provider.complete = AsyncMock()
     engine = IdiomReviewEngine(provider=provider, ai_config=_config())
 
-    issues = engine.review_file(file_path="m.py", source="   \n")
+    issues = await engine.review_file(file_path="m.py", source="   \n")
 
     assert_that(issues).is_empty()
     assert_that(provider.complete.call_count).is_equal_to(0)
 
 
-def test_review_file_caches_by_content(tmp_path: Path) -> None:
+async def test_review_file_caches_by_content(tmp_path: Path) -> None:
     """A repeat review of identical source is served from cache."""
     provider = MagicMock()
+    provider.complete = AsyncMock()
     provider.complete.return_value = _response('{"findings": []}')
     engine = IdiomReviewEngine(
         provider=provider,
@@ -82,25 +85,27 @@ def test_review_file_caches_by_content(tmp_path: Path) -> None:
     )
     source = "x = 1\n"
 
-    engine.review_file(file_path="m.py", source=source)
-    engine.review_file(file_path="m.py", source=source)
+    await engine.review_file(file_path="m.py", source=source)
+    await engine.review_file(file_path="m.py", source=source)
 
     # Second call hit the cache: the provider was only invoked once.
     assert_that(provider.complete.call_count).is_equal_to(1)
 
 
-def test_review_duplication_empty_signatures_skips_provider() -> None:
+async def test_review_duplication_empty_signatures_skips_provider() -> None:
     """No signatures means no duplication call."""
     provider = MagicMock()
+    provider.complete = AsyncMock()
     engine = IdiomReviewEngine(provider=provider, ai_config=_config())
 
-    assert_that(engine.review_duplication([])).is_empty()
+    assert_that(await engine.review_duplication([])).is_empty()
     assert_that(provider.complete.call_count).is_equal_to(0)
 
 
-def test_review_duplication_parses_groups() -> None:
+async def test_review_duplication_parses_groups() -> None:
     """review_duplication parses duplicate groups into issues."""
     provider = MagicMock()
+    provider.complete = AsyncMock()
     provider.complete.return_value = _response(
         json.dumps(
             {
@@ -121,7 +126,7 @@ def test_review_duplication_parses_groups() -> None:
     engine = IdiomReviewEngine(provider=provider, ai_config=_config())
     sigs = extract_python_signatures("a.py", "def add(a, b):\n    return a + b\n")
 
-    issues = engine.review_duplication(sigs)
+    issues = await engine.review_duplication(sigs)
 
     assert_that(issues).is_length(2)
     assert_that(provider.complete.call_count).is_equal_to(1)

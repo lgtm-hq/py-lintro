@@ -27,14 +27,11 @@ from lintro.ai.prompts import (
     SUMMARY_SYSTEM,
 )
 from lintro.ai.secrets import redact_secrets
-from lintro.ai.summary_params import SummaryGenParams
 from lintro.ai.token_budget import estimate_tokens
 
 if TYPE_CHECKING:
     from lintro.ai.providers.base import BaseAIProvider
     from lintro.models.core.tool_result import ToolResult
-
-__all__ = ["SummaryGenParams"]
 
 
 # -- Type helpers --------------------------------------------------------------
@@ -245,7 +242,7 @@ def _parse_summary_response(
     )
 
 
-def _call_summary_provider(
+async def _call_summary_provider(
     prompt: str,
     *,
     provider: BaseAIProvider,
@@ -253,9 +250,20 @@ def _call_summary_provider(
     max_tokens: int,
     workspace_root: Path | None,
 ) -> AISummary | None:
-    """Shared call/parse helper for summary generation."""
+    """Shared call/parse helper for summary generation.
+
+    Args:
+        prompt: The fully built summary prompt.
+        provider: AI provider instance.
+        ai_config: AI configuration for retry, transport, and fallback.
+        max_tokens: Maximum tokens to request.
+        workspace_root: Optional workspace root forwarded as repo root.
+
+    Returns:
+        The parsed summary, or None when the call or parse fails.
+    """
     try:
-        response = call_ai(
+        response = await call_ai(
             provider=provider,
             ai_config=ai_config,
             user_prompt=prompt,
@@ -276,7 +284,7 @@ def _call_summary_provider(
         return None
 
 
-def generate_summary(
+async def generate_summary(
     results: Sequence[ToolResult],
     provider: BaseAIProvider,
     *,
@@ -343,7 +351,7 @@ def generate_summary(
         fallback_models=fallback_models,
     )
 
-    return _call_summary_provider(
+    return await _call_summary_provider(
         prompt,
         provider=provider,
         ai_config=effective_config,
@@ -352,40 +360,7 @@ def generate_summary(
     )
 
 
-def generate_summary_from_params(
-    results: Sequence[ToolResult],
-    provider: BaseAIProvider,
-    params: SummaryGenParams,
-) -> AISummary | None:
-    """Generate a summary using a ``SummaryGenParams`` parameter object.
-
-    Thin wrapper around ``generate_summary`` that unpacks the params
-    object into keyword arguments.
-
-    Args:
-        results: Tool results containing parsed issues.
-        provider: AI provider instance.
-        params: Grouped generation parameters.
-
-    Returns:
-        AISummary, or None if generation fails or there are no issues.
-    """
-    return generate_summary(
-        results,
-        provider,
-        ai_config=params.ai_config,
-        max_tokens=params.max_tokens,
-        workspace_root=params.workspace_root,
-        timeout=params.timeout,
-        max_retries=params.max_retries,
-        base_delay=params.base_delay,
-        max_delay=params.max_delay,
-        backoff_factor=params.backoff_factor,
-        fallback_models=params.fallback_models,
-    )
-
-
-def generate_post_fix_summary(
+async def generate_post_fix_summary(
     *,
     applied: int,
     rejected: int,
@@ -463,50 +438,10 @@ def generate_post_fix_summary(
         fallback_models=fallback_models,
     )
 
-    return _call_summary_provider(
+    return await _call_summary_provider(
         prompt,
         provider=provider,
         ai_config=effective_config,
         max_tokens=max_tokens,
         workspace_root=workspace_root,
-    )
-
-
-def generate_post_fix_summary_from_params(
-    *,
-    applied: int,
-    rejected: int,
-    remaining_results: Sequence[ToolResult],
-    provider: BaseAIProvider,
-    params: SummaryGenParams,
-) -> AISummary | None:
-    """Generate a post-fix summary using a ``SummaryGenParams`` parameter object.
-
-    Thin wrapper around ``generate_post_fix_summary`` that unpacks the
-    params object into keyword arguments.
-
-    Args:
-        applied: Number of fixes applied.
-        rejected: Number of fixes rejected.
-        remaining_results: Tool results with remaining issues.
-        provider: AI provider instance.
-        params: Grouped generation parameters.
-
-    Returns:
-        AISummary, or None if generation fails.
-    """
-    return generate_post_fix_summary(
-        applied=applied,
-        rejected=rejected,
-        remaining_results=remaining_results,
-        provider=provider,
-        ai_config=params.ai_config,
-        max_tokens=params.max_tokens,
-        workspace_root=params.workspace_root,
-        timeout=params.timeout,
-        max_retries=params.max_retries,
-        base_delay=params.base_delay,
-        max_delay=params.max_delay,
-        backoff_factor=params.backoff_factor,
-        fallback_models=params.fallback_models,
     )

@@ -55,15 +55,18 @@ class ToolResult:
     # Optional pytest-specific summary data for display
     pytest_summary: dict[str, Any] | None = field(default=None)
 
-    # Optional AI-generated metadata (explanations, fix suggestions).
+    # Optional tool metadata. Most keys are AI-generated (explanations, fix
+    # suggestions), but the field is not AI-specific: osv-scanner stores its
+    # suppression classifications here with the AI layer fully disabled.
     # Expected keys (all optional):
     #   "fix_suggestions": list[AIFixSuggestionPayload]  (serialized)
     #   "fixed_count": int
     #   "verified_count": int
     #   "unverified_count": int
     #   "telemetry": dict with api_calls, tokens, cost, latency
-    # Built incrementally via helpers in lintro.ai.metadata.
-    ai_metadata: dict[str, Any] | None = field(default=None)
+    #   "suppressions": list[dict]  (osv-scanner, non-AI)
+    # AI keys are built incrementally via helpers in lintro.ai.metadata.
+    metadata: dict[str, Any] | None = field(default=None)
 
     # Working directory used during tool execution (for resolving relative
     # issue file paths in AI fix generation)
@@ -72,6 +75,14 @@ class ToolResult:
     # Skip tracking for tools that didn't execute
     skipped: bool = field(default=False)
     skip_reason: str | None = field(default=None)
+
+    # Execution-timeout tracking. ``True`` when the tool's subprocess exceeded
+    # its deadline and was killed. A timeout is an *execution failure*, not a
+    # lint finding: it never contributes to ``issues_count``. Consumers use
+    # this flag (surfaced as ``timed_out`` in the JSON report) to tell an
+    # infrastructure flake apart from a genuine finding without regex-matching
+    # the human-readable ``output`` string.
+    timed_out: bool = field(default=False)
 
     # Parser failures (items that could not be parsed from tool output).
     # Omitted from JSON output unless the tool sets this explicitly.

@@ -10,11 +10,34 @@ import pytest
 from assertpy import assert_that
 
 from lintro.utils.path_utils import (
+    absolute_path_without_resolving,
     find_file_upward,
     find_lintro_ignore,
     load_lintro_ignore,
     normalize_file_path_for_display,
 )
+
+# =============================================================================
+# Tests for absolute_path_without_resolving
+# =============================================================================
+
+
+def test_absolute_path_without_resolving_preserves_symlink(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Normalize relative segments without resolving symlink components."""
+    real_dir = tmp_path / "real"
+    real_dir.mkdir()
+    symlink_dir = tmp_path / "link"
+    symlink_dir.symlink_to(real_dir, target_is_directory=True)
+    monkeypatch.chdir(tmp_path)
+
+    result = absolute_path_without_resolving(Path("link") / ".." / "link" / "file.py")
+
+    assert_that(result).is_equal_to(str(symlink_dir / "file.py"))
+    assert_that(result).does_not_contain(str(real_dir))
+
 
 # =============================================================================
 # Tests for find_file_upward

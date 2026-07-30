@@ -21,6 +21,790 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.95.0] - 2026-07-30
+
+### Added
+
+- **core**: remove deprecated `ai_metadata` alias and JSON dual-emit (#1863) (dcf4104)
+
+## [0.94.8] - 2026-07-30
+
+### Fixed
+
+- **ai**: recover prose review responses instead of discarding findings (#1853) (#1861)
+  (50bebe0)
+
+## [0.94.7] - 2026-07-30
+
+### Changed
+
+- **ai**: complete config reference and correct privacy claims (#1186) (4fbbf4f)
+
+### Fixed
+
+- **ai**: detect CLI auth mode instead of forcing --bare (#1838) (#1859) (bc6ef28)
+
+## [0.94.6] - 2026-07-29
+
+### Changed
+
+- **ai**: compatibility floors, ai image variant, and CI transport auth (#1854)
+  (dbdb863)
+- **deps**: update ghcr.io/lgtm-hq/py-lintro docker tag to 0.94.3 (patch) (#1855)
+  (e4352c6)
+
+### Fixed
+
+- **deps**: update dependency @lgtm-hq/turbo-themes to 0.40.13 (patch) (#1856) (520002c)
+
+## [0.94.5] - 2026-07-29
+
+### Fixed
+
+- **deps**: update dependency @lgtm-hq/turbo-themes to 0.40.9 (patch) (#1850) (d44ad61)
+
+## [0.94.4] - 2026-07-29
+
+### Fixed
+
+- **deps**: update dependency @lgtm-hq/turbo-themes to 0.40.7 (patch) (#1848) (70ed51c)
+
+## [0.94.3] - 2026-07-29
+
+### Fixed
+
+- **deps**: update dependency @lgtm-hq/turbo-themes to 0.40.6 (patch) (#1846) (7ab3b9b)
+
+## [0.94.2] - 2026-07-28
+
+### Changed
+
+- **ai**: tiered agent-CLI contract tests + presence→liveness gating (#1834) (e901053)
+- **deps**: update ghcr.io/lgtm-hq/py-lintro docker tag to 0.94.1 (patch) (#1842)
+  (34e857a)
+- **deps**: update docker/login-action action to v4.5.2 (patch) (#1841) (427bb4a)
+- **deps**: update dependency astral-sh/uv to 0.11.33 (patch) (#1840) (0f6cff8)
+- **deps**: update ghcr.io/lgtm-hq/py-lintro docker tag to 0.94.0 (minor) (#1835)
+  (824a5f8)
+
+### Fixed
+
+- **deps**: update dependency @lgtm-hq/turbo-themes to 0.40.5 (patch) (#1843) (7f1b917)
+
+## [0.94.1] - 2026-07-28
+
+### Fixed
+
+- **ai**: surface CLI stdout causes and classify CLI auth failures (#1837) (f9ebca5)
+
+## [0.94.0] - 2026-07-28
+
+### Added
+
+- **output**: rename ToolResult.ai_metadata to metadata and drop the last core->AI
+  import (#1830) (1bb73b5)
+
+### Changed
+
+- correct Node tool install advice to match resolution (#1799) (#1810) (e7c1c4c)
+- **config**: decouple AIConfig from LintroConfig (#1829) (397a657)
+- **deps**: update dependency svelte to 5.56.8 (patch) (#1828) (1fc7a28)
+- **ai**: add AI interface facade and move AI out of the executor (#1827) (fb8a862)
+- **ai**: migrate providers to async/await (#1825) (5633d00)
+- **output**: move SARIF rendering out of the AI package (#1824) (89e6254)
+- **ai**: add baked ai image variant (#1819) (0c91443)
+- **deps**: update ghcr.io/lgtm-hq/py-lintro docker tag to 0.93.1 (patch) (#1820)
+  (4e4fb40)
+- **deps**: update ghcr.io/lgtm-hq/py-lintro docker tag to 0.93.0 (minor) (#1816)
+  (dbe200b)
+- **ai**: add lintro-ai-tools base image (#1812) (dc13707)
+
+## [0.93.1] - 2026-07-27
+
+### Changed
+
+- **deps**: update ghcr.io/lgtm-hq/py-lintro docker tag to 0.91.59 (patch) (#1803)
+  (a9f6c02)
+- **deps**: update ghcr.io/lgtm-hq/lintro-tools:latest docker digest to 8ad3e30 (#1805)
+  (7cf5397)
+
+### Fixed
+
+- **ci**: drop unnecessary contents:write from SBOM jobs (#1809) (0aa0ece)
+
+## [0.93.0] - 2026-07-27
+
+### Added
+
+- **json**: serialize tool timeout state and auto-emit the JSON artifact in CI (#1802)
+  (5743b2b)
+
+## [0.92.0] - 2026-07-27
+
+### Added
+
+- **ai**: hybrid capability guard for CLI transports (#1804) (a84a103)
+
+### Changed
+
+- **deps**: update dependency lgtm-hq/lgtm-ci to v0.62.0 (minor) (#1801) (3fe101a)
+- **deps**: update ghcr.io/lgtm-hq/lintro-tools:latest docker digest to e7afee4 (#1797)
+  (3c6b0a9)
+- **deps**: update ghcr.io/lgtm-hq/py-lintro docker tag to 0.91.58 (patch) (#1800)
+  (96a0cd2)
+- **deps**: update dependency lgtm-hq/lgtm-ci to v0.61.0 (minor) (#1795) (95e9580)
+- **deps**: update ghcr.io/lgtm-hq/py-lintro docker tag to 0.91.57 (patch) (#1798)
+  (8aa3617)
+
+## [0.91.59] - 2026-07-27
+
+### Changed
+
+- **deps**: update dependency lgtm-hq/lgtm-ci to v0.60.0 (minor) (#1794) (a0c2ee9)
+
+### Fixed
+
+- **deps**: update dependency @lgtm-hq/turbo-themes to 0.40.3 (minor) (#1792) (dd73751)
+
+## [0.91.58] - 2026-07-27
+
+### Changed
+
+- **deps**: update ghcr.io/lgtm-hq/lintro-tools:latest docker digest to 0c902d3 (#1788)
+  (ddef117)
+- **deps**: update github-actions (#1790) (b79fef7)
+
+### Fixed
+
+- **config**: keep plugin tool config and warn on unknown keys (#1757) (#1785) (90ca51f)
+
+## [0.91.57] - 2026-07-27
+
+### Changed
+
+- **deps**: update all major dependencies (major) (#1606) (1884d0a)
+- **deps**: update ghcr.io/lgtm-hq/py-lintro docker tag to 0.91.56 (patch) (#1789)
+  (6bf34f0)
+- **deps**: update lockfile (#1783) (eac1f56)
+- **deps**: update dependency lgtm-hq/lgtm-ci to v0.59.30 (patch) (#1782) (410c6ff)
+- **deps**: update dependency svelte to 5.56.7 (patch) (#1784) (c8b846b)
+- **deps**: update ghcr.io/lgtm-hq/lintro-tools:latest docker digest to 1b6b254 (#1755)
+  (5fbd2fd)
+- **deps**: update dependency lgtm-hq/lgtm-ci to v0.59.28 (patch) (#1776) (9e6558f)
+
+### Fixed
+
+- **html-validate**: make the bunx fallback fail actionably (#1786) (ed54f6e)
+
+## [0.91.56] - 2026-07-26
+
+### Fixed
+
+- **ci**: make the lgtm-ci pin self-maintaining across bumps (#1779) (b2ad050)
+
+## [0.91.55] - 2026-07-26
+
+### Changed
+
+- **deps**: update linting tools (#1607) (517d70a)
+- **deps**: update dependency lgtm-hq/lgtm-ci to v0.59.25 (patch) (#1769) (50e5484)
+
+### Fixed
+
+- **ci**: auto-rerun every workflow whose failure reddens main (#1777) (a766c4d)
+
+## [0.91.54] - 2026-07-26
+
+### Fixed
+
+- **ci**: verify persistent GHCR tags survive the CI-tag sweep (#1652) (#1772) (dc304b6)
+
+## [0.91.53] - 2026-07-26
+
+### Changed
+
+- **ci**: trace gate memory to diagnose the repeated runner kills (#1761) (#1766)
+  (ad8ba8e)
+
+### Fixed
+
+- **tools**: pin down builder cwd resolution contract (#1758) (#1770) (73c395d)
+
+## [0.91.52] - 2026-07-26
+
+### Fixed
+
+- **ci**: bump the pinned release image and keep it synced (#1590) (#1764) (058acea)
+
+## [0.91.51] - 2026-07-26
+
+### Fixed
+
+- **osv_scanner**: honor .lintro-ignore and --exclude patterns (#1732) (bf334fe)
+
+## [0.91.50] - 2026-07-26
+
+### Fixed
+
+- **ci**: alarm on post-release version skew across PyPI, npm, and Homebrew (#1712)
+  (#1738) (9383923)
+
+## [0.91.49] - 2026-07-26
+
+### Fixed
+
+- **ci**: classify dogfood tool-execution timeouts (diagnostic; gate absorb deferred to
+  lgtm-ci#746) (#1733) (98de8ac)
+- **html-validate**: pin executable resolution and pass literal paths (#1731) (50a9c26)
+
+## [0.91.48] - 2026-07-26
+
+### Fixed
+
+- **ci**: wire transient-infra signatures into the auto-rerun matcher (#1728) (324ded5)
+- **trufflehog**: stop routing absent paths into the scan set (#1736) (7a1e873)
+
+## [0.91.47] - 2026-07-25
+
+### Fixed
+
+- **ci**: retry transient infra failures in tag publish pipeline (#1571) (73fb1e6)
+
+## [0.91.46] - 2026-07-25
+
+### Changed
+
+- **deps**: update dependency devalue to 5.8.2 (patch) (#1753) (c0bc3fc)
+- **deps**: update ghcr.io/lgtm-hq/lintro-tools:latest docker digest to 4c5f412 (#1750)
+  (0680e0c)
+- **deps**: update dependency astral-sh/uv to 0.11.32 (patch) (#1749) (3c60a2f)
+- **deps**: update ghcr.io/lgtm-hq/lintro-tools:latest docker digest to 7c309ca (#1604)
+  (77fba17)
+
+### Fixed
+
+- **ci**: manage the pinned py-lintro release image as one Renovate set (#1751) (#1752)
+  (9d70078)
+
+## [0.91.45] - 2026-07-25
+
+### Fixed
+
+- **ci**: bump dogfooding mypy timeout to 120s (#1721) (8275a3b)
+
+## [0.91.44] - 2026-07-25
+
+### Fixed
+
+- **ci**: bound dogfood no-silent-skip gate timeout at 20 min (#1704) (#1708) (ce6bace)
+
+## [0.91.43] - 2026-07-25
+
+### Fixed
+
+- **ci**: bound binary build timeouts and instrument OOM diagnostics (#1702, #1707)
+  (#1713) (a4a8fee)
+
+## [0.91.42] - 2026-07-25
+
+### Fixed
+
+- **ci**: reconcile npm dist-tag on idempotent publish skip/conflict paths (#1710)
+  (aa9a1c9)
+
+## [0.91.41] - 2026-07-25
+
+### Fixed
+
+- **ci**: strip rustup HTML doc trees from lintro-tools image (#1703) (#1709) (d48f25a)
+
+## [0.91.40] - 2026-07-25
+
+### Fixed
+
+- **ci**: drop dead free-text failure-reason heuristic from code-quality gate (#1711)
+  (cfe670c)
+
+## [0.91.39] - 2026-07-24
+
+### Fixed
+
+- **ci**: retry and idempotency for npm publish to survive Sigstore tlog 409 (#1688)
+  (fcc6024)
+
+## [0.91.38] - 2026-07-24
+
+### Fixed
+
+- **ci**: retry transient registry blips in CI image promote (#1696) (#1698) (625789d)
+
+## [0.91.37] - 2026-07-24
+
+### Fixed
+
+- **security**: bump postcss to >=8.5.18 (GHSA-r28c-9q8g-f849) (#1700) (d1a1f58)
+
+## [0.91.36] - 2026-07-24
+
+### Fixed
+
+- **ci**: run the release SBOM vulnerability gate pre-merge (#1675) (e5025e7)
+
+## [0.91.35] - 2026-07-24
+
+### Fixed
+
+- **ci**: absorb dogfooding lint infra flakes in code-quality gate (#1650) (0491ae2)
+- **core**: prettier reports PASS when `node_modules` is absent instead of skipping
+  loudly (#1683) (c0fe1c1)
+
+## [0.91.34] - 2026-07-24
+
+### Fixed
+
+- **ci**: retry cosign OIDC token fetch flakes in docker publish (#1690) (cbe8c90)
+- **trufflehog**: fail closed when scan errors cannot be classified (#1671) (54cc33b)
+
+## [0.91.33] - 2026-07-24
+
+### Fixed
+
+- **ci**: backtick-wrap `snake_case` identifiers in generated CHANGELOG (MD037) (#1687)
+  (f042074)
+
+## [0.91.32] - 2026-07-24
+
+### Changed
+
+- **ai**: remove dead `AUDIT_FILE` constant and unused `_rotate_audit_log` wrapper
+  (#1669) (d6367ff)
+
+### Fixed
+
+- **ci**: validate `MIN_AGE_DAYS` floor and `TAG_PREFIX` in GHCR CI-tag sweep (#1674)
+  (aaa4124)
+
+## [0.91.31] - 2026-07-24
+
+### Fixed
+
+- **output**: --output-format csv emits doubled CR on Windows stdout (#1672) (0e33b4d)
+
+## [0.91.30] - 2026-07-24
+
+### Fixed
+
+- **tools**: keep commitlint install hint when companion version is unresolvable (#1668)
+  (deba2f2)
+
+## [0.91.29] - 2026-07-24
+
+### Fixed
+
+- **ci**: built-package validation cancels itself on consecutive main pushes (#1676)
+  (0f89b40)
+
+## [0.91.28] - 2026-07-24
+
+### Fixed
+
+- **security**: override mcp>=1.28.1 and bump click>=8.3.3 (#1660) (092ddf1)
+
+## [0.91.27] - 2026-07-24
+
+### Fixed
+
+- **ci**: defer GHCR CI-tag cleanup for partial reruns (#1645) (2da2225)
+
+## [0.91.26] - 2026-07-24
+
+### Fixed
+
+- **security**: re-enable release SBOM fail-on-severity high (#1648) (cf953e3)
+
+## [0.91.25] - 2026-07-24
+
+### Fixed
+
+- **output**: summary accuracy for black, files, init (#1465) (048459b)
+
+## [0.91.24] - 2026-07-24
+
+### Fixed
+
+- **ci**: add preflight fallback for scheduled lintro analysis (#1326) (0578175)
+
+## [0.91.23] - 2026-07-23
+
+### Fixed
+
+- **ai**: AI-module hygiene — remove dead code, JSONL audit log, test coverage (#1188)
+  (d9a0203)
+
+## [0.91.22] - 2026-07-23
+
+### Fixed
+
+- **formatters**: unify rule-code across output formats (#1463) (7ae350e)
+
+## [0.91.21] - 2026-07-23
+
+### Fixed
+
+- **tools**: add missing @commitlint/cli install hint (#1636) (e0028b6)
+
+## [0.91.20] - 2026-07-23
+
+### Changed
+
+- **ai**: add fallback concurrency regression tests (#1441) (4cf515a)
+
+### Fixed
+
+- **ci**: guard single-run scheduled lintro analysis invariant (#1169) (466f037)
+
+## [0.91.19] - 2026-07-23
+
+### Fixed
+
+- **docker**: backfill dispatch input-validation gaps (#1327) (af2d25b)
+
+## [0.91.18] - 2026-07-23
+
+### Fixed
+
+- **output**: --output-format markdown/csv stdout clean like json/sarif (#1464)
+  (da2bca6)
+
+## [0.91.17] - 2026-07-23
+
+### Fixed
+
+- **trufflehog**: ignore benign missing-path scan errors (#1633) (05c6e31)
+
+## [0.91.16] - 2026-07-23
+
+### Fixed
+
+- **cli**: accept hyphenated names in --tools selection (#1635) (ad37502)
+
+## [0.91.15] - 2026-07-23
+
+### Fixed
+
+- **cli**: render clean --help text for subcommands (#1457) (b7b5fbe)
+
+## [0.91.14] - 2026-07-23
+
+### Fixed
+
+- **ci**: upload build-binary artifacts on `workflow_dispatch` (#1634) (60572af)
+
+## [0.91.13] - 2026-07-23
+
+### Fixed
+
+- **cli**: let explicit --tools bypass `enabled_tools` allowlist (#1451) (9def246)
+
+## [0.91.12] - 2026-07-23
+
+### Fixed
+
+- **cli**: force UTF-8 stdio under ASCII locales (#1479) (fc4abf2)
+
+## [0.91.11] - 2026-07-23
+
+### Fixed
+
+- **cli**: warn when --diff targets mix repo and non-repo paths (#1628) (b43aa3d)
+
+## [0.91.10] - 2026-07-23
+
+### Fixed
+
+- **ai**: only pass --json-schema-name when the claude CLI supports it (#1626) (329ccb4)
+
+## [0.91.9] - 2026-07-23
+
+### Fixed
+
+- **core**: anchor tool cwd to the files' project root for scope-independence (#1623)
+  (edf70c4)
+
+## [0.91.8] - 2026-07-23
+
+### Fixed
+
+- **cli**: resolve symlinks in --diff changed-file matching (#1621) (db7e5e2)
+
+## [0.91.7] - 2026-07-23
+
+### Fixed
+
+- **cli**: resolve --diff per repository for multi-repo scans (#1383) (c06ce16)
+
+## [0.91.6] - 2026-07-23
+
+### Changed
+
+- **security**: retire homebrew-tap write credential references (#1459) (fe37b8a)
+
+### Fixed
+
+- **cli**: resolve --diff cwd and reject path tokens (#1335) (d8b57ff)
+
+## [0.91.5] - 2026-07-23
+
+### Changed
+
+- **deps**: update dependency astral-sh/uv to 0.11.31 (patch) (#1603) (1b40902)
+- **deps**: update ghcr.io/lgtm-hq/lintro-tools:latest docker digest to eda3491 (#1602)
+  (1304e8d)
+- **deps**: update linting tools (#1477) (ecad0ec)
+- **deps**: update dependency lgtm-hq/lgtm-ci to v0.59.2 (minor) (#1482) (e2b5faf)
+- **deps**: update ghcr.io/lgtm-hq/lintro-tools:latest docker digest to 7623a30 (#1443)
+  (a8f7c48)
+- **deps**: update github-actions (#1589) (0d74038)
+
+### Fixed
+
+- **gitleaks**: surface non-zero exits, resolve prepared source path; extend ai-review
+  secret scope guard (#1385) (f2cc1df)
+
+## [0.91.4] - 2026-07-22
+
+### Changed
+
+- **deps**: update dependency fast-uri to 4.1.1 (patch) [security] (#1600) (0374661)
+
+### Fixed
+
+- **deps**: update dependency @lgtm-hq/turbo-themes to 0.29.3 (minor) (#1563) (8f879c7)
+
+## [0.91.3] - 2026-07-21
+
+### Fixed
+
+- **licenses**: SPDX/npm evaluation gaps can false-pass a deny policy (#1330) (e03b71b)
+
+## [0.91.2] - 2026-07-21
+
+### Fixed
+
+- **security**: bump fast-uri and svgo past new advisories (#1597) (bb991c0)
+
+## [0.91.1] - 2026-07-21
+
+### Fixed
+
+- **security**: make external plugin loading opt-in with a trust model (#1256) (29e47df)
+
+## [0.91.0] - 2026-07-21
+
+### Added
+
+- **tools**: add html-validate for HTML validation (#1153) (266e94e)
+
+## [0.90.1] - 2026-07-21
+
+### Changed
+
+- **deps**: update dependency astral-sh/uv to 0.11.30 (patch) (#1587) (a8f4790)
+
+### Fixed
+
+- **ci**: tolerate baked-tool version lag and bump astro to 7.1.3 (#1591) (3bfe08b)
+
+## [0.90.0] - 2026-07-21
+
+### Added
+
+- **tools**: add trufflehog for secrets detection (#1149) (7ad74bf)
+
+## [0.89.1] - 2026-07-21
+
+### Fixed
+
+- **security**: time-box suppression for astro GHSA-4g3v-8h47-v7g6 (#1585) (f0dae4a)
+
+## [0.89.0] - 2026-07-20
+
+### Added
+
+- **tools**: add golangci-lint Go meta-linter plugin (#1148) (700b595)
+
+### Fixed
+
+- **tools**: complete golangci-lint registration to unbreak main (#1581) (b3bd671)
+
+## [0.88.1] - 2026-07-20
+
+### Fixed
+
+- **ci**: tolerate PR-introduced tools in the docker-ci manifest gate (#1566) (b9fa926)
+
+## [0.88.0] - 2026-07-20
+
+### Added
+
+- **docker**: bundle pinned Go toolchain in lintro-tools image (#1553) (87a7c6f)
+
+## [0.87.1] - 2026-07-20
+
+### Changed
+
+- **deps**: update actions/setup-python action to v7.0.0 (major) (#1547) (511a54d)
+
+### Fixed
+
+- **markdownlint**: forward nested defaults.markdownlint rule options (#1554) (c2df0c2)
+
+## [0.87.0] - 2026-07-20
+
+### Added
+
+- **oxlint**: add type-aware linting support with doctor checks (#1526) (1f6a979)
+- **pip_audit**: close parity gaps with `osv_scanner` (#1525) (1171941)
+- **ci**: run verify-manifest-tools inside built and pinned images to catch
+  manifest-vs-image drift (#1528) (1ee3b3b)
+
+### Changed
+
+- **tools**: add parametrized tool-completeness gate over the plugin registry (#1524)
+  (06f203c)
+
+## [0.86.0] - 2026-07-20
+
+### Added
+
+- **ci**: add repo-root .stylelintrc.json and fix hex violations (#1519) (4aa2234)
+
+## [0.85.2] - 2026-07-20
+
+### Fixed
+
+- **docker**: deliver and verify pip-audit in runtime image (#1523) (3714ed6)
+
+## [0.85.1] - 2026-07-20
+
+### Fixed
+
+- **ci**: allow raw.githubusercontent.com in generate-man-page egress allowlist (#1557)
+  (76c4b1a)
+
+## [0.85.0] - 2026-07-20
+
+### Added
+
+- **vale**: add repo-root .vale.ini for prose linting (#1522) (39e953c)
+
+### Changed
+
+- add adding-a-new-tool guide, issue template, and PR checklist (#1530) (08a0512)
+- add idiom-review documentation across README, configuration, and tool analysis (#1527)
+  (5a7ce54)
+
+## [0.84.1] - 2026-07-20
+
+### Changed
+
+- **core**: migrate os.path usage to pathlib in core modules (#1537) (ac761d9)
+
+### Fixed
+
+- **manifest**: drop formatter tag from dotenv-linter entry (#1521) (858ddac)
+
+## [0.84.0] - 2026-07-20
+
+### Added
+
+- **cli**: add shell completions and man page generation (#1541) (a5ba92a)
+
+## [0.83.0] - 2026-07-20
+
+### Added
+
+- **ci**: fail dogfooding when an enabled tool silently skips (#1536) (89a9e5b)
+
+### Changed
+
+- **tests**: normalize new-tool test and fixture placements (#1538) (2dd1d42)
+
+## [0.82.3] - 2026-07-20
+
+### Changed
+
+- **deps**: update dependency svelte to 5.56.6 (patch) (#1544) (437ddf5)
+- **deps**: update renovatebot/github-action action to v46.1.20 (patch) (#1545)
+  (61a8087)
+
+### Fixed
+
+- **output**: gate ASCII art on TTY and add --no-art (#1539) (5ed0ad3)
+
+## [0.82.2] - 2026-07-20
+
+### Changed
+
+- **deps**: update pypa/gh-action-pypi-publish action to v1.14.1 (patch) (#1542)
+  (888e926)
+
+### Fixed
+
+- **output**: stop routing bandit no-files message through JSON parser (#1540) (a4640e5)
+
+## [0.82.1] - 2026-07-19
+
+### Fixed
+
+- **release**: stamp SECURITY.md support table on minor bumps (#1467) (bf46365)
+
+## [0.82.0] - 2026-07-18
+
+### Added
+
+- **commitlint**: add root commitlint.config.js extending config-conventional (#1518)
+  (69de320)
+
+### Changed
+
+- **idiom-review**: remove dead `DEFAULT_ENABLED` ClassVar (#1520) (fd4ad29)
+
+## [0.81.3] - 2026-07-18
+
+### Fixed
+
+- **pip-audit**: continue auditing remaining targets after a per-target timeout (#1507)
+  (d0211ce)
+
+## [0.81.2] - 2026-07-18
+
+### Fixed
+
+- **deps**: exclude `test_samples` fixtures from Renovate tracking (#1504) (a8e051e)
+
+## [0.81.1] - 2026-07-18
+
+### Changed
+
+- add AGENTS.md with Cursor Cloud dev environment instructions (#1503) (ff00551)
+
+### Fixed
+
+- **ci**: retry setup-uv in binary builds and disable matrix fail-fast (#1514) (2e24483)
+
+## [0.81.0] - 2026-07-18
+
+### Added
+
+- **tools**: add pip-audit for Python dependency vulnerability scanning (#1145)
+  (8d37f54)
+
+### Changed
+
+- **deps**: update python:3.14-slim docker digest to cea0e60 (#1489) (0ca34b1)
+- **deps**: update dependency svelte to 5.56.5 (patch) (#1488) (9b19881)
+
 ## [0.80.11] - 2026-07-17
 
 ### Changed
@@ -38,8 +822,8 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 - **repo**: add root CONTRIBUTING.md pointer and remove stray findings.md (#1455)
   (504e31d)
-- replace bare assert with assertpy assert_that across test suite (#1389) (4fc76f4)
-- move inline tool sample inputs to test_samples fixtures (#1382) (9f75984)
+- replace bare assert with assertpy `assert_that` across test suite (#1389) (4fc76f4)
+- move inline tool sample inputs to `test_samples` fixtures (#1382) (9f75984)
 
 ### Fixed
 
@@ -55,7 +839,7 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Fixed
 
-- **tools**: preserve explicit timeout=0 and route ruff through _prepare_execution
+- **tools**: preserve explicit timeout=0 and route ruff through `_prepare_execution`
   (#1266) (ca1b013)
 
 ## [0.80.7] - 2026-07-17
@@ -117,7 +901,7 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Fixed
 
-- **ai/review**: preserve Findings in section-aware _cap_body truncation (#1334)
+- **ai/review**: preserve Findings in section-aware `_cap_body` truncation (#1334)
   (f3d98f2)
 
 ## [0.80.3] - 2026-07-16
@@ -213,8 +997,8 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Changed
 
-- **security**: verify ANTHROPIC_API_KEY exposure ordering for dogfood AI review (#1325)
-  (c5caf17)
+- **security**: verify `ANTHROPIC_API_KEY` exposure ordering for dogfood AI review
+  (#1325) (c5caf17)
 
 ### Fixed
 
@@ -499,7 +1283,7 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Fixed
 
-- **ai/review**: classify ValueError as INVALID_RESPONSE before shared severity
+- **ai/review**: classify ValueError as `INVALID_RESPONSE` before shared severity
   signatures (#1122) (14b618f)
 
 ## [0.69.0] - 2026-07-06
@@ -545,7 +1329,7 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 ### Changed
 
 - **changelog**: wrap release-note lines to satisfy lint gate (#1088) (1180000)
-- **tools**: deduplicate tsc and vue_tsc definitions (76% identical) (#1092) (e13bb69)
+- **tools**: deduplicate tsc and `vue_tsc` definitions (76% identical) (#1092) (e13bb69)
 - **tools**: replace repetitive tool-option type validation with schema-based checks
   (#1076) (caa0540)
 
@@ -589,9 +1373,9 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 - **config**: enforce module size limit via lint gate (#1078) (276929e)
 - **output**: SARIF output should emit standard lint results, not only AI metadata
   (#1079) (4a423f1)
-- **utils**: extract shared find_file_upward helper for duplicated config-walk logic
+- **utils**: extract shared `find_file_upward` helper for duplicated config-walk logic
   (#1077) (8d983ca)
-- pin merge_group activity type to checks_requested (#1059) (5f8edcd)
+- pin `merge_group` activity type to `checks_requested` (#1059) (5f8edcd)
 - **plugins**: separate stdout/stderr from subprocess and harden parsers (#1061)
   (23f6f09)
 - **deps**: update actions/attest-build-provenance to v4.1.1 (#874) (d839d3d)

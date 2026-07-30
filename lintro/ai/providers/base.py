@@ -7,11 +7,24 @@ here so that concrete providers only implement SDK-specific pieces.
 
 from __future__ import annotations
 
+import asyncio
 import os
 from abc import ABC, abstractmethod
+from collections.abc import AsyncIterator
 from typing import TYPE_CHECKING, Any
 
+from lintro.ai.enums import AITransport
 from lintro.ai.exceptions import AIAuthenticationError, AINotAvailableError
+from lintro.ai.liveness import (
+    LIVENESS_PROBE_PROMPT,
+    LIVENESS_TIMEOUT,
+    LivenessResult,
+    live_result,
+    liveness_from_error,
+    missing_credential_result,
+)
+from lintro.ai.providers.async_stream_result import AsyncAIStreamResult
+from lintro.ai.providers.capabilities import ProviderCapabilities
 from lintro.ai.providers.constants import (
     DEFAULT_MAX_TOKENS,
     DEFAULT_PER_CALL_MAX_TOKENS,
@@ -21,10 +34,17 @@ from lintro.ai.providers.response import AIResponse  # noqa: F401
 from lintro.ai.providers.stream_result import AIStreamResult  # noqa: F401
 
 if TYPE_CHECKING:
-    from lintro.ai.enums import AITransport
     from lintro.ai.json_response import CliSchemaRequest
+    from lintro.ai.providers.cli_transport import CliTransport
 
-__all__ = ["AIResponse", "AIStreamResult", "BaseAIProvider"]
+__all__ = [
+    "AIResponse",
+    "AIStreamResult",
+    "AsyncAIStreamResult",
+    "BaseAIProvider",
+    "LivenessResult",
+    "ProviderCapabilities",
+]
 
 
 class BaseAIProvider(ABC):
@@ -88,11 +108,30 @@ class BaseAIProvider(ABC):
         self._base_url = base_url
         self._transport = transport
         self._client: Any = None
+        self._client_loop: asyncio.AbstractEventLoop | None = None
 
     # -- Client management -------------------------------------------------
 
+    @staticmethod
+    def _current_loop() -> asyncio.AbstractEventLoop | None:
+        """Return the running event loop, or ``None`` outside of one.
+
+        Returns:
+            The running loop when called from async code, else ``None``.
+        """
+        try:
+            return asyncio.get_running_loop()
+        except RuntimeError:
+            return None
+
     def _get_client(self) -> Any:
-        """Get or lazily create the SDK client.
+        """Get or lazily create the SDK client for the running event loop.
+
+        Async SDK clients own an HTTP connection pool bound to the event
+        loop that created them, so a client built on a *different* loop is
+        discarded and rebuilt rather than reused. Callers that stay on a
+        single loop (the normal path) always get the cached instance, and a
+        client injected outside any loop is left alone.
 
         Returns:
             The SDK client instance.
@@ -100,7 +139,9 @@ class BaseAIProvider(ABC):
         Raises:
             AIAuthenticationError: If no API key is found.
         """
-        if self._client is not None:
+        loop = self._current_loop()
+        stale = self._client_loop is not None and self._client_loop is not loop
+        if self._client is not None and not stale:
             return self._client
 
         api_key = os.environ.get(self._api_key_env) or ""
@@ -114,6 +155,7 @@ class BaseAIProvider(ABC):
             api_key = "not-needed"
 
         self._client = self._create_client(api_key=api_key)
+        self._client_loop = loop
         return self._client
 
     @abstractmethod
@@ -131,7 +173,7 @@ class BaseAIProvider(ABC):
     # -- Abstract: SDK-specific completion ---------------------------------
 
     @abstractmethod
-    def complete(
+    async def complete(
         self,
         prompt: str,
         *,
@@ -168,7 +210,7 @@ class BaseAIProvider(ABC):
 
     # -- Streaming (default delegates to complete) --------------------------
 
-    def stream_complete(
+    async def stream_complete(
         self,
         prompt: str,
         *,
@@ -176,7 +218,7 @@ class BaseAIProvider(ABC):
         max_tokens: int = DEFAULT_PER_CALL_MAX_TOKENS,
         timeout: float = DEFAULT_TIMEOUT,
         model: str | None = None,
-    ) -> AIStreamResult:
+    ) -> AsyncAIStreamResult:
         """Stream a completion. Default: delegates to complete().
 
         Providers with native streaming support should override this.
@@ -189,18 +231,134 @@ class BaseAIProvider(ABC):
             model: Optional per-call model override.
 
         Returns:
-            An AIStreamResult wrapping the token stream.
+            An AsyncAIStreamResult wrapping the token stream.
         """
-        response = self.complete(
+        response = await self.complete(
             prompt,
             system=system,
             max_tokens=max_tokens,
             timeout=timeout,
             model=model,
         )
-        return AIStreamResult(
-            _chunks=iter([response.content]),
+
+        async def _single_chunk() -> AsyncIterator[str]:
+            """Yield the whole response as one chunk.
+
+            Yields:
+                str: The complete response text.
+            """
+            yield response.content
+
+        return AsyncAIStreamResult(
+            _chunks=_single_chunk(),
             _on_done=lambda: response,
+        )
+
+    # -- Capability declaration --------------------------------------------
+
+    @property
+    def capabilities(self) -> ProviderCapabilities:
+        """Declare what this provider supports on its configured transport.
+
+        The base declaration is deliberately conservative -- nothing is
+        supported unless a provider says so -- so a new provider degrades to
+        the safe path until it declares otherwise.
+
+        Returns:
+            The provider's capability declaration.
+        """
+        return ProviderCapabilities()
+
+    # -- Credential liveness -----------------------------------------------
+
+    def _cli_transport(self) -> CliTransport | None:
+        """Return the CLI transport backing this provider, when it has one.
+
+        Declared here so credential liveness can branch on transport in one
+        place rather than being re-implemented per provider. CLI-backed providers
+        override it; API-only providers inherit ``None``.
+
+        Returns:
+            The provider's CLI transport, or ``None``.
+        """
+        return None
+
+    async def check_liveness(
+        self,
+        *,
+        timeout: float = LIVENESS_TIMEOUT,
+    ) -> LivenessResult:
+        """Probe whether this provider's credential can actually serve a call.
+
+        Second step of the ``is_available() -> check_liveness() -> invoke``
+        chain. Presence is checked first, then a **minimal real call** is made:
+        one token, content-free prompt, response discarded. The real call is the
+        point — a depleted account authenticates and lists models perfectly well,
+        so nothing short of asking it to generate something distinguishes
+        "authed" from "authed and able to serve" (#1826).
+
+        CLI transports take the presence-only path instead (see
+        :meth:`~lintro.ai.providers.cli_transport.CliTransport.probe_liveness`):
+        a real invocation of a subscription agent CLI is slow and may consume a
+        metered turn, so their result reports ``quota_verified=False``.
+
+        Args:
+            timeout: Seconds allowed for the probe.
+
+        Returns:
+            The classified liveness result; failures are returned, never raised,
+            so the caller can surface a visible skip instead of a traceback.
+        """
+        transport = self._transport
+        if transport == AITransport.CLI:
+            cli = self._cli_transport()
+            if cli is None:
+                return missing_credential_result(
+                    provider=self._provider_name,
+                    transport=transport,
+                    message="CLI transport is not initialized",
+                    hint="Install the provider CLI and ensure it is on PATH",
+                )
+            try:
+                return await cli.probe_liveness(provider_name=self._provider_name)
+            except Exception as exc:  # noqa: BLE001 - every failure is a verdict
+                # Same contract as the API branch below: this method promises a
+                # classified result, so an unexpected probe failure must not
+                # escape as a traceback to `lintro doctor` or the contract suite.
+                return liveness_from_error(
+                    provider=self._provider_name,
+                    transport=transport,
+                    error=exc,
+                    quota_verified=False,
+                )
+
+        if not self.is_available():
+            return missing_credential_result(
+                provider=self._provider_name,
+                transport=transport,
+                message=f"{self._api_key_env} is not set",
+                hint=f"Export {self._api_key_env} to enable {self._provider_name}",
+            )
+
+        try:
+            await self.complete(
+                LIVENESS_PROBE_PROMPT,
+                max_tokens=1,
+                timeout=timeout,
+            )
+        except Exception as exc:  # noqa: BLE001 - every failure is a verdict
+            return liveness_from_error(
+                provider=self._provider_name,
+                transport=transport,
+                error=exc,
+                quota_verified=True,
+            )
+
+        return live_result(
+            provider=self._provider_name,
+            transport=transport,
+            quota_verified=True,
+            message="credential authenticated and served a probe call",
         )
 
     def begin_durable_session(self, *, repo_root: str) -> None:

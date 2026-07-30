@@ -11,9 +11,11 @@ Supports parallel execution when enabled via configuration.
 
 from __future__ import annotations
 
+import sys
 from typing import TYPE_CHECKING, Any
 
 from lintro.enums.action import Action, normalize_action
+from lintro.models.core.ai_seam import AISarifEnrichment
 from lintro.models.core.tool_result import ToolResult
 from lintro.tools import tool_manager
 from lintro.utils.config import load_post_checks_config
@@ -37,6 +39,12 @@ from lintro.utils.unified_config import UnifiedConfigManager
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
 
+    from lintro.models.core.ai_seam import (
+        AIOutcome,
+        AIRunner,
+        AISarifEnricher,
+        AIStatusRenderer,
+    )
     from lintro.parsers.base_issue import BaseIssue
     from lintro.plugins.base import BaseToolPlugin
 
@@ -47,6 +55,35 @@ __all__ = [
     "DEFAULT_REMAINING_COUNT",
     "run_lint_tools_simple",
 ]
+
+
+def _write_stdout_verbatim(payload: str) -> None:
+    r"""Write ``payload`` to stdout without newline translation.
+
+    The CSV renderer emits RFC 4180 ``\r\n`` line terminators. Writing that
+    through the text-mode ``sys.stdout`` wrapper would translate every ``\n``
+    a second time on Windows, producing ``\r\r\n`` and breaking the
+    byte-for-byte equality between the stdout payload and the
+    ``--output <file>.csv`` artifact (#1665).
+
+    Writing UTF-8 bytes straight to ``sys.stdout.buffer`` bypasses translation
+    on every platform. Streams without a binary ``buffer`` (for example a
+    ``StringIO`` substituted by a caller) fall back to a plain text write,
+    which is already correct because such streams perform no translation.
+
+    Args:
+        payload: The exact document to emit on stdout.
+    """
+    stream = sys.stdout
+    buffer = getattr(stream, "buffer", None)
+    if buffer is None:
+        stream.write(payload)
+        stream.flush()
+        return
+    # Flush any pending text writes first so byte output stays ordered.
+    stream.flush()
+    buffer.write(payload.encode("utf-8"))
+    buffer.flush()
 
 
 def _get_remaining_count(result: ToolResult) -> int:
@@ -114,7 +151,9 @@ def _run_fix_with_retry(
         remaining = _get_remaining_count(result)
 
     # Merge: keep initial_issues_count and initial_issues from first pass,
-    # rest from last pass
+    # rest from last pass. ``timed_out`` must be carried over from the final
+    # pass: rebuilding the result field-by-field would otherwise erase it, and
+    # a tool that really did time out would serialize ``timed_out: false``.
     if initial_issues_count is not None:
         fixed = max(0, initial_issues_count - remaining)
         result = ToolResult(
@@ -129,6 +168,7 @@ def _run_fix_with_retry(
             formatted_output=result.formatted_output,
             initial_issues=first_pass_initial_issues,
             cwd=result.cwd,
+            timed_out=result.timed_out,
         )
     elif first_pass_initial_issues is not None:
         # Preserve initial_issues even when initial_issues_count is absent
@@ -145,30 +185,10 @@ def _run_fix_with_retry(
             formatted_output=result.formatted_output,
             initial_issues=first_pass_initial_issues,
             cwd=result.cwd,
+            timed_out=result.timed_out,
         )
 
     return result
-
-
-def _warn_ai_fix_disabled(
-    *,
-    action: Action,
-    ai_fix: bool,
-    ai_lint_enabled: bool,
-    logger: Any,
-    output_format: str = "",
-) -> None:
-    """Warn when users request AI fixes but AI lint is disabled in config."""
-    if action != Action.CHECK or not ai_fix or ai_lint_enabled:
-        return
-    # Suppress plain-text warnings for machine-readable output formats
-    if output_format.lower() in ("json", "sarif"):
-        return
-    logger.console_output(
-        "AI fixes requested with --fix, but AI lint is disabled in "
-        ".lintro-config.yaml (set ai.enabled and ai.lint: true); "
-        "skipping AI enhancements.",
-    )
 
 
 def _display_fix_result(
@@ -221,7 +241,7 @@ def _display_fix_result(
             raw_output_for_meta=result.output,
             action=action,
             success=result.success,
-            ai_metadata=result.ai_metadata,
+            metadata=result.metadata,
             parse_failures_count=result.parse_failures_count or 0,
         )
         return
@@ -236,6 +256,8 @@ def _display_fix_result(
             output=result.output or "",
             output_format=output_format,
             issues=list(result.issues) if result.issues else None,
+            success=result.success,
+            issues_count=result.issues_count,
         )
     if result.output and raw_output:
         display_output = result.output
@@ -250,7 +272,7 @@ def _display_fix_result(
             raw_output_for_meta=result.output,
             action=action,
             success=result.success,
-            ai_metadata=result.ai_metadata,
+            metadata=result.metadata,
             parse_failures_count=result.parse_failures_count or 0,
         )
     elif (
@@ -266,7 +288,7 @@ def _display_fix_result(
             issues_count=0,
             action=action,
             success=result.success,
-            ai_metadata=result.ai_metadata,
+            metadata=result.metadata,
             parse_failures_count=result.parse_failures_count or 0,
         )
 
@@ -281,6 +303,29 @@ _ARTIFACT_EXTENSIONS: dict[str, str] = {
 }
 
 
+def _resolve_sarif_enrichment(
+    ai_sarif_enricher: AISarifEnricher | None,
+    all_results: list[ToolResult],
+) -> AISarifEnrichment:
+    """Obtain SARIF AI enrichment through the injected seam.
+
+    The runner must not import :mod:`lintro.ai` (issue #724), so it never
+    reconstructs AI objects itself; it asks the injected enricher, and falls
+    back to empty enrichment when the caller did not supply one.
+
+    Args:
+        ai_sarif_enricher: Optional enricher injected by the caller.
+        all_results: Results from all tools, possibly carrying AI metadata.
+
+    Returns:
+        The enrichment to hand to the SARIF renderer; empty when no enricher
+        was injected.
+    """
+    if ai_sarif_enricher is None:
+        return AISarifEnrichment()
+    return ai_sarif_enricher(all_results=all_results)
+
+
 def _write_artifacts(
     all_results: list[ToolResult],
     lintro_config: Any,
@@ -290,12 +335,16 @@ def _write_artifacts(
     total_fixed: int,
     *,
     warn_func: Any = None,
+    ai_sarif_enricher: AISarifEnricher | None = None,
 ) -> None:
     """Write side-channel artifact files alongside primary output.
 
     Emits artifact files into ``.lintro/artifacts/<format>/`` for each
-    format listed in ``execution.artifacts``.  SARIF is also auto-emitted
-    when ``GITHUB_ACTIONS=true`` is detected (for Code Scanning).
+    format listed in ``execution.artifacts``.  SARIF (for Code Scanning) and
+    JSON (for structured CI evidence, including per-tool ``timed_out`` state)
+    are also auto-emitted when ``GITHUB_ACTIONS=true`` is detected, landing at
+    ``.lintro/artifacts/sarif/results.sarif.json`` and
+    ``.lintro/artifacts/json/results.json`` respectively.
 
     Supported formats match ``OutputFormat``: json, csv, markdown,
     html, sarif, plain.
@@ -309,6 +358,9 @@ def _write_artifacts(
         total_fixed: Total number of issues fixed.
         warn_func: Optional callback for emitting warnings.  When ``None``,
             falls back to ``logger.console_output``.
+        ai_sarif_enricher: Optional AI seam used to build enrichment for a
+            SARIF artifact. Resolved only when SARIF is actually among the
+            artifacts, so a non-SARIF run never touches the AI layer.
     """
     import os
     from pathlib import Path
@@ -323,10 +375,25 @@ def _write_artifacts(
     if is_gha and "sarif" not in artifacts:
         artifacts.append("sarif")
 
+    # Auto-emit the JSON report in GitHub Actions too. SARIF omits clean tools
+    # and omits failures that produced no issues, so a CI consumer cannot use
+    # it to tell a tool timeout from a genuine finding without failing open.
+    # The JSON report covers every tool and carries the ``timed_out`` flag,
+    # and emitting it here keeps ``--output-format`` (and therefore the
+    # console/grid output every existing consumer parses) untouched.
+    if is_gha and "json" not in artifacts:
+        artifacts.append("json")
+
     if not artifacts:
         return
 
     _emit = warn_func if warn_func is not None else logger.console_output
+
+    ai_enrichment = (
+        _resolve_sarif_enrichment(ai_sarif_enricher, all_results)
+        if "sarif" in artifacts
+        else None
+    )
 
     for artifact in artifacts:
         filename = _ARTIFACT_EXTENSIONS.get(artifact)
@@ -344,6 +411,7 @@ def _write_artifacts(
                 action=action,
                 total_issues=total_issues,
                 total_fixed=total_fixed,
+                ai_enrichment=ai_enrichment,
             )
         except (OSError, ValueError, TypeError) as e:
             _emit(f"Warning: Failed to write {artifact} artifact: {e}")
@@ -480,6 +548,10 @@ def run_lint_tools_simple(
     score: bool = False,
     fail_under: float | None = None,
     diff_base: str | None = None,
+    no_art: bool = False,
+    ai_runner: AIRunner | None = None,
+    ai_status_renderer: AIStatusRenderer | None = None,
+    ai_sarif_enricher: AISarifEnricher | None = None,
 ) -> int:
     """Simplified runner using Loguru-based logging with rich formatting.
 
@@ -523,6 +595,20 @@ def run_lint_tools_simple(
             files; :data:`~lintro.utils.git_diff.DIFF_DEFAULT_SENTINEL` resolves
             the repository default base; any other value is used as the base
             ref. Non-git directories fall back to a full scan with a warning.
+        no_art: When True, suppress decorative ASCII art regardless of the
+            ``output.art`` config value. Art is also suppressed automatically
+            when ``output.art`` is ``False`` or stdout is not a TTY.
+        ai_runner: Optional AI layer entry point injected by the caller
+            (``run_ai_layer`` from the AI interface facade). When None, no AI
+            enhancement runs and no AI exit-code adjustment is applied.
+        ai_status_renderer: Optional renderer for the AI rows of the
+            pre-execution configuration summary (``render_ai_status`` from the
+            AI interface facade). When None, the AI row reports a missing
+            configuration.
+        ai_sarif_enricher: Optional callable that reconstructs SARIF AI
+            enrichment from tool metadata (``sarif_enrichment_from_results``
+            from the AI interface facade). When None, SARIF renders without
+            AI enrichment.
 
     Returns:
         Exit code (0 for success, 1 for failures).
@@ -530,7 +616,6 @@ def run_lint_tools_simple(
     Raises:
         TypeError: If a programming error occurs during tool execution.
         AttributeError: If a programming error occurs during tool execution.
-        Exception: Re-raised from AI hook when ``ai.fail_on_ai_error`` is enabled.
     """
     # Normalize action to enum
     action = normalize_action(action)
@@ -553,18 +638,29 @@ def run_lint_tools_simple(
 
     setup_execution_logging(output_manager.run_dir, debug=debug)
 
-    # Create simplified logger with rich formatting. For machine-readable
-    # output (JSON/SARIF) route all decorative console output to stderr so
-    # stdout carries only the final parseable document.
+    # Create simplified logger with rich formatting.
     from lintro.utils.console import create_logger
 
-    machine_readable_output = output_format.lower() in ("json", "sarif")
+    # Explicit non-grid formats that must emit a single clean, parseable
+    # document on stdout. For these we route all decorative console UI to
+    # stderr and suppress the human summary so stdout carries only the payload
+    # (grid remains the default human view).
+    clean_stdout_output = output_format.lower() in ("json", "sarif", "csv", "markdown")
     # Score-only takes priority over machine-readable formats so
     # ``--score --output-format json`` still prints only the numeric score.
     score_only = bool(score)
+
+    # Resolve whether decorative ASCII art may be shown. Either the ``--no-art``
+    # flag or ``output.art: false`` in config disables it; the TTY guard in
+    # print_ascii_art still applies on top of this.
+    from lintro.config.config_loader import get_config as _get_config
+
+    art_enabled = bool(_get_config().output.art) and not no_art
+
     logger = create_logger(
         run_dir=output_manager.run_dir,
-        route_stderr=machine_readable_output or score_only,
+        route_stderr=clean_stdout_output or score_only,
+        art_enabled=art_enabled,
     )
 
     # Get tools to run (now returns ToolsToRunResult with skip info)
@@ -672,29 +768,35 @@ def run_lint_tools_simple(
 
     # Resolve the git-diff base ref (if --diff was supplied). Non-git dirs and
     # unresolvable default refs fall back to a full scan with a warning; an
-    # explicit but unresolvable ref is a hard error.
+    # explicit but unresolvable ref is a hard error. Scan targets may span
+    # multiple repositories; each repo's diff is computed independently.
     resolved_diff_base: str | None = None
     if diff_base is not None:
         from lintro.utils.git_diff import (
             DIFF_DEFAULT_SENTINEL,
             DiffResolutionError,
-            get_changed_files,
+            all_repo_defaults_resolvable,
+            get_changed_files_for_paths,
             is_git_repository,
-            resolve_default_base,
+            resolve_git_cwd_from_paths,
         )
 
-        if not is_git_repository():
+        repo_groups = resolve_git_cwd_from_paths(paths)
+        has_repo_paths = any(root is not None for root in repo_groups)
+
+        if not has_repo_paths and not is_git_repository():
             logger.console_output(
                 text="--diff requested but not inside a git repository; "
                 "scanning all files.",
                 color="yellow",
             )
         elif diff_base == DIFF_DEFAULT_SENTINEL:
-            resolved_diff_base = resolve_default_base()
-            if resolved_diff_base is None:
+            if all_repo_defaults_resolvable(paths):
+                resolved_diff_base = DIFF_DEFAULT_SENTINEL
+            else:
                 logger.console_output(
-                    text="--diff: could not resolve a default base ref "
-                    "(tried origin/HEAD, origin/main, main, ...); "
+                    text="--diff: could not resolve a default base ref in every "
+                    "repository (tried origin/HEAD, origin/main, main, ...); "
                     "scanning all files.",
                     color="yellow",
                 )
@@ -703,14 +805,34 @@ def run_lint_tools_simple(
 
         if resolved_diff_base is not None:
             try:
-                changed = get_changed_files(resolved_diff_base)
+                changed = get_changed_files_for_paths(resolved_diff_base, paths)
             except DiffResolutionError as exc:
                 logger.console_output(text=f"Error: {exc}", color="red")
                 return 1
+            # Non-repo scan targets are scanned in full (they have no diff to
+            # filter against), but the changed-file count only covers the
+            # repository targets. Warn so the count below isn't read as the
+            # whole scan scope when targets are mixed (#1618).
+            non_repo_targets = repo_groups.get(None)
+            if non_repo_targets and has_repo_paths:
+                logger.console_output(
+                    text=(
+                        f"--diff: {len(non_repo_targets)} scan target(s) are "
+                        "outside a git repository and are scanned in full (not "
+                        "diff-filtered); the changed-file count below counts only "
+                        "the repository target(s)."
+                    ),
+                    color="yellow",
+                )
+            display_base = (
+                "default base"
+                if resolved_diff_base == DIFF_DEFAULT_SENTINEL
+                else resolved_diff_base
+            )
             logger.console_output(
                 text=(
                     f"Diff mode: scanning {len(changed)} file(s) changed vs "
-                    f"{resolved_diff_base}"
+                    f"{display_base}"
                 ),
                 color="cyan",
             )
@@ -746,12 +868,10 @@ def run_lint_tools_simple(
     else:
         effective_auto_install = is_container
 
-    # Pre-execution config summary (suppress in JSON/SARIF and score-only mode)
-    if (
-        output_format.lower() not in {"json", "sarif"}
-        and not score_only
-        and (tools_to_run or skipped_tools)
-    ):
+    # Pre-execution config summary. Suppressed for clean-stdout formats
+    # (json/sarif/csv/markdown) and score-only mode because it writes the rich
+    # Configuration box to stdout via its own Console, bypassing route_stderr.
+    if not clean_stdout_output and not score_only and (tools_to_run or skipped_tools):
         from lintro.utils.console.pre_execution_summary import (
             print_pre_execution_summary,
         )
@@ -773,7 +893,11 @@ def run_lint_tools_simple(
             is_container=is_container,
             is_ci=is_ci,
             per_tool_auto_install=per_tool_auto if per_tool_auto else None,
-            ai_config=lintro_config.ai,
+            ai_status_lines=(
+                ai_status_renderer(ai_config=lintro_config.ai, is_ci=is_ci)
+                if ai_status_renderer is not None
+                else None
+            ),
         )
 
         # Confirmation prompt — skip when non-interactive
@@ -988,44 +1112,21 @@ def run_lint_tools_simple(
             action,
         )
 
-    # AI enhancement via hook pattern
-    effective_ai_fix = ai_fix or lintro_config.ai.default_fix
-    _warn_ai_fix_disabled(
-        action=action,
-        ai_fix=effective_ai_fix,
-        ai_lint_enabled=lintro_config.ai.lint_enabled,
-        logger=logger,
-        output_format=output_format,
-    )
-
-    from lintro.ai.hook import AIPostExecutionHook
-
-    ai_hook = AIPostExecutionHook(
-        lintro_config,
-        ai_fix=effective_ai_fix,
-        transport=transport,
-    )
-    ai_result = None
-    if ai_hook.should_run(action):
-        try:
-            ai_result = ai_hook.execute(
-                action,
-                all_results,
-                console_logger=logger,
-                output_format=output_format,
-            )
-        except Exception as exc:
-            from loguru import logger as loguru_logger
-
-            loguru_logger.opt(exception=True).debug(f"AI hook failed: {exc}")
-            if getattr(lintro_config.ai, "fail_on_ai_error", False):
-                raise
-            if output_format.lower() not in ("json", "sarif"):
-                logger.console_output(f"Warning: AI enhancement failed: {exc}")
-            from lintro.ai.models import AIResult
-
-            ai_result = AIResult(error=True, message=str(exc))
-        if ai_result is not None:
+    # AI enhancement through the injected seam. The AI layer itself lives
+    # behind the AI interface facade; core never imports it (issue #724).
+    ai_outcome: AIOutcome | None = None
+    if ai_runner is not None:
+        ai_outcome = ai_runner(
+            action=action,
+            all_results=all_results,
+            lintro_config=lintro_config,
+            console_logger=logger,
+            output_format=output_format,
+            ai_fix=ai_fix,
+            transport=transport,
+        )
+        if ai_outcome.ran:
+            # The AI layer may mutate results in place, so re-aggregate.
             total_issues, total_fixed, total_remaining = aggregate_tool_results(
                 all_results,
                 action,
@@ -1042,13 +1143,11 @@ def run_lint_tools_simple(
         ),
     )
 
-    # AI-driven exit code adjustments
-    if ai_result is not None:
-        ai_config = lintro_config.ai
-        if ai_config.fail_on_unfixed and ai_result.unfixed_issues > 0:
-            final_exit_code = 1
-        if ai_config.fail_on_ai_error and ai_result.error:
-            final_exit_code = 1
+    # AI-driven exit code adjustments. Must stay after determine_exit_code and
+    # before the fail_under score gate, so the score gate can still fail a run
+    # that AI left at 0.
+    if ai_outcome is not None and ai_outcome.force_failure:
+        final_exit_code = 1
 
     # Compute the deterministic 0-100 health score from the aggregated results.
     from lintro.utils.health_score import health_score_for_results
@@ -1084,24 +1183,37 @@ def run_lint_tools_simple(
             )
             print(json.dumps(json_data, indent=2))
         elif output_format.lower() == "sarif":
-            from lintro.ai.output.sarif import render_fixes_sarif
-            from lintro.ai.output.sarif_bridge import (
-                standard_issues_from_results,
-                suggestions_from_results,
-                summary_from_results,
-            )
             from lintro.utils.output.file_writer import build_doc_url_map
+            from lintro.utils.output.sarif import (
+                render_fixes_sarif,
+                standard_issues_from_results,
+            )
 
-            suggestions = suggestions_from_results(all_results)
-            summary = summary_from_results(all_results)
-            standard_issues = standard_issues_from_results(all_results)
+            enrichment = _resolve_sarif_enrichment(
+                ai_sarif_enricher,
+                all_results,
+            )
             sarif_json = render_fixes_sarif(
-                suggestions,
-                summary,
+                standard_issues_from_results(all_results),
                 doc_urls=build_doc_url_map(all_results) or None,
-                standard_issues=standard_issues,
+                ai_suggestions=enrichment.suggestions,
+                ai_summary=enrichment.summary,
             )
             print(sarif_json)
+        elif output_format.lower() == "csv":
+            # Emit a single clean CSV document on stdout; decorative UI has been
+            # routed to stderr so stdout parses with csv.reader.
+            from lintro.utils.output.file_writer import render_csv_report
+
+            # Emitted verbatim as UTF-8 bytes so the csv module's \r\n line
+            # terminators are not translated a second time on Windows and the
+            # payload stays byte-identical to the --output file artifact.
+            _write_stdout_verbatim(render_csv_report(all_results))
+        elif output_format.lower() == "markdown":
+            # Emit a single clean Markdown report on stdout.
+            from lintro.utils.output.file_writer import render_markdown_report
+
+            print(render_markdown_report(all_results, action))
         else:
             logger.print_execution_summary(action, all_results)
 
@@ -1138,9 +1250,10 @@ def run_lint_tools_simple(
                     color=_tier_color,
                 )
 
-        # Route warnings to stderr (loguru) for machine-readable formats so
-        # plain-text messages don't corrupt JSON/SARIF output on stdout.
-        _is_machine = output_format.lower() in ("json", "sarif")
+        # Route warnings to stderr (loguru) for clean-stdout formats so
+        # plain-text messages don't corrupt the JSON/SARIF/CSV/Markdown
+        # document on stdout.
+        _is_machine = clean_stdout_output
 
         def _warn(msg: str) -> None:
             if _is_machine:
@@ -1189,23 +1302,22 @@ def run_lint_tools_simple(
                 if fmt == OutputFormat.SARIF:
                     from pathlib import Path
 
-                    from lintro.ai.output.sarif import write_sarif
-                    from lintro.ai.output.sarif_bridge import (
-                        standard_issues_from_results,
-                        suggestions_from_results,
-                        summary_from_results,
-                    )
                     from lintro.utils.output.file_writer import build_doc_url_map
+                    from lintro.utils.output.sarif import (
+                        standard_issues_from_results,
+                        write_sarif,
+                    )
 
-                    suggestions = suggestions_from_results(all_results)
-                    summary = summary_from_results(all_results)
-                    standard_issues = standard_issues_from_results(all_results)
+                    enrichment = _resolve_sarif_enrichment(
+                        ai_sarif_enricher,
+                        all_results,
+                    )
                     write_sarif(
-                        suggestions,
-                        summary,
+                        standard_issues_from_results(all_results),
                         output_path=Path(output_file),
                         doc_urls=build_doc_url_map(all_results) or None,
-                        standard_issues=standard_issues,
+                        ai_suggestions=enrichment.suggestions,
+                        ai_summary=enrichment.summary,
                     )
                 else:
                     write_output_file(
@@ -1229,6 +1341,7 @@ def run_lint_tools_simple(
             total_issues=total_issues,
             total_fixed=total_fixed,
             warn_func=_warn,
+            ai_sarif_enricher=ai_sarif_enricher,
         )
 
         # Clean up old run directories to prevent unbounded growth

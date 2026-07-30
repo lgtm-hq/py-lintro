@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import json
 import os
-from collections.abc import Iterator
+from collections.abc import AsyncIterator, Iterator
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
@@ -24,12 +24,23 @@ from lintro.ai.exceptions import (
     AIRateLimitError,
 )
 from lintro.ai.json_response import CliSchemaRequest
-from lintro.ai.providers.base import AIResponse, AIStreamResult, BaseAIProvider
-from lintro.ai.providers.cli_transport import CliTransport
+from lintro.ai.providers.base import (
+    AIResponse,
+    AsyncAIStreamResult,
+    BaseAIProvider,
+    ProviderCapabilities,
+)
+from lintro.ai.providers.cli_contracts import cli_contract_for
+from lintro.ai.providers.cli_transport import CliTransport, OptionalArg
 from lintro.ai.providers.constants import (
     DEFAULT_MAX_TOKENS,
     DEFAULT_PER_CALL_MAX_TOKENS,
     DEFAULT_TIMEOUT,
+)
+from lintro.ai.raw_response import (
+    CLI_ENVELOPE_STAGE,
+    describe_raw_response,
+    recover_prose_envelope,
 )
 from lintro.ai.registry import PROVIDERS, AIProvider
 
@@ -73,6 +84,7 @@ class _CodexCliTransport(CliTransport):
             binary_name="Codex",
             install_hint="Install Codex CLI: https://developers.openai.com/codex/cli",
             api_key_env="CODEX_API_KEY",
+            contract=cli_contract_for(AIProvider.OPENAI),
         )
         self._model = model
 
@@ -121,10 +133,36 @@ class _CodexCliTransport(CliTransport):
                 input_tokens = int(usage.get("input_tokens", input_tokens))
                 output_tokens = int(usage.get("output_tokens", output_tokens))
             except json.JSONDecodeError as exc:
-                raise AIProviderError(
-                    f"Codex CLI returned unparsable output: {exc}\n"
-                    f"Raw output: {stdout[:500]}",
-                ) from exc
+                recovered = recover_prose_envelope(
+                    provider="Codex",
+                    stdout=stdout,
+                    reason=str(exc),
+                )
+                if recovered is None:
+                    evidence = describe_raw_response(
+                        provider="Codex",
+                        stage=CLI_ENVELOPE_STAGE,
+                        raw=stdout,
+                    )
+                    raise AIProviderError(
+                        f"Codex CLI returned unparsable output: {exc}\n{evidence}",
+                    ) from exc
+                # Return the prose untouched: substitute_parsed_json would swap
+                # in any balanced JSON span it finds inside the answer, which
+                # on a prose answer means silently dropping the surrounding
+                # findings. The review layer extracts embedded JSON itself.
+                return AIResponse(
+                    content=recovered,
+                    model=self._model,
+                    input_tokens=input_tokens,
+                    output_tokens=output_tokens,
+                    cost_estimate=estimate_cost(
+                        self._model,
+                        input_tokens,
+                        output_tokens,
+                    ),
+                    provider=AIProvider.OPENAI,
+                )
 
         cost = estimate_cost(self._model, input_tokens, output_tokens)
         return AIResponse(
@@ -237,12 +275,12 @@ class OpenAIProvider(BaseAIProvider):
             api_key: The resolved API key.
 
         Returns:
-            openai.OpenAI: The API client.
+            openai.AsyncOpenAI: The async API client.
         """
         kwargs: dict[str, Any] = {"api_key": api_key}
         if self._base_url:
             kwargs["base_url"] = self._base_url
-        return openai.OpenAI(**kwargs)
+        return openai.AsyncOpenAI(**kwargs)
 
     def is_available(self) -> bool:
         """Return True when the configured transport is usable."""
@@ -250,7 +288,35 @@ class OpenAIProvider(BaseAIProvider):
             return _find_codex() is not None
         return super().is_available()
 
-    def _complete_cli(
+    def _cli_transport(self) -> _CodexCliTransport | None:
+        """Return the ``codex`` CLI transport, when one was constructed.
+
+        Returns:
+            The CLI transport, or ``None`` under API transport.
+        """
+        return self._cli
+
+    @property
+    def capabilities(self) -> ProviderCapabilities:
+        """Declare OpenAI capabilities for the configured transport.
+
+        Returns:
+            CLI transport accepts a native output schema but exposes no
+            resumable session to lintro; API transport streams natively.
+        """
+        if self._transport == AITransport.CLI:
+            return ProviderCapabilities(
+                supports_sessions=False,
+                supports_structured_output=True,
+                supports_streaming=False,
+            )
+        return ProviderCapabilities(
+            supports_sessions=False,
+            supports_structured_output=False,
+            supports_streaming=True,
+        )
+
+    async def _complete_cli(
         self,
         prompt: str,
         *,
@@ -272,16 +338,26 @@ class OpenAIProvider(BaseAIProvider):
             "--model",
             effective_model,
         ]
+        candidates: list[OptionalArg] = []
         if cli_schema is not None:
-            cmd.extend(["--output-schema", json.dumps(cli_schema.schema)])
+            candidates.append(
+                OptionalArg(
+                    flag="--output-schema",
+                    values=(json.dumps(cli_schema.schema),),
+                ),
+            )
+
+        optional_args = await self._cli.apply_optional_args(cmd, candidates)
+        # The prompt is a trailing positional, so it must follow every flag.
         cmd.append(prompt)
 
         logger.debug(
             f"Codex CLI request: model={effective_model}, prompt_len={len(prompt)}",
         )
 
-        result = self._cli.run(
+        result = await self._cli.run_guarded(
             cmd,
+            optional_args=optional_args,
             timeout=timeout,
             cwd=repo_root or os.getcwd(),
         )
@@ -292,7 +368,7 @@ class OpenAIProvider(BaseAIProvider):
         )
         return self._cli.parse_stdout(result.stdout)
 
-    def complete(
+    async def complete(
         self,
         prompt: str,
         *,
@@ -324,7 +400,7 @@ class OpenAIProvider(BaseAIProvider):
             combined = prompt
             if system:
                 combined = f"{system}\n\n---\n\n{prompt}"
-            return self._complete_cli(
+            return await self._complete_cli(
                 combined,
                 timeout=timeout,
                 repo_root=repo_root,
@@ -345,7 +421,7 @@ class OpenAIProvider(BaseAIProvider):
                 messages.append({"role": "system", "content": system})
             messages.append({"role": "user", "content": prompt})
 
-            response = client.chat.completions.create(
+            response = await client.chat.completions.create(
                 model=effective_model,
                 messages=messages,
                 max_tokens=effective_max,
@@ -371,7 +447,7 @@ class OpenAIProvider(BaseAIProvider):
                 provider=AIProvider.OPENAI,
             )
 
-    def stream_complete(
+    async def stream_complete(
         self,
         prompt: str,
         *,
@@ -379,7 +455,7 @@ class OpenAIProvider(BaseAIProvider):
         max_tokens: int = DEFAULT_PER_CALL_MAX_TOKENS,
         timeout: float = DEFAULT_TIMEOUT,
         model: str | None = None,
-    ) -> AIStreamResult:
+    ) -> AsyncAIStreamResult:
         """Stream a completion from the OpenAI API token-by-token.
 
         Args:
@@ -390,10 +466,10 @@ class OpenAIProvider(BaseAIProvider):
             model: Optional per-call model override.
 
         Returns:
-            An AIStreamResult wrapping the token stream.
+            An AsyncAIStreamResult wrapping the token stream.
         """
         if self._transport == AITransport.CLI:
-            return super().stream_complete(
+            return await super().stream_complete(
                 prompt,
                 system=system,
                 max_tokens=max_tokens,
@@ -417,9 +493,14 @@ class OpenAIProvider(BaseAIProvider):
         final_response: list[AIResponse] = []
         accumulated_text: list[str] = []
 
-        def _generate() -> Iterator[str]:
+        async def _generate() -> AsyncIterator[str]:
+            """Yield tokens from the OpenAI stream and capture usage.
+
+            Yields:
+                str: Content deltas in arrival order.
+            """
             with self._map_errors():
-                stream = client.chat.completions.create(
+                stream = await client.chat.completions.create(
                     model=effective_model,
                     messages=messages,
                     max_tokens=effective_max,
@@ -431,7 +512,7 @@ class OpenAIProvider(BaseAIProvider):
                 input_tokens = 0
                 output_tokens = 0
 
-                for chunk in stream:
+                async for chunk in stream:
                     if chunk.choices and chunk.choices[0].delta.content:
                         text = chunk.choices[0].delta.content
                         accumulated_text.append(text)
@@ -459,7 +540,7 @@ class OpenAIProvider(BaseAIProvider):
                 )
             return final_response[0]
 
-        return AIStreamResult(
+        return AsyncAIStreamResult(
             _chunks=_generate(),
             _on_done=_on_done,
         )

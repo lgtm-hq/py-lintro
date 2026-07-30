@@ -115,6 +115,7 @@ class ActionlintPlugin(BaseToolPlugin):
             results["skipped_files"].append(file_path)
             results["all_success"] = False
             results["execution_failures"] += 1
+            results["timed_out"] = True
         except (OSError, ValueError, RuntimeError) as e:  # pragma: no cover
             results["all_success"] = False
             results["all_outputs"].append(f"Error checking {file_path}: {e}")
@@ -170,6 +171,7 @@ class ActionlintPlugin(BaseToolPlugin):
             "all_success": True,
             "skipped_files": [],
             "execution_failures": 0,
+            "timed_out": False,
         }
 
         # Show progress bar only when processing multiple files
@@ -222,6 +224,7 @@ class ActionlintPlugin(BaseToolPlugin):
             output=combined_output,
             issues_count=len(results["all_issues"]),
             issues=results["all_issues"],
+            timed_out=bool(results["timed_out"]),
         )
 
     def fix(self, paths: list[str], options: dict[str, object]) -> ToolResult:

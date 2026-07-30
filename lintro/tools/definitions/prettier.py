@@ -249,6 +249,12 @@ class PrettierPlugin(BaseToolPlugin):
     ) -> ToolResult:
         """Create a ToolResult for timeout scenarios.
 
+        Follows the shared timeout accounting model (see
+        :mod:`lintro.tools.core.timeout_utils`): the timeout is reported via
+        ``timed_out=True`` and ``success=False`` rather than as a synthetic
+        ``TIMEOUT`` pseudo-issue, so it never inflates the issue counts. Only
+        genuine issues detected before the timeout are reported.
+
         Args:
             timeout_val: The timeout value that was exceeded.
             initial_issues: Optional list of issues found before timeout.
@@ -264,26 +270,20 @@ class PrettierPlugin(BaseToolPlugin):
             "  - Large codebase taking too long to process\n"
             "  - Need to increase timeout via --tool-options prettier:timeout=N"
         )
-        timeout_issue = PrettierIssue(
-            file="execution",
-            line=0,
-            code="TIMEOUT",
-            message=timeout_msg,
-            column=0,
-        )
-        combined_issues = (initial_issues or []) + [timeout_issue]
-        remaining_count = len(combined_issues)
+        detected_issues = list(initial_issues or [])
+        remaining_count = len(detected_issues)
         # Maintain invariant: initial = fixed + remaining
         return ToolResult(
             name=self.definition.name,
             success=False,
             output=timeout_msg,
             issues_count=remaining_count,
-            issues=combined_issues,
+            issues=detected_issues,
             initial_issues_count=remaining_count,
             fixed_issues_count=0,
             remaining_issues_count=remaining_count,
             cwd=cwd,
+            timed_out=True,
         )
 
     def check(self, paths: list[str], options: dict[str, object]) -> ToolResult:

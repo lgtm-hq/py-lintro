@@ -7,6 +7,7 @@ tool outputs into various display formats.
 from __future__ import annotations
 
 import json
+from unittest.mock import patch
 
 import pytest
 from assertpy import assert_that
@@ -218,6 +219,66 @@ def test_format_tool_output_handles_invalid_bandit_json() -> None:
     assert_that(result).contains("Failed to parse Bandit output")
     assert_that(result).contains("Raw output:")
     assert_that(result).contains(bandit_output)
+
+
+def test_format_tool_output_skips_reparse_for_clean_pass() -> None:
+    """Verify informational output on a clean pass is not routed through parser.
+
+    A successful, zero-issue run whose ``output`` is a non-JSON informational
+    string must be returned verbatim instead of raising a parse error (#1534).
+    """
+    informational = "No .py/.pyi files found to check."
+
+    result = format_tool_output(
+        "bandit",
+        informational,
+        output_format="plain",
+        success=True,
+        issues_count=0,
+    )
+
+    assert_that(result).is_equal_to(informational)
+    assert_that(result).does_not_contain("Error:")
+
+
+def test_format_tool_output_clean_pass_shortcut_is_bandit_specific() -> None:
+    """Verify other tools still use parser dispatch for clean-pass output."""
+    informational = "informational output"
+
+    with patch(
+        "lintro.utils.output.file_writer.ParserRegistry.parse",
+        return_value=[],
+    ) as mock_parse:
+        result = format_tool_output(
+            "ruff",
+            informational,
+            output_format="plain",
+            success=True,
+            issues_count=0,
+        )
+
+    mock_parse.assert_called_once_with("ruff", informational)
+    assert_that(result).is_equal_to(informational)
+
+
+def test_format_tool_output_still_errors_on_failed_bandit_run() -> None:
+    """Verify a failed bandit run with unparseable output still surfaces an error.
+
+    The clean-pass skip must not weaken the #1044 guarantee: real unparseable
+    bandit output from a failed run must still be reported as an error.
+    """
+    bandit_output = "not valid json { broken"
+
+    result = format_tool_output(
+        "bandit",
+        bandit_output,
+        output_format="plain",
+        success=False,
+        issues_count=0,
+    )
+
+    assert_that(result).contains("Error:")
+    assert_that(result).contains("Failed to parse Bandit output")
 
 
 @pytest.mark.parametrize(
