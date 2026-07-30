@@ -16,7 +16,7 @@ from typing import Any
 from loguru import logger
 
 from lintro.ai.cost import estimate_cost
-from lintro.ai.enums import AITransport
+from lintro.ai.enums import AITransport, CliBareMode
 from lintro.ai.exceptions import (
     AIAuthenticationError,
     AINotAvailableError,
@@ -30,6 +30,7 @@ from lintro.ai.providers.base import (
     BaseAIProvider,
     ProviderCapabilities,
 )
+from lintro.ai.providers.claude_auth import should_send_bare
 from lintro.ai.providers.cli_contracts import cli_contract_for
 from lintro.ai.providers.cli_transport import CliTransport, OptionalArg
 from lintro.ai.providers.constants import (
@@ -55,6 +56,31 @@ _CLAUDE_BIN = "claude"
 def _find_claude() -> str | None:
     """Return the full path to the ``claude`` binary, or None."""
     return CliTransport.find_binary(_CLAUDE_BIN)
+
+
+def _auth_hint(*, bare: bool) -> str:
+    """Return guidance matching the auth mode the failed call actually used.
+
+    A subscription user told to "run /login" after a bare invocation has
+    already done so; the real remedy differs per mode, so the hint must too.
+
+    Args:
+        bare: Whether ``--bare`` was sent on the failing invocation.
+
+    Returns:
+        Actionable guidance for the mode that failed.
+    """
+    if bare:
+        return (
+            "Set ANTHROPIC_API_KEY or configure apiKeyHelper "
+            "(--bare mode does not use OAuth login), or set "
+            "ai.cli_bare: never / LINTRO_CLI_BARE=never to use the CLI's "
+            "own login session."
+        )
+    return (
+        "Log in with 'claude /login', or set ANTHROPIC_API_KEY to "
+        "authenticate the CLI with an API key."
+    )
 
 
 class _AnthropicCliTransport(CliTransport):
@@ -167,6 +193,7 @@ class AnthropicProvider(BaseAIProvider):
         max_tokens: int = DEFAULT_MAX_TOKENS,
         base_url: str | None = None,
         transport: AITransport = AITransport.API,
+        cli_bare: CliBareMode = CliBareMode.AUTO,
     ) -> None:
         """Initialize the Anthropic provider.
 
@@ -178,12 +205,16 @@ class AnthropicProvider(BaseAIProvider):
             base_url: Custom API base URL for Anthropic-compatible
                 endpoints (proxies, self-hosted, etc.).
             transport: ``api`` for SDK or ``cli`` for ``claude -p``.
+            cli_bare: Whether CLI transport passes ``--bare``. Defaults to
+                auto-detection from the CLI's own API-key sources; see
+                :mod:`lintro.ai.providers.claude_auth`.
 
         Raises:
             AINotAvailableError: When CLI transport is selected but the
                 ``claude`` binary is not on PATH.
         """
         self._transport = transport
+        self._cli_bare = cli_bare
         self._cli: _AnthropicCliTransport | None = None
 
         if transport == AITransport.CLI:
@@ -307,9 +338,14 @@ class AnthropicProvider(BaseAIProvider):
             raise AINotAvailableError("Claude CLI transport is not initialized")
 
         effective_model = model or self._model
+        working_dir = repo_root or os.getcwd()
+        # `--bare` disables the CLI's OAuth session login, so it may only be
+        # sent when the binary can reach an API key. Forcing it locked every
+        # subscription-authenticated user out of this transport (#1838).
+        bare = should_send_bare(configured=self._cli_bare, cwd=working_dir)
         cmd = [
             self._cli._binary_path,
-            "--bare",
+            *(("--bare",) if bare else ()),
             "-p",
             prompt,
             "--output-format",
@@ -344,6 +380,7 @@ class AnthropicProvider(BaseAIProvider):
         logger.debug(
             f"Claude CLI request: model={effective_model}, "
             f"resume={resume_session_id is not None}, "
+            f"bare={bare}, "
             f"prompt_len={len(prompt)}",
         )
 
@@ -351,15 +388,12 @@ class AnthropicProvider(BaseAIProvider):
             cmd,
             optional_args=optional_args,
             timeout=timeout,
-            cwd=repo_root or os.getcwd(),
+            cwd=working_dir,
         )
         self._cli.check_exit_code(
             result,
             auth_patterns=("authentication", "login", "not logged in"),
-            auth_hint=(
-                "Set ANTHROPIC_API_KEY or configure apiKeyHelper "
-                "(--bare mode does not use OAuth login)."
-            ),
+            auth_hint=_auth_hint(bare=bare),
         )
 
         response, session_id = self._cli.parse_stdout(result.stdout)

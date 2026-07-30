@@ -102,3 +102,24 @@ def test_get_provider_cursor_trust_threaded_when_enabled():
     assert_that(isinstance(provider, CursorProvider)).is_true()
     cursor = cast(CursorProvider, provider)
     assert_that(cursor._trust_workspace).is_true()
+
+
+def test_get_provider_anthropic_threads_cli_bare() -> None:
+    """get_provider threads ai.cli_bare into the Anthropic provider."""
+    from lintro.ai.enums import AITransport, CliBareMode
+    from lintro.ai.providers.anthropic import AnthropicProvider
+
+    config = AIConfig(
+        provider="anthropic",  # type: ignore[arg-type]  # Pydantic coerces str
+        transport=AITransport.CLI,
+        cli_bare=CliBareMode.NEVER,
+    )
+    with patch.object(
+        anthropic_mod,
+        "_find_claude",
+        return_value="/usr/local/bin/claude",
+    ):
+        provider = get_provider(config)
+    assert_that(isinstance(provider, AnthropicProvider)).is_true()
+    anthropic_provider = cast(AnthropicProvider, provider)
+    assert_that(anthropic_provider._cli_bare).is_equal_to(CliBareMode.NEVER)

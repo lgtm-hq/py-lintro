@@ -10,7 +10,7 @@ from unittest.mock import patch
 import pytest
 from assertpy import assert_that
 
-from lintro.ai.enums import AITransport
+from lintro.ai.enums import AITransport, CliBareMode
 from lintro.ai.exceptions import AIAuthenticationError, AINotAvailableError
 from lintro.ai.providers.anthropic import AnthropicProvider, _find_claude
 from lintro.ai.registry import AIProvider
@@ -71,6 +71,7 @@ class TestClaudeCliComplete:
         provider = AnthropicProvider(
             model="claude-sonnet-4-6",
             transport=AITransport.CLI,
+            cli_bare=CliBareMode.ALWAYS,
         )
         stdout = _cli_json(result='{"summary": "ok"}')
         with patch_cli_exec() as mock_run:
