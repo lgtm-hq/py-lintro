@@ -123,6 +123,7 @@ Scripts for GitHub Actions workflows and continuous integration.
 | `run-with-memory-trace.sh`           | Run a command with a live memory trace streamed to the job log (#1761)     | `./scripts/ci/run-with-memory-trace.sh <command> [args...]`                                 |
 | `collect-oom-evidence.sh`            | Best-effort dmesg/journal OOM-killer evidence after a failed build (#1707) | `./scripts/ci/collect-oom-evidence.sh <output-file>`                                        |
 | `validate-docker-backfill-inputs.sh` | Validate workflow-dispatch backfill version/ref inputs                     | `BACKFILL_VERSION=<ver> BACKFILL_REF=<ref> ./scripts/ci/validate-docker-backfill-inputs.sh` |
+| `resolve-allowed-endpoints.sh`       | Flatten the shared harden-runner egress allowlist into a job output        | `./scripts/ci/resolve-allowed-endpoints.sh --help`                                          |
 | `security-comment.sh`                | Run osv-scanner via lintro in Docker and generate security PR comment      | `./scripts/ci/security-comment.sh --help`                                                   |
 | `install-osv-scanner.sh`             | Download and verify osv-scanner with curl exit-23 retries                  | `./scripts/ci/security/install-osv-scanner.sh`                                              |
 | `check-vuln-suppressions.sh`         | Verbose wrapper for lgtm-ci vulnerability suppression check                | `./scripts/ci/security/check-vuln-suppressions.sh`                                          |
