@@ -144,6 +144,12 @@ _ANTHROPIC_CONTRACT = CliContract(
     # Claude Code 2.x introduced the --bare / --json-schema surface lintro
     # drives; 1.x cannot serve a structured CLI review at all.
     version_floor=(2, 0, 0),
+    # `--bare` is sent conditionally (see lintro.ai.providers.claude_auth): it
+    # disables OAuth session login, so it is only safe when the binary can
+    # reach an API key. It stays *required* rather than optional because the
+    # API-key path cannot degrade without it -- silently dropping it there
+    # would hand the agentic tool surface a review prompt -- so its
+    # disappearance from the flag surface must break CI, not a user's review.
     required_flags=(
         "--bare",
         "--print",

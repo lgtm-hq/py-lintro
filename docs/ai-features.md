@@ -348,6 +348,15 @@ ai:
   # Max cached entries before eviction. (int >= 1, default: 1000)
   cache_max_entries: 1000
 
+  # ── Anthropic CLI transport ───────────────────────────────────
+  # Whether to pass "--bare" to the "claude" binary. "--bare" drops the CLI's
+  # agentic tool surface but also disables OAuth session login, so it only
+  # authenticates against an API key. "auto" sends it only when a key is
+  # reachable (ANTHROPIC_API_KEY or an apiKeyHelper), so a subscription login
+  # keeps working. Override per run with LINTRO_CLI_BARE.
+  # (auto | always | never, default: auto)
+  cli_bare: auto
+
   # ── Advanced / trust (leave off unless you understand the risk) ──
   # Pass "--trust" to the Cursor agent CLI. Security risk: the Cursor provider
   # can be fed prompt-injectable content (e.g. fork-PR diffs), so keep this
@@ -441,32 +450,33 @@ config for a single invocation.
 **Every transport needs a credential of its own — CLI transport is not
 credential-free.**
 
-| Provider    | Transport | Credential                                                      |
-| ----------- | --------- | --------------------------------------------------------------- |
-| `anthropic` | `api`     | `ANTHROPIC_API_KEY`                                             |
-| `anthropic` | `cli`     | `ANTHROPIC_API_KEY` (or a `claude` `apiKeyHelper`) — see below  |
-| `openai`    | `api`     | `OPENAI_API_KEY`                                                |
-| `openai`    | `cli`     | `codex login` session (`~/.codex/auth.json`) or `CODEX_API_KEY` |
-| `cursor`    | `cli`     | `agent login` session or `CURSOR_API_KEY` (CLI-only provider)   |
+| Provider    | Transport | Credential                                                        |
+| ----------- | --------- | ----------------------------------------------------------------- |
+| `anthropic` | `api`     | `ANTHROPIC_API_KEY`                                               |
+| `anthropic` | `cli`     | `claude` login session, `ANTHROPIC_API_KEY`, or an `apiKeyHelper` |
+| `openai`    | `api`     | `OPENAI_API_KEY`                                                  |
+| `openai`    | `cli`     | `codex login` session (`~/.codex/auth.json`) or `CODEX_API_KEY`   |
+| `cursor`    | `cli`     | `agent login` session or `CURSOR_API_KEY` (CLI-only provider)     |
 
 `ai.api_key_env` overrides the API-transport variable name if you keep the key somewhere
 else.
 
-> **Anthropic `--transport cli` needs an API key — an interactive Claude login is not
-> enough.**
+> **Anthropic `--transport cli` and the `--bare` flag.**
 >
-> Lintro invokes the Claude CLI as `claude --bare -p …`, and `--bare` disables OAuth
-> session login. Consequences:
+> `claude --bare` runs the CLI without its agentic tool surface, but it also disables
+> OAuth session login — in bare mode the binary authenticates only against an API key.
+> Lintro therefore chooses the flag per invocation (`ai.cli_bare`, default `auto`):
 >
-> - `CLAUDE_CODE_OAUTH_TOKEN` and a logged-in interactive `claude` session **do not**
->   authenticate this path; it fails with `Not logged in · Please run /login` even
->   though the same binary works in the same shell.
-> - `--transport cli` bills an `ANTHROPIC_API_KEY` exactly like `--transport api`.
->   **There is no subscription-billed path today.**
+> - An API key is reachable (`ANTHROPIC_API_KEY` is set, or a Claude Code settings file
+>   declares an `apiKeyHelper`) → lintro sends `--bare`, and the call bills that key
+>   exactly like `--transport api`.
+> - No API key is reachable → lintro omits `--bare`, and the call uses your `claude`
+>   login session, billed to that subscription.
 >
-> This is tracked in [#1838](https://github.com/lgtm-hq/py-lintro/issues/1838); the
-> CLI's own error hint ("`--bare` mode does not use OAuth login") describes the same
-> constraint. Codex and Cursor are unaffected — both accept a CLI login session.
+> Force either mode explicitly with `ai.cli_bare: always|never` in config, or with the
+> `LINTRO_CLI_BARE=always|never` environment variable (the environment wins). Codex and
+> Cursor are unaffected — both accept a CLI login session. See
+> [#1838](https://github.com/lgtm-hq/py-lintro/issues/1838).
 
 ### Failures are visible, never a green no-op
 

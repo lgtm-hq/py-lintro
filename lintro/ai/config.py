@@ -25,7 +25,12 @@ from loguru import logger
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from lintro.ai.config_views import AIBudgetConfig, AIOutputConfig, AIProviderConfig
-from lintro.ai.enums import AITransport, ConfidenceLevel, SanitizeMode
+from lintro.ai.enums import (
+    AITransport,
+    CliBareMode,
+    ConfidenceLevel,
+    SanitizeMode,
+)
 from lintro.ai.registry import AIProvider
 
 __all__ = [
@@ -213,6 +218,20 @@ class AIConfig(BaseModel):
             "'off' disables detection."
         ),
     )
+    cli_bare: CliBareMode = Field(
+        default=CliBareMode.AUTO,
+        description=(
+            "Whether the anthropic CLI transport passes '--bare' to the "
+            "'claude' binary. '--bare' drops the CLI's agentic tool surface "
+            "but also disables OAuth session login, so it only authenticates "
+            "against an API key. 'auto' (default) sends it only when an API "
+            "key is reachable (ANTHROPIC_API_KEY or a configured "
+            "apiKeyHelper), so subscription logins keep working; 'always' and "
+            "'never' force the choice. Overridable per run with the "
+            "LINTRO_CLI_BARE environment variable."
+        ),
+    )
+
     cursor_trust_workspace: bool = Field(
         default=False,
         description=(
@@ -365,6 +384,7 @@ class AIConfig(BaseModel):
         return AIProviderConfig(
             provider=self.provider,
             transport=self.transport,
+            cli_bare=self.cli_bare,
             model=self.model,
             api_key_env=self.api_key_env,
             api_base_url=self.api_base_url,
