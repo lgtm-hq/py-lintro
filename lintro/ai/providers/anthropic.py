@@ -38,6 +38,11 @@ from lintro.ai.providers.constants import (
     DEFAULT_PER_CALL_MAX_TOKENS,
     DEFAULT_TIMEOUT,
 )
+from lintro.ai.raw_response import (
+    CLI_ENVELOPE_STAGE,
+    describe_raw_response,
+    recover_prose_envelope,
+)
 from lintro.ai.registry import PROVIDERS, AIProvider
 
 _has_anthropic = False
@@ -106,15 +111,36 @@ class _AnthropicCliTransport(CliTransport):
         try:
             data = json.loads(stdout.strip())
         except json.JSONDecodeError as exc:
-            raise AIProviderError(
-                f"Claude CLI returned invalid JSON: {exc}\n"
-                f"Raw output: {stdout[:500]}",
-            ) from exc
+            recovered = recover_prose_envelope(
+                provider="Claude",
+                stdout=stdout,
+                reason=str(exc),
+            )
+            if recovered is None:
+                evidence = describe_raw_response(
+                    provider="Claude",
+                    stage=CLI_ENVELOPE_STAGE,
+                    raw=stdout,
+                )
+                raise AIProviderError(
+                    f"Claude CLI returned invalid JSON: {exc}\n{evidence}",
+                ) from exc
+            return (
+                AIResponse(
+                    content=recovered,
+                    model=self._model,
+                    provider=AIProvider.ANTHROPIC,
+                ),
+                None,
+            )
 
         if data.get("is_error") or data.get("subtype") == "error":
-            raise AIProviderError(
-                f"Claude CLI reported error: {data.get('result', stdout[:500])}",
+            cause = data.get("result") or describe_raw_response(
+                provider="Claude",
+                stage=CLI_ENVELOPE_STAGE,
+                raw=stdout,
             )
+            raise AIProviderError(f"Claude CLI reported error: {cause}")
 
         content = data.get("result", "")
         structured = data.get("structured_output")

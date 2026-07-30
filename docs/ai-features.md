@@ -664,6 +664,24 @@ your normal linting results with a one-line notice:
 AI: enhancement unavailable
 ```
 
+### Non-JSON review responses
+
+`lintro review` asks the model for a JSON object. When an answer comes back as prose
+instead, the findings it contains are recovered rather than discarded:
+
+1. The response is parsed, including JSON embedded in surrounding prose.
+2. If that fails, lintro makes **exactly one** retry asking the model to re-emit its
+   answer in the required schema. The retry is charged against the same per-call
+   `ai.api_timeout` budget as the original call (capped at half of it), and is skipped
+   entirely when too little of that budget remains.
+3. If the retry also fails, the prose is reported as a single low-severity "unstructured
+   review output" finding carrying the complete answer, and the chunk completes instead
+   of aborting.
+
+Every response that fails to parse — at the CLI-envelope layer or the review layer — is
+written in full to `.lintro-cache/ai/raw-responses/`, so nothing the model produced is
+lost to truncation.
+
 ## Pre-Execution Summary
 
 When AI is enabled, the pre-execution summary table includes AI configuration:

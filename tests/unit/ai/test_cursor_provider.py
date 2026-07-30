@@ -316,13 +316,26 @@ async def test_complete_raises_on_nonzero_exit(provider):
             await provider.complete("Hello")
 
 
-async def test_complete_raises_on_invalid_json_stdout(provider):
-    """Raise AIProviderError when stdout is not valid JSON."""
+async def test_complete_recovers_prose_stdout(provider):
+    """Recover a non-JSON envelope as unstructured prose instead of failing."""
     with patch_cli_exec() as mock_run:
         mock_run.return_value = subprocess.CompletedProcess(
             args=[],
             returncode=0,
             stdout="not json at all",
+            stderr="",
+        )
+        response = await provider.complete("Hello")
+    assert_that(response.content).is_equal_to("not json at all")
+
+
+async def test_complete_raises_on_blank_stdout(provider):
+    """Raise AIProviderError when stdout carries no recoverable text."""
+    with patch_cli_exec() as mock_run:
+        mock_run.return_value = subprocess.CompletedProcess(
+            args=[],
+            returncode=0,
+            stdout="   \n  ",
             stderr="",
         )
         with pytest.raises(AIProviderError, match="invalid JSON"):
