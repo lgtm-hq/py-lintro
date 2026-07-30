@@ -8,7 +8,6 @@ from lintro.ai.metadata.helpers import (
     attach_telemetry_metadata,
     attach_validation_counts_metadata,
     ensure_ai_metadata,
-    normalize_ai_metadata,
     suggestion_to_payload,
     summary_to_payload,
 )
@@ -23,7 +22,6 @@ __all__ = [
     "attach_telemetry_metadata",
     "attach_validation_counts_metadata",
     "ensure_ai_metadata",
-    "normalize_ai_metadata",
     "suggestion_to_payload",
     "summary_to_payload",
 ]

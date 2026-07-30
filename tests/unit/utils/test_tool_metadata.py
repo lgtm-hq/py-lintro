@@ -9,14 +9,14 @@ from __future__ import annotations
 
 from assertpy import assert_that
 
-from lintro.ai.metadata import normalize_ai_metadata
+import lintro.ai.metadata as ai_metadata_module
 from lintro.models.core.tool_result import ToolResult
 from lintro.utils.tool_metadata import get_ai_count, normalize_tool_metadata
 
 
-def test_deprecated_ai_alias_is_the_core_function() -> None:
-    """``lintro.ai.metadata`` re-exports the relocated core function."""
-    assert_that(normalize_ai_metadata).is_same_as(normalize_tool_metadata)
+def test_ai_package_no_longer_re_exports_the_core_function() -> None:
+    """The ``lintro.ai.metadata`` compatibility shim is gone (issue #1831)."""
+    assert_that(hasattr(ai_metadata_module, "normalize_ai_metadata")).is_false()
 
 
 def test_normalize_drops_unknown_keys() -> None:

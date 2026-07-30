@@ -103,9 +103,8 @@ def serialize_tool_result(
         The per-tool JSON object: always ``tool``, ``success``,
         ``issues_count``, ``skipped``, ``skip_reason``, ``timed_out`` and
         ``output``; plus ``parse_failures_count`` when set,
-        ``fixed``/``remaining`` in FIX mode, normalized ``metadata`` (plus its
-        deprecated ``ai_metadata`` duplicate) when present, and ``issues``
-        when any exist.
+        ``fixed``/``remaining`` in FIX mode, normalized ``metadata`` when
+        present, and ``issues`` when any exist.
     """
     merged_issues = merge_detected_and_remaining(
         getattr(result, "initial_issues", None),
@@ -132,10 +131,6 @@ def serialize_tool_result(
         normalized_metadata = normalize_tool_metadata(metadata)
         if normalized_metadata:
             data["metadata"] = normalized_metadata
-            # Deprecated duplicate of ``metadata``, emitted for one release
-            # cycle so existing consumers keep working. Removed in a future
-            # release; see the deprecation note in docs/ai-features.md.
-            data["ai_metadata"] = normalized_metadata
     if merged_issues:
         data["issues"] = [serialize_issue(issue) for issue in merged_issues]
     return data

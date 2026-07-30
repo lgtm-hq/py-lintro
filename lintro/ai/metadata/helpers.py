@@ -1,6 +1,6 @@
 """Helper functions for attaching AI metadata to tool results.
 
-``normalize_ai_metadata`` is re-exported here as a deprecated alias for
+Metadata normalization lives in
 :func:`lintro.utils.tool_metadata.normalize_tool_metadata`, which moved to
 core in issue #724: it is a pure dict whitelist with no AI dependency, and
 leaving it here forced the JSON output path to import :mod:`lintro.ai`.
@@ -12,7 +12,6 @@ from typing import TYPE_CHECKING, Any
 
 from lintro.ai.metadata.fix_suggestion_payload import AIFixSuggestionPayload
 from lintro.ai.metadata.summary_payload import AISummaryPayload
-from lintro.utils.tool_metadata import normalize_tool_metadata
 
 if TYPE_CHECKING:
     from lintro.ai.models import AIFixSuggestion, AISummary
@@ -122,8 +121,3 @@ def attach_telemetry_metadata(
         return
     metadata = ensure_ai_metadata(results[0])
     metadata["ai_metrics"] = telemetry.to_dict()
-
-
-#: Deprecated alias retained for backwards compatibility; the implementation
-#: moved to :mod:`lintro.utils.tool_metadata` (issue #724).
-normalize_ai_metadata = normalize_tool_metadata

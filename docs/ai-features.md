@@ -577,11 +577,10 @@ AI output adapts to the environment:
 
 When using `--output-format json`, AI data is included in the output.
 
-> **Deprecation:** the per-tool key is now `metadata`. The old `ai_metadata` key is
-> still emitted with identical content for one release cycle and will be removed in a
-> future release — migrate consumers to `metadata`. The key was renamed because it is
-> not AI-specific: osv-scanner writes its suppression classifications there with AI
-> fully disabled.
+> **Note:** the per-tool key is `metadata`. It is deliberately not named `ai_metadata`
+> because it is not AI-specific: osv-scanner writes its suppression classifications
+> there with AI fully disabled. The old `ai_metadata` key was removed after its
+> deprecation cycle — consumers must read `metadata`.
 
 ```json
 {
@@ -597,8 +596,7 @@ When using `--output-format json`, AI data is included in the output.
           "estimated_effort": "20-30 minutes"
         },
         "fix_suggestions": [...]
-      },
-      "ai_metadata": { "...": "deprecated duplicate of metadata" }
+      }
     }
   ],
   "summary": {...},
