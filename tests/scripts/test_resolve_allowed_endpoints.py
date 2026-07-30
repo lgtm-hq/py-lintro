@@ -55,7 +55,12 @@ def test_flattens_the_repository_allowlist_into_one_line() -> None:
     endpoints = result.stdout.strip()
     assert_that(endpoints).does_not_contain("\n")
     assert_that(endpoints).does_not_contain("#")
-    assert_that(endpoints.split()).contains("ghcr.io:443", "fulcio.sigstore.dev:443")
+    expected = [
+        line.split("#", 1)[0].strip()
+        for line in _ALLOWLIST.read_text(encoding="utf-8").splitlines()
+        if line.split("#", 1)[0].strip()
+    ]
+    assert_that(endpoints.split()).is_equal_to(expected)
 
 
 def test_writes_the_endpoints_output_for_the_workflow(tmp_path: Path) -> None:
@@ -108,6 +113,69 @@ def test_fails_instead_of_emitting_an_empty_allowlist(
 
     assert_that(result.returncode).is_not_equal_to(0)
     assert_that(result.stderr).contains("no endpoints found")
+
+
+@pytest.mark.parametrize(
+    ("content", "message"),
+    [
+        pytest.param(
+            "github.com:443 ghcr.io:443\n",
+            "expected one host:port value",
+            id="two-values-on-one-line",
+        ),
+        pytest.param("github.com\n", "not a host:port value", id="missing-port"),
+        pytest.param(
+            "https://github.com:443\n",
+            "not a host:port value",
+            id="scheme-prefixed",
+        ),
+        pytest.param("github.com:99999\n", "port out of range", id="port-too-large"),
+        pytest.param("github.com:0\n", "port out of range", id="port-zero"),
+    ],
+)
+def test_rejects_malformed_entries(
+    tmp_path: Path,
+    content: str,
+    message: str,
+) -> None:
+    """A typo'd entry must fail here, not silently block a host at build time.
+
+    harden-runner accepts whatever it is handed, so an unvalidated typo turns
+    into a blocked host that only surfaces during a release publish.
+    """
+    allowlist = tmp_path / "endpoints.txt"
+    allowlist.write_text(content, encoding="utf-8")
+
+    result = _run(endpoints_file=str(allowlist))
+
+    assert_that(result.returncode).is_not_equal_to(0)
+    assert_that(result.stderr).contains(message)
+    assert_that(result.stdout).is_empty()
+
+
+def test_a_malformed_line_discards_the_whole_list(tmp_path: Path) -> None:
+    """One bad line must not yield a partial allowlist for the valid ones."""
+    allowlist = tmp_path / "endpoints.txt"
+    allowlist.write_text("github.com:443\nbroken\nghcr.io:443\n", encoding="utf-8")
+    output_file = tmp_path / "github_output"
+    output_file.touch()
+
+    result = _run(endpoints_file=str(allowlist), github_output=output_file)
+
+    assert_that(result.returncode).is_not_equal_to(0)
+    assert_that(result.stdout).is_empty()
+    assert_that(output_file.read_text(encoding="utf-8")).is_empty()
+
+
+def test_accepts_wildcard_hosts(tmp_path: Path) -> None:
+    """harden-runner supports wildcard hosts, so validation must allow them."""
+    allowlist = tmp_path / "endpoints.txt"
+    allowlist.write_text("*.githubusercontent.com:443\n", encoding="utf-8")
+
+    result = _run(endpoints_file=str(allowlist))
+
+    assert_that(result.returncode).is_equal_to(0)
+    assert_that(result.stdout.strip()).is_equal_to("*.githubusercontent.com:443")
 
 
 def test_fails_when_the_allowlist_file_is_missing(tmp_path: Path) -> None:
