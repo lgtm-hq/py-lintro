@@ -128,14 +128,14 @@ def _read_settings(path: Path) -> str | None:
     try:
         if not path.is_file():
             return None
-        with path.open(encoding="utf-8") as handle:
+        with path.open("rb") as handle:
             raw = handle.read(_MAX_SETTINGS_BYTES + 1)
+        if len(raw) > _MAX_SETTINGS_BYTES:
+            logger.debug(f"Ignoring oversized Claude settings file: {path}")
+            return None
+        return raw.decode("utf-8")
     except (OSError, ValueError):
         return None
-    if len(raw) > _MAX_SETTINGS_BYTES:
-        logger.debug(f"Ignoring oversized Claude settings file: {path}")
-        return None
-    return raw
 
 
 def _declares_api_key_helper(path: Path) -> bool:
