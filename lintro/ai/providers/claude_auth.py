@@ -211,7 +211,8 @@ def resolve_bare_mode(configured: CliBareMode = CliBareMode.AUTO) -> CliBareMode
         # untrusted input and log sinks are not a place to replay it.
         logger.warning(
             f"Ignoring invalid {BARE_MODE_ENV}: expected one of "
-            f"{', '.join(mode.value for mode in CliBareMode)}.",
+            f"{', '.join(mode.value for mode in CliBareMode)} "
+            "(or a recognized boolean alias).",
         )
         return configured
 
