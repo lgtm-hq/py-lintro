@@ -20,6 +20,7 @@ from lintro.ai.enums import AITransport
 from lintro.ai.exceptions import AICostBudgetExceededError, AIProviderError
 from lintro.ai.providers.capabilities import ProviderCapabilities
 from lintro.ai.providers.response import AIResponse
+from lintro.ai.raw_response import RAW_RESPONSE_DIR
 from lintro.ai.review.models.changed_file import ChangedFile
 from lintro.ai.review.models.review_context import ReviewContext
 from lintro.ai.review.models.review_result import ReviewResult
@@ -214,6 +215,30 @@ def test_prose_twice_falls_back_to_unstructured_findings() -> None:
     assert_that(result.findings).is_length(1)
     assert_that(result.findings[0].category).is_equal_to(UNSTRUCTURED_CATEGORY)
     assert_that(result.findings[0].description).is_equal_to("Still prose, sorry.")
+
+
+def test_first_failed_answer_is_persisted_even_when_the_retry_succeeds() -> None:
+    """The original unparseable answer survives a successful retry on disk."""
+    _run(responses=[_response(_PROSE), _response(_valid_payload())])
+
+    captures = list((Path.cwd() / RAW_RESPONSE_DIR).glob("parse-failure-*"))
+    assert_that(captures).is_length(1)
+    assert_that(captures[0].read_text(encoding="utf-8")).is_equal_to(_PROSE)
+
+
+def test_both_failed_answers_are_persisted_on_fallback() -> None:
+    """When the retry also fails, the original and retry answers both survive."""
+    _run(responses=[_response(_PROSE), _response("Still prose, sorry.")])
+
+    capture_dir = Path.cwd() / RAW_RESPONSE_DIR
+    originals = list(capture_dir.glob("parse-failure-*"))
+    fallbacks = list(capture_dir.glob("unstructured-*"))
+    assert_that(originals).is_length(1)
+    assert_that(originals[0].read_text(encoding="utf-8")).is_equal_to(_PROSE)
+    assert_that(fallbacks).is_length(1)
+    assert_that(fallbacks[0].read_text(encoding="utf-8")).is_equal_to(
+        "Still prose, sorry.",
+    )
 
 
 def test_unstructured_fallback_preserves_the_full_answer() -> None:

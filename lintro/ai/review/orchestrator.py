@@ -38,6 +38,7 @@ from lintro.ai.prompts.review import (
     format_changed_files_for_prompt,
     format_lint_results_section,
 )
+from lintro.ai.raw_response import persist_raw_response
 from lintro.ai.review.chunker import chunk_review_context
 from lintro.ai.review.enums.review_strictness import ReviewStrictness
 from lintro.ai.review.errors_taxonomy import (
@@ -1285,6 +1286,17 @@ async def _parse_review_payload_with_recovery(
         return response, parse_review_response(content=response.content)
     except ValueError as exc:
         first_error = exc
+
+    # Persisted immediately: a successful retry replaces this answer in the
+    # payload, and a failed one echoes back only the retry's text, so this is
+    # the sole capture of what the model originally produced.
+    first_capture = persist_raw_response(
+        provider="review",
+        stage="parse-failure",
+        raw=response.content,
+    )
+    if first_capture is not None:
+        logger.debug(f"Unparseable review response saved to {first_capture}")
 
     retry_timeout = resolve_schema_retry_timeout(
         api_timeout=ai_config.api_timeout,

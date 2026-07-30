@@ -16,6 +16,7 @@ from __future__ import annotations
 import hashlib
 import os
 import re
+import stat
 import tempfile
 import time
 from pathlib import Path
@@ -105,6 +106,37 @@ def _candidate_dirs(*, workspace_root: Path | None) -> tuple[Path, ...]:
     )
 
 
+def _prepare_directory(*, directory: Path) -> bool:
+    """Create *directory* and verify it is safe to write captures into.
+
+    The fallback lives at a predictable path in the shared system temp
+    directory, so a pre-existing entry there is untrusted: a symlink, another
+    user's directory, or one with loose permissions would leak captures that
+    can embed diff context. ``lstat`` deliberately does not follow symlinks.
+
+    Args:
+        directory: Candidate capture directory.
+
+    Returns:
+        True when the directory exists, is a real directory (not a symlink),
+        is owned by the current user, and is owner-only.
+
+    Raises:
+        OSError: When the directory cannot be created or inspected.
+    """
+    directory.mkdir(parents=True, exist_ok=True, mode=_DIR_MODE)
+    info = directory.lstat()
+    if not stat.S_ISDIR(info.st_mode):
+        return False
+    if hasattr(os, "geteuid") and info.st_uid != os.geteuid():
+        return False
+    if stat.S_IMODE(info.st_mode) != _DIR_MODE:
+        # A pre-existing directory we own but with looser modes is tightened
+        # rather than rejected: losing the capture is the worse outcome.
+        directory.chmod(_DIR_MODE)
+    return True
+
+
 def persist_raw_response(
     *,
     provider: str,
@@ -132,17 +164,23 @@ def persist_raw_response(
     )
     for directory in _candidate_dirs(workspace_root=workspace_root):
         try:
-            directory.mkdir(parents=True, exist_ok=True, mode=_DIR_MODE)
+            if not _prepare_directory(directory=directory):
+                continue
             target = directory / name
             # Captures can embed diff context, so they are created owner-only
-            # rather than at the process umask.
+            # rather than at the process umask. O_EXCL + O_NOFOLLOW refuse
+            # pre-existing entries and symlinks in the shared temp fallback.
             descriptor = os.open(
                 target,
-                os.O_WRONLY | os.O_CREAT | os.O_TRUNC,
+                os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0),
                 _FILE_MODE,
             )
             with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
                 handle.write(raw)
+        except FileExistsError:
+            # Same second, same content (the name embeds a content digest in a
+            # directory verified owner-only): the capture already exists.
+            return directory / name
         except OSError:
             continue
         return target

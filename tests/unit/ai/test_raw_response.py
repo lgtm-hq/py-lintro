@@ -164,6 +164,39 @@ def test_repeated_identical_captures_do_not_fail(tmp_path: Path) -> None:
     assert_that(second.read_text(encoding="utf-8")).is_equal_to("same prose")
 
 
+def test_symlinked_capture_directory_is_refused(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A symlink planted at the capture path never receives captures."""
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir(mode=0o700)
+    workspace = tmp_path / "workspace"
+    (workspace / ".lintro-cache" / "ai").mkdir(parents=True)
+    (workspace / RAW_RESPONSE_DIR).symlink_to(elsewhere)
+    fallback = tmp_path / "system-temp"
+    monkeypatch.setattr(
+        "lintro.ai.raw_response.tempfile.gettempdir",
+        lambda: str(fallback),
+    )
+
+    path = _persist(raw="prose", workspace_root=workspace)
+
+    assert_that(path.is_relative_to(fallback)).is_true()
+    assert_that(list(elsewhere.iterdir())).is_empty()
+
+
+def test_loose_directory_permissions_are_tightened(tmp_path: Path) -> None:
+    """A pre-existing capture directory with loose modes is made owner-only."""
+    directory = tmp_path / RAW_RESPONSE_DIR
+    directory.mkdir(parents=True)
+    directory.chmod(0o755)
+
+    path = _persist(raw="prose", workspace_root=tmp_path)
+
+    assert_that(path.parent.stat().st_mode & 0o077).is_equal_to(0)
+
+
 def test_persisted_names_are_filesystem_safe(tmp_path: Path) -> None:
     """Provider and stage labels are slugged, never written raw."""
     path = _persist(
