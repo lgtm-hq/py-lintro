@@ -39,6 +39,9 @@ class RunArtifact:
         total_remaining: Issues still outstanding after the run.
         exit_code: Process exit code the run resolved to.
         dry_run_preview: Whether this was a ``fmt --dry-run`` preview.
+        main_phase_empty_due_to_filter: Whether post-check filtering left the
+            main phase with no tools to run. Carried here so a re-scored
+            artifact resolves its exit code the same way the first pass did.
         early_exit: Whether the run stopped before executing any tool (bad
             tool selection, unresolvable ``--diff`` base, or a declined
             confirmation prompt). Renderers must emit nothing for such a run;
@@ -54,6 +57,7 @@ class RunArtifact:
     total_remaining: int = 0
     exit_code: int = 0
     dry_run_preview: bool = False
+    main_phase_empty_due_to_filter: bool = False
     early_exit: bool = False
 
     @property
@@ -67,9 +71,11 @@ class RunArtifact:
 
     @property
     def health_score(self) -> int:
-        """Numeric health score, or 100 when no score was computed.
+        """Numeric health score for this run.
 
         Returns:
-            int: The 0-100 health score for this run.
+            int: The 0-100 health score, or 0 when the run never got far
+            enough to be scored (see :attr:`early_exit`). Reported as 0 rather
+            than 100 so an un-scored run is never mistaken for a perfect one.
         """
-        return 100 if self.health is None else self.health.score
+        return 0 if self.health is None else self.health.score

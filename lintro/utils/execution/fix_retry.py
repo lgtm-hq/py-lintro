@@ -15,8 +15,10 @@ from lintro.utils.execution.result_shaping import get_remaining_count
 if TYPE_CHECKING:
     from lintro.plugins.base import BaseToolPlugin
 
+__all__ = ["run_fix_with_retry"]
 
-def _run_fix_with_retry(
+
+def run_fix_with_retry(
     tool: BaseToolPlugin,
     paths: list[str],
     options: dict[str, object],

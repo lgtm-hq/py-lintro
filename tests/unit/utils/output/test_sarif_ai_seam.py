@@ -156,11 +156,14 @@ def test_core_render_path_never_imports_the_ai_layer() -> None:
 
     for source_path in guarded:
         tree = ast.parse(source_path.read_text(encoding="utf-8"))
+        # Only the ``if`` body is type-only; an ``else:`` branch under the
+        # same guard runs at runtime and must still be checked.
         type_only = {
             child
             for node in ast.walk(tree)
             if isinstance(node, ast.If) and _is_type_checking(node.test)
-            for child in ast.walk(node)
+            for statement in node.body
+            for child in ast.walk(statement)
         }
         for node in ast.walk(tree):
             if node in type_only:

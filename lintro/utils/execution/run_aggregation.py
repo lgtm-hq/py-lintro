@@ -90,6 +90,7 @@ def finalize_artifact(
         total_remaining=total_remaining,
         exit_code=exit_code,
         dry_run_preview=ctx.dry_run_preview,
+        main_phase_empty_due_to_filter=main_phase_empty_due_to_filter,
     )
 
 
@@ -97,7 +98,6 @@ def refresh_artifact(
     artifact: RunArtifact,
     *,
     ctx: RunContext,
-    main_phase_empty_due_to_filter: bool = False,
     fail_under: float | None = None,
     force_failure: bool = False,
 ) -> RunArtifact:
@@ -110,10 +110,10 @@ def refresh_artifact(
     left at 0.
 
     Args:
-        artifact: The artifact whose results were mutated.
+        artifact: The artifact whose results were mutated. Its
+            ``main_phase_empty_due_to_filter`` state is carried over so the
+            exit code is resolved exactly as it was on the first pass.
         ctx: Shared run context.
-        main_phase_empty_due_to_filter: Whether post-check filtering emptied
-            the main phase.
         fail_under: Optional health-score gate.
         force_failure: Whether the consumer requires a non-zero exit code.
 
@@ -130,7 +130,7 @@ def refresh_artifact(
         total_issues=total_issues,
         total_fixed=total_fixed,
         total_remaining=total_remaining,
-        main_phase_empty_due_to_filter=main_phase_empty_due_to_filter,
+        main_phase_empty_due_to_filter=artifact.main_phase_empty_due_to_filter,
         fail_under=fail_under,
     )
     if force_failure:

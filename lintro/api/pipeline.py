@@ -154,9 +154,12 @@ def run_lint_artifact(
             strictly below this threshold (CI gate).
         diff_base: Git base ref for ``--diff`` scanning, or ``None``.
         no_art: When True, suppress decorative ASCII art.
-        ai_enabled: Whether the AI layer may run at all. ``lintro test`` sets
-            this to False: AI never applies to the test action, and skipping
-            the call keeps the AI configuration untouched.
+        ai_enabled: Whether the post-execution AI enhancement may run.
+            ``lintro test`` sets this to False because AI never applies to the
+            test action. It gates :func:`~lintro.ai.interface.enhance_artifact`
+            only; the AI status rows of the configuration summary and any SARIF
+            enrichment are still produced, exactly as they were before the
+            executor's AI seams were removed.
 
     Returns:
         RunArtifact: The rendered run's results, totals, health score, and
@@ -287,7 +290,7 @@ def run_lint_with_ai(
             strictly below this threshold (CI gate).
         diff_base: Git base ref for ``--diff`` scanning, or ``None``.
         no_art: When True, suppress decorative ASCII art.
-        ai_enabled: Whether the AI layer may run at all.
+        ai_enabled: Whether the post-execution AI enhancement may run.
 
     Returns:
         int: Exit code (0 for success, 1 for failures).

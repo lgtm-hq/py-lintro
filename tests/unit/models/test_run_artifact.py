@@ -27,7 +27,7 @@ def test_default_artifact_is_an_empty_successful_run() -> None:
     assert_that(artifact.dry_run_preview).is_false()
     assert_that(artifact.early_exit).is_false()
     assert_that(artifact.success).is_true()
-    assert_that(artifact.health_score).is_equal_to(100)
+    assert_that(artifact.health_score).is_equal_to(0)
 
 
 def test_artifact_carries_every_field_of_a_real_run(tmp_path: Path) -> None:
@@ -64,3 +64,5 @@ def test_early_exit_artifact_reports_its_failure() -> None:
     assert_that(artifact.early_exit).is_true()
     assert_that(artifact.tool_results).is_empty()
     assert_that(artifact.success).is_false()
+    # An un-scored run must not masquerade as a perfect one.
+    assert_that(artifact.health_score).is_equal_to(0)

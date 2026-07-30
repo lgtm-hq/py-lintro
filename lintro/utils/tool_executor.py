@@ -30,7 +30,12 @@ from lintro.utils.execution.exit_codes import (
     DEFAULT_REMAINING_COUNT,
     aggregate_tool_results,
 )
-from lintro.utils.execution.fix_retry import _run_fix_with_retry
+
+# Aliased to its historical private name: external callers and tests have
+# imported ``_run_fix_with_retry`` from this module since before the split.
+from lintro.utils.execution.fix_retry import (
+    run_fix_with_retry as _run_fix_with_retry,
+)
 from lintro.utils.execution.parallel_executor import run_tools_parallel
 from lintro.utils.execution.result_shaping import (
     enrich_issues_with_doc_urls as _enrich_issues_with_doc_urls,

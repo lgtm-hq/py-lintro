@@ -584,7 +584,7 @@ def render_run(
     if artifact.early_exit:
         return
 
-    health_score = artifact.health.score if artifact.health else 0
+    health_score = artifact.health_score
 
     if not artifact.tool_results:
         # Empty result set (e.g. all tools skipped) still needs numeric stdout.
