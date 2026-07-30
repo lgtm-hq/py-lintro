@@ -126,14 +126,14 @@ def format_comment(json_path: str) -> str | None:
         print("osv-scanner did not produce results.", file=sys.stderr)
         return None
 
-    ai_meta = osv_result.get("ai_metadata")
+    tool_meta = osv_result.get("metadata")
     # None means probe didn't run; [] means probe ran but found no suppressions
     probe_suppressions: list[dict[str, object]] | None = None
-    if isinstance(ai_meta, dict) and isinstance(
-        ai_meta.get("suppressions"),
+    if isinstance(tool_meta, dict) and isinstance(
+        tool_meta.get("suppressions"),
         list,
     ):
-        probe_suppressions = ai_meta["suppressions"]
+        probe_suppressions = tool_meta["suppressions"]
 
     sections: list[str] = []
 
@@ -221,7 +221,7 @@ def format_comment(json_path: str) -> str | None:
     else:
         # No probe data: fall back to static TOML entries.
         # Note: TOML uses camelCase keys (e.g. "ignoreUntil") while
-        # probe-derived ai_metadata uses snake_case ("ignore_until").
+        # probe-derived metadata uses snake_case ("ignore_until").
         toml_suppressions = _read_suppressions_from_toml()
         if toml_suppressions:
             sections.append("| ID | Expires | Reason |")

@@ -329,11 +329,11 @@ def test_create_json_output_counts_survive_legacy_normalization() -> None:
     assert_that(ai_meta["ai_metrics"]["total_api_calls"]).is_equal_to(2)
 
 
-def test_json_output_dual_emits_metadata_and_deprecated_alias() -> None:
-    """Both ``metadata`` and the deprecated ``ai_metadata`` key are emitted.
+def test_json_output_emits_metadata_only() -> None:
+    """Only ``metadata`` is emitted; the ``ai_metadata`` duplicate is gone.
 
-    The duplicate ships for one release cycle so existing JSON consumers keep
-    working through the rename (issue #724).
+    The deprecated duplicate was removed in issue #1831 after its one-release
+    deprecation cycle.
     """
     result = ToolResult(
         name="ruff",
@@ -353,12 +353,12 @@ def test_json_output_dual_emits_metadata_and_deprecated_alias() -> None:
 
     tool_data = data["results"][0]
     assert_that(tool_data).contains_key("metadata")
-    assert_that(tool_data).contains_key("ai_metadata")
-    assert_that(tool_data["ai_metadata"]).is_equal_to(tool_data["metadata"])
+    assert_that(tool_data["metadata"]["fixed_count"]).is_equal_to(3)
+    assert_that(tool_data).does_not_contain_key("ai_metadata")
 
 
-def test_json_output_omits_both_metadata_keys_when_absent() -> None:
-    """A result without metadata emits neither key."""
+def test_json_output_omits_metadata_key_when_absent() -> None:
+    """A result without metadata emits no metadata key."""
     result = ToolResult(name="ruff", success=True, issues_count=0)
 
     data = create_json_output(

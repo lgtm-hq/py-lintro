@@ -11,10 +11,10 @@ from lintro.ai.metadata import (
     attach_fixed_count_metadata,
     attach_summary_metadata,
     attach_validation_counts_metadata,
-    normalize_ai_metadata,
 )
 from lintro.ai.models import AIFixSuggestion, AISummary
 from lintro.models.core.tool_result import ToolResult
+from lintro.utils.tool_metadata import normalize_tool_metadata
 
 
 def test_metadata_summary_and_fixes_coexist():
@@ -46,7 +46,7 @@ def test_metadata_normalize_supports_legacy_suggestions_key():
         "suggestions": [{"file": "a.py", "line": 1, "code": "E501"}],
     }
 
-    normalized = normalize_ai_metadata(raw)
+    normalized = normalize_tool_metadata(raw)
 
     assert_that(normalized).contains_key("summary")
     assert_that(normalized).contains_key("fix_suggestions")
@@ -73,7 +73,7 @@ def test_metadata_fixed_count_is_attached_and_normalized():
     assert_that(result.metadata["verified_count"]).is_equal_to(2)  # type: ignore[index]  # assertpy is_not_none narrows this
     assert_that(result.metadata["unverified_count"]).is_equal_to(1)  # type: ignore[index]  # assertpy is_not_none narrows this
 
-    normalized = normalize_ai_metadata(result.metadata or {})
+    normalized = normalize_tool_metadata(result.metadata or {})
     assert_that(normalized["fixed_count"]).is_equal_to(3)
     assert_that(normalized["applied_count"]).is_equal_to(3)
     assert_that(normalized["verified_count"]).is_equal_to(2)
