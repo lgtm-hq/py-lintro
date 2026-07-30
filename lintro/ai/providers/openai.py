@@ -147,7 +147,22 @@ class _CodexCliTransport(CliTransport):
                     raise AIProviderError(
                         f"Codex CLI returned unparsable output: {exc}\n{evidence}",
                     ) from exc
-                final_text = recovered
+                # Return the prose untouched: substitute_parsed_json would swap
+                # in any balanced JSON span it finds inside the answer, which
+                # on a prose answer means silently dropping the surrounding
+                # findings. The review layer extracts embedded JSON itself.
+                return AIResponse(
+                    content=recovered,
+                    model=self._model,
+                    input_tokens=input_tokens,
+                    output_tokens=output_tokens,
+                    cost_estimate=estimate_cost(
+                        self._model,
+                        input_tokens,
+                        output_tokens,
+                    ),
+                    provider=AIProvider.OPENAI,
+                )
 
         cost = estimate_cost(self._model, input_tokens, output_tokens)
         return AIResponse(

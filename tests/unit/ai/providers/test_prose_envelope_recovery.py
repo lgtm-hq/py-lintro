@@ -145,6 +145,22 @@ async def test_blank_envelope_reports_untruncated_evidence(
 
 
 @pytest.mark.parametrize("name", ["anthropic", "cursor", "openai"])
+async def test_prose_with_an_inline_json_span_is_not_reduced_to_it(
+    name: str,
+    _binaries_on_path: None,
+) -> None:
+    """An incidental ``{...}`` inside prose must not replace the whole answer."""
+    provider = _providers()[name]
+    prose = f'Finding 1: the config `{{"retries": 3}}` is wrong.\n{_PROSE}'
+
+    with patch_cli_exec() as mock_run:
+        mock_run.return_value = _completed(prose)
+        response = await provider.complete("Review this")
+
+    assert_that(response.content).is_equal_to(prose.strip())
+
+
+@pytest.mark.parametrize("name", ["anthropic", "cursor", "openai"])
 async def test_error_evidence_is_never_truncated_to_500_chars(
     name: str,
     _binaries_on_path: None,
