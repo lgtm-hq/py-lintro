@@ -21,6 +21,13 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.94.8] - 2026-07-30
+
+### Fixed
+
+- **ai**: recover prose review responses instead of discarding findings (#1853) (#1861)
+  (50bebe0)
+
 ## [0.94.7] - 2026-07-30
 
 ### Changed
