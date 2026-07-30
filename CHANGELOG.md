@@ -21,6 +21,12 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.95.0] - 2026-07-30
+
+### Added
+
+- **core**: remove deprecated `ai_metadata` alias and JSON dual-emit (#1863) (dcf4104)
+
 ## [0.94.8] - 2026-07-30
 
 ### Fixed
