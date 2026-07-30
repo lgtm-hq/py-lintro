@@ -329,7 +329,7 @@ def test_check_command_output_file(
 def test_check_function_calls_command() -> None:
     """Verify check() routes through the library API."""
     with patch(
-        "lintro.api.core.run_lint_tools_simple",
+        "lintro.api.core.run_lint_with_ai",
         return_value=0,
     ) as mock_run:
         check(
@@ -351,7 +351,7 @@ def test_check_function_calls_command() -> None:
 
 def test_check_function_exits_on_failure() -> None:
     """Verify check() function exits with non-zero code on failure."""
-    with patch("lintro.api.core.run_lint_tools_simple", return_value=1):
+    with patch("lintro.api.core.run_lint_with_ai", return_value=1):
         with pytest.raises(SystemExit) as exc_info:
             check(
                 paths=("src",),

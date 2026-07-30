@@ -21,7 +21,7 @@ def test_check_programmatic_success(monkeypatch: pytest.MonkeyPatch) -> None:
     import lintro.api.core as api_core
 
     mock_run = MagicMock(return_value=0)
-    monkeypatch.setattr(api_core, "run_lint_tools_simple", mock_run, raising=True)
+    monkeypatch.setattr(api_core, "run_lint_with_ai", mock_run, raising=True)
 
     # Function returns None on success (no exception raised)
     check_prog(
@@ -55,7 +55,7 @@ def test_check_programmatic_failure_raises(monkeypatch: pytest.MonkeyPatch) -> N
 
     monkeypatch.setattr(
         api_core,
-        "run_lint_tools_simple",
+        "run_lint_with_ai",
         lambda **k: 1,
         raising=True,
     )
@@ -87,7 +87,7 @@ def test_format_programmatic_success(monkeypatch: pytest.MonkeyPatch) -> None:
     mock_run = MagicMock(return_value=0)
     monkeypatch.setattr(
         api_core,
-        "run_lint_tools_simple",
+        "run_lint_with_ai",
         mock_run,
         raising=True,
     )
@@ -121,7 +121,7 @@ def test_format_programmatic_failure_raises(monkeypatch: pytest.MonkeyPatch) -> 
 
     monkeypatch.setattr(
         api_core,
-        "run_lint_tools_simple",
+        "run_lint_with_ai",
         lambda **k: 1,
         raising=True,
     )

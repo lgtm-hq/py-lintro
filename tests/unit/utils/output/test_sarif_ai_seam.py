@@ -1,10 +1,10 @@
-"""Tests for the SARIF AI-enrichment seam introduced by issue #724.
+"""Tests for the SARIF AI-enrichment boundary (issues #724, #1823).
 
-``suggestions_from_results``/``summary_from_results`` moved into
+``suggestions_from_results``/``summary_from_results`` live in
 ``lintro.ai.sarif_bridge`` because they construct AI models. Core SARIF
-emitters reach them only through
-:class:`~lintro.models.core.ai_seam.AISarifEnricher`, so core stays free of
-``lintro.ai`` imports.
+emitters never call them: since the execute/render split they receive an
+already-built :class:`~lintro.models.core.sarif_enrichment.AISarifEnrichment`
+as plain data, so core stays free of ``lintro.ai`` imports.
 """
 
 from __future__ import annotations
@@ -19,7 +19,7 @@ import lintro
 from lintro.ai.interface import sarif_enrichment_from_results
 from lintro.enums.action import Action
 from lintro.enums.output_format import OutputFormat
-from lintro.models.core.ai_seam import AISarifEnrichment
+from lintro.models.core.sarif_enrichment import AISarifEnrichment
 from lintro.models.core.tool_result import ToolResult
 from lintro.utils.output.file_writer import write_output_file
 
@@ -109,31 +109,65 @@ def test_empty_enrichment_is_the_no_ai_default() -> None:
     assert_that(enrichment.summary).is_none()
 
 
-def test_every_runner_call_site_injects_the_enricher() -> None:
-    """Every ``run_lint_tools_simple`` caller must inject the SARIF seam.
+def _is_type_checking(test: ast.expr) -> bool:
+    """Whether an ``if`` test is the ``TYPE_CHECKING`` guard.
 
-    The seam is opt-in: a caller that forgets it silently drops AI enrichment
-    from SARIF output instead of failing. Assert wiring at the source level so
-    a new entrypoint cannot regress the way ``test_command`` once did.
+    Args:
+        test: The condition expression of an ``if`` statement.
+
+    Returns:
+        bool: True when the branch only runs for static type checkers.
+    """
+    if isinstance(test, ast.Name):
+        return test.id == "TYPE_CHECKING"
+    return isinstance(test, ast.Attribute) and test.attr == "TYPE_CHECKING"
+
+
+def _imports_ai(node: ast.AST) -> bool:
+    """Whether an AST node is a runtime import of :mod:`lintro.ai`.
+
+    Args:
+        node: Any node from the parsed module.
+
+    Returns:
+        bool: True when the node imports from the AI package.
+    """
+    if isinstance(node, ast.ImportFrom):
+        return (node.module or "").startswith("lintro.ai")
+    if isinstance(node, ast.Import):
+        return any(alias.name.startswith("lintro.ai") for alias in node.names)
+    return False
+
+
+def test_core_render_path_never_imports_the_ai_layer() -> None:
+    """No module under the core render/execute path may import ``lintro.ai``.
+
+    The seam callables are gone (issue #1823); what replaces them is a plain
+    data hand-off. Assert the boundary at the source level so a new import
+    edge cannot creep back into the executor or the output writers.
     """
     package_root = Path(lintro.__file__).parent
-    missing: list[str] = []
+    guarded = [
+        package_root / "utils" / "tool_executor.py",
+        *sorted((package_root / "utils" / "execution").rglob("*.py")),
+        *sorted((package_root / "utils" / "output").rglob("*.py")),
+    ]
+    offenders: list[str] = []
 
-    for source_path in sorted(package_root.rglob("*.py")):
+    for source_path in guarded:
         tree = ast.parse(source_path.read_text(encoding="utf-8"))
+        type_only = {
+            child
+            for node in ast.walk(tree)
+            if isinstance(node, ast.If) and _is_type_checking(node.test)
+            for child in ast.walk(node)
+        }
         for node in ast.walk(tree):
-            if not isinstance(node, ast.Call):
+            if node in type_only:
                 continue
-            func = node.func
-            name = func.id if isinstance(func, ast.Name) else None
-            if name != "run_lint_tools_simple":
+            if not _imports_ai(node):
                 continue
-            keywords = {kw.arg for kw in node.keywords}
-            if "ai_sarif_enricher" not in keywords:
-                missing.append(
-                    f"{source_path.relative_to(package_root)}:{node.lineno}",
-                )
+            line = getattr(node, "lineno", 0)
+            offenders.append(f"{source_path.relative_to(package_root)}:{line}")
 
-    assert_that(missing).described_as(
-        "call sites missing ai_sarif_enricher",
-    ).is_empty()
+    assert_that(offenders).described_as("core modules importing lintro.ai").is_empty()

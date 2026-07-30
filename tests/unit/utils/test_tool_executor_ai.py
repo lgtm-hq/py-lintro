@@ -1,9 +1,10 @@
-"""Tests for the executor's AI seam and AI-driven exit-code behavior.
+"""Tests for AI enhancement of a completed run and its exit-code effects.
 
-The executor itself no longer imports :mod:`lintro.ai` (issue #724 PR 2). It
-consumes an injected ``ai_runner`` returning a core
-:class:`~lintro.models.core.ai_seam.AIOutcome`, so these tests exercise the
-seam rather than the AI layer.
+Since issue #1823 the executor takes no AI callables at all. The CLI and the
+public API call :func:`lintro.utils.tool_executor.execute_run`, hand the
+resulting artifact to :func:`lintro.ai.interface.enhance_artifact`, and render
+whatever comes back. These tests drive that hand-off through
+:func:`lintro.api.pipeline.run_lint_artifact`.
 """
 
 from __future__ import annotations
@@ -12,15 +13,17 @@ from typing import Any
 
 from assertpy import assert_that
 
+import lintro.ai.interface as ai_interface
+import lintro.utils.execution.run_aggregation as run_aggregation
 import lintro.utils.tool_executor as te
 from lintro.ai.config import AIConfig
 from lintro.ai.enums import AITransport
+from lintro.ai.interface import AIOutcome
+from lintro.api.pipeline import run_lint_artifact
 from lintro.config.execution_config import ExecutionConfig
 from lintro.config.lintro_config import LintroConfig
-from lintro.models.core.ai_seam import AIOutcome
 from lintro.models.core.tool_result import ToolResult
 from lintro.utils.execution.tool_configuration import ToolsToRunResult
-from lintro.utils.tool_executor import run_lint_tools_simple
 
 
 class _FakeTool:
@@ -76,7 +79,7 @@ def _install_executor_doubles(
     fake_logger: Any,
     lintro_config: LintroConfig,
 ) -> None:
-    """Patch out the executor's environment so only the seam is exercised.
+    """Patch out the executor's environment so only the hand-off is exercised.
 
     Args:
         monkeypatch: pytest monkeypatch fixture.
@@ -161,14 +164,14 @@ def _fix_results_in_place(all_results: list[ToolResult]) -> None:
         result.issues_count = 0
 
 
-def _run_executor(**kwargs: Any) -> int:
-    """Invoke the executor with the shared fixture arguments.
+def _run_pipeline(**kwargs: Any) -> int:
+    """Invoke the AI-aware pipeline with the shared fixture arguments.
 
     Args:
-        **kwargs: Extra keyword arguments forwarded to the executor.
+        **kwargs: Extra keyword arguments forwarded to the pipeline.
 
     Returns:
-        The exit code returned by the executor.
+        The exit code the pipeline resolved to.
     """
     call_kwargs: dict[str, Any] = {
         "action": "fmt",
@@ -183,17 +186,29 @@ def _run_executor(**kwargs: Any) -> int:
         "raw_output": False,
     }
     call_kwargs.update(kwargs)
-    return run_lint_tools_simple(**call_kwargs)
+    return run_lint_artifact(**call_kwargs).exit_code
 
 
-def test_fix_recomputes_totals_after_ai_runner_changes(monkeypatch, fake_logger):
-    """Totals are re-aggregated when the injected AI runner reports it ran."""
+def _install_ai_layer(monkeypatch: Any, runner: Any) -> None:
+    """Replace the AI layer entry point used by ``enhance_artifact``.
+
+    Args:
+        monkeypatch: pytest monkeypatch fixture.
+        runner: Callable standing in for ``run_ai_layer``.
+    """
+    monkeypatch.setattr(ai_interface, "run_ai_layer", runner)
+
+
+def test_fix_recomputes_totals_after_ai_changes(monkeypatch, fake_logger):
+    """Totals are re-aggregated when the AI layer reports that it ran."""
     lintro_config = _ai_enabled_config()
     _install_executor_doubles(monkeypatch, fake_logger, lintro_config)
 
-    def _ai_runner(*, all_results: list[ToolResult], **_kwargs: Any) -> AIOutcome:
+    def _runner(*, all_results: list[ToolResult], **_kwargs: Any) -> AIOutcome:
         _fix_results_in_place(all_results)
         return AIOutcome(ran=True, force_failure=False)
+
+    _install_ai_layer(monkeypatch, _runner)
 
     captured: dict[str, int] = {}
 
@@ -209,24 +224,24 @@ def test_fix_recomputes_totals_after_ai_runner_changes(monkeypatch, fake_logger)
         captured["total_remaining"] = total_remaining
         return 0 if total_remaining == 0 else 1
 
-    monkeypatch.setattr(te, "determine_exit_code", _capture_exit_code)
+    monkeypatch.setattr(run_aggregation, "determine_exit_code", _capture_exit_code)
 
-    exit_code = _run_executor(ai_runner=_ai_runner)
+    exit_code = _run_pipeline()
 
     assert_that(exit_code).is_equal_to(0)
     assert_that(captured.get("total_issues")).is_equal_to(0)
     assert_that(captured.get("total_remaining")).is_equal_to(0)
 
 
-def test_no_ai_runner_means_no_ai_and_unchanged_exit_code(monkeypatch, fake_logger):
-    """Without an injected runner the executor runs no AI at all."""
+def test_ai_disabled_means_no_ai_and_unchanged_exit_code(monkeypatch, fake_logger):
+    """With ``ai_enabled=False`` the pipeline never constructs the AI hook."""
     lintro_config = _ai_enabled_config()
     _install_executor_doubles(monkeypatch, fake_logger, lintro_config)
 
     import lintro.ai.hook as hook_module
 
     def _fail(*_args: Any, **_kwargs: Any) -> None:
-        raise AssertionError("executor must not construct the AI hook")
+        raise AssertionError("pipeline must not construct the AI hook")
 
     monkeypatch.setattr(hook_module, "AIPostExecutionHook", _fail)
 
@@ -243,57 +258,82 @@ def test_no_ai_runner_means_no_ai_and_unchanged_exit_code(monkeypatch, fake_logg
         captured["total_remaining"] = total_remaining
         return 0 if total_remaining == 0 else 1
 
-    monkeypatch.setattr(te, "determine_exit_code", _capture_exit_code)
+    monkeypatch.setattr(run_aggregation, "determine_exit_code", _capture_exit_code)
 
-    exit_code = _run_executor()
+    exit_code = _run_pipeline(ai_enabled=False)
 
     assert_that(exit_code).is_equal_to(1)
     assert_that(captured.get("total_remaining")).is_equal_to(1)
 
 
-def test_ai_runner_force_failure_overrides_clean_exit_code(monkeypatch, fake_logger):
-    """A forcing AI outcome turns a clean run into exit code 1."""
+def test_executor_alone_runs_no_ai(monkeypatch, fake_logger):
+    """``run_lint_tools_simple`` is AI-free: the AI hook is never built."""
     lintro_config = _ai_enabled_config()
     _install_executor_doubles(monkeypatch, fake_logger, lintro_config)
 
-    def _ai_runner(*, all_results: list[ToolResult], **_kwargs: Any) -> AIOutcome:
-        _fix_results_in_place(all_results)
-        return AIOutcome(ran=True, force_failure=True)
+    import lintro.ai.hook as hook_module
 
-    monkeypatch.setattr(te, "determine_exit_code", lambda **_kwargs: 0)
+    def _fail(*_args: Any, **_kwargs: Any) -> None:
+        raise AssertionError("the executor must not construct the AI hook")
 
-    exit_code = _run_executor(ai_runner=_ai_runner)
+    monkeypatch.setattr(hook_module, "AIPostExecutionHook", _fail)
+
+    exit_code = te.run_lint_tools_simple(
+        action="fmt",
+        paths=["."],
+        tools="ruff",
+        tool_options=None,
+        exclude=None,
+        include_venv=False,
+        group_by="auto",
+        output_format="json",
+        verbose=False,
+    )
 
     assert_that(exit_code).is_equal_to(1)
 
 
-def test_ai_runner_without_force_failure_leaves_exit_code(monkeypatch, fake_logger):
+def test_ai_force_failure_overrides_clean_exit_code(monkeypatch, fake_logger):
+    """A forcing AI outcome turns a clean run into exit code 1."""
+    lintro_config = _ai_enabled_config()
+    _install_executor_doubles(monkeypatch, fake_logger, lintro_config)
+
+    def _runner(*, all_results: list[ToolResult], **_kwargs: Any) -> AIOutcome:
+        _fix_results_in_place(all_results)
+        return AIOutcome(ran=True, force_failure=True)
+
+    _install_ai_layer(monkeypatch, _runner)
+    monkeypatch.setattr(run_aggregation, "determine_exit_code", lambda **_kw: 0)
+
+    assert_that(_run_pipeline()).is_equal_to(1)
+
+
+def test_ai_without_force_failure_leaves_exit_code(monkeypatch, fake_logger):
     """A non-forcing AI outcome does not change the computed exit code."""
     lintro_config = _ai_enabled_config()
     _install_executor_doubles(monkeypatch, fake_logger, lintro_config)
 
-    def _ai_runner(*, all_results: list[ToolResult], **_kwargs: Any) -> AIOutcome:
+    def _runner(*, all_results: list[ToolResult], **_kwargs: Any) -> AIOutcome:
         _fix_results_in_place(all_results)
         return AIOutcome(ran=True, force_failure=False)
 
-    monkeypatch.setattr(te, "determine_exit_code", lambda **_kwargs: 0)
+    _install_ai_layer(monkeypatch, _runner)
+    monkeypatch.setattr(run_aggregation, "determine_exit_code", lambda **_kw: 0)
 
-    exit_code = _run_executor(ai_runner=_ai_runner)
-
-    assert_that(exit_code).is_equal_to(0)
+    assert_that(_run_pipeline()).is_equal_to(0)
 
 
-def test_ai_runner_exception_propagates(monkeypatch, fake_logger):
-    """Errors raised by the AI seam propagate, as ``fail_on_ai_error`` needs."""
+def test_ai_exception_propagates(monkeypatch, fake_logger):
+    """Errors raised by the AI layer propagate, as ``fail_on_ai_error`` needs."""
     lintro_config = _ai_enabled_config()
     _install_executor_doubles(monkeypatch, fake_logger, lintro_config)
 
-    def _ai_runner(**_kwargs: Any) -> AIOutcome:
+    def _runner(**_kwargs: Any) -> AIOutcome:
         raise RuntimeError("provider exploded")
 
-    assert_that(_run_executor).raises(RuntimeError).when_called_with(
-        ai_runner=_ai_runner,
-    )
+    _install_ai_layer(monkeypatch, _runner)
+
+    assert_that(_run_pipeline).raises(RuntimeError).when_called_with()
 
 
 def test_fail_under_still_forces_failure_after_ai_clears_run(
@@ -304,22 +344,22 @@ def test_fail_under_still_forces_failure_after_ai_clears_run(
     lintro_config = _ai_enabled_config()
     _install_executor_doubles(monkeypatch, fake_logger, lintro_config)
 
-    def _ai_runner(*, all_results: list[ToolResult], **_kwargs: Any) -> AIOutcome:
+    def _runner(*, all_results: list[ToolResult], **_kwargs: Any) -> AIOutcome:
         _fix_results_in_place(all_results)
         return AIOutcome(ran=True, force_failure=False)
 
-    monkeypatch.setattr(te, "determine_exit_code", lambda **_kwargs: 0)
+    _install_ai_layer(monkeypatch, _runner)
+    monkeypatch.setattr(run_aggregation, "determine_exit_code", lambda **_kw: 0)
 
-    exit_code = _run_executor(fail_under=101.0, ai_runner=_ai_runner)
-
-    assert_that(exit_code).is_equal_to(1)
+    assert_that(_run_pipeline(fail_under=101.0)).is_equal_to(1)
 
 
-def test_ai_status_renderer_lines_reach_the_summary(monkeypatch, fake_logger):
-    """The injected status renderer supplies the summary's AI rows."""
+def test_ai_status_lines_reach_the_summary(monkeypatch, fake_logger):
+    """The pipeline renders AI status rows into the configuration summary."""
     lintro_config = _ai_enabled_config()
     _install_executor_doubles(monkeypatch, fake_logger, lintro_config)
-    monkeypatch.setattr(te, "determine_exit_code", lambda **_kwargs: 0)
+    monkeypatch.setattr(run_aggregation, "determine_exit_code", lambda **_kw: 0)
+    _install_ai_layer(monkeypatch, lambda **_kw: AIOutcome(ran=False))
 
     captured: dict[str, Any] = {}
 
@@ -333,16 +373,13 @@ def test_ai_status_renderer_lines_reach_the_summary(monkeypatch, fake_logger):
         "print_pre_execution_summary",
         _fake_summary,
     )
-
-    def _renderer(*, ai_config: Any, is_ci: bool) -> list[str]:
-        captured["renderer_ai_config"] = ai_config
-        return ["[green]enabled[/green]"]
-
-    exit_code = _run_executor(
-        output_format="grid",
-        ai_status_renderer=_renderer,
+    monkeypatch.setattr(
+        ai_interface,
+        "render_ai_status",
+        lambda *, ai_config, is_ci: ["[green]enabled[/green]"],
     )
+
+    exit_code = _run_pipeline(output_format="grid")
 
     assert_that(exit_code).is_equal_to(0)
     assert_that(captured.get("ai_status_lines")).is_equal_to(["[green]enabled[/green]"])
-    assert_that(captured.get("renderer_ai_config")).is_same_as(lintro_config.ai)

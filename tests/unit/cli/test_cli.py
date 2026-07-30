@@ -341,9 +341,9 @@ def test_lintro_group_invoke_normalizes_comma_separated_commands() -> None:
     runner = CliRunner()
     # This tests the parsing logic - actual execution would require mocking
     with (
-        patch("lintro.cli_utils.commands.check.run_lint_tools_simple") as mock_check,
+        patch("lintro.cli_utils.commands.check.run_lint_with_ai") as mock_check,
         patch(
-            "lintro.cli_utils.commands.format.run_lint_tools_simple",
+            "lintro.cli_utils.commands.format.run_lint_with_ai",
         ) as mock_fmt,
     ):
         mock_check.return_value = 0
@@ -358,7 +358,7 @@ def test_lintro_group_invoke_normalizes_comma_separated_commands() -> None:
 def test_lintro_group_invoke_single_command() -> None:
     """Verify single command execution works normally."""
     runner = CliRunner()
-    with patch("lintro.cli_utils.commands.check.run_lint_tools_simple") as mock:
+    with patch("lintro.cli_utils.commands.check.run_lint_with_ai") as mock:
         mock.return_value = 0
         runner.invoke(cli, ["check", "."])
         mock.assert_called_once()
@@ -367,7 +367,7 @@ def test_lintro_group_invoke_single_command() -> None:
 def test_lintro_group_invoke_handles_keyboard_interrupt() -> None:
     """Verify KeyboardInterrupt is re-raised during command chaining."""
     runner = CliRunner()
-    with patch("lintro.cli_utils.commands.check.run_lint_tools_simple") as mock:
+    with patch("lintro.cli_utils.commands.check.run_lint_with_ai") as mock:
         mock.side_effect = KeyboardInterrupt()
         result = runner.invoke(cli, ["check", "."])
         # CliRunner catches KeyboardInterrupt and sets exit code
@@ -378,8 +378,8 @@ def test_lintro_group_invoke_aggregates_exit_codes() -> None:
     """Verify chained commands aggregate exit codes (max)."""
     runner = CliRunner()
     with (
-        patch("lintro.cli_utils.commands.format.run_lint_tools_simple") as mock_fmt,
-        patch("lintro.cli_utils.commands.check.run_lint_tools_simple") as mock_chk,
+        patch("lintro.cli_utils.commands.format.run_lint_with_ai") as mock_fmt,
+        patch("lintro.cli_utils.commands.check.run_lint_with_ai") as mock_chk,
     ):
         # First command succeeds, second fails
         mock_fmt.return_value = 0

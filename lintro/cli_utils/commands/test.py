@@ -5,7 +5,7 @@ from typing import Any, cast
 import click
 
 from lintro.api import core as api
-from lintro.utils.tool_executor import run_lint_tools_simple
+from lintro.api.pipeline import run_lint_with_ai
 
 # Constants
 DEFAULT_PATHS: list[str] = ["."]
@@ -253,13 +253,8 @@ def test_command(
         ",".join(tool_option_parts) if tool_option_parts else None
     )
 
-    from lintro.ai.interface import (
-        render_ai_status,
-        sarif_enrichment_from_results,
-    )
-
-    # Run with pytest tool
-    exit_code: int = run_lint_tools_simple(
+    # Run with pytest tool. AI never applies to the test action.
+    exit_code: int = run_lint_with_ai(
         action=DEFAULT_ACTION,
         paths=path_list,
         tools="pytest",
@@ -271,10 +266,9 @@ def test_command(
         verbose=verbose,
         raw_output=raw_output,
         output_file=output,
-        ai_status_renderer=render_ai_status,
-        ai_sarif_enricher=sarif_enrichment_from_results,
         debug=debug,
         yes=yes,
+        ai_enabled=False,
     )
 
     # Exit with code only

@@ -3,9 +3,9 @@
 import click
 
 from lintro.api import core as api
+from lintro.api.pipeline import run_lint_with_ai
 from lintro.cli_utils.diff_option import validate_diff_base_ref
 from lintro.utils.git_diff import DIFF_DEFAULT_SENTINEL
-from lintro.utils.tool_executor import run_lint_tools_simple
 
 # Constants
 DEFAULT_PATHS: list[str] = ["."]
@@ -180,14 +180,8 @@ def format_command(
     # Default to current directory if no paths provided
     normalized_paths: list[str] = list(paths) if paths else list(DEFAULT_PATHS)
 
-    from lintro.ai.interface import (
-        render_ai_status,
-        run_ai_layer,
-        sarif_enrichment_from_results,
-    )
-
-    # Run with simplified approach
-    exit_code: int = run_lint_tools_simple(
+    # Run the AI-aware pipeline: execute, AI-enhance, render.
+    exit_code: int = run_lint_with_ai(
         action=DEFAULT_ACTION,
         paths=normalized_paths,
         tools=tools,
@@ -205,9 +199,6 @@ def format_command(
         no_log=no_log,
         auto_install=auto_install,
         yes=yes,
-        ai_runner=run_ai_layer,
-        ai_status_renderer=render_ai_status,
-        ai_sarif_enricher=sarif_enrichment_from_results,
         dry_run=dry_run,
         no_art=no_art,
     )

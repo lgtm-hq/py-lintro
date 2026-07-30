@@ -4,8 +4,8 @@
 dependency on the AI layer, so this module never imports :mod:`lintro.ai`.
 Reconstructing the optional AI enrichment (fix suggestions and the run
 summary) needs :mod:`lintro.ai.models`, so it lives in
-:mod:`lintro.ai.sarif_bridge` and reaches core through the injected
-:class:`~lintro.models.core.ai_seam.AISarifEnricher` seam (issue #724).
+:mod:`lintro.ai.sarif_bridge`; core receives the finished value as the
+``ai_enrichment`` argument (issues #724, #1823).
 """
 
 from __future__ import annotations

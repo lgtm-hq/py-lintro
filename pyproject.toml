@@ -287,7 +287,6 @@ enabled = true
 threshold = 800
 baseline = [
   "lintro/ai/review/orchestrator.py",
-  "lintro/utils/tool_executor.py",
   "lintro/cli_utils/commands/doctor.py",
 ]
 exclude = [

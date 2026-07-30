@@ -31,7 +31,7 @@ def test_help_lists_score_options(runner: CliRunner) -> None:
 def test_score_flag_forwarded(runner: CliRunner) -> None:
     """--score is forwarded to the executor and drives the exit code."""
     with patch(
-        "lintro.cli_utils.commands.check.run_lint_tools_simple",
+        "lintro.cli_utils.commands.check.run_lint_with_ai",
         return_value=0,
     ) as mock_run:
         result = runner.invoke(check_command, [".", "--score"])
@@ -45,7 +45,7 @@ def test_score_flag_forwarded(runner: CliRunner) -> None:
 def test_fail_under_forwarded(runner: CliRunner) -> None:
     """--fail-under is parsed as a float and forwarded to the executor."""
     with patch(
-        "lintro.cli_utils.commands.check.run_lint_tools_simple",
+        "lintro.cli_utils.commands.check.run_lint_with_ai",
         return_value=1,
     ) as mock_run:
         result = runner.invoke(check_command, [".", "--fail-under", "75"])
