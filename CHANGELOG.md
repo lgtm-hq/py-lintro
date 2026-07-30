@@ -21,6 +21,16 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.94.7] - 2026-07-30
+
+### Changed
+
+- **ai**: complete config reference and correct privacy claims (#1186) (4fbbf4f)
+
+### Fixed
+
+- **ai**: detect CLI auth mode instead of forcing --bare (#1838) (#1859) (bc6ef28)
+
 ## [0.94.6] - 2026-07-29
 
 ### Changed
