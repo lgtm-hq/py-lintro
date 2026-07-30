@@ -106,6 +106,31 @@ def _candidate_dirs(*, workspace_root: Path | None) -> tuple[Path, ...]:
     )
 
 
+def _mkdir_private(*, directory: Path) -> None:
+    """Create *directory* and any missing ancestors owner-only.
+
+    ``Path.mkdir(parents=True, mode=...)`` applies the mode only to the leaf,
+    leaving newly created ancestors (``.lintro-cache``, ``.lintro-cache/ai``)
+    at the process umask. Missing ancestors are created here at ``0700`` and
+    chmodded to defeat a restrictive umask; pre-existing directories are left
+    untouched.
+
+    Args:
+        directory: Capture directory to create.
+    """
+    missing: list[Path] = []
+    current = directory
+    while not current.exists():
+        missing.append(current)
+        parent = current.parent
+        if parent == current:
+            break
+        current = parent
+    for path in reversed(missing):
+        path.mkdir(mode=_DIR_MODE, exist_ok=True)
+        path.chmod(_DIR_MODE)
+
+
 def _prepare_directory(*, directory: Path) -> bool:
     """Create *directory* and verify it is safe to write captures into.
 
@@ -113,6 +138,8 @@ def _prepare_directory(*, directory: Path) -> bool:
     directory, so a pre-existing entry there is untrusted: a symlink, another
     user's directory, or one with loose permissions would leak captures that
     can embed diff context. ``lstat`` deliberately does not follow symlinks.
+    ``OSError`` from creation or inspection propagates to the caller, which
+    treats it as "try the next candidate".
 
     Args:
         directory: Candidate capture directory.
@@ -120,11 +147,8 @@ def _prepare_directory(*, directory: Path) -> bool:
     Returns:
         True when the directory exists, is a real directory (not a symlink),
         is owned by the current user, and is owner-only.
-
-    Raises:
-        OSError: When the directory cannot be created or inspected.
     """
-    directory.mkdir(parents=True, exist_ok=True, mode=_DIR_MODE)
+    _mkdir_private(directory=directory)
     info = directory.lstat()
     if not stat.S_ISDIR(info.st_mode):
         return False

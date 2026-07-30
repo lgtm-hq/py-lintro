@@ -186,6 +186,16 @@ def test_symlinked_capture_directory_is_refused(
     assert_that(list(elsewhere.iterdir())).is_empty()
 
 
+def test_created_cache_ancestors_are_owner_only(tmp_path: Path) -> None:
+    """Freshly created ``.lintro-cache`` ancestors never get umask modes."""
+    path = _persist(raw="prose", workspace_root=tmp_path)
+
+    ancestor = path.parent
+    while ancestor != tmp_path:
+        assert_that(ancestor.stat().st_mode & 0o077).is_equal_to(0)
+        ancestor = ancestor.parent
+
+
 def test_loose_directory_permissions_are_tightened(tmp_path: Path) -> None:
     """A pre-existing capture directory with loose modes is made owner-only."""
     directory = tmp_path / RAW_RESPONSE_DIR
