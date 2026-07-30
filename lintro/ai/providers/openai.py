@@ -37,6 +37,11 @@ from lintro.ai.providers.constants import (
     DEFAULT_PER_CALL_MAX_TOKENS,
     DEFAULT_TIMEOUT,
 )
+from lintro.ai.raw_response import (
+    CLI_ENVELOPE_STAGE,
+    describe_raw_response,
+    recover_prose_envelope,
+)
 from lintro.ai.registry import PROVIDERS, AIProvider
 
 _has_openai = False
@@ -128,10 +133,21 @@ class _CodexCliTransport(CliTransport):
                 input_tokens = int(usage.get("input_tokens", input_tokens))
                 output_tokens = int(usage.get("output_tokens", output_tokens))
             except json.JSONDecodeError as exc:
-                raise AIProviderError(
-                    f"Codex CLI returned unparsable output: {exc}\n"
-                    f"Raw output: {stdout[:500]}",
-                ) from exc
+                recovered = recover_prose_envelope(
+                    provider="Codex",
+                    stdout=stdout,
+                    reason=str(exc),
+                )
+                if recovered is None:
+                    evidence = describe_raw_response(
+                        provider="Codex",
+                        stage=CLI_ENVELOPE_STAGE,
+                        raw=stdout,
+                    )
+                    raise AIProviderError(
+                        f"Codex CLI returned unparsable output: {exc}\n{evidence}",
+                    ) from exc
+                final_text = recovered
 
         cost = estimate_cost(self._model, input_tokens, output_tokens)
         return AIResponse(

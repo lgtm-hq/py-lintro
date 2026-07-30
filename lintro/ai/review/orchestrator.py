@@ -32,6 +32,7 @@ from lintro.ai.prompts.review import (
     REVIEW_GIT_NATIVE_DIFF_WORKTREE_COMMAND,
     REVIEW_GIT_NATIVE_USER_PROMPT_TEMPLATE,
     REVIEW_OUTPUT_SCHEMA,
+    REVIEW_SCHEMA_REMINDER_TEMPLATE,
     REVIEW_SYSTEM,
     REVIEW_USER_PROMPT_TEMPLATE,
     format_changed_files_for_prompt,
@@ -55,6 +56,11 @@ from lintro.ai.review.progress import (
     NullReviewProgress,
     ReviewProgressCallback,
     StepTrackingProgress,
+)
+from lintro.ai.review.response_recovery import (
+    build_schema_reminder_prompt,
+    resolve_schema_retry_timeout,
+    unstructured_review_payload,
 )
 from lintro.ai.review.sensitivity import (
     ReviewSensitivityPolicy,
@@ -1182,6 +1188,7 @@ async def _review_chunk(
             extra_checklist=extra_checklist,
             strictness_section=strictness_section,
         )
+    started = time.monotonic()
     response = await call_ai(
         provider=provider,
         ai_config=ai_config,
@@ -1192,7 +1199,16 @@ async def _review_chunk(
         use_one_shot=use_one_shot,
         cli_schema=cli_schema_for_review(transport=ai_config.transport),
     )
-    payload = parse_review_response(content=response.content)
+    response, payload = await _parse_review_payload_with_recovery(
+        response=response,
+        chunk=chunk,
+        provider=provider,
+        ai_config=ai_config,
+        budget=budget,
+        repo_root=repo_root,
+        use_one_shot=use_one_shot,
+        elapsed=time.monotonic() - started,
+    )
     partial = _payload_to_partial(response=response, payload=payload)
 
     if extra_checklist_usage is not None:
@@ -1225,6 +1241,125 @@ async def _review_chunk(
         )
 
     return partial, next_generated_checklist_id
+
+
+async def _parse_review_payload_with_recovery(
+    *,
+    response: AIResponse,
+    chunk: ReviewChunk,
+    provider: BaseAIProvider,
+    ai_config: AIConfig,
+    budget: CostBudget,
+    repo_root: str,
+    use_one_shot: bool,
+    elapsed: float,
+) -> tuple[AIResponse, dict[str, Any]]:
+    """Parse a chunk response, recovering non-JSON answers instead of failing.
+
+    The ladder is: parse (which already extracts JSON embedded in prose) →
+    exactly one schema-reminder retry, when the per-call timeout budget still
+    allows one → present the prose as unstructured findings with the full text
+    preserved. A prose answer normally carries real findings, so discarding it
+    as ``invalid_response`` lost work that had already been paid for (#1853).
+
+    Args:
+        response: The response from the main chunk call.
+        chunk: The chunk under review, used to locate the fallback finding.
+        provider: Configured AI provider instance.
+        ai_config: AI configuration for retries, budget, and timeouts.
+        budget: Session cost budget tracker.
+        repo_root: Absolute path to the repository under review.
+        use_one_shot: When True, avoid durable provider sessions.
+        elapsed: Wall-clock seconds the main chunk call consumed.
+
+    Returns:
+        The response whose usage should be attributed to the chunk (the retry's
+        usage folded in when a retry ran) and the parsed review payload.
+    """
+    try:
+        return response, parse_review_response(content=response.content)
+    except ValueError as exc:
+        first_error = exc
+
+    retry_timeout = resolve_schema_retry_timeout(
+        api_timeout=ai_config.api_timeout,
+        elapsed=elapsed,
+    )
+    if retry_timeout is None:
+        logger.warning(
+            "Review response was not valid JSON and the timeout budget left no "
+            "room for a schema-reminder retry; recovering it as unstructured "
+            f"output ({first_error}).",
+        )
+        return response, unstructured_review_payload(
+            content=response.content,
+            files=tuple(chunk.files),
+        )
+
+    logger.warning(
+        f"Review response was not valid JSON ({first_error}); retrying once "
+        f"with a schema reminder (timeout {retry_timeout:.0f}s).",
+    )
+    reminder = build_schema_reminder_prompt(
+        template=REVIEW_SCHEMA_REMINDER_TEMPLATE,
+        output_schema=REVIEW_OUTPUT_SCHEMA,
+        previous_response=response.content,
+    )
+    try:
+        retry_response = await call_ai(
+            provider=provider,
+            ai_config=ai_config,
+            system_prompt=REVIEW_SYSTEM,
+            user_prompt=reminder,
+            budget=budget,
+            repo_root=repo_root or None,
+            use_one_shot=use_one_shot,
+            cli_schema=cli_schema_for_review(transport=ai_config.transport),
+            timeout=retry_timeout,
+        )
+    except AIError as retry_exc:
+        # The reminder is best-effort: a failed retry must never be worse than
+        # not retrying, so the original answer is still recovered.
+        logger.warning(f"Schema-reminder retry failed: {retry_exc}")
+        return response, unstructured_review_payload(
+            content=response.content,
+            files=tuple(chunk.files),
+        )
+
+    merged = _merge_response_usage(first=response, second=retry_response)
+    try:
+        return merged, parse_review_response(content=retry_response.content)
+    except ValueError as retry_error:
+        logger.warning(
+            f"Schema-reminder retry was still not valid JSON ({retry_error}); "
+            "recovering the review as unstructured output.",
+        )
+
+    # The retry's answer is the model's latest word; prefer it when it carries
+    # text, and fall back to the original answer when the retry came back empty.
+    recovered = retry_response.content.strip() or response.content
+    return merged, unstructured_review_payload(
+        content=recovered,
+        files=tuple(chunk.files),
+    )
+
+
+def _merge_response_usage(*, first: AIResponse, second: AIResponse) -> AIResponse:
+    """Return *second* with *first*'s token and cost usage folded in.
+
+    Args:
+        first: The earlier response.
+        second: The later response whose content is authoritative.
+
+    Returns:
+        A response carrying the combined usage of both calls.
+    """
+    return replace(
+        second,
+        input_tokens=first.input_tokens + second.input_tokens,
+        output_tokens=first.output_tokens + second.output_tokens,
+        cost_estimate=first.cost_estimate + second.cost_estimate,
+    )
 
 
 async def _generate_extra_checklist(
