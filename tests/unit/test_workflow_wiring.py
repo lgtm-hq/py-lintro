@@ -2669,3 +2669,82 @@ def test_ghcr_cleanup_sweeps_commit_tags_with_the_shared_safety_rule() -> None:
     assert_that(sweep_steps).is_length(1)
     assert_that(sweep_steps[0]["env"]["TAG_PREFIX"]).is_equal_to("sha-")
     assert_that(job["permissions"]["packages"]).is_equal_to("write")
+
+
+def test_docker_image_jobs_share_one_allowed_endpoints_source() -> None:
+    """The three image jobs must not carry their own copies of the allowlist.
+
+    Three verbatim copies drifted apart silently: a host added for one target
+    was easy to forget on the other two, and under ``replace`` semantics a
+    missing baseline host fails the build only during a release (#1821).
+    """
+    workflow = _load_workflow(name="docker-build-publish.yml")
+    jobs = workflow["jobs"]
+    expected = "${{ needs.resolve-endpoints.outputs.endpoints }}"
+
+    for job_name in ("docker-base", "docker-full", "docker-ai"):
+        job = jobs[job_name]
+        assert_that(job["with"]["allowed-endpoints"]).is_equal_to(expected)
+        assert_that(job["with"]["allowed-endpoints-mode"]).is_equal_to("replace")
+        assert_that(job["needs"]).contains("resolve-endpoints")
+        # An empty output would blank the allowlist under replace semantics and
+        # block all egress, so the image jobs must not start without it.
+        assert_that(_normalize_github_expr(job["if"])).contains(
+            "needs.resolve-endpoints.result == 'success'",
+        )
+
+
+def test_resolve_endpoints_job_publishes_the_shared_allowlist() -> None:
+    """The resolver job must read the checked-in allowlist and export it.
+
+    GitHub Actions rejects YAML anchors and forbids the ``env`` context in
+    job-level ``with:`` blocks of reusable-workflow calls, so a job output is
+    the only way the three callers can share one list (#1821).
+    """
+    workflow = _load_workflow(name="docker-build-publish.yml")
+    job = workflow["jobs"]["resolve-endpoints"]
+
+    assert_that(job["outputs"]["endpoints"]).is_equal_to(
+        "${{ steps.resolve.outputs.endpoints }}",
+    )
+    resolve_steps = [
+        step
+        for step in job["steps"]
+        if step.get("run") == "./scripts/ci/resolve-allowed-endpoints.sh"
+    ]
+    assert_that(resolve_steps).is_length(1)
+    assert_that(resolve_steps[0]["id"]).is_equal_to("resolve")
+    assert_that(resolve_steps[0]["env"]["ENDPOINTS_FILE"]).is_equal_to(
+        ".github/allowed-endpoints/docker-build-publish.txt",
+    )
+    assert_that((_REPO_ROOT / resolve_steps[0]["env"]["ENDPOINTS_FILE"]).exists())
+
+
+def test_docker_allowlist_file_keeps_the_baseline_and_signing_hosts() -> None:
+    """The shared allowlist must stay a superset of the docker preset baseline.
+
+    ``allowed-endpoints-mode: replace`` means the list is passed verbatim to
+    harden-runner, so dropping a registry or sigstore host silently breaks
+    pushes or cosign signing on the next release only.
+    """
+    allowlist = (
+        _REPO_ROOT / ".github" / "allowed-endpoints" / "docker-build-publish.txt"
+    ).read_text(encoding="utf-8")
+    endpoints = [
+        line.split("#", 1)[0].strip()
+        for line in allowlist.splitlines()
+        if line.split("#", 1)[0].strip()
+    ]
+
+    assert_that(endpoints).does_not_contain_duplicates()
+    for endpoint in (
+        "ghcr.io:443",
+        "registry-1.docker.io:443",
+        "auth.docker.io:443",
+        "pypi.org:443",
+        "files.pythonhosted.org:443",
+        "fulcio.sigstore.dev:443",
+        "rekor.sigstore.dev:443",
+        "token.actions.githubusercontent.com:443",
+    ):
+        assert_that(endpoints).contains(endpoint)

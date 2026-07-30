@@ -29,6 +29,7 @@ scripts/ci/
 | `test-ci.yml`                 | lgtm-ci reusable (coverage + PR comments)                                                                                        |
 | `docker-ci.yml`               | Fork detect, image pull/load, lgtm-ci quality, test summary, security audit                                                      |
 | `publish-pypi-on-tag.yml`     | lgtm-ci quality/SBOM; `build-artifacts` + PyPI publish + GitHub release                                                          |
+| `docker-build-publish.yml`    | `validate-docker-backfill-inputs.sh`, `resolve-allowed-endpoints.sh` (shared harden-runner allowlist, #1821)                     |
 | `pr-comment-cleanup.yml`      | `post-pr-delete-previous.sh`                                                                                                     |
 | `lintro-report-scheduled.yml` | `resolve-lintro-image.sh`, `pull-lintro-image.sh`, `lintro-report-generate.sh`                                                   |
 | GHCR cleanup (scheduled)      | lgtm-ci `reusable-ghcr-cleanup.yml` + `maintenance/sweep-ci-ghcr-tags.sh` (`ghcr-cleanup.yml`, #1138)                            |
