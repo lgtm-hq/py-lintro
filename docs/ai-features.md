@@ -190,10 +190,19 @@ emits a deprecation warning. Set `ai.lint` and/or `ai.review` explicitly to sile
 
 ### Full Configuration Reference
 
+Every key below maps 1:1 to a field on `AIConfig` in `lintro/ai/config.py`, which is the
+source of truth. All fields are optional; each is shown with its type, default, and
+accepted range. Unknown keys under `ai:` are dropped with a warning rather than
+rejected, so a stale key never breaks a run — but a typo never takes effect either.
+
+The grouping below (provider, budget, safety, output, cache, advanced) is for
+readability only; the loader expects the flat key layout shown.
+
 ```yaml
 ai:
+  # ── Provider & transport ──────────────────────────────────────
   # Master switch — all AI features are disabled when false. AND-ed with the
-  # per-feature toggles below.
+  # per-feature toggles below. (bool, default: false)
   enabled: true
 
   # Per-feature toggles (both default to false). Effective only when
@@ -201,7 +210,8 @@ ai:
   lint: true # AI lint summaries during chk/fmt
   review: true # the `lintro review` AI diff review
 
-  # Provider: "anthropic", "openai" or "cursor" ("cursor" is CLI-only)
+  # Provider: "anthropic", "openai" or "cursor" ("cursor" is CLI-only).
+  # (default: anthropic)
   provider: anthropic
 
   # How to invoke the provider: "api" (SDK) or "cli" (local agent binary).
@@ -209,52 +219,146 @@ ai:
   # "cursor" requires "cli". See "Transports".
   transport: api
 
-  # Model override (uses provider default if omitted)
+  # Model override (uses provider default if omitted). (str, default: none)
   # model: claude-sonnet-4-6
 
-  # Custom env var for API key (uses provider default if omitted)
+  # Custom env var for API key (uses provider default if omitted).
+  # (str, default: none)
   # api_key_env: MY_CUSTOM_KEY
 
-  # Set true to always run --fix in chk without the CLI flag
-  default_fix: false
+  # Custom API base URL — enables Ollama, vLLM, Azure OpenAI, or any other
+  # OpenAI-compatible endpoint. (str, default: none)
+  # api_base_url: http://localhost:11434/v1
 
-  # Auto-apply fixes without interactive review (use with caution)
-  auto_apply: false
+  # Provider region hint for data residency; used together with api_base_url
+  # for region-specific endpoints. (str, default: none)
+  # api_region: eu
 
-  # Auto-apply deterministic style fixes (e.g. E501) in non-interactive/json runs
-  auto_apply_safe_fixes: true
+  # Ordered fallback model chain — each entry is tried in turn if the primary
+  # model fails. (list[str], default: [])
+  fallback_models: []
 
-  # Max tokens per API request
+  # Max tokens per API request. (int 1–128000, default: 4096)
   max_tokens: 4096
 
-  # Max issues to generate AI fixes for per run
-  max_fix_attempts: 20
-
-  # Concurrent API calls for fix (1-20)
-  max_parallel_calls: 5
-
-  # Max retries for transient API errors (0-10)
+  # Max retries for transient API errors. (int 0–10, default: 2)
   max_retries: 2
 
-  # API request timeout in seconds
+  # API request timeout in seconds. (float >= 1.0, default: 60.0)
   api_timeout: 60.0
 
-  # Interactive mode: validate immediately after each accepted group
+  # Retry backoff parameters.
+  retry_base_delay: 1.0 # initial delay, seconds (float >= 0.1)
+  retry_max_delay: 30.0 # max delay, seconds (float >= 1.0, must be >= base)
+  retry_backoff_factor: 2.0 # multiplier per retry (float >= 1.0)
+
+  # ── Budget & cost caps ────────────────────────────────────────
+  # Max issues to attempt fixing per run. Counts API calls made, not
+  # suggestions returned. (int >= 1, default: 20)
+  max_fix_attempts: 20
+
+  # Concurrent API calls during fix generation. (int 1–20, default: 5)
+  max_parallel_calls: 5
+
+  # Hard ceiling on total spend per AI session, in USD; the run stops
+  # requesting fixes once the estimate reaches the cap. null disables it.
+  # (float >= 0 | null, default: null)
+  max_cost_usd: null
+
+  # Token budget for a fix prompt before context is trimmed — a soft budget,
+  # see "Data & Privacy". (int >= 1000, default: 12000)
+  max_prompt_tokens: 12000
+
+  # Re-prompt to refine a fix that failed verification. (int 0–3, default: 1)
+  max_refinement_attempts: 1
+
+  # ── Safety & filtering ────────────────────────────────────────
+  # How to handle prompt-injection patterns detected in source files or
+  # diagnostics: "warn" logs and continues, "block" skips the affected file,
+  # "off" disables detection. (one of: off | warn | block, default: warn)
+  sanitize_mode: warn
+
+  # Minimum confidence for AI fix suggestions; anything below the threshold is
+  # discarded. (one of: low | medium | high, default: low)
+  min_confidence: low
+
+  # Restrict AI processing to matching paths / rules (glob patterns).
+  # Empty means "no filter". (list[str], default: [])
+  include_paths: []
+  exclude_paths: []
+  include_rules: []
+  exclude_rules: []
+
+  # ── Output & apply behaviour ──────────────────────────────────
+  # Set true to always run --fix in chk without the CLI flag.
+  # (bool, default: false)
+  default_fix: false
+
+  # Auto-apply fixes without interactive review (use with caution).
+  # (bool, default: false)
+  auto_apply: false
+
+  # Auto-apply deterministic style fixes (e.g. E501) in non-interactive/json
+  # runs. (bool, default: true)
+  auto_apply_safe_fixes: true
+
+  # Preview mode: show AI fix suggestions without applying them.
+  # (bool, default: false)
+  dry_run: false
+
+  # Interactive mode: validate immediately after each accepted group.
+  # (bool, default: false)
   validate_after_group: false
 
-  # Show token count and cost estimate in output
+  # Show token count and cost estimate in output. (bool, default: true)
   show_cost_estimate: true
 
-  # Lines of surrounding context sent to AI for fix generation (1-100)
+  # Extra diagnostic logging for AI operations. (bool, default: false)
+  verbose: false
+
+  # Stream AI responses token-by-token in interactive mode.
+  # (bool, default: false)
+  stream: false
+
+  # Post AI summaries and inline fix suggestions as PR review comments when
+  # running in GitHub Actions. (bool, default: false)
+  github_pr_comments: false
+
+  # CI exit-code control: when true, an AI error (fail_on_ai_error) or an
+  # unfixed/failed AI fix (fail_on_unfixed) contributes to a non-zero exit
+  # code. (bool, default: false)
+  fail_on_ai_error: false
+  fail_on_unfixed: false
+
+  # Lines of surrounding context sent to AI for fix generation.
+  # (int 1–100, default: 15)
   context_lines: 15
 
-  # Max lines above/below target for line-targeted fix search (1-50)
+  # Max lines above/below target for line-targeted fix search.
+  # (int 1–50, default: 5)
   fix_search_radius: 5
 
-  # Retry backoff parameters
-  retry_base_delay: 1.0 # Initial delay in seconds (min 0.1)
-  retry_max_delay: 30.0 # Maximum delay in seconds (min 1.0)
-  retry_backoff_factor: 2.0 # Multiplier per retry (min 1.0)
+  # ── Suggestion cache ──────────────────────────────────────────
+  # Deduplicate identical fix requests across runs. (bool, default: false)
+  enable_cache: false
+
+  # Cache entry time-to-live, seconds. (int >= 60, default: 3600)
+  cache_ttl: 3600
+
+  # Max cached entries before eviction. (int >= 1, default: 1000)
+  cache_max_entries: 1000
+
+  # ── Advanced / trust (leave off unless you understand the risk) ──
+  # Pass "--trust" to the Cursor agent CLI. Security risk: the Cursor provider
+  # can be fed prompt-injectable content (e.g. fork-PR diffs), so keep this
+  # false outside fully trusted local workspaces. (bool, default: false)
+  cursor_trust_workspace: false
+
+  # Let the git-native (CLI transport) review path delegate diff retrieval to
+  # the provider instead of embedding a redacted diff. Security risk: a
+  # delegated diff bypasses lintro's secret-redaction choke point — see the
+  # warning under "Data & Privacy". (bool, default: false)
+  review_allow_unredacted_git_native: false
 ```
 
 ### Config Defaults for CLI Flags
@@ -682,8 +786,9 @@ persistent rate limiting:
 
 - **Summary mode** (`lintro check`): An issue digest containing error codes, counts,
   issue messages, and workspace-relative file paths. No source code is sent.
-- **Fix mode** (`--fix` or `lintro format`): A ~30-line code context window around each
-  issue line, plus the issue message and error code. One API call per issue.
+- **Fix mode** (`--fix` or `lintro format`): The source of the file carrying the issue,
+  plus the issue message and error code. **How much of that file is sent depends on its
+  size — often all of it.** See below.
 - **Review mode** (`lintro review`): The unified diff under review — changed lines with
   their surrounding hunk context — the workspace-relative paths of the changed files,
   and, when lint results are available, a digest of them. The diff passes through
@@ -698,13 +803,41 @@ persistent rate limiting:
 > only in a controlled, trusted environment, on diffs you have confirmed carry no
 > secrets, and only when delegated retrieval is needed for a very large diff.
 
+### How much source code fix mode sends
+
+Fix mode is the one path that can send a whole source file. The amount is
+size-dependent, governed by `FULL_FILE_THRESHOLD` (500 lines) in
+`lintro/ai/fix_context.py`:
+
+- **Files at or under 500 lines** — the **entire file** is attempted first, so the model
+  can reason about the whole file when generating a fix. It is sent in full only if the
+  resulting prompt fits within `max_prompt_tokens`; otherwise lintro falls back to the
+  window below.
+- **Files over 500 lines** — only a window around the issue line is sent
+  (`context_lines`, default 15 lines either side). The same windowing catches a small
+  file whose full contents would blow the prompt token budget.
+- **Batch path** — when several fixable issues share one file, the batch prompt embeds
+  the sanitized **full file regardless of line count**, falling back to per-issue
+  prompts only when the estimated batch prompt exceeds `max_prompt_tokens`.
+- **Token budget** — `max_prompt_tokens` (default 12000) is a _soft_ budget. The
+  single-issue path halves the window down to a 3-line floor and then sends the prompt
+  anyway if it is still over; refinement prompts build a fixed window with no budget
+  check at all. Very wide lines or refinement retries can therefore exceed the cap.
+
+Secret redaction and prompt-injection scanning are applied to every prompt lintro
+assembles, regardless of context size. The one documented exception is
+`ai.review_allow_unredacted_git_native`, which delegates diff retrieval to the provider
+and so bypasses redaction entirely (see the warning above). If sending whole files is
+unacceptable in your environment, keep fix mode off — `max_prompt_tokens` alone is not a
+guarantee.
+
 ### What is NOT sent
 
-- **Full files** — only a small context window around the issue line (summary and fix
-  modes), or the changed hunks of the diff (review mode)
 - **Absolute paths** — all paths are made relative to the workspace root before sending
 - **Other project files** — in summary and fix modes, only files with reported issues
   are read; in review mode, only files that the diff under review touches
+- **Detected secrets** — recognized secret patterns are redacted from the file content,
+  the issue message, and any context window before the prompt leaves lintro
 
 ### Workspace boundary enforcement
 
