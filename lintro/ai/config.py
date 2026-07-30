@@ -384,6 +384,7 @@ class AIConfig(BaseModel):
         return AIProviderConfig(
             provider=self.provider,
             transport=self.transport,
+            cli_bare=self.cli_bare,
             model=self.model,
             api_key_env=self.api_key_env,
             api_base_url=self.api_base_url,

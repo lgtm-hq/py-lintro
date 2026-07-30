@@ -207,8 +207,10 @@ def resolve_bare_mode(configured: CliBareMode = CliBareMode.AUTO) -> CliBareMode
     try:
         return CliBareMode(normalized)
     except ValueError:
+        # The value itself is deliberately not echoed: environment content is
+        # untrusted input and log sinks are not a place to replay it.
         logger.warning(
-            f"Ignoring {BARE_MODE_ENV}={raw!r}: expected one of "
+            f"Ignoring invalid {BARE_MODE_ENV}: expected one of "
             f"{', '.join(mode.value for mode in CliBareMode)}.",
         )
         return configured

@@ -13,7 +13,12 @@ from lintro.ai.config_views import (
     AIOutputConfig,
     AIProviderConfig,
 )
-from lintro.ai.enums import AITransport, ConfidenceLevel, SanitizeMode
+from lintro.ai.enums import (
+    AITransport,
+    CliBareMode,
+    ConfidenceLevel,
+    SanitizeMode,
+)
 from lintro.ai.registry import AIProvider
 
 
@@ -22,6 +27,7 @@ def test_provider_config_construction_and_fields() -> None:
     view = AIProviderConfig(
         provider=AIProvider.ANTHROPIC,
         transport=AITransport.API,
+        cli_bare=CliBareMode.AUTO,
         model="claude-sonnet-4-6",
         api_key_env="ANTHROPIC_API_KEY",
         api_base_url=None,
@@ -47,6 +53,7 @@ def test_provider_config_is_frozen() -> None:
     view = AIProviderConfig(
         provider=AIProvider.ANTHROPIC,
         transport=None,
+        cli_bare=CliBareMode.AUTO,
         model=None,
         api_key_env=None,
         api_base_url=None,
@@ -127,3 +134,4 @@ def test_views_derived_from_ai_config() -> None:
     assert_that(budget_view).is_instance_of(AIBudgetConfig)
     assert_that(output_view).is_instance_of(AIOutputConfig)
     assert_that(provider_view.provider).is_equal_to(config.provider)
+    assert_that(provider_view.cli_bare).is_equal_to(config.cli_bare)
