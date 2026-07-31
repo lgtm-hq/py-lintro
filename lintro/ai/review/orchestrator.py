@@ -722,8 +722,10 @@ async def run_review_async(
     collected: list[_ChunkReviewPartial] = []
     partials: list[_ChunkReviewPartial] = []
     custom_results: list[CustomAgentPassResult] = []
+    custom_agents_failed: list[str] = []
     merged = merge_review_results(partials=partials)
     filtered_findings: tuple[ReviewFinding, ...] = ()
+    custom_findings: tuple[ReviewFinding, ...] = ()
     started_at = time.monotonic()
     try:
         # Open the session inside the try so a failure before or during
@@ -767,11 +769,22 @@ async def run_review_async(
             # an independent, narrowly scoped pass with its own instructions.
             use_one_shot=True,
             on_pass_complete=custom_results.append,
+            on_agent_failed=custom_agents_failed.append,
         )
         merged, filtered_findings, total_findings = _finalize_partials(
             partials=partials,
             policy=review_sensitivity,
         )
+        # Custom agent findings bypass the run-level sensitivity filter: each
+        # agent declares its own strictness and severity policy, so a
+        # run-level preset must not silently drop what a maintainer
+        # explicitly asked to be checked. Merged here, before the finally
+        # block, so tracker.on_complete's count includes them.
+        custom_findings = tuple(
+            finding for result in custom_results for finding in result.findings
+        )
+        filtered_findings = filtered_findings + custom_findings
+        total_findings = len(filtered_findings)
         completed = True
     except (AIError, ReviewExecutionError) as exc:
         # A graceful partial review: the cost cap was reached mid-run. Keep the
@@ -793,6 +806,11 @@ async def run_review_async(
             partials=partials,
             policy=review_sensitivity,
         )
+        custom_findings = tuple(
+            finding for result in custom_results for finding in result.findings
+        )
+        filtered_findings = filtered_findings + custom_findings
+        total_findings = len(filtered_findings)
         completed = True
         logger.warning(
             "Review stopped early — {reason} after reviewing {n} of {m} "
@@ -812,15 +830,6 @@ async def run_review_async(
                 tracker.on_abort()
 
     duration_seconds = time.monotonic() - started_at
-
-    # Custom agent findings bypass the run-level sensitivity filter: each agent
-    # declares its own strictness and severity policy, so a run-level preset
-    # must not silently drop what a maintainer explicitly asked to be checked.
-    custom_findings = tuple(
-        finding for result in custom_results for finding in result.findings
-    )
-    filtered_findings = filtered_findings + custom_findings
-    total_findings = len(filtered_findings)
 
     total_input = sum(item.input_tokens for item in partials) + sum(
         result.input_tokens for result in custom_results
@@ -867,7 +876,9 @@ async def run_review_async(
         stopped_reason=stopped_reason,
         duration_seconds=duration_seconds,
         custom_agents_run=len(custom_results),
-        custom_agents_skipped=len(agent_selection.skipped),
+        custom_agents_skipped=(
+            len(agent_selection.skipped) + len(custom_agents_failed)
+        ),
     )
 
     return ReviewResult(

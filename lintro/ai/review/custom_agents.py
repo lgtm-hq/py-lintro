@@ -45,6 +45,7 @@ from typing import Any
 
 import yaml
 
+from lintro.ai.review.enums.custom_agent_mode import CustomAgentMode
 from lintro.ai.review.enums.review_strictness import ReviewStrictness
 from lintro.ai.review.finding_parser import parse_severity_label
 from lintro.ai.review.glob_utils import normalize_path, path_matches_any_glob
@@ -308,6 +309,11 @@ def _load_front_matter(*, front_matter: str) -> dict[str, Any]:
         raise CustomAgentConfigError(
             field="front-matter",
             message="front matter must be a YAML mapping",
+        )
+    if not all(isinstance(key, str) for key in parsed):
+        raise CustomAgentConfigError(
+            field="front-matter",
+            message="front-matter keys must be strings",
         )
 
     unknown = sorted(set(parsed) - _KNOWN_FIELDS)
@@ -677,16 +683,30 @@ def select_custom_agents(
     return CustomAgentSelection(selected=tuple(selected), skipped=tuple(skipped))
 
 
-def format_custom_agent_listing(*, discovery: CustomAgentDiscovery) -> str:
+def format_custom_agent_listing(
+    *,
+    discovery: CustomAgentDiscovery,
+    mode: CustomAgentMode | None = None,
+) -> str:
     """Render discovered agents for ``lintro review --list-agents``.
 
     Args:
         discovery: Discovery result to render.
+        mode: Effective ``review.custom_agents`` mode. When provided, a
+            header line reports it and warns when it is ``disabled`` --
+            listed agents never run in that configuration.
 
     Returns:
         Plain-text listing of agents and any structured configuration errors.
     """
     lines: list[str] = [f"Custom review agents: {discovery.directory}"]
+    if mode is not None:
+        lines.append(f"Effective mode: {mode.value}")
+        if mode is CustomAgentMode.DISABLED:
+            lines.append(
+                "  warning: review.custom_agents is disabled -- none of the "
+                "agents below will run during a real review.",
+            )
     if not discovery.agents and not discovery.issues:
         lines.append("")
         lines.append("  (none found)")

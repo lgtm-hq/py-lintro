@@ -241,6 +241,7 @@ async def run_custom_agent_passes(
     workspace_root: Path | None = None,
     use_one_shot: bool = True,
     on_pass_complete: Callable[[CustomAgentPassResult], None] | None = None,
+    on_agent_failed: Callable[[str], None] | None = None,
 ) -> tuple[CustomAgentPassResult, ...]:
     """Run every selected custom review agent against its scoped diff.
 
@@ -261,6 +262,9 @@ async def run_custom_agent_passes(
         on_pass_complete: Optional callback invoked with each completed pass
             as soon as it finishes, so a caller can recover work already done
             if a later pass trips the cost cap.
+        on_agent_failed: Optional callback invoked with the agent's name when
+            a non-budget provider error skips it, so a caller can count it
+            toward skipped-agent metadata (issue #1245).
 
     Returns:
         Results for every agent that completed a pass.
@@ -311,6 +315,8 @@ async def run_custom_agent_passes(
                 agent=agent.name,
                 error=error,
             )
+            if on_agent_failed is not None:
+                on_agent_failed(agent.name)
             continue
 
         result = CustomAgentPassResult(

@@ -184,6 +184,7 @@ def review_command(
         click.echo(
             format_custom_agent_listing(
                 discovery=discover_custom_agents(workspace_root=workspace_root),
+                mode=lintro_config.review.custom_agents,
             ),
         )
         raise SystemExit(0)
@@ -392,6 +393,11 @@ def _resolve_custom_agents(
 
     Returns:
         The discovered agents, or an empty tuple when discovery is disabled.
+
+    Raises:
+        click.UsageError: When ``mode`` is ``only`` and no valid agents were
+            discovered, since the built-in checklist is skipped in that mode
+            and running would silently review nothing.
     """
     if mode == CustomAgentMode.DISABLED:
         return ()
@@ -399,10 +405,11 @@ def _resolve_custom_agents(
     for issue in discovery.issues:
         logger.warning("Skipping invalid review agent — {issue}", issue=issue.format())
     if mode == CustomAgentMode.ONLY and not discovery.agents:
-        logger.warning(
-            "review.custom_agents is 'only' but no valid agents were found in "
-            "{directory}; the review will have nothing to run.",
-            directory=discovery.directory,
+        raise click.UsageError(
+            "review.custom_agents is 'only' but no valid agents were found "
+            f"in {discovery.directory}; the built-in checklist is skipped in "
+            "'only' mode, so there is nothing left to review. Add a valid "
+            "agent file or change review.custom_agents.",
         )
     return discovery.agents
 

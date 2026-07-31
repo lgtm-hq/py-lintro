@@ -145,6 +145,13 @@ def test_parse_custom_agent_keeps_model_override(tmp_path: Path) -> None:
         ),
         ("---\nname: x\ninclude: ['*.py']\nbogus: 1\n---\n\nbody\n", "bogus"),
         ("---\nname: x\ninclude: ['*.py']\n---\n\n   \n", "body"),
+        # YAML 1.1 resolves an unquoted `on:` key to the boolean True; a
+        # non-string front-matter key must never crash the join() that
+        # reports unknown fields (see issue #1245 review follow-up).
+        (
+            "---\nname: x\ninclude: ['*.py']\non: true\n---\n\nbody\n",
+            "front-matter",
+        ),
     ],
 )
 def test_parse_custom_agent_rejects_invalid_files(

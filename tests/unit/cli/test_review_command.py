@@ -686,6 +686,27 @@ _AGENT_MARKDOWN = (
 )
 
 
+def _agent_mode_config(*, tmp_path: Path, mode: CustomAgentMode) -> MagicMock:
+    """Build a review config mock scoped to a workspace and agent mode.
+
+    Args:
+        tmp_path: Workspace root holding ``.lintro/review-agents``.
+        mode: Custom agent activation mode under test.
+
+    Returns:
+        The configured mock.
+    """
+    mock_config = MagicMock(ai={"enabled": True})
+    mock_config.config_path = str(tmp_path / ".lintro-config.yaml")
+    mock_config.review.depth = 1
+    mock_config.review.strictness = ReviewStrictness.BALANCED
+    mock_config.review.sensitivity = MagicMock()
+    mock_config.review.force_semantic_chunking = False
+    mock_config.review.checklist_display = ChecklistDisplay.OFF
+    mock_config.review.custom_agents = mode
+    return mock_config
+
+
 def test_review_help_shows_list_agents_flag() -> None:
     """Review help advertises the custom agent listing flag."""
     runner = CliRunner()
@@ -728,14 +749,7 @@ def test_review_passes_discovered_agents_to_run_review(tmp_path: Path) -> None:
     _write_agent_file(root=tmp_path, name="a.md", text=_AGENT_MARKDOWN)
     runner = CliRunner()
     patches = _mock_review_pipeline()
-    mock_config = MagicMock(ai={"enabled": True})
-    mock_config.config_path = str(tmp_path / ".lintro-config.yaml")
-    mock_config.review.depth = 1
-    mock_config.review.strictness = ReviewStrictness.BALANCED
-    mock_config.review.sensitivity = MagicMock()
-    mock_config.review.force_semantic_chunking = False
-    mock_config.review.checklist_display = ChecklistDisplay.OFF
-    mock_config.review.custom_agents = CustomAgentMode.ENABLED
+    mock_config = _agent_mode_config(tmp_path=tmp_path, mode=CustomAgentMode.ENABLED)
 
     with (
         patches["require_ai"],
@@ -755,8 +769,9 @@ def test_review_passes_discovered_agents_to_run_review(tmp_path: Path) -> None:
         ) as run_review,
         patches["render_review_output"],
     ):
-        runner.invoke(cli, ["review"])
+        result = runner.invoke(cli, ["review"])
 
+    assert_that(result.exit_code).is_equal_to(0)
     kwargs = run_review.call_args.kwargs
     assert_that([agent.name for agent in kwargs["custom_agents"]]).is_equal_to(
         ["no-raw-sql"],
@@ -769,14 +784,7 @@ def test_review_custom_agents_disabled_skips_discovery(tmp_path: Path) -> None:
     _write_agent_file(root=tmp_path, name="a.md", text=_AGENT_MARKDOWN)
     runner = CliRunner()
     patches = _mock_review_pipeline()
-    mock_config = MagicMock(ai={"enabled": True})
-    mock_config.config_path = str(tmp_path / ".lintro-config.yaml")
-    mock_config.review.depth = 1
-    mock_config.review.strictness = ReviewStrictness.BALANCED
-    mock_config.review.sensitivity = MagicMock()
-    mock_config.review.force_semantic_chunking = False
-    mock_config.review.checklist_display = ChecklistDisplay.OFF
-    mock_config.review.custom_agents = CustomAgentMode.DISABLED
+    mock_config = _agent_mode_config(tmp_path=tmp_path, mode=CustomAgentMode.DISABLED)
 
     with (
         patches["require_ai"],
@@ -796,8 +804,9 @@ def test_review_custom_agents_disabled_skips_discovery(tmp_path: Path) -> None:
         ) as run_review,
         patches["render_review_output"],
     ):
-        runner.invoke(cli, ["review"])
+        result = runner.invoke(cli, ["review"])
 
+    assert_that(result.exit_code).is_equal_to(0)
     kwargs = run_review.call_args.kwargs
     assert_that(kwargs["custom_agents"]).is_empty()
     assert_that(kwargs["run_builtin_checklist"]).is_true()
@@ -810,14 +819,7 @@ def test_review_custom_agents_only_disables_builtin_checklist(
     _write_agent_file(root=tmp_path, name="a.md", text=_AGENT_MARKDOWN)
     runner = CliRunner()
     patches = _mock_review_pipeline()
-    mock_config = MagicMock(ai={"enabled": True})
-    mock_config.config_path = str(tmp_path / ".lintro-config.yaml")
-    mock_config.review.depth = 1
-    mock_config.review.strictness = ReviewStrictness.BALANCED
-    mock_config.review.sensitivity = MagicMock()
-    mock_config.review.force_semantic_chunking = False
-    mock_config.review.checklist_display = ChecklistDisplay.OFF
-    mock_config.review.custom_agents = CustomAgentMode.ONLY
+    mock_config = _agent_mode_config(tmp_path=tmp_path, mode=CustomAgentMode.ONLY)
 
     with (
         patches["require_ai"],
@@ -837,8 +839,46 @@ def test_review_custom_agents_only_disables_builtin_checklist(
         ) as run_review,
         patches["render_review_output"],
     ):
-        runner.invoke(cli, ["review"])
+        result = runner.invoke(cli, ["review"])
 
+    assert_that(result.exit_code).is_equal_to(0)
     kwargs = run_review.call_args.kwargs
     assert_that(kwargs["run_builtin_checklist"]).is_false()
     assert_that(kwargs["custom_agents"]).is_length(1)
+
+
+def test_review_custom_agents_only_with_no_valid_agents_errors(
+    tmp_path: Path,
+) -> None:
+    """custom_agents: only with no discovered agents fails loudly.
+
+    Otherwise the built-in checklist is skipped, no agents run, and the
+    command reports a clean review with nothing actually checked.
+    """
+    runner = CliRunner()
+    patches = _mock_review_pipeline()
+    mock_config = _agent_mode_config(tmp_path=tmp_path, mode=CustomAgentMode.ONLY)
+
+    with (
+        patches["require_ai"],
+        patch(
+            "lintro.cli_utils.commands.review.get_config",
+            return_value=mock_config,
+        ),
+        patches["collect_review_context"],
+        patches["classify_changed_files"],
+        patches["get_all_checklist_items"],
+        patches["select_checklist_items"],
+        patches["format_checklist_for_prompt"],
+        patches["get_provider"],
+        patch(
+            "lintro.cli_utils.commands.review.run_review",
+            return_value=_empty_result(),
+        ) as run_review,
+        patches["render_review_output"],
+    ):
+        result = runner.invoke(cli, ["review"])
+
+    assert_that(result.exit_code).is_equal_to(2)
+    assert_that(str(result.output)).contains("no valid agents were found")
+    assert_that(run_review.called).is_false()
