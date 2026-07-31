@@ -65,7 +65,8 @@ def committed_schema() -> dict[str, Any]:
     Returns:
         dict[str, Any]: Parsed schema document.
     """
-    return json.loads(SCHEMA_PATH.read_text(encoding="utf-8"))
+    data: dict[str, Any] = json.loads(SCHEMA_PATH.read_text(encoding="utf-8"))
+    return data
 
 
 def test_committed_schema_matches_generator_output(generator: ModuleType) -> None:
