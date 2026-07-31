@@ -21,6 +21,18 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.96.0] - 2026-07-31
+
+### Added
+
+- **core**: split `run_lint_tools_simple` into execute and render phases (#1867)
+  (ba0faf3)
+
+### Changed
+
+- split oversized modules under the size gate (#1481) (d4120dd)
+- **ci**: dedupe allowed-endpoints across docker image jobs (#1865) (a369677)
+
 ## [0.95.0] - 2026-07-30
 
 ### Added
