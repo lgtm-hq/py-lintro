@@ -21,6 +21,12 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.97.1] - 2026-07-31
+
+### Fixed
+
+- **ci**: tolerate semgrep probe exit-lag in manifest verification (#1875) (6cb3016)
+
 ## [0.97.0] - 2026-07-31
 
 ### Added
