@@ -136,3 +136,4 @@ review:
     doc_drift: null
     test_gaps: null
   force_semantic_chunking: false # same as --semantic-chunks (~6× agent calls)
+  custom_agents: true # true | false | only — .lintro/review-agents/*.md

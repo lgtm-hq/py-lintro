@@ -40,16 +40,25 @@ from lintro.ai.prompts.review import (
 )
 from lintro.ai.raw_response import persist_raw_response
 from lintro.ai.review.chunker import chunk_review_context
+from lintro.ai.review.custom_agent_runner import (
+    CustomAgentPassResult,
+    run_custom_agent_passes,
+)
+from lintro.ai.review.custom_agents import (
+    CustomAgentSpec,
+    select_custom_agents,
+)
 from lintro.ai.review.enums.review_strictness import ReviewStrictness
 from lintro.ai.review.errors_taxonomy import (
     classify_provider_error,
     resolve_cause_text,
 )
 from lintro.ai.review.exceptions import ReviewExecutionError
+from lintro.ai.review.finding_parser import parse_findings
 from lintro.ai.review.group_labels import REL_DIRECTORY_PREFIX, REL_SINGLE_FILE
 from lintro.ai.review.models.checklist_answer import ChecklistAnswer
 from lintro.ai.review.models.review_chunk import ReviewChunk
-from lintro.ai.review.models.review_finding import ReviewFinding, Severity
+from lintro.ai.review.models.review_finding import ReviewFinding
 from lintro.ai.review.models.review_metadata import ReviewMetadata
 from lintro.ai.review.models.review_result import ReviewResult
 from lintro.ai.review.paths_registry import generate_interaction_paths
@@ -58,6 +67,7 @@ from lintro.ai.review.progress import (
     ReviewProgressCallback,
     StepTrackingProgress,
 )
+from lintro.ai.review.prompt_redaction import redact_prompt_text
 from lintro.ai.review.response_recovery import (
     build_schema_reminder_prompt,
     resolve_schema_retry_timeout,
@@ -68,10 +78,11 @@ from lintro.ai.review.sensitivity import (
     filter_findings_by_policy,
     format_strictness_prompt_section,
 )
-from lintro.ai.secrets import redact_secrets, scan_for_secrets
 from lintro.ai.token_budget import estimate_tokens
 
 if TYPE_CHECKING:
+    from pathlib import Path
+
     from lintro.ai.config import AIConfig
     from lintro.ai.providers.base import AIResponse, BaseAIProvider
     from lintro.ai.review.models.checklist_item import ChecklistItem
@@ -91,32 +102,6 @@ __all__ = [
     "strip_json_fences",
 ]
 _PROMPT_OVERHEAD_TOKENS = 12_000
-
-
-def _redact_prompt_text(*, text: str, source: str) -> str:
-    """Redact detected secrets from prompt text before provider dispatch.
-
-    This is the single redaction choke point for every review prompt path
-    (base review, git-native, depth-2 question generation, and depth-3
-    adversarial sweep). Any diff or PR metadata destined for an external AI
-    provider must pass through here so credentials never leave the machine.
-
-    Args:
-        text: Raw text destined for an AI provider prompt.
-        source: Human-readable label for the text origin, used in log lines.
-
-    Returns:
-        The text with any detected secrets replaced by ``[REDACTED]``.
-    """
-    detected = scan_for_secrets(text)
-    if detected:
-        logger.warning(
-            "Redacted {count} potential secret(s) from review {source} "
-            "before sending to the AI provider.",
-            count=len(detected),
-            source=source,
-        )
-    return redact_secrets(text)
 
 
 def _aborted_before_completion(
@@ -549,6 +534,9 @@ def run_review(
     sensitivity: ReviewSensitivityPolicy | None = None,
     force_semantic_chunking: bool = False,
     timeout: float | None = None,
+    custom_agents: tuple[CustomAgentSpec, ...] = (),
+    run_builtin_checklist: bool = True,
+    workspace_root: Path | None = None,
 ) -> ReviewResult:
     """Execute an AI diff review from synchronous code.
 
@@ -571,6 +559,11 @@ def run_review(
         sensitivity: Sensitivity preset controlling prompts and filters.
         force_semantic_chunking: When True, skip the single-chunk fast path.
         timeout: Optional per-call timeout override in seconds.
+        custom_agents: Discovered user-defined review agents (issue #1245).
+        run_builtin_checklist: When False, skip the built-in checklist passes
+            and run only the custom agents (``review.custom_agents: only``).
+        workspace_root: Optional workspace root used to build providers for
+            agents that declare a ``model`` override.
 
     Returns:
         Complete review result with metadata, checklist, and findings.
@@ -590,6 +583,9 @@ def run_review(
             sensitivity=sensitivity,
             force_semantic_chunking=force_semantic_chunking,
             timeout=timeout,
+            custom_agents=custom_agents,
+            run_builtin_checklist=run_builtin_checklist,
+            workspace_root=workspace_root,
         ),
     )
 
@@ -609,6 +605,9 @@ async def run_review_async(
     sensitivity: ReviewSensitivityPolicy | None = None,
     force_semantic_chunking: bool = False,
     timeout: float | None = None,
+    custom_agents: tuple[CustomAgentSpec, ...] = (),
+    run_builtin_checklist: bool = True,
+    workspace_root: Path | None = None,
 ) -> ReviewResult:
     """Execute an AI diff review with depth-controlled passes.
 
@@ -626,6 +625,13 @@ async def run_review_async(
         sensitivity: Sensitivity preset controlling prompts and finding filters.
         force_semantic_chunking: When True, skip the single-chunk fast path.
         timeout: Optional per-call timeout override in seconds.
+        custom_agents: Discovered user-defined review agents (issue #1245).
+            Agents are scoped to the changed files their globs match; each
+            scoped agent adds one provider call against the same run budget.
+        run_builtin_checklist: When False, skip the built-in checklist passes
+            and run only the custom agents (``review.custom_agents: only``).
+        workspace_root: Optional workspace root used to build providers for
+            agents that declare a ``model`` override.
 
     Returns:
         Complete review result with metadata, checklist, and findings.
@@ -672,12 +678,26 @@ async def run_review_async(
         context_window=context_window,
         prompt_overhead=prompt_overhead,
     )
-    chunks = resolve_review_chunks(
-        context=context,
-        diff_budget=diff_budget,
-        classifications=classifications,
-        force_semantic_chunking=force_semantic_chunking,
+    chunks = (
+        resolve_review_chunks(
+            context=context,
+            diff_budget=diff_budget,
+            classifications=classifications,
+            force_semantic_chunking=force_semantic_chunking,
+        )
+        if run_builtin_checklist
+        else []
     )
+    agent_selection = select_custom_agents(
+        agents=custom_agents,
+        changed_paths=tuple(file.path for file in context.changed_files),
+    )
+    for skipped_agent in agent_selection.skipped:
+        logger.info(
+            "Skipping custom review agent {agent}: {reason}",
+            agent=skipped_agent.agent.name,
+            reason=skipped_agent.reason.value,
+        )
 
     effective_ai_config = (
         ai_config.model_copy(update={"api_timeout": timeout})
@@ -701,8 +721,11 @@ async def run_review_async(
     stopped_reason = ""
     collected: list[_ChunkReviewPartial] = []
     partials: list[_ChunkReviewPartial] = []
+    custom_results: list[CustomAgentPassResult] = []
+    custom_agents_failed: list[str] = []
     merged = merge_review_results(partials=partials)
     filtered_findings: tuple[ReviewFinding, ...] = ()
+    custom_findings: tuple[ReviewFinding, ...] = ()
     started_at = time.monotonic()
     try:
         # Open the session inside the try so a failure before or during
@@ -711,32 +734,57 @@ async def run_review_async(
             provider.begin_durable_session(repo_root=repo_root)
             durable_session_started = True
         tracker.on_start(total_chunks=len(chunks), depth=depth)
-        partials = await _review_all_chunks(
-            chunks=chunks,
+        if chunks:
+            partials = await _review_all_chunks(
+                chunks=chunks,
+                context=context,
+                provider=provider,
+                ai_config=effective_ai_config,
+                depth=depth,
+                checklist_items=checklist_items,
+                checklist_text=checklist_text,
+                classifications=classifications,
+                lint_results=lint_results,
+                budget=budget,
+                progress=tracker,
+                repo_root=repo_root,
+                use_one_shot=use_one_shot,
+                max_parallel_calls=ai_config.max_parallel_calls,
+                strictness_section=strictness_section,
+                next_generated_checklist_id=(
+                    _max_checklist_id(checklist_items=checklist_items) + 1
+                ),
+                diff_budget=diff_budget,
+                completed_sink=collected,
+            )
+        await run_custom_agent_passes(
+            selected=agent_selection.selected,
             context=context,
             provider=provider,
             ai_config=effective_ai_config,
-            depth=depth,
-            checklist_items=checklist_items,
-            checklist_text=checklist_text,
-            classifications=classifications,
-            lint_results=lint_results,
             budget=budget,
-            progress=tracker,
             repo_root=repo_root,
-            use_one_shot=use_one_shot,
-            max_parallel_calls=ai_config.max_parallel_calls,
-            strictness_section=strictness_section,
-            next_generated_checklist_id=(
-                _max_checklist_id(checklist_items=checklist_items) + 1
-            ),
-            diff_budget=diff_budget,
-            completed_sink=collected,
+            workspace_root=workspace_root,
+            # Never reuse the built-in review's durable session: each agent is
+            # an independent, narrowly scoped pass with its own instructions.
+            use_one_shot=True,
+            on_pass_complete=custom_results.append,
+            on_agent_failed=custom_agents_failed.append,
         )
         merged, filtered_findings, total_findings = _finalize_partials(
             partials=partials,
             policy=review_sensitivity,
         )
+        # Custom agent findings bypass the run-level sensitivity filter: each
+        # agent declares its own strictness and severity policy, so a
+        # run-level preset must not silently drop what a maintainer
+        # explicitly asked to be checked. Merged here, before the finally
+        # block, so tracker.on_complete's count includes them.
+        custom_findings = tuple(
+            finding for result in custom_results for finding in result.findings
+        )
+        filtered_findings = filtered_findings + custom_findings
+        total_findings = len(filtered_findings)
         completed = True
     except (AIError, ReviewExecutionError) as exc:
         # A graceful partial review: the cost cap was reached mid-run. Keep the
@@ -758,6 +806,11 @@ async def run_review_async(
             partials=partials,
             policy=review_sensitivity,
         )
+        custom_findings = tuple(
+            finding for result in custom_results for finding in result.findings
+        )
+        filtered_findings = filtered_findings + custom_findings
+        total_findings = len(filtered_findings)
         completed = True
         logger.warning(
             "Review stopped early — {reason} after reviewing {n} of {m} "
@@ -778,10 +831,24 @@ async def run_review_async(
 
     duration_seconds = time.monotonic() - started_at
 
-    total_input = sum(item.input_tokens for item in partials)
-    total_output = sum(item.output_tokens for item in partials)
-    total_cost = sum(item.cost_estimate for item in partials)
+    total_input = sum(item.input_tokens for item in partials) + sum(
+        result.input_tokens for result in custom_results
+    )
+    total_output = sum(item.output_tokens for item in partials) + sum(
+        result.output_tokens for result in custom_results
+    )
+    total_cost = sum(item.cost_estimate for item in partials) + sum(
+        result.cost_estimate for result in custom_results
+    )
     chunks_reviewed = len(partials)
+    summary = (
+        _custom_agents_only_summary(
+            run_builtin_checklist=run_builtin_checklist,
+            agents_run=len(custom_results),
+            findings=len(custom_findings),
+        )
+        or merged.summary
+    )
 
     metadata = ReviewMetadata(
         model=provider.model_name,
@@ -808,13 +875,44 @@ async def run_review_async(
         chunks_reviewed=chunks_reviewed,
         stopped_reason=stopped_reason,
         duration_seconds=duration_seconds,
+        custom_agents_run=len(custom_results),
+        custom_agents_skipped=(
+            len(agent_selection.skipped) + len(custom_agents_failed)
+        ),
     )
 
     return ReviewResult(
         metadata=metadata,
-        summary=merged.summary,
+        summary=summary,
         checklist=merged.checklist,
         findings=filtered_findings,
+    )
+
+
+def _custom_agents_only_summary(
+    *,
+    run_builtin_checklist: bool,
+    agents_run: int,
+    findings: int,
+) -> str:
+    """Build a summary for a run that produced no built-in review summary.
+
+    Args:
+        run_builtin_checklist: Whether the built-in checklist pass ran.
+        agents_run: Number of custom agent passes that completed.
+        findings: Number of findings the custom agents reported.
+
+    Returns:
+        A summary sentence, or an empty string when the built-in checklist ran
+        and simply produced no summary of its own.
+    """
+    if run_builtin_checklist:
+        return ""
+    if agents_run == 0:
+        return "No custom review agents matched the changed files."
+    return (
+        f"Custom review agents only: {agents_run} agent(s) ran and reported "
+        f"{findings} finding(s)."
     )
 
 
@@ -864,10 +962,10 @@ def build_review_prompt(
         Tuple of (system_prompt, user_prompt).
     """
     pr_title = context.pr_metadata.title if context.pr_metadata else "Local changes"
-    pr_title = _redact_prompt_text(text=pr_title, source="PR title")
+    pr_title = redact_prompt_text(text=pr_title, source="PR title")
     pr_summary = context.pr_metadata.body if context.pr_metadata else "(no PR summary)"
-    pr_summary = _redact_prompt_text(text=pr_summary, source="PR metadata")
-    redacted_diff = _redact_prompt_text(text=chunk.diff, source="diff")
+    pr_summary = redact_prompt_text(text=pr_summary, source="PR metadata")
+    redacted_diff = redact_prompt_text(text=chunk.diff, source="diff")
     changed_files = [file for file in context.changed_files if file.path in chunk.files]
     combined_checklist = checklist_text
     if extra_checklist.strip():
@@ -941,9 +1039,9 @@ def build_git_native_review_prompt(
     if not embed_diff and not allow_unredacted_git_native:
         embed_diff = True
     pr_title = context.pr_metadata.title if context.pr_metadata else "Local changes"
-    pr_title = _redact_prompt_text(text=pr_title, source="PR title")
+    pr_title = redact_prompt_text(text=pr_title, source="PR title")
     pr_summary = context.pr_metadata.body if context.pr_metadata else "(no PR summary)"
-    pr_summary = _redact_prompt_text(text=pr_summary, source="PR metadata")
+    pr_summary = redact_prompt_text(text=pr_summary, source="PR metadata")
     changed_files = [file for file in context.changed_files if file.path in chunk.files]
     combined_checklist = checklist_text
     if extra_checklist.strip():
@@ -955,7 +1053,7 @@ def build_git_native_review_prompt(
     git_diff_paths = " ".join(shlex.quote(path) for path in chunk.files)
     if embed_diff:
         diff_section = REVIEW_GIT_NATIVE_DIFF_INLINE.format(
-            diff=_redact_prompt_text(text=chunk.diff, source="diff"),
+            diff=redact_prompt_text(text=chunk.diff, source="diff"),
         )
     elif context.head_ref == "WORKTREE":
         diff_section = REVIEW_GIT_NATIVE_DIFF_WORKTREE_COMMAND.format(
@@ -1414,7 +1512,7 @@ async def _generate_extra_checklist(
         files=[file for file in context.changed_files if file.path in chunk.files],
     )
     prompt = REVIEW_GENERATE_QUESTIONS_TEMPLATE.format(
-        diff=_redact_prompt_text(text=chunk.diff, source="diff"),
+        diff=redact_prompt_text(text=chunk.diff, source="diff"),
         changed_files=changed_files,
     )
     budget.check()
@@ -1499,7 +1597,7 @@ async def _run_adversarial_pass(
     )
     prompt = REVIEW_ADVERSARIAL_SWEEP_TEMPLATE.format(
         prior_findings_json=prior_json,
-        diff=_redact_prompt_text(text=chunk.diff, source="diff"),
+        diff=redact_prompt_text(text=chunk.diff, source="diff"),
     )
     budget.check()
     response = await call_ai(
@@ -1536,7 +1634,7 @@ async def _run_adversarial_pass(
         )
 
     findings_raw = payload.get("findings", [])
-    findings = _parse_findings(raw_findings=findings_raw)
+    findings = parse_findings(raw_findings=findings_raw)
     return _ChunkReviewPartial(
         summary="",
         checklist=(),
@@ -1558,7 +1656,7 @@ def _payload_to_partial(
         summary = str(summary)
 
     checklist = _parse_checklist(raw_checklist=payload.get("checklist", []))
-    findings = _parse_findings(raw_findings=payload.get("findings", []))
+    findings = parse_findings(raw_findings=payload.get("findings", []))
 
     return _ChunkReviewPartial(
         summary=summary,
@@ -1601,46 +1699,6 @@ def _parse_checklist(*, raw_checklist: object) -> tuple[ChecklistAnswer, ...]:
     return tuple(answers)
 
 
-def _parse_findings(*, raw_findings: object) -> tuple[ReviewFinding, ...]:
-    """Parse findings from AI JSON."""
-    if not isinstance(raw_findings, list):
-        return ()
-    findings: list[ReviewFinding] = []
-    for item in raw_findings:
-        if not isinstance(item, dict):
-            continue
-        line = item.get("line", 0)
-        if not isinstance(line, int):
-            try:
-                line = int(line)
-            except (TypeError, ValueError):
-                line = 0
-        checklist_ids_raw = item.get("checklist_ids", [])
-        checklist_ids: tuple[int, ...] = ()
-        if isinstance(checklist_ids_raw, list):
-            checklist_ids = tuple(
-                checklist_id
-                for checklist_id in checklist_ids_raw
-                if isinstance(checklist_id, int)
-            )
-        findings.append(
-            ReviewFinding(
-                severity=_normalize_severity(raw=item.get("severity", "P3")),
-                category=str(item.get("category", "logic-bug")),
-                file=str(item.get("file", "")),
-                line=line,
-                title=str(item.get("title", "")),
-                description=str(item.get("description", "")),
-                cause=str(item.get("cause", "")),
-                fix=str(item.get("fix", "")),
-                confidence=str(item.get("confidence", "medium")),
-                checklist_ids=checklist_ids,
-                suggested_code=str(item.get("suggested_code", "")),
-            ),
-        )
-    return tuple(findings)
-
-
 def _estimate_prompt_overhead(
     *,
     context: ReviewContext,
@@ -1671,68 +1729,6 @@ def _max_checklist_id(*, checklist_items: list[ChecklistItem]) -> int:
     if not checklist_items:
         return 0
     return int(max(item.id for item in checklist_items))
-
-
-_SEVERITY_SYNONYMS: dict[str, Severity] = {
-    "CRITICAL": Severity.P1,
-    "BLOCKER": Severity.P1,
-    "BLOCKING": Severity.P1,
-    "HIGH": Severity.P1,
-    "SEVERE": Severity.P1,
-    "ERROR": Severity.P1,
-    "MAJOR": Severity.P2,
-    "MEDIUM": Severity.P2,
-    "MODERATE": Severity.P2,
-    "WARNING": Severity.P2,
-    "WARN": Severity.P2,
-    "MINOR": Severity.P3,
-    "LOW": Severity.P3,
-    "TRIVIAL": Severity.P3,
-    "INFO": Severity.P3,
-    "NOTE": Severity.P3,
-}
-
-
-def _normalize_severity(*, raw: object) -> Severity:
-    """Normalize an unvalidated model severity value to a ``Severity`` member.
-
-    Strips surrounding whitespace and uppercases the value before matching
-    against the canonical ``P1``/``P2``/``P3`` labels. When the value is not a
-    canonical label, it is matched against a table of common synonyms so that
-    blocking words like ``critical`` map to ``P1`` rather than being downgraded.
-    A truly unknown value fails closed to ``Severity.P1`` and is logged: since
-    the exit gate only trips on ``P1``, an unrecognized label (e.g. ``fatal``)
-    must be treated as blocking so malformed model output can never silently
-    pass the gate. The synonym table already captures the benign labels, so the
-    fallback is deliberately conservative.
-
-    Synonym mapping:
-        P1: critical, blocker, blocking, high, severe, error.
-        P2: major, medium, moderate, warning, warn.
-        P3: minor, low, trivial, info, note.
-
-    Args:
-        raw: Raw severity value from a parsed model response.
-
-    Returns:
-        The matching ``Severity`` member, a synonym-mapped member, or
-        ``Severity.P1`` (fail-closed) when the value is unrecognized.
-    """
-    normalized = str(raw).strip().upper()
-    try:
-        return Severity(normalized)
-    except ValueError:
-        pass
-
-    synonym = _SEVERITY_SYNONYMS.get(normalized)
-    if synonym is not None:
-        return synonym
-
-    logger.warning(
-        "Unknown finding severity {raw!r}; failing closed to P1.",
-        raw=raw,
-    )
-    return Severity.P1
 
 
 def _normalize_checklist_answer_value(*, answer: str) -> str:

@@ -137,11 +137,13 @@ def _render_finding_panel(
 ) -> None:
     """Render a single finding as a Rich panel."""
     severity_style = _SEVERITY_STYLES.get(finding.severity, "white")
+    source_chip = f"  [dim]via {finding.source}[/dim]" if finding.source else ""
     title = (
         f"[{severity_style}]{finding.severity}[/{severity_style}]  "
         f"{finding.category}  "
         f"{finding.file}:{finding.line}  "
         f"[dim]({finding.confidence})[/dim]"
+        f"{source_chip}"
     )
     body = Text()
     body.append(f"{finding.title}\n\n", style="bold")

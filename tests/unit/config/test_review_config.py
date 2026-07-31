@@ -16,7 +16,9 @@ from lintro.ai.review.enums.review_strictness import ReviewStrictness
 from lintro.config.config_loader import clear_config_cache, load_config
 from lintro.config.review_config import (
     ReviewChecklistItemConfig,
+    ReviewConfig,
 )
+from lintro.enums.custom_agent_mode import CustomAgentMode
 
 
 def test_load_config_parses_review_checklist_items(
@@ -309,3 +311,54 @@ review:
 
     with pytest.raises(ValueError, match=escape("Unknown review.checklist keys")):
         load_config(config_path=config_file)
+
+
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    [
+        ("true", CustomAgentMode.ENABLED),
+        ("false", CustomAgentMode.DISABLED),
+        ("only", CustomAgentMode.ONLY),
+        ("enabled", CustomAgentMode.ENABLED),
+        ("disabled", CustomAgentMode.DISABLED),
+    ],
+)
+def test_load_config_parses_custom_agents_mode(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    value: str,
+    expected: CustomAgentMode,
+) -> None:
+    """review.custom_agents accepts true/false and the named modes."""
+    config_file = tmp_path / ".lintro-config.yaml"
+    config_file.write_text(
+        f"review:\n  custom_agents: {value}\n",
+        encoding="utf-8",
+    )
+    monkeypatch.chdir(tmp_path)
+    clear_config_cache()
+
+    config = load_config(config_path=config_file)
+
+    assert_that(config.review.custom_agents).is_equal_to(expected)
+
+
+def test_custom_agents_defaults_to_enabled(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Custom review agents are opt-out, not opt-in."""
+    config_file = tmp_path / ".lintro-config.yaml"
+    config_file.write_text("review:\n  depth: 1\n", encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+    clear_config_cache()
+
+    config = load_config(config_path=config_file)
+
+    assert_that(config.review.custom_agents).is_equal_to(CustomAgentMode.ENABLED)
+
+
+def test_custom_agents_rejects_unknown_mode() -> None:
+    """An unrecognized mode names the offending key in the error."""
+    with pytest.raises(ValueError, match=escape("review.custom_agents must be")):
+        ReviewConfig.model_validate({"custom_agents": "sometimes"})

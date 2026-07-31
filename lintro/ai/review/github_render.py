@@ -146,6 +146,9 @@ def format_finding_comment(
         f"{_severity_badge(severity=finding.severity)} · "
         f"{_chip(finding.category)} · {_chip(f'{finding.confidence} confidence')}"
     )
+    if finding.source:
+        source = sanitize_comment_text(finding.source, limit=100)
+        header += f" · {_chip(f'agent: {source}')}"
     lines = [header, "", f"### {title}", "", description]
 
     detail: list[str] = []

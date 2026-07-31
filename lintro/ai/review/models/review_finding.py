@@ -46,6 +46,9 @@ class ReviewFinding:
             mechanical fix applies. Rendered as a GitHub ``suggestion`` block on
             inline comments so reviewers can commit it in one click. Empty when
             no concrete code replacement is available.
+        source: Provenance of the finding. Empty for the built-in checklist
+            review; the agent name for a user-defined review agent (issue
+            #1245) so merged output attributes each finding to its origin.
     """
 
     severity: Severity
@@ -59,3 +62,4 @@ class ReviewFinding:
     confidence: str
     checklist_ids: tuple[int, ...] = field(default_factory=tuple)
     suggested_code: str = ""
+    source: str = ""
